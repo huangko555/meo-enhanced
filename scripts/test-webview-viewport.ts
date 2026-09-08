@@ -523,7 +523,7 @@ async function main() {
         'Show Original · Source Only'
       ],
       headerText: 'No Changes·vs. Last Saved Version',
-      settingsHeading: 'Display Settings',
+      settingsHeading: 'Editor Settings',
       clipped: false
     })) {
       throw new Error(`English change review labels did not fit the shared menu width: ${JSON.stringify(englishReviewMenu)}`);
@@ -717,7 +717,7 @@ async function main() {
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
         '显示行号', '折叠长代码块', '限制宽度'
       ]) ||
-      moreToolsLayout.topHeading !== '显示设置' ||
+      moreToolsLayout.topHeading !== '编辑器设置' ||
       moreToolsLayout.languageAutoLabel !== '自动' ||
       !moreToolsLayout.directChildren ||
       moreToolsLayout.separatorCount !== 2 ||

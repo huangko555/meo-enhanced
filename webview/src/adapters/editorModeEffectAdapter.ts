@@ -28,7 +28,7 @@ export type EditorModeEffectCapabilities = {
     viewport: EditorModeViewportToken | null
   ): void | Promise<void>;
   setPreviewActive(active: boolean): void;
-  setEditorVisible(visible: boolean): void;
+  setEditorVisible(visible: boolean, interactive?: boolean): void;
   presentModeControl(mode: EditorMode): void;
   closeFind(): void;
   setSearchOwner(owner: 'editor' | 'preview'): void;
@@ -68,11 +68,26 @@ export function createEditorModeEffectAdapter(
   let cancelScheduledMount: (() => void) | null = null;
   let resolveScheduledMount: ((run: boolean) => void) | null = null;
   let mountAbortController: AbortController | null = null;
+  let presentationGeneration = 0;
+  let pendingAtomicReveal: {
+    readonly generation: number;
+    readonly restoreEditorFocus: boolean;
+  } | null = null;
 
   const applyPresentation = (presentation: EditorModePresentation): void => {
+    const generation = ++presentationGeneration;
+    pendingAtomicReveal = null;
     if (presentation.closeFind) capabilities.closeFind();
-    capabilities.setPreviewActive(presentation.previewActive);
-    capabilities.setEditorVisible(presentation.editorVisible);
+    if (presentation.atomicEditorReveal) {
+      capabilities.setEditorVisible(true, false);
+      pendingAtomicReveal = {
+        generation,
+        restoreEditorFocus: presentation.restoreEditorFocus
+      };
+    } else {
+      capabilities.setPreviewActive(presentation.previewActive);
+      capabilities.setEditorVisible(presentation.editorVisible, presentation.editorVisible);
+    }
     capabilities.presentModeControl(presentation.mode);
     capabilities.setSearchOwner(presentation.searchOwner);
     capabilities.setOutlineOwner(presentation.outlineOwner);
@@ -88,16 +103,18 @@ export function createEditorModeEffectAdapter(
         presentation.previewActive ? 'preview' : 'editor'
       );
     }
-    if (presentation.restoreEditorFocus) capabilities.focusEditor();
+    if (presentation.restoreEditorFocus && !presentation.atomicEditorReveal) capabilities.focusEditor();
   };
 
   const rollbackPresentation = (
     mode: EditorMode,
     viewport: EditorModeViewportToken | null
   ): void => {
+    presentationGeneration += 1;
+    pendingAtomicReveal = null;
     const preview = mode === 'preview';
     capabilities.setPreviewActive(preview);
-    capabilities.setEditorVisible(!preview);
+    capabilities.setEditorVisible(!preview, !preview);
     capabilities.presentModeControl(mode);
     capabilities.setSearchOwner(preview ? 'preview' : 'editor');
     capabilities.setOutlineOwner(preview ? 'preview' : 'editor');
@@ -127,17 +144,31 @@ export function createEditorModeEffectAdapter(
           return {};
         case 'applyEditorMode': {
           const operation = effect.mode === 'live' ? 'apply-live' : 'apply-source';
+          const atomicReveal = pendingAtomicReveal;
           return {
             completion: Promise.resolve()
               .then(() => capabilities.applyEditorMode(effect.mode, effect.viewport))
-              .then<EditorModeInput>(() => ({
-                type: 'editorModeApplied', transitionId: effect.transitionId
-              }))
-              .catch((error): EditorModeInput => ({
-                type: 'editorModeFailed',
-                transitionId: effect.transitionId,
-                failure: capabilities.classifyError(error, operation)
-              }))
+              .then<EditorModeInput>(() => {
+                if (
+                  atomicReveal &&
+                  pendingAtomicReveal === atomicReveal &&
+                  presentationGeneration === atomicReveal.generation
+                ) {
+                  pendingAtomicReveal = null;
+                  capabilities.setPreviewActive(false);
+                  capabilities.setEditorVisible(true, true);
+                  if (atomicReveal.restoreEditorFocus) capabilities.focusEditor();
+                }
+                return { type: 'editorModeApplied', transitionId: effect.transitionId };
+              })
+              .catch((error): EditorModeInput => {
+                if (pendingAtomicReveal === atomicReveal) pendingAtomicReveal = null;
+                return {
+                  type: 'editorModeFailed',
+                  transitionId: effect.transitionId,
+                  failure: capabilities.classifyError(error, operation)
+                };
+              })
           };
         }
         case 'persistMode':
@@ -191,6 +222,8 @@ export function createEditorModeEffectAdapter(
           };
         }
         case 'disposeMode':
+          presentationGeneration += 1;
+          pendingAtomicReveal = null;
           cancelScheduledMount?.();
           cancelScheduledMount = null;
           resolveScheduledMount?.(false);

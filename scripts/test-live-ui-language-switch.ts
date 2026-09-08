@@ -26,7 +26,7 @@ function expectedLabels(language: UiLanguage, mermaidLine: number, formulaLine: 
     codeActions: [strings.selectAllCode, strings.copyCode, strings.selectAllCode, strings.copyCode],
     longCode: strings.showMoreCode(9),
     longCodeFloating: strings.showLessCode,
-    imageActions: [strings.openLink, strings.openWithSystemApp, strings.fullscreenImage],
+    imageActions: [strings.openLink, strings.refreshImage, strings.openWithSystemApp, strings.fullscreenImage],
     task: strings.markTaskComplete,
     alert: strings.alertLabel('NOTE'),
     html: strings.showHtmlSource,

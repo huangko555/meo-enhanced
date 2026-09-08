@@ -149,6 +149,7 @@ const factoryPool: ImagePresentationResourcePool = {
     return () => { poolLeaseReleases[leaseIndex] += 1; };
   },
   invalidate() {},
+  invalidateResource() {},
   resolve: async () => null,
   getResolved: () => null,
   load: async () => null,

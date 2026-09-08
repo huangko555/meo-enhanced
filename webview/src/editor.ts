@@ -2640,6 +2640,27 @@ export function createEditor({
   return {
     view,
     state: view.state,
+    async whenVisibleImagesReady(timeoutMs: number) {
+      if (editorDestroyed || currentMode !== 'live') return;
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      if (editorDestroyed || currentMode !== 'live') return;
+      let timeout: number | null = null;
+      const waitAbortController = new AbortController();
+      try {
+        await Promise.race([
+          imagePresentationFactory.whenVisiblePresentationsSettle(waitAbortController.signal),
+          new Promise<void>((resolve) => {
+            timeout = window.setTimeout(() => {
+              waitAbortController.abort();
+              resolve();
+            }, Math.max(0, timeoutMs));
+          })
+        ]);
+      } finally {
+        waitAbortController.abort();
+        if (timeout !== null) window.clearTimeout(timeout);
+      }
+    },
     getText() {
       commitActiveTableInput();
       return view.state.doc.toString();

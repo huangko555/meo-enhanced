@@ -475,7 +475,7 @@ async function main(): Promise<void> {
       footnoteBack: '跳转到脚注引用 1',
       codeActions: ['全选代码', '复制代码', '全选代码', '复制代码'],
       longCode: { lineCountVisible: false, action: '显示其余 10 行代码' },
-      imageActions: ['打开链接', '使用系统应用打开', '全屏查看图片'],
+      imageActions: ['打开链接', '刷新图片', '使用系统应用打开', '全屏查看图片'],
       featureChrome: {
         alert: '备注',
         html: '显示 HTML 源码'

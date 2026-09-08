@@ -7,7 +7,7 @@ import type {
 
 export type ImagePresentationRuntime = {
   dispatch(input: ImagePresentationInput): void;
-  whenCurrentPresentationSettles(): Promise<void>;
+  whenCurrentPresentationSettles(signal?: AbortSignal): Promise<void>;
   dispose(): void;
 };
 
@@ -96,9 +96,20 @@ export function createImagePresentationRuntime(
 
   return {
     dispatch: dispatchInternal,
-    whenCurrentPresentationSettles() {
-      if (isIdle()) return Promise.resolve();
-      return new Promise<void>((resolve) => idleWaiters.add(resolve));
+    whenCurrentPresentationSettles(signal) {
+      if (isIdle() || signal?.aborted) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          idleWaiters.delete(finish);
+          signal?.removeEventListener('abort', finish);
+          resolve();
+        };
+        idleWaiters.add(finish);
+        signal?.addEventListener('abort', finish, { once: true });
+      });
     },
     dispose() {
       if (disposed) return;

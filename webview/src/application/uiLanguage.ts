@@ -138,6 +138,7 @@ export type UiStrings = Readonly<{
   mermaidError: (message: string) => string;
   openWithSystemApp: string;
   fullscreenImage: string;
+  refreshImage: string;
   colorLabel: (value: string) => string;
   showHtmlPreview: string;
   unsupportedHtmlSource: string;
@@ -211,6 +212,7 @@ export type UiStrings = Readonly<{
   gitHead: string;
   compareWithVersion: string;
   displaySettings: string;
+  editorSettings: string;
   currentDiskVersionOption: string;
   currentDiskVersionDescription: string;
   beforeLastSaveVersionOption: string;
@@ -309,7 +311,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     loading: 'Loading...', zoomIn: 'Zoom in', zoomOut: 'Zoom out', resetZoom: 'Reset zoom',
     fullscreen: 'Fullscreen', exitFullscreen: 'Exit fullscreen',
     mermaidError: (message: string) => `Mermaid error: ${message}`,
-    openWithSystemApp: 'Open with system app', fullscreenImage: 'Fullscreen image',
+    openWithSystemApp: 'Open with system app', fullscreenImage: 'Fullscreen image', refreshImage: 'Refresh image',
     colorLabel: (value: string) => `Color ${value}`,
     showHtmlPreview: 'Show HTML preview',
     unsupportedHtmlSource: 'This HTML stays as source because it contains unsupported or invalid markup.',
@@ -344,7 +346,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     disableConstrainedWidth: 'Disable Constrained Width',
     currentEdits: 'Last Saved Version', recentSave: 'Before Agent Edits',
     gitHead: 'Git HEAD (Latest Commit)',
-    compareWithVersion: 'Compare Against', displaySettings: 'Display Settings',
+    compareWithVersion: 'Compare Against', displaySettings: 'Display Settings', editorSettings: 'Editor Settings',
     currentDiskVersionOption: 'Last Saved Version',
     currentDiskVersionDescription: 'Compare with the latest file contents saved on disk, including external changes',
     beforeLastSaveVersionOption: 'Before Agent Edits',
@@ -453,7 +455,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     loading: '正在加载…', zoomIn: '放大', zoomOut: '缩小', resetZoom: '重置缩放',
     fullscreen: '全屏', exitFullscreen: '退出全屏',
     mermaidError: (message: string) => `Mermaid 错误：${message}`,
-    openWithSystemApp: '使用系统应用打开', fullscreenImage: '全屏查看图片',
+    openWithSystemApp: '使用系统应用打开', fullscreenImage: '全屏查看图片', refreshImage: '刷新图片',
     colorLabel: (value: string) => `颜色 ${value}`,
     showHtmlPreview: '显示 HTML 预览',
     unsupportedHtmlSource: '此 HTML 包含不支持或无效的标记，因此保留为源码。',
@@ -487,7 +489,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     disableConstrainedWidth: '取消内容宽度限制',
     currentEdits: '最近保存版本', recentSave: 'Agent 编辑前版本',
     gitHead: 'Git HEAD（最新提交）',
-    compareWithVersion: '比较方式', displaySettings: '显示设置',
+    compareWithVersion: '比较方式', displaySettings: '显示设置', editorSettings: '编辑器设置',
     currentDiskVersionOption: '与最近保存版本比较',
     currentDiskVersionDescription: '与磁盘上最新保存的文件内容比较，包含外部修改',
     beforeLastSaveVersionOption: '与 Agent 编辑前版本比较',

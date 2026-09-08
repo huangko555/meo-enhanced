@@ -82,7 +82,7 @@ const leavePresentation = leavePreview.find((effect) => effect.type === 'present
 assert.deepEqual(leavePresentation?.type === 'presentMode' ? leavePresentation.presentation : null, {
   mode: 'source', previousMode: 'preview', closeFind: true, previewActive: false, editorVisible: true,
   searchOwner: 'editor', outlineOwner: 'editor', replaceEnabled: true, hideSelectionMenu: false,
-  viewport: previewViewport, restoreEditorFocus: true
+  viewport: previewViewport, restoreEditorFocus: true, atomicEditorReveal: false
 });
 const leaveId = localInit.getState().pendingTransition?.id;
 assert.ok(leaveId);
@@ -104,6 +104,10 @@ const previewEffects = localInit.dispatch({
 });
 assert.deepEqual(effectTypes(previewEffects), ['commitTransientEdits', 'presentMode', 'persistMode', 'postMode']);
 const previewPresentation = previewEffects.find((effect) => effect.type === 'presentMode');
+assert.equal(
+  previewPresentation?.type === 'presentMode' ? previewPresentation.presentation.atomicEditorReveal : null,
+  false
+);
 assert.equal(previewPresentation?.type === 'presentMode' && previewPresentation.presentation.searchOwner, 'preview');
 assert.equal(previewPresentation?.type === 'presentMode' && previewPresentation.presentation.outlineOwner, 'preview');
 assert.equal(previewPresentation?.type === 'presentMode' && previewPresentation.presentation.hideSelectionMenu, true);
@@ -117,6 +121,22 @@ assert.equal(
   returnPresentation?.type === 'presentMode' && returnPresentation.presentation.restoreEditorFocus,
   true,
   'Preview exit must restore the focus intent captured before Preview blurred the editor'
+);
+
+const atomicReveal = createEditorModeApplication();
+atomicReveal.dispatch({ type: 'initialize', hostMode: 'live' });
+mountEditor(atomicReveal);
+atomicReveal.dispatch({ type: 'requestMode', mode: 'preview', source: 'user', viewport });
+const liveAfterPreview = atomicReveal.dispatch({
+  type: 'requestMode', mode: 'live', source: 'user', viewport, restoreEditorFocus: true
+});
+const liveAfterPreviewPresentation = liveAfterPreview.find((effect) => effect.type === 'presentMode');
+assert.equal(
+  liveAfterPreviewPresentation?.type === 'presentMode'
+    ? liveAfterPreviewPresentation.presentation.atomicEditorReveal
+    : null,
+  true,
+  'Preview→Live must keep Preview as a bounded cover while visible Live images become ready'
 );
 
 const fallback = createEditorModeApplication();

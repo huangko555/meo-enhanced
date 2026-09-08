@@ -38,14 +38,14 @@ const pendingTokenDecoration = Decoration.mark({
   }
 });
 
-function isSupportedFencedCodeAt(state: EditorState, position: number): boolean {
+function isFencedCodeAt(state: EditorState, position: number): boolean {
   const boundedPosition = Math.max(0, Math.min(position, state.doc.length));
   const probes = boundedPosition > 0 ? [boundedPosition, boundedPosition - 1] : [boundedPosition];
   for (const probe of probes) {
     let node: SyntaxNode | null = syntaxTree(state).resolveInner(probe, -1);
     while (node) {
       if (node.name === 'FencedCode') {
-        return resolveShikiLang(getFencedCodeInfo(state, node)) !== null;
+        return true;
       }
       node = node.parent;
     }
@@ -60,11 +60,11 @@ function addPendingTokenDecorations(
   const added: Array<ReturnType<typeof pendingTokenDecoration.range>> = [];
   transaction.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
     if (fromB >= toB) return;
-    const wasSupportedCode = isSupportedFencedCodeAt(transaction.startState, fromA)
-      || isSupportedFencedCodeAt(transaction.startState, toA);
-    const isSupportedCode = isSupportedFencedCodeAt(transaction.state, fromB)
-      || isSupportedFencedCodeAt(transaction.state, toB);
-    if (!wasSupportedCode && !isSupportedCode) return;
+    const wasFencedCode = isFencedCodeAt(transaction.startState, fromA)
+      || isFencedCodeAt(transaction.startState, toA);
+    const isFencedCode = isFencedCodeAt(transaction.state, fromB)
+      || isFencedCodeAt(transaction.state, toB);
+    if (!wasFencedCode && !isFencedCode) return;
 
     const startLine = transaction.newDoc.lineAt(fromB).number;
     const endLine = transaction.newDoc.lineAt(Math.max(fromB, toB - 1)).number;

@@ -2,11 +2,14 @@ export type ImagePresentationView = {
   showFallback(sourceKey: string): boolean;
   showImage(image: HTMLImageElement): boolean;
   preserveLayoutChange(apply: () => boolean): boolean | Promise<boolean>;
+  isVisible?(): boolean;
 };
 
 export type ImagePresentationHandle = {
   present(sourceKey: string, rawSrc: string): void;
+  refresh(): Promise<void>;
   externalDocumentPresented(): void;
+  whenCurrentPresentationSettles(signal?: AbortSignal): Promise<void>;
   dispose(): void;
 };
 
@@ -16,6 +19,7 @@ export type ImagePresentationFactory = {
   acquire(): () => void;
   preload(rawSrc: string): Promise<void>;
   create(view: ImagePresentationView): ImagePresentationHandle;
+  whenVisiblePresentationsSettle(signal?: AbortSignal): Promise<void>;
   externalDocumentPresented(): void;
   dispose(): void;
 };

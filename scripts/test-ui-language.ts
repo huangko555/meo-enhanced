@@ -36,6 +36,11 @@ assert.deepEqual(
 );
 assert.deepEqual([english.more, english.moreTools], ['Settings', 'Settings']);
 assert.deepEqual([chinese.more, chinese.moreTools], ['设置', '设置']);
+assert.deepEqual(
+  [english.editorSettings, chinese.editorSettings, english.displaySettings, chinese.displaySettings],
+  ['Editor Settings', '编辑器设置', 'Display Settings', '显示设置']
+);
+assert.deepEqual([english.refreshImage, chinese.refreshImage], ['Refresh image', '刷新图片']);
 assert.deepEqual([english.feedbackPrompt, english.reportIssue], ['Having trouble?', 'Report an issue']);
 assert.deepEqual([chinese.feedbackPrompt, chinese.reportIssue], ['使用中遇到问题？', '欢迎反馈']);
 assert.equal(english.line, 'Lines');

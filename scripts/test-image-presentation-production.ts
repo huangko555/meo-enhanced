@@ -86,7 +86,17 @@ async function main(): Promise<void> {
           `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="80"><rect width="160" height="80" fill="${color}"/><text x="8" y="42">${label}</text></svg>`
         )}`
       );
-      harness.setImageSrcResolver((url: string) => svg(url, '#68a'));
+      const resolutions = new Map<string, number>();
+      const pendingRefreshes: Array<(value: string | null) => void> = [];
+      harness.setImageSrcResolver((url: string) => {
+        const count = (resolutions.get(url) ?? 0) + 1;
+        resolutions.set(url, count);
+        if (url === 'first.png' && count > 1) {
+          return new Promise<string | null>((resolve) => pendingRefreshes.push(resolve));
+        }
+        return svg(`${url}:v1`, '#68a');
+      });
+      (window as any).__imageRefresh = { resolutions, pendingRefreshes, svg };
       (window as any).__imageHoverEditor = harness.createEditor({
         parent: document.getElementById('app')!,
         text: '![first](first.png) ![second](second.png)',
@@ -174,6 +184,64 @@ async function main(): Promise<void> {
       { hovered: true, opacity: 1 },
       { hovered: false, opacity: 0 }
     ], 'keyboard focus on another image must not compete with the current mouse Hover owner');
+
+    const firstSourceBeforeRefresh = await page.$eval(
+      '.meo-md-image:first-of-type .meo-md-image-img',
+      (image) => image.getAttribute('src') ?? ''
+    );
+    await page.$eval(
+      '.meo-md-image:first-of-type button[aria-label="Refresh image"]',
+      (button) => button.dispatchEvent(new PointerEvent('pointerdown', {
+        button: 0, bubbles: true, cancelable: true
+      }))
+    );
+    await page.waitForFunction(() => (
+      (window as any).__imageRefresh.resolutions.get('first.png') === 2
+    ));
+    assert.equal(
+      await page.$eval('.meo-md-image:first-of-type .meo-md-image-img', (image) => image.getAttribute('src') ?? ''),
+      firstSourceBeforeRefresh,
+      'a pending refresh must keep the current image painted'
+    );
+    assert.equal(
+      await page.evaluate(() => (window as any).__imageRefresh.resolutions.get('second.png')),
+      1,
+      'refreshing one image must not invalidate unrelated image resources'
+    );
+    await page.evaluate(() => {
+      const state = (window as any).__imageRefresh;
+      state.pendingRefreshes.shift()?.(state.svg('first.png:v2', '#6a8'));
+    });
+    await page.waitForFunction(() => (
+      document.querySelector<HTMLImageElement>('.meo-md-image:first-of-type .meo-md-image-img')
+        ?.getAttribute('src')?.includes('first.png%3Av2')
+    ));
+    const refreshedSource = await page.$eval(
+      '.meo-md-image:first-of-type .meo-md-image-img',
+      (image) => image.getAttribute('src') ?? ''
+    );
+    assert.notEqual(refreshedSource, firstSourceBeforeRefresh);
+
+    await page.$eval(
+      '.meo-md-image:first-of-type button[aria-label="Refresh image"]',
+      (button) => button.dispatchEvent(new PointerEvent('pointerdown', {
+        button: 0, bubbles: true, cancelable: true
+      }))
+    );
+    await page.waitForFunction(() => (
+      (window as any).__imageRefresh.resolutions.get('first.png') === 3
+    ));
+    await page.evaluate(() => (window as any).__imageRefresh.pendingRefreshes.shift()?.(null));
+    await page.waitForFunction(() => (
+      !document.querySelector<HTMLButtonElement>(
+        '.meo-md-image:first-of-type button[aria-label="Refresh image"]'
+      )?.disabled
+    ));
+    assert.equal(
+      await page.$eval('.meo-md-image:first-of-type .meo-md-image-img', (image) => image.getAttribute('src') ?? ''),
+      refreshedSource,
+      'a failed refresh must keep the last successfully loaded image'
+    );
 
     await page.evaluate(() => {
       (window as any).__imageHoverEditor.destroy();

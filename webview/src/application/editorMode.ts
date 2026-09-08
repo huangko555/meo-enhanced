@@ -69,6 +69,7 @@ export type EditorModePresentation = {
   readonly closeFind: boolean;
   readonly previewActive: boolean;
   readonly editorVisible: boolean;
+  readonly atomicEditorReveal: boolean;
   readonly searchOwner: 'editor' | 'preview';
   readonly outlineOwner: 'editor' | 'preview';
   readonly replaceEnabled: boolean;
@@ -148,13 +149,15 @@ const presentationFor = (
   mode: EditorMode,
   previousMode: EditorMode,
   viewport: EditorModeViewportToken | null,
-  restoreEditorFocus: boolean
+  restoreEditorFocus: boolean,
+  editorMounted: boolean
 ): EditorModePresentation => ({
   mode,
   previousMode,
   closeFind: mode !== previousMode,
   previewActive: mode === 'preview',
   editorVisible: mode !== 'preview',
+  atomicEditorReveal: mode === 'live' && previousMode === 'preview' && editorMounted,
   searchOwner: mode === 'preview' ? 'preview' : 'editor',
   outlineOwner: mode === 'preview' ? 'preview' : 'editor',
   replaceEnabled: mode !== 'preview',
@@ -295,7 +298,13 @@ export function createEditorModeApplication(): EditorModeApplication {
       { type: 'commitTransientEdits' },
       {
         type: 'presentMode',
-        presentation: presentationFor(targetMode, previousMode, viewport, effectiveRestoreEditorFocus)
+        presentation: presentationFor(
+          targetMode,
+          previousMode,
+          viewport,
+          effectiveRestoreEditorFocus,
+          editorMount === 'mounted'
+        )
       }
     ];
 
@@ -415,7 +424,13 @@ export function createEditorModeApplication(): EditorModeApplication {
           return [
             {
               type: 'presentMode',
-              presentation: presentationFor('source', 'live', pending.viewport, pending.restoreEditorFocus)
+              presentation: presentationFor(
+                'source',
+                'live',
+                pending.viewport,
+                pending.restoreEditorFocus,
+                editorMount === 'mounted'
+              )
             },
             ...(pending.requestedMode === 'source'
               ? finalize('source', {

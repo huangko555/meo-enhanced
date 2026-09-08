@@ -83,9 +83,10 @@ const adapter = createEditorModeEffectAdapter({
     element('preview').hidden = !active;
     events.push(`preview:${active}`);
   },
-  setEditorVisible(visible) {
+  setEditorVisible(visible, interactive = visible) {
     element('editor').hidden = !visible;
-    events.push(`editor:${visible}`);
+    element('editor').inert = !interactive;
+    events.push(`editor:${visible}:${interactive}`);
   },
   presentModeControl(mode) {
     element('mode').dataset.mode = mode;

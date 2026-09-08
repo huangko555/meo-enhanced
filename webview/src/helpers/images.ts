@@ -1,5 +1,5 @@
 import { EditorView, WidgetType } from '@codemirror/view';
-import { AppWindow, createElement, ExternalLink, Maximize2, RotateCcw, SquareArrowRightEnter, X, ZoomIn, ZoomOut } from 'lucide';
+import { AppWindow, createElement, ExternalLink, Maximize2, RefreshCw, RotateCcw, SquareArrowRightEnter, X, ZoomIn, ZoomOut } from 'lucide';
 import { getViewportController } from './viewportController';
 import { createImageResolutionTransport, type ImageResolutionTransport } from '../adapters/imageResolutionTransport';
 import { createClipboardImageSaveTransport, type ClipboardImageSaveTransport } from '../adapters/clipboardImageSaveTransport';
@@ -368,7 +368,21 @@ export class ImageWidget extends WidgetType {
         container.replaceChildren(image, this.createImageControls(image));
         return true;
       },
-      preserveLayoutChange: (apply) => this.preserveImageLayoutChange(container, view, apply)
+      preserveLayoutChange: (apply) => this.preserveImageLayoutChange(container, view, apply),
+      isVisible: () => {
+        if (!container.isConnected) return false;
+        const bounds = container.getBoundingClientRect();
+        const viewport = view?.scrollDOM.getBoundingClientRect() ?? {
+          top: 0,
+          right: window.innerWidth,
+          bottom: window.innerHeight,
+          left: 0
+        };
+        return bounds.bottom > viewport.top
+          && bounds.top < viewport.bottom
+          && bounds.right > viewport.left
+          && bounds.left < viewport.right;
+      }
     });
     this.presentationHandle = presentationHandle;
     container.addEventListener(IMAGE_PRESENTATION_DISPOSE_EVENT, () => {
@@ -496,6 +510,24 @@ export class ImageWidget extends WidgetType {
       openImageExternally(this.url);
     });
 
+    const refresh = document.createElement('button');
+    refresh.type = 'button';
+    refresh.className = 'meo-visual-control-btn meo-md-image-control-btn';
+    refresh.title = strings.refreshImage;
+    refresh.setAttribute('aria-label', strings.refreshImage);
+    refresh.appendChild(createElement(RefreshCw, { width: 16, height: 16 }));
+    refresh.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (refresh.disabled) return;
+      const refreshWork = this.presentationHandle?.refresh();
+      if (!refreshWork) return;
+      refresh.disabled = true;
+      void refreshWork.finally(() => {
+        if (refresh.isConnected) refresh.disabled = false;
+      });
+    });
+
     const fullscreen = document.createElement('button');
     fullscreen.type = 'button';
     fullscreen.className = 'meo-visual-control-btn meo-md-image-control-btn';
@@ -508,7 +540,7 @@ export class ImageWidget extends WidgetType {
       this.openFullscreen(img.currentSrc || img.src);
     });
 
-    controls.append(openExternally, fullscreen);
+    controls.append(refresh, openExternally, fullscreen);
     return controls;
   }
 

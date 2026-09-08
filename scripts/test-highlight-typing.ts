@@ -87,5 +87,60 @@ try {
     }
     await page.evaluate(() => (window as any).typingEditor.destroy());
   }
+  for (const fenceInfo of ['', 'text']) {
+    await page.evaluate((info) => {
+      const harness = (window as any).HighlightHarness;
+      harness.setShikiTheme({
+        name: 'plain-typing',
+        type: 'dark',
+        colors: { 'editor.foreground': '#eeeeee' },
+        tokenColors: [{ scope: 'string', settings: { foreground: '#0000ff' } }]
+      });
+      const code = ['plain value', ...Array.from({ length: 3000 }, (_, i) => `plain row ${i}`)].join('\n');
+      const text = `\`\`\`${info}\n${code}\n\`\`\``;
+      const parent = document.getElementById('app')!;
+      parent.replaceChildren();
+      const editor = harness.createEditor({ parent, text, initialMode: 'live', onApplyChanges() {} });
+      editor.view.dispatch({ selection: { anchor: text.indexOf('plain value') + 'plain value'.length } });
+      editor.focus();
+      (window as any).typingEditor = editor;
+      const baselinePosition = editor.view.state.selection.main.head - 1;
+      const baselineNode = editor.view.domAtPos(baselinePosition).node;
+      const baselineElement = baselineNode.nodeType === Node.ELEMENT_NODE
+        ? baselineNode as Element
+        : baselineNode.parentElement!;
+      (window as any).plainTyping = {
+        colors: [],
+        done: false,
+        baselineColor: getComputedStyle(baselineElement).color
+      };
+      const sample = () => {
+        const { node } = editor.view.domAtPos(editor.view.state.selection.main.head - 1);
+        const element = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement!;
+        (window as any).plainTyping.colors.push(getComputedStyle(element).color);
+        if (!(window as any).plainTyping.done) requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    }, fenceInfo);
+    await page.keyboard.type('abcdef', { delay: 70 });
+    await new Promise(resolve => setTimeout(resolve, 250));
+    const result = await page.evaluate(() => {
+      (window as any).plainTyping.done = true;
+      return {
+        text: (window as any).typingEditor.getText(),
+        colors: [...new Set((window as any).plainTyping.colors as string[])],
+        baselineColor: (window as any).plainTyping.baselineColor as string
+      };
+    });
+    assert.ok(result.text.includes('plain valueabcdef'));
+    assert.ok(!result.colors.includes('rgb(0, 0, 255)'),
+      `Plain fenced code must never expose Markdown token blue while typing: ${fenceInfo || 'no language'}`);
+    assert.deepEqual(
+      result.colors,
+      [result.baselineColor],
+      `Plain fenced code must preserve its stable color while typing: ${fenceInfo || 'no language'}`
+    );
+    await page.evaluate(() => (window as any).typingEditor.destroy());
+  }
   console.log('Code highlighting remains painted during typing');
 } finally { await browser.close(); }

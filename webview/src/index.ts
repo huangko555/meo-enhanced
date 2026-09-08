@@ -775,7 +775,7 @@ displaySeparator.className = 'more-tools-separator';
 displaySeparator.setAttribute('role', 'separator');
 const displaySettingsHeading = document.createElement('div');
 displaySettingsHeading.className = 'more-tools-section-label';
-displaySettingsHeading.textContent = activeUiStrings.displaySettings;
+displaySettingsHeading.textContent = activeUiStrings.editorSettings;
 const editorAppearanceControl = createSegmentedControl<EditorAppearance>({
   ariaLabel: activeUiStrings.editorAppearance,
   className: 'editor-appearance-control',
@@ -902,7 +902,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   moreToolsButton.title = strings.more;
   moreToolsButton.setAttribute('aria-label', strings.moreTools);
   moreToolsPanel.setAttribute('aria-label', strings.moreTools);
-  displaySettingsHeading.textContent = strings.displaySettings;
+  displaySettingsHeading.textContent = strings.editorSettings;
   feedbackPrompt.textContent = strings.feedbackPrompt;
   reportIssueButton.title = strings.reportIssue;
   reportIssueButton.setAttribute('aria-label', strings.reportIssue);
@@ -1348,6 +1348,7 @@ let pendingEditorSurfaceRecoveryRaf: number | null = null;
 let createEditorFactoryPromise: Promise<CreateEditorFactory> | null = null;
 let editorFontSizePreference: EditorFontSizePreference = { mode: 'auto', value: 14 };
 const INITIAL_EDITOR_MOUNT_FALLBACK_MS = 120;
+const LIVE_IMAGE_REVEAL_WAIT_MS = 120;
 
 const failureNotice = createFailureNoticeManager(editorNotice);
 handleEditorNoticeDismiss = failureNotice.clearFailureNotice;
@@ -1952,9 +1953,12 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     };
   },
   mountEditor: mountEditorForMode,
-  applyEditorMode(mode, viewport) {
+  async applyEditorMode(mode, viewport) {
     if (!editor) throw new Error('Editor is not mounted');
     editor.setMode(mode, viewport);
+    if (mode === 'live' && !previewController.host.hidden) {
+      await editor.whenVisibleImagesReady(LIVE_IMAGE_REVEAL_WAIT_MS);
+    }
     changesReviewMode = mode;
     syncGitDiffDetails();
     syncGitDiffLineHighlights();
@@ -1974,9 +1978,9 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     syncGitDiffLineHighlights();
     if (active) syncGitDiffDetails();
   },
-  setEditorVisible(visible) {
+  setEditorVisible(visible, interactive = visible) {
     editorHost.toggleAttribute('data-preview-cover', !visible && !previewPaintReady);
-    editorHost.inert = !visible;
+    editorHost.inert = !interactive;
     editorHost.hidden = !visible;
   },
   presentModeControl(mode) {

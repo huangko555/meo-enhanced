@@ -29,6 +29,7 @@ const DEFAULT_FAILURE_RETRY_MS = 30_000;
 export type ImagePresentationResourcePool = {
   acquire(): () => void;
   invalidate(): void;
+  invalidateResource(contextKey: string, rawSrc: string, resolvedSrc: string | null): void;
   resolve(contextKey: string, rawSrc: string): Promise<string | null>;
   getResolved(contextKey: string, rawSrc: string): string | null;
   load(contextKey: string, resolvedSrc: string): Promise<HTMLImageElement | null>;
@@ -44,7 +45,8 @@ export type ImagePresentationResourcePoolOptions = {
   ) => Promise<string | null>;
   readonly loadImage: (
     resolvedSrc: string,
-    signal: AbortSignal
+    signal: AbortSignal,
+    forceReload: boolean
   ) => Promise<HTMLImageElement | null>;
   readonly now?: () => number;
   readonly maxConcurrentLoads?: number;
@@ -75,6 +77,7 @@ type ImageResourceGeneration = {
   readonly loadedCache: Map<string, HTMLImageElement>;
   readonly loadInFlight: Map<string, Promise<HTMLImageElement | null>>;
   readonly failedAt: Map<string, number>;
+  readonly forcedReloads: Set<string>;
   readonly queue: QueuedLoad[];
   activeLoads: number;
   released: boolean;
@@ -125,6 +128,7 @@ export function createImagePresentationResourcePool(
       loadedCache: new Map(),
       loadInFlight: new Map(),
       failedAt: new Map(),
+      forcedReloads: new Set(),
       queue: [],
       activeLoads: 0,
       released: false
@@ -150,6 +154,7 @@ export function createImagePresentationResourcePool(
     generation.resolvedCache.clear();
     generation.loadedCache.clear();
     generation.failedAt.clear();
+    generation.forcedReloads.clear();
   };
 
   const startNext = (generation: ImageResourceGeneration): void => {
@@ -246,9 +251,10 @@ export function createImagePresentationResourcePool(
     if (generation.loadInFlight.size >= maxConcurrentLoads + maxQueuedLoads) {
       return Promise.resolve(null);
     }
+    const forceReload = generation.forcedReloads.delete(key);
     const browserLoad = schedule(
       generation,
-      () => options.loadImage(resolvedSrc, generation.abortController.signal)
+      () => options.loadImage(resolvedSrc, generation.abortController.signal, forceReload)
     );
     const loading = Promise.race([browserLoad, generation.releasedResult])
       .then((image) => {
@@ -296,6 +302,19 @@ export function createImagePresentationResourcePool(
       const activeLeases = [...generation.leases];
       releaseGeneration(generation, false);
       currentGeneration = createGeneration(activeLeases);
+    },
+    invalidateResource(contextKey, rawSrc, resolvedSrc) {
+      const generation = currentGeneration;
+      if (disposed || !generation || generation.released) return;
+      const resolutionKey = cacheKey(contextKey, rawSrc);
+      generation.resolvedCache.delete(resolutionKey);
+      generation.resolutionInFlight.delete(resolutionKey);
+      if (!resolvedSrc) return;
+      const loadKey = cacheKey(contextKey, resolvedSrc);
+      generation.loadedCache.delete(loadKey);
+      generation.loadInFlight.delete(loadKey);
+      generation.failedAt.delete(loadKey);
+      generation.forcedReloads.add(loadKey);
     },
     resolve,
     getResolved(contextKey, rawSrc) {
@@ -460,7 +479,10 @@ export type ImagePresentationFactoryOptions = {
 export function createImagePresentationFactory(
   options: ImagePresentationFactoryOptions
 ): ImagePresentationFactory {
-  const handles = new Set<ImagePresentationHandle>();
+  const handles = new Map<ImagePresentationHandle, {
+    readonly view: ImagePresentationView;
+    readonly runtime: ReturnType<typeof createImagePresentationRuntime>;
+  }>();
   const releaseResourceLeases = new Set<() => void>();
   let disposed = false;
 
@@ -478,9 +500,40 @@ export function createImagePresentationFactory(
       present(sourceKey, rawSrc) {
         if (active) runtime.dispatch({ type: 'present', sourceKey, rawSrc });
       },
+      async refresh() {
+        if (!active) return;
+        const before = application.getState().current;
+        if (!before || before.phase !== 'ready') return;
+        options.resources.invalidateResource(
+          options.resourceContextKey,
+          before.rawSrc,
+          before.resolvedSrc
+        );
+        const resolved = await options.resources.resolve(
+          options.resourceContextKey,
+          before.rawSrc
+        );
+        if (!resolved || !active) return;
+        const loaded = await options.resources.load(options.resourceContextKey, resolved);
+        const current = application.getState().current;
+        if (
+          !loaded ||
+          !active ||
+          current?.presentationId !== before.presentationId ||
+          current.sourceKey !== before.sourceKey ||
+          current.rawSrc !== before.rawSrc
+        ) return;
+        runtime.dispatch({
+          type: 'present',
+          sourceKey: before.sourceKey,
+          rawSrc: before.rawSrc
+        });
+        await runtime.whenCurrentPresentationSettles();
+      },
       externalDocumentPresented() {
         if (active) runtime.dispatch({ type: 'externalDocumentPresented' });
       },
+      whenCurrentPresentationSettles: (signal) => runtime.whenCurrentPresentationSettles(signal),
       dispose() {
         if (!active) return;
         active = false;
@@ -488,7 +541,7 @@ export function createImagePresentationFactory(
         runtime.dispose();
       }
     };
-    handles.add(handle);
+    handles.set(handle, { view, runtime });
     return handle;
   };
 
@@ -513,15 +566,22 @@ export function createImagePresentationFactory(
       await options.resources.load(options.resourceContextKey, resolved);
     },
     create,
+    async whenVisiblePresentationsSettle(signal) {
+      if (disposed) return;
+      const pending = [...handles.values()]
+        .filter(({ view }) => view.isVisible?.() !== false)
+        .map(({ runtime }) => runtime.whenCurrentPresentationSettles(signal));
+      await Promise.all(pending);
+    },
     externalDocumentPresented() {
       if (disposed) return;
       options.resources.invalidate();
-      for (const handle of handles) handle.externalDocumentPresented();
+      for (const handle of handles.keys()) handle.externalDocumentPresented();
     },
     dispose() {
       if (disposed) return;
       disposed = true;
-      for (const handle of [...handles]) handle.dispose();
+      for (const handle of [...handles.keys()]) handle.dispose();
       handles.clear();
       for (const release of [...releaseResourceLeases]) release();
       releaseResourceLeases.clear();
@@ -529,9 +589,22 @@ export function createImagePresentationFactory(
   };
 }
 
+let imageReloadSequence = 0;
+
+function cacheBustedImageSource(resolvedSrc: string): string {
+  if (/^(?:data:|blob:)/i.test(resolvedSrc)) return resolvedSrc;
+  const hashAt = resolvedSrc.indexOf('#');
+  const base = hashAt >= 0 ? resolvedSrc.slice(0, hashAt) : resolvedSrc;
+  const hash = hashAt >= 0 ? resolvedSrc.slice(hashAt) : '';
+  const separator = base.includes('?') ? '&' : '?';
+  imageReloadSequence += 1;
+  return `${base}${separator}meoReload=${imageReloadSequence}${hash}`;
+}
+
 export function loadBrowserImage(
   resolvedSrc: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  forceReload = false
 ): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     const image = new Image();
@@ -568,7 +641,7 @@ export function loadBrowserImage(
     image.addEventListener('load', onLoad, { once: true });
     image.addEventListener('error', onError, { once: true });
     signal?.addEventListener('abort', onAbort, { once: true });
-    image.src = resolvedSrc;
+    image.src = forceReload ? cacheBustedImageSource(resolvedSrc) : resolvedSrc;
     if (image.complete && image.naturalWidth > 0) complete(image);
   });
 }

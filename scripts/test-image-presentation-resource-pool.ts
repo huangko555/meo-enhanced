@@ -134,4 +134,33 @@ boundedLoadReleases.shift()?.();
 await Promise.all([boundedLoadA, boundedLoadB]);
 boundedPool.dispose();
 
+let refreshResolveCalls = 0;
+const refreshLoadFlags: boolean[] = [];
+const refreshPool = createImagePresentationResourcePool({
+  async resolveSource(_contextKey, rawSrc) {
+    refreshResolveCalls += 1;
+    return `resolved:${rawSrc}`;
+  },
+  async loadImage(resolvedSrc, _signal, forceReload) {
+    refreshLoadFlags.push(forceReload);
+    return { src: resolvedSrc } as HTMLImageElement;
+  }
+});
+const releaseRefreshPool = refreshPool.acquire();
+const refreshedRawSrc = './refresh.png';
+const refreshedResolvedSrc = await refreshPool.resolve('document', refreshedRawSrc);
+assert.ok(refreshedResolvedSrc);
+await refreshPool.load('document', refreshedResolvedSrc);
+refreshPool.invalidateResource('document', refreshedRawSrc, refreshedResolvedSrc);
+assert.equal(await refreshPool.resolve('document', refreshedRawSrc), refreshedResolvedSrc);
+await refreshPool.load('document', refreshedResolvedSrc);
+assert.equal(refreshResolveCalls, 2, 'single-image refresh must resolve the selected resource again');
+assert.deepEqual(
+  refreshLoadFlags,
+  [false, true],
+  'single-image refresh must request one browser cache-bypassing load'
+);
+releaseRefreshPool();
+refreshPool.dispose();
+
 console.log('image presentation resource pool contracts passed');

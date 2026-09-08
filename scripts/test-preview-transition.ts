@@ -27,12 +27,16 @@ try {
   await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
   await page.addStyleTag({ path: 'webview/src/styles.css' });
   let failRender = false;
+  let holdLiveImageResolution = false;
+  const pendingLiveImageResolutions: Array<() => void> = [];
   let releaseInitialRender!: () => void;
   const initialRender = new Promise<void>(resolve => { releaseInitialRender = resolve; });
   let holdInitialRender = true;
   await page.exposeFunction('__renderPreview', async (message: any) => {
     if (message.type === 'resolveImageSrc') {
-      assert.equal(message.delivery, 'embedded', 'Preview iframe images must request embedded delivery');
+      if (message.delivery !== 'embedded' && holdLiveImageResolution) {
+        await new Promise<void>((resolve) => pendingLiveImageResolutions.push(resolve));
+      }
       return {
         type: 'resolvedImageSrc',
         requestId: message.requestId,
@@ -154,6 +158,51 @@ try {
   });
   assert.deepEqual(cancelled, { editorVisible: true, editorInert: false, covered: false, previewHidden: true, previewInert: true },
     'Late paint readiness must not cover or disable an editor after switching back');
+
+  await page.click('button[data-mode="source"]');
+  await page.click('button[data-mode="preview"]');
+  await page.waitForFunction(() => !document.querySelector<HTMLElement>('.preview-host')?.hidden);
+  holdLiveImageResolution = true;
+  await page.click('button[data-mode="live"]');
+  await new Promise(resolve => setTimeout(resolve, 35));
+  const pendingLiveReveal = await page.evaluate(() => {
+    const editor = document.querySelector<HTMLElement>('.editor-host')!;
+    const preview = document.querySelector<HTMLElement>('.preview-host')!;
+    return {
+      editorHidden: editor.hidden,
+      editorInert: editor.inert,
+      previewHidden: preview.hidden,
+      previewInert: preview.inert
+    };
+  });
+  assert.deepEqual(pendingLiveReveal, {
+    editorHidden: false,
+    editorInert: true,
+    previewHidden: false,
+    previewInert: false
+  }, 'Preview must cover a non-interactive Live surface while visible images reload');
+  holdLiveImageResolution = false;
+  pendingLiveImageResolutions.splice(0).forEach((release) => release());
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('.preview-host')?.hidden);
+  assert.deepEqual(await page.evaluate(() => {
+    const editor = document.querySelector<HTMLElement>('.editor-host')!;
+    return { hidden: editor.hidden, inert: editor.inert };
+  }), { hidden: false, inert: false });
+
+  await page.click('button[data-mode="source"]');
+  await page.click('button[data-mode="preview"]');
+  await page.waitForFunction(() => !document.querySelector<HTMLElement>('.preview-host')?.hidden);
+  holdLiveImageResolution = true;
+  const timeoutRevealStartedAt = Date.now();
+  await page.click('button[data-mode="live"]');
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('.preview-host')?.hidden, { timeout: 1000 });
+  const timeoutRevealElapsed = Date.now() - timeoutRevealStartedAt;
+  assert.ok(
+    timeoutRevealElapsed <= 260,
+    `Live reveal must not wait indefinitely for slow images: ${timeoutRevealElapsed}ms`
+  );
+  holdLiveImageResolution = false;
+  pendingLiveImageResolutions.splice(0).forEach((release) => release());
   failRender = true;
   await page.click('.cm-content');
   await page.keyboard.type('changed');

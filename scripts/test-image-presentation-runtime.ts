@@ -52,6 +52,15 @@ void runtime.whenCurrentPresentationSettles().then(() => { firstIdle = true; });
 await Promise.resolve();
 assert.equal(firstIdle, false, 'resolving presentation must not be idle');
 
+const abandonedWait = new AbortController();
+let abandonedWaitSettled = false;
+void runtime.whenCurrentPresentationSettles(abandonedWait.signal).then(() => {
+  abandonedWaitSettled = true;
+});
+abandonedWait.abort();
+await Promise.resolve();
+assert.equal(abandonedWaitSettled, true, 'an abandoned reveal wait must release immediately');
+
 runtime.dispatch({ type: 'present', sourceKey: 'b', rawSrc: './b.png' });
 const secondId = application.getState().current?.presentationId;
 assert.ok(secondId && secondId !== firstId);
