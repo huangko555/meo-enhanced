@@ -5148,13 +5148,16 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       bottom: window.innerHeight
     };
     const rowRect = row.getBoundingClientRect();
-    const targetOutsideViewport = rowRect.bottom <= viewportRect.top || rowRect.top >= viewportRect.bottom;
-    const targetHiddenByStickyHeader = rowIndex === 0
-      && this.domRefs.stickyChrome.classList.contains('is-visible');
+    const stickyHeaderVisible = this.domRefs.stickyChrome.classList.contains('is-visible');
+    const effectiveViewportTop = stickyHeaderVisible
+      ? Math.max(viewportRect.top, this.domRefs.stickyChrome.getBoundingClientRect().bottom)
+      : viewportRect.top;
+    const targetOutsideViewport = rowRect.bottom <= effectiveViewportTop || rowRect.top >= viewportRect.bottom;
+    const targetHiddenByStickyHeader = rowIndex === 0 && stickyHeaderVisible;
     contextTrigger.hidden = targetOutsideViewport || targetHiddenByStickyHeader;
     if (contextTrigger.hidden && !contextMenu.hidden) this.setContextMenuOpen(false);
     if (contextTrigger.hidden) return;
-    const visibleTop = Math.max(viewportRect.top, wrapRect.top);
+    const visibleTop = Math.max(effectiveViewportTop, wrapRect.top);
     const visibleBottom = Math.min(viewportRect.bottom, wrapRect.bottom);
     const selectionRange = this.cellSelection.snapshot().range;
     const hasMultiCellSelection = Boolean(selectionRange && (
@@ -5185,7 +5188,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     contextTrigger.style.left = `${triggerLeft}px`;
     contextTrigger.style.top = `${rowCenter}px`;
     if (contextMenu.hidden) return;
-    const gap = 6;
+    const gap = 8;
     const menuWidth = contextMenu.offsetWidth;
     const menuHeight = contextMenu.offsetHeight;
     const visibleLeft = Math.max(shellRect.left, viewportRect.left);
@@ -5195,11 +5198,27 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       Math.max(preferredLeft, visibleLeft + 4),
       Math.max(visibleLeft + 4, visibleRight - menuWidth - 4)
     );
-    const below = anchorBottom + gap;
-    const above = anchorTop - menuHeight - gap;
-    const menuTop = below + menuHeight <= viewportRect.bottom - 4
-      ? below
-      : Math.max(viewportRect.top + 4, above);
+    const minimumMenuTop = effectiveViewportTop + 4;
+    const maximumMenuTop = Math.max(minimumMenuTop, viewportRect.bottom - menuHeight - 4);
+    const aboveRow = rowRect.top - menuHeight - gap;
+    const belowRow = rowRect.bottom + gap;
+    let menuTop: number;
+    if (belowRow <= maximumMenuTop) {
+      menuTop = belowRow;
+    } else if (aboveRow >= minimumMenuTop) {
+      menuTop = aboveRow;
+    } else {
+      const clampMenuTop = (value: number) => Math.min(Math.max(value, minimumMenuTop), maximumMenuTop);
+      const aboveCaret = clampMenuTop(anchorTop - menuHeight - gap);
+      const belowCaret = clampMenuTop(anchorBottom + gap);
+      const overlapWithCaret = (top: number) => Math.max(
+        0,
+        Math.min(top + menuHeight, anchorBottom) - Math.max(top, anchorTop)
+      );
+      menuTop = overlapWithCaret(belowCaret) <= overlapWithCaret(aboveCaret)
+        ? belowCaret
+        : aboveCaret;
+    }
     contextMenu.style.left = `${menuLeft - shellRect.left}px`;
     contextMenu.style.top = `${menuTop - shellRect.top}px`;
   }

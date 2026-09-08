@@ -100,6 +100,11 @@ async function main(): Promise<void> {
       const shellHeightBefore = shell.getBoundingClientRect().height;
       const triggerVisibleBeforeOpen = getComputedStyle(trigger).visibility;
       const triggerBackground = getComputedStyle(trigger).backgroundColor;
+      const initialRow = firstInput.closest<HTMLTableRowElement>('tr')!;
+      const initialViewportRect = editor.view.scrollDOM.getBoundingClientRect();
+      editor.view.scrollDOM.scrollTop += initialRow.getBoundingClientRect().top - (initialViewportRect.top + 160);
+      await frames(4);
+      firstInput.focus({ preventScroll: true });
       pointer(trigger);
       await frames(2);
       const menu = shell.querySelector<HTMLElement>('.meo-md-html-table-context-menu')!;
@@ -128,6 +133,10 @@ async function main(): Promise<void> {
       const triggerOutsideTable = triggerRect.right <= wrapRect.left + 0.5;
       const tableUsesNormalContentLeft = Math.abs(wrapRect.left - shellRect.left) < 0.5;
       const menuInsideViewport = menuRect.left >= -0.5 && menuRect.right <= window.innerWidth + 0.5;
+      const initialRowRect = initialRow.getBoundingClientRect();
+      const menuPrefersBelowWhenBothFit = menuRect.top - initialRowRect.bottom >= 7.5;
+      const initialMenuFitsOnBothSides = initialRowRect.top - menuRect.height - 8 >= initialViewportRect.top + 4
+        && initialRowRect.bottom + menuRect.height + 8 <= initialViewportRect.bottom - 4;
       const floating = getComputedStyle(menu).position;
       const menuStyle = getComputedStyle(menu);
       const shellZIndex = Number(getComputedStyle(shell).zIndex);
@@ -170,6 +179,22 @@ async function main(): Promise<void> {
       firstInput.dispatchEvent(new Event('input', { bubbles: true }));
       await frames(4);
       const triggerCenterAtFirstVisualLine = trigger.getBoundingClientRect().top + trigger.offsetHeight / 2;
+      pointer(trigger);
+      await frames(2);
+      const tallRow = firstInput.closest<HTMLTableRowElement>('tr')!;
+      const tallMenu = shell.querySelector<HTMLElement>('.meo-md-html-table-context-menu')!;
+      const tallViewportRect = editor.view.scrollDOM.getBoundingClientRect();
+      const tallRowRectBeforePositioning = tallRow.getBoundingClientRect();
+      const tallMenuHeight = tallMenu.getBoundingClientRect().height;
+      editor.view.scrollDOM.scrollTop += tallRowRectBeforePositioning.top
+        - (tallViewportRect.top + tallMenuHeight + 20);
+      await frames(4);
+      const tallRowRect = tallRow.getBoundingClientRect();
+      const tallMenuRect = tallMenu.getBoundingClientRect();
+      const tallMenuGapAboveRow = tallRowRect.top - tallMenuRect.bottom;
+      const tallMenuAvoidsActiveRow = tallMenuGapAboveRow >= 7.5;
+      pointer(tallMenu.querySelector<HTMLButtonElement>('.meo-md-html-table-context-collapse')!);
+      await frames(1);
       firstInput.setSelectionRange(firstInput.value.length, firstInput.value.length);
       firstInput.dispatchEvent(new Event('input', { bubbles: true }));
       await frames(4);
@@ -179,6 +204,35 @@ async function main(): Promise<void> {
       firstInput.setSelectionRange(firstInput.value.length, firstInput.value.length);
       firstInput.dispatchEvent(new Event('input', { bubbles: true }));
       await frames(4);
+
+      const scrollBeforeStickyOcclusion = editor.view.scrollDOM.scrollTop;
+      firstInput.focus({ preventScroll: true });
+      if (menu.hidden) pointer(trigger);
+      await frames(2);
+      const stickyChrome = shell.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome')!;
+      const rowBeforeStickyOcclusion = initialRow.getBoundingClientRect();
+      const viewportBeforeStickyOcclusion = editor.view.scrollDOM.getBoundingClientRect();
+      const stickyHeight = Math.max(
+        stickyChrome.getBoundingClientRect().height,
+        table.tHead!.rows[0].getBoundingClientRect().height
+      );
+      editor.view.scrollDOM.dispatchEvent(new WheelEvent('wheel', { deltaY: 80, bubbles: true }));
+      editor.view.scrollDOM.scrollTop += rowBeforeStickyOcclusion.bottom
+        - (viewportBeforeStickyOcclusion.top + stickyHeight - 2);
+      await waitUntil(
+        () => stickyChrome.classList.contains('is-visible'),
+        'sticky header over the active body row'
+      );
+      await frames(4);
+      const occludedRowRect = initialRow.getBoundingClientRect();
+      const occludingStickyRect = stickyChrome.getBoundingClientRect();
+      const occludedViewportRect = editor.view.scrollDOM.getBoundingClientRect();
+      const bodyRowStillInViewportWhenOccluded = occludedRowRect.bottom > occludedViewportRect.top + 0.5;
+      const bodyRowFullyBehindStickyHeader = occludedRowRect.bottom <= occludingStickyRect.bottom + 0.5;
+      const bodyRowControlsHiddenByStickyHeader = trigger.hidden && menu.hidden;
+      editor.view.scrollDOM.dispatchEvent(new WheelEvent('wheel', { deltaY: -80, bubbles: true }));
+      editor.view.scrollDOM.scrollTop = scrollBeforeStickyOcclusion;
+      await frames(6);
 
       const headerInput = shell.querySelector<HTMLTextAreaElement>('thead textarea')!;
       headerInput.focus({ preventScroll: true });
@@ -345,6 +399,8 @@ async function main(): Promise<void> {
         triggerOutsideTable,
         tableUsesNormalContentLeft,
         menuInsideViewport,
+        menuPrefersBelowWhenBothFit,
+        initialMenuFitsOnBothSides,
         leadingControlCenterDelta,
         trailingControlCenterDelta,
         floating,
@@ -367,6 +423,11 @@ async function main(): Promise<void> {
         visibleText,
         horizontalMenu,
         collapseClosesMenu,
+        tallMenuAvoidsActiveRow,
+        tallMenuGapAboveRow,
+        bodyRowStillInViewportWhenOccluded,
+        bodyRowFullyBehindStickyHeader,
+        bodyRowControlsHiddenByStickyHeader,
         triggerFollowsCaretLine,
         triggerHiddenWithStickyHeader,
         menuClosedWithStickyHeader,
@@ -524,6 +585,16 @@ async function main(): Promise<void> {
     assert.equal(result.arrangementSeparatorCount, 3);
     assert.equal(result.horizontalMenu, true);
     assert.equal(result.collapseClosesMenu, true);
+    assert.equal(
+      result.tallMenuAvoidsActiveRow,
+      true,
+      `the expanded toolbar must stay at least 8px outside a tall active row when space is available: ${result.tallMenuGapAboveRow}px`
+    );
+    assert.equal(result.bodyRowStillInViewportWhenOccluded, true, 'the sticky-header fixture must not scroll the row out of the viewport');
+    assert.equal(result.bodyRowFullyBehindStickyHeader, true, 'the active body row must be fully covered by the sticky header');
+    assert.equal(result.bodyRowControlsHiddenByStickyHeader, true, 'controls must hide once the sticky header fully covers their active row');
+    assert.equal(result.initialMenuFitsOnBothSides, true, 'the below-placement fixture must have room on both sides');
+    assert.equal(result.menuPrefersBelowWhenBothFit, true, 'the expanded toolbar must prefer the active row\'s lower side');
     assert.equal(result.defaultPage, 'structure');
     assert.equal(result.arrangementPage, 'arrangement');
     assert.equal(result.previousPageReturns, true);
