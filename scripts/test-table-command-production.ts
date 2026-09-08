@@ -112,7 +112,10 @@ async function main() {
         const heightBefore = shell.getBoundingClientRect().height;
         const triggerVisibleBeforeOpen = getComputedStyle(trigger).visibility;
         pointer(trigger);
-        const button = menu.querySelector<HTMLButtonElement>('.meo-md-html-table-context-btn')!;
+        const button = menu.querySelector<HTMLButtonElement>('.meo-md-html-table-context-btn[data-command]')!;
+        const edgeButtons = Array.from(menu.querySelectorAll<HTMLButtonElement>(
+          '[data-context-page="structure"] .meo-md-html-table-context-collapse, [data-context-page="structure"] .meo-md-html-table-context-page-btn'
+        ));
         const triggerRect = trigger.getBoundingClientRect();
         const shellRect = shell.getBoundingClientRect();
         const wrapRect = shell.querySelector<HTMLElement>('.meo-md-html-table-wrap')!.getBoundingClientRect();
@@ -128,14 +131,16 @@ async function main() {
           heightAfter: shell.getBoundingClientRect().height,
           menuPosition: getComputedStyle(menu).position,
           buttonSize: [button.getBoundingClientRect().width, button.getBoundingClientRect().height],
+          edgeButtonWidths: edgeButtons.map((edgeButton) => edgeButton.getBoundingClientRect().width),
           preferredColumnWidths: Array.from(
             shell.querySelectorAll<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead th'),
             (cell) => cell.getBoundingClientRect().width
           ),
           visibleText: menu.innerText.trim(),
-          separatorCount: menu.querySelectorAll('[role="separator"]').length,
+          separatorCount: menu.querySelectorAll('[data-context-page="structure"] [role="separator"]').length,
+          activePage: menu.dataset.activePage,
           commandOrder: Array.from(
-            menu.querySelectorAll<HTMLButtonElement>('.meo-md-html-table-context-btn[data-command]'),
+            menu.querySelectorAll<HTMLButtonElement>('[data-context-page="structure"] .meo-md-html-table-context-btn[data-command]'),
             (item) => item.dataset.command
           )
         };
@@ -178,6 +183,7 @@ async function main() {
       secondInput?.focus();
       pointer(shells[0].querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
       pointer(shells[1].querySelector<HTMLButtonElement>('.meo-md-html-table-context-trigger')!);
+      pointer(shells[1].querySelector<HTMLButtonElement>('.meo-md-html-table-context-next')!);
       pointer(shells[1].querySelector<HTMLButtonElement>('button[title="Align selected column right"]')!);
       await waitUntil(() => /\| C\s+\| D\s+\|\n\| ---:\s+\| ---\s+\|/.test(editor.view.state.doc.toString()), 'multi-table queue');
       const afterRapidMultiTable = editor.view.state.doc.toString();
@@ -446,15 +452,19 @@ async function main() {
     assert.equal(result.contextLayout.buttonSize[0], 28);
     assert.equal(result.contextLayout.buttonSize[1], 28);
     assert.ok(
+      result.contextLayout.edgeButtonWidths.every((width) => width === 22),
+      `close and paging controls must share the same compact width: ${JSON.stringify(result.contextLayout.edgeButtonWidths)}`
+    );
+    assert.ok(
       result.contextLayout.preferredColumnWidths.every((width) => width >= 89.5),
       `Columns with available space must keep the 90px preferred minimum: ${JSON.stringify(result.contextLayout.preferredColumnWidths)}`
     );
     assert.equal(result.contextLayout.visibleText, '');
     assert.equal(result.contextLayout.separatorCount, 3);
+    assert.equal(result.contextLayout.activePage, 'structure');
     assert.deepEqual(result.contextLayout.commandOrder, [
-      'insert-row-above', 'insert-row-below', 'move-row-up', 'move-row-down', 'delete-row',
-      'insert-column-left', 'insert-column-right', 'move-column-left', 'move-column-right', 'delete-column',
-      'align-left', 'align-center', 'align-right'
+      'insert-row-above', 'insert-row-below', 'delete-row',
+      'insert-column-left', 'insert-column-right', 'delete-column'
     ]);
     assert.equal(result.menuOpenAfterAtomicInsert, true, 'Context menu must remain open after a table command restores focus');
     assert.match(result.afterAtomicInsert, /edited/);
@@ -466,14 +476,14 @@ async function main() {
     assert.deepEqual(result.contextActions, [
       'Insert row above',
       'Insert row below',
-      'Move row up',
-      'Move row down',
       'Delete row',
       'Insert column left',
       'Insert column right',
+      'Delete column',
+      'Move row up',
+      'Move row down',
       'Move column left',
       'Move column right',
-      'Delete column',
       'Align selected column left',
       'Align selected column center',
       'Align selected column right'

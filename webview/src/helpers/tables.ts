@@ -84,6 +84,24 @@ import {
   type TableClipboardMatrix
 } from '../editor/tableClipboard';
 import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
+import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  ChevronLeft,
+  ChevronRight,
+  Columns2,
+  EllipsisVertical,
+  Plus,
+  Rows2,
+  X,
+  createElement,
+  type IconNode
+} from 'lucide';
 
 interface TableData {
   rows: string[][];
@@ -139,8 +157,12 @@ interface DomRefs {
   stickyHeaderRow: HTMLTableRowElement;
   contextTrigger: HTMLButtonElement;
   contextMenu: HTMLDivElement;
+  contextPages: Record<TableContextPage, HTMLDivElement>;
   contextButtons: {
     collapse: HTMLButtonElement;
+    collapseArrangement: HTMLButtonElement;
+    previousPage: HTMLButtonElement;
+    nextPage: HTMLButtonElement;
     insertRowAbove: HTMLButtonElement;
     insertRowBelow: HTMLButtonElement;
     moveRowUp: HTMLButtonElement;
@@ -184,10 +206,7 @@ interface TableRange {
   to: number;
 }
 
-interface TableToolbarIcon {
-  className: string;
-  paths: string[];
-}
+type TableContextPage = 'structure' | 'arrangement';
 
 interface TableActionTarget {
   row: number;
@@ -598,111 +617,6 @@ export const tableHeaderAlignmentOverrideField = StateField.define<RangeSet<Tabl
     return RangeSet.of(entries.map((entry) => entry.value.range(entry.from, entry.to)), true);
   }
 });
-
-// Icons are inline SVG path data from Tabler Icons (MIT), vendored to avoid a
-// broad icon dependency for this table-only toolbar.
-const tableToolbarIcons: Record<string, TableToolbarIcon> = {
-  dotsVertical: {
-    className: 'icon-tabler-dots-vertical',
-    paths: [
-      'M12 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0',
-      'M12 19m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0',
-      'M12 5m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0'
-    ]
-  },
-  rowInsertTop: {
-    className: 'icon-tabler-row-insert-top',
-    paths: [
-      'M4 18v-4a1 1 0 0 1 1 -1h14a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-14a1 1 0 0 1 -1 -1',
-      'M12 9v-4',
-      'M10 7l4 0'
-    ]
-  },
-  rowInsertBottom: {
-    className: 'icon-tabler-row-insert-bottom',
-    paths: [
-      'M20 6v4a1 1 0 0 1 -1 1h-14a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h14a1 1 0 0 1 1 1',
-      'M12 15l0 4',
-      'M14 17l-4 0'
-    ]
-  },
-  columnInsertLeft: {
-    className: 'icon-tabler-column-insert-left',
-    paths: [
-      'M14 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1v-14a1 1 0 0 1 1 -1',
-      'M5 12l4 0',
-      'M7 10l0 4'
-    ]
-  },
-  columnInsertRight: {
-    className: 'icon-tabler-column-insert-right',
-    paths: [
-      'M6 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1v-14a1 1 0 0 1 1 -1',
-      'M15 12l4 0',
-      'M17 10l0 4'
-    ]
-  },
-  arrowUp: {
-    className: 'icon-tabler-arrow-up',
-    paths: ['M12 5l0 14', 'M18 11l-6 -6', 'M6 11l6 -6']
-  },
-  arrowDown: {
-    className: 'icon-tabler-arrow-down',
-    paths: ['M12 5l0 14', 'M18 13l-6 6', 'M6 13l6 6']
-  },
-  arrowLeft: {
-    className: 'icon-tabler-arrow-left',
-    paths: ['M5 12l14 0', 'M5 12l6 6', 'M5 12l6 -6']
-  },
-  arrowRight: {
-    className: 'icon-tabler-arrow-right',
-    paths: ['M5 12l14 0', 'M13 18l6 -6', 'M13 6l6 6']
-  },
-  chevronLeft: {
-    className: 'icon-tabler-chevron-left',
-    paths: ['M15 6l-6 6l6 6']
-  },
-  rowRemove: {
-    className: 'icon-tabler-row-remove',
-    paths: [
-      'M20 6v4a1 1 0 0 1 -1 1h-14a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h14a1 1 0 0 1 1 1',
-      'M10 16l4 4',
-      'M10 20l4 -4'
-    ]
-  },
-  columnRemove: {
-    className: 'icon-tabler-column-remove',
-    paths: [
-      'M6 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1v-14a1 1 0 0 1 1 -1',
-      'M16 10l4 4',
-      'M16 14l4 -4'
-    ]
-  },
-  alignLeft: {
-    className: 'icon-tabler-align-left',
-    paths: [
-      'M4 6l16 0',
-      'M4 12l10 0',
-      'M4 18l14 0'
-    ]
-  },
-  alignRight: {
-    className: 'icon-tabler-align-right',
-    paths: [
-      'M4 6l16 0',
-      'M10 12l10 0',
-      'M6 18l14 0'
-    ]
-  },
-  alignCenter: {
-    className: 'icon-tabler-align-center',
-    paths: [
-      'M4 6l16 0',
-      'M6 12l12 0',
-      'M5 18l14 0'
-    ]
-  }
-};
 
 function isTableControlTarget(target: EventTarget | null): boolean {
   return Boolean(target instanceof Element && target.closest(tableControlSelector));
@@ -2393,6 +2307,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   selectionDomAnchor: { node: Node; offset: number } | null;
   measuredHeight: number;
   pendingContextMenuRestore: boolean;
+  contextPage: TableContextPage;
 
   constructor(
     tableData: WidgetTableData,
@@ -2418,6 +2333,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     this.selectionDomAnchor = null;
     this.measuredHeight = -1;
     this.pendingContextMenuRestore = false;
+    this.contextPage = 'structure';
     this.stickyHeaderAdapterFactory = stickyHeaderAdapterFactory;
     this.layoutTasks = new Set();
     this.layoutScheduler = {
@@ -4053,6 +3969,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       input.setSelectionRange(caret, caret);
       if (restoreContextMenu) {
         const owner = shell ? tableDomOwners.get(shell) : null;
+        owner?.setContextPage(this.contextPage);
         owner?.setContextMenuOpen(true);
         this.pendingContextMenuRestore = false;
       }
@@ -5044,33 +4961,21 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     return { content, input };
   }
 
-  createContextIcon(icon: TableToolbarIcon) {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('width', '18');
-    svg.setAttribute('height', '18');
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('fill', 'none');
-    svg.setAttribute('stroke', 'currentColor');
-    svg.setAttribute('stroke-width', '2');
-    svg.setAttribute('stroke-linecap', 'round');
-    svg.setAttribute('stroke-linejoin', 'round');
-    svg.setAttribute('aria-hidden', 'true');
-    svg.setAttribute('class', `meo-md-html-table-context-icon ${icon.className}`);
-
-    for (const d of icon.paths) {
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', d);
-      svg.appendChild(path);
-    }
-
-    return svg;
+  createContextIcon(icon: IconNode, className = '') {
+    return createElement(icon, {
+      width: 18,
+      height: 18,
+      'aria-hidden': 'true',
+      class: `meo-md-html-table-context-icon${className ? ` ${className}` : ''}`
+    });
   }
 
   createContextButton(
     label: string,
     command: TableCommand | null,
-    icon: TableToolbarIcon,
-    onClick: () => void
+    icon: IconNode,
+    onClick: () => void,
+    badge?: { icon: IconNode; placement: 'top' | 'bottom' | 'left' | 'right' | 'bottom-right' }
   ) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -5081,6 +4986,12 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     button.setAttribute('role', 'menuitem');
     if (command) button.dataset.command = command;
     button.appendChild(this.createContextIcon(icon));
+    if (badge) {
+      button.appendChild(this.createContextIcon(
+        badge.icon,
+        `meo-md-html-table-context-icon-badge is-${badge.placement}`
+      ));
+    }
     button.addEventListener('pointerdown', (event) => {
       if (event.button !== 0) return;
       event.preventDefault();
@@ -5102,7 +5013,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
   visibleContextMenuButtons(): HTMLButtonElement[] {
     if (!this.domRefs) return [];
-    return Array.from(this.domRefs.contextMenu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+    return Array.from(this.domRefs.contextPages[this.contextPage].querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
   }
 
   refreshUiLanguage(language: UiLanguage) {
@@ -5115,6 +5026,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
     const commandLabels: Array<[HTMLButtonElement, string]> = [
       [contextButtons.collapse, strings.tableCollapse],
+      [contextButtons.collapseArrangement, strings.tableCollapse],
+      [contextButtons.previousPage, strings.tablePreviousActions],
+      [contextButtons.nextPage, strings.tableMoreActions],
       [contextButtons.insertRowAbove, strings.insertRowAbove],
       [contextButtons.insertRowBelow, strings.insertRowBelow],
       [contextButtons.moveRowUp, strings.moveRowUp],
@@ -5136,6 +5050,19 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     this.updateContextControlsPosition();
   }
 
+  setContextPage(page: TableContextPage, focusFirst = false) {
+    this.contextPage = page;
+    if (!this.domRefs) return;
+    const { contextMenu, contextPages } = this.domRefs;
+    contextPages.structure.hidden = page !== 'structure';
+    contextPages.arrangement.hidden = page !== 'arrangement';
+    contextMenu.dataset.activePage = page;
+    this.updateContextControlsPosition();
+    if (focusFirst && !contextMenu.hidden) {
+      this.visibleContextMenuButtons()[0]?.focus({ preventScroll: true });
+    }
+  }
+
   setContextMenuOpen(open: boolean, focusFirst = false) {
     if (!this.domRefs) return;
     const { shell, contextTrigger, contextMenu } = this.domRefs;
@@ -5143,6 +5070,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     contextTrigger.setAttribute('aria-expanded', String(open));
     shell.classList.toggle('is-context-menu-open', open);
     if (!open) return;
+    this.setContextPage(this.contextPage);
     this.updateContextMenuState();
     this.updateContextControlsPosition();
     if (focusFirst) {
@@ -5217,101 +5145,138 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     trigger.setAttribute('aria-haspopup', 'menu');
     trigger.setAttribute('aria-expanded', 'false');
     trigger.setAttribute('aria-controls', menuId);
-    trigger.appendChild(this.createContextIcon(tableToolbarIcons.dotsVertical));
+    trigger.appendChild(this.createContextIcon(EllipsisVertical));
 
     const menu = document.createElement('div');
     menu.id = menuId;
     menu.className = 'meo-visual-surface meo-md-html-table-context-menu';
     menu.setAttribute('role', 'menu');
     menu.setAttribute('aria-label', strings.tableActions);
+    menu.dataset.activePage = this.contextPage;
     menu.hidden = true;
 
-    const collapse = this.createContextButton(strings.tableCollapse, null, tableToolbarIcons.chevronLeft, () => {
+    const collapse = this.createContextButton(strings.tableCollapse, null, X, () => {
       this.setContextMenuOpen(false);
     });
     collapse.classList.add('meo-md-html-table-context-collapse');
-    const insertRowAbove = this.createContextButton(strings.insertRowAbove, 'insert-row-above', tableToolbarIcons.rowInsertTop, () => {
+    const collapseArrangement = this.createContextButton(strings.tableCollapse, null, X, () => {
+      this.setContextMenuOpen(false);
+    });
+    collapseArrangement.classList.add('meo-md-html-table-context-collapse');
+    const previousPage = this.createContextButton(strings.tablePreviousActions, null, ChevronLeft, () => {
+      this.setContextPage('structure', document.activeElement === previousPage);
+    });
+    previousPage.classList.add('meo-md-html-table-context-page-btn', 'meo-md-html-table-context-previous');
+    previousPage.dataset.pageAction = 'previous';
+    const nextPage = this.createContextButton(strings.tableMoreActions, null, ChevronRight, () => {
+      this.setContextPage('arrangement', document.activeElement === nextPage);
+    });
+    nextPage.classList.add('meo-md-html-table-context-page-btn', 'meo-md-html-table-context-next');
+    nextPage.dataset.pageAction = 'next';
+    const insertRowAbove = this.createContextButton(strings.insertRowAbove, 'insert-row-above', Rows2, () => {
       this.requestInsertRowAbove(container);
-    });
-    const insertRowBelow = this.createContextButton(strings.insertRowBelow, 'insert-row-below', tableToolbarIcons.rowInsertBottom, () => {
+    }, { icon: Plus, placement: 'top' });
+    const insertRowBelow = this.createContextButton(strings.insertRowBelow, 'insert-row-below', Rows2, () => {
       this.requestInsertRowBelow(container);
-    });
-    const moveRowUp = this.createContextButton(strings.moveRowUp, 'move-row-up', tableToolbarIcons.arrowUp, () => {
+    }, { icon: Plus, placement: 'bottom' });
+    const moveRowUp = this.createContextButton(strings.moveRowUp, 'move-row-up', ArrowUp, () => {
       this.requestMoveRow(container, 'up');
     });
-    const moveRowDown = this.createContextButton(strings.moveRowDown, 'move-row-down', tableToolbarIcons.arrowDown, () => {
+    const moveRowDown = this.createContextButton(strings.moveRowDown, 'move-row-down', ArrowDown, () => {
       this.requestMoveRow(container, 'down');
     });
-    const deleteRow = this.createContextButton(strings.deleteRow, 'delete-row', tableToolbarIcons.rowRemove, () => {
+    const deleteRow = this.createContextButton(strings.deleteRow, 'delete-row', Rows2, () => {
       this.requestDeleteRow(container);
-    });
-    const insertColumnLeft = this.createContextButton(strings.insertColumnLeft, 'insert-column-left', tableToolbarIcons.columnInsertLeft, () => {
+    }, { icon: X, placement: 'bottom-right' });
+    const insertColumnLeft = this.createContextButton(strings.insertColumnLeft, 'insert-column-left', Columns2, () => {
       this.requestInsertColumnLeft(container);
-    });
-    const insertColumnRight = this.createContextButton(strings.insertColumnRight, 'insert-column-right', tableToolbarIcons.columnInsertRight, () => {
+    }, { icon: Plus, placement: 'left' });
+    const insertColumnRight = this.createContextButton(strings.insertColumnRight, 'insert-column-right', Columns2, () => {
       this.requestInsertColumnRight(container);
-    });
-    const moveColumnLeft = this.createContextButton(strings.moveColumnLeft, 'move-column-left', tableToolbarIcons.arrowLeft, () => {
+    }, { icon: Plus, placement: 'right' });
+    const moveColumnLeft = this.createContextButton(strings.moveColumnLeft, 'move-column-left', ArrowLeft, () => {
       this.requestMoveColumn(container, 'left');
     });
-    const moveColumnRight = this.createContextButton(strings.moveColumnRight, 'move-column-right', tableToolbarIcons.arrowRight, () => {
+    const moveColumnRight = this.createContextButton(strings.moveColumnRight, 'move-column-right', ArrowRight, () => {
       this.requestMoveColumn(container, 'right');
     });
-    const deleteColumn = this.createContextButton(strings.deleteColumn, 'delete-column', tableToolbarIcons.columnRemove, () => {
+    const deleteColumn = this.createContextButton(strings.deleteColumn, 'delete-column', Columns2, () => {
       this.requestDeleteColumn(container);
-    });
-    const alignColumnLeft = this.createContextButton(strings.alignColumnLeft, 'align-left', tableToolbarIcons.alignLeft, () => {
+    }, { icon: X, placement: 'bottom-right' });
+    const alignColumnLeft = this.createContextButton(strings.alignColumnLeft, 'align-left', AlignLeft, () => {
       this.requestColumnAlignment(container, 'left');
     });
-    const alignColumnCenter = this.createContextButton(strings.alignColumnCenter, 'align-center', tableToolbarIcons.alignCenter, () => {
+    alignColumnLeft.classList.add('meo-md-html-table-context-align-left');
+    const alignColumnCenter = this.createContextButton(strings.alignColumnCenter, 'align-center', AlignCenter, () => {
       this.requestColumnAlignment(container, 'center');
     });
-    const alignColumnRight = this.createContextButton(strings.alignColumnRight, 'align-right', tableToolbarIcons.alignRight, () => {
+    alignColumnCenter.classList.add('meo-md-html-table-context-align-center');
+    const alignColumnRight = this.createContextButton(strings.alignColumnRight, 'align-right', AlignRight, () => {
       this.requestColumnAlignment(container, 'right');
     });
+    alignColumnRight.classList.add('meo-md-html-table-context-align-right');
     alignColumnLeft.setAttribute('role', 'menuitemradio');
     alignColumnCenter.setAttribute('role', 'menuitemradio');
     alignColumnRight.setAttribute('role', 'menuitemradio');
     deleteRow.classList.add('meo-md-html-table-context-delete-btn');
     deleteColumn.classList.add('meo-md-html-table-context-delete-btn');
 
-    const createSeparator = () => {
+    const createSeparator = (edgePosition?: 'after-leading-control' | 'before-trailing-control') => {
       const separator = document.createElement('span');
       separator.className = 'meo-md-html-table-context-separator';
+      if (edgePosition) separator.classList.add(`is-${edgePosition}`);
       separator.setAttribute('role', 'separator');
       separator.setAttribute('aria-orientation', 'vertical');
       return separator;
     };
-    menu.append(
+    const structurePage = document.createElement('div');
+    structurePage.className = 'meo-md-html-table-context-page';
+    structurePage.dataset.contextPage = 'structure';
+    structurePage.append(
       collapse,
-      createSeparator(),
+      createSeparator('after-leading-control'),
       insertRowAbove,
       insertRowBelow,
-      moveRowUp,
-      moveRowDown,
       deleteRow,
       createSeparator(),
       insertColumnLeft,
       insertColumnRight,
+      deleteColumn,
+      createSeparator('before-trailing-control'),
+      nextPage
+    );
+    const arrangementPage = document.createElement('div');
+    arrangementPage.className = 'meo-md-html-table-context-page';
+    arrangementPage.dataset.contextPage = 'arrangement';
+    arrangementPage.hidden = true;
+    arrangementPage.append(
+      collapseArrangement,
+      createSeparator('after-leading-control'),
+      moveRowUp,
+      moveRowDown,
       moveColumnLeft,
       moveColumnRight,
-      deleteColumn,
       createSeparator(),
       alignColumnLeft,
       alignColumnCenter,
-      alignColumnRight
+      alignColumnRight,
+      createSeparator('before-trailing-control'),
+      previousPage
     );
+    menu.append(structurePage, arrangementPage);
 
     trigger.addEventListener('pointerdown', (event) => {
       if (event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
+      if (menu.hidden) this.setContextPage('structure');
       this.setContextMenuOpen(menu.hidden);
     });
     trigger.addEventListener('keydown', (event) => {
       if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'ArrowDown') return;
       event.preventDefault();
       event.stopPropagation();
+      this.setContextPage('structure');
       this.setContextMenuOpen(true, true);
     });
     menu.addEventListener('keydown', (event) => {
@@ -5338,8 +5303,15 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     return {
       trigger,
       menu,
+      pages: {
+        structure: structurePage,
+        arrangement: arrangementPage
+      },
       buttons: {
         collapse,
+        collapseArrangement,
+        previousPage,
+        nextPage,
         insertRowAbove,
         insertRowBelow,
         moveRowUp,
@@ -5390,6 +5362,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const {
       trigger: contextTrigger,
       menu: contextMenu,
+      pages: contextPages,
       buttons: contextButtons
     } = this.createTableContextControls(wrap);
 
@@ -5536,6 +5509,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       stickyHeaderRow,
       contextTrigger,
       contextMenu,
+      contextPages,
       contextButtons
     };
     let mounted = mountedTableWidgets.get(view);

@@ -107,6 +107,22 @@ async function main(): Promise<void> {
       const shellRect = shell.getBoundingClientRect();
       const wrapRect = wrap.getBoundingClientRect();
       const menuRect = menu.getBoundingClientRect();
+      const structurePage = menu.querySelector<HTMLElement>('[data-context-page="structure"]')!;
+      const structureSeparators = Array.from(
+        structurePage.querySelectorAll<HTMLElement>('.meo-md-html-table-context-separator')
+      );
+      const collapseRect = structurePage.querySelector<HTMLElement>('.meo-md-html-table-context-collapse')!.getBoundingClientRect();
+      const nextPageRect = structurePage.querySelector<HTMLElement>('.meo-md-html-table-context-next')!.getBoundingClientRect();
+      const leadingSeparatorRect = structureSeparators[0].getBoundingClientRect();
+      const trailingSeparatorRect = structureSeparators.at(-1)!.getBoundingClientRect();
+      const leadingControlCenterDelta = Math.abs(
+        (collapseRect.left + collapseRect.right) / 2
+        - (menuRect.left + (leadingSeparatorRect.left + leadingSeparatorRect.right) / 2) / 2
+      );
+      const trailingControlCenterDelta = Math.abs(
+        (nextPageRect.left + nextPageRect.right) / 2
+        - ((trailingSeparatorRect.left + trailingSeparatorRect.right) / 2 + menuRect.right) / 2
+      );
       const triggerHiddenWhileOpen = getComputedStyle(trigger).visibility;
       const triggerInsideViewport = triggerRect.left >= -0.5 && triggerRect.right <= window.innerWidth + 0.5;
       const triggerOutsideTable = triggerRect.right <= wrapRect.left + 0.5;
@@ -118,10 +134,31 @@ async function main(): Promise<void> {
       const gutterZIndex = Number(getComputedStyle(document.querySelector('.cm-gutters')!).zIndex);
       const shellHeightStable = Math.abs(shell.getBoundingClientRect().height - shellHeightBefore) < 0.5;
       const commandOrder = Array.from(
-        menu.querySelectorAll<HTMLButtonElement>('.meo-md-html-table-context-btn[data-command]'),
+        menu.querySelectorAll<HTMLButtonElement>('[data-context-page="structure"] .meo-md-html-table-context-btn[data-command]'),
         (button) => button.dataset.command
       );
-      const separatorCount = menu.querySelectorAll('[role="separator"]').length;
+      const separatorCount = menu.querySelectorAll('[data-context-page="structure"] [role="separator"]').length;
+      const defaultPage = menu.dataset.activePage;
+      const pageNavigationShellTop = shell.getBoundingClientRect().top;
+      pointer(menu.querySelector<HTMLButtonElement>('.meo-md-html-table-context-next')!);
+      await frames(1);
+      const arrangementCommandOrder = Array.from(
+        menu.querySelectorAll<HTMLButtonElement>('[data-context-page="arrangement"] .meo-md-html-table-context-btn[data-command]'),
+        (button) => button.dataset.command
+      );
+      const arrangementSeparatorCount = menu.querySelectorAll('[data-context-page="arrangement"] [role="separator"]').length;
+      const arrangementPage = menu.dataset.activePage;
+      pointer(menu.querySelector<HTMLButtonElement>('.meo-md-html-table-context-previous')!);
+      await frames(1);
+      const previousPageReturns = menu.dataset.activePage === 'structure';
+      const pageNavigationDelta = Math.abs(shell.getBoundingClientRect().top - pageNavigationShellTop);
+      pointer(menu.querySelector<HTMLButtonElement>('.meo-md-html-table-context-next')!);
+      pointer(menu.querySelector<HTMLButtonElement>('[data-context-page="arrangement"] .meo-md-html-table-context-collapse')!);
+      await frames(1);
+      const arrangementCollapseClosesMenu = menu.hidden && trigger.getAttribute('aria-expanded') === 'false';
+      pointer(trigger);
+      await frames(1);
+      const reopenDefaultsToStructure = menu.dataset.activePage === 'structure';
       const visibleText = menu.innerText.trim();
       const horizontalMenu = menuRect.width > menuRect.height * 4;
       pointer(menu.querySelector<HTMLButtonElement>('.meo-md-html-table-context-collapse')!);
@@ -150,8 +187,22 @@ async function main(): Promise<void> {
 
       const commandVisualDeltas: Record<string, number> = {};
       const commandVisualSamples: Record<string, number[]> = {};
+      const commandPagesAfter: Record<string, string | undefined> = {};
       const runStableCommand = async (title: string) => {
         const currentMenu = document.querySelector<HTMLElement>('.meo-md-html-table-context-menu:not([hidden])')!;
+        const arrangementTitles = new Set([
+          'Move row up', 'Move row down', 'Move column left', 'Move column right',
+          'Align selected column center', 'Align selected column right', 'Align selected column left'
+        ]);
+        const desiredPage = arrangementTitles.has(title) ? 'arrangement' : 'structure';
+        if (currentMenu.dataset.activePage !== desiredPage) {
+          pointer(currentMenu.querySelector<HTMLButtonElement>(
+            desiredPage === 'arrangement'
+              ? '.meo-md-html-table-context-next'
+              : '.meo-md-html-table-context-previous'
+          )!);
+          await frames(1);
+        }
         const button = currentMenu.querySelector<HTMLButtonElement>(`button[title="${title}"]`)!;
         if (button.disabled) throw new Error(`${title} is unexpectedly disabled`);
         const textBefore = editor.getText();
@@ -170,6 +221,9 @@ async function main(): Promise<void> {
           ...visualSamples.map((value) => Math.abs(value - visualAnchorBefore))
         );
         commandVisualSamples[title] = visualSamples.map((value) => value - visualAnchorBefore);
+        commandPagesAfter[title] = document.querySelector<HTMLElement>(
+          '.meo-md-html-table-context-menu:not([hidden])'
+        )?.dataset.activePage;
       };
 
       editor.view.scrollDOM.dispatchEvent(new WheelEvent('wheel', { deltaY: 500, bubbles: true }));
@@ -254,6 +308,8 @@ async function main(): Promise<void> {
         triggerOutsideTable,
         tableUsesNormalContentLeft,
         menuInsideViewport,
+        leadingControlCenterDelta,
+        trailingControlCenterDelta,
         floating,
         triggerBackground,
         shellZIndex,
@@ -262,7 +318,15 @@ async function main(): Promise<void> {
         menuBackdropFilter: menuStyle.backdropFilter,
         shellHeightStable,
         commandOrder,
+        arrangementCommandOrder,
         separatorCount,
+        arrangementSeparatorCount,
+        defaultPage,
+        arrangementPage,
+        previousPageReturns,
+        pageNavigationDelta,
+        arrangementCollapseClosesMenu,
+        reopenDefaultsToStructure,
         visibleText,
         horizontalMenu,
         collapseClosesMenu,
@@ -273,6 +337,7 @@ async function main(): Promise<void> {
         menuOpenAfterCommands,
         commandVisualDeltas,
         commandVisualSamples,
+        commandPagesAfter,
         menuClosedAfterTargetScroll,
         constrainedWidths,
         constrainedFits: constrainedTable.getBoundingClientRect().width <= constrainedWrap.clientWidth + 1,
@@ -339,7 +404,15 @@ async function main(): Promise<void> {
       await page.waitForSelector('.meo-md-html-table-context-menu:not([hidden])');
       if (process.env.MEO_CAPTURE_TABLE_CONTEXT_MENU) {
         await waitForFrames(page, 2);
+        await page.mouse.move(800, 580);
         await page.screenshot({ path: process.env.MEO_CAPTURE_TABLE_CONTEXT_MENU });
+      }
+      if (process.env.MEO_CAPTURE_TABLE_CONTEXT_MENU_PAGE_2) {
+        await trustedMouseClick('.meo-md-html-table-context-next');
+        await waitForFrames(page, 2);
+        await page.mouse.move(800, 580);
+        await page.screenshot({ path: process.env.MEO_CAPTURE_TABLE_CONTEXT_MENU_PAGE_2 });
+        await trustedMouseClick('.meo-md-html-table-context-previous');
       }
     };
     const trustedMouseClick = async (selector: string) => {
@@ -351,6 +424,19 @@ async function main(): Promise<void> {
     };
     const trustedClickDeltas: Record<string, number> = {};
     const trustedClick = async (label: string, selector: string) => {
+      const targetPage = await page.$eval(selector, (button) => (
+        button.closest<HTMLElement>('[data-context-page]')?.dataset.contextPage ?? 'structure'
+      ));
+      const activePage = await page.$eval('.meo-md-html-table-context-menu:not([hidden])', (menu) => (
+        (menu as HTMLElement).dataset.activePage
+      ));
+      if (targetPage !== activePage) {
+        await trustedMouseClick(
+          targetPage === 'arrangement'
+            ? '.meo-md-html-table-context-next'
+            : '.meo-md-html-table-context-previous'
+        );
+      }
       const before = await page.evaluate(() => {
         const shell = document.querySelector<HTMLElement>('.meo-md-html-table-shell')!;
         return { shellTop: shell.getBoundingClientRect().top };
@@ -379,6 +465,8 @@ async function main(): Promise<void> {
     assert.equal(result.triggerOutsideTable, true, 'the row action trigger must float over the gutter to the left of the table');
     assert.equal(result.tableUsesNormalContentLeft, true, 'the table must not move right to reserve trigger space');
     assert.equal(result.menuInsideViewport, true, 'the menu must remain inside the viewport');
+    assert.ok(result.leadingControlCenterDelta <= 0.5, `close control is not centered between border and separator: ${result.leadingControlCenterDelta}px`);
+    assert.ok(result.trailingControlCenterDelta <= 0.5, `page control is not centered between separator and border: ${result.trailingControlCenterDelta}px`);
     assert.equal(result.floating, 'absolute');
     assert.ok(
       result.shellZIndex > result.gutterZIndex,
@@ -393,11 +481,22 @@ async function main(): Promise<void> {
     assert.equal(result.shellHeightStable, true, 'the floating menu must not reserve document height');
     assert.equal(result.visibleText, '', 'the expanded toolbar must not render visible labels');
     assert.equal(result.separatorCount, 3);
+    assert.equal(result.arrangementSeparatorCount, 3);
     assert.equal(result.horizontalMenu, true);
     assert.equal(result.collapseClosesMenu, true);
+    assert.equal(result.defaultPage, 'structure');
+    assert.equal(result.arrangementPage, 'arrangement');
+    assert.equal(result.previousPageReturns, true);
+    assert.equal(result.arrangementCollapseClosesMenu, true);
+    assert.equal(result.reopenDefaultsToStructure, true);
+    assert.ok(result.pageNavigationDelta <= 0.5, `paging shifted visible content by ${result.pageNavigationDelta}px`);
     assert.deepEqual(result.commandOrder, [
-      'insert-row-above', 'insert-row-below', 'move-row-up', 'move-row-down', 'delete-row',
-      'insert-column-left', 'insert-column-right', 'move-column-left', 'move-column-right', 'delete-column',
+      'insert-row-above', 'insert-row-below', 'delete-row',
+      'insert-column-left', 'insert-column-right', 'delete-column'
+    ]);
+    assert.deepEqual(result.arrangementCommandOrder, [
+      'move-row-up', 'move-row-down',
+      'move-column-left', 'move-column-right',
       'align-left', 'align-center', 'align-right'
     ]);
     assert.equal(result.preferredColumnWidth, '90');
@@ -405,6 +504,9 @@ async function main(): Promise<void> {
     assert.equal(result.rowCountAfterRepeatedInsert, 20);
     assert.equal(result.menuOpenAfterRepeatedInsert, true);
     assert.equal(result.menuOpenAfterCommands, true, 'repeated commands must keep the toolbar open');
+    assert.equal(result.commandPagesAfter['Move row up'], 'arrangement');
+    assert.equal(result.commandPagesAfter['Align selected column center'], 'arrangement');
+    assert.equal(result.commandPagesAfter['Insert row above'], 'structure');
     assert.ok(
       Math.max(...Object.values(result.commandVisualDeltas)) <= 0.5,
       `table command shifted visible content: ${JSON.stringify({

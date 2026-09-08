@@ -5431,7 +5431,18 @@ body.outline-resizing .preview-frame {
   display: none;
 }
 
+.cm-editor .meo-md-html-table-context-page {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.cm-editor .meo-md-html-table-context-page[hidden] {
+  display: none;
+}
+
 .cm-editor .meo-md-html-table-context-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5459,6 +5470,14 @@ body.outline-resizing .preview-frame {
   background: color-mix(in srgb, var(--meo-foreground) 16%, transparent);
 }
 
+.cm-editor .meo-md-html-table-context-separator.is-after-leading-control {
+  margin-left: 2px;
+}
+
+.cm-editor .meo-md-html-table-context-separator.is-before-trailing-control {
+  margin-right: 2px;
+}
+
 .cm-editor .meo-md-html-table-context-btn:hover:not(:disabled),
 .cm-editor .meo-md-html-table-context-btn:focus-visible,
 .cm-editor .meo-md-html-table-context-btn.is-active {
@@ -5474,6 +5493,15 @@ body.outline-resizing .preview-frame {
 
 .cm-editor .meo-md-html-table-context-delete-btn {
   color: #f48771;
+}
+
+.cm-editor .meo-md-html-table-context-page-btn {
+  width: 22px;
+  color: var(--meo-color-base02);
+}
+
+.cm-editor .meo-md-html-table-context-collapse {
+  width: 22px;
 }
 
 html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-trigger,
@@ -5493,6 +5521,69 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-delet
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
+}
+
+.cm-editor .meo-md-html-table-context-btn .meo-md-html-table-context-icon-badge {
+  position: absolute;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  color: var(--vscode-charts-green, #89d185);
+  border-radius: 2px;
+  background-color: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-editor-background, #1f2328)));
+  stroke-width: 3.5;
+}
+
+.cm-editor .meo-md-html-table-context-btn .meo-md-html-table-context-icon-badge.is-top {
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.cm-editor .meo-md-html-table-context-btn .meo-md-html-table-context-icon-badge.is-bottom {
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.cm-editor .meo-md-html-table-context-btn .meo-md-html-table-context-icon-badge.is-left {
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+}
+
+.cm-editor .meo-md-html-table-context-btn .meo-md-html-table-context-icon-badge.is-right {
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+}
+
+.cm-editor .meo-md-html-table-context-btn .meo-md-html-table-context-icon-badge.is-bottom-right {
+  right: 0;
+  bottom: 0;
+}
+
+.cm-editor .meo-md-html-table-context-align-left > svg:first-child path:nth-child(2),
+.cm-editor .meo-md-html-table-context-align-center > svg:first-child path:nth-child(2),
+.cm-editor .meo-md-html-table-context-align-right > svg:first-child path:nth-child(2) {
+  transform: scaleX(0.65);
+  transform-box: fill-box;
+}
+
+.cm-editor .meo-md-html-table-context-align-left > svg:first-child path:nth-child(2) {
+  transform-origin: left;
+}
+
+.cm-editor .meo-md-html-table-context-align-center > svg:first-child path:nth-child(2) {
+  transform-origin: center;
+}
+
+.cm-editor .meo-md-html-table-context-align-right > svg:first-child path:nth-child(2) {
+  transform-origin: right;
+}
+
+.cm-editor .meo-md-html-table-context-delete-btn .meo-md-html-table-context-icon-badge {
+  color: inherit;
 }
 
 .cm-editor .meo-md-html-table-context-trigger svg {

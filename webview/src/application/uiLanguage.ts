@@ -153,6 +153,8 @@ export type UiStrings = Readonly<{
   tableDelete: string;
   tableBack: string;
   tableCollapse: string;
+  tableMoreActions: string;
+  tablePreviousActions: string;
   tableAlign: string;
   insertRowAbove: string;
   insertRowBelow: string;
@@ -316,7 +318,8 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     incomingVersion: (label: string) => `Incoming: ${label}`,
     alertLabel: (type: string) => type,
     tableActions: 'Table actions', tableInsert: 'Insert', tableMove: 'Move', tableDelete: 'Delete', tableBack: 'Back',
-    tableCollapse: 'Collapse table actions',
+    tableCollapse: 'Collapse table actions', tableMoreActions: 'More table actions',
+    tablePreviousActions: 'Previous table actions',
     tableAlign: 'Align',
     insertRowAbove: 'Insert row above', insertRowBelow: 'Insert row below', moveRowUp: 'Move row up', moveRowDown: 'Move row down',
     deleteRow: 'Delete row', insertColumnLeft: 'Insert column left', insertColumnRight: 'Insert column right',
@@ -459,7 +462,8 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     incomingVersion: (label: string) => `传入：${label}`,
     alertLabel: (type: string) => ({ NOTE: '备注', TIP: '提示', IMPORTANT: '重要', WARNING: '警告', CAUTION: '注意' }[type] ?? type),
     tableActions: '表格操作', tableInsert: '插入', tableMove: '移动', tableDelete: '删除', tableBack: '返回',
-    tableCollapse: '收起表格操作',
+    tableCollapse: '收起表格操作', tableMoreActions: '更多表格操作',
+    tablePreviousActions: '上一页表格操作',
     tableAlign: '对齐',
     insertRowAbove: '在上方插入行', insertRowBelow: '在下方插入行', moveRowUp: '上移行', moveRowDown: '下移行',
     deleteRow: '删除行', insertColumnLeft: '在左侧插入列', insertColumnRight: '在右侧插入列',

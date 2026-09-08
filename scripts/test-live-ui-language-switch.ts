@@ -36,17 +36,20 @@ function expectedLabels(language: UiLanguage, mermaidLine: number, formulaLine: 
       strings.tableCollapse,
       strings.insertRowAbove,
       strings.insertRowBelow,
-      strings.moveRowUp,
-      strings.moveRowDown,
       strings.deleteRow,
       strings.insertColumnLeft,
       strings.insertColumnRight,
+      strings.deleteColumn,
+      strings.tableMoreActions,
+      strings.tableCollapse,
+      strings.moveRowUp,
+      strings.moveRowDown,
       strings.moveColumnLeft,
       strings.moveColumnRight,
-      strings.deleteColumn,
       strings.alignColumnLeft,
       strings.alignColumnCenter,
-      strings.alignColumnRight
+      strings.alignColumnRight,
+      strings.tablePreviousActions
     ],
     mermaidControls: strings.mermaidBlockControls(mermaidLine),
     mermaidMode: strings.editMermaidSplit,
@@ -201,6 +204,7 @@ async function main(): Promise<void> {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const tableTrigger = document.querySelector<HTMLButtonElement>('.meo-md-html-table-context-trigger')!;
       pointer(tableTrigger);
+      pointer(document.querySelector<HTMLButtonElement>('.meo-md-html-table-context-next')!);
       const gutter = editor.view.dom.querySelector<HTMLElement>('.cm-gutters')!;
       const lineNumberNodes = Array.from(gutter.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement'));
       const tableLineNumbers = gutter.querySelector<HTMLElement>('.meo-md-html-table-line-numbers');
@@ -213,7 +217,8 @@ async function main(): Promise<void> {
         selection: editor.view.state.selection.toJSON(),
         history: editor.getHistoryDepth(),
         text: editor.getText(),
-        tableMenuOpen: tableTrigger.getAttribute('aria-expanded')
+        tableMenuOpen: tableTrigger.getAttribute('aria-expanded'),
+        tableMenuPage: document.querySelector<HTMLElement>('.meo-md-html-table-context-menu')?.dataset.activePage
       };
       editor.setUiLanguage('en');
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -227,6 +232,7 @@ async function main(): Promise<void> {
         history: editor.getHistoryDepth(),
         text: editor.getText(),
         tableMenuOpen: document.querySelector('.meo-md-html-table-context-trigger')?.getAttribute('aria-expanded'),
+        tableMenuPage: document.querySelector<HTMLElement>('.meo-md-html-table-context-menu')?.dataset.activePage,
         stableLineNumbers: lineNumberNodes.length === nextLineNumberNodes.length
           && lineNumberNodes.every((node, index) => node === nextLineNumberNodes[index]),
         stableTableLineNumbers: tableLineNumbers === gutter.querySelector('.meo-md-html-table-line-numbers'),
@@ -252,6 +258,8 @@ async function main(): Promise<void> {
     );
     assert.equal(result.before.tableMenuOpen, 'true');
     assert.equal(result.after.tableMenuOpen, 'true', 'language switch closed the open table menu');
+    assert.equal(result.before.tableMenuPage, 'arrangement');
+    assert.equal(result.after.tableMenuPage, 'arrangement', 'language switch reset the open table menu page');
     assert.ok(Math.abs(result.after.scrollTop - result.before.scrollTop) <= 1, 'language switch moved the Live viewport');
     assert.deepEqual(result.after.selection, result.before.selection, 'language switch changed the editor selection');
     assert.deepEqual(result.after.history, result.before.history, 'language switch changed undo/redo history');
