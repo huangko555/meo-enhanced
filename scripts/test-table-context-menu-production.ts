@@ -164,6 +164,43 @@ async function main(): Promise<void> {
       pointer(menu.querySelector<HTMLButtonElement>('.meo-md-html-table-context-collapse')!);
       await frames(1);
       const collapseClosesMenu = menu.hidden && trigger.getAttribute('aria-expanded') === 'false';
+
+      firstInput.value = Array.from({ length: 18 }, (_, index) => `wrapped segment ${index + 1}`).join(' ');
+      firstInput.setSelectionRange(0, 0);
+      firstInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await frames(4);
+      const triggerCenterAtFirstVisualLine = trigger.getBoundingClientRect().top + trigger.offsetHeight / 2;
+      firstInput.setSelectionRange(firstInput.value.length, firstInput.value.length);
+      firstInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await frames(4);
+      const triggerCenterAtLastVisualLine = trigger.getBoundingClientRect().top + trigger.offsetHeight / 2;
+      const triggerFollowsCaretLine = triggerCenterAtLastVisualLine > triggerCenterAtFirstVisualLine + 40;
+      firstInput.value = 'row 1';
+      firstInput.setSelectionRange(firstInput.value.length, firstInput.value.length);
+      firstInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await frames(4);
+
+      const headerInput = shell.querySelector<HTMLTextAreaElement>('thead textarea')!;
+      headerInput.focus({ preventScroll: true });
+      await frames(2);
+      pointer(trigger);
+      await frames(1);
+      const originalHeaderRect = table.tHead!.rows[0].getBoundingClientRect();
+      const editorViewportRect = editor.view.scrollDOM.getBoundingClientRect();
+      editor.view.scrollDOM.dispatchEvent(new WheelEvent('wheel', { deltaY: 160, bubbles: true }));
+      editor.view.scrollDOM.scrollTop += originalHeaderRect.bottom - editorViewportRect.top + 24;
+      await waitUntil(
+        () => shell.querySelector('.meo-md-html-table-sticky-chrome')?.classList.contains('is-visible') === true,
+        'sticky table header'
+      );
+      await frames(2);
+      const triggerHiddenWithStickyHeader = trigger.hidden;
+      const menuClosedWithStickyHeader = menu.hidden;
+      editor.view.scrollDOM.dispatchEvent(new WheelEvent('wheel', { deltaY: -160, bubbles: true }));
+      editor.view.scrollDOM.scrollTop = 0;
+      await frames(6);
+      firstInput.focus({ preventScroll: true });
+      await frames(2);
       pointer(trigger);
       await frames(1);
       pointer(menu.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
@@ -330,6 +367,9 @@ async function main(): Promise<void> {
         visibleText,
         horizontalMenu,
         collapseClosesMenu,
+        triggerFollowsCaretLine,
+        triggerHiddenWithStickyHeader,
+        menuClosedWithStickyHeader,
         initialWidths,
         preferredColumnWidth: table.dataset.tablePreferredColumnWidth,
         rowCountAfterRepeatedInsert,
@@ -515,6 +555,9 @@ async function main(): Promise<void> {
       })}`
     );
     assert.equal(result.menuClosedAfterTargetScroll, true, 'the menu must close when its target row leaves the viewport');
+    assert.equal(result.triggerFollowsCaretLine, true, 'the row action trigger must follow the caret visual line in a tall cell');
+    assert.equal(result.triggerHiddenWithStickyHeader, true, 'the row action trigger must hide when its source header is replaced by the sticky header');
+    assert.equal(result.menuClosedWithStickyHeader, true, 'the expanded row action menu must close when the sticky header replaces its target');
     assert.ok(
       Math.max(...Object.values(trustedClickDeltas)) <= 0.5,
       `trusted table-menu clicks shifted the viewport: ${JSON.stringify(trustedClickDeltas)}`

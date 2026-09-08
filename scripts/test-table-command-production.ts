@@ -532,6 +532,7 @@ async function main() {
       target: { row: number; col: number };
       expected: string;
       focus: { row: number; col: number };
+      caret?: number;
     };
     const matrixOriginal = [
       '| A | B |',
@@ -543,12 +544,12 @@ async function main() {
       {
         name: 'insert row above', title: 'Insert row above', edit: { row: 1, col: 0 }, target: { row: 1, col: 0 },
         expected: ['| A | B |', '| --- | --- |', '|  |  |', '| one! | two |', '| three | four |'].join('\n'),
-        focus: { row: 1, col: 0 }
+        focus: { row: 2, col: 0 }, caret: 2
       },
       {
         name: 'insert row below', title: 'Insert row below', edit: { row: 1, col: 0 }, target: { row: 1, col: 0 },
         expected: ['| A | B |', '| --- | --- |', '| one! | two |', '|  |  |', '| three | four |'].join('\n'),
-        focus: { row: 2, col: 0 }
+        focus: { row: 1, col: 0 }, caret: 2
       },
       {
         name: 'move row up', title: 'Move row up', edit: { row: 1, col: 0 }, target: { row: 2, col: 0 },
@@ -627,7 +628,7 @@ async function main() {
       await page.click(editSelector);
       await page.keyboard.press('End');
       await page.keyboard.type('!');
-      const beforeCommand = await page.evaluate((target) => {
+      const beforeCommand = await page.evaluate(({ target, caret }) => {
         const editor = (window as any).__tableCommandMatrixEditor;
         const view = editor.view;
         const before = {
@@ -643,8 +644,12 @@ async function main() {
           cancelable: true,
           pointerId: 101
         }));
+        if (caret !== undefined) {
+          input.focus({ preventScroll: true });
+          input.setSelectionRange(caret, caret);
+        }
         return before;
-      }, matrixCase.target);
+      }, { target: matrixCase.target, caret: matrixCase.caret });
       await page.evaluate((title) => {
         const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.meo-md-html-table-context-btn'))
           .find((candidate) => candidate.title === title)!;
@@ -672,7 +677,11 @@ async function main() {
       assert.equal(afterCommand.markdown, matrixCase.expected, `${matrixCase.name}: exact Markdown`);
       assert.deepEqual(beforeCommand.history, { undo: 0, redo: 0 }, `${matrixCase.name}: clean history baseline`);
       assert.deepEqual(afterCommand.history, { undo: 1, redo: 0 }, `${matrixCase.name}: one Editor History item`);
-      assert.deepEqual(afterCommand.focus, { ...matrixCase.focus, start: 0, end: 0 }, `${matrixCase.name}: focus/caret`);
+      assert.deepEqual(afterCommand.focus, {
+        ...matrixCase.focus,
+        start: matrixCase.caret ?? 0,
+        end: matrixCase.caret ?? 0
+      }, `${matrixCase.name}: focus/caret`);
       assert.equal(afterCommand.scrollTop, beforeCommand.scrollTop, `${matrixCase.name}: scroll continuity`);
 
       assert.equal(await page.evaluate(() => (window as any).__tableCommandMatrixEditor.undo()), true, `${matrixCase.name}: undo accepted`);

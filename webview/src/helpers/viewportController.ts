@@ -712,6 +712,31 @@ export class ViewportController {
     }, { settle: true }, isCurrent);
   }
 
+  /** Reveals measured caret-like geometry and keeps remeasuring while surrounding layout settles. */
+  revealVerticalBounds(
+    readBounds: () => { top: number; bottom: number } | null,
+    isCurrent: () => boolean = () => true,
+    { yMargin = 0 }: { yMargin?: number } = {}
+  ): void {
+    this.runNavigationReveal(() => {
+      const bounds = readBounds();
+      if (!bounds) return { kind: 'unavailable' };
+      const current = this.readScrollPosition();
+      const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+      const margin = Math.min(
+        Math.max(0, yMargin),
+        Math.max(0, ((scrollerRect.bottom - scrollerRect.top) - (bounds.bottom - bounds.top)) / 2)
+      );
+      const topDelta = bounds.top - scrollerRect.top - margin;
+      const bottomDelta = bounds.bottom - scrollerRect.bottom + margin;
+      if (topDelta >= 0 && bottomDelta <= 0) return { kind: 'stable' };
+      const delta = topDelta < 0 && bottomDelta > 0
+        ? (Math.abs(topDelta) <= bottomDelta ? topDelta : bottomDelta)
+        : topDelta < 0 ? topDelta : bottomDelta;
+      return { kind: 'target', target: { top: current.top + delta } };
+    }, { settle: true }, isCurrent);
+  }
+
   destroy(): void {
     this.destroyed = true;
     this.interactionGeneration += 1;

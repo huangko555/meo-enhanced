@@ -2308,6 +2308,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   measuredHeight: number;
   pendingContextMenuRestore: boolean;
   contextPage: TableContextPage;
+  tableCaretRevealGeneration: number;
 
   constructor(
     tableData: WidgetTableData,
@@ -2334,6 +2335,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     this.measuredHeight = -1;
     this.pendingContextMenuRestore = false;
     this.contextPage = 'structure';
+    this.tableCaretRevealGeneration = 0;
     this.stickyHeaderAdapterFactory = stickyHeaderAdapterFactory;
     this.layoutTasks = new Set();
     this.layoutScheduler = {
@@ -3998,25 +4000,31 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     if (!view || !isCurrent()) return;
     const viewport = getViewportController(view);
     if (viewport) {
-      const isNavigationCurrent = viewport.beginNavigationReveal();
-      const canReveal = () => isCurrent() && isNavigationCurrent();
+      const revealGeneration = ++this.tableCaretRevealGeneration;
+      const canReveal = () => isCurrent() && revealGeneration === this.tableCaretRevealGeneration;
       const inputContextMargin = visualLineContextMargin(view, 1);
-      view.requestMeasure({
-        read: () => {
-          if (!canReveal() || !input.isConnected) return null;
-          const caret = tableCellCaretViewportBounds(input);
-          const viewportRect = view.scrollDOM.getBoundingClientRect();
-          const delta = caret.top < viewportRect.top
-            ? caret.top - viewportRect.top - inputContextMargin
-            : caret.bottom > viewportRect.bottom
-              ? caret.bottom - viewportRect.bottom + inputContextMargin
-              : 0;
-          return Math.abs(delta) >= 1 ? delta : null;
-        },
-        write: (delta) => {
-          if (delta !== null && canReveal()) viewport.navigateBy({ top: delta });
+      let attempts = 0;
+      const settle = () => {
+        if (!canReveal() || !input.isConnected || attempts >= 8) return;
+        attempts += 1;
+        const caret = tableCellCaretViewportBounds(input);
+        const viewportRect = view.scrollDOM.getBoundingClientRect();
+        const delta = caret.top < viewportRect.top
+          ? caret.top - viewportRect.top - inputContextMargin
+          : caret.bottom > viewportRect.bottom
+            ? caret.bottom - viewportRect.bottom + inputContextMargin
+            : 0;
+        if (Math.abs(delta) >= 1) {
+          viewport.revealVerticalBounds(
+            () => canReveal() && input.isConnected ? tableCellCaretViewportBounds(input) : null,
+            canReveal,
+            { yMargin: inputContextMargin }
+          );
+          return;
         }
-      });
+        requestAnimationFrame(settle);
+      };
+      settle();
     } else {
       const caret = tableCellCaretViewportBounds(input);
       const viewportRect = view.scrollDOM.getBoundingClientRect();
@@ -4145,7 +4153,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
     const insertAt = Math.min(Math.max(rowIndex + 1, 0), matrix.rows.length);
-    const sourcePlan = this.buildInsertSourceRowTransaction(dom, insertAt, matrix.headerCells.length);
+    const focusTarget = this.focusTargetAfterRowInsertion(insertAt, focusColumn);
+    const sourcePlan = this.buildInsertSourceRowTransaction(dom, insertAt, matrix.headerCells.length, focusTarget);
     if (sourcePlan) return sourcePlan;
     matrix.rows.splice(insertAt, 0, new Array(matrix.headerCells.length).fill(''));
     const sourceRowOrder = matrix.rows.map((_row, index) => (
@@ -4154,16 +4163,32 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     return this.buildMatrixTransaction(
       matrix,
       dom,
-      { row: insertAt + 1, col: focusColumn },
+      focusTarget,
       { sourceRowOrder }
     );
+  }
+
+  focusTargetAfterRowInsertion(insertAt: number, fallbackColumn: number): PendingCellFocus {
+    const active = document.activeElement;
+    const activeCoords = active instanceof HTMLTextAreaElement && this.domRefs?.shell.contains(active)
+      ? this.parseCellCoords(active.dataset.tableRow, active.dataset.tableCol)
+      : null;
+    const row = activeCoords?.row ?? this.activeTarget.row;
+    return {
+      row: row > 0 && row - 1 >= insertAt ? row + 1 : row,
+      col: activeCoords?.col ?? fallbackColumn,
+      caret: active instanceof HTMLTextAreaElement && activeCoords
+        ? active.selectionStart ?? 0
+        : 0
+    };
   }
 
   buildAddRowBefore(dom: HTMLElement, rowIndex: number, focusColumn: number): TableCommandTransactionPlan {
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
     const insertAt = Math.min(Math.max(rowIndex, 0), matrix.rows.length);
-    const sourcePlan = this.buildInsertSourceRowTransaction(dom, insertAt, matrix.headerCells.length);
+    const focusTarget = this.focusTargetAfterRowInsertion(insertAt, focusColumn);
+    const sourcePlan = this.buildInsertSourceRowTransaction(dom, insertAt, matrix.headerCells.length, focusTarget);
     if (sourcePlan) return sourcePlan;
     matrix.rows.splice(insertAt, 0, new Array(matrix.headerCells.length).fill(''));
     const sourceRowOrder = matrix.rows.map((_row, index) => (
@@ -4172,7 +4197,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     return this.buildMatrixTransaction(
       matrix,
       dom,
-      { row: insertAt + 1, col: focusColumn },
+      focusTarget,
       { sourceRowOrder }
     );
   }
@@ -4216,7 +4241,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   buildInsertSourceRowTransaction(
     dom: HTMLElement,
     insertAt: number,
-    colCount: number
+    colCount: number,
+    focusTarget: PendingCellFocus
   ): TableCommandTransactionPlan | null {
     const view = this.getEditorView(dom);
     if (!view || colCount <= 0) return null;
@@ -4246,7 +4272,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       assoc: -1,
       offset: insertedRowOffset
     });
-    const focusTarget = { row: insertAt + 1, col: this.activeColumnIndex() ?? 0 };
     return {
       transaction: { changes, effects: insertedRowEffect },
       outcome: 'changed',
@@ -4782,8 +4807,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     }
     this.syncTableLineNumbers();
     this.syncTableDiffMarkers();
-    this.updateContextControlsPosition();
     for (const task of Array.from(this.layoutTasks)) task();
+    this.updateContextControlsPosition();
   }
 
   syncTableDiffMarkers() {
@@ -5073,7 +5098,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     this.setContextPage(this.contextPage);
     this.updateContextMenuState();
     this.updateContextControlsPosition();
-    if (focusFirst) {
+    if (focusFirst && !contextMenu.hidden) {
       this.visibleContextMenuButtons()[0]?.focus({ preventScroll: true });
     }
   }
@@ -5093,17 +5118,33 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       bottom: window.innerHeight
     };
     const rowRect = row.getBoundingClientRect();
-    if (
-      !contextMenu.hidden &&
-      (rowRect.bottom <= viewportRect.top || rowRect.top >= viewportRect.bottom)
-    ) {
-      this.setContextMenuOpen(false);
-      return;
-    }
+    const targetOutsideViewport = rowRect.bottom <= viewportRect.top || rowRect.top >= viewportRect.bottom;
+    const targetHiddenByStickyHeader = rowIndex === 0
+      && this.domRefs.stickyChrome.classList.contains('is-visible');
+    contextTrigger.hidden = targetOutsideViewport || targetHiddenByStickyHeader;
+    if (contextTrigger.hidden && !contextMenu.hidden) this.setContextMenuOpen(false);
+    if (contextTrigger.hidden) return;
     const visibleTop = Math.max(viewportRect.top, wrapRect.top);
     const visibleBottom = Math.min(viewportRect.bottom, wrapRect.bottom);
+    const selectionRange = this.cellSelection.snapshot().range;
+    const hasMultiCellSelection = Boolean(selectionRange && (
+      selectionRange.fromRow !== selectionRange.toRow
+      || selectionRange.fromCol !== selectionRange.toCol
+    ));
+    const focusedInput = document.activeElement;
+    const targetInput = focusedInput instanceof HTMLTextAreaElement && row.contains(focusedInput)
+      ? focusedInput
+      : this.domRefs.allRowInputs[rowIndex]?.[this.activeTarget.col] ?? null;
+    const caretBounds = !hasMultiCellSelection && targetInput
+      ? tableCellCaretViewportBounds(targetInput)
+      : null;
+    const anchorTop = caretBounds?.top ?? rowRect.top;
+    const anchorBottom = caretBounds?.bottom ?? rowRect.bottom;
+    const anchorCenter = caretBounds
+      ? (caretBounds.top + caretBounds.bottom) / 2
+      : rowRect.top + rowRect.height / 2;
     const rowCenterInViewport = Math.min(
-      Math.max(rowRect.top + rowRect.height / 2, visibleTop + 14),
+      Math.max(anchorCenter, visibleTop + 14),
       visibleBottom - 14
     );
     const rowCenter = rowCenterInViewport - shellRect.top;
@@ -5124,8 +5165,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       Math.max(preferredLeft, visibleLeft + 4),
       Math.max(visibleLeft + 4, visibleRight - menuWidth - 4)
     );
-    const below = rowRect.bottom + gap;
-    const above = rowRect.top - menuHeight - gap;
+    const below = anchorBottom + gap;
+    const above = anchorTop - menuHeight - gap;
     const menuTop = below + menuHeight <= viewportRect.bottom - 4
       ? below
       : Math.max(viewportRect.top + 4, above);
@@ -5512,6 +5553,13 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       contextPages,
       contextButtons
     };
+    const cancelCaretReveal = () => { this.tableCaretRevealGeneration += 1; };
+    view.scrollDOM.addEventListener('wheel', cancelCaretReveal, { passive: true });
+    view.scrollDOM.addEventListener('touchstart', cancelCaretReveal, { passive: true });
+    this.cleanupFns.push(() => {
+      view.scrollDOM.removeEventListener('wheel', cancelCaretReveal);
+      view.scrollDOM.removeEventListener('touchstart', cancelCaretReveal);
+    });
     let mounted = mountedTableWidgets.get(view);
     if (!mounted) {
       mounted = new Set();
