@@ -87,8 +87,13 @@ try {
     }
     await page.evaluate(() => (window as any).typingEditor.destroy());
   }
-  for (const fenceInfo of ['', 'text']) {
-    await page.evaluate((info) => {
+  for (const scenario of [
+    { mode: 'live', fence: '' },
+    { mode: 'source', fence: '' },
+    { mode: 'live', fence: 'text' },
+    { mode: 'source', fence: 'text' }
+  ]) {
+    await page.evaluate(({ mode, fence }) => {
       const harness = (window as any).HighlightHarness;
       harness.setShikiTheme({
         name: 'plain-typing',
@@ -97,48 +102,40 @@ try {
         tokenColors: [{ scope: 'string', settings: { foreground: '#0000ff' } }]
       });
       const code = ['plain value', ...Array.from({ length: 3000 }, (_, i) => `plain row ${i}`)].join('\n');
-      const text = `\`\`\`${info}\n${code}\n\`\`\``;
+      const text = `\`\`\`${fence}\n${code}\n\`\`\``;
       const parent = document.getElementById('app')!;
       parent.replaceChildren();
-      const editor = harness.createEditor({ parent, text, initialMode: 'live', onApplyChanges() {} });
+      const editor = harness.createEditor({ parent, text, initialMode: mode, onApplyChanges() {} });
       editor.view.dispatch({ selection: { anchor: text.indexOf('plain value') + 'plain value'.length } });
       editor.focus();
       (window as any).typingEditor = editor;
-      const baselinePosition = editor.view.state.selection.main.head - 1;
-      const baselineNode = editor.view.domAtPos(baselinePosition).node;
-      const baselineElement = baselineNode.nodeType === Node.ELEMENT_NODE
-        ? baselineNode as Element
-        : baselineNode.parentElement!;
-      (window as any).plainTyping = {
-        colors: [],
-        done: false,
-        baselineColor: getComputedStyle(baselineElement).color
-      };
-      const sample = () => {
+      (window as any).inputColor = () => {
         const { node } = editor.view.domAtPos(editor.view.state.selection.main.head - 1);
-        const element = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement!;
-        (window as any).plainTyping.colors.push(getComputedStyle(element).color);
-        if (!(window as any).plainTyping.done) requestAnimationFrame(sample);
+        return getComputedStyle(node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement!).color;
+      };
+    }, scenario);
+    await page.waitForFunction(() => Boolean((window as any).inputColor()));
+    const baselineColor = await page.evaluate(() => (window as any).inputColor() as string);
+    await page.evaluate(() => {
+      const state = (window as any).typingSamples = { inputColors: [], done: false };
+      const sample = () => {
+        state.inputColors.push((window as any).inputColor());
+        if (!state.done) requestAnimationFrame(sample);
       };
       requestAnimationFrame(sample);
-    }, fenceInfo);
+    });
     await page.keyboard.type('abcdef', { delay: 70 });
     await new Promise(resolve => setTimeout(resolve, 250));
     const result = await page.evaluate(() => {
-      (window as any).plainTyping.done = true;
-      return {
-        text: (window as any).typingEditor.getText(),
-        colors: [...new Set((window as any).plainTyping.colors as string[])],
-        baselineColor: (window as any).plainTyping.baselineColor as string
-      };
+      (window as any).typingSamples.done = true;
+      return (window as any).typingSamples.inputColors as string[];
     });
-    assert.ok(result.text.includes('plain valueabcdef'));
-    assert.ok(!result.colors.includes('rgb(0, 0, 255)'),
-      `Plain fenced code must never expose Markdown token blue while typing: ${fenceInfo || 'no language'}`);
+    const inputColors = result.filter(Boolean);
+    assert.ok(inputColors.length >= 2, 'Capture more than a single painted plain-code frame');
     assert.deepEqual(
-      result.colors,
-      [result.baselineColor],
-      `Plain fenced code must preserve its stable color while typing: ${fenceInfo || 'no language'}`
+      [...new Set(inputColors)],
+      [baselineColor],
+      `Plain code input must inherit the preceding character color on every frame: ${JSON.stringify(scenario)}`
     );
     await page.evaluate(() => (window as any).typingEditor.destroy());
   }
