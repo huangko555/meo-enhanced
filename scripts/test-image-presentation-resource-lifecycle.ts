@@ -103,7 +103,13 @@ assert.equal(
 
 const currentLoad = pool.load('document', 'resolved:current');
 assert.equal(loads.length, 2, 'replacement generation must perform its own browser load');
-const currentImage = { src: 'resolved:current' } as HTMLImageElement;
+const currentImage = {
+  src: 'resolved:current',
+  naturalWidth: 800,
+  naturalHeight: 400,
+  width: 800,
+  height: 400
+} as HTMLImageElement;
 loads[1].work.resolve(currentImage);
 assert.equal(await currentLoad, currentImage);
 assert.equal(pool.getLoaded('document', 'resolved:current'), currentImage);
@@ -126,6 +132,15 @@ releaseCurrent();
 assert.equal(pool.getLoaded('document', 'resolved:current'), currentImage, '2→1 must retain ready cache');
 releaseSurvivor();
 assert.equal(pool.getLoaded('document', 'resolved:current'), null, '1→0 must release ready cache');
+const resolutionCountBeforeWarmReuse = resolutions.length;
+const loadCountBeforeWarmReuse = loads.length;
+const releaseWarmReuse = pool.acquire();
+assert.equal(await pool.resolve('document', './replaced.png'), 'resolved:current');
+assert.equal(await pool.load('document', 'resolved:current'), currentImage);
+assert.equal(resolutions.length, resolutionCountBeforeWarmReuse, 'a new live lease must reuse warm source resolution');
+assert.equal(loads.length, loadCountBeforeWarmReuse, 'a new live lease must reuse a bounded decoded image');
+assert.deepEqual(pool.getIntrinsicSize('document', './replaced.png'), { width: 800, height: 400 });
+releaseWarmReuse();
 
 const releaseDisposed = pool.acquire();
 const pendingAtDispose = pool.resolve('document', './dispose.png');
@@ -154,6 +169,7 @@ const factoryPool: ImagePresentationResourcePool = {
   getResolved: () => null,
   load: async () => null,
   getLoaded: () => null,
+  getIntrinsicSize: () => null,
   dispose() { poolDisposeCalls += 1; }
 };
 const factory = createImagePresentationFactory({

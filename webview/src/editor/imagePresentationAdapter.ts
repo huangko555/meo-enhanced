@@ -15,6 +15,8 @@ import type {
 
 const DEFAULT_RESOLUTION_CACHE_LIMIT = 512;
 const DEFAULT_LOADED_CACHE_LIMIT = 128;
+const DEFAULT_WARM_LOADED_CACHE_LIMIT = 16;
+const DEFAULT_INTRINSIC_SIZE_CACHE_LIMIT = 512;
 const DEFAULT_FAILURE_CACHE_LIMIT = 256;
 const DEFAULT_MAX_CONCURRENT_LOADS = 6;
 const DEFAULT_MAX_PENDING_RESOLUTIONS = 512;
@@ -23,8 +25,9 @@ const DEFAULT_FAILURE_RETRY_MS = 30_000;
 
 /**
  * Shared resolve/load state for one active resource generation. Callers must
- * acquire before requesting work; the last idempotent release invalidates the
- * generation, settles its waiters and clears its bounded caches.
+ * acquire before requesting work; the last idempotent release aborts pending
+ * work while retaining only a small bounded set of ready resources for a fast
+ * mode round-trip.
  */
 export type ImagePresentationResourcePool = {
   acquire(): () => void;
@@ -34,6 +37,7 @@ export type ImagePresentationResourcePool = {
   getResolved(contextKey: string, rawSrc: string): string | null;
   load(contextKey: string, resolvedSrc: string): Promise<HTMLImageElement | null>;
   getLoaded(contextKey: string, resolvedSrc: string): HTMLImageElement | null;
+  getIntrinsicSize(contextKey: string, rawSrc: string): { width: number; height: number } | null;
   dispose(): void;
 };
 
@@ -55,6 +59,8 @@ export type ImagePresentationResourcePoolOptions = {
   readonly failureRetryMs?: number;
   readonly resolutionCacheLimit?: number;
   readonly loadedCacheLimit?: number;
+  readonly warmLoadedCacheLimit?: number;
+  readonly intrinsicSizeCacheLimit?: number;
   readonly failureCacheLimit?: number;
 };
 
@@ -110,6 +116,9 @@ export function createImagePresentationResourcePool(
   const failureRetryMs = options.failureRetryMs ?? DEFAULT_FAILURE_RETRY_MS;
   let disposed = false;
   let currentGeneration: ImageResourceGeneration | null = null;
+  const warmResolvedCache = new Map<string, string>();
+  const warmLoadedCache = new Map<string, HTMLImageElement>();
+  const intrinsicSizeCache = new Map<string, { width: number; height: number }>();
 
   const createGeneration = (
     leases: readonly ImageResourceLease[] = []
@@ -137,7 +146,8 @@ export function createImagePresentationResourcePool(
 
   const releaseGeneration = (
     generation: ImageResourceGeneration,
-    releaseLeases: boolean
+    releaseLeases: boolean,
+    preserveReadyResources = false
   ): void => {
     if (currentGeneration === generation) currentGeneration = null;
     if (releaseLeases) {
@@ -145,6 +155,14 @@ export function createImagePresentationResourcePool(
     }
     generation.leases.clear();
     if (generation.released) return;
+    if (preserveReadyResources) {
+      for (const [key, value] of generation.resolvedCache) {
+        setBounded(warmResolvedCache, key, value, options.resolutionCacheLimit ?? DEFAULT_RESOLUTION_CACHE_LIMIT);
+      }
+      for (const [key, value] of generation.loadedCache) {
+        setBounded(warmLoadedCache, key, value, options.warmLoadedCacheLimit ?? DEFAULT_WARM_LOADED_CACHE_LIMIT);
+      }
+    }
     generation.released = true;
     generation.abortController.abort();
     generation.settleReleased();
@@ -201,6 +219,12 @@ export function createImagePresentationResourcePool(
       touch(generation.resolvedCache, key, cached);
       return Promise.resolve(cached);
     }
+    const warm = warmResolvedCache.get(key);
+    if (warm !== undefined) {
+      touch(warmResolvedCache, key, warm);
+      setBounded(generation.resolvedCache, key, warm, options.resolutionCacheLimit ?? DEFAULT_RESOLUTION_CACHE_LIMIT);
+      return Promise.resolve(warm);
+    }
     const pending = generation.resolutionInFlight.get(key);
     if (pending) return pending;
     if (generation.resolutionInFlight.size >= maxPendingResolutions) return Promise.resolve(null);
@@ -241,6 +265,12 @@ export function createImagePresentationResourcePool(
       touch(generation.loadedCache, key, cached);
       return Promise.resolve(cached);
     }
+    const warm = warmLoadedCache.get(key);
+    if (warm) {
+      touch(warmLoadedCache, key, warm);
+      setBounded(generation.loadedCache, key, warm, options.loadedCacheLimit ?? DEFAULT_LOADED_CACHE_LIMIT);
+      return Promise.resolve(warm);
+    }
     const failed = generation.failedAt.get(key);
     if (failed !== undefined) {
       if (now() - failed < failureRetryMs) return Promise.resolve(null);
@@ -267,6 +297,16 @@ export function createImagePresentationResourcePool(
             options.loadedCacheLimit ?? DEFAULT_LOADED_CACHE_LIMIT
           );
           generation.failedAt.delete(key);
+          const width = Number(image.naturalWidth || image.width);
+          const height = Number(image.naturalHeight || image.height);
+          if (width > 0 && height > 0) {
+            setBounded(
+              intrinsicSizeCache,
+              key,
+              { width, height },
+              options.intrinsicSizeCacheLimit ?? DEFAULT_INTRINSIC_SIZE_CACHE_LIMIT
+            );
+          }
         } else {
           setBounded(
             generation.failedAt,
@@ -293,12 +333,16 @@ export function createImagePresentationResourcePool(
         lease.released = true;
         const generation = currentGeneration;
         if (!generation || !generation.leases.delete(lease)) return;
-        if (generation.leases.size === 0) releaseGeneration(generation, false);
+        if (generation.leases.size === 0) releaseGeneration(generation, false, true);
       };
     },
     invalidate() {
       const generation = currentGeneration;
-      if (disposed || !generation) return;
+      if (disposed) return;
+      warmResolvedCache.clear();
+      warmLoadedCache.clear();
+      intrinsicSizeCache.clear();
+      if (!generation) return;
       const activeLeases = [...generation.leases];
       releaseGeneration(generation, false);
       currentGeneration = createGeneration(activeLeases);
@@ -307,14 +351,19 @@ export function createImagePresentationResourcePool(
       const generation = currentGeneration;
       if (disposed || !generation || generation.released) return;
       const resolutionKey = cacheKey(contextKey, rawSrc);
+      const warmResolved = warmResolvedCache.get(resolutionKey);
       generation.resolvedCache.delete(resolutionKey);
       generation.resolutionInFlight.delete(resolutionKey);
-      if (!resolvedSrc) return;
-      const loadKey = cacheKey(contextKey, resolvedSrc);
+      warmResolvedCache.delete(resolutionKey);
+      const invalidatedResolvedSrc = resolvedSrc ?? warmResolved ?? null;
+      if (!invalidatedResolvedSrc) return;
+      const loadKey = cacheKey(contextKey, invalidatedResolvedSrc);
       generation.loadedCache.delete(loadKey);
       generation.loadInFlight.delete(loadKey);
       generation.failedAt.delete(loadKey);
       generation.forcedReloads.add(loadKey);
+      warmLoadedCache.delete(loadKey);
+      intrinsicSizeCache.delete(loadKey);
     },
     resolve,
     getResolved(contextKey, rawSrc) {
@@ -334,11 +383,24 @@ export function createImagePresentationResourcePool(
       if (image) touch(generation.loadedCache, key, image);
       return image;
     },
+    getIntrinsicSize(contextKey, rawSrc) {
+      const resolutionKey = cacheKey(contextKey, rawSrc);
+      const resolvedSrc = currentGeneration?.resolvedCache.get(resolutionKey)
+        ?? warmResolvedCache.get(resolutionKey);
+      if (!resolvedSrc) return null;
+      const sizeKey = cacheKey(contextKey, resolvedSrc);
+      const size = intrinsicSizeCache.get(sizeKey) ?? null;
+      if (size) touch(intrinsicSizeCache, sizeKey, size);
+      return size;
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
       const generation = currentGeneration;
       if (generation) releaseGeneration(generation, true);
+      warmResolvedCache.clear();
+      warmLoadedCache.clear();
+      intrinsicSizeCache.clear();
     }
   };
 }
@@ -564,6 +626,9 @@ export function createImagePresentationFactory(
       const resolved = await options.resources.resolve(options.resourceContextKey, rawSrc);
       if (!resolved || disposed) return;
       await options.resources.load(options.resourceContextKey, resolved);
+    },
+    getIntrinsicSize(rawSrc) {
+      return options.resources.getIntrinsicSize(options.resourceContextKey, rawSrc);
     },
     create,
     async whenVisiblePresentationsSettle(signal) {

@@ -3795,6 +3795,12 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   color: var(--meo-semantic-imageFallbackForeground);
 }
 
+.cm-editor .meo-md-image-size-placeholder {
+  display: block;
+  max-width: 100%;
+  background: var(--meo-semantic-imageBackground);
+}
+
 .cm-editor .meo-md-image-linked {
   cursor: pointer;
 }

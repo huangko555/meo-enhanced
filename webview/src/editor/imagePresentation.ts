@@ -18,6 +18,7 @@ export type ImagePresentationFactory = {
   /** Keeps shared image resource work active until the returned release is called. */
   acquire(): () => void;
   preload(rawSrc: string): Promise<void>;
+  getIntrinsicSize(rawSrc: string): { width: number; height: number } | null;
   create(view: ImagePresentationView): ImagePresentationHandle;
   whenVisiblePresentationsSettle(signal?: AbortSignal): Promise<void>;
   externalDocumentPresented(): void;

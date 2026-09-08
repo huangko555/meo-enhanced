@@ -168,19 +168,25 @@ try {
   const pendingLiveReveal = await page.evaluate(() => {
     const editor = document.querySelector<HTMLElement>('.editor-host')!;
     const preview = document.querySelector<HTMLElement>('.preview-host')!;
+    const liveImages = Array.from(editor.querySelectorAll<HTMLImageElement>('.meo-md-image-img'));
     return {
       editorHidden: editor.hidden,
       editorInert: editor.inert,
       previewHidden: preview.hidden,
-      previewInert: preview.inert
+      previewInert: preview.inert,
+      liveImageCount: liveImages.length,
+      liveImagesReady: liveImages.every((image) => image.complete && image.naturalWidth > 0)
     };
   });
   assert.deepEqual(pendingLiveReveal, {
     editorHidden: false,
-    editorInert: true,
-    previewHidden: false,
-    previewInert: false
-  }, 'Preview must cover a non-interactive Live surface while visible images reload');
+    editorInert: false,
+    previewHidden: true,
+    previewInert: true,
+    liveImageCount: 2,
+    liveImagesReady: true
+  }, 'A recent Source → Preview → Live cycle must reuse decoded images before the first Live paint');
+  assert.equal(pendingLiveImageResolutions.length, 0, 'warm Live image resources must not resolve or load again');
   holdLiveImageResolution = false;
   pendingLiveImageResolutions.splice(0).forEach((release) => release());
   await page.waitForFunction(() => document.querySelector<HTMLElement>('.preview-host')?.hidden);

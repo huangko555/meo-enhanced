@@ -688,6 +688,16 @@ export class ImageWidget extends WidgetType {
 
   renderFallback(container: HTMLElement): void {
     container.classList.add('meo-md-image-fallback');
+    const intrinsicSize = this.url ? this.presentationFactory.getIntrinsicSize(this.url) : null;
+    if (intrinsicSize) {
+      const heightScale = Math.min(1, 240 / intrinsicSize.height);
+      const placeholder = document.createElement('span');
+      placeholder.className = 'meo-md-image-size-placeholder';
+      placeholder.style.width = `${intrinsicSize.width * heightScale}px`;
+      placeholder.style.aspectRatio = `${intrinsicSize.width} / ${intrinsicSize.height}`;
+      container.replaceChildren(placeholder);
+      return;
+    }
     const fallback = document.createElement('code');
     fallback.className = 'meo-md-image-fallback-text';
     fallback.textContent = `![${this.altText}](${this.url})`;
