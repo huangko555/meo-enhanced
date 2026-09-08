@@ -247,7 +247,7 @@ contentMaxWidthBtn.className = 'more-tools-option more-tools-toggle-option';
 contentMaxWidthBtn.dataset.action = 'contentMaxWidth';
 contentMaxWidthBtn.title = activeUiStrings.constrainContentWidth;
 contentMaxWidthBtn.setAttribute('role', 'menuitemcheckbox');
-appendMoreToolsOptionContent(contentMaxWidthBtn, PanelLeftRightDashed, activeUiStrings.constrainWidth);
+appendMoreToolsOptionContent(contentMaxWidthBtn, PanelLeftRightDashed, activeUiStrings.constrainContentWidth);
 
 const sourceLineNumbersBtn = document.createElement('button');
 sourceLineNumbersBtn.type = 'button';
@@ -938,7 +938,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
     ? strings.reloadDiskVersionDoubleClick
     : strings.reloadDiskVersion;
   discardBtn.setAttribute('aria-label', strings.reloadDiskVersion);
-  contentMaxWidthBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.constrainWidth;
+  contentMaxWidthBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.constrainContentWidth;
   sourceLineNumbersBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.showLineNumbers;
   longCodeBlockFoldingBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.foldLongCodeBlocks;
   tableStickyHeaderBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.stickyTableHeader;

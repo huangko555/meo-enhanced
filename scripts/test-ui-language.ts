@@ -42,6 +42,10 @@ assert.deepEqual(
 );
 assert.deepEqual([english.refreshImage, chinese.refreshImage], ['Refresh image', '刷新图片']);
 assert.deepEqual(
+  [english.constrainContentWidth, chinese.constrainContentWidth],
+  ['Constrain Content Width', '限制内容宽度']
+);
+assert.deepEqual(
   [english.stickyTableHeader, chinese.stickyTableHeader],
   ['Sticky table header', '表格浮动表头']
 );
@@ -127,6 +131,9 @@ assert.equal(Object.isFrozen(english), true);
 assert.equal(Object.isFrozen(chinese), true);
 
 const repoRoot = path.resolve(import.meta.dir, '..');
+const webviewIndexText = fs.readFileSync(path.join(repoRoot, 'webview/src/index.ts'), 'utf8');
+assert.match(webviewIndexText, /appendMoreToolsOptionContent\([^\n]+constrainContentWidth\)/);
+assert.doesNotMatch(webviewIndexText, /more-tools-option-label[^\n]+constrainWidth/);
 const packageText = fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8');
 const packageManifest = JSON.parse(packageText) as {
   contributes?: {
