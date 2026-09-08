@@ -3718,14 +3718,28 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       run();
       return;
     }
-    const scrollTop = view.scrollDOM.scrollTop;
     const scrollLeft = view.scrollDOM.scrollLeft;
-    run();
-    view.scrollDOM.scrollLeft = scrollLeft;
-    // Table commands preserve the physical viewport. A document-position
-    // anchor is incorrect for row moves because the selected content changes
-    // source position and makes the viewport visibly chase it.
-    controller.lockScrollTop(scrollTop);
+    const shell = this.domRefs?.shell ?? null;
+    const tableStartLine = shell?.dataset.meoRenderedBlockStartLine;
+    if (!shell || !tableStartLine) {
+      const scrollTop = view.scrollDOM.scrollTop;
+      run();
+      view.scrollDOM.scrollLeft = scrollLeft;
+      controller.lockScrollTop(scrollTop);
+      return;
+    }
+    controller.preserveElementPositionWhileMutation(
+      shell,
+      () => view.dom.querySelector<HTMLElement>(
+        `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${tableStartLine}"]`
+      ),
+      () => {
+        run();
+        view.scrollDOM.scrollLeft = scrollLeft;
+      },
+      'immediate',
+      true
+    );
   }
 
   buildAlignmentTransaction(
@@ -4794,7 +4808,10 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     };
     const active = table.ownerDocument.activeElement;
     const controller = this.view ? getViewportController(this.view) : null;
-    if (active instanceof HTMLTextAreaElement && table.contains(active) && controller) {
+    if (
+      active instanceof HTMLTextAreaElement && table.contains(active) && controller &&
+      !this.domRefs.shell.classList.contains('is-context-menu-open')
+    ) {
       // Column redistribution can unwrap an earlier row. Preserve the active
       // input at the row measurement boundary, after content projection settles.
       controller.preserveElementPositionWhileMutation(

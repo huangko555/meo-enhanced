@@ -4729,6 +4729,14 @@ body.outline-resizing .preview-frame {
   margin: 0 0 0 var(--meo-html-table-indent);
 }
 
+.cm-editor .meo-md-html-table-shell:focus-within,
+.cm-editor .meo-md-html-table-shell.is-interacting,
+.cm-editor .meo-md-html-table-shell.is-context-menu-open {
+  /* CodeMirror's sticky gutter paints at z-index 200. Raise only the active
+     table so its gutter-side action control is visible without moving content. */
+  z-index: 201;
+}
+
 .cm-editor .meo-md-html-table-line-numbers {
   position: absolute;
   top: 0;

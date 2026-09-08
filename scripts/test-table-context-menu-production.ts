@@ -7,6 +7,14 @@ import { launchTestBrowser } from './browser-test-helpers';
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-table-context-menu-'));
 
+async function waitForFrames(page: import('puppeteer-core').Page, count = 6): Promise<void> {
+  await page.evaluate(async (frameCount) => {
+    for (let index = 0; index < frameCount; index += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  }, count);
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-table-stability-entry.ts')],
@@ -46,6 +54,7 @@ async function main(): Promise<void> {
 
     const result = await page.evaluate(async () => {
       const app = document.getElementById('app')!;
+      app.classList.add('editor-host');
       const editor = (window as any).TableStabilityHarness.createEditor({
         parent: app,
         text: [
@@ -104,6 +113,8 @@ async function main(): Promise<void> {
       const floating = getComputedStyle(menu).position;
       const menuStyle = getComputedStyle(menu);
       const triggerBackground = getComputedStyle(trigger).backgroundColor;
+      const shellZIndex = Number(getComputedStyle(shell).zIndex);
+      const gutterZIndex = Number(getComputedStyle(document.querySelector('.cm-gutters')!).zIndex);
       const shellHeightStable = Math.abs(shell.getBoundingClientRect().height - shellHeightBefore) < 0.5;
       const rootActionLabels = Array.from(
         menu.querySelectorAll('[data-context-panel="root"] .meo-md-html-table-context-btn-label'),
@@ -144,6 +155,7 @@ async function main(): Promise<void> {
         return currentMenu;
       };
       const commandVisualDeltas: Record<string, number> = {};
+      const commandVisualSamples: Record<string, number[]> = {};
       const runStableCommand = async (panel: 'insert' | 'move' | 'align' | 'delete', title: string) => {
         const currentMenu = openPanel(panel);
         const button = currentMenu.querySelector<HTMLButtonElement>(`button[title="${title}"]`)!;
@@ -163,10 +175,11 @@ async function main(): Promise<void> {
         commandVisualDeltas[title] = Math.max(
           ...visualSamples.map((value) => Math.abs(value - visualAnchorBefore))
         );
+        commandVisualSamples[title] = visualSamples.map((value) => value - visualAnchorBefore);
       };
 
-      editor.view.scrollDOM.dispatchEvent(new WheelEvent('wheel', { deltaY: 260, bubbles: true }));
-      editor.view.scrollDOM.scrollTop = 260;
+      editor.view.scrollDOM.dispatchEvent(new WheelEvent('wheel', { deltaY: 500, bubbles: true }));
+      editor.view.scrollDOM.scrollTop = 500;
       await frames(4);
       const scrollerRect = editor.view.scrollDOM.getBoundingClientRect();
       const moveInput = Array.from(document.querySelectorAll<HTMLTextAreaElement>(
@@ -179,6 +192,11 @@ async function main(): Promise<void> {
       if (!moveInput) throw new Error('No visible content row found for command stability checks');
       moveInput.focus({ preventScroll: true });
       await frames(4);
+      const focusedShell = moveInput.closest<HTMLElement>('.meo-md-html-table-shell')!;
+      const focusedMenu = focusedShell.querySelector<HTMLElement>('.meo-md-html-table-context-menu')!;
+      if (focusedMenu.hidden) {
+        pointer(focusedShell.querySelector<HTMLButtonElement>('.meo-md-html-table-context-trigger')!);
+      }
       await runStableCommand('move', 'Move row up');
       await runStableCommand('move', 'Move row down');
       await runStableCommand('insert', 'Insert row above');
@@ -243,6 +261,8 @@ async function main(): Promise<void> {
         menuInsideViewport,
         floating,
         triggerBackground,
+        shellZIndex,
+        gutterZIndex,
         menuBackground: menuStyle.backgroundColor,
         menuBackdropFilter: menuStyle.backdropFilter,
         shellHeightStable,
@@ -254,6 +274,7 @@ async function main(): Promise<void> {
         menuOpenAfterRepeatedInsert,
         activePanelAfterCommands,
         commandVisualDeltas,
+        commandVisualSamples,
         menuClosedAfterTargetScroll,
         constrainedWidths,
         constrainedFits: constrainedTable.getBoundingClientRect().width <= constrainedWrap.clientWidth + 1,
@@ -275,9 +296,92 @@ async function main(): Promise<void> {
       return output;
     });
 
-    if (process.env.MEO_CAPTURE_TABLE_CONTEXT_MENU) {
-      await page.screenshot({ path: process.env.MEO_CAPTURE_TABLE_CONTEXT_MENU });
-    }
+    const resetTrustedClickScenario = async () => {
+      await page.evaluate(async () => {
+        const editor = (window as any).__tableContextMenuEditor;
+        const openMenu = document.querySelector<HTMLElement>('.meo-md-html-table-context-menu:not([hidden])');
+        if (openMenu) {
+          openMenu.hidden = true;
+          openMenu.closest('.meo-md-html-table-shell')?.classList.remove('is-context-menu-open');
+        }
+        editor.view.scrollDOM.scrollTop = 500;
+        for (let index = 0; index < 4; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+        const viewport = editor.view.scrollDOM.getBoundingClientRect();
+        const input = Array.from(document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table-shell textarea'))
+          .find((candidate) => {
+            const rect = candidate.getBoundingClientRect();
+            return rect.top >= viewport.top + 60 && rect.bottom <= viewport.bottom - 60;
+          });
+        if (!input) throw new Error('No visible table cell for trusted-click scenario');
+        input.focus({ preventScroll: true });
+      });
+      await waitForFrames(page, 4);
+      const triggerState = await page.$eval('.meo-md-html-table-context-trigger', (trigger) => {
+        const rect = trigger.getBoundingClientRect();
+        const style = getComputedStyle(trigger);
+        return {
+          rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height },
+          visibility: style.visibility,
+          opacity: style.opacity,
+          display: style.display,
+          pointerEvents: style.pointerEvents,
+          activeTag: document.activeElement?.tagName ?? null,
+          shellFocusWithin: Boolean(trigger.closest('.meo-md-html-table-shell')?.matches(':focus-within'))
+        };
+      });
+      if (
+        triggerState.visibility !== 'visible' || triggerState.opacity === '0' ||
+        triggerState.rect.width === 0 || triggerState.rect.height === 0
+      ) {
+        throw new Error(`Table trigger has no visible trusted-click target: ${JSON.stringify(triggerState)}`);
+      }
+      await trustedMouseClick('.meo-md-html-table-context-trigger');
+      await page.waitForSelector('.meo-md-html-table-context-menu:not([hidden])');
+      if (process.env.MEO_CAPTURE_TABLE_CONTEXT_MENU) {
+        await page.screenshot({ path: process.env.MEO_CAPTURE_TABLE_CONTEXT_MENU });
+      }
+    };
+    const trustedMouseClick = async (selector: string) => {
+      const point = await page.$eval(selector, (element) => {
+        const rect = element.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      });
+      await page.mouse.click(point.x, point.y);
+    };
+    const trustedClickDeltas: Record<string, number> = {};
+    const trustedClick = async (label: string, selector: string) => {
+      const before = await page.evaluate(() => {
+        const shell = document.querySelector<HTMLElement>('.meo-md-html-table-shell')!;
+        return { shellTop: shell.getBoundingClientRect().top };
+      });
+      await trustedMouseClick(selector);
+      await waitForFrames(page, 8);
+      const after = await page.evaluate(() => {
+        const shell = document.querySelector<HTMLElement>('.meo-md-html-table-shell')!;
+        return { shellTop: shell.getBoundingClientRect().top };
+      });
+      trustedClickDeltas[label] = Math.max(
+        Math.abs(after.shellTop - before.shellTop)
+      );
+    };
+    await resetTrustedClickScenario();
+    await trustedClick('Open insert panel', '[data-context-panel-target="insert"]');
+    await trustedClick('Back to root panel', '.meo-md-html-table-context-back');
+    await trustedClick('Open move panel', '[data-context-panel-target="move"]');
+    await trustedClick('Move column right', 'button[title="Move column right"]');
+    await trustedClick('Back after move', '.meo-md-html-table-context-back');
+    await trustedClick('Reopen insert panel', '[data-context-panel-target="insert"]');
+    await trustedClick('Insert row below', 'button[title="Insert row below"]');
+    await trustedClick('Insert column right', 'button[title="Insert column right"]');
+    await trustedClick('Back after insert', '.meo-md-html-table-context-back');
+    await trustedClick('Open align panel', '[data-context-panel-target="align"]');
+    await trustedClick('Align column center', 'button[title="Align selected column center"]');
+    await trustedClick('Back after align', '.meo-md-html-table-context-back');
+    await trustedClick('Open delete panel', '[data-context-panel-target="delete"]');
+    await trustedClick('Delete row', 'button[title="Delete row"]');
+    await trustedClick('Delete column', 'button[title="Delete column"]');
 
     assert.equal(result.triggerVisible, 'visible');
     assert.equal(result.triggerInsideViewport, true, 'the row action trigger must remain visible in the viewport');
@@ -285,6 +389,13 @@ async function main(): Promise<void> {
     assert.equal(result.tableUsesNormalContentLeft, true, 'the table must not move right to reserve trigger space');
     assert.equal(result.menuInsideViewport, true, 'the menu must remain inside the viewport');
     assert.equal(result.floating, 'absolute');
+    assert.ok(
+      result.shellZIndex > result.gutterZIndex,
+      `the active table controls must paint above the line-number/change-marker gutter: ${JSON.stringify({
+        shell: result.shellZIndex,
+        gutter: result.gutterZIndex
+      })}`
+    );
     assert.doesNotMatch(result.triggerBackground, /rgba\([^)]*,\s*(?:0(?:\.\d+)?|0?\.\d+)\s*\)/, 'the trigger must use an opaque surface');
     assert.doesNotMatch(result.menuBackground, /rgba\([^)]*,\s*0(?:\.0+)?\)/, 'the menu surface must be opaque');
     assert.ok(result.menuBackdropFilter === 'none' || result.menuBackdropFilter === '');
@@ -297,10 +408,17 @@ async function main(): Promise<void> {
     assert.equal(result.menuOpenAfterRepeatedInsert, true);
     assert.equal(result.activePanelAfterCommands, 'delete', 'repeated commands must stay in the current submenu');
     assert.ok(
-      Math.max(...Object.values(result.commandVisualDeltas)) <= 2.5,
-      `table command shifted visible content beyond row-layout rounding: ${JSON.stringify(result.commandVisualDeltas)}`
+      Math.max(...Object.values(result.commandVisualDeltas)) <= 0.5,
+      `table command shifted visible content: ${JSON.stringify({
+        deltas: result.commandVisualDeltas,
+        samples: result.commandVisualSamples
+      })}`
     );
     assert.equal(result.menuClosedAfterTargetScroll, true, 'the menu must close when its target row leaves the viewport');
+    assert.ok(
+      Math.max(...Object.values(trustedClickDeltas)) <= 0.5,
+      `trusted table-menu clicks shifted the viewport: ${JSON.stringify(trustedClickDeltas)}`
+    );
     assert.equal(result.constrainedFits, true, 'preferred cell width must yield when the table reaches its available width');
     assert.equal(result.constrainedOverflow, false, 'a feasible constrained table must not gain horizontal overflow');
     console.log('table context menu production checks passed');

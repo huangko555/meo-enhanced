@@ -86,6 +86,8 @@ interface ActiveLayoutAnchor extends LayoutAnchor {
 }
 
 interface StabilizeOptions {
+  canSettle?: () => boolean;
+  requiredStableFrames?: number;
   onSettled?: () => void;
   schedule?: 'immediate' | 'next-frame';
 }
@@ -635,7 +637,8 @@ export class ViewportController {
     element: HTMLElement,
     resolveCurrentElement: () => HTMLElement | null,
     mutate: () => void,
-    schedule: StabilizeOptions['schedule'] = 'next-frame'
+    schedule: StabilizeOptions['schedule'] = 'next-frame',
+    waitForReplacement = false
   ): void {
     const beforeTop = element.isConnected ? element.getBoundingClientRect().top : null;
     mutate();
@@ -647,7 +650,11 @@ export class ViewportController {
         top: this.view.scrollDOM.scrollTop + current.getBoundingClientRect().top - beforeTop
       };
     }, {
-      schedule
+      schedule,
+      canSettle: waitForReplacement
+        ? () => resolveCurrentElement() !== element
+        : undefined,
+      requiredStableFrames: waitForReplacement ? 4 : undefined
     });
   }
 
@@ -790,7 +797,11 @@ export class ViewportController {
             const currentTarget = this.resolveScrollTarget(requested, this.readScrollPosition());
             const changed = this.writeScrollPosition(currentTarget);
             stableFrames = changed ? 0 : stableFrames + 1;
-            if (stableFrames >= REQUIRED_STABLE_FRAMES || attempts >= MAX_SETTLE_FRAMES) {
+            if (
+              (stableFrames >= (options.requiredStableFrames ?? REQUIRED_STABLE_FRAMES)
+                && (options.canSettle?.() ?? true)) ||
+              attempts >= MAX_SETTLE_FRAMES
+            ) {
               finish();
               return;
             }
