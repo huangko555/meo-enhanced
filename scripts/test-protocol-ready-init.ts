@@ -50,6 +50,7 @@ const completeInit = {
   fixedBaselineActive: false,
   fixedBaselineUpdatedAt: null,
   contentMaxWidthEnabled: true,
+  tableStickyHeaderEnabled: true,
   findOptions: { wholeWord: false, caseSensitive: false },
   outlinePosition: 'right' as const,
   outlineVisible: true,
@@ -78,6 +79,11 @@ assert.deepEqual(
   decodeInitMessage({ ...completeInit, editorFontSizeMode: undefined, editorFontSize: undefined }),
   completeInit
 );
+assert.equal(
+  decodeInitMessage({ ...completeInit, tableStickyHeaderEnabled: undefined })?.tableStickyHeaderEnabled,
+  true
+);
+assert.equal(decodeInitMessage({ ...completeInit, tableStickyHeaderEnabled: 'yes' }), null);
 assert.equal(decodeInitMessage({ ...completeInit, savedRevision: undefined }), null);
 assert.equal(decodeInitMessage({ ...completeInit, savedRevision: { version: -1, text: '# saved' } }), null);
 assert.equal(decodeInitMessage({ ...completeInit, savedRevision: { version: 4, text: '# future' } }), null);
@@ -660,6 +666,7 @@ for (const command of [
   { type: 'setOutlinePosition', position: 'right' },
   { type: 'setOutlineWidth', width: 240 },
   { type: 'setContentMaxWidth', enabled: true },
+  { type: 'setTableStickyHeader', enabled: false },
   { type: 'setFindOptions', findOptions: { wholeWord: true, caseSensitive: false } },
   { type: 'openLink', href: 'docs/readme.md', source: 'preview' },
   { type: 'openImageExternally', url: 'file:///image.png' },
@@ -720,6 +727,11 @@ assert.equal(decodeHostConfigurationEvent({ type: 'vscodeCodeThemeChanged', vsco
 assert.equal(decodeHostConfigurationEvent({ type: 'themeChanged', theme: {}, codeTheme }), null);
 assert.equal(decodeHostConfigurationEvent({ type: 'shikiCodeBlocksChanged', enabled: true, codeTheme }), null);
 assert.deepEqual(decodeHostConfigurationEvent({ type: 'toggleMode' }), { type: 'toggleMode' });
+assert.deepEqual(
+  decodeHostConfigurationEvent({ type: 'tableStickyHeaderChanged', enabled: false }),
+  { type: 'tableStickyHeaderChanged', enabled: false }
+);
+assert.equal(decodeHostConfigurationEvent({ type: 'tableStickyHeaderChanged', enabled: 'no' }), null);
 assert.deepEqual(decodeDiagnosticsChangedEvent({
   type: 'diagnosticsChanged', diagnostics: [{ from: 1, to: 3, severity: 2, message: 'Typo', source: 'meo' }]
 }), {

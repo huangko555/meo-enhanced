@@ -30,12 +30,14 @@ import {
   GIT_CHANGES_GUTTER_LEGACY_VISIBLE_SETTING_KEY,
   GIT_CHANGES_GUTTER_LEGACY_VISIBILITY_SETTING_KEY,
   GIT_CHANGES_GUTTER_SETTING_KEY,
+  TABLE_STICKY_HEADER_SETTING_KEY,
   OUTLINE_VISIBLE_KEY,
   getCurrentVscodeCodeTheme,
   syncEditorAssociations,
   getGitChangesGutterEnabled,
   getOutlineVisible,
   getContentMaxWidthEnabled,
+  getTableStickyHeaderEnabled,
   isMarkdownDocumentPath,
   migrateLegacyToggleSettings
 } from './shared/extensionConfig';
@@ -408,6 +410,13 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
   }
 
   async handleConfigurationChanged(event: vscode.ConfigurationChangeEvent): Promise<void> {
+    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${TABLE_STICKY_HEADER_SETTING_KEY}`)) {
+      this.broadcast({
+        type: 'tableStickyHeaderChanged',
+        enabled: getTableStickyHeaderEnabled()
+      });
+    }
+
     if (
       event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${GIT_CHANGES_GUTTER_SETTING_KEY}`) ||
       event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${GIT_CHANGES_GUTTER_LEGACY_VISIBLE_SETTING_KEY}`) ||

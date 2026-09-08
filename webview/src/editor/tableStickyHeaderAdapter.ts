@@ -36,7 +36,57 @@ export type TableStickyHeaderAdapter = {
 
 export type TableStickyHeaderAdapterFactory = {
   create(options: TableStickyHeaderAdapterOptions): TableStickyHeaderAdapter;
+  setEnabled(enabled: boolean): void;
 };
+
+export function createToggleableTableStickyHeaderAdapterFactory(
+  delegateFactory: Pick<TableStickyHeaderAdapterFactory, 'create'>,
+  initiallyEnabled = true
+): TableStickyHeaderAdapterFactory {
+  const entries = new Set<{
+    readonly delegate: TableStickyHeaderAdapter;
+    mounted: boolean;
+  }>();
+  let enabled = initiallyEnabled;
+
+  return {
+    create(options) {
+      const delegate = delegateFactory.create(options);
+      const entry = { delegate, mounted: false };
+      entries.add(entry);
+      return {
+        mount() {
+          entry.mounted = true;
+          if (enabled) delegate.mount();
+        },
+        update() {
+          if (entry.mounted && enabled) delegate.update();
+        },
+        invalidate() {
+          if (entry.mounted && enabled) delegate.invalidate();
+        },
+        unmount() {
+          entry.mounted = false;
+          delegate.unmount();
+        },
+        dispose() {
+          entry.mounted = false;
+          entries.delete(entry);
+          delegate.dispose();
+        }
+      };
+    },
+    setEnabled(nextEnabled) {
+      if (nextEnabled === enabled) return;
+      enabled = nextEnabled;
+      for (const entry of entries) {
+        if (!entry.mounted) continue;
+        if (enabled) entry.delegate.mount();
+        else entry.delegate.unmount();
+      }
+    }
+  };
+}
 
 export const tableStickyHeaderAdapterFactoryFacet = Facet.define<
   TableStickyHeaderAdapterFactory,

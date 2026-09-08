@@ -55,6 +55,7 @@ export type InitMessage = {
   readonly fixedBaselineActive: boolean;
   readonly fixedBaselineUpdatedAt?: number | null;
   readonly contentMaxWidthEnabled: boolean;
+  readonly tableStickyHeaderEnabled: boolean;
   readonly findOptions: { readonly wholeWord: boolean; readonly caseSensitive: boolean };
   readonly outlinePosition: 'left' | 'right';
   readonly outlineVisible: boolean;
@@ -92,6 +93,11 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     : isRecord(value) && typeof value.editorFontSize === 'number'
       && normalizeEditorFontSize(value.editorFontSize) === value.editorFontSize
       ? value.editorFontSize
+      : null;
+  const tableStickyHeaderEnabled = isRecord(value) && value.tableStickyHeaderEnabled === undefined
+    ? true
+    : isRecord(value) && typeof value.tableStickyHeaderEnabled === 'boolean'
+      ? value.tableStickyHeaderEnabled
       : null;
   if (!isRecord(value)
     || value.type !== 'init'
@@ -136,6 +142,7 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
       && value.fixedBaselineUpdatedAt !== null
       && (typeof value.fixedBaselineUpdatedAt !== 'number' || !Number.isFinite(value.fixedBaselineUpdatedAt)))
     || typeof value.contentMaxWidthEnabled !== 'boolean'
+    || tableStickyHeaderEnabled === null
     || !isRecord(value.findOptions)
     || typeof value.findOptions.wholeWord !== 'boolean'
     || typeof value.findOptions.caseSensitive !== 'boolean'
@@ -154,7 +161,8 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     automaticUiLanguage: value.automaticUiLanguage ?? value.uiLanguage,
     previewFontFamily,
     editorFontSizeMode,
-    editorFontSize
+    editorFontSize,
+    tableStickyHeaderEnabled
   } as InitMessage;
 }
 

@@ -48,6 +48,7 @@ export type UiStrings = Readonly<{
   interfaceLanguage: string;
   showLineNumbers: string;
   foldLongCodeBlocks: string;
+  stickyTableHeader: string;
   findAndReplacePanel: string;
   find: string;
   replace: string;
@@ -267,7 +268,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     editorAppearance: 'Editor appearance', editorFontSize: 'Font size',
     custom: 'Custom', decreaseFontSize: 'Decrease font size', increaseFontSize: 'Increase font size',
     interfaceLanguage: 'Interface language', showLineNumbers: 'Show line numbers',
-    foldLongCodeBlocks: 'Fold long code blocks',
+    foldLongCodeBlocks: 'Fold long code blocks', stickyTableHeader: 'Sticky table header',
     findAndReplacePanel: 'Find and replace', find: 'Find', replace: 'Replace',
     clearFind: 'Clear Find', clearReplace: 'Clear Replace', wholeWord: 'Whole Word',
     caseSensitive: 'Case Sensitive', previousMatch: 'Previous Match', nextMatch: 'Next Match',
@@ -413,7 +414,8 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     editorAppearance: '编辑器外观', editorFontSize: '字号大小', custom: '自定义',
     decreaseFontSize: '减小字号', increaseFontSize: '增大字号',
     interfaceLanguage: '界面语言', showLineNumbers: '显示行号',
-    foldLongCodeBlocks: '折叠长代码块', findAndReplacePanel: '查找和替换', find: '查找',
+    foldLongCodeBlocks: '折叠长代码块', stickyTableHeader: '表格浮动表头',
+    findAndReplacePanel: '查找和替换', find: '查找',
     replace: '替换', clearFind: '清除查找内容', clearReplace: '清除替换内容',
     wholeWord: '全字匹配', caseSensitive: '区分大小写', previousMatch: '上一个匹配项',
     nextMatch: '下一个匹配项', closeFind: '关闭查找', replaceCurrentMatch: '替换当前匹配项',

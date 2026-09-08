@@ -41,6 +41,7 @@ import { tableColumnWidthPolicy } from './editor/tableColumnWidthPolicy';
 import { createCodeMirrorDomTableStickyHeaderAdapter } from './editor/internal/codeMirrorDomTableStickyHeaderAdapter';
 import { tableStickyHeaderPolicy } from './editor/tableStickyHeaderPolicy';
 import {
+  createToggleableTableStickyHeaderAdapterFactory,
   tableStickyHeaderAdapterFactoryFacet,
   type TableStickyHeaderAdapterFactory
 } from './editor/tableStickyHeaderAdapter';
@@ -186,6 +187,7 @@ type CreateEditorOptions = {
   initialMode?: EditableEditorMode;
   initialGitGutter?: boolean;
   initialLongCodeBlockFolding?: boolean;
+  initialTableStickyHeaderEnabled?: boolean;
   initialDiagnostics?: readonly EditorDiagnostic[];
   mermaidDiagramPresentationFactory: MermaidDiagramPresentationFactory;
   previewViewportSurface?: PreviewViewportSurface;
@@ -330,6 +332,7 @@ export function createEditor({
   initialMode = 'source',
   initialGitGutter = true,
   initialLongCodeBlockFolding = true,
+  initialTableStickyHeaderEnabled = true,
   initialDiagnostics = [],
   mermaidDiagramPresentationFactory,
   previewViewportSurface,
@@ -1857,14 +1860,15 @@ export function createEditor({
     root: parent,
     policy: tableColumnWidthPolicy
   });
-  const tableStickyHeaderAdapterFactory: TableStickyHeaderAdapterFactory = {
-    create(options) {
-      return createCodeMirrorDomTableStickyHeaderAdapter({
-        ...options,
-        policy: tableStickyHeaderPolicy
-      });
-    }
-  };
+  const tableStickyHeaderAdapterFactory: TableStickyHeaderAdapterFactory =
+    createToggleableTableStickyHeaderAdapterFactory({
+      create(options) {
+        return createCodeMirrorDomTableStickyHeaderAdapter({
+          ...options,
+          policy: tableStickyHeaderPolicy
+        });
+      }
+    }, initialTableStickyHeaderEnabled);
   const tableCommandTargetRegistry = createTableCommandTargetRegistry();
   const tableCommandApplication = createTableCommandApplication();
   const tableCommandEffectAdapter = createCodeMirrorTableCommandEffectAdapter({
@@ -3026,6 +3030,9 @@ export function createEditor({
       view.dispatch({
         effects: longCodeBlockPreferenceCompartment.reconfigure(longCodeBlockEnabledFacet.of(enabled))
       });
+    },
+    setTableStickyHeaderEnabled(enabled: boolean) {
+      tableStickyHeaderAdapterFactory.setEnabled(enabled);
     },
     setUiLanguage(language: UiLanguage) {
       view.dispatch({

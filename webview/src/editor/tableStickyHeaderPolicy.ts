@@ -27,7 +27,6 @@ export type TableStickyHeaderLayout =
   | {
     readonly visible: false;
     readonly reason:
-      | 'table-too-short'
       | 'before-threshold'
       | 'insufficient-content'
       | 'outside-horizontal-viewport';
@@ -48,16 +47,12 @@ export type TableStickyHeaderPolicy = {
   layout(input: TableStickyHeaderLayoutInput): TableStickyHeaderLayout;
 };
 
-const minimumTableViewportRatio = 0.5;
 const separatorDepth = 3;
 
 export const tableStickyHeaderPolicy: TableStickyHeaderPolicy = {
   layout(input) {
     const controlsHeight = Math.max(0, input.controlsHeight);
     const stickyHeaderTop = input.scroller.top + controlsHeight;
-    if (input.table.height < input.scroller.height * minimumTableViewportRatio) {
-      return { visible: false, reason: 'table-too-short' };
-    }
     if (input.header.top > stickyHeaderTop) {
       return { visible: false, reason: 'before-threshold' };
     }

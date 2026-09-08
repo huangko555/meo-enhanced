@@ -41,6 +41,10 @@ assert.deepEqual(
   ['Editor Settings', '编辑器设置', 'Display Settings', '显示设置']
 );
 assert.deepEqual([english.refreshImage, chinese.refreshImage], ['Refresh image', '刷新图片']);
+assert.deepEqual(
+  [english.stickyTableHeader, chinese.stickyTableHeader],
+  ['Sticky table header', '表格浮动表头']
+);
 assert.deepEqual([english.feedbackPrompt, english.reportIssue], ['Having trouble?', 'Report an issue']);
 assert.deepEqual([chinese.feedbackPrompt, chinese.reportIssue], ['使用中遇到问题？', '欢迎反馈']);
 assert.equal(english.line, 'Lines');
@@ -121,11 +125,23 @@ assert.equal(Object.isFrozen(chinese), true);
 const repoRoot = path.resolve(import.meta.dir, '..');
 const packageText = fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8');
 const packageManifest = JSON.parse(packageText) as {
-  contributes?: { commands?: Array<{ command?: string; title?: string }> };
+  contributes?: {
+    commands?: Array<{ command?: string; title?: string }>;
+    configuration?: { properties?: Record<string, { type?: string; default?: unknown }> };
+  };
 };
 assert.equal(
   packageManifest.contributes?.commands?.find((command) => command.command === 'meoEnhanced.toggleEditor')?.title,
   'MEO+'
+);
+assert.deepEqual(
+  packageManifest.contributes?.configuration?.properties?.['meoEnhanced.table.stickyHeader'],
+  {
+    type: 'boolean',
+    default: true,
+    order: 4,
+    description: '%config.table.stickyHeader%'
+  }
 );
 const englishNls = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.nls.json'), 'utf8')) as Record<string, string>;
 const chineseNls = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.nls.zh-cn.json'), 'utf8')) as Record<string, string>;

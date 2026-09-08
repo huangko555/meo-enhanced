@@ -201,6 +201,7 @@ let gitDiffSummary: ChangesReviewDiffSummary = { status: 'pending', added: 0, de
 let gitBaselineState: GitBaselinePayload | null = null;
 let changesReviewMode: 'live' | 'source' | 'preview' = 'live';
 let contentMaxWidthEnabled = false;
+let tableStickyHeaderEnabled = true;
 let outlineUiState: { mode: 'floating' | 'fixed'; width: number } = { mode: 'fixed', width: 260 };
 
 const CONTENT_MAX_WIDTH_ENABLED_VALUE = '800px';
@@ -259,6 +260,14 @@ longCodeBlockFoldingBtn.className = 'more-tools-option more-tools-toggle-option 
 longCodeBlockFoldingBtn.dataset.action = 'longCodeBlockFolding';
 longCodeBlockFoldingBtn.setAttribute('role', 'menuitemcheckbox');
 appendMoreToolsOptionContent(longCodeBlockFoldingBtn, Code, activeUiStrings.foldLongCodeBlocks);
+
+const tableStickyHeaderBtn = document.createElement('button');
+tableStickyHeaderBtn.type = 'button';
+tableStickyHeaderBtn.className = 'more-tools-option more-tools-toggle-option is-active';
+tableStickyHeaderBtn.dataset.action = 'tableStickyHeader';
+tableStickyHeaderBtn.setAttribute('role', 'menuitemcheckbox');
+tableStickyHeaderBtn.setAttribute('aria-checked', 'true');
+appendMoreToolsOptionContent(tableStickyHeaderBtn, Table2, activeUiStrings.stickyTableHeader);
 
 const changesReviewControl = createChangesReviewControl({
   uiLanguage: activeUiLanguage,
@@ -364,6 +373,11 @@ const setGitDiffDetailsVisibleState = (
   if (post) vscode.postMessage({ type: 'setGitDiffDetailsVisible', visible: gitDiffDetailsVisible });
 };
 
+const updateTableStickyHeaderUI = () => {
+  tableStickyHeaderBtn.classList.toggle('is-active', tableStickyHeaderEnabled);
+  tableStickyHeaderBtn.setAttribute('aria-checked', tableStickyHeaderEnabled ? 'true' : 'false');
+};
+
 type PostUpdateOptions = { post?: boolean };
 type PersistedPostUpdateOptions = PostUpdateOptions & { persist?: boolean };
 
@@ -409,6 +423,20 @@ const setContentMaxWidthEnabled = (
   }
   if (post && changed) {
     vscode.postMessage({ type: 'setContentMaxWidth', enabled: contentMaxWidthEnabled });
+  }
+};
+
+const setTableStickyHeaderEnabled = (
+  enabled: boolean,
+  { post = true }: PostUpdateOptions = {}
+) => {
+  const nextEnabled = enabled === true;
+  const changed = nextEnabled !== tableStickyHeaderEnabled;
+  tableStickyHeaderEnabled = nextEnabled;
+  updateTableStickyHeaderUI();
+  if (changed) editor?.setTableStickyHeaderEnabled(tableStickyHeaderEnabled);
+  if (post && changed) {
+    vscode.postMessage({ type: 'setTableStickyHeader', enabled: tableStickyHeaderEnabled });
   }
 };
 
@@ -883,6 +911,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   contentMaxWidthBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.constrainWidth;
   sourceLineNumbersBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.showLineNumbers;
   longCodeBlockFoldingBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.foldLongCodeBlocks;
+  tableStickyHeaderBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.stickyTableHeader;
   changesReviewControl.setUiLanguage(language);
   updateGitChangesGutterUI();
   updateContentMaxWidthUI();
@@ -976,6 +1005,7 @@ moreToolsPanel.append(
   sourceLineNumbersBtn,
   longCodeBlockFoldingBtn,
   contentMaxWidthBtn,
+  tableStickyHeaderBtn,
   displaySeparator,
   editorAppearanceRow,
   uiLanguageRow,
@@ -1887,6 +1917,7 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     initialMode: mode,
     initialGitGutter: gitChangesGutterVisible,
     initialLongCodeBlockFolding: longCodeBlockFoldingEnabled,
+    initialTableStickyHeaderEnabled: tableStickyHeaderEnabled,
     initialDiagnostics: pendingDiagnostics,
     onApplyChanges: handleLocalEditorChange,
     onOpenLink: (href: string) => vscode.postMessage({ type: 'openLink', href }),
@@ -2060,6 +2091,7 @@ const handleInit = (message: InitMessage) => {
   sourceLineNumbersBtn.classList.toggle('is-active', message.sourceLineNumbers !== 'off');
   sourceLineNumbersBtn.setAttribute('aria-checked', message.sourceLineNumbers !== 'off' ? 'true' : 'false');
   longCodeBlockFoldingBtn.setAttribute('aria-checked', longCodeBlockFoldingEnabled ? 'true' : 'false');
+  setTableStickyHeaderEnabled(message.tableStickyHeaderEnabled, { post: false });
   toolbar.classList.remove('meo-preload-toolbar');
   toolbar.removeAttribute('aria-hidden');
   editorWrapper.classList.remove('meo-preload-editor-shell');
@@ -2249,6 +2281,11 @@ window.addEventListener('message', (event) => {
 
   if (message.type === 'contentMaxWidthChanged') {
     setContentMaxWidthEnabled(message.enabled, { post: false });
+    return;
+  }
+
+  if (message.type === 'tableStickyHeaderChanged') {
+    setTableStickyHeaderEnabled(message.enabled, { post: false });
     return;
   }
 
@@ -2579,6 +2616,9 @@ longCodeBlockFoldingBtn.addEventListener('click', () => {
   longCodeBlockFoldingBtn.classList.toggle('is-active', longCodeBlockFoldingEnabled);
   longCodeBlockFoldingBtn.setAttribute('aria-checked', longCodeBlockFoldingEnabled ? 'true' : 'false');
   editor?.setLongCodeBlockFolding(longCodeBlockFoldingEnabled);
+});
+tableStickyHeaderBtn.addEventListener('click', () => {
+  setTableStickyHeaderEnabled(!tableStickyHeaderEnabled);
 });
 scheduleReadyHandshake();
 scheduleEditorBundleWarmupAfterReady();

@@ -259,16 +259,22 @@
           "order": 3,
           "description": "%config.contentMaxWidth%"
         },
-        "meoEnhanced.performance.largeDocumentOptimization": {
+        "meoEnhanced.table.stickyHeader": {
           "type": "boolean",
           "default": true,
           "order": 4,
+          "description": "%config.table.stickyHeader%"
+        },
+        "meoEnhanced.performance.largeDocumentOptimization": {
+          "type": "boolean",
+          "default": true,
+          "order": 5,
           "description": "%config.performance.largeDocumentOptimization%"
         },
         "meoEnhanced.gitChanges.visible": {
           "type": "boolean",
           "default": true,
-          "order": 5,
+          "order": 6,
           "description": "%config.gitChanges%"
         },
         "meoEnhanced.changes.baseline": {
@@ -284,25 +290,25 @@
             "%config.baseline.gitHead%"
           ],
           "default": "current-edit",
-          "order": 6,
+          "order": 7,
           "description": "%config.baseline.description%"
         },
         "meoEnhanced.changes.showBeforeContent": {
           "type": "boolean",
           "default": false,
-          "order": 7,
+          "order": 8,
           "description": "%config.showBeforeContent%"
         },
         "meoEnhanced.gitChanges.lineHighlights": {
           "type": "boolean",
           "default": false,
-          "order": 8,
+          "order": 9,
           "description": "%config.lineHighlights%"
         },
         "meoEnhanced.imageFolder": {
           "type": "string",
           "default": "assets",
-          "order": 9,
+          "order": 10,
           "description": "%config.imageFolder%"
         }
       }

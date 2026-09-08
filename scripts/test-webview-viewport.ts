@@ -508,6 +508,9 @@ async function main() {
         labels: labels.map((label) => label.textContent),
         headerText: header.textContent,
         settingsHeading: document.querySelector<HTMLElement>('.more-tools-section-label')?.textContent,
+        stickyHeaderLabel: document.querySelector<HTMLElement>(
+          '[data-action="tableStickyHeader"] .more-tools-option-label'
+        )?.textContent,
         clipped: labels.some((label) => label.scrollWidth > label.clientWidth)
           || header.scrollWidth > header.clientWidth
           || headerBaseline.scrollWidth > headerBaseline.clientWidth
@@ -524,9 +527,39 @@ async function main() {
       ],
       headerText: 'No Changes·vs. Last Saved Version',
       settingsHeading: 'Editor Settings',
+      stickyHeaderLabel: 'Sticky table header',
       clipped: false
     })) {
       throw new Error(`English change review labels did not fit the shared menu width: ${JSON.stringify(englishReviewMenu)}`);
+    }
+    const stickyHeaderSetting = await page.evaluate(() => {
+      const messages = (window as typeof window & { __hostMessages?: Array<Record<string, unknown>> })
+        .__hostMessages ?? [];
+      const button = document.querySelector<HTMLButtonElement>('[data-action="tableStickyHeader"]')!;
+      button.click();
+      return {
+        active: button.classList.contains('is-active'),
+        checked: button.getAttribute('aria-checked'),
+        message: messages.at(-1)
+      };
+    });
+    if (JSON.stringify(stickyHeaderSetting) !== JSON.stringify({
+      active: false,
+      checked: 'false',
+      message: { type: 'setTableStickyHeader', enabled: false }
+    })) {
+      throw new Error(`Sticky table header setting did not post its disabled state: ${JSON.stringify(stickyHeaderSetting)}`);
+    }
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'tableStickyHeaderChanged', enabled: true }
+    })));
+    await waitForFrames(page, 2);
+    const restoredStickyHeaderSetting = await page.$eval<HTMLElement, [boolean, string | null]>(
+      '[data-action="tableStickyHeader"]',
+      (button) => [button.classList.contains('is-active'), button.getAttribute('aria-checked')]
+    );
+    if (JSON.stringify(restoredStickyHeaderSetting) !== JSON.stringify([true, 'true'])) {
+      throw new Error(`Sticky table header host update was not applied: ${JSON.stringify(restoredStickyHeaderSetting)}`);
     }
     const recentSaveHeaders = await page.evaluate(() => {
       const read = () => {
@@ -715,7 +748,7 @@ async function main() {
     });
     if (
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
-        '显示行号', '折叠长代码块', '限制宽度'
+        '显示行号', '折叠长代码块', '限制宽度', '表格浮动表头'
       ]) ||
       moreToolsLayout.topHeading !== '编辑器设置' ||
       moreToolsLayout.languageAutoLabel !== '自动' ||

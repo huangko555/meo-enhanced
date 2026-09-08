@@ -319,6 +319,21 @@ async function main(): Promise<void> {
         scroller.dispatchEvent(new Event('scroll'));
       }, () => state().visible));
       const appeared = state();
+      transactions.push(await settle(
+        () => editor.setTableStickyHeaderEnabled(false),
+        () => !state().visible
+      ));
+      const disabled = state();
+      transactions.push(await settle(() => {
+        scroller.dispatchEvent(new Event('scroll'));
+        window.dispatchEvent(new Event('resize'));
+      }, () => true, true));
+      const disabledAfterLayoutEvents = state();
+      transactions.push(await settle(
+        () => editor.setTableStickyHeaderEnabled(true),
+        () => state().visible
+      ));
+      const reenabled = state();
 
       const input = document.querySelector<HTMLTextAreaElement>('.meo-md-html-table tbody textarea')!;
       transactions.push(await settle(() => input.focus({ preventScroll: true }), () => (
@@ -505,7 +520,8 @@ async function main(): Promise<void> {
         oldScroller.dispatchEvent(new Event('scroll')); outer.dispatchEvent(new Event('scroll')); window.dispatchEvent(new Event('resize'));
       }, () => true, true));
       const disposedAfterLateEvents = detached.map(publicNodeSnapshot);
-      return { transactions, initialHidden, appeared, controls, outerAligned, domContract,
+      return { transactions, initialHidden, appeared, disabled, disabledAfterLayoutEvents, reenabled,
+        controls, outerAligned, domContract,
         hiddenAtTail, tailState, equalExternalCount, changedExternal, sourceCount, liveCount, previewVisible,
         pendingBeforeReplacement, pendingAfterReplacement, delayedImageContract, detachedCloneBehavior,
         afterDispose: state().count, disposedBeforeLateEvents, disposedAfterLateEvents };
@@ -518,6 +534,10 @@ async function main(): Promise<void> {
     });
     assert.equal(result.initialHidden, true);
     assert.equal(result.appeared.visible, true);
+    assert.deepEqual(
+      [result.disabled.visible, result.disabledAfterLayoutEvents.visible, result.reenabled.visible],
+      [false, false, true]
+    );
     assert.ok(Math.abs(result.appeared.chromeTop - result.appeared.scrollerTop) <= 1);
     assert.ok(Math.abs(result.controls[0] - result.controls[1]) <= 1);
     assert.ok(Math.abs(result.outerAligned.chromeTop - result.outerAligned.scrollerTop) <= 1);

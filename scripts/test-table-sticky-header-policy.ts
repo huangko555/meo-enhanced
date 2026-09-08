@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { tableStickyHeaderPolicy } from '../webview/src/editor/tableStickyHeaderPolicy';
+import { createToggleableTableStickyHeaderAdapterFactory } from '../webview/src/editor/tableStickyHeaderAdapter';
 
 const common = {
   scroller: { top: 10, left: 20, right: 420, height: 300 },
@@ -8,10 +9,11 @@ const common = {
   controlsHeight: 0
 } as const;
 
-assert.deepEqual(tableStickyHeaderPolicy.layout({
+const shortTable = tableStickyHeaderPolicy.layout({
   ...common,
   table: { ...common.table, height: 149 }
-}), { visible: false, reason: 'table-too-short' });
+});
+assert.equal(shortTable.visible, true, 'short tables should become sticky after crossing the threshold');
 
 assert.deepEqual(tableStickyHeaderPolicy.layout({
   ...common,
@@ -67,5 +69,35 @@ if (fractionalLayout.visible) {
   assert.equal(fractionalLayout.width, 400, 'fractional right edge should round outward');
   assert.ok(Math.abs(fractionalLayout.translateX - 0.4) < 0.001);
 }
+
+const lifecycle: string[] = [];
+const toggleableFactory = createToggleableTableStickyHeaderAdapterFactory({
+  create: () => ({
+    mount: () => lifecycle.push('mount'),
+    update: () => lifecycle.push('update'),
+    invalidate: () => lifecycle.push('invalidate'),
+    unmount: () => lifecycle.push('unmount'),
+    dispose: () => lifecycle.push('dispose')
+  })
+}, false);
+const adapter = toggleableFactory.create({
+  scheduler: { register: () => ({ request() {}, dispose() {} }) },
+  resolveElements: () => null,
+  controlsHeight: () => 0
+});
+adapter.mount();
+adapter.update();
+adapter.invalidate();
+assert.deepEqual(lifecycle, [], 'disabled sticky headers must not install observers or request layout');
+toggleableFactory.setEnabled(true);
+adapter.update();
+adapter.invalidate();
+assert.deepEqual(lifecycle, ['mount', 'update', 'invalidate']);
+toggleableFactory.setEnabled(false);
+adapter.update();
+adapter.invalidate();
+assert.deepEqual(lifecycle, ['mount', 'update', 'invalidate', 'unmount']);
+adapter.dispose();
+assert.deepEqual(lifecycle, ['mount', 'update', 'invalidate', 'unmount', 'dispose']);
 
 console.log('table sticky header policy contracts passed');

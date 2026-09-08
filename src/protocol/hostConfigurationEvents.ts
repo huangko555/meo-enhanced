@@ -7,6 +7,7 @@ export type CodeThemeDto = {
 
 export type HostConfigurationEvent =
   | { readonly type: 'toggleMode' }
+  | { readonly type: 'tableStickyHeaderChanged'; readonly enabled: boolean }
   | {
       readonly type: 'vscodeCodeThemeChanged';
       readonly appearance: 'light' | 'dark';
@@ -41,6 +42,8 @@ export function decodeHostConfigurationEvent(value: unknown): HostConfigurationE
   switch (value.type) {
     case 'toggleMode':
       return { type: 'toggleMode' };
+    case 'tableStickyHeaderChanged':
+      return typeof value.enabled === 'boolean' ? value as HostConfigurationEvent : null;
     case 'vscodeCodeThemeChanged':
       return (value.appearance === 'light' || value.appearance === 'dark')
         && decodeCodeTheme(value.vscodeTheme) !== false && decodeCodeTheme(value.vscodeTheme) !== undefined
