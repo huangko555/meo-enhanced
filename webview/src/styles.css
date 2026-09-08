@@ -5381,11 +5381,16 @@ body.outline-resizing .preview-frame {
 }
 
 .cm-editor .meo-md-html-table-shell:focus-within .meo-md-html-table-context-trigger,
-.cm-editor .meo-md-html-table-shell.is-interacting .meo-md-html-table-context-trigger,
-.cm-editor .meo-md-html-table-shell.is-context-menu-open .meo-md-html-table-context-trigger {
+.cm-editor .meo-md-html-table-shell.is-interacting .meo-md-html-table-context-trigger {
   visibility: visible;
   opacity: 1;
   pointer-events: auto;
+}
+
+.cm-editor .meo-md-html-table-shell.is-context-menu-open .meo-md-html-table-context-trigger {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .cm-editor .meo-md-html-table-context-trigger:hover,
@@ -5403,10 +5408,15 @@ body.outline-resizing .preview-frame {
   position: absolute;
   left: 32px;
   z-index: 230;
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 2px;
   box-sizing: border-box;
-  width: min(196px, calc(100% - 8px));
-  padding: 6px;
+  width: max-content;
+  max-width: calc(100% - 8px);
+  padding: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
   border: 1px solid color-mix(in srgb, var(--meo-foreground) 14%, transparent);
   border-radius: 8px;
   color: var(--meo-foreground);
@@ -5414,74 +5424,22 @@ body.outline-resizing .preview-frame {
   opacity: 1;
   backdrop-filter: none;
   box-shadow: 0 10px 28px rgb(0 0 0 / 28%);
+  scrollbar-width: thin;
 }
 
 .cm-editor .meo-md-html-table-context-menu[hidden] {
   display: none;
 }
 
-.cm-editor .meo-md-html-table-context-panel,
-.cm-editor .meo-md-html-table-context-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.cm-editor .meo-md-html-table-context-panel[hidden] {
-  display: none;
-}
-
-.cm-editor .meo-md-html-table-context-panel-header {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  align-items: center;
-  min-height: 30px;
-  margin-bottom: 4px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid color-mix(in srgb, var(--meo-foreground) 12%, transparent);
-}
-
-.cm-editor .meo-md-html-table-context-back {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 0;
-  border-radius: 5px;
-  color: inherit;
-  background: transparent;
-  cursor: pointer;
-}
-
-.cm-editor .meo-md-html-table-context-back:hover,
-.cm-editor .meo-md-html-table-context-back:focus-visible {
-  background: var(--vscode-toolbar-hoverBackground, rgb(127 127 127 / 18%));
-  outline: none;
-}
-
-.cm-editor .meo-md-html-table-context-panel-title {
-  padding-left: 4px;
-  overflow: hidden;
-  font-size: 12px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
 .cm-editor .meo-md-html-table-context-btn {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
+  justify-content: center;
+  flex: 0 0 auto;
   box-sizing: border-box;
-  width: 100%;
-  height: 32px;
-  min-width: 0;
-  padding: 0 8px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   border: 0;
   border-radius: 5px;
   color: inherit;
@@ -5493,19 +5451,12 @@ body.outline-resizing .preview-frame {
   white-space: nowrap;
 }
 
-.cm-editor .meo-md-html-table-context-btn-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cm-editor .meo-md-html-table-context-btn.is-navigation .meo-md-html-table-context-btn-label {
-  flex: 1 1 auto;
-}
-
-.cm-editor .meo-md-html-table-context-chevron {
-  margin-left: auto;
-  opacity: 0.58;
+.cm-editor .meo-md-html-table-context-separator {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 18px;
+  margin: 0 3px;
+  background: color-mix(in srgb, var(--meo-foreground) 16%, transparent);
 }
 
 .cm-editor .meo-md-html-table-context-btn:hover:not(:disabled),
@@ -5522,7 +5473,6 @@ body.outline-resizing .preview-frame {
 }
 
 .cm-editor .meo-md-html-table-context-delete-btn {
-  margin-top: 3px;
   color: #f48771;
 }
 
