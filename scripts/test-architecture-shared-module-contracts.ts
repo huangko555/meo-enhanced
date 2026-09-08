@@ -2855,7 +2855,6 @@ try {
     ['src/shared/extensionConfig.ts', 'export const exportBrowserPath = undefined;\n'],
     ['src/host/vscodeRetiredWorkspaceStateCleanup.ts', "const RETIRED_VIEW_POSITIONS_STATE_KEY = 'rememberedViewPositionsByDocument';\nexport const restore = (workspaceState) => workspaceState.get(RETIRED_VIEW_POSITIONS_STATE_KEY);\n"],
     ['src/host/vscodeRetiredWorkspaceStateCleanup.ts', "const RETIRED_VIEW_POSITIONS_STATE_KEY = 'rememberedViewPositionsByDocument';\nexport const retain = (workspaceState) => workspaceState.update(RETIRED_VIEW_POSITIONS_STATE_KEY, { line: 5 });\n"],
-    ['docs/position.md', 'MEO Enhanced remembers the cross-session scroll position.\n'],
     ['docs/line-numbers.md', 'MEO Enhanced provides a configurable line numbers setting.\n'],
     ['docs/export.md', 'MEO Enhanced lets users choose embedded or linked HTML images.\n'],
     ['docs/export.md', 'Configure meoEnhanced.export.browserPath for PDF export.\n']
@@ -2880,6 +2879,7 @@ try {
     ['src/export/assetPaths.ts', 'export const embeddedImageDataUrlCache = new Map();\n'],
     ['src/export/pdfRenderer.ts', 'export const browserExecutablePath = findPdfBrowserExecutablePath();\n'],
     ['docs/retained.md', 'MEO Enhanced preserves the viewport during same-session mode switching.\n'],
+    ['docs/position.md', 'MEO Enhanced restores the cross-session reading position with a bounded semantic anchor.\n'],
     ['docs/retained.md', 'Live uses source-mapped line numbers and Preview code blocks have their own line numbers.\n'],
     ['docs/retained.md', 'HTML embeds local images; PDF automatically discovers Edge, Chrome, or Chromium.\n']
   ] as const;

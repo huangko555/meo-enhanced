@@ -265,16 +265,22 @@
           "order": 4,
           "description": "%config.table.stickyHeader%"
         },
-        "meoEnhanced.performance.largeDocumentOptimization": {
+        "meoEnhanced.readingPosition.restoreOnOpen": {
           "type": "boolean",
           "default": true,
           "order": 5,
+          "description": "%config.readingPosition.restoreOnOpen%"
+        },
+        "meoEnhanced.performance.largeDocumentOptimization": {
+          "type": "boolean",
+          "default": true,
+          "order": 6,
           "description": "%config.performance.largeDocumentOptimization%"
         },
         "meoEnhanced.gitChanges.visible": {
           "type": "boolean",
           "default": true,
-          "order": 6,
+          "order": 7,
           "description": "%config.gitChanges%"
         },
         "meoEnhanced.changes.baseline": {
@@ -290,25 +296,25 @@
             "%config.baseline.gitHead%"
           ],
           "default": "current-edit",
-          "order": 7,
+          "order": 8,
           "description": "%config.baseline.description%"
         },
         "meoEnhanced.changes.showBeforeContent": {
           "type": "boolean",
           "default": false,
-          "order": 8,
+          "order": 9,
           "description": "%config.showBeforeContent%"
         },
         "meoEnhanced.gitChanges.lineHighlights": {
           "type": "boolean",
           "default": false,
-          "order": 9,
+          "order": 10,
           "description": "%config.lineHighlights%"
         },
         "meoEnhanced.imageFolder": {
           "type": "string",
           "default": "assets",
-          "order": 10,
+          "order": 11,
           "description": "%config.imageFolder%"
         }
       }
@@ -316,8 +322,9 @@
   },
   "scripts": {
     "install:all": "bun install && (cd webview && bun install)",
-    "test": "bun run test:latex-scanner && bun run test:table-provenance && bun run test:table-column-width && bun run test:table-sticky-header && bun run test:table-command && bun run test:image-presentation && bun run test:mermaid-presentation && bun run test:changes-review && bun run test:unit && bun run test:browser-high-risk && bun run test:browser",
+    "test": "bun run test:latex-scanner && bun run test:table-provenance && bun run test:table-column-width && bun run test:table-sticky-header && bun run test:table-command && bun run test:image-presentation && bun run test:mermaid-presentation && bun run test:reading-position && bun run test:changes-review && bun run test:unit && bun run test:browser-high-risk && bun run test:browser",
     "test:quick": "bun scripts/test-workflow.ts quick",
+    "test:reading-position": "bun scripts/test-reading-position-memory.ts && bun scripts/test-reading-position-lifecycle.ts && bun scripts/test-vscode-reading-position-adapter.ts && bun scripts/test-panel-session-reading-position.ts && bun scripts/test-reading-position-production.ts",
     "test:targeted": "bun scripts/test-workflow.ts targeted",
     "test:release": "bun scripts/test-workflow.ts release",
     "test:endurance": "bun scripts/test-workflow.ts endurance",

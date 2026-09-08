@@ -208,6 +208,7 @@ export type UiStrings = Readonly<{
   constrainContentWidth: string;
   constrainWidth: string;
   disableConstrainedWidth: string;
+  resumeFromLastPosition: string;
   currentEdits: string;
   recentSave: string;
   gitHead: string;
@@ -345,6 +346,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     reloadDiskVersion: 'Reload from disk and discard unsaved changes', reloadDiskVersionDoubleClick: 'Click again to discard unsaved changes and reload from disk',
     constrainContentWidth: 'Constrain Content Width', constrainWidth: 'Constrain Width',
     disableConstrainedWidth: 'Disable Constrained Width',
+    resumeFromLastPosition: 'Resume from last position',
     currentEdits: 'Last Saved Version', recentSave: 'Before Agent Edits',
     gitHead: 'Git HEAD (Latest Commit)',
     compareWithVersion: 'Compare Against', displaySettings: 'Display Settings', editorSettings: 'Editor Settings',
@@ -489,6 +491,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     reloadDiskVersion: '从磁盘重新加载，放弃未保存的更改', reloadDiskVersionDoubleClick: '再次点击将放弃未保存的更改，并从磁盘重新加载',
     constrainContentWidth: '限制内容宽度', constrainWidth: '限制宽度',
     disableConstrainedWidth: '取消内容宽度限制',
+    resumeFromLastPosition: '打开时恢复上一次阅读位置',
     currentEdits: '最近保存版本', recentSave: 'Agent 编辑前版本',
     gitHead: 'Git HEAD（最新提交）',
     compareWithVersion: '比较方式', displaySettings: '显示设置', editorSettings: '编辑器设置',

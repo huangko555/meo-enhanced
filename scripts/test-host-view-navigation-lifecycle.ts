@@ -22,12 +22,14 @@ const createLifecycle = (initial?: {
 });
 
 const initial = createLifecycle({ selection: { anchor: 7, head: 9 }, fragment: '#later' });
+assert.equal(initial.hasPendingExplicitNavigation(), true);
 await initial.ready();
 assert.deepEqual(reveals.splice(0), [
   { kind: 'selection', anchor: 7, head: 9, focus: undefined, preserveViewport: false },
   { kind: 'fragment', href: '#later' }
 ], 'ready must flush Selection before fragment so fragment keeps final priority');
 initial.dispose();
+assert.equal(initial.hasPendingExplicitNavigation(), false);
 
 let acceptSelection = false;
 const independentFailureReveals: ViewNavigationReveal[] = [];
@@ -81,7 +83,9 @@ assert.deepEqual(
 superseding.dispose();
 
 const pending = createLifecycle();
+assert.equal(pending.hasPendingExplicitNavigation(), false);
 await pending.revealSelection({ anchor: 1, head: 1 });
+assert.equal(pending.hasPendingExplicitNavigation(), true);
 await pending.revealSelection({ anchor: 2, head: 3 });
 await pending.revealFragment('#first');
 await pending.revealFragment('#latest');

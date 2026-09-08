@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, HardDriveUpload, PanelLeftRightDashed, Settings, Check, Ellipsis, Sun, Moon, ExternalLink } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, HardDriveUpload, PanelLeftRightDashed, Settings, Check, Ellipsis, Sun, Moon, ExternalLink, History } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -53,6 +53,7 @@ import { getUiStrings, type UiLanguage } from './application/uiLanguage';
 import { createChangesReviewControl } from './adapters/changesReviewControl';
 import type { ChangesReviewDiffSummary } from './application/changesReview';
 import { setGitDiffDetailsVisible } from './helpers/gitDiffDetails';
+import { createReadingPositionLifecycle, type ReadingPositionLifecycle } from './application/readingPositionLifecycle';
 
 type CreateEditorFactory = (typeof import('./editor'))['createEditor'];
 
@@ -202,6 +203,7 @@ let gitBaselineState: GitBaselinePayload | null = null;
 let changesReviewMode: 'live' | 'source' | 'preview' = 'live';
 let contentMaxWidthEnabled = false;
 let tableStickyHeaderEnabled = true;
+let restoreReadingPositionOnOpen = true;
 let outlineUiState: { mode: 'floating' | 'fixed'; width: number } = { mode: 'fixed', width: 260 };
 
 const CONTENT_MAX_WIDTH_ENABLED_VALUE = '800px';
@@ -268,6 +270,14 @@ tableStickyHeaderBtn.dataset.action = 'tableStickyHeader';
 tableStickyHeaderBtn.setAttribute('role', 'menuitemcheckbox');
 tableStickyHeaderBtn.setAttribute('aria-checked', 'true');
 appendMoreToolsOptionContent(tableStickyHeaderBtn, Table2, activeUiStrings.stickyTableHeader);
+
+const restoreReadingPositionBtn = document.createElement('button');
+restoreReadingPositionBtn.type = 'button';
+restoreReadingPositionBtn.className = 'more-tools-option more-tools-toggle-option is-active';
+restoreReadingPositionBtn.dataset.action = 'restoreReadingPosition';
+restoreReadingPositionBtn.setAttribute('role', 'menuitemcheckbox');
+restoreReadingPositionBtn.setAttribute('aria-checked', 'true');
+appendMoreToolsOptionContent(restoreReadingPositionBtn, History, activeUiStrings.resumeFromLastPosition);
 
 const changesReviewControl = createChangesReviewControl({
   uiLanguage: activeUiLanguage,
@@ -378,6 +388,12 @@ const updateTableStickyHeaderUI = () => {
   tableStickyHeaderBtn.setAttribute('aria-checked', tableStickyHeaderEnabled ? 'true' : 'false');
 };
 
+const updateRestoreReadingPositionUI = () => {
+  restoreReadingPositionBtn.classList.toggle('is-active', restoreReadingPositionOnOpen);
+  restoreReadingPositionBtn.setAttribute('aria-checked', restoreReadingPositionOnOpen ? 'true' : 'false');
+  restoreReadingPositionBtn.title = activeUiStrings.resumeFromLastPosition;
+};
+
 type PostUpdateOptions = { post?: boolean };
 type PersistedPostUpdateOptions = PostUpdateOptions & { persist?: boolean };
 
@@ -437,6 +453,20 @@ const setTableStickyHeaderEnabled = (
   if (changed) editor?.setTableStickyHeaderEnabled(tableStickyHeaderEnabled);
   if (post && changed) {
     vscode.postMessage({ type: 'setTableStickyHeader', enabled: tableStickyHeaderEnabled });
+  }
+};
+
+const setRestoreReadingPositionOnOpen = (
+  enabled: boolean,
+  { post = true }: PostUpdateOptions = {}
+) => {
+  const nextEnabled = enabled === true;
+  const changed = nextEnabled !== restoreReadingPositionOnOpen;
+  restoreReadingPositionOnOpen = nextEnabled;
+  readingPositionLifecycle?.setEnabled(nextEnabled);
+  updateRestoreReadingPositionUI();
+  if (post && changed) {
+    vscode.postMessage({ type: 'setRestoreReadingPositionOnOpen', enabled: nextEnabled });
   }
 };
 
@@ -912,9 +942,11 @@ const applyUiLanguage = (language: UiLanguage): void => {
   sourceLineNumbersBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.showLineNumbers;
   longCodeBlockFoldingBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.foldLongCodeBlocks;
   tableStickyHeaderBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.stickyTableHeader;
+  restoreReadingPositionBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.resumeFromLastPosition;
   changesReviewControl.setUiLanguage(language);
   updateGitChangesGutterUI();
   updateContentMaxWidthUI();
+  updateRestoreReadingPositionUI();
   editorNotice.setUiLanguage(language);
   modeControl.element.setAttribute('aria-label', strings.markdownMode);
   modeControl.setLabels({ live: strings.live, source: strings.source, preview: strings.preview });
@@ -1006,6 +1038,7 @@ moreToolsPanel.append(
   longCodeBlockFoldingBtn,
   contentMaxWidthBtn,
   tableStickyHeaderBtn,
+  restoreReadingPositionBtn,
   displaySeparator,
   editorAppearanceRow,
   uiLanguageRow,
@@ -1254,6 +1287,7 @@ const editorScrollToTopController = createDocumentScrollToTopController(activeUi
 editorHost.appendChild(editorScrollToTopController.button);
 
 let editor: any = null;
+let readingPositionLifecycle: ReadingPositionLifecycle | null = null;
 let outlineController: ReturnType<typeof createOutlineController>;
 const mermaidDiagramRenderPool = createMermaidDiagramRenderPool({
   initialize: initializeMermaidEditorRuntime,
@@ -1307,8 +1341,13 @@ const previewController = createPreviewController({
     if (outlineController?.isVisible()) {
       outlineController.refresh();
     }
+    readingPositionLifecycle?.surfaceReady();
   },
-  onViewportInteraction: () => editor?.markViewportInteraction?.(),
+  onViewportInteraction: () => {
+    editor?.markViewportInteraction?.();
+    readingPositionLifecycle?.userInteracted();
+  },
+  onViewportChange: () => readingPositionLifecycle?.viewportChanged(),
   runViewportTransaction: (mutate) => {
     const viewport = editor?.captureViewportAnchorToken?.('preview') ?? null;
     if (!editor?.runViewportAnchorTransaction) {
@@ -1625,6 +1664,30 @@ const getTopVisiblePosition = (): { topLine: number; topLineOffset: number } | n
   };
 };
 
+readingPositionLifecycle = createReadingPositionLifecycle({
+  timer: {
+    schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+    cancel: (handle) => window.clearTimeout(handle as number)
+  },
+  capture: () => {
+    const position = getActiveEditorMode() === 'preview'
+      ? previewController.getTopVisiblePosition()
+      : getTopVisiblePosition();
+    return position ? { line: position.topLine, lineOffset: position.topLineOffset } : null;
+  },
+  restore: (position) => {
+    if (getActiveEditorMode() === 'preview') {
+      if (!previewController.getTopVisiblePosition()) return false;
+      previewController.restoreTopLine(position.line, position.lineOffset);
+      return true;
+    }
+    if (!editor) return false;
+    editor.restoreTopLine(position.line, position.lineOffset, { syncCursor: false });
+    return true;
+  },
+  post: (position) => vscode.postMessage({ type: 'readingPositionChanged', position })
+});
+
 const refreshEditorSurface = (): void => {
   if (!editor) {
     return;
@@ -1663,6 +1726,8 @@ const applyRevealSelectionFromHost = (revealMessage: any) => {
     return;
   }
 
+  readingPositionLifecycle?.explicitNavigation();
+
   if (!editor) {
     pendingRevealSelection = { anchor, head, focus };
     return;
@@ -1682,6 +1747,7 @@ const applyRevealDocumentFragmentFromHost = (href: unknown): void => {
   if (typeof href !== 'string' || !href.startsWith('#')) {
     return;
   }
+  readingPositionLifecycle?.explicitNavigation();
   if (!editor) {
     pendingRevealDocumentFragment = href;
     return;
@@ -1929,6 +1995,7 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
       gitDiffSummary = summary;
       presentChangesReview();
     },
+    onViewportChange: () => readingPositionLifecycle?.viewportChanged(),
     previewViewportSurface: {
       captureTopVisiblePosition() {
         const position = previewController.getTopVisiblePosition();
@@ -2092,6 +2159,11 @@ const handleInit = (message: InitMessage) => {
   sourceLineNumbersBtn.setAttribute('aria-checked', message.sourceLineNumbers !== 'off' ? 'true' : 'false');
   longCodeBlockFoldingBtn.setAttribute('aria-checked', longCodeBlockFoldingEnabled ? 'true' : 'false');
   setTableStickyHeaderEnabled(message.tableStickyHeaderEnabled, { post: false });
+  setRestoreReadingPositionOnOpen(message.restoreReadingPositionOnOpen, { post: false });
+  readingPositionLifecycle?.start({
+    enabled: message.restoreReadingPositionOnOpen,
+    restore: message.readingPositionRestore
+  });
   toolbar.classList.remove('meo-preload-toolbar');
   toolbar.removeAttribute('aria-hidden');
   editorWrapper.classList.remove('meo-preload-editor-shell');
@@ -2215,7 +2287,10 @@ window.addEventListener('message', (event) => {
 
       handleInit(message);
       void editorModeRuntime.dispatch({ type: 'initialize', hostMode: message.mode })
-        .then(() => failureNotice.updateEditorNotice());
+        .then(() => {
+          readingPositionLifecycle?.surfaceReady();
+          failureNotice.updateEditorNotice();
+        });
     });
     return;
   }
@@ -2286,6 +2361,11 @@ window.addEventListener('message', (event) => {
 
   if (message.type === 'tableStickyHeaderChanged') {
     setTableStickyHeaderEnabled(message.enabled, { post: false });
+    return;
+  }
+
+  if (message.type === 'restoreReadingPositionOnOpenChanged') {
+    setRestoreReadingPositionOnOpen(message.enabled, { post: false });
     return;
   }
 
@@ -2620,5 +2700,19 @@ longCodeBlockFoldingBtn.addEventListener('click', () => {
 tableStickyHeaderBtn.addEventListener('click', () => {
   setTableStickyHeaderEnabled(!tableStickyHeaderEnabled);
 });
+restoreReadingPositionBtn.addEventListener('click', () => {
+  setRestoreReadingPositionOnOpen(!restoreReadingPositionOnOpen);
+});
+
+for (const eventName of ['wheel', 'pointerdown', 'keydown', 'touchstart']) {
+  root.addEventListener(eventName, (event) => {
+    if (event.isTrusted) readingPositionLifecycle?.userInteracted();
+  }, { capture: true });
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') readingPositionLifecycle?.flush();
+});
+window.addEventListener('pagehide', () => readingPositionLifecycle?.flush());
 scheduleReadyHandshake();
 scheduleEditorBundleWarmupAfterReady();

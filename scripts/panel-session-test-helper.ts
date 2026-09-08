@@ -130,12 +130,17 @@ export const createPanelSessionControllerParams = (
     publishFixedState: async () => undefined
   },
   viewNavigation: {
+    hasPendingExplicitNavigation: () => false,
     ready: async () => undefined,
     flush: async () => undefined,
     revealCurrentEditorSelection: async () => undefined,
     revealSelectionForEditor: async () => undefined,
     revealDocumentLink: async () => false,
     dispose: () => undefined
+  },
+  readingPosition: {
+    readInitial: () => null,
+    remember: async () => undefined
   },
   saveDocument: async () => true,
   onExportDocument: async () => undefined,

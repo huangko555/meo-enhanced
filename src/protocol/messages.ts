@@ -13,6 +13,7 @@ import { decodeResolveLocalLinksRequest, decodeResolvedLocalLinksResponse, type 
 import { decodePreviewRenderRequest, decodePreviewRenderResponse, type PreviewRenderRequest, type PreviewRenderResponse } from './previewRender';
 import { decodeInitMessage, decodeReadyMessage, type InitMessage, type ReadyMessage } from './readyInit';
 import { decodeResolveWikiLinksRequest, decodeResolvedWikiLinksResponse, type ResolveWikiLinksRequest, type ResolvedWikiLinksResponse } from './wikiLinkResolution';
+import { decodeReadingPositionChangedMessage, type ReadingPositionChangedMessage } from './readingPosition';
 
 export type WebviewToHostMessage =
   | ReadyMessage
@@ -21,6 +22,7 @@ export type WebviewToHostMessage =
   | DocumentRevisionRequest
   | FlushDocumentEditsResponse
   | EditorCommand
+  | ReadingPositionChangedMessage
   | ResolveImageSrcRequest
   | ResolveWikiLinksRequest
   | ResolveLocalLinksRequest
@@ -52,6 +54,7 @@ export function decodeWebviewToHostMessage(value: unknown): WebviewToHostMessage
     ?? decodeDocumentRevisionRequest(value)
     ?? decodeFlushDocumentEditsResponse(value)
     ?? decodeEditorCommand(value)
+    ?? decodeReadingPositionChangedMessage(value)
     ?? decodeResolveImageSrcRequest(value)
     ?? decodeResolveWikiLinksRequest(value)
     ?? decodeResolveLocalLinksRequest(value)

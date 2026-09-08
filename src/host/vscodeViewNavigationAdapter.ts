@@ -81,6 +81,7 @@ export function createVscodeViewNavigationAdapter(
   });
 
   return {
+    hasPendingExplicitNavigation: lifecycle.hasPendingExplicitNavigation,
     ready: lifecycle.ready,
     flush: lifecycle.flush,
     async revealSelectionForEditor(editor) {

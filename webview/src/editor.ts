@@ -184,6 +184,7 @@ type CreateEditorOptions = {
   onOpenLink?: (href: string) => void;
   onSelectionChange?: (state: SelectionMenuState & { from?: number; to?: number }) => void;
   onGitDiffSummaryChange?: (summary: ChangesReviewDiffSummary) => void;
+  onViewportChange?: () => void;
   initialMode?: EditableEditorMode;
   initialGitGutter?: boolean;
   initialLongCodeBlockFolding?: boolean;
@@ -329,6 +330,7 @@ export function createEditor({
   onOpenLink,
   onSelectionChange,
   onGitDiffSummaryChange,
+  onViewportChange,
   initialMode = 'source',
   initialGitGutter = true,
   initialLongCodeBlockFolding = true,
@@ -2606,6 +2608,7 @@ export function createEditor({
   onScroll = () => {
     emitSelectionChange();
     gitDiffOverviewRuler?.refresh();
+    onViewportChange?.();
   };
   view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
   gitDiffOverviewRuler = createGitDiffOverviewRulerController({

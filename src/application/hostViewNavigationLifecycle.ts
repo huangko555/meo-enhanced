@@ -14,6 +14,7 @@ export type ViewNavigationReveal =
   | { readonly kind: 'fragment'; readonly href: string };
 
 export type HostViewNavigationLifecycle = {
+  hasPendingExplicitNavigation(): boolean;
   revealSelection(selection: ViewSelection): Promise<void>;
   revealFragment(href: string): Promise<void>;
   ready(): Promise<void>;
@@ -23,6 +24,7 @@ export type HostViewNavigationLifecycle = {
 
 /** Host Session port; the concrete editor source is interpreted only by its Adapter. */
 export type HostViewNavigationPort<TEditorSource> = {
+  hasPendingExplicitNavigation(): boolean;
   ready(): Promise<void>;
   flush(): Promise<void>;
   revealSelectionForEditor(editor: TEditorSource | undefined): Promise<void>;
@@ -109,6 +111,9 @@ export function createHostViewNavigationLifecycle(
   };
 
   return {
+    hasPendingExplicitNavigation() {
+      return pendingSelection !== null || pendingFragment !== null;
+    },
     revealSelection(selection) {
       if (disposed || selectionKey(selection) === lastSentSelectionKey) return Promise.resolve();
       pendingSelection = selection;

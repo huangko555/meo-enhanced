@@ -46,6 +46,7 @@ const adapter = createVscodeViewNavigationAdapter({
   resolveLocalLinkTarget: async () => resolvedLinkTarget as never,
   post: async (message) => { messages.push(message); return true; }
 });
+assert.equal(adapter.hasPendingExplicitNavigation(), true);
 await adapter.ready();
 assert.deepEqual(messages.splice(0), [{
   type: 'revealSelection', anchor: 21, head: 23, focus: undefined, preserveViewport: false
@@ -69,6 +70,7 @@ const lineAdapter = createVscodeViewNavigationAdapter({
   resolveLocalLinkTarget: async () => null,
   post: async (message) => { lineMessages.push(message); return true; }
 });
+assert.equal(lineAdapter.hasPendingExplicitNavigation(), true);
 await lineAdapter.ready();
 assert.deepEqual(lineMessages, [{
   type: 'revealSelection', anchor: 995, head: 995, focus: undefined, preserveViewport: false
@@ -84,6 +86,7 @@ const invalidAdapter = createVscodeViewNavigationAdapter({
   resolveLocalLinkTarget: async () => null,
   post: async (message) => { invalidMessages.push(message); return true; }
 });
+assert.equal(invalidAdapter.hasPendingExplicitNavigation(), true);
 await invalidAdapter.ready();
 assert.deepEqual(
   invalidMessages,

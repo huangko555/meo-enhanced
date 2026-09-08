@@ -15,6 +15,7 @@ import {
   normalizeEditorFontSize,
   type EditorFontSizeMode
 } from '../foundation/editorFontSize';
+import { decodeReadingPosition, type ReadingPositionDto } from './readingPosition';
 
 export type EditorMode = 'live' | 'source' | 'preview';
 export type PreviewAppearance = 'auto' | 'dark' | 'light';
@@ -56,6 +57,8 @@ export type InitMessage = {
   readonly fixedBaselineUpdatedAt?: number | null;
   readonly contentMaxWidthEnabled: boolean;
   readonly tableStickyHeaderEnabled: boolean;
+  readonly restoreReadingPositionOnOpen: boolean;
+  readonly readingPositionRestore: ReadingPositionDto | null;
   readonly findOptions: { readonly wholeWord: boolean; readonly caseSensitive: boolean };
   readonly outlinePosition: 'left' | 'right';
   readonly outlineVisible: boolean;
@@ -99,6 +102,14 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     : isRecord(value) && typeof value.tableStickyHeaderEnabled === 'boolean'
       ? value.tableStickyHeaderEnabled
       : null;
+  const restoreReadingPositionOnOpen = isRecord(value) && value.restoreReadingPositionOnOpen === undefined
+    ? true
+    : isRecord(value) && typeof value.restoreReadingPositionOnOpen === 'boolean'
+      ? value.restoreReadingPositionOnOpen
+      : null;
+  const readingPositionRestore = isRecord(value) && value.readingPositionRestore === undefined
+    ? null
+    : isRecord(value) ? decodeReadingPosition(value.readingPositionRestore) : null;
   if (!isRecord(value)
     || value.type !== 'init'
     || 'theme' in value
@@ -143,6 +154,10 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
       && (typeof value.fixedBaselineUpdatedAt !== 'number' || !Number.isFinite(value.fixedBaselineUpdatedAt)))
     || typeof value.contentMaxWidthEnabled !== 'boolean'
     || tableStickyHeaderEnabled === null
+    || restoreReadingPositionOnOpen === null
+    || (value.readingPositionRestore !== undefined
+      && value.readingPositionRestore !== null
+      && readingPositionRestore === null)
     || !isRecord(value.findOptions)
     || typeof value.findOptions.wholeWord !== 'boolean'
     || typeof value.findOptions.caseSensitive !== 'boolean'
@@ -162,7 +177,9 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     previewFontFamily,
     editorFontSizeMode,
     editorFontSize,
-    tableStickyHeaderEnabled
+    tableStickyHeaderEnabled,
+    restoreReadingPositionOnOpen,
+    readingPositionRestore
   } as InitMessage;
 }
 

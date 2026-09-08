@@ -27,6 +27,7 @@
   "config.outline.position": "Position of the document outline sidebar.",
   "config.contentMaxWidth": "Constrain the editor content to a centered 800px column.",
   "config.table.stickyHeader": "Keep a table header visible at the top of the editor while its body remains in view.",
+  "config.readingPosition.restoreOnOpen": "Resume from the last reading position when reopening a document.",
   "config.performance.largeDocumentOptimization": "Open large documents in Source mode initially to keep editing responsive. A manual mode choice remains preferred.",
   "config.gitChanges": "Show change indicators in the editor.",
   "config.baseline.currentEdit": "diff: Latest Disk Version",

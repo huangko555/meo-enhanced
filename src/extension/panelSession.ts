@@ -17,6 +17,7 @@ import {
   type DiffBaselineOutput
 } from '../application/diffBaselineSelection';
 import type { HostViewNavigationPort } from '../application/hostViewNavigationLifecycle';
+import type { ReadingPositionPort } from '../application/readingPositionMemory';
 import {
   EXTENSION_CONFIG_SECTION,
   GIT_CHANGES_GUTTER_SETTING_KEY,
@@ -24,9 +25,11 @@ import {
   DIFF_BASELINE_MODE_SETTING_KEY,
   CONTENT_MAX_WIDTH_SETTING_KEY,
   TABLE_STICKY_HEADER_SETTING_KEY,
+  RESTORE_READING_POSITION_SETTING_KEY,
   OUTLINE_WIDTH_KEY,
   getContentMaxWidthEnabled,
   getTableStickyHeaderEnabled,
+  getRestoreReadingPositionOnOpen,
   getGitChangesGutterEnabled,
   getGitDiffDetailsVisible,
   getGitDiffLineHighlightsEnabled,
@@ -112,6 +115,7 @@ type PanelSessionControllerParams = {
   savedRevisionRefreshTimer: SavedRevisionRefreshTimer;
   diffBaselineOutput: DiffBaselineOutput<GitBaselinePayload>;
   viewNavigation: HostViewNavigationPort<vscode.TextEditor>;
+  readingPosition: ReadingPositionPort;
   saveDocument: () => Promise<boolean>;
   onExportDocument: (session: PanelSession, format: ExportFormat) => Promise<void>;
   renderPreview: (options: {
@@ -171,6 +175,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     savedRevisionRefreshTimer,
     diffBaselineOutput,
     viewNavigation,
+    readingPosition,
     saveDocument,
     onExportDocument,
     renderPreview,
@@ -356,6 +361,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       persistedMode: persistedEditorMode,
       optimizationEnabled: getLargeDocumentOptimizationEnabled()
     });
+    const restoreReadingPositionOnOpen = getRestoreReadingPositionOnOpen();
+    const readingPositionRestore = restoreReadingPositionOnOpen
+      && !viewNavigation.hasPendingExplicitNavigation()
+      ? readingPosition.readInitial()
+      : null;
     const message: InitMessage = {
       type: 'init',
       documentId: documentKey,
@@ -385,6 +395,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       fixedBaselineUpdatedAt: diffBaselineState.fixedUpdatedAt,
       contentMaxWidthEnabled: getContentMaxWidthEnabled(context),
       tableStickyHeaderEnabled: getTableStickyHeaderEnabled(),
+      restoreReadingPositionOnOpen,
+      readingPositionRestore,
       findOptions: getFindOptions(),
       outlinePosition: getOutlinePosition(),
       outlineVisible: getOutlineVisible(context),
@@ -596,6 +608,14 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         await vscode.workspace
           .getConfiguration(EXTENSION_CONFIG_SECTION)
           .update(TABLE_STICKY_HEADER_SETTING_KEY, raw.enabled === true, vscode.ConfigurationTarget.Global);
+        return;
+      case 'setRestoreReadingPositionOnOpen':
+        await vscode.workspace
+          .getConfiguration(EXTENSION_CONFIG_SECTION)
+          .update(RESTORE_READING_POSITION_SETTING_KEY, raw.enabled === true, vscode.ConfigurationTarget.Global);
+        return;
+      case 'readingPositionChanged':
+        await readingPosition.remember(raw.position);
         return;
       case 'setFindOptions': {
         const wholeWord = raw.findOptions?.wholeWord ?? raw.wholeWord;

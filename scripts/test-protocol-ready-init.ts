@@ -51,6 +51,8 @@ const completeInit = {
   fixedBaselineUpdatedAt: null,
   contentMaxWidthEnabled: true,
   tableStickyHeaderEnabled: true,
+  restoreReadingPositionOnOpen: true,
+  readingPositionRestore: { line: 42, lineOffset: 6.5 },
   findOptions: { wholeWord: false, caseSensitive: false },
   outlinePosition: 'right' as const,
   outlineVisible: true,
@@ -84,6 +86,17 @@ assert.equal(
   true
 );
 assert.equal(decodeInitMessage({ ...completeInit, tableStickyHeaderEnabled: 'yes' }), null);
+assert.equal(
+  decodeInitMessage({
+    ...completeInit,
+    restoreReadingPositionOnOpen: undefined,
+    readingPositionRestore: undefined
+  })?.restoreReadingPositionOnOpen,
+  true
+);
+assert.equal(decodeInitMessage({ ...completeInit, restoreReadingPositionOnOpen: 'yes' }), null);
+assert.equal(decodeInitMessage({ ...completeInit, readingPositionRestore: { line: 0, lineOffset: 0 } }), null);
+assert.equal(decodeInitMessage({ ...completeInit, readingPositionRestore: { line: 4, lineOffset: -1 } }), null);
 assert.equal(decodeInitMessage({ ...completeInit, savedRevision: undefined }), null);
 assert.equal(decodeInitMessage({ ...completeInit, savedRevision: { version: -1, text: '# saved' } }), null);
 assert.equal(decodeInitMessage({ ...completeInit, savedRevision: { version: 4, text: '# future' } }), null);
@@ -667,6 +680,7 @@ for (const command of [
   { type: 'setOutlineWidth', width: 240 },
   { type: 'setContentMaxWidth', enabled: true },
   { type: 'setTableStickyHeader', enabled: false },
+  { type: 'setRestoreReadingPositionOnOpen', enabled: false },
   { type: 'setFindOptions', findOptions: { wholeWord: true, caseSensitive: false } },
   { type: 'openLink', href: 'docs/readme.md', source: 'preview' },
   { type: 'openImageExternally', url: 'file:///image.png' },
@@ -687,6 +701,17 @@ assert.equal(decodeEditorCommand({ type: 'setLineNumbers', visible: true }), nul
 assert.equal(decodeEditorCommand({ type: 'setLongCodeBlockFolding', enabled: false }), null);
 assert.equal(decodeEditorCommand({ type: 'viewPositionChanged', topLine: 3 }), null);
 assert.equal(decodeEditorCommand({ type: 'viewPositionChanged', topLine: 0 }), null);
+assert.deepEqual(
+  decodeWebviewToHostMessage({
+    type: 'readingPositionChanged',
+    position: { line: 7, lineOffset: 2.25 }
+  }),
+  { type: 'readingPositionChanged', position: { line: 7, lineOffset: 2.25 } }
+);
+assert.equal(decodeWebviewToHostMessage({
+  type: 'readingPositionChanged',
+  position: { line: 0, lineOffset: 0 }
+}), null);
 assert.equal(decodeEditorCommand({ type: 'setOutlineWidth', width: Number.NaN }), null);
 assert.equal(decodeEditorCommand({ type: 'setEditorFontSize', mode: 'custom', value: 9 }), null);
 assert.equal(decodeEditorCommand({ type: 'setEditorFontSize', mode: 'custom', value: 18.5 }), null);
@@ -730,6 +755,10 @@ assert.deepEqual(decodeHostConfigurationEvent({ type: 'toggleMode' }), { type: '
 assert.deepEqual(
   decodeHostConfigurationEvent({ type: 'tableStickyHeaderChanged', enabled: false }),
   { type: 'tableStickyHeaderChanged', enabled: false }
+);
+assert.deepEqual(
+  decodeHostConfigurationEvent({ type: 'restoreReadingPositionOnOpenChanged', enabled: false }),
+  { type: 'restoreReadingPositionOnOpenChanged', enabled: false }
 );
 assert.equal(decodeHostConfigurationEvent({ type: 'tableStickyHeaderChanged', enabled: 'no' }), null);
 assert.deepEqual(decodeDiagnosticsChangedEvent({

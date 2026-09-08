@@ -2254,10 +2254,10 @@ for (const path of removedColorCapabilityScope) {
   }
 }
 
-// Product deletion guard: MEO no longer owns cross-session viewport persistence,
-// a global line-number toggle, or user-selectable export image/browser paths.
-// Same-session viewport navigation, native/source-mapped line numbers, HTML image
-// embedding and PDF browser discovery remain independent retained capabilities.
+// Product deletion guard: the retired numeric position threshold and workspace
+// payload must not return. Cross-session reading-position restoration now uses a
+// new bounded contract. The global line-number toggle and user-selectable export
+// image/browser paths remain deleted.
 const removedStage10Scope = projectFilesForCapabilityGuard().filter((path) => (
   path === 'package.json' ||
   /^README(?:\.[^/]+)?\.md$/i.test(path) ||
@@ -2318,7 +2318,6 @@ const hasCurrentRemovedStage10DocumentationClaim = (value: string): boolean => {
     if (stage10HistoricalMarkers.some((marker) => normalized.includes(marker))) return false;
     if (hasRemovedStage10Alias(segment)) return true;
     return [
-      /(?:remember|restore).{0,24}(?:cross[- ]?session|scroll|reading|view).{0,12}(?:position|location)/i,
       /(?:global|toggle|configure|configurable|setting).{0,20}line numbers?/i,
       /line numbers?.{0,20}(?:global|toggle|configure|configurable|setting)/i,
       /(?:choose|select|configure).{0,24}(?:embedded|linked).{0,20}(?:html )?images?/i,
@@ -2331,7 +2330,7 @@ for (const path of removedStage10Scope) {
   const isDocumentationPath = /^README(?:\.[^/]+)?\.md$/i.test(path) || /^docs\/.*\.md$/i.test(path);
   const isRetiredWorkspaceStateCleanup = path === 'src/host/vscodeRetiredWorkspaceStateCleanup.ts';
   if (isProductionPath && hasRemovedStage10Alias(path)) {
-    failures.push(`ARCH022 已删除的位置记忆、独立行号或重复导出设置重新出现: ${path}:1`);
+    failures.push(`ARCH022 已删除的旧位置记忆、独立行号或重复导出设置重新出现: ${path}:1`);
     continue;
   }
   const lines = readTrackedProjectFile(path).split(/\r?\n/);
@@ -2353,7 +2352,7 @@ for (const path of removedStage10Scope) {
     }
     if ((isDocumentationPath && hasCurrentRemovedStage10DocumentationClaim(line))
       || (!isDocumentationPath && hasRemovedStage10Alias(line))) {
-      failures.push(`ARCH022 已删除的位置记忆、独立行号或重复导出设置重新出现: ${path}:${index + 1}`);
+      failures.push(`ARCH022 已删除的旧位置记忆、独立行号或重复导出设置重新出现: ${path}:${index + 1}`);
     }
   }
 }

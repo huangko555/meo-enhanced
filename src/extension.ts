@@ -31,6 +31,7 @@ import {
   GIT_CHANGES_GUTTER_LEGACY_VISIBILITY_SETTING_KEY,
   GIT_CHANGES_GUTTER_SETTING_KEY,
   TABLE_STICKY_HEADER_SETTING_KEY,
+  RESTORE_READING_POSITION_SETTING_KEY,
   OUTLINE_VISIBLE_KEY,
   getCurrentVscodeCodeTheme,
   syncEditorAssociations,
@@ -38,6 +39,7 @@ import {
   getOutlineVisible,
   getContentMaxWidthEnabled,
   getTableStickyHeaderEnabled,
+  getRestoreReadingPositionOnOpen,
   isMarkdownDocumentPath,
   migrateLegacyToggleSettings
 } from './shared/extensionConfig';
@@ -49,6 +51,7 @@ import { createSavedRevisionRefreshTimerAdapter } from './host/savedRevisionRefr
 import { createVscodeDiagnosticsAdapter } from './host/vscodeDiagnosticsAdapter';
 import { createDiffBaselineProtocolAdapter } from './host/diffBaselineProtocolAdapter';
 import { createVscodeViewNavigationAdapter } from './host/vscodeViewNavigationAdapter';
+import { createVscodeReadingPositionAdapter } from './host/vscodeReadingPositionAdapter';
 import { cleanupRetiredWorkspaceState } from './host/vscodeRetiredWorkspaceStateCleanup';
 import { type PreviewRenderResult } from './shared/preview';
 import {
@@ -417,6 +420,13 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       });
     }
 
+    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${RESTORE_READING_POSITION_SETTING_KEY}`)) {
+      this.broadcast({
+        type: 'restoreReadingPositionOnOpenChanged',
+        enabled: getRestoreReadingPositionOnOpen()
+      });
+    }
+
     if (
       event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${GIT_CHANGES_GUTTER_SETTING_KEY}`) ||
       event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${GIT_CHANGES_GUTTER_LEGACY_VISIBLE_SETTING_KEY}`) ||
@@ -521,6 +531,11 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
           }
         }
       }),
+      readingPosition: createVscodeReadingPositionAdapter(
+        this.context,
+        document,
+        getRestoreReadingPositionOnOpen
+      ),
       saveDocument: async () => document.save(),
       onExportDocument: (session, format) => this.exportSessionDocument(session, format),
       renderPreview: async (options) => {

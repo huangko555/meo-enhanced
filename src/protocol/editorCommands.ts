@@ -24,6 +24,7 @@ export type EditorCommand =
   | { readonly type: 'setOutlineWidth'; readonly width: number }
   | { readonly type: 'setContentMaxWidth'; readonly enabled: boolean }
   | { readonly type: 'setTableStickyHeader'; readonly enabled: boolean }
+  | { readonly type: 'setRestoreReadingPositionOnOpen'; readonly enabled: boolean }
   | {
       readonly type: 'setFindOptions';
       readonly wholeWord?: boolean;
@@ -72,6 +73,7 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
     case 'setFixedBaseline':
     case 'setContentMaxWidth':
     case 'setTableStickyHeader':
+    case 'setRestoreReadingPositionOnOpen':
       return isBoolean(value.enabled) ? value as EditorCommand : null;
     case 'setDiffBaselineMode':
       return value.mode === 'current-edit' || value.mode === 'recent-save' || value.mode === 'git-head'

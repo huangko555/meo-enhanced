@@ -27,6 +27,7 @@ type PreviewControllerOptions = {
   onPaintReady?: () => void;
   onFindRequested?: () => void;
   onViewportInteraction?: () => void;
+  onViewportChange?: () => void;
   runViewportTransaction?: (mutate: () => void) => void;
   mermaidRenderResources: MermaidDiagramRenderResources;
 };
@@ -266,6 +267,7 @@ export function createPreviewController({
   onPaintReady,
   onFindRequested,
   onViewportInteraction,
+  onViewportChange,
   runViewportTransaction,
   mermaidRenderResources
 }: PreviewControllerOptions) {
@@ -721,6 +723,7 @@ export function createPreviewController({
       syncPreviewCodeHighlight(frameDocument);
       frameDocument.addEventListener('scroll', () => {
         if (!disposed && activeFrameDocument === frameDocument && sourceColoring) scheduleViewportHighlight(frameDocument);
+        if (!disposed && activeFrameDocument === frameDocument) onViewportChange?.();
       }, { passive: true, signal });
       if (viewportRestore?.isCurrent()) {
         restoreTopLine(viewportRestore.line, viewportRestore.lineOffset);

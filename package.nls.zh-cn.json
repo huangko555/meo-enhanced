@@ -27,6 +27,7 @@
   "config.outline.position": "文档目录侧边栏的位置。",
   "config.contentMaxWidth": "将编辑器内容限制在居中的 800px 栏内。",
   "config.table.stickyHeader": "表格正文仍在视野内时，将已滚出的表头固定显示在编辑器顶部。",
+  "config.readingPosition.restoreOnOpen": "重新打开文档时恢复到上一次阅读位置。",
   "config.performance.largeDocumentOptimization": "大文档初次以源码模式打开以保持编辑响应；手动选择的模式仍然优先。",
   "config.gitChanges": "在编辑器中显示更改指示器。",
   "config.baseline.currentEdit": "diff: 与最新磁盘版本比较",

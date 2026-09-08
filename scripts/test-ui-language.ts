@@ -45,6 +45,10 @@ assert.deepEqual(
   [english.stickyTableHeader, chinese.stickyTableHeader],
   ['Sticky table header', '表格浮动表头']
 );
+assert.deepEqual(
+  [english.resumeFromLastPosition, chinese.resumeFromLastPosition],
+  ['Resume from last position', '打开时恢复上一次阅读位置']
+);
 assert.deepEqual([english.feedbackPrompt, english.reportIssue], ['Having trouble?', 'Report an issue']);
 assert.deepEqual([chinese.feedbackPrompt, chinese.reportIssue], ['使用中遇到问题？', '欢迎反馈']);
 assert.equal(english.line, 'Lines');
@@ -141,6 +145,15 @@ assert.deepEqual(
     default: true,
     order: 4,
     description: '%config.table.stickyHeader%'
+  }
+);
+assert.deepEqual(
+  packageManifest.contributes?.configuration?.properties?.['meoEnhanced.readingPosition.restoreOnOpen'],
+  {
+    type: 'boolean',
+    default: true,
+    order: 5,
+    description: '%config.readingPosition.restoreOnOpen%'
   }
 );
 const englishNls = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.nls.json'), 'utf8')) as Record<string, string>;

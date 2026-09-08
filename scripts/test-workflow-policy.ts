@@ -124,6 +124,7 @@ function targetedCommands(
       ];
     case 'viewport':
       return [
+        packageScript('test:reading-position'),
         script('scripts/test-viewport-controller.ts'),
         script('scripts/test-document-reload-mermaid-viewport.ts'),
         script('scripts/test-uat-viewport-stability.ts'),
@@ -208,6 +209,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
         longRunning: false,
         stages: [serialStage('Quick regression contracts', [
           packageScript('typecheck'),
+          packageScript('test:reading-position'),
           script('scripts/test-test-workflow.ts'),
           script('scripts/test-document-auto-save-concurrency.ts'),
           script('scripts/test-editor-history-runtime.ts'),
@@ -254,6 +256,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
               packageScript('test:table-command'),
               packageScript('test:image-presentation'),
               packageScript('test:mermaid-presentation'),
+              packageScript('test:reading-position'),
               packageScript('test:changes-review'),
               packageScript('test:unit')
             ]
