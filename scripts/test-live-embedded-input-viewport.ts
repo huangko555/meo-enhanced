@@ -168,8 +168,64 @@ async function main(): Promise<void> {
       failures.push(`Typing at the Mermaid tail moved the viewport or lost input: ${JSON.stringify(mermaidInput)}`);
     }
 
-    await page.evaluate(() => {
+    const mermaidTopBefore = await page.evaluate(() => {
       const editor = (window as any).__embeddedEditor;
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')!;
+      const innerView = (block as any).__meoMermaidEditingController.innerView;
+      innerView.dispatch({ selection: { anchor: 0 } });
+      innerView.focus();
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      const caret = innerView.coordsAtPos(0);
+      if (!caret) throw new Error('Could not measure Mermaid top caret');
+      editor.view.scrollDOM.dispatchEvent(new WheelEvent('wheel', { deltaY: 60, bubbles: true }));
+      editor.view.scrollDOM.scrollTop += caret.top - viewport.top + 3;
+      return {
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        caretTop: innerView.coordsAtPos(0)?.top ?? null,
+        viewportTop: viewport.top,
+        lineHeight: editor.view.defaultLineHeight
+      };
+    });
+    await page.keyboard.type('X');
+    await page.evaluate(async () => {
+      for (let index = 0; index < 10; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+    const mermaidTopAfter = await page.evaluate(() => {
+      const editor = (window as any).__embeddedEditor;
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')!;
+      const innerView = (block as any).__meoMermaidEditingController.innerView;
+      const caret = innerView.coordsAtPos(innerView.state.selection.main.head);
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      return {
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        caretTop: caret?.top ?? null,
+        viewportTop: viewport.top,
+        lineHeight: editor.view.defaultLineHeight
+      };
+    });
+    if (
+      mermaidTopBefore.caretTop === null || mermaidTopAfter.caretTop === null ||
+      mermaidTopBefore.caretTop >= mermaidTopBefore.viewportTop ||
+      mermaidTopAfter.caretTop < mermaidTopAfter.viewportTop + mermaidTopAfter.lineHeight - 2 ||
+      mermaidTopAfter.scrollTop < mermaidTopBefore.scrollTop - mermaidTopAfter.lineHeight - 10
+    ) {
+      failures.push(`Mermaid source did not use minimal top reveal: ${JSON.stringify({
+        mermaidTopBefore,
+        mermaidTopAfter
+      })}`);
+    }
+
+    await page.evaluate(async () => {
+      const editor = (window as any).__embeddedEditor;
+      const button = document.querySelector<HTMLElement>('.meo-mermaid-mode-btn')!;
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      editor.view.scrollDOM.dispatchEvent(new WheelEvent('wheel', { deltaY: -60, bubbles: true }));
+      editor.view.scrollDOM.scrollTop += button.getBoundingClientRect().top - viewport.top - 96;
+      for (let index = 0; index < 4; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
       (window as any).__postInputModeTrace = [{
         scrollTop: editor.view.scrollDOM.scrollTop,
         buttonTop: document.querySelector<HTMLElement>('.meo-mermaid-mode-btn')!.getBoundingClientRect().top

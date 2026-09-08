@@ -2055,7 +2055,7 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     if (!editor) throw new Error('Editor is not mounted');
     editor.setMode(mode, viewport);
     if (mode === 'live' && !previewController.host.hidden) {
-      await editor.whenVisibleImagesReady(LIVE_IMAGE_REVEAL_WAIT_MS);
+      await editor.whenVisiblePresentationReady(LIVE_IMAGE_REVEAL_WAIT_MS);
     }
     changesReviewMode = mode;
     syncGitDiffDetails();

@@ -2305,11 +2305,12 @@ export function createEditor({
   interactionContinuity = createEditorInteractionContinuity({
     view,
     viewport: {
-      revealCaret(position, isCurrent, withComfortBand) {
+      revealCaret(position, isCurrent, originScrollTop) {
         viewportController.revealPosition(position, {
           y: 'nearest',
           yMargin: visualLineContextMargin(view, 1),
-          marginMode: withComfortBand ? 'comfort-band' : 'outside-only'
+          marginMode: 'outside-only',
+          originScrollTop
         }, isCurrent);
       }
     },
@@ -2647,8 +2648,9 @@ export function createEditor({
   return {
     view,
     state: view.state,
-    async whenVisibleImagesReady(timeoutMs: number) {
+    async whenVisiblePresentationReady(timeoutMs: number) {
       if (editorDestroyed || currentMode !== 'live') return;
+      const deadline = performance.now() + Math.max(0, timeoutMs);
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
       if (editorDestroyed || currentMode !== 'live') return;
       let timeout: number | null = null;
@@ -2660,13 +2662,15 @@ export function createEditor({
             timeout = window.setTimeout(() => {
               waitAbortController.abort();
               resolve();
-            }, Math.max(0, timeoutMs));
+            }, Math.max(0, deadline - performance.now()));
           })
         ]);
       } finally {
         waitAbortController.abort();
         if (timeout !== null) window.clearTimeout(timeout);
       }
+      if (editorDestroyed || currentMode !== 'live') return;
+      await viewportController.whenPresentationSettled(Math.max(0, deadline - performance.now()));
     },
     getText() {
       commitActiveTableInput();

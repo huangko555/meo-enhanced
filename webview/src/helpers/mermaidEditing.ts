@@ -871,16 +871,20 @@ class MermaidEditingController {
       interactionTarget: this.outerView.scrollDOM,
       viewport: {
         readBounds: () => this.outerView.scrollDOM.getBoundingClientRect(),
-        revealCaret: (caret, isCurrent) => {
+        readScrollTop: () => this.outerView.scrollDOM.scrollTop,
+        revealCaret: (position, isCurrent, originScrollTop) => {
           if (!isCurrent()) return;
-          const bounds = this.outerView.scrollDOM.getBoundingClientRect();
           const margin = visualLineContextMargin(this.outerView, 1);
-          const top = caret.top < bounds.top
-            ? caret.top - bounds.top - margin
-            : caret.bottom > bounds.bottom
-              ? caret.bottom - bounds.bottom + margin
-              : 0;
-          if (top !== 0) getViewportController(this.outerView)?.navigateBy({ top });
+          getViewportController(this.outerView)?.revealVerticalBounds(
+            () => {
+              const caret = this.innerView.coordsAtPos(
+                Math.max(0, Math.min(position, this.innerView.state.doc.length))
+              );
+              return caret ? { top: caret.top, bottom: caret.bottom } : null;
+            },
+            isCurrent,
+            { yMargin: margin, originScrollTop }
+          );
         }
       }
     });

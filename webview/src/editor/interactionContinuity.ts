@@ -5,7 +5,7 @@ export type InteractionContinuityViewport = {
   revealCaret(
     position: number,
     isCurrent: () => boolean,
-    withComfortBand: boolean
+    originScrollTop: number
   ): void;
 };
 
@@ -17,9 +17,11 @@ export type EditorInteractionContinuity = {
 
 export type NestedEditorInteractionContinuityViewport = {
   readBounds(): { top: number; bottom: number };
+  readScrollTop(): number;
   revealCaret(
-    caret: { top: number; bottom: number },
-    isCurrent: () => boolean
+    position: number,
+    isCurrent: () => boolean,
+    originScrollTop: number
   ): void;
 };
 
@@ -33,6 +35,11 @@ type ActiveInput = {
 };
 
 type ActiveMainInput = ActiveInput & {
+  scrollTopBeforeInput: number;
+  viewportMoved: boolean;
+};
+
+type ActiveNestedInput = ActiveInput & {
   scrollTopBeforeInput: number;
   viewportMoved: boolean;
 };
@@ -84,15 +91,9 @@ export function createEditorInteractionContinuity(input: {
           const position = Math.max(0, Math.min(candidate.position, view.state.doc.length));
           const coords = view.coordsAtPos(position);
           const scroller = view.scrollDOM.getBoundingClientRect();
-          const comfortMargin = Math.max(0, view.defaultLineHeight);
           return {
             position,
             visible: Boolean(coords && coords.top >= scroller.top && coords.bottom <= scroller.bottom),
-            comfortablyVisible: Boolean(
-              coords &&
-              coords.top >= scroller.top + comfortMargin &&
-              coords.bottom <= scroller.bottom - comfortMargin
-            ),
             viewportMoved: candidate.viewportMoved || (
               Math.abs(view.scrollDOM.scrollTop - candidate.scrollTopBeforeInput) > 0.5
             )
@@ -102,15 +103,12 @@ export function createEditorInteractionContinuity(input: {
           if (!measurement || !isCurrent(candidate)) return;
           candidate.remainingFrames -= 1;
           candidate.viewportMoved = measurement.viewportMoved;
-          const needsComfortReveal = (
-            measurement.viewportMoved && !measurement.comfortablyVisible
-          );
-          if (!measurement.visible || needsComfortReveal) {
+          if (!measurement.visible || measurement.viewportMoved) {
             candidate.stableFrames = 0;
             viewport.revealCaret(
               measurement.position,
               () => isCurrent(candidate),
-              needsComfortReveal
+              candidate.scrollTopBeforeInput
             );
           } else {
             candidate.stableFrames += 1;
@@ -219,7 +217,8 @@ export function createNestedEditorInteractionContinuity(input: {
 }): EditorInteractionContinuity {
   const { view, viewport, isActive, interactionTarget } = input;
   let nextGeneration = 0;
-  let active: ActiveInput | null = null;
+  let active: ActiveNestedInput | null = null;
+  let pendingScrollTopBeforeInput: number | null = null;
   let disposed = false;
 
   const cancel = (): void => {
@@ -228,13 +227,14 @@ export function createNestedEditorInteractionContinuity(input: {
       cancelAnimationFrame(active.frame);
     }
     active = null;
+    pendingScrollTopBeforeInput = null;
   };
 
-  const isCurrent = (candidate: ActiveInput): boolean => (
+  const isCurrent = (candidate: ActiveNestedInput): boolean => (
     !disposed && active === candidate && candidate.generation === nextGeneration
   );
 
-  const schedule = (candidate: ActiveInput): void => {
+  const schedule = (candidate: ActiveNestedInput): void => {
     if (!isCurrent(candidate) || candidate.frame !== null) return;
     candidate.frame = requestAnimationFrame(() => {
       candidate.frame = null;
@@ -250,16 +250,24 @@ export function createNestedEditorInteractionContinuity(input: {
           if (!coords) return null;
           const bounds = viewport.readBounds();
           return {
-            caret: { top: coords.top, bottom: coords.bottom },
-            visible: coords.top >= bounds.top && coords.bottom <= bounds.bottom
+            position,
+            visible: coords.top >= bounds.top && coords.bottom <= bounds.bottom,
+            viewportMoved: candidate.viewportMoved || (
+              Math.abs(viewport.readScrollTop() - candidate.scrollTopBeforeInput) > 0.5
+            )
           };
         },
         write: (measurement) => {
           if (!measurement || !isCurrent(candidate)) return;
           candidate.remainingFrames -= 1;
-          if (!measurement.visible) {
+          candidate.viewportMoved = measurement.viewportMoved;
+          if (!measurement.visible || measurement.viewportMoved) {
             candidate.stableFrames = 0;
-            viewport.revealCaret(measurement.caret, () => isCurrent(candidate));
+            viewport.revealCaret(
+              measurement.position,
+              () => isCurrent(candidate),
+              candidate.scrollTopBeforeInput
+            );
           } else {
             candidate.stableFrames += 1;
           }
@@ -274,10 +282,14 @@ export function createNestedEditorInteractionContinuity(input: {
   };
 
   const beginInputSettlement = (): void => {
+    const scrollTopBeforeInput = pendingScrollTopBeforeInput ?? viewport.readScrollTop();
+    pendingScrollTopBeforeInput = null;
     cancel();
-    const candidate: ActiveInput = {
+    const candidate: ActiveNestedInput = {
       generation: nextGeneration,
       position: view.state.selection.main.head,
+      scrollTopBeforeInput,
+      viewportMoved: false,
       awaitingDerivedPresentation: false,
       frame: null,
       remainingFrames: MAX_SETTLE_FRAMES,
@@ -287,7 +299,13 @@ export function createNestedEditorInteractionContinuity(input: {
     schedule(candidate);
   };
 
+  const captureScrollTopBeforeInput = (): void => {
+    pendingScrollTopBeforeInput = isActive() && view.hasFocus
+      ? viewport.readScrollTop()
+      : null;
+  };
   const cancelOnInteraction = () => cancel();
+  view.dom.addEventListener('beforeinput', captureScrollTopBeforeInput, true);
   interactionTarget?.addEventListener('wheel', cancelOnInteraction, { capture: true, passive: true });
   interactionTarget?.addEventListener('touchstart', cancelOnInteraction, { capture: true, passive: true });
   view.dom.addEventListener('pointerdown', cancelOnInteraction, true);
@@ -310,6 +328,7 @@ export function createNestedEditorInteractionContinuity(input: {
       if (disposed) return;
       disposed = true;
       cancel();
+      view.dom.removeEventListener('beforeinput', captureScrollTopBeforeInput, true);
       interactionTarget?.removeEventListener('wheel', cancelOnInteraction, true);
       interactionTarget?.removeEventListener('touchstart', cancelOnInteraction, true);
       view.dom.removeEventListener('pointerdown', cancelOnInteraction, true);

@@ -569,12 +569,12 @@ async function main() {
       {
         name: 'insert column left', title: 'Insert column left', edit: { row: 1, col: 1 }, target: { row: 1, col: 1 },
         expected: ['| A |  | B |', '| --- | --- | --- |', '| one |  | two! |', '| three |  | four |'].join('\n'),
-        focus: { row: 1, col: 1 }
+        focus: { row: 1, col: 2 }, caret: 2
       },
       {
         name: 'insert column right', title: 'Insert column right', edit: { row: 1, col: 0 }, target: { row: 1, col: 0 },
         expected: ['| A |  | B |', '| --- | --- | --- |', '| one! |  | two |', '| three |  | four |'].join('\n'),
-        focus: { row: 1, col: 1 }
+        focus: { row: 1, col: 0 }, caret: 2
       },
       {
         name: 'move column left', title: 'Move column left', edit: { row: 1, col: 0 }, target: { row: 1, col: 1 },

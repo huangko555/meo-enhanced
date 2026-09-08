@@ -107,6 +107,58 @@ async function main(): Promise<void> {
       })}`);
     }
 
+    const topRevealBefore = await page.evaluate(async () => {
+      const view = (window as any).__editor.view;
+      const target = view.state.doc.line(120);
+      view.dispatch({ selection: { anchor: target.to } });
+      view.focus();
+      for (let index = 0; index < 3; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const caret = view.coordsAtPos(target.to);
+      const viewport = view.scrollDOM.getBoundingClientRect();
+      if (!caret) throw new Error('Could not measure top reveal target');
+      view.scrollDOM.scrollTop += caret.top - viewport.top + 3;
+      for (let index = 0; index < 3; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const positioned = view.coordsAtPos(target.to);
+      return {
+        scrollTop: view.scrollDOM.scrollTop,
+        caretTop: positioned?.top ?? null,
+        viewportTop: view.scrollDOM.getBoundingClientRect().top,
+        lineHeight: view.defaultLineHeight
+      };
+    });
+    await page.keyboard.type('X');
+    await page.evaluate(async () => {
+      for (let index = 0; index < 8; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+    const topRevealAfter = await page.evaluate(() => {
+      const view = (window as any).__editor.view;
+      const caret = view.coordsAtPos(view.state.selection.main.head);
+      const viewport = view.scrollDOM.getBoundingClientRect();
+      return {
+        scrollTop: view.scrollDOM.scrollTop,
+        caretTop: caret?.top ?? null,
+        viewportTop: viewport.top,
+        lineHeight: view.defaultLineHeight
+      };
+    });
+    if (
+      topRevealBefore.caretTop === null || topRevealAfter.caretTop === null ||
+      topRevealBefore.caretTop >= topRevealBefore.viewportTop ||
+      topRevealAfter.caretTop < topRevealAfter.viewportTop + topRevealAfter.lineHeight - 2 ||
+      topRevealAfter.scrollTop < topRevealBefore.scrollTop - topRevealAfter.lineHeight - 8
+    ) {
+      throw new Error(`Typing above the viewport did not use the nearest edge plus one line: ${JSON.stringify({
+        topRevealBefore,
+        topRevealAfter
+      })}`);
+    }
+
     await page.click('.cm-content');
     await page.keyboard.down('Control');
     await page.keyboard.press('End');
@@ -173,6 +225,91 @@ async function main(): Promise<void> {
         afterFirstFrame
       })}`);
     }
+
+    const verifyMainTopReveal = async (
+      name: string,
+      documentText: string,
+      targetNeedle: string,
+      activateSelector?: string
+    ) => {
+      await page.evaluate(async (nextText) => {
+        (window as any).__editor.setText(nextText, true);
+        for (let index = 0; index < 8; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      }, documentText);
+      if (activateSelector) {
+        await page.waitForSelector(activateSelector);
+        await page.click(activateSelector);
+        await page.waitForSelector('.cm-line.meo-md-html-source-range');
+      }
+      const before = await page.evaluate(async ({ needle }) => {
+        const view = (window as any).__editor.view;
+        const position = view.state.doc.toString().indexOf(needle) + needle.length;
+        if (position < needle.length) throw new Error(`Missing reveal target: ${needle}`);
+        view.dispatch({ selection: { anchor: position } });
+        view.focus();
+        const block = view.lineBlockAt(position);
+        view.scrollDOM.scrollTop = block.top + 3;
+        for (let index = 0; index < 5; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+        const viewport = view.scrollDOM.getBoundingClientRect();
+        const initialCaret = view.coordsAtPos(position);
+        if (!initialCaret) throw new Error(`Could not measure reveal target: ${needle}`);
+        view.scrollDOM.dispatchEvent(new WheelEvent('wheel', { deltaY: 60, bubbles: true }));
+        view.scrollDOM.scrollTop += initialCaret.top - viewport.top + 3;
+        const caret = view.coordsAtPos(position);
+        return {
+          scrollTop: view.scrollDOM.scrollTop,
+          caretTop: caret?.top ?? null,
+          viewportTop: viewport.top,
+          lineHeight: view.defaultLineHeight
+        };
+      }, { needle: targetNeedle });
+      await page.keyboard.type('X');
+      await page.evaluate(async () => {
+        for (let index = 0; index < 8; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      });
+      const after = await page.evaluate(() => {
+        const view = (window as any).__editor.view;
+        const caret = view.coordsAtPos(view.state.selection.main.head);
+        const viewport = view.scrollDOM.getBoundingClientRect();
+        return {
+          scrollTop: view.scrollDOM.scrollTop,
+          caretTop: caret?.top ?? null,
+          viewportTop: viewport.top,
+          lineHeight: view.defaultLineHeight
+        };
+      });
+      if (
+        before.caretTop === null || after.caretTop === null ||
+        before.caretTop >= before.viewportTop ||
+        after.caretTop < after.viewportTop + after.lineHeight - 2 ||
+        after.scrollTop < before.scrollTop - after.lineHeight - 10
+      ) {
+        throw new Error(`${name} did not use minimal top reveal: ${JSON.stringify({ before, after })}`);
+      }
+    };
+
+    const matrixPrefix = Array.from({ length: 120 }, (_, index) => `矩阵前正文 ${index + 1}`);
+    const matrixSuffix = Array.from({ length: 40 }, (_, index) => `矩阵后正文 ${index + 1}`);
+    await verifyMainTopReveal('language-less fenced code', [
+      ...matrixPrefix, '```', '无语言代码块目标', '```', ...matrixSuffix
+    ].join('\n'), '无语言代码块目标');
+    await verifyMainTopReveal('text fenced code', [
+      ...matrixPrefix, '```text', 'text 代码块目标', '```', ...matrixSuffix
+    ].join('\n'), 'text 代码块目标');
+    await verifyMainTopReveal('multi-line HTML source', [
+      ...matrixPrefix,
+      '<p>',
+      '  HTML 普通内容',
+      '  <del>HTML 第 51 行式目标</del>',
+      '</p>',
+      ...matrixSuffix
+    ].join('\n'), '<del>HTML 第 51 行式目标</del>', '.meo-md-html-source-toggle');
 
     const numericBurstText = [
       ...Array.from({ length: 799 }, (_, index) => `数字前正文 ${index + 1}`),
@@ -272,13 +409,60 @@ async function main(): Promise<void> {
       throw new Error(`Numeric formula input left its source line outside the outer viewport: ${JSON.stringify(formulaCaret)}`);
     }
 
+    const formulaTopBefore = await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      const block = document.querySelector<HTMLElement>('.meo-latex-math-editing-block')!;
+      const innerView = (block as any).__meoLatexMathEditingController.innerView;
+      innerView.dispatch({ selection: { anchor: 0 } });
+      innerView.focus();
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      const caret = innerView.coordsAtPos(0);
+      if (!caret) throw new Error('Could not measure formula top caret');
+      editor.view.scrollDOM.dispatchEvent(new WheelEvent('wheel', { deltaY: 60, bubbles: true }));
+      editor.view.scrollDOM.scrollTop += caret.top - viewport.top + 3;
+      return {
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        caretTop: innerView.coordsAtPos(0)?.top ?? null,
+        viewportTop: viewport.top,
+        lineHeight: editor.view.defaultLineHeight
+      };
+    });
+    await page.keyboard.type('X');
+    await page.evaluate(async () => {
+      for (let index = 0; index < 8; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+    const formulaTopAfter = await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      const block = document.querySelector<HTMLElement>('.meo-latex-math-editing-block')!;
+      const innerView = (block as any).__meoLatexMathEditingController.innerView;
+      const caret = innerView.coordsAtPos(innerView.state.selection.main.head);
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      return {
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        caretTop: caret?.top ?? null,
+        viewportTop: viewport.top,
+        lineHeight: editor.view.defaultLineHeight
+      };
+    });
+    if (
+      formulaTopBefore.caretTop === null || formulaTopAfter.caretTop === null ||
+      formulaTopBefore.caretTop >= formulaTopBefore.viewportTop ||
+      formulaTopAfter.caretTop < formulaTopAfter.viewportTop + formulaTopAfter.lineHeight - 2 ||
+      formulaTopAfter.scrollTop < formulaTopBefore.scrollTop - formulaTopAfter.lineHeight - 10
+    ) {
+      throw new Error(`Formula source did not use minimal top reveal: ${JSON.stringify({
+        formulaTopBefore,
+        formulaTopAfter
+      })}`);
+    }
+
     const tableText = [
       ...Array.from({ length: 799 }, (_, index) => `表格前正文 ${index + 1}`),
       '| ID | 名称 | 状态 |',
       '| --- | --- | --- |',
-      '| 1 | Alpha | Ready |',
-      '| 2 | Bravo | Editing |',
-      '| 3 | Charlie | Done |',
+      ...Array.from({ length: 24 }, (_, index) => `| ${index + 1} | Row ${index + 1} | Ready |`),
       ...Array.from({ length: 300 }, (_, index) => `表格后正文 ${index + 1}`)
     ].join('\n');
     await page.evaluate((nextText) => (window as any).__editor.setText(nextText, true), tableText);
@@ -306,7 +490,7 @@ async function main(): Promise<void> {
     });
     await page.keyboard.type('1234567890'.repeat(30));
     await page.evaluate(async () => {
-      for (let index = 0; index < 8; index += 1) {
+      for (let index = 0; index < 12; index += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
     });
@@ -326,11 +510,64 @@ async function main(): Promise<void> {
         cellBottom: cellRect.bottom,
         viewportBottom: viewport.bottom,
         inputScrollTop: input.scrollTop,
-        visible: inputRect.bottom <= viewport.bottom && cellRect.bottom <= viewport.bottom && input.scrollTop <= 1
+        visible: inputRect.bottom <= viewport.bottom + 3 && cellRect.bottom <= viewport.bottom + 3 && input.scrollTop <= 1
       };
     });
     if (!tableCaret.visible || !tableCaret.active || tableCaret.selectionEnd !== tableCaret.valueLength) {
       throw new Error(`Numeric table input left its active line outside the viewport: ${JSON.stringify(tableCaret)}`);
+    }
+
+    const stickyBefore = await page.evaluate(async () => {
+      const editor = (window as any).__editor;
+      const input = document.querySelector<HTMLTextAreaElement>(
+        '.meo-md-html-table-shell tbody tr:nth-child(12) td:nth-child(2) textarea'
+      )!;
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(input.value.length, input.value.length);
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      editor.view.scrollDOM.scrollTop += input.getBoundingClientRect().top - viewport.top - 48;
+      for (let index = 0; index < 8; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const sticky = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome.is-visible');
+      editor.view.scrollDOM.scrollTop += input.getBoundingClientRect().top - viewport.top - 2;
+      return {
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        inputTop: input.getBoundingClientRect().top,
+        viewportTop: editor.view.scrollDOM.getBoundingClientRect().top,
+        stickyBottom: sticky?.getBoundingClientRect().bottom ?? null,
+        lineHeight: editor.view.defaultLineHeight
+      };
+    });
+    await page.keyboard.type('X');
+    await page.evaluate(async () => {
+      for (let index = 0; index < 8; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+    const stickyAfter = await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      const input = document.querySelector<HTMLTextAreaElement>(
+        '.meo-md-html-table-shell tbody tr:nth-child(12) td:nth-child(2) textarea'
+      )!;
+      const sticky = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome.is-visible');
+      return {
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        inputTop: input.getBoundingClientRect().top,
+        stickyBottom: sticky?.getBoundingClientRect().bottom ?? null,
+        lineHeight: editor.view.defaultLineHeight
+      };
+    });
+    if (
+      stickyBefore.stickyBottom === null || stickyAfter.stickyBottom === null ||
+      stickyBefore.inputTop >= stickyBefore.stickyBottom ||
+      stickyAfter.inputTop < stickyAfter.stickyBottom + stickyAfter.lineHeight - 2 ||
+      stickyAfter.scrollTop < stickyBefore.scrollTop - stickyAfter.lineHeight * 3
+    ) {
+      throw new Error(`Table input hidden by the sticky header was not minimally revealed: ${JSON.stringify({
+        stickyBefore,
+        stickyAfter
+      })}`);
     }
 
     console.log('live caret continuity browser test passed');

@@ -64,6 +64,17 @@ try {
   await page.addScriptTag({ content: `window.acquireVsCodeApi=()=>({getState(){},setState(){},postMessage(message){window.__renderPreview(message).then(response=>{if(response)window.dispatchEvent(new MessageEvent('message',{data:response}));});}});` });
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
   const text = [
+    ...Array.from({ length: 90 }, (_, i) => `HTML 前固定参照行 ${i + 1}`),
+    [
+      '<table>',
+      '  <thead><tr><th>项目</th><th>短内容</th><th>长内容（编辑此列以制造换行和高度变化）</th></tr></thead>',
+      '  <tbody>',
+      '    <tr><td>模式切换</td><td>预览</td><td>Source → Preview → Live 首帧稳定性</td></tr>',
+      '    <tr><td>定位</td><td>锚点</td><td>表格上方退出源码时不应挤压下方图片</td></tr>',
+      '  </tbody>',
+      '</table>'
+    ].join('\n'),
+    'HTML 测试区结束固定锚点',
     '![Markdown local](images/markdown-local.png)',
     '<img src="images/html-local.png" alt="HTML local">',
     '![Markdown remote](https://preview-image.test/markdown.gif)',
@@ -109,6 +120,10 @@ try {
     , { timeout: 5000 });
     // Text must become readable while the network image requests are unresolved.
     // Release them only after the previous-surface cover is gone.
+    await page.evaluate(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      frame.contentDocument?.images[0]?.scrollIntoView({ block: 'center' });
+    });
     holdRemoteImages = false;
     await Promise.all(pendingRemoteImages.splice(0).map(respond => respond()));
     await page.waitForFunction(() => {
@@ -159,12 +174,35 @@ try {
   assert.deepEqual(cancelled, { editorVisible: true, editorInert: false, covered: false, previewHidden: true, previewInert: true },
     'Late paint readiness must not cover or disable an editor after switching back');
 
+  await page.evaluate(async () => {
+    const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+    const image = document.querySelector<HTMLElement>('.meo-md-image-img')!;
+    const viewport = scroller.getBoundingClientRect();
+    scroller.scrollTop += image.getBoundingClientRect().top - viewport.top - 120;
+    for (let index = 0; index < 6; index += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  });
   await page.click('button[data-mode="source"]');
   await page.click('button[data-mode="preview"]');
   await page.waitForFunction(() => !document.querySelector<HTMLElement>('.preview-host')?.hidden);
   holdLiveImageResolution = true;
-  await page.click('button[data-mode="live"]');
-  await new Promise(resolve => setTimeout(resolve, 35));
+  const liveRevealTrace = await page.evaluate(async () => {
+    const preview = document.querySelector<HTMLElement>('.preview-host')!;
+    const samples = [{ hidden: preview.hidden }];
+    document.querySelector<HTMLButtonElement>('button[data-mode="live"]')!.click();
+    for (let index = 0; index < 6; index += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      samples.push({ hidden: preview.hidden });
+    }
+    return samples;
+  });
+  const firstHiddenFrame = liveRevealTrace.findIndex((sample) => sample.hidden);
+  assert.ok(
+    firstHiddenFrame === -1 || firstHiddenFrame >= 3,
+    `Preview cover must remain through two Live layout observations: ${JSON.stringify(liveRevealTrace)}`
+  );
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('.preview-host')?.hidden);
   const pendingLiveReveal = await page.evaluate(() => {
     const editor = document.querySelector<HTMLElement>('.editor-host')!;
     const preview = document.querySelector<HTMLElement>('.preview-host')!;
@@ -175,17 +213,55 @@ try {
       previewHidden: preview.hidden,
       previewInert: preview.inert,
       liveImageCount: liveImages.length,
-      liveImagesReady: liveImages.every((image) => image.complete && image.naturalWidth > 0)
+      liveImagesReady: liveImages.every((image) => image.complete && image.naturalWidth > 0),
+      tableWidths: Array.from(
+        editor.querySelectorAll<HTMLElement>('.meo-md-html-block table thead th'),
+        (cell) => cell.getBoundingClientRect().width
+      ),
+      firstImageTop: liveImages[0]?.getBoundingClientRect().top ?? null
     };
   });
-  assert.deepEqual(pendingLiveReveal, {
+  assert.deepEqual({
+    ...pendingLiveReveal,
+    tableWidths: undefined,
+    firstImageTop: undefined
+  }, {
     editorHidden: false,
     editorInert: false,
     previewHidden: true,
     previewInert: true,
     liveImageCount: 2,
-    liveImagesReady: true
+    liveImagesReady: true,
+    tableWidths: undefined,
+    firstImageTop: undefined
   }, 'A recent Source → Preview → Live cycle must reuse decoded images before the first Live paint');
+  await page.evaluate(async () => {
+    for (let index = 0; index < 8; index += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  });
+  const settledLiveLayout = await page.evaluate(() => {
+    const editor = document.querySelector<HTMLElement>('.editor-host')!;
+    const liveImages = Array.from(editor.querySelectorAll<HTMLImageElement>('.meo-md-image-img'));
+    return {
+      tableWidths: Array.from(
+        editor.querySelectorAll<HTMLElement>('.meo-md-html-block table thead th'),
+        (cell) => cell.getBoundingClientRect().width
+      ),
+      firstImageTop: liveImages[0]?.getBoundingClientRect().top ?? null
+    };
+  });
+  assert.deepEqual(
+    pendingLiveReveal.tableWidths.map((width) => Math.round(width)),
+    settledLiveLayout.tableWidths.map((width) => Math.round(width)),
+    'Live must not expose provisional table column widths after the Preview cover is removed'
+  );
+  assert.equal(pendingLiveReveal.tableWidths.length, 3, 'The Live stability fixture must include its HTML table');
+  assert.ok(
+    pendingLiveReveal.firstImageTop !== null && settledLiveLayout.firstImageTop !== null
+      && Math.abs(pendingLiveReveal.firstImageTop - settledLiveLayout.firstImageTop) <= 1,
+    `Live must not expose a provisional vertical anchor after the Preview cover is removed: ${JSON.stringify({ pendingLiveReveal, settledLiveLayout })}`
+  );
   assert.equal(pendingLiveImageResolutions.length, 0, 'warm Live image resources must not resolve or load again');
   holdLiveImageResolution = false;
   pendingLiveImageResolutions.splice(0).forEach((release) => release());

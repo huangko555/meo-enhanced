@@ -963,6 +963,45 @@ await flushFrames(wheelFrames);
 if (revealScrollDOM.scrollTop !== 180) {
   throw new Error(`Contextual nearest reveal moved an already-visible target to ${revealScrollDOM.scrollTop}`);
 }
+revealScrollDOM.scrollTop = 660;
+const preInputViewportReveal = revealController.beginNavigationReveal();
+revealController.revealPosition(900, {
+  y: 'nearest',
+  yMargin: 40,
+  originScrollTop: 1000
+}, preInputViewportReveal);
+await Promise.resolve();
+await flushFrames(wheelFrames);
+if (revealScrollDOM.scrollTop !== 860) {
+  throw new Error(`Input auto-scroll was not corrected to the original nearest edge: ${revealScrollDOM.scrollTop}`);
+}
+revealScrollDOM.scrollTop = 660;
+const preInputVisibleReveal = revealController.beginNavigationReveal();
+revealController.revealPosition(900, {
+  y: 'nearest',
+  yMargin: 40,
+  originScrollTop: 700
+}, preInputVisibleReveal);
+await Promise.resolve();
+await flushFrames(wheelFrames);
+if (revealScrollDOM.scrollTop !== 700) {
+  throw new Error(`Input auto-scroll moved a caret that was visible before input: ${revealScrollDOM.scrollTop}`);
+}
+revealScrollDOM.scrollTop = 100;
+const occludedBoundsReveal = revealController.beginNavigationReveal();
+revealController.revealVerticalBounds(
+  () => ({
+    top: 110 - revealScrollDOM.scrollTop,
+    bottom: 130 - revealScrollDOM.scrollTop
+  }),
+  occludedBoundsReveal,
+  { yMargin: 20, readViewportBounds: () => ({ top: 50, bottom: 500 }) }
+);
+await Promise.resolve();
+await flushFrames(wheelFrames);
+if (revealScrollDOM.scrollTop !== 40) {
+  throw new Error(`Occluded caret bounds were not revealed below fixed chrome: ${revealScrollDOM.scrollTop}`);
+}
 revealScrollDOM.scrollTop = 100;
 const lineBlockContextReveal = revealController.beginNavigationReveal();
 revealController.revealPosition(900, {

@@ -4003,12 +4003,23 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       const revealGeneration = ++this.tableCaretRevealGeneration;
       const canReveal = () => isCurrent() && revealGeneration === this.tableCaretRevealGeneration;
       const inputContextMargin = visualLineContextMargin(view, 1);
+      const readUsableViewportBounds = () => {
+        const viewportRect = view.scrollDOM.getBoundingClientRect();
+        const stickyChrome = this.domRefs?.stickyChrome;
+        const stickyBottom = stickyChrome?.classList.contains('is-visible')
+          ? stickyChrome.getBoundingClientRect().bottom
+          : viewportRect.top;
+        return {
+          top: Math.max(viewportRect.top, stickyBottom),
+          bottom: viewportRect.bottom
+        };
+      };
       let attempts = 0;
       const settle = () => {
         if (!canReveal() || !input.isConnected || attempts >= 8) return;
         attempts += 1;
         const caret = tableCellCaretViewportBounds(input);
-        const viewportRect = view.scrollDOM.getBoundingClientRect();
+        const viewportRect = readUsableViewportBounds();
         const delta = caret.top < viewportRect.top
           ? caret.top - viewportRect.top - inputContextMargin
           : caret.bottom > viewportRect.bottom
@@ -4018,7 +4029,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
           viewport.revealVerticalBounds(
             () => canReveal() && input.isConnected ? tableCellCaretViewportBounds(input) : null,
             canReveal,
-            { yMargin: inputContextMargin }
+            { yMargin: inputContextMargin, readViewportBounds: readUsableViewportBounds }
           );
           return;
         }
@@ -4028,8 +4039,12 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     } else {
       const caret = tableCellCaretViewportBounds(input);
       const viewportRect = view.scrollDOM.getBoundingClientRect();
+      const stickyChrome = this.domRefs?.stickyChrome;
+      const viewportTop = stickyChrome?.classList.contains('is-visible')
+        ? Math.max(viewportRect.top, stickyChrome.getBoundingClientRect().bottom)
+        : viewportRect.top;
       if (
-        caret.top >= viewportRect.top &&
+        caret.top >= viewportTop &&
         caret.bottom <= viewportRect.bottom
       ) return;
       input.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
@@ -4412,7 +4427,22 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length - 1, '').map((value) => value ?? null);
     alignments.splice(insertAt, 0, null);
     matrix.alignments = alignments;
-    return this.buildMatrixTransaction(matrix, dom, { row: focusRow, col: insertAt });
+    return this.buildMatrixTransaction(matrix, dom, this.focusTargetAfterColumnInsertion(insertAt, focusRow));
+  }
+
+  focusTargetAfterColumnInsertion(insertAt: number, fallbackRow: number): PendingCellFocus {
+    const active = document.activeElement;
+    const activeCoords = active instanceof HTMLTextAreaElement && this.domRefs?.shell.contains(active)
+      ? this.parseCellCoords(active.dataset.tableRow, active.dataset.tableCol)
+      : null;
+    const col = activeCoords?.col ?? this.activeTarget.col;
+    return {
+      row: activeCoords?.row ?? fallbackRow,
+      col: col >= insertAt ? col + 1 : col,
+      caret: active instanceof HTMLTextAreaElement && activeCoords
+        ? active.selectionStart ?? 0
+        : 0
+    };
   }
 
   buildAddColumnBefore(dom: HTMLElement, colIndex: number, focusRow: number): TableCommandTransactionPlan {
@@ -4428,7 +4458,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length - 1, '').map((value) => value ?? null);
     alignments.splice(insertAt, 0, null);
     matrix.alignments = alignments;
-    return this.buildMatrixTransaction(matrix, dom, { row: focusRow, col: insertAt });
+    return this.buildMatrixTransaction(matrix, dom, this.focusTargetAfterColumnInsertion(insertAt, focusRow));
   }
 
   buildMoveColumns(

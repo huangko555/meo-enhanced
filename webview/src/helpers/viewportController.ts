@@ -120,6 +120,8 @@ interface NavigationRevealOptions {
 interface RevealPositionOptions {
   readonly geometry?: 'caret' | 'line-block';
   readonly marginMode?: 'outside-only' | 'comfort-band';
+  /** Evaluate visibility against the viewport that existed before browser auto-scroll. */
+  readonly originScrollTop?: number;
   readonly y?: 'nearest' | 'center' | 'center-if-outside' | 'start';
   readonly yMargin?: number;
   readonly schedule?: 'immediate' | 'next-frame';
@@ -716,25 +718,103 @@ export class ViewportController {
   revealVerticalBounds(
     readBounds: () => { top: number; bottom: number } | null,
     isCurrent: () => boolean = () => true,
-    { yMargin = 0 }: { yMargin?: number } = {}
+    {
+      yMargin = 0,
+      readViewportBounds,
+      originScrollTop
+    }: {
+      yMargin?: number;
+      readViewportBounds?: () => { top: number; bottom: number };
+      originScrollTop?: number;
+    } = {}
   ): void {
     this.runNavigationReveal(() => {
       const bounds = readBounds();
       if (!bounds) return { kind: 'unavailable' };
       const current = this.readScrollPosition();
-      const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+      const scrollerRect = readViewportBounds?.() ?? this.view.scrollDOM.getBoundingClientRect();
+      const evaluationTop = Number.isFinite(originScrollTop)
+        ? Math.max(0, originScrollTop as number)
+        : current.top;
+      const projectedTop = bounds.top + current.top - evaluationTop;
+      const projectedBottom = bounds.bottom + current.top - evaluationTop;
       const margin = Math.min(
         Math.max(0, yMargin),
         Math.max(0, ((scrollerRect.bottom - scrollerRect.top) - (bounds.bottom - bounds.top)) / 2)
       );
-      const topDelta = bounds.top - scrollerRect.top - margin;
-      const bottomDelta = bounds.bottom - scrollerRect.bottom + margin;
-      if (topDelta >= 0 && bottomDelta <= 0) return { kind: 'stable' };
+      const topDelta = projectedTop - scrollerRect.top - margin;
+      const bottomDelta = projectedBottom - scrollerRect.bottom + margin;
+      if (topDelta >= 0 && bottomDelta <= 0) {
+        return Math.abs(current.top - evaluationTop) <= POSITION_EPSILON
+          ? { kind: 'stable' }
+          : { kind: 'target', target: { top: evaluationTop } };
+      }
       const delta = topDelta < 0 && bottomDelta > 0
         ? (Math.abs(topDelta) <= bottomDelta ? topDelta : bottomDelta)
         : topDelta < 0 ? topDelta : bottomDelta;
-      return { kind: 'target', target: { top: current.top + delta } };
+      return { kind: 'target', target: { top: evaluationTop + delta } };
     }, { settle: true }, isCurrent);
+  }
+
+  /** Waits for the post-reconfiguration height map, anchor projection, and visible block geometry. */
+  async whenPresentationSettled(timeoutMs: number): Promise<void> {
+    if (this.destroyed || timeoutMs <= 0) return;
+    const deadline = performance.now() + timeoutMs;
+    let previousSignature: string | null = null;
+    let stableFrames = 0;
+    await new Promise<void>((resolve) => {
+      const sample = () => {
+        if (this.destroyed || performance.now() >= deadline) {
+          resolve();
+          return;
+        }
+        this.view.requestMeasure({
+          read: () => {
+            if (this.destroyed) return null;
+            const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+            const visibleBlocks = Array.from(
+              this.view.contentDOM.querySelectorAll<HTMLElement>('[data-meo-rendered-block-start-line]')
+            ).filter((element) => {
+              const rect = element.getBoundingClientRect();
+              return rect.bottom >= scrollerRect.top && rect.top <= scrollerRect.bottom;
+            }).map((element) => {
+              const rect = element.getBoundingClientRect();
+              return [
+                element.dataset.meoRenderedBlockStartLine ?? '',
+                Math.round(rect.top * 2) / 2,
+                Math.round(rect.bottom * 2) / 2,
+                Math.round(rect.width * 2) / 2
+              ].join(':');
+            });
+            return [
+              Math.round(this.view.scrollDOM.scrollTop * 2) / 2,
+              this.view.scrollDOM.scrollHeight,
+              Math.round(this.view.contentHeight * 2) / 2,
+              this.view.viewport.from,
+              this.view.viewport.to,
+              ...visibleBlocks
+            ].join('|');
+          },
+          write: (signature) => {
+            if (this.destroyed || signature === null) {
+              resolve();
+              return;
+            }
+            const anchorBusy = this.hasActiveDocumentAnchorStabilization();
+            stableFrames = !anchorBusy && signature === previousSignature
+              ? stableFrames + 1
+              : 0;
+            previousSignature = signature;
+            if (stableFrames >= REQUIRED_STABLE_FRAMES || performance.now() >= deadline) {
+              resolve();
+              return;
+            }
+            requestAnimationFrame(sample);
+          }
+        });
+      };
+      requestAnimationFrame(sample);
+    });
   }
 
   destroy(): void {
@@ -1199,6 +1279,7 @@ export class ViewportController {
     {
       geometry = 'caret',
       marginMode = 'outside-only',
+      originScrollTop,
       y = 'nearest',
       yMargin = 0,
       schedule = 'immediate'
@@ -1217,6 +1298,9 @@ export class ViewportController {
       const current = this.readScrollPosition();
       const coords = geometry === 'caret' ? this.view.coordsAtPos(targetPosition) : null;
       const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+      const evaluationTop = Number.isFinite(originScrollTop)
+        ? Math.max(0, originScrollTop as number)
+        : current.top;
       if (y === 'center' || y === 'center-if-outside') {
         if (coords) {
           if (
@@ -1256,6 +1340,8 @@ export class ViewportController {
         };
       }
       if (coords) {
+        const projectedTop = coords.top + current.top - evaluationTop;
+        const projectedBottom = coords.bottom + current.top - evaluationTop;
         const targetHeight = Math.max(0, coords.bottom - coords.top);
         const viewportHeight = Math.max(0, scrollerRect.bottom - scrollerRect.top);
         const margin = Math.min(
@@ -1264,18 +1350,20 @@ export class ViewportController {
         );
         const appliedMargin = marginMode === 'comfort-band' ? margin : 0;
         if (
-          coords.top >= scrollerRect.top + appliedMargin &&
-          coords.bottom <= scrollerRect.bottom - appliedMargin
+          projectedTop >= scrollerRect.top + appliedMargin &&
+          projectedBottom <= scrollerRect.bottom - appliedMargin
         ) {
-          return { kind: 'stable' };
+          return Math.abs(current.top - evaluationTop) <= POSITION_EPSILON
+            ? { kind: 'stable' }
+            : { kind: 'target', target: { top: evaluationTop } };
         }
         return {
           kind: 'target',
           target: {
-            top: current.top + (
-              coords.top < scrollerRect.top
-                ? coords.top - scrollerRect.top - margin
-                : coords.bottom - scrollerRect.bottom + margin
+            top: evaluationTop + (
+              projectedTop < scrollerRect.top
+                ? projectedTop - scrollerRect.top - margin
+                : projectedBottom - scrollerRect.bottom + margin
             )
           }
         };
@@ -1287,13 +1375,15 @@ export class ViewportController {
         Math.max(0, (viewportHeight - block.height) / 2)
       );
       const appliedMargin = marginMode === 'comfort-band' ? margin : 0;
-      if (block.top < current.top + appliedMargin) {
+      if (block.top < evaluationTop + appliedMargin) {
         return { kind: 'target', target: { top: block.top - margin } };
       }
-      if (block.bottom > current.top + viewportHeight - appliedMargin) {
+      if (block.bottom > evaluationTop + viewportHeight - appliedMargin) {
         return { kind: 'target', target: { top: block.bottom - viewportHeight + margin } };
       }
-      return { kind: 'stable' };
+      return Math.abs(current.top - evaluationTop) <= POSITION_EPSILON
+        ? { kind: 'stable' }
+        : { kind: 'target', target: { top: evaluationTop } };
     }, { schedule, settle }, isCurrent);
   }
 
