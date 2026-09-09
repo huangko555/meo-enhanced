@@ -34,6 +34,7 @@ import {
 import { updateGitDiffMarkerElement } from './gitDiffMarkerDom';
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
+import { getTableHistoryFocus, type TableHistoryFocusTarget } from '../adapters/tableHistoryFocus';
 import {
   getTableTransactionProvenance,
   getTableTransactionProvenanceSnapshot,
@@ -406,12 +407,42 @@ export function focusTableHistoryChange(
   changed: { from: number; to: number },
   previousScrollTop: number,
   targetPosition?: number,
-  isCurrent: () => boolean = () => true
+  isCurrent: () => boolean = () => true,
+  semanticTarget?: TableHistoryFocusTarget
 ): 'not-rendered' | 'restored' | 'retry' {
   if (!isCurrent()) return 'not-rendered';
 
   const changedLine = view.state.doc.lineAt(Math.min(changed.from, view.state.doc.length)).number;
+  const refreshCurrentInputRange = (input: HTMLTextAreaElement): boolean => {
+    const sourceLine = Number.parseInt(input.closest('tr')?.dataset.sourceLineNumber ?? '', 10);
+    const column = Number.parseInt(input.dataset.tableCol ?? '', 10);
+    if (!Number.isInteger(sourceLine) || !Number.isInteger(column)) return false;
+    const currentLine = view.state.doc.line(sourceLine);
+    const currentSegment = parseTableRowCells(currentLine.text, currentLine.from).segments[column];
+    const from = currentSegment?.from ?? Number.parseInt(input.dataset.tableCellFrom ?? '', 10);
+    const to = currentSegment?.to ?? Number.parseInt(input.dataset.tableCellTo ?? '', 10);
+    if (!Number.isFinite(from) || !Number.isFinite(to)) return false;
+    // A history transaction updates the document before Live's derived table
+    // presentation is replaced. Never focus that stale textarea: it would be
+    // detached on the next frame and the restored focus would immediately vanish.
+    const currentSource = view.state.doc.sliceString(from, to).trim();
+    if (tableCellEditorValueToSource(input.value).trim() !== currentSource) return false;
+    input.dataset.tableCellFrom = String(from);
+    input.dataset.tableCellTo = String(to);
+    return true;
+  };
   const findInput = () => {
+    if (semanticTarget) {
+      const tableStartLine = view.state.doc.lineAt(
+        Math.max(0, Math.min(semanticTarget.tableFrom, view.state.doc.length))
+      ).number;
+      const input = view.dom.querySelector<HTMLTextAreaElement>(
+        `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${tableStartLine}"] ` +
+        `.meo-md-html-table:not(.meo-md-html-table-sticky-table) ` +
+        `textarea[data-table-row="${semanticTarget.row}"][data-table-col="${semanticTarget.col}"]`
+      );
+      if (input && refreshCurrentInputRange(input)) return input;
+    }
     let closest: { input: HTMLTextAreaElement; distance: number; viewportDistance: number } | null = null;
     const viewport = view.scrollDOM.getBoundingClientRect();
     for (const input of view.dom.querySelectorAll<HTMLTextAreaElement>(
@@ -419,21 +450,9 @@ export function focusTableHistoryChange(
     )) {
       const sourceLine = Number.parseInt(input.closest('tr')?.dataset.sourceLineNumber ?? '', 10);
       if (sourceLine !== changedLine) continue;
-      const column = Number.parseInt(input.dataset.tableCol ?? '', 10);
-      const currentLine = view.state.doc.line(sourceLine);
-      const currentSegment = Number.isInteger(column)
-        ? parseTableRowCells(currentLine.text, currentLine.from).segments[column]
-        : null;
-      const from = currentSegment?.from ?? Number.parseInt(input.dataset.tableCellFrom ?? '', 10);
-      const to = currentSegment?.to ?? Number.parseInt(input.dataset.tableCellTo ?? '', 10);
-      if (!Number.isFinite(from) || !Number.isFinite(to)) continue;
-      // A history transaction updates the document before Live's derived table
-      // presentation is replaced. Never focus that stale textarea: it would be
-      // detached on the next frame and the restored focus would immediately vanish.
-      const currentSource = view.state.doc.sliceString(from, to).trim();
-      if (tableCellEditorValueToSource(input.value).trim() !== currentSource) continue;
-      input.dataset.tableCellFrom = String(from);
-      input.dataset.tableCellTo = String(to);
+      if (!refreshCurrentInputRange(input)) continue;
+      const from = Number.parseInt(input.dataset.tableCellFrom ?? '', 10);
+      const to = Number.parseInt(input.dataset.tableCellTo ?? '', 10);
       const distance = changed.to < from
         ? from - changed.to
         : changed.from > to
@@ -464,7 +483,9 @@ export function focusTableHistoryChange(
     const cellFrom = Number.parseInt(input.dataset.tableCellFrom ?? '', 10);
     const cellTo = Number.parseInt(input.dataset.tableCellTo ?? '', 10);
     const sourceCaret = Math.min(Math.max((targetPosition ?? changed.to) - cellFrom, 0), cellTo - cellFrom);
-    const caret = tableCellSourceOffsetToEditorOffset(input.value, sourceCaret);
+    const caret = semanticTarget
+      ? Math.min(Math.max(semanticTarget.caret, 0), input.value.length)
+      : tableCellSourceOffsetToEditorOffset(input.value, sourceCaret);
     input.focus({ preventScroll: true });
     input.setSelectionRange(caret, caret);
 
@@ -3289,6 +3310,21 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const cellCount = (range.toRow - range.fromRow + 1) * (range.toCol - range.fromCol + 1);
     if (cellCount <= 1) return false;
 
+    // The history event owns the same semantic target as the immediate focus
+    // restore. This survives host-driven undo where no textarea is focused.
+    const revealTarget = { row: range.fromRow, col: range.fromCol };
+    const currentRange = this.resolveCurrentTableRange(view, dom);
+    const tableStartLine = currentRange
+      ? view.state.doc.lineAt(currentRange.from).number
+      : this.tableData.startLine;
+    const historyFocusEffects = currentRange
+      ? [getTableHistoryFocus(view.state).effect({
+          tableFrom: currentRange.from,
+          ...revealTarget,
+          caret: 0
+        })]
+      : [];
+
     const commit = this.cellInteraction.accept({ type: 'commit', reason: 'command' }).commit;
     const confirmation = commit
       ? createTableCellCommitConfirmation(this.cellInteraction, commit.generation)
@@ -3304,20 +3340,15 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
           if (col < cells.length) cells[col] = '';
         }
       }
-      plan = this.buildMatrixTransaction(matrix, dom, null, { preserveScrollPosition: true });
+      plan = this.buildMatrixTransaction(matrix, dom, null, {
+        preserveScrollPosition: true,
+        extraEffects: historyFocusEffects
+      });
     } catch (error) {
       confirmation?.settle('failed');
       throw error;
     }
 
-    // Clearing a rectangular selection has one stable semantic target: its
-    // top-left cell. Unlike the pointer anchor, this remains predictable for
-    // both drag directions and is guaranteed to be one of the cleared cells.
-    const revealTarget = { row: range.fromRow, col: range.fromCol };
-    const currentRange = this.resolveCurrentTableRange(view, dom);
-    const tableStartLine = currentRange
-      ? view.state.doc.lineAt(currentRange.from).number
-      : this.tableData.startLine;
     const replacedInput = dom.querySelector<HTMLTextAreaElement>(
       `textarea[data-table-row="${revealTarget.row}"][data-table-col="${revealTarget.col}"]`
     );

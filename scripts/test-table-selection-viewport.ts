@@ -36,6 +36,77 @@ async function main(): Promise<void> {
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
     await page.evaluate(() => {
+      const text = [
+        '---',
+        'fixture: true',
+        'second: value',
+        '---',
+        '',
+        '',
+        '| 类型 | | 类型 | | | 内容 | 备注 |',
+        '| --- | --- | --- | --- | --- |',
+        '| 链接 | | | [VS Code](https://code.visualstudio.com/) | #table/tag |',
+        '| 强调 | | | **粗体**、*斜体*、~~删除线~~ | `inline code` |',
+        '| | | | 1 | |',
+        '| | | | | | | |',
+        '| | | | | | | |',
+        '| | | | | | | |',
+        '| | | | | | | |',
+        '| | | | | | | |',
+        '| | | | | | 多列表格 |'
+      ].join('\n');
+      (window as any).__selectionViewportEditor = (window as any).EmbeddedInputViewportHarness.createEditor({
+        parent: document.getElementById('app')!, text, initialMode: 'live', onApplyChanges() {}
+      });
+    });
+    await page.waitForFunction(() => document.querySelectorAll('.meo-md-html-table tbody tr').length === 9);
+    const looseStartSelector = '.meo-md-html-table tbody tr:first-child td:nth-child(4) .meo-md-html-table-cell-preview';
+    const looseEndSelector = '.meo-md-html-table tbody tr:nth-child(2) td:nth-child(5) .meo-md-html-table-cell-preview';
+    const looseExpectedTarget = await page.$eval(looseStartSelector, (preview) => {
+      const input = preview.closest('td')?.querySelector<HTMLTextAreaElement>('textarea');
+      return { row: input?.dataset.tableRow ?? null, col: input?.dataset.tableCol ?? null };
+    });
+    const looseCenter = async (query: string) => page.$eval(query, (element) => {
+      const rect = element.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    });
+    const looseStart = await looseCenter(looseStartSelector);
+    const looseEnd = await looseCenter(looseEndSelector);
+    await page.mouse.move(looseStart.x, looseStart.y);
+    await page.mouse.down();
+    await page.mouse.move(looseEnd.x, looseEnd.y, { steps: 5 });
+    await page.mouse.up();
+    await page.keyboard.press('Delete');
+    await page.waitForFunction(() => !(window as any).__selectionViewportEditor.getText().includes('VS Code'));
+    await page.evaluate(() => {
+      const editor = (window as any).__selectionViewportEditor;
+      editor.view.contentDOM.focus({ preventScroll: true });
+      editor.undo();
+    });
+    await page.waitForFunction(() => (window as any).__selectionViewportEditor.getText().includes('VS Code'));
+    await waitForFrames(page, 12);
+    const looseUndoFocus = await page.evaluate(() => {
+      const active = document.activeElement;
+      return active instanceof HTMLTextAreaElement ? {
+        row: active.dataset.tableRow ?? null,
+        col: active.dataset.tableCol ?? null,
+        caret: active.selectionStart,
+        stickyClone: Boolean(active.closest('.meo-md-html-table-sticky-table'))
+      } : null;
+    });
+    if (
+      looseUndoFocus?.row !== looseExpectedTarget.row || looseUndoFocus.col !== looseExpectedTarget.col
+      || looseUndoFocus.caret !== 0 || looseUndoFocus.stickyClone
+    ) {
+      throw new Error(`Loose-table undo focused outside the cleared rectangle: ${JSON.stringify({
+        expected: looseExpectedTarget, actual: looseUndoFocus
+      })}`);
+    }
+    await page.evaluate(() => {
+      (window as any).__selectionViewportEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+    });
+    await page.evaluate(() => {
       const rows = Array.from({ length: 12 }, (_, index) => {
         const row = String(index + 1).padStart(2, '0');
         return `| ${row} | A${row} | B${row} |`;
@@ -157,6 +228,10 @@ async function main(): Promise<void> {
       return {
         scrollTop: editor.view.scrollDOM.scrollTop,
         value: active instanceof HTMLTextAreaElement ? active.value : null,
+        row: active instanceof HTMLTextAreaElement ? active.dataset.tableRow ?? null : null,
+        col: active instanceof HTMLTextAreaElement ? active.dataset.tableCol ?? null : null,
+        caret: active instanceof HTMLTextAreaElement ? active.selectionStart : null,
+        stickyClone: Boolean(active?.closest('.meo-md-html-table-sticky-table')),
         top: rect?.top ?? null,
         bottom: rect?.bottom ?? null,
         usableTop,
@@ -169,6 +244,8 @@ async function main(): Promise<void> {
       beforeDelete.visible || !afterDelete.visible || beforeUndo.visible || !afterUndo.visible
       || afterDeleteFocus?.row !== '2' || afterDeleteFocus.col !== '1'
       || afterDeleteFocus.selectionStart !== 0 || afterDeleteFocus.stickyClone
+      || afterUndo.row !== '2' || afterUndo.col !== '1'
+      || afterUndo.caret !== 0 || afterUndo.stickyClone
     ) {
       throw new Error(`Offscreen multi-cell delete/undo did not minimally reveal its target: ${JSON.stringify({
         beforeDelete, afterDelete, afterDeleteFocus, beforeUndo, afterUndo

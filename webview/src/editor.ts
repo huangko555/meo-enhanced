@@ -36,6 +36,7 @@ import { gitDiffLineHighlightsField } from './helpers/gitDiffLineHighlights';
 import { gitDiffDetailsExtensions } from './helpers/gitDiffDetails';
 import { createTableTransactionProvenance } from './application/tableTransactionProvenance';
 import { createCodeMirrorTableTransactionProvenanceAdapter } from './adapters/codeMirrorTableTransactionProvenanceAdapter';
+import { createCodeMirrorTableHistoryFocusAdapter } from './adapters/codeMirrorTableHistoryFocusAdapter';
 import { createCodeMirrorDomTableColumnWidthAdapter } from './editor/tableColumnWidthAdapter';
 import { tableColumnWidthPolicy } from './editor/tableColumnWidthPolicy';
 import { createCodeMirrorDomTableStickyHeaderAdapter } from './editor/internal/codeMirrorDomTableStickyHeaderAdapter';
@@ -1858,6 +1859,7 @@ export function createEditor({
   const tableTransactionProvenanceAdapter = createCodeMirrorTableTransactionProvenanceAdapter(
     createTableTransactionProvenance()
   );
+  const tableHistoryFocusAdapter = createCodeMirrorTableHistoryFocusAdapter();
   const tableColumnWidthAdapter = createCodeMirrorDomTableColumnWidthAdapter({
     root: parent,
     policy: tableColumnWidthPolicy
@@ -1948,6 +1950,7 @@ export function createEditor({
       lineNumberCompartment.of(lineNumberExtensions(startMode, currentSourceLineNumbers)),
       longCodeBlockPreferenceCompartment.of(longCodeBlockEnabledFacet.of(initialLongCodeBlockFolding)),
       tableTransactionProvenanceAdapter.extension,
+      tableHistoryFocusAdapter.extension,
       ...gitDiffGutterBaselineExtensions(),
       gitGutterCompartment.of(startMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()),
       highlightActiveLine(),
@@ -2360,7 +2363,8 @@ export function createEditor({
           request.changedRange,
           request.previousViewport.scrollTop,
           request.targetPosition ?? undefined,
-          isCurrent
+          isCurrent,
+          tableHistoryFocusAdapter.read(view.state) ?? undefined
         );
         if (tableAttempt === 'retry') {
           pendingTableHistoryFocus = null;

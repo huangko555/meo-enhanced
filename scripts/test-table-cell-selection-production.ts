@@ -133,10 +133,28 @@ async function main() {
         values: Array.from(
           document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table-shell[data-test-table="0"] textarea')
         ).map((input) => input.value),
-        selected: document.querySelectorAll('.meo-md-html-table-cell-selected').length
+        selected: document.querySelectorAll('.meo-md-html-table-cell-selected').length,
+        active: document.activeElement?.tagName,
+        row: document.activeElement instanceof HTMLTextAreaElement
+          ? document.activeElement.dataset.tableRow ?? null
+          : null,
+        col: document.activeElement instanceof HTMLTextAreaElement
+          ? document.activeElement.dataset.tableCol ?? null
+          : null,
+        caret: document.activeElement instanceof HTMLTextAreaElement
+          ? document.activeElement.selectionStart
+          : null,
+        stickyClone: Boolean(document.activeElement?.closest('.meo-md-html-table-sticky-table'))
       }));
       if (JSON.stringify(restored.values) !== JSON.stringify(beforeDeleteKeys.values)) {
         throw new Error(`${key} clear was not restored by one undo step: ${JSON.stringify(restored)}`);
+      }
+      if (
+        restored.active !== 'TEXTAREA'
+        || restored.row !== expectedClearTarget.row || restored.col !== expectedClearTarget.col
+        || restored.caret !== 0 || restored.stickyClone
+      ) {
+        throw new Error(`${key} undo did not restore focus to the cleared rectangle's top-left cell: ${JSON.stringify(restored)}`);
       }
       await page.click('#outside');
       await page.waitForFunction((selector) => {
