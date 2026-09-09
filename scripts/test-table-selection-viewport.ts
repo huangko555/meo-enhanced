@@ -128,6 +128,14 @@ async function main(): Promise<void> {
     });
     await waitForFrames(page, 16);
     const afterDelete = await visibility();
+    const afterDeleteFocus = await page.evaluate(() => {
+      const active = document.activeElement;
+      return active instanceof HTMLTextAreaElement ? {
+        row: active.dataset.tableRow ?? null,
+        col: active.dataset.tableCol ?? null,
+        selectionStart: active.selectionStart
+      } : null;
+    });
 
     await moveSelectionUnderStickyHeader();
     const beforeUndo = await visibility();
@@ -154,9 +162,13 @@ async function main(): Promise<void> {
       };
     });
 
-    if (beforeDelete.visible || !afterDelete.visible || beforeUndo.visible || !afterUndo.visible) {
+    if (
+      beforeDelete.visible || !afterDelete.visible || beforeUndo.visible || !afterUndo.visible
+      || afterDeleteFocus?.row !== '2' || afterDeleteFocus.col !== '1'
+      || afterDeleteFocus.selectionStart !== 0
+    ) {
       throw new Error(`Offscreen multi-cell delete/undo did not minimally reveal its target: ${JSON.stringify({
-        beforeDelete, afterDelete, beforeUndo, afterUndo
+        beforeDelete, afterDelete, afterDeleteFocus, beforeUndo, afterUndo
       })}`);
     }
 
@@ -204,33 +216,36 @@ async function main(): Promise<void> {
       scrollTop: (window as any).__selectionViewportEditor.view.scrollDOM.scrollTop,
       rowCount: document.querySelectorAll('.meo-md-html-table tbody tr').length
     }));
+    const beforeEnterText = await page.evaluate(() => (window as any).__selectionViewportEditor.getText());
     await page.keyboard.press('Enter');
-    await page.waitForFunction(() => document.querySelectorAll('.meo-md-html-table tbody tr').length === 3);
     await waitForFrames(page, 24);
     const afterEnter = await page.evaluate(() => {
       const editor = (window as any).__selectionViewportEditor;
       const active = document.activeElement;
       const trace = (window as any).__tableEnterViewportTrace as Array<{ scrollTop: number }>;
       return {
+        text: editor.getText(),
+        rowCount: document.querySelectorAll('.meo-md-html-table tbody tr').length,
+        selectionLine: editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number,
         scrollTop: editor.view.scrollDOM.scrollTop,
         scrollSpan: Math.max(...trace.map((sample) => sample.scrollTop))
           - Math.min(...trace.map((sample) => sample.scrollTop)),
-        activeRow: active instanceof HTMLTextAreaElement ? active.dataset.tableRow : null,
-        activeCol: active instanceof HTMLTextAreaElement ? active.dataset.tableCol : null
+        activeTag: active?.tagName ?? null
       };
     });
     if (
-      afterEnter.activeRow !== '3' || afterEnter.activeCol !== '1' ||
-      Math.abs(afterEnter.scrollTop - beforeEnter.scrollTop) > 2 ||
-      afterEnter.scrollSpan > 2
+      afterEnter.text !== beforeEnterText || afterEnter.rowCount !== 2
+      || afterEnter.selectionLine !== 31 || afterEnter.activeTag === 'TEXTAREA'
+      || afterEnter.scrollSpan > 2
     ) {
-      throw new Error(`Enter inserted a row with a viewport jump: ${JSON.stringify({ beforeEnter, afterEnter })}`);
+      throw new Error(`Last-row Enter did not leave the table without changing Markdown: ${JSON.stringify({ beforeEnter, afterEnter })}`);
     }
 
     await page.evaluate(() => {
       const input = document.querySelector<HTMLTextAreaElement>(
-        '.meo-md-html-table textarea[data-table-row="3"][data-table-col="1"]'
+        '.meo-md-html-table textarea[data-table-row="2"][data-table-col="1"]'
       )!;
+      input.focus({ preventScroll: true });
       input.setSelectionRange(0, 0);
     });
     const beforeFinalTab = await page.evaluate(() => ({
@@ -244,7 +259,7 @@ async function main(): Promise<void> {
       return {
         scrollTop: editor.view.scrollDOM.scrollTop,
         stayedInFinalCell: active instanceof HTMLTextAreaElement
-          && active.dataset.tableRow === '3'
+          && active.dataset.tableRow === '2'
           && active.dataset.tableCol === '1'
       };
     });

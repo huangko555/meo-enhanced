@@ -526,18 +526,9 @@ async function main(): Promise<void> {
       const style = getComputedStyle(handle, '::after');
       return {
         content: style.content,
-        width: style.width,
-        opacity: style.opacity,
-        backgroundColor: style.backgroundColor
+        cursor: getComputedStyle(handle).cursor
       };
     });
-    const columnResizeAffordances = await page.$$eval(
-      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) [data-table-resize-column="0"]',
-      (handles) => handles.map((handle) => {
-        const style = getComputedStyle(handle, '::after');
-        return { opacity: style.opacity, backgroundColor: style.backgroundColor };
-      })
-    );
     const trustedMouseClick = async (selector: string) => {
       const point = await page.$eval(selector, (element) => {
         const rect = element.getBoundingClientRect();
@@ -589,17 +580,9 @@ async function main(): Promise<void> {
     assert.equal(result.tableUsesNormalContentLeft, true, 'the table must not move right to reserve trigger space');
     assert.equal(result.menuInsideViewport, true, 'the menu must remain inside the viewport');
     assert.deepEqual(resizeAffordance, {
-      content: '\"\"',
-      width: '3px',
-      opacity: '1',
-      backgroundColor: 'rgb(49, 109, 202)'
-    }, 'hovering a resizable table boundary must show a centered 3px blue guide');
-    assert.ok(
-      columnResizeAffordances.length > 1 && columnResizeAffordances.every((item) => (
-        item.opacity === '1' && item.backgroundColor === 'rgb(49, 109, 202)'
-      )),
-      `hovering one boundary must highlight that column through the full table height: ${JSON.stringify(columnResizeAffordances)}`
-    );
+      content: 'none',
+      cursor: 'col-resize'
+    }, 'table boundaries must remain resizable without drawing a blue guide');
     assert.ok(result.leadingControlCenterDelta <= 0.5, `close control is not centered between border and separator: ${result.leadingControlCenterDelta}px`);
     assert.ok(result.trailingControlCenterDelta <= 0.5, `page control is not centered between separator and border: ${result.trailingControlCenterDelta}px`);
     assert.equal(result.floating, 'absolute');

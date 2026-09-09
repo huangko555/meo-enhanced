@@ -1105,24 +1105,27 @@ async function main() {
       previous.destroy();
       document.getElementById('app')!.replaceChildren();
       const codeLines = Array.from({ length: 30 }, (_, index) => (
-        index === 18 ? '' : `const viewportCase${index + 1} = 'line ${index + 1}';`
+        index === 18 ? '  ' : `  const viewportCase${index + 1} = 'line ${index + 1}';`
       ));
       const editor = (window as any).CodeBlockLineNumbersHarness.createEditor({
         parent: document.getElementById('app')!,
-        text: ['```ts', ...codeLines, '```'].join('\n'),
+        text: ['- nested long code', '', '  ```ts', ...codeLines, '  ```'].join('\n'),
         initialMode: 'live',
         onApplyChanges() {}
       });
       (window as any).__codeBlockLineNumbersEditor = editor;
-      const blankLine = editor.view.state.doc.line(20);
+      const blankLine = editor.view.state.doc.line(22);
       editor.view.dispatch({ selection: { anchor: blankLine.from } });
       editor.view.contentDOM.focus({ preventScroll: true });
       (window as any).__firstKeyboardCodeLineNumber = null;
       document.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter') return;
         requestAnimationFrame(() => {
-          (window as any).__firstKeyboardCodeLineNumber = editor.view.contentDOM
-            .querySelector<HTMLElement>('.cm-activeLine')?.dataset.meoCodeLineNumber ?? '';
+          const activeLine = editor.view.contentDOM.querySelector<HTMLElement>('.cm-activeLine');
+          (window as any).__firstKeyboardCodeLineNumber = {
+            number: activeLine?.dataset.meoCodeLineNumber ?? '',
+            pseudoContent: activeLine ? getComputedStyle(activeLine, '::before').content : ''
+          };
         });
       }, { capture: true, once: true });
     });
@@ -1132,7 +1135,10 @@ async function main() {
     const firstKeyboardCodeLineNumber = await page.evaluate(() => (
       (window as any).__firstKeyboardCodeLineNumber
     ));
-    if (firstKeyboardCodeLineNumber !== '20') {
+    if (
+      firstKeyboardCodeLineNumber?.number !== '20'
+      || firstKeyboardCodeLineNumber.pseudoContent !== '"20"'
+    ) {
       throw new Error(`Keyboard Enter exposed an unnumbered code line on the first frame: ${JSON.stringify(firstKeyboardCodeLineNumber)}`);
     }
 

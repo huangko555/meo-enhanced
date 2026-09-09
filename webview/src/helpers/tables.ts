@@ -2373,7 +2373,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   selectionDomAnchor: { node: Node; offset: number } | null;
   measuredHeight: number;
   pendingContextMenuRestore: boolean;
-  pendingKeyboardRowInsertionFocus: PendingCellFocus | null;
   contextPage: TableContextPage;
   tableCaretRevealGeneration: number;
 
@@ -2401,7 +2400,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     this.selectionDomAnchor = null;
     this.measuredHeight = -1;
     this.pendingContextMenuRestore = false;
-    this.pendingKeyboardRowInsertionFocus = null;
     this.contextPage = 'structure';
     this.tableCaretRevealGeneration = 0;
     this.stickyHeaderAdapterFactory = stickyHeaderAdapterFactory;
@@ -3317,12 +3315,20 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const tableStartLine = currentRange
       ? view.state.doc.lineAt(currentRange.from).number
       : this.tableData.startLine;
+    const replacedInput = dom.querySelector<HTMLTextAreaElement>(
+      `textarea[data-table-row="${revealTarget.row}"][data-table-col="${revealTarget.col}"]`
+    );
     const confirmations = confirmation ? [confirmation] : [];
     executeTableCellCommitBoundary(confirmations, () => {
       if (!plan.transaction) return;
       for (const pending of confirmations) pending.applied = true;
       this.preserveTableCommandViewport(() => view.dispatch(plan.transaction!));
-      this.scheduleRevealCellAfterCommit(view, tableStartLine, revealTarget);
+      this.scheduleFocusCellAfterCommit(
+        view,
+        tableStartLine,
+        { ...revealTarget, caret: 0 },
+        replacedInput
+      );
     });
     return true;
   }
@@ -4117,46 +4123,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     requestAnimationFrame(() => focusCell());
   }
 
-  scheduleRevealCellAfterCommit(
-    view: EditorView,
-    tableStartLine: number,
-    target: CellCoords
-  ) {
-    const viewport = getViewportController(view);
-    const isRevealCurrent = viewport?.beginNavigationReveal() ?? (() => true);
-    let remainingFrames = 8;
-    const reveal = () => {
-      if (!isRevealCurrent()) return;
-      const cell = view.dom.querySelector<HTMLElement>(
-        `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${tableStartLine}"] ${tableCellSelector}[data-table-row="${target.row}"][data-table-col="${target.col}"]`
-      );
-      if (!cell) {
-        remainingFrames -= 1;
-        if (remainingFrames > 0) requestAnimationFrame(reveal);
-        return;
-      }
-      const readViewportBounds = () => tableUsableViewportBounds(view, cell);
-      const rect = cell.getBoundingClientRect();
-      const bounds = readViewportBounds();
-      if (rect.bottom > bounds.top && rect.top < bounds.bottom) return;
-      if (viewport) {
-        viewport.revealVerticalBounds(
-          () => isRevealCurrent() && cell.isConnected ? cell.getBoundingClientRect() : null,
-          isRevealCurrent,
-          { yMargin: 0, readViewportBounds }
-        );
-        return;
-      }
-      const delta = rect.bottom <= bounds.top
-        ? rect.top - bounds.top
-        : rect.top >= bounds.bottom
-          ? rect.bottom - bounds.bottom
-          : 0;
-      if (Math.abs(delta) >= 1) view.scrollDOM.scrollTop += delta;
-    };
-    requestAnimationFrame(reveal);
-  }
-
   revealTableCellCaretIfNeeded(input: HTMLTextAreaElement, isCurrent: () => boolean = () => true) {
     const view = this.view;
     if (!view || !isCurrent()) return;
@@ -4165,17 +4131,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       const revealGeneration = ++this.tableCaretRevealGeneration;
       const canReveal = () => isCurrent() && revealGeneration === this.tableCaretRevealGeneration;
       const inputContextMargin = visualLineContextMargin(view, 1);
-      const readUsableViewportBounds = () => {
-        const viewportRect = view.scrollDOM.getBoundingClientRect();
-        const stickyChrome = this.domRefs?.stickyChrome;
-        const stickyBottom = stickyChrome?.classList.contains('is-visible')
-          ? stickyChrome.getBoundingClientRect().bottom
-          : viewportRect.top;
-        return {
-          top: Math.max(viewportRect.top, stickyBottom),
-          bottom: viewportRect.bottom
-        };
-      };
+      const readUsableViewportBounds = () => tableUsableViewportBounds(view, input);
       let attempts = 0;
       const settle = () => {
         if (!canReveal() || !input.isConnected || attempts >= 8) return;
@@ -4200,13 +4156,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       settle();
     } else {
       const caret = tableCellCaretViewportBounds(input);
-      const viewportRect = view.scrollDOM.getBoundingClientRect();
-      const stickyChrome = this.domRefs?.stickyChrome;
-      const viewportTop = stickyChrome?.classList.contains('is-visible')
-        ? Math.max(viewportRect.top, stickyChrome.getBoundingClientRect().bottom)
-        : viewportRect.top;
+      const viewportRect = tableUsableViewportBounds(view, input);
       if (
-        caret.top >= viewportTop &&
+        caret.top >= viewportRect.top &&
         caret.bottom <= viewportRect.bottom
       ) return;
       input.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
@@ -4346,9 +4298,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   focusTargetAfterRowInsertion(insertAt: number, fallbackColumn: number): PendingCellFocus {
-    const keyboardTarget = this.pendingKeyboardRowInsertionFocus;
-    this.pendingKeyboardRowInsertionFocus = null;
-    if (keyboardTarget) return keyboardTarget;
     const active = document.activeElement;
     const activeCoords = active instanceof HTMLTextAreaElement && this.domRefs?.shell.contains(active)
       ? this.parseCellCoords(active.dataset.tableRow, active.dataset.tableCol)
@@ -4811,19 +4760,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         event.preventDefault();
         event.stopPropagation();
         this.moveVerticalOutOfTable(container, keyboard.direction, keyboard.column);
-        return;
-      }
-      if (keyboard?.type === 'insert-row-below') {
-        event.preventDefault();
-        event.stopPropagation();
-        this.setActionTarget({ row: rowIndex, col: colIndex });
-        const focusTarget = { row: rowIndex + 1, col: colIndex, caret: 0 };
-        this.pendingKeyboardRowInsertionFocus = focusTarget;
-        void this.requestTableCommand('insert-row-below', true).finally(() => {
-          if (this.pendingKeyboardRowInsertionFocus === focusTarget) {
-            this.pendingKeyboardRowInsertionFocus = null;
-          }
-        });
         return;
       }
       if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && (event.key === ']' || event.key === '[')) {

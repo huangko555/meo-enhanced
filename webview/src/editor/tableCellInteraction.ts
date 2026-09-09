@@ -34,7 +34,6 @@ export type TableCellKeyboardDecision =
   | { readonly type: 'pass-through' }
   | { readonly type: 'consume' }
   | { readonly type: 'insert-line-break' }
-  | { readonly type: 'insert-row-below' }
   | { readonly type: 'commit-and-exit' }
   | { readonly type: 'focus-cell'; readonly target: TableCellCoordinates; readonly caretColumn: number }
   | { readonly type: 'move-out-of-table'; readonly direction: 'up' | 'down'; readonly column: number };
@@ -111,7 +110,7 @@ function decideKeyboard(input: TableCellKeyboardInput): TableCellKeyboardDecisio
     if (input.row + 1 < input.rowCount) {
       return { type: 'focus-cell', target: { row: input.row + 1, col: input.col }, caretColumn: 0 };
     }
-    return { type: 'insert-row-below' };
+    return { type: 'move-out-of-table', direction: 'down', column: 0 };
   }
   if (input.key === 'Tab' && !primaryModifier && !input.altKey && !input.metaKey) {
     const direction = input.shiftKey ? -1 : 1;

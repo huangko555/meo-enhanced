@@ -115,8 +115,8 @@ assert(
   `Ordinary Enter did not explicitly choose the next row: ${JSON.stringify(enterNextRow)}`
 );
 assert(
-  key({ type: 'keyboard', input: { ...keyboardInput, row: 2, key: 'Enter' } })?.type === 'insert-row-below',
-  'Last-row Enter did not explicitly choose row insertion'
+  key({ type: 'keyboard', input: { ...keyboardInput, row: 2, key: 'Enter' } })?.type === 'move-out-of-table',
+  'Last-row Enter did not explicitly leave the table'
 );
 assert(key({ type: 'keyboard', input: { ...keyboardInput, key: 'Escape' } })?.type === 'commit-and-exit', 'Escape did not request one commit and exit');
 assert(key({ type: 'keyboard', input: { ...keyboardInput, key: 'ArrowLeft' } })?.type === 'pass-through', 'Ordinary horizontal navigation was stolen');

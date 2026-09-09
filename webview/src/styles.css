@@ -3292,11 +3292,11 @@ button:focus-visible > .menu-switch {
   }
 }
 
-.cm-editor.meo-mode-live .cm-line.meo-md-code-block.meo-md-code-line-numbered {
+.cm-editor.meo-mode-live .cm-line.meo-md-code-line-numbered {
   padding-left: calc(var(--meo-code-line-number-width) + 4ch);
 }
 
-.cm-editor.meo-mode-live .cm-line.meo-md-code-block.meo-md-code-line-numbered::before {
+.cm-editor.meo-mode-live .cm-line.meo-md-code-line-numbered::before {
   position: absolute;
   left: 1ch;
   box-sizing: content-box;
@@ -5084,25 +5084,6 @@ body.outline-resizing .preview-frame {
   width: 10px;
   cursor: col-resize !important;
   touch-action: none;
-}
-
-.cm-editor .meo-md-html-table-column-resize-handle::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 5px;
-  width: 3px;
-  transform: translateX(-50%);
-  background: #316dca;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.cm-editor .meo-md-html-table-column-resize-handle:hover::after,
-.cm-editor .meo-md-html-table-column-resize-handle.is-resizing::after,
-.cm-editor .meo-md-html-table-column-resize-handle.is-resize-column-highlighted::after {
-  opacity: 1;
 }
 
 .cm-editor .meo-md-html-table-wrap.is-table-overflowing {
