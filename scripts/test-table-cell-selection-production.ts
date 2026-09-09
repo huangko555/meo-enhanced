@@ -83,6 +83,13 @@ async function main() {
         document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table-shell[data-test-table="0"] textarea')
       ).map((input) => input.value)
     }));
+    const expectedClearTarget = await page.$eval(first, (preview) => {
+      const input = preview.closest('td')?.querySelector<HTMLTextAreaElement>('textarea');
+      return {
+        row: input?.dataset.tableRow ?? null,
+        col: input?.dataset.tableCol ?? null
+      };
+    });
     const assertSelectionCleared = async (key: 'Delete' | 'Backspace') => {
       const selectedBefore = await page.$$eval('.meo-md-html-table-cell-selected', (elements) => elements.length);
       if (selectedBefore !== 4) await drag(first, last);
@@ -96,10 +103,25 @@ async function main() {
       const cleared = await page.evaluate(() => ({
         text: (window as any).__selectionEditor.view.state.doc.toString(),
         selected: document.querySelectorAll('.meo-md-html-table-cell-selected').length,
-        active: document.activeElement?.tagName
+        active: document.activeElement?.tagName,
+        row: document.activeElement instanceof HTMLTextAreaElement
+          ? document.activeElement.dataset.tableRow ?? null
+          : null,
+        col: document.activeElement instanceof HTMLTextAreaElement
+          ? document.activeElement.dataset.tableCol ?? null
+          : null,
+        caret: document.activeElement instanceof HTMLTextAreaElement
+          ? document.activeElement.selectionStart
+          : null,
+        stickyClone: Boolean(document.activeElement?.closest('.meo-md-html-table-sticky-table'))
       }));
-      if (cleared.selected !== 4 || cleared.active !== 'TABLE' || !/^\| A&B \| <tag> \|/m.test(cleared.text)) {
-        throw new Error(`${key} did not atomically clear and retain the rectangular body selection: ${JSON.stringify(cleared)}`);
+      if (
+        cleared.selected !== 0 || cleared.active !== 'TEXTAREA'
+        || cleared.row !== expectedClearTarget.row || cleared.col !== expectedClearTarget.col
+        || cleared.caret !== 0 || cleared.stickyClone
+        || !/^\| A&B \| <tag> \|/m.test(cleared.text)
+      ) {
+        throw new Error(`${key} did not atomically clear the rectangle and focus its top-left cell: ${JSON.stringify(cleared)}`);
       }
       await page.keyboard.down('Control');
       await page.keyboard.press('KeyZ');

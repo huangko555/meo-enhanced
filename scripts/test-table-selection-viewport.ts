@@ -65,13 +65,15 @@ async function main(): Promise<void> {
       const rect = element.getBoundingClientRect();
       return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
     });
-    const start = await center(selector(2, 1));
-    const end = await center(selector(3, 2));
+    const start = await center(selector(3, 2));
+    const end = await center(selector(2, 1));
     await page.mouse.move(start.x, start.y);
     await page.mouse.down();
     await page.mouse.move(end.x, end.y, { steps: 5 });
     await page.mouse.up();
-    await page.waitForFunction(() => document.querySelectorAll('.meo-md-html-table-cell-selected').length === 4);
+    await waitForFrames(page, 4);
+    const selectedCount = await page.$$eval('.meo-md-html-table-cell-selected', (cells) => cells.length);
+    if (selectedCount !== 4) throw new Error(`Expected 4 selected cells, got ${selectedCount}`);
 
     const moveSelectionAboveViewport = async () => {
       await page.evaluate(() => {
@@ -133,7 +135,8 @@ async function main(): Promise<void> {
       return active instanceof HTMLTextAreaElement ? {
         row: active.dataset.tableRow ?? null,
         col: active.dataset.tableCol ?? null,
-        selectionStart: active.selectionStart
+        selectionStart: active.selectionStart,
+        stickyClone: Boolean(active.closest('.meo-md-html-table-sticky-table'))
       } : null;
     });
 
@@ -165,7 +168,7 @@ async function main(): Promise<void> {
     if (
       beforeDelete.visible || !afterDelete.visible || beforeUndo.visible || !afterUndo.visible
       || afterDeleteFocus?.row !== '2' || afterDeleteFocus.col !== '1'
-      || afterDeleteFocus.selectionStart !== 0
+      || afterDeleteFocus.selectionStart !== 0 || afterDeleteFocus.stickyClone
     ) {
       throw new Error(`Offscreen multi-cell delete/undo did not minimally reveal its target: ${JSON.stringify({
         beforeDelete, afterDelete, afterDeleteFocus, beforeUndo, afterUndo

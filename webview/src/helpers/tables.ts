@@ -3310,7 +3310,10 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       throw error;
     }
 
-    const revealTarget = selection.anchor ?? { row: range.fromRow, col: range.fromCol };
+    // Clearing a rectangular selection has one stable semantic target: its
+    // top-left cell. Unlike the pointer anchor, this remains predictable for
+    // both drag directions and is guaranteed to be one of the cleared cells.
+    const revealTarget = { row: range.fromRow, col: range.fromCol };
     const currentRange = this.resolveCurrentTableRange(view, dom);
     const tableStartLine = currentRange
       ? view.state.doc.lineAt(currentRange.from).number
