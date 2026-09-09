@@ -544,6 +544,16 @@ export function insertCodeBlock(view: EditorView, selection: { from: number; to:
 
 const sourceCodeBlockLine = Decoration.line({ class: 'meo-src-code-block' });
 
+export function codeBlockLineNumberDecoration(codeLineNumber: number, numberWidth: number) {
+  return Decoration.line({
+    class: 'meo-md-code-line-numbered',
+    attributes: {
+      'data-meo-code-line-number': String(codeLineNumber),
+      style: `--meo-code-line-number-width:${numberWidth}ch`
+    }
+  });
+}
+
 function computeSourceCodeBlockLines(state: EditorState): any {
   const ranges: any[] = [];
   currentSyntaxTree(state).iterate({
@@ -608,13 +618,7 @@ export function addCodeBlockLineNumbers(builder: any[], state: EditorState, node
   for (let lineNo = firstContentLine; lineNo <= lastContentLine; lineNo += 1) {
     const line = state.doc.line(lineNo);
     const codeLineNumber = lineNo - firstContentLine + 1;
-    builder.push(Decoration.line({
-      class: 'meo-md-code-line-numbered',
-      attributes: {
-        'data-meo-code-line-number': String(codeLineNumber),
-        style: `--meo-code-line-number-width:${numberWidth}ch`
-      }
-    }).range(line.from));
+    builder.push(codeBlockLineNumberDecoration(codeLineNumber, numberWidth).range(line.from));
   }
 }
 

@@ -1100,6 +1100,42 @@ async function main() {
       }
     }
 
+    await page.evaluate(() => {
+      const previous = (window as any).__codeBlockLineNumbersEditor;
+      previous.destroy();
+      document.getElementById('app')!.replaceChildren();
+      const codeLines = Array.from({ length: 30 }, (_, index) => (
+        index === 18 ? '' : `const viewportCase${index + 1} = 'line ${index + 1}';`
+      ));
+      const editor = (window as any).CodeBlockLineNumbersHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: ['```ts', ...codeLines, '```'].join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      (window as any).__codeBlockLineNumbersEditor = editor;
+      const blankLine = editor.view.state.doc.line(20);
+      editor.view.dispatch({ selection: { anchor: blankLine.from } });
+      editor.view.contentDOM.focus({ preventScroll: true });
+      (window as any).__firstKeyboardCodeLineNumber = null;
+      document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        requestAnimationFrame(() => {
+          (window as any).__firstKeyboardCodeLineNumber = editor.view.contentDOM
+            .querySelector<HTMLElement>('.cm-activeLine')?.dataset.meoCodeLineNumber ?? '';
+        });
+      }, { capture: true, once: true });
+    });
+    await waitForFrames(page, 4);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => (window as any).__firstKeyboardCodeLineNumber !== null);
+    const firstKeyboardCodeLineNumber = await page.evaluate(() => (
+      (window as any).__firstKeyboardCodeLineNumber
+    ));
+    if (firstKeyboardCodeLineNumber !== '20') {
+      throw new Error(`Keyboard Enter exposed an unnumbered code line on the first frame: ${JSON.stringify(firstKeyboardCodeLineNumber)}`);
+    }
+
     const firstFrameInputLineNumbers = await page.evaluate(async () => {
       const previous = (window as any).__codeBlockLineNumbersEditor;
       previous.destroy();
@@ -1139,10 +1175,15 @@ async function main() {
         });
         await frames(1);
         const insertedLine = editor.view.state.doc.lineAt(sourceLine.to + 1);
-        const mapped = editor.view.domAtPos(insertedLine.from);
-        const mappedElement = mapped.node instanceof Element ? mapped.node : mapped.node.parentElement;
-        const lineElement = mappedElement?.closest<HTMLElement>('.cm-line') ?? null;
-        return lineElement?.dataset.meoCodeLineNumber === '2';
+        const firstLineElement = editor.view.contentDOM.querySelector<HTMLElement>('.cm-activeLine');
+        editor.view.dispatch({
+          changes: { from: insertedLine.to, insert: '\n' },
+          selection: { anchor: insertedLine.to + 1 }
+        });
+        await frames(1);
+        const secondLineElement = editor.view.contentDOM.querySelector<HTMLElement>('.cm-activeLine');
+        return firstLineElement?.dataset.meoCodeLineNumber === '2'
+          && secondLineElement?.dataset.meoCodeLineNumber === '3';
       };
       const plainFirstFrame = await insertBlankLine('alpha');
       const textFirstFrame = await insertBlankLine('gamma');

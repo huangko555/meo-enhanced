@@ -18,6 +18,7 @@ import {
   addFenceOpeningLineMarker,
   addCodeLanguageLabel,
   addCodeBlockLineNumbers,
+  codeBlockLineNumberDecoration,
   addTopLineCopyButton,
   addTopLinePillLabel,
   addMermaidDiagram,
@@ -3111,6 +3112,87 @@ function retainLargeDocumentInputDecorations(
   return Decoration.set(retained, true);
 }
 
+function codeBlockAtInputPosition(tree: Tree, position: number): SyntaxNode | null {
+  for (const side of [-1, 1] as const) {
+    let node: SyntaxNode | null = tree.resolveInner(position, side);
+    while (node) {
+      if (node.name === 'FencedCode' || node.name === 'CodeBlock') return node;
+      node = node.parent;
+    }
+  }
+  return null;
+}
+
+/**
+ * Input-derived work intentionally waits for an idle frame, but a newline in a
+ * code block creates a visible line immediately. Project just that block's line
+ * decorations from the pre-input syntax tree so the first painted frame already
+ * has the correct gutter; the normal derived-work refresh remains authoritative.
+ */
+function projectInputCodeBlockLineNumbers(
+  decorations: DecorationSet,
+  transaction: Transaction
+): DecorationSet {
+  const startDocument = transaction.startState.doc;
+  const nextDocument = transaction.newDoc;
+  const tree = resolvedSyntaxTree(transaction.startState);
+  const projectedBlocks = new Set<string>();
+  let projected = decorations;
+
+  transaction.changes.iterChangedRanges((fromA, toA) => {
+    const lookupPosition = Math.min(fromA, startDocument.length);
+    const node = codeBlockAtInputPosition(tree, lookupPosition);
+    if (!node) return;
+
+    const startLine = startDocument.lineAt(node.from);
+    const endLine = startDocument.lineAt(Math.max(node.to - 1, node.from));
+    const lastChild = node.lastChild;
+    const hasClosingFence = node.name === 'FencedCode'
+      && lastChild?.name === 'CodeMark'
+      && startDocument.lineAt(lastChild.from).number === endLine.number;
+    const firstContentLine = node.name === 'FencedCode' ? startLine.number + 1 : startLine.number;
+    const lastContentLine = endLine.number - (hasClosingFence ? 1 : 0);
+    if (firstContentLine > lastContentLine) return;
+
+    const contentFrom = startDocument.line(firstContentLine).from;
+    const contentTo = startDocument.line(lastContentLine).to;
+    if (fromA < contentFrom || toA > contentTo) return;
+
+    const key = `${node.from}:${node.to}`;
+    if (projectedBlocks.has(key)) return;
+    projectedBlocks.add(key);
+
+    const mappedFrom = transaction.changes.mapPos(node.from, -1);
+    const mappedTo = transaction.changes.mapPos(node.to, 1);
+    const nextStartLine = nextDocument.lineAt(Math.min(mappedFrom, nextDocument.length));
+    const nextEndLine = nextDocument.lineAt(Math.max(mappedFrom, Math.min(mappedTo - 1, nextDocument.length)));
+    const nextFirstContentLine = node.name === 'FencedCode'
+      ? nextStartLine.number + 1
+      : nextStartLine.number;
+    const nextLastContentLine = nextEndLine.number - (hasClosingFence ? 1 : 0);
+    const lineCount = Math.max(0, nextLastContentLine - nextFirstContentLine + 1);
+    const numberWidth = Math.max(2, String(lineCount).length);
+    const additions: Range<Decoration>[] = [];
+    for (let lineNumber = nextFirstContentLine; lineNumber <= nextLastContentLine; lineNumber += 1) {
+      const line = nextDocument.line(lineNumber);
+      additions.push(codeBlockLineNumberDecoration(
+        lineNumber - nextFirstContentLine + 1,
+        numberWidth
+      ).range(line.from));
+    }
+
+    projected = projected.update({
+      filterFrom: nextStartLine.from,
+      filterTo: nextEndLine.to,
+      filter: (_from, _to, value) => value.spec.class !== 'meo-md-code-line-numbered',
+      add: additions,
+      sort: true
+    });
+  });
+
+  return projected;
+}
+
 const liveDecorationField = StateField.define<DecorationSet>({
   create(state: EditorState): DecorationSet {
     return safeBuildDecorations(state, Decoration.none, 'create');
@@ -3141,7 +3223,10 @@ const liveDecorationField = StateField.define<DecorationSet>({
                 add: [decoration.range(from, to)]
               });
             }, inputDecorations.map(transaction.changes))
-          : mapLiveInputDerivedDecorations(inputDecorations, transaction)
+          : projectInputCodeBlockLineNumbers(
+            mapLiveInputDerivedDecorations(inputDecorations, transaction),
+            transaction
+          )
         : inputDecorations;
     }
     // Explicit effects also refresh resources and presentation state. Only reuse
