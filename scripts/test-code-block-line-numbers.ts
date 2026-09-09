@@ -1100,6 +1100,130 @@ async function main() {
       }
     }
 
+    const firstFrameInputLineNumbers = await page.evaluate(async () => {
+      const previous = (window as any).__codeBlockLineNumbersEditor;
+      previous.destroy();
+      document.getElementById('app')!.replaceChildren();
+      const editor = (window as any).CodeBlockLineNumbersHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: [
+          '```', 'alpha', '```', '',
+          '```text', 'gamma', '```', '',
+          '```mermaid', 'graph TD', 'A-->B', '```', '',
+          '$$', 'x = 1', '$$'
+        ].join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      (window as any).__codeBlockLineNumbersEditor = editor;
+      const frames = async (count: number) => {
+        for (let index = 0; index < count; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      };
+      await frames(8);
+
+      const insertBlankLine = async (sourceText: string) => {
+        let sourceLine = null;
+        for (let lineNumber = 1; lineNumber <= editor.view.state.doc.lines; lineNumber += 1) {
+          const candidate = editor.view.state.doc.line(lineNumber);
+          if (candidate.text === sourceText) {
+            sourceLine = candidate;
+            break;
+          }
+        }
+        if (!sourceLine) return false;
+        editor.view.dispatch({
+          changes: { from: sourceLine.to, insert: '\n' },
+          selection: { anchor: sourceLine.to + 1 }
+        });
+        await frames(1);
+        const insertedLine = editor.view.state.doc.lineAt(sourceLine.to + 1);
+        const mapped = editor.view.domAtPos(insertedLine.from);
+        const mappedElement = mapped.node instanceof Element ? mapped.node : mapped.node.parentElement;
+        const lineElement = mappedElement?.closest<HTMLElement>('.cm-line') ?? null;
+        return lineElement?.dataset.meoCodeLineNumber === '2';
+      };
+      const plainFirstFrame = await insertBlankLine('alpha');
+      const textFirstFrame = await insertBlankLine('gamma');
+
+      const openSource = async (buttonSelector: string, sourceSelector: string) => {
+        for (let attempt = 0; attempt < 3 && !document.querySelector(sourceSelector); attempt += 1) {
+          document.querySelector<HTMLButtonElement>(buttonSelector)?.click();
+          await frames(2);
+        }
+      };
+      await openSource('.meo-mermaid-mode-btn', '.meo-mermaid-source-editor');
+      await openSource('.meo-latex-math-mode-btn', '.meo-latex-math-source-editor');
+
+      const readRenderedBlock = async (
+        rootSelector: string,
+        controllerKey: '__meoMermaidEditingController' | '__meoLatexMathEditingController',
+        insertedText: string
+      ) => {
+        const root = document.querySelector<HTMLElement>(rootSelector) as (HTMLElement & Record<string, any>) | null;
+        const innerView = root?.[controllerKey]?.innerView;
+        if (!root || !innerView) return { innerFirstFrame: false, outerFirstFrame: false };
+        const insertionAt = innerView.state.doc.line(1).to;
+        innerView.dispatch({
+          changes: { from: insertionAt, insert: `\n${insertedText}` },
+          selection: { anchor: insertionAt + insertedText.length + 1 }
+        });
+        await frames(1);
+        const read = () => {
+          const currentRoot = document.querySelector<HTMLElement>(rootSelector) as (HTMLElement & Record<string, any>) | null;
+          const currentInnerView = currentRoot?.[controllerKey]?.innerView;
+          if (!currentRoot || !currentInnerView) return null;
+          const innerNumbers = Array.from(currentRoot.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement'))
+            .filter((marker) => (
+              getComputedStyle(marker).visibility !== 'hidden'
+              && marker.getBoundingClientRect().height > 0
+            ))
+            .map((marker) => marker.textContent?.trim() ?? '')
+            .filter(Boolean);
+          const outerNumbers = Array.from(
+            editor.view.scrollDOM.querySelectorAll<HTMLElement>('.meo-rendered-block-document-line-number')
+          ).filter((marker) => currentRoot.getBoundingClientRect().top <= marker.getBoundingClientRect().top
+            && marker.getBoundingClientRect().top < currentRoot.getBoundingClientRect().bottom);
+          return { innerNumbers, outerCount: outerNumbers.length, lines: currentInnerView.state.doc.lines };
+        };
+        const firstFrame = read();
+        await frames(2);
+        const settled = read();
+        return {
+          innerFirstFrame: firstFrame?.innerNumbers.length === firstFrame?.lines,
+          outerFirstFrame: firstFrame?.outerCount === firstFrame?.lines,
+          firstFrame,
+          settled
+        };
+      };
+
+      return {
+        plainFirstFrame,
+        textFirstFrame,
+        mermaid: await readRenderedBlock(
+          '.meo-mermaid-editing-block',
+          '__meoMermaidEditingController',
+          'B-->C'
+        ),
+        math: await readRenderedBlock(
+          '.meo-latex-math-editing-block',
+          '__meoLatexMathEditingController',
+          'y = 2'
+        )
+      };
+    });
+    if (
+      !firstFrameInputLineNumbers.plainFirstFrame ||
+      !firstFrameInputLineNumbers.textFirstFrame ||
+      !firstFrameInputLineNumbers.mermaid.innerFirstFrame ||
+      !firstFrameInputLineNumbers.mermaid.outerFirstFrame ||
+      !firstFrameInputLineNumbers.math.innerFirstFrame ||
+      !firstFrameInputLineNumbers.math.outerFirstFrame
+    ) {
+      throw new Error(`New block lines did not have line numbers in the first visible frame: ${JSON.stringify(firstFrameInputLineNumbers)}`);
+    }
+
     console.log('code block line number checks passed');
   } finally {
     await browser.close();

@@ -9,6 +9,7 @@ import { consumeEditorHistoryCommand } from './historyCommands';
 import { attachLatexMathViewport, type LatexMathViewportController } from './latexMathViewport';
 import {
   markLiveInputNestedProjection,
+  replaceLiveInputNestedDecoration,
   supersedeLiveInputDerivedWork
 } from '../editor/liveInputDerivedWork';
 import {
@@ -473,6 +474,7 @@ class LatexMathEditingController {
   private outerView: EditorView;
   private block: LatexMathEditingBlock;
   private mode: Exclude<LatexMathBlockMode, 'preview'>;
+  private searchReveal: LatexMathSearchReveal;
   private root: LatexMathEditingBlockElement;
   private sourceHost: HTMLElement;
   private innerView: EditorView;
@@ -491,6 +493,7 @@ class LatexMathEditingController {
     this.outerView = outerView;
     this.block = block;
     this.mode = mode;
+    this.searchReveal = searchReveal;
     this.root = document.createElement('div') as LatexMathEditingBlockElement;
     this.root.className = 'meo-latex-math-editing-block meo-rendered-block-mode-shell';
     this.root.setAttribute('role', 'region');
@@ -542,9 +545,23 @@ class LatexMathEditingController {
               (current, transaction) => transaction.annotation(Transaction.userEvent) ?? current,
               undefined
             ) ?? 'input';
-            this.block = { ...this.block, contentTo: contentFrom + sourceText.length, sourceText };
+            const nextBlock = {
+              ...this.block,
+              contentTo: contentFrom + sourceText.length,
+              sourceText
+            };
+            this.block = nextBlock;
             this.outerView.dispatch({
               changes: { from: contentFrom, to: contentTo, insert: sourceText },
+              effects: replaceLiveInputNestedDecoration(
+                nextBlock.contentFrom,
+                nextBlock.contentTo,
+                Decoration.replace({
+                  widget: new LatexMathEditingWidget(nextBlock, this.mode, this.searchReveal),
+                  block: true,
+                  inclusive: true
+                })
+              ),
               annotations: [
                 Transaction.userEvent.of(userEvent),
                 markLiveInputNestedProjection()
@@ -647,6 +664,7 @@ class LatexMathEditingController {
     }
     this.outerView = outerView;
     this.block = block;
+    this.searchReveal = searchReveal;
     const currentText = this.innerView.state.doc.toString();
     if (currentText !== block.sourceText) {
       this.syncingFromOuter = true;
