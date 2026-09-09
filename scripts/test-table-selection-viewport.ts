@@ -1,0 +1,267 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
+
+const repoRoot = path.resolve(import.meta.dir, '..');
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-table-selection-viewport-'));
+
+async function waitForFrames(page: import('puppeteer-core').Page, count = 12): Promise<void> {
+  await page.evaluate(async (frameCount) => {
+    for (let index = 0; index < frameCount; index += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  }, count);
+}
+
+async function main(): Promise<void> {
+  const build = await Bun.build({
+    entrypoints: [path.join(repoRoot, 'scripts', 'test-live-embedded-input-viewport-entry.ts')],
+    outdir: tempDir,
+    target: 'browser',
+    format: 'iife',
+    naming: 'bundle.js'
+  });
+  if (!build.success) throw new Error(build.logs.map(String).join('\n'));
+
+  const browser = await launchTestBrowser();
+  let primaryError: unknown;
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1000, height: 600, deviceScaleFactor: 1 });
+    await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
+    await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+    await page.addStyleTag({
+      content: ':root{--meo-background:#24292e;--meo-foreground:#e6edf3;--meo-code-background:#1b1f23;--meo-surface-background:#24292e;--meo-semantic-mutedForeground:#8b949e;--meo-font-live:Arial;--meo-font-live-weight:400;--meo-font-live-size:16px;--meo-font-source:monospace;--meo-font-source-weight:400;--meo-font-source-size:14px;--vscode-editor-font-family:monospace;--vscode-editor-font-size:14px;--vscode-editor-line-height:20px}'
+    });
+    await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+    await page.evaluate(() => {
+      const rows = Array.from({ length: 12 }, (_, index) => {
+        const row = String(index + 1).padStart(2, '0');
+        return `| ${row} | A${row} | B${row} |`;
+      });
+      const text = [
+        ...Array.from({ length: 35 }, (_, index) => `Before ${index + 1}`),
+        '',
+        '| Row | A | B |',
+        '| --- | --- | --- |',
+        ...rows,
+        '',
+        ...Array.from({ length: 35 }, (_, index) => `After ${index + 1}`)
+      ].join('\n');
+      (window as any).__selectionViewportEditor = (window as any).EmbeddedInputViewportHarness.createEditor({
+        parent: document.getElementById('app')!, text, initialMode: 'live', onApplyChanges() {}
+      });
+      (window as any).__selectionViewportEditor.scrollToLine(39, 'center');
+    });
+    await page.waitForFunction(() => document.querySelectorAll('.meo-md-html-table-shell').length > 0);
+    const renderedRowCount = await page.$$eval('.meo-md-html-table tbody tr', (rows) => rows.length);
+    if (renderedRowCount !== 12) throw new Error(`Expected 12 rendered table rows, got ${renderedRowCount}`);
+
+    const selector = (row: number, col: number) => (
+      `.meo-md-html-table tbody td[data-table-row="${row}"][data-table-col="${col}"] .meo-md-html-table-cell-preview`
+    );
+    const center = async (query: string) => page.$eval(query, (element) => {
+      const rect = element.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    });
+    const start = await center(selector(2, 1));
+    const end = await center(selector(3, 2));
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForFunction(() => document.querySelectorAll('.meo-md-html-table-cell-selected').length === 4);
+
+    const moveSelectionAboveViewport = async () => {
+      await page.evaluate(() => {
+        const editor = (window as any).__selectionViewportEditor;
+        const cell = document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="1"]')!;
+        const viewport = editor.view.scrollDOM.getBoundingClientRect();
+        const rect = cell.getBoundingClientRect();
+        editor.view.scrollDOM.scrollTop += rect.bottom - viewport.top + 100;
+      });
+      await waitForFrames(page, 4);
+    };
+    const moveSelectionUnderStickyHeader = async () => {
+      await page.evaluate(() => {
+        const editor = (window as any).__selectionViewportEditor;
+        const cell = document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="1"]')!;
+        const viewport = editor.view.scrollDOM.getBoundingClientRect();
+        editor.view.scrollDOM.scrollTop += cell.getBoundingClientRect().bottom - viewport.top + 20;
+      });
+      await waitForFrames(page, 8);
+      await page.evaluate(() => {
+        const editor = (window as any).__selectionViewportEditor;
+        const cell = document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="1"]')!;
+        const sticky = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome.is-visible');
+        if (!sticky) throw new Error('Sticky header did not become visible');
+        editor.view.scrollDOM.scrollTop += cell.getBoundingClientRect().bottom
+          - sticky.getBoundingClientRect().bottom + 4;
+      });
+      await waitForFrames(page, 4);
+    };
+    const visibility = async () => page.evaluate(() => {
+      const editor = (window as any).__selectionViewportEditor;
+      const cell = document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="1"]');
+      const sticky = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome.is-visible');
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      const rect = cell?.getBoundingClientRect() ?? null;
+      const usableTop = Math.max(viewport.top, sticky?.getBoundingClientRect().bottom ?? viewport.top);
+      return {
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        top: rect?.top ?? null,
+        bottom: rect?.bottom ?? null,
+        usableTop,
+        viewportBottom: viewport.bottom,
+        visible: Boolean(rect && rect.bottom > usableTop && rect.top < viewport.bottom),
+        active: document.activeElement?.tagName ?? null
+      };
+    });
+
+    await moveSelectionAboveViewport();
+    const beforeDelete = await visibility();
+    await page.keyboard.press('Delete');
+    await page.waitForFunction(() => {
+      const editor = (window as any).__selectionViewportEditor;
+      return !editor.getText().includes('A02') && !editor.getText().includes('B03');
+    });
+    await waitForFrames(page, 16);
+    const afterDelete = await visibility();
+
+    await moveSelectionUnderStickyHeader();
+    const beforeUndo = await visibility();
+    await page.keyboard.down('Control');
+    await page.keyboard.press('z');
+    await page.keyboard.up('Control');
+    await page.waitForFunction(() => (window as any).__selectionViewportEditor.getText().includes('A02'));
+    await waitForFrames(page, 20);
+    const afterUndo = await page.evaluate(() => {
+      const editor = (window as any).__selectionViewportEditor;
+      const active = document.activeElement;
+      const sticky = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome.is-visible');
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      const rect = active instanceof HTMLTextAreaElement ? active.getBoundingClientRect() : null;
+      const usableTop = Math.max(viewport.top, sticky?.getBoundingClientRect().bottom ?? viewport.top);
+      return {
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        value: active instanceof HTMLTextAreaElement ? active.value : null,
+        top: rect?.top ?? null,
+        bottom: rect?.bottom ?? null,
+        usableTop,
+        viewportBottom: viewport.bottom,
+        visible: Boolean(rect && rect.bottom > usableTop && rect.top < viewport.bottom)
+      };
+    });
+
+    if (beforeDelete.visible || !afterDelete.visible || beforeUndo.visible || !afterUndo.visible) {
+      throw new Error(`Offscreen multi-cell delete/undo did not minimally reveal its target: ${JSON.stringify({
+        beforeDelete, afterDelete, beforeUndo, afterUndo
+      })}`);
+    }
+
+    await page.evaluate(() => {
+      (window as any).__selectionViewportEditor.destroy();
+      const text = [
+        ...Array.from({ length: 25 }, (_, index) => `Before Enter ${index + 1}`),
+        '',
+        '| A | B |',
+        '| --- | --- |',
+        '| one | two |',
+        '| three | four |',
+        '',
+        ...Array.from({ length: 30 }, (_, index) => `After Enter ${index + 1}`)
+      ].join('\n');
+      (window as any).__selectionViewportEditor = (window as any).EmbeddedInputViewportHarness.createEditor({
+        parent: document.getElementById('app')!, text, initialMode: 'live', onApplyChanges() {}
+      });
+      (window as any).__selectionViewportEditor.scrollToLine(30, 'center');
+    });
+    await page.waitForFunction(() => document.querySelectorAll('.meo-md-html-table tbody tr').length === 2);
+    await page.evaluate(() => {
+      const editor = (window as any).__selectionViewportEditor;
+      const input = document.querySelector<HTMLTextAreaElement>(
+        '.meo-md-html-table textarea[data-table-row="2"][data-table-col="1"]'
+      )!;
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      const rect = input.getBoundingClientRect();
+      editor.view.scrollDOM.scrollTop += rect.bottom - (viewport.bottom - 100);
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(input.value.length, input.value.length);
+      (window as any).__tableEnterViewportTrace = [];
+      const sample = () => {
+        const active = document.activeElement;
+        (window as any).__tableEnterViewportTrace.push({
+          scrollTop: editor.view.scrollDOM.scrollTop,
+          activeRow: active instanceof HTMLTextAreaElement ? active.dataset.tableRow : null,
+          activeCol: active instanceof HTMLTextAreaElement ? active.dataset.tableCol : null
+        });
+        if ((window as any).__tableEnterViewportTrace.length < 80) requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    const beforeEnter = await page.evaluate(() => ({
+      scrollTop: (window as any).__selectionViewportEditor.view.scrollDOM.scrollTop,
+      rowCount: document.querySelectorAll('.meo-md-html-table tbody tr').length
+    }));
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => document.querySelectorAll('.meo-md-html-table tbody tr').length === 3);
+    await waitForFrames(page, 24);
+    const afterEnter = await page.evaluate(() => {
+      const editor = (window as any).__selectionViewportEditor;
+      const active = document.activeElement;
+      const trace = (window as any).__tableEnterViewportTrace as Array<{ scrollTop: number }>;
+      return {
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        scrollSpan: Math.max(...trace.map((sample) => sample.scrollTop))
+          - Math.min(...trace.map((sample) => sample.scrollTop)),
+        activeRow: active instanceof HTMLTextAreaElement ? active.dataset.tableRow : null,
+        activeCol: active instanceof HTMLTextAreaElement ? active.dataset.tableCol : null
+      };
+    });
+    if (
+      afterEnter.activeRow !== '3' || afterEnter.activeCol !== '1' ||
+      Math.abs(afterEnter.scrollTop - beforeEnter.scrollTop) > 2 ||
+      afterEnter.scrollSpan > 2
+    ) {
+      throw new Error(`Enter inserted a row with a viewport jump: ${JSON.stringify({ beforeEnter, afterEnter })}`);
+    }
+
+    await page.evaluate(() => {
+      const input = document.querySelector<HTMLTextAreaElement>(
+        '.meo-md-html-table textarea[data-table-row="3"][data-table-col="1"]'
+      )!;
+      input.setSelectionRange(0, 0);
+    });
+    const beforeFinalTab = await page.evaluate(() => ({
+      scrollTop: (window as any).__selectionViewportEditor.view.scrollDOM.scrollTop
+    }));
+    await page.keyboard.press('Tab');
+    await waitForFrames(page, 4);
+    const afterFinalTab = await page.evaluate(() => {
+      const editor = (window as any).__selectionViewportEditor;
+      const active = document.activeElement;
+      return {
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        stayedInFinalCell: active instanceof HTMLTextAreaElement
+          && active.dataset.tableRow === '3'
+          && active.dataset.tableCol === '1'
+      };
+    });
+    if (
+      !afterFinalTab.stayedInFinalCell ||
+      Math.abs(afterFinalTab.scrollTop - beforeFinalTab.scrollTop) > 1
+    ) {
+      throw new Error(`Tab escaped the final table cell: ${JSON.stringify({ beforeFinalTab, afterFinalTab })}`);
+    }
+    console.log('table selection viewport checks passed');
+  } catch (error) {
+    primaryError = error;
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    if (primaryError === undefined) await closeTestBrowser(browser);
+    else await closeTestBrowser(browser, primaryError);
+  }
+}
+
+await main();

@@ -44,7 +44,7 @@ async function main(): Promise<void> {
         --meo-color-base01: #d7dde5;
         --meo-color-base02: #8c98a5;
         --meo-color-base03: #444c56;
-        --meo-semantic-tableSelectionBorder: #58a6ff;
+        --meo-semantic-tableSelectionBorder: #316dca;
       }
       body { margin: 0; background: #20252b; }
       #app { width: 780px; height: 580px; }
@@ -231,6 +231,8 @@ async function main(): Promise<void> {
       const bodyRowStillInViewportWhenOccluded = occludedRowRect.bottom > occludedViewportRect.top + 0.5;
       const bodyRowFullyBehindStickyHeader = occludedRowRect.bottom <= occludingStickyRect.bottom + 0.5;
       const bodyRowControlsHiddenByStickyHeader = trigger.hidden && menu.hidden;
+      const occludedTriggerStyle = getComputedStyle(trigger);
+      const bodyRowTriggerActuallyHidden = occludedTriggerStyle.display === 'none';
       editor.view.scrollDOM.dispatchEvent(new WheelEvent('wheel', { deltaY: -80, bubbles: true }));
       editor.view.scrollDOM.scrollTop = scrollBeforeStickyOcclusion;
       await frames(6);
@@ -429,6 +431,7 @@ async function main(): Promise<void> {
         bodyRowStillInViewportWhenOccluded,
         bodyRowFullyBehindStickyHeader,
         bodyRowControlsHiddenByStickyHeader,
+        bodyRowTriggerActuallyHidden,
         triggerFollowsCaretLine,
         triggerHiddenWithStickyHeader,
         menuClosedWithStickyHeader,
@@ -528,6 +531,13 @@ async function main(): Promise<void> {
         backgroundColor: style.backgroundColor
       };
     });
+    const columnResizeAffordances = await page.$$eval(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) [data-table-resize-column="0"]',
+      (handles) => handles.map((handle) => {
+        const style = getComputedStyle(handle, '::after');
+        return { opacity: style.opacity, backgroundColor: style.backgroundColor };
+      })
+    );
     const trustedMouseClick = async (selector: string) => {
       const point = await page.$eval(selector, (element) => {
         const rect = element.getBoundingClientRect();
@@ -582,8 +592,14 @@ async function main(): Promise<void> {
       content: '\"\"',
       width: '3px',
       opacity: '1',
-      backgroundColor: 'rgb(88, 166, 255)'
+      backgroundColor: 'rgb(49, 109, 202)'
     }, 'hovering a resizable table boundary must show a centered 3px blue guide');
+    assert.ok(
+      columnResizeAffordances.length > 1 && columnResizeAffordances.every((item) => (
+        item.opacity === '1' && item.backgroundColor === 'rgb(49, 109, 202)'
+      )),
+      `hovering one boundary must highlight that column through the full table height: ${JSON.stringify(columnResizeAffordances)}`
+    );
     assert.ok(result.leadingControlCenterDelta <= 0.5, `close control is not centered between border and separator: ${result.leadingControlCenterDelta}px`);
     assert.ok(result.trailingControlCenterDelta <= 0.5, `page control is not centered between separator and border: ${result.trailingControlCenterDelta}px`);
     assert.equal(result.floating, 'absolute');
@@ -611,6 +627,7 @@ async function main(): Promise<void> {
     assert.equal(result.bodyRowStillInViewportWhenOccluded, true, 'the sticky-header fixture must not scroll the row out of the viewport');
     assert.equal(result.bodyRowFullyBehindStickyHeader, true, 'the active body row must be fully covered by the sticky header');
     assert.equal(result.bodyRowControlsHiddenByStickyHeader, true, 'controls must hide once the sticky header fully covers their active row');
+    assert.equal(result.bodyRowTriggerActuallyHidden, true, 'the hidden trigger must not remain painted over a sticky header');
     assert.equal(result.initialMenuFitsOnBothSides, true, 'the below-placement fixture must have room on both sides');
     assert.equal(result.menuPrefersBelowWhenBothFit, true, 'the expanded toolbar must prefer the active row\'s lower side');
     assert.equal(result.defaultPage, 'structure');

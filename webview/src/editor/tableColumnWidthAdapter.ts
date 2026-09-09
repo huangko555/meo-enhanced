@@ -452,6 +452,8 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     let dragLayoutFactsDirty = false;
     let initialResizePending = true;
     let projectedContainerWidth: number | null = null;
+    let hoveredGuideColumn: number | null = null;
+    let draggedGuideColumn: number | null = null;
     table.dataset.tableColumnWidthOwner = 'adapter';
     acquireStartupBaseline(table);
     const committedIntent = findIntent(table, true);
@@ -477,6 +479,15 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       && isCurrentEpoch(epoch)
       && table.isConnected
       && options.root.contains(table);
+    const updateColumnGuide = () => {
+      for (const candidate of table.querySelectorAll<HTMLElement>(handleSelector)) {
+        const column = Number(candidate.dataset.tableResizeColumn);
+        candidate.classList.toggle(
+          'is-resize-column-highlighted',
+          column === draggedGuideColumn || column === hoveredGuideColumn
+        );
+      }
+    };
     const scheduleProjection = (entries: readonly ResizeObserverEntry[]) => {
       if (!isCurrentBinding()) return;
       // observe() always delivers the current size once. The binding was
@@ -578,6 +589,8 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         pointerBoundary.removeEventListener('lostpointercapture', finish);
         pointerBoundary.classList.remove(resizingClassName);
         handle.classList.remove('is-resizing');
+        draggedGuideColumn = null;
+        updateColumnGuide();
         if (pointerBoundary.hasPointerCapture?.(event.pointerId)) {
           pointerBoundary.releasePointerCapture(event.pointerId);
         }
@@ -618,6 +631,8 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       dragCleanup = removeDragListeners;
       pointerBoundary.classList.add(resizingClassName);
       handle.classList.add('is-resizing');
+      draggedGuideColumn = column;
+      updateColumnGuide();
       window.addEventListener('pointermove', move, true);
       window.addEventListener('pointerup', finish, true);
       window.addEventListener('pointercancel', finish, true);
@@ -631,9 +646,32 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     };
 
     const handleRoot = table.closest<HTMLElement>('.meo-md-html-table-shell') ?? table;
+    const updateHoveredGuide = (event: PointerEvent) => {
+      const handle = event.target instanceof Element
+        ? event.target.closest<HTMLElement>(handleSelector)
+        : null;
+      const nextColumn = handle && table.contains(handle)
+        ? Number(handle.dataset.tableResizeColumn)
+        : null;
+      const normalized = nextColumn !== null && Number.isInteger(nextColumn) ? nextColumn : null;
+      if (normalized === hoveredGuideColumn) return;
+      hoveredGuideColumn = normalized;
+      updateColumnGuide();
+    };
+    const clearHoveredGuide = () => {
+      if (hoveredGuideColumn === null) return;
+      hoveredGuideColumn = null;
+      updateColumnGuide();
+    };
     // Capture before the passive Sticky Header layer can consume cloned-cell events.
     handleRoot.addEventListener('pointerdown', start, true);
+    handleRoot.addEventListener('pointerover', updateHoveredGuide, true);
+    handleRoot.addEventListener('pointerout', updateHoveredGuide, true);
+    handleRoot.addEventListener('pointerleave', clearHoveredGuide);
     cleanups.push(() => handleRoot.removeEventListener('pointerdown', start, true));
+    cleanups.push(() => handleRoot.removeEventListener('pointerover', updateHoveredGuide, true));
+    cleanups.push(() => handleRoot.removeEventListener('pointerout', updateHoveredGuide, true));
+    cleanups.push(() => handleRoot.removeEventListener('pointerleave', clearHoveredGuide));
 
     if (typeof ResizeObserver !== 'undefined') {
       const observer = new ResizeObserver(scheduleProjection);

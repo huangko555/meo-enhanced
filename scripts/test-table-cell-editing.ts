@@ -106,7 +106,7 @@ assert(
   tabTarget?.type === 'focus-cell' && tabTarget.caretColumn === 0,
   `Tab did not move to the start of the next cell: ${JSON.stringify(tabTarget)}`
 );
-assert(key({ type: 'keyboard', input: { ...keyboardInput, row: 2, col: 1, key: 'Tab' } })?.type === 'pass-through', 'Last Tab tried to add or wrap a row');
+assert(key({ type: 'keyboard', input: { ...keyboardInput, row: 2, col: 1, key: 'Tab' } })?.type === 'consume', 'Last Tab was not blocked in the final cell');
 assert(key({ type: 'keyboard', input: { ...keyboardInput, row: 0, col: 0, key: 'Tab', shiftKey: true } })?.type === 'pass-through', 'First Shift+Tab moved outside explicitly');
 assert(key({ type: 'keyboard', input: { ...keyboardInput, key: 'Enter', shiftKey: true } })?.type === 'insert-line-break', 'Shift+Enter did not insert a line break');
 const enterNextRow = key({ type: 'keyboard', input: { ...keyboardInput, key: 'Enter' } });

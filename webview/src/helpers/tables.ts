@@ -370,6 +370,37 @@ function stabilizeHistoryScrollTop(
   }
 }
 
+function tableUsableViewportBounds(view: EditorView, element: Element) {
+  const viewport = view.scrollDOM.getBoundingClientRect();
+  const shell = element.closest('.meo-md-html-table-shell');
+  const stickyChrome = shell?.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome.is-visible')
+    ?? view.dom.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome.is-visible');
+  const table = element.closest<HTMLTableElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
+  const tableRect = table?.getBoundingClientRect();
+  const headerRect = table?.tHead?.getBoundingClientRect();
+  const elementRect = element.getBoundingClientRect();
+  // History restoration can run in the same checkpoint that replaces the
+  // table, before the Sticky adapter has marked the new clone visible. Infer
+  // the reserved header band from the primary table during that brief gap.
+  const bodyOverlapsStickyBand = Boolean(
+    headerRect && element.closest('tbody')
+    && elementRect.top < viewport.top + headerRect.height
+  );
+  const inferredStickyBottom = tableRect && headerRect
+    && tableRect.bottom > viewport.top
+    && (headerRect.bottom <= viewport.top || bodyOverlapsStickyBand)
+    ? viewport.top + headerRect.height
+    : viewport.top;
+  return {
+    top: Math.max(
+      viewport.top,
+      stickyChrome?.getBoundingClientRect().bottom ?? viewport.top,
+      inferredStickyBottom
+    ),
+    bottom: viewport.bottom
+  };
+}
+
 export function focusTableHistoryChange(
   view: EditorView,
   changed: { from: number; to: number },
@@ -440,12 +471,35 @@ export function focusTableHistoryChange(
     const cell = input.closest<HTMLElement>(tableCellSelector);
     if (!cell) return 'restored' as const;
     const scrollerRect = view.scrollDOM.getBoundingClientRect();
+    const usableViewport = tableUsableViewportBounds(view, cell);
     const caretRect = tableCellCaretViewportBounds(input);
     const caretTop = caretRect.top - scrollerRect.top + view.scrollDOM.scrollTop;
     const caretBottom = caretRect.bottom - scrollerRect.top + view.scrollDOM.scrollTop;
     const historyContextMargin = visualLineContextMargin(view, 2.5);
+    const primaryTable = cell.closest<HTMLTableElement>(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table)'
+    );
+    const primaryTableRect = primaryTable?.getBoundingClientRect();
+    const headerRect = primaryTable?.tHead?.getBoundingClientRect();
+    const headerBottomInScrollContent = headerRect
+      ? headerRect.bottom - scrollerRect.top + view.scrollDOM.scrollTop
+      : null;
+    const tableBottomInScrollContent = primaryTableRect
+      ? primaryTableRect.bottom - scrollerRect.top + view.scrollDOM.scrollTop
+      : null;
+    const previousStickyHeight = headerRect
+      && headerBottomInScrollContent !== null
+      && tableBottomInScrollContent !== null
+      && headerBottomInScrollContent <= previousScrollTop + tableCellCaretRevealEpsilon
+      && tableBottomInScrollContent > previousScrollTop
+      ? headerRect.height
+      : 0;
+    const previousUsableTop = previousScrollTop + Math.max(
+      previousStickyHeight,
+      usableViewport.top - scrollerRect.top
+    );
     const caretWasVisible = (
-      caretTop >= previousScrollTop - tableCellCaretRevealEpsilon &&
+      caretTop >= previousUsableTop - tableCellCaretRevealEpsilon &&
       caretBottom <= previousScrollTop + view.scrollDOM.clientHeight + tableCellCaretRevealEpsilon
     );
     if (caretWasVisible) {
@@ -456,17 +510,29 @@ export function focusTableHistoryChange(
       return 'restored' as const;
     }
     const caretIsVisible = (
-      caretRect.top >= scrollerRect.top - tableCellCaretRevealEpsilon &&
-      caretRect.bottom <= scrollerRect.bottom + tableCellCaretRevealEpsilon
+      caretRect.top >= usableViewport.top - tableCellCaretRevealEpsilon &&
+      caretRect.bottom <= usableViewport.bottom + tableCellCaretRevealEpsilon
     );
     if (!caretIsVisible) {
       const viewportController = getViewportController(view);
       const isNavigationCurrent = viewportController?.beginNavigationReveal();
       if (viewportController && isNavigationCurrent) {
         const canReveal = () => isCurrent() && isNavigationCurrent();
-        viewportController.revealElement(cell, canReveal, { yMargin: historyContextMargin });
+        viewportController.revealVerticalBounds(
+          () => canReveal() && input.isConnected ? tableCellCaretViewportBounds(input) : null,
+          canReveal,
+          {
+            yMargin: historyContextMargin,
+            readViewportBounds: () => tableUsableViewportBounds(view, cell)
+          }
+        );
       } else {
-        input.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+        const delta = caretRect.top < usableViewport.top
+          ? caretRect.top - usableViewport.top - historyContextMargin
+          : caretRect.bottom > usableViewport.bottom
+            ? caretRect.bottom - usableViewport.bottom + historyContextMargin
+            : 0;
+        if (Math.abs(delta) >= 1) view.scrollDOM.scrollTop += delta;
       }
       return 'retry' as const;
     }
@@ -3217,7 +3283,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   clearSelectedCellContents(): boolean {
-    const range = this.cellSelection.snapshot().range;
+    const selection = this.cellSelection.snapshot();
+    const range = selection.range;
     const view = this.view;
     const dom = this.domRefs?.wrap;
     if (!range || !view || !dom) return false;
@@ -3245,11 +3312,17 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       throw error;
     }
 
+    const revealTarget = selection.anchor ?? { row: range.fromRow, col: range.fromCol };
+    const currentRange = this.resolveCurrentTableRange(view, dom);
+    const tableStartLine = currentRange
+      ? view.state.doc.lineAt(currentRange.from).number
+      : this.tableData.startLine;
     const confirmations = confirmation ? [confirmation] : [];
     executeTableCellCommitBoundary(confirmations, () => {
       if (!plan.transaction) return;
       for (const pending of confirmations) pending.applied = true;
       this.preserveTableCommandViewport(() => view.dispatch(plan.transaction!));
+      this.scheduleRevealCellAfterCommit(view, tableStartLine, revealTarget);
     });
     return true;
   }
@@ -4044,6 +4117,46 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     requestAnimationFrame(() => focusCell());
   }
 
+  scheduleRevealCellAfterCommit(
+    view: EditorView,
+    tableStartLine: number,
+    target: CellCoords
+  ) {
+    const viewport = getViewportController(view);
+    const isRevealCurrent = viewport?.beginNavigationReveal() ?? (() => true);
+    let remainingFrames = 8;
+    const reveal = () => {
+      if (!isRevealCurrent()) return;
+      const cell = view.dom.querySelector<HTMLElement>(
+        `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${tableStartLine}"] ${tableCellSelector}[data-table-row="${target.row}"][data-table-col="${target.col}"]`
+      );
+      if (!cell) {
+        remainingFrames -= 1;
+        if (remainingFrames > 0) requestAnimationFrame(reveal);
+        return;
+      }
+      const readViewportBounds = () => tableUsableViewportBounds(view, cell);
+      const rect = cell.getBoundingClientRect();
+      const bounds = readViewportBounds();
+      if (rect.bottom > bounds.top && rect.top < bounds.bottom) return;
+      if (viewport) {
+        viewport.revealVerticalBounds(
+          () => isRevealCurrent() && cell.isConnected ? cell.getBoundingClientRect() : null,
+          isRevealCurrent,
+          { yMargin: 0, readViewportBounds }
+        );
+        return;
+      }
+      const delta = rect.bottom <= bounds.top
+        ? rect.top - bounds.top
+        : rect.top >= bounds.bottom
+          ? rect.bottom - bounds.bottom
+          : 0;
+      if (Math.abs(delta) >= 1) view.scrollDOM.scrollTop += delta;
+    };
+    requestAnimationFrame(reveal);
+  }
+
   revealTableCellCaretIfNeeded(input: HTMLTextAreaElement, isCurrent: () => boolean = () => true) {
     const view = this.view;
     if (!view || !isCurrent()) return;
@@ -4666,6 +4779,11 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
           composing: event.isComposing || event.keyCode === 229
         }
       }).keyboard;
+      if (keyboard?.type === 'consume') {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       if (keyboard?.type === 'insert-line-break') {
         event.preventDefault();
         event.stopPropagation();

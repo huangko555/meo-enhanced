@@ -5094,13 +5094,14 @@ body.outline-resizing .preview-frame {
   left: 5px;
   width: 3px;
   transform: translateX(-50%);
-  background: var(--meo-semantic-tableSelectionBorder);
+  background: #316dca;
   opacity: 0;
   pointer-events: none;
 }
 
 .cm-editor .meo-md-html-table-column-resize-handle:hover::after,
-.cm-editor .meo-md-html-table-column-resize-handle.is-resizing::after {
+.cm-editor .meo-md-html-table-column-resize-handle.is-resizing::after,
+.cm-editor .meo-md-html-table-column-resize-handle.is-resize-column-highlighted::after {
   opacity: 1;
 }
 
@@ -5402,6 +5403,10 @@ body.outline-resizing .preview-frame {
   pointer-events: none;
   transform: translateY(-50%);
   transition: opacity 0.1s ease, background-color 0.1s ease;
+}
+
+.cm-editor .meo-md-html-table-context-trigger[hidden] {
+  display: none;
 }
 
 .cm-editor .meo-md-html-table-shell:focus-within .meo-md-html-table-context-trigger,

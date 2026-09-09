@@ -32,6 +32,7 @@ export type TableCellKeyboardInput = Readonly<{
 
 export type TableCellKeyboardDecision =
   | { readonly type: 'pass-through' }
+  | { readonly type: 'consume' }
   | { readonly type: 'insert-line-break' }
   | { readonly type: 'insert-row-below' }
   | { readonly type: 'commit-and-exit' }
@@ -115,7 +116,8 @@ function decideKeyboard(input: TableCellKeyboardInput): TableCellKeyboardDecisio
   if (input.key === 'Tab' && !primaryModifier && !input.altKey && !input.metaKey) {
     const direction = input.shiftKey ? -1 : 1;
     const offset = input.row * input.colCount + input.col + direction;
-    if (offset < 0 || offset >= input.rowCount * input.colCount) return { type: 'pass-through' };
+    if (offset >= input.rowCount * input.colCount) return { type: 'consume' };
+    if (offset < 0) return { type: 'pass-through' };
     return {
       type: 'focus-cell',
       target: { row: Math.floor(offset / input.colCount), col: offset % input.colCount },
