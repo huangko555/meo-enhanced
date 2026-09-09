@@ -83,27 +83,49 @@ async function main() {
         document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table-shell[data-test-table="0"] textarea')
       ).map((input) => input.value)
     }));
-    await page.keyboard.press('Delete');
-    await page.keyboard.press('Backspace');
-    const afterDeleteKeys = await page.evaluate(() => ({
-      committed: (window as any).__selectionEditor.commitTransientEdits(),
-      text: (window as any).__selectionEditor.view.state.doc.toString(),
-      values: Array.from(
-        document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table-shell[data-test-table="0"] textarea')
-      ).map((input) => input.value),
-      selected: document.querySelectorAll('.meo-md-html-table-cell-selected').length
-    }));
-    if (
-      afterDeleteKeys.committed ||
-      afterDeleteKeys.text !== beforeDeleteKeys.text ||
-      JSON.stringify(afterDeleteKeys.values) !== JSON.stringify(beforeDeleteKeys.values) ||
-      afterDeleteKeys.selected !== 4
-    ) {
-      throw new Error(`Delete/Backspace changed the rectangular selection document: ${JSON.stringify({
-        beforeDeleteKeys,
-        afterDeleteKeys
-      })}`);
-    }
+    const assertSelectionCleared = async (key: 'Delete' | 'Backspace') => {
+      const selectedBefore = await page.$$eval('.meo-md-html-table-cell-selected', (elements) => elements.length);
+      if (selectedBefore !== 4) await drag(first, last);
+      await page.keyboard.press(key);
+      await page.waitForFunction(() => {
+        const inputs = Array.from(
+          document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table-shell[data-test-table="0"] tbody textarea')
+        );
+        return inputs.length === 4 && inputs.every((input) => input.value === '');
+      });
+      const cleared = await page.evaluate(() => ({
+        text: (window as any).__selectionEditor.view.state.doc.toString(),
+        selected: document.querySelectorAll('.meo-md-html-table-cell-selected').length,
+        active: document.activeElement?.tagName
+      }));
+      if (cleared.selected !== 4 || cleared.active !== 'TABLE' || !/^\| A&B \| <tag> \|/m.test(cleared.text)) {
+        throw new Error(`${key} did not atomically clear and retain the rectangular body selection: ${JSON.stringify(cleared)}`);
+      }
+      await page.keyboard.down('Control');
+      await page.keyboard.press('KeyZ');
+      await page.keyboard.up('Control');
+      await page.waitForFunction((originalText) => (
+        (window as any).__selectionEditor.view.state.doc.toString() === originalText
+      ), {}, beforeDeleteKeys.text);
+      const restored = await page.evaluate(() => ({
+        values: Array.from(
+          document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table-shell[data-test-table="0"] textarea')
+        ).map((input) => input.value),
+        selected: document.querySelectorAll('.meo-md-html-table-cell-selected').length
+      }));
+      if (JSON.stringify(restored.values) !== JSON.stringify(beforeDeleteKeys.values)) {
+        throw new Error(`${key} clear was not restored by one undo step: ${JSON.stringify(restored)}`);
+      }
+      await page.click('#outside');
+      await page.waitForFunction((selector) => {
+        const preview = document.querySelector<HTMLElement>(selector);
+        return preview?.isConnected && getComputedStyle(preview).visibility === 'visible';
+      }, {}, first);
+    };
+    await assertSelectionCleared('Delete');
+    await assertSelectionCleared('Backspace');
+
+    await drag(first, last);
 
     await page.evaluate(() => {
       (window as any).__selectionClipboard = null;

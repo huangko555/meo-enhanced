@@ -2307,6 +2307,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   selectionDomAnchor: { node: Node; offset: number } | null;
   measuredHeight: number;
   pendingContextMenuRestore: boolean;
+  pendingKeyboardRowInsertionFocus: PendingCellFocus | null;
   contextPage: TableContextPage;
   tableCaretRevealGeneration: number;
 
@@ -2334,6 +2335,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     this.selectionDomAnchor = null;
     this.measuredHeight = -1;
     this.pendingContextMenuRestore = false;
+    this.pendingKeyboardRowInsertionFocus = null;
     this.contextPage = 'structure';
     this.tableCaretRevealGeneration = 0;
     this.stickyHeaderAdapterFactory = stickyHeaderAdapterFactory;
@@ -2706,7 +2708,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   requestTableCommand(command: TableCommand, enabled = true) {
     const target = this.currentCommandTarget();
     this.pendingContextMenuRestore = Boolean(this.domRefs && !this.domRefs.contextMenu.hidden);
-    void this.tableCommandEnvironment.dispatch({
+    return this.tableCommandEnvironment.dispatch({
       type: 'request',
       command,
       target,
@@ -3214,6 +3216,44 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     });
   }
 
+  clearSelectedCellContents(): boolean {
+    const range = this.cellSelection.snapshot().range;
+    const view = this.view;
+    const dom = this.domRefs?.wrap;
+    if (!range || !view || !dom) return false;
+    const cellCount = (range.toRow - range.fromRow + 1) * (range.toCol - range.fromCol + 1);
+    if (cellCount <= 1) return false;
+
+    const commit = this.cellInteraction.accept({ type: 'commit', reason: 'command' }).commit;
+    const confirmation = commit
+      ? createTableCellCommitConfirmation(this.cellInteraction, commit.generation)
+      : null;
+    if (confirmation) this.cancelPendingCellAutoCommit();
+    let plan: TableCommandTransactionPlan;
+    try {
+      const matrix = this.readCellMatrix();
+      for (let row = range.fromRow; row <= range.toRow; row += 1) {
+        const cells = row === 0 ? matrix.headerCells : matrix.rows[row - 1];
+        if (!cells) continue;
+        for (let col = range.fromCol; col <= range.toCol; col += 1) {
+          if (col < cells.length) cells[col] = '';
+        }
+      }
+      plan = this.buildMatrixTransaction(matrix, dom, null, { preserveScrollPosition: true });
+    } catch (error) {
+      confirmation?.settle('failed');
+      throw error;
+    }
+
+    const confirmations = confirmation ? [confirmation] : [];
+    executeTableCellCommitBoundary(confirmations, () => {
+      if (!plan.transaction) return;
+      for (const pending of confirmations) pending.applied = true;
+      this.preserveTableCommandViewport(() => view.dispatch(plan.transaction!));
+    });
+    return true;
+  }
+
   handleHistoryShortcut(event: KeyboardEvent, table: HTMLTableElement) {
     if (!isPrimaryModifier(event) || (!isUndoShortcut(event) && !isRedoShortcut(event))) {
       return false;
@@ -3401,6 +3441,15 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (this.handleHistoryShortcut(event, table)) {
+        return;
+      }
+      if (
+        (event.key === 'Delete' || event.key === 'Backspace') &&
+        !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey &&
+        this.clearSelectedCellContents()
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
         return;
       }
       if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
@@ -4184,6 +4233,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   focusTargetAfterRowInsertion(insertAt: number, fallbackColumn: number): PendingCellFocus {
+    const keyboardTarget = this.pendingKeyboardRowInsertionFocus;
+    this.pendingKeyboardRowInsertionFocus = null;
+    if (keyboardTarget) return keyboardTarget;
     const active = document.activeElement;
     const activeCoords = active instanceof HTMLTextAreaElement && this.domRefs?.shell.contains(active)
       ? this.parseCellCoords(active.dataset.tableRow, active.dataset.tableCol)
@@ -4647,7 +4699,13 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         event.preventDefault();
         event.stopPropagation();
         this.setActionTarget({ row: rowIndex, col: colIndex });
-        this.requestTableCommand('insert-row-below', true);
+        const focusTarget = { row: rowIndex + 1, col: colIndex, caret: 0 };
+        this.pendingKeyboardRowInsertionFocus = focusTarget;
+        void this.requestTableCommand('insert-row-below', true).finally(() => {
+          if (this.pendingKeyboardRowInsertionFocus === focusTarget) {
+            this.pendingKeyboardRowInsertionFocus = null;
+          }
+        });
         return;
       }
       if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && (event.key === ']' || event.key === '[')) {
