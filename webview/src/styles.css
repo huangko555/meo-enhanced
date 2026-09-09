@@ -5086,6 +5086,24 @@ body.outline-resizing .preview-frame {
   touch-action: none;
 }
 
+.cm-editor .meo-md-html-table-column-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 3px;
+  transform: translateX(-50%);
+  background: var(--meo-semantic-tableSelectionBorder);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cm-editor .meo-md-html-table-column-resize-handle:hover::after,
+.cm-editor .meo-md-html-table-column-resize-handle.is-resizing::after {
+  opacity: 1;
+}
+
 .cm-editor .meo-md-html-table-wrap.is-table-overflowing {
   overflow-x: auto;
 }

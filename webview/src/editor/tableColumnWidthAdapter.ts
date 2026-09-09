@@ -577,6 +577,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         pointerBoundary.removeEventListener('pointerleave', finish);
         pointerBoundary.removeEventListener('lostpointercapture', finish);
         pointerBoundary.classList.remove(resizingClassName);
+        handle.classList.remove('is-resizing');
         if (pointerBoundary.hasPointerCapture?.(event.pointerId)) {
           pointerBoundary.releasePointerCapture(event.pointerId);
         }
@@ -616,6 +617,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       dragPreviewActive = true;
       dragCleanup = removeDragListeners;
       pointerBoundary.classList.add(resizingClassName);
+      handle.classList.add('is-resizing');
       window.addEventListener('pointermove', move, true);
       window.addEventListener('pointerup', finish, true);
       window.addEventListener('pointercancel', finish, true);

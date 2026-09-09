@@ -44,6 +44,7 @@ async function main(): Promise<void> {
         --meo-color-base01: #d7dde5;
         --meo-color-base02: #8c98a5;
         --meo-color-base03: #444c56;
+        --meo-semantic-tableSelectionBorder: #58a6ff;
       }
       body { margin: 0; background: #20252b; }
       #app { width: 780px; height: 580px; }
@@ -516,6 +517,17 @@ async function main(): Promise<void> {
         await trustedMouseClick('.meo-md-html-table-context-previous');
       }
     };
+    const resizeHandle = '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tbody td:first-child > .meo-md-html-table-column-resize-handle';
+    await page.hover(resizeHandle);
+    const resizeAffordance = await page.$eval(resizeHandle, (handle) => {
+      const style = getComputedStyle(handle, '::after');
+      return {
+        content: style.content,
+        width: style.width,
+        opacity: style.opacity,
+        backgroundColor: style.backgroundColor
+      };
+    });
     const trustedMouseClick = async (selector: string) => {
       const point = await page.$eval(selector, (element) => {
         const rect = element.getBoundingClientRect();
@@ -566,6 +578,12 @@ async function main(): Promise<void> {
     assert.equal(result.triggerOutsideTable, true, 'the row action trigger must float over the gutter to the left of the table');
     assert.equal(result.tableUsesNormalContentLeft, true, 'the table must not move right to reserve trigger space');
     assert.equal(result.menuInsideViewport, true, 'the menu must remain inside the viewport');
+    assert.deepEqual(resizeAffordance, {
+      content: '\"\"',
+      width: '3px',
+      opacity: '1',
+      backgroundColor: 'rgb(88, 166, 255)'
+    }, 'hovering a resizable table boundary must show a centered 3px blue guide');
     assert.ok(result.leadingControlCenterDelta <= 0.5, `close control is not centered between border and separator: ${result.leadingControlCenterDelta}px`);
     assert.ok(result.trailingControlCenterDelta <= 0.5, `page control is not centered between separator and border: ${result.trailingControlCenterDelta}px`);
     assert.equal(result.floating, 'absolute');
