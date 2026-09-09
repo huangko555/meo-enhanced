@@ -828,9 +828,6 @@ toolbarOverflowSection.id = 'toolbar-overflow-panel';
 toolbarOverflowSection.setAttribute('role', 'group');
 toolbarOverflowSection.setAttribute('aria-label', activeUiStrings.toolbarOverflow);
 toolbarOverflowSection.hidden = true;
-const displaySeparator = document.createElement('div');
-displaySeparator.className = 'more-tools-separator';
-displaySeparator.setAttribute('role', 'separator');
 const displaySettingsHeading = document.createElement('div');
 displaySettingsHeading.className = 'more-tools-section-label';
 displaySettingsHeading.textContent = activeUiStrings.editorSettings;
@@ -1039,7 +1036,6 @@ moreToolsPanel.append(
   contentMaxWidthBtn,
   tableStickyHeaderBtn,
   restoreReadingPositionBtn,
-  displaySeparator,
   editorAppearanceRow,
   uiLanguageRow,
   editorFontSizeRow,

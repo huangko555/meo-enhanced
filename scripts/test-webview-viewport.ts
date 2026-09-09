@@ -748,12 +748,12 @@ async function main() {
     });
     if (
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
-        '显示行号', '折叠长代码块', '限制宽度', '表格浮动表头'
+        '显示行号', '折叠长代码块', '限制内容宽度', '表格浮动表头', '打开时恢复上一次阅读位置'
       ]) ||
       moreToolsLayout.topHeading !== '编辑器设置' ||
       moreToolsLayout.languageAutoLabel !== '自动' ||
       !moreToolsLayout.directChildren ||
-      moreToolsLayout.separatorCount !== 2 ||
+      moreToolsLayout.separatorCount !== 1 ||
       moreToolsLayout.feedbackPrompt !== '使用中遇到问题？' ||
       moreToolsLayout.feedbackLabel !== '欢迎反馈' ||
       moreToolsLayout.width > 268 ||
