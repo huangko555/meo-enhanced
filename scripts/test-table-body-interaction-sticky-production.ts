@@ -50,6 +50,67 @@ async function main(): Promise<void> {
     await page.waitForSelector('.meo-md-html-table:not(.meo-md-html-table-sticky-table) tbody tr:nth-child(2) td:first-child');
     await waitForFrames(page);
 
+    const headerClickPoint = await page.$eval(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead th:nth-child(3) .meo-md-html-table-cell-preview',
+      (preview) => {
+        const rect = preview.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      }
+    );
+    await page.mouse.click(headerClickPoint.x, headerClickPoint.y);
+    await waitForFrames(page, 2);
+    const activeHeaderStickyState = await page.evaluate(async () => {
+      const editor = (window as any).__tableBodyInteractionEditor;
+      const scroller = editor.view.scrollDOM as HTMLElement;
+      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
+      const bodyRow = table.querySelector<HTMLElement>('tbody tr:nth-child(24)')!;
+      const viewport = scroller.getBoundingClientRect();
+      const active = document.activeElement;
+      const activeHeader = active instanceof HTMLTextAreaElement
+        && active.closest('th')?.dataset.tableRow === '0'
+        && active.closest('th')?.dataset.tableCol === '2';
+      scroller.scrollTop += bodyRow.getBoundingClientRect().top - viewport.top - viewport.height / 2;
+      scroller.dispatchEvent(new Event('scroll'));
+      for (let frame = 0; frame < 12; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const stickyCell = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-table thead th:nth-child(3)');
+      const stickyInput = stickyCell?.querySelector<HTMLTextAreaElement>('textarea') ?? null;
+      const stickyPreview = stickyCell?.querySelector<HTMLElement>('.meo-md-html-table-cell-preview') ?? null;
+      const isVisible = (element: HTMLElement | null) => {
+        if (!element) return false;
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+      };
+      return {
+        activeHeader,
+        sourceValue: active instanceof HTMLTextAreaElement ? active.value : null,
+        stickyVisible: Boolean(stickyCell && stickyCell.getBoundingClientRect().height > 0),
+        stickyInputVisible: isVisible(stickyInput),
+        stickyInputValue: stickyInput?.value ?? null,
+        stickyPreviewVisible: isVisible(stickyPreview),
+        stickyPreviewText: stickyPreview?.innerText.trim() ?? null
+      };
+    });
+    const activeHeaderStickyText = activeHeaderStickyState.stickyInputVisible
+      ? activeHeaderStickyState.stickyInputValue
+      : activeHeaderStickyState.stickyPreviewText;
+    if (
+      !activeHeaderStickyState.activeHeader
+      || activeHeaderStickyState.sourceValue !== 'Column 3'
+      || !activeHeaderStickyState.stickyVisible
+      || activeHeaderStickyText !== 'Column 3'
+    ) {
+      throw new Error(`Active header cell became empty in the floating header: ${JSON.stringify(activeHeaderStickyState)}`);
+    }
+    await page.evaluate(() => {
+      const editor = (window as any).__tableBodyInteractionEditor;
+      editor.view.scrollDOM.scrollTop = 0;
+      editor.view.scrollDOM.dispatchEvent(new Event('scroll'));
+    });
+    await waitForFrames(page, 4);
+
     const clickPoint = await page.$eval(
       '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tbody tr:nth-child(2) td:nth-child(8) .meo-md-html-table-cell-preview',
       (preview) => {

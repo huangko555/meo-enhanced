@@ -129,6 +129,14 @@ function runCleanupInReverse(cleanup: Array<() => void>): unknown[] {
 function clonePassiveHeader(source: HTMLTableRowElement): HTMLTableCellElement[] {
   return Array.from(source.cells, (cell) => {
     const clone = cell.cloneNode(true) as HTMLTableCellElement;
+    // The floating header is a passive projection, even when its source cell is
+    // currently being edited. Keeping the transient editing class would hide
+    // the cloned preview, while passive cleanup removes the cloned textarea.
+    for (const content of Array.from(clone.querySelectorAll<HTMLElement>(
+      '.meo-md-html-table-cell-content.is-editing'
+    ))) {
+      content.classList.remove('is-editing');
+    }
     makeStickyContentPassive(clone);
     return clone;
   });
