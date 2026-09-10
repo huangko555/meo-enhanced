@@ -36,7 +36,12 @@ export type TableCellKeyboardDecision =
   | { readonly type: 'insert-line-break' }
   | { readonly type: 'commit-and-exit' }
   | { readonly type: 'focus-cell'; readonly target: TableCellCoordinates; readonly caretColumn: number }
-  | { readonly type: 'move-out-of-table'; readonly direction: 'up' | 'down'; readonly column: number };
+  | {
+      readonly type: 'move-out-of-table';
+      readonly direction: 'up' | 'down';
+      readonly column: number;
+      readonly createLineIfMissing?: boolean;
+    };
 
 export type TableCellInteractionResult = Readonly<{
   snapshot: TableCellInteractionSnapshot;
@@ -110,7 +115,7 @@ function decideKeyboard(input: TableCellKeyboardInput): TableCellKeyboardDecisio
     if (input.row + 1 < input.rowCount) {
       return { type: 'focus-cell', target: { row: input.row + 1, col: input.col }, caretColumn: 0 };
     }
-    return { type: 'move-out-of-table', direction: 'down', column: 0 };
+    return { type: 'move-out-of-table', direction: 'down', column: 0, createLineIfMissing: true };
   }
   if (input.key === 'Tab' && !primaryModifier && !input.altKey && !input.metaKey) {
     const direction = input.shiftKey ? -1 : 1;

@@ -114,9 +114,10 @@ assert(
   enterNextRow?.type === 'focus-cell' && enterNextRow.target.row === 2 && enterNextRow.target.col === 0,
   `Ordinary Enter did not explicitly choose the next row: ${JSON.stringify(enterNextRow)}`
 );
+const finalRowEnter = key({ type: 'keyboard', input: { ...keyboardInput, row: 2, key: 'Enter' } });
 assert(
-  key({ type: 'keyboard', input: { ...keyboardInput, row: 2, key: 'Enter' } })?.type === 'move-out-of-table',
-  'Last-row Enter did not explicitly leave the table'
+  finalRowEnter?.type === 'move-out-of-table' && finalRowEnter.createLineIfMissing === true,
+  'Last-row Enter did not explicitly leave the table and create a destination line when needed'
 );
 assert(key({ type: 'keyboard', input: { ...keyboardInput, key: 'Escape' } })?.type === 'commit-and-exit', 'Escape did not request one commit and exit');
 assert(key({ type: 'keyboard', input: { ...keyboardInput, key: 'ArrowLeft' } })?.type === 'pass-through', 'Ordinary horizontal navigation was stolen');

@@ -400,6 +400,7 @@ export function createEditor({
   let pendingTableHistoryFocus: { replayId: number; semanticTarget: string; stableChecks: number } | null = null;
   let pendingRenderedHistoryFocus: { replayId: number; run: () => boolean } | null = null;
   let onHistoryKeyDown: ((event: KeyboardEvent) => void) | null = null;
+  let onHistoryKeyUp: ((event: KeyboardEvent) => void) | null = null;
   let onHistoryBeforeInput: ((event: InputEvent) => void) | null = null;
   let onHistoryPointerDown: (() => void) | null = null;
   let onHistoryWheel: (() => void) | null = null;
@@ -1559,10 +1560,9 @@ export function createEditor({
     }
     let stableFocusedElement: Element | null = null;
     return () => {
-      if (!renderedBlockIsReady()) {
-        stableFocusedElement = null;
+      const blockIsReady = renderedBlockIsReady();
+      if (!blockIsReady) {
         requestBoundaryReveal();
-        return false;
       }
       const focused = block.kind === 'mermaid'
         ? focusMermaidEditingOffset(view, openingLine.from, offset, isCurrent)
@@ -1574,6 +1574,10 @@ export function createEditor({
         !renderedBlockRoots().some((root) => root.contains(activeElement))
       ) {
         stableFocusedElement = null;
+        return false;
+      }
+      if (!blockIsReady) {
+        stableFocusedElement = activeElement;
         return false;
       }
       if (stableFocusedElement !== activeElement) {
@@ -2478,11 +2482,13 @@ export function createEditor({
       historyScrollGuard = null;
       setEditorHistoryRunner(view, null);
       if (onHistoryKeyDown) view.dom.removeEventListener('keydown', onHistoryKeyDown, true);
+      if (onHistoryKeyUp) view.dom.ownerDocument.defaultView?.removeEventListener('keyup', onHistoryKeyUp, true);
       if (onHistoryBeforeInput) view.dom.removeEventListener('beforeinput', onHistoryBeforeInput, true);
       if (onHistoryPointerDown) view.dom.removeEventListener('pointerdown', onHistoryPointerDown, true);
       if (onHistoryWheel) view.dom.removeEventListener('wheel', onHistoryWheel, true);
       if (onHistoryBlur) view.dom.removeEventListener('blur', onHistoryBlur, true);
       onHistoryKeyDown = null;
+      onHistoryKeyUp = null;
       onHistoryBeforeInput = null;
       onHistoryPointerDown = null;
       onHistoryWheel = null;
@@ -2510,6 +2516,19 @@ export function createEditor({
     }
     if (!isModifier) void editorHistoryRuntime?.dispatch({ type: 'cancelRestore' });
   };
+  onHistoryKeyUp = (event) => {
+    const key = event.key.toLowerCase();
+    if (key === 'control' || key === 'meta') {
+      // The final replay in a held-modifier burst may still be waiting for a
+      // rendered replacement to stabilize. Transfer focus once synchronously
+      // before the next unmodified character can target the previous block.
+      editorHistoryRuntime?.flushPendingRestore();
+      const runtime = editorHistoryRuntime;
+      void runtime?.whenIdle().then(() => {
+        if (editorHistoryRuntime === runtime) runtime.flushPendingRestore();
+      });
+    }
+  };
   onHistoryBeforeInput = (event) => {
     if (event.inputType !== 'historyUndo' && event.inputType !== 'historyRedo') {
       void editorHistoryRuntime?.dispatch({ type: 'cancelRestore' });
@@ -2535,6 +2554,7 @@ export function createEditor({
     });
   };
   view.dom.addEventListener('keydown', onHistoryKeyDown, true);
+  view.dom.ownerDocument.defaultView?.addEventListener('keyup', onHistoryKeyUp, true);
   view.dom.addEventListener('beforeinput', onHistoryBeforeInput, true);
   view.dom.addEventListener('pointerdown', onHistoryPointerDown, true);
   view.dom.addEventListener('wheel', onHistoryWheel, { capture: true, passive: true });

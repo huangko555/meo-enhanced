@@ -275,11 +275,16 @@ async function main(): Promise<void> {
       const input = document.querySelector<HTMLTextAreaElement>(
         '.meo-md-html-table textarea[data-table-row="2"][data-table-col="1"]'
       )!;
+      editor.markViewportInteraction();
       const viewport = editor.view.scrollDOM.getBoundingClientRect();
       const rect = input.getBoundingClientRect();
       editor.view.scrollDOM.scrollTop += rect.bottom - (viewport.bottom - 100);
       input.focus({ preventScroll: true });
       input.setSelectionRange(input.value.length, input.value.length);
+    });
+    await waitForFrames(page, 4);
+    await page.evaluate(() => {
+      const editor = (window as any).__selectionViewportEditor;
       (window as any).__tableEnterViewportTrace = [];
       const sample = () => {
         const active = document.activeElement;

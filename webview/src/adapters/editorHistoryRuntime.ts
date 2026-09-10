@@ -9,6 +9,7 @@ import type {
 
 export type EditorHistoryRuntime = {
   dispatch(input: EditorHistoryRuntimeInput): Promise<boolean | null>;
+  flushPendingRestore(): void;
   whenIdle(): Promise<void>;
   whenSettled(): Promise<void>;
   getState(): EditorHistoryState;
@@ -94,6 +95,9 @@ export function createEditorHistoryRuntime(
 
   return {
     dispatch: enqueue,
+    flushPendingRestore() {
+      if (!disposed) adapter.flushPendingRestore();
+    },
     async whenIdle() {
       let current = operation;
       await current;

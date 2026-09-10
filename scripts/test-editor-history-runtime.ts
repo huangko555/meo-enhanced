@@ -93,7 +93,7 @@ assert.equal(runtime.getState().pendingReplay?.phase, 'restoring');
 restoreResult = 'restored';
 const retry = scheduledRetry;
 assert.ok(retry);
-retry();
+runtime.flushPendingRestore();
 await new Promise((resolve) => setTimeout(resolve, 0));
 await runtime.whenIdle();
 assert.equal(runtime.getState().pendingReplay, null);

@@ -590,6 +590,10 @@ async function main() {
       const lastNavigationTarget = document.activeElement instanceof HTMLTextAreaElement
         ? { row: document.activeElement.dataset.tableRow, col: document.activeElement.dataset.tableCol }
         : null;
+      const navigationExitState = {
+        focused: navigationEditor.hasFocus(),
+        line: navigationEditor.view.state.doc.lineAt(navigationEditor.view.state.selection.main.head).number
+      };
       const navigationSource = navigationEditor.view.state.doc.toString();
       navigationEditor.destroy();
 
@@ -1105,6 +1109,7 @@ async function main() {
         tableShortcutSource,
         middleNavigationTarget,
         lastNavigationTarget,
+        navigationExitState,
         navigationSource,
         deleteRowsSource,
         pendingEditDeleteSource,
@@ -1322,10 +1327,11 @@ async function main() {
     }
     if (
       result.middleNavigationTarget?.row !== '2' || result.middleNavigationTarget?.col !== '1' ||
-      result.lastNavigationTarget?.row !== '3' || result.lastNavigationTarget?.col !== '1' ||
-      !result.navigationSource.includes('|  |  |')
+      result.lastNavigationTarget !== null ||
+      !result.navigationExitState.focused || result.navigationExitState.line !== 5 ||
+      result.navigationSource !== '| A | B |\n| --- | --- |\n| one | two |\n| three | four |\n'
     ) {
-      failures.push(`plain table Enter navigation failed: ${JSON.stringify({ middle: result.middleNavigationTarget, last: result.lastNavigationTarget, source: result.navigationSource })}`);
+      failures.push(`plain table Enter navigation failed: ${JSON.stringify({ middle: result.middleNavigationTarget, last: result.lastNavigationTarget, exit: result.navigationExitState, source: result.navigationSource })}`);
     }
     if (result.deleteRowsSource.includes('r1a') || result.deleteRowsSource.includes('r2a') || !result.deleteRowsSource.includes('r3a')) {
       failures.push(`multi-cell row deletion used only one active row: ${JSON.stringify(result.deleteRowsSource)}`);

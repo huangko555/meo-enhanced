@@ -45,6 +45,7 @@ export function createEditorHistoryEffectAdapter(
   let restoreGeneration = 0;
   let cancelFocusRetry: (() => void) | null = null;
   let settleRestore: ((completion: EditorHistoryInput | null) => void) | null = null;
+  let flushRestore: (() => void) | null = null;
 
   const cancelPendingRestore = (): void => {
     restoreGeneration += 1;
@@ -52,6 +53,7 @@ export function createEditorHistoryEffectAdapter(
     cancelFocusRetry = null;
     settleRestore?.(null);
     settleRestore = null;
+    flushRestore = null;
   };
 
   const restoreInteraction = (request: EditorHistoryRestoreRequest): Promise<EditorHistoryInput | null> => {
@@ -68,6 +70,7 @@ export function createEditorHistoryEffectAdapter(
         cancelFocusRetry?.();
         cancelFocusRetry = null;
         settleRestore = null;
+        flushRestore = null;
         resolve(completion);
       };
 
@@ -98,6 +101,7 @@ export function createEditorHistoryEffectAdapter(
         }
       };
 
+      flushRestore = attempt;
       attempt();
     });
   };
@@ -159,6 +163,10 @@ export function createEditorHistoryEffectAdapter(
           capabilities.dispose();
           return {};
       }
+    },
+
+    flushPendingRestore() {
+      flushRestore?.();
     }
   };
 }

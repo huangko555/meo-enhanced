@@ -82,6 +82,7 @@ export type EditorHistoryEffectExecution = {
 export type EditorHistoryEffectExecutor = {
   prepareInput(input: EditorHistoryRuntimeInput): EditorHistoryInput;
   execute(effect: EditorHistoryEffect): EditorHistoryEffectExecution;
+  flushPendingRestore(): void;
 };
 
 type PendingReplay = {

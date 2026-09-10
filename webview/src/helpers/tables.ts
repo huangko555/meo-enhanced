@@ -367,7 +367,11 @@ function stabilizeHistoryScrollTop(
   if (!isCurrent()) return;
   const viewportController = getViewportController(view);
   if (viewportController) {
-    viewportController.lockScrollTop(targetTop, isCurrent);
+    // Once a current history restore owns the viewport, keep that lock on the
+    // viewport interaction generation. The restore task can finish before a
+    // replacement table's late height measurement; the next real interaction
+    // still cancels the lock through ViewportController.markInteraction().
+    viewportController.lockScrollTop(targetTop);
   }
 }
 
@@ -2953,7 +2957,12 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     return input ? this.focusTableInput(input, caret) : false;
   }
 
-  moveVerticalOutOfTable(container: HTMLElement, direction: 'up' | 'down', preferredColumn = 0) {
+  moveVerticalOutOfTable(
+    container: HTMLElement,
+    direction: 'up' | 'down',
+    preferredColumn = 0,
+    createLineIfMissing = false
+  ) {
     const view = this.getEditorView(container);
     if (!view) return false;
 
@@ -2966,7 +2975,27 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     if (!lineStep) return false;
     const anchorLineNo = lineStep < 0 ? firstLine.number : lastLine.number;
     const targetLineNo = anchorLineNo + lineStep;
-    if (targetLineNo < 1 || targetLineNo > view.state.doc.lines) return false;
+    if (targetLineNo < 1 || targetLineNo > view.state.doc.lines) {
+      if (!createLineIfMissing || direction !== 'down' || targetLineNo !== view.state.doc.lines + 1) return false;
+
+      commitPendingTableEdits(view);
+      this.exitTableInteraction(container);
+      const appendAt = view.state.doc.length;
+      const targetPos = appendAt + 1;
+      view.dispatch({
+        changes: { from: appendAt, insert: '\n' },
+        selection: { anchor: targetPos }
+      });
+      const viewport = getViewportController(view);
+      const isRevealCurrent = viewport?.beginNavigationReveal();
+      if (viewport && isRevealCurrent) viewport.revealPosition(targetPos, {
+        y: 'nearest',
+        yMargin: visualLineContextMargin(view, 1)
+      }, isRevealCurrent);
+      else view.dispatch({ effects: EditorView.scrollIntoView(targetPos, { y: 'nearest' }) });
+      view.focus();
+      return true;
+    }
 
     const targetLine = view.state.doc.line(targetLineNo);
     const targetPos = Math.min(targetLine.from + Math.max(preferredColumn, 0), targetLine.to);
@@ -4157,13 +4186,15 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     requestAnimationFrame(() => focusCell());
   }
 
-  revealTableCellCaretIfNeeded(input: HTMLTextAreaElement, isCurrent: () => boolean = () => true) {
+  revealTableCellCaretIfNeeded(input: HTMLTextAreaElement, isCurrent?: () => boolean) {
     const view = this.view;
-    if (!view || !isCurrent()) return;
+    if (!view) return;
     const viewport = getViewportController(view);
     if (viewport) {
+      const revealIsCurrent = isCurrent ?? viewport.captureNavigationCurrentness();
+      if (!revealIsCurrent()) return;
       const revealGeneration = ++this.tableCaretRevealGeneration;
-      const canReveal = () => isCurrent() && revealGeneration === this.tableCaretRevealGeneration;
+      const canReveal = () => revealIsCurrent() && revealGeneration === this.tableCaretRevealGeneration;
       const inputContextMargin = visualLineContextMargin(view, 1);
       const readUsableViewportBounds = () => tableUsableViewportBounds(view, input);
       let attempts = 0;
@@ -4793,7 +4824,12 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       if (keyboard?.type === 'move-out-of-table') {
         event.preventDefault();
         event.stopPropagation();
-        this.moveVerticalOutOfTable(container, keyboard.direction, keyboard.column);
+        this.moveVerticalOutOfTable(
+          container,
+          keyboard.direction,
+          keyboard.column,
+          keyboard.createLineIfMissing === true
+        );
         return;
       }
       if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && (event.key === ']' || event.key === '[')) {

@@ -101,6 +101,34 @@ async function main() {
     }));
     if (lastTabState.rows !== 2 || lastTabState.text !== source) throw new Error(`Last-cell Tab changed Markdown: ${JSON.stringify(lastTabState)}`);
 
+    await page.click(last);
+    await page.keyboard.press('Enter');
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
+    const finalEnterState = await page.evaluate(() => {
+      const editor = (window as any).__tableCellEditor;
+      const head = editor.view.state.selection.main.head;
+      return {
+        active: document.activeElement?.tagName ?? '',
+        focused: editor.hasFocus(),
+        head,
+        line: editor.view.state.doc.lineAt(head).number,
+        rows: document.querySelectorAll('.meo-md-html-table-shell tbody tr').length,
+        text: editor.getText()
+      };
+    });
+    if (
+      finalEnterState.active === 'TEXTAREA' ||
+      !finalEnterState.focused ||
+      finalEnterState.head !== source.length + 1 ||
+      finalEnterState.line !== 5 ||
+      finalEnterState.rows !== 2 ||
+      finalEnterState.text !== `${source}\n`
+    ) {
+      throw new Error(`Last-cell Enter did not create and enter the line after the table: ${JSON.stringify(finalEnterState)}`);
+    }
+
     await page.click(second);
     await page.keyboard.press('End');
     await page.keyboard.down('Shift');
@@ -150,6 +178,44 @@ async function main() {
     await page.waitForFunction(() => !document.querySelector('.meo-md-html-table-shell'));
     const sourceModeText = await page.evaluate(() => (window as any).__tableCellEditor.getText());
     if (!sourceModeText.includes('external mode')) throw new Error(`Mode transition lost pending cell intent: ${sourceModeText}`);
+
+    await page.evaluate((text) => {
+      (window as any).__tableCellEditor.destroy();
+      (window as any).__tableCellEditor = (window as any).TableStabilityHarness.createEditor({
+        parent: document.getElementById('app')!, text, initialMode: 'live', onApplyChanges() {}
+      });
+    }, source);
+    await waitForTable(page);
+    await page.click(last);
+    await page.keyboard.press('End');
+    await page.keyboard.type(' changed');
+    await page.keyboard.press('Enter');
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
+    const pendingFinalEnterState = await page.evaluate(() => {
+      const editor = (window as any).__tableCellEditor;
+      const head = editor.view.state.selection.main.head;
+      return {
+        active: document.activeElement?.tagName ?? '',
+        focused: editor.hasFocus(),
+        head,
+        line: editor.view.state.doc.lineAt(head).number,
+        rows: document.querySelectorAll('.meo-md-html-table-shell tbody tr').length,
+        text: editor.getText()
+      };
+    });
+    const pendingFinalEnterSource = `${source.replace('four', 'four changed')}\n`;
+    if (
+      pendingFinalEnterState.active === 'TEXTAREA' ||
+      !pendingFinalEnterState.focused ||
+      pendingFinalEnterState.head !== pendingFinalEnterSource.length ||
+      pendingFinalEnterState.line !== 5 ||
+      pendingFinalEnterState.rows !== 2 ||
+      pendingFinalEnterState.text !== pendingFinalEnterSource
+    ) {
+      throw new Error(`Last-cell Enter lost a pending edit while leaving the table: ${JSON.stringify(pendingFinalEnterState)}`);
+    }
 
     await page.evaluate(() => (window as any).__tableCellEditor.destroy());
     console.log('table cell editing production checks passed');

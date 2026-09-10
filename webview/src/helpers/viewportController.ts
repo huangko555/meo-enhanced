@@ -290,6 +290,7 @@ export class ViewportController {
   private explicitNavigationGeneration = 0;
   private pendingNavigationTarget: { position: number; generation: number } | null = null;
   private scrollLockGeneration = 0;
+  private activeScrollLockGeneration: number | null = null;
   private activeScrollTarget: ActiveScrollTarget | null = null;
   private activeLayoutAnchor: ActiveLayoutAnchor | null = null;
   private anchorStabilizationGeneration: number | null = null;
@@ -349,6 +350,7 @@ export class ViewportController {
     this.navigationGeneration += 1;
     this.pendingNavigationTarget = null;
     this.scrollLockGeneration += 1;
+    this.activeScrollLockGeneration = null;
     this.generation += 1;
     this.activeScrollTarget = null;
     this.activeLayoutAnchor = null;
@@ -367,6 +369,7 @@ export class ViewportController {
       this.interactionGeneration += 1;
     }
     this.scrollLockGeneration += 1;
+    this.activeScrollLockGeneration = null;
     this.lastWheelAt = Number.NEGATIVE_INFINITY;
     this.lastTouchMoveAt = Number.NEGATIVE_INFINITY;
     this.lastTouchY = null;
@@ -457,6 +460,7 @@ export class ViewportController {
     if (this.destroyed || !isCurrent()) return;
     this.markInteraction();
     const lockGeneration = ++this.scrollLockGeneration;
+    this.activeScrollLockGeneration = lockGeneration;
     let remainingFrames = MAX_SETTLE_FRAMES;
     const write = () => {
       if (
@@ -464,6 +468,9 @@ export class ViewportController {
         lockGeneration !== this.scrollLockGeneration ||
         !isCurrent()
       ) {
+        if (this.activeScrollLockGeneration === lockGeneration) {
+          this.activeScrollLockGeneration = null;
+        }
         return;
       }
       const nextScrollTop = Math.max(0, Math.min(
@@ -479,6 +486,9 @@ export class ViewportController {
       }
       remainingFrames -= 1;
       if (remainingFrames > 0 && isCurrent()) requestAnimationFrame(write);
+      else if (this.activeScrollLockGeneration === lockGeneration) {
+        this.activeScrollLockGeneration = null;
+      }
     };
     write();
   }
@@ -844,7 +854,7 @@ export class ViewportController {
   }
 
   private stabilize(readTarget: () => ScrollTarget | null, options: StabilizeOptions = {}): void {
-    if (this.destroyed) return;
+    if (this.destroyed || this.hasActiveScrollLock()) return;
     const generation = ++this.generation;
     this.activeScrollTarget = null;
     this.activeLayoutAnchor = null;
@@ -1096,6 +1106,11 @@ export class ViewportController {
     return this.anchorStabilizationGeneration === this.generation;
   }
 
+  private hasActiveScrollLock(): boolean {
+    return this.activeScrollLockGeneration !== null
+      && this.activeScrollLockGeneration === this.scrollLockGeneration;
+  }
+
   private handleWheel(event: WheelEvent): void {
     if (this.getMode() !== 'live' || event.ctrlKey || (!event.deltaX && !event.deltaY)) {
       this.markInteraction();
@@ -1247,6 +1262,7 @@ export class ViewportController {
     // Otherwise the old owner can pull the viewport back, or make the new
     // command look like it is still part of the earlier wheel gesture.
     this.scrollLockGeneration += 1;
+    this.activeScrollLockGeneration = null;
     this.explicitNavigationGeneration += 1;
     this.lastWheelAt = Number.NEGATIVE_INFINITY;
     this.lastTouchMoveAt = Number.NEGATIVE_INFINITY;
