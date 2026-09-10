@@ -3,6 +3,14 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.18
+- Added contextual table actions, rectangular multi-cell selection and paste, safer deletion, and more predictable focus, undo, and keyboard navigation.
+- Improved table layout and interaction with configurable sticky headers, stable toolbar placement, clearer column-resize boundaries, and better default widths.
+- Stabilized minimal scrolling and reading-position continuity during typing, history replay, table editing, image refreshes, and Live/Source/Preview transitions.
+- Fixed first-frame line numbers and input colors in code, Mermaid, and block-math editors so rendered editing feedback appears immediately.
+- Refined image presentation and reload behavior, editor settings labels and layout, and initial reading-position restoration.
+- Fixed Windows F5 builds by locating Bun reliably when it is not available on the task shell path.
+
 ## 0.3.17
 - Stabilized reading-position continuity across Live, Source, and Preview transitions, including image loading and long-document viewport restoration.
 - Improved mode-switch performance by reusing Markdown parses, decorations, rendered-block discovery, and loaded Preview documents while discarding obsolete background results.
