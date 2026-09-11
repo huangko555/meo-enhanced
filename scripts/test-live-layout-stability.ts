@@ -398,6 +398,7 @@ async function main(): Promise<void> {
       const anchor = editor.getText().indexOf('<details>');
       const summary = document.querySelector<HTMLElement>('.meo-md-details-summary');
       const summaryIcon = summary?.querySelector<HTMLElement>('.meo-md-details-summary-icon[aria-hidden="true"]') ?? null;
+      const summaryIconRect = summaryIcon?.getBoundingClientRect() ?? null;
       const summaryTop = summary?.getBoundingClientRect().top ?? null;
       const summaryLine = summary?.closest<HTMLElement>('.cm-line') ?? null;
       const sourceToggle = document.querySelector<HTMLElement>('.meo-md-details-source-toggle');
@@ -411,6 +412,7 @@ async function main(): Promise<void> {
           .some((line) => line.textContent?.includes('<details>')),
         summaryTop,
         summaryIconVisible: (summaryIcon?.getBoundingClientRect().width ?? 0) > 0,
+        summaryIconWidth: summaryIconRect?.width ?? 0,
         summaryIconTransform: summaryIcon ? getComputedStyle(summaryIcon).transform : '',
         summaryExpanded: summary?.getAttribute('aria-expanded') ?? null,
         sourceToggleVisible: Boolean(sourceToggle),
@@ -483,6 +485,7 @@ async function main(): Promise<void> {
       listVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
         .some((line) => line.textContent?.includes('hybrid markdown list item')),
       summaryTop: document.querySelector<HTMLElement>('.meo-md-details-summary')?.getBoundingClientRect().top ?? null,
+      summaryIconWidth: document.querySelector<HTMLElement>('.meo-md-details-summary .meo-md-details-summary-icon[aria-hidden="true"]')!.getBoundingClientRect().width,
       summaryIconTransform: getComputedStyle(
         document.querySelector<HTMLElement>('.meo-md-details-summary .meo-md-details-summary-icon[aria-hidden="true"]')!
       ).transform,
@@ -492,9 +495,14 @@ async function main(): Promise<void> {
       !hybridExpanded.bodyVisible || !hybridExpanded.listVisible || hybridExpanded.summaryTop === null ||
       Math.abs(hybridExpanded.summaryTop - hybridSummaryPoint.top) > 1 ||
       hybridExpanded.summaryIconTransform === hybridPreview.summaryIconTransform ||
+      Math.abs(hybridExpanded.summaryIconWidth - hybridPreview.summaryIconWidth) > 0.5 ||
       hybridExpanded.summaryExpanded !== 'true'
     ) {
-      throw new Error(`Hybrid details did not expand Markdown content in place: ${JSON.stringify({ hybridSummaryPoint, hybridExpanded })}`);
+      throw new Error(`Hybrid details did not expand Markdown content in place: ${JSON.stringify({
+        hybridSummaryPoint,
+        hybridPreview,
+        hybridExpanded
+      })}`);
     }
 
     const quoteSource = [

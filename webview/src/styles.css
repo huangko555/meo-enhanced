@@ -1992,13 +1992,12 @@ button:focus-visible > .menu-switch {
 }
 
 .cm-editor .meo-md-details-summary-icon {
-  width: 0;
-  height: 0;
+  width: 0.6em;
+  height: 0.6em;
   flex: none;
-  border-top: 0.3em solid transparent;
-  border-bottom: 0.3em solid transparent;
-  border-left: 0.45em solid currentColor;
-  transform-origin: 35% 50%;
+  background: currentColor;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+  transform-origin: center;
 }
 
 .cm-editor .meo-md-details-summary[aria-expanded="true"] .meo-md-details-summary-icon,

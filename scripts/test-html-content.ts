@@ -152,6 +152,9 @@ async function main() {
         .find((element) => element.textContent?.includes('Safe visible text'));
       const details = document.querySelector<HTMLElement>('.meo-md-html-block details');
       const detailsIcon = details?.querySelector<HTMLElement>(':scope > summary > .meo-md-details-summary-icon[aria-hidden="true"]') ?? null;
+      const detailsSummary = details?.querySelector<HTMLElement>(':scope > summary') ?? null;
+      const detailsIconRect = detailsIcon?.getBoundingClientRect() ?? null;
+      const detailsSummaryRect = detailsSummary?.getBoundingClientRect() ?? null;
       const quote = document.querySelector<HTMLElement>('.meo-md-html-block blockquote');
       const table = document.querySelector<HTMLElement>('.meo-md-html-block table');
       const tableHeader = table?.querySelector<HTMLElement>('th') ?? null;
@@ -206,6 +209,12 @@ async function main() {
         sourceToggleCount: document.querySelectorAll('.meo-md-html-source-toggle').length,
         detailsRendered: Boolean(details?.textContent?.includes('Rendered details body')),
         detailsIconVisible: (detailsIcon?.getBoundingClientRect().width ?? 0) > 0,
+        detailsIconWidth: detailsIconRect?.width ?? 0,
+        detailsIconContained: Boolean(
+          detailsIconRect && detailsSummaryRect &&
+          detailsIconRect.top >= detailsSummaryRect.top - 1 &&
+          detailsIconRect.bottom <= detailsSummaryRect.bottom + 1
+        ),
         detailsIconTransform: detailsIcon ? getComputedStyle(detailsIcon).transform : '',
         detailsSourceVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
           .some((line) => line.textContent?.includes('<details open>')),
@@ -263,6 +272,7 @@ async function main() {
       initial.sourceToggleCount < 3 ||
       !initial.detailsRendered ||
       !initial.detailsIconVisible ||
+      !initial.detailsIconContained ||
       initial.detailsIconTransform === 'none' ||
       initial.detailsSourceVisible ||
       initial.quoteBorderWidth === '0px' ||
@@ -381,18 +391,24 @@ async function main() {
       open: (element as HTMLDetailsElement).open,
       top: element.closest('.meo-md-html-block')?.getBoundingClientRect().top ?? null,
       bodyVisible: (element.querySelector('p')?.getBoundingClientRect().height ?? 0) > 0,
-      iconTransform: getComputedStyle(element.querySelector<HTMLElement>(':scope > summary > .meo-md-details-summary-icon[aria-hidden="true"]')!).transform
+      iconTransform: getComputedStyle(element.querySelector<HTMLElement>(':scope > summary > .meo-md-details-summary-icon[aria-hidden="true"]')!).transform,
+      iconWidth: element.querySelector<HTMLElement>(':scope > summary > .meo-md-details-summary-icon[aria-hidden="true"]')!.getBoundingClientRect().width
     }));
     if (
       !detailsBeforeToggle.open ||
       detailsAfterCollapse.open ||
       detailsAfterCollapse.bodyVisible ||
       detailsAfterCollapse.iconTransform === initial.detailsIconTransform ||
+      Math.abs(detailsAfterCollapse.iconWidth - initial.detailsIconWidth) > 0.5 ||
       detailsBeforeToggle.top === null ||
       detailsAfterCollapse.top === null ||
       Math.abs(detailsAfterCollapse.top - detailsBeforeToggle.top) > 1
     ) {
-      throw new Error(`Rendered details did not collapse in place: ${JSON.stringify({ detailsBeforeToggle, detailsAfterCollapse })}`);
+      throw new Error(`Rendered details did not collapse in place: ${JSON.stringify({
+        detailsBeforeToggle,
+        detailsAfterCollapse,
+        expandedIconWidth: initial.detailsIconWidth
+      })}`);
     }
     await page.click('.meo-md-html-block details > summary');
     await waitForFrames(page, 8);
