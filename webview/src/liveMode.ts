@@ -11,7 +11,7 @@ import {
   type DecorationSet
 } from '@codemirror/view';
 import type { SyntaxNode, SyntaxNodeRef, Tree } from '@lezer/common';
-import { createElement, AlertCircle, ChevronRight, Code2, Delete } from 'lucide';
+import { createElement, AlertCircle, Code2, Delete } from 'lucide';
 import {
   resolveCodeLanguage,
   isFenceMarker,
@@ -1108,8 +1108,9 @@ class DetailsSummaryWidget extends UiLanguageSensitiveWidget {
     button.setAttribute('aria-label', button.title);
     button.setAttribute('aria-expanded', String(!this.collapsed));
 
-    const icon = createElement(ChevronRight, { width: 14, height: 14, 'aria-hidden': 'true' });
-    icon.classList.add('meo-md-details-summary-icon');
+    const icon = document.createElement('span');
+    icon.className = 'meo-md-details-summary-icon';
+    icon.setAttribute('aria-hidden', 'true');
 
     const label = document.createElement('span');
     label.className = 'meo-md-details-summary-label';

@@ -397,7 +397,7 @@ async function main(): Promise<void> {
       const editor = (window as any).__editor;
       const anchor = editor.getText().indexOf('<details>');
       const summary = document.querySelector<HTMLElement>('.meo-md-details-summary');
-      const summaryIcon = summary?.querySelector<SVGElement>('svg[aria-hidden="true"]') ?? null;
+      const summaryIcon = summary?.querySelector<HTMLElement>('.meo-md-details-summary-icon[aria-hidden="true"]') ?? null;
       const summaryTop = summary?.getBoundingClientRect().top ?? null;
       const summaryLine = summary?.closest<HTMLElement>('.cm-line') ?? null;
       const sourceToggle = document.querySelector<HTMLElement>('.meo-md-details-source-toggle');
@@ -484,7 +484,7 @@ async function main(): Promise<void> {
         .some((line) => line.textContent?.includes('hybrid markdown list item')),
       summaryTop: document.querySelector<HTMLElement>('.meo-md-details-summary')?.getBoundingClientRect().top ?? null,
       summaryIconTransform: getComputedStyle(
-        document.querySelector<SVGElement>('.meo-md-details-summary svg[aria-hidden="true"]')!
+        document.querySelector<HTMLElement>('.meo-md-details-summary .meo-md-details-summary-icon[aria-hidden="true"]')!
       ).transform,
       summaryExpanded: document.querySelector<HTMLElement>('.meo-md-details-summary')?.getAttribute('aria-expanded') ?? null
     }));

@@ -151,7 +151,7 @@ async function main() {
       const safeBlock = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-block'))
         .find((element) => element.textContent?.includes('Safe visible text'));
       const details = document.querySelector<HTMLElement>('.meo-md-html-block details');
-      const detailsIcon = details?.querySelector<SVGElement>(':scope > summary > svg[aria-hidden="true"]') ?? null;
+      const detailsIcon = details?.querySelector<HTMLElement>(':scope > summary > .meo-md-details-summary-icon[aria-hidden="true"]') ?? null;
       const quote = document.querySelector<HTMLElement>('.meo-md-html-block blockquote');
       const table = document.querySelector<HTMLElement>('.meo-md-html-block table');
       const tableHeader = table?.querySelector<HTMLElement>('th') ?? null;
@@ -381,7 +381,7 @@ async function main() {
       open: (element as HTMLDetailsElement).open,
       top: element.closest('.meo-md-html-block')?.getBoundingClientRect().top ?? null,
       bodyVisible: (element.querySelector('p')?.getBoundingClientRect().height ?? 0) > 0,
-      iconTransform: getComputedStyle(element.querySelector<SVGElement>(':scope > summary > svg[aria-hidden="true"]')!).transform
+      iconTransform: getComputedStyle(element.querySelector<HTMLElement>(':scope > summary > .meo-md-details-summary-icon[aria-hidden="true"]')!).transform
     }));
     if (
       !detailsBeforeToggle.open ||
