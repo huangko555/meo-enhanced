@@ -3,6 +3,10 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.20
+- Added GitHub-style disclosure markers to collapsible HTML and Markdown details, with stable geometry in both states.
+- Fixed Live-mode blockquote text shifting while clicking.
+
 ## 0.3.19
 - Refined table controls with opaque neutral surfaces, clearer hover and active states, and balanced contrast in both light and dark appearances.
 - Kept table toolbars at the viewport edge for exceptionally tall cells, including when sticky headers are disabled, and preserved column widths across Preview and Live transitions.
