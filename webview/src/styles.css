@@ -4229,9 +4229,19 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   top: 0;
   bottom: 0;
   width: 12px;
-  background: transparent;
   cursor: ew-resize;
   z-index: 4;
+}
+
+.outline-resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 4px;
+  background: transparent;
+  transform: translateX(-50%);
   transition: background-color 120ms ease;
 }
 
@@ -4239,12 +4249,23 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   right: -6px;
 }
 
+.editor-wrapper[data-outline-position='left'] .outline-resizer::before {
+  right: 6px;
+  left: auto;
+  transform: none;
+}
+
 .editor-wrapper[data-outline-position='right'] .outline-resizer {
   left: -6px;
 }
 
-.outline-resizer:hover,
-body.outline-resizing .outline-resizer {
+.editor-wrapper[data-outline-position='right'] .outline-resizer::before {
+  left: 6px;
+  transform: none;
+}
+
+.outline-resizer:hover::before,
+body.outline-resizing .outline-resizer::before {
   background: #316dca;
 }
 

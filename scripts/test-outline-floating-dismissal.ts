@@ -67,11 +67,19 @@ async function main(): Promise<void> {
     );
     assert.deepEqual(foldIconSize, { width: '14', height: '14' }, 'outline fold icon size regressed');
     const resizeIndicatorStyle = await page.$eval('.outline-resizer', async (element) => {
-      (element as HTMLElement).style.transition = 'none';
+      const indicatorRule = Array.from(document.styleSheets)
+        .flatMap((sheet) => Array.from(sheet.cssRules))
+        .find((rule) => rule instanceof CSSStyleRule && rule.selectorText === '.outline-resizer::before');
+      if (indicatorRule instanceof CSSStyleRule) indicatorRule.style.transition = 'none';
       document.body.classList.add('outline-resizing');
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      const style = getComputedStyle(element);
-      const result = { color: style.backgroundColor, width: style.width };
+      const hitTargetStyle = getComputedStyle(element);
+      const indicatorStyle = getComputedStyle(element, '::before');
+      const result = {
+        color: indicatorStyle.backgroundColor,
+        indicatorWidth: indicatorStyle.width,
+        hitTargetWidth: hitTargetStyle.width
+      };
       document.body.classList.remove('outline-resizing');
       return result;
     });
@@ -79,6 +87,16 @@ async function main(): Promise<void> {
       resizeIndicatorStyle.color,
       'rgb(49, 109, 202)',
       `outline resize indicator color regressed: ${JSON.stringify(resizeIndicatorStyle)}`
+    );
+    assert.equal(
+      resizeIndicatorStyle.indicatorWidth,
+      '4px',
+      `outline resize indicator width regressed: ${JSON.stringify(resizeIndicatorStyle)}`
+    );
+    assert.equal(
+      resizeIndicatorStyle.hitTargetWidth,
+      '12px',
+      `outline resize hit target width regressed: ${JSON.stringify(resizeIndicatorStyle)}`
     );
 
     await page.click('.outline-item');
