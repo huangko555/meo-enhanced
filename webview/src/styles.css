@@ -4558,7 +4558,37 @@ body.outline-resizing .preview-frame {
   color: var(--vscode-editor-foreground);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  user-select: none;
+}
+
+.meo-git-diff-selecting-original .cm-editor .cm-line {
+  user-select: none;
+}
+
+.meo-git-diff-selecting-original .cm-editor .meo-git-diff-original-content {
   user-select: text;
+}
+
+.meo-git-diff-selecting-current .cm-editor .meo-git-diff-original-block,
+.meo-git-diff-selecting-current .cm-editor .meo-git-diff-original-content {
+  user-select: none;
+}
+
+.meo-git-diff-selecting-original .cm-editor .cm-selectionBackground {
+  display: none !important;
+}
+
+.cm-editor .meo-git-diff-original-content::selection,
+.cm-editor .meo-git-diff-original-content *::selection,
+.meo-git-diff-selecting-original .cm-editor .cm-line::selection,
+.meo-git-diff-selecting-original .cm-editor .cm-line *::selection {
+  color: currentColor !important;
+  background-color: transparent !important;
+}
+
+.meo-git-diff-selecting-original .cm-editor .meo-git-diff-original-content::selection,
+.meo-git-diff-selecting-original .cm-editor .meo-git-diff-original-content *::selection {
+  background-color: var(--meo-selection-bg) !important;
 }
 
 .cm-editor .meo-git-overview-ruler {

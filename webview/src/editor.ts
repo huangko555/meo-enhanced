@@ -368,6 +368,7 @@ export function createEditor({
   let imeCompositionFlushTimer: number | null = null;
   let capturedPointerId: number | null = null;
   let liveSelectionPointerId: number | null = null;
+  let gitDiffSelectionPointerId: number | null = null;
   let liveSelectionGeneration = 0;
   let inlineCodeClick: InlineCodeClickState | null = null;
   let checkboxClick: PointerClickState | null = null;
@@ -392,6 +393,7 @@ export function createEditor({
   let onWindowBlur: (() => void) | null = null;
   let onDocumentSelectionChange: (() => void) | null = null;
   let onHtmlContentPointerDown: ((event: PointerEvent) => void) | null = null;
+  let onGitDiffSelectionPointerDown: ((event: PointerEvent) => void) | null = null;
   let suppressSelectionMenuForNativeHtml = false;
   let onBlockActionPointerMove: ((event: PointerEvent) => void) | null = null;
   let onBlockActionPointerLeave: (() => void) | null = null;
@@ -851,10 +853,23 @@ export function createEditor({
     }
   };
 
-  const clearPointerSelection = () => {
+  const gitDiffSelectionHost = (): HTMLElement => view.dom.ownerDocument.documentElement;
+
+  const clearGitDiffSelectionDomain = () => {
+    if (view) {
+      gitDiffSelectionHost().classList.remove(
+        'meo-git-diff-selecting-current',
+        'meo-git-diff-selecting-original'
+      );
+    }
+    gitDiffSelectionPointerId = null;
+  };
+
+  const clearPointerSelection = (preserveGitDiffDomain = false) => {
     if (view) {
       view.dom.classList.remove('meo-pointer-selecting');
     }
+    if (!preserveGitDiffDomain) clearGitDiffSelectionDomain();
     if (liveSelectionPointerId === null) {
       return;
     }
@@ -866,16 +881,21 @@ export function createEditor({
     }
   };
 
-  const finishPointerSelection = (pointerId: number, defer = false) => {
+  const finishPointerSelection = (
+    pointerId: number,
+    defer = false,
+    preserveGitDiffDomain = false
+  ) => {
     if (view) {
       view.dom.classList.remove('meo-pointer-selecting');
     }
+    if (!preserveGitDiffDomain) clearGitDiffSelectionDomain();
     if (liveSelectionPointerId === pointerId) {
       if (defer) {
         const generation = liveSelectionGeneration;
         requestAnimationFrame(() => {
           if (liveSelectionPointerId === pointerId && liveSelectionGeneration === generation) {
-            clearPointerSelection();
+            clearPointerSelection(preserveGitDiffDomain);
           }
         });
       } else {
@@ -889,6 +909,13 @@ export function createEditor({
       return;
     }
     const hasSelection = view.state.selection.ranges.some((range) => !range.empty);
+    if (
+      !hasSelection &&
+      gitDiffSelectionPointerId === null &&
+      gitDiffSelectionHost().classList.contains('meo-git-diff-selecting-current')
+    ) {
+      clearGitDiffSelectionDomain();
+    }
     const hasSearchSelection = view.state.selection.ranges.some((range) =>
       isSearchMatchSelection(Math.min(range.from, range.to), Math.max(range.from, range.to))
     );
@@ -2053,7 +2080,7 @@ export function createEditor({
           return false;
         },
         pointerup(event, view) {
-          finishPointerSelection(event.pointerId, true);
+          finishPointerSelection(event.pointerId, true, true);
 
           if (checkboxClick?.pointerId === event.pointerId) {
             frontmatterBoundaryClick = null;
@@ -2604,8 +2631,61 @@ export function createEditor({
     onSelectionChange?.({ visible: false });
   };
   view.dom.addEventListener('pointerdown', onHtmlContentPointerDown, true);
+  onGitDiffSelectionPointerDown = (event) => {
+    if (event.button !== 0) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (
+      currentMode !== 'source' ||
+      !view.dom.classList.contains('meo-git-diff-details-visible') ||
+      !target ||
+      !view.contentDOM.contains(target)
+    ) {
+      clearGitDiffSelectionDomain();
+      return;
+    }
+    const domain = target.closest('.meo-git-diff-original-content')
+      ? 'original'
+      : target.closest('.cm-line')
+        ? 'current'
+        : null;
+    if (!domain) {
+      clearGitDiffSelectionDomain();
+      return;
+    }
+    const selectionHost = gitDiffSelectionHost();
+    const previousDomain = selectionHost.classList.contains('meo-git-diff-selecting-original')
+      ? 'original'
+      : selectionHost.classList.contains('meo-git-diff-selecting-current')
+        ? 'current'
+        : null;
+    if (domain === 'original' && !view.state.selection.main.empty) {
+      // Collapse CodeMirror's separately rendered selection before native
+      // selection begins in an original-version widget.
+      view.dispatch({ selection: { anchor: view.state.selection.main.head } });
+    }
+    if (domain === 'original' || (previousDomain && previousDomain !== domain)) {
+      // Clear the completed native range while its old domain is still
+      // isolated. Enabling the other domain first would briefly reveal the
+      // hidden part of that range before Chromium collapses it for this click.
+      view.dom.ownerDocument.getSelection()?.removeAllRanges();
+    }
+    // The original rows are DOM-only widgets while current rows belong to the
+    // CodeMirror document. Lock one drag to its starting domain so native DOM
+    // selection cannot absorb text from the other representation.
+    selectionHost.classList.toggle('meo-git-diff-selecting-original', domain === 'original');
+    selectionHost.classList.toggle('meo-git-diff-selecting-current', domain === 'current');
+    gitDiffSelectionPointerId = event.pointerId;
+  };
+  view.dom.addEventListener('pointerdown', onGitDiffSelectionPointerDown, true);
   onDocumentSelectionChange = () => {
     const selection = document.getSelection();
+    if (
+      (!selection || selection.isCollapsed) &&
+      gitDiffSelectionPointerId === null &&
+      gitDiffSelectionHost().classList.contains('meo-git-diff-selecting-original')
+    ) {
+      clearGitDiffSelectionDomain();
+    }
     if (!selection || selection.isCollapsed) {
       return;
     }
@@ -2621,9 +2701,27 @@ export function createEditor({
   };
   document.addEventListener('selectionchange', onDocumentSelectionChange);
   onWindowPointerUp = (event) => {
-    clearPointerSelection();
+    if (gitDiffSelectionPointerId === event.pointerId) gitDiffSelectionPointerId = null;
+    // Keep the originating diff domain while the completed selection remains.
+    // Otherwise Chromium repaints the DOM range after pointerup and reveals
+    // text from the other version under the same native range.
+    clearPointerSelection(true);
+    requestAnimationFrame(() => {
+      if (gitDiffSelectionPointerId !== null) return;
+      if (gitDiffSelectionHost().classList.contains('meo-git-diff-selecting-current')) {
+        if (view.state.selection.main.empty) clearGitDiffSelectionDomain();
+        return;
+      }
+      if (
+        gitDiffSelectionHost().classList.contains('meo-git-diff-selecting-original') &&
+        document.getSelection()?.isCollapsed
+      ) {
+        clearGitDiffSelectionDomain();
+      }
+    });
   };
   onWindowPointerCancel = (event) => {
+    if (gitDiffSelectionPointerId === event.pointerId) gitDiffSelectionPointerId = null;
     clearPointerSelection();
   };
   onWindowBlur = () => clearPointerSelection();
@@ -2853,6 +2951,10 @@ export function createEditor({
       if (onHtmlContentPointerDown) {
         view.dom.removeEventListener('pointerdown', onHtmlContentPointerDown, true);
         onHtmlContentPointerDown = null;
+      }
+      if (onGitDiffSelectionPointerDown) {
+        view.dom.removeEventListener('pointerdown', onGitDiffSelectionPointerDown, true);
+        onGitDiffSelectionPointerDown = null;
       }
       if (onBlockActionPointerMove) {
         view.dom.removeEventListener('pointermove', onBlockActionPointerMove);

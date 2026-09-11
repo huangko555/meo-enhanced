@@ -1297,7 +1297,7 @@ async function main() {
       sourceDiffDetails.firstNumber !== '40' ||
       sourceDiffDetails.firstContent !== 'removed baseline line 1' ||
       sourceDiffDetails.oldContentEditable !== 'false' ||
-      sourceDiffDetails.oldContentUserSelect !== 'text' ||
+      sourceDiffDetails.oldContentUserSelect !== 'none' ||
       sourceDiffDetails.currentContentEditable !== 'true' ||
       sourceDiffDetails.reviewCountStyles.length < 2 ||
       sourceDiffDetails.reviewCountStyles.some(({ fontSize, fontWeight, inHeader }) =>
