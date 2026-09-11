@@ -1956,7 +1956,9 @@ button:focus-visible > .menu-switch {
 }
 
 .cm-editor .meo-md-details-summary {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
   margin: 0;
   padding: 0;
   border: 0;
@@ -1987,6 +1989,18 @@ button:focus-visible > .menu-switch {
 
 .cm-editor .meo-md-details-summary-label {
   display: inline;
+}
+
+.cm-editor .meo-md-details-summary-icon {
+  width: 0.9em;
+  height: 0.9em;
+  flex: none;
+  color: currentColor;
+}
+
+.cm-editor .meo-md-details-summary[aria-expanded="true"] .meo-md-details-summary-icon,
+.cm-editor .meo-md-html-content details[open] > summary > .meo-md-details-summary-icon {
+  transform: rotate(90deg);
 }
 
 .cm-editor .cm-gutterElement.cm-activeLineGutter {
@@ -2601,8 +2615,7 @@ button:focus-visible > .menu-switch {
   -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;
 }
 
-.cm-editor.meo-mode-live .cm-activeLine.meo-md-quote {
-  padding-left: 3ch;
+.cm-editor.meo-mode-live .cm-activeLine.meo-md-quote:not(.meo-md-code-block):not(.meo-mermaid-block):has(> .meo-md-marker-active:first-child) {
   text-indent: -2ch;
 }
 
@@ -3087,6 +3100,9 @@ button:focus-visible > .menu-switch {
 }
 
 .cm-editor .meo-md-html-content summary {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
   color: var(--meo-foreground);
   box-shadow: inset 0 -1px 0 color-mix(
     in srgb,
@@ -3095,6 +3111,11 @@ button:focus-visible > .menu-switch {
   );
   font-weight: 600;
   cursor: pointer;
+  list-style: none;
+}
+
+.cm-editor .meo-md-html-content summary::-webkit-details-marker {
+  display: none;
 }
 
 .cm-editor .meo-md-html-content details:not([open]) > :not(summary) {

@@ -11,7 +11,7 @@ import {
   type DecorationSet
 } from '@codemirror/view';
 import type { SyntaxNode, SyntaxNodeRef, Tree } from '@lezer/common';
-import { createElement, AlertCircle, Code2, Delete } from 'lucide';
+import { createElement, AlertCircle, ChevronRight, Code2, Delete } from 'lucide';
 import {
   resolveCodeLanguage,
   isFenceMarker,
@@ -1106,11 +1106,15 @@ class DetailsSummaryWidget extends UiLanguageSensitiveWidget {
     button.className = 'meo-md-details-summary';
     button.title = this.collapsed ? strings.expandDetails : strings.collapseDetails;
     button.setAttribute('aria-label', button.title);
+    button.setAttribute('aria-expanded', String(!this.collapsed));
+
+    const icon = createElement(ChevronRight, { width: 14, height: 14, 'aria-hidden': 'true' });
+    icon.classList.add('meo-md-details-summary-icon');
 
     const label = document.createElement('span');
     label.className = 'meo-md-details-summary-label';
     label.textContent = this.summaryText;
-    button.appendChild(label);
+    button.append(icon, label);
 
     button.addEventListener('pointerdown', (event) => {
       event.preventDefault();

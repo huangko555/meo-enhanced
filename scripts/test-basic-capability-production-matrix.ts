@@ -87,6 +87,69 @@ async function alerts(browser: Browser): Promise<void> {
   } finally { await page.close(); }
 }
 
+async function blockquotePressLayout(browser: Browser): Promise<void> {
+  const quoteText = '目标：在 Live 模式中像普通正文一样显示安全 HTML，不出现代码块式背景；Source 模式始终保留原始源码；Preview 与导出结果应保持一致。11111111111145544244224242424';
+  const page = await open(browser, `# HTML 内容渲染与交互测试区\n\n> ${quoteText}\n\nHTML 测试区下方固定参照行`, 'live');
+  const measure = () => page.evaluate((needle) => {
+    const line = [...document.querySelectorAll<HTMLElement>('.cm-line')]
+      .find((candidate) => candidate.textContent?.includes(needle));
+    if (!line) return null;
+    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode as Text;
+      const offset = node.data.indexOf(needle);
+      if (offset < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, offset);
+      range.setEnd(node, offset + 1);
+      const rect = range.getBoundingClientRect();
+      return {
+        left: rect.left,
+        x: rect.left + 3,
+        y: rect.top + rect.height / 2,
+        lineText: line.textContent ?? '',
+        lineClass: line.className,
+        paddingLeft: getComputedStyle(line).paddingLeft,
+        textIndent: getComputedStyle(line).textIndent,
+        editorPaddingLeft: getComputedStyle(document.querySelector<HTMLElement>('.cm-content')!).paddingLeft,
+        childSignature: Array.from(line.childNodes).map((child) => (
+          child instanceof HTMLElement ? `${child.tagName}.${child.className}` : '#text'
+        ))
+      };
+    }
+    return null;
+  }, quoteText);
+  try {
+    await page.waitForFunction((needle) => {
+      const line = [...document.querySelectorAll<HTMLElement>('.cm-line')]
+        .find((candidate) => candidate.textContent?.includes(needle));
+      return line?.classList.contains('meo-md-quote') === true &&
+        line.firstElementChild?.classList.contains('meo-md-marker') === true;
+    }, {}, quoteText);
+    const before = await measure();
+    assert.ok(before, 'Rendered blockquote content was not measurable before pointerdown');
+    await page.mouse.move(before.x, before.y);
+    await page.mouse.down();
+    const pressedFrames = [];
+    for (let frame = 0; frame < 4; frame += 1) {
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+      pressedFrames.push(await measure());
+    }
+    await page.mouse.up();
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    const released = await measure();
+    assert.ok(released, 'Rendered blockquote content was not measurable after pointerup');
+    assert.ok(
+      pressedFrames.every((frame) => frame && Math.abs(frame.left - before.left) <= 1) &&
+      Math.abs(released.left - before.left) <= 1,
+      `Pressing rendered blockquote text changed its content inset: ${JSON.stringify({ before, pressedFrames, released })}`
+    );
+  } finally {
+    await page.mouse.up().catch(() => {});
+    await page.close();
+  }
+}
+
 async function sourceLineNumberPreference(browser: Browser): Promise<void> {
   const text = Array.from({ length: 12 }, (_, index) => `line ${index + 1}`).join('\n');
   const page = await open(browser, text, 'source', 'off');
@@ -126,5 +189,5 @@ async function sourceLineNumberPreference(browser: Browser): Promise<void> {
   }
 }
 
-async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { await matrix(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
+async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { await blockquotePressLayout(browser); await matrix(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
 main().finally(() => fs.rmSync(temp, { recursive: true, force: true })).catch((e) => { console.error(e instanceof Error ? e.stack : e); process.exitCode = 1; });

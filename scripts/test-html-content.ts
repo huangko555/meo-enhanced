@@ -151,6 +151,7 @@ async function main() {
       const safeBlock = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-block'))
         .find((element) => element.textContent?.includes('Safe visible text'));
       const details = document.querySelector<HTMLElement>('.meo-md-html-block details');
+      const detailsIcon = details?.querySelector<SVGElement>(':scope > summary > svg[aria-hidden="true"]') ?? null;
       const quote = document.querySelector<HTMLElement>('.meo-md-html-block blockquote');
       const table = document.querySelector<HTMLElement>('.meo-md-html-block table');
       const tableHeader = table?.querySelector<HTMLElement>('th') ?? null;
@@ -204,6 +205,8 @@ async function main() {
         safeOnclick: safeBlock?.querySelector<HTMLElement>('p')?.getAttribute('onclick') ?? null,
         sourceToggleCount: document.querySelectorAll('.meo-md-html-source-toggle').length,
         detailsRendered: Boolean(details?.textContent?.includes('Rendered details body')),
+        detailsIconVisible: (detailsIcon?.getBoundingClientRect().width ?? 0) > 0,
+        detailsIconTransform: detailsIcon ? getComputedStyle(detailsIcon).transform : '',
         detailsSourceVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
           .some((line) => line.textContent?.includes('<details open>')),
         quoteBorderWidth: quote ? getComputedStyle(quote).borderLeftWidth : '',
@@ -259,6 +262,8 @@ async function main() {
       initial.safeOnclick !== null ||
       initial.sourceToggleCount < 3 ||
       !initial.detailsRendered ||
+      !initial.detailsIconVisible ||
+      initial.detailsIconTransform === 'none' ||
       initial.detailsSourceVisible ||
       initial.quoteBorderWidth === '0px' ||
       initial.quoteBackground !== 'rgba(0, 0, 0, 0)' ||
@@ -375,12 +380,14 @@ async function main() {
     const detailsAfterCollapse = await page.$eval('.meo-md-html-block details', (element) => ({
       open: (element as HTMLDetailsElement).open,
       top: element.closest('.meo-md-html-block')?.getBoundingClientRect().top ?? null,
-      bodyVisible: (element.querySelector('p')?.getBoundingClientRect().height ?? 0) > 0
+      bodyVisible: (element.querySelector('p')?.getBoundingClientRect().height ?? 0) > 0,
+      iconTransform: getComputedStyle(element.querySelector<SVGElement>(':scope > summary > svg[aria-hidden="true"]')!).transform
     }));
     if (
       !detailsBeforeToggle.open ||
       detailsAfterCollapse.open ||
       detailsAfterCollapse.bodyVisible ||
+      detailsAfterCollapse.iconTransform === initial.detailsIconTransform ||
       detailsBeforeToggle.top === null ||
       detailsAfterCollapse.top === null ||
       Math.abs(detailsAfterCollapse.top - detailsBeforeToggle.top) > 1

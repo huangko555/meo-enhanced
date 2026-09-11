@@ -8,7 +8,7 @@ import {
   lineNumberWidgetMarker
 } from '@codemirror/view';
 import type { SyntaxNodeRef } from '@lezer/common';
-import { createElement, AlertTriangle, Code2, Eye } from 'lucide';
+import { createElement, AlertTriangle, ChevronRight, Code2, Eye } from 'lucide';
 import {
   getHtmlRootTagName,
   isSafeHtmlUrl,
@@ -307,6 +307,15 @@ class HtmlBlockWidget extends UiLanguageSensitiveWidget {
     root.appendChild(contentRoot);
 
     const details = contentRoot.querySelector<HTMLDetailsElement>(':scope > details');
+    const summary = details?.querySelector<HTMLElement>(':scope > summary') ?? null;
+    if (summary) {
+      const label = document.createElement('span');
+      label.className = 'meo-md-details-summary-label';
+      label.append(...Array.from(summary.childNodes));
+      const icon = createElement(ChevronRight, { width: 14, height: 14, 'aria-hidden': 'true' });
+      icon.classList.add('meo-md-details-summary-icon');
+      summary.append(icon, label);
+    }
     if (details && this.block.detailsCollapsed !== null) {
       details.open = !this.block.detailsCollapsed;
       details.addEventListener('toggle', () => {

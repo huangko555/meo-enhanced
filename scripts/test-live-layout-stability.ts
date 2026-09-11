@@ -397,6 +397,7 @@ async function main(): Promise<void> {
       const editor = (window as any).__editor;
       const anchor = editor.getText().indexOf('<details>');
       const summary = document.querySelector<HTMLElement>('.meo-md-details-summary');
+      const summaryIcon = summary?.querySelector<SVGElement>('svg[aria-hidden="true"]') ?? null;
       const summaryTop = summary?.getBoundingClientRect().top ?? null;
       const summaryLine = summary?.closest<HTMLElement>('.cm-line') ?? null;
       const sourceToggle = document.querySelector<HTMLElement>('.meo-md-details-source-toggle');
@@ -409,6 +410,9 @@ async function main(): Promise<void> {
         rawOpeningVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
           .some((line) => line.textContent?.includes('<details>')),
         summaryTop,
+        summaryIconVisible: (summaryIcon?.getBoundingClientRect().width ?? 0) > 0,
+        summaryIconTransform: summaryIcon ? getComputedStyle(summaryIcon).transform : '',
+        summaryExpanded: summary?.getAttribute('aria-expanded') ?? null,
         sourceToggleVisible: Boolean(sourceToggle),
         sourceToggleSameRow: Boolean(
           summaryLineRect && sourceToggleRect &&
@@ -428,6 +432,8 @@ async function main(): Promise<void> {
     await waitForFrames(page, 4);
     if (
       hybridPreview.collapsed !== true || hybridPreview.rawOpeningVisible ||
+      !hybridPreview.summaryIconVisible || hybridPreview.summaryIconTransform !== 'none' ||
+      hybridPreview.summaryExpanded !== 'false' ||
       !hybridPreview.sourceToggleVisible || !hybridPreview.sourceToggleSameRow ||
       !hybridPreview.sourceToggleOutsideContent || !hybridPreview.sourceToggleInsideViewport ||
       hybridPreview.sourceToggleTopDelta === null || Math.abs(hybridPreview.sourceToggleTopDelta) > 1 ||
@@ -476,11 +482,17 @@ async function main(): Promise<void> {
         .some((line) => line.textContent?.includes('Hybrid body')),
       listVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
         .some((line) => line.textContent?.includes('hybrid markdown list item')),
-      summaryTop: document.querySelector<HTMLElement>('.meo-md-details-summary')?.getBoundingClientRect().top ?? null
+      summaryTop: document.querySelector<HTMLElement>('.meo-md-details-summary')?.getBoundingClientRect().top ?? null,
+      summaryIconTransform: getComputedStyle(
+        document.querySelector<SVGElement>('.meo-md-details-summary svg[aria-hidden="true"]')!
+      ).transform,
+      summaryExpanded: document.querySelector<HTMLElement>('.meo-md-details-summary')?.getAttribute('aria-expanded') ?? null
     }));
     if (
       !hybridExpanded.bodyVisible || !hybridExpanded.listVisible || hybridExpanded.summaryTop === null ||
-      Math.abs(hybridExpanded.summaryTop - hybridSummaryPoint.top) > 1
+      Math.abs(hybridExpanded.summaryTop - hybridSummaryPoint.top) > 1 ||
+      hybridExpanded.summaryIconTransform === hybridPreview.summaryIconTransform ||
+      hybridExpanded.summaryExpanded !== 'true'
     ) {
       throw new Error(`Hybrid details did not expand Markdown content in place: ${JSON.stringify({ hybridSummaryPoint, hybridExpanded })}`);
     }
