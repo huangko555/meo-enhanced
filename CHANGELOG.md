@@ -3,6 +3,11 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.19
+- Refined table controls with opaque neutral surfaces, clearer hover and active states, and balanced contrast in both light and dark appearances.
+- Kept table toolbars at the viewport edge for exceptionally tall cells, including when sticky headers are disabled, and preserved column widths across Preview and Live transitions.
+- Narrowed the outline resize guide and isolated text selection between current and previous-version content in Source mode.
+
 ## 0.3.18
 - Added contextual table actions, rectangular multi-cell selection and paste, safer deletion, and more predictable focus, undo, and keyboard navigation.
 - Improved table layout and interaction with configurable sticky headers, stable toolbar placement, clearer column-resize boundaries, and better default widths.
