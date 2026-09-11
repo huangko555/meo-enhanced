@@ -5361,6 +5361,39 @@ body.outline-resizing .preview-frame {
   background: var(--meo-active-line-bg);
 }
 
+.cm-editor .meo-md-html-table-context-trigger,
+.cm-editor .meo-md-html-table-context-menu {
+  --meo-table-context-surface: color-mix(
+    in srgb,
+    var(--meo-background) 84%,
+    black 16%
+  );
+  --meo-table-context-hover-surface: color-mix(
+    in srgb,
+    var(--meo-table-context-surface) 90%,
+    var(--meo-foreground) 10%
+  );
+  --meo-table-context-selected-surface: color-mix(
+    in srgb,
+    var(--meo-table-context-surface) 82%,
+    var(--meo-foreground) 18%
+  );
+  --meo-table-context-border: color-mix(
+    in srgb,
+    var(--meo-background) 70%,
+    var(--meo-foreground) 30%
+  );
+}
+
+html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-trigger,
+html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-menu {
+  --meo-table-context-surface: color-mix(
+    in srgb,
+    var(--meo-background) 84%,
+    white 16%
+  );
+}
+
 .cm-editor .meo-md-html-table-context-trigger {
   position: absolute;
   left: -26px;
@@ -5372,11 +5405,11 @@ body.outline-resizing .preview-frame {
   width: 22px;
   height: 28px;
   padding: 0;
-  border: 1px solid color-mix(in srgb, var(--meo-foreground) 16%, transparent);
+  border: 1px solid var(--meo-table-context-border);
   border-radius: 6px;
-  color: var(--meo-color-base02);
+  color: var(--meo-foreground);
   font: 600 17px/1 var(--meo-active-editor-font);
-  background: var(--vscode-menu-background, var(--meo-background));
+  background: var(--meo-table-context-surface);
   box-shadow: 0 2px 8px rgb(0 0 0 / 16%);
   cursor: pointer;
   visibility: hidden;
@@ -5403,10 +5436,14 @@ body.outline-resizing .preview-frame {
   pointer-events: none;
 }
 
-.cm-editor .meo-md-html-table-context-trigger:hover,
+.cm-editor .meo-md-html-table-context-trigger:hover {
+  color: var(--meo-foreground);
+  background: var(--meo-table-context-hover-surface);
+}
+
 .cm-editor .meo-md-html-table-context-trigger[aria-expanded='true'] {
   color: var(--meo-foreground);
-  background: color-mix(in srgb, var(--vscode-menu-background, var(--meo-background)) 88%, var(--meo-foreground));
+  background: var(--meo-table-context-selected-surface);
 }
 
 .cm-editor .meo-md-html-table-context-trigger:focus-visible {
@@ -5427,10 +5464,10 @@ body.outline-resizing .preview-frame {
   padding: 4px;
   overflow-x: auto;
   overflow-y: hidden;
-  border: 1px solid color-mix(in srgb, var(--meo-foreground) 14%, transparent);
+  border: 1px solid var(--meo-table-context-border);
   border-radius: 8px;
   color: var(--meo-foreground);
-  background-color: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-editor-background, #1f2328)));
+  background-color: var(--meo-table-context-surface);
   opacity: 1;
   backdrop-filter: none;
   box-shadow: 0 10px 28px rgb(0 0 0 / 28%);
@@ -5452,6 +5489,7 @@ body.outline-resizing .preview-frame {
 }
 
 .cm-editor .meo-md-html-table-context-btn {
+  --meo-table-context-control-surface: var(--meo-table-context-surface);
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -5489,10 +5527,15 @@ body.outline-resizing .preview-frame {
 }
 
 .cm-editor .meo-md-html-table-context-btn:hover:not(:disabled),
-.cm-editor .meo-md-html-table-context-btn:focus-visible,
-.cm-editor .meo-md-html-table-context-btn.is-active {
-  background: var(--vscode-toolbar-hoverBackground, rgb(127 127 127 / 18%));
+.cm-editor .meo-md-html-table-context-btn:focus-visible {
+  --meo-table-context-control-surface: var(--meo-table-context-hover-surface);
+  background: var(--meo-table-context-hover-surface);
   outline: none;
+}
+
+.cm-editor .meo-md-html-table-context-btn.is-active {
+  --meo-table-context-control-surface: var(--meo-table-context-selected-surface);
+  background: var(--meo-table-context-selected-surface);
 }
 
 .cm-editor .meo-md-html-table-context-btn:disabled {
@@ -5507,7 +5550,8 @@ body.outline-resizing .preview-frame {
 
 .cm-editor .meo-md-html-table-context-page-btn {
   width: 22px;
-  color: var(--meo-color-base02);
+  color: var(--meo-foreground);
+  background: var(--meo-table-context-surface);
 }
 
 .cm-editor .meo-md-html-table-context-collapse {
@@ -5520,7 +5564,7 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-menu 
 }
 
 html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-menu {
-  background-color: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-editor-background, #fff)));
+  background-color: var(--meo-table-context-surface);
 }
 
 html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-delete-btn {
@@ -5540,7 +5584,12 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-delet
   height: 10px;
   color: var(--vscode-charts-green, #89d185);
   border-radius: 2px;
-  background-color: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-editor-background, #1f2328)));
+  background-color: transparent;
+  filter:
+    drop-shadow(1px 0 0 var(--meo-table-context-control-surface))
+    drop-shadow(-1px 0 0 var(--meo-table-context-control-surface))
+    drop-shadow(0 1px 0 var(--meo-table-context-control-surface))
+    drop-shadow(0 -1px 0 var(--meo-table-context-control-surface));
   stroke-width: 3.5;
 }
 

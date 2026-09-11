@@ -642,13 +642,21 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     return {
       table,
       project() {
+        const nextContainerWidth = availableWidth(table);
+        // Preview hides the live editor without releasing its width adapter.
+        // A hidden table measures as zero-width; treating that as a real layout
+        // constraint would replace the readable columns with their minimum widths.
+        if (nextContainerWidth <= 0 || table.getClientRects().length === 0) {
+          projectedContainerWidth = nextContainerWidth;
+          return 'stable';
+        }
         const previousContainerWidth = projectedContainerWidth;
         if (dragPreviewActive) {
           const intent = findIntent(table);
           if (intent && !sameLayoutFacts(intent.snapshot, layoutFacts(table))) {
             dragLayoutFactsDirty = true;
           }
-          projectedContainerWidth = availableWidth(table);
+          projectedContainerWidth = nextContainerWidth;
           return 'drag-pending';
         }
         const beforeWidths = Array.from(table.querySelectorAll<HTMLElement>('thead th'))
@@ -656,7 +664,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         const beforeTotalWidth = table.getBoundingClientRect().width;
         project(table, epoch);
         dragLayoutFactsDirty = false;
-        projectedContainerWidth = availableWidth(table);
+        projectedContainerWidth = nextContainerWidth;
         const afterWidths = Array.from(table.querySelectorAll<HTMLElement>('thead th'))
           .map((cell) => cell.getBoundingClientRect().width);
         const afterTotalWidth = table.getBoundingClientRect().width;

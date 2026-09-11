@@ -7,6 +7,80 @@ import { launchTestBrowser } from './browser-test-helpers';
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-table-context-menu-'));
 
+type ComputedColor = { red: number; green: number; blue: number; alpha: number };
+
+function parseComputedColor(value: string): ComputedColor {
+  const components = value.match(/[\d.]+/g)?.map(Number) ?? [];
+  if (value.startsWith('color(srgb ') && components.length >= 3) {
+    return {
+      red: components[0] * 255,
+      green: components[1] * 255,
+      blue: components[2] * 255,
+      alpha: components[3] ?? 1
+    };
+  }
+  if ((value.startsWith('rgb(') || value.startsWith('rgba(')) && components.length >= 3) {
+    return {
+      red: components[0],
+      green: components[1],
+      blue: components[2],
+      alpha: components[3] ?? 1
+    };
+  }
+  throw new Error(`Unsupported computed color: ${value}`);
+}
+
+function colorBrightness(value: string): number {
+  const color = parseComputedColor(value);
+  return (color.red + color.green + color.blue) / 3;
+}
+
+function colorDistance(left: string, right: string): number {
+  const a = parseComputedColor(left);
+  const b = parseComputedColor(right);
+  return Math.max(
+    Math.abs(a.red - b.red),
+    Math.abs(a.green - b.green),
+    Math.abs(a.blue - b.blue)
+  );
+}
+
+function assertOpaqueColor(value: string, label: string): void {
+  assert.equal(parseComputedColor(value).alpha, 1, `${label} must be fully opaque: ${value}`);
+}
+
+function assertTableActionsAppearance(
+  appearance: Record<string, string>,
+  editorBackground: string,
+  label: string,
+  direction: 'darker' | 'lighter'
+): void {
+  for (const key of [
+    'triggerBackground',
+    'triggerActiveBackground',
+    'menuBackground',
+    'moreButtonBackground',
+    'moreButtonActiveBackground'
+  ]) {
+    assertOpaqueColor(appearance[key], `${label} ${key}`);
+  }
+  for (const key of ['triggerBackground', 'menuBackground', 'moreButtonBackground']) {
+    const delta = colorBrightness(appearance[key]) - colorBrightness(editorBackground);
+    assert.ok(
+      direction === 'darker' ? delta < -1 : delta > 1,
+      `${label} ${key} must move ${direction} than the editor background: ${JSON.stringify(appearance)}`
+    );
+  }
+  assert.ok(
+    colorDistance(appearance.triggerActiveBackground, appearance.triggerBackground) >= 14,
+    `${label} trigger active state must stand out from its surface`
+  );
+  assert.ok(
+    colorDistance(appearance.moreButtonActiveBackground, appearance.moreButtonBackground) >= 14,
+    `${label} more-button active state must stand out from its surface`
+  );
+}
+
 async function waitForFrames(page: import('puppeteer-core').Page, count = 6): Promise<void> {
   await page.evaluate(async (frameCount) => {
     for (let index = 0; index < frameCount; index += 1) {
@@ -395,6 +469,50 @@ async function main(): Promise<void> {
         constrainedTable.tHead!.rows[0].cells,
         (cell) => cell.getBoundingClientRect().width
       );
+      const root = document.documentElement;
+      const darkTrigger = document.querySelector<HTMLElement>('.meo-md-html-table-context-trigger')!;
+      const darkMoreButton = document.querySelector<HTMLElement>('.meo-md-html-table-context-next')!;
+      const darkTriggerBackground = getComputedStyle(darkTrigger).backgroundColor;
+      const darkMenuBackground = getComputedStyle(document.querySelector('.meo-md-html-table-context-menu')!).backgroundColor;
+      const darkMoreButtonBackground = getComputedStyle(darkMoreButton).backgroundColor;
+      darkTrigger.setAttribute('aria-expanded', 'true');
+      darkMoreButton.classList.add('is-active');
+      const darkAppearance = {
+        triggerBackground: darkTriggerBackground,
+        triggerActiveBackground: getComputedStyle(darkTrigger).backgroundColor,
+        menuBackground: darkMenuBackground,
+        moreButtonColor: getComputedStyle(darkMoreButton).color,
+        moreButtonBackground: darkMoreButtonBackground,
+        moreButtonActiveBackground: getComputedStyle(darkMoreButton).backgroundColor
+      };
+      darkTrigger.setAttribute('aria-expanded', 'false');
+      darkMoreButton.classList.remove('is-active');
+      root.dataset.editorAppearance = 'light';
+      root.style.setProperty('--meo-background', '#f2f3f5');
+      root.style.setProperty('--meo-foreground', '#1f2328');
+      root.style.setProperty('--meo-color-base02', '#57606a');
+      const lightTrigger = document.querySelector<HTMLElement>('.meo-md-html-table-context-trigger')!;
+      const lightMoreButton = document.querySelector<HTMLElement>('.meo-md-html-table-context-next')!;
+      const lightTriggerBackground = getComputedStyle(lightTrigger).backgroundColor;
+      const lightMenuBackground = getComputedStyle(document.querySelector('.meo-md-html-table-context-menu')!).backgroundColor;
+      const lightMoreButtonColor = getComputedStyle(lightMoreButton).color;
+      const lightMoreButtonBackground = getComputedStyle(lightMoreButton).backgroundColor;
+      lightTrigger.setAttribute('aria-expanded', 'true');
+      lightMoreButton.classList.add('is-active');
+      const lightAppearance = {
+        triggerBackground: lightTriggerBackground,
+        triggerActiveBackground: getComputedStyle(lightTrigger).backgroundColor,
+        menuBackground: lightMenuBackground,
+        moreButtonColor: lightMoreButtonColor,
+        moreButtonBackground: lightMoreButtonBackground,
+        moreButtonActiveBackground: getComputedStyle(lightMoreButton).backgroundColor
+      };
+      lightTrigger.setAttribute('aria-expanded', 'false');
+      lightMoreButton.classList.remove('is-active');
+      root.dataset.editorAppearance = 'dark';
+      root.style.setProperty('--meo-background', '#22272e');
+      root.style.setProperty('--meo-foreground', '#d7dde5');
+      root.style.setProperty('--meo-color-base02', '#8c98a5');
       const output = {
         triggerVisibleBeforeOpen,
         triggerHiddenWhileOpen,
@@ -446,7 +564,9 @@ async function main(): Promise<void> {
         menuClosedAfterTargetScroll,
         constrainedWidths,
         constrainedFits: constrainedTable.getBoundingClientRect().width <= constrainedWrap.clientWidth + 1,
-        constrainedOverflow: constrainedWrap.classList.contains('is-table-overflowing')
+        constrainedOverflow: constrainedWrap.classList.contains('is-table-overflowing'),
+        darkAppearance,
+        lightAppearance
       };
       app.style.width = '780px';
       editor.view.scrollDOM.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
@@ -653,6 +773,8 @@ async function main(): Promise<void> {
     );
     assert.equal(result.constrainedFits, true, 'preferred cell width must yield when the table reaches its available width');
     assert.equal(result.constrainedOverflow, false, 'a feasible constrained table must not gain horizontal overflow');
+    assertTableActionsAppearance(result.darkAppearance, 'rgb(34, 39, 46)', 'dark table actions', 'darker');
+    assertTableActionsAppearance(result.lightAppearance, 'rgb(242, 243, 245)', 'light table actions', 'lighter');
     console.log('table context menu production checks passed');
   } finally {
     await browser.close();

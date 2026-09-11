@@ -5353,8 +5353,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const caretBounds = !hasMultiCellSelection && targetInput
       ? tableCellCaretViewportBounds(targetInput)
       : null;
-    const anchorTop = caretBounds?.top ?? rowRect.top;
-    const anchorBottom = caretBounds?.bottom ?? rowRect.bottom;
     const anchorCenter = caretBounds
       ? (caretBounds.top + caretBounds.bottom) / 2
       : rowRect.top + rowRect.height / 2;
@@ -5390,16 +5388,13 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     } else if (aboveRow >= minimumMenuTop) {
       menuTop = aboveRow;
     } else {
-      const clampMenuTop = (value: number) => Math.min(Math.max(value, minimumMenuTop), maximumMenuTop);
-      const aboveCaret = clampMenuTop(anchorTop - menuHeight - gap);
-      const belowCaret = clampMenuTop(anchorBottom + gap);
-      const overlapWithCaret = (top: number) => Math.max(
-        0,
-        Math.min(top + menuHeight, anchorBottom) - Math.max(top, anchorTop)
-      );
-      menuTop = overlapWithCaret(belowCaret) <= overlapWithCaret(aboveCaret)
-        ? belowCaret
-        : aboveCaret;
+      // A row taller than the viewport has no true "outside" position. Keep the
+      // toolbar away from the editing point and pin it to a viewport edge instead
+      // of letting it float beside the caret in the middle of the window.
+      const viewportCenter = (effectiveViewportTop + viewportRect.bottom) / 2;
+      menuTop = rowCenterInViewport <= viewportCenter
+        ? maximumMenuTop
+        : minimumMenuTop;
     }
     contextMenu.style.left = `${menuLeft - shellRect.left}px`;
     contextMenu.style.top = `${menuTop - shellRect.top}px`;
@@ -5785,11 +5780,19 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       contextButtons
     };
     const cancelCaretReveal = () => { this.tableCaretRevealGeneration += 1; };
+    const updateActiveContextControls = () => {
+      if (!this.domRefs?.shell.matches(':focus-within, .is-interacting, .is-context-menu-open')) return;
+      this.scheduleLayout();
+    };
     view.scrollDOM.addEventListener('wheel', cancelCaretReveal, { passive: true });
     view.scrollDOM.addEventListener('touchstart', cancelCaretReveal, { passive: true });
+    view.scrollDOM.addEventListener('scroll', updateActiveContextControls, { passive: true });
+    view.scrollDOM.ownerDocument.defaultView?.addEventListener('resize', updateActiveContextControls);
     this.cleanupFns.push(() => {
       view.scrollDOM.removeEventListener('wheel', cancelCaretReveal);
       view.scrollDOM.removeEventListener('touchstart', cancelCaretReveal);
+      view.scrollDOM.removeEventListener('scroll', updateActiveContextControls);
+      view.scrollDOM.ownerDocument.defaultView?.removeEventListener('resize', updateActiveContextControls);
     });
     let mounted = mountedTableWidgets.get(view);
     if (!mounted) {
