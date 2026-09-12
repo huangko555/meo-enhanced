@@ -2908,6 +2908,18 @@ export function createEditor({
     markViewportInteraction(): void {
       viewportController.markInteraction();
     },
+    markPreviewViewportInteraction(): void {
+      viewportController.markPreviewInteraction();
+    },
+    previewViewportChanged(): void {
+      viewportController.previewViewportChanged();
+    },
+    linkedPreviewReady(): void {
+      viewportController.linkedPreviewReady();
+    },
+    setLinkedPreviewEnabled(enabled: boolean): void {
+      viewportController.setLinkedPreviewEnabled(enabled);
+    },
     focus() {
       const activeTableInput = getActiveTableInput();
       if (activeTableInput) {

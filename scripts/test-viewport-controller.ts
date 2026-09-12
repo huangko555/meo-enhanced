@@ -1997,4 +1997,99 @@ for (const settledShift of [0, 40]) {
   }
 }
 
+// Split Source/Preview uses the existing controller as the sole scroll owner.
+// Programmatic follower scrolls must not echo back, and Preview -> Source must
+// move only the viewport (the editor selection remains untouched).
+{
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameId = 0;
+  const previousRaf = globalThis.requestAnimationFrame;
+  const previousCancelRaf = globalThis.cancelAnimationFrame;
+  globalThis.requestAnimationFrame = (callback) => {
+    const id = ++frameId;
+    frames.set(id, callback);
+    return id;
+  };
+  globalThis.cancelAnimationFrame = (id) => { frames.delete(id); };
+  const flushLinkedFrames = async () => {
+    while (frames.size > 0) {
+      const batch = [...frames.values()];
+      frames.clear();
+      for (const callback of batch) callback(0);
+      await Promise.resolve();
+    }
+  };
+  const doc = Text.of(Array.from({ length: 80 }, (_, index) => `line ${index + 1}`));
+  const selection = { main: { anchor: 7, head: 7 } };
+  const scrollDOM = {
+    scrollTop: 200,
+    scrollLeft: 0,
+    scrollHeight: 2000,
+    scrollWidth: 800,
+    clientHeight: 400,
+    clientWidth: 800,
+    getBoundingClientRect: () => ({ top: 0, bottom: 400, left: 0, right: 800 })
+  };
+  const lineAtHeight = (height: number) => {
+    const number = Math.max(1, Math.min(doc.lines, Math.floor(height / 20) + 1));
+    const line = doc.line(number);
+    return { from: line.from, to: line.to, top: (number - 1) * 20, bottom: number * 20 };
+  };
+  let previewPosition = { line: 1, lineOffset: 0, editorLineOffset: 0 };
+  const previewWrites: Array<{ line: number; lineOffset: number }> = [];
+  const controller = new ViewportController({
+    dom: {},
+    scrollDOM,
+    contentDOM: { querySelectorAll: () => [] },
+    state: { doc, selection },
+    lineBlockAtHeight: lineAtHeight,
+    lineBlockAt: (position: number) => lineAtHeight((doc.lineAt(position).number - 1) * 20),
+    requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
+  } as any, {
+    attachInteractions: false,
+    previewSurface: {
+      captureTopVisiblePosition: () => previewPosition,
+      restoreTopVisiblePosition(position, isCurrent) {
+        if (isCurrent()) previewWrites.push(position);
+      }
+    }
+  });
+  try {
+    controller.setLinkedPreviewEnabled(true);
+    await flushLinkedFrames();
+    if (previewWrites.length !== 1 || previewWrites[0].line !== 11) {
+      throw new Error(`Source did not seed linked Preview: ${JSON.stringify(previewWrites)}`);
+    }
+
+    previewPosition = { line: 25, lineOffset: 3, editorLineOffset: 3 };
+    controller.markPreviewInteraction();
+    controller.previewViewportChanged();
+    await flushLinkedFrames();
+    if (scrollDOM.scrollTop !== 483) {
+      throw new Error(`Preview did not semantically project into Source: ${scrollDOM.scrollTop}`);
+    }
+    if (selection.main.anchor !== 7 || selection.main.head !== 7) {
+      throw new Error('Preview scrolling changed the Source selection');
+    }
+    controller.editorViewportChanged();
+    await flushLinkedFrames();
+    if (previewWrites.length !== 1) throw new Error('Follower scroll echoed back into Preview');
+
+    controller.markInteraction();
+    scrollDOM.scrollTop = 600;
+    controller.editorViewportChanged();
+    await flushLinkedFrames();
+    if (previewWrites.at(-1)?.line !== 31) throw new Error('Source could not retake linked scroll ownership');
+
+    controller.setLinkedPreviewEnabled(false);
+    controller.editorViewportChanged();
+    await flushLinkedFrames();
+    if (previewWrites.length !== 2) throw new Error('Disabled linked scrolling performed work');
+  } finally {
+    controller.destroy();
+    globalThis.requestAnimationFrame = previousRaf;
+    globalThis.cancelAnimationFrame = previousCancelRaf;
+  }
+}
+
 console.log('viewport controller checks passed');

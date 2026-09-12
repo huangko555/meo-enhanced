@@ -134,6 +134,19 @@ body {
   grid-area: 1 / 1;
 }
 
+.editor-surface[data-source-preview] {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.editor-surface[data-source-preview] > .editor-host {
+  grid-area: 1 / 1;
+}
+
+.editor-surface[data-source-preview] > .preview-host {
+  grid-area: 1 / 2;
+  border-left: 1px solid var(--vscode-panel-border, color-mix(in srgb, var(--meo-foreground) 18%, transparent));
+}
+
 .editor-surface > .preview-host[hidden] {
   display: block;
   visibility: hidden;
@@ -5196,6 +5209,15 @@ body.outline-resizing .preview-frame {
 
 .preview-host[hidden] {
   display: none;
+}
+
+.source-preview-button {
+  display: none;
+  flex: 0 0 auto;
+}
+
+.editor-root[data-mode='source'] .source-preview-button {
+  display: inline-flex;
 }
 
 .preview-frame {

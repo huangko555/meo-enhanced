@@ -297,6 +297,10 @@ export class ViewportController {
   private lastTouchY: number | null = null;
   private scrollbarDragActive = false;
   private pendingHistoryShortcutViewport: ViewportHistorySnapshot | null = null;
+  private linkedPreviewEnabled = false;
+  private linkedViewportDriver: ViewportAnchorOwner = 'editor';
+  private linkedProjectionFrame: number | null = null;
+  private linkedProjectionGeneration = 0;
   private readonly getMode: () => 'live' | 'source';
   private readonly previewSurface: PreviewViewportSurface | null;
   private readonly anchorTokens = new WeakMap<ViewportAnchorToken, ViewportAnchorTokenRecord>();
@@ -305,7 +309,10 @@ export class ViewportController {
   private documentChangeDepth = 0;
   private pendingAsyncAnchorTransactions = 0;
   private readonly onWheel = (event: WheelEvent) => this.handleWheel(event);
-  private readonly onScroll = () => this.scheduleActiveScrollFrame();
+  private readonly onScroll = () => {
+    this.scheduleActiveScrollFrame();
+    this.scheduleLinkedViewportProjection('editor');
+  };
   private readonly onPointerDown = (event: PointerEvent) => this.handlePotentialLayoutInteraction(event);
   private readonly onPointerUp = () => this.finishScrollbarDrag();
   private readonly onKeyDown = (event: KeyboardEvent) => this.handleKeyDown(event);
@@ -339,7 +346,15 @@ export class ViewportController {
     }
   }
 
-  markInteraction(): void {
+  markInteraction(owner: ViewportAnchorOwner = 'editor'): void {
+    if (this.linkedPreviewEnabled) {
+      this.linkedViewportDriver = owner;
+      this.linkedProjectionGeneration += 1;
+      if (this.linkedProjectionFrame !== null) {
+        cancelAnimationFrame(this.linkedProjectionFrame);
+        this.linkedProjectionFrame = null;
+      }
+    }
     const scope = this.anchorTransactionScope;
     const programmaticCurrentTransaction = scope.kind === 'current'
       && this.isAnchorTokenCurrent(scope.record)
@@ -491,6 +506,66 @@ export class ViewportController {
       }
     };
     write();
+  }
+
+  setLinkedPreviewEnabled(enabled: boolean): void {
+    if (this.destroyed || this.linkedPreviewEnabled === enabled) return;
+    this.linkedPreviewEnabled = enabled;
+    this.linkedViewportDriver = 'editor';
+    this.linkedProjectionGeneration += 1;
+    if (this.linkedProjectionFrame !== null) {
+      cancelAnimationFrame(this.linkedProjectionFrame);
+      this.linkedProjectionFrame = null;
+    }
+    if (enabled) this.scheduleLinkedViewportProjection('editor');
+  }
+
+  markPreviewInteraction(): void {
+    this.markInteraction('preview');
+  }
+
+  editorViewportChanged(): void {
+    this.scheduleLinkedViewportProjection('editor');
+  }
+
+  previewViewportChanged(): void {
+    this.scheduleLinkedViewportProjection('preview');
+  }
+
+  linkedPreviewReady(): void {
+    this.scheduleLinkedViewportProjection(this.linkedViewportDriver);
+  }
+
+  private scheduleLinkedViewportProjection(owner: ViewportAnchorOwner): void {
+    if (
+      this.destroyed || !this.linkedPreviewEnabled || !this.previewSurface ||
+      this.linkedViewportDriver !== owner
+    ) return;
+    const generation = this.linkedProjectionGeneration;
+    if (this.linkedProjectionFrame !== null) cancelAnimationFrame(this.linkedProjectionFrame);
+    this.linkedProjectionFrame = requestAnimationFrame(() => {
+      this.linkedProjectionFrame = null;
+      if (
+        this.destroyed || !this.linkedPreviewEnabled || !this.previewSurface ||
+        generation !== this.linkedProjectionGeneration || this.linkedViewportDriver !== owner
+      ) return;
+      if (owner === 'editor') {
+        const position = this.getTopVisiblePosition();
+        this.previewSurface.restoreTopVisiblePosition(position, () => (
+          !this.destroyed && this.linkedPreviewEnabled &&
+          generation === this.linkedProjectionGeneration && this.linkedViewportDriver === 'editor'
+        ));
+        return;
+      }
+      const position = this.previewSurface.captureTopVisiblePosition();
+      if (!position) return;
+      this.restoreTopVisibleLine(
+        position.line,
+        position.editorLineOffset ?? position.lineOffset,
+        undefined,
+        { force: true }
+      );
+    });
   }
 
   consumeHistoryShortcutViewport(): ViewportHistorySnapshot | null {
@@ -829,6 +904,12 @@ export class ViewportController {
 
   destroy(): void {
     this.destroyed = true;
+    this.linkedPreviewEnabled = false;
+    this.linkedProjectionGeneration += 1;
+    if (this.linkedProjectionFrame !== null) {
+      cancelAnimationFrame(this.linkedProjectionFrame);
+      this.linkedProjectionFrame = null;
+    }
     this.interactionGeneration += 1;
     this.navigationGeneration += 1;
     this.generation += 1;

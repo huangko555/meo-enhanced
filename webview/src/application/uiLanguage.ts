@@ -90,6 +90,8 @@ export type UiStrings = Readonly<{
   live: string;
   source: string;
   preview: string;
+  showSidePreview: string;
+  hideSidePreview: string;
   inlineMarkdownFormatting: string;
   bold: string;
   italic: string;
@@ -289,6 +291,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     backToTop: 'Back to top',
     editorToolbar: 'Editor toolbar', formatting: 'Formatting', markdownMode: 'Markdown mode',
     live: 'Live', source: 'Source', preview: 'Preview',
+    showSidePreview: 'Show side preview', hideSidePreview: 'Hide side preview',
     inlineMarkdownFormatting: 'Inline markdown formatting', bold: 'Bold', italic: 'Italic',
     lineover: 'Lineover', highlight: 'Highlight', inlineCode: 'Inline Code', kbd: 'Kbd',
     underline: 'Underline', markTaskComplete: 'Mark task as complete',
@@ -435,7 +438,8 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     outlineExpand: '展开', outlineCollapse: '折叠', outlineNoHeadings: '暂无标题', untitled: '未命名',
     backToTop: '回到顶部',
     editorToolbar: '编辑器工具栏', formatting: '格式', markdownMode: 'Markdown 模式',
-    live: '实时', source: '源码', preview: '预览', inlineMarkdownFormatting: '行内 Markdown 格式',
+    live: '实时', source: '源码', preview: '预览',
+    showSidePreview: '显示侧边预览', hideSidePreview: '关闭侧边预览', inlineMarkdownFormatting: '行内 Markdown 格式',
     bold: '加粗', italic: '斜体', lineover: '删除线', highlight: '高亮', inlineCode: '行内代码',
     kbd: '按键', underline: '下划线', markTaskComplete: '标记任务为已完成',
     markTaskIncomplete: '标记任务为未完成', clearLinkUrl: '清除链接地址',

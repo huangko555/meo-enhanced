@@ -947,6 +947,11 @@ const applyUiLanguage = (language: UiLanguage): void => {
   editorNotice.setUiLanguage(language);
   modeControl.element.setAttribute('aria-label', strings.markdownMode);
   modeControl.setLabels({ live: strings.live, source: strings.source, preview: strings.preview });
+  const sourcePreviewLabel = sourcePreviewButton.classList.contains('is-active')
+    ? strings.hideSidePreview
+    : strings.showSidePreview;
+  sourcePreviewButton.title = sourcePreviewLabel;
+  sourcePreviewButton.setAttribute('aria-label', sourcePreviewLabel);
   selectionMenuElements.setUiLanguage(language);
   editorScrollToTopController.setUiLanguage(language);
   findToggleBtn.title = strings.findAndReplace;
@@ -1119,6 +1124,14 @@ const liveButton = modeControl.getButton('live');
 const sourceButton = modeControl.getButton('source');
 const previewButton = modeControl.getButton('preview');
 
+const sourcePreviewButton = document.createElement('button');
+sourcePreviewButton.type = 'button';
+sourcePreviewButton.className = 'format-button source-preview-button';
+sourcePreviewButton.title = activeUiStrings.showSidePreview;
+sourcePreviewButton.setAttribute('aria-label', activeUiStrings.showSidePreview);
+sourcePreviewButton.setAttribute('aria-pressed', 'false');
+sourcePreviewButton.appendChild(createElement(PanelLeftRightDashed, { width: 18, height: 18, 'aria-hidden': 'true' }));
+
 const toolbarOverflowIndicator = document.createElement('button');
 toolbarOverflowIndicator.type = 'button';
 toolbarOverflowIndicator.className = 'format-button toolbar-overflow-indicator';
@@ -1158,7 +1171,7 @@ document.addEventListener('keydown', (event) => {
 
 const toolbarRight = document.createElement('div');
 toolbarRight.className = 'toolbar-right';
-toolbarRight.append(rightGroup, modeGroup);
+toolbarRight.append(rightGroup, sourcePreviewButton, modeGroup);
 
 const findPanelElements = createFindPanel(findToggleBtn, activeUiLanguage);
 const findPanelController = createFindPanelController(
@@ -1337,13 +1350,17 @@ const previewController = createPreviewController({
     if (outlineController?.isVisible()) {
       outlineController.refresh();
     }
+    editor?.linkedPreviewReady?.();
     readingPositionLifecycle?.surfaceReady();
   },
   onViewportInteraction: () => {
-    editor?.markViewportInteraction?.();
+    editor?.markPreviewViewportInteraction?.();
     readingPositionLifecycle?.userInteracted();
   },
-  onViewportChange: () => readingPositionLifecycle?.viewportChanged(),
+  onViewportChange: () => {
+    if (isSidePreviewVisible()) editor?.previewViewportChanged?.();
+    readingPositionLifecycle?.viewportChanged();
+  },
   runViewportTransaction: (mutate) => {
     const viewport = editor?.captureViewportAnchorToken?.('preview') ?? null;
     if (!editor?.runViewportAnchorTransaction) {
@@ -1395,7 +1412,30 @@ root.replaceChildren(toolbar, editorWrapper);
 
 const editorModeApplication = createEditorModeApplication();
 let editorModeRuntime: EditorModeRuntime;
+let sourcePreviewEnabled = false;
 const getActiveEditorMode = (): EditorMode => editorModeApplication.getState().mode;
+const isSidePreviewVisible = (): boolean => (
+  sourcePreviewEnabled && getActiveEditorMode() === 'source'
+);
+const isPreviewSurfaceVisible = (): boolean => (
+  getActiveEditorMode() === 'preview' || isSidePreviewVisible()
+);
+const presentPreviewSurface = (fullPreview: boolean): { readonly split: boolean; readonly visible: boolean } => {
+  const split = !fullPreview && isSidePreviewVisible();
+  const visible = fullPreview || split;
+  if (visible !== !previewController.host.hidden) previewPaintReady = false;
+  editorSurface.toggleAttribute('data-source-preview', split);
+  sourcePreviewButton.classList.toggle('is-active', split);
+  sourcePreviewButton.setAttribute('aria-pressed', split ? 'true' : 'false');
+  const sourcePreviewLabel = split
+    ? activeUiStrings.hideSidePreview
+    : activeUiStrings.showSidePreview;
+  sourcePreviewButton.title = sourcePreviewLabel;
+  sourcePreviewButton.setAttribute('aria-label', sourcePreviewLabel);
+  previewAdapter.setActive({ active: visible, text: getCurrentEditorText() });
+  editor?.setLinkedPreviewEnabled?.(split);
+  return { split, visible };
+};
 const getActiveEditableMode = (): 'live' | 'source' => {
   const state = editorModeApplication.getState();
   return state.mode === 'preview' ? state.lastEditableMode : state.mode;
@@ -1896,6 +1936,7 @@ const presentDocumentText = async (
   }
 
   const previewActive = getActiveEditorMode() === 'preview';
+  const previewVisible = isPreviewSurfaceVisible();
   const owner = previewActive ? 'preview' : 'editor';
   const viewport = source === 'disk-reload' && pendingReloadViewport?.owner === owner
     ? pendingReloadViewport.handle
@@ -1904,7 +1945,7 @@ const presentDocumentText = async (
   const present = async (isViewportCurrent: () => boolean): Promise<void> => {
     presented = await setEditorTextSafely(text, `documentSession.${source}`, source === 'disk-reload');
     if (!presented) throw viewportPresentationFailed;
-    if (previewActive) {
+    if (previewVisible) {
       previewAdapter.refreshVisible(text, { preserveViewport: !isViewportCurrent() });
     }
   };
@@ -1964,6 +2005,7 @@ const shortcutHandlerContext: ShortcutHandlerContext = {
 const handleLocalEditorChange = (nextText: string) => {
   documentSessionAdapter.localDraftChanged(nextText);
   scheduleDocumentDerivedUiRefresh(nextText);
+  if (isSidePreviewVisible()) previewAdapter.scheduleVisibleRefresh(nextText);
 };
 
 const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal): Promise<void> => {
@@ -2061,11 +2103,7 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     failureNotice.updateEditorNotice();
   },
   setPreviewActive(active) {
-    if (active !== !previewController.host.hidden) previewPaintReady = false;
-    previewAdapter.setActive({
-      active,
-      text: getCurrentEditorText()
-    });
+    presentPreviewSurface(active);
     if (active && document.activeElement instanceof HTMLElement && editorHost.contains(document.activeElement)) {
       document.activeElement.blur();
     }
@@ -2489,6 +2527,7 @@ window.addEventListener('resize', () => {
   findPanelController.updateAnchor();
   if (editor) {
     editor.refreshSelectionOverlay();
+    if (isSidePreviewVisible()) editor.linkedPreviewReady?.();
   }
 });
 
@@ -2529,6 +2568,19 @@ sourceButton.addEventListener('click', () => {
     type: 'requestMode', mode: 'source', source: 'user',
     restoreEditorFocus: editor?.hasFocus() === true
   });
+});
+
+sourcePreviewButton.addEventListener('click', () => {
+  if (getActiveEditorMode() !== 'source' || !editor) return;
+  const viewport = editor.captureViewportAnchorToken?.('editor') ?? null;
+  sourcePreviewEnabled = !sourcePreviewEnabled;
+  const { split } = presentPreviewSurface(false);
+  editor.focus();
+  if (viewport) {
+    editor.restoreViewportAnchorToken?.(viewport, 'editor');
+    if (split) editor.restoreViewportAnchorToken?.(viewport, 'preview');
+  }
+  editor.refreshLayout?.();
 });
 
 previewButton.addEventListener('click', () => {

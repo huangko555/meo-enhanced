@@ -28,7 +28,7 @@ type PreviewControllerOptions = {
   onFindRequested?: () => void;
   onViewportInteraction?: () => void;
   onViewportChange?: () => void;
-  runViewportTransaction?: (mutate: () => void) => void;
+  runViewportTransaction?: (mutate: () => void) => void | Promise<void>;
   mermaidRenderResources: MermaidDiagramRenderResources;
 };
 
@@ -368,6 +368,8 @@ export function createPreviewController({
   let pendingText = '';
   let latestAcceptedText: string | null = null;
   let frameRenderedText: string | null = null;
+  let sourceMapDocument: Document | null = null;
+  let sourceMap: Array<{ element: HTMLElement; start: number; end: number }> = [];
   let latestPayload: PreviewRenderValue | null = null;
   const previewRenderTransport = createPreviewRenderTransport((message) => vscode.postMessage(message));
   const previewMermaidRenderer = createPreviewMermaidRenderer(
@@ -704,6 +706,8 @@ export function createPreviewController({
         return;
       }
       activeFrameDocument = frameDocument;
+      sourceMapDocument = null;
+      sourceMap = [];
       frameEvents = new AbortController();
       const signal = frameEvents.signal;
       frameRenderedText = renderedText;
@@ -874,8 +878,8 @@ export function createPreviewController({
       force?: boolean;
       preserveFrame?: boolean;
     } = {}
-  ) => {
-    if (disposed) return;
+  ): Promise<void> => {
+    if (disposed) return Promise.resolve();
     if (!force
       && latestPayload
       && text === latestAcceptedText
@@ -884,11 +888,11 @@ export function createPreviewController({
       setStatus(null);
       onRendered?.();
       schedulePaintReady();
-      return;
+      return Promise.resolve();
     }
     if (!force && hasPendingRequest && text === pendingText) {
       if (!background) setStatus(uiStrings.previewGenerating);
-      return;
+      return Promise.resolve();
     }
     const generation = requestGeneration + 1;
     cancelPaintReady();
@@ -898,16 +902,17 @@ export function createPreviewController({
     pendingViewportRestore = null;
     pendingText = text;
     if (!background) setStatus(uiStrings.previewGenerating);
-    void previewRenderTransport.render({
+    return previewRenderTransport.render({
       text,
       uiLanguage,
       environment: getStyleEnvironment()
     }).then((result) => {
       if (generation !== requestGeneration) return;
       hasPendingRequest = false;
-      // A hidden preload can finish after typing has already made it obsolete.
-      // Keep explicit visible requests authoritative, including a promoted preload.
-      if (background && host.hidden && isCurrentText?.(requestText) === false) {
+      // A render may finish after typing or an external update has already
+      // produced a newer Draft. Never flash that stale presentation while the
+      // single-flight Adapter starts the newest queued render.
+      if (isCurrentText?.(requestText) === false) {
         pendingViewportRestore = null;
         return;
       }
@@ -927,7 +932,7 @@ export function createPreviewController({
       } else {
         renderFrame(requestText, viewportRestore);
       }
-    });
+    }).then(() => undefined);
   };
 
   const requestRender = (
@@ -938,14 +943,18 @@ export function createPreviewController({
       preserveViewport?: boolean;
       preserveFrame?: boolean;
   } = {}
-  ): void => {
+  ): Promise<void> => {
     const preserveCurrentFrame = preserveFrame
       && activeFrameDocument !== null
       && frameRenderedText === text;
     if (preserveCurrentFrame) capturePresentationScroll();
-    const mutate = () => performRequestRender(text, { background, force, preserveFrame });
+    let completion = Promise.resolve();
+    const mutate = () => {
+      completion = performRequestRender(text, { background, force, preserveFrame });
+    };
     if (preserveViewport && !preserveCurrentFrame) withViewportTransaction(() => mutate());
     else mutate();
+    return completion;
   };
 
   const acceptRenderResponse = (message: PreviewRenderResponse) => (
@@ -1023,9 +1032,21 @@ export function createPreviewController({
   updateSourceColoringControl();
 
   const getFrameDocument = () => frame.contentDocument;
-  const getSourceElements = (): HTMLElement[] => Array.from(
-    getFrameDocument()?.querySelectorAll<HTMLElement>('[data-source-line]') ?? []
-  );
+  const getSourceMap = () => {
+    const frameDocument = getFrameDocument();
+    if (!frameDocument) return [];
+    if (sourceMapDocument !== frameDocument) {
+      sourceMapDocument = frameDocument;
+      sourceMap = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
+        .map((element) => {
+          const range = getSourceRange(element);
+          return range ? { element, ...range } : null;
+        })
+        .filter((entry): entry is { element: HTMLElement; start: number; end: number } => entry !== null);
+    }
+    return sourceMap;
+  };
+  const getSourceElements = (): HTMLElement[] => getSourceMap().map(({ element }) => element);
   const getSourceRange = (element: HTMLElement): { start: number; end: number } | null => {
     const start = Number.parseInt(element.dataset.sourceLine ?? '', 10);
     if (!Number.isFinite(start)) {
@@ -1034,57 +1055,79 @@ export function createPreviewController({
     const parsedEnd = Number.parseInt(element.dataset.sourceEndLine ?? '', 10);
     return { start, end: Number.isFinite(parsedEnd) ? Math.max(start, parsedEnd) : start };
   };
-  const findSourceElement = (line: number): { element: HTMLElement; start: number; end: number } | null => {
-    let candidate: { element: HTMLElement; start: number; end: number } | null = null;
-    for (const element of getSourceElements()) {
-      const range = getSourceRange(element);
-      if (!range) {
-        continue;
-      }
-      if (line >= range.start && line <= range.end) {
-        return { element, ...range };
-      }
-      if (range.start > line) {
-        if (candidate && line - candidate.end <= range.start - line) {
-          return candidate;
-        }
-        return { element, ...range };
-      }
-      candidate = { element, ...range };
+  const findSourceProjection = (line: number): {
+    exact?: { element: HTMLElement; start: number; end: number };
+    before?: { element: HTMLElement; start: number; end: number };
+    after?: { element: HTMLElement; start: number; end: number };
+  } | null => {
+    const entries = getSourceMap();
+    if (entries.length === 0) return null;
+    let low = 0;
+    let high = entries.length - 1;
+    while (low <= high) {
+      const middle = (low + high) >>> 1;
+      const entry = entries[middle];
+      if (line < entry.start) high = middle - 1;
+      else low = middle + 1;
     }
-    return candidate;
+    const before = high >= 0 ? entries[high] : undefined;
+    const after = low < entries.length ? entries[low] : undefined;
+    if (before && line <= before.end) return { exact: before };
+    return { before, after };
   };
   const restoreTopLine = (line: number, lineOffset = 0): void => {
-    const source = findSourceElement(line);
+    const source = findSourceProjection(line);
     const scrollElement = getFrameDocument()?.scrollingElement;
     if (!source || !scrollElement) {
       return;
     }
-    const lineSpan = Math.max(1, source.end - source.start + 1);
-    const ratio = Math.max(0, Math.min(1, (line - source.start) / lineSpan));
-    const rect = source.element.getBoundingClientRect();
-    const mappedOffset = line >= source.start && line <= source.end ? Math.max(0, lineOffset) : 0;
-    scrollElement.scrollTop += rect.top + rect.height * ratio + mappedOffset;
+    if (source.exact) {
+      const lineSpan = Math.max(1, source.exact.end - source.exact.start + 1);
+      const ratio = Math.max(0, Math.min(1, (line - source.exact.start) / lineSpan));
+      const rect = source.exact.element.getBoundingClientRect();
+      scrollElement.scrollTop += rect.top + rect.height * ratio + Math.max(0, lineOffset);
+      return;
+    }
+    if (source.before && source.after) {
+      const beforeRect = source.before.element.getBoundingClientRect();
+      const afterRect = source.after.element.getBoundingClientRect();
+      const lineGap = Math.max(1, source.after.start - source.before.end);
+      const ratio = Math.max(0, Math.min(1, (line - source.before.end) / lineGap));
+      scrollElement.scrollTop += beforeRect.bottom + (afterRect.top - beforeRect.bottom) * ratio;
+      return;
+    }
+    const edge = source.before ?? source.after;
+    if (edge) scrollElement.scrollTop += edge.element.getBoundingClientRect().top;
   };
   const getTopVisiblePosition = (): { topLine: number; topLineOffset: number; editorLineOffset: number } | null => {
-    const elements = getSourceElements();
-    if (elements.length === 0) {
+    const entries = getSourceMap();
+    if (entries.length === 0) {
       return null;
     }
     const viewportAnchor = 0;
-    let candidate = elements[0];
-    for (const element of elements) {
-      // Scroll positions can round a block just below zero at fractional scale.
-      if (element.getBoundingClientRect().top > viewportAnchor + 0.5) {
-        break;
+    let low = 0;
+    let high = entries.length - 1;
+    while (low <= high) {
+      const middle = (low + high) >>> 1;
+      if (entries[middle].element.getBoundingClientRect().top <= viewportAnchor + 0.5) low = middle + 1;
+      else high = middle - 1;
+    }
+    const candidate = entries[Math.max(0, high)];
+    const range = candidate;
+    const rect = candidate.element.getBoundingClientRect();
+    const next = entries[Math.max(0, high) + 1];
+    if (rect.bottom < viewportAnchor && next) {
+      const nextRect = next.element.getBoundingClientRect();
+      if (nextRect.top > viewportAnchor) {
+        const gapHeight = Math.max(1, nextRect.top - rect.bottom);
+        const ratio = Math.max(0, Math.min(1, (viewportAnchor - rect.bottom) / gapHeight));
+        return {
+          topLine: Math.round(range.end + (next.start - range.end) * ratio),
+          topLineOffset: 0,
+          editorLineOffset: 0
+        };
       }
-      candidate = element;
     }
-    const range = getSourceRange(candidate);
-    if (!range) {
-      return null;
-    }
-    const rect = candidate.getBoundingClientRect();
     const ratio = rect.height > 0 ? Math.max(0, Math.min(1, (viewportAnchor - rect.top) / rect.height)) : 0;
     const topLine = Math.round(range.start + (range.end - range.start) * ratio);
     const lineSpan = Math.max(1, range.end - range.start + 1);
@@ -1223,6 +1266,8 @@ export function createPreviewController({
       unsubscribePreviewCodeHighlight();
       releasePreviewCodeHighlighting();
       activeFrameDocument = null;
+      sourceMapDocument = null;
+      sourceMap = [];
       frameRenderedText = null;
       frame.style.removeProperty('visibility');
       hasPendingRequest = false;

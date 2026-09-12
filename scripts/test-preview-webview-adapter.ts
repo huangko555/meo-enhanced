@@ -109,6 +109,62 @@ assert.equal(adapter.accept(response), true);
 assert.equal(calls.length, beforeDisposedActions);
 assert.equal(calls.filter(call => call.type === 'dispose').length, 1);
 
+const scheduled = new Map<number, () => void>();
+let timerId = 0;
+const scheduledRenders: string[] = [];
+let finishRender: (() => void) | null = null;
+let finishPreload: (() => void) | null = null;
+const scheduledAdapter = createPreviewWebviewAdapter({
+  ...surface,
+  preload() {
+    return new Promise<void>((resolve) => { finishPreload = resolve; });
+  },
+  setVisible() {},
+  requestRender(text: string) {
+    scheduledRenders.push(text);
+    return new Promise<void>((resolve) => { finishRender = resolve; });
+  },
+  dispose() {}
+}, {
+  refreshDelayMs: 300,
+  scheduleTimeout(callback) {
+    const id = ++timerId;
+    scheduled.set(id, callback);
+    return id;
+  },
+  cancelTimeout(timeout) {
+    scheduled.delete(timeout as number);
+  }
+});
+scheduledAdapter.start({ text: 'hidden', appearance: 'auto', fontFamily: '', sourceColoring: true, active: false });
+scheduledAdapter.scheduleVisibleRefresh('hidden edit');
+assert.deepEqual(scheduledRenders, [], 'Hidden Source must not schedule Preview work');
+assert.equal(scheduled.size, 0);
+
+scheduledAdapter.setActive({ active: true, text: 'initial' });
+scheduledAdapter.scheduleVisibleRefresh('draft 1');
+scheduledAdapter.scheduleVisibleRefresh('draft 2');
+assert.deepEqual(scheduledRenders, [], 'Opening must not race the existing hidden preload');
+finishPreload?.();
+await Promise.resolve();
+await Promise.resolve();
+assert.deepEqual(scheduledRenders, ['draft 2'], 'Only the latest Draft should follow an in-flight preload');
+finishRender?.();
+await Promise.resolve();
+scheduledAdapter.scheduleVisibleRefresh('draft 3');
+scheduledAdapter.scheduleVisibleRefresh('draft 4');
+assert.equal(scheduled.size, 1, 'Typing should keep one coalescing timer');
+const scheduledEntry = scheduled.entries().next().value;
+if (scheduledEntry) {
+  scheduled.delete(scheduledEntry[0]);
+  scheduledEntry[1]();
+}
+assert.deepEqual(scheduledRenders, ['draft 2', 'draft 4']);
+scheduledAdapter.setActive({ active: false, text: 'hidden' });
+scheduledAdapter.scheduleVisibleRefresh('ignored');
+assert.equal(scheduled.size, 0);
+scheduledAdapter.dispose();
+
 const repoRoot = path.resolve(import.meta.dir, '..');
 const bootstrap = fs.readFileSync(path.join(repoRoot, 'webview/src/index.ts'), 'utf8');
 assert.equal((bootstrap.match(/createPreviewWebviewAdapter\s*\(/g) ?? []).length, 1);
