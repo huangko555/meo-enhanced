@@ -103,6 +103,13 @@ html::-webkit-scrollbar-corner,
 body::-webkit-scrollbar-corner {
   background: transparent !important;
 }
+
+html[data-meo-preview-horizontal-overflow="pending"]::-webkit-scrollbar,
+html[data-meo-preview-horizontal-overflow="contained"]::-webkit-scrollbar,
+html[data-meo-preview-horizontal-overflow="pending"] body::-webkit-scrollbar,
+html[data-meo-preview-horizontal-overflow="contained"] body::-webkit-scrollbar {
+  height: 0 !important;
+}
 `;
 
 const previewFontFamilies = [
@@ -386,6 +393,7 @@ export function createPreviewController({
   let disposed = false;
   let paintFrame: number | null = null;
   let highlightFrame: number | null = null;
+  let horizontalOverflowFrame: number | null = null;
   const cancelHighlightFrame = () => {
     if (highlightFrame !== null) window.cancelAnimationFrame(highlightFrame);
     highlightFrame = null;
@@ -402,6 +410,35 @@ export function createPreviewController({
   const cancelPaintReady = () => {
     if (paintFrame !== null) window.cancelAnimationFrame(paintFrame);
     paintFrame = null;
+  };
+  const cancelHorizontalOverflowSync = () => {
+    if (horizontalOverflowFrame !== null) window.cancelAnimationFrame(horizontalOverflowFrame);
+    horizontalOverflowFrame = null;
+  };
+  const scheduleHorizontalOverflowSync = (frameDocument: Document): void => {
+    if (disposed || activeFrameDocument !== frameDocument) return;
+    cancelHorizontalOverflowSync();
+    // Math and diagram fitters settle on the next layout frame. Suppress only
+    // the horizontal track until then; genuine overflow remains scrollable.
+    frameDocument.documentElement.dataset.meoPreviewHorizontalOverflow = 'pending';
+    let remainingLayoutFrames = 1;
+    const sync = () => {
+      horizontalOverflowFrame = null;
+      if (disposed || activeFrameDocument !== frameDocument) return;
+      if (remainingLayoutFrames > 0) {
+        remainingLayoutFrames -= 1;
+        horizontalOverflowFrame = window.requestAnimationFrame(sync);
+        return;
+      }
+      const scrollElement = frameDocument.scrollingElement;
+      const overflow = scrollElement
+        ? scrollElement.scrollWidth - scrollElement.clientWidth
+        : 0;
+      frameDocument.documentElement.dataset.meoPreviewHorizontalOverflow = overflow > 1
+        ? 'scrollable'
+        : 'contained';
+    };
+    horizontalOverflowFrame = window.requestAnimationFrame(sync);
   };
   const schedulePaintReady = () => {
     cancelPaintReady();
@@ -496,7 +533,10 @@ export function createPreviewController({
       for (const attribute of Array.from(image.attributes)) {
         if (attribute.name !== 'src') prepared.setAttribute(attribute.name, attribute.value);
       }
-      const commit = () => image.replaceWith(prepared);
+      const commit = () => {
+        image.replaceWith(prepared);
+        scheduleHorizontalOverflowSync(frameDocument);
+      };
       if (host.hidden) commit();
       else withViewportTransaction(commit);
     };
@@ -669,6 +709,15 @@ export function createPreviewController({
     status.textContent = message ?? '';
   };
 
+  const setPendingStatus = (background: boolean): void => {
+    // Once a usable reading surface exists it is the progress UI. Keeping it
+    // unobstructed also avoids turning every coalesced Source edit into a flash.
+    const hasReadablePresentation = latestPayload !== null || Boolean(
+      frame.contentDocument?.querySelector('main.meo-export-doc')
+    );
+    setStatus(!background && !hasReadablePresentation ? uiStrings.previewGenerating : null);
+  };
+
   const renderFrame = (
     renderedText: string,
     viewportRestore: PreviewViewportRestore | null = null
@@ -690,7 +739,6 @@ export function createPreviewController({
     pendingPresentationScroll = null;
     frameRenderedText = null;
     disposeDeferredImages();
-    frame.style.visibility = 'hidden';
     const katexHref = document.body.dataset.meoKatexSrc ?? '';
     const katexInlineStyles = collectPreviewKatexStyles(katexHref).replace(/<\/style/gi, '<\\/style');
     const katexStylesTag = katexInlineStyles
@@ -729,16 +777,26 @@ export function createPreviewController({
         if (!disposed && activeFrameDocument === frameDocument && sourceColoring) scheduleViewportHighlight(frameDocument);
         if (!disposed && activeFrameDocument === frameDocument) onViewportChange?.();
       }, { passive: true, signal });
+      frameDocument.defaultView?.addEventListener('resize', () => {
+        scheduleHorizontalOverflowSync(frameDocument);
+      }, { passive: true, signal });
       if (viewportRestore?.isCurrent()) {
         restoreTopLine(viewportRestore.line, viewportRestore.lineOffset);
       }
       const notifyViewportInteraction = (event: Event) => {
         if (!event.isTrusted) return;
+        if (event.type === 'keydown') {
+          const key = (event as KeyboardEvent).key;
+          if (!['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(key)) return;
+        }
         viewportInteractionGeneration += 1;
         pendingPresentationScroll = null;
         onViewportInteraction?.();
       };
-      for (const type of ['wheel', 'pointerdown', 'keydown', 'beforeinput', 'selectionchange', 'focusin']) {
+      // Ownership follows gestures that can actually move the reading surface.
+      // Selection/focus events may be browser-generated by a DOM replacement and
+      // must never turn a presentation update into a reverse linked scroll.
+      for (const type of ['wheel', 'pointerdown', 'touchstart', 'keydown']) {
         frameDocument.addEventListener(type, notifyViewportInteraction, { capture: true, signal });
       }
       // Pointer events do not bubble out of an iframe. Notify the outer document
@@ -772,11 +830,16 @@ export function createPreviewController({
         scrollToTopController.sync();
         onRendered?.();
         schedulePaintReady();
+        scheduleHorizontalOverflowSync(frameDocument);
       };
       finishRender();
+      void frameDocument.fonts.ready.then(() => scheduleHorizontalOverflowSync(frameDocument));
       attachDeferredImages(frameDocument);
       if (payload.hasMermaid) {
-        void previewMermaidRenderer.render(frameDocument, appearance, keepPosition, isCurrent).finally(keepPosition);
+        void previewMermaidRenderer.render(frameDocument, appearance, keepPosition, isCurrent).finally(() => {
+          keepPosition();
+          scheduleHorizontalOverflowSync(frameDocument);
+        });
       }
     };
     disposePreviewMathViewports();
@@ -788,7 +851,9 @@ export function createPreviewController({
       reusableDocument.getSelection()?.removeAllRanges();
       reusableDocument.documentElement.lang = uiLanguage;
       reusableMain.innerHTML = payload.html;
-      if (reusableDocument.scrollingElement) reusableDocument.scrollingElement.scrollTop = 0;
+      if (!viewportRestore && reusableDocument.scrollingElement) {
+        reusableDocument.scrollingElement.scrollTop = 0;
+      }
       initializeFrame();
       return;
     }
@@ -832,8 +897,12 @@ export function createPreviewController({
     syncPreviewCodeHighlight(frameDocument);
     keepPosition();
     onRendered?.();
+    scheduleHorizontalOverflowSync(frameDocument);
     if (payload.hasMermaid) {
-      void previewMermaidRenderer.render(frameDocument, appearance, keepPosition, isCurrent).finally(keepPosition);
+      void previewMermaidRenderer.render(frameDocument, appearance, keepPosition, isCurrent).finally(() => {
+        keepPosition();
+        scheduleHorizontalOverflowSync(frameDocument);
+      });
     }
     if (!hasPendingRequest && pendingPresentationScroll?.document === frameDocument) {
       pendingPresentationScroll = null;
@@ -891,7 +960,7 @@ export function createPreviewController({
       return Promise.resolve();
     }
     if (!force && hasPendingRequest && text === pendingText) {
-      if (!background) setStatus(uiStrings.previewGenerating);
+      setPendingStatus(background);
       return Promise.resolve();
     }
     const generation = requestGeneration + 1;
@@ -901,7 +970,7 @@ export function createPreviewController({
     hasPendingRequest = true;
     pendingViewportRestore = null;
     pendingText = text;
-    if (!background) setStatus(uiStrings.previewGenerating);
+    setPendingStatus(background);
     return previewRenderTransport.render({
       text,
       uiLanguage,
@@ -1259,6 +1328,7 @@ export function createPreviewController({
       disposed = true;
       cancelPaintReady();
       cancelHighlightFrame();
+      cancelHorizontalOverflowSync();
       requestGeneration += 1;
       frameGeneration += 1;
       mermaidPresentationGeneration += 1;

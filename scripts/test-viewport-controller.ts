@@ -2064,9 +2064,17 @@ for (const settledShift of [0, 40]) {
     previewPosition = { line: 25, lineOffset: 3, editorLineOffset: 3 };
     controller.markPreviewInteraction();
     controller.previewViewportChanged();
-    await flushLinkedFrames();
+    const projectionFrame = frames.values().next().value;
+    frames.clear();
+    if (!projectionFrame) throw new Error('Preview projection did not schedule a frame');
+    projectionFrame(0);
+    await Promise.resolve();
+    await Promise.resolve();
     if (scrollDOM.scrollTop !== 483) {
       throw new Error(`Preview did not semantically project into Source: ${scrollDOM.scrollTop}`);
+    }
+    if (frames.size !== 0) {
+      throw new Error(`Preview projection left ${frames.size} delayed Source correction frame(s)`);
     }
     if (selection.main.anchor !== 7 || selection.main.head !== 7) {
       throw new Error('Preview scrolling changed the Source selection');

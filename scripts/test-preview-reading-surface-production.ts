@@ -509,6 +509,9 @@ async function assertPreviewProjectionTransactions(
     await page.waitForFunction(() => (
       document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent?.includes('Old frame sentinel')
     ));
+    if (available[0]?.message.text === initialText) {
+      await resolveRequest(available.shift()!);
+    }
 
     await page.evaluate(() => {
       document.querySelector<HTMLButtonElement>('.preview-appearance-dropdown')!.click();
@@ -527,6 +530,7 @@ async function assertPreviewProjectionTransactions(
       )!.click();
     });
     const disabledColoringRequest = await nextRequest('disabled source coloring from custom dropdown');
+    assert.equal(disabledColoringRequest.message.environment.previewSourceColoring, false);
     await resolveRequest(disabledColoringRequest);
     await page.waitForFunction(() => {
       const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
@@ -640,12 +644,40 @@ async function assertPreviewProjectionTransactions(
     await page.waitForFunction(() => (
       document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent?.includes('Old frame sentinel')
     ));
+    if (available[0]?.message.text === initialText) {
+      await resolveRequest(available.shift()!);
+    }
 
     const nextText = `# Projection T1\n\n${Array.from({ length: 80 }, (_, index) => `Line ${index}`).join('\n\n')}`;
+    await page.evaluate(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      (window as typeof window & { __previewFrameHiddenTransitions?: number }).__previewFrameHiddenTransitions = 0;
+      new MutationObserver((records) => {
+        if (
+          frame.style.visibility === 'hidden' ||
+          records.some(record => record.oldValue?.includes('visibility: hidden'))
+        ) {
+          (window as typeof window & { __previewFrameHiddenTransitions: number })
+            .__previewFrameHiddenTransitions += 1;
+        }
+      }).observe(frame, { attributes: true, attributeFilter: ['style'], attributeOldValue: true });
+    });
     await page.evaluate((text) => window.dispatchEvent(new MessageEvent('message', {
       data: { type: 'docChanged', text, version: 2 }
     })), nextText);
     const nextDocumentRequest = await nextRequest('T1 document');
+    assert.deepEqual(await page.evaluate(() => ({
+      previousPresentationVisible: document.querySelector<HTMLIFrameElement>('.preview-frame')
+        ?.contentDocument?.body.textContent?.includes('Old frame sentinel'),
+      statusHidden: document.querySelector<HTMLElement>('.preview-status')?.hidden,
+      statusText: document.querySelector<HTMLElement>('.preview-status')?.textContent,
+      frameVisibility: document.querySelector<HTMLIFrameElement>('.preview-frame')?.style.visibility
+    })), {
+      previousPresentationVisible: true,
+      statusHidden: true,
+      statusText: '',
+      frameVisibility: ''
+    }, 'Standalone Preview refresh must preserve its last committed presentation');
     await page.evaluate(() => {
       const select = document.querySelector<HTMLSelectElement>('.preview-font-family-select')!;
       select.value = 'Georgia';
@@ -660,6 +692,13 @@ async function assertPreviewProjectionTransactions(
     await page.waitForFunction(() => (
       document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent?.includes('Projection T1')
     ));
+    assert.equal(
+      await page.evaluate(() => (
+        (window as typeof window & { __previewFrameHiddenTransitions?: number }).__previewFrameHiddenTransitions ?? 0
+      )),
+      0,
+      'Standalone Preview refresh must not hide its current frame'
+    );
     await resolveRequest(nextDocumentRequest);
 
     const interaction = await page.evaluateHandle(() => {

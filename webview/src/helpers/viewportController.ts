@@ -559,12 +559,42 @@ export class ViewportController {
       }
       const position = this.previewSurface.captureTopVisiblePosition();
       if (!position) return;
-      this.restoreTopVisibleLine(
+      this.restoreLinkedEditorPosition(
         position.line,
         position.editorLineOffset ?? position.lineOffset,
-        undefined,
-        { force: true }
+        () => (
+          !this.destroyed && this.linkedPreviewEnabled &&
+          generation === this.linkedProjectionGeneration && this.linkedViewportDriver === 'preview'
+        )
       );
+    });
+  }
+
+  private restoreLinkedEditorPosition(
+    lineNumber: number,
+    lineOffset: number,
+    isCurrent: () => boolean
+  ): void {
+    // A linked follower tracks the current gesture, not an asynchronous layout
+    // mutation. One measured write avoids the generic multi-frame stabilizer
+    // chasing a Preview gesture after it has already advanced.
+    this.view.requestMeasure({
+      read: () => {
+        if (!isCurrent()) return null;
+        const normalizedLine = Math.min(
+          Math.max(1, Math.floor(Number.isFinite(lineNumber) ? lineNumber : 1)),
+          this.view.state.doc.lines
+        );
+        const line = this.view.state.doc.line(normalizedLine);
+        return this.resolveScrollTarget({
+          top: this.view.lineBlockAt(line.from).top + (
+            Number.isFinite(lineOffset) ? Math.max(0, lineOffset) : 0
+          )
+        }, this.readScrollPosition());
+      },
+      write: (target) => {
+        if (target && isCurrent()) this.writeScrollPosition(target);
+      }
     });
   }
 

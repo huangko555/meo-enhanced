@@ -15,9 +15,13 @@ try {
   const page = await browser.newPage();
   await page.setViewport({ width: 1200, height: 760 });
   let previewRenderCount = 0;
+  let nextPreviewRenderDelayMs = 0;
   await page.exposeFunction('__renderSourceSidePreview', async (message: any) => {
     if (message.type !== 'requestPreviewRender') return null;
     previewRenderCount += 1;
+    const delayMs = nextPreviewRenderDelayMs;
+    nextPreviewRenderDelayMs = 0;
+    if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
     return {
       type: 'previewRenderResult',
       requestId: message.requestId,
@@ -32,6 +36,10 @@ try {
       }
     };
   });
+  await page.exposeFunction('__delayNextSourceSidePreviewRender', (delayMs: number) => {
+    nextPreviewRenderDelayMs = Math.max(0, delayMs);
+  });
+  await page.exposeFunction('__getSourceSidePreviewRenderCount', () => previewRenderCount);
   await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
   await page.addStyleTag({ path: 'webview/src/styles.css' });
   await page.addScriptTag({ content: `window.acquireVsCodeApi=()=>({getState(){},setState(){},postMessage(message){window.__renderSourceSidePreview(message).then(response=>{if(response)window.dispatchEvent(new MessageEvent('message',{data:response}));});}});` });
@@ -99,6 +107,127 @@ try {
     (document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.scrollingElement?.scrollTop ?? 0) > 200
   ));
 
+  const refreshScrollTop = await page.$eval('.cm-scroller', element => element.scrollTop);
+  await page.evaluate(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+    const frameDocument = frame.contentDocument!;
+    const firstText = frameDocument.querySelector('.meo-export-doc')?.firstChild;
+    if (firstText) {
+      const range = frameDocument.createRange();
+      range.selectNodeContents(firstText);
+      const selection = frameDocument.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    const probe = {
+      frameHiddenTransitions: 0,
+      editorScrollTops: [] as number[]
+    };
+    new MutationObserver((records) => {
+      if (
+        frame.style.visibility === 'hidden' ||
+        records.some(record => record.oldValue?.includes('visibility: hidden'))
+      ) probe.frameHiddenTransitions += 1;
+    }).observe(frame, { attributes: true, attributeFilter: ['style'], attributeOldValue: true });
+    document.querySelector<HTMLElement>('.cm-scroller')!.addEventListener('scroll', () => {
+      probe.editorScrollTops.push(document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop);
+    }, { passive: true });
+    (window as typeof window & { __sourcePreviewContinuityProbe?: typeof probe }).__sourcePreviewContinuityProbe = probe;
+  });
+  const sourceBounds = await page.$eval('.cm-scroller', element => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  });
+  await page.mouse.click(
+    sourceBounds.x + sourceBounds.width / 2,
+    sourceBounds.y + sourceBounds.height / 2
+  );
+  const renderCountBeforeContinuityEdit = previewRenderCount;
+  await page.evaluate(() => (
+    (window as typeof window & { __delayNextSourceSidePreviewRender(delayMs: number): Promise<void> })
+      .__delayNextSourceSidePreviewRender(500)
+  ));
+  await page.keyboard.type('CONTINUITY');
+  await page.waitForFunction(async count => (
+    await (window as typeof window & { __getSourceSidePreviewRenderCount(): Promise<number> })
+      .__getSourceSidePreviewRenderCount()
+  ) > count, {}, renderCountBeforeContinuityEdit);
+  const inFlightPresentation = await page.evaluate(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+    const status = document.querySelector<HTMLElement>('.preview-status')!;
+    return {
+      frameVisibility: frame.style.visibility,
+      oldFrameStillVisible: frame.contentDocument?.body.textContent?.includes('Section 140'),
+      statusHidden: status.hidden
+    };
+  });
+  await page.waitForFunction(() => (
+    document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent?.includes('CONTINUITY')
+  ), { timeout: 3000 });
+  await page.waitForFunction(() => {
+    const root = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.documentElement;
+    return root?.dataset.meoPreviewHorizontalOverflow === 'contained';
+  });
+  const continuity = await page.evaluate((beforeScrollTop) => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const probe = (window as typeof window & {
+      __sourcePreviewContinuityProbe: { frameHiddenTransitions: number; editorScrollTops: number[] };
+    }).__sourcePreviewContinuityProbe;
+    const editorScrollTop = document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop;
+    return {
+      ...probe,
+      editorScrollDelta: editorScrollTop - beforeScrollTop,
+      documentOverflow: frameDocument.documentElement.scrollWidth - frameDocument.documentElement.clientWidth,
+      bodyOverflow: frameDocument.body.scrollWidth - frameDocument.body.clientWidth,
+      horizontalOverflowMode: frameDocument.documentElement.dataset.meoPreviewHorizontalOverflow,
+      horizontalScrollbarHeight: frameDocument.defaultView!
+        .getComputedStyle(frameDocument.documentElement, '::-webkit-scrollbar').height
+    };
+  }, refreshScrollTop);
+  assert.deepEqual(inFlightPresentation, {
+    frameVisibility: '',
+    oldFrameStillVisible: true,
+    statusHidden: true
+  }, 'An existing Preview must remain unobstructed while its replacement renders');
+  assert.equal(continuity.frameHiddenTransitions, 0, 'Preview updates must never hide the current frame');
+  assert.ok(Math.abs(continuity.editorScrollDelta) <= 2, JSON.stringify(continuity));
+  assert.ok(continuity.documentOverflow <= 1 && continuity.bodyOverflow <= 1, JSON.stringify(continuity));
+  assert.equal(continuity.horizontalOverflowMode, 'contained');
+  assert.equal(continuity.horizontalScrollbarHeight, '0px');
+
+  await page.evaluate(() => {
+    const frameWindow = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentWindow!;
+    const wide = frameWindow.document.createElement('div');
+    wide.dataset.testGenuineHorizontalOverflow = 'true';
+    wide.style.width = '1800px';
+    wide.style.height = '1px';
+    frameWindow.document.querySelector('.meo-export-doc')!.append(wide);
+    frameWindow.dispatchEvent(new Event('resize'));
+  });
+  await page.waitForFunction(() => (
+    document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.documentElement
+      .dataset.meoPreviewHorizontalOverflow === 'scrollable'
+  ));
+  const genuineOverflow = await page.evaluate(() => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    return {
+      overflow: frameDocument.documentElement.scrollWidth - frameDocument.documentElement.clientWidth,
+      scrollbarHeight: frameDocument.defaultView!
+        .getComputedStyle(frameDocument.documentElement, '::-webkit-scrollbar').height
+    };
+  });
+  assert.ok(genuineOverflow.overflow > 500, JSON.stringify(genuineOverflow));
+  assert.equal(genuineOverflow.scrollbarHeight, '10px');
+  await page.evaluate(() => {
+    const frameWindow = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentWindow!;
+    frameWindow.document.querySelector('[data-test-genuine-horizontal-overflow]')?.remove();
+    frameWindow.dispatchEvent(new Event('resize'));
+  });
+  await page.waitForFunction(() => (
+    document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.documentElement
+      .dataset.meoPreviewHorizontalOverflow === 'contained'
+  ));
+
   const selectionBefore = await page.evaluate(() => {
     const selection = document.getSelection();
     return selection ? { anchorOffset: selection.anchorOffset, focusOffset: selection.focusOffset } : null;
@@ -108,8 +237,26 @@ try {
     return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
   });
   const editorScrollBefore = await page.$eval('.cm-scroller', element => element.scrollTop);
+  await page.evaluate(() => {
+    const probe = (window as typeof window & {
+      __sourcePreviewContinuityProbe: {
+        frameHiddenTransitions: number;
+        editorScrollTops: number[];
+        previewScrollTops?: number[];
+      };
+    }).__sourcePreviewContinuityProbe;
+    probe.editorScrollTops = [];
+    probe.previewScrollTops = [];
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    frameDocument.addEventListener('scroll', () => {
+      probe.previewScrollTops!.push(frameDocument.scrollingElement!.scrollTop);
+    }, { passive: true });
+  });
   await page.mouse.move(frameBounds.x + frameBounds.width / 2, frameBounds.y + frameBounds.height / 2);
-  await page.mouse.wheel({ deltaY: 700 });
+  for (let index = 0; index < 6; index += 1) {
+    await page.mouse.wheel({ deltaY: 120 });
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
   await page.waitForFunction(previous => (
     Math.abs(document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop - previous) > 100
   ), { timeout: 3000 }, editorScrollBefore);
@@ -118,6 +265,17 @@ try {
     return selection ? { anchorOffset: selection.anchorOffset, focusOffset: selection.focusOffset } : null;
   });
   assert.deepEqual(selectionAfter, selectionBefore, 'Preview-driven scroll must not move Source selection');
+  const scrollTrace = await page.evaluate(() => {
+    const probe = (window as typeof window & {
+      __sourcePreviewContinuityProbe: { editorScrollTops: number[]; previewScrollTops?: number[] };
+    }).__sourcePreviewContinuityProbe;
+    return { editor: probe.editorScrollTops, preview: probe.previewScrollTops ?? [] };
+  });
+  const hasReverseStep = (values: number[]) => values.some((value, index) => (
+    index > 0 && value < values[index - 1] - 1
+  ));
+  assert.equal(hasReverseStep(scrollTrace.preview), false, JSON.stringify(scrollTrace));
+  assert.equal(hasReverseStep(scrollTrace.editor), false, JSON.stringify(scrollTrace));
 
   await page.click('.source-preview-button');
   const closed = await page.evaluate(() => ({
