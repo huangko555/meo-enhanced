@@ -1280,7 +1280,9 @@ export class ViewportController {
               resolve();
               return;
             }
-            const anchorBusy = this.hasActiveDocumentAnchorStabilization();
+            const anchorBusy = this.hasActiveDocumentAnchorStabilization()
+              || this.activeLayoutAnchor !== null
+              || this.isActiveScrollTargetValid(this.activeScrollTarget);
             stableFrames = !anchorBusy && signature === previousSignature
               ? stableFrames + 1
               : 0;

@@ -83,6 +83,7 @@ const DISPLAY_MATH_VIEWBOX_PADDING = Object.freeze({
   bottom: 12
 });
 const DISPLAY_MATH_TRIM_RETRY_DELAYS_MS = Object.freeze([80, 220]);
+const MERMAID_VIEWPORT_SETTLE_TIMEOUT_MS = 500;
 const DISPLAY_MATH_LABEL_SELECTORS = Object.freeze([
   '.nodeLabel .katex-mathml math',
   '.nodeLabel .katex-html',
@@ -664,6 +665,24 @@ export class MermaidDiagramWidget extends WidgetType {
 
   toDOM(view?: EditorView) {
     const container = document.createElement('div');
+    let presentationGeneration = 0;
+    let releaseBusyAfterLayout = false;
+    const finishPresentation = () => {
+      presentationGeneration += 1;
+      releaseBusyAfterLayout = false;
+      container.removeAttribute('aria-busy');
+    };
+    const releaseBusyWhenSettled = (generation: number, waitForLayout: Promise<void>) => {
+      void waitForLayout.then(() => {
+        if (
+          presentationGeneration === generation
+          && container.isConnected
+          && container.querySelector('.meo-mermaid-svg-wrapper')
+        ) {
+          container.removeAttribute('aria-busy');
+        }
+      });
+    };
     container.className = 'meo-mermaid-block';
     const initialHeight = this.estimatedHeight;
     if (initialHeight > 0 && !this.staleSvg) {
@@ -716,11 +735,13 @@ export class MermaidDiagramWidget extends WidgetType {
 
     this.presentationHandle = this.presentationFactory.create({
       showPending: () => {
+        presentationGeneration += 1;
+        releaseBusyAfterLayout = false;
+        container.setAttribute('aria-busy', 'true');
         if (container.querySelector('.meo-mermaid-svg-wrapper')) {
           // Theme/config refreshes keep the last valid diagram visible until
           // its replacement is ready. Collapsing a tall diagram to a Loading
           // row and expanding it again causes avoidable viewport jumps.
-          container.setAttribute('aria-busy', 'true');
           return;
         }
         if (container.isConnected) {
@@ -733,7 +754,7 @@ export class MermaidDiagramWidget extends WidgetType {
         container.replaceChildren(loading);
       },
       showDiagram: (svg) => {
-        container.removeAttribute('aria-busy');
+        releaseBusyAfterLayout = true;
         const contentWidth = currentMermaidContentWidth(container);
         const estimatedHeight = estimateCachedMermaidHeight(svg, contentWidth);
         this.intrinsicSvg = svg;
@@ -753,13 +774,13 @@ export class MermaidDiagramWidget extends WidgetType {
         this.renderSvg(container, svg);
       },
       showError: (_source, error) => {
-        container.removeAttribute('aria-busy');
+        finishPresentation();
         container.style.removeProperty('min-height');
         container.replaceChildren();
         this.renderError(container, error);
       },
       clearPresentation: () => {
-        container.removeAttribute('aria-busy');
+        finishPresentation();
         this.exitFullscreen('external');
         this.embeddedInteractionCleanup();
         container.style.removeProperty('min-height');
@@ -768,12 +789,26 @@ export class MermaidDiagramWidget extends WidgetType {
       preserveLayoutChange: (apply) => {
         if (!view || !container.isConnected) {
           apply();
+          if (releaseBusyAfterLayout) {
+            releaseBusyAfterLayout = false;
+            const generation = presentationGeneration;
+            releaseBusyWhenSettled(generation, new Promise<void>((resolve) => {
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+            }));
+          }
           return;
         }
         const controller = getViewportController(view);
         if (!controller || this.startLine <= 0 || this.endLine <= 0) {
           apply();
           view.requestMeasure();
+          if (releaseBusyAfterLayout) {
+            releaseBusyAfterLayout = false;
+            const generation = presentationGeneration;
+            releaseBusyWhenSettled(generation, new Promise<void>((resolve) => {
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+            }));
+          }
           return;
         }
         const startLine = view.state.doc.line(Math.min(this.startLine, view.state.doc.lines));
@@ -782,7 +817,15 @@ export class MermaidDiagramWidget extends WidgetType {
           element: container,
           from: startLine.from,
           to: endLine.to
-        }, apply);
+        }, () => {
+          apply();
+          if (!releaseBusyAfterLayout) return;
+          releaseBusyAfterLayout = false;
+          releaseBusyWhenSettled(
+            presentationGeneration,
+            controller.whenPresentationSettled(MERMAID_VIEWPORT_SETTLE_TIMEOUT_MS)
+          );
+        });
       }
     });
     const identity = getMermaidEditorPresentationIdentity();

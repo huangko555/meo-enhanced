@@ -2608,20 +2608,37 @@ async function main() {
         if (pending) {
           const viewportTop = scroller.getBoundingClientRect().top;
           scroller.scrollTop += pending.getBoundingClientRect().bottom - viewportTop - 220;
-          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-          const pendingBottom = pending.getBoundingClientRect().bottom;
-          const anchor = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-            .find((line) => (
-              line.getBoundingClientRect().top >= pendingBottom &&
-              Boolean(line.textContent?.trim()) && line.textContent?.trim() !== '```'
-            ));
-          return {
-            text: anchor?.textContent ?? null,
-            top: anchor?.getBoundingClientRect().top ?? null,
-            blockTop: pending.getBoundingClientRect().top,
-            blockHeight: pending.getBoundingClientRect().height,
-            scrollTop: scroller.scrollTop
-          };
+          let previousSignature = '';
+          let stableFrames = 0;
+          for (let settleAttempt = 0; settleAttempt < 20; settleAttempt += 1) {
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            const pendingRect = pending.getBoundingClientRect();
+            const anchor = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+              .find((line) => (
+                line.getBoundingClientRect().top >= pendingRect.bottom &&
+                Boolean(line.textContent?.trim()) && line.textContent?.trim() !== '```'
+              ));
+            const anchorTop = anchor?.getBoundingClientRect().top ?? null;
+            const signature = JSON.stringify({
+              anchorText: anchor?.textContent ?? null,
+              anchorTop,
+              blockTop: pendingRect.top,
+              blockHeight: pendingRect.height,
+              scrollTop: scroller.scrollTop
+            });
+            stableFrames = signature === previousSignature ? stableFrames + 1 : 0;
+            previousSignature = signature;
+            if (stableFrames >= 2) {
+              return {
+                text: anchor?.textContent ?? null,
+                top: anchorTop,
+                blockTop: pendingRect.top,
+                blockHeight: pendingRect.height,
+                scrollTop: scroller.scrollTop
+              };
+            }
+          }
+          return null;
         }
         scroller.scrollTop = Math.max(0, scroller.scrollTop - 120);
       }
@@ -2637,11 +2654,37 @@ async function main() {
       await page.mouse.wheel({ deltaY: tallMermaidWheelDelta });
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
+    await page.evaluate(() => {
+      const target = document.querySelector<HTMLElement>(
+        '.meo-mermaid-block[aria-busy="true"]:has(svg[height="3000"])'
+      );
+      if (!target) throw new Error('Tall Mermaid pending block disappeared before release');
+      (window as any).__tallMermaidReadyTrace = [];
+      const record = () => {
+        (window as any).__tallMermaidReadyTrace.push({
+          busy: target.getAttribute('aria-busy'),
+          rendered: Boolean(target.querySelector('svg[height="3000"]'))
+        });
+      };
+      new MutationObserver(record).observe(target, {
+        attributes: true,
+        attributeFilter: ['aria-busy'],
+        childList: true,
+        subtree: true
+      });
+      record();
+    });
     await page.evaluate(() => (window as any).__releaseTallMermaidRender());
     await page.waitForFunction(() => (
       !document.querySelector('.meo-mermaid-block[aria-busy="true"]:has(svg[height="3000"])') &&
       Boolean(document.querySelector('.meo-mermaid-block svg[height="3000"]'))
     ));
+    const tallMermaidReadyTrace = await page.evaluate(() => (window as any).__tallMermaidReadyTrace);
+    if (!tallMermaidReadyTrace.some((entry: { busy: string | null; rendered: boolean }) => (
+      entry.busy === 'true' && entry.rendered
+    ))) {
+      throw new Error(`Tall Mermaid announced ready before layout settlement: ${JSON.stringify(tallMermaidReadyTrace)}`);
+    }
     for (let index = pendingWheelCount; index < tallMermaidWheelCount; index += 1) {
       await page.mouse.wheel({ deltaY: tallMermaidWheelDelta });
       await new Promise((resolve) => setTimeout(resolve, 50));
