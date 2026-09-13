@@ -3,6 +3,13 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.21
+- Added an optional Source split Preview with live rendering, bidirectional semantic scroll synchronization, a compact session-only sync control, and linked back-to-top navigation.
+- Stabilized reading position across Live, Source, Preview, split-view transitions, edits, asynchronous layout, and disk reloads without changing cursor, selection, or focus.
+- Reworked Preview presentation so code highlighting, Mermaid diagrams, and other rendered content update atomically with less flicker and redundant work.
+- Improved Preview table fitting with content-aware column allocation, proportional compression, and no unnecessary horizontal scrolling or clipped right edge.
+- Refined editor interactions and visual consistency, including selection toolbar timing and surfaces, HTML details line numbers and spacing, table header colors, and scroll-to-top controls.
+
 ## 0.3.20
 - Added GitHub-style disclosure markers to collapsible HTML and Markdown details, with stable geometry in both states.
 - Fixed Live-mode blockquote text shifting while clicking.
