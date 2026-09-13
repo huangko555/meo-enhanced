@@ -1,3 +1,4 @@
+import morphdom from 'morphdom';
 import { getExportStyleEnvironment } from './export';
 import { createPreviewMermaidRenderer } from './previewMermaid';
 import { logWebviewRenderError } from './errors';
@@ -23,7 +24,7 @@ type PreviewControllerOptions = {
   isCurrentText?: (text: string) => boolean;
   getCodePalette: (appearance: 'light' | 'dark') => PreviewCodePalette;
   applyCodeTheme: (appearance: 'light' | 'dark') => void;
-  onRendered?: () => void;
+  onRendered?: (options?: { readonly skipLinkedViewportProjection?: boolean }) => void;
   onPaintReady?: () => void;
   onFindRequested?: () => void;
   onViewportInteraction?: () => void;
@@ -42,6 +43,128 @@ type PreviewViewportProjectionSlot = {
   restore: PreviewViewportRestore | null;
 };
 
+const previewMutableStateAttributes = new Set([
+  'open',
+  'data-source-line',
+  'data-source-end-line'
+]);
+
+function syncSourceMappingAttributes(fromElement: Element, toElement: Element): void {
+  for (const attribute of ['data-source-line', 'data-source-end-line']) {
+    const value = toElement.getAttribute(attribute);
+    if (value === null) fromElement.removeAttribute(attribute);
+    else fromElement.setAttribute(attribute, value);
+  }
+}
+
+function syncDescendantSourceMappings(fromElement: Element, toElement: Element): void {
+  syncSourceMappingAttributes(fromElement, toElement);
+  const fromMapped = fromElement.querySelectorAll('[data-source-line], [data-source-end-line]');
+  const toMapped = toElement.querySelectorAll('[data-source-line], [data-source-end-line]');
+  if (fromMapped.length !== toMapped.length) return;
+  for (let index = 0; index < fromMapped.length; index += 1) {
+    syncSourceMappingAttributes(fromMapped[index], toMapped[index]);
+  }
+}
+
+function haveEquivalentPreviewAttributes(left: Element, right: Element): boolean {
+  let leftCount = 0;
+  let rightCount = 0;
+  for (const attribute of Array.from(left.attributes)) {
+    if (previewMutableStateAttributes.has(attribute.name)) continue;
+    leftCount += 1;
+    if (right.getAttribute(attribute.name) !== attribute.value) return false;
+  }
+  for (const attribute of Array.from(right.attributes)) {
+    if (!previewMutableStateAttributes.has(attribute.name)) rightCount += 1;
+  }
+  return leftCount === rightCount;
+}
+
+function areEquivalentPreviewNodes(left: Node, right: Node): boolean {
+  if (left.nodeType !== right.nodeType) return false;
+  if (left.nodeType !== 1) return left.isEqualNode(right);
+  const leftElement = left as Element;
+  const rightElement = right as Element;
+  if (
+    leftElement.tagName !== rightElement.tagName
+    || !haveEquivalentPreviewAttributes(leftElement, rightElement)
+    || leftElement.childNodes.length !== rightElement.childNodes.length
+  ) return false;
+  for (let index = 0; index < leftElement.childNodes.length; index += 1) {
+    if (!areEquivalentPreviewNodes(
+      leftElement.childNodes[index],
+      rightElement.childNodes[index]
+    )) return false;
+  }
+  return true;
+}
+
+function areEquivalentPreviewElements(left: HTMLElement, right: HTMLElement): boolean {
+  return areEquivalentPreviewNodes(left, right);
+}
+
+function preserveLoadedPreviewImage(fromImage: HTMLImageElement, toImage: HTMLImageElement): boolean {
+  const loadedSource = fromImage.dataset.meoPreviewImageSource;
+  const nextSource = toImage.dataset.meoDeferredImageSrc;
+  if (!loadedSource || loadedSource !== nextSource) return false;
+  for (const attribute of Array.from(fromImage.attributes)) {
+    if (
+      attribute.name !== 'src'
+      && attribute.name !== 'data-meo-preview-image-source'
+      && !toImage.hasAttribute(attribute.name)
+    ) {
+      fromImage.removeAttribute(attribute.name);
+    }
+  }
+  for (const attribute of Array.from(toImage.attributes)) {
+    if (attribute.name !== 'src' && attribute.name !== 'data-meo-deferred-image-src') {
+      fromImage.setAttribute(attribute.name, attribute.value);
+    }
+  }
+  syncSourceMappingAttributes(fromImage, toImage);
+  return true;
+}
+
+function morphPreviewMain(frameDocument: Document, currentMain: HTMLElement, html: string): void {
+  const nextMain = frameDocument.createElement('main');
+  nextMain.className = 'meo-export-doc';
+  nextMain.innerHTML = html;
+  morphdom(currentMain, nextMain, {
+    childrenOnly: true,
+    onBeforeElUpdated(fromElement, toElement) {
+      if (
+        fromElement.tagName === 'IMG'
+        && toElement.tagName === 'IMG'
+        && preserveLoadedPreviewImage(
+          fromElement as HTMLImageElement,
+          toElement as HTMLImageElement
+        )
+      ) {
+        return false;
+      }
+      const mermaidSource = fromElement.dataset.sourceB64;
+      if (
+        mermaidSource
+        && fromElement.classList.contains('meo-export-mermaid')
+        && toElement.classList.contains('meo-export-mermaid')
+        && mermaidSource === toElement.dataset.sourceB64
+      ) {
+        syncSourceMappingAttributes(fromElement, toElement);
+        return false;
+      }
+      if (fromElement.tagName === 'DETAILS') {
+        toElement.toggleAttribute('open', (fromElement as HTMLDetailsElement).open);
+      }
+      if (areEquivalentPreviewElements(fromElement, toElement)) {
+        syncDescendantSourceMappings(fromElement, toElement);
+        return false;
+      }
+      return true;
+    }
+  });
+}
+
 const previewScrollbarStyles = `
 html[data-meo-preview-source-coloring="false"] .meo-export-code-line-source > span {
   color: inherit !important;
@@ -53,16 +176,27 @@ html[data-meo-preview-source-coloring="false"] .meo-export-code-line-source > sp
 html,
 body {
   overflow-anchor: none;
-  scrollbar-gutter: stable;
   scrollbar-color: color-mix(in srgb, var(--meo-fg) 38%, transparent) transparent;
   scrollbar-width: thin;
+}
+
+html {
+  overflow-x: auto;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+body {
+  min-width: 0;
+  overflow-x: visible;
+  scrollbar-gutter: stable;
 }
 
 html::-webkit-scrollbar,
 body::-webkit-scrollbar {
   -webkit-appearance: none;
   width: 10px !important;
-  height: 10px !important;
+  height: 0 !important;
 }
 
 html::-webkit-scrollbar-track,
@@ -104,11 +238,11 @@ body::-webkit-scrollbar-corner {
   background: transparent !important;
 }
 
-html[data-meo-preview-horizontal-overflow="pending"]::-webkit-scrollbar,
-html[data-meo-preview-horizontal-overflow="contained"]::-webkit-scrollbar,
-html[data-meo-preview-horizontal-overflow="pending"] body::-webkit-scrollbar,
-html[data-meo-preview-horizontal-overflow="contained"] body::-webkit-scrollbar {
-  height: 0 !important;
+.meo-export-html-block,
+.meo-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 `;
 
@@ -370,7 +504,6 @@ export function createPreviewController({
   let pendingPresentationScroll: { document: Document; scrollTop: number } | null = null;
   let viewportInteractionGeneration = 0;
   let hasPendingRequest = false;
-  let pendingViewportRestore: PreviewViewportRestore | null = null;
   let acceptingViewportProjection: PreviewViewportProjectionSlot | null = null;
   let pendingText = '';
   let latestAcceptedText: string | null = null;
@@ -393,7 +526,6 @@ export function createPreviewController({
   let disposed = false;
   let paintFrame: number | null = null;
   let highlightFrame: number | null = null;
-  let horizontalOverflowFrame: number | null = null;
   const cancelHighlightFrame = () => {
     if (highlightFrame !== null) window.cancelAnimationFrame(highlightFrame);
     highlightFrame = null;
@@ -410,35 +542,6 @@ export function createPreviewController({
   const cancelPaintReady = () => {
     if (paintFrame !== null) window.cancelAnimationFrame(paintFrame);
     paintFrame = null;
-  };
-  const cancelHorizontalOverflowSync = () => {
-    if (horizontalOverflowFrame !== null) window.cancelAnimationFrame(horizontalOverflowFrame);
-    horizontalOverflowFrame = null;
-  };
-  const scheduleHorizontalOverflowSync = (frameDocument: Document): void => {
-    if (disposed || activeFrameDocument !== frameDocument) return;
-    cancelHorizontalOverflowSync();
-    // Math and diagram fitters settle on the next layout frame. Suppress only
-    // the horizontal track until then; genuine overflow remains scrollable.
-    frameDocument.documentElement.dataset.meoPreviewHorizontalOverflow = 'pending';
-    let remainingLayoutFrames = 1;
-    const sync = () => {
-      horizontalOverflowFrame = null;
-      if (disposed || activeFrameDocument !== frameDocument) return;
-      if (remainingLayoutFrames > 0) {
-        remainingLayoutFrames -= 1;
-        horizontalOverflowFrame = window.requestAnimationFrame(sync);
-        return;
-      }
-      const scrollElement = frameDocument.scrollingElement;
-      const overflow = scrollElement
-        ? scrollElement.scrollWidth - scrollElement.clientWidth
-        : 0;
-      frameDocument.documentElement.dataset.meoPreviewHorizontalOverflow = overflow > 1
-        ? 'scrollable'
-        : 'contained';
-    };
-    horizontalOverflowFrame = window.requestAnimationFrame(sync);
   };
   const schedulePaintReady = () => {
     cancelPaintReady();
@@ -489,6 +592,7 @@ export function createPreviewController({
     const loadImage = async (image: HTMLImageElement) => {
       const rawSrc = image.getAttribute('data-meo-deferred-image-src') ?? '';
       image.removeAttribute('data-meo-deferred-image-src');
+      image.dataset.meoPreviewImageSource = rawSrc;
       const resolvedSrc = await resolveEmbeddedImageSrc(rawSrc, abortController.signal);
       if (
         abortController.signal.aborted ||
@@ -535,7 +639,6 @@ export function createPreviewController({
       }
       const commit = () => {
         image.replaceWith(prepared);
-        scheduleHorizontalOverflowSync(frameDocument);
       };
       if (host.hidden) commit();
       else withViewportTransaction(commit);
@@ -718,10 +821,7 @@ export function createPreviewController({
     setStatus(!background && !hasReadablePresentation ? uiStrings.previewGenerating : null);
   };
 
-  const renderFrame = (
-    renderedText: string,
-    viewportRestore: PreviewViewportRestore | null = null
-  ) => {
+  const renderFrame = (renderedText: string, preserveViewport = false) => {
     if (disposed || !latestPayload) {
       return;
     }
@@ -747,7 +847,7 @@ export function createPreviewController({
         ? `<link rel="stylesheet" href="${escapeHtmlAttribute(katexHref)}">`
         : '';
     const styles = payload.styles[appearance].replace(/<\/style/gi, '<\\/style');
-    const initializeFrame = () => {
+    const initializeFrame = (viewportSlot: PreviewViewportProjectionSlot | null = null) => {
       if (disposed || loadGeneration !== frameGeneration) return;
       const frameDocument = frame.contentDocument;
       if (!frameDocument) {
@@ -777,12 +877,6 @@ export function createPreviewController({
         if (!disposed && activeFrameDocument === frameDocument && sourceColoring) scheduleViewportHighlight(frameDocument);
         if (!disposed && activeFrameDocument === frameDocument) onViewportChange?.();
       }, { passive: true, signal });
-      frameDocument.defaultView?.addEventListener('resize', () => {
-        scheduleHorizontalOverflowSync(frameDocument);
-      }, { passive: true, signal });
-      if (viewportRestore?.isCurrent()) {
-        restoreTopLine(viewportRestore.line, viewportRestore.lineOffset);
-      }
       const notifyViewportInteraction = (event: Event) => {
         if (!event.isTrusted) return;
         if (event.type === 'keydown') {
@@ -820,6 +914,7 @@ export function createPreviewController({
           disposed ||
           !isCurrent()
         ) return;
+        const viewportRestore = viewportSlot?.restore;
         if (viewportRestore?.isCurrent()) {
           restoreTopLine(viewportRestore.line, viewportRestore.lineOffset);
         }
@@ -828,36 +923,37 @@ export function createPreviewController({
         keepPosition();
         frame.style.removeProperty('visibility');
         scrollToTopController.sync();
-        onRendered?.();
+        onRendered?.({ skipLinkedViewportProjection: preserveViewport });
         schedulePaintReady();
-        scheduleHorizontalOverflowSync(frameDocument);
       };
       finishRender();
-      void frameDocument.fonts.ready.then(() => scheduleHorizontalOverflowSync(frameDocument));
       attachDeferredImages(frameDocument);
       if (payload.hasMermaid) {
         void previewMermaidRenderer.render(frameDocument, appearance, keepPosition, isCurrent).finally(() => {
           keepPosition();
-          scheduleHorizontalOverflowSync(frameDocument);
         });
       }
     };
     disposePreviewMathViewports();
     scrollToTopController.setScrollElement(null);
     if (reusableDocument && reusableMain) {
-      // Keep the document's font/layout caches while retiring each presentation's
-      // listeners, measurements and asynchronous image/diagram generations.
+      // Keep the browsing context and unchanged blocks alive. The viewport
+      // transaction projects the current driver exactly once after the morph,
+      // before the browser can paint the new layout.
       frame.onload = null;
-      reusableDocument.getSelection()?.removeAllRanges();
-      reusableDocument.documentElement.lang = uiLanguage;
-      reusableMain.innerHTML = payload.html;
-      if (!viewportRestore && reusableDocument.scrollingElement) {
-        reusableDocument.scrollingElement.scrollTop = 0;
-      }
-      initializeFrame();
+      const commit = (viewportSlot: PreviewViewportProjectionSlot | null) => {
+        reusableDocument.documentElement.lang = uiLanguage;
+        morphPreviewMain(reusableDocument, reusableMain, payload.html);
+        if (!preserveViewport && reusableDocument.scrollingElement) {
+          reusableDocument.scrollingElement.scrollTop = 0;
+        }
+        initializeFrame(viewportSlot);
+      };
+      if (preserveViewport) withViewportTransaction((slot) => commit(slot));
+      else commit(null);
       return;
     }
-    frame.onload = initializeFrame;
+    frame.onload = () => initializeFrame();
     frame.srcdoc = `<!DOCTYPE html><html lang="${uiLanguage}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewLatexMathViewportStyles}${previewPropertiesStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${payload.html}</main></div></body></html>`;
   };
 
@@ -896,12 +992,10 @@ export function createPreviewController({
     styleElement.textContent = payload.styles[appearance];
     syncPreviewCodeHighlight(frameDocument);
     keepPosition();
-    onRendered?.();
-    scheduleHorizontalOverflowSync(frameDocument);
+    onRendered?.({ skipLinkedViewportProjection: true });
     if (payload.hasMermaid) {
       void previewMermaidRenderer.render(frameDocument, appearance, keepPosition, isCurrent).finally(() => {
         keepPosition();
-        scheduleHorizontalOverflowSync(frameDocument);
       });
     }
     if (!hasPendingRequest && pendingPresentationScroll?.document === frameDocument) {
@@ -942,9 +1036,10 @@ export function createPreviewController({
 
   const performRequestRender = (
     text: string,
-    { background = false, force = false, preserveFrame = false }: {
+    { background = false, force = false, preserveViewport = false, preserveFrame = false }: {
       background?: boolean;
       force?: boolean;
+      preserveViewport?: boolean;
       preserveFrame?: boolean;
     } = {}
   ): Promise<void> => {
@@ -968,7 +1063,6 @@ export function createPreviewController({
     const requestText = text;
     requestGeneration = generation;
     hasPendingRequest = true;
-    pendingViewportRestore = null;
     pendingText = text;
     setPendingStatus(background);
     return previewRenderTransport.render({
@@ -982,11 +1076,9 @@ export function createPreviewController({
       // produced a newer Draft. Never flash that stale presentation while the
       // single-flight Adapter starts the newest queued render.
       if (isCurrentText?.(requestText) === false) {
-        pendingViewportRestore = null;
         return;
       }
       if (result.ok === false) {
-        pendingViewportRestore = null;
         setStatus(uiStrings.previewFailed);
         schedulePaintReady();
         return;
@@ -994,12 +1086,10 @@ export function createPreviewController({
       latestPayload = result.value;
       latestAcceptedText = requestText;
       setStatus(null);
-      const viewportRestore = pendingViewportRestore;
-      pendingViewportRestore = null;
       if (preserveFrame && activeFrameDocument && frameRenderedText === requestText) {
         applyAppearanceToFrame();
       } else {
-        renderFrame(requestText, viewportRestore);
+        renderFrame(requestText, preserveViewport);
       }
     }).then(() => undefined);
   };
@@ -1017,13 +1107,12 @@ export function createPreviewController({
       && activeFrameDocument !== null
       && frameRenderedText === text;
     if (preserveCurrentFrame) capturePresentationScroll();
-    let completion = Promise.resolve();
-    const mutate = () => {
-      completion = performRequestRender(text, { background, force, preserveFrame });
-    };
-    if (preserveViewport && !preserveCurrentFrame) withViewportTransaction(() => mutate());
-    else mutate();
-    return completion;
+    return performRequestRender(text, {
+      background,
+      force,
+      preserveViewport: preserveViewport && !preserveCurrentFrame,
+      preserveFrame
+    });
   };
 
   const acceptRenderResponse = (message: PreviewRenderResponse) => (
@@ -1214,13 +1303,6 @@ export function createPreviewController({
   ): void => {
     const restore = { ...position, isCurrent };
     if (acceptingViewportProjection) acceptingViewportProjection.restore = restore;
-    if (hasPendingRequest) {
-      pendingViewportRestore = restore;
-      if (activeFrameDocument && frameRenderedText !== null && restore.isCurrent()) {
-        restoreTopLine(restore.line, restore.lineOffset);
-      }
-      return;
-    }
     if (restore.isCurrent()) restoreTopLine(restore.line, restore.lineOffset);
   };
   const getHeadings = (): OutlineHeading[] => {
@@ -1328,7 +1410,6 @@ export function createPreviewController({
       disposed = true;
       cancelPaintReady();
       cancelHighlightFrame();
-      cancelHorizontalOverflowSync();
       requestGeneration += 1;
       frameGeneration += 1;
       mermaidPresentationGeneration += 1;
@@ -1341,7 +1422,6 @@ export function createPreviewController({
       frameRenderedText = null;
       frame.style.removeProperty('visibility');
       hasPendingRequest = false;
-      pendingViewportRestore = null;
       previewRenderTransport.cancelAll('Preview closed');
       appearanceSelect.removeEventListener('change', handleAppearanceControlChange);
       sourceColoringSelect.removeEventListener('change', handleSourceColoringChange);

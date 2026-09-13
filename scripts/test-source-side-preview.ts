@@ -45,9 +45,12 @@ try {
   await page.addScriptTag({ content: `window.acquireVsCodeApi=()=>({getState(){},setState(){},postMessage(message){window.__renderSourceSidePreview(message).then(response=>{if(response)window.dispatchEvent(new MessageEvent('message',{data:response}));});}});` });
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
 
-  const text = Array.from({ length: 140 }, (_, index) => (
-    `## Section ${index + 1}\n\nParagraph ${index + 1} with enough text to exercise semantic linked scrolling.`
-  )).join('\n\n');
+  const text = [
+    'Intro paragraph for formatting continuity.',
+    ...Array.from({ length: 140 }, (_, index) => (
+      `## Section ${index + 1}\n\nParagraph ${index + 1} with enough text to exercise semantic linked scrolling.`
+    ))
+  ].join('\n\n');
   await page.evaluate(text => window.dispatchEvent(new MessageEvent('message', { data: {
     type: 'init', documentId: 'file:///source-side-preview.md', text, version: 1,
     savedRevision: { version: 1, text }, diagnostics: [], mode: 'source', uiLanguage: 'en',
@@ -90,12 +93,17 @@ try {
   assert.ok(Math.abs(layout.editorWidth - layout.previewWidth) <= 2, JSON.stringify(layout));
 
   const countBeforeTyping = previewRenderCount;
-  await page.keyboard.type('XYZ');
+  await page.keyboard.down('Control');
+  await page.keyboard.down('Shift');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.up('Shift');
+  await page.keyboard.up('Control');
+  await page.keyboard.type('**Intro**');
   await new Promise(resolve => setTimeout(resolve, 150));
   assert.equal(previewRenderCount, countBeforeTyping, 'Preview refresh must yield during active typing');
   await page.waitForFunction(() => {
     const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
-    return frame?.contentDocument?.body.textContent?.includes('XYZ');
+    return frame?.contentDocument?.querySelector('strong')?.textContent === 'Intro';
   }, { timeout: 3000 });
   assert.equal(previewRenderCount, countBeforeTyping + 1, 'A typing burst should coalesce to one render');
 
@@ -121,7 +129,11 @@ try {
     }
     const probe = {
       frameHiddenTransitions: 0,
-      editorScrollTops: [] as number[]
+      editorScrollTops: [] as number[],
+      previewScrollTops: [] as number[],
+      previewFrames: [] as Array<{ scrollTop: number; sourceLine: number | null; anchorTop: number | null }>,
+      samplePreviewFrames: false,
+      stablePreviewNode: frameDocument.querySelector<HTMLElement>('h2')
     };
     new MutationObserver((records) => {
       if (
@@ -132,6 +144,31 @@ try {
     document.querySelector<HTMLElement>('.cm-scroller')!.addEventListener('scroll', () => {
       probe.editorScrollTops.push(document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop);
     }, { passive: true });
+    frameDocument.addEventListener('scroll', () => {
+      probe.previewScrollTops.push(frameDocument.scrollingElement!.scrollTop);
+    }, { passive: true });
+    const samplePreviewFrame = () => {
+      if (!probe.samplePreviewFrames) return;
+      const currentDocument = frame.contentDocument;
+      const scrollTop = currentDocument?.scrollingElement?.scrollTop ?? 0;
+      const anchor = Array.from(currentDocument?.querySelectorAll<HTMLElement>('[data-source-line]') ?? [])
+        .find((element) => element.getBoundingClientRect().bottom > 0);
+      probe.previewFrames.push({
+        scrollTop,
+        sourceLine: anchor ? Number(anchor.dataset.sourceLine) : null,
+        anchorTop: anchor?.getBoundingClientRect().top ?? null
+      });
+      requestAnimationFrame(samplePreviewFrame);
+    };
+    (probe as typeof probe & { startPreviewFrameSampling(): void; stopPreviewFrameSampling(): void })
+      .startPreviewFrameSampling = () => {
+        probe.previewScrollTops = [];
+        probe.previewFrames = [];
+        probe.samplePreviewFrames = true;
+        requestAnimationFrame(samplePreviewFrame);
+      };
+    (probe as typeof probe & { startPreviewFrameSampling(): void; stopPreviewFrameSampling(): void })
+      .stopPreviewFrameSampling = () => { probe.samplePreviewFrames = false; };
     (window as typeof window & { __sourcePreviewContinuityProbe?: typeof probe }).__sourcePreviewContinuityProbe = probe;
   });
   const sourceBounds = await page.$eval('.cm-scroller', element => {
@@ -140,14 +177,21 @@ try {
   });
   await page.mouse.click(
     sourceBounds.x + sourceBounds.width / 2,
-    sourceBounds.y + sourceBounds.height / 2
+    sourceBounds.y + 24
   );
+  await page.evaluate(() => {
+    const probe = (window as typeof window & {
+      __sourcePreviewContinuityProbe: { startPreviewFrameSampling(): void };
+    }).__sourcePreviewContinuityProbe;
+    probe.startPreviewFrameSampling();
+  });
   const renderCountBeforeContinuityEdit = previewRenderCount;
   await page.evaluate(() => (
     (window as typeof window & { __delayNextSourceSidePreviewRender(delayMs: number): Promise<void> })
       .__delayNextSourceSidePreviewRender(500)
   ));
-  await page.keyboard.type('CONTINUITY');
+  const continuityEdit = 'CONTINUITY';
+  await page.keyboard.type(continuityEdit);
   await page.waitForFunction(async count => (
     await (window as typeof window & { __getSourceSidePreviewRenderCount(): Promise<number> })
       .__getSourceSidePreviewRenderCount()
@@ -164,22 +208,28 @@ try {
   await page.waitForFunction(() => (
     document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent?.includes('CONTINUITY')
   ), { timeout: 3000 });
-  await page.waitForFunction(() => {
-    const root = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.documentElement;
-    return root?.dataset.meoPreviewHorizontalOverflow === 'contained';
-  });
+  await new Promise(resolve => setTimeout(resolve, 100));
   const continuity = await page.evaluate((beforeScrollTop) => {
     const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
     const probe = (window as typeof window & {
-      __sourcePreviewContinuityProbe: { frameHiddenTransitions: number; editorScrollTops: number[] };
+      __sourcePreviewContinuityProbe: {
+        frameHiddenTransitions: number;
+        editorScrollTops: number[];
+        previewScrollTops: number[];
+        previewFrames: Array<{ scrollTop: number; sourceLine: number | null; anchorTop: number | null }>;
+        stablePreviewNode: HTMLElement | null;
+        stopPreviewFrameSampling(): void;
+      };
     }).__sourcePreviewContinuityProbe;
+    probe.stopPreviewFrameSampling();
     const editorScrollTop = document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop;
     return {
       ...probe,
+      stablePreviewNodePreserved: probe.stablePreviewNode?.isConnected === true
+        && frameDocument.querySelector('h2') === probe.stablePreviewNode,
       editorScrollDelta: editorScrollTop - beforeScrollTop,
       documentOverflow: frameDocument.documentElement.scrollWidth - frameDocument.documentElement.clientWidth,
       bodyOverflow: frameDocument.body.scrollWidth - frameDocument.body.clientWidth,
-      horizontalOverflowMode: frameDocument.documentElement.dataset.meoPreviewHorizontalOverflow,
       horizontalScrollbarHeight: frameDocument.defaultView!
         .getComputedStyle(frameDocument.documentElement, '::-webkit-scrollbar').height
     };
@@ -190,43 +240,53 @@ try {
     statusHidden: true
   }, 'An existing Preview must remain unobstructed while its replacement renders');
   assert.equal(continuity.frameHiddenTransitions, 0, 'Preview updates must never hide the current frame');
+  assert.equal(continuity.stablePreviewNodePreserved, true, 'Unchanged Preview blocks must survive a live update');
   assert.ok(Math.abs(continuity.editorScrollDelta) <= 2, JSON.stringify(continuity));
+  assert.ok(continuity.previewFrames.length >= 2, JSON.stringify(continuity));
+  assert.ok(continuity.previewFrames.every(frame => frame.sourceLine !== null), JSON.stringify(continuity));
+  const previewScrollRange = Math.max(...continuity.previewFrames.map(frame => frame.scrollTop))
+    - Math.min(...continuity.previewFrames.map(frame => frame.scrollTop));
+  assert.ok(previewScrollRange <= 1, JSON.stringify(continuity));
   assert.ok(continuity.documentOverflow <= 1 && continuity.bodyOverflow <= 1, JSON.stringify(continuity));
-  assert.equal(continuity.horizontalOverflowMode, 'contained');
   assert.equal(continuity.horizontalScrollbarHeight, '0px');
 
   await page.evaluate(() => {
     const frameWindow = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentWindow!;
     const wide = frameWindow.document.createElement('div');
+    wide.className = 'meo-export-html-block';
     wide.dataset.testGenuineHorizontalOverflow = 'true';
-    wide.style.width = '1800px';
-    wide.style.height = '1px';
+    const content = frameWindow.document.createElement('div');
+    content.style.width = '1800px';
+    content.style.height = '1px';
+    wide.append(content);
     frameWindow.document.querySelector('.meo-export-doc')!.append(wide);
     frameWindow.dispatchEvent(new Event('resize'));
   });
-  await page.waitForFunction(() => (
-    document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.documentElement
-      .dataset.meoPreviewHorizontalOverflow === 'scrollable'
-  ));
+  await page.waitForFunction(() => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+    const overflow = frameDocument?.querySelector<HTMLElement>('[data-test-genuine-horizontal-overflow]');
+    return Boolean(overflow && overflow.scrollWidth - overflow.clientWidth > 500);
+  });
   const genuineOverflow = await page.evaluate(() => {
     const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const localScroller = frameDocument.querySelector<HTMLElement>('[data-test-genuine-horizontal-overflow]')!;
     return {
-      overflow: frameDocument.documentElement.scrollWidth - frameDocument.documentElement.clientWidth,
-      scrollbarHeight: frameDocument.defaultView!
-        .getComputedStyle(frameDocument.documentElement, '::-webkit-scrollbar').height
+      rootOverflow: frameDocument.documentElement.scrollWidth - frameDocument.documentElement.clientWidth,
+      rootScrollbarHeight: frameDocument.defaultView!
+        .getComputedStyle(frameDocument.documentElement, '::-webkit-scrollbar').height,
+      localOverflow: localScroller.scrollWidth - localScroller.clientWidth,
+      localOverflowX: frameDocument.defaultView!.getComputedStyle(localScroller).overflowX
     };
   });
-  assert.ok(genuineOverflow.overflow > 500, JSON.stringify(genuineOverflow));
-  assert.equal(genuineOverflow.scrollbarHeight, '10px');
+  assert.ok(genuineOverflow.localOverflow > 500, JSON.stringify(genuineOverflow));
+  assert.equal(genuineOverflow.localOverflowX, 'auto');
+  assert.ok(genuineOverflow.rootOverflow <= 1, JSON.stringify(genuineOverflow));
+  assert.equal(genuineOverflow.rootScrollbarHeight, '0px');
   await page.evaluate(() => {
     const frameWindow = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentWindow!;
     frameWindow.document.querySelector('[data-test-genuine-horizontal-overflow]')?.remove();
     frameWindow.dispatchEvent(new Event('resize'));
   });
-  await page.waitForFunction(() => (
-    document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.documentElement
-      .dataset.meoPreviewHorizontalOverflow === 'contained'
-  ));
 
   const selectionBefore = await page.evaluate(() => {
     const selection = document.getSelection();

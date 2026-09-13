@@ -2917,6 +2917,9 @@ export function createEditor({
     linkedPreviewReady(): void {
       viewportController.linkedPreviewReady();
     },
+    runPreviewPresentationTransaction(mutate: () => void): void {
+      viewportController.runPreviewPresentationTransaction(mutate);
+    },
     setLinkedPreviewEnabled(enabled: boolean): void {
       viewportController.setLinkedPreviewEnabled(enabled);
     },

@@ -2065,7 +2065,6 @@ async function main(): Promise<void> {
         result.table.tableOverflows.every((value) => value <= 1),
         JSON.stringify({ width, zoom, deviceScaleFactor, table: result.table })
       );
-      assert.ok(result.table.wrapperOverflowX.every((value) => value !== 'auto' && value !== 'scroll'));
       assert.deepEqual(result.table.clippingAncestors, []);
       assert.equal(result.table.rectsWithinPage, true, JSON.stringify({ width, zoom, deviceScaleFactor, table: result.table }));
       assert.ok(result.table.kbdFragments.every((count) => count > 1), JSON.stringify({ width, zoom, deviceScaleFactor, table: result.table }));

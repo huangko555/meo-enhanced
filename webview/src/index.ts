@@ -1346,11 +1346,13 @@ const previewController = createPreviewController({
     previewPaintReady = true;
     editorHost.removeAttribute('data-preview-cover');
   },
-  onRendered: () => {
+  onRendered: (options) => {
     if (outlineController?.isVisible()) {
       outlineController.refresh();
     }
-    editor?.linkedPreviewReady?.();
+    if (options?.skipLinkedViewportProjection !== true) {
+      editor?.linkedPreviewReady?.();
+    }
     readingPositionLifecycle?.surfaceReady();
   },
   onViewportInteraction: () => {
@@ -1362,12 +1364,11 @@ const previewController = createPreviewController({
     readingPositionLifecycle?.viewportChanged();
   },
   runViewportTransaction: (mutate) => {
-    const viewport = editor?.captureViewportAnchorToken?.('preview') ?? null;
-    if (!editor?.runViewportAnchorTransaction) {
+    if (!editor?.runPreviewPresentationTransaction) {
       mutate();
       return;
     }
-    editor.runViewportAnchorTransaction(viewport, 'preview', mutate);
+    editor.runPreviewPresentationTransaction(mutate);
   }
 });
 const previewAdapter = createPreviewWebviewAdapter(previewController);

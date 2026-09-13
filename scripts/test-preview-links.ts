@@ -28,6 +28,7 @@ try {
       result: { ok: true, value: { hasMermaid: false, styles: { dark: '', light: '' }, html: '<p>Obsolete preload</p>' } } });
     await Promise.resolve();
     const srcdoc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.srcdoc;
+    (window as any).__previewCurrentText = 'promoted text';
     controller.preload('promoted text');
     controller.setVisible(true);
     const promotedId = (window as any).__previewMessages.findLast((message: any) => message.type === 'requestPreviewRender').requestId;

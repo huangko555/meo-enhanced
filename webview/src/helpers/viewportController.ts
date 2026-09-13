@@ -536,6 +536,21 @@ export class ViewportController {
     this.scheduleLinkedViewportProjection(this.linkedViewportDriver);
   }
 
+  /** Keeps a Preview presentation update inside the current scroll owner's transaction. */
+  runPreviewPresentationTransaction(mutate: () => void): void {
+    if (this.destroyed) {
+      mutate();
+      return;
+    }
+    const owner = this.linkedPreviewEnabled ? this.linkedViewportDriver : 'preview';
+    const handle = this.captureAnchorToken(owner);
+    if (!handle) {
+      mutate();
+      return;
+    }
+    this.runAnchorTransaction(handle, 'preview', () => mutate());
+  }
+
   private scheduleLinkedViewportProjection(owner: ViewportAnchorOwner): void {
     if (
       this.destroyed || !this.linkedPreviewEnabled || !this.previewSurface ||
@@ -1519,7 +1534,7 @@ export class ViewportController {
     const navigationAnchor = owner === 'editor'
       ? this.consumeVisibleNavigationTargetAnchor()
       : null;
-    this.markInteraction();
+    this.markInteraction(owner);
     const anchor = owner === 'editor'
       ? navigationAnchor ?? this.captureDocumentAnchor()
       : this.capturePreviewDocumentAnchor();

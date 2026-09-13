@@ -90,6 +90,10 @@ async function renderMermaidBlocks(
   if (!isCurrent()) return;
   const viewportCenter = (frameDocument.defaultView?.innerHeight ?? 0) / 2;
   const blocks = Array.from(frameDocument.querySelectorAll<HTMLElement>('.meo-export-mermaid[data-source-b64]'))
+    .filter((block) => (
+      !block.classList.contains('is-rendered')
+      || block.dataset.meoPreviewMermaidAppearance !== appearance
+    ))
     .map((block, documentIndex) => ({ block, documentIndex }))
     .sort((left, right) =>
       Math.abs(left.block.getBoundingClientRect().top - viewportCenter)
@@ -168,6 +172,7 @@ async function renderMermaidBlocks(
       block.classList.toggle('is-math', isDisplayMathDiagram(source));
       block.classList.add('is-rendered');
       block.classList.remove('is-error');
+      block.dataset.meoPreviewMermaidAppearance = appearance;
       block.innerHTML = `<div class="meo-export-mermaid-svg">${svg}</div>`;
       onDiagramRendered?.();
     } catch {
