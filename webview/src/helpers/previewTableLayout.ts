@@ -133,18 +133,43 @@ function measurePreferredWidths(table: HTMLTableElement, columnCount: number): n
   return preferred;
 }
 
+function isTableOnlyHtmlHost(wrapper: HTMLElement): boolean {
+  if (!wrapper.classList.contains('meo-export-html-block')) return false;
+  return Array.from(wrapper.childNodes).every((node) => (
+    (node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim() === '')
+    || (node.nodeType === Node.ELEMENT_NODE && (node as Element).tagName === 'TABLE')
+  ));
+}
+
+function applyTableWidthPlan(
+  table: HTMLTableElement,
+  columns: readonly HTMLTableColElement[],
+  preferred: readonly number[],
+  availableWidth: number
+): void {
+  const plan = planPreviewTableWidths(preferred, availableWidth);
+  table.style.width = `${plan.totalWidth}px`;
+  plan.widths.forEach((width, index) => { columns[index].style.width = `${width}px`; });
+}
+
 function layoutTable(table: HTMLTableElement): void {
   const wrapper = table.closest<HTMLElement>('.meo-table-scroll, .meo-export-html-block') ?? table.parentElement;
   const columnCount = tableColumnCount(table);
   if (!wrapper || columnCount === 0) return;
   const columns = ensureColumnGroup(table, columnCount);
   const preferred = measurePreferredWidths(table, columnCount);
-  const plan = planPreviewTableWidths(preferred, wrapper.clientWidth);
-  table.style.width = `${plan.totalWidth}px`;
   table.style.minWidth = '0';
   table.style.maxWidth = '100%';
   table.style.tableLayout = 'fixed';
-  plan.widths.forEach((width, index) => { columns[index].style.width = `${width}px`; });
+  applyTableWidthPlan(table, columns, preferred, wrapper.clientWidth);
+  // With collapsed borders Chromium paints half of each outer cell border
+  // outside the declared table width. Calibrate against the actual rendered
+  // box so fractional device-pixel rounding cannot create a 1px scroll range.
+  const renderedOverhang = Math.max(0, table.getBoundingClientRect().width - wrapper.clientWidth);
+  if (renderedOverhang > 0.01) {
+    applyTableWidthPlan(table, columns, preferred, Math.max(0, wrapper.clientWidth - renderedOverhang));
+  }
+  wrapper.classList.toggle('meo-preview-table-only-html', isTableOnlyHtmlHost(wrapper));
   wrapper.classList.remove('is-table-overflowing');
 }
 

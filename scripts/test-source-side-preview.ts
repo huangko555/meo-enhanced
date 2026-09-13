@@ -56,6 +56,23 @@ try {
     '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     '| 1 | This column needs materially more room than the compact labels | 3 | 4 | 5 | 6 | 7 | 8 | 9 |'
   ].join('\n');
+  const rawHtmlTable = [
+    '<table>',
+    '  <thead><tr><th>HTML type</th><th>Expected behavior</th><th>Interaction</th></tr></thead>',
+    '  <tbody>',
+    '    <tr><td>Inline style</td><td>Embedded ordinary text</td><td>Edit current line</td></tr>',
+    '    <tr><td>Link</td><td>Always shows navigation target</td><td>Click target</td></tr>',
+    '    <tr><td>Block HTML</td><td>No card background</td><td>Source button edits</td></tr>',
+    '  </tbody>',
+    '</table>'
+  ].join('\n');
+  const modeTable = [
+    '| Mode row | Content |',
+    '| --- | --- |',
+    ...Array.from({ length: 14 }, (_, index) => (
+      `| Mode row ${index + 1} | Complex table content ${index + 1} |`
+    ))
+  ].join('\n');
   const text = [
     'Intro paragraph for formatting continuity.',
     `### Long heading ${'6'.repeat(180)}`,
@@ -68,6 +85,8 @@ try {
     )),
     compactComplexBlock,
     narrowTable,
+    rawHtmlTable,
+    modeTable,
     ...Array.from({ length: 118 }, (_, index) => {
       const section = index + 23;
       return `## Section ${section}\n\nParagraph ${section} with enough text to exercise semantic linked scrolling.`;
@@ -116,17 +135,31 @@ try {
   assert.ok(Math.abs(layout.editorWidth - layout.previewWidth) <= 2, JSON.stringify(layout));
   const tableFit = await page.evaluate(() => {
     const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
-    const wrapper = frameDocument.querySelector<HTMLElement>('.meo-table-scroll')!;
-    const columns = Array.from(wrapper.querySelectorAll<HTMLTableColElement>('col'));
-    return {
-      overflow: wrapper.scrollWidth - wrapper.clientWidth,
-      overflowX: getComputedStyle(wrapper).overflowX,
-      widths: columns.map(column => column.getBoundingClientRect().width)
-    };
+    return Array.from(frameDocument.querySelectorAll<HTMLTableElement>('table')).map(table => {
+      const wrapper = table.closest<HTMLElement>('.meo-table-scroll, .meo-export-html-block')!;
+      const wrapperRect = wrapper.getBoundingClientRect();
+      const tableRect = table.getBoundingClientRect();
+      const columns = Array.from(table.querySelectorAll<HTMLTableColElement>('col'));
+      return {
+        wrapperClass: wrapper.className,
+        wrapperClientWidth: wrapper.clientWidth,
+        tableStyleWidth: table.style.width,
+        tableRectWidth: tableRect.width,
+        overflow: wrapper.scrollWidth - wrapper.clientWidth,
+        overflowX: getComputedStyle(wrapper).overflowX,
+        rightOverflow: tableRect.right - wrapperRect.right,
+        widths: columns.map(column => column.getBoundingClientRect().width)
+      };
+    });
   });
-  assert.ok(tableFit.overflow <= 1, JSON.stringify(tableFit));
-  assert.ok(tableFit.overflowX === 'clip' || tableFit.overflowX === 'hidden', JSON.stringify(tableFit));
-  assert.ok(tableFit.widths[1] > tableFit.widths[0], JSON.stringify(tableFit));
+  assert.ok(tableFit.length >= 2, JSON.stringify(tableFit));
+  assert.ok(tableFit.every(table => table.overflow <= 0.5), JSON.stringify(tableFit));
+  assert.ok(
+    tableFit.every(table => table.overflowX === 'clip' || table.overflowX === 'hidden'),
+    JSON.stringify(tableFit)
+  );
+  assert.ok(tableFit.every(table => table.rightOverflow <= 0.5), JSON.stringify(tableFit));
+  assert.ok(tableFit[0].widths[1] > tableFit[0].widths[0], JSON.stringify(tableFit));
 
   const compactBlockStartLine = text.slice(0, text.indexOf('<details>')).split('\n').length;
   await page.click('.line-jump-input');
@@ -519,6 +552,158 @@ try {
   assert.ok(
     Math.max(...visibleSplitEntryPositions) - Math.min(...visibleSplitEntryPositions) <= 1,
     `A split Preview must be at its final position before its first visible frame: ${JSON.stringify(splitEntrySamples)}`
+  );
+
+  const modeAnchorText = 'Section 80';
+  const modeAnchorLine = text.slice(0, text.indexOf(`## ${modeAnchorText}`)).split('\n').length;
+  await page.click('.line-jump-input');
+  await page.keyboard.down('Control');
+  await page.keyboard.press('A');
+  await page.keyboard.up('Control');
+  await page.keyboard.type(String(modeAnchorLine));
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(anchorText => Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+    .some(line => line.textContent?.includes(anchorText)), {}, modeAnchorText);
+  await page.evaluate(anchorText => {
+    const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+    const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+      .find(candidate => candidate.textContent?.includes(anchorText))!;
+    const viewport = scroller.getBoundingClientRect();
+    scroller.scrollTop += line.getBoundingClientRect().top - viewport.top - viewport.height / 3;
+  }, modeAnchorText);
+  await new Promise(resolve => setTimeout(resolve, 120));
+  const readModeAnchorOffset = async (surface: 'editor' | 'preview') => page.evaluate(({ surface, anchorText }) => {
+    if (surface === 'preview') {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const heading = Array.from(frame.contentDocument!.querySelectorAll<HTMLElement>('h2'))
+        .find(candidate => candidate.textContent?.includes(anchorText))!;
+      return heading.getBoundingClientRect().top;
+    }
+    const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+    const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+      .find(candidate => candidate.textContent?.includes(anchorText))!;
+    return line.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+  }, { surface, anchorText: modeAnchorText });
+  const modeAnchorOffsets: Array<{ mode: string; offset: number }> = [
+    { mode: 'source', offset: await readModeAnchorOffset('editor') }
+  ];
+  await page.click('button[data-mode="live"]');
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live');
+  await new Promise(resolve => setTimeout(resolve, 160));
+  modeAnchorOffsets.push({ mode: 'live', offset: await readModeAnchorOffset('editor') });
+  await page.evaluate(anchorText => {
+    const samples: number[] = [];
+    let remaining = 16;
+    const sample = () => {
+      const root = document.querySelector<HTMLElement>('#app');
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
+      const heading = Array.from(frame?.contentDocument?.querySelectorAll<HTMLElement>('h2') ?? [])
+        .find(candidate => candidate.textContent?.includes(anchorText));
+      if (root?.dataset.mode === 'preview' && heading) samples.push(heading.getBoundingClientRect().top);
+      remaining -= 1;
+      if (remaining > 0) requestAnimationFrame(sample);
+    };
+    (window as typeof window & { __fullPreviewEntryAnchorSamples?: number[] })
+      .__fullPreviewEntryAnchorSamples = samples;
+    requestAnimationFrame(sample);
+  }, modeAnchorText);
+  await page.click('button[data-mode="preview"]');
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview');
+  await new Promise(resolve => setTimeout(resolve, 160));
+  modeAnchorOffsets.push({ mode: 'preview', offset: await readModeAnchorOffset('preview') });
+  const fullPreviewEntryAnchorSamples = await page.evaluate(() => (
+    (window as typeof window & { __fullPreviewEntryAnchorSamples?: number[] })
+      .__fullPreviewEntryAnchorSamples ?? []
+  ));
+  assert.ok(fullPreviewEntryAnchorSamples.length >= 2, JSON.stringify(fullPreviewEntryAnchorSamples));
+  assert.ok(
+    Math.max(...fullPreviewEntryAnchorSamples) - Math.min(...fullPreviewEntryAnchorSamples) <= 2,
+    `Full Preview must enter at its final reading position: ${JSON.stringify(fullPreviewEntryAnchorSamples)}`
+  );
+  const fullPreviewTableFit = await page.evaluate(() => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    return Array.from(frameDocument.querySelectorAll<HTMLTableElement>('table')).map(table => {
+      const wrapper = table.closest<HTMLElement>('.meo-table-scroll, .meo-export-html-block')!;
+      return {
+        overflow: wrapper.scrollWidth - wrapper.clientWidth,
+        overflowX: getComputedStyle(wrapper).overflowX,
+        rightOverflow: table.getBoundingClientRect().right - wrapper.getBoundingClientRect().right
+      };
+    });
+  });
+  assert.ok(fullPreviewTableFit.every(table => table.overflow <= 0.5), JSON.stringify(fullPreviewTableFit));
+  assert.ok(
+    fullPreviewTableFit.every(table => table.overflowX === 'clip' || table.overflowX === 'hidden'),
+    JSON.stringify(fullPreviewTableFit)
+  );
+  assert.ok(fullPreviewTableFit.every(table => table.rightOverflow <= 0.5), JSON.stringify(fullPreviewTableFit));
+  await page.click('button[data-mode="source"]');
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');
+  await new Promise(resolve => setTimeout(resolve, 160));
+  modeAnchorOffsets.push({ mode: 'source-return', offset: await readModeAnchorOffset('editor') });
+  const baselineModeAnchorOffset = modeAnchorOffsets[0].offset;
+  assert.ok(
+    modeAnchorOffsets.every(sample => Math.abs(sample.offset - baselineModeAnchorOffset) <= 20),
+    `Mode switches must keep one semantic reading anchor on the same screen band: ${JSON.stringify(modeAnchorOffsets)}`
+  );
+
+  const complexTableStartLine = text.slice(0, text.indexOf('| Mode row | Content |')).split('\n').length;
+  const complexTableAnchorText = 'Mode row 8';
+  const complexTableAnchorLine = complexTableStartLine + 9;
+  await page.click('.line-jump-input');
+  await page.keyboard.down('Control');
+  await page.keyboard.press('A');
+  await page.keyboard.up('Control');
+  await page.keyboard.type(String(complexTableAnchorLine));
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(anchorText => Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+    .some(line => line.textContent?.includes(anchorText)), {}, complexTableAnchorText);
+  await page.evaluate(anchorText => {
+    const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+    const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+      .find(candidate => candidate.textContent?.includes(anchorText))!;
+    const viewport = scroller.getBoundingClientRect();
+    scroller.scrollTop += line.getBoundingClientRect().top - viewport.top - viewport.height / 3;
+  }, complexTableAnchorText);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const complexTableSourceOffset = await page.evaluate(anchorText => {
+    const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+    const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+      .find(candidate => candidate.textContent?.includes(anchorText))!;
+    return line.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+  }, complexTableAnchorText);
+  await page.click('button[data-mode="live"]');
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live');
+  await new Promise(resolve => setTimeout(resolve, 160));
+  const complexTableLiveProjection = await page.evaluate(({ startLine, targetLine }) => {
+    const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+    const blocks = Array.from(document.querySelectorAll<HTMLElement>(
+      '[data-meo-rendered-block-start-line][data-meo-rendered-block-end-line]'
+    ));
+    const block = blocks.find(candidate => Number(candidate.dataset.meoRenderedBlockStartLine) === startLine);
+    if (!block) return Number.NaN;
+    const rect = block.getBoundingClientRect();
+    const viewport = scroller.getBoundingClientRect();
+    const endLine = Number(block.dataset.meoRenderedBlockEndLine);
+    const progress = (targetLine - startLine) / Math.max(1, endLine - startLine);
+    return rect.top - viewport.top + rect.height * progress;
+  }, { startLine: complexTableStartLine, targetLine: complexTableAnchorLine });
+  assert.ok(
+    Math.abs(complexTableLiveProjection - complexTableSourceOffset) <= 20,
+    JSON.stringify({ complexTableSourceOffset, complexTableLiveProjection })
+  );
+  await page.click('button[data-mode="source"]');
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');
+  await new Promise(resolve => setTimeout(resolve, 160));
+  const complexTableSourceReturnOffset = await page.evaluate(anchorText => {
+    const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+    const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+      .find(candidate => candidate.textContent?.includes(anchorText))!;
+    return line.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+  }, complexTableAnchorText);
+  assert.ok(
+    Math.abs(complexTableSourceReturnOffset - complexTableSourceOffset) <= 20,
+    JSON.stringify({ complexTableSourceOffset, complexTableSourceReturnOffset })
   );
 
   await page.click('.source-preview-button');

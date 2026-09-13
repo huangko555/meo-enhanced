@@ -41,6 +41,7 @@ type PreviewControllerOptions = {
 type PreviewViewportRestore = {
   readonly line: number;
   readonly lineOffset: number;
+  readonly viewportOffset?: number;
   readonly isCurrent: () => boolean;
 };
 
@@ -289,19 +290,22 @@ body::-webkit-scrollbar-corner {
   scrollbar-width: thin;
 }
 
-.meo-table-scroll {
+.meo-table-scroll,
+.meo-export-html-block.meo-preview-table-only-html {
   max-width: 100%;
   min-width: 0;
   overflow-x: clip;
 }
 
-.meo-table-scroll :is(th, td) {
+.meo-table-scroll :is(th, td),
+.meo-export-html-block.meo-preview-table-only-html :is(th, td) {
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
-.meo-table-scroll :is(pre, code) {
+.meo-table-scroll :is(pre, code),
+.meo-export-html-block.meo-preview-table-only-html :is(pre, code) {
   max-width: 100%;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1038,7 +1042,11 @@ export function createPreviewController({
         ) return;
         const viewportRestore = viewportSlot?.restore;
         if (viewportRestore?.isCurrent()) {
-          restoreTopLine(viewportRestore.line, viewportRestore.lineOffset);
+          restoreTopLine(
+            viewportRestore.line,
+            viewportRestore.lineOffset,
+            viewportRestore.viewportOffset
+          );
         }
       };
       const finishRender = () => {
@@ -1397,7 +1405,7 @@ export function createPreviewController({
     if (before && line <= before.end) return { exact: before };
     return { before, after };
   };
-  const restoreTopLine = (line: number, lineOffset = 0): void => {
+  const restoreTopLine = (line: number, lineOffset = 0, viewportOffset = 0): void => {
     const source = findSourceProjection(line);
     const scrollElement = getFrameDocument()?.scrollingElement;
     if (!source || !scrollElement) {
@@ -1408,25 +1416,34 @@ export function createPreviewController({
       const ratio = Math.max(0, Math.min(1, (line - source.exact.start) / lineSpan));
       scrollElement.scrollTop = source.exact.top
         + (source.exact.bottom - source.exact.top) * ratio
-        + Math.max(0, lineOffset);
+        + Math.max(0, lineOffset)
+        - Math.max(0, viewportOffset);
       return;
     }
     if (source.before && source.after) {
       const lineGap = Math.max(1, source.after.start - source.before.end);
       const ratio = Math.max(0, Math.min(1, (line - source.before.end) / lineGap));
       scrollElement.scrollTop = source.before.bottom
-        + (source.after.top - source.before.bottom) * ratio;
+        + (source.after.top - source.before.bottom) * ratio
+        - Math.max(0, viewportOffset);
       return;
     }
     const edge = source.before ?? source.after;
-    if (edge) scrollElement.scrollTop = edge.top;
+    if (edge) scrollElement.scrollTop = edge.top - Math.max(0, viewportOffset);
   };
-  const getTopVisiblePosition = (): { topLine: number; topLineOffset: number; editorLineOffset: number } | null => {
+  const getTopVisiblePosition = (viewportOffset = 0): {
+    topLine: number;
+    topLineOffset: number;
+    editorLineOffset: number;
+    viewportOffset: number;
+  } | null => {
     const entries = getSourceMap();
     if (entries.length === 0) {
       return null;
     }
-    const viewportAnchor = getFrameDocument()?.scrollingElement?.scrollTop ?? 0;
+    const viewportTop = getFrameDocument()?.scrollingElement?.scrollTop ?? 0;
+    const boundedViewportOffset = Math.max(0, viewportOffset);
+    const viewportAnchor = viewportTop + boundedViewportOffset;
     let low = 0;
     let high = entries.length - 1;
     while (low <= high) {
@@ -1444,7 +1461,8 @@ export function createPreviewController({
         return {
           topLine: Math.round(range.end + (next.start - range.end) * ratio),
           topLineOffset: 0,
-          editorLineOffset: 0
+          editorLineOffset: 0,
+          viewportOffset: boundedViewportOffset
         };
       }
     }
@@ -1457,16 +1475,17 @@ export function createPreviewController({
       topLine,
       topLineOffset: Math.max(0, viewportAnchor - lineTop),
       // An unmapped Preview gap has no corresponding editor line box.
-      editorLineOffset: candidate.bottom <= viewportAnchor ? 0 : Math.max(0, viewportAnchor - lineTop)
+      editorLineOffset: candidate.bottom <= viewportAnchor ? 0 : Math.max(0, viewportAnchor - lineTop),
+      viewportOffset: Math.max(0, lineTop - viewportTop)
     };
   };
   const restoreTopVisiblePosition = (
-    position: { line: number; lineOffset: number },
+    position: { line: number; lineOffset: number; viewportOffset?: number },
     isCurrent: () => boolean
   ): void => {
     const restore = { ...position, isCurrent };
     if (acceptingViewportProjection) acceptingViewportProjection.restore = restore;
-    if (restore.isCurrent()) restoreTopLine(restore.line, restore.lineOffset);
+    if (restore.isCurrent()) restoreTopLine(restore.line, restore.lineOffset, restore.viewportOffset);
   };
   const getHeadings = (): OutlineHeading[] => {
     const headingElements = Array.from(
@@ -1554,6 +1573,10 @@ export function createPreviewController({
       frame.contentDocument?.body.focus({ preventScroll: true });
     },
     getTopVisiblePosition,
+    getReadingPosition: (viewportRatio: number) => getTopVisiblePosition(
+      Math.max(0, frame.contentWindow?.innerHeight ?? host.clientHeight)
+        * Math.max(0, Math.min(1, viewportRatio))
+    ),
     restoreTopLine,
     restoreTopVisiblePosition,
     captureLinkedGeometry: () => {

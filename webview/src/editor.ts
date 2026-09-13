@@ -2895,6 +2895,9 @@ export function createEditor({
     captureViewportAnchorToken(owner: ViewportAnchorOwner): ViewportAnchorToken | null {
       return viewportController.captureAnchorToken(owner);
     },
+    captureModeTransitionAnchorToken(owner: ViewportAnchorOwner): ViewportAnchorToken | null {
+      return viewportController.captureModeTransitionAnchorToken(owner);
+    },
     restoreViewportAnchorToken(handle: ViewportAnchorToken, owner: ViewportAnchorOwner): void {
       viewportController.restoreAnchorToken(handle, owner);
     },

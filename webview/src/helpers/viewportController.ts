@@ -41,9 +41,20 @@ export function visualLineContextMargin(
 }
 
 export interface PreviewViewportSurface {
-  captureTopVisiblePosition(): { line: number; lineOffset: number; editorLineOffset?: number } | null;
+  captureTopVisiblePosition(viewportOffset?: number): {
+    line: number;
+    lineOffset: number;
+    editorLineOffset?: number;
+    viewportOffset?: number;
+  } | null;
+  captureReadingPosition?(viewportRatio: number): {
+    line: number;
+    lineOffset: number;
+    editorLineOffset?: number;
+    viewportOffset?: number;
+  } | null;
   restoreTopVisiblePosition(
-    position: { line: number; lineOffset: number },
+    position: { line: number; lineOffset: number; viewportOffset?: number },
     isCurrent: () => boolean
   ): void;
   captureLinkedGeometry?(): {
@@ -792,6 +803,39 @@ export class ViewportController {
             top: Math.max(
               0,
               this.view.scrollDOM.scrollTop + blockRect.top - scrollerRect.top + lineOffset
+            )
+          };
+        }
+      }
+      if (
+        viewportOffset !== null && this.getMode() === 'live'
+        && typeof this.view.contentDOM?.querySelectorAll === 'function'
+      ) {
+        const lineNumber = this.view.state.doc.lineAt(position).number;
+        const renderedBlock = Array.from(
+          this.view.contentDOM.querySelectorAll<HTMLElement>(
+            '[data-meo-rendered-block-start-line][data-meo-rendered-block-end-line]'
+          )
+        ).find((block) => {
+          const startLine = Number(block.dataset.meoRenderedBlockStartLine);
+          const endLine = Number(block.dataset.meoRenderedBlockEndLine);
+          return Number.isInteger(startLine) && Number.isInteger(endLine)
+            && lineNumber >= startLine && lineNumber <= endLine;
+        });
+        if (renderedBlock) {
+          const startLine = Number(renderedBlock.dataset.meoRenderedBlockStartLine);
+          const endLine = Number(renderedBlock.dataset.meoRenderedBlockEndLine);
+          const progress = Math.max(0, Math.min(
+            1,
+            (lineNumber - startLine) / Math.max(1, endLine - startLine)
+          ));
+          const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+          const blockRect = renderedBlock.getBoundingClientRect();
+          return {
+            top: Math.max(
+              0,
+              this.view.scrollDOM.scrollTop + blockRect.top - scrollerRect.top
+                + blockRect.height * progress - viewportOffset
             )
           };
         }
@@ -1648,6 +1692,23 @@ export class ViewportController {
     return handle;
   }
 
+  captureModeTransitionAnchorToken(owner: ViewportAnchorOwner): ViewportAnchorToken | null {
+    if (this.destroyed) return null;
+    this.markInteraction(owner);
+    const viewportOffset = this.view.scrollDOM.clientHeight / 3;
+    const anchor = owner === 'editor'
+      ? this.captureEditorReadingAnchor(viewportOffset)
+      : this.capturePreviewDocumentAnchor(undefined, 1 / 3);
+    if (!anchor) return null;
+    const handle = Object.freeze({}) as ViewportAnchorToken;
+    this.anchorTokens.set(handle, {
+      anchor,
+      interactionGeneration: this.interactionGeneration,
+      projectedOwners: new Set()
+    });
+    return handle;
+  }
+
   restoreAnchorToken(handle: ViewportAnchorToken, owner: ViewportAnchorOwner): void {
     this.runAnchorTransaction(handle, owner, () => undefined);
   }
@@ -1840,7 +1901,8 @@ export class ViewportController {
     );
     this.previewSurface?.restoreTopVisiblePosition({
       line: line.number,
-      lineOffset: anchor.lineOffset
+      lineOffset: anchor.lineOffset,
+      viewportOffset: anchor.viewportOffset
     }, () => this.isAnchorTokenCurrent(record));
     record.projectedOwners.add(owner);
   }
@@ -1905,8 +1967,52 @@ export class ViewportController {
     this.markInteraction();
   }
 
-  private capturePreviewDocumentAnchor(): ViewportDocumentAnchor | null {
-    const position = this.previewSurface?.captureTopVisiblePosition();
+  private captureEditorReadingAnchor(viewportOffset: number): ViewportDocumentAnchor {
+    const scroller = this.view.scrollDOM;
+    const boundedViewportOffset = Math.max(0, Math.min(viewportOffset, scroller.clientHeight));
+    const sampleHeight = scroller.scrollTop + boundedViewportOffset;
+    if (this.getMode() === 'live') {
+      const scrollerRect = scroller.getBoundingClientRect();
+      const sampleY = scrollerRect.top + boundedViewportOffset;
+      const renderedBlock = Array.from(
+        this.view.contentDOM.querySelectorAll<HTMLElement>(
+          '[data-meo-rendered-block-start-line][data-meo-rendered-block-end-line]'
+        )
+      ).find((block) => {
+        const rect = block.getBoundingClientRect();
+        return rect.top <= sampleY && rect.bottom > sampleY;
+      });
+      if (renderedBlock) {
+        const startLine = Number(renderedBlock.dataset.meoRenderedBlockStartLine);
+        const endLine = Number(renderedBlock.dataset.meoRenderedBlockEndLine);
+        if (Number.isInteger(startLine) && Number.isInteger(endLine) && endLine >= startLine) {
+          const rect = renderedBlock.getBoundingClientRect();
+          const progress = Math.max(0, Math.min(1, (sampleY - rect.top) / Math.max(1, rect.height)));
+          const lineNumber = Math.round(startLine + (endLine - startLine) * progress);
+          return {
+            position: this.view.state.doc.line(Math.min(this.view.state.doc.lines, lineNumber)).from,
+            lineOffset: 0,
+            viewportOffset: boundedViewportOffset
+          };
+        }
+      }
+    }
+    const block = this.view.lineBlockAtHeight(sampleHeight);
+    return {
+      position: block.from,
+      lineOffset: 0,
+      viewportOffset: Math.max(0, block.top - scroller.scrollTop)
+    };
+  }
+
+  private capturePreviewDocumentAnchor(
+    viewportOffset = 0,
+    viewportRatio?: number
+  ): ViewportDocumentAnchor | null {
+    const position = viewportRatio === undefined
+      ? this.previewSurface?.captureTopVisiblePosition(viewportOffset)
+      : this.previewSurface?.captureReadingPosition?.(viewportRatio)
+        ?? this.previewSurface?.captureTopVisiblePosition(viewportOffset);
     if (!position) return null;
     const lineNumber = Math.min(
       Math.max(1, Math.floor(Number.isFinite(position.line) ? position.line : 1)),
@@ -1917,6 +2023,9 @@ export class ViewportController {
       lineOffset: Number.isFinite(position.lineOffset) ? Math.max(0, position.lineOffset) : 0,
       editorLineOffset: position.editorLineOffset !== undefined && Number.isFinite(position.editorLineOffset)
         ? Math.max(0, position.editorLineOffset)
+        : undefined,
+      viewportOffset: position.viewportOffset !== undefined && Number.isFinite(position.viewportOffset)
+        ? Math.max(0, position.viewportOffset)
         : undefined
     };
   }

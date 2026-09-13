@@ -2089,12 +2089,22 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     },
     onViewportChange: () => readingPositionLifecycle?.viewportChanged(),
     previewViewportSurface: {
-      captureTopVisiblePosition() {
-        const position = previewController.getTopVisiblePosition();
+      captureTopVisiblePosition(viewportOffset) {
+        const position = previewController.getTopVisiblePosition(viewportOffset);
         return position ? {
           line: position.topLine,
           lineOffset: position.topLineOffset,
-          editorLineOffset: position.editorLineOffset
+          editorLineOffset: position.editorLineOffset,
+          viewportOffset: position.viewportOffset
+        } : null;
+      },
+      captureReadingPosition(viewportRatio) {
+        const position = previewController.getReadingPosition(viewportRatio);
+        return position ? {
+          line: position.topLine,
+          lineOffset: position.topLineOffset,
+          editorLineOffset: position.editorLineOffset,
+          viewportOffset: position.viewportOffset
         } : null;
       },
       restoreTopVisiblePosition(position, isCurrent) {
@@ -2207,7 +2217,7 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
   },
   hideSelectionMenu: () => selectionMenuController.hide(),
   captureViewport() {
-    return editor?.captureViewportAnchorToken?.(editorHost.hidden ? 'preview' : 'editor') ?? null;
+    return editor?.captureModeTransitionAnchorToken?.(editorHost.hidden ? 'preview' : 'editor') ?? null;
   },
   restoreViewport(viewport, owner) {
     editor?.restoreViewportAnchorToken?.(viewport, owner);
