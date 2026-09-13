@@ -2548,30 +2548,24 @@ async function main() {
 
     await page.mouse.move(450, 260);
     const wheelScrollTops: number[] = [];
-    const wheelVisualPositions: number[] = [];
+    const wheelLinePositions: Array<Array<{ text: string; top: number }>> = [];
     for (let index = 0; index < 8; index += 1) {
       await page.mouse.wheel({ deltaY: -80 });
       await waitForFrames(page, 1);
-      wheelScrollTops.push(await page.evaluate(() =>
-        document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!.scrollTop
-      ));
-      wheelVisualPositions.push(await page.evaluate(() => {
+      const wheelSnapshot = await page.evaluate(() => {
         const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
-        const scrollerRect = scroller.getBoundingClientRect();
-        const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line')).find((candidate) => {
-          if (!/^(?:stable line \d+|const line\d+)/.test(candidate.textContent ?? '')) return false;
-          const rect = candidate.getBoundingClientRect();
-          return rect.bottom > scrollerRect.top && rect.top < scrollerRect.bottom;
-        });
-        const text = line?.textContent ?? '';
-        const stableMatch = text.match(/^stable line (\d+)/);
-        const codeMatch = text.match(/^const line(\d+)/);
-        const documentLine = stableMatch ? Number(stableMatch[1]) : codeMatch ? 133 + Number(codeMatch[1]) : 0;
-        const lineHeight = line ? Number.parseFloat(getComputedStyle(line).lineHeight) : 0;
-        return documentLine > 0 && lineHeight > 0
-          ? documentLine * lineHeight - line!.getBoundingClientRect().top
-          : Number.NaN;
-      }));
+        return {
+          lines: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+            .filter((candidate) => /^(?:stable line \d+|const line\d+)/.test(candidate.textContent ?? ''))
+            .map((candidate) => ({
+              text: candidate.textContent ?? '',
+              top: candidate.getBoundingClientRect().top
+            })),
+          scrollTop: scroller.scrollTop
+        };
+      });
+      wheelScrollTops.push(wheelSnapshot.scrollTop);
+      wheelLinePositions.push(wheelSnapshot.lines);
     }
     await new Promise((resolve) => setTimeout(resolve, 180));
     await waitForFrames(page);
@@ -2584,8 +2578,17 @@ async function main() {
     const beforeLine = lineNumber(before.text);
     const afterUpdateLine = lineNumber(afterUpdate.text);
     const afterThemeLine = lineNumber(afterTheme.text);
-    const wheelMovedOnlyUp = wheelVisualPositions.every((position, index) => (
-      Number.isFinite(position) && (index === 0 || position <= wheelVisualPositions[index - 1] + 1)
+    const wheelMovedOnlyUp = wheelLinePositions.every((positions, index) => {
+      if (index === 0) return true;
+      const previousByText = new Map(
+        wheelLinePositions[index - 1].map((position) => [position.text, position.top])
+      );
+      const sharedDeltas = positions
+        .filter((position) => previousByText.has(position.text))
+        .map((position) => position.top - previousByText.get(position.text)!);
+      return sharedDeltas.length > 0 && sharedDeltas.every((delta) => delta >= -1);
+    }) && wheelScrollTops.every((scrollTop, index) => (
+      index === 0 || scrollTop <= wheelScrollTops[index - 1] + 1
     ));
     if (
       beforeLine === null || afterUpdateLine === null || afterThemeLine === null ||
@@ -2594,7 +2597,7 @@ async function main() {
       Math.abs((afterTheme.top ?? 0) - (afterUpdate.top ?? 0)) > 1 ||
       !wheelMovedOnlyUp
     ) {
-      throw new Error(`Implicit webview updates moved the visual anchor: ${JSON.stringify({ before, afterUpdate, afterTheme, wheelScrollTops, wheelVisualPositions, afterUpwardScroll })}`);
+      throw new Error(`Implicit webview updates moved the visual anchor: ${JSON.stringify({ before, afterUpdate, afterTheme, wheelScrollTops, wheelLinePositions, afterUpwardScroll })}`);
     }
 
     const tallMermaidBefore = await page.evaluate(async () => {
