@@ -2179,7 +2179,10 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
       (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
       markSourcePreviewEditorReady();
     }
-    if (mode === 'live' && !previewController.host.hidden) {
+    if (
+      !previewController.host.hidden &&
+      (mode === 'live' || (mode === 'source' && editorHost.inert))
+    ) {
       await editor.whenVisiblePresentationReady(LIVE_IMAGE_REVEAL_WAIT_MS);
     }
     changesReviewMode = mode;

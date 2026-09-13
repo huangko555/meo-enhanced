@@ -25,6 +25,67 @@ async function positionPreviewElement(page: Page, selector: string, ratio = 0): 
   }, { targetSelector: selector, targetRatio: ratio });
 }
 
+// Independent browser oracle for DEC-0023's one-third-viewport semantic reading anchor.
+async function captureSourceReadingAnchor(page: Page, text: string): Promise<{
+  line: number | null;
+  text: string | null;
+}> {
+  return page.evaluate((documentText) => {
+    const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+    const viewport = scroller.getBoundingClientRect();
+    const readingY = viewport.top + viewport.height / 3;
+    const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+      .find((candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return rect.top <= readingY && rect.bottom > readingY;
+      });
+    return {
+      line: line ? documentText.split('\n').indexOf(line.textContent ?? '') + 1 : null,
+      text: line?.textContent ?? null
+    };
+  }, text);
+}
+
+async function capturePreviewReadingAnchor(page: Page): Promise<{
+  line: number | null;
+}> {
+  return page.evaluate(() => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const scrollElement = frameDocument.scrollingElement!;
+    const anchorTop = scrollElement.scrollTop + frameDocument.documentElement.clientHeight / 3;
+    const entries = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          start: Number(element.dataset.sourceLine),
+          end: Number(element.dataset.sourceEndLine ?? element.dataset.sourceLine),
+          top: rect.top + scrollElement.scrollTop,
+          bottom: rect.bottom + scrollElement.scrollTop
+        };
+      })
+      .sort((left, right) => left.top - right.top || left.bottom - right.bottom || left.start - right.start);
+    if (entries.length === 0) return { line: null };
+    let low = 0;
+    let high = entries.length - 1;
+    while (low <= high) {
+      const middle = (low + high) >>> 1;
+      if (entries[middle].top <= anchorTop + 0.5) low = middle + 1;
+      else high = middle - 1;
+    }
+    const candidate = entries[Math.max(0, high)];
+    const next = entries[Math.max(0, high) + 1];
+    if (candidate.bottom < anchorTop && next?.top > anchorTop) {
+      const progress = (anchorTop - candidate.bottom) / Math.max(1, next.top - candidate.bottom);
+      return { line: Math.round(candidate.end + (next.start - candidate.end) * progress) };
+    }
+    const progress = Math.max(0, Math.min(
+      1,
+      (anchorTop - candidate.top) / Math.max(1, candidate.bottom - candidate.top)
+    ));
+    return { line: Math.round(candidate.start + (candidate.end - candidate.start) * progress) };
+  });
+}
+
 function createFixture(): string {
   const lines = Array.from({ length: 280 }, (_, index) => `stable line ${index + 1}`);
   lines[14] = '```javascript';
@@ -1631,6 +1692,14 @@ async function main() {
     }, editorScrollTopBeforePreview);
     await waitForFrames(page, 2);
     await page.click('[data-mode="preview"]');
+    await page.waitForFunction((previousRequestId) => {
+      const messages = (
+        window as typeof window & { __hostMessages?: Array<{ type?: string; requestId?: string }> }
+      ).__hostMessages ?? [];
+      const currentRequestId = messages
+        .findLast((message) => message.type === 'requestPreviewRender')?.requestId ?? '';
+      return Boolean(currentRequestId && currentRequestId !== previousRequestId);
+    }, {}, stalePreviewRequestId);
     previewRequestId = await page.evaluate(() => {
       const messages = (window as typeof window & { __hostMessages?: Array<{ type?: string; requestId?: string }> }).__hostMessages ?? [];
       return messages.findLast((message) => message.type === 'requestPreviewRender')?.requestId ?? '';
@@ -1657,7 +1726,7 @@ async function main() {
         type: 'previewRenderResult',
         requestId,
         result: { ok: true, value: {
-          html: '<h1 id="intro" data-source-line="1">Intro</h1><div id="preview-wide-math" class="meo-export-math meo-export-math-display meo-export-math-fenced-display" data-source-line="3" data-source-end-line="5"><span class="katex-display"><span class="katex" style="display:inline-block;white-space:nowrap;font-family:serif;font-size:1.21em">WIDE_FORMULA_ALPHA_BETA_GAMMA_DELTA_EPSILON_ZETA_ETA_THETA_IOTA_KAPPA_LAMBDA_MU_NU_XI_OMICRON_PI_RHO_SIGMA_TAU</span></span></div><p>Footnote reference <a id="fnref-1" href="#fn-1">1</a></p><pre id="collapsed-long-code" data-source-line="15" data-source-end-line="36" style="height:440px">Long code block</pre><pre id="short-code" data-source-line="45" data-source-end-line="56" style="height:240px">Short code block</pre><div style="height:600px"></div><h2 id="short-mermaid" data-source-line="78">Short Mermaid</h2><div style="height:900px"></div><pre id="anchor-133" data-source-line="133" data-source-end-line="222" style="height:900px">Code block</pre><div style="height:600px"></div><h2 id="tall-mermaid" data-source-line="231">Tall Mermaid</h2><div style="height:900px"></div><div class="meo-export-mermaid" data-source-b64="Zmxvd2NoYXJ0IExSClN0YXJ0IC0tPiBEb25l" style="display:none"></div><ol><li id="fn-1">Footnote content <a href="#fnref-1">Back</a></li></ol>',
+          html: '<h1 id="intro" data-source-line="1">Intro</h1><div id="preview-wide-math" class="meo-export-math meo-export-math-display meo-export-math-fenced-display" data-source-line="3" data-source-end-line="5"><span class="katex-display"><span class="katex" style="display:inline-block;white-space:nowrap;font-family:serif;font-size:1.21em">WIDE_FORMULA_ALPHA_BETA_GAMMA_DELTA_EPSILON_ZETA_ETA_THETA_IOTA_KAPPA_LAMBDA_MU_NU_XI_OMICRON_PI_RHO_SIGMA_TAU</span></span></div><p>Footnote reference <a id="fnref-1" href="#fn-1">1</a></p><pre id="collapsed-long-code" data-source-line="15" data-source-end-line="36" style="height:440px">Long code block</pre><pre id="short-code" data-source-line="45" data-source-end-line="56" style="height:240px">Short code block</pre><div style="height:600px"></div><h2 id="short-mermaid" data-source-line="78">Short Mermaid</h2><div style="height:900px"></div><pre id="anchor-133" data-source-line="133" data-source-end-line="222" style="height:900px">Code block</pre><div style="height:600px"></div><h2 id="tall-mermaid" data-source-line="231">Tall Mermaid</h2><div data-source-line="232" data-source-end-line="280" style="height:900px"></div><div class="meo-export-mermaid" data-source-b64="Zmxvd2NoYXJ0IExSClN0YXJ0IC0tPiBEb25l" style="display:none"></div><ol><li id="fn-1">Footnote content <a href="#fnref-1">Back</a></li></ol>',
           hasMermaid: true,
           styles: {
           dark: 'html,body{margin:0;background:#20252b;color:#fff}.meo-export-doc{padding:20px}',
@@ -2132,18 +2201,16 @@ async function main() {
     if (!mermaidThemeIsolation.previewSawDark || !mermaidThemeIsolation.previewSawLight || !mermaidThemeIsolation.editorEndedDark) {
       throw new Error(`Preview Mermaid theme was not isolated: ${JSON.stringify(mermaidThemeIsolation)}`);
     }
+    const previewExitReadingAnchor = await capturePreviewReadingAnchor(page);
     await page.click('[data-mode="live"]');
     await waitForFrames(page, 2);
-    const previewExitVisibleLine = await page.evaluate(() => {
-      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
-      const viewport = scroller.getBoundingClientRect();
-      return Array.from(document.querySelectorAll<HTMLElement>('.cm-line')).some((line) => {
-        const rect = line.getBoundingClientRect();
-        return line.textContent === '## Tall Mermaid' && rect.bottom > viewport.top && rect.top < viewport.bottom;
-      });
-    });
-    if (!previewExitVisibleLine) {
-      throw new Error('Leaving Preview did not preserve the visible document position');
+    const liveEntryReadingAnchor = await captureSourceReadingAnchor(page, initialText);
+    if (
+      previewExitReadingAnchor.line === null ||
+      liveEntryReadingAnchor.line === null ||
+      Math.abs(liveEntryReadingAnchor.line - previewExitReadingAnchor.line) > 1
+    ) {
+      throw new Error(`Leaving Preview lost the semantic reading anchor: ${JSON.stringify({ previewExitReadingAnchor, liveEntryReadingAnchor })}`);
     }
     const backwardSelectionText = 'stable line 120';
     await page.evaluate(({ text, selectedText }) => {
@@ -2200,21 +2267,31 @@ async function main() {
     const previewRequestsBeforeCachedSwitch = await page.evaluate(() => (
       (window as typeof window & { __hostMessages?: Array<{ type?: string }> }).__hostMessages ?? []
     ).filter((message) => message.type === 'requestPreviewRender').length);
+    const sourceReadingAnchor = await captureSourceReadingAnchor(page, initialText);
     await page.click('[data-mode="preview"]');
     await waitForFrames(page, 2);
     const cachedSwitchState = await page.evaluate(() => {
       const messages = (window as typeof window & { __hostMessages?: Array<{ type?: string }> }).__hostMessages ?? [];
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const frameDocument = frame.contentDocument!;
       return {
         requests: messages.filter((message) => message.type === 'requestPreviewRender').length,
-        shortHeadingTop: frame.contentDocument!.querySelector<HTMLElement>('#short-mermaid')!.getBoundingClientRect().top
+        shortHeadingTop: frameDocument.querySelector<HTMLElement>('#short-mermaid')!.getBoundingClientRect().top,
+        shortHeadingVisible: (() => {
+          const rect = frameDocument.querySelector<HTMLElement>('#short-mermaid')!.getBoundingClientRect();
+          return rect.bottom > 0 && rect.top < frameDocument.documentElement.clientHeight;
+        })()
       };
     });
+    const cachedPreviewReadingAnchor = await capturePreviewReadingAnchor(page);
     if (
       cachedSwitchState.requests !== previewRequestsBeforeCachedSwitch ||
-      Math.abs(cachedSwitchState.shortHeadingTop) > 4
+      sourceReadingAnchor.line === null ||
+      cachedPreviewReadingAnchor.line === null ||
+      Math.abs(cachedPreviewReadingAnchor.line - sourceReadingAnchor.line) > 1 ||
+      !cachedSwitchState.shortHeadingVisible
     ) {
-      throw new Error(`Unchanged Preview switch was not immediate: ${JSON.stringify({ previewRequestsBeforeCachedSwitch, cachedSwitchState })}`);
+      throw new Error(`Unchanged Preview switch lost its cached semantic anchor: ${JSON.stringify({ previewRequestsBeforeCachedSwitch, sourceReadingAnchor, cachedPreviewReadingAnchor, cachedSwitchState })}`);
     }
     await page.click('[data-mode="source"]');
     await waitForFrames(page, 2);
@@ -2242,38 +2319,48 @@ async function main() {
     if (sourceHeadingTop === null || Math.abs(sourceHeadingTop) > 4) {
       throw new Error(`Source test setup did not position the target heading: ${sourceHeadingTop}`);
     }
+    const tallSourceReadingAnchor = await captureSourceReadingAnchor(page, initialText);
     await page.click('[data-mode="preview"]');
     await waitForFrames(page, 2);
+    const tallPreviewReadingAnchor = await capturePreviewReadingAnchor(page);
     const sourcePreviewHeadingTop = await page.evaluate(() => (
       document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
         .querySelector<HTMLElement>('#tall-mermaid')!.getBoundingClientRect().top
     ));
-    if (Math.abs(sourcePreviewHeadingTop) > 4) {
-      throw new Error(`Source to Preview lost the visible document position: ${sourcePreviewHeadingTop}`);
+    if (
+      tallSourceReadingAnchor.line === null ||
+      tallPreviewReadingAnchor.line === null ||
+      Math.abs(tallPreviewReadingAnchor.line - tallSourceReadingAnchor.line) > 1
+    ) {
+      throw new Error(`Source to Preview lost the semantic reading anchor: ${JSON.stringify({ sourcePreviewHeadingTop, tallSourceReadingAnchor, tallPreviewReadingAnchor })}`);
     }
     await positionPreviewElement(page, '#short-mermaid', 0);
+    const shortPreviewReadingAnchor = await capturePreviewReadingAnchor(page);
     await page.click('[data-mode="source"]');
-    await waitForFrames(page, 2);
-    const previewSourceVisibleLine = await page.evaluate(() => {
-      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
-      const viewport = scroller.getBoundingClientRect();
-      return Array.from(document.querySelectorAll<HTMLElement>('.cm-line')).some((line) => {
-        const rect = line.getBoundingClientRect();
-        return line.textContent === '## Short Mermaid' && rect.bottom > viewport.top && rect.top < viewport.bottom;
-      });
+    await page.waitForFunction(() => {
+      const editorHost = document.querySelector<HTMLElement>('.editor-host');
+      return document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source'
+        && editorHost?.inert === false;
     });
-    if (!previewSourceVisibleLine) {
-      throw new Error('Preview to Source lost the visible document position');
+    const previewSourceReadingAnchor = await captureSourceReadingAnchor(page, initialText);
+    if (
+      shortPreviewReadingAnchor.line === null ||
+      previewSourceReadingAnchor.line === null ||
+      Math.abs(previewSourceReadingAnchor.line - shortPreviewReadingAnchor.line) > 1
+    ) {
+      throw new Error(`Preview to Source lost the semantic reading anchor: ${JSON.stringify({ shortPreviewReadingAnchor, previewSourceReadingAnchor })}`);
     }
-    const sourceLiveFrames = await page.evaluate(async () => {
+    const sourceLiveEntryAnchor = await captureSourceReadingAnchor(page, initialText);
+    if (!sourceLiveEntryAnchor.text) throw new Error('Source to Live test could not capture a reading anchor');
+    const sourceLiveFrames = await page.evaluate(async (anchorText) => {
       const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
       const sample = () => {
-        const heading = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-          .find((line) => line.textContent === '## Short Mermaid');
+        const anchor = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .find((line) => line.textContent === anchorText);
         const viewport = scroller.getBoundingClientRect();
         return {
           mode: document.querySelector<HTMLElement>('.editor-root')?.dataset.mode,
-          targetTop: heading ? heading.getBoundingClientRect().top - viewport.top : null,
+          targetTop: anchor ? anchor.getBoundingClientRect().top - viewport.top : null,
           viewportHeight: viewport.height
         };
       };
@@ -2284,7 +2371,7 @@ async function main() {
         frames.push(sample());
       }
       return frames;
-    });
+    }, sourceLiveEntryAnchor.text);
     const liveFrames = sourceLiveFrames.filter((frame) => frame.mode === 'live');
     const liveTargetTops = liveFrames
       .map((frame) => frame.targetTop)
@@ -2297,16 +2384,13 @@ async function main() {
     ) {
       throw new Error(`Source to Live painted an unstable viewport frame: ${JSON.stringify(sourceLiveFrames)}`);
     }
-    const sourceLiveVisibleLine = await page.evaluate(() => {
-      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
-      const viewport = scroller.getBoundingClientRect();
-      return Array.from(document.querySelectorAll<HTMLElement>('.cm-line')).some((line) => {
-        const rect = line.getBoundingClientRect();
-        return line.textContent === '## Short Mermaid' && rect.bottom > viewport.top && rect.top < viewport.bottom;
-      });
-    });
-    if (!sourceLiveVisibleLine) {
-      throw new Error('Source to Live lost the visible document position');
+    const sourceLiveReadingAnchor = await captureSourceReadingAnchor(page, initialText);
+    if (
+      sourceLiveEntryAnchor.line === null ||
+      sourceLiveReadingAnchor.line === null ||
+      Math.abs(sourceLiveReadingAnchor.line - sourceLiveEntryAnchor.line) > 1
+    ) {
+      throw new Error(`Source to Live lost the semantic reading anchor: ${JSON.stringify({ sourceLiveEntryAnchor, sourceLiveReadingAnchor })}`);
     }
     await page.evaluate((text) => {
       const selection = text.indexOf('## Tall Mermaid');
@@ -2673,26 +2757,36 @@ async function main() {
       }
     });
     await waitForFrames(page, 2);
+    const pendingPreviewSourceAnchor = await captureSourceReadingAnchor(page, updatedText);
     const requestsBeforePendingPreviewSwitch = await page.evaluate(() => (
       (window as typeof window & { __hostMessages?: Array<{ type?: string }> }).__hostMessages ?? []
     ).filter((message) => message.type === 'requestPreviewRender').length);
     await page.click('[data-mode="preview"]');
+    await page.waitForFunction((previousRequestCount) => (
+      (window as typeof window & { __hostMessages?: Array<{ type?: string }> }).__hostMessages ?? []
+    ).filter((message) => message.type === 'requestPreviewRender').length === previousRequestCount + 1, {}, requestsBeforePendingPreviewSwitch);
+    const pendingPreviewReadingAnchor = await capturePreviewReadingAnchor(page);
     const pendingPreviewFirstSurface = await page.evaluate(() => {
       const messages = (window as typeof window & { __hostMessages?: Array<{ type?: string }> }).__hostMessages ?? [];
       const heading = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
         .querySelector<HTMLElement>('#tall-mermaid');
       return {
         requests: messages.filter((message) => message.type === 'requestPreviewRender').length,
-        headingTop: heading?.getBoundingClientRect().top ?? null
+        headingTop: heading?.getBoundingClientRect().top ?? null,
+        headingVisible: Boolean(heading && heading.getBoundingClientRect().bottom > 0)
       };
     });
     if (
       pendingPreviewFirstSurface.requests !== requestsBeforePendingPreviewSwitch + 1 ||
-      pendingPreviewFirstSurface.headingTop === null ||
-      Math.abs(pendingPreviewFirstSurface.headingTop) > 4
+      pendingPreviewSourceAnchor.line === null ||
+      pendingPreviewReadingAnchor.line === null ||
+      Math.abs(pendingPreviewReadingAnchor.line - pendingPreviewSourceAnchor.line) > 1 ||
+      !pendingPreviewFirstSurface.headingVisible
     ) {
       throw new Error(`Pending Preview switch painted a stale viewport first: ${JSON.stringify({
         requestsBeforePendingPreviewSwitch,
+        pendingPreviewSourceAnchor,
+        pendingPreviewReadingAnchor,
         pendingPreviewFirstSurface
       })}`);
     }

@@ -157,7 +157,7 @@ const presentationFor = (
   closeFind: mode !== previousMode,
   previewActive: mode === 'preview',
   editorVisible: mode !== 'preview',
-  atomicEditorReveal: mode === 'live' && previousMode === 'preview' && editorMounted,
+  atomicEditorReveal: mode !== 'preview' && previousMode === 'preview' && editorMounted,
   searchOwner: mode === 'preview' ? 'preview' : 'editor',
   outlineOwner: mode === 'preview' ? 'preview' : 'editor',
   replaceEnabled: mode !== 'preview',

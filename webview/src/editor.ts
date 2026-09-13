@@ -2772,27 +2772,30 @@ export function createEditor({
     view,
     state: view.state,
     async whenVisiblePresentationReady(timeoutMs: number) {
-      if (editorDestroyed || currentMode !== 'live') return;
+      if (editorDestroyed) return;
+      const presentationMode = currentMode;
       const deadline = performance.now() + Math.max(0, timeoutMs);
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-      if (editorDestroyed || currentMode !== 'live') return;
-      let timeout: number | null = null;
-      const waitAbortController = new AbortController();
-      try {
-        await Promise.race([
-          imagePresentationFactory.whenVisiblePresentationsSettle(waitAbortController.signal),
-          new Promise<void>((resolve) => {
-            timeout = window.setTimeout(() => {
-              waitAbortController.abort();
-              resolve();
-            }, Math.max(0, deadline - performance.now()));
-          })
-        ]);
-      } finally {
-        waitAbortController.abort();
-        if (timeout !== null) window.clearTimeout(timeout);
+      if (editorDestroyed || currentMode !== presentationMode) return;
+      if (presentationMode === 'live') {
+        let timeout: number | null = null;
+        const waitAbortController = new AbortController();
+        try {
+          await Promise.race([
+            imagePresentationFactory.whenVisiblePresentationsSettle(waitAbortController.signal),
+            new Promise<void>((resolve) => {
+              timeout = window.setTimeout(() => {
+                waitAbortController.abort();
+                resolve();
+              }, Math.max(0, deadline - performance.now()));
+            })
+          ]);
+        } finally {
+          waitAbortController.abort();
+          if (timeout !== null) window.clearTimeout(timeout);
+        }
       }
-      if (editorDestroyed || currentMode !== 'live') return;
+      if (editorDestroyed || currentMode !== presentationMode) return;
       await viewportController.whenPresentationSettled(Math.max(0, deadline - performance.now()));
     },
     getText() {

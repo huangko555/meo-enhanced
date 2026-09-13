@@ -82,7 +82,7 @@ const leavePresentation = leavePreview.find((effect) => effect.type === 'present
 assert.deepEqual(leavePresentation?.type === 'presentMode' ? leavePresentation.presentation : null, {
   mode: 'source', previousMode: 'preview', closeFind: true, previewActive: false, editorVisible: true,
   searchOwner: 'editor', outlineOwner: 'editor', replaceEnabled: true, hideSelectionMenu: false,
-  viewport: previewViewport, restoreEditorFocus: true, atomicEditorReveal: false
+  viewport: previewViewport, restoreEditorFocus: true, atomicEditorReveal: true
 });
 const leaveId = localInit.getState().pendingTransition?.id;
 assert.ok(leaveId);
