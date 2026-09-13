@@ -1193,6 +1193,78 @@ try {
     JSON.stringify({ complexTableSourceOffset, complexTableSourceReturnOffset })
   );
 
+  const splitSourceBounds = await page.$eval('.cm-scroller', element => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.move(splitSourceBounds.x, splitSourceBounds.y);
+  await page.mouse.wheel({ deltaY: 1 });
+  await new Promise(resolve => setTimeout(resolve, 80));
+  const splitModeRoundTripScrollTops = [await page.$eval(
+    '.cm-scroller',
+    element => (element as HTMLElement).scrollTop
+  )];
+  for (let round = 0; round < 8; round += 1) {
+    await page.click('button[data-mode="preview"]');
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview');
+    await new Promise(resolve => setTimeout(resolve, 80));
+    await page.click('button[data-mode="source"]');
+    await page.waitForFunction(() => (
+      document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source'
+      && document.querySelector<HTMLElement>('.editor-surface')?.hasAttribute('data-source-preview')
+      && getComputedStyle(document.querySelector<HTMLElement>('.preview-host')!).visibility !== 'hidden'
+    ));
+    await new Promise(resolve => setTimeout(resolve, 120));
+    splitModeRoundTripScrollTops.push(await page.$eval(
+      '.cm-scroller',
+      element => (element as HTMLElement).scrollTop
+    ));
+  }
+  const splitModeRoundTripBaseline = splitModeRoundTripScrollTops[0]!;
+  const splitModeRoundTripDrift = splitModeRoundTripScrollTops.map(
+    scrollTop => scrollTop - splitModeRoundTripBaseline
+  );
+  assert.ok(
+    splitModeRoundTripDrift.every(drift => Math.abs(drift) <= 2),
+    `Repeated Source split ↔ Preview round-trips must not accumulate viewport drift: ${JSON.stringify(splitModeRoundTripDrift)}`
+  );
+
+  const splitPreviewRoundTripBounds = await page.$eval('.preview-frame', element => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.move(splitPreviewRoundTripBounds.x, splitPreviewRoundTripBounds.y);
+  await page.mouse.wheel({ deltaY: 1 });
+  await new Promise(resolve => setTimeout(resolve, 80));
+  const previewOwnedRoundTripScrollTops = [await page.$eval(
+    '.preview-frame',
+    frame => (frame as HTMLIFrameElement).contentDocument!.scrollingElement!.scrollTop
+  )];
+  for (let round = 0; round < 8; round += 1) {
+    await page.click('button[data-mode="preview"]');
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview');
+    await new Promise(resolve => setTimeout(resolve, 80));
+    await page.click('button[data-mode="source"]');
+    await page.waitForFunction(() => (
+      document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source'
+      && document.querySelector<HTMLElement>('.editor-surface')?.hasAttribute('data-source-preview')
+      && getComputedStyle(document.querySelector<HTMLElement>('.preview-host')!).visibility !== 'hidden'
+    ));
+    await new Promise(resolve => setTimeout(resolve, 120));
+    previewOwnedRoundTripScrollTops.push(await page.$eval(
+      '.preview-frame',
+      frame => (frame as HTMLIFrameElement).contentDocument!.scrollingElement!.scrollTop
+    ));
+  }
+  const previewOwnedRoundTripBaseline = previewOwnedRoundTripScrollTops[0]!;
+  const previewOwnedRoundTripDrift = previewOwnedRoundTripScrollTops.map(
+    scrollTop => scrollTop - previewOwnedRoundTripBaseline
+  );
+  assert.ok(
+    previewOwnedRoundTripDrift.every(drift => Math.abs(drift) <= 2),
+    `Preview-owned Source split ↔ Preview round-trips must not accumulate viewport drift: ${JSON.stringify(previewOwnedRoundTripDrift)}`
+  );
+
   await alignSourceLineAtReadingBand(transitionTableAnchorLine);
   await page.click('button[data-mode="live"]');
   await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live');
@@ -1212,6 +1284,13 @@ try {
   );
 
   await alignSourceLineAtReadingBand(transitionTableAnchorLine);
+  const splitPreviewBounds = await page.$eval('.preview-frame', element => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.move(splitPreviewBounds.x, splitPreviewBounds.y);
+  await page.mouse.wheel({ deltaY: 1 });
+  await new Promise(resolve => setTimeout(resolve, 80));
   const sourceToFullReadingAnchor = await page.evaluate(() => {
     const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
     const viewportTop = frameDocument.scrollingElement?.scrollTop ?? 0;

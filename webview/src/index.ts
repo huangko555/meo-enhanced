@@ -33,7 +33,11 @@ import { createDocumentSessionWebviewAdapter } from './adapters/documentSessionW
 import { createDocumentSaveFlushWebviewAdapter } from './adapters/documentSaveFlushWebviewAdapter';
 import { createPreviewWebviewAdapter } from './adapters/previewWebviewAdapter';
 import { createAppearanceWebviewAdapter } from './adapters/appearanceWebviewAdapter';
-import { createEditorModeApplication, type EditorMode } from './application/editorMode';
+import {
+  createEditorModeApplication,
+  type EditorMode,
+  type EditorModeViewportToken
+} from './application/editorMode';
 import type { DocumentPresentationSource } from '../../src/application/documentSession';
 import { createEditorModeEffectAdapter } from './adapters/editorModeEffectAdapter';
 import { createEditorModeRuntime, type EditorModeRuntime } from './adapters/editorModeRuntime';
@@ -1442,6 +1446,9 @@ const editorModeApplication = createEditorModeApplication();
 let editorModeRuntime: EditorModeRuntime;
 let sourcePreviewEnabled = false;
 let sourcePreviewScrollSyncEnabled = true;
+let splitModeTransitionViewport: EditorModeViewportToken | null = null;
+let pendingEditorViewportAfterPreviewExit: EditorModeViewportToken | null = null;
+let deferEditorViewportUntilPreviewExit = false;
 let sourcePreviewRevealGeneration = 0;
 let pendingSourcePreviewReveal: {
   readonly generation: number;
@@ -1483,11 +1490,13 @@ function presentSourcePreviewControls(): void {
     }
   ));
 }
-const activateSourcePreviewLinkage = (): void => {
+const activateSourcePreviewLinkage = (
+  activationOwner: 'editor' | 'last-interaction' = 'editor'
+): void => {
   if (!editor) return;
   // Independent panes still open at one shared semantic position. Continuous
   // projection is disabled immediately after that initial alignment.
-  editor.setLinkedPreviewEnabled?.(true, 'editor');
+  editor.setLinkedPreviewEnabled?.(true, activationOwner);
   if (!sourcePreviewScrollSyncEnabled) editor.setLinkedPreviewEnabled?.(false);
 };
 const cancelSourcePreviewReveal = (): void => {
@@ -1541,7 +1550,11 @@ const presentPreviewSurface = (
   }
   cancelSourcePreviewReveal();
   previewAdapter.setActive({ active: visible, text: getCurrentEditorText() });
-  if (split) activateSourcePreviewLinkage();
+  if (split) {
+    activateSourcePreviewLinkage(
+      deferEditorViewportUntilPreviewExit ? 'last-interaction' : 'editor'
+    );
+  }
   else editor?.setLinkedPreviewEnabled?.(false);
   return { split, visible };
 };
@@ -2223,7 +2236,14 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
   mountEditor: mountEditorForMode,
   async applyEditorMode(mode, viewport) {
     if (!editor) throw new Error('Editor is not mounted');
-    editor.setMode(mode, viewport);
+    // Preview exits reveal the editor at its final width only after the mode
+    // change succeeds. Restoring before that reveal projects against the
+    // temporary full-width geometry and is then displaced by split reflow.
+    const editorViewport = deferEditorViewportUntilPreviewExit
+      && pendingEditorViewportAfterPreviewExit === viewport
+      ? null
+      : viewport;
+    editor.setMode(mode, editorViewport);
     if (mode === 'source' && pendingSourcePreviewReveal) {
       (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
       markSourcePreviewEditorReady();
@@ -2247,6 +2267,17 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
       && presentation.previousMode !== 'source'
       && sourcePreviewEnabled;
     presentPreviewSurface(active, { atomicSplit });
+    if (active && pendingEditorViewportAfterPreviewExit) {
+      pendingEditorViewportAfterPreviewExit = null;
+      deferEditorViewportUntilPreviewExit = false;
+    }
+    if (!active && pendingEditorViewportAfterPreviewExit) {
+      const viewport = pendingEditorViewportAfterPreviewExit;
+      pendingEditorViewportAfterPreviewExit = null;
+      deferEditorViewportUntilPreviewExit = false;
+      editor?.restoreViewportAnchorToken?.(viewport, 'editor');
+      editor?.restoreModeRoundTripCaptureSurface?.(viewport);
+    }
     if (active) {
       // A Source split and the standalone Preview have different final widths.
       // Reflow width-dependent content and invalidate its source map before the
@@ -2285,10 +2316,37 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
   },
   hideSelectionMenu: () => selectionMenuController.hide(),
   captureViewport(targetMode) {
-    const owner = editorHost.hidden || (targetMode === 'preview' && isSidePreviewVisible())
+    const currentMode = getActiveEditorMode();
+    if (
+      currentMode === 'preview'
+      && targetMode !== 'preview'
+      && splitModeTransitionViewport
+    ) {
+      const viewport = splitModeTransitionViewport;
+      if (editor?.prepareModeRoundTripReturn?.(viewport)) {
+        splitModeTransitionViewport = null;
+        pendingEditorViewportAfterPreviewExit = viewport;
+        deferEditorViewportUntilPreviewExit = true;
+        return viewport;
+      }
+    }
+
+    const owner = editorHost.hidden
       ? 'preview'
-      : 'editor';
-    return editor?.captureModeTransitionAnchorToken?.(owner) ?? null;
+      : isSidePreviewVisible()
+        ? editor?.getLastViewportInteractionOwner?.() ?? 'editor'
+        : 'editor';
+    const viewport = editor?.captureModeTransitionAnchorToken?.(owner) ?? null;
+    if (currentMode === 'source' && isSidePreviewVisible() && targetMode === 'preview') {
+      splitModeTransitionViewport = viewport;
+    } else if (currentMode === 'preview' && targetMode !== 'preview') {
+      splitModeTransitionViewport = null;
+      pendingEditorViewportAfterPreviewExit = viewport;
+      deferEditorViewportUntilPreviewExit = false;
+    } else {
+      splitModeTransitionViewport = null;
+    }
+    return viewport;
   },
   restoreViewport(viewport, owner) {
     editor?.restoreViewportAnchorToken?.(viewport, owner);

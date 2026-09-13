@@ -181,6 +181,13 @@ interface ActiveScrollTarget {
 interface ViewportAnchorTokenRecord {
   anchor: ViewportDocumentAnchor;
   readonly interactionGeneration: number;
+  readonly modeRoundTripSnapshot: {
+    readonly editorMode: 'live' | 'source' | null;
+    readonly owner: ViewportAnchorOwner;
+    readonly scrollTop: number;
+    returnEnabled: boolean;
+    returned: boolean;
+  } | null;
   readonly projectedOwners: Set<ViewportAnchorOwner>;
 }
 
@@ -409,6 +416,10 @@ export class ViewportController {
   markInteraction(owner: ViewportAnchorOwner = 'editor'): void {
     this.lastViewportInteractionOwner = owner;
     this.claimLinkedViewport(owner);
+    this.invalidateViewportWork();
+  }
+
+  private invalidateViewportWork(): void {
     const scope = this.anchorTransactionScope;
     const programmaticCurrentTransaction = scope.kind === 'current'
       && this.isAnchorTokenCurrent(scope.record)
@@ -427,6 +438,24 @@ export class ViewportController {
     this.lastWheelAt = Number.NEGATIVE_INFINITY;
     this.lastTouchMoveAt = Number.NEGATIVE_INFINITY;
     this.lastTouchY = null;
+  }
+
+  getLastViewportInteractionOwner(): ViewportAnchorOwner {
+    return this.lastViewportInteractionOwner;
+  }
+
+  prepareModeRoundTripReturn(handle: ViewportAnchorToken): boolean {
+    const record = this.anchorTokens.get(handle);
+    if (!record || !this.isAnchorTokenCurrent(record) || !record.modeRoundTripSnapshot) return false;
+    record.modeRoundTripSnapshot.returnEnabled = true;
+    return true;
+  }
+
+  restoreModeRoundTripCaptureSurface(handle: ViewportAnchorToken): void {
+    const record = this.anchorTokens.get(handle);
+    const roundTrip = record?.modeRoundTripSnapshot;
+    if (!record || !roundTrip?.returnEnabled || roundTrip.returned) return;
+    this.runAnchorTransaction(handle, roundTrip.owner, () => undefined);
   }
 
   private markNavigationScrollStart(): void {
@@ -1848,6 +1877,7 @@ export class ViewportController {
     this.anchorTokens.set(handle, {
       anchor,
       interactionGeneration: this.interactionGeneration,
+      modeRoundTripSnapshot: null,
       projectedOwners: new Set()
     });
     return handle;
@@ -1855,16 +1885,31 @@ export class ViewportController {
 
   captureModeTransitionAnchorToken(owner: ViewportAnchorOwner): ViewportAnchorToken | null {
     if (this.destroyed) return null;
-    this.markInteraction(owner);
+    // A mode switch is a programmatic viewport intent, not a user interaction
+    // with either pane. Invalidate stale restorations without changing the
+    // pane that should own the next split-to-single transition.
+    this.invalidateViewportWork();
     const viewportOffset = this.view.scrollDOM.clientHeight / 3;
     const anchor = owner === 'editor'
       ? this.captureEditorReadingAnchor(viewportOffset)
       : this.capturePreviewDocumentAnchor(undefined, 1 / 3);
     if (!anchor) return null;
     const handle = Object.freeze({}) as ViewportAnchorToken;
+    const capturedScrollTop = owner === 'editor'
+      ? this.view.scrollDOM.scrollTop
+      : this.previewSurface?.readScrollTop?.() ?? null;
     this.anchorTokens.set(handle, {
       anchor,
       interactionGeneration: this.interactionGeneration,
+      modeRoundTripSnapshot: capturedScrollTop === null
+        ? null
+        : {
+            editorMode: owner === 'editor' ? this.getMode() : null,
+            owner,
+            scrollTop: capturedScrollTop,
+            returnEnabled: false,
+            returned: false
+          },
       projectedOwners: new Set()
     });
     return handle;
@@ -1890,11 +1935,14 @@ export class ViewportController {
     const parent = this.anchorTransactionScope;
     const record = handle ? this.anchorTokens.get(handle) : undefined;
     const targetAvailable = owner === 'editor' || this.previewSurface !== null;
+    const modeRoundTripReturn = Boolean(
+      record && this.canRestoreModeRoundTripSnapshot(record, owner)
+    );
     const currentTarget = Boolean(
       record &&
       targetAvailable &&
       this.isAnchorTokenCurrent(record) &&
-      !record.projectedOwners.has(owner)
+      (!record.projectedOwners.has(owner) || modeRoundTripReturn)
     );
     if (
       this.pendingAsyncAnchorTransactions > 0 &&
@@ -2048,6 +2096,24 @@ export class ViewportController {
     owner: ViewportAnchorOwner,
     anchor: ViewportDocumentAnchor
   ): void {
+    const roundTrip = record.modeRoundTripSnapshot;
+    if (roundTrip && this.canRestoreModeRoundTripSnapshot(record, owner)) {
+      if (owner === 'editor') {
+        this.writeScrollPosition({
+          top: roundTrip.scrollTop,
+          left: this.view.scrollDOM.scrollLeft
+        });
+        this.stabilizeScrollPosition({
+          top: roundTrip.scrollTop,
+          left: this.view.scrollDOM.scrollLeft
+        });
+      } else {
+        this.stabilizePreviewScrollTop(roundTrip.scrollTop, record);
+      }
+      roundTrip.returned = true;
+      record.projectedOwners.add(owner);
+      return;
+    }
     if (record.projectedOwners.has(owner)) return;
     if (owner === 'editor') {
       this.restoreDocumentAnchor({
@@ -2067,6 +2133,39 @@ export class ViewportController {
       sourceRange: anchor.sourceRange
     }, () => this.isAnchorTokenCurrent(record));
     record.projectedOwners.add(owner);
+  }
+
+  private canRestoreModeRoundTripSnapshot(
+    record: ViewportAnchorTokenRecord,
+    owner: ViewportAnchorOwner
+  ): boolean {
+    const roundTrip = record.modeRoundTripSnapshot;
+    return Boolean(
+      roundTrip
+      && roundTrip.returnEnabled
+      && !roundTrip.returned
+      && owner === roundTrip.owner
+      && (owner !== 'editor' || roundTrip.editorMode === this.getMode())
+    );
+  }
+
+  private stabilizePreviewScrollTop(
+    targetScrollTop: number,
+    record: ViewportAnchorTokenRecord
+  ): void {
+    if (!this.previewSurface?.readScrollTop || !this.previewSurface.writeScrollTop) return;
+    let remainingFrames = MAX_SETTLE_FRAMES;
+    const write = () => {
+      if (this.destroyed || !this.isAnchorTokenCurrent(record)) return;
+      const currentScrollTop = this.previewSurface?.readScrollTop?.();
+      if (currentScrollTop === undefined) return;
+      if (Math.abs(currentScrollTop - targetScrollTop) > POSITION_EPSILON) {
+        this.previewSurface?.writeScrollTop?.(targetScrollTop);
+      }
+      remainingFrames -= 1;
+      if (remainingFrames > 0) requestAnimationFrame(write);
+    };
+    write();
   }
 
   private mapAnchorThroughDocumentChange(

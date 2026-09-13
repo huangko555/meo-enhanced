@@ -2903,6 +2903,15 @@ export function createEditor({
     captureModeTransitionAnchorToken(owner: ViewportAnchorOwner): ViewportAnchorToken | null {
       return viewportController.captureModeTransitionAnchorToken(owner);
     },
+    getLastViewportInteractionOwner(): ViewportAnchorOwner {
+      return viewportController.getLastViewportInteractionOwner();
+    },
+    prepareModeRoundTripReturn(handle: ViewportAnchorToken): boolean {
+      return viewportController.prepareModeRoundTripReturn(handle);
+    },
+    restoreModeRoundTripCaptureSurface(handle: ViewportAnchorToken): void {
+      viewportController.restoreModeRoundTripCaptureSurface(handle);
+    },
     restoreViewportAnchorToken(handle: ViewportAnchorToken, owner: ViewportAnchorOwner): void {
       viewportController.restoreAnchorToken(handle, owner);
     },
