@@ -212,7 +212,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const workspaceRoot = vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath;
   const gitDocumentState = new GitDocumentState(documentUri.fsPath, workspaceRoot);
   const savedRevisionTracker = new SavedRevisionTracker();
-  const documentReload = createVscodeDocumentReloadAdapter(document);
+  const documentReload = createVscodeDocumentReloadAdapter(document, {
+    isTargetEditorActive: () => !disposed && panel.active
+  });
   let nextDiskReloadId = 1;
   let draftRecoveryReceiptVersion = 0;
   const pendingDiskReloadPresentations = new Map<number, {

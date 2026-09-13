@@ -5,15 +5,23 @@ export type VscodeDocumentReloadAdapter = {
   reloadFromDisk(): Promise<DocumentRevisionDto>;
 };
 
+export type VscodeDocumentReloadAdapterOptions = {
+  /** The custom editor that initiated the request must still own the active tab. */
+  isTargetEditorActive(): boolean;
+};
+
 /**
- * Reveals the target before using VS Code's active-editor revert command. VS Code
- * exposes no resource-bound revert for text documents, so the synchronous
- * dispatch guard refuses to run while another dirty document could be harmed.
+ * Uses VS Code's active-editor revert command without opening or revealing a
+ * different editor. VS Code exposes no resource-bound revert for text documents,
+ * so the dispatch guard refuses to run after the initiating custom editor loses
+ * activation or while another dirty document could be harmed by an activation race.
  */
 export function createVscodeDocumentReloadAdapter(
-  document: vscode.TextDocument
+  document: vscode.TextDocument,
+  options: VscodeDocumentReloadAdapterOptions
 ): VscodeDocumentReloadAdapter {
   const isTargetDocumentActive = (): boolean => {
+    if (!options.isTargetEditorActive()) return false;
     const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
     const uri = (input as { readonly uri?: vscode.Uri } | undefined)?.uri;
     return uri?.toString() === document.uri.toString();
@@ -36,7 +44,6 @@ export function createVscodeDocumentReloadAdapter(
   return {
     async reloadFromDisk() {
       try {
-        await vscode.commands.executeCommand('vscode.open', document.uri);
         await executeTargetRevert();
         if (!isTargetDocumentActive() || document.isDirty) {
           throw new Error('VS Code did not confirm that the target document was reloaded');

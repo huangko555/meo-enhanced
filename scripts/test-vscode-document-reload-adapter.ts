@@ -18,7 +18,9 @@ const createDocument = (uri: string, text: string, version: number): FakeDocumen
 const target = createDocument('file:///target.md', 'local unsaved', 3);
 const other = createDocument('file:///other.md', 'other local unsaved', 8);
 let activeDocument = other;
+let targetEditorActive = true;
 let switchFocusAfterTargetCheck = false;
+let skipRevertMutation = false;
 let commandFailure: Error | null = null;
 const commands: Array<{ command: string; target?: string }> = [];
 
@@ -32,6 +34,7 @@ mock.module('vscode', () => ({
         return;
       }
       if (command === 'workbench.action.files.revert') {
+        if (skipRevertMutation) return;
         activeDocument.text = activeDocument === target
           ? 'disk version from external tool'
           : 'other disk version';
@@ -71,15 +74,17 @@ const adapter = createVscodeDocumentReloadAdapter({
   getText: () => target.text,
   get version() { return target.version; },
   get isDirty() { return target.dirty; }
-} as never);
+} as never, {
+  isTargetEditorActive: () => targetEditorActive
+});
 
 other.dirty = false;
+activeDocument = target;
 assert.deepEqual(await adapter.reloadFromDisk(), {
   version: 4,
   text: 'disk version from external tool'
 });
 assert.deepEqual(commands.splice(0), [
-  { command: 'vscode.open', target: 'file:///target.md' },
   { command: 'workbench.action.files.revert', target: undefined }
 ]);
 assert.equal(other.text, 'other local unsaved', 'binding the target must not touch another tab');
@@ -97,9 +102,40 @@ assert.equal(target.text, 'second local draft');
 assert.equal(target.dirty, true, 'a failed target check must preserve the target Draft');
 assert.equal(other.text, 'other second local draft');
 assert.equal(other.dirty, true, 'a post-check focus race must not revert the newly active dirty tab');
+assert.deepEqual(commands.splice(0), []);
+
+activeDocument = other;
+other.dirty = false;
+await assert.rejects(
+  () => adapter.reloadFromDisk(),
+  /the target document is no longer active/
+);
+assert.equal(activeDocument, other, 'Reload must not activate or replace another editor');
+assert.deepEqual(commands.splice(0), []);
+
+activeDocument = target;
+targetEditorActive = false;
+await assert.rejects(
+  () => adapter.reloadFromDisk(),
+  /the target document is no longer active/
+);
+assert.equal(activeDocument, target, 'An inactive custom editor must not trigger a global revert');
+assert.equal(target.dirty, true);
+assert.deepEqual(commands.splice(0), []);
+targetEditorActive = true;
+
+activeDocument = target;
+skipRevertMutation = true;
+await assert.rejects(
+  () => adapter.reloadFromDisk(),
+  /VS Code did not confirm that the target document was reloaded/
+);
+assert.equal(activeDocument, target, 'A no-op revert must leave the initiating editor active');
+assert.equal(target.dirty, true, 'A no-op revert must not be reported as a successful disk reload');
 assert.deepEqual(commands.splice(0), [
-  { command: 'vscode.open', target: 'file:///target.md' }
+  { command: 'workbench.action.files.revert', target: undefined }
 ]);
+skipRevertMutation = false;
 
 activeDocument = target;
 other.dirty = false;
