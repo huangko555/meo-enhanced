@@ -35,7 +35,7 @@ export type EditorModeEffectCapabilities = {
   setOutlineOwner(owner: 'editor' | 'preview'): void;
   setReplaceEnabled(enabled: boolean): void;
   hideSelectionMenu(): void;
-  captureViewport(): EditorModeViewportToken | null;
+  captureViewport(targetMode?: EditorMode): EditorModeViewportToken | null;
   restoreViewport(viewport: EditorModeViewportToken, owner: 'editor' | 'preview'): void;
   focusEditor(): void;
   persistMode(mode: EditorMode, lastEditableMode: EditableMode): void | Promise<void>;
@@ -128,7 +128,10 @@ export function createEditorModeEffectAdapter(
       if ((input.type !== 'requestMode' && input.type !== 'toggleMode') || input.viewport !== undefined) {
         return input;
       }
-      return { ...input, viewport: capabilities.captureViewport() };
+      return {
+        ...input,
+        viewport: capabilities.captureViewport(input.type === 'requestMode' ? input.mode : undefined)
+      };
     },
 
     execute(effect) {

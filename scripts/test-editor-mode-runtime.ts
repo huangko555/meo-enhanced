@@ -11,6 +11,7 @@ import { createEditorModeRuntime } from '../webview/src/adapters/editorModeRunti
 const events: string[] = [];
 const errors: string[] = [];
 const viewportHandle = Object.freeze({});
+const capturedViewportTargets: Array<EditorMode | undefined> = [];
 let mountAttempts = 0;
 let failLiveOnce = true;
 let releaseLateApply: (() => void) | null = null;
@@ -43,7 +44,10 @@ const capabilities: EditorModeEffectCapabilities = {
   setOutlineOwner: (owner) => events.push(`outline:${owner}`),
   setReplaceEnabled: (enabled) => events.push(`replace:${enabled}`),
   hideSelectionMenu: () => events.push('hide-selection-menu'),
-  captureViewport: () => viewportHandle,
+  captureViewport: (targetMode) => {
+    capturedViewportTargets.push(targetMode);
+    return viewportHandle;
+  },
   restoreViewport: (handle, owner) => {
     events.push(`restore:${owner}:${handle === viewportHandle ? 'captured' : 'unknown'}`);
   },
@@ -75,6 +79,11 @@ events.length = 0;
 await runtime.dispatch({ type: 'requestMode', mode: 'source', source: 'user', restoreEditorFocus: true });
 assert.equal(runtime.getState().mode, 'source');
 assert.equal(
+  capturedViewportTargets.at(-1),
+  'source',
+  'explicit mode requests must tell viewport capture which surface will become visible'
+);
+assert.equal(
   events.some((event) => event.startsWith('restore:')),
   false,
   'Live/Source reconfiguration must remain inside the Editor ViewportController transaction'
@@ -101,6 +110,11 @@ assert.equal(events.at(-1), 'post:source');
 events.length = 0;
 await runtime.dispatch({ type: 'requestMode', mode: 'preview', source: 'user' });
 assert.equal(runtime.getState().mode, 'preview');
+assert.equal(
+  capturedViewportTargets.at(-1),
+  'preview',
+  'Preview requests must let an already-visible split Preview keep anchor ownership'
+);
 assert.equal(events.includes('preview:true'), true);
 assert.equal(
   events.includes('restore:preview:captured'),

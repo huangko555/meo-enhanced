@@ -20,6 +20,9 @@ use the same presentation controller.
 - Mode transitions carry a continuous position inside the most specific rendered
   source range, not only an integer source line. The destination is measured at
   its final width before that position is projected.
+- When a split Preview is already visible and becomes the standalone Preview,
+  it remains the transition anchor owner. The final-width layout reprojects that
+  same Preview reading point instead of recapturing an approximate Source line.
 
 VS Code's Markdown Preview follows the same broad model: it caches mapped
 elements by document version, ignores duplicate list and `pre` containers,

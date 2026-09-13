@@ -1183,16 +1183,67 @@ try {
   );
 
   await alignSourceLineAtReadingBand(transitionTableAnchorLine);
+  const sourceToFullReadingAnchor = await page.evaluate(() => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const viewportTop = frameDocument.scrollingElement?.scrollTop ?? 0;
+    const viewportAnchor = viewportTop + frameDocument.documentElement.clientHeight / 3;
+    const entries = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
+      .map(element => {
+        const rect = element.getBoundingClientRect();
+        return {
+          startLine: Number(element.dataset.sourceLine),
+          endLine: Number(element.dataset.sourceEndLine ?? element.dataset.sourceLine),
+          top: rect.top + viewportTop,
+          bottom: rect.bottom + viewportTop,
+          height: rect.height
+        };
+      })
+      .sort((left, right) => left.top - right.top || left.bottom - right.bottom || left.startLine - right.startLine);
+    let low = 0;
+    let high = entries.length - 1;
+    while (low <= high) {
+      const middle = (low + high) >>> 1;
+      if (entries[middle].top <= viewportAnchor + 0.5) low = middle + 1;
+      else high = middle - 1;
+    }
+    const candidate = entries[Math.max(0, high)];
+    return candidate ? {
+      startLine: candidate.startLine,
+      endLine: candidate.endLine,
+      progress: Math.max(0, Math.min(1, (viewportAnchor - candidate.top) / Math.max(1, candidate.height)))
+    } : null;
+  });
+  assert.ok(sourceToFullReadingAnchor, 'Split Preview must expose a semantic reading anchor');
   await startPreviewAnchorSampling(transitionTableAnchorLine);
   await page.click('button[data-mode="preview"]');
   await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview');
   await new Promise(resolve => setTimeout(resolve, 220));
   const sourceToFullPreviewFrames = await stopPreviewAnchorSampling();
-  const finalFullPreviewFrame = sourceToFullPreviewFrames.filter(frame => frame.visible && frame.offset !== null).at(-1);
+  const visibleSourceToFullPreviewFrames = sourceToFullPreviewFrames
+    .filter(frame => frame.visible && frame.offset !== null);
+  const finalFullPreviewFrame = visibleSourceToFullPreviewFrames.at(-1);
   assert.ok(finalFullPreviewFrame, JSON.stringify(sourceToFullPreviewFrames));
   assert.ok(
     Math.abs(finalFullPreviewFrame.offset as number) <= 20,
     `Source-to-Preview must project the complex anchor after full-width layout: ${JSON.stringify(sourceToFullPreviewFrames)}`
+  );
+  const finalReadingAnchorOffset = await page.evaluate(anchor => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const readingBand = frameDocument.documentElement.clientHeight / 3;
+    const entry = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
+      .filter(element => (
+        Number(element.dataset.sourceLine) === anchor.startLine
+        && Number(element.dataset.sourceEndLine ?? element.dataset.sourceLine) === anchor.endLine
+      ))
+      .map(element => ({ element, rect: element.getBoundingClientRect() }))
+      .sort((left, right) => Math.abs(left.rect.top - readingBand) - Math.abs(right.rect.top - readingBand))[0];
+    return entry
+      ? entry.rect.top + entry.rect.height * anchor.progress - readingBand
+      : null;
+  }, sourceToFullReadingAnchor!);
+  assert.ok(
+    finalReadingAnchorOffset !== null && Math.abs(finalReadingAnchorOffset) <= 1,
+    `Source-to-Preview must preserve the already-visible Preview reading anchor: ${JSON.stringify({ sourceToFullReadingAnchor, finalReadingAnchorOffset, sourceToFullPreviewFrames })}`
   );
   await page.click('button[data-mode="source"]');
   await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');

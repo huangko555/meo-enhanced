@@ -2223,8 +2223,11 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     ]) control.disabled = !enabled;
   },
   hideSelectionMenu: () => selectionMenuController.hide(),
-  captureViewport() {
-    return editor?.captureModeTransitionAnchorToken?.(editorHost.hidden ? 'preview' : 'editor') ?? null;
+  captureViewport(targetMode) {
+    const owner = editorHost.hidden || (targetMode === 'preview' && isSidePreviewVisible())
+      ? 'preview'
+      : 'editor';
+    return editor?.captureModeTransitionAnchorToken?.(owner) ?? null;
   },
   restoreViewport(viewport, owner) {
     editor?.restoreViewportAnchorToken?.(viewport, owner);
