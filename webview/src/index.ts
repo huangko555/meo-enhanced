@@ -1474,6 +1474,14 @@ let pendingSourcePreviewReveal: {
   editorReady: boolean;
   previewReady: boolean;
 } | null = null;
+const restorePendingEditorViewportAfterPreviewExit = (): void => {
+  const viewport = pendingEditorViewportAfterPreviewExit;
+  if (!viewport) return;
+  pendingEditorViewportAfterPreviewExit = null;
+  deferEditorViewportUntilPreviewExit = false;
+  editor?.restoreViewportAnchorToken?.(viewport, 'editor');
+  editor?.restoreModeRoundTripCaptureSurface?.(viewport);
+};
 const getActiveEditorMode = (): EditorMode => editorModeApplication.getState().mode;
 const isSidePreviewVisible = (): boolean => (
   sourcePreviewEnabled && getActiveEditorMode() === 'source'
@@ -1532,6 +1540,7 @@ const finishSourcePreviewReveal = (): void => {
     if (reveal.generation !== sourcePreviewRevealGeneration || !isSidePreviewVisible()) return;
     previewController.refreshLayout();
     if (editor) (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
+    restorePendingEditorViewportAfterPreviewExit();
     activateSourcePreviewLinkage();
     previewController.host.inert = false;
     previewController.host.style.removeProperty('visibility');
@@ -2288,11 +2297,9 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     // Preview exits reveal the editor at its final width only after the mode
     // change succeeds. Restoring before that reveal projects against the
     // temporary full-width geometry and is then displaced by split reflow.
-    const editorViewport = deferEditorViewportUntilPreviewExit
-      && pendingEditorViewportAfterPreviewExit === viewport
-      ? null
-      : viewport;
-    editor.setMode(mode, editorViewport);
+    const deferViewportRestore = deferEditorViewportUntilPreviewExit
+      && pendingEditorViewportAfterPreviewExit === viewport;
+    editor.setMode(mode, viewport, { deferViewportRestore });
     if (mode === 'source' && pendingSourcePreviewReveal) {
       (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
       markSourcePreviewEditorReady();
@@ -2320,12 +2327,8 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
       pendingEditorViewportAfterPreviewExit = null;
       deferEditorViewportUntilPreviewExit = false;
     }
-    if (!active && pendingEditorViewportAfterPreviewExit) {
-      const viewport = pendingEditorViewportAfterPreviewExit;
-      pendingEditorViewportAfterPreviewExit = null;
-      deferEditorViewportUntilPreviewExit = false;
-      editor?.restoreViewportAnchorToken?.(viewport, 'editor');
-      editor?.restoreModeRoundTripCaptureSurface?.(viewport);
+    if (!active && pendingEditorViewportAfterPreviewExit && !atomicSplit) {
+      restorePendingEditorViewportAfterPreviewExit();
     }
     if (active) {
       // A Source split and the standalone Preview have different final widths.
@@ -2391,7 +2394,10 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     } else if (currentMode === 'preview' && targetMode !== 'preview') {
       splitModeTransitionViewport = null;
       pendingEditorViewportAfterPreviewExit = viewport;
-      deferEditorViewportUntilPreviewExit = false;
+      // Source split reaches its final width only after standalone Preview is
+      // removed. Restore every Preview -> Source transition against that final
+      // geometry, not just a direct split-mode round trip.
+      deferEditorViewportUntilPreviewExit = targetMode === 'source' && sourcePreviewEnabled;
     } else {
       splitModeTransitionViewport = null;
     }

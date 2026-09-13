@@ -40,14 +40,14 @@ assert.equal((source.match(/editorModeRuntime = createEditorModeRuntime\(/g) ?? 
 assert.equal(source.includes('editorModeApplication.dispatch('), false);
 assert.equal(source.includes('editorModeEffectAdapter.execute('), false);
 assert.equal(
-  (source.match(/editor\.setMode\(mode, (?:viewport|editorViewport)\)/g) ?? []).length,
+  (source.match(/editor\.setMode\(mode, viewport, \{ deferViewportRestore \}\)/g) ?? []).length,
   1,
   'Editor mode application must apply its captured viewport through the injected Effect capability'
 );
 assert.equal(
-  /const editorViewport = [\s\S]*?\? null\s*:\s*viewport;[\s\S]*?editor\.setMode\(mode, editorViewport\)/.test(source),
+  /const deferViewportRestore = deferEditorViewportUntilPreviewExit[\s\S]*?pendingEditorViewportAfterPreviewExit === viewport;[\s\S]*?editor\.setMode\(mode, viewport, \{ deferViewportRestore \}\)/.test(source),
   true,
-  'Deferred editor reveals must derive their final viewport from the captured Effect viewport'
+  'Deferred editor reveals must keep the captured Effect viewport current until final geometry'
 );
 assert.equal(
   (source.match(/restoreViewport\(viewport, owner\)\s*\{\s*editor\?\.restoreViewportAnchorToken\?\.\(viewport, owner\);\s*\}/g) ?? []).length,

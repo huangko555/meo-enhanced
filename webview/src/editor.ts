@@ -3111,7 +3111,11 @@ export function createEditor({
         emitSelectionChange();
       });
     },
-    setMode(mode: EditableEditorMode, viewport: ViewportAnchorToken | null = null) {
+    setMode(
+      mode: EditableEditorMode,
+      viewport: ViewportAnchorToken | null = null,
+      { deferViewportRestore = false }: { deferViewportRestore?: boolean } = {}
+    ) {
       const applyMode = (isTransactionCurrent: () => boolean): void => {
         interactionContinuity?.cancel();
         commitActiveTableInput();
@@ -3123,7 +3127,8 @@ export function createEditor({
         void editorHistoryRuntime?.dispatch({ type: 'presentationChanged' });
 
         const topPosition = isTransactionCurrent() ? null : computeTopVisiblePosition();
-        viewportController.markInteraction();
+        if (deferViewportRestore) viewportController.markDeferredModeMutation();
+        else viewportController.markInteraction();
 
         const previousMode = currentMode;
         currentMode = nextMode;
@@ -3189,7 +3194,11 @@ export function createEditor({
         }
       };
 
-      viewportController.runAnchorTransaction(viewport, 'editor', applyMode);
+      if (deferViewportRestore && viewport) {
+        applyMode(() => viewportController.isTokenCurrent(viewport));
+      } else {
+        viewportController.runAnchorTransaction(viewport, 'editor', applyMode);
+      }
     },
     setGitGutterVisible(visible: boolean) {
       const nextVisible = visible !== false;

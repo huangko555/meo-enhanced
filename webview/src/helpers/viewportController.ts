@@ -191,6 +191,11 @@ interface ViewportAnchorTokenRecord {
   readonly projectedOwners: Set<ViewportAnchorOwner>;
 }
 
+interface ModeTransitionChain {
+  anchor: ViewportDocumentAnchor;
+  readonly editorAnchors: Partial<Record<'live' | 'source', ViewportDocumentAnchor>>;
+}
+
 type ViewportAnchorSuppressionReason =
   | 'parent-suppressed'
   | 'null-token'
@@ -368,6 +373,7 @@ export class ViewportController {
   private readonly getMode: () => 'live' | 'source';
   private readonly previewSurface: PreviewViewportSurface | null;
   private readonly anchorTokens = new WeakMap<ViewportAnchorToken, ViewportAnchorTokenRecord>();
+  private modeTransitionChain: ModeTransitionChain | null = null;
   private anchorTransactionScope: AnchorTransactionScope = IDLE_ANCHOR_TRANSACTION_SCOPE;
   private anchorMutationDepth = 0;
   private documentChangeDepth = 0;
@@ -414,17 +420,22 @@ export class ViewportController {
   }
 
   markInteraction(owner: ViewportAnchorOwner = 'editor'): void {
+    const scope = this.anchorTransactionScope;
+    const programmaticModeMutation = scope.kind === 'current'
+      && this.isAnchorTokenCurrent(scope.record)
+      && this.anchorMutationDepth > 0;
+    if (!programmaticModeMutation) this.modeTransitionChain = null;
     this.lastViewportInteractionOwner = owner;
     this.claimLinkedViewport(owner);
     this.invalidateViewportWork();
   }
 
-  private invalidateViewportWork(): void {
+  private invalidateViewportWork(preserveInteractionGeneration = false): void {
     const scope = this.anchorTransactionScope;
     const programmaticCurrentTransaction = scope.kind === 'current'
       && this.isAnchorTokenCurrent(scope.record)
       && (this.anchorMutationDepth > 0 || this.documentChangeDepth > 0);
-    if (!programmaticCurrentTransaction) {
+    if (!programmaticCurrentTransaction && !preserveInteractionGeneration) {
       this.interactionGeneration += 1;
     }
     this.navigationGeneration += 1;
@@ -444,6 +455,11 @@ export class ViewportController {
     return this.lastViewportInteractionOwner;
   }
 
+  /** Invalidates layout work while a captured mode token waits for final geometry. */
+  markDeferredModeMutation(): void {
+    this.invalidateViewportWork(true);
+  }
+
   prepareModeRoundTripReturn(handle: ViewportAnchorToken): boolean {
     const record = this.anchorTokens.get(handle);
     if (!record || !this.isAnchorTokenCurrent(record) || !record.modeRoundTripSnapshot) return false;
@@ -459,6 +475,7 @@ export class ViewportController {
   }
 
   private markNavigationScrollStart(): void {
+    this.modeTransitionChain = null;
     const scope = this.anchorTransactionScope;
     const programmaticCurrentTransaction = scope.kind === 'current'
       && this.isAnchorTokenCurrent(scope.record)
@@ -1282,6 +1299,7 @@ export class ViewportController {
 
   destroy(): void {
     this.destroyed = true;
+    this.modeTransitionChain = null;
     this.linkedPreviewEnabled = false;
     this.linkedViewportMap = null;
     if (this.linkedViewportMapRefreshTimer !== null) {
@@ -1717,6 +1735,7 @@ export class ViewportController {
 
   /** Reserves currentness for one navigation intent without disturbing the active viewport owner. */
   beginNavigationReveal(): () => boolean {
+    this.modeTransitionChain = null;
     // An explicit newer navigation supersedes an absolute scroll lock left by
     // transient-edit settlement and any previous gesture's idle window.
     // Otherwise the old owner can pull the viewport back, or make the new
@@ -1890,16 +1909,31 @@ export class ViewportController {
     // pane that should own the next split-to-single transition.
     this.invalidateViewportWork();
     const viewportOffset = this.view.scrollDOM.clientHeight / 3;
-    const anchor = owner === 'editor'
+    const capturedAnchor = owner === 'editor'
       ? this.captureEditorReadingAnchor(viewportOffset)
       : this.capturePreviewDocumentAnchor(undefined, 1 / 3);
-    if (!anchor) return null;
+    if (!capturedAnchor) return null;
+    const chain = this.modeTransitionChain ?? {
+      anchor: capturedAnchor,
+      editorAnchors: {}
+    };
+    this.modeTransitionChain = chain;
+    // Source has line geometry only. Once Live exposes the corresponding
+    // rendered block, promote that richer continuous range for subsequent
+    // Preview projections without discarding Source's exact return snapshot.
+    if (!chain.anchor.sourceRange && capturedAnchor.sourceRange) {
+      chain.anchor = capturedAnchor;
+    }
+    if (owner === 'editor') {
+      const editorMode = this.getMode();
+      chain.editorAnchors[editorMode] ??= { ...capturedAnchor };
+    }
     const handle = Object.freeze({}) as ViewportAnchorToken;
     const capturedScrollTop = owner === 'editor'
       ? this.view.scrollDOM.scrollTop
       : this.previewSurface?.readScrollTop?.() ?? null;
     this.anchorTokens.set(handle, {
-      anchor,
+      anchor: chain.anchor,
       interactionGeneration: this.interactionGeneration,
       modeRoundTripSnapshot: capturedScrollTop === null
         ? null
@@ -2116,6 +2150,17 @@ export class ViewportController {
         this.stabilizePreviewScrollTop(roundTrip.scrollTop, record);
       }
       roundTrip.returned = true;
+      record.projectedOwners.add(owner);
+      return;
+    }
+    const editorModeAnchor = owner === 'editor'
+      ? this.modeTransitionChain?.editorAnchors[this.getMode()]
+      : undefined;
+    if (editorModeAnchor) {
+      this.restoreDocumentAnchor({
+        ...editorModeAnchor,
+        lineOffset: editorModeAnchor.editorLineOffset ?? editorModeAnchor.lineOffset
+      }, undefined, { force: true });
       record.projectedOwners.add(owner);
       return;
     }

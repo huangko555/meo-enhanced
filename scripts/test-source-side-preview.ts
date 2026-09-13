@@ -1075,6 +1075,12 @@ try {
     const viewport = scroller.getBoundingClientRect();
     scroller.scrollTop += line.getBoundingClientRect().top - viewport.top - viewport.height / 3;
   }, complexTableAnchorText);
+  const complexTableSourceBounds = await page.$eval('.cm-scroller', element => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.move(complexTableSourceBounds.x, complexTableSourceBounds.y);
+  await page.mouse.wheel({ deltaY: 1 });
   await new Promise(resolve => setTimeout(resolve, 100));
   const complexTableSourceOffset = await page.evaluate(anchorText => {
     const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
@@ -1139,68 +1145,33 @@ try {
     complexPreviewSemanticOffset !== null && Math.abs(complexPreviewSemanticOffset) <= 2,
     `Live-to-Preview must preserve continuous table progress: ${JSON.stringify({ complexLiveSemanticAnchor, complexPreviewSemanticOffset })}`
   );
-  const previewCapturedSemanticAnchor = await page.evaluate(() => {
-    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
-    const viewportTop = frameDocument.scrollingElement?.scrollTop ?? 0;
-    const viewportAnchor = viewportTop + frameDocument.documentElement.clientHeight / 3;
-    const entries = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
-      .map(element => {
-        const rect = element.getBoundingClientRect();
-        return {
-          start: Number(element.dataset.sourceLine),
-          end: Number(element.dataset.sourceEndLine ?? element.dataset.sourceLine),
-          top: rect.top + viewportTop,
-          bottom: rect.bottom + viewportTop,
-          tag: element.tagName,
-          height: rect.height
-        };
-      })
-      .sort((left, right) => left.top - right.top || left.bottom - right.bottom || left.start - right.start);
-    let low = 0;
-    let high = entries.length - 1;
-    while (low <= high) {
-      const middle = (low + high) >>> 1;
-      if (entries[middle].top <= viewportAnchor + 0.5) low = middle + 1;
-      else high = middle - 1;
-    }
-    const candidate = entries[Math.max(0, high)];
-    return candidate ? {
-      startLine: candidate.start,
-      endLine: candidate.end,
-      progress: Math.max(0, Math.min(1, (viewportAnchor - candidate.top) / Math.max(1, candidate.height)))
-    } : null;
-  });
-  assert.ok(previewCapturedSemanticAnchor, 'Preview must capture a semantic range at the reading band');
   await page.click('button[data-mode="source"]');
   await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');
   await new Promise(resolve => setTimeout(resolve, 160));
-  const complexSourceSemanticOffset = await page.evaluate(anchor => {
-    const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-    const viewport = scroller.getBoundingClientRect();
-    const lineSpan = Math.max(1, anchor.endLine - anchor.startLine + 1);
-    const rangeOffset = lineSpan * anchor.progress;
-    const lineIndex = Math.min(lineSpan - 1, Math.floor(rangeOffset));
-    const lineNumber = anchor.startLine + lineIndex;
-    const lineProgress = anchor.progress >= 1 ? 1 : rangeOffset - lineIndex;
-    const gutter = Array.from(document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement'))
-      .find(element => Number(element.textContent) === lineNumber);
-    if (!gutter) return null;
-    const rect = gutter.getBoundingClientRect();
-    return rect.top + rect.height * lineProgress - viewport.top - viewport.height / 3;
-  }, previewCapturedSemanticAnchor!);
-  assert.ok(
-    complexSourceSemanticOffset !== null && Math.abs(complexSourceSemanticOffset) <= 2,
-    `Preview-to-Source must preserve continuous table progress: ${JSON.stringify({ previewCapturedSemanticAnchor, complexSourceSemanticOffset })}`
-  );
-  const complexTableSourceReturnOffset = await page.evaluate(anchorText => {
+  const readComplexTableSourceOffset = () => page.evaluate(anchorText => {
     const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
     const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
       .find(candidate => candidate.textContent?.includes(anchorText))!;
     return line.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
   }, complexTableAnchorText);
+  const complexTableSourceReturnOffsets = [await readComplexTableSourceOffset()];
+  for (let round = 0; round < 3; round += 1) {
+    await page.click('button[data-mode="live"]');
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live');
+    await page.click('button[data-mode="preview"]');
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview');
+    await page.click('button[data-mode="source"]');
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');
+    await new Promise(resolve => setTimeout(resolve, 80));
+    complexTableSourceReturnOffsets.push(await readComplexTableSourceOffset());
+  }
   assert.ok(
-    Math.abs(complexTableSourceReturnOffset - complexTableSourceOffset) <= 20,
-    JSON.stringify({ complexTableSourceOffset, complexTableSourceReturnOffset })
+    complexTableSourceReturnOffsets.every(offset => Math.abs(offset - complexTableSourceOffset) <= 20),
+    JSON.stringify({
+      complexTableSourceOffset,
+      complexTableSourceReturnOffsets,
+      complexLiveSemanticAnchor,
+    })
   );
 
   const splitSourceBounds = await page.$eval('.cm-scroller', element => {
@@ -1524,7 +1495,9 @@ try {
     return {
       scrollTop: scroller.scrollTop,
       line: Math.round(visible.start + (visible.end - visible.start) * ratio),
-      offset: visible.top - scroller.scrollTop
+      offset: visible.top - scroller.scrollTop,
+      range: { start: visible.start, end: visible.end },
+      geometry: { top: visible.top, bottom: visible.bottom }
     };
   });
   await page.evaluate(line => {

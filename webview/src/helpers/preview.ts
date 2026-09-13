@@ -46,7 +46,7 @@ type PreviewControllerOptions = {
   mermaidRenderResources: MermaidDiagramRenderResources;
 };
 
-type PreviewViewportRestore = {
+type PreviewViewportPosition = {
   readonly line: number;
   readonly lineOffset: number;
   readonly viewportOffset?: number;
@@ -55,6 +55,9 @@ type PreviewViewportRestore = {
     readonly endLine: number;
     readonly progress: number;
   };
+};
+
+type PreviewViewportRestore = PreviewViewportPosition & {
   readonly isCurrent: () => boolean;
 };
 
@@ -628,6 +631,12 @@ export function createPreviewController({
   let activeFrameDocument: Document | null = null;
   let pendingPresentationScroll: { document: Document; scrollTop: number } | null = null;
   let viewportInteractionGeneration = 0;
+  let retainedViewportProjection: {
+    readonly document: Document;
+    readonly position: PreviewViewportPosition;
+    readonly scrollTop: number;
+    readonly interactionGeneration: number;
+  } | null = null;
   let hasPendingRequest = false;
   let acceptingViewportProjection: PreviewViewportProjectionSlot | null = null;
   let pendingText = '';
@@ -1007,6 +1016,7 @@ export function createPreviewController({
     frameGeneration = loadGeneration;
     mermaidPresentationGeneration += 1;
     activeFrameDocument = null;
+    retainedViewportProjection = null;
     pendingPresentationScroll = null;
     frameRenderedText = null;
     disposeDeferredImages();
@@ -1077,6 +1087,7 @@ export function createPreviewController({
           if (!['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(key)) return;
         }
         viewportInteractionGeneration += 1;
+        retainedViewportProjection = null;
         pendingPresentationScroll = null;
         onViewportInteraction?.();
       };
@@ -1115,6 +1126,7 @@ export function createPreviewController({
             viewportRestore.viewportOffset,
             viewportRestore.sourceRange
           );
+          retainViewportProjection(viewportRestore);
         }
       };
       const finishRender = () => {
@@ -1469,6 +1481,27 @@ export function createPreviewController({
   };
   const getVisualSourceMap = (): PreviewSourceMapEntry[] => [...getSourceMap()]
     .sort((left, right) => left.top - right.top || left.bottom - right.bottom || left.start - right.start);
+  const findVisualRangeProjection = (
+    sourceRange: NonNullable<PreviewViewportPosition['sourceRange']>,
+    viewportAnchor: number
+  ): PreviewSourceMapEntry | undefined => {
+    const ranges = getVisualSourceMap().filter(entry => (
+      entry.start === sourceRange.startLine && entry.end === sourceRange.endLine
+    ));
+    if (ranges.length === 0) return undefined;
+    // Mirror getTopVisiblePosition: the visual entry whose top is the last one
+    // at or above the reading band owns the anchor. Source order and nearest-top
+    // selection are lossy when a rendered container and one of its descendants
+    // intentionally expose the same source range.
+    let low = 0;
+    let high = ranges.length - 1;
+    while (low <= high) {
+      const middle = (low + high) >>> 1;
+      if (ranges[middle].top <= viewportAnchor + 0.5) low = middle + 1;
+      else high = middle - 1;
+    }
+    return ranges[Math.max(0, high)];
+  };
   const getSourceElements = (): HTMLElement[] => getSourceMap().map(({ element }) => element);
   const getSourceRange = (element: HTMLElement): { start: number; end: number } | null => {
     const start = Number.parseInt(element.dataset.sourceLine ?? '', 10);
@@ -1504,19 +1537,17 @@ export function createPreviewController({
     viewportOffset = 0,
     sourceRange?: { startLine: number; endLine: number; progress: number }
   ): void => {
+    retainedViewportProjection = null;
     const source = findSourceProjection(line);
     const scrollElement = getFrameDocument()?.scrollingElement;
     if (!scrollElement) {
       return;
     }
     if (sourceRange) {
-      const range = getSourceMap()
-        .filter(entry => (
-          entry.start === sourceRange.startLine && entry.end === sourceRange.endLine
-        ))
-        .sort((left, right) => (
-          Math.abs(left.top - scrollElement.scrollTop) - Math.abs(right.top - scrollElement.scrollTop)
-        ))[0];
+      const range = findVisualRangeProjection(
+        sourceRange,
+        scrollElement.scrollTop + Math.max(0, viewportOffset)
+      );
       if (range) {
         const progress = Math.max(0, Math.min(1, sourceRange.progress));
         scrollElement.scrollTop = range.top
@@ -1546,6 +1577,20 @@ export function createPreviewController({
     const edge = source.before ?? source.after;
     if (edge) scrollElement.scrollTop = edge.top - Math.max(0, viewportOffset);
   };
+  const retainViewportProjection = (position: PreviewViewportPosition): void => {
+    const frameDocument = getFrameDocument();
+    const scrollElement = frameDocument?.scrollingElement;
+    if (!frameDocument || !scrollElement) return;
+    retainedViewportProjection = {
+      document: frameDocument,
+      position: {
+        ...position,
+        sourceRange: position.sourceRange ? { ...position.sourceRange } : undefined
+      },
+      scrollTop: scrollElement.scrollTop,
+      interactionGeneration: viewportInteractionGeneration
+    };
+  };
   const getTopVisiblePosition = (viewportOffset = 0): {
     topLine: number;
     topLineOffset: number;
@@ -1553,12 +1598,31 @@ export function createPreviewController({
     viewportOffset: number;
     sourceRange?: { startLine: number; endLine: number; progress: number };
   } | null => {
+    const frameDocument = getFrameDocument();
+    const scrollElement = frameDocument?.scrollingElement;
+    const boundedViewportOffset = Math.max(0, viewportOffset);
+    const retained = retainedViewportProjection;
+    if (
+      retained && frameDocument && scrollElement &&
+      retained.document === frameDocument &&
+      retained.interactionGeneration === viewportInteractionGeneration &&
+      Math.abs(scrollElement.scrollTop - retained.scrollTop) <= 0.5 &&
+      Math.abs((retained.position.viewportOffset ?? 0) - boundedViewportOffset) <= 0.5
+    ) {
+      return {
+        topLine: retained.position.line,
+        topLineOffset: retained.position.lineOffset,
+        editorLineOffset: 0,
+        viewportOffset: boundedViewportOffset,
+        sourceRange: retained.position.sourceRange ? { ...retained.position.sourceRange } : undefined
+      };
+    }
+    if (retained) retainedViewportProjection = null;
     const entries = getVisualSourceMap();
     if (entries.length === 0) {
       return null;
     }
-    const viewportTop = getFrameDocument()?.scrollingElement?.scrollTop ?? 0;
-    const boundedViewportOffset = Math.max(0, viewportOffset);
+    const viewportTop = scrollElement?.scrollTop ?? 0;
     const viewportAnchor = viewportTop + boundedViewportOffset;
     let low = 0;
     let high = entries.length - 1;
@@ -1598,12 +1662,7 @@ export function createPreviewController({
     };
   };
   const restoreTopVisiblePosition = (
-    position: {
-      line: number;
-      lineOffset: number;
-      viewportOffset?: number;
-      sourceRange?: { startLine: number; endLine: number; progress: number };
-    },
+    position: PreviewViewportPosition,
     isCurrent: () => boolean
   ): void => {
     const restore = { ...position, isCurrent };
@@ -1615,6 +1674,7 @@ export function createPreviewController({
         restore.viewportOffset,
         restore.sourceRange
       );
+      retainViewportProjection(restore);
     }
   };
   const getHeadings = (): OutlineHeading[] => {
@@ -1761,6 +1821,7 @@ export function createPreviewController({
       unsubscribePreviewCodeHighlight();
       releasePreviewCodeHighlighting();
       activeFrameDocument = null;
+      retainedViewportProjection = null;
       commitPendingCodeHighlight = null;
       sourceMapDocument = null;
       sourceMap = [];
