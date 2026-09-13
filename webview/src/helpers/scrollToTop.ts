@@ -3,7 +3,10 @@ import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 
 type ScrollElement = Element & { scrollTop: number };
 
-export function createDocumentScrollToTopController(uiLanguage: UiLanguage) {
+export function createDocumentScrollToTopController(
+  uiLanguage: UiLanguage,
+  onNavigateToTop?: () => boolean
+) {
   const strings = getUiStrings(uiLanguage);
   const button = document.createElement('button');
   button.type = 'button';
@@ -38,7 +41,9 @@ export function createDocumentScrollToTopController(uiLanguage: UiLanguage) {
     if (!scrollElement) {
       return;
     }
-    scrollElement.scrollTop = 0;
+    if (onNavigateToTop?.() !== true) {
+      scrollElement.scrollTop = 0;
+    }
     sync();
   });
 

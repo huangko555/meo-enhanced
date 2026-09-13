@@ -1249,6 +1249,41 @@ try {
   await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');
   await new Promise(resolve => setTimeout(resolve, 120));
 
+  await page.evaluate(() => {
+    const sourceScroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+    sourceScroller.scrollTop = 600;
+    sourceScroller.dispatchEvent(new Event('scroll'));
+  });
+  await new Promise(resolve => setTimeout(resolve, 120));
+  await page.click('.preview-host > .document-scroll-top');
+  await new Promise(resolve => setTimeout(resolve, 120));
+  const previewButtonTop = await page.evaluate(() => ({
+    source: document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop,
+    preview: document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop
+  }));
+  assert.ok(
+    previewButtonTop.source <= 0.5 && previewButtonTop.preview <= 0.5,
+    `Preview back-to-top must move both linked surfaces: ${JSON.stringify(previewButtonTop)}`
+  );
+
+  const previewFrameBounds = await page.$eval('.preview-frame', element => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.move(previewFrameBounds.x, previewFrameBounds.y);
+  await page.mouse.wheel({ deltaY: 600 });
+  await new Promise(resolve => setTimeout(resolve, 120));
+  await page.click('.editor-host > .document-scroll-top');
+  await new Promise(resolve => setTimeout(resolve, 120));
+  const sourceButtonTop = await page.evaluate(() => ({
+    source: document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop,
+    preview: document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop
+  }));
+  assert.ok(
+    sourceButtonTop.source <= 0.5 && sourceButtonTop.preview <= 0.5,
+    `Source back-to-top must move both linked surfaces: ${JSON.stringify(sourceButtonTop)}`
+  );
+
   await page.click('.source-preview-button');
   const closed = await page.evaluate(() => ({
     split: document.querySelector('.editor-surface')?.hasAttribute('data-source-preview'),

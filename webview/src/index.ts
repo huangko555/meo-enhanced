@@ -1292,7 +1292,11 @@ editorWrapper.setAttribute('aria-hidden', 'true');
 const existingEditorHost = editorWrapper.querySelector('.editor-host');
 const editorHost = existingEditorHost instanceof HTMLElement ? existingEditorHost : document.createElement('div');
 editorHost.className = 'editor-host';
-const editorScrollToTopController = createDocumentScrollToTopController(activeUiLanguage);
+const editorScrollToTopController = createDocumentScrollToTopController(activeUiLanguage, () => {
+  if (!isSidePreviewVisible() || !editor?.navigateLinkedViewportToTop?.('editor')) return false;
+  readingPositionLifecycle?.userInteracted();
+  return true;
+});
 editorHost.appendChild(editorScrollToTopController.button);
 
 let editor: any = null;
@@ -1342,6 +1346,11 @@ const previewController = createPreviewController({
   applyCodeTheme: (appearance) => applyCodeThemeForPreview(appearance),
   mermaidRenderResources: mermaidDiagramRenderPool,
   onFindRequested: () => findPanelController.open('find'),
+  onNavigateToTop: () => {
+    if (!isSidePreviewVisible() || !editor?.navigateLinkedViewportToTop?.('preview')) return false;
+    readingPositionLifecycle?.userInteracted();
+    return true;
+  },
   onPaintReady: () => {
     previewPaintReady = true;
     editorHost.removeAttribute('data-preview-cover');

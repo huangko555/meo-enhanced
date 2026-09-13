@@ -2915,6 +2915,9 @@ export function createEditor({
     markPreviewViewportInteraction(): void {
       viewportController.markPreviewInteraction();
     },
+    navigateLinkedViewportToTop(owner: ViewportAnchorOwner): boolean {
+      return viewportController.navigateLinkedToTop(owner);
+    },
     previewViewportChanged(): void {
       viewportController.previewViewportChanged();
     },

@@ -35,6 +35,7 @@ type PreviewControllerOptions = {
   onRendered?: (options?: { readonly skipLinkedViewportProjection?: boolean }) => void;
   onPaintReady?: () => void;
   onFindRequested?: () => void;
+  onNavigateToTop?: () => boolean;
   onViewportInteraction?: () => void;
   onViewportChange?: () => void;
   onGeometryChanged?: () => void;
@@ -529,6 +530,7 @@ export function createPreviewController({
   onRendered,
   onPaintReady,
   onFindRequested,
+  onNavigateToTop,
   onViewportInteraction,
   onViewportChange,
   onGeometryChanged,
@@ -613,7 +615,7 @@ export function createPreviewController({
     scrollToTopController.setUiLanguage(language);
   };
 
-  const scrollToTopController = createDocumentScrollToTopController(uiLanguage);
+  const scrollToTopController = createDocumentScrollToTopController(uiLanguage, onNavigateToTop);
   host.append(frame, status, scrollToTopController.button);
 
   let appearancePreference: PreviewAppearance = 'auto';

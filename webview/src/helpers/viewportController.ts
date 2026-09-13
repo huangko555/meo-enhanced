@@ -581,6 +581,21 @@ export class ViewportController {
     this.markInteraction('preview');
   }
 
+  /** Treats back-to-top as one explicit navigation across the linked surfaces. */
+  navigateLinkedToTop(owner: ViewportAnchorOwner): boolean {
+    if (
+      this.destroyed || !this.linkedPreviewEnabled ||
+      !this.previewSurface?.writeScrollTop
+    ) return false;
+    this.markInteraction(owner);
+    this.writeScrollPosition({
+      top: 0,
+      left: this.view.scrollDOM.scrollLeft
+    });
+    this.previewSurface.writeScrollTop(0);
+    return true;
+  }
+
   editorViewportChanged(): void {
     this.projectLinkedViewport('editor');
   }
