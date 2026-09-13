@@ -45,6 +45,17 @@ try {
   await page.addScriptTag({ content: `window.acquireVsCodeApi=()=>({getState(){},setState(){},postMessage(message){window.__renderSourceSidePreview(message).then(response=>{if(response)window.dispatchEvent(new MessageEvent('message',{data:response}));});}});` });
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
 
+  const compactComplexBlock = [
+    '<details>',
+    '<summary>Compact complex block</summary>',
+    ...Array.from({ length: 36 }, (_, index) => `<p>Collapsed source row ${index + 1}</p>`),
+    '</details>'
+  ].join('\n');
+  const narrowTable = [
+    '| A | Content-heavy column | C | D | E | F | G | H | I |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| 1 | This column needs materially more room than the compact labels | 3 | 4 | 5 | 6 | 7 | 8 | 9 |'
+  ].join('\n');
   const text = [
     'Intro paragraph for formatting continuity.',
     `### Long heading ${'6'.repeat(180)}`,
@@ -52,9 +63,15 @@ try {
     `Ordinary paragraph ${'7'.repeat(220)}`,
     '',
     `- Ordinary list item ${'unbroken'.repeat(55)}`,
-    ...Array.from({ length: 140 }, (_, index) => (
+    ...Array.from({ length: 22 }, (_, index) => (
       `## Section ${index + 1}\n\nParagraph ${index + 1} with enough text to exercise semantic linked scrolling.`
-    ))
+    )),
+    compactComplexBlock,
+    narrowTable,
+    ...Array.from({ length: 118 }, (_, index) => {
+      const section = index + 23;
+      return `## Section ${section}\n\nParagraph ${section} with enough text to exercise semantic linked scrolling.`;
+    })
   ].join('\n\n');
   await page.evaluate(text => window.dispatchEvent(new MessageEvent('message', { data: {
     type: 'init', documentId: 'file:///source-side-preview.md', text, version: 1,
@@ -76,7 +93,8 @@ try {
   await page.waitForFunction(() => {
     const preview = document.querySelector<HTMLIFrameElement>('.preview-frame');
     return document.querySelector('.editor-surface')?.hasAttribute('data-source-preview')
-      && preview?.contentDocument?.body.textContent?.includes('Section 140');
+      && preview?.contentDocument?.body.textContent?.includes('Section 140')
+      && getComputedStyle(document.querySelector<HTMLElement>('.preview-host')!).visibility !== 'hidden';
   });
   const layout = await page.evaluate(() => {
     const editor = document.querySelector<HTMLElement>('.editor-host')!;
@@ -96,6 +114,44 @@ try {
   assert.equal(layout.pressed, 'true');
   assert.equal(layout.focusedInEditor, true, 'Opening side Preview should restore editor focus');
   assert.ok(Math.abs(layout.editorWidth - layout.previewWidth) <= 2, JSON.stringify(layout));
+  const tableFit = await page.evaluate(() => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const wrapper = frameDocument.querySelector<HTMLElement>('.meo-table-scroll')!;
+    const columns = Array.from(wrapper.querySelectorAll<HTMLTableColElement>('col'));
+    return {
+      overflow: wrapper.scrollWidth - wrapper.clientWidth,
+      overflowX: getComputedStyle(wrapper).overflowX,
+      widths: columns.map(column => column.getBoundingClientRect().width)
+    };
+  });
+  assert.ok(tableFit.overflow <= 1, JSON.stringify(tableFit));
+  assert.ok(tableFit.overflowX === 'clip' || tableFit.overflowX === 'hidden', JSON.stringify(tableFit));
+  assert.ok(tableFit.widths[1] > tableFit.widths[0], JSON.stringify(tableFit));
+
+  const compactBlockStartLine = text.slice(0, text.indexOf('<details>')).split('\n').length;
+  await page.click('.line-jump-input');
+  await page.keyboard.type(String(compactBlockStartLine));
+  await page.keyboard.press('Enter');
+  await new Promise(resolve => setTimeout(resolve, 120));
+  const compactBlockTrace = await page.evaluate(async () => {
+    const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const positions: number[] = [];
+    for (let frame = 0; frame < 150; frame += 1) {
+      scroller.scrollTop += 6;
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      positions.push(frameDocument.scrollingElement!.scrollTop);
+    }
+    return positions;
+  });
+  const compactBlockReverseSteps = compactBlockTrace.filter((position, index) => (
+    index > 0 && position < compactBlockTrace[index - 1] - 1
+  ));
+  assert.equal(
+    compactBlockReverseSteps.length,
+    0,
+    `Compact complex blocks must not make linked Preview reverse: ${JSON.stringify(compactBlockTrace)}`
+  );
 
   const countBeforeTyping = previewRenderCount;
   await page.keyboard.down('Control');
@@ -225,6 +281,14 @@ try {
     sourceFollowerLagFrames.length,
     0,
     `Source-driven linked scrolling must update Preview in the same sampled frame: ${JSON.stringify(sourceDrivenFrames)}`
+  );
+  const sourceDrivenPreviewReverseSteps = sourceDrivenFrames.filter((frame, index) => (
+    index > 0 && frame.scrollTop < sourceDrivenFrames[index - 1].scrollTop - 1
+  ));
+  assert.equal(
+    sourceDrivenPreviewReverseSteps.length,
+    0,
+    `Source-driven Preview must remain monotonic through compact complex blocks: ${JSON.stringify(sourceDrivenFrames)}`
   );
   await page.mouse.click(
     sourceBounds.x + sourceBounds.width / 2,
@@ -416,6 +480,45 @@ try {
     previewFollowerLagFrames.length,
     0,
     `Preview-driven linked scrolling must update Source in the same sampled frame: ${JSON.stringify(scrollTrace.frames)}`
+  );
+
+  await page.click('button[data-mode="live"]');
+  await page.waitForFunction(() => (
+    document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live'
+    && document.querySelector<HTMLElement>('.preview-host')?.hidden === true
+  ));
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await page.evaluate(() => {
+    const samples: Array<{ hidden: boolean; scrollTop: number }> = [];
+    let remaining = 24;
+    const sample = () => {
+      const host = document.querySelector<HTMLElement>('.preview-host')!;
+      const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument;
+      samples.push({
+        hidden: host.hidden || getComputedStyle(host).visibility === 'hidden',
+        scrollTop: frameDocument?.scrollingElement?.scrollTop ?? 0
+      });
+      remaining -= 1;
+      if (remaining > 0) requestAnimationFrame(sample);
+    };
+    (window as typeof window & { __sourceSplitEntrySamples?: typeof samples }).__sourceSplitEntrySamples = samples;
+    requestAnimationFrame(sample);
+  });
+  await page.click('button[data-mode="source"]');
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');
+  await new Promise(resolve => setTimeout(resolve, 450));
+  const splitEntrySamples = await page.evaluate(() => (
+    (window as typeof window & {
+      __sourceSplitEntrySamples: Array<{ hidden: boolean; scrollTop: number }>;
+    }).__sourceSplitEntrySamples
+  ));
+  const visibleSplitEntryPositions = splitEntrySamples
+    .filter(sample => !sample.hidden)
+    .map(sample => sample.scrollTop);
+  assert.ok(visibleSplitEntryPositions.length >= 2, JSON.stringify(splitEntrySamples));
+  assert.ok(
+    Math.max(...visibleSplitEntryPositions) - Math.min(...visibleSplitEntryPositions) <= 1,
+    `A split Preview must be at its final position before its first visible frame: ${JSON.stringify(splitEntrySamples)}`
   );
 
   await page.click('.source-preview-button');

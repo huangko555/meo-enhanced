@@ -19,8 +19,23 @@ export function planPreviewTableWidths(
   const available = Math.max(0, availableWidth);
   const minimum = Math.max(1, minimumColumnWidth);
   const minimumTotal = minimum * preferredWidths.length;
-  const totalWidth = Math.max(available, minimumTotal);
+  const totalWidth = available;
   const preferredCap = Math.max(minimum, Math.min(640, Math.max(360, available * 0.62)));
+  if (available < minimumTotal) {
+    // The minimum is a readability target, not an overflow trigger. Preserve a
+    // small equal share for every column, then distribute the remaining width
+    // by measured content demand so the table always converges on its container.
+    const equalBudget = available * 0.35;
+    const equalShare = equalBudget / preferredWidths.length;
+    const demands = preferredWidths.map(width => Math.max(
+      1,
+      Math.min(preferredCap, Number.isFinite(width) ? width : minimum)
+    ));
+    const demandTotal = demands.reduce((sum, demand) => sum + demand, 0);
+    const weightedBudget = Math.max(0, available - equalBudget);
+    const widths = demands.map(demand => equalShare + weightedBudget * (demand / demandTotal));
+    return { widths, totalWidth, overflows: false };
+  }
   const demands = preferredWidths.map((width) => (
     Math.max(0, Math.min(preferredCap, Number.isFinite(width) ? width : minimum) - minimum)
   ));
@@ -51,7 +66,7 @@ export function planPreviewTableWidths(
     const extra = remaining / widths.length;
     for (let index = 0; index < widths.length; index += 1) widths[index] += extra;
   }
-  return { widths, totalWidth, overflows: minimumTotal > available + 0.5 };
+  return { widths, totalWidth, overflows: false };
 }
 
 export type PreviewTableLayoutController = {
@@ -126,11 +141,11 @@ function layoutTable(table: HTMLTableElement): void {
   const preferred = measurePreferredWidths(table, columnCount);
   const plan = planPreviewTableWidths(preferred, wrapper.clientWidth);
   table.style.width = `${plan.totalWidth}px`;
-  table.style.minWidth = `${plan.totalWidth}px`;
-  table.style.maxWidth = 'none';
+  table.style.minWidth = '0';
+  table.style.maxWidth = '100%';
   table.style.tableLayout = 'fixed';
   plan.widths.forEach((width, index) => { columns[index].style.width = `${width}px`; });
-  wrapper.classList.toggle('is-table-overflowing', plan.overflows);
+  wrapper.classList.remove('is-table-overflowing');
 }
 
 export function createPreviewTableLayoutController(frameDocument: Document): PreviewTableLayoutController {

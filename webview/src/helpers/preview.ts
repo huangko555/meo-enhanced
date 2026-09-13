@@ -33,6 +33,7 @@ type PreviewControllerOptions = {
   onFindRequested?: () => void;
   onViewportInteraction?: () => void;
   onViewportChange?: () => void;
+  onGeometryChanged?: () => void;
   runViewportTransaction?: (mutate: () => void) => void | Promise<void>;
   mermaidRenderResources: MermaidDiagramRenderResources;
 };
@@ -282,11 +283,29 @@ body::-webkit-scrollbar-corner {
   background: transparent !important;
 }
 
-.meo-export-html-block,
-.meo-table-scroll {
+.meo-export-html-block {
   max-width: 100%;
   overflow-x: auto;
   scrollbar-width: thin;
+}
+
+.meo-table-scroll {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: clip;
+}
+
+.meo-table-scroll :is(th, td) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.meo-table-scroll :is(pre, code) {
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 `;
 
@@ -453,6 +472,7 @@ export function createPreviewController({
   onFindRequested,
   onViewportInteraction,
   onViewportChange,
+  onGeometryChanged,
   runViewportTransaction,
   mermaidRenderResources
 }: PreviewControllerOptions) {
@@ -951,7 +971,10 @@ export function createPreviewController({
           if (sourceMapMeasureFrame !== null) return;
           sourceMapMeasureFrame = window.requestAnimationFrame(() => {
             sourceMapMeasureFrame = null;
-            if (!disposed && activeFrameDocument === frameDocument) getSourceMap();
+            if (!disposed && activeFrameDocument === frameDocument) {
+              getSourceMap();
+              onGeometryChanged?.();
+            }
           });
         });
         sourceMapResizeObserver.observe(mappedRoot);
@@ -1533,6 +1556,34 @@ export function createPreviewController({
     getTopVisiblePosition,
     restoreTopLine,
     restoreTopVisiblePosition,
+    captureLinkedGeometry: () => {
+      const frameDocument = getFrameDocument();
+      const scrollElement = frameDocument?.scrollingElement;
+      if (!frameDocument || !scrollElement) return null;
+      return {
+        regions: getSourceMap().map(entry => ({
+          startLine: entry.start,
+          endLine: entry.end,
+          top: entry.top,
+          bottom: entry.bottom
+        })),
+        maximumScrollTop: Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight)
+      };
+    },
+    readScrollTop: () => getFrameDocument()?.scrollingElement?.scrollTop ?? 0,
+    writeScrollTop: (scrollTop: number) => {
+      const scrollElement = getFrameDocument()?.scrollingElement;
+      if (!scrollElement) return;
+      const next = Math.max(0, Math.min(
+        Number.isFinite(scrollTop) ? scrollTop : 0,
+        scrollElement.scrollHeight - scrollElement.clientHeight
+      ));
+      if (Math.abs(scrollElement.scrollTop - next) > 0.1) scrollElement.scrollTop = next;
+    },
+    refreshLayout: () => {
+      previewTableLayout?.refresh();
+      sourceMapDirty = true;
+    },
     getSelectedText: () => frame.contentWindow?.getSelection()?.toString() ?? '',
     getSearchAdapter: () => ({
       setSearchQuery,

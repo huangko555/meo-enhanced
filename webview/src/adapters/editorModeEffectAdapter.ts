@@ -27,7 +27,7 @@ export type EditorModeEffectCapabilities = {
     mode: EditableMode,
     viewport: EditorModeViewportToken | null
   ): void | Promise<void>;
-  setPreviewActive(active: boolean): void;
+  setPreviewActive(active: boolean, presentation?: EditorModePresentation): void;
   setEditorVisible(visible: boolean, interactive?: boolean): void;
   presentModeControl(mode: EditorMode): void;
   closeFind(): void;
@@ -85,7 +85,7 @@ export function createEditorModeEffectAdapter(
         restoreEditorFocus: presentation.restoreEditorFocus
       };
     } else {
-      capabilities.setPreviewActive(presentation.previewActive);
+      capabilities.setPreviewActive(presentation.previewActive, presentation);
       capabilities.setEditorVisible(presentation.editorVisible, presentation.editorVisible);
     }
     capabilities.presentModeControl(presentation.mode);

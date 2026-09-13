@@ -8,10 +8,13 @@ assert.ok(contentAware.widths[1] > contentAware.widths[0] * 2, JSON.stringify(co
 assert.ok(contentAware.widths[1] > contentAware.widths[2] * 2, JSON.stringify(contentAware));
 assert.equal(contentAware.overflows, false);
 
-const locallyScrollable = planPreviewTableWidths([110, 760, 150], 220);
-assert.deepEqual(locallyScrollable.widths.map(Math.round), [90, 90, 90]);
-assert.equal(locallyScrollable.totalWidth, 270);
-assert.equal(locallyScrollable.overflows, true);
+const tightlyFitted = planPreviewTableWidths([110, 760, 150], 220);
+assert.equal(Math.round(tightlyFitted.widths.reduce((sum, width) => sum + width, 0)), 220);
+assert.ok(tightlyFitted.widths.every((width) => width > 0));
+assert.ok(tightlyFitted.widths[1] > tightlyFitted.widths[0], JSON.stringify(tightlyFitted));
+assert.ok(tightlyFitted.widths[1] > tightlyFitted.widths[2], JSON.stringify(tightlyFitted));
+assert.equal(tightlyFitted.totalWidth, 220);
+assert.equal(tightlyFitted.overflows, false);
 
 const spareSpace = planPreviewTableWidths([100, 100], 500);
 assert.equal(Math.round(spareSpace.widths.reduce((sum, width) => sum + width, 0)), 500);

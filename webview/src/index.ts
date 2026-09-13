@@ -1345,6 +1345,7 @@ const previewController = createPreviewController({
   onPaintReady: () => {
     previewPaintReady = true;
     editorHost.removeAttribute('data-preview-cover');
+    markSourcePreviewSurfaceReady();
   },
   onRendered: (options) => {
     if (outlineController?.isVisible()) {
@@ -1353,6 +1354,7 @@ const previewController = createPreviewController({
     if (options?.skipLinkedViewportProjection !== true) {
       editor?.linkedPreviewReady?.();
     }
+    markSourcePreviewSurfaceReady();
     readingPositionLifecycle?.surfaceReady();
   },
   onViewportInteraction: () => {
@@ -1362,6 +1364,9 @@ const previewController = createPreviewController({
   onViewportChange: () => {
     if (isSidePreviewVisible()) editor?.previewViewportChanged?.();
     readingPositionLifecycle?.viewportChanged();
+  },
+  onGeometryChanged: () => {
+    if (isSidePreviewVisible()) editor?.linkedPreviewReady?.();
   },
   runViewportTransaction: (mutate) => {
     if (!editor?.runPreviewPresentationTransaction) {
@@ -1414,6 +1419,12 @@ root.replaceChildren(toolbar, editorWrapper);
 const editorModeApplication = createEditorModeApplication();
 let editorModeRuntime: EditorModeRuntime;
 let sourcePreviewEnabled = false;
+let sourcePreviewRevealGeneration = 0;
+let pendingSourcePreviewReveal: {
+  readonly generation: number;
+  editorReady: boolean;
+  previewReady: boolean;
+} | null = null;
 const getActiveEditorMode = (): EditorMode => editorModeApplication.getState().mode;
 const isSidePreviewVisible = (): boolean => (
   sourcePreviewEnabled && getActiveEditorMode() === 'source'
@@ -1421,7 +1432,39 @@ const isSidePreviewVisible = (): boolean => (
 const isPreviewSurfaceVisible = (): boolean => (
   getActiveEditorMode() === 'preview' || isSidePreviewVisible()
 );
-const presentPreviewSurface = (fullPreview: boolean): { readonly split: boolean; readonly visible: boolean } => {
+const cancelSourcePreviewReveal = (): void => {
+  sourcePreviewRevealGeneration += 1;
+  pendingSourcePreviewReveal = null;
+  previewController.host.style.removeProperty('visibility');
+};
+const finishSourcePreviewReveal = (): void => {
+  const reveal = pendingSourcePreviewReveal;
+  if (!reveal || !reveal.editorReady || !reveal.previewReady) return;
+  if (reveal.generation !== sourcePreviewRevealGeneration || !isSidePreviewVisible()) return;
+  pendingSourcePreviewReveal = null;
+  window.requestAnimationFrame(() => {
+    if (reveal.generation !== sourcePreviewRevealGeneration || !isSidePreviewVisible()) return;
+    previewController.refreshLayout();
+    if (editor) (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
+    editor?.setLinkedPreviewEnabled?.(true);
+    previewController.host.inert = false;
+    previewController.host.style.removeProperty('visibility');
+  });
+};
+function markSourcePreviewSurfaceReady(): void {
+  if (!pendingSourcePreviewReveal) return;
+  pendingSourcePreviewReveal.previewReady = true;
+  finishSourcePreviewReveal();
+}
+const markSourcePreviewEditorReady = (): void => {
+  if (!pendingSourcePreviewReveal) return;
+  pendingSourcePreviewReveal.editorReady = true;
+  finishSourcePreviewReveal();
+};
+const presentPreviewSurface = (
+  fullPreview: boolean,
+  { atomicSplit = false }: { readonly atomicSplit?: boolean } = {}
+): { readonly split: boolean; readonly visible: boolean } => {
   const split = !fullPreview && isSidePreviewVisible();
   const visible = fullPreview || split;
   if (visible !== !previewController.host.hidden) previewPaintReady = false;
@@ -1433,6 +1476,16 @@ const presentPreviewSurface = (fullPreview: boolean): { readonly split: boolean;
     : activeUiStrings.showSidePreview;
   sourcePreviewButton.title = sourcePreviewLabel;
   sourcePreviewButton.setAttribute('aria-label', sourcePreviewLabel);
+  if (atomicSplit && split) {
+    const generation = ++sourcePreviewRevealGeneration;
+    pendingSourcePreviewReveal = { generation, editorReady: false, previewReady: false };
+    previewController.host.style.visibility = 'hidden';
+    editor?.setLinkedPreviewEnabled?.(false);
+    previewAdapter.setActive({ active: true, text: getCurrentEditorText() });
+    previewController.host.inert = true;
+    return { split, visible };
+  }
+  cancelSourcePreviewReveal();
   previewAdapter.setActive({ active: visible, text: getCurrentEditorText() });
   editor?.setLinkedPreviewEnabled?.(split);
   return { split, visible };
@@ -2046,6 +2099,15 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
       },
       restoreTopVisiblePosition(position, isCurrent) {
         previewController.restoreTopVisiblePosition(position, isCurrent);
+      },
+      captureLinkedGeometry() {
+        return previewController.captureLinkedGeometry();
+      },
+      readScrollTop() {
+        return previewController.readScrollTop();
+      },
+      writeScrollTop(scrollTop) {
+        previewController.writeScrollTop(scrollTop);
       }
     }
   });
@@ -2093,6 +2155,10 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
   async applyEditorMode(mode, viewport) {
     if (!editor) throw new Error('Editor is not mounted');
     editor.setMode(mode, viewport);
+    if (mode === 'source' && pendingSourcePreviewReveal) {
+      (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
+      markSourcePreviewEditorReady();
+    }
     if (mode === 'live' && !previewController.host.hidden) {
       await editor.whenVisiblePresentationReady(LIVE_IMAGE_REVEAL_WAIT_MS);
     }
@@ -2103,8 +2169,12 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     if (mode === 'live') failureNotice.clearFailureNotice();
     failureNotice.updateEditorNotice();
   },
-  setPreviewActive(active) {
-    presentPreviewSurface(active);
+  setPreviewActive(active, presentation) {
+    const atomicSplit = !active
+      && presentation?.mode === 'source'
+      && presentation.previousMode !== 'source'
+      && sourcePreviewEnabled;
+    presentPreviewSurface(active, { atomicSplit });
     if (active && document.activeElement instanceof HTMLElement && editorHost.contains(document.activeElement)) {
       document.activeElement.blur();
     }
@@ -2575,13 +2645,16 @@ sourcePreviewButton.addEventListener('click', () => {
   if (getActiveEditorMode() !== 'source' || !editor) return;
   const viewport = editor.captureViewportAnchorToken?.('editor') ?? null;
   sourcePreviewEnabled = !sourcePreviewEnabled;
-  const { split } = presentPreviewSurface(false);
+  const { split } = presentPreviewSurface(false, { atomicSplit: sourcePreviewEnabled });
   editor.focus();
   if (viewport) {
     editor.restoreViewportAnchorToken?.(viewport, 'editor');
-    if (split) editor.restoreViewportAnchorToken?.(viewport, 'preview');
   }
   editor.refreshLayout?.();
+  if (split) {
+    (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
+    markSourcePreviewEditorReady();
+  }
 });
 
 previewButton.addEventListener('click', () => {

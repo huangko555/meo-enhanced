@@ -1,4 +1,5 @@
 import type { EditorView } from '@codemirror/view';
+import { createLinkedViewportMap, type LinkedViewportMap, type LinkedViewportPoint } from './linkedViewportMap';
 
 export interface ViewportDocumentAnchor {
   position: number;
@@ -45,6 +46,17 @@ export interface PreviewViewportSurface {
     position: { line: number; lineOffset: number },
     isCurrent: () => boolean
   ): void;
+  captureLinkedGeometry?(): {
+    readonly regions: readonly {
+      readonly startLine: number;
+      readonly endLine: number;
+      readonly top: number;
+      readonly bottom: number;
+    }[];
+    readonly maximumScrollTop: number;
+  } | null;
+  readScrollTop?(): number;
+  writeScrollTop?(scrollTop: number): void;
 }
 
 interface ViewportControllerOptions {
@@ -300,6 +312,10 @@ export class ViewportController {
   private linkedPreviewEnabled = false;
   private linkedViewportDriver: ViewportAnchorOwner = 'editor';
   private linkedProjectionGeneration = 0;
+  private linkedViewportMap: LinkedViewportMap | null = null;
+  private linkedViewportMapDirty = true;
+  private linkedViewportMapRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private linkedInteractionUntil = Number.NEGATIVE_INFINITY;
   private readonly getMode: () => 'live' | 'source';
   private readonly previewSurface: PreviewViewportSurface | null;
   private readonly anchorTokens = new WeakMap<ViewportAnchorToken, ViewportAnchorTokenRecord>();
@@ -316,7 +332,10 @@ export class ViewportController {
   private readonly onPointerUp = () => this.finishScrollbarDrag();
   private readonly onKeyDown = (event: KeyboardEvent) => this.handleKeyDown(event);
   private readonly onKeyUp = (event: KeyboardEvent) => this.handleKeyUp(event);
-  private readonly onBeforeInput = () => { this.navigationGeneration += 1; };
+  private readonly onBeforeInput = () => {
+    this.claimLinkedViewport('editor');
+    this.navigationGeneration += 1;
+  };
   private readonly onTouchStart = (event: TouchEvent) => this.handleTouchStart(event);
   private readonly onTouchMove = (event: TouchEvent) => this.handleTouchMove(event);
   private readonly onTouchEnd = () => this.finishTouchGesture();
@@ -346,10 +365,7 @@ export class ViewportController {
   }
 
   markInteraction(owner: ViewportAnchorOwner = 'editor'): void {
-    if (this.linkedPreviewEnabled) {
-      this.linkedViewportDriver = owner;
-      this.linkedProjectionGeneration += 1;
-    }
+    this.claimLinkedViewport(owner);
     const scope = this.anchorTransactionScope;
     const programmaticCurrentTransaction = scope.kind === 'current'
       && this.isAnchorTokenCurrent(scope.record)
@@ -508,7 +524,17 @@ export class ViewportController {
     this.linkedPreviewEnabled = enabled;
     this.linkedViewportDriver = 'editor';
     this.linkedProjectionGeneration += 1;
-    if (enabled) this.projectLinkedViewport('editor');
+    this.linkedViewportMapDirty = true;
+    if (this.linkedViewportMapRefreshTimer !== null) {
+      clearTimeout(this.linkedViewportMapRefreshTimer);
+      this.linkedViewportMapRefreshTimer = null;
+    }
+    if (enabled) {
+      this.rebuildLinkedViewportMap(false);
+      this.projectLinkedViewport('editor');
+    } else {
+      this.linkedViewportMap = null;
+    }
   }
 
   markPreviewInteraction(): void {
@@ -524,13 +550,22 @@ export class ViewportController {
   }
 
   linkedPreviewReady(): void {
-    this.projectLinkedViewport(this.linkedViewportDriver);
+    this.linkedViewportMapDirty = true;
+    this.scheduleLinkedViewportMapRefresh();
   }
 
   /** Keeps a Preview presentation update inside the current scroll owner's transaction. */
   runPreviewPresentationTransaction(mutate: () => void): void {
     if (this.destroyed) {
       mutate();
+      return;
+    }
+    if (this.linkedPreviewEnabled && this.previewSurface?.readScrollTop && this.previewSurface.writeScrollTop) {
+      const heldPreviewTop = this.previewSurface.readScrollTop();
+      mutate();
+      this.linkedViewportMapDirty = true;
+      this.previewSurface.writeScrollTop(heldPreviewTop);
+      this.scheduleLinkedViewportMapRefresh();
       return;
     }
     const owner = this.linkedPreviewEnabled ? this.linkedViewportDriver : 'preview';
@@ -552,6 +587,20 @@ export class ViewportController {
       this.destroyed || !this.linkedPreviewEnabled || !this.previewSurface ||
       generation !== this.linkedProjectionGeneration || this.linkedViewportDriver !== owner
     ) return;
+    const linkedMap = this.linkedViewportMap;
+    if (
+      linkedMap && this.previewSurface.readScrollTop && this.previewSurface.writeScrollTop
+    ) {
+      if (owner === 'editor') {
+        this.previewSurface.writeScrollTop(linkedMap.sourceToPreview(this.view.scrollDOM.scrollTop));
+      } else {
+        this.writeScrollPosition({
+          top: linkedMap.previewToSource(this.previewSurface.readScrollTop()),
+          left: this.view.scrollDOM.scrollLeft
+        });
+      }
+      return;
+    }
     if (owner === 'editor') {
       const position = this.getTopVisiblePosition();
       this.previewSurface.restoreTopVisiblePosition(position, () => (
@@ -570,6 +619,74 @@ export class ViewportController {
         generation === this.linkedProjectionGeneration && this.linkedViewportDriver === 'preview'
       )
     );
+  }
+
+  private claimLinkedViewport(owner: ViewportAnchorOwner): void {
+    if (!this.linkedPreviewEnabled) return;
+    this.linkedViewportDriver = owner;
+    this.linkedProjectionGeneration += 1;
+    this.linkedInteractionUntil = this.readClock() + WHEEL_GESTURE_IDLE_MS;
+  }
+
+  private readClock(): number {
+    return typeof performance !== 'undefined' ? performance.now() : Date.now();
+  }
+
+  private isLinkedInteractionActive(): boolean {
+    return this.readClock() < this.linkedInteractionUntil;
+  }
+
+  private scheduleLinkedViewportMapRefresh(): void {
+    if (this.destroyed || !this.linkedPreviewEnabled) return;
+    if (this.linkedViewportMapRefreshTimer !== null) clearTimeout(this.linkedViewportMapRefreshTimer);
+    const delay = Math.max(0, this.linkedInteractionUntil - this.readClock());
+    this.linkedViewportMapRefreshTimer = setTimeout(() => {
+      this.linkedViewportMapRefreshTimer = null;
+      if (this.destroyed || !this.linkedPreviewEnabled) return;
+      if (this.isLinkedInteractionActive()) {
+        this.scheduleLinkedViewportMapRefresh();
+        return;
+      }
+      this.rebuildLinkedViewportMap(true);
+    }, delay);
+  }
+
+  private rebuildLinkedViewportMap(project: boolean): void {
+    if (this.destroyed || !this.linkedPreviewEnabled || !this.linkedViewportMapDirty) return;
+    const geometry = this.previewSurface?.captureLinkedGeometry?.();
+    if (!geometry) return;
+    const sourceMaximum = Math.max(0, this.view.scrollDOM.scrollHeight - this.view.scrollDOM.clientHeight);
+    const points: LinkedViewportPoint[] = [];
+    for (const region of geometry.regions) {
+      const startLineNumber = Math.min(
+        Math.max(1, region.startLine),
+        this.view.state.doc.lines
+      );
+      const endLineNumber = Math.min(
+        Math.max(startLineNumber, region.endLine),
+        this.view.state.doc.lines
+      );
+      const startLine = this.view.state.doc.line(startLineNumber);
+      const endLine = this.view.state.doc.line(endLineNumber);
+      const startBlock = this.view.lineBlockAt(startLine.from);
+      const endBlock = this.view.lineBlockAt(endLine.from);
+      points.push(
+        { source: startBlock.top, preview: region.top },
+        { source: endBlock.bottom, preview: region.bottom }
+      );
+    }
+    const pinnedPoint = project && this.linkedViewportMap && this.previewSurface?.readScrollTop
+      ? {
+          source: this.view.scrollDOM.scrollTop,
+          preview: this.previewSurface.readScrollTop()
+        }
+      : undefined;
+    this.linkedViewportMap = createLinkedViewportMap(points, {
+      sourceMaximum,
+      previewMaximum: Math.max(0, geometry.maximumScrollTop)
+    }, pinnedPoint);
+    this.linkedViewportMapDirty = false;
+    if (project) this.projectLinkedViewport(this.linkedViewportDriver);
   }
 
   private restoreLinkedEditorPosition(
@@ -932,6 +1049,11 @@ export class ViewportController {
   destroy(): void {
     this.destroyed = true;
     this.linkedPreviewEnabled = false;
+    this.linkedViewportMap = null;
+    if (this.linkedViewportMapRefreshTimer !== null) {
+      clearTimeout(this.linkedViewportMapRefreshTimer);
+      this.linkedViewportMapRefreshTimer = null;
+    }
     this.linkedProjectionGeneration += 1;
     this.interactionGeneration += 1;
     this.navigationGeneration += 1;
