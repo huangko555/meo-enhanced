@@ -327,11 +327,15 @@ async function main() {
     const headingStrikeLine = '# 标题里的 **粗体 `内`** ~~删除中的 *斜体*~~ `外`';
     const source = [...markerLines, headingStrikeLine, '', ...bodyLines].join('\n');
     await page.evaluate((text) => {
+      (window as any).__selectionStates = [];
       (window as any).__editor = (window as any).EditorStabilityHarness.createEditor({
         parent: document.getElementById('app')!,
         text,
         initialMode: 'live',
-        onApplyChanges() {}
+        onApplyChanges() {},
+        onSelectionChange(state: { visible: boolean }) {
+          (window as any).__selectionStates.push(state);
+        }
       });
     }, source);
     if (process.env.MEO_TEST_VIEWPORT_ONLY === '1') {
@@ -339,6 +343,48 @@ async function main() {
       console.log('external update viewport stability checks passed');
       return;
     }
+    for (const mode of ['live', 'source'] as const) {
+      await page.evaluate((nextMode) => {
+        const editor = (window as any).__editor;
+        const start = editor.getText().indexOf('稳定锚点 1');
+        editor.setMode(nextMode);
+        editor.view.dispatch({ selection: { anchor: start } });
+        editor.scrollToLine(editor.view.state.doc.lineAt(start).number, 'center');
+        (window as any).__selectionStates = [];
+      }, mode);
+      await waitForFrames(page, 4);
+      const drag = await page.evaluate(() => {
+        const editor = (window as any).__editor;
+        const start = editor.getText().indexOf('稳定锚点 1');
+        const from = editor.view.coordsAtPos(start + 1);
+        const to = editor.view.coordsAtPos(start + 5);
+        return from && to ? {
+          from: { x: from.left + 1, y: (from.top + from.bottom) / 2 },
+          to: { x: to.right - 1, y: (to.top + to.bottom) / 2 }
+        } : null;
+      });
+      if (!drag) throw new Error(`Could not locate ${mode} selection drag`);
+      await page.mouse.move(drag.from.x, drag.from.y);
+      await page.mouse.down();
+      await page.mouse.move(drag.to.x, drag.to.y, { steps: 6 });
+      await waitForFrames(page, 2);
+      const duringDrag = await page.evaluate(() => (window as any).__selectionStates.at(-1));
+      if (duringDrag?.visible !== false) {
+        throw new Error(`${mode} selection menu became visible before pointerup: ${JSON.stringify(duringDrag)}`);
+      }
+      await page.mouse.up();
+      await waitForFrames(page, 2);
+      const afterPointerUp = await page.evaluate(() => (window as any).__selectionStates.at(-1));
+      if (afterPointerUp?.visible !== true) {
+        throw new Error(`${mode} selection menu did not appear after pointerup: ${JSON.stringify(afterPointerUp)}`);
+      }
+    }
+    await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      editor.setMode('live');
+      editor.view.dispatch({ selection: { anchor: 0 } });
+    });
+    await waitForFrames(page, 3);
     const contextualStrongColors = await page.evaluate(() => {
       const bodyLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
         .find((line) => line.textContent?.includes('粗体一')) ?? null;

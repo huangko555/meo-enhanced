@@ -30,7 +30,7 @@ async function main(): Promise<void> {
       await geometryPage.setContent('<!doctype html><div id="outer"><div class="spacer"></div><div id="ancestor"><div id="host"></div></div><div class="tail"></div></div>');
       await geometryPage.addStyleTag({ path: path.join(root, 'webview', 'src', 'styles.css') });
       await geometryPage.addStyleTag({ content: `
-        :root{--meo-background:#24292e;--meo-inset-background:#2a2d2f;--meo-foreground:#e6edf3;--meo-semantic-tableBorder:#474b50}
+        :root{--meo-background:#24292e;--meo-inset-background:#2a2d2f;--meo-foreground:#e6edf3;--meo-semantic-tableBorder:#474b50;--meo-semantic-tableHeaderBackground:#314159}
         html,body{height:100%;margin:0}#outer{height:390px;overflow-y:auto}#ancestor{transform:${scenario.transform ?? 'none'};transform-origin:0 0}
         #host{height:330px;width:360px;zoom:${scenario.zoom}}#host .meo-md-html-table{min-width:520px}.spacer{height:70px}.tail{height:260px}
       ` });
@@ -63,6 +63,9 @@ async function main(): Promise<void> {
           firstColumnDelta: mainCell && stickyCell
             ? Math.abs(mainCell.getBoundingClientRect().left - stickyCell.getBoundingClientRect().left)
             : null,
+          mainHeaderBackground: mainCell ? getComputedStyle(mainCell).backgroundColor : null,
+          stickyHeaderBackground: stickyCell ? getComputedStyle(stickyCell).backgroundColor : null,
+          stickySurfaceBackground: stickyHeader ? getComputedStyle(stickyHeader).backgroundColor : null,
           controlsSticky: shell?.classList.contains('is-controls-sticky') ?? false,
           visible: Boolean(chrome && getComputedStyle(chrome).display !== 'none')
         };
@@ -182,6 +185,9 @@ async function main(): Promise<void> {
       assert.ok(Math.abs(geometry.chromeTop! - geometry.scrollerTop!) <= 1, JSON.stringify(geometry));
       assert.ok(Math.abs(geometry.stickyHeaderTop! - geometry.chromeTop!) <= 1, JSON.stringify(geometry));
       assert.ok(geometry.firstColumnDelta! <= 1, JSON.stringify(geometry));
+      assert.equal(geometry.mainHeaderBackground, 'rgb(49, 65, 89)', JSON.stringify(geometry));
+      assert.equal(geometry.stickyHeaderBackground, geometry.mainHeaderBackground, JSON.stringify(geometry));
+      assert.equal(geometry.stickySurfaceBackground, geometry.mainHeaderBackground, JSON.stringify(geometry));
       assert.equal(geometry.contextTriggerFixed, false, JSON.stringify(geometry));
       assert.equal(geometry.stickyToolbarBands, 0, JSON.stringify(geometry));
       assert.equal(geometry.controlsSticky, false, JSON.stringify(geometry));

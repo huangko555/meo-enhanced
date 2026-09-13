@@ -90,6 +90,7 @@ async function main() {
       '<details open>',
       '  <summary><strong>Rich summary</strong> <kbd>Enter</kbd></summary>',
       '  <p>Rendered details body with <mark>highlight</mark>.</p>',
+      '  <p>Second details paragraph.</p>',
       '</details>',
       '',
       '<blockquote>',
@@ -153,8 +154,16 @@ async function main() {
       const details = document.querySelector<HTMLElement>('.meo-md-html-block details');
       const detailsIcon = details?.querySelector<HTMLElement>(':scope > summary > .meo-md-details-summary-icon[aria-hidden="true"]') ?? null;
       const detailsSummary = details?.querySelector<HTMLElement>(':scope > summary') ?? null;
+      const detailsBody = details?.querySelector<HTMLElement>(':scope > p') ?? null;
       const detailsIconRect = detailsIcon?.getBoundingClientRect() ?? null;
       const detailsSummaryRect = detailsSummary?.getBoundingClientRect() ?? null;
+      const detailsBodyRect = detailsBody?.getBoundingClientRect() ?? null;
+      const detailsLineNumbers = Array.from(
+        document.querySelectorAll<HTMLElement>('.meo-md-html-details-line-number')
+      ).map((element) => ({
+        line: Number(element.textContent),
+        top: element.getBoundingClientRect().top
+      }));
       const quote = document.querySelector<HTMLElement>('.meo-md-html-block blockquote');
       const table = document.querySelector<HTMLElement>('.meo-md-html-block table');
       const tableHeader = table?.querySelector<HTMLElement>('th') ?? null;
@@ -216,6 +225,9 @@ async function main() {
           detailsIconRect.bottom <= detailsSummaryRect.bottom + 1
         ),
         detailsIconTransform: detailsIcon ? getComputedStyle(detailsIcon).transform : '',
+        detailsLineNumbers,
+        detailsSummaryTop: detailsSummaryRect?.top ?? null,
+        detailsBodyTop: detailsBodyRect?.top ?? null,
         detailsSourceVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
           .some((line) => line.textContent?.includes('<details open>')),
         quoteBorderWidth: quote ? getComputedStyle(quote).borderLeftWidth : '',
@@ -274,6 +286,18 @@ async function main() {
       !initial.detailsIconVisible ||
       !initial.detailsIconContained ||
       initial.detailsIconTransform === 'none' ||
+      initial.detailsLineNumbers.length !== 3 ||
+      initial.detailsLineNumbers[0].line !== 38 ||
+      initial.detailsLineNumbers[1].line !== 39 ||
+      initial.detailsLineNumbers[2].line !== 40 ||
+      Math.abs(
+        (initial.detailsLineNumbers[2].top - initial.detailsLineNumbers[1].top) -
+        (initial.detailsLineNumbers[1].top - initial.detailsLineNumbers[0].top)
+      ) > 1 ||
+      initial.detailsSummaryTop === null ||
+      initial.detailsBodyTop === null ||
+      Math.abs(initial.detailsLineNumbers[0].top - initial.detailsSummaryTop) > 1 ||
+      Math.abs(initial.detailsLineNumbers[1].top - initial.detailsBodyTop) > 1 ||
       initial.detailsSourceVisible ||
       initial.quoteBorderWidth === '0px' ||
       initial.quoteBackground !== 'rgba(0, 0, 0, 0)' ||
@@ -391,6 +415,8 @@ async function main() {
       open: (element as HTMLDetailsElement).open,
       top: element.closest('.meo-md-html-block')?.getBoundingClientRect().top ?? null,
       bodyVisible: (element.querySelector('p')?.getBoundingClientRect().height ?? 0) > 0,
+      lineNumbers: Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-details-line-number'))
+        .map(marker => Number(marker.textContent)),
       iconTransform: getComputedStyle(element.querySelector<HTMLElement>(':scope > summary > .meo-md-details-summary-icon[aria-hidden="true"]')!).transform,
       iconWidth: element.querySelector<HTMLElement>(':scope > summary > .meo-md-details-summary-icon[aria-hidden="true"]')!.getBoundingClientRect().width
     }));
@@ -398,6 +424,8 @@ async function main() {
       !detailsBeforeToggle.open ||
       detailsAfterCollapse.open ||
       detailsAfterCollapse.bodyVisible ||
+      detailsAfterCollapse.lineNumbers.length !== 1 ||
+      detailsAfterCollapse.lineNumbers[0] !== 38 ||
       detailsAfterCollapse.iconTransform === initial.detailsIconTransform ||
       Math.abs(detailsAfterCollapse.iconWidth - initial.detailsIconWidth) > 0.5 ||
       detailsBeforeToggle.top === null ||

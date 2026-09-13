@@ -1,4 +1,4 @@
-import { ChevronsUp, createElement } from 'lucide';
+import { ArrowUpToLine, createElement } from 'lucide';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 
 type ScrollElement = Element & { scrollTop: number };
@@ -13,9 +13,10 @@ export function createDocumentScrollToTopController(
   button.className = 'document-scroll-top';
   button.title = strings.backToTop;
   button.setAttribute('aria-label', strings.backToTop);
-  button.appendChild(createElement(ChevronsUp, {
-    width: 22,
-    height: 22,
+  button.appendChild(createElement(ArrowUpToLine, {
+    width: 18,
+    height: 18,
+    'data-icon': 'arrow-up-to-line',
     'aria-hidden': 'true'
   }));
   button.hidden = true;

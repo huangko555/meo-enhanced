@@ -195,7 +195,6 @@ body {
 .document-scroll-top svg {
   opacity: 0.8;
   pointer-events: none;
-  transform: translateY(-1px);
 }
 
 .editor-root.outline-visible
@@ -215,7 +214,7 @@ body {
   padding: 2px;
   border: 1px solid var(--vscode-panel-border, var(--meo-semantic-tableBorder, transparent));
   border-radius: 8px;
-  background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+  background: var(--meo-table-context-surface);
   opacity: 0;
   pointer-events: none;
   transform: translateY(-100%);
@@ -3087,6 +3086,12 @@ button:focus-visible > .menu-switch {
   margin: 0 0 1em;
 }
 
+/* Details are an editor disclosure surface: adjacent visible source rows keep
+   the editor's line rhythm instead of inheriting reading-page paragraph gaps. */
+.cm-editor .meo-md-html-content details p {
+  margin-bottom: 0;
+}
+
 .cm-editor .meo-md-html-content ul,
 .cm-editor .meo-md-html-content ol {
   margin: 0 0 1em;
@@ -3127,6 +3132,29 @@ button:focus-visible > .menu-switch {
   font-weight: 600;
   cursor: pointer;
   list-style: none;
+}
+
+.cm-editor.meo-mode-live .cm-lineNumbers .cm-gutterElement.meo-md-html-details-line-numbers {
+  position: relative;
+  align-items: flex-start;
+  overflow: visible;
+}
+
+.cm-editor .meo-md-html-details-line-number-column {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.cm-editor .meo-md-html-details-line-number {
+  position: absolute;
+  right: 0;
+  display: block;
+  width: 100%;
+  font: inherit;
+  line-height: var(--meo-active-editor-line-height);
+  text-align: right;
 }
 
 .cm-editor .meo-md-html-content summary::-webkit-details-marker {
@@ -5151,7 +5179,10 @@ body.outline-resizing .preview-frame {
   --meo-table-sel-left: var(--meo-semantic-tableSelectionBorder);
 }
 
-.cm-editor .meo-md-html-table thead tr:nth-child(odd) th,
+.cm-editor .meo-md-html-table thead th {
+  background-color: var(--meo-semantic-tableHeaderBackground);
+}
+
 .cm-editor .meo-md-html-table tbody tr:nth-child(even) td {
   background-color: var(--meo-inset-background);
 }
@@ -5341,7 +5372,7 @@ body.outline-resizing .preview-frame {
 .cm-editor .meo-md-html-table-sticky-header {
   width: 100%;
   overflow: hidden;
-  background: var(--meo-inset-background);
+  background: var(--meo-semantic-tableHeaderBackground);
   box-shadow: inset 0 -1px 0 var(--meo-semantic-tableBorder);
 }
 
@@ -5509,6 +5540,7 @@ body.outline-resizing .preview-frame {
   background: var(--meo-active-line-bg);
 }
 
+.selection-inline-menu,
 .cm-editor .meo-md-html-table-context-trigger,
 .cm-editor .meo-md-html-table-context-menu {
   --meo-table-context-surface: color-mix(
@@ -5533,6 +5565,7 @@ body.outline-resizing .preview-frame {
   );
 }
 
+html[data-editor-appearance='light'] .selection-inline-menu,
 html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-trigger,
 html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-menu {
   --meo-table-context-surface: color-mix(
