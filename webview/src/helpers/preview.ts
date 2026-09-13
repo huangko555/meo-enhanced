@@ -12,7 +12,11 @@ import type { MermaidDiagramRenderResources } from '../application/mermaidDiagra
 import type { PreviewCodePalette } from '../application/finalCodePalette';
 import { normalizePreviewFontFamily } from '../../../src/shared/preview';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
-import { applyPreviewCodeHighlight } from './previewCodeHighlight';
+import {
+  applyPreviewCodeHighlight,
+  hasAppliedPreviewCodeHighlight,
+  isPreviewCodeHighlightReady
+} from './previewCodeHighlight';
 import { activateShikiCodeHighlighting, subscribeShikiRefresh } from './shikiHighlighter';
 import { createToolbarDropdown } from './toolbarDropdown';
 import { resolveEmbeddedImageSrc } from './images';
@@ -132,7 +136,12 @@ function preserveLoadedPreviewImage(fromImage: HTMLImageElement, toImage: HTMLIm
   return true;
 }
 
-function morphPreviewMain(frameDocument: Document, currentMain: HTMLElement, html: string): void {
+function morphPreviewMain(
+  frameDocument: Document,
+  currentMain: HTMLElement,
+  html: string,
+  deferUnreadyCodeBlock: boolean
+): boolean {
   const nextMain = frameDocument.createElement('main');
   nextMain.className = 'meo-export-doc';
   nextMain.innerHTML = html;
@@ -142,6 +151,7 @@ function morphPreviewMain(frameDocument: Document, currentMain: HTMLElement, htm
       ?.querySelector<HTMLTableColElement>(':scope > colgroup[data-meo-preview-columns]');
     if (columns) table.prepend(columns.cloneNode(true));
   });
+  let deferredCodeBlock = false;
   morphdom(currentMain, nextMain, {
     childrenOnly: true,
     onBeforeElUpdated(fromElement, toElement) {
@@ -180,6 +190,21 @@ function morphPreviewMain(frameDocument: Document, currentMain: HTMLElement, htm
         syncSourceMappingAttributes(fromElement, toElement);
         return false;
       }
+      if (
+        deferUnreadyCodeBlock
+        && fromElement.classList.contains('meo-export-code-block-wrap')
+        && toElement.classList.contains('meo-export-code-block-wrap')
+        && fromElement.textContent !== toElement.textContent
+        && hasAppliedPreviewCodeHighlight(fromElement)
+        && !isPreviewCodeHighlightReady(toElement)
+      ) {
+        // Keep the last fully themed block until the replacement tokens exist.
+        // The Shiki refresh callback reruns this morph, which then commits the
+        // new source and token DOM together before the next visible frame.
+        syncSourceMappingAttributes(fromElement, toElement);
+        deferredCodeBlock = true;
+        return false;
+      }
       if (fromElement.tagName === 'DETAILS') {
         toElement.toggleAttribute('open', (fromElement as HTMLDetailsElement).open);
       }
@@ -190,6 +215,7 @@ function morphPreviewMain(frameDocument: Document, currentMain: HTMLElement, htm
       return true;
     }
   });
+  return deferredCodeBlock;
 }
 
 const previewScrollbarStyles = `
@@ -605,6 +631,7 @@ export function createPreviewController({
   let disposed = false;
   let paintFrame: number | null = null;
   let highlightFrame: number | null = null;
+  let commitPendingCodeHighlight: (() => void) | null = null;
   const cancelHighlightFrame = () => {
     if (highlightFrame !== null) window.cancelAnimationFrame(highlightFrame);
     highlightFrame = null;
@@ -636,6 +663,12 @@ export function createPreviewController({
   };
   const releasePreviewCodeHighlighting = activateShikiCodeHighlighting('preview');
   const unsubscribePreviewCodeHighlight = subscribeShikiRefresh(() => {
+    const pendingCommit = commitPendingCodeHighlight;
+    if (pendingCommit) {
+      commitPendingCodeHighlight = null;
+      pendingCommit();
+      return;
+    }
     if (!disposed && sourceColoring && activeFrameDocument) {
       applyPreviewCodeHighlight(activeFrameDocument, true);
     }
@@ -928,6 +961,7 @@ export function createPreviewController({
     }
     const payload = latestPayload;
     cancelHighlightFrame();
+    commitPendingCodeHighlight = null;
     const reusableDocument = activeFrameDocument === frame.contentDocument ? activeFrameDocument : null;
     const reusableMain = reusableDocument?.querySelector<HTMLElement>('main.meo-export-doc');
     frameEvents?.abort();
@@ -1088,7 +1122,20 @@ export function createPreviewController({
         clearSearchMatches();
         disposePreviewMathViewports();
         reusableDocument.documentElement.lang = uiLanguage;
-        morphPreviewMain(reusableDocument, reusableMain, payload.html);
+        const deferredCodeBlock = morphPreviewMain(
+          reusableDocument,
+          reusableMain,
+          payload.html,
+          sourceColoring
+        );
+        if (deferredCodeBlock) {
+          commitPendingCodeHighlight = () => {
+            if (
+              !disposed && activeFrameDocument === reusableDocument
+              && latestPayload === payload && frameRenderedText === renderedText
+            ) renderFrame(renderedText, true);
+          };
+        }
         if (!preserveViewport && reusableDocument.scrollingElement) {
           reusableDocument.scrollingElement.scrollTop = 0;
         }
@@ -1372,10 +1419,15 @@ export function createPreviewController({
             bottom: rect.bottom + scrollTop
           };
         })
-        .filter((entry): entry is PreviewSourceMapEntry => entry !== null);
+        .filter((entry): entry is PreviewSourceMapEntry => entry !== null)
+        // Source projection and binary search must not inherit DOM order:
+        // footnotes and similar semantic blocks intentionally render elsewhere.
+        .sort((left, right) => left.start - right.start || right.end - left.end || left.top - right.top);
     }
     return sourceMap;
   };
+  const getVisualSourceMap = (): PreviewSourceMapEntry[] => [...getSourceMap()]
+    .sort((left, right) => left.top - right.top || left.bottom - right.bottom || left.start - right.start);
   const getSourceElements = (): HTMLElement[] => getSourceMap().map(({ element }) => element);
   const getSourceRange = (element: HTMLElement): { start: number; end: number } | null => {
     const start = Number.parseInt(element.dataset.sourceLine ?? '', 10);
@@ -1437,7 +1489,7 @@ export function createPreviewController({
     editorLineOffset: number;
     viewportOffset: number;
   } | null => {
-    const entries = getSourceMap();
+    const entries = getVisualSourceMap();
     if (entries.length === 0) {
       return null;
     }
@@ -1631,6 +1683,7 @@ export function createPreviewController({
       unsubscribePreviewCodeHighlight();
       releasePreviewCodeHighlighting();
       activeFrameDocument = null;
+      commitPendingCodeHighlight = null;
       sourceMapDocument = null;
       sourceMap = [];
       sourceMapDirty = true;

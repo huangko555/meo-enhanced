@@ -36,17 +36,15 @@ function monotonicPoints(
   const points: LinkedViewportPoint[] = [];
   for (let index = 0; index < sorted.length;) {
     const source = sorted[index].source;
-    let previewTotal = 0;
-    let count = 0;
+    const previews: number[] = [];
     while (index < sorted.length && Math.abs(sorted[index].source - source) <= 0.01) {
-      previewTotal += sorted[index].preview;
-      count += 1;
+      previews.push(sorted[index].preview);
       index += 1;
     }
-    const previousPreview = points.at(-1)?.preview ?? 0;
+    previews.sort((left, right) => left - right);
     points.push({
       source,
-      preview: Math.max(previousPreview, previewTotal / Math.max(1, count))
+      preview: previews[Math.floor((previews.length - 1) / 2)] ?? 0
     });
   }
   if (points.length === 1) points.push({ source: sourceMaximum, preview: previewMaximum });
@@ -56,6 +54,35 @@ function monotonicPoints(
     source: sourceMaximum,
     preview: Math.max(last.preview, previewMaximum)
   };
+  const longestNonDecreasingPath = (candidates: readonly LinkedViewportPoint[]): LinkedViewportPoint[] => {
+    if (candidates.length <= 2) return [...candidates];
+    const tails: number[] = [];
+    const tailIndices: number[] = [];
+    const previous = Array.from({ length: candidates.length }, () => -1);
+    for (let index = 0; index < candidates.length; index += 1) {
+      const value = candidates[index].preview;
+      let low = 0;
+      let high = tails.length;
+      // upper_bound keeps equal Preview coordinates. They represent legitimate
+      // compact ranges, while a later lower coordinate is an out-of-flow block.
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (tails[middle] <= value) low = middle + 1;
+        else high = middle;
+      }
+      previous[index] = low > 0 ? tailIndices[low - 1] : -1;
+      tails[low] = value;
+      tailIndices[low] = index;
+    }
+    const path: LinkedViewportPoint[] = [];
+    let index = tailIndices[tails.length - 1] ?? -1;
+    while (index >= 0) {
+      path.push(candidates[index]);
+      index = previous[index];
+    }
+    path.reverse();
+    return path;
+  };
   if (pinnedPoint) {
     const pinned = {
       source: finiteCoordinate(pinnedPoint.source, sourceMaximum),
@@ -64,15 +91,18 @@ function monotonicPoints(
     const withoutSameSource: Array<{ source: number; preview: number }> = points
       .filter(point => Math.abs(point.source - pinned.source) > 0.01)
       .map(point => ({ ...point }));
-    for (const point of withoutSameSource) {
-      if (point.source < pinned.source && point.preview > pinned.preview) point.preview = pinned.preview;
-      if (point.source > pinned.source && point.preview < pinned.preview) point.preview = pinned.preview;
-    }
     withoutSameSource.push(pinned);
     withoutSameSource.sort((left, right) => left.source - right.source);
-    return withoutSameSource;
+    const pinnedIndex = withoutSameSource.indexOf(pinned);
+    const left = longestNonDecreasingPath(withoutSameSource
+      .slice(0, pinnedIndex + 1)
+      .filter(point => point === pinned || point.preview <= pinned.preview));
+    const right = longestNonDecreasingPath(withoutSameSource
+      .slice(pinnedIndex)
+      .filter(point => point === pinned || point.preview >= pinned.preview));
+    return [...left, ...right.slice(1)];
   }
-  return points;
+  return longestNonDecreasingPath(points);
 }
 
 function project(value: number, points: readonly LinkedViewportPoint[], from: 'source' | 'preview'): number {

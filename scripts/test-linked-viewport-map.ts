@@ -42,4 +42,19 @@ assert.equal(rebased.previewToSource(640), 500);
 const rebasedSamples = Array.from({ length: 101 }, (_, index) => rebased.sourceToPreview(index * 10));
 assert.equal(rebasedSamples.some((value, index) => index > 0 && value < rebasedSamples[index - 1]), false);
 
+const displacedSemanticBlock = createLinkedViewportMap([
+  { source: 100, preview: 100 },
+  // Footnote definitions and similar semantic blocks can render at the end of
+  // Preview even though their source range sits in the middle of the document.
+  { source: 200, preview: 900 },
+  { source: 300, preview: 300 },
+  { source: 400, preview: 400 },
+  { source: 500, preview: 500 }
+], { sourceMaximum: 600, previewMaximum: 600 });
+assert.ok(
+  Math.abs(displacedSemanticBlock.sourceToPreview(300) - 300) < 0.01,
+  'An out-of-flow semantic block must not flatten all later in-flow mappings'
+);
+assert.ok(Math.abs(displacedSemanticBlock.previewToSource(300) - 300) < 0.01);
+
 console.log('Linked viewport map checks passed');

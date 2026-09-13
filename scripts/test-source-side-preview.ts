@@ -56,6 +56,63 @@ try {
     '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     '| 1 | This column needs materially more room than the compact labels | 3 | 4 | 5 | 6 | 7 | 8 | 9 |'
   ].join('\n');
+  const reportedTable = [
+    '| asd | asd | asd | asd | |',
+    '| --- | --- | --- | --- | --- |',
+    '| **asd**332 | *asd* | ~~asd~~ | `asd` | #asd |',
+    '| asd | asd | asd | sadasd | sadasd |',
+    '| | | | [linked cell](https://example.com/)LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL | |',
+    '| - asd | | | | |'
+  ].join('\n');
+  const structuredMappingBlock = [
+    '## Structured mapping fixture',
+    '',
+    '- Apple',
+    '- Banana',
+    '  - Banana milk',
+    '  - Banana cake',
+    '    - Deep nested item',
+    '      - Deeper nested item with `code`',
+    '',
+    'Ordered list:',
+    '',
+    ...Array.from({ length: 20 }, (_, index) => `${index + 1}. Ordered item ${index + 1}`),
+    '   1. Nested ordered item',
+    '',
+    'Task list:',
+    '',
+    '- [x] Completed task',
+    '- [ ] Pending task',
+    '- [ ] Task with **formatting** and `code`',
+    '- [x] Task with a displaced footnote[^mapping-note]',
+    '',
+    '[^mapping-note]: Footnote definitions render outside their source position.',
+    '',
+    'Mixed list:',
+    '',
+    '1. First ordered item',
+    '   - Nested unordered item',
+    '   - Nested task item',
+    '     - [ ] Child task',
+    '2. Second ordered item',
+    '   > Quote in list',
+    '   >',
+    '   > ```js',
+    '   > console.log("code in quote in list");',
+    '   > ```',
+    '3. Third ordered item',
+    '',
+    '## Structured mapping end',
+    '',
+    'The content after the structured range must align on both surfaces.'
+  ].join('\n');
+  const highlightedCodeBlock = [
+    '## Highlight continuity fixture',
+    '',
+    '```typescript',
+    'const previewHighlight = "before";',
+    '```'
+  ].join('\n');
   const rawHtmlTable = [
     '<table>',
     '  <thead><tr><th>HTML type</th><th>Expected behavior</th><th>Interaction</th></tr></thead>',
@@ -75,6 +132,7 @@ try {
   ].join('\n');
   const text = [
     'Intro paragraph for formatting continuity.',
+    highlightedCodeBlock,
     `### Long heading ${'6'.repeat(180)}`,
     '',
     `Ordinary paragraph ${'7'.repeat(220)}`,
@@ -85,8 +143,10 @@ try {
     )),
     compactComplexBlock,
     narrowTable,
+    reportedTable,
     rawHtmlTable,
     modeTable,
+    structuredMappingBlock,
     ...Array.from({ length: 118 }, (_, index) => {
       const section = index + 23;
       return `## Section ${section}\n\nParagraph ${section} with enough text to exercise semantic linked scrolling.`;
@@ -140,6 +200,9 @@ try {
       const wrapperRect = wrapper.getBoundingClientRect();
       const tableRect = table.getBoundingClientRect();
       const columns = Array.from(table.querySelectorAll<HTMLTableColElement>('col'));
+      const lastCells = Array.from(table.rows)
+        .map(row => row.cells.item(row.cells.length - 1))
+        .filter((cell): cell is HTMLTableCellElement => cell !== null);
       return {
         wrapperClass: wrapper.className,
         wrapperClientWidth: wrapper.clientWidth,
@@ -148,6 +211,12 @@ try {
         overflow: wrapper.scrollWidth - wrapper.clientWidth,
         overflowX: getComputedStyle(wrapper).overflowX,
         rightOverflow: tableRect.right - wrapperRect.right,
+        rightSafetyInset: wrapperRect.right - tableRect.right,
+        viewportRightOverflow: tableRect.right - frameDocument.documentElement.clientWidth,
+        lastCellRightOverflow: Math.max(
+          Number.NEGATIVE_INFINITY,
+          ...lastCells.map(cell => cell.getBoundingClientRect().right - frameDocument.documentElement.clientWidth)
+        ),
         widths: columns.map(column => column.getBoundingClientRect().width)
       };
     });
@@ -159,6 +228,8 @@ try {
     JSON.stringify(tableFit)
   );
   assert.ok(tableFit.every(table => table.rightOverflow <= 0.5), JSON.stringify(tableFit));
+  assert.ok(tableFit.every(table => table.viewportRightOverflow <= -0.75), JSON.stringify(tableFit));
+  assert.ok(tableFit.every(table => table.lastCellRightOverflow <= -0.75), JSON.stringify(tableFit));
   assert.ok(tableFit[0].widths[1] > tableFit[0].widths[0], JSON.stringify(tableFit));
 
   const compactBlockStartLine = text.slice(0, text.indexOf('<details>')).split('\n').length;
@@ -185,7 +256,207 @@ try {
     0,
     `Compact complex blocks must not make linked Preview reverse: ${JSON.stringify(compactBlockTrace)}`
   );
+  let longestStationaryPreviewRun = 0;
+  let stationaryPreviewRun = 0;
+  for (let index = 1; index < compactBlockTrace.length; index += 1) {
+    if (Math.abs(compactBlockTrace[index] - compactBlockTrace[index - 1]) <= 0.1) {
+      stationaryPreviewRun += 1;
+      longestStationaryPreviewRun = Math.max(longestStationaryPreviewRun, stationaryPreviewRun);
+    } else {
+      stationaryPreviewRun = 0;
+    }
+  }
+  assert.ok(
+    longestStationaryPreviewRun <= 8,
+    `A mapped complex range must not create a long stationary Preview plateau: ${JSON.stringify({ longestStationaryPreviewRun, compactBlockTrace })}`
+  );
+  const structuredTargets = [
+    'Deeper nested item with',
+    'Ordered item 6',
+    'Ordered item 14',
+    'Pending task',
+    'Nested unordered item',
+    'console.log("code in quote in list")',
+    'Structured mapping end'
+  ].map(marker => ({
+    marker,
+    line: text.slice(0, text.indexOf(marker)).split('\n').length
+  }));
+  const structuredAlignment = [] as Array<{
+    marker: string;
+    line: number;
+    previewOffset: number | null;
+    previewRange: [number, number] | null;
+  }>;
+  for (const target of structuredTargets) {
+    await page.click('.line-jump-input');
+    await page.keyboard.down('Control');
+    await page.keyboard.press('A');
+    await page.keyboard.up('Control');
+    await page.keyboard.type(String(target.line));
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(marker => Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+      .some(line => line.textContent?.includes(marker)), {}, target.marker);
+    await page.evaluate(marker => {
+      const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(candidate => candidate.textContent?.includes(marker))!;
+      const viewport = scroller.getBoundingClientRect();
+      scroller.scrollTop += line.getBoundingClientRect().top - viewport.top - viewport.height / 3;
+    }, target.marker);
+    await new Promise(resolve => setTimeout(resolve, 40));
+    structuredAlignment.push(await page.evaluate(({ marker, line }) => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const frameDocument = frame.contentDocument!;
+      const readingBand = frameDocument.documentElement.clientHeight / 3;
+      const candidates = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
+        .filter(element => {
+          const start = Number(element.dataset.sourceLine);
+          const end = Number(element.dataset.sourceEndLine ?? start);
+          return start <= line && end >= line;
+        })
+        .map(element => {
+          const rect = element.getBoundingClientRect();
+          return {
+            offset: rect.top - readingBand,
+            range: [Number(element.dataset.sourceLine), Number(element.dataset.sourceEndLine ?? element.dataset.sourceLine)] as [number, number],
+            height: rect.height
+          };
+        })
+        .sort((left, right) => Math.abs(left.offset) - Math.abs(right.offset) || left.height - right.height);
+      return {
+        marker,
+        line,
+        previewOffset: candidates[0]?.offset ?? null,
+        previewRange: candidates[0]?.range ?? null
+      };
+    }, target));
+  }
+  assert.ok(
+    structuredAlignment.every(sample => sample.previewOffset !== null && Math.abs(sample.previewOffset) <= 120),
+    `The same structured source range must remain in the Preview reading band: ${JSON.stringify(structuredAlignment)}`
+  );
+  const highlightedSourceLine = text.slice(0, text.indexOf('const previewHighlight')).split('\n').length;
+  await page.click('.line-jump-input');
+  await page.keyboard.down('Control');
+  await page.keyboard.press('A');
+  await page.keyboard.up('Control');
+  await page.keyboard.type(String(highlightedSourceLine));
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+    const code = Array.from(frameDocument?.querySelectorAll<HTMLElement>('code.hljs') ?? [])
+      .find(candidate => candidate.textContent?.includes('previewHighlight'));
+    const sources = Array.from(code?.querySelectorAll<HTMLElement>('.meo-export-code-line-source') ?? []);
+    return sources.length > 0 && sources.every(source => source.dataset.meoShiki && source.querySelector('span[style*="color"]'));
+  }, { timeout: 10000 });
+  await page.evaluate(() => {
+    const samples: Array<{ text: string; highlighted: boolean }> = [];
+    let active = true;
+    const sample = () => {
+      if (!active) return;
+      const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+      const code = Array.from(frameDocument?.querySelectorAll<HTMLElement>('code.hljs') ?? [])
+        .find(candidate => candidate.textContent?.includes('previewHighlight'));
+      const sources = Array.from(code?.querySelectorAll<HTMLElement>('.meo-export-code-line-source') ?? []);
+      samples.push({
+        text: code?.textContent ?? '',
+        highlighted: sources.length > 0
+          && sources.every(source => Boolean(source.dataset.meoShiki && source.querySelector('span[style*="color"]')))
+      });
+      requestAnimationFrame(sample);
+    };
+    (window as typeof window & {
+      __previewHighlightContinuityProbe?: { samples: typeof samples; stop(): void };
+    }).__previewHighlightContinuityProbe = { samples, stop: () => { active = false; } };
+    requestAnimationFrame(sample);
+  });
+  await page.keyboard.press('End');
+  await page.keyboard.type('X');
+  await page.waitForFunction(() => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+    const code = Array.from(frameDocument?.querySelectorAll<HTMLElement>('code.hljs') ?? [])
+      .find(candidate => candidate.textContent?.includes('previewHighlight'));
+    const sources = Array.from(code?.querySelectorAll<HTMLElement>('.meo-export-code-line-source') ?? []);
+    return code?.textContent?.includes(';X')
+      && sources.length > 0
+      && sources.every(source => source.dataset.meoShiki && source.querySelector('span[style*="color"]'));
+  }, { timeout: 10000 });
+  const highlightContinuityFrames = await page.evaluate(() => {
+    const probe = (window as typeof window & {
+      __previewHighlightContinuityProbe: { samples: Array<{ text: string; highlighted: boolean }>; stop(): void };
+    }).__previewHighlightContinuityProbe;
+    probe.stop();
+    return probe.samples;
+  });
+  assert.ok(
+    highlightContinuityFrames.every(frame => !frame.text.includes(';X') || frame.highlighted),
+    `Updated code must not become visible before its syntax colors are ready: ${JSON.stringify(highlightContinuityFrames)}`
+  );
+  const structuredStartLine = text.slice(0, text.indexOf('## Structured mapping fixture')).split('\n').length;
+  const structuredEndLine = text.slice(0, text.indexOf('## Structured mapping end')).split('\n').length;
+  await page.click('.line-jump-input');
+  await page.keyboard.down('Control');
+  await page.keyboard.press('A');
+  await page.keyboard.up('Control');
+  await page.keyboard.type(String(structuredStartLine));
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('.cm-line')?.isConnected === true);
+  const semanticScrollTrace = await page.evaluate(async ({ startLine, endLine }) => {
+    const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const samples: Array<{ sourceLine: number | null; previewLine: number | null; delta: number | null }> = [];
+    for (let step = 0; step <= 100; step += 1) {
+      scroller.scrollTop += 12;
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      const sourceBand = scroller.getBoundingClientRect().top + scroller.clientHeight / 3;
+      const sourceLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement'))
+        .map(element => ({ element, rect: element.getBoundingClientRect() }))
+        .filter(entry => entry.rect.bottom >= sourceBand)
+        .sort((left, right) => Math.abs(left.rect.top - sourceBand) - Math.abs(right.rect.top - sourceBand))[0]
+        ?.element.textContent;
+      const previewBand = frameDocument.documentElement.clientHeight / 3;
+      const previewCandidates = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
+        .map(element => {
+          const rect = element.getBoundingClientRect();
+          const start = Number(element.dataset.sourceLine);
+          const end = Number(element.dataset.sourceEndLine ?? start);
+          const ratio = rect.height > 0 ? Math.max(0, Math.min(1, (previewBand - rect.top) / rect.height)) : 0;
+          return {
+            contains: rect.top <= previewBand && rect.bottom >= previewBand,
+            distance: rect.top <= previewBand ? previewBand - rect.top : rect.top - previewBand,
+            height: rect.height,
+            line: Math.round(start + (end - start) * ratio)
+          };
+        })
+        .filter(entry => Number.isFinite(entry.line))
+        .sort((left, right) => Number(right.contains) - Number(left.contains)
+          || (left.contains && right.contains ? left.height - right.height : left.distance - right.distance));
+      const parsedSourceLine = Number(sourceLine);
+      const previewLine = previewCandidates[0]?.line ?? null;
+      if (!Number.isFinite(parsedSourceLine) || parsedSourceLine < startLine || parsedSourceLine > endLine) continue;
+      samples.push({
+        sourceLine: Number.isFinite(parsedSourceLine) ? parsedSourceLine : null,
+        previewLine,
+        delta: Number.isFinite(parsedSourceLine) && previewLine !== null
+          ? previewLine - parsedSourceLine
+          : null
+      });
+    }
+    return samples;
+  }, { startLine: structuredStartLine, endLine: structuredEndLine });
+  assert.ok(
+    semanticScrollTrace.every(sample => sample.delta !== null && Math.abs(sample.delta) <= 12),
+    `Linked scrolling must keep the same semantic source range in the reading band: ${JSON.stringify(semanticScrollTrace)}`
+  );
+  assert.ok(
+    tableFit.every(table => table.rightSafetyInset >= 0.75),
+    `The final collapsed border needs a visible safety inset: ${JSON.stringify(tableFit)}`
+  );
 
+  await page.keyboard.down('Control');
+  await page.keyboard.press('Home');
+  await page.keyboard.up('Control');
   const countBeforeTyping = previewRenderCount;
   await page.keyboard.down('Control');
   await page.keyboard.down('Shift');
@@ -443,9 +714,24 @@ try {
     frameWindow.dispatchEvent(new Event('resize'));
   });
 
+  // Keep the caret inside the currently rendered Source viewport so this check
+  // observes selection movement rather than CodeMirror virtualizing an old,
+  // off-screen DOM selection left by an earlier fixture phase.
+  await page.mouse.click(
+    sourceBounds.x + sourceBounds.width / 2,
+    sourceBounds.y + sourceBounds.height / 2
+  );
   const selectionBefore = await page.evaluate(() => {
     const selection = document.getSelection();
-    return selection ? { anchorOffset: selection.anchorOffset, focusOffset: selection.focusOffset } : null;
+    const anchorNode = selection?.anchorNode;
+    const line = anchorNode instanceof Element
+      ? anchorNode.closest<HTMLElement>('.cm-line')
+      : anchorNode?.parentElement?.closest<HTMLElement>('.cm-line');
+    if (!selection || !anchorNode || !line) return null;
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    range.setEnd(anchorNode, selection.anchorOffset);
+    return { lineText: line.textContent, offset: range.toString().length };
   });
   const frameBounds = await page.$eval('.preview-frame', frame => {
     const rect = frame.getBoundingClientRect();
@@ -478,8 +764,17 @@ try {
     Math.abs(document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop - previous) > 100
   ), { timeout: 3000 }, editorScrollBefore);
   const selectionAfter = await page.evaluate(() => {
+    document.querySelector<HTMLElement>('.cm-content')?.focus({ preventScroll: true });
     const selection = document.getSelection();
-    return selection ? { anchorOffset: selection.anchorOffset, focusOffset: selection.focusOffset } : null;
+    const anchorNode = selection?.anchorNode;
+    const line = anchorNode instanceof Element
+      ? anchorNode.closest<HTMLElement>('.cm-line')
+      : anchorNode?.parentElement?.closest<HTMLElement>('.cm-line');
+    if (!selection || !anchorNode || !line) return null;
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    range.setEnd(anchorNode, selection.anchorOffset);
+    return { lineText: line.textContent, offset: range.toString().length };
   });
   assert.deepEqual(selectionAfter, selectionBefore, 'Preview-driven scroll must not move Source selection');
   const scrollTrace = await page.evaluate(() => {
@@ -624,10 +919,13 @@ try {
     const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
     return Array.from(frameDocument.querySelectorAll<HTMLTableElement>('table')).map(table => {
       const wrapper = table.closest<HTMLElement>('.meo-table-scroll, .meo-export-html-block')!;
+      const wrapperRect = wrapper.getBoundingClientRect();
+      const tableRect = table.getBoundingClientRect();
       return {
         overflow: wrapper.scrollWidth - wrapper.clientWidth,
         overflowX: getComputedStyle(wrapper).overflowX,
-        rightOverflow: table.getBoundingClientRect().right - wrapper.getBoundingClientRect().right
+        rightOverflow: tableRect.right - wrapperRect.right,
+        rightSafetyInset: wrapperRect.right - tableRect.right
       };
     });
   });
@@ -637,6 +935,7 @@ try {
     JSON.stringify(fullPreviewTableFit)
   );
   assert.ok(fullPreviewTableFit.every(table => table.rightOverflow <= 0.5), JSON.stringify(fullPreviewTableFit));
+  assert.ok(fullPreviewTableFit.every(table => table.rightSafetyInset >= 0.75), JSON.stringify(fullPreviewTableFit));
   await page.click('button[data-mode="source"]');
   await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');
   await new Promise(resolve => setTimeout(resolve, 160));

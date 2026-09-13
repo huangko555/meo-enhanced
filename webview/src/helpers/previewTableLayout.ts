@@ -152,6 +152,23 @@ function applyTableWidthPlan(
   plan.widths.forEach((width, index) => { columns[index].style.width = `${width}px`; });
 }
 
+function visibleRightEdgeInset(table: HTMLTableElement): number {
+  const view = table.ownerDocument.defaultView;
+  const devicePixelRatio = Math.max(1, view?.devicePixelRatio ?? 1);
+  let outerBorderWidth = 0;
+  for (const row of Array.from(table.rows)) {
+    const lastCell = row.cells.item(row.cells.length - 1);
+    if (!lastCell) continue;
+    const style = view?.getComputedStyle(lastCell) ?? getComputedStyle(lastCell);
+    const width = Number.parseFloat(style.borderRightWidth);
+    if (Number.isFinite(width)) outerBorderWidth = Math.max(outerBorderWidth, width);
+  }
+  // overflow: clip must not coincide with a collapsed/antialiased border edge.
+  // Reserve at least one physical pixel and the full declared outer border so
+  // both the last border and the last cell's paint remain visibly inside.
+  return Math.max(1 / devicePixelRatio, outerBorderWidth);
+}
+
 function layoutTable(table: HTMLTableElement): void {
   const wrapper = table.closest<HTMLElement>('.meo-table-scroll, .meo-export-html-block') ?? table.parentElement;
   const columnCount = tableColumnCount(table);
@@ -161,13 +178,19 @@ function layoutTable(table: HTMLTableElement): void {
   table.style.minWidth = '0';
   table.style.maxWidth = '100%';
   table.style.tableLayout = 'fixed';
-  applyTableWidthPlan(table, columns, preferred, wrapper.clientWidth);
-  // With collapsed borders Chromium paints half of each outer cell border
-  // outside the declared table width. Calibrate against the actual rendered
-  // box so fractional device-pixel rounding cannot create a 1px scroll range.
-  const renderedOverhang = Math.max(0, table.getBoundingClientRect().width - wrapper.clientWidth);
-  if (renderedOverhang > 0.01) {
-    applyTableWidthPlan(table, columns, preferred, Math.max(0, wrapper.clientWidth - renderedOverhang));
+  const rightEdgeInset = visibleRightEdgeInset(table);
+  let availableWidth = Math.max(0, wrapper.clientWidth - rightEdgeInset);
+  const clippedRightEdge = () => (
+    wrapper.getBoundingClientRect().left + wrapper.clientLeft + wrapper.clientWidth - rightEdgeInset
+  );
+  // Chromium's collapsed-border box can differ fractionally from the declared
+  // width. Converge against the actual clip edge, not scrollWidth (which rounds
+  // and cannot tell whether the final painted border is still being clipped).
+  for (let pass = 0; pass < 3; pass += 1) {
+    applyTableWidthPlan(table, columns, preferred, availableWidth);
+    const renderedOverhang = table.getBoundingClientRect().right - clippedRightEdge();
+    if (renderedOverhang <= 0.01) break;
+    availableWidth = Math.max(0, availableWidth - renderedOverhang);
   }
   wrapper.classList.toggle('meo-preview-table-only-html', isTableOnlyHtmlHost(wrapper));
   wrapper.classList.remove('is-table-overflowing');
