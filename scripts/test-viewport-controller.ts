@@ -2028,7 +2028,7 @@ for (const settledShift of [0, 40]) {
     scrollWidth: 800,
     clientHeight: 400,
     clientWidth: 800,
-    getBoundingClientRect: () => ({ top: 0, bottom: 400, left: 0, right: 800 })
+    getBoundingClientRect: () => { throw new Error('Source linked scrolling must not measure the editor DOM'); }
   };
   const lineAtHeight = (height: number) => {
     const number = Math.max(1, Math.min(doc.lines, Math.floor(height / 20) + 1));
@@ -2040,13 +2040,14 @@ for (const settledShift of [0, 40]) {
   const controller = new ViewportController({
     dom: {},
     scrollDOM,
-    contentDOM: { querySelectorAll: () => [] },
+    contentDOM: { querySelectorAll: () => { throw new Error('Source linked scrolling must not scan rendered DOM'); } },
     state: { doc, selection },
     lineBlockAtHeight: lineAtHeight,
     lineBlockAt: (position: number) => lineAtHeight((doc.lineAt(position).number - 1) * 20),
     requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
   } as any, {
     attachInteractions: false,
+    getMode: () => 'source',
     previewSurface: {
       captureTopVisiblePosition: () => previewPosition,
       restoreTopVisiblePosition(position, isCurrent) {
@@ -2064,12 +2065,6 @@ for (const settledShift of [0, 40]) {
     previewPosition = { line: 25, lineOffset: 3, editorLineOffset: 3 };
     controller.markPreviewInteraction();
     controller.previewViewportChanged();
-    const projectionFrame = frames.values().next().value;
-    frames.clear();
-    if (!projectionFrame) throw new Error('Preview projection did not schedule a frame');
-    projectionFrame(0);
-    await Promise.resolve();
-    await Promise.resolve();
     if (scrollDOM.scrollTop !== 483) {
       throw new Error(`Preview did not semantically project into Source: ${scrollDOM.scrollTop}`);
     }

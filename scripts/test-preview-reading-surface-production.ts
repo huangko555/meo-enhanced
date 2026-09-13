@@ -1447,7 +1447,9 @@ async function main(): Promise<void> {
         const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
         const doc = frame.contentDocument!;
         const tables = Array.from(doc.querySelectorAll<HTMLTableElement>('table'));
-        const tableContainers = tables.map((item) => item.closest<HTMLElement>('.meo-table-scroll') ?? item);
+        const tableContainers = tables.map((item) => (
+          item.closest<HTMLElement>('.meo-table-scroll, .meo-export-html-block') ?? item
+        ));
         const table = tables[0];
         const tableCells = tables.flatMap((item) => Array.from(item.querySelectorAll<HTMLElement>('th, td')));
         const tableKbds = tables.flatMap((item) => Array.from(item.querySelectorAll<HTMLElement>('kbd')));
@@ -1523,6 +1525,7 @@ async function main(): Promise<void> {
           const contentRight = baseRects.length > 0 ? Math.max(...baseRects.map((base) => base.right)) : rect.right;
           const clippingAncestors: string[] = [];
           for (let current: HTMLElement | null = root; current; current = current.parentElement) {
+            if (current === doc.body || current === doc.documentElement) continue;
             const currentStyle = getComputedStyle(current);
             if ([currentStyle.overflowX, currentStyle.overflowY].some((value) => value === 'hidden' || value === 'clip')) {
               clippingAncestors.push(`${current.tagName.toLowerCase()}.${current.className}:${currentStyle.overflowX}/${currentStyle.overflowY}`);
@@ -1614,6 +1617,7 @@ async function main(): Promise<void> {
           const clipping: string[] = [];
           for (let current = graphic.parentElement; current; current = current.parentElement) {
             if (current.namespaceURI === 'http://www.w3.org/2000/svg') continue;
+            if (current === doc.body || current === doc.documentElement) continue;
             const style = getComputedStyle(current);
             if ([style.overflowX, style.overflowY].some((value) => value === 'hidden' || value === 'clip')) {
               clipping.push(`${current.tagName.toLowerCase()}.${current.className}:${style.overflowX}/${style.overflowY}`);
@@ -1781,9 +1785,14 @@ async function main(): Promise<void> {
             wrapperOverflows: tableContainers.map((container) => container.scrollWidth - container.clientWidth),
             tableOverflows: tables.map((item) => item.scrollWidth - item.clientWidth),
             wrapperOverflowX: tableContainers.map((container) => getComputedStyle(container).overflowX),
+            columnWidths: tables.map((item) => Array.from(
+              item.querySelectorAll<HTMLTableColElement>(':scope > colgroup[data-meo-preview-columns] > col'),
+              (column) => column.getBoundingClientRect().width
+            )),
             clippingAncestors: [...tableContainers, ...tables, ...tableCells, ...tableKbds].flatMap((element) => {
               const clipping: string[] = [];
               for (let current: HTMLElement | null = element; current; current = current.parentElement) {
+                if (current === doc.body || current === doc.documentElement) continue;
                 const overflowX = getComputedStyle(current).overflowX;
                 if (overflowX === 'hidden' || overflowX === 'clip') {
                   clipping.push(`${current.tagName.toLowerCase()}.${current.className}:${overflowX}`);
@@ -1791,7 +1800,7 @@ async function main(): Promise<void> {
               }
               return clipping;
             }),
-            rectsWithinPage: [...tableContainers, ...tables, ...tableCells, ...tableKbds, tableLink].every((element) => {
+            rectsWithinPage: tableContainers.every((element) => {
               const rect = element.getBoundingClientRect();
               return rect.left >= rootRect.left - 1 && rect.right <= rootRect.right + 1;
             }),
@@ -2061,9 +2070,17 @@ async function main(): Promise<void> {
         result.table.documentOverflow <= 1 &&
         result.table.bodyOverflow <= 1 &&
         result.table.pageOverflow <= 1 &&
-        result.table.wrapperOverflows.every((value) => value <= 1) &&
         result.table.tableOverflows.every((value) => value <= 1),
         JSON.stringify({ width, zoom, deviceScaleFactor, table: result.table })
+      );
+      assert.ok(result.table.wrapperOverflowX.every((value) => value === 'auto'), JSON.stringify(result.table));
+      assert.ok(
+        result.table.columnWidths.every((columns) => columns.every((value) => value >= 89 * zoom)),
+        JSON.stringify(result.table)
+      );
+      assert.ok(
+        result.table.columnWidths[1][0] > result.table.columnWidths[1][1] * 1.5,
+        JSON.stringify(result.table)
       );
       assert.deepEqual(result.table.clippingAncestors, []);
       assert.equal(result.table.rectsWithinPage, true, JSON.stringify({ width, zoom, deviceScaleFactor, table: result.table }));

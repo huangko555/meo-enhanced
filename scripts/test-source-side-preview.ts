@@ -47,6 +47,11 @@ try {
 
   const text = [
     'Intro paragraph for formatting continuity.',
+    `### Long heading ${'6'.repeat(180)}`,
+    '',
+    `Ordinary paragraph ${'7'.repeat(220)}`,
+    '',
+    `- Ordinary list item ${'unbroken'.repeat(55)}`,
     ...Array.from({ length: 140 }, (_, index) => (
       `## Section ${index + 1}\n\nParagraph ${index + 1} with enough text to exercise semantic linked scrolling.`
     ))
@@ -131,7 +136,12 @@ try {
       frameHiddenTransitions: 0,
       editorScrollTops: [] as number[],
       previewScrollTops: [] as number[],
-      previewFrames: [] as Array<{ scrollTop: number; sourceLine: number | null; anchorTop: number | null }>,
+      previewFrames: [] as Array<{
+        editorScrollTop: number;
+        scrollTop: number;
+        sourceLine: number | null;
+        anchorTop: number | null;
+      }>,
       samplePreviewFrames: false,
       stablePreviewNode: frameDocument.querySelector<HTMLElement>('h2')
     };
@@ -154,6 +164,7 @@ try {
       const anchor = Array.from(currentDocument?.querySelectorAll<HTMLElement>('[data-source-line]') ?? [])
         .find((element) => element.getBoundingClientRect().bottom > 0);
       probe.previewFrames.push({
+        editorScrollTop: document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop,
         scrollTop,
         sourceLine: anchor ? Number(anchor.dataset.sourceLine) : null,
         anchorTop: anchor?.getBoundingClientRect().top ?? null
@@ -179,6 +190,48 @@ try {
     sourceBounds.x + sourceBounds.width / 2,
     sourceBounds.y + 24
   );
+  await page.evaluate(() => {
+    const probe = (window as typeof window & {
+      __sourcePreviewContinuityProbe: { startPreviewFrameSampling(): void };
+    }).__sourcePreviewContinuityProbe;
+    probe.startPreviewFrameSampling();
+  });
+  await page.mouse.move(
+    sourceBounds.x + sourceBounds.width / 2,
+    sourceBounds.y + sourceBounds.height / 2
+  );
+  for (let index = 0; index < 6; index += 1) {
+    await page.mouse.wheel({ deltaY: 120 });
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  await new Promise(resolve => setTimeout(resolve, 120));
+  const sourceDrivenFrames = await page.evaluate(() => {
+    const probe = (window as typeof window & {
+      __sourcePreviewContinuityProbe: {
+        previewFrames: Array<{ editorScrollTop: number; scrollTop: number }>;
+        stopPreviewFrameSampling(): void;
+      };
+    }).__sourcePreviewContinuityProbe;
+    probe.stopPreviewFrameSampling();
+    return probe.previewFrames;
+  });
+  const sourceFollowerLagFrames = sourceDrivenFrames.filter((frame, index) => {
+    if (index === 0) return false;
+    const previous = sourceDrivenFrames[index - 1];
+    return Math.abs(frame.editorScrollTop - previous.editorScrollTop) > 1
+      && Math.abs(frame.scrollTop - previous.scrollTop) <= 1;
+  });
+  assert.equal(
+    sourceFollowerLagFrames.length,
+    0,
+    `Source-driven linked scrolling must update Preview in the same sampled frame: ${JSON.stringify(sourceDrivenFrames)}`
+  );
+  await page.mouse.click(
+    sourceBounds.x + sourceBounds.width / 2,
+    sourceBounds.y + sourceBounds.height / 2
+  );
+  await new Promise(resolve => setTimeout(resolve, 40));
+  const continuityScrollTop = await page.$eval('.cm-scroller', element => element.scrollTop);
   await page.evaluate(() => {
     const probe = (window as typeof window & {
       __sourcePreviewContinuityProbe: { startPreviewFrameSampling(): void };
@@ -216,7 +269,12 @@ try {
         frameHiddenTransitions: number;
         editorScrollTops: number[];
         previewScrollTops: number[];
-        previewFrames: Array<{ scrollTop: number; sourceLine: number | null; anchorTop: number | null }>;
+        previewFrames: Array<{
+          editorScrollTop: number;
+          scrollTop: number;
+          sourceLine: number | null;
+          anchorTop: number | null;
+        }>;
         stablePreviewNode: HTMLElement | null;
         stopPreviewFrameSampling(): void;
       };
@@ -233,7 +291,7 @@ try {
       horizontalScrollbarHeight: frameDocument.defaultView!
         .getComputedStyle(frameDocument.documentElement, '::-webkit-scrollbar').height
     };
-  }, refreshScrollTop);
+  }, continuityScrollTop);
   assert.deepEqual(inFlightPresentation, {
     frameVisibility: '',
     oldFrameStillVisible: true,
@@ -303,10 +361,12 @@ try {
         frameHiddenTransitions: number;
         editorScrollTops: number[];
         previewScrollTops?: number[];
+        startPreviewFrameSampling(): void;
       };
     }).__sourcePreviewContinuityProbe;
     probe.editorScrollTops = [];
     probe.previewScrollTops = [];
+    probe.startPreviewFrameSampling();
     const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
     frameDocument.addEventListener('scroll', () => {
       probe.previewScrollTops!.push(frameDocument.scrollingElement!.scrollTop);
@@ -327,15 +387,36 @@ try {
   assert.deepEqual(selectionAfter, selectionBefore, 'Preview-driven scroll must not move Source selection');
   const scrollTrace = await page.evaluate(() => {
     const probe = (window as typeof window & {
-      __sourcePreviewContinuityProbe: { editorScrollTops: number[]; previewScrollTops?: number[] };
+      __sourcePreviewContinuityProbe: {
+        editorScrollTops: number[];
+        previewScrollTops?: number[];
+        previewFrames: Array<{ editorScrollTop: number; scrollTop: number }>;
+        stopPreviewFrameSampling(): void;
+      };
     }).__sourcePreviewContinuityProbe;
-    return { editor: probe.editorScrollTops, preview: probe.previewScrollTops ?? [] };
+    probe.stopPreviewFrameSampling();
+    return {
+      editor: probe.editorScrollTops,
+      preview: probe.previewScrollTops ?? [],
+      frames: probe.previewFrames
+    };
   });
   const hasReverseStep = (values: number[]) => values.some((value, index) => (
     index > 0 && value < values[index - 1] - 1
   ));
   assert.equal(hasReverseStep(scrollTrace.preview), false, JSON.stringify(scrollTrace));
   assert.equal(hasReverseStep(scrollTrace.editor), false, JSON.stringify(scrollTrace));
+  const previewFollowerLagFrames = scrollTrace.frames.filter((frame, index) => {
+    if (index === 0) return false;
+    const previous = scrollTrace.frames[index - 1];
+    return Math.abs(frame.scrollTop - previous.scrollTop) > 5
+      && Math.abs(frame.editorScrollTop - previous.editorScrollTop) <= 1;
+  });
+  assert.equal(
+    previewFollowerLagFrames.length,
+    0,
+    `Preview-driven linked scrolling must update Source in the same sampled frame: ${JSON.stringify(scrollTrace.frames)}`
+  );
 
   await page.click('.source-preview-button');
   const closed = await page.evaluate(() => ({

@@ -36,7 +36,8 @@ export function createPreviewMermaidRenderer(
     frameDocument: Document,
     appearance: PreviewAppearance,
     onDiagramRendered?: () => void,
-    isCurrent: () => boolean = () => true
+    isCurrent: () => boolean = () => true,
+    commit: (mutate: () => void) => void = (mutate) => mutate()
   ): Promise<void> => {
     const renderGeneration = latestRenderGeneration + 1;
     latestRenderGeneration = renderGeneration;
@@ -54,7 +55,8 @@ export function createPreviewMermaidRenderer(
               frameDocument,
               appearance,
               onDiagramRendered,
-              requestIsCurrent
+              requestIsCurrent,
+              commit
             );
           } finally {
             await restoreMermaidEditorTheme();
@@ -85,7 +87,8 @@ async function renderMermaidBlocks(
   frameDocument: Document,
   appearance: PreviewAppearance,
   onDiagramRendered: (() => void) | undefined,
-  isCurrent: () => boolean
+  isCurrent: () => boolean,
+  commit: (mutate: () => void) => void
 ): Promise<void> {
   if (!isCurrent()) return;
   const viewportCenter = (frameDocument.defaultView?.innerHeight ?? 0) / 2;
@@ -134,6 +137,8 @@ async function renderMermaidBlocks(
   });
 
   let renderIndex = 0;
+  const prepared: Array<{ block: HTMLElement; source: string; svg: string }> = [];
+  const failed: HTMLElement[] = [];
   for (const { block, documentIndex } of blocks) {
     // Mermaid's promises can resolve in one task. Let input and paint run
     // between diagrams while retaining the exclusive theme lease.
@@ -169,16 +174,28 @@ async function renderMermaidBlocks(
       if (!svg) continue;
 
       cachePreviewMermaidSvg(cacheKey, svg);
+      prepared.push({ block, source, svg });
+    } catch {
+      failed.push(block);
+    }
+  }
+  if (!isCurrent() || (prepared.length === 0 && failed.length === 0)) return;
+  commit(() => {
+    if (!isCurrent()) return;
+    for (const { block, source, svg } of prepared) {
       block.classList.toggle('is-math', isDisplayMathDiagram(source));
       block.classList.add('is-rendered');
       block.classList.remove('is-error');
+      delete block.dataset.meoPreviewMermaidPending;
       block.dataset.meoPreviewMermaidAppearance = appearance;
       block.innerHTML = `<div class="meo-export-mermaid-svg">${svg}</div>`;
-      onDiagramRendered?.();
-    } catch {
-      if (isCurrent()) block.classList.add('is-error');
     }
-  }
+    for (const block of failed) {
+      if (!block.classList.contains('is-rendered')) block.classList.add('is-error');
+      delete block.dataset.meoPreviewMermaidPending;
+    }
+  });
+  onDiagramRendered?.();
 }
 
 function readPreviewMermaidPalette(

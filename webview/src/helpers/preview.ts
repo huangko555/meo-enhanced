@@ -16,6 +16,10 @@ import { applyPreviewCodeHighlight } from './previewCodeHighlight';
 import { activateShikiCodeHighlighting, subscribeShikiRefresh } from './shikiHighlighter';
 import { createToolbarDropdown } from './toolbarDropdown';
 import { resolveEmbeddedImageSrc } from './images';
+import {
+  createPreviewTableLayoutController,
+  type PreviewTableLayoutController
+} from './previewTableLayout';
 
 type PreviewControllerOptions = {
   vscode: { postMessage: (message: WebviewMessage) => void };
@@ -130,6 +134,12 @@ function morphPreviewMain(frameDocument: Document, currentMain: HTMLElement, htm
   const nextMain = frameDocument.createElement('main');
   nextMain.className = 'meo-export-doc';
   nextMain.innerHTML = html;
+  const currentTables = Array.from(currentMain.querySelectorAll<HTMLTableElement>('table'));
+  Array.from(nextMain.querySelectorAll<HTMLTableElement>('table')).forEach((table, index) => {
+    const columns = currentTables[index]
+      ?.querySelector<HTMLTableColElement>(':scope > colgroup[data-meo-preview-columns]');
+    if (columns) table.prepend(columns.cloneNode(true));
+  });
   morphdom(currentMain, nextMain, {
     childrenOnly: true,
     onBeforeElUpdated(fromElement, toElement) {
@@ -148,8 +158,23 @@ function morphPreviewMain(frameDocument: Document, currentMain: HTMLElement, htm
         mermaidSource
         && fromElement.classList.contains('meo-export-mermaid')
         && toElement.classList.contains('meo-export-mermaid')
-        && mermaidSource === toElement.dataset.sourceB64
       ) {
+        const nextSource = toElement.dataset.sourceB64;
+        if (
+          nextSource
+          && nextSource !== mermaidSource
+          && fromElement.classList.contains('is-rendered')
+          && fromElement.querySelector('svg')
+        ) {
+          // Keep the last successful diagram on screen while the replacement is
+          // rendered off-layout. The renderer commits the new SVG atomically.
+          fromElement.dataset.sourceB64 = nextSource;
+          fromElement.dataset.meoPreviewMermaidPending = 'true';
+          delete fromElement.dataset.meoPreviewMermaidAppearance;
+          syncSourceMappingAttributes(fromElement, toElement);
+          return false;
+        }
+        if (mermaidSource !== nextSource) return true;
         syncSourceMappingAttributes(fromElement, toElement);
         return false;
       }
@@ -181,15 +206,34 @@ body {
 }
 
 html {
-  overflow-x: auto;
+  max-width: 100%;
+  overflow-x: hidden;
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
 
 body {
+  max-width: 100%;
   min-width: 0;
-  overflow-x: visible;
+  overflow-x: clip;
   scrollbar-gutter: stable;
+}
+
+.meo-export-page {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.meo-export-doc {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.meo-export-math,
+.meo-export-math * {
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 html::-webkit-scrollbar,
@@ -508,8 +552,18 @@ export function createPreviewController({
   let pendingText = '';
   let latestAcceptedText: string | null = null;
   let frameRenderedText: string | null = null;
+  type PreviewSourceMapEntry = {
+    element: HTMLElement;
+    start: number;
+    end: number;
+    top: number;
+    bottom: number;
+  };
   let sourceMapDocument: Document | null = null;
-  let sourceMap: Array<{ element: HTMLElement; start: number; end: number }> = [];
+  let sourceMap: PreviewSourceMapEntry[] = [];
+  let sourceMapDirty = true;
+  let sourceMapResizeObserver: ResizeObserver | null = null;
+  let sourceMapMeasureFrame: number | null = null;
   let latestPayload: PreviewRenderValue | null = null;
   const previewRenderTransport = createPreviewRenderTransport((message) => vscode.postMessage(message));
   const previewMermaidRenderer = createPreviewMermaidRenderer(
@@ -521,6 +575,7 @@ export function createPreviewController({
   let searchMatches: HTMLElement[] = [];
   let activeSearchIndex = -1;
   let previewMathViewports: LatexMathViewportController[] = [];
+  let previewTableLayout: PreviewTableLayoutController | null = null;
   let disposeDeferredImages = () => {};
   let frameEvents: AbortController | null = null;
   let disposed = false;
@@ -586,6 +641,28 @@ export function createPreviewController({
   const attachDeferredImages = (frameDocument: Document) => {
     disposeDeferredImages();
     const abortController = new AbortController();
+    const pendingCommits: Array<() => void> = [];
+    let commitFrame: number | null = null;
+    const flushCommits = () => {
+      commitFrame = null;
+      if (
+        abortController.signal.aborted || disposed ||
+        activeFrameDocument !== frameDocument || pendingCommits.length === 0
+      ) return;
+      const commits = pendingCommits.splice(0);
+      const commit = () => {
+        for (const mutate of commits) mutate();
+        sourceMapDirty = true;
+      };
+      if (host.hidden) commit();
+      else withViewportTransaction(() => commit());
+    };
+    const enqueueCommit = (commit: () => void) => {
+      pendingCommits.push(commit);
+      if (commitFrame !== null) return;
+      commitFrame = frameDocument.defaultView?.requestAnimationFrame(flushCommits) ?? null;
+      if (commitFrame === null) flushCommits();
+    };
     const images = Array.from(frameDocument.querySelectorAll<HTMLImageElement>(
       'img[data-meo-deferred-image-src]'
     ));
@@ -600,8 +677,7 @@ export function createPreviewController({
         activeFrameDocument !== frameDocument
       ) return;
       if (!resolvedSrc) {
-        if (host.hidden) image.removeAttribute('src');
-        else withViewportTransaction(() => image.removeAttribute('src'));
+        enqueueCommit(() => image.removeAttribute('src'));
         return;
       }
       // Load outside the reading layout so intrinsic dimensions do not change
@@ -637,11 +713,9 @@ export function createPreviewController({
       for (const attribute of Array.from(image.attributes)) {
         if (attribute.name !== 'src') prepared.setAttribute(attribute.name, attribute.value);
       }
-      const commit = () => {
+      enqueueCommit(() => {
         image.replaceWith(prepared);
-      };
-      if (host.hidden) commit();
-      else withViewportTransaction(commit);
+      });
     };
     const FrameIntersectionObserver = frame.contentWindow
       ? (frame.contentWindow as unknown as Pick<typeof globalThis, 'IntersectionObserver'>).IntersectionObserver
@@ -663,6 +737,9 @@ export function createPreviewController({
     disposeDeferredImages = () => {
       observer?.disconnect();
       abortController.abort();
+      pendingCommits.length = 0;
+      if (commitFrame !== null) frameDocument.defaultView?.cancelAnimationFrame(commitFrame);
+      commitFrame = null;
       disposeDeferredImages = () => {};
     };
   };
@@ -831,7 +908,10 @@ export function createPreviewController({
     const reusableMain = reusableDocument?.querySelector<HTMLElement>('main.meo-export-doc');
     frameEvents?.abort();
     frameEvents = null;
-    clearSearchMatches();
+    if (!reusableDocument) {
+      searchMatches = [];
+      activeSearchIndex = -1;
+    }
     const loadGeneration = frameGeneration + 1;
     frameGeneration = loadGeneration;
     mermaidPresentationGeneration += 1;
@@ -856,11 +936,30 @@ export function createPreviewController({
       activeFrameDocument = frameDocument;
       sourceMapDocument = null;
       sourceMap = [];
+      sourceMapDirty = true;
       frameEvents = new AbortController();
       const signal = frameEvents.signal;
       frameRenderedText = renderedText;
+      sourceMapResizeObserver?.disconnect();
+      const FrameResizeObserver = frame.contentWindow
+        ? (frame.contentWindow as unknown as Pick<typeof globalThis, 'ResizeObserver'>).ResizeObserver
+        : null;
+      const mappedRoot = frameDocument.querySelector<HTMLElement>('main.meo-export-doc');
+      if (FrameResizeObserver && mappedRoot) {
+        sourceMapResizeObserver = new FrameResizeObserver(() => {
+          sourceMapDirty = true;
+          if (sourceMapMeasureFrame !== null) return;
+          sourceMapMeasureFrame = window.requestAnimationFrame(() => {
+            sourceMapMeasureFrame = null;
+            if (!disposed && activeFrameDocument === frameDocument) getSourceMap();
+          });
+        });
+        sourceMapResizeObserver.observe(mappedRoot);
+      }
       const styleElement = frameDocument.querySelector<HTMLStyleElement>('style[data-meo-preview-styles]');
       if (styleElement) styleElement.textContent = payload.styles[appearance];
+      previewTableLayout?.dispose();
+      previewTableLayout = createPreviewTableLayoutController(frameDocument);
       const presentationGeneration = mermaidPresentationGeneration + 1;
       mermaidPresentationGeneration = presentationGeneration;
       const isCurrent = () => (
@@ -929,12 +1028,25 @@ export function createPreviewController({
       finishRender();
       attachDeferredImages(frameDocument);
       if (payload.hasMermaid) {
-        void previewMermaidRenderer.render(frameDocument, appearance, keepPosition, isCurrent).finally(() => {
-          keepPosition();
-        });
+        void previewMermaidRenderer.render(
+          frameDocument,
+          appearance,
+          () => {
+            sourceMapDirty = true;
+            scrollToTopController.sync();
+          },
+          isCurrent,
+          (mutate) => {
+            const commit = () => {
+              mutate();
+              sourceMapDirty = true;
+            };
+            if (host.hidden) commit();
+            else withViewportTransaction(() => commit());
+          }
+        );
       }
     };
-    disposePreviewMathViewports();
     scrollToTopController.setScrollElement(null);
     if (reusableDocument && reusableMain) {
       // Keep the browsing context and unchanged blocks alive. The viewport
@@ -942,6 +1054,8 @@ export function createPreviewController({
       // before the browser can paint the new layout.
       frame.onload = null;
       const commit = (viewportSlot: PreviewViewportProjectionSlot | null) => {
+        clearSearchMatches();
+        disposePreviewMathViewports();
         reusableDocument.documentElement.lang = uiLanguage;
         morphPreviewMain(reusableDocument, reusableMain, payload.html);
         if (!preserveViewport && reusableDocument.scrollingElement) {
@@ -953,6 +1067,9 @@ export function createPreviewController({
       else commit(null);
       return;
     }
+    disposePreviewMathViewports();
+    previewTableLayout?.dispose();
+    previewTableLayout = null;
     frame.onload = () => initializeFrame();
     frame.srcdoc = `<!DOCTYPE html><html lang="${uiLanguage}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewLatexMathViewportStyles}${previewPropertiesStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${payload.html}</main></div></body></html>`;
   };
@@ -990,13 +1107,28 @@ export function createPreviewController({
     // This is a presentation-only update of the same frame and document. A
     // cross-surface semantic projection would race this exact reading offset.
     styleElement.textContent = payload.styles[appearance];
+    previewTableLayout?.refresh();
     syncPreviewCodeHighlight(frameDocument);
     keepPosition();
     onRendered?.({ skipLinkedViewportProjection: true });
     if (payload.hasMermaid) {
-      void previewMermaidRenderer.render(frameDocument, appearance, keepPosition, isCurrent).finally(() => {
-        keepPosition();
-      });
+      void previewMermaidRenderer.render(
+        frameDocument,
+        appearance,
+        () => {
+          sourceMapDirty = true;
+          scrollToTopController.sync();
+        },
+        isCurrent,
+        (mutate) => {
+          const commit = () => {
+            mutate();
+            sourceMapDirty = true;
+          };
+          if (host.hidden) commit();
+          else withViewportTransaction(() => commit());
+        }
+      );
     }
     if (!hasPendingRequest && pendingPresentationScroll?.document === frameDocument) {
       pendingPresentationScroll = null;
@@ -1193,14 +1325,23 @@ export function createPreviewController({
   const getSourceMap = () => {
     const frameDocument = getFrameDocument();
     if (!frameDocument) return [];
-    if (sourceMapDocument !== frameDocument) {
+    if (sourceMapDocument !== frameDocument || sourceMapDirty) {
       sourceMapDocument = frameDocument;
+      sourceMapDirty = false;
+      const scrollTop = frameDocument.scrollingElement?.scrollTop ?? 0;
       sourceMap = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
         .map((element) => {
           const range = getSourceRange(element);
-          return range ? { element, ...range } : null;
+          if (!range) return null;
+          const rect = element.getBoundingClientRect();
+          return {
+            element,
+            ...range,
+            top: rect.top + scrollTop,
+            bottom: rect.bottom + scrollTop
+          };
         })
-        .filter((entry): entry is { element: HTMLElement; start: number; end: number } => entry !== null);
+        .filter((entry): entry is PreviewSourceMapEntry => entry !== null);
     }
     return sourceMap;
   };
@@ -1214,9 +1355,9 @@ export function createPreviewController({
     return { start, end: Number.isFinite(parsedEnd) ? Math.max(start, parsedEnd) : start };
   };
   const findSourceProjection = (line: number): {
-    exact?: { element: HTMLElement; start: number; end: number };
-    before?: { element: HTMLElement; start: number; end: number };
-    after?: { element: HTMLElement; start: number; end: number };
+    exact?: PreviewSourceMapEntry;
+    before?: PreviewSourceMapEntry;
+    after?: PreviewSourceMapEntry;
   } | null => {
     const entries = getSourceMap();
     if (entries.length === 0) return null;
@@ -1242,43 +1383,41 @@ export function createPreviewController({
     if (source.exact) {
       const lineSpan = Math.max(1, source.exact.end - source.exact.start + 1);
       const ratio = Math.max(0, Math.min(1, (line - source.exact.start) / lineSpan));
-      const rect = source.exact.element.getBoundingClientRect();
-      scrollElement.scrollTop += rect.top + rect.height * ratio + Math.max(0, lineOffset);
+      scrollElement.scrollTop = source.exact.top
+        + (source.exact.bottom - source.exact.top) * ratio
+        + Math.max(0, lineOffset);
       return;
     }
     if (source.before && source.after) {
-      const beforeRect = source.before.element.getBoundingClientRect();
-      const afterRect = source.after.element.getBoundingClientRect();
       const lineGap = Math.max(1, source.after.start - source.before.end);
       const ratio = Math.max(0, Math.min(1, (line - source.before.end) / lineGap));
-      scrollElement.scrollTop += beforeRect.bottom + (afterRect.top - beforeRect.bottom) * ratio;
+      scrollElement.scrollTop = source.before.bottom
+        + (source.after.top - source.before.bottom) * ratio;
       return;
     }
     const edge = source.before ?? source.after;
-    if (edge) scrollElement.scrollTop += edge.element.getBoundingClientRect().top;
+    if (edge) scrollElement.scrollTop = edge.top;
   };
   const getTopVisiblePosition = (): { topLine: number; topLineOffset: number; editorLineOffset: number } | null => {
     const entries = getSourceMap();
     if (entries.length === 0) {
       return null;
     }
-    const viewportAnchor = 0;
+    const viewportAnchor = getFrameDocument()?.scrollingElement?.scrollTop ?? 0;
     let low = 0;
     let high = entries.length - 1;
     while (low <= high) {
       const middle = (low + high) >>> 1;
-      if (entries[middle].element.getBoundingClientRect().top <= viewportAnchor + 0.5) low = middle + 1;
+      if (entries[middle].top <= viewportAnchor + 0.5) low = middle + 1;
       else high = middle - 1;
     }
     const candidate = entries[Math.max(0, high)];
     const range = candidate;
-    const rect = candidate.element.getBoundingClientRect();
     const next = entries[Math.max(0, high) + 1];
-    if (rect.bottom < viewportAnchor && next) {
-      const nextRect = next.element.getBoundingClientRect();
-      if (nextRect.top > viewportAnchor) {
-        const gapHeight = Math.max(1, nextRect.top - rect.bottom);
-        const ratio = Math.max(0, Math.min(1, (viewportAnchor - rect.bottom) / gapHeight));
+    if (candidate.bottom < viewportAnchor && next) {
+      if (next.top > viewportAnchor) {
+        const gapHeight = Math.max(1, next.top - candidate.bottom);
+        const ratio = Math.max(0, Math.min(1, (viewportAnchor - candidate.bottom) / gapHeight));
         return {
           topLine: Math.round(range.end + (next.start - range.end) * ratio),
           topLineOffset: 0,
@@ -1286,15 +1425,16 @@ export function createPreviewController({
         };
       }
     }
-    const ratio = rect.height > 0 ? Math.max(0, Math.min(1, (viewportAnchor - rect.top) / rect.height)) : 0;
+    const height = candidate.bottom - candidate.top;
+    const ratio = height > 0 ? Math.max(0, Math.min(1, (viewportAnchor - candidate.top) / height)) : 0;
     const topLine = Math.round(range.start + (range.end - range.start) * ratio);
     const lineSpan = Math.max(1, range.end - range.start + 1);
-    const lineTop = rect.top + rect.height * ((topLine - range.start) / lineSpan);
+    const lineTop = candidate.top + height * ((topLine - range.start) / lineSpan);
     return {
       topLine,
       topLineOffset: Math.max(0, viewportAnchor - lineTop),
       // An unmapped Preview gap has no corresponding editor line box.
-      editorLineOffset: rect.bottom <= viewportAnchor ? 0 : Math.max(0, viewportAnchor - lineTop)
+      editorLineOffset: candidate.bottom <= viewportAnchor ? 0 : Math.max(0, viewportAnchor - lineTop)
     };
   };
   const restoreTopVisiblePosition = (
@@ -1419,6 +1559,11 @@ export function createPreviewController({
       activeFrameDocument = null;
       sourceMapDocument = null;
       sourceMap = [];
+      sourceMapDirty = true;
+      sourceMapResizeObserver?.disconnect();
+      sourceMapResizeObserver = null;
+      if (sourceMapMeasureFrame !== null) window.cancelAnimationFrame(sourceMapMeasureFrame);
+      sourceMapMeasureFrame = null;
       frameRenderedText = null;
       frame.style.removeProperty('visibility');
       hasPendingRequest = false;
@@ -1431,6 +1576,8 @@ export function createPreviewController({
       fontFamilySelectControl.dispose();
       frame.onload = null;
       disposePreviewMathViewports();
+      previewTableLayout?.dispose();
+      previewTableLayout = null;
       frameEvents?.abort();
       frameEvents = null;
       disposeDeferredImages();

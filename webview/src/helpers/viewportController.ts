@@ -299,7 +299,6 @@ export class ViewportController {
   private pendingHistoryShortcutViewport: ViewportHistorySnapshot | null = null;
   private linkedPreviewEnabled = false;
   private linkedViewportDriver: ViewportAnchorOwner = 'editor';
-  private linkedProjectionFrame: number | null = null;
   private linkedProjectionGeneration = 0;
   private readonly getMode: () => 'live' | 'source';
   private readonly previewSurface: PreviewViewportSurface | null;
@@ -311,7 +310,7 @@ export class ViewportController {
   private readonly onWheel = (event: WheelEvent) => this.handleWheel(event);
   private readonly onScroll = () => {
     this.scheduleActiveScrollFrame();
-    this.scheduleLinkedViewportProjection('editor');
+    this.projectLinkedViewport('editor');
   };
   private readonly onPointerDown = (event: PointerEvent) => this.handlePotentialLayoutInteraction(event);
   private readonly onPointerUp = () => this.finishScrollbarDrag();
@@ -350,10 +349,6 @@ export class ViewportController {
     if (this.linkedPreviewEnabled) {
       this.linkedViewportDriver = owner;
       this.linkedProjectionGeneration += 1;
-      if (this.linkedProjectionFrame !== null) {
-        cancelAnimationFrame(this.linkedProjectionFrame);
-        this.linkedProjectionFrame = null;
-      }
     }
     const scope = this.anchorTransactionScope;
     const programmaticCurrentTransaction = scope.kind === 'current'
@@ -513,11 +508,7 @@ export class ViewportController {
     this.linkedPreviewEnabled = enabled;
     this.linkedViewportDriver = 'editor';
     this.linkedProjectionGeneration += 1;
-    if (this.linkedProjectionFrame !== null) {
-      cancelAnimationFrame(this.linkedProjectionFrame);
-      this.linkedProjectionFrame = null;
-    }
-    if (enabled) this.scheduleLinkedViewportProjection('editor');
+    if (enabled) this.projectLinkedViewport('editor');
   }
 
   markPreviewInteraction(): void {
@@ -525,15 +516,15 @@ export class ViewportController {
   }
 
   editorViewportChanged(): void {
-    this.scheduleLinkedViewportProjection('editor');
+    this.projectLinkedViewport('editor');
   }
 
   previewViewportChanged(): void {
-    this.scheduleLinkedViewportProjection('preview');
+    this.projectLinkedViewport('preview');
   }
 
   linkedPreviewReady(): void {
-    this.scheduleLinkedViewportProjection(this.linkedViewportDriver);
+    this.projectLinkedViewport(this.linkedViewportDriver);
   }
 
   /** Keeps a Preview presentation update inside the current scroll owner's transaction. */
@@ -551,38 +542,34 @@ export class ViewportController {
     this.runAnchorTransaction(handle, 'preview', () => mutate());
   }
 
-  private scheduleLinkedViewportProjection(owner: ViewportAnchorOwner): void {
+  private projectLinkedViewport(owner: ViewportAnchorOwner): void {
     if (
       this.destroyed || !this.linkedPreviewEnabled || !this.previewSurface ||
       this.linkedViewportDriver !== owner
     ) return;
     const generation = this.linkedProjectionGeneration;
-    if (this.linkedProjectionFrame !== null) cancelAnimationFrame(this.linkedProjectionFrame);
-    this.linkedProjectionFrame = requestAnimationFrame(() => {
-      this.linkedProjectionFrame = null;
-      if (
-        this.destroyed || !this.linkedPreviewEnabled || !this.previewSurface ||
-        generation !== this.linkedProjectionGeneration || this.linkedViewportDriver !== owner
-      ) return;
-      if (owner === 'editor') {
-        const position = this.getTopVisiblePosition();
-        this.previewSurface.restoreTopVisiblePosition(position, () => (
-          !this.destroyed && this.linkedPreviewEnabled &&
-          generation === this.linkedProjectionGeneration && this.linkedViewportDriver === 'editor'
-        ));
-        return;
-      }
-      const position = this.previewSurface.captureTopVisiblePosition();
-      if (!position) return;
-      this.restoreLinkedEditorPosition(
-        position.line,
-        position.editorLineOffset ?? position.lineOffset,
-        () => (
-          !this.destroyed && this.linkedPreviewEnabled &&
-          generation === this.linkedProjectionGeneration && this.linkedViewportDriver === 'preview'
-        )
-      );
-    });
+    if (
+      this.destroyed || !this.linkedPreviewEnabled || !this.previewSurface ||
+      generation !== this.linkedProjectionGeneration || this.linkedViewportDriver !== owner
+    ) return;
+    if (owner === 'editor') {
+      const position = this.getTopVisiblePosition();
+      this.previewSurface.restoreTopVisiblePosition(position, () => (
+        !this.destroyed && this.linkedPreviewEnabled &&
+        generation === this.linkedProjectionGeneration && this.linkedViewportDriver === 'editor'
+      ));
+      return;
+    }
+    const position = this.previewSurface.captureTopVisiblePosition();
+    if (!position) return;
+    this.restoreLinkedEditorPosition(
+      position.line,
+      position.editorLineOffset ?? position.lineOffset,
+      () => (
+        !this.destroyed && this.linkedPreviewEnabled &&
+        generation === this.linkedProjectionGeneration && this.linkedViewportDriver === 'preview'
+      )
+    );
   }
 
   private restoreLinkedEditorPosition(
@@ -593,24 +580,18 @@ export class ViewportController {
     // A linked follower tracks the current gesture, not an asynchronous layout
     // mutation. One measured write avoids the generic multi-frame stabilizer
     // chasing a Preview gesture after it has already advanced.
-    this.view.requestMeasure({
-      read: () => {
-        if (!isCurrent()) return null;
-        const normalizedLine = Math.min(
-          Math.max(1, Math.floor(Number.isFinite(lineNumber) ? lineNumber : 1)),
-          this.view.state.doc.lines
-        );
-        const line = this.view.state.doc.line(normalizedLine);
-        return this.resolveScrollTarget({
-          top: this.view.lineBlockAt(line.from).top + (
-            Number.isFinite(lineOffset) ? Math.max(0, lineOffset) : 0
-          )
-        }, this.readScrollPosition());
-      },
-      write: (target) => {
-        if (target && isCurrent()) this.writeScrollPosition(target);
-      }
-    });
+    if (!isCurrent()) return;
+    const normalizedLine = Math.min(
+      Math.max(1, Math.floor(Number.isFinite(lineNumber) ? lineNumber : 1)),
+      this.view.state.doc.lines
+    );
+    const line = this.view.state.doc.line(normalizedLine);
+    const target = this.resolveScrollTarget({
+      top: this.view.lineBlockAt(line.from).top + (
+        Number.isFinite(lineOffset) ? Math.max(0, lineOffset) : 0
+      )
+    }, this.readScrollPosition());
+    if (isCurrent()) this.writeScrollPosition(target);
   }
 
   consumeHistoryShortcutViewport(): ViewportHistorySnapshot | null {
@@ -629,7 +610,8 @@ export class ViewportController {
 
   captureDocumentAnchor(): ViewportDocumentAnchor {
     const scrollTop = Math.max(0, this.view.scrollDOM.scrollTop);
-    const canInspectLayout = typeof this.view.scrollDOM.getBoundingClientRect === 'function'
+    const canInspectLayout = this.getMode() === 'live'
+      && typeof this.view.scrollDOM.getBoundingClientRect === 'function'
       && typeof this.view.contentDOM?.querySelectorAll === 'function';
     if (canInspectLayout) {
       const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
@@ -951,10 +933,6 @@ export class ViewportController {
     this.destroyed = true;
     this.linkedPreviewEnabled = false;
     this.linkedProjectionGeneration += 1;
-    if (this.linkedProjectionFrame !== null) {
-      cancelAnimationFrame(this.linkedProjectionFrame);
-      this.linkedProjectionFrame = null;
-    }
     this.interactionGeneration += 1;
     this.navigationGeneration += 1;
     this.generation += 1;

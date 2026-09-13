@@ -265,6 +265,12 @@ try {
   await page.evaluate(() => {
     (window as typeof window & { __previewController?: any }).__previewController?.setVisible(true);
   });
+  const updatedMarkdownText = markdownText.replace('Start --> Check --> Done', 'Start --> Updated --> Done');
+  const updatedRendered = renderMarkdownToHtml({
+    markdownText: updatedMarkdownText,
+    markdownFilePath: 'C:/tmp/preview-mermaid.md',
+    target: 'html'
+  });
   const previewDragState = await page.evaluate(() => {
     const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
     const diagram = frameDocument?.querySelector<HTMLElement>('.meo-export-mermaid.is-rendered:not(.is-math)');
@@ -382,6 +388,56 @@ try {
   ) {
     throw new Error(`Light Preview Mermaid palette mismatch: ${JSON.stringify(lightPalette)}`);
   }
+  const changedDiagramTransition = await page.evaluate(async ({ text, html, lightStyles, darkStyles }) => {
+    const controller = (window as typeof window & { __previewController?: any }).__previewController;
+    const testWindow = window as typeof window & {
+      __previewMessages?: Array<{ type?: string; requestId?: string }>;
+      __queueSlowLiveOperations?: (count: number, delayMs: number) => void;
+    };
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const previousSvg = frameDocument.querySelector<SVGSVGElement>(
+      '.meo-export-mermaid:not(.is-math).is-rendered svg'
+    )?.outerHTML ?? '';
+    testWindow.__queueSlowLiveOperations?.(1, 400);
+    controller.requestRender(text, { preserveViewport: true });
+    const requestId = testWindow.__previewMessages
+      ?.findLast((message) => message.type === 'requestPreviewRender')?.requestId ?? '';
+    controller.acceptRenderResponse({
+      type: 'previewRenderResult',
+      requestId,
+      result: { ok: true, value: { html, hasMermaid: true, styles: { light: lightStyles, dark: darkStyles } } }
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    const block = frameDocument.querySelector<HTMLElement>('.meo-export-mermaid:not(.is-math)');
+    return {
+      requestId,
+      previousSvg,
+      visibleSvg: block?.querySelector('svg')?.outerHTML ?? '',
+      visibleFallback: Boolean(block?.querySelector('code')),
+      rendered: block?.classList.contains('is-rendered') ?? false
+    };
+  }, {
+    text: updatedMarkdownText,
+    html: updatedRendered.html,
+    lightStyles,
+    darkStyles
+  });
+  if (!changedDiagramTransition.requestId) throw new Error('Changed Mermaid request was not created');
+  if (
+    !changedDiagramTransition.previousSvg
+    || changedDiagramTransition.visibleSvg !== changedDiagramTransition.previousSvg
+    || changedDiagramTransition.visibleFallback
+    || !changedDiagramTransition.rendered
+  ) {
+    throw new Error(
+      `Changed Mermaid must keep its last successful SVG until replacement is ready: ${JSON.stringify(changedDiagramTransition)}`
+    );
+  }
+  await page.waitForFunction(() => (
+    document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
+      ?.querySelector('.meo-export-mermaid:not(.is-math).is-rendered')?.textContent?.includes('Updated')
+  ), { timeout: 3000 });
   const stalePreview = await page.evaluate(({ oldText, html, lightStyles, darkStyles }) => {
     const controller = (window as typeof window & { __previewController?: any }).__previewController;
     const messages = (window as typeof window & {
