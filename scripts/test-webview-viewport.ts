@@ -23,6 +23,15 @@ async function positionPreviewElement(page: Page, selector: string, ratio = 0): 
     const rect = element.getBoundingClientRect();
     frameDocument.scrollingElement!.scrollTop += rect.top + rect.height * targetRatio;
   }, { targetSelector: selector, targetRatio: ratio });
+  const previewPoint = await page.$eval('.preview-frame', (element) => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.move(previewPoint.x, previewPoint.y);
+  // Programmatic positioning prepares the fixture; the trusted wheel event
+  // models the user intent that owns the next mode-transition anchor.
+  await page.mouse.wheel({ deltaY: 1 });
+  await waitForFrames(page, 1);
 }
 
 // Independent browser oracle for DEC-0023's one-third-viewport semantic reading anchor.
@@ -2724,7 +2733,7 @@ async function main() {
         !hiddenAtTop || !visibleAfterScroll || afterClick.scrollTop !== 0 || !afterClick.hidden ||
         afterClick.width !== afterClick.height || afterClick.borderRadius !== '50%' ||
         afterClick.background !== afterClick.documentBackground ||
-        Math.abs(visibleGeometry.centerXDelta) > 0.01 || Math.abs(visibleGeometry.centerYDelta + 1) > 0.01 ||
+        Math.abs(visibleGeometry.centerXDelta) > 0.01 || Math.abs(visibleGeometry.centerYDelta) > 0.01 ||
         visibleGeometry.iconLeftFraction > 0.01 || visibleGeometry.iconTopFraction > 0.01
       ) {
         throw new Error(`${mode} scroll-to-top button failed: ${JSON.stringify({
