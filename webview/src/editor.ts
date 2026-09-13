@@ -95,6 +95,7 @@ import { getLiveRenderedBlocks } from './helpers/liveRenderedBlocks';
 import {
   ViewportController,
   visualLineContextMargin,
+  type PreviewDocumentChange,
   type PreviewViewportSurface,
   type ViewportAnchorOwner,
   type ViewportAnchorToken
@@ -2920,8 +2921,11 @@ export function createEditor({
     linkedPreviewReady(): void {
       viewportController.linkedPreviewReady();
     },
-    runPreviewPresentationTransaction(mutate: () => void): void {
-      viewportController.runPreviewPresentationTransaction(mutate);
+    runPreviewPresentationTransaction(
+      mutate: () => void,
+      documentChange?: PreviewDocumentChange
+    ): void {
+      viewportController.runPreviewPresentationTransaction(mutate, documentChange);
     },
     setLinkedPreviewEnabled(enabled: boolean): void {
       viewportController.setLinkedPreviewEnabled(enabled);

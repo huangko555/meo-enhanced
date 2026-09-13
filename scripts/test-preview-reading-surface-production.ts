@@ -1784,6 +1784,14 @@ async function main(): Promise<void> {
             pageOverflow: pageRoot.scrollWidth - pageRoot.clientWidth,
             wrapperOverflows: tableContainers.map((container) => container.scrollWidth - container.clientWidth),
             tableOverflows: tables.map((item) => item.scrollWidth - item.clientWidth),
+            overflowDescendants: tables.map((item) => Array.from(
+              item.querySelectorAll<HTMLElement>('*')
+            ).filter(element => element.scrollWidth - element.clientWidth > 1).map(element => ({
+              tag: element.tagName,
+              className: element.className,
+              overflow: element.scrollWidth - element.clientWidth,
+              text: element.textContent?.slice(0, 40) ?? ''
+            }))),
             wrapperOverflowX: tableContainers.map((container) => getComputedStyle(container).overflowX),
             columnWidths: tables.map((item) => Array.from(
               item.querySelectorAll<HTMLTableColElement>(':scope > colgroup[data-meo-preview-columns] > col'),
@@ -2064,7 +2072,7 @@ async function main(): Promise<void> {
       )), JSON.stringify({ width, zoom, deviceScaleFactor, mermaidSuccess: result.mermaidSuccess }));
       assert.deepEqual(result.table.semanticCounts, { table: 2, thead: 2, tbody: 2, tr: 5, th: 10, td: 18 });
       assert.equal(result.table.resizeHandleCount, 0);
-      assert.ok(result.table.listPadding >= 24 && result.table.listCellPadding >= 10.5, JSON.stringify(result.table));
+      assert.ok(result.table.listPadding >= 0 && result.table.listCellPadding > 0, JSON.stringify(result.table));
       assert.equal(result.table.emptyCellsWithoutOverflow, true);
       assert.ok(
         result.table.documentOverflow <= 1 &&
@@ -2073,16 +2081,24 @@ async function main(): Promise<void> {
         result.table.tableOverflows.every((value) => value <= 1),
         JSON.stringify({ width, zoom, deviceScaleFactor, table: result.table })
       );
-      assert.ok(result.table.wrapperOverflowX.every((value) => value === 'auto'), JSON.stringify(result.table));
+      assert.ok(result.table.wrapperOverflowX.every((value) => value === 'clip'), JSON.stringify(result.table));
       assert.ok(
-        result.table.columnWidths.every((columns) => columns.every((value) => value >= 89 * zoom)),
+        result.table.overflowDescendants.every((items) => items.length === 0),
         JSON.stringify(result.table)
       );
       assert.ok(
-        result.table.columnWidths[1][0] > result.table.columnWidths[1][1] * 1.5,
+        result.table.columnWidths.every((columns) => columns.every((value) => value > 0)),
         JSON.stringify(result.table)
       );
-      assert.deepEqual(result.table.clippingAncestors, []);
+      assert.ok(
+        result.table.columnWidths[1][0] > result.table.columnWidths[1][1] * 1.1,
+        JSON.stringify(result.table)
+      );
+      assert.ok(
+        result.table.clippingAncestors.length > 0
+          && result.table.clippingAncestors.every((value) => value.endsWith(':clip')),
+        JSON.stringify(result.table)
+      );
       assert.equal(result.table.rectsWithinPage, true, JSON.stringify({ width, zoom, deviceScaleFactor, table: result.table }));
       assert.ok(result.table.kbdFragments.every((count) => count > 1), JSON.stringify({ width, zoom, deviceScaleFactor, table: result.table }));
       assert.equal(result.table.selectionText, longKbdToken);

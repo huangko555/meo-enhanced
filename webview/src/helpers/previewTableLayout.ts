@@ -150,6 +150,36 @@ function applyTableWidthPlan(
   const plan = planPreviewTableWidths(preferred, availableWidth);
   table.style.width = `${plan.totalWidth}px`;
   plan.widths.forEach((width, index) => { columns[index].style.width = `${width}px`; });
+  const compressed = availableWidth < DEFAULT_MINIMUM_COLUMN_WIDTH * columns.length;
+  // Read the authored padding without a previous compact pass feeding its own
+  // custom value back into the next ResizeObserver refresh.
+  table.classList.remove('meo-preview-table-compressed');
+  table.style.removeProperty('--meo-preview-table-cell-inline-padding');
+  if (compressed) {
+    const smallestColumn = Math.min(...plan.widths);
+    const firstCell = table.querySelector<HTMLTableCellElement>('th, td');
+    const cellStyle = firstCell
+      ? table.ownerDocument.defaultView?.getComputedStyle(firstCell) ?? getComputedStyle(firstCell)
+      : null;
+    const authoredPadding = cellStyle
+      ? Math.max(
+          1,
+          Math.min(
+            Number.parseFloat(cellStyle.paddingInlineStart) || 0,
+            Number.parseFloat(cellStyle.paddingInlineEnd) || 0
+          )
+        )
+      : 1;
+    // Keep at least a few CSS pixels for a breakable glyph after borders and
+    // padding. Without this, a legal narrow column can still have scrollWidth
+    // larger than clientWidth and the wrapper merely clips its last pixels.
+    const compactPadding = Math.min(
+      authoredPadding,
+      Math.max(1, Math.min(6, (smallestColumn - 18) / 2))
+    );
+    table.style.setProperty('--meo-preview-table-cell-inline-padding', `${compactPadding}px`);
+    table.classList.add('meo-preview-table-compressed');
+  }
 }
 
 function visibleRightEdgeInset(table: HTMLTableElement): number {
@@ -174,6 +204,10 @@ function layoutTable(table: HTMLTableElement): void {
   const columnCount = tableColumnCount(table);
   if (!wrapper || columnCount === 0) return;
   const columns = ensureColumnGroup(table, columnCount);
+  // Preferred demand must be measured from the authored table, not from a
+  // compact presentation left by the previous viewport width.
+  table.classList.remove('meo-preview-table-compressed');
+  table.style.removeProperty('--meo-preview-table-cell-inline-padding');
   const preferred = measurePreferredWidths(table, columnCount);
   table.style.minWidth = '0';
   table.style.maxWidth = '100%';

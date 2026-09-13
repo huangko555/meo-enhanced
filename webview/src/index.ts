@@ -1354,7 +1354,6 @@ const previewController = createPreviewController({
     if (options?.skipLinkedViewportProjection !== true) {
       editor?.linkedPreviewReady?.();
     }
-    markSourcePreviewSurfaceReady();
     readingPositionLifecycle?.surfaceReady();
   },
   onViewportInteraction: () => {
@@ -1368,12 +1367,12 @@ const previewController = createPreviewController({
   onGeometryChanged: () => {
     if (isSidePreviewVisible()) editor?.linkedPreviewReady?.();
   },
-  runViewportTransaction: (mutate) => {
+  runViewportTransaction: (mutate, documentChange) => {
     if (!editor?.runPreviewPresentationTransaction) {
       mutate();
       return;
     }
-    editor.runPreviewPresentationTransaction(mutate);
+    editor.runPreviewPresentationTransaction(mutate, documentChange);
   }
 });
 const previewAdapter = createPreviewWebviewAdapter(previewController);
@@ -2095,7 +2094,8 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
           line: position.topLine,
           lineOffset: position.topLineOffset,
           editorLineOffset: position.editorLineOffset,
-          viewportOffset: position.viewportOffset
+          viewportOffset: position.viewportOffset,
+          sourceRange: position.sourceRange
         } : null;
       },
       captureReadingPosition(viewportRatio) {
@@ -2104,7 +2104,8 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
           line: position.topLine,
           lineOffset: position.topLineOffset,
           editorLineOffset: position.editorLineOffset,
-          viewportOffset: position.viewportOffset
+          viewportOffset: position.viewportOffset,
+          sourceRange: position.sourceRange
         } : null;
       },
       restoreTopVisiblePosition(position, isCurrent) {
@@ -2185,6 +2186,12 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
       && presentation.previousMode !== 'source'
       && sourcePreviewEnabled;
     presentPreviewSurface(active, { atomicSplit });
+    if (active) {
+      // A Source split and the standalone Preview have different final widths.
+      // Reflow width-dependent content and invalidate its source map before the
+      // mode transaction projects the captured reading anchor.
+      previewController.refreshLayout();
+    }
     if (active && document.activeElement instanceof HTMLElement && editorHost.contains(document.activeElement)) {
       document.activeElement.blur();
     }

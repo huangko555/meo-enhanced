@@ -232,6 +232,78 @@ try {
   assert.ok(tableFit.every(table => table.lastCellRightOverflow <= -0.75), JSON.stringify(tableFit));
   assert.ok(tableFit[0].widths[1] > tableFit[0].widths[0], JSON.stringify(tableFit));
 
+  const transitionTableStartLine = text.slice(0, text.indexOf('| asd | asd | asd | asd | |')).split('\n').length;
+  const transitionTableAnchorLine = transitionTableStartLine + 2;
+  const alignSourceLineAtReadingBand = async (lineNumber: number) => {
+    await page.click('.line-jump-input');
+    await page.keyboard.down('Control');
+    await page.keyboard.press('A');
+    await page.keyboard.up('Control');
+    await page.keyboard.type(String(lineNumber));
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(line => Array.from(
+      document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement')
+    ).some(element => Number(element.textContent) === line), {}, lineNumber);
+    await page.evaluate(line => {
+      const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+      const gutter = Array.from(document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement'))
+        .find(element => Number(element.textContent) === line)!;
+      const viewport = scroller.getBoundingClientRect();
+      scroller.scrollTop += gutter.getBoundingClientRect().top - viewport.top - viewport.height / 3;
+    }, lineNumber);
+    await new Promise(resolve => setTimeout(resolve, 100));
+  };
+  const startPreviewAnchorSampling = async (lineNumber: number) => page.evaluate(line => {
+    const samples: Array<{ visible: boolean; offset: number | null; scrollTop: number; width: number }> = [];
+    let active = true;
+    const sample = () => {
+      if (!active) return;
+      const host = document.querySelector<HTMLElement>('.preview-host')!;
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const frameDocument = frame.contentDocument!;
+      const viewportOffset = frameDocument.documentElement.clientHeight / 3;
+      const projection = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
+        .filter(element => {
+          const start = Number(element.dataset.sourceLine);
+          const end = Number(element.dataset.sourceEndLine ?? start);
+          return start <= line && end >= line;
+        })
+        .map(element => {
+          const start = Number(element.dataset.sourceLine);
+          const end = Number(element.dataset.sourceEndLine ?? start);
+          const rect = element.getBoundingClientRect();
+          const ratio = (line - start) / Math.max(1, end - start + 1);
+          return {
+            offset: rect.top + rect.height * ratio - viewportOffset,
+            span: end - start,
+            height: rect.height
+          };
+        })
+        .sort((left, right) => left.span - right.span || left.height - right.height)[0];
+      samples.push({
+        visible: !host.hidden && getComputedStyle(host).visibility !== 'hidden',
+        offset: projection?.offset ?? null,
+        scrollTop: frameDocument.scrollingElement?.scrollTop ?? 0,
+        width: frame.getBoundingClientRect().width
+      });
+      requestAnimationFrame(sample);
+    };
+    (window as typeof window & {
+      __previewModeAnchorProbe?: { samples: typeof samples; stop(): void };
+    }).__previewModeAnchorProbe = { samples, stop: () => { active = false; } };
+    requestAnimationFrame(sample);
+  }, lineNumber);
+  const stopPreviewAnchorSampling = async () => page.evaluate(() => {
+    const probe = (window as typeof window & {
+      __previewModeAnchorProbe: {
+        samples: Array<{ visible: boolean; offset: number | null; scrollTop: number; width: number }>;
+        stop(): void;
+      };
+    }).__previewModeAnchorProbe;
+    probe.stop();
+    return probe.samples;
+  });
+
   const compactBlockStartLine = text.slice(0, text.indexOf('<details>')).split('\n').length;
   await page.click('.line-jump-input');
   await page.keyboard.type(String(compactBlockStartLine));
@@ -991,9 +1063,96 @@ try {
     Math.abs(complexTableLiveProjection - complexTableSourceOffset) <= 20,
     JSON.stringify({ complexTableSourceOffset, complexTableLiveProjection })
   );
+  const complexLiveSemanticAnchor = await page.evaluate(startLine => {
+    const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+    const viewport = scroller.getBoundingClientRect();
+    const readingY = viewport.top + viewport.height / 3;
+    const block = Array.from(document.querySelectorAll<HTMLElement>(
+      '[data-meo-rendered-block-start-line][data-meo-rendered-block-end-line]'
+    )).find(candidate => Number(candidate.dataset.meoRenderedBlockStartLine) === startLine);
+    if (!block) return null;
+    const rect = block.getBoundingClientRect();
+    return {
+      startLine: Number(block.dataset.meoRenderedBlockStartLine),
+      endLine: Number(block.dataset.meoRenderedBlockEndLine),
+      progress: Math.max(0, Math.min(1, (readingY - rect.top) / Math.max(1, rect.height)))
+    };
+  }, complexTableStartLine);
+  assert.ok(complexLiveSemanticAnchor, 'The table fixture must expose a rendered semantic range');
+  await page.click('button[data-mode="preview"]');
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview');
+  await new Promise(resolve => setTimeout(resolve, 160));
+  const complexPreviewSemanticOffset = await page.evaluate(anchor => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const readingBand = frameDocument.documentElement.clientHeight / 3;
+    const entry = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
+      .filter(element => (
+        Number(element.dataset.sourceLine) === anchor.startLine
+        && Number(element.dataset.sourceEndLine ?? element.dataset.sourceLine) === anchor.endLine
+      ))
+      .map(element => ({ element, rect: element.getBoundingClientRect() }))
+      .sort((left, right) => Math.abs(left.rect.top - readingBand) - Math.abs(right.rect.top - readingBand))[0];
+    return entry
+      ? entry.rect.top + entry.rect.height * anchor.progress - readingBand
+      : null;
+  }, complexLiveSemanticAnchor!);
+  assert.ok(
+    complexPreviewSemanticOffset !== null && Math.abs(complexPreviewSemanticOffset) <= 2,
+    `Live-to-Preview must preserve continuous table progress: ${JSON.stringify({ complexLiveSemanticAnchor, complexPreviewSemanticOffset })}`
+  );
+  const previewCapturedSemanticAnchor = await page.evaluate(() => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const viewportTop = frameDocument.scrollingElement?.scrollTop ?? 0;
+    const viewportAnchor = viewportTop + frameDocument.documentElement.clientHeight / 3;
+    const entries = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
+      .map(element => {
+        const rect = element.getBoundingClientRect();
+        return {
+          start: Number(element.dataset.sourceLine),
+          end: Number(element.dataset.sourceEndLine ?? element.dataset.sourceLine),
+          top: rect.top + viewportTop,
+          bottom: rect.bottom + viewportTop,
+          tag: element.tagName,
+          height: rect.height
+        };
+      })
+      .sort((left, right) => left.top - right.top || left.bottom - right.bottom || left.start - right.start);
+    let low = 0;
+    let high = entries.length - 1;
+    while (low <= high) {
+      const middle = (low + high) >>> 1;
+      if (entries[middle].top <= viewportAnchor + 0.5) low = middle + 1;
+      else high = middle - 1;
+    }
+    const candidate = entries[Math.max(0, high)];
+    return candidate ? {
+      startLine: candidate.start,
+      endLine: candidate.end,
+      progress: Math.max(0, Math.min(1, (viewportAnchor - candidate.top) / Math.max(1, candidate.height)))
+    } : null;
+  });
+  assert.ok(previewCapturedSemanticAnchor, 'Preview must capture a semantic range at the reading band');
   await page.click('button[data-mode="source"]');
   await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');
   await new Promise(resolve => setTimeout(resolve, 160));
+  const complexSourceSemanticOffset = await page.evaluate(anchor => {
+    const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+    const viewport = scroller.getBoundingClientRect();
+    const lineSpan = Math.max(1, anchor.endLine - anchor.startLine + 1);
+    const rangeOffset = lineSpan * anchor.progress;
+    const lineIndex = Math.min(lineSpan - 1, Math.floor(rangeOffset));
+    const lineNumber = anchor.startLine + lineIndex;
+    const lineProgress = anchor.progress >= 1 ? 1 : rangeOffset - lineIndex;
+    const gutter = Array.from(document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement'))
+      .find(element => Number(element.textContent) === lineNumber);
+    if (!gutter) return null;
+    const rect = gutter.getBoundingClientRect();
+    return rect.top + rect.height * lineProgress - viewport.top - viewport.height / 3;
+  }, previewCapturedSemanticAnchor!);
+  assert.ok(
+    complexSourceSemanticOffset !== null && Math.abs(complexSourceSemanticOffset) <= 2,
+    `Preview-to-Source must preserve continuous table progress: ${JSON.stringify({ previewCapturedSemanticAnchor, complexSourceSemanticOffset })}`
+  );
   const complexTableSourceReturnOffset = await page.evaluate(anchorText => {
     const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
     const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
@@ -1004,6 +1163,40 @@ try {
     Math.abs(complexTableSourceReturnOffset - complexTableSourceOffset) <= 20,
     JSON.stringify({ complexTableSourceOffset, complexTableSourceReturnOffset })
   );
+
+  await alignSourceLineAtReadingBand(transitionTableAnchorLine);
+  await page.click('button[data-mode="live"]');
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live');
+  await new Promise(resolve => setTimeout(resolve, 120));
+  await startPreviewAnchorSampling(transitionTableAnchorLine);
+  await page.click('button[data-mode="source"]');
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');
+  await new Promise(resolve => setTimeout(resolve, 220));
+  const splitModeEntryFrames = await stopPreviewAnchorSampling();
+  const visibleSplitModeOffsets = splitModeEntryFrames
+    .filter(frame => frame.visible && frame.offset !== null)
+    .map(frame => frame.offset as number);
+  assert.ok(visibleSplitModeOffsets.length >= 2, JSON.stringify(splitModeEntryFrames));
+  assert.ok(
+    Math.max(...visibleSplitModeOffsets) - Math.min(...visibleSplitModeOffsets) <= 1,
+    `Split Preview content must not reflow after its first visible frame: ${JSON.stringify(splitModeEntryFrames)}`
+  );
+
+  await alignSourceLineAtReadingBand(transitionTableAnchorLine);
+  await startPreviewAnchorSampling(transitionTableAnchorLine);
+  await page.click('button[data-mode="preview"]');
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview');
+  await new Promise(resolve => setTimeout(resolve, 220));
+  const sourceToFullPreviewFrames = await stopPreviewAnchorSampling();
+  const finalFullPreviewFrame = sourceToFullPreviewFrames.filter(frame => frame.visible && frame.offset !== null).at(-1);
+  assert.ok(finalFullPreviewFrame, JSON.stringify(sourceToFullPreviewFrames));
+  assert.ok(
+    Math.abs(finalFullPreviewFrame.offset as number) <= 20,
+    `Source-to-Preview must project the complex anchor after full-width layout: ${JSON.stringify(sourceToFullPreviewFrames)}`
+  );
+  await page.click('button[data-mode="source"]');
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');
+  await new Promise(resolve => setTimeout(resolve, 120));
 
   await page.click('.source-preview-button');
   const closed = await page.evaluate(() => ({

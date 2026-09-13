@@ -17,6 +17,9 @@ use the same presentation controller.
   them before the scroll hot path; a scroll frame performs no DOM scan.
 - Exactly one surface owns a scroll gesture. A follower write must not claim
   ownership or echo a new projection back to the driver.
+- Mode transitions carry a continuous position inside the most specific rendered
+  source range, not only an integer source line. The destination is measured at
+  its final width before that position is projected.
 
 VS Code's Markdown Preview follows the same broad model: it caches mapped
 elements by document version, ignores duplicate list and `pre` containers,
@@ -37,6 +40,12 @@ echoed event: [microsoft/vscode#307762](https://github.com/microsoft/vscode/issu
   committed together.
 - Unchanged nodes survive incremental updates so selection, expanded details,
   decoded assets, and layout identity are not discarded.
+- A content edit inside or below the visible Preview retains its physical viewport;
+  an edit strictly above it maps the top semantic anchor through the text change.
+  Presentation-only geometry changes retain the semantic point in the reading
+  band, then pin the cached linked-scroll map to the committed position.
+- Initial split Preview becomes visible only after both editor layout and Preview
+  paint readiness are confirmed. Render completion alone is not a reveal signal.
 
 VS Code's official Preview implementation similarly moves new styles into place
 before morphing specifically to prevent an unstyled flash, and preserves equal
@@ -48,6 +57,10 @@ nodes during incremental updates. See
 - Preview tables never create an internal horizontal scrollbar. Column demand
   controls the proportions; when space is insufficient, every column continues
   to shrink and wrap.
+- When the readable column target is infeasible, cell padding is reduced before
+  content can be clipped. Native list markers are visually omitted only in this
+  compressed state because their unbreakable marker box can otherwise exceed a
+  narrow cell; the semantic `ul`/`ol`/`li` structure and all text remain intact.
 - `scrollWidth <= clientWidth` is not sufficient evidence. Chromium rounds those
   values while collapsed borders and antialiasing use fractional geometry.
 - The final painted table edge must remain inside the wrapper's clip edge by at
@@ -59,5 +72,8 @@ nodes during incremental updates. See
 The browser contract in `scripts/test-source-side-preview.ts` covers the reported
 five-column table, narrow many-column tables, raw HTML tables, split Preview,
 standalone Preview, displaced footnotes, continuous bidirectional scrolling,
-and atomic code highlighting. The pure projection outlier contract is in
-`scripts/test-linked-viewport-map.ts`.
+atomic code highlighting, and cross-mode continuous range projection. Delayed
+asset geometry is covered by `scripts/test-source-preview-late-layout.ts`. The
+standalone reading-surface matrix also checks table descendants across viewport
+widths, zoom factors, and device pixel ratios. The pure projection outlier
+contract is in `scripts/test-linked-viewport-map.ts`.

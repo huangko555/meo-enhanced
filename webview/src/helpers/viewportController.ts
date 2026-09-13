@@ -8,6 +8,12 @@ export interface ViewportDocumentAnchor {
   editorLineOffset?: number;
   viewportOffset?: number;
   renderedBlock?: boolean;
+  /** Continuous semantic position inside a rendered source range. */
+  sourceRange?: {
+    startLine: number;
+    endLine: number;
+    progress: number;
+  };
 }
 
 type RestoreDocumentAnchorOptions = {
@@ -26,6 +32,11 @@ export interface ViewportLayoutRegion {
 }
 
 export type ViewportAnchorOwner = 'editor' | 'preview';
+
+export interface PreviewDocumentChange {
+  readonly previousText: string;
+  readonly nextText: string;
+}
 
 export type ViewportAnchorToken = object & {
   readonly __viewportAnchorHandle: unique symbol;
@@ -46,15 +57,22 @@ export interface PreviewViewportSurface {
     lineOffset: number;
     editorLineOffset?: number;
     viewportOffset?: number;
+    sourceRange?: { startLine: number; endLine: number; progress: number };
   } | null;
   captureReadingPosition?(viewportRatio: number): {
     line: number;
     lineOffset: number;
     editorLineOffset?: number;
     viewportOffset?: number;
+    sourceRange?: { startLine: number; endLine: number; progress: number };
   } | null;
   restoreTopVisiblePosition(
-    position: { line: number; lineOffset: number; viewportOffset?: number },
+    position: {
+      line: number;
+      lineOffset: number;
+      viewportOffset?: number;
+      sourceRange?: { startLine: number; endLine: number; progress: number };
+    },
     isCurrent: () => boolean
   ): void;
   captureLinkedGeometry?(): {
@@ -285,6 +303,17 @@ function mapPositionThroughDocumentChange(
     return change.from + Math.round(relativeOffset * change.insertedText.length);
   }
   return mapThroughReplacement();
+}
+
+function positionAtDocumentLine(text: string, requestedLine: number): number {
+  const line = Math.max(1, Math.floor(Number.isFinite(requestedLine) ? requestedLine : 1));
+  let position = 0;
+  for (let currentLine = 1; currentLine < line; currentLine += 1) {
+    const nextBreak = text.indexOf('\n', position);
+    if (nextBreak < 0) return text.length;
+    position = nextBreak + 1;
+  }
+  return position;
 }
 
 
@@ -566,16 +595,78 @@ export class ViewportController {
   }
 
   /** Keeps a Preview presentation update inside the current scroll owner's transaction. */
-  runPreviewPresentationTransaction(mutate: () => void): void {
+  runPreviewPresentationTransaction(
+    mutate: () => void,
+    documentChange?: PreviewDocumentChange
+  ): void {
     if (this.destroyed) {
       mutate();
       return;
     }
     if (this.linkedPreviewEnabled && this.previewSurface?.readScrollTop && this.previewSurface.writeScrollTop) {
       const heldPreviewTop = this.previewSurface.readScrollTop();
+      const projectionGeneration = this.linkedProjectionGeneration;
+      const projectionDriver = this.linkedViewportDriver;
+      const previewGestureActive = projectionDriver === 'preview' && this.isLinkedInteractionActive();
+      let readingAnchor: ViewportDocumentAnchor | null = null;
+      if (!this.isUserScrolling() && !previewGestureActive) {
+        if (documentChange) {
+          const topAnchor = this.capturePreviewDocumentAnchor(0, undefined, documentChange.previousText);
+          const changedRange = findChangedDocumentRange(
+            documentChange.previousText,
+            documentChange.nextText
+          );
+          // Edits inside or below the visible surface should not turn typing into
+          // viewport motion. Only an upstream edit can displace the current view;
+          // in that case preserve the semantic element at the top edge.
+          if (topAnchor && changedRange && changedRange.previousTo <= topAnchor.position) {
+            readingAnchor = topAnchor;
+          }
+        } else {
+          readingAnchor = this.capturePreviewDocumentAnchor(undefined, 1 / 3);
+        }
+      }
       mutate();
       this.linkedViewportMapDirty = true;
-      this.previewSurface.writeScrollTop(heldPreviewTop);
+      // Async Preview presentation commits can change the height of content above
+      // the reading point. When Source owns an idle viewport, project the semantic
+      // position sampled from Preview's reading band against the committed geometry
+      // in the same frame. Content refreshes map that anchor through the text diff;
+      // presentation-only commits retain its exact rendered-range progress. During
+      // a scroll gesture, preserve the physical follower position so layout cannot
+      // fight the user's input.
+      if (readingAnchor) {
+        const projectedAnchor = documentChange
+          ? this.mapAnchorThroughDocumentChange(
+              readingAnchor,
+              documentChange.previousText,
+              documentChange.nextText
+            )
+          : readingAnchor;
+        if (!projectedAnchor) {
+          this.previewSurface.writeScrollTop(heldPreviewTop);
+          this.scheduleLinkedViewportMapRefresh();
+          return;
+        }
+        const line = this.view.state.doc.lineAt(
+          Math.min(Math.max(0, projectedAnchor.position), this.view.state.doc.length)
+        );
+        this.previewSurface.restoreTopVisiblePosition({
+          line: line.number,
+          lineOffset: projectedAnchor.lineOffset,
+          viewportOffset: projectedAnchor.viewportOffset,
+          sourceRange: projectedAnchor.sourceRange
+        }, () => (
+          !this.destroyed && this.linkedPreviewEnabled &&
+          projectionGeneration === this.linkedProjectionGeneration &&
+          this.linkedViewportDriver === projectionDriver
+        ));
+      } else {
+        this.previewSurface.writeScrollTop(heldPreviewTop);
+      }
+      // Pin the refreshed hot-path map to the exact post-commit position so the
+      // next wheel delta continues from this frame without a correction.
+      this.rebuildLinkedViewportMap(true);
       this.scheduleLinkedViewportMapRefresh();
       return;
     }
@@ -791,6 +882,51 @@ export class ViewportController {
       ? Math.max(0, anchor.viewportOffset ?? 0)
       : null;
     this.stabilize(() => {
+      if (anchor.sourceRange && viewportOffset !== null) {
+        const startLine = Math.min(
+          Math.max(1, Math.floor(anchor.sourceRange.startLine)),
+          this.view.state.doc.lines
+        );
+        const endLine = Math.min(
+          Math.max(startLine, Math.floor(anchor.sourceRange.endLine)),
+          this.view.state.doc.lines
+        );
+        const progress = Math.max(0, Math.min(1, anchor.sourceRange.progress));
+        if (this.getMode() === 'live' && typeof this.view.contentDOM?.querySelectorAll === 'function') {
+          const renderedBlock = Array.from(
+            this.view.contentDOM.querySelectorAll<HTMLElement>(
+              '[data-meo-rendered-block-start-line][data-meo-rendered-block-end-line]'
+            )
+          ).find((block) => (
+            Number(block.dataset.meoRenderedBlockStartLine) === startLine
+            && Number(block.dataset.meoRenderedBlockEndLine) === endLine
+          ));
+          if (renderedBlock) {
+            const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+            const blockRect = renderedBlock.getBoundingClientRect();
+            return {
+              top: Math.max(
+                0,
+                this.view.scrollDOM.scrollTop + blockRect.top - scrollerRect.top
+                  + blockRect.height * progress - viewportOffset
+              )
+            };
+          }
+        }
+        if (this.getMode() === 'source') {
+          const lineSpan = Math.max(1, endLine - startLine + 1);
+          const rangeOffset = lineSpan * progress;
+          const lineIndex = Math.min(lineSpan - 1, Math.floor(rangeOffset));
+          const lineNumber = startLine + lineIndex;
+          const lineProgress = progress >= 1
+            ? 1
+            : Math.max(0, Math.min(1, rangeOffset - lineIndex));
+          const block = this.view.lineBlockAt(this.view.state.doc.line(lineNumber).from);
+          return {
+            top: Math.max(0, block.top + block.height * lineProgress - viewportOffset)
+          };
+        }
+      }
       if (anchor.renderedBlock && typeof this.view.contentDOM?.querySelectorAll === 'function') {
         const lineNumber = this.view.state.doc.lineAt(position).number;
         const renderedBlock = Array.from(
@@ -1902,7 +2038,8 @@ export class ViewportController {
     this.previewSurface?.restoreTopVisiblePosition({
       line: line.number,
       lineOffset: anchor.lineOffset,
-      viewportOffset: anchor.viewportOffset
+      viewportOffset: anchor.viewportOffset,
+      sourceRange: anchor.sourceRange
     }, () => this.isAnchorTokenCurrent(record));
     record.projectedOwners.add(owner);
   }
@@ -1920,7 +2057,10 @@ export class ViewportController {
         position: Math.min(
           Math.max(0, mapPositionThroughDocumentChange(anchor.position, previousText, nextText, change)),
           nextText.length
-        )
+        ),
+        // A text change may split, merge, or move the captured structure. Keep
+        // the mapped source position, but do not reuse the old range identity.
+        sourceRange: undefined
       };
     } catch {
       return null;
@@ -1992,7 +2132,12 @@ export class ViewportController {
           return {
             position: this.view.state.doc.line(Math.min(this.view.state.doc.lines, lineNumber)).from,
             lineOffset: 0,
-            viewportOffset: boundedViewportOffset
+            viewportOffset: boundedViewportOffset,
+            sourceRange: {
+              startLine,
+              endLine,
+              progress
+            }
           };
         }
       }
@@ -2007,25 +2152,42 @@ export class ViewportController {
 
   private capturePreviewDocumentAnchor(
     viewportOffset = 0,
-    viewportRatio?: number
+    viewportRatio?: number,
+    sourceText?: string
   ): ViewportDocumentAnchor | null {
     const position = viewportRatio === undefined
       ? this.previewSurface?.captureTopVisiblePosition(viewportOffset)
       : this.previewSurface?.captureReadingPosition?.(viewportRatio)
         ?? this.previewSurface?.captureTopVisiblePosition(viewportOffset);
     if (!position) return null;
-    const lineNumber = Math.min(
-      Math.max(1, Math.floor(Number.isFinite(position.line) ? position.line : 1)),
-      this.view.state.doc.lines
+    const requestedLine = Math.max(
+      1,
+      Math.floor(Number.isFinite(position.line) ? position.line : 1)
     );
+    const lineNumber = Math.min(requestedLine, this.view.state.doc.lines);
     return {
-      position: this.view.state.doc.line(lineNumber).from,
+      position: sourceText === undefined
+        ? this.view.state.doc.line(lineNumber).from
+        : positionAtDocumentLine(sourceText, requestedLine),
       lineOffset: Number.isFinite(position.lineOffset) ? Math.max(0, position.lineOffset) : 0,
       editorLineOffset: position.editorLineOffset !== undefined && Number.isFinite(position.editorLineOffset)
         ? Math.max(0, position.editorLineOffset)
         : undefined,
       viewportOffset: position.viewportOffset !== undefined && Number.isFinite(position.viewportOffset)
         ? Math.max(0, position.viewportOffset)
+        : undefined,
+      sourceRange: position.sourceRange
+        ? {
+            startLine: Math.min(
+              Math.max(1, Math.floor(position.sourceRange.startLine)),
+              this.view.state.doc.lines
+            ),
+            endLine: Math.min(
+              Math.max(1, Math.floor(position.sourceRange.endLine)),
+              this.view.state.doc.lines
+            ),
+            progress: Math.max(0, Math.min(1, position.sourceRange.progress))
+          }
         : undefined
     };
   }

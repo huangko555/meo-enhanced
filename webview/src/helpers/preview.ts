@@ -38,7 +38,10 @@ type PreviewControllerOptions = {
   onViewportInteraction?: () => void;
   onViewportChange?: () => void;
   onGeometryChanged?: () => void;
-  runViewportTransaction?: (mutate: () => void) => void | Promise<void>;
+  runViewportTransaction?: (
+    mutate: () => void,
+    documentChange?: { readonly previousText: string; readonly nextText: string }
+  ) => void | Promise<void>;
   mermaidRenderResources: MermaidDiagramRenderResources;
 };
 
@@ -46,6 +49,11 @@ type PreviewViewportRestore = {
   readonly line: number;
   readonly lineOffset: number;
   readonly viewportOffset?: number;
+  readonly sourceRange?: {
+    readonly startLine: number;
+    readonly endLine: number;
+    readonly progress: number;
+  };
   readonly isCurrent: () => boolean;
 };
 
@@ -335,6 +343,27 @@ body::-webkit-scrollbar-corner {
   max-width: 100%;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+table.meo-preview-table-compressed :is(th, td) {
+  padding-inline: var(--meo-preview-table-cell-inline-padding) !important;
+}
+
+table.meo-preview-table-compressed :is(th, td) :is(ul, ol) {
+  box-sizing: border-box;
+  max-width: 100%;
+  margin-inline: 0;
+  padding-inline-start: 0 !important;
+  /* At infeasible widths a native list marker has its own unbreakable minimum.
+     Keep the cell text visible; semantic list structure remains in the DOM. */
+  list-style: none;
+}
+
+table.meo-preview-table-compressed :is(th, td) :is(ul, ol, li) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
   word-break: break-word;
 }
 `;
@@ -675,13 +704,14 @@ export function createPreviewController({
   }, 'preview');
 
   const withViewportTransaction = (
-    mutate: (slot: PreviewViewportProjectionSlot) => void
+    mutate: (slot: PreviewViewportProjectionSlot) => void,
+    documentChange?: { readonly previousText: string; readonly nextText: string }
   ): void => {
     const slot: PreviewViewportProjectionSlot = { restore: null };
     const previousSlot = acceptingViewportProjection;
     acceptingViewportProjection = slot;
     try {
-      if (runViewportTransaction) runViewportTransaction(() => mutate(slot));
+      if (runViewportTransaction) runViewportTransaction(() => mutate(slot), documentChange);
       else mutate(slot);
     } finally {
       acceptingViewportProjection = previousSlot;
@@ -964,6 +994,7 @@ export function createPreviewController({
     commitPendingCodeHighlight = null;
     const reusableDocument = activeFrameDocument === frame.contentDocument ? activeFrameDocument : null;
     const reusableMain = reusableDocument?.querySelector<HTMLElement>('main.meo-export-doc');
+    const previousRenderedText = frameRenderedText;
     frameEvents?.abort();
     frameEvents = null;
     if (!reusableDocument) {
@@ -1079,7 +1110,8 @@ export function createPreviewController({
           restoreTopLine(
             viewportRestore.line,
             viewportRestore.lineOffset,
-            viewportRestore.viewportOffset
+            viewportRestore.viewportOffset,
+            viewportRestore.sourceRange
           );
         }
       };
@@ -1141,7 +1173,14 @@ export function createPreviewController({
         }
         initializeFrame(viewportSlot);
       };
-      if (preserveViewport) withViewportTransaction((slot) => commit(slot));
+      if (preserveViewport) {
+        withViewportTransaction(
+          (slot) => commit(slot),
+          previousRenderedText === null
+            ? undefined
+            : { previousText: previousRenderedText, nextText: renderedText }
+        );
+      }
       else commit(null);
       return;
     }
@@ -1457,12 +1496,34 @@ export function createPreviewController({
     if (before && line <= before.end) return { exact: before };
     return { before, after };
   };
-  const restoreTopLine = (line: number, lineOffset = 0, viewportOffset = 0): void => {
+  const restoreTopLine = (
+    line: number,
+    lineOffset = 0,
+    viewportOffset = 0,
+    sourceRange?: { startLine: number; endLine: number; progress: number }
+  ): void => {
     const source = findSourceProjection(line);
     const scrollElement = getFrameDocument()?.scrollingElement;
-    if (!source || !scrollElement) {
+    if (!scrollElement) {
       return;
     }
+    if (sourceRange) {
+      const range = getSourceMap()
+        .filter(entry => (
+          entry.start === sourceRange.startLine && entry.end === sourceRange.endLine
+        ))
+        .sort((left, right) => (
+          Math.abs(left.top - scrollElement.scrollTop) - Math.abs(right.top - scrollElement.scrollTop)
+        ))[0];
+      if (range) {
+        const progress = Math.max(0, Math.min(1, sourceRange.progress));
+        scrollElement.scrollTop = range.top
+          + (range.bottom - range.top) * progress
+          - Math.max(0, viewportOffset);
+        return;
+      }
+    }
+    if (!source) return;
     if (source.exact) {
       const lineSpan = Math.max(1, source.exact.end - source.exact.start + 1);
       const ratio = Math.max(0, Math.min(1, (line - source.exact.start) / lineSpan));
@@ -1488,6 +1549,7 @@ export function createPreviewController({
     topLineOffset: number;
     editorLineOffset: number;
     viewportOffset: number;
+    sourceRange?: { startLine: number; endLine: number; progress: number };
   } | null => {
     const entries = getVisualSourceMap();
     if (entries.length === 0) {
@@ -1521,23 +1583,37 @@ export function createPreviewController({
     const height = candidate.bottom - candidate.top;
     const ratio = height > 0 ? Math.max(0, Math.min(1, (viewportAnchor - candidate.top) / height)) : 0;
     const topLine = Math.round(range.start + (range.end - range.start) * ratio);
-    const lineSpan = Math.max(1, range.end - range.start + 1);
-    const lineTop = candidate.top + height * ((topLine - range.start) / lineSpan);
     return {
       topLine,
-      topLineOffset: Math.max(0, viewportAnchor - lineTop),
-      // An unmapped Preview gap has no corresponding editor line box.
-      editorLineOffset: candidate.bottom <= viewportAnchor ? 0 : Math.max(0, viewportAnchor - lineTop),
-      viewportOffset: Math.max(0, lineTop - viewportTop)
+      topLineOffset: 0,
+      editorLineOffset: 0,
+      viewportOffset: boundedViewportOffset,
+      sourceRange: {
+        startLine: range.start,
+        endLine: range.end,
+        progress: ratio
+      }
     };
   };
   const restoreTopVisiblePosition = (
-    position: { line: number; lineOffset: number; viewportOffset?: number },
+    position: {
+      line: number;
+      lineOffset: number;
+      viewportOffset?: number;
+      sourceRange?: { startLine: number; endLine: number; progress: number };
+    },
     isCurrent: () => boolean
   ): void => {
     const restore = { ...position, isCurrent };
     if (acceptingViewportProjection) acceptingViewportProjection.restore = restore;
-    if (restore.isCurrent()) restoreTopLine(restore.line, restore.lineOffset, restore.viewportOffset);
+    if (restore.isCurrent()) {
+      restoreTopLine(
+        restore.line,
+        restore.lineOffset,
+        restore.viewportOffset,
+        restore.sourceRange
+      );
+    }
   };
   const getHeadings = (): OutlineHeading[] => {
     const headingElements = Array.from(
