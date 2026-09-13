@@ -40,9 +40,19 @@ assert.equal((source.match(/editorModeRuntime = createEditorModeRuntime\(/g) ?? 
 assert.equal(source.includes('editorModeApplication.dispatch('), false);
 assert.equal(source.includes('editorModeEffectAdapter.execute('), false);
 assert.equal(
-  (source.match(/editor\.setMode\(mode, viewport\)/g) ?? []).length,
+  (source.match(/editor\.setMode\(mode, (?:viewport|editorViewport)\)/g) ?? []).length,
   1,
-  'Editor mode application and viewport restore must share the injected Effect capability'
+  'Editor mode application must apply its captured viewport through the injected Effect capability'
+);
+assert.equal(
+  /const editorViewport = [\s\S]*?\? null\s*:\s*viewport;[\s\S]*?editor\.setMode\(mode, editorViewport\)/.test(source),
+  true,
+  'Deferred editor reveals must derive their final viewport from the captured Effect viewport'
+);
+assert.equal(
+  (source.match(/restoreViewport\(viewport, owner\)\s*\{\s*editor\?\.restoreViewportAnchorToken\?\.\(viewport, owner\);\s*\}/g) ?? []).length,
+  1,
+  'Viewport restoration must remain a single injected Effect capability'
 );
 assert.equal(
   (source.match(/type: 'setMode'/g) ?? []).length,
