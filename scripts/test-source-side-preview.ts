@@ -179,18 +179,47 @@ try {
     const editor = document.querySelector<HTMLElement>('.editor-host')!;
     const preview = document.querySelector<HTMLElement>('.preview-host')!;
     const button = document.querySelector<HTMLButtonElement>('.source-preview-button')!;
+    const syncButton = document.querySelector<HTMLButtonElement>('.source-preview-scroll-sync-button')!;
+    const previewRect = preview.getBoundingClientRect();
+    const syncRect = syncButton.getBoundingClientRect();
     return {
       editorWidth: editor.getBoundingClientRect().width,
       previewWidth: preview.getBoundingClientRect().width,
       editorVisible: !editor.hidden,
       previewVisible: !preview.hidden,
       pressed: button.getAttribute('aria-pressed'),
+      label: button.textContent?.trim(),
+      syncPressed: syncButton.getAttribute('aria-pressed'),
+      syncVisible: syncButton.offsetParent !== null,
+      splitIcon: button.querySelector('svg')?.getAttribute('data-icon'),
+      syncIcon: syncButton.querySelector('svg')?.getAttribute('data-icon'),
+      syncIconSize: syncButton.querySelector('svg')?.getBoundingClientRect().width,
+      syncBorderRadius: getComputedStyle(syncButton).borderRadius,
+      syncBorderWidth: getComputedStyle(syncButton).borderTopWidth,
+      syncBoxShadow: getComputedStyle(syncButton).boxShadow,
+      syncSize: { width: syncRect.width, height: syncRect.height },
+      syncOffset: {
+        left: syncRect.left - previewRect.left,
+        top: syncRect.top - previewRect.top
+      },
       focusedInEditor: editor.contains(document.activeElement)
     };
   });
   assert.equal(layout.editorVisible, true);
   assert.equal(layout.previewVisible, true);
   assert.equal(layout.pressed, 'true');
+  assert.equal(layout.label, 'Exit split');
+  assert.equal(layout.syncPressed, 'true');
+  assert.equal(layout.syncVisible, true);
+  assert.equal(layout.splitIcon, 'square-split-horizontal');
+  assert.equal(layout.syncIcon, 'link');
+  assert.equal(layout.syncIconSize, 14);
+  assert.equal(layout.syncBorderRadius, '50%');
+  assert.equal(layout.syncBorderWidth, '1px');
+  assert.notEqual(layout.syncBoxShadow, 'none');
+  assert.deepEqual(layout.syncSize, { width: 20, height: 20 });
+  assert.ok(layout.syncOffset.left >= 2 && layout.syncOffset.left <= 4, JSON.stringify(layout));
+  assert.ok(Math.abs(layout.syncOffset.top - 2) <= 0.5, JSON.stringify(layout));
   assert.equal(layout.focusedInEditor, true, 'Opening side Preview should restore editor focus');
   assert.ok(Math.abs(layout.editorWidth - layout.previewWidth) <= 2, JSON.stringify(layout));
   const tableFit = await page.evaluate(() => {
@@ -1284,13 +1313,66 @@ try {
     `Source back-to-top must move both linked surfaces: ${JSON.stringify(sourceButtonTop)}`
   );
 
+  await page.click('.source-preview-scroll-sync-button');
+  const independentState = await page.$eval('.source-preview-scroll-sync-button', button => ({
+    pressed: button.getAttribute('aria-pressed'),
+    independent: button.classList.contains('is-independent'),
+    icon: button.querySelector('svg')?.getAttribute('data-icon')
+  }));
+  assert.equal(independentState.pressed, 'false');
+  assert.equal(independentState.independent, true);
+  assert.equal(independentState.icon, 'unlink');
+  const independentStart = await page.evaluate(() => ({
+    source: document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop,
+    preview: document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop
+  }));
+  const syncButtonBounds = await page.$eval('.source-preview-scroll-sync-button', element => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.move(syncButtonBounds.x, syncButtonBounds.y);
+  await page.mouse.wheel({ deltaY: 600 });
+  await new Promise(resolve => setTimeout(resolve, 120));
+  const independentWheel = await page.evaluate(() => ({
+    source: document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop,
+    preview: document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop
+  }));
+  assert.ok(
+    independentWheel.preview > independentStart.preview + 100,
+    `Wheel over the floating sync control must keep scrolling Preview: ${JSON.stringify({ independentStart, independentWheel })}`
+  );
+  assert.ok(
+    Math.abs(independentWheel.source - independentStart.source) <= 0.5,
+    `Independent Preview scrolling must not move Source: ${JSON.stringify({ independentStart, independentWheel })}`
+  );
+  await page.click('.source-preview-scroll-sync-button');
+  await new Promise(resolve => setTimeout(resolve, 120));
+  const relinkedState = await page.evaluate(() => ({
+    pressed: document.querySelector('.source-preview-scroll-sync-button')?.getAttribute('aria-pressed'),
+    source: document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop,
+    preview: document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop
+  }));
+  assert.equal(relinkedState.pressed, 'true');
+  assert.ok(
+    relinkedState.source > independentStart.source + 100,
+    `Re-enabling sync must align once from the last active Preview pane: ${JSON.stringify({ independentStart, independentWheel, relinkedState })}`
+  );
+
   await page.click('.source-preview-button');
   const closed = await page.evaluate(() => ({
     split: document.querySelector('.editor-surface')?.hasAttribute('data-source-preview'),
     previewHidden: document.querySelector<HTMLElement>('.preview-host')?.hidden,
-    editorHidden: document.querySelector<HTMLElement>('.editor-host')?.hidden
+    editorHidden: document.querySelector<HTMLElement>('.editor-host')?.hidden,
+    label: document.querySelector<HTMLButtonElement>('.source-preview-button')?.textContent?.trim(),
+    syncVisible: document.querySelector<HTMLElement>('.source-preview-scroll-sync-button')?.offsetParent !== null
   }));
-  assert.deepEqual(closed, { split: false, previewHidden: true, editorHidden: false });
+  assert.deepEqual(closed, {
+    split: false,
+    previewHidden: true,
+    editorHidden: false,
+    label: 'Split preview',
+    syncVisible: false
+  });
   const closedRenderCount = previewRenderCount;
   await page.keyboard.type('OFF');
   await new Promise(resolve => setTimeout(resolve, 450));

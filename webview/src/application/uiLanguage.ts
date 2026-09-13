@@ -90,8 +90,12 @@ export type UiStrings = Readonly<{
   live: string;
   source: string;
   preview: string;
+  sidePreview: string;
+  exitSidePreview: string;
   showSidePreview: string;
   hideSidePreview: string;
+  disableSynchronizedScrolling: string;
+  enableSynchronizedScrolling: string;
   inlineMarkdownFormatting: string;
   bold: string;
   italic: string;
@@ -291,7 +295,10 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     backToTop: 'Back to top',
     editorToolbar: 'Editor toolbar', formatting: 'Formatting', markdownMode: 'Markdown mode',
     live: 'Live', source: 'Source', preview: 'Preview',
+    sidePreview: 'Split preview', exitSidePreview: 'Exit split',
     showSidePreview: 'Show side preview', hideSidePreview: 'Hide side preview',
+    disableSynchronizedScrolling: 'Synchronized scrolling is on; click for independent scrolling',
+    enableSynchronizedScrolling: 'Independent scrolling is on; click to restore synchronized scrolling',
     inlineMarkdownFormatting: 'Inline markdown formatting', bold: 'Bold', italic: 'Italic',
     lineover: 'Lineover', highlight: 'Highlight', inlineCode: 'Inline Code', kbd: 'Kbd',
     underline: 'Underline', markTaskComplete: 'Mark task as complete',
@@ -439,7 +446,11 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     backToTop: '回到顶部',
     editorToolbar: '编辑器工具栏', formatting: '格式', markdownMode: 'Markdown 模式',
     live: '实时', source: '源码', preview: '预览',
-    showSidePreview: '显示侧边预览', hideSidePreview: '关闭侧边预览', inlineMarkdownFormatting: '行内 Markdown 格式',
+    sidePreview: '分栏预览', exitSidePreview: '退出分栏',
+    showSidePreview: '显示侧边预览', hideSidePreview: '关闭侧边预览',
+    disableSynchronizedScrolling: '当前为同步滚动，点击切换为独立滚动',
+    enableSynchronizedScrolling: '当前为独立滚动，点击恢复同步滚动',
+    inlineMarkdownFormatting: '行内 Markdown 格式',
     bold: '加粗', italic: '斜体', lineover: '删除线', highlight: '高亮', inlineCode: '行内代码',
     kbd: '按键', underline: '下划线', markTaskComplete: '标记任务为已完成',
     markTaskIncomplete: '标记任务为未完成', clearLinkUrl: '清除链接地址',

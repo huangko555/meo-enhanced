@@ -418,6 +418,7 @@ async function main() {
         if (element.dataset.action) return element.dataset.action;
         if (element.classList.contains('line-jump-control')) return 'line-jump';
         if (element.classList.contains('format-separator')) return 'separator';
+        if (element.classList.contains('source-preview-button')) return 'split-preview';
         if (element.classList.contains('changes-controls')) return 'changes';
         if (element.classList.contains('more-tools-wrapper')) return 'more';
         return element.className;
@@ -430,7 +431,7 @@ async function main() {
     });
     if (
       JSON.stringify(toolbarLayout.left.slice(0, 5)) !== JSON.stringify(['outline-left', 'line-jump', 'save', 'discard', 'separator']) ||
-      JSON.stringify(toolbarLayout.right) !== JSON.stringify(['changes', 'separator', 'find', 'outline-right', 'more']) ||
+      JSON.stringify(toolbarLayout.right) !== JSON.stringify(['split-preview', 'changes', 'separator', 'find', 'outline-right', 'more']) ||
       JSON.stringify(toolbarLayout.changes) !== JSON.stringify(['changes-review-trigger', 'changes-review-panel'])
     ) {
       throw new Error(`Unexpected toolbar layout: ${JSON.stringify(toolbarLayout)}`);

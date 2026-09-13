@@ -32,6 +32,7 @@ export interface ViewportLayoutRegion {
 }
 
 export type ViewportAnchorOwner = 'editor' | 'preview';
+export type LinkedPreviewActivationOwner = ViewportAnchorOwner | 'last-interaction';
 
 export interface PreviewDocumentChange {
   readonly previousText: string;
@@ -351,6 +352,7 @@ export class ViewportController {
   private pendingHistoryShortcutViewport: ViewportHistorySnapshot | null = null;
   private linkedPreviewEnabled = false;
   private linkedViewportDriver: ViewportAnchorOwner = 'editor';
+  private lastViewportInteractionOwner: ViewportAnchorOwner = 'editor';
   private linkedProjectionGeneration = 0;
   private linkedViewportMap: LinkedViewportMap | null = null;
   private linkedViewportMapDirty = true;
@@ -405,6 +407,7 @@ export class ViewportController {
   }
 
   markInteraction(owner: ViewportAnchorOwner = 'editor'): void {
+    this.lastViewportInteractionOwner = owner;
     this.claimLinkedViewport(owner);
     const scope = this.anchorTransactionScope;
     const programmaticCurrentTransaction = scope.kind === 'current'
@@ -559,10 +562,17 @@ export class ViewportController {
     write();
   }
 
-  setLinkedPreviewEnabled(enabled: boolean): void {
+  setLinkedPreviewEnabled(
+    enabled: boolean,
+    activationOwner: LinkedPreviewActivationOwner = 'editor'
+  ): void {
     if (this.destroyed || this.linkedPreviewEnabled === enabled) return;
     this.linkedPreviewEnabled = enabled;
-    this.linkedViewportDriver = 'editor';
+    if (enabled) {
+      this.linkedViewportDriver = activationOwner === 'last-interaction'
+        ? this.lastViewportInteractionOwner
+        : activationOwner;
+    }
     this.linkedProjectionGeneration += 1;
     this.linkedViewportMapDirty = true;
     if (this.linkedViewportMapRefreshTimer !== null) {
@@ -571,7 +581,7 @@ export class ViewportController {
     }
     if (enabled) {
       this.rebuildLinkedViewportMap(false);
-      this.projectLinkedViewport('editor');
+      this.projectLinkedViewport(this.linkedViewportDriver);
     } else {
       this.linkedViewportMap = null;
     }

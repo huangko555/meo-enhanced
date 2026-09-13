@@ -5214,10 +5214,62 @@ body.outline-resizing .preview-frame {
 .source-preview-button {
   display: none;
   flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+  gap: 5px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, var(--vscode-icon-foreground));
 }
 
 .editor-root[data-mode='source'] .source-preview-button {
   display: inline-flex;
+}
+
+.source-preview-button.is-active {
+  color: var(--vscode-editor-foreground);
+  background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.source-preview-button > svg {
+  color: var(--vscode-editor-foreground);
+}
+
+.source-preview-scroll-sync-button {
+  position: absolute;
+  z-index: 250;
+  top: 2px;
+  left: 2px;
+  display: none;
+  width: 20px;
+  height: 20px;
+  box-sizing: border-box;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--meo-foreground) 22%, transparent);
+  border-radius: 50%;
+  color: var(--meo-foreground);
+  background: var(--meo-background);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 16%);
+  cursor: pointer;
+}
+
+.editor-surface[data-source-preview] > .preview-host > .source-preview-scroll-sync-button {
+  display: flex;
+}
+
+.source-preview-scroll-sync-button:hover,
+.source-preview-scroll-sync-button:focus-visible {
+  background-color: color-mix(in srgb, var(--meo-background) 80%, var(--meo-foreground) 20%);
+}
+
+.source-preview-scroll-sync-button:active {
+  background-color: color-mix(in srgb, var(--meo-background) 72%, var(--meo-foreground) 28%);
+}
+
+.source-preview-scroll-sync-button svg {
+  opacity: 0.8;
+  pointer-events: none;
 }
 
 .preview-frame {

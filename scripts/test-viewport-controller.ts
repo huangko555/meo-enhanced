@@ -2088,6 +2088,14 @@ for (const settledShift of [0, 40]) {
     controller.editorViewportChanged();
     await flushLinkedFrames();
     if (previewWrites.length !== 2) throw new Error('Disabled linked scrolling performed work');
+
+    previewPosition = { line: 50, lineOffset: 3, editorLineOffset: 3 };
+    controller.markPreviewInteraction();
+    controller.setLinkedPreviewEnabled(true, 'last-interaction');
+    if (scrollDOM.scrollTop !== 983) {
+      throw new Error(`Re-enabled linked scrolling did not follow the last Preview interaction: ${scrollDOM.scrollTop}`);
+    }
+    controller.setLinkedPreviewEnabled(false);
   } finally {
     controller.destroy();
     globalThis.requestAnimationFrame = previousRaf;

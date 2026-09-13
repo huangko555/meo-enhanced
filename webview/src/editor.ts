@@ -98,6 +98,7 @@ import {
   type PreviewDocumentChange,
   type PreviewViewportSurface,
   type ViewportAnchorOwner,
+  type LinkedPreviewActivationOwner,
   type ViewportAnchorToken
 } from './helpers/viewportController';
 import { collectRenderableHtmlBlocks, setHtmlEditingRangeEffect } from './helpers/htmlContent';
@@ -2933,8 +2934,8 @@ export function createEditor({
     ): void {
       viewportController.runPreviewPresentationTransaction(mutate, documentChange);
     },
-    setLinkedPreviewEnabled(enabled: boolean): void {
-      viewportController.setLinkedPreviewEnabled(enabled);
+    setLinkedPreviewEnabled(enabled: boolean, activationOwner?: LinkedPreviewActivationOwner): void {
+      viewportController.setLinkedPreviewEnabled(enabled, activationOwner);
     },
     focus() {
       const activeTableInput = getActiveTableInput();

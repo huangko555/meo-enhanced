@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, HardDriveUpload, PanelLeftRightDashed, Settings, Check, Ellipsis, Sun, Moon, ExternalLink, History } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Unlink, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, HardDriveUpload, PanelLeftRightDashed, SquareSplitHorizontal, Settings, Check, Ellipsis, Sun, Moon, ExternalLink, History } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -947,11 +947,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   editorNotice.setUiLanguage(language);
   modeControl.element.setAttribute('aria-label', strings.markdownMode);
   modeControl.setLabels({ live: strings.live, source: strings.source, preview: strings.preview });
-  const sourcePreviewLabel = sourcePreviewButton.classList.contains('is-active')
-    ? strings.hideSidePreview
-    : strings.showSidePreview;
-  sourcePreviewButton.title = sourcePreviewLabel;
-  sourcePreviewButton.setAttribute('aria-label', sourcePreviewLabel);
+  presentSourcePreviewControls();
   selectionMenuElements.setUiLanguage(language);
   editorScrollToTopController.setUiLanguage(language);
   findToggleBtn.title = strings.findAndReplace;
@@ -1130,7 +1126,24 @@ sourcePreviewButton.className = 'format-button source-preview-button';
 sourcePreviewButton.title = activeUiStrings.showSidePreview;
 sourcePreviewButton.setAttribute('aria-label', activeUiStrings.showSidePreview);
 sourcePreviewButton.setAttribute('aria-pressed', 'false');
-sourcePreviewButton.appendChild(createElement(PanelLeftRightDashed, { width: 18, height: 18, 'aria-hidden': 'true' }));
+const sourcePreviewButtonLabel = document.createElement('span');
+sourcePreviewButtonLabel.className = 'source-preview-button-label';
+sourcePreviewButtonLabel.textContent = activeUiStrings.sidePreview;
+sourcePreviewButton.append(
+  createElement(SquareSplitHorizontal, {
+    width: 16,
+    height: 16,
+    'aria-hidden': 'true',
+    'data-icon': 'square-split-horizontal'
+  }),
+  sourcePreviewButtonLabel
+);
+rightGroup.insertBefore(sourcePreviewButton, changesControls);
+
+const sourcePreviewScrollSyncButton = document.createElement('button');
+sourcePreviewScrollSyncButton.type = 'button';
+sourcePreviewScrollSyncButton.className = 'format-button source-preview-scroll-sync-button';
+sourcePreviewScrollSyncButton.setAttribute('aria-pressed', 'true');
 
 const toolbarOverflowIndicator = document.createElement('button');
 toolbarOverflowIndicator.type = 'button';
@@ -1171,7 +1184,7 @@ document.addEventListener('keydown', (event) => {
 
 const toolbarRight = document.createElement('div');
 toolbarRight.className = 'toolbar-right';
-toolbarRight.append(rightGroup, sourcePreviewButton, modeGroup);
+toolbarRight.append(rightGroup, modeGroup);
 
 const findPanelElements = createFindPanel(findToggleBtn, activeUiLanguage);
 const findPanelController = createFindPanelController(
@@ -1388,6 +1401,7 @@ const previewAdapter = createPreviewWebviewAdapter(previewController);
 previewAppearanceSlot.replaceWith(previewController.appearanceControl);
 previewFontFamilySlot.replaceWith(previewController.fontFamilyControl);
 previewSourceColoringSlot.replaceWith(previewController.sourceColoringControl);
+previewController.host.append(sourcePreviewScrollSyncButton);
 outlineController = createOutlineController({
   root,
   editorWrapper,
@@ -1427,6 +1441,7 @@ root.replaceChildren(toolbar, editorWrapper);
 const editorModeApplication = createEditorModeApplication();
 let editorModeRuntime: EditorModeRuntime;
 let sourcePreviewEnabled = false;
+let sourcePreviewScrollSyncEnabled = true;
 let sourcePreviewRevealGeneration = 0;
 let pendingSourcePreviewReveal: {
   readonly generation: number;
@@ -1440,6 +1455,41 @@ const isSidePreviewVisible = (): boolean => (
 const isPreviewSurfaceVisible = (): boolean => (
   getActiveEditorMode() === 'preview' || isSidePreviewVisible()
 );
+function presentSourcePreviewControls(): void {
+  const split = isSidePreviewVisible();
+  const sourcePreviewLabel = split
+    ? activeUiStrings.hideSidePreview
+    : activeUiStrings.showSidePreview;
+  sourcePreviewButton.title = sourcePreviewLabel;
+  sourcePreviewButton.setAttribute('aria-label', sourcePreviewLabel);
+  sourcePreviewButtonLabel.textContent = split
+    ? activeUiStrings.exitSidePreview
+    : activeUiStrings.sidePreview;
+
+  const syncLabel = sourcePreviewScrollSyncEnabled
+    ? activeUiStrings.disableSynchronizedScrolling
+    : activeUiStrings.enableSynchronizedScrolling;
+  sourcePreviewScrollSyncButton.title = syncLabel;
+  sourcePreviewScrollSyncButton.setAttribute('aria-label', syncLabel);
+  sourcePreviewScrollSyncButton.setAttribute('aria-pressed', sourcePreviewScrollSyncEnabled ? 'true' : 'false');
+  sourcePreviewScrollSyncButton.classList.toggle('is-independent', !sourcePreviewScrollSyncEnabled);
+  sourcePreviewScrollSyncButton.replaceChildren(createElement(
+    sourcePreviewScrollSyncEnabled ? Link : Unlink,
+    {
+      width: 14,
+      height: 14,
+      'aria-hidden': 'true',
+      'data-icon': sourcePreviewScrollSyncEnabled ? 'link' : 'unlink'
+    }
+  ));
+}
+const activateSourcePreviewLinkage = (): void => {
+  if (!editor) return;
+  // Independent panes still open at one shared semantic position. Continuous
+  // projection is disabled immediately after that initial alignment.
+  editor.setLinkedPreviewEnabled?.(true, 'editor');
+  if (!sourcePreviewScrollSyncEnabled) editor.setLinkedPreviewEnabled?.(false);
+};
 const cancelSourcePreviewReveal = (): void => {
   sourcePreviewRevealGeneration += 1;
   pendingSourcePreviewReveal = null;
@@ -1454,7 +1504,7 @@ const finishSourcePreviewReveal = (): void => {
     if (reveal.generation !== sourcePreviewRevealGeneration || !isSidePreviewVisible()) return;
     previewController.refreshLayout();
     if (editor) (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
-    editor?.setLinkedPreviewEnabled?.(true);
+    activateSourcePreviewLinkage();
     previewController.host.inert = false;
     previewController.host.style.removeProperty('visibility');
   });
@@ -1479,11 +1529,7 @@ const presentPreviewSurface = (
   editorSurface.toggleAttribute('data-source-preview', split);
   sourcePreviewButton.classList.toggle('is-active', split);
   sourcePreviewButton.setAttribute('aria-pressed', split ? 'true' : 'false');
-  const sourcePreviewLabel = split
-    ? activeUiStrings.hideSidePreview
-    : activeUiStrings.showSidePreview;
-  sourcePreviewButton.title = sourcePreviewLabel;
-  sourcePreviewButton.setAttribute('aria-label', sourcePreviewLabel);
+  presentSourcePreviewControls();
   if (atomicSplit && split) {
     const generation = ++sourcePreviewRevealGeneration;
     pendingSourcePreviewReveal = { generation, editorReady: false, previewReady: false };
@@ -1495,7 +1541,8 @@ const presentPreviewSurface = (
   }
   cancelSourcePreviewReveal();
   previewAdapter.setActive({ active: visible, text: getCurrentEditorText() });
-  editor?.setLinkedPreviewEnabled?.(split);
+  if (split) activateSourcePreviewLinkage();
+  else editor?.setLinkedPreviewEnabled?.(false);
   return { split, visible };
 };
 const getActiveEditableMode = (): 'live' | 'source' => {
@@ -1681,6 +1728,7 @@ type WebviewUiState = {
   mode?: 'live' | 'source' | 'preview';
   lastEditableMode?: 'live' | 'source';
   contentMaxWidthEnabled?: boolean;
+  sourcePreviewScrollSyncEnabled?: boolean;
   outlineMode?: 'floating' | 'fixed';
   outlineWidth?: number;
 };
@@ -1693,6 +1741,7 @@ const persistUiState = (
     mode,
     lastEditableMode,
     contentMaxWidthEnabled,
+    sourcePreviewScrollSyncEnabled,
     outlineMode: outlineUiState.mode,
     outlineWidth: outlineUiState.width
   };
@@ -2648,6 +2697,10 @@ if (state && (state.mode === 'live' || state.mode === 'source' || state.mode ===
 if (typeof state?.contentMaxWidthEnabled === 'boolean') {
   setContentMaxWidthEnabled(state.contentMaxWidthEnabled, { post: false, persist: false });
 }
+if (typeof state?.sourcePreviewScrollSyncEnabled === 'boolean') {
+  sourcePreviewScrollSyncEnabled = state.sourcePreviewScrollSyncEnabled;
+  presentSourcePreviewControls();
+}
 if (state?.outlineMode === 'floating' || state?.outlineMode === 'fixed') {
   outlineUiState.mode = state.outlineMode;
   outlineController.setMode(state.outlineMode);
@@ -2688,6 +2741,35 @@ sourcePreviewButton.addEventListener('click', () => {
     markSourcePreviewEditorReady();
   }
 });
+
+sourcePreviewScrollSyncButton.addEventListener('pointerdown', (event) => {
+  if (event.pointerType === 'mouse') event.preventDefault();
+});
+
+sourcePreviewScrollSyncButton.addEventListener('click', () => {
+  if (!isSidePreviewVisible() || !editor) return;
+  sourcePreviewScrollSyncEnabled = !sourcePreviewScrollSyncEnabled;
+  editor.setLinkedPreviewEnabled?.(
+    sourcePreviewScrollSyncEnabled,
+    sourcePreviewScrollSyncEnabled ? 'last-interaction' : undefined
+  );
+  presentSourcePreviewControls();
+  persistUiState();
+});
+
+sourcePreviewScrollSyncButton.addEventListener('wheel', (event) => {
+  if (!isSidePreviewVisible() || event.ctrlKey || event.deltaY === 0) return;
+  event.preventDefault();
+  editor?.markPreviewViewportInteraction?.();
+  const deltaScale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+    ? 16
+    : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+      ? previewController.host.clientHeight
+      : 1;
+  previewController.writeScrollTop(
+    previewController.readScrollTop() + event.deltaY * deltaScale
+  );
+}, { passive: false });
 
 previewButton.addEventListener('click', () => {
   void editorModeRuntime.dispatch({
