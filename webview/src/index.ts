@@ -1354,6 +1354,7 @@ let applyCodeThemeForPreview = (appearance: 'light' | 'dark') => {
   setShikiTheme(codePaletteAdapter.resolve(undefined, appearance).sourceTheme, 'preview');
 };
 let previewPaintReady = false;
+let previewViewportInteractionGeneration = 0;
 const previewController = createPreviewController({
   vscode,
   uiLanguage: activeUiLanguage,
@@ -1383,6 +1384,7 @@ const previewController = createPreviewController({
     readingPositionLifecycle?.surfaceReady();
   },
   onViewportInteraction: () => {
+    previewViewportInteractionGeneration += 1;
     editor?.markPreviewViewportInteraction?.();
     readingPositionLifecycle?.userInteracted();
   },
@@ -1398,7 +1400,22 @@ const previewController = createPreviewController({
       mutate();
       return;
     }
+    const reloadViewport = pendingReloadPreviewViewport;
     editor.runPreviewPresentationTransaction(mutate, documentChange);
+    if (
+      !reloadViewport ||
+      reloadViewport.text === null ||
+      documentChange?.nextText !== reloadViewport.text ||
+      reloadViewport.interactionGeneration !== previewViewportInteractionGeneration ||
+      !reloadViewport.isCurrent?.()
+    ) return;
+    pendingReloadPreviewViewport = null;
+    previewController.restoreTopVisiblePosition({
+      line: reloadViewport.position.topLine,
+      lineOffset: reloadViewport.position.topLineOffset,
+      viewportOffset: reloadViewport.position.viewportOffset,
+      sourceRange: reloadViewport.position.sourceRange
+    }, () => true);
   }
 });
 const previewAdapter = createPreviewWebviewAdapter(previewController);
@@ -1445,6 +1462,8 @@ root.replaceChildren(toolbar, editorWrapper);
 const editorModeApplication = createEditorModeApplication();
 let editorModeRuntime: EditorModeRuntime;
 let sourcePreviewEnabled = false;
+// This preference belongs to one open document session. Keep it out of
+// WebviewUiState so reopening the document starts from synchronized scrolling.
 let sourcePreviewScrollSyncEnabled = true;
 let splitModeTransitionViewport: EditorModeViewportToken | null = null;
 let pendingEditorViewportAfterPreviewExit: EditorModeViewportToken | null = null;
@@ -1741,7 +1760,6 @@ type WebviewUiState = {
   mode?: 'live' | 'source' | 'preview';
   lastEditableMode?: 'live' | 'source';
   contentMaxWidthEnabled?: boolean;
-  sourcePreviewScrollSyncEnabled?: boolean;
   outlineMode?: 'floating' | 'fixed';
   outlineWidth?: number;
 };
@@ -1754,7 +1772,6 @@ const persistUiState = (
     mode,
     lastEditableMode,
     contentMaxWidthEnabled,
-    sourcePreviewScrollSyncEnabled,
     outlineMode: outlineUiState.mode,
     outlineWidth: outlineUiState.width
   };
@@ -1938,6 +1955,12 @@ gitClient = createGitClient();
 const discardConfirmationWindowMs = 3000;
 let discardConfirmationTimer: number | null = null;
 let pendingReloadViewport: { handle: ViewportAnchorToken; owner: 'editor' | 'preview' } | null = null;
+let pendingReloadPreviewViewport: {
+  readonly position: NonNullable<ReturnType<typeof previewController.getTopVisiblePosition>>;
+  readonly interactionGeneration: number;
+  readonly text: string | null;
+  readonly isCurrent?: () => boolean;
+} | null = null;
 
 const clearDiscardConfirmation = () => {
   if (discardConfirmationTimer !== null) {
@@ -1958,6 +1981,16 @@ const discardUnsavedChanges = () => {
   const viewportHandle = editor?.captureViewportAnchorToken?.(previewActive ? 'preview' : 'editor') ?? null;
   pendingReloadViewport = viewportHandle
     ? { handle: viewportHandle, owner: previewActive ? 'preview' : 'editor' }
+    : null;
+  const splitPreviewPosition = !previewActive && isSidePreviewVisible()
+    ? previewController.getTopVisiblePosition()
+    : null;
+  pendingReloadPreviewViewport = splitPreviewPosition
+    ? {
+        position: splitPreviewPosition,
+        interactionGeneration: previewViewportInteractionGeneration,
+        text: null
+      }
     : null;
   commitEditorTransientEdits();
   documentSessionAdapter.requestReloadFromDisk({
@@ -2070,7 +2103,20 @@ const presentDocumentText = async (
     presented = await setEditorTextSafely(text, `documentSession.${source}`, source === 'disk-reload');
     if (!presented) throw viewportPresentationFailed;
     if (previewVisible) {
-      previewAdapter.refreshVisible(text, { preserveViewport: !isViewportCurrent() });
+      if (source === 'disk-reload' && pendingReloadPreviewViewport) {
+        const reloadHandle = pendingReloadViewport?.handle ?? null;
+        pendingReloadPreviewViewport = {
+          ...pendingReloadPreviewViewport,
+          text,
+          isCurrent: () => reloadHandle === null ||
+            editor?.isViewportAnchorTokenCurrent?.(reloadHandle) === true
+        };
+      }
+      previewAdapter.refreshVisible(text, {
+        // An Editor-owned transaction only restores the CodeMirror surface.
+        // A simultaneously visible split Preview must preserve its own anchor.
+        preserveViewport: owner === 'editor' || !isViewportCurrent()
+      });
     }
   };
   try {
@@ -2094,7 +2140,10 @@ const documentSessionAdapter = createDocumentSessionWebviewAdapter({
     void message;
     pendingReloadViewport = null;
   },
-  showFailureNotice: (message) => failureNotice.setFailureNotice(message, 'warning'),
+  showFailureNotice: (message) => {
+    pendingReloadPreviewViewport = null;
+    failureNotice.setFailureNotice(message, 'warning');
+  },
   reportUnexpectedError: (context, error) => {
     console.error(`[MEO webview] Document Session ${context}`, error);
   }
@@ -2755,10 +2804,6 @@ if (state && (state.mode === 'live' || state.mode === 'source' || state.mode ===
 if (typeof state?.contentMaxWidthEnabled === 'boolean') {
   setContentMaxWidthEnabled(state.contentMaxWidthEnabled, { post: false, persist: false });
 }
-if (typeof state?.sourcePreviewScrollSyncEnabled === 'boolean') {
-  sourcePreviewScrollSyncEnabled = state.sourcePreviewScrollSyncEnabled;
-  presentSourcePreviewControls();
-}
 if (state?.outlineMode === 'floating' || state?.outlineMode === 'fixed') {
   outlineUiState.mode = state.outlineMode;
   outlineController.setMode(state.outlineMode);
@@ -2812,7 +2857,6 @@ sourcePreviewScrollSyncButton.addEventListener('click', () => {
     sourcePreviewScrollSyncEnabled ? 'last-interaction' : undefined
   );
   presentSourcePreviewControls();
-  persistUiState();
 });
 
 sourcePreviewScrollSyncButton.addEventListener('wheel', (event) => {

@@ -1919,6 +1919,11 @@ export class ViewportController {
     this.runAnchorTransaction(handle, owner, () => undefined);
   }
 
+  isTokenCurrent(handle: ViewportAnchorToken): boolean {
+    const record = this.anchorTokens.get(handle);
+    return Boolean(record && this.isAnchorTokenCurrent(record));
+  }
+
   /**
    * Runs one serialized surface transaction and then projects its Controller-bound token.
    * Every outer call establishes a scope: invalid targets are suppressed while their mutation

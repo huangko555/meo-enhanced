@@ -2925,6 +2925,9 @@ export function createEditor({
     restoreViewportAnchorToken(handle: ViewportAnchorToken, owner: ViewportAnchorOwner): void {
       viewportController.restoreAnchorToken(handle, owner);
     },
+    isViewportAnchorTokenCurrent(handle: ViewportAnchorToken): boolean {
+      return viewportController.isTokenCurrent(handle);
+    },
     runViewportAnchorTransaction(
       handle: ViewportAnchorToken | null,
       owner: ViewportAnchorOwner,

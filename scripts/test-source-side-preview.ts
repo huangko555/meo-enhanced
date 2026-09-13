@@ -42,7 +42,7 @@ try {
   await page.exposeFunction('__getSourceSidePreviewRenderCount', () => previewRenderCount);
   await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
   await page.addStyleTag({ path: 'webview/src/styles.css' });
-  await page.addScriptTag({ content: `window.acquireVsCodeApi=()=>({getState(){},setState(){},postMessage(message){window.__renderSourceSidePreview(message).then(response=>{if(response)window.dispatchEvent(new MessageEvent('message',{data:response}));});}});` });
+  await page.addScriptTag({ content: `window.__sourceSideMessages=[];window.__sourceSideUiState={sourcePreviewScrollSyncEnabled:false};window.acquireVsCodeApi=()=>({getState(){return window.__sourceSideUiState},setState(state){window.__sourceSideUiState=state},postMessage(message){window.__sourceSideMessages.push(message);if(message.type==='reloadDocumentFromDisk'){setTimeout(()=>window.dispatchEvent(new MessageEvent('message',{data:{type:'documentReloadedFromDisk',reloadId:1,version:2,text:window.__sourceSideDiskText,topLine:message.topLine,topLineOffset:message.topLineOffset}})),0);return;}window.__renderSourceSidePreview(message).then(response=>{if(response)window.dispatchEvent(new MessageEvent('message',{data:response}));});}});` });
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
 
   const compactComplexBlock = [
@@ -152,18 +152,21 @@ try {
       return `## Section ${section}\n\nParagraph ${section} with enough text to exercise semantic linked scrolling.`;
     })
   ].join('\n\n');
-  await page.evaluate(text => window.dispatchEvent(new MessageEvent('message', { data: {
-    type: 'init', documentId: 'file:///source-side-preview.md', text, version: 1,
-    savedRevision: { version: 1, text }, diagnostics: [], mode: 'source', uiLanguage: 'en',
-    uiLanguagePreference: 'auto', automaticUiLanguage: 'en', sourceLineNumbers: 'on',
-    previewAppearance: 'dark', previewFontFamily: '', previewSourceColoring: true,
-    editorAppearance: 'dark', editorFontSizeMode: 'auto', editorFontSize: 14,
-    gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false,
-    diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
-    contentMaxWidthEnabled: false, findOptions: { wholeWord: false, caseSensitive: false },
-    outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
-    restoreReadingPositionOnOpen: false, vscodeTheme: null
-  } })), text);
+  await page.evaluate(text => {
+    (window as any).__sourceSideDiskText = text;
+    window.dispatchEvent(new MessageEvent('message', { data: {
+      type: 'init', documentId: 'file:///source-side-preview.md', text, version: 1,
+      savedRevision: { version: 1, text }, diagnostics: [], mode: 'source', uiLanguage: 'en',
+      uiLanguagePreference: 'auto', automaticUiLanguage: 'en', sourceLineNumbers: 'on',
+      previewAppearance: 'dark', previewFontFamily: '', previewSourceColoring: true,
+      editorAppearance: 'dark', editorFontSizeMode: 'auto', editorFontSize: 14,
+      gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false,
+      diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
+      contentMaxWidthEnabled: false, findOptions: { wholeWord: false, caseSensitive: false },
+      outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
+      restoreReadingPositionOnOpen: false, vscodeTheme: null
+    } }));
+  }, text);
   await page.waitForSelector('.cm-content');
   await page.waitForFunction(() => document.querySelector<HTMLElement>('.source-preview-button')?.offsetParent !== null);
   const preloadCount = previewRenderCount;
@@ -193,6 +196,8 @@ try {
       syncVisible: syncButton.offsetParent !== null,
       splitIcon: button.querySelector('svg')?.getAttribute('data-icon'),
       syncIcon: syncButton.querySelector('svg')?.getAttribute('data-icon'),
+      scrollTopIcons: Array.from(document.querySelectorAll<SVGElement>('.document-scroll-top svg'))
+        .map(icon => icon.getAttribute('data-icon')),
       syncIconSize: syncButton.querySelector('svg')?.getBoundingClientRect().width,
       syncBorderRadius: getComputedStyle(syncButton).borderRadius,
       syncBorderWidth: getComputedStyle(syncButton).borderTopWidth,
@@ -209,10 +214,15 @@ try {
   assert.equal(layout.previewVisible, true);
   assert.equal(layout.pressed, 'true');
   assert.equal(layout.label, 'Exit split');
-  assert.equal(layout.syncPressed, 'true');
+  assert.equal(
+    layout.syncPressed,
+    'true',
+    'A newly opened document session must ignore stale persisted scroll-sync state'
+  );
   assert.equal(layout.syncVisible, true);
   assert.equal(layout.splitIcon, 'square-split-horizontal');
   assert.equal(layout.syncIcon, 'link');
+  assert.deepEqual(layout.scrollTopIcons, ['arrow-up-to-line', 'arrow-up-to-line']);
   assert.equal(layout.syncIconSize, 14);
   assert.equal(layout.syncBorderRadius, '50%');
   assert.equal(layout.syncBorderWidth, '1px');
@@ -1269,6 +1279,39 @@ try {
   await page.click('button[data-mode="live"]');
   await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live');
   await new Promise(resolve => setTimeout(resolve, 120));
+  const tableHeaderColors = await page.evaluate(() => {
+    const liveTable = Array.from(document.querySelectorAll<HTMLTableElement>(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table)'
+    )).find(table => table.textContent?.includes('asd332'));
+    const previewDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const previewTable = Array.from(previewDocument.querySelectorAll<HTMLTableElement>('table'))
+      .find(table => table.textContent?.includes('asd332'));
+    const liveHeader = liveTable?.querySelector<HTMLElement>('thead th') ?? null;
+    const previewHeader = previewTable?.querySelector<HTMLElement>('thead th') ?? null;
+    const selectionMenu = document.querySelector<HTMLElement>('.selection-inline-menu');
+    const tableMenu = liveTable?.closest('.meo-md-html-table-shell')
+      ?.querySelector<HTMLElement>('.meo-md-html-table-context-menu') ?? null;
+    const menuBackgrounds = () => ({
+      selection: selectionMenu ? getComputedStyle(selectionMenu).backgroundColor : null,
+      table: tableMenu ? getComputedStyle(tableMenu).backgroundColor : null
+    });
+    const darkMenus = menuBackgrounds();
+    const previousAppearance = document.documentElement.dataset.editorAppearance;
+    document.documentElement.dataset.editorAppearance = 'light';
+    const lightMenus = menuBackgrounds();
+    if (previousAppearance === undefined) delete document.documentElement.dataset.editorAppearance;
+    else document.documentElement.dataset.editorAppearance = previousAppearance;
+    return {
+      live: liveHeader ? getComputedStyle(liveHeader).backgroundColor : null,
+      preview: previewHeader ? previewDocument.defaultView!.getComputedStyle(previewHeader).backgroundColor : null,
+      darkMenus,
+      lightMenus
+    };
+  });
+  assert.ok(tableHeaderColors.live && tableHeaderColors.preview, JSON.stringify(tableHeaderColors));
+  assert.equal(tableHeaderColors.live, tableHeaderColors.preview, JSON.stringify(tableHeaderColors));
+  assert.equal(tableHeaderColors.darkMenus.selection, tableHeaderColors.darkMenus.table, JSON.stringify(tableHeaderColors));
+  assert.equal(tableHeaderColors.lightMenus.selection, tableHeaderColors.lightMenus.table, JSON.stringify(tableHeaderColors));
   await startPreviewAnchorSampling(transitionTableAnchorLine);
   await page.click('button[data-mode="source"]');
   await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');
@@ -1363,6 +1406,23 @@ try {
     sourceScroller.dispatchEvent(new Event('scroll'));
   });
   await new Promise(resolve => setTimeout(resolve, 120));
+  const scrollTopButtonVisual = await page.$eval('.preview-host > .document-scroll-top', element => {
+    const button = element.getBoundingClientRect();
+    const icon = element.querySelector<SVGElement>('svg')!.getBoundingClientRect();
+    return {
+      iconWidth: icon.width,
+      iconHeight: icon.height,
+      centerOffsetX: (icon.left + icon.width / 2) - (button.left + button.width / 2),
+      centerOffsetY: (icon.top + icon.height / 2) - (button.top + button.height / 2)
+    };
+  });
+  assert.deepEqual(
+    { width: scrollTopButtonVisual.iconWidth, height: scrollTopButtonVisual.iconHeight },
+    { width: 18, height: 18 },
+    JSON.stringify(scrollTopButtonVisual)
+  );
+  assert.ok(Math.abs(scrollTopButtonVisual.centerOffsetX) <= 0.25, JSON.stringify(scrollTopButtonVisual));
+  assert.ok(Math.abs(scrollTopButtonVisual.centerOffsetY) <= 0.25, JSON.stringify(scrollTopButtonVisual));
   await page.click('.preview-host > .document-scroll-top');
   await new Promise(resolve => setTimeout(resolve, 120));
   const previewButtonTop = await page.evaluate(() => ({
@@ -1437,6 +1497,61 @@ try {
     `Re-enabling sync must align once from the last active Preview pane: ${JSON.stringify({ independentStart, independentWheel, relinkedState })}`
   );
 
+  const reloadAnchorLine = text.slice(0, text.indexOf('## Section 100')).split('\n').length;
+  const readSplitPreviewPosition = () => page.evaluate(() => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const scroller = frameDocument.scrollingElement!;
+    const entries = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
+      .map(element => {
+        const start = Number(element.dataset.sourceLine);
+        const end = Number(element.dataset.sourceEndLine ?? start);
+        const rect = element.getBoundingClientRect();
+        return { start, end, top: rect.top + scroller.scrollTop, bottom: rect.bottom + scroller.scrollTop };
+      })
+      .filter(entry => Number.isFinite(entry.start))
+      .sort((left, right) => left.top - right.top || left.bottom - right.bottom || left.start - right.start);
+    let low = 0;
+    let high = entries.length - 1;
+    while (low <= high) {
+      const middle = (low + high) >>> 1;
+      if (entries[middle].top <= scroller.scrollTop + 0.5) low = middle + 1;
+      else high = middle - 1;
+    }
+    const visible = entries[Math.max(0, high)];
+    const ratio = visible.bottom > visible.top
+      ? Math.max(0, Math.min(1, (scroller.scrollTop - visible.top) / (visible.bottom - visible.top)))
+      : 0;
+    return {
+      scrollTop: scroller.scrollTop,
+      line: Math.round(visible.start + (visible.end - visible.start) * ratio),
+      offset: visible.top - scroller.scrollTop
+    };
+  });
+  await page.evaluate(line => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const target = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
+      .find(element => Number(element.dataset.sourceLine) === line)!;
+    frameDocument.scrollingElement!.scrollTop += target.getBoundingClientRect().top - 40;
+    frameDocument.dispatchEvent(new Event('scroll', { bubbles: true }));
+  }, reloadAnchorLine);
+  await new Promise(resolve => setTimeout(resolve, 120));
+  const reloadBefore = await readSplitPreviewPosition();
+  assert.ok(reloadBefore.scrollTop > 100, JSON.stringify(reloadBefore));
+  await page.$eval<HTMLButtonElement>('[data-action="discard"]', button => {
+    button.click();
+    button.click();
+  });
+  await page.waitForFunction(() => (window as any).__sourceSideMessages.some(
+    (message: any) => message.type === 'documentReloadPresentationCompleted' && message.reloadId === 1
+  ));
+  await new Promise(resolve => setTimeout(resolve, 160));
+  const reloadAfter = await readSplitPreviewPosition();
+  assert.equal(reloadAfter.line, reloadBefore.line, JSON.stringify({ reloadBefore, reloadAfter }));
+  assert.ok(
+    Math.abs(reloadAfter.offset - reloadBefore.offset) <= 6,
+    JSON.stringify({ reloadBefore, reloadAfter })
+  );
+
   await page.click('.source-preview-button');
   const closed = await page.evaluate(() => ({
     split: document.querySelector('.editor-surface')?.hasAttribute('data-source-preview'),
@@ -1452,6 +1567,47 @@ try {
     label: 'Split preview',
     syncVisible: false
   });
+  await page.click('.source-preview-button');
+  await page.waitForFunction(() => (
+    document.querySelector('.editor-surface')?.hasAttribute('data-source-preview')
+    && document.querySelector<HTMLElement>('.preview-host')?.inert === false
+    && document.querySelector('.source-preview-scroll-sync-button')?.getAttribute('aria-pressed') === 'true'
+  ));
+  await page.click('.source-preview-scroll-sync-button');
+  assert.equal(
+    await page.$eval('.source-preview-scroll-sync-button', button => button.getAttribute('aria-pressed')),
+    'false'
+  );
+  assert.equal(
+    await page.evaluate(() => Object.hasOwn((window as any).__sourceSideUiState, 'sourcePreviewScrollSyncEnabled')),
+    false,
+    'Temporary scroll-sync changes must not enter persisted Webview state'
+  );
+  await page.click('.source-preview-button');
+  await page.click('.source-preview-button');
+  await page.waitForFunction(() => (
+    document.querySelector('.editor-surface')?.hasAttribute('data-source-preview')
+    && document.querySelector<HTMLElement>('.preview-host')?.inert === false
+  ));
+  assert.equal(
+    await page.$eval('.source-preview-scroll-sync-button', button => button.getAttribute('aria-pressed')),
+    'false',
+    'Reopening side Preview in the same document session must retain the user choice'
+  );
+  await page.click('button[data-mode="preview"]');
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview');
+  await page.click('button[data-mode="source"]');
+  await page.waitForFunction(() => (
+    document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source'
+    && document.querySelector('.editor-surface')?.hasAttribute('data-source-preview')
+    && document.querySelector<HTMLElement>('.preview-host')?.inert === false
+  ));
+  assert.equal(
+    await page.$eval('.source-preview-scroll-sync-button', button => button.getAttribute('aria-pressed')),
+    'false',
+    'Mode switching in the same document session must retain the user choice'
+  );
+  await page.click('.source-preview-button');
   const closedRenderCount = previewRenderCount;
   await page.keyboard.type('OFF');
   await new Promise(resolve => setTimeout(resolve, 450));
