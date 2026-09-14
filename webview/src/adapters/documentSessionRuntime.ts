@@ -9,7 +9,8 @@ import type { ApplyChangesMessage, DraftChangedMessage } from '../../../src/prot
 import type { InitMessage } from '../../../src/protocol/readyInit';
 import {
   createDocumentSessionActionAdapter,
-  type DocumentSessionActionAdapter
+  type DocumentSessionActionAdapter,
+  type DocumentSessionNotice
 } from './documentSessionActions';
 import { createDocumentSessionCoordinatorFromInit } from './documentSessionTransport';
 
@@ -32,7 +33,7 @@ export type DocumentSessionRuntimeDependencies = {
     source: DocumentPresentationSource
   ) => boolean | void | Promise<boolean | void>;
   readonly executeRemote: (action: RemoteDocumentSessionAction) => Promise<DocumentSessionInput>;
-  readonly showFailureNotice: (message: string) => void;
+  readonly showNotice: (notice: DocumentSessionNotice) => void;
 };
 
 /** Owns the one production Document Session coordinator and serializes its inputs. */
@@ -65,7 +66,6 @@ export function createDocumentSessionRuntime(
       coordinator = createDocumentSessionCoordinatorFromInit(message);
       actionAdapter = createDocumentSessionActionAdapter({
         ...dependencies,
-        uiLanguage: message.uiLanguage,
         handleInput: (input) => requireSession().coordinator.handle(input)
       });
       return operation;

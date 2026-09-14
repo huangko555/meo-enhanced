@@ -140,7 +140,6 @@ const candidate = {
     savedText = init.savedRevision?.text ?? '';
     transport = createDocumentSessionTransport(postMessage);
     actionAdapter = createDocumentSessionActionAdapter({
-      uiLanguage: 'en',
       postMessage,
       presentText: (text) => {
         requireRuntime().editor.setText(text);
@@ -148,7 +147,7 @@ const candidate = {
       },
       executeRemote: (action) => requireRuntime().transport.execute(action),
       handleInput: (input) => requireRuntime().coordinator.handle(input),
-      showFailureNotice: (message) => notices.push(message)
+      showNotice: (notice) => notices.push(notice)
     });
     const parent = document.querySelector<HTMLElement>('#editor');
     if (!parent) throw new Error('Missing editor host');

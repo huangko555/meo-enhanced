@@ -23,7 +23,7 @@ const adapter = createDocumentSessionWebviewAdapter({
   restoreReloadedView: ({ topLine, topLineOffset }) => {
     restored.push({ topLine, topLineOffset });
   },
-  showFailureNotice: (message) => { notices.push(message); },
+  showNotice: (notice) => { notices.push(notice); },
   reportUnexpectedError: (context, error) => { unexpected.push({ context, error }); }
 });
 
@@ -93,7 +93,9 @@ assert.equal(adapter.accept({
   message: 'Could not reload the document from disk: VS Code refused to revert'
 }), true);
 await adapter.whenIdle();
-assert.deepEqual(notices, ['Could not reload the document from disk: VS Code refused to revert']);
+assert.deepEqual(notices, ['reload-from-disk-failed']);
+assert.equal(unexpected.at(-1)?.context, 'document reload failure');
+assert.match(String(unexpected.at(-1)?.error), /VS Code refused to revert/);
 
 adapter.requestSave();
 for (let attempt = 0; attempt < 10 && posted.at(-1)?.type !== 'saveDocumentRevision'; attempt += 1) {
@@ -113,14 +115,14 @@ if (saveRequest?.type === 'saveDocumentRevision') {
 adapter.localDraftChanged('ignored after dispose');
 await adapter.whenIdle();
 assert.equal(posted.some(message => message.type === 'draftChanged' && message.text === 'ignored after dispose'), false);
-assert.deepEqual(unexpected, []);
+assert.equal(unexpected.length, 1, 'the raw reload failure should only be logged once');
 
 const earlyErrors: string[] = [];
 const earlyAdapter = createDocumentSessionWebviewAdapter({
   postMessage: () => undefined,
   presentText: () => undefined,
   restoreReloadedView: () => undefined,
-  showFailureNotice: () => undefined,
+  showNotice: () => undefined,
   reportUnexpectedError: (context) => { earlyErrors.push(context); }
 });
 earlyAdapter.localDraftChanged('too early');
@@ -146,7 +148,7 @@ const testAsyncReloadPresentation = async (
     postMessage: (message) => { asyncMessages.push(message); },
     presentText: () => presentation,
     restoreReloadedView: ({ topLine }) => { asyncRestores.push(topLine); },
-    showFailureNotice: () => undefined,
+    showNotice: () => undefined,
     reportUnexpectedError: (context, error) => {
       throw new Error(`${context}: ${String(error)}`);
     }

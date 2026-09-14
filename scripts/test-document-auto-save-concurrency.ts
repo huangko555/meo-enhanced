@@ -43,7 +43,7 @@ for (const timing of ['idle', 'snapshot', 'transport'] as const) {
       },
       presentText() { errors.push('Unexpected external presentation'); },
       restoreReloadedView() {},
-      showFailureNotice(message) { failures.push(message); },
+      showNotice(notice) { failures.push(notice); },
       reportUnexpectedError(_context, error) { errors.push(error); }
     });
     const typeNextEdit = () => {

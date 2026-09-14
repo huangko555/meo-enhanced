@@ -2,6 +2,10 @@ import type { DiffBaselineMode, OutlinePosition } from './editorCommands';
 
 export type HostEditorEvent =
   | { readonly type: 'focusEditor' }
+  | {
+      readonly type: 'externalFileStatusChanged';
+      readonly status: 'current' | 'modified-while-dirty' | 'deleted-while-dirty';
+    }
   | { readonly type: 'revealSelection'; readonly anchor: number; readonly head: number; readonly focus?: boolean; readonly preserveViewport?: boolean }
   | { readonly type: 'revealDocumentFragment'; readonly href: string }
   | { readonly type: 'outlinePositionChanged'; readonly position: OutlinePosition }
@@ -26,6 +30,11 @@ export function decodeHostEditorEvent(value: unknown): HostEditorEvent | null {
   switch (value.type) {
     case 'focusEditor':
       return { type: 'focusEditor' };
+    case 'externalFileStatusChanged':
+      return value.status === 'current'
+        || value.status === 'modified-while-dirty'
+        || value.status === 'deleted-while-dirty'
+        ? value as HostEditorEvent : null;
     case 'revealSelection':
       return isOffset(value.anchor) && isOffset(value.head)
         && (value.focus === undefined || typeof value.focus === 'boolean')

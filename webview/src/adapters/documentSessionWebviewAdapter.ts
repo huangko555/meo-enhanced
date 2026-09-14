@@ -4,6 +4,7 @@ import type { DocumentReloadedFromDiskMessage } from '../../../src/protocol/docu
 import type { InitMessage } from '../../../src/protocol/readyInit';
 import { createDocumentSessionRuntime } from './documentSessionRuntime';
 import { createDocumentSessionTransport } from './documentSessionTransport';
+import type { DocumentSessionNotice } from './documentSessionActions';
 
 export type DocumentSessionViewPosition = {
   readonly topLine: number;
@@ -27,7 +28,7 @@ export type DocumentSessionWebviewAdapterDependencies = {
     source: DocumentPresentationSource
   ) => boolean | void | Promise<boolean | void>;
   readonly restoreReloadedView: (message: DocumentReloadedFromDiskMessage) => void;
-  readonly showFailureNotice: (message: string) => void;
+  readonly showNotice: (notice: DocumentSessionNotice) => void;
   readonly reportUnexpectedError: (context: string, error: unknown) => void;
 };
 
@@ -43,7 +44,7 @@ export function createDocumentSessionWebviewAdapter(
     postMessage: dependencies.postMessage,
     presentText: dependencies.presentText,
     executeRemote: (action) => transport.execute(action),
-    showFailureNotice: dependencies.showFailureNotice
+    showNotice: dependencies.showNotice
   });
   let operation: Promise<void> = Promise.resolve();
   let started = false;
@@ -106,7 +107,10 @@ export function createDocumentSessionWebviewAdapter(
       return true;
     }
     if (message.type === 'documentReloadFromDiskFailed') {
-      enqueueSession('document reload failure', () => dependencies.showFailureNotice(message.message));
+      enqueueSession('document reload failure', () => {
+        dependencies.reportUnexpectedError('document reload failure', new Error(message.message));
+        dependencies.showNotice('reload-from-disk-failed');
+      });
       return true;
     }
     return false;

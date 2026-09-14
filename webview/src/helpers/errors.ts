@@ -41,22 +41,30 @@ export const logWebviewRenderError = (context: string, error: unknown, extra: Re
 };
 
 export interface FailureNoticeState {
-  message: string;
+  message: NoticeMessage;
   kind: string;
 }
 
+export type NoticeMessage = string | (() => string);
+
 export const createFailureNoticeManager = (notice: EditorNotice) => {
   let failureNotice: FailureNoticeState = { message: '', kind: 'error' };
+  let persistentNotice: FailureNoticeState = { message: '', kind: 'warning' };
+
+  const resolveMessage = (message: NoticeMessage): string => (
+    typeof message === 'function' ? message() : message
+  );
 
   const updateEditorNotice = () => {
-    if (failureNotice.message) {
-      notice.setEditorNotice(failureNotice.message, failureNotice.kind);
+    const activeNotice = failureNotice.message ? failureNotice : persistentNotice;
+    if (activeNotice.message) {
+      notice.setEditorNotice(resolveMessage(activeNotice.message), activeNotice.kind);
       return;
     }
     notice.clearEditorNotice();
   };
 
-  const setFailureNotice = (message: string, kind: 'error' | 'warning' = 'error'): void => {
+  const setFailureNotice = (message: NoticeMessage, kind: 'error' | 'warning' = 'error'): void => {
     failureNotice = { message, kind };
     updateEditorNotice();
   };
@@ -69,11 +77,33 @@ export const createFailureNoticeManager = (notice: EditorNotice) => {
     updateEditorNotice();
   };
 
+  const setPersistentNotice = (message: NoticeMessage, kind: 'warning' = 'warning'): void => {
+    persistentNotice = { message, kind };
+    updateEditorNotice();
+  };
+
+  const clearPersistentNotice = (): void => {
+    if (!persistentNotice.message) return;
+    persistentNotice = { message: '', kind: 'warning' };
+    updateEditorNotice();
+  };
+
+  const dismissCurrentNotice = (): void => {
+    if (failureNotice.message) {
+      clearFailureNotice();
+      return;
+    }
+    clearPersistentNotice();
+  };
+
   const hasFailureNotice = (): boolean => Boolean(failureNotice.message);
 
   return {
     setFailureNotice,
     clearFailureNotice,
+    setPersistentNotice,
+    clearPersistentNotice,
+    dismissCurrentNotice,
     hasFailureNotice,
     updateEditorNotice
   };

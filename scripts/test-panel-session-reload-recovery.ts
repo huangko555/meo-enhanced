@@ -135,7 +135,7 @@ const webview = createDocumentSessionWebviewAdapter({
   },
   presentText: () => presentation,
   restoreReloadedView: () => undefined,
-  showFailureNotice: () => undefined,
+  showNotice: () => undefined,
   reportUnexpectedError: (context, error) => {
     throw new Error(`${context}: ${String(error)}`);
   }
@@ -190,7 +190,7 @@ assert.equal(typeof immediateCloseFixture.getReceiveMessage(), 'function');
     },
     presentText: () => true,
     restoreReloadedView: () => undefined,
-    showFailureNotice: () => undefined,
+    showNotice: () => undefined,
     reportUnexpectedError: (context, error) => {
       throw new Error(`${context}: ${String(error)}`);
     }

@@ -24,7 +24,7 @@ const documentSession = createDocumentSessionWebviewAdapter({
     return true;
   },
   restoreReloadedView: () => undefined,
-  showFailureNotice: (message) => { throw new Error(message); },
+  showNotice: (notice) => { throw new Error(notice); },
   reportUnexpectedError: (context, error) => { throw new Error(`${context}: ${String(error)}`); }
 });
 

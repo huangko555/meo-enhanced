@@ -8,8 +8,11 @@ import type {
   ApplyChangesMessage,
   DraftChangedMessage
 } from '../../../src/protocol/documentSync';
-import type { UiLanguage } from '../../../src/foundation/uiLanguage';
-import { getUiStrings } from '../application/uiLanguage';
+
+export type DocumentSessionNotice =
+  | 'external-conflict'
+  | 'resync-failed'
+  | 'reload-from-disk-failed';
 
 type RemoteDocumentSessionAction = Extract<
   DocumentSessionAction,
@@ -30,8 +33,7 @@ export type DocumentSessionActionAdapterDependencies = {
   ) => boolean | void | Promise<boolean | void>;
   readonly executeRemote: (action: RemoteDocumentSessionAction) => Promise<DocumentSessionInput>;
   readonly handleInput: (input: DocumentSessionInput) => readonly DocumentSessionAction[];
-  readonly showFailureNotice: (message: string) => void;
-  readonly uiLanguage: UiLanguage;
+  readonly showNotice: (notice: DocumentSessionNotice) => void;
 };
 
 const MAX_REVISION_REQUEST_ATTEMPTS = 2;
@@ -43,7 +45,6 @@ const MAX_REVISION_REQUEST_ATTEMPTS = 2;
 export function createDocumentSessionActionAdapter(
   dependencies: DocumentSessionActionAdapterDependencies
 ): DocumentSessionActionAdapter {
-  const uiStrings = getUiStrings(dependencies.uiLanguage);
   return {
     async execute(actions) {
       const queue = Array.from(actions);
@@ -78,12 +79,12 @@ export function createDocumentSessionActionAdapter(
           continue;
         }
         if (action.type === 'showExternalConflict') {
-          dependencies.showFailureNotice(uiStrings.externalConflictNotice);
+          dependencies.showNotice('external-conflict');
           continue;
         }
         if (action.type === 'requestRevision'
           && revisionRequestAttempts >= MAX_REVISION_REQUEST_ATTEMPTS) {
-          dependencies.showFailureNotice(uiStrings.resyncFailureNotice);
+          dependencies.showNotice('resync-failed');
           continue;
         }
 
@@ -96,7 +97,7 @@ export function createDocumentSessionActionAdapter(
           if (revisionRequestAttempts < MAX_REVISION_REQUEST_ATTEMPTS) {
             queue.unshift(action);
           } else {
-            dependencies.showFailureNotice(uiStrings.resyncFailureNotice);
+            dependencies.showNotice('resync-failed');
           }
           continue;
         }

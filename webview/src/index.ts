@@ -949,6 +949,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   updateContentMaxWidthUI();
   updateRestoreReadingPositionUI();
   editorNotice.setUiLanguage(language);
+  failureNotice.updateEditorNotice();
   modeControl.element.setAttribute('aria-label', strings.markdownMode);
   modeControl.setLabels({ live: strings.live, source: strings.source, preview: strings.preview });
   presentSourcePreviewControls();
@@ -1606,7 +1607,7 @@ const INITIAL_EDITOR_MOUNT_FALLBACK_MS = 120;
 const LIVE_IMAGE_REVEAL_WAIT_MS = 120;
 
 const failureNotice = createFailureNoticeManager(editorNotice);
-handleEditorNoticeDismiss = failureNotice.clearFailureNotice;
+handleEditorNoticeDismiss = failureNotice.dismissCurrentNotice;
 
 const syncEditorFontSizeControls = (): void => {
   const custom = editorFontSizePreference.mode === 'custom';
@@ -2045,12 +2046,12 @@ const setEditorTextSafely = async (
       } catch (retryInLiveError) {
         logWebviewRenderError('setText.retryInLive', retryInLiveError, { context });
         if (!shouldAutoFallbackToSourceForLiveError(retryInLiveError)) {
-          failureNotice.setFailureNotice(activeUiStrings.transientUpdateFailure, 'warning');
+          failureNotice.setFailureNotice(() => activeUiStrings.transientUpdateFailure, 'warning');
           return false;
         }
       }
 
-      failureNotice.setFailureNotice(activeUiStrings.liveModeFailure, 'warning');
+      failureNotice.setFailureNotice(() => activeUiStrings.liveModeFailure, 'warning');
       await editorModeRuntime.dispatch({
         type: 'requestMode', mode: 'source', source: 'render-failure', basisManualIntentId
       });
@@ -2060,12 +2061,12 @@ const setEditorTextSafely = async (
         return true;
       } catch (retryError) {
         logWebviewRenderError('setText.retryInSource', retryError, { context });
-        failureNotice.setFailureNotice(activeUiStrings.editorUpdateFailure, 'error');
+        failureNotice.setFailureNotice(() => activeUiStrings.editorUpdateFailure, 'error');
         return false;
       }
     }
 
-    failureNotice.setFailureNotice(activeUiStrings.editorUpdateFailure, 'error');
+    failureNotice.setFailureNotice(() => activeUiStrings.editorUpdateFailure, 'error');
     return false;
   }
 };
@@ -2149,9 +2150,14 @@ const documentSessionAdapter = createDocumentSessionWebviewAdapter({
     void message;
     pendingReloadViewport = null;
   },
-  showFailureNotice: (message) => {
+  showNotice: (notice) => {
     pendingReloadPreviewViewport = null;
-    failureNotice.setFailureNotice(message, 'warning');
+    const resolveMessage = () => {
+      if (notice === 'external-conflict') return activeUiStrings.externalConflictNotice;
+      if (notice === 'resync-failed') return activeUiStrings.resyncFailureNotice;
+      return activeUiStrings.reloadDiskFailureNotice;
+    };
+    failureNotice.setFailureNotice(resolveMessage, 'warning');
   },
   reportUnexpectedError: (context, error) => {
     console.error(`[MEO webview] Document Session ${context}`, error);
@@ -2411,15 +2417,15 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
   postMode: (mode) => vscode.postMessage({ type: 'setMode', mode }),
   showNotice(notice) {
     if (notice === 'transient-live') {
-      failureNotice.setFailureNotice(activeUiStrings.transientModeFailure, 'warning');
+      failureNotice.setFailureNotice(() => activeUiStrings.transientModeFailure, 'warning');
     } else if (notice === 'live-fallback') {
-      failureNotice.setFailureNotice(activeUiStrings.liveModeFailure, 'warning');
+      failureNotice.setFailureNotice(() => activeUiStrings.liveModeFailure, 'warning');
     } else if (notice === 'mount-retry') {
-      failureNotice.setFailureNotice(activeUiStrings.transientLoadRetry, 'warning');
+      failureNotice.setFailureNotice(() => activeUiStrings.transientLoadRetry, 'warning');
     } else if (notice === 'mount-failure') {
-      failureNotice.setFailureNotice(activeUiStrings.transientLoadFailure, 'warning');
+      failureNotice.setFailureNotice(() => activeUiStrings.transientLoadFailure, 'warning');
     } else {
-      failureNotice.setFailureNotice(activeUiStrings.editorUpdateFailure, 'error');
+      failureNotice.setFailureNotice(() => activeUiStrings.editorUpdateFailure, 'error');
     }
     failureNotice.updateEditorNotice();
   },
@@ -2614,6 +2620,20 @@ window.addEventListener('message', (event) => {
     return;
   }
 
+  if (message.type === 'externalFileStatusChanged') {
+    if (message.status === 'current') {
+      failureNotice.clearPersistentNotice();
+    } else {
+      failureNotice.setPersistentNotice(
+        () => message.status === 'deleted-while-dirty'
+          ? activeUiStrings.externalFileDeletedNotice
+          : activeUiStrings.externalFileModifiedNotice,
+        'warning'
+      );
+    }
+    return;
+  }
+
   if (message.type === 'toggleMode') {
     void editorModeRuntime.dispatch({ type: 'toggleMode', source: 'host-command' });
     return;
@@ -2747,7 +2767,10 @@ window.addEventListener('paste', async (event) => {
   await handleImagePaste(event, editor, {
     lineNumber: lineNumberAtPaste,
     lineOffset: lineOffsetAtPaste,
-    onError: (message) => failureNotice.setFailureNotice(activeUiStrings.pasteImageFailure(message), 'warning')
+    onError: (message) => failureNotice.setFailureNotice(
+      () => activeUiStrings.pasteImageFailure(message),
+      'warning'
+    )
   });
 });
 

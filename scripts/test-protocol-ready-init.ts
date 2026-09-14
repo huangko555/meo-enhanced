@@ -722,6 +722,7 @@ assert.equal(decodeEditorCommand({ type: 'setPreviewFontFamily', fontFamily: 'x'
 assert.equal(decodeEditorCommand({ type: 'setPreviewFontFamily', previewFontFamily: 'MEO Synthetic Sans' }), null);
 for (const event of [
   { type: 'focusEditor' },
+  { type: 'externalFileStatusChanged', status: 'modified-while-dirty' },
   { type: 'revealSelection', anchor: 0, head: 4, preserveViewport: true },
   { type: 'revealDocumentFragment', href: '#intro' },
   { type: 'outlinePositionChanged', position: 'left' },
@@ -736,6 +737,7 @@ for (const event of [
   assert.notEqual(decodeHostEditorEvent(event), null, `Host editor event was rejected: ${event.type}`);
 }
 assert.equal(decodeHostEditorEvent({ type: 'revealSelection', anchor: -1, head: 0 }), null);
+assert.equal(decodeHostEditorEvent({ type: 'externalFileStatusChanged', status: 'modified' }), null);
 assert.equal(decodeHostEditorEvent({ type: 'lineNumbersChanged', enabled: true }), null);
 assert.equal(decodeHostEditorEvent({ type: 'longCodeBlockFoldingChanged', enabled: true }), null);
 assert.equal(decodeHostEditorEvent({ type: 'fixedBaselineChanged', pinned: true, active: 'yes' }), null);

@@ -127,6 +127,22 @@ assert.deepEqual(
   ['行内 Markdown 格式', '加粗', '行内代码', '下划线']
 );
 assert.equal(chinese.pasteImageFailure('格式错误'), '无法粘贴图片：格式错误');
+assert.deepEqual(
+  [
+    chinese.externalFileModifiedNotice,
+    chinese.externalFileDeletedNotice,
+    chinese.reloadDiskFailureNotice,
+    chinese.externalConflictNotice,
+    chinese.resyncFailureNotice
+  ],
+  [
+    '磁盘文件已被外部修改。未保存的编辑已保留，请在保存前查看变更。',
+    '磁盘文件已被外部删除。未保存的编辑已保留，请在保存前确认如何处理。',
+    '无法从磁盘重新加载最新版本，已保留本地编辑。',
+    '文档发生外部变化时，本地编辑尚未应用完成。当前编辑已保留。',
+    '无法重新同步文档，已保留本地编辑。'
+  ]
+);
 assert.equal(Object.isFrozen(english), true);
 assert.equal(Object.isFrozen(chinese), true);
 

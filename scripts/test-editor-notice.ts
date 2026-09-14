@@ -44,7 +44,25 @@ async function main() {
         text: banner.querySelector('.editor-notice-message')?.textContent ?? '',
         kind: banner.dataset.kind
       };
-      return { firstState, dismissed, dismissCount, secondState };
+      controller.clearEditorNotice();
+
+      let localizedMessage = '磁盘文件已修改';
+      const manager = (window as any).EditorNoticeHarness.createFailureNoticeManager(controller);
+      manager.setPersistentNotice(() => localizedMessage, 'warning');
+      const persistentText = banner.querySelector('.editor-notice-message')?.textContent ?? '';
+      manager.setFailureNotice('临时错误', 'error');
+      const failureText = banner.querySelector('.editor-notice-message')?.textContent ?? '';
+      manager.clearFailureNotice();
+      const restoredPersistentText = banner.querySelector('.editor-notice-message')?.textContent ?? '';
+      localizedMessage = 'The file changed on disk';
+      manager.updateEditorNotice();
+      const relocalizedText = banner.querySelector('.editor-notice-message')?.textContent ?? '';
+      manager.dismissCurrentNotice();
+      const persistentDismissed = banner.hidden;
+      return {
+        firstState, dismissed, dismissCount, secondState,
+        persistentText, failureText, restoredPersistentText, relocalizedText, persistentDismissed
+      };
     });
 
     if (!result.firstState.visible || result.firstState.text !== 'First warning' ||
@@ -54,6 +72,11 @@ async function main() {
     if (!result.dismissed || result.dismissCount !== 1) throw new Error('notice could not be dismissed');
     if (!result.secondState.visible || result.secondState.text !== 'Second warning' || result.secondState.kind !== 'error') {
       throw new Error(`notice did not reopen: ${JSON.stringify(result.secondState)}`);
+    }
+    if (result.persistentText !== '磁盘文件已修改' || result.failureText !== '临时错误' ||
+      result.restoredPersistentText !== '磁盘文件已修改' || result.relocalizedText !== 'The file changed on disk' ||
+      !result.persistentDismissed) {
+      throw new Error(`persistent or localized notice lifecycle was incorrect: ${JSON.stringify(result)}`);
     }
     console.log('editor notice checks passed');
   } finally {

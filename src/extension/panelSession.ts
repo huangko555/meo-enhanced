@@ -98,6 +98,7 @@ type FindOptions = {
 
 const GIT_BASELINE_STARTUP_DELAY_MS = 350;
 const GIT_BASELINE_REFRESH_DELAY_MS = 150;
+const normalizeDocumentText = (text: string): string => text.replace(/\r\n/g, '\n');
 type PanelDiagnostics = {
   read(): SerializedDiagnostic[];
 };
@@ -250,6 +251,17 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     }
   };
 
+  type ExternalFileStatus = Extract<HostEditorEvent, { type: 'externalFileStatusChanged' }>['status'];
+  let externalFileStatus: ExternalFileStatus = 'current';
+  let publishedExternalFileStatus: ExternalFileStatus = 'current';
+  const publishExternalFileStatus = (status: ExternalFileStatus, force = false): void => {
+    externalFileStatus = status;
+    if (!initDelivered || (!force && publishedExternalFileStatus === status)) return;
+    publishedExternalFileStatus = status;
+    const message: HostEditorEvent = { type: 'externalFileStatusChanged', status };
+    runBackground(postToWebview(message), 'externalFileStatusChanged');
+  };
+
   let notifySavedRevisionChanged = (): void => undefined;
   const savedRevisionLifecycle = createSavedRevisionLifecycle({
     file: savedRevisionFile,
@@ -264,6 +276,13 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       const changed = savedRevisionTracker.getCurrentEditBaseline()
         ? savedRevisionTracker.noteDiskRevision(result.text)
         : savedRevisionTracker.initialize(result.text);
+      const diskText = normalizeDocumentText(result.text);
+      const documentText = normalizeDocumentText(document.getText());
+      if (!document.isDirty || diskText === documentText) {
+        publishExternalFileStatus('current');
+      } else if (changed || recoveredFromUnavailable) {
+        publishExternalFileStatus('modified-while-dirty', true);
+      }
       if (changed || recoveredFromUnavailable) {
         notifySavedRevisionChanged();
       }
@@ -478,6 +497,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     const posted = await sendInit();
     if (posted) {
       initDelivered = true;
+      if (externalFileStatus !== 'current') {
+        publishExternalFileStatus(externalFileStatus, true);
+      }
       await viewNavigation.ready();
     }
   };
@@ -868,6 +890,10 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       return;
     }
 
+    if (!event.document.isDirty) {
+      publishExternalFileStatus('current');
+    }
+
     // Save/dirty-state transitions can emit document events without text edits.
     if (event.contentChanges.length === 0) {
       return;
@@ -882,6 +908,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     if (savedDocument.uri.toString() !== documentKey) {
       return;
     }
+    publishExternalFileStatus('current');
     runBackground(enqueue(async () => {
       await sendDocChanged();
     }), 'sendDocChanged.save');
@@ -902,6 +929,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     scheduleSavedRevisionRefresh();
   });
   const savedFileDeleteSubscription = savedFileWatcher?.onDidDelete(() => {
+    if (document.isDirty && externalFileStatus !== 'deleted-while-dirty') {
+      publishExternalFileStatus('deleted-while-dirty');
+    }
     runBackground(savedRevisionLifecycle.markUnavailable('error'), 'markSavedRevisionUnavailable');
   });
 

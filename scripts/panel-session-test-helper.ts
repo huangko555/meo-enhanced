@@ -45,6 +45,12 @@ type VscodeMockOverrides = {
   readonly onWillSaveTextDocument?: (listener: (event: never) => void) => PanelSessionTestDisposable;
   readonly onDidChangeTextDocument?: (listener: (event: never) => void) => PanelSessionTestDisposable;
   readonly onDidSaveTextDocument?: (listener: (document: never) => void) => PanelSessionTestDisposable;
+  readonly createFileSystemWatcher?: () => {
+    dispose(): void;
+    onDidChange(listener: (uri: never) => void): PanelSessionTestDisposable;
+    onDidCreate(listener: (uri: never) => void): PanelSessionTestDisposable;
+    onDidDelete(listener: (uri: never) => void): PanelSessionTestDisposable;
+  };
   readonly applyEdit?: (edit: never) => Promise<boolean>;
   readonly showWarningMessage?: (message: string) => Promise<unknown>;
 };
@@ -89,12 +95,12 @@ export const createPanelSessionVscodeMock = (
     onWillSaveTextDocument: overrides.onWillSaveTextDocument ?? (() => panelSessionDisposable()),
     onDidChangeTextDocument: overrides.onDidChangeTextDocument ?? (() => panelSessionDisposable()),
     onDidSaveTextDocument: overrides.onDidSaveTextDocument ?? (() => panelSessionDisposable()),
-    createFileSystemWatcher: () => ({
+    createFileSystemWatcher: overrides.createFileSystemWatcher ?? (() => ({
       ...panelSessionDisposable(),
       onDidChange: () => panelSessionDisposable(),
       onDidCreate: () => panelSessionDisposable(),
       onDidDelete: () => panelSessionDisposable()
-    }),
+    })),
     applyEdit: overrides.applyEdit ?? (async () => true),
     fs: {}
   }

@@ -12,7 +12,6 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   const messages: unknown[] = [];
   const presentations: Array<{ text: string; source: string }> = [];
   const adapter = createDocumentSessionActionAdapter({
-    uiLanguage: 'en',
     postMessage: (message) => messages.push(message),
     presentText: (text, source) => {
       presentations.push({ text, source });
@@ -22,7 +21,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
       throw new Error('Unexpected remote action');
     },
     handleInput: () => [],
-    showFailureNotice: () => undefined
+    showNotice: () => undefined
   });
 
   await adapter.execute([
@@ -56,7 +55,6 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   const presentations: string[] = [];
   const notices: string[] = [];
   const adapter = createDocumentSessionActionAdapter({
-    uiLanguage: 'en',
     postMessage: (message) => messages.push(message),
     presentText: (text) => {
       presentations.push(text);
@@ -66,7 +64,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
       throw new Error('Dirty Draft external conflict must not start a remote action');
     },
     handleInput: (input) => coordinator.handle(input),
-    showFailureNotice: (message) => notices.push(message)
+    showNotice: (notice) => notices.push(notice)
   });
 
   await adapter.execute(coordinator.handle({ type: 'localDraftChanged', text: 'one\nlocal' }));
@@ -87,7 +85,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   assert.equal(messages.length, messagesBeforeExternal, 'external conflict must not discard or resubmit the dirty Draft');
   assert.equal(coordinator.draftRecoveryReceiptVersion(), 1, 'external conflict must not advance the Draft Recovery Receipt');
   assert.deepEqual(notices, [
-    'The document changed externally while local edits were pending. Local edits were kept.'
+    'external-conflict'
   ]);
 }
 
@@ -97,7 +95,6 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   const notices: string[] = [];
   let revisionRequests = 0;
   const adapter = createDocumentSessionActionAdapter({
-    uiLanguage: 'en',
     postMessage: (message) => messages.push(message),
     presentText: () => true,
     executeRemote: async (action) => {
@@ -109,7 +106,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
       };
     },
     handleInput: (input) => coordinator.handle(input),
-    showFailureNotice: (message) => notices.push(message)
+    showNotice: (notice) => notices.push(notice)
   });
 
   await adapter.execute(coordinator.handle({
@@ -123,7 +120,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
 
   assert.equal(revisionRequests, 2);
   assert.deepEqual(messages, [{ type: 'draftChanged', text: 'newer draft', receiptVersion: 1 }]);
-  assert.deepEqual(notices, ['Could not resynchronize the document. Local edits were kept.']);
+  assert.deepEqual(notices, ['resync-failed']);
 }
 
 {
@@ -131,7 +128,6 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   const presentations: string[] = [];
   let revisionRequests = 0;
   const adapter = createDocumentSessionActionAdapter({
-    uiLanguage: 'en',
     postMessage: () => undefined,
     presentText: (text) => {
       presentations.push(text);
@@ -142,7 +138,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
       return { type: 'hostRevisionChanged', version: 2, text: 'late response' };
     },
     handleInput: (input) => coordinator.handle(input),
-    showFailureNotice: () => undefined
+    showNotice: () => undefined
   });
 
   await adapter.execute(coordinator.handle({
@@ -159,7 +155,6 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   const notices: string[] = [];
   let revisionRequests = 0;
   const adapter = createDocumentSessionActionAdapter({
-    uiLanguage: 'zh-CN',
     postMessage: () => undefined,
     presentText: () => true,
     executeRemote: async () => {
@@ -167,13 +162,13 @@ const createCoordinator = () => createDocumentSessionCoordinator({
       return { type: 'hostRevisionChanged', version: 3, text: `contradiction ${revisionRequests}` };
     },
     handleInput: (input) => coordinator.handle(input),
-    showFailureNotice: (message) => notices.push(message)
+    showNotice: (notice) => notices.push(notice)
   });
 
   await adapter.execute([{ type: 'requestRevision' }]);
 
   assert.equal(revisionRequests, 2);
-  assert.deepEqual(notices, ['无法重新同步文档，已保留本地编辑。']);
+  assert.deepEqual(notices, ['resync-failed']);
 }
 
 console.log('Document Session action adapter checks passed');
