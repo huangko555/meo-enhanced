@@ -193,6 +193,7 @@ body {
 }
 
 .document-scroll-top svg {
+  transform: translateY(1px);
   opacity: 0.8;
   pointer-events: none;
 }
@@ -1035,15 +1036,20 @@ body {
   padding-top: 5px;
 }
 
+.changes-review-header::after,
 .changes-review-section + .changes-review-section::before {
   content: '';
   position: absolute;
-  top: 0;
   right: 6px;
   left: 6px;
   height: 1px;
   background: var(--meo-divider-color, var(--vscode-panel-border));
+  opacity: 0.8;
   pointer-events: none;
+}
+
+.changes-review-section + .changes-review-section::before {
+  top: 0;
 }
 
 .changes-review-section-label {
@@ -1151,14 +1157,7 @@ body {
 }
 
 .changes-review-header::after {
-  content: '';
-  position: absolute;
-  right: 6px;
   bottom: 0;
-  left: 6px;
-  height: 1px;
-  background: var(--meo-divider-color, var(--vscode-panel-border));
-  pointer-events: none;
 }
 
 .changes-review-header .changes-review-count {

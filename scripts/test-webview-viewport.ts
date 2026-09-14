@@ -2779,7 +2779,7 @@ async function main() {
         !hiddenAtTop || !visibleAfterScroll || afterClick.scrollTop !== 0 || !afterClick.hidden ||
         afterClick.width !== afterClick.height || afterClick.borderRadius !== '50%' ||
         afterClick.background !== afterClick.documentBackground ||
-        Math.abs(visibleGeometry.centerXDelta) > 0.01 || Math.abs(visibleGeometry.centerYDelta) > 0.01 ||
+        Math.abs(visibleGeometry.centerXDelta) > 0.01 || Math.abs(visibleGeometry.centerYDelta - 1) > 0.01 ||
         visibleGeometry.iconLeftFraction > 0.01 || visibleGeometry.iconTopFraction > 0.01
       ) {
         throw new Error(`${mode} scroll-to-top button failed: ${JSON.stringify({

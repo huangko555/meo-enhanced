@@ -1,6 +1,7 @@
 import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { buildExportStyles, buildPreviewStyles } from '../src/export/exportStyles';
 import exportRuntime from '../src/export/runtime';
+import { getBuiltInVisuals } from '../src/shared/builtInVisualBaseline';
 
 const escapedMultiBacktick = `${String.fromCharCode(92)}${String.fromCharCode(96).repeat(2)}#0a0${String.fromCharCode(96)} #0b0`;
 const backtick = String.fromCharCode(96);
@@ -475,10 +476,11 @@ for (const [preview, exported, color] of [
 
 if (
   !darkPreviewStyles.includes('--meo-heading-1-size: 1.6em') ||
-  !darkPreviewStyles.includes('--meo-heading-1-weight: 400') ||
+  !darkPreviewStyles.includes('--meo-heading-1-weight: 600') ||
+  getBuiltInVisuals('dark').typography.headingFontWeights[0] !== '400' ||
   !darkPreviewStyles.includes('strong { color: inherit; font-weight: 700; }')
 ) {
-  throw new Error('Preview strong text must inherit its surrounding color and only change font weight');
+  throw new Error('Preview headings must be semibold without changing Live heading weight or strong-text emphasis');
 }
 if (!customSizeStyles.includes('--meo-font-size-body: 12px')
   || !customSizeStyles.includes('--meo-font-size-code: 12px')) {

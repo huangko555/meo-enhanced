@@ -154,6 +154,10 @@ async function main(): Promise<void> {
         headerContentCenterOffset: (contentTop + contentBottom) / 2
           - (panelRect.top + Number.parseFloat(getComputedStyle(panel).borderTopWidth)
             + headerRect.bottom - Number.parseFloat(headerDivider.height)) / 2,
+        headerDividerHeight: headerDivider.height,
+        headerDividerOpacity: headerDivider.opacity,
+        sectionDividerHeight: sectionDivider.height,
+        sectionDividerOpacity: sectionDivider.opacity,
         headerFont: getComputedStyle(header).fontSize,
         optionFont: getComputedStyle(panel.querySelector('.changes-review-option')!).fontSize
       };
@@ -178,6 +182,8 @@ async function main(): Promise<void> {
       Math.abs(changesMenuGeometry.sectionDividerLeft - expectedLeft) > 0.5 ||
       Math.abs(changesMenuGeometry.sectionDividerRight - expectedRight) > 0.5 ||
       Math.abs(changesMenuGeometry.headerContentCenterOffset) > 0.25 ||
+      changesMenuGeometry.headerDividerHeight !== changesMenuGeometry.sectionDividerHeight ||
+      changesMenuGeometry.headerDividerOpacity !== changesMenuGeometry.sectionDividerOpacity ||
       changesMenuGeometry.headerFont !== changesMenuGeometry.optionFont
     ) {
       throw new Error(`Changes menu alignment did not match Settings: ${JSON.stringify({

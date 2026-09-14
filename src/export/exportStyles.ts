@@ -91,7 +91,7 @@ function buildReadingStyles(
   const lineHeight = Math.max(1.7, clampLineHeight(environment.liveLineHeight ?? fonts.liveLineHeight));
   const sourceLineHeight = clampLineHeight(environment.sourceLineHeight ?? fonts.sourceLineHeight);
   const headingFontSizes = fonts.headingFontSizes.map((fontSize) => `${fontSize}em`);
-  const headingFontWeights = fonts.headingFontWeights.map((fontWeight) => sanitizeFontWeight(fontWeight, '400'));
+  const headingFontWeights = headingFontSizes.map(() => '600');
   const headingSizeVarsCss = headingFontSizes
     .map((fontSize, index) => `  --meo-heading-${index + 1}-size: ${fontSize};`)
     .join('\n');
