@@ -180,12 +180,19 @@ type MarkerReplacementContext = {
 
 type EditableEditorMode = 'source' | 'live';
 
+type SourcePositionChange = {
+  readonly line: number;
+  readonly active: boolean;
+  readonly revealIfOutside: boolean;
+};
+
 type CreateEditorOptions = {
   parent: HTMLElement;
   text: string;
   onApplyChanges: (text: string) => void;
   onOpenLink?: (href: string) => void;
   onSelectionChange?: (state: SelectionMenuState & { from?: number; to?: number }) => void;
+  onSourcePositionChange?: (change: SourcePositionChange) => void;
   onGitDiffSummaryChange?: (summary: ChangesReviewDiffSummary) => void;
   onViewportChange?: () => void;
   initialMode?: EditableEditorMode;
@@ -332,6 +339,7 @@ export function createEditor({
   onApplyChanges,
   onOpenLink,
   onSelectionChange,
+  onSourcePositionChange,
   onGitDiffSummaryChange,
   onViewportChange,
   initialMode = 'source',
@@ -400,6 +408,7 @@ export function createEditor({
   let suppressSelectionMenuForNativeHtml = false;
   let onBlockActionPointerMove: ((event: PointerEvent) => void) | null = null;
   let onBlockActionPointerLeave: (() => void) | null = null;
+  let onSourcePositionPointerDown: ((event: PointerEvent) => void) | null = null;
   let editorHistoryRuntime: EditorHistoryRuntime | null = null;
   let historyScrollGuard: EditorHistoryViewport | null = null;
   let pendingTableHistoryFocus: { replayId: number; semanticTarget: string; stableChecks: number } | null = null;
@@ -427,6 +436,14 @@ export function createEditor({
   const tablePositionDerivedConsumer = {};
   const bootstrapDerivedConsumer = {};
   let editorDestroyed = false;
+  const emitSourcePositionChange = (active: boolean, revealIfOutside = false): void => {
+    if (!view || currentMode !== 'source') return;
+    onSourcePositionChange?.({
+      line: view.state.doc.lineAt(view.state.selection.main.head).number,
+      active,
+      revealIfOutside
+    });
+  };
   const startImeComposition = () => {
     imeCompositionBaseText ??= view.state.doc.toString();
     imeCompositionActive = true;
@@ -2003,6 +2020,11 @@ export function createEditor({
             imeCompositionActive = false;
             scheduleImeCompositionFlush();
           }
+          emitSourcePositionChange(false);
+          return false;
+        },
+        focus() {
+          emitSourcePositionChange(true);
           return false;
         },
         compositionstart() {
@@ -2264,6 +2286,9 @@ export function createEditor({
           suppressSelectionMenuForNativeHtml = false;
           syncSelectionClass();
           emitSelectionChange();
+          emitSourcePositionChange(update.view.hasFocus);
+        } else if (update.docChanged) {
+          emitSourcePositionChange(update.view.hasFocus);
         } else if (update.viewportChanged) {
           emitSelectionChange();
         }
@@ -2313,6 +2338,20 @@ export function createEditor({
   onBlockActionPointerLeave = () => setHoveredBlockActionToolbar(null);
   view.dom.addEventListener('pointermove', onBlockActionPointerMove);
   view.dom.addEventListener('pointerleave', onBlockActionPointerLeave);
+  onSourcePositionPointerDown = (event) => {
+    if (
+      event.button !== 0 || currentMode !== 'source' ||
+      !(event.target instanceof Node) || !view.contentDOM.contains(event.target)
+    ) return;
+    const position = view.posAtCoords({ x: event.clientX, y: event.clientY });
+    if (position === null) return;
+    onSourcePositionChange?.({
+      line: view.state.doc.lineAt(position).number,
+      active: true,
+      revealIfOutside: true
+    });
+  };
+  view.dom.addEventListener('pointerdown', onSourcePositionPointerDown);
   // CodeMirror filters events owned by embedded editors. Their projected
   // changes still belong to this document and must share its IME save boundary.
   const onNestedComposition = (event: Event) => {
@@ -2778,6 +2817,7 @@ export function createEditor({
     view.dispatch({ effects: setDiagnosticsEffect.of(currentDiagnostics) });
   }
   emitSelectionChange();
+  emitSourcePositionChange(view.hasFocus);
 
   return {
     view,
@@ -2941,6 +2981,9 @@ export function createEditor({
     markPreviewViewportInteraction(): void {
       viewportController.markPreviewInteraction();
     },
+    holdLinkedPreviewAttention(): void {
+      viewportController.holdLinkedPreviewAttention();
+    },
     navigateLinkedViewportToTop(owner: ViewportAnchorOwner): boolean {
       return viewportController.navigateLinkedToTop(owner);
     },
@@ -3014,6 +3057,10 @@ export function createEditor({
       if (onBlockActionPointerLeave) {
         view.dom.removeEventListener('pointerleave', onBlockActionPointerLeave);
         onBlockActionPointerLeave = null;
+      }
+      if (onSourcePositionPointerDown) {
+        view.dom.removeEventListener('pointerdown', onSourcePositionPointerDown);
+        onSourcePositionPointerDown = null;
       }
       if (blockActionToolbarReconcileFrame !== null) {
         window.cancelAnimationFrame(blockActionToolbarReconcileFrame);

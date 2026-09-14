@@ -207,6 +207,7 @@ export type UiStrings = Readonly<{
   table: string;
   line: string;
   goToLine: string;
+  editInSource: string;
   save: string;
   saveDocument: string;
   reloadDiskVersion: string;
@@ -355,7 +356,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     showOutlineLeft: 'Show Outline on Left', showOutlineRight: 'Show Outline on Right',
     codeBlock: 'Code Block', quote: 'Quote', horizontalRule: 'Horizontal Rule',
     link: 'Link', wikiLink: 'Wiki Link', image: 'Image', table: 'Table', line: 'Lines',
-    goToLine: 'Go to line', save: 'Save (Ctrl+S)', saveDocument: 'Save document',
+    goToLine: 'Go to line', editInSource: 'Edit in Source', save: 'Save (Ctrl+S)', saveDocument: 'Save document',
     reloadDiskVersion: 'Reload from disk and discard unsaved changes', reloadDiskVersionDoubleClick: 'Click again to discard unsaved changes and reload from disk',
     constrainContentWidth: 'Constrain Content Width', constrainWidth: 'Constrain Width',
     disableConstrainedWidth: 'Disable Constrained Width',
@@ -508,7 +509,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     numberedList: '有序列表', task: '任务列表', showOutlineLeft: '在左侧显示目录',
     showOutlineRight: '在右侧显示目录', codeBlock: '代码块', quote: '引用',
     horizontalRule: '分隔线', link: '链接', wikiLink: 'Wiki 链接', image: '图片', table: '表格',
-    line: '行号', goToLine: '跳转到行', save: '保存 (Ctrl+S)', saveDocument: '保存文档',
+    line: '行号', goToLine: '跳转到行', editInSource: '在源码中编辑', save: '保存 (Ctrl+S)', saveDocument: '保存文档',
     reloadDiskVersion: '从磁盘重新加载，放弃未保存的更改', reloadDiskVersionDoubleClick: '再次点击将放弃未保存的更改，并从磁盘重新加载',
     constrainContentWidth: '限制内容宽度', constrainWidth: '限制宽度',
     disableConstrainedWidth: '取消内容宽度限制',

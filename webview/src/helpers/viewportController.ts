@@ -370,6 +370,7 @@ export class ViewportController {
   private linkedViewportMapDirty = true;
   private linkedViewportMapRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   private linkedInteractionUntil = Number.NEGATIVE_INFINITY;
+  private linkedPreviewAttentionHeld = false;
   private readonly getMode: () => 'live' | 'source';
   private readonly previewSurface: PreviewViewportSurface | null;
   private readonly anchorTokens = new WeakMap<ViewportAnchorToken, ViewportAnchorTokenRecord>();
@@ -558,6 +559,7 @@ export class ViewportController {
   }
 
   navigateBy(delta: ViewportScrollDelta): void {
+    this.releaseLinkedPreviewAttention();
     this.markInteraction();
     const current = this.readScrollPosition();
     const target = this.resolveScrollTarget({
@@ -614,6 +616,7 @@ export class ViewportController {
   ): void {
     if (this.destroyed || this.linkedPreviewEnabled === enabled) return;
     this.linkedPreviewEnabled = enabled;
+    if (!enabled) this.linkedPreviewAttentionHeld = false;
     if (enabled) {
       this.linkedViewportDriver = activationOwner === 'last-interaction'
         ? this.lastViewportInteractionOwner
@@ -634,7 +637,14 @@ export class ViewportController {
   }
 
   markPreviewInteraction(): void {
+    this.releaseLinkedPreviewAttention();
     this.markInteraction('preview');
+  }
+
+  holdLinkedPreviewAttention(): void {
+    if (this.destroyed || !this.linkedPreviewEnabled) return;
+    this.linkedPreviewAttentionHeld = true;
+    this.linkedProjectionGeneration += 1;
   }
 
   /** Treats back-to-top as one explicit navigation across the linked surfaces. */
@@ -755,6 +765,7 @@ export class ViewportController {
       this.destroyed || !this.linkedPreviewEnabled || !this.previewSurface ||
       this.linkedViewportDriver !== owner
     ) return;
+    if (owner === 'editor' && this.linkedPreviewAttentionHeld) return;
     const generation = this.linkedProjectionGeneration;
     if (
       this.destroyed || !this.linkedPreviewEnabled || !this.previewSurface ||
@@ -799,6 +810,14 @@ export class ViewportController {
     this.linkedViewportDriver = owner;
     this.linkedProjectionGeneration += 1;
     this.linkedInteractionUntil = this.readClock() + WHEEL_GESTURE_IDLE_MS;
+  }
+
+  private releaseLinkedPreviewAttention(): void {
+    if (!this.linkedPreviewAttentionHeld) return;
+    this.linkedPreviewAttentionHeld = false;
+    this.linkedProjectionGeneration += 1;
+    this.linkedViewportMapDirty = true;
+    this.rebuildLinkedViewportMap(true);
   }
 
   private readClock(): number {
@@ -1592,6 +1611,7 @@ export class ViewportController {
   }
 
   private handleWheel(event: WheelEvent): void {
+    this.releaseLinkedPreviewAttention();
     if (this.getMode() !== 'live' || event.ctrlKey || (!event.deltaX && !event.deltaY)) {
       this.markInteraction();
       return;
@@ -1602,6 +1622,9 @@ export class ViewportController {
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
+    if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) {
+      this.releaseLinkedPreviewAttention();
+    }
     const isModifierKey = event.key === 'Control' || event.key === 'Meta';
     const isHistoryShortcut = (
       (event.ctrlKey || event.metaKey) &&
@@ -1627,6 +1650,7 @@ export class ViewportController {
   }
 
   private handlePotentialLayoutInteraction(event: PointerEvent): void {
+    this.releaseLinkedPreviewAttention();
     this.markInteraction();
     if (event.button === 0 && event.target === this.view.scrollDOM) {
       this.scrollbarDragActive = true;
@@ -1690,6 +1714,7 @@ export class ViewportController {
   }
 
   private handleTouchStart(event: TouchEvent): void {
+    this.releaseLinkedPreviewAttention();
     const touch = event.touches[0];
     if (this.getMode() !== 'live' || !touch) {
       this.markInteraction();

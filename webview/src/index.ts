@@ -1370,6 +1370,12 @@ const previewController = createPreviewController({
     readingPositionLifecycle?.userInteracted();
     return true;
   },
+  onNavigateToSource: (line) => {
+    if (!isSidePreviewVisible() || !editor) return;
+    editor.holdLinkedPreviewAttention?.();
+    editor.scrollToLine(line, 'center');
+    readingPositionLifecycle?.userInteracted();
+  },
   onPaintReady: () => {
     previewPaintReady = true;
     editorHost.removeAttribute('data-preview-cover');
@@ -1387,6 +1393,8 @@ const previewController = createPreviewController({
   onViewportInteraction: () => {
     previewViewportInteractionGeneration += 1;
     editor?.markPreviewViewportInteraction?.();
+    sourcePreviewPosition = { ...sourcePreviewPosition, active: false };
+    presentSourcePreviewPosition();
     readingPositionLifecycle?.userInteracted();
   },
   onViewportChange: () => {
@@ -1466,6 +1474,7 @@ let sourcePreviewEnabled = false;
 // This preference belongs to one open document session. Keep it out of
 // WebviewUiState so reopening the document starts from synchronized scrolling.
 let sourcePreviewScrollSyncEnabled = true;
+let sourcePreviewPosition = { line: 1, active: false };
 let splitModeTransitionViewport: EditorModeViewportToken | null = null;
 let pendingEditorViewportAfterPreviewExit: EditorModeViewportToken | null = null;
 let deferEditorViewportUntilPreviewExit = false;
@@ -1489,6 +1498,13 @@ const isSidePreviewVisible = (): boolean => (
 );
 const isPreviewSurfaceVisible = (): boolean => (
   getActiveEditorMode() === 'preview' || isSidePreviewVisible()
+);
+const presentSourcePreviewPosition = (revealIfOutside = false, deferLayout = false): boolean => (
+  previewController.setSourcePositionMarker({
+    visible: isSidePreviewVisible(),
+    line: sourcePreviewPosition.line,
+    active: sourcePreviewPosition.active
+  }, { revealIfOutside, deferLayout }) === true
 );
 function presentSourcePreviewControls(): void {
   const split = isSidePreviewVisible();
@@ -1545,6 +1561,11 @@ const finishSourcePreviewReveal = (): void => {
     activateSourcePreviewLinkage();
     previewController.host.inert = false;
     previewController.host.style.removeProperty('visibility');
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      if (reveal.generation === sourcePreviewRevealGeneration && isSidePreviewVisible()) {
+        presentSourcePreviewPosition();
+      }
+    }));
   });
 };
 function markSourcePreviewSurfaceReady(): void {
@@ -1574,6 +1595,7 @@ const presentPreviewSurface = (
     previewController.host.style.visibility = 'hidden';
     editor?.setLinkedPreviewEnabled?.(false);
     previewAdapter.setActive({ active: true, text: getCurrentEditorText() });
+    presentSourcePreviewPosition(false, true);
     previewController.host.inert = true;
     return { split, visible };
   }
@@ -1585,6 +1607,7 @@ const presentPreviewSurface = (
     );
   }
   else editor?.setLinkedPreviewEnabled?.(false);
+  presentSourcePreviewPosition(false, true);
   return { split, visible };
 };
 const getActiveEditableMode = (): 'live' | 'source' => {
@@ -2214,6 +2237,15 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     onApplyChanges: handleLocalEditorChange,
     onOpenLink: (href: string) => vscode.postMessage({ type: 'openLink', href }),
     onSelectionChange: (state: any) => selectionMenuController.update(state),
+    onSourcePositionChange: (change) => {
+      sourcePreviewPosition = { line: change.line, active: change.active };
+      const canReveal = change.revealIfOutside
+        && isSidePreviewVisible()
+        && sourcePreviewScrollSyncEnabled;
+      if (presentSourcePreviewPosition(canReveal)) {
+        editor?.holdLinkedPreviewAttention?.();
+      }
+    },
     mermaidDiagramPresentationFactory,
     uiLanguage: activeUiLanguage,
     sourceLineNumbers: pendingSourceLineNumbers,

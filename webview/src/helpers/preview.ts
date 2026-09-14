@@ -1,4 +1,5 @@
 import morphdom from 'morphdom';
+import { createElement as createIconElement, PenLine, TextCursor } from 'lucide';
 import { getExportStyleEnvironment } from './export';
 import { createPreviewMermaidRenderer } from './previewMermaid';
 import { logWebviewRenderError } from './errors';
@@ -36,6 +37,7 @@ type PreviewControllerOptions = {
   onPaintReady?: () => void;
   onFindRequested?: () => void;
   onNavigateToTop?: () => boolean;
+  onNavigateToSource?: (line: number) => void;
   onViewportInteraction?: () => void;
   onViewportChange?: () => void;
   onGeometryChanged?: () => void;
@@ -63,6 +65,12 @@ type PreviewViewportRestore = PreviewViewportPosition & {
 
 type PreviewViewportProjectionSlot = {
   restore: PreviewViewportRestore | null;
+};
+
+type PreviewSourcePositionMarkerState = {
+  readonly visible: boolean;
+  readonly line: number;
+  readonly active: boolean;
 };
 
 const previewMutableStateAttributes = new Set([
@@ -454,6 +462,129 @@ const previewFontFamilies = [
   'Georgia'
 ] as const;
 
+const previewSourcePositionMarkerStyles = `
+.meo-preview-source-position-marker {
+  position: absolute;
+  z-index: 20;
+  width: 20px;
+  min-height: 1px;
+  color: light-dark(rgb(86 88 91), rgb(188 191 195));
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+.meo-preview-source-position-marker[hidden] {
+  display: none;
+}
+
+.meo-preview-source-position-rail {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 3px;
+  background: currentColor;
+  box-shadow: -1px 0 color-mix(in srgb, var(--meo-bg) 72%, transparent);
+}
+
+.meo-preview-source-position-cursor {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  opacity: 0;
+  transform: translateY(-50%);
+  color: var(--meo-link);
+}
+
+.meo-preview-source-position-cursor svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.8;
+}
+
+.meo-preview-source-position-marker.is-active {
+  opacity: 0.9;
+}
+
+.meo-preview-source-position-marker.is-active .meo-preview-source-position-cursor {
+  opacity: 1;
+}
+
+.meo-preview-source-position-marker.is-navigation-visible .meo-preview-source-position-cursor {
+  opacity: 0;
+}
+
+.meo-preview-source-navigation {
+  position: absolute;
+  z-index: 21;
+  display: block;
+  width: 28px;
+  min-height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--meo-link);
+  background: transparent;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.meo-preview-source-navigation[hidden] {
+  display: none;
+}
+
+.meo-preview-source-navigation.is-visible {
+  opacity: 0.82;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.meo-preview-source-navigation-icon {
+  position: absolute;
+  top: var(--meo-preview-source-navigation-icon-top, 2px);
+  left: 2px;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+}
+
+.meo-preview-source-navigation-icon svg {
+  display: block;
+  width: 17px;
+  height: 17px;
+  stroke-width: 1.8;
+}
+
+.meo-preview-source-navigation:is(:hover, :focus-visible) {
+  opacity: 1;
+  outline: none;
+}
+
+.meo-preview-source-navigation:focus-visible .meo-preview-source-navigation-icon {
+  outline: 1px solid currentColor;
+  outline-offset: 2px;
+}
+
+@media (forced-colors: active) {
+  .meo-preview-source-position-marker {
+    color: CanvasText;
+    forced-color-adjust: none;
+  }
+
+  .meo-preview-source-position-cursor,
+  .meo-preview-source-navigation {
+    color: LinkText;
+    forced-color-adjust: none;
+  }
+}
+`;
+
 const previewLatexMathViewportStyles = `
 .meo-export-math-display.meo-export-math-fenced-display {
   padding-block: 1em;
@@ -606,6 +737,7 @@ export function createPreviewController({
   onPaintReady,
   onFindRequested,
   onNavigateToTop,
+  onNavigateToSource,
   onViewportInteraction,
   onViewportChange,
   onGeometryChanged,
@@ -687,6 +819,10 @@ export function createPreviewController({
     fontFamilySelectControl.setLabel(uiStrings.previewFontFamily);
     defaultFontOption.textContent = uiStrings.previewFontPlaceholder;
     fontFamilySelectControl.refreshOptions();
+    if (sourceNavigation) {
+      sourceNavigation.title = uiStrings.editInSource;
+      sourceNavigation.setAttribute('aria-label', uiStrings.editInSource);
+    }
     scrollToTopController.setUiLanguage(language);
   };
 
@@ -726,6 +862,18 @@ export function createPreviewController({
   let sourceMapDirty = true;
   let sourceMapResizeObserver: ResizeObserver | null = null;
   let sourceMapMeasureFrame: number | null = null;
+  let sourcePositionMarker: HTMLElement | null = null;
+  let sourcePositionMarkerDocument: Document | null = null;
+  let sourceNavigation: HTMLButtonElement | null = null;
+  let sourceNavigationDocument: Document | null = null;
+  let sourceNavigationLine: number | null = null;
+  let pendingSourceNavigationLine: number | null = null;
+  let sourceNavigationTimer: number | null = null;
+  let sourcePositionMarkerState: PreviewSourcePositionMarkerState = {
+    visible: false,
+    line: 1,
+    active: false
+  };
   let latestPayload: PreviewRenderValue | null = null;
   const previewRenderTransport = createPreviewRenderTransport((message) => vscode.postMessage(message));
   const previewMermaidRenderer = createPreviewMermaidRenderer(
@@ -1095,6 +1243,7 @@ export function createPreviewController({
     const reusableDocument = activeFrameDocument === frame.contentDocument ? activeFrameDocument : null;
     const reusableMain = reusableDocument?.querySelector<HTMLElement>('main.meo-export-doc');
     const previousRenderedText = frameRenderedText;
+    hideSourceNavigation();
     frameEvents?.abort();
     frameEvents = null;
     if (!reusableDocument) {
@@ -1143,6 +1292,8 @@ export function createPreviewController({
             sourceMapMeasureFrame = null;
             if (!disposed && activeFrameDocument === frameDocument) {
               getSourceMap();
+              refreshSourcePositionMarker();
+              refreshSourceNavigation();
               onGeometryChanged?.();
             }
           });
@@ -1199,6 +1350,7 @@ export function createPreviewController({
         }));
       }, { capture: true, signal });
       bindPreviewLinks(frameDocument, vscode, signal);
+      bindSourceNavigation(frameDocument, mappedRoot, signal);
       bindPreviewWheelFallback(frameDocument, signal);
       bindPreviewFindShortcut(frameDocument, onFindRequested, signal);
       refreshSearchMatches();
@@ -1220,6 +1372,7 @@ export function createPreviewController({
       };
       const finishRender = () => {
         keepPosition();
+        refreshSourcePositionMarker();
         frame.style.removeProperty('visibility');
         scrollToTopController.sync();
         onRendered?.({ skipLinkedViewportProjection: preserveViewport });
@@ -1290,7 +1443,7 @@ export function createPreviewController({
     previewTableLayout?.dispose();
     previewTableLayout = null;
     frame.onload = () => initializeFrame();
-    frame.srcdoc = `<!DOCTYPE html><html lang="${uiLanguage}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewLatexMathViewportStyles}${previewPropertiesStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${payload.html}</main></div></body></html>`;
+    frame.srcdoc = `<!DOCTYPE html><html lang="${uiLanguage}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewLatexMathViewportStyles}${previewPropertiesStyles}${previewSourcePositionMarkerStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${payload.html}</main></div></body></html>`;
   };
 
   const applyAppearanceToFrame = () => {
@@ -1619,6 +1772,269 @@ export function createPreviewController({
     if (before && line <= before.end) return { exact: before };
     return { before, after };
   };
+  const getPreviewContentLeft = (frameDocument: Document, scrollElement: Element): number | null => {
+    const readingRoot = frameDocument.querySelector<HTMLElement>('main.meo-export-doc');
+    if (!readingRoot) return null;
+    const rootRect = readingRoot.getBoundingClientRect();
+    const rootStyle = frameDocument.defaultView?.getComputedStyle(readingRoot);
+    const rootPaddingLeft = Number.parseFloat(rootStyle?.paddingLeft ?? '');
+    return rootRect.left + scrollElement.scrollLeft
+      + (Number.isFinite(rootPaddingLeft) ? rootPaddingLeft : 0);
+  };
+  const getSourcePositionMarker = (frameDocument: Document): HTMLElement => {
+    if (sourcePositionMarkerDocument === frameDocument && sourcePositionMarker?.isConnected) {
+      return sourcePositionMarker;
+    }
+    const marker = frameDocument.createElement('div');
+    marker.className = 'meo-preview-source-position-marker';
+    marker.hidden = true;
+    marker.setAttribute('aria-hidden', 'true');
+    const cursor = frameDocument.createElement('span');
+    cursor.className = 'meo-preview-source-position-cursor';
+    cursor.appendChild(frameDocument.importNode(createIconElement(TextCursor, {
+      width: 16,
+      height: 16,
+      class: 'lucide lucide-text-cursor',
+      'aria-hidden': 'true'
+    }), true));
+    const rail = frameDocument.createElement('span');
+    rail.className = 'meo-preview-source-position-rail';
+    marker.append(cursor, rail);
+    frameDocument.body.appendChild(marker);
+    sourcePositionMarker = marker;
+    sourcePositionMarkerDocument = frameDocument;
+    return marker;
+  };
+  const projectSourcePositionMarker = (line: number): {
+    readonly top: number;
+    readonly bottom: number;
+    readonly left: number;
+    readonly lineHeight: number;
+    readonly kind: 'line' | 'block';
+  } | null => {
+    const frameDocument = getFrameDocument();
+    const scrollElement = frameDocument?.scrollingElement;
+    if (!frameDocument || !scrollElement) return null;
+    const source = findSourceProjection(line);
+    const entry = source?.exact;
+    if (!entry) return null;
+    const contentLeft = getPreviewContentLeft(frameDocument, scrollElement);
+    if (contentLeft === null) return null;
+    const computedLineHeight = Number.parseFloat(
+      frameDocument.defaultView?.getComputedStyle(entry.element).lineHeight ?? ''
+    );
+    const lineHeight = Number.isFinite(computedLineHeight)
+      ? computedLineHeight
+      : Math.max(1, entry.bottom - entry.top);
+    return {
+      top: entry.top,
+      bottom: Math.max(entry.top + 1, entry.bottom),
+      left: contentLeft,
+      lineHeight,
+      kind: entry.start === entry.end ? 'line' : 'block'
+    };
+  };
+  const clearSourceNavigationTimer = (): void => {
+    if (sourceNavigationTimer !== null) window.clearTimeout(sourceNavigationTimer);
+    sourceNavigationTimer = null;
+  };
+  const hideSourceNavigation = (): void => {
+    clearSourceNavigationTimer();
+    pendingSourceNavigationLine = null;
+    sourceNavigationLine = null;
+    sourcePositionMarker?.classList.remove('is-navigation-visible');
+    sourceNavigation?.classList.remove('is-visible');
+    if (sourceNavigation) sourceNavigation.hidden = true;
+  };
+  const getSourceNavigation = (frameDocument: Document): HTMLButtonElement => {
+    if (sourceNavigationDocument === frameDocument && sourceNavigation?.isConnected) {
+      return sourceNavigation;
+    }
+    const navigation = frameDocument.createElement('button');
+    navigation.type = 'button';
+    navigation.className = 'meo-preview-source-navigation';
+    navigation.hidden = true;
+    navigation.tabIndex = -1;
+    navigation.title = uiStrings.editInSource;
+    navigation.setAttribute('aria-label', uiStrings.editInSource);
+    const icon = frameDocument.createElement('span');
+    icon.className = 'meo-preview-source-navigation-icon';
+    icon.appendChild(frameDocument.importNode(createIconElement(PenLine, {
+      width: 17,
+      height: 17,
+      class: 'lucide lucide-pen-line',
+      'aria-hidden': 'true'
+    }), true));
+    navigation.appendChild(icon);
+    navigation.addEventListener('click', (event) => {
+      const line = sourceNavigationLine;
+      if (line === null || !sourcePositionMarkerState.visible) return;
+      event.preventDefault();
+      event.stopPropagation();
+      hideSourceNavigation();
+      onNavigateToSource?.(line);
+    });
+    frameDocument.body.appendChild(navigation);
+    sourceNavigation = navigation;
+    sourceNavigationDocument = frameDocument;
+    return navigation;
+  };
+  const showSourceNavigation = (line: number): void => {
+    const frameDocument = getFrameDocument();
+    const scrollElement = frameDocument?.scrollingElement;
+    if (!frameDocument || !scrollElement || !sourcePositionMarkerState.visible || !onNavigateToSource) {
+      hideSourceNavigation();
+      return;
+    }
+    const projection = projectSourcePositionMarker(line);
+    if (!projection) {
+      hideSourceNavigation();
+      return;
+    }
+    const navigation = getSourceNavigation(frameDocument);
+    const height = Math.max(1, projection.bottom - projection.top);
+    const leadingHeight = Math.min(height, Math.max(18, projection.lineHeight));
+    navigation.dataset.meoSourceNavigationLine = String(line);
+    navigation.style.left = `${Math.max(0, projection.left - 28)}px`;
+    navigation.style.top = `${projection.top}px`;
+    navigation.style.height = `${height}px`;
+    navigation.style.setProperty(
+      '--meo-preview-source-navigation-icon-top',
+      `${Math.max(0, (leadingHeight - 18) / 2)}px`
+    );
+    navigation.hidden = false;
+    navigation.classList.add('is-visible');
+    sourcePositionMarker?.classList.add('is-navigation-visible');
+    sourceNavigationLine = line;
+  };
+  const refreshSourceNavigation = (): void => {
+    if (sourceNavigationLine !== null) showSourceNavigation(sourceNavigationLine);
+  };
+  const requestSourceNavigation = (line: number): void => {
+    if (sourceNavigationLine === line && sourceNavigation?.classList.contains('is-visible')) return;
+    if (pendingSourceNavigationLine === line && sourceNavigationTimer !== null) return;
+    clearSourceNavigationTimer();
+    pendingSourceNavigationLine = line;
+    sourceNavigationTimer = window.setTimeout(() => {
+      sourceNavigationTimer = null;
+      if (pendingSourceNavigationLine !== line) return;
+      pendingSourceNavigationLine = null;
+      showSourceNavigation(line);
+    }, 80);
+  };
+  const isSourceNavigationGutterPoint = (
+    frameDocument: Document,
+    clientX: number
+  ): boolean => {
+    const scrollElement = frameDocument.scrollingElement;
+    if (!scrollElement) return false;
+    const contentLeft = getPreviewContentLeft(frameDocument, scrollElement);
+    if (contentLeft === null) return false;
+    const documentX = clientX + scrollElement.scrollLeft;
+    return documentX >= Math.max(0, contentLeft - 28) && documentX <= contentLeft;
+  };
+  const findSourceNavigationEntry = (
+    frameDocument: Document,
+    mappedRoot: HTMLElement,
+    event: MouseEvent
+  ): PreviewSourceMapEntry | null => {
+    const navigationTarget = typeof (event.target as Element | null)?.closest === 'function'
+      ? (event.target as Element).closest('.meo-preview-source-navigation')
+      : null;
+    if (navigationTarget && sourceNavigationLine !== null) {
+      return findSourceProjection(sourceNavigationLine)?.exact ?? null;
+    }
+    const mappedTarget = typeof (event.target as Element | null)?.closest === 'function'
+      ? (event.target as Element).closest<HTMLElement>('[data-source-line]')
+      : null;
+    if (mappedTarget && mappedRoot.contains(mappedTarget)) {
+      return getSourceMap().find(entry => entry.element === mappedTarget) ?? null;
+    }
+    const scrollElement = frameDocument.scrollingElement;
+    if (!scrollElement) return null;
+    if (!isSourceNavigationGutterPoint(frameDocument, event.clientX)) return null;
+    const documentY = event.clientY + scrollElement.scrollTop;
+    return getVisualSourceMap()
+      .filter(entry => entry.top <= documentY && entry.bottom >= documentY)
+      .sort((left, right) => (
+        (left.bottom - left.top) - (right.bottom - right.top)
+        || right.start - left.start
+      ))[0] ?? null;
+  };
+  const bindSourceNavigation = (
+    frameDocument: Document,
+    mappedRoot: HTMLElement | null,
+    signal: AbortSignal
+  ): void => {
+    if (!mappedRoot || !onNavigateToSource) return;
+    frameDocument.addEventListener('pointermove', (event) => {
+      if (event.pointerType !== 'mouse' || !sourcePositionMarkerState.visible) {
+        hideSourceNavigation();
+        return;
+      }
+      const entry = findSourceNavigationEntry(frameDocument, mappedRoot, event);
+      if (!entry) {
+        hideSourceNavigation();
+        return;
+      }
+      requestSourceNavigation(entry.start);
+    }, { capture: true, passive: true, signal });
+    frameDocument.addEventListener('click', (event) => {
+      if (!sourcePositionMarkerState.visible || !isSourceNavigationGutterPoint(frameDocument, event.clientX)) {
+        return;
+      }
+      const entry = findSourceNavigationEntry(frameDocument, mappedRoot, event);
+      if (!entry) return;
+      event.preventDefault();
+      event.stopPropagation();
+      hideSourceNavigation();
+      onNavigateToSource(entry.start);
+    }, { capture: true, signal });
+    frameDocument.addEventListener('pointerleave', hideSourceNavigation, { signal });
+  };
+  const refreshSourcePositionMarker = (revealIfOutside = false): boolean => {
+    const frameDocument = getFrameDocument();
+    const scrollElement = frameDocument?.scrollingElement;
+    if (!frameDocument || !scrollElement) return false;
+    const marker = getSourcePositionMarker(frameDocument);
+    const projection = sourcePositionMarkerState.visible
+      ? projectSourcePositionMarker(sourcePositionMarkerState.line)
+      : null;
+    marker.hidden = !projection;
+    marker.classList.toggle('is-active', sourcePositionMarkerState.active);
+    marker.dataset.meoSourcePositionLine = String(sourcePositionMarkerState.line);
+    if (!projection) return false;
+    marker.dataset.meoSourcePositionKind = projection.kind;
+
+    const viewportHeight = scrollElement.clientHeight || frame.contentWindow?.innerHeight || 0;
+    let revealed = false;
+    if (revealIfOutside && viewportHeight > 0) {
+      const viewportTop = scrollElement.scrollTop;
+      const viewportBottom = viewportTop + viewportHeight;
+      const above = projection.bottom <= viewportTop;
+      const below = projection.top >= viewportBottom;
+      if (above || below) {
+        const context = projection.lineHeight;
+        const requestedTop = above
+          ? projection.top - context
+          : projection.bottom + context - viewportHeight;
+        const nextTop = Math.max(0, Math.min(
+          requestedTop,
+          scrollElement.scrollHeight - viewportHeight
+        ));
+        if (Math.abs(scrollElement.scrollTop - nextTop) > 0.5) {
+          scrollElement.scrollTop = nextTop;
+          revealed = true;
+        }
+      }
+    }
+    // Keep the locator in the document's own left padding. Its rail remains
+    // eight pixels away from the content edge regardless of nested indentation.
+    marker.style.left = `${Math.max(0, projection.left - 28)}px`;
+    marker.style.top = `${projection.top}px`;
+    marker.style.height = `${projection.bottom - projection.top}px`;
+    return revealed;
+  };
   const restoreTopLine = (
     line: number,
     lineOffset = 0,
@@ -1829,6 +2245,28 @@ export function createPreviewController({
     setSourceColoring,
     setFontFamily,
     setUiLanguage: applyUiLanguage,
+    setSourcePositionMarker: (
+      state: PreviewSourcePositionMarkerState,
+      {
+        revealIfOutside = false,
+        deferLayout = false
+      }: { readonly revealIfOutside?: boolean; readonly deferLayout?: boolean } = {}
+    ) => {
+      sourcePositionMarkerState = {
+        visible: state.visible,
+        line: Math.max(1, Math.round(state.line)),
+        active: state.active
+      };
+      if (deferLayout) {
+        if (!sourcePositionMarkerState.visible) {
+          if (sourcePositionMarker) sourcePositionMarker.hidden = true;
+          hideSourceNavigation();
+        }
+        return false;
+      }
+      if (!sourcePositionMarkerState.visible) hideSourceNavigation();
+      return refreshSourcePositionMarker(revealIfOutside);
+    },
     syncAutoAppearance: () => {
       if (appearancePreference === 'auto') setAppearance('auto');
       else {
@@ -1842,7 +2280,10 @@ export function createPreviewController({
     setVisible: (visible: boolean) => {
       host.hidden = !visible;
       host.inert = !visible;
-      if (!visible) cancelPaintReady();
+      if (!visible) {
+        cancelPaintReady();
+        hideSourceNavigation();
+      }
       else if (activeFrameDocument && !hasPendingRequest) schedulePaintReady();
     },
     focus: () => {
@@ -1884,6 +2325,8 @@ export function createPreviewController({
     refreshLayout: () => {
       previewTableLayout?.refresh();
       sourceMapDirty = true;
+      refreshSourcePositionMarker();
+      refreshSourceNavigation();
     },
     getSelectedText: () => frame.contentWindow?.getSelection()?.toString() ?? '',
     getSearchAdapter: () => ({
@@ -1918,6 +2361,13 @@ export function createPreviewController({
       sourceMapResizeObserver = null;
       if (sourceMapMeasureFrame !== null) window.cancelAnimationFrame(sourceMapMeasureFrame);
       sourceMapMeasureFrame = null;
+      sourcePositionMarker?.remove();
+      sourcePositionMarker = null;
+      sourcePositionMarkerDocument = null;
+      hideSourceNavigation();
+      sourceNavigation?.remove();
+      sourceNavigation = null;
+      sourceNavigationDocument = null;
       frameRenderedText = null;
       frame.style.removeProperty('visibility');
       hasPendingRequest = false;
