@@ -71,6 +71,60 @@ const previewMutableStateAttributes = new Set([
   'data-source-end-line'
 ]);
 
+const previewPresentationSelector = [
+  '.meo-export-mermaid[data-source-b64]',
+  '.meo-export-math-display',
+  '.meo-export-math-inline'
+].join(', ');
+const previewPresentationMorphKeyAttribute = 'data-meo-preview-morph-key';
+
+function isPreviewMathElement(element: Element): boolean {
+  return element.classList.contains('meo-export-math-display')
+    || element.classList.contains('meo-export-math-inline');
+}
+
+function getPreviewPresentationSignature(element: Element): string | null {
+  if (element.classList.contains('meo-export-mermaid')) {
+    const source = element.getAttribute('data-source-b64');
+    return source ? `mermaid:${source}` : null;
+  }
+  if (!isPreviewMathElement(element)) return null;
+  const layout = element.classList.contains('meo-export-math-display') ? 'display' : 'inline';
+  const fenced = element.classList.contains('meo-export-math-fenced-display') ? ':fenced' : '';
+  const canvas = element.querySelector<HTMLElement>(':scope > .meo-latex-math-canvas');
+  return `math:${layout}${fenced}:${canvas?.innerHTML ?? element.innerHTML}`;
+}
+
+function preparePreviewPresentationMorphKeys(
+  currentMain: HTMLElement,
+  nextMain: HTMLElement
+): () => void {
+  const available = new Map<string, HTMLElement[]>();
+  for (const element of Array.from(currentMain.querySelectorAll<HTMLElement>(previewPresentationSelector))) {
+    const signature = getPreviewPresentationSignature(element);
+    if (!signature) continue;
+    const matches = available.get(signature);
+    if (matches) matches.push(element);
+    else available.set(signature, [element]);
+  }
+
+  const keyedCurrent: HTMLElement[] = [];
+  let pairIndex = 0;
+  for (const element of Array.from(nextMain.querySelectorAll<HTMLElement>(previewPresentationSelector))) {
+    const signature = getPreviewPresentationSignature(element);
+    const current = signature ? available.get(signature)?.shift() : undefined;
+    if (!current) continue;
+    const key = `meo-preview-presentation-${pairIndex += 1}`;
+    current.setAttribute(previewPresentationMorphKeyAttribute, key);
+    element.setAttribute(previewPresentationMorphKeyAttribute, key);
+    keyedCurrent.push(current);
+  }
+
+  return () => {
+    for (const element of keyedCurrent) element.removeAttribute(previewPresentationMorphKeyAttribute);
+  };
+}
+
 function syncSourceMappingAttributes(fromElement: Element, toElement: Element): void {
   for (const attribute of ['data-source-line', 'data-source-end-line']) {
     const value = toElement.getAttribute(attribute);
@@ -163,70 +217,88 @@ function morphPreviewMain(
       ?.querySelector<HTMLTableColElement>(':scope > colgroup[data-meo-preview-columns]');
     if (columns) table.prepend(columns.cloneNode(true));
   });
+  const clearPresentationMorphKeys = preparePreviewPresentationMorphKeys(currentMain, nextMain);
   let deferredCodeBlock = false;
-  morphdom(currentMain, nextMain, {
-    childrenOnly: true,
-    onBeforeElUpdated(fromElement, toElement) {
-      if (
-        fromElement.tagName === 'IMG'
-        && toElement.tagName === 'IMG'
-        && preserveLoadedPreviewImage(
-          fromElement as HTMLImageElement,
-          toElement as HTMLImageElement
-        )
-      ) {
-        return false;
-      }
-      const mermaidSource = fromElement.dataset.sourceB64;
-      if (
-        mermaidSource
-        && fromElement.classList.contains('meo-export-mermaid')
-        && toElement.classList.contains('meo-export-mermaid')
-      ) {
-        const nextSource = toElement.dataset.sourceB64;
+  try {
+    morphdom(currentMain, nextMain, {
+      childrenOnly: true,
+      getNodeKey(node) {
+        if (node.nodeType !== 1) return undefined;
+        const element = node as Element;
+        return element.getAttribute(previewPresentationMorphKeyAttribute) ?? (element.id || undefined);
+      },
+      onBeforeElUpdated(fromElement, toElement) {
         if (
-          nextSource
-          && nextSource !== mermaidSource
-          && fromElement.classList.contains('is-rendered')
-          && fromElement.querySelector('svg')
+          fromElement.tagName === 'IMG'
+          && toElement.tagName === 'IMG'
+          && preserveLoadedPreviewImage(
+            fromElement as HTMLImageElement,
+            toElement as HTMLImageElement
+          )
         ) {
-          // Keep the last successful diagram on screen while the replacement is
-          // rendered off-layout. The renderer commits the new SVG atomically.
-          fromElement.dataset.sourceB64 = nextSource;
-          fromElement.dataset.meoPreviewMermaidPending = 'true';
-          delete fromElement.dataset.meoPreviewMermaidAppearance;
+          return false;
+        }
+        const mermaidSource = fromElement.dataset.sourceB64;
+        if (
+          mermaidSource
+          && fromElement.classList.contains('meo-export-mermaid')
+          && toElement.classList.contains('meo-export-mermaid')
+        ) {
+          const nextSource = toElement.dataset.sourceB64;
+          if (
+            nextSource
+            && nextSource !== mermaidSource
+            && fromElement.classList.contains('is-rendered')
+            && fromElement.querySelector('svg')
+          ) {
+            // Keep the last successful diagram on screen while the replacement is
+            // rendered off-layout. The renderer commits the new SVG atomically.
+            fromElement.dataset.sourceB64 = nextSource;
+            fromElement.dataset.meoPreviewMermaidPending = 'true';
+            delete fromElement.dataset.meoPreviewMermaidAppearance;
+            syncSourceMappingAttributes(fromElement, toElement);
+            return false;
+          }
+          if (mermaidSource !== nextSource) return true;
           syncSourceMappingAttributes(fromElement, toElement);
           return false;
         }
-        if (mermaidSource !== nextSource) return true;
-        syncSourceMappingAttributes(fromElement, toElement);
-        return false;
+        const fromPresentation = getPreviewPresentationSignature(fromElement);
+        if (
+          fromPresentation?.startsWith('math:')
+          && fromPresentation === getPreviewPresentationSignature(toElement)
+        ) {
+          syncSourceMappingAttributes(fromElement, toElement);
+          return false;
+        }
+        if (
+          deferUnreadyCodeBlock
+          && fromElement.classList.contains('meo-export-code-block-wrap')
+          && toElement.classList.contains('meo-export-code-block-wrap')
+          && fromElement.textContent !== toElement.textContent
+          && hasAppliedPreviewCodeHighlight(fromElement)
+          && !isPreviewCodeHighlightReady(toElement)
+        ) {
+          // Keep the last fully themed block until the replacement tokens exist.
+          // The Shiki refresh callback reruns this morph, which then commits the
+          // new source and token DOM together before the next visible frame.
+          syncSourceMappingAttributes(fromElement, toElement);
+          deferredCodeBlock = true;
+          return false;
+        }
+        if (fromElement.tagName === 'DETAILS') {
+          toElement.toggleAttribute('open', (fromElement as HTMLDetailsElement).open);
+        }
+        if (areEquivalentPreviewElements(fromElement, toElement)) {
+          syncDescendantSourceMappings(fromElement, toElement);
+          return false;
+        }
+        return true;
       }
-      if (
-        deferUnreadyCodeBlock
-        && fromElement.classList.contains('meo-export-code-block-wrap')
-        && toElement.classList.contains('meo-export-code-block-wrap')
-        && fromElement.textContent !== toElement.textContent
-        && hasAppliedPreviewCodeHighlight(fromElement)
-        && !isPreviewCodeHighlightReady(toElement)
-      ) {
-        // Keep the last fully themed block until the replacement tokens exist.
-        // The Shiki refresh callback reruns this morph, which then commits the
-        // new source and token DOM together before the next visible frame.
-        syncSourceMappingAttributes(fromElement, toElement);
-        deferredCodeBlock = true;
-        return false;
-      }
-      if (fromElement.tagName === 'DETAILS') {
-        toElement.toggleAttribute('open', (fromElement as HTMLDetailsElement).open);
-      }
-      if (areEquivalentPreviewElements(fromElement, toElement)) {
-        syncDescendantSourceMappings(fromElement, toElement);
-        return false;
-      }
-      return true;
-    }
-  });
+    });
+  } finally {
+    clearPresentationMorphKeys();
+  }
   return deferredCodeBlock;
 }
 
@@ -664,7 +736,10 @@ export function createPreviewController({
   let searchOptions = { wholeWord: false, caseSensitive: false };
   let searchMatches: HTMLElement[] = [];
   let activeSearchIndex = -1;
-  let previewMathViewports: LatexMathViewportController[] = [];
+  let previewMathViewports = new Map<HTMLElement, {
+    readonly controller: LatexMathViewportController;
+    readonly signature: string;
+  }>();
   let previewTableLayout: PreviewTableLayoutController | null = null;
   let disposeDeferredImages = () => {};
   let frameEvents: AbortController | null = null;
@@ -730,10 +805,10 @@ export function createPreviewController({
   };
 
   const disposePreviewMathViewports = () => {
-    for (const viewport of previewMathViewports) {
-      viewport.destroy();
+    for (const viewport of previewMathViewports.values()) {
+      viewport.controller.destroy();
     }
-    previewMathViewports = [];
+    previewMathViewports.clear();
   };
 
   const attachDeferredImages = (frameDocument: Document) => {
@@ -843,14 +918,28 @@ export function createPreviewController({
   };
 
   const attachPreviewMathViewports = (frameDocument: Document) => {
-    disposePreviewMathViewports();
-    previewMathViewports = Array.from(frameDocument.querySelectorAll<HTMLElement>(
+    const roots = Array.from(frameDocument.querySelectorAll<HTMLElement>(
       '.meo-export-math-display, .meo-export-math-inline'
-    )).map((element) => (
-      element.classList.contains('meo-export-math-inline')
+    ));
+    const currentRoots = new Set(roots);
+    for (const [element, viewport] of previewMathViewports) {
+      if (
+        currentRoots.has(element)
+        && element.isConnected
+        && getPreviewPresentationSignature(element) === viewport.signature
+      ) continue;
+      viewport.controller.destroy();
+      previewMathViewports.delete(element);
+    }
+    for (const element of roots) {
+      if (previewMathViewports.has(element)) continue;
+      const controller = element.classList.contains('meo-export-math-inline')
         ? attachLatexMathViewport(element, { layout: { kind: 'inline' } })
         : attachLatexMathViewport(element)
-    ));
+      const signature = getPreviewPresentationSignature(element);
+      if (signature) previewMathViewports.set(element, { controller, signature });
+      else controller.destroy();
+    }
   };
 
   const clearSearchMatches = (): void => {
@@ -1166,7 +1255,6 @@ export function createPreviewController({
       frame.onload = null;
       const commit = (viewportSlot: PreviewViewportProjectionSlot | null) => {
         clearSearchMatches();
-        disposePreviewMathViewports();
         reusableDocument.documentElement.lang = uiLanguage;
         const deferredCodeBlock = morphPreviewMain(
           reusableDocument,

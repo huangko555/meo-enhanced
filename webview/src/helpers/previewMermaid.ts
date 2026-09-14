@@ -42,6 +42,13 @@ export function createPreviewMermaidRenderer(
     const renderGeneration = latestRenderGeneration + 1;
     latestRenderGeneration = renderGeneration;
     activeGroup?.end();
+    const hasPendingBlocks = Array.from(frameDocument.querySelectorAll<HTMLElement>(
+      '.meo-export-mermaid[data-source-b64]'
+    )).some((block) => (
+      !block.classList.contains('is-rendered')
+      || block.dataset.meoPreviewMermaidAppearance !== appearance
+    ));
+    if (!hasPendingBlocks) return Promise.resolve();
     const scheduled = renderTail.catch(() => undefined).then(async () => {
       const requestIsCurrent = () => renderGeneration === latestRenderGeneration && isCurrent();
       if (!requestIsCurrent()) return;

@@ -26,14 +26,17 @@ const previewResources = {
   })
 } as MermaidDiagramRenderResources;
 const previewRenderer = createPreviewMermaidRenderer(previewResources);
-const emptyFrame = {
+const pendingFrame = {
   defaultView: null,
-  querySelectorAll: () => []
+  querySelectorAll: () => [{
+    classList: { contains: () => false },
+    dataset: {}
+  }]
 } as unknown as Document;
 const previewRequests = [
-  previewRenderer.render(emptyFrame, 'dark'),
-  previewRenderer.render(emptyFrame, 'light'),
-  previewRenderer.render(emptyFrame, 'dark')
+  previewRenderer.render(pendingFrame, 'dark'),
+  previewRenderer.render(pendingFrame, 'light'),
+  previewRenderer.render(pendingFrame, 'dark')
 ];
 await new Promise((resolve) => setTimeout(resolve, 0));
 if (previewResourceRequests !== 1) {
@@ -50,7 +53,7 @@ const rejectedPreviewRenderer = createPreviewMermaidRenderer({
     end() {}
   })
 } as MermaidDiagramRenderResources);
-await rejectedPreviewRenderer.render(emptyFrame, 'dark');
+await rejectedPreviewRenderer.render(pendingFrame, 'dark');
 const reportedPreviewErrors: unknown[] = [];
 const failedPreviewRenderer = createPreviewMermaidRenderer({
   acquireGroup: () => ({
@@ -58,7 +61,7 @@ const failedPreviewRenderer = createPreviewMermaidRenderer({
     end() {}
   })
 } as MermaidDiagramRenderResources, (error) => reportedPreviewErrors.push(error));
-await failedPreviewRenderer.render(emptyFrame, 'dark');
+await failedPreviewRenderer.render(pendingFrame, 'dark');
 if (!(reportedPreviewErrors[0] instanceof Error)
   || reportedPreviewErrors[0].message !== 'runtime failed') {
   throw new Error('Unexpected Preview Mermaid failures must be reported');
@@ -268,6 +271,12 @@ try {
   const updatedMarkdownText = markdownText.replace('Start --> Check --> Done', 'Start --> Updated --> Done');
   const updatedRendered = renderMarkdownToHtml({
     markdownText: updatedMarkdownText,
+    markdownFilePath: 'C:/tmp/preview-mermaid.md',
+    target: 'html'
+  });
+  const shiftedMarkdownText = `Unrelated prose inserted before rendered blocks.\n\n${markdownText}`;
+  const shiftedRendered = renderMarkdownToHtml({
+    markdownText: shiftedMarkdownText,
     markdownFilePath: 'C:/tmp/preview-mermaid.md',
     target: 'html'
   });
@@ -531,6 +540,61 @@ try {
     document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
       ?.querySelector('.meo-export-mermaid.is-rendered svg')
   ));
+  const shiftedBlockContinuity = await page.evaluate(async ({ text, html, lightStyles, darkStyles }) => {
+    const controller = (window as typeof window & { __previewController?: any }).__previewController;
+    const testWindow = window as typeof window & {
+      __previewMessages?: Array<{ type?: string; requestId?: string }>;
+      __previewMermaidRequests?: number;
+    };
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const mermaidRoot = frameDocument.querySelector<HTMLElement>(
+      '.meo-export-mermaid:not(.is-math).is-rendered'
+    )!;
+    const mermaidSvg = mermaidRoot.querySelector('svg')!;
+    const mathRoot = frameDocument.querySelector<HTMLElement>('.meo-export-math-display')!;
+    const mathKatex = mathRoot.querySelector('.katex')!;
+    const mermaidRequestsBefore = testWindow.__previewMermaidRequests ?? 0;
+    controller.requestRender(text, { preserveViewport: true });
+    const requestId = testWindow.__previewMessages
+      ?.findLast((message) => message.type === 'requestPreviewRender')?.requestId ?? '';
+    controller.acceptRenderResponse({
+      type: 'previewRenderResult',
+      requestId,
+      result: { ok: true, value: { html, hasMermaid: true, styles: { light: lightStyles, dark: darkStyles } } }
+    });
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    const nextMermaidRoot = frameDocument.querySelector<HTMLElement>(
+      '.meo-export-mermaid:not(.is-math)'
+    )!;
+    const nextMathRoot = frameDocument.querySelector<HTMLElement>('.meo-export-math-display')!;
+    return {
+      requestId,
+      mermaidRootPreserved: nextMermaidRoot === mermaidRoot,
+      mermaidSvgPreserved: nextMermaidRoot.querySelector('svg') === mermaidSvg,
+      mermaidFallbackVisible: Boolean(nextMermaidRoot.querySelector('code')),
+      mermaidRenderRequests: (testWindow.__previewMermaidRequests ?? 0) - mermaidRequestsBefore,
+      mathRootPreserved: nextMathRoot === mathRoot,
+      mathKatexPreserved: nextMathRoot.querySelector('.katex') === mathKatex
+    };
+  }, {
+    text: shiftedMarkdownText,
+    html: shiftedRendered.html,
+    lightStyles,
+    darkStyles
+  });
+  if (
+    !shiftedBlockContinuity.requestId
+    || !shiftedBlockContinuity.mermaidRootPreserved
+    || !shiftedBlockContinuity.mermaidSvgPreserved
+    || shiftedBlockContinuity.mermaidFallbackVisible
+    || shiftedBlockContinuity.mermaidRenderRequests !== 0
+    || !shiftedBlockContinuity.mathRootPreserved
+    || !shiftedBlockContinuity.mathKatexPreserved
+  ) {
+    throw new Error(
+      `Unrelated edits before rendered blocks must preserve Mermaid and math presentations: ${JSON.stringify(shiftedBlockContinuity)}`
+    );
+  }
   const disposingPreview = await page.evaluate(({ text, html, lightStyles, darkStyles }) => {
     const controller = (window as typeof window & { __previewController?: any }).__previewController;
     const testWindow = window as typeof window & {
@@ -550,8 +614,8 @@ try {
     });
     return { requestId, mermaidRequestsBefore };
   }, {
-    text: `${markdownText}\n<!-- disposed-mermaid-frame -->`,
-    html: rendered.html,
+    text: `${updatedMarkdownText}\n<!-- disposed-mermaid-frame -->`,
+    html: updatedRendered.html,
     lightStyles,
     darkStyles
   });
