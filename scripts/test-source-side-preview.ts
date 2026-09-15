@@ -386,6 +386,65 @@ try {
     probe.stop();
     return probe.samples;
   });
+  const startEditorAnchorSampling = async (anchorText: string) => page.evaluate(text => {
+    const samples: Array<{
+      started: boolean;
+      mode: string;
+      previewVisible: boolean;
+      editorVisible: boolean;
+      offset: number | null;
+      scrollTop: number;
+      width: number;
+    }> = [];
+    let active = true;
+    let started = false;
+    const sample = () => {
+      if (!active) return;
+      const previewHost = document.querySelector<HTMLElement>('.preview-host')!;
+      const editorHost = document.querySelector<HTMLElement>('.editor-host')!;
+      const scroller = document.querySelector<HTMLElement>('.cm-scroller');
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(candidate => candidate.textContent?.includes(text));
+      const viewport = scroller?.getBoundingClientRect() ?? null;
+      const lineRect = line?.getBoundingClientRect() ?? null;
+      samples.push({
+        started,
+        mode: document.querySelector<HTMLElement>('#app')?.dataset.mode ?? '',
+        previewVisible: !previewHost.hidden && getComputedStyle(previewHost).visibility !== 'hidden',
+        editorVisible: !editorHost.hidden && getComputedStyle(editorHost).visibility !== 'hidden',
+        offset: viewport && lineRect ? lineRect.top - viewport.top : null,
+        scrollTop: scroller?.scrollTop ?? 0,
+        width: editorHost.getBoundingClientRect().width
+      });
+      requestAnimationFrame(sample);
+    };
+    (window as typeof window & {
+      __editorModeAnchorProbe?: { samples: typeof samples; markStarted(): void; stop(): void };
+    }).__editorModeAnchorProbe = {
+      samples,
+      markStarted: () => { started = true; },
+      stop: () => { active = false; }
+    };
+    requestAnimationFrame(sample);
+  }, anchorText);
+  const stopEditorAnchorSampling = async () => page.evaluate(() => {
+    const probe = (window as typeof window & {
+      __editorModeAnchorProbe: {
+        samples: Array<{
+          started: boolean;
+          mode: string;
+          previewVisible: boolean;
+          editorVisible: boolean;
+          offset: number | null;
+          scrollTop: number;
+          width: number;
+        }>;
+        stop(): void;
+      };
+    }).__editorModeAnchorProbe;
+    probe.stop();
+    return probe.samples;
+  });
 
   const compactBlockStartLine = text.slice(0, text.indexOf('<details>')).split('\n').length;
   await page.click('.line-jump-input');
@@ -1473,6 +1532,78 @@ try {
     )),
     `Preview-to-Source must not expose intermediate split geometry or anchor movement: ${JSON.stringify(fullPreviewToSourceFrames)}`
   );
+
+  const waitForMode = async (mode: 'live' | 'source' | 'preview') => {
+    await page.waitForFunction(expectedMode => (
+      document.querySelector<HTMLElement>('#app')?.dataset.mode === expectedMode
+      && (expectedMode !== 'live' || document.querySelector<HTMLElement>('.preview-host')?.hidden === true)
+    ), {}, mode);
+    await new Promise(resolve => setTimeout(resolve, 120));
+  };
+  const selectMode = async (mode: 'live' | 'source' | 'preview') => {
+    await page.click(`button[data-mode="${mode}"]`);
+    await waitForMode(mode);
+  };
+  const setSourcePreviewEnabled = async (enabled: boolean) => {
+    if (await page.$eval('#app', element => (element as HTMLElement).dataset.mode) !== 'source') {
+      await selectMode('source');
+    }
+    const current = await page.$eval(
+      '.editor-surface',
+      element => element.hasAttribute('data-source-preview')
+    );
+    if (current === enabled) return;
+    await page.click('.source-preview-button');
+    await page.waitForFunction(expected => (
+      document.querySelector('.editor-surface')?.hasAttribute('data-source-preview') === expected
+    ), {}, enabled);
+    await new Promise(resolve => setTimeout(resolve, 120));
+  };
+  const assertLiveRevealStable = async (label: string) => {
+    await startEditorAnchorSampling(modeAnchorText);
+    await page.evaluate(() => {
+      (window as typeof window & {
+        __editorModeAnchorProbe: { markStarted(): void };
+      }).__editorModeAnchorProbe.markStarted();
+      document.querySelector<HTMLButtonElement>('button[data-mode="live"]')!.click();
+    });
+    await waitForMode('live');
+    const frames = await stopEditorAnchorSampling();
+    const visibleLiveFrames = frames.filter(frame => (
+      frame.started
+      && frame.mode === 'live'
+      && !frame.previewVisible
+      && frame.editorVisible
+      && frame.offset !== null
+    ));
+    const finalLiveFrame = visibleLiveFrames.at(-1);
+    assert.ok(finalLiveFrame && visibleLiveFrames.length >= 2, `${label}: ${JSON.stringify(frames)}`);
+    assert.ok(
+      visibleLiveFrames.every(frame => (
+        Math.abs(frame.width - finalLiveFrame.width) <= 1
+        && Math.abs((frame.offset as number) - (finalLiveFrame.offset as number)) <= 1
+      )),
+      `${label} must reveal Live at its final reading position: ${JSON.stringify(frames)}`
+    );
+  };
+  const exerciseModeCycles = async (splitEnabled: boolean) => {
+    const prefix = splitEnabled ? 'Split enabled' : 'Split disabled';
+    await setSourcePreviewEnabled(splitEnabled);
+    await selectMode('live');
+
+    await selectMode('source');
+    await alignSourceLineAtReadingBand(modeAnchorLine);
+    await selectMode('preview');
+    await assertLiveRevealStable(`${prefix} Live-to-Source-to-Preview-to-Live`);
+
+    await selectMode('preview');
+    await selectMode('source');
+    await assertLiveRevealStable(`${prefix} Live-to-Preview-to-Source-to-Live`);
+  };
+
+  await exerciseModeCycles(true);
+  await exerciseModeCycles(false);
+  await setSourcePreviewEnabled(true);
 
   await page.evaluate(() => {
     const sourceScroller = document.querySelector<HTMLElement>('.cm-scroller')!;

@@ -2468,9 +2468,11 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
   hideSelectionMenu: () => selectionMenuController.hide(),
   captureViewport(targetMode) {
     const currentMode = getActiveEditorMode();
+    // This snapshot is a return ticket to the same split Source surface.
+    // Live must instead project the reading anchor currently shown by Preview.
     if (
       currentMode === 'preview'
-      && targetMode !== 'preview'
+      && targetMode === 'source'
       && splitModeTransition
     ) {
       const { viewport, editorScrollTop } = splitModeTransition;
