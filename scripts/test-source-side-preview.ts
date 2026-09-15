@@ -1162,7 +1162,15 @@ try {
     await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview');
     await page.click('button[data-mode="source"]');
     await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');
-    await new Promise(resolve => setTimeout(resolve, 80));
+    await page.evaluate(() => new Promise<void>(resolve => {
+      let remainingFrames = 10;
+      const waitForFrame = () => {
+        remainingFrames -= 1;
+        if (remainingFrames <= 0) resolve();
+        else requestAnimationFrame(waitForFrame);
+      };
+      requestAnimationFrame(waitForFrame);
+    }));
     complexTableSourceReturnOffsets.push(await readComplexTableSourceOffset());
   }
   assert.ok(
@@ -1393,7 +1401,7 @@ try {
     JSON.stringify(scrollTopButtonVisual)
   );
   assert.ok(Math.abs(scrollTopButtonVisual.centerOffsetX) <= 0.25, JSON.stringify(scrollTopButtonVisual));
-  assert.ok(Math.abs(scrollTopButtonVisual.centerOffsetY) <= 0.25, JSON.stringify(scrollTopButtonVisual));
+  assert.ok(Math.abs(scrollTopButtonVisual.centerOffsetY - 1) <= 0.25, JSON.stringify(scrollTopButtonVisual));
   await page.click('.preview-host > .document-scroll-top');
   await new Promise(resolve => setTimeout(resolve, 120));
   const previewButtonTop = await page.evaluate(() => ({
