@@ -42,6 +42,8 @@ try {
     'A multiline paragraph starts here.\nIts second source line shares one rendered paragraph.',
     '> An indented quotation must not move the Preview locator horizontally.',
     '- An indented list item must use the same Preview locator gutter.',
+    '- Reverse locator middle item.',
+    '- Reverse locator lower item.',
     ...Array.from({ length: 90 }, (_, index) => (
       `## Section ${index + 1}\n\nParagraph ${index + 1} with enough text to create a distant Preview position.`
     ))
@@ -80,17 +82,8 @@ try {
     const cursor = marker.querySelector<HTMLElement>('.meo-preview-source-position-cursor')!;
     const rail = marker.querySelector<HTMLElement>('.meo-preview-source-position-rail')!;
     const cursorRect = cursor.getBoundingClientRect();
-    const railRect = rail.getBoundingClientRect();
     const readingRoot = frameDocument.querySelector<HTMLElement>('main.meo-export-doc')!;
-    const rootRect = readingRoot.getBoundingClientRect();
-    const rootStyle = frameDocument.defaultView!.getComputedStyle(readingRoot);
-    const contentLeft = rootRect.left + Number.parseFloat(rootStyle.paddingLeft);
-    const color = style.color.match(/[\d.]+/g)?.slice(0, 3).map(Number) ?? [];
-    const accentProbe = frameDocument.createElement('span');
-    accentProbe.style.color = 'var(--meo-link)';
-    frameDocument.body.appendChild(accentProbe);
-    const accentColor = frameDocument.defaultView!.getComputedStyle(accentProbe).color;
-    accentProbe.remove();
+    const activeLineBackground = getComputedStyle(document.querySelector<HTMLElement>('.cm-activeLine')!).backgroundColor;
     return {
       active: marker.classList.contains('is-active'),
       line: marker.dataset.meoSourcePositionLine,
@@ -98,19 +91,20 @@ try {
       height: Number.parseFloat(style.height),
       position: style.position,
       pointerEvents: style.pointerEvents,
-      neutralColor: color.length === 3 && Math.max(...color) - Math.min(...color) <= 8,
-      softColor: color.length === 3 && Math.min(...color) >= 48 && Math.max(...color) <= 216,
+      backgroundColor: style.backgroundColor,
+      activeLineBackground,
+      zIndex: style.zIndex,
       kind: marker.dataset.meoSourcePositionKind,
       ownerDocument: marker.ownerDocument === frameDocument,
-      cursorOnLeft: cursorRect.right <= railRect.left,
+      parentIsReadingRoot: marker.parentElement === readingRoot,
       cursorWidth: cursorRect.width,
-      cursorOpacity: Number.parseFloat(frameDocument.defaultView!.getComputedStyle(cursor).opacity),
-      cursorColor: frameDocument.defaultView!.getComputedStyle(cursor).color,
-      accentColor,
+      cursorDisplay: frameDocument.defaultView!.getComputedStyle(cursor).display,
+      railDisplay: frameDocument.defaultView!.getComputedStyle(rail).display,
       usesTextCursorIcon: cursor.querySelector('svg')?.classList.contains('lucide-text-cursor'),
       railBorderRadius: frameDocument.defaultView!.getComputedStyle(rail).borderRadius,
       markerLeft: marker.getBoundingClientRect().left,
-      contentGap: contentLeft - marker.getBoundingClientRect().right
+      markerRight: marker.getBoundingClientRect().right,
+      positioningWidth: marker.offsetParent!.getBoundingClientRect().width
     };
   });
   assert.equal(markerPresentation.active, true);
@@ -119,17 +113,18 @@ try {
   assert.ok(markerPresentation.height > 1, JSON.stringify(markerPresentation));
   assert.equal(markerPresentation.position, 'absolute');
   assert.equal(markerPresentation.pointerEvents, 'none');
-  assert.equal(markerPresentation.neutralColor, true, JSON.stringify(markerPresentation));
-  assert.equal(markerPresentation.softColor, true, JSON.stringify(markerPresentation));
+  assert.equal(markerPresentation.backgroundColor, markerPresentation.activeLineBackground);
+  assert.equal(markerPresentation.zIndex, '-1');
   assert.equal(markerPresentation.kind, 'line');
   assert.equal(markerPresentation.ownerDocument, true);
-  assert.equal(markerPresentation.cursorOnLeft, true, JSON.stringify(markerPresentation));
-  assert.ok(markerPresentation.cursorWidth >= 16, JSON.stringify(markerPresentation));
-  assert.ok(markerPresentation.cursorOpacity > 0, JSON.stringify(markerPresentation));
-  assert.equal(markerPresentation.cursorColor, markerPresentation.accentColor);
+  assert.equal(markerPresentation.parentIsReadingRoot, true);
+  assert.equal(markerPresentation.cursorWidth, 0);
+  assert.equal(markerPresentation.cursorDisplay, 'none');
+  assert.equal(markerPresentation.railDisplay, 'none');
   assert.equal(markerPresentation.usesTextCursorIcon, true);
   assert.equal(markerPresentation.railBorderRadius, '0px');
-  assert.ok(markerPresentation.contentGap >= 7, JSON.stringify(markerPresentation));
+  assert.ok(Math.abs(markerPresentation.markerLeft) <= 0.5, JSON.stringify(markerPresentation));
+  assert.ok(Math.abs(markerPresentation.markerRight - markerPresentation.positioningWidth) <= 0.5, JSON.stringify(markerPresentation));
 
   await page.$eval('.preview-appearance-select', element => {
     const select = element as HTMLSelectElement;
@@ -139,14 +134,15 @@ try {
   await page.waitForFunction(() => {
     const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
     const marker = frameDocument.querySelector<HTMLElement>('.meo-preview-source-position-marker')!;
-    return frameDocument.defaultView!.getComputedStyle(marker).color.includes('86, 88, 91');
+    return frameDocument.defaultView!.getComputedStyle(marker).backgroundColor
+      === getComputedStyle(document.querySelector<HTMLElement>('.cm-activeLine')!).backgroundColor;
   });
-  const lightMarkerColor = await page.evaluate(() => {
+  const lightMarkerBackground = await page.evaluate(() => {
     const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
     const marker = frameDocument.querySelector<HTMLElement>('.meo-preview-source-position-marker')!;
-    return frameDocument.defaultView!.getComputedStyle(marker).color;
+    return frameDocument.defaultView!.getComputedStyle(marker).backgroundColor;
   });
-  assert.match(lightMarkerColor, /rgb\(86, 88, 91\)/);
+  assert.equal(lightMarkerBackground, markerPresentation.activeLineBackground);
   await page.$eval('.preview-appearance-select', element => {
     const select = element as HTMLSelectElement;
     select.value = 'dark';
@@ -155,7 +151,8 @@ try {
   await page.waitForFunction(() => {
     const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
     const marker = frameDocument.querySelector<HTMLElement>('.meo-preview-source-position-marker')!;
-    return frameDocument.defaultView!.getComputedStyle(marker).color.includes('188, 191, 195');
+    return frameDocument.defaultView!.getComputedStyle(marker).backgroundColor
+      === getComputedStyle(document.querySelector<HTMLElement>('.cm-activeLine')!).backgroundColor;
   });
 
   const nativeScrollAttachment = await page.evaluate(() => {
@@ -332,10 +329,17 @@ try {
       const cursor = frameDocument.querySelector<HTMLElement>('.meo-preview-source-position-cursor')!;
       return {
         active: marker?.classList.contains('is-active'),
-        cursorOpacity: Number.parseFloat(frameDocument.defaultView!.getComputedStyle(cursor).opacity)
+        cursorDisplay: frameDocument.defaultView!.getComputedStyle(cursor).display,
+        backgroundColor: frameDocument.defaultView!.getComputedStyle(marker!).backgroundColor,
+        activeLineBackground: getComputedStyle(document.querySelector<HTMLElement>('.cm-activeLine')!).backgroundColor
       };
     }),
-    { active: false, cursorOpacity: 0 }
+    {
+      active: false,
+      cursorDisplay: 'none',
+      backgroundColor: markerPresentation.activeLineBackground,
+      activeLineBackground: markerPresentation.activeLineBackground
+    }
   );
 
   await page.click('.source-preview-scroll-sync-button');
@@ -355,6 +359,45 @@ try {
     const rect = element.getBoundingClientRect();
     return { left: rect.left, top: rect.top };
   });
+  await page.evaluate(() => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const middle = Array.from(frameDocument.querySelectorAll<HTMLElement>('li[data-source-line]'))
+      .find(element => element.textContent?.trim() === 'Reverse locator middle item.')!;
+    middle.style.marginBottom = '28px';
+    const lower = Array.from(frameDocument.querySelectorAll<HTMLElement>('li[data-source-line]'))
+      .find(element => element.textContent?.trim() === 'Reverse locator lower item.')!;
+    lower.scrollIntoView({ block: 'center' });
+  });
+  await new Promise(resolve => setTimeout(resolve, 80));
+  const listGapTarget = await page.evaluate(() => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const items = Array.from(frameDocument.querySelectorAll<HTMLElement>('li[data-source-line]'));
+    const middle = items.find(element => element.textContent?.trim() === 'Reverse locator middle item.')!;
+    const lower = items.find(element => element.textContent?.trim() === 'Reverse locator lower item.')!;
+    const middleRect = middle.getBoundingClientRect();
+    const lowerRect = lower.getBoundingClientRect();
+    const gap = lowerRect.top - middleRect.bottom;
+    const x = lowerRect.left + Math.min(32, lowerRect.width / 2);
+    const y = lowerRect.top - Math.min(4, gap / 4);
+    const rawMappedTarget = frameDocument.elementFromPoint(x, y)?.closest<HTMLElement>('[data-source-line]');
+    return {
+      expectedLine: Number(lower.dataset.sourceLine),
+      rawMappedLine: Number(rawMappedTarget?.dataset.sourceLine),
+      gap,
+      x,
+      y
+    };
+  });
+  assert.ok(listGapTarget.gap >= 20, JSON.stringify(listGapTarget));
+  assert.notEqual(listGapTarget.rawMappedLine, listGapTarget.expectedLine, JSON.stringify(listGapTarget));
+  await page.mouse.move(4, 4);
+  await page.mouse.move(frameRect.left + listGapTarget.x, frameRect.top + listGapTarget.y);
+  await page.waitForFunction((line) => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    return Number(frameDocument.querySelector<HTMLElement>('.meo-preview-source-navigation.is-visible')
+      ?.dataset.meoSourceNavigationLine) === line;
+  }, {}, listGapTarget.expectedLine);
+
   const reverseTarget = await page.evaluate(() => {
     const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
     const target = Array.from(frameDocument.querySelectorAll<HTMLElement>('h2[data-source-line]'))
@@ -403,9 +446,9 @@ try {
       color: frameDocument.defaultView!.getComputedStyle(navigation).color,
       accentColor,
       usesPenLineIcon: navigation.querySelector('svg')?.classList.contains('lucide-pen-line'),
-      markerCursorOpacity: Number.parseFloat(frameDocument.defaultView!.getComputedStyle(
+      markerCursorDisplay: frameDocument.defaultView!.getComputedStyle(
         frameDocument.querySelector<HTMLElement>('.meo-preview-source-position-cursor')!
-      ).opacity)
+      ).display
     };
   });
   assert.equal(reverseAction.line, reverseTarget.line, JSON.stringify({ reverseAction, reverseTarget }));
@@ -413,7 +456,7 @@ try {
   assert.ok(Math.abs(reverseAction.right - reverseTarget.contentLeft) <= 0.5, JSON.stringify(reverseAction));
   assert.equal(reverseAction.color, reverseAction.accentColor);
   assert.equal(reverseAction.usesPenLineIcon, true);
-  assert.equal(reverseAction.markerCursorOpacity, 0);
+  assert.equal(reverseAction.markerCursorDisplay, 'none');
 
   await page.mouse.click(
     frameRect.left + reverseAction.left + 4,

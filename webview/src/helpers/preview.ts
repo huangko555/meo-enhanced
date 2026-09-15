@@ -340,11 +340,14 @@ body {
 }
 
 .meo-export-page {
+  position: relative;
+  isolation: isolate;
   min-width: 0;
   max-width: 100%;
 }
 
 .meo-export-doc {
+  isolation: isolate;
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: normal;
@@ -465,11 +468,14 @@ const previewFontFamilies = [
 const previewSourcePositionMarkerStyles = `
 .meo-preview-source-position-marker {
   position: absolute;
-  z-index: 20;
-  width: 20px;
+  z-index: -1;
+  left: 0;
+  width: 100%;
   min-height: 1px;
-  color: light-dark(rgb(86 88 91), rgb(188 191 195));
-  opacity: 0.42;
+  background: var(
+    --meo-preview-source-active-line-bg,
+    color-mix(in srgb, var(--meo-fg) 8%, transparent)
+  );
   pointer-events: none;
 }
 
@@ -477,27 +483,29 @@ const previewSourcePositionMarkerStyles = `
   display: none;
 }
 
-.meo-preview-source-position-rail {
+.meo-preview-source-navigation-highlight {
   position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 3px;
-  background: currentColor;
-  box-shadow: -1px 0 color-mix(in srgb, var(--meo-bg) 72%, transparent);
+  z-index: -1;
+  left: 0;
+  width: 100%;
+  min-height: 1px;
+  background: var(
+    --meo-preview-source-hover-bg,
+    color-mix(in srgb, var(--meo-fg) 12%, transparent)
+  );
+  pointer-events: none;
+}
+
+.meo-preview-source-navigation-highlight[hidden] {
+  display: none;
+}
+
+.meo-preview-source-position-rail {
+  display: none;
 }
 
 .meo-preview-source-position-cursor {
-  position: absolute;
-  top: 50%;
-  right: 4px;
-  display: grid;
-  width: 16px;
-  height: 16px;
-  place-items: center;
-  opacity: 0;
-  transform: translateY(-50%);
-  color: var(--meo-link);
+  display: none;
 }
 
 .meo-preview-source-position-cursor svg {
@@ -507,24 +515,12 @@ const previewSourcePositionMarkerStyles = `
   stroke-width: 1.8;
 }
 
-.meo-preview-source-position-marker.is-active {
-  opacity: 0.9;
-}
-
-.meo-preview-source-position-marker.is-active .meo-preview-source-position-cursor {
-  opacity: 1;
-}
-
-.meo-preview-source-position-marker.is-navigation-visible .meo-preview-source-position-cursor {
-  opacity: 0;
-}
-
 .meo-preview-source-navigation {
   position: absolute;
   z-index: 21;
   display: block;
   width: 28px;
-  min-height: 20px;
+  min-height: 22px;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -547,11 +543,15 @@ const previewSourcePositionMarkerStyles = `
 .meo-preview-source-navigation-icon {
   position: absolute;
   top: var(--meo-preview-source-navigation-icon-top, 2px);
-  left: 2px;
+  left: 50%;
   display: grid;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   place-items: center;
+  border-radius: 4px;
+  background: transparent;
+  transform: translateX(-50%);
+  transition: background-color 80ms ease-out, transform 80ms ease-out;
 }
 
 .meo-preview-source-navigation-icon svg {
@@ -566,18 +566,28 @@ const previewSourcePositionMarkerStyles = `
   outline: none;
 }
 
+.meo-preview-source-navigation:is(:hover, :focus-visible) .meo-preview-source-navigation-icon {
+  background: color-mix(in srgb, var(--meo-link) 14%, transparent);
+}
+
+.meo-preview-source-navigation:active .meo-preview-source-navigation-icon {
+  background: color-mix(in srgb, var(--meo-link) 24%, transparent);
+  transform: translateX(-50%) scale(0.9);
+}
+
 .meo-preview-source-navigation:focus-visible .meo-preview-source-navigation-icon {
   outline: 1px solid currentColor;
   outline-offset: 2px;
 }
 
 @media (forced-colors: active) {
-  .meo-preview-source-position-marker {
-    color: CanvasText;
+  .meo-preview-source-position-marker,
+  .meo-preview-source-navigation-highlight {
+    background: Highlight;
+    opacity: 0.18;
     forced-color-adjust: none;
   }
 
-  .meo-preview-source-position-cursor,
   .meo-preview-source-navigation {
     color: LinkText;
     forced-color-adjust: none;
@@ -859,16 +869,21 @@ export function createPreviewController({
   };
   let sourceMapDocument: Document | null = null;
   let sourceMap: PreviewSourceMapEntry[] = [];
+  let visualSourceMap: PreviewSourceMapEntry[] = [];
+  let sourceMapByElement = new WeakMap<HTMLElement, PreviewSourceMapEntry>();
+  let sourceNavigationCandidatesByRoot = new WeakMap<HTMLElement, PreviewSourceMapEntry[]>();
   let sourceMapDirty = true;
   let sourceMapResizeObserver: ResizeObserver | null = null;
   let sourceMapMeasureFrame: number | null = null;
   let sourcePositionMarker: HTMLElement | null = null;
   let sourcePositionMarkerDocument: Document | null = null;
+  let sourceNavigationHighlight: HTMLElement | null = null;
+  let sourceNavigationHighlightDocument: Document | null = null;
   let sourceNavigation: HTMLButtonElement | null = null;
   let sourceNavigationDocument: Document | null = null;
   let sourceNavigationLine: number | null = null;
   let pendingSourceNavigationLine: number | null = null;
-  let sourceNavigationTimer: number | null = null;
+  let sourceNavigationFrame: number | null = null;
   let sourcePositionMarkerState: PreviewSourcePositionMarkerState = {
     visible: false,
     line: 1,
@@ -1207,6 +1222,29 @@ export function createPreviewController({
     if (sourceColoring) applyPreviewCodeHighlight(frameDocument, true);
   };
 
+  const syncSourceActiveLineBackground = (frameDocument: Document): void => {
+    const probe = document.createElement('span');
+    probe.style.position = 'fixed';
+    probe.style.visibility = 'hidden';
+    probe.style.pointerEvents = 'none';
+    probe.style.backgroundColor = 'var(--meo-active-line-bg)';
+    document.body.appendChild(probe);
+    const background = window.getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    frameDocument.documentElement.style.setProperty(
+      '--meo-preview-source-active-line-bg',
+      background
+    );
+    probe.style.backgroundColor = 'var(--vscode-list-hoverBackground, var(--meo-active-line-bg))';
+    document.body.appendChild(probe);
+    const hoverBackground = window.getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    frameDocument.documentElement.style.setProperty(
+      '--meo-preview-source-hover-bg',
+      hoverBackground
+    );
+  };
+
   const capturePresentationScroll = (): void => {
     const frameDocument = activeFrameDocument;
     const scrollElement = frameDocument?.scrollingElement;
@@ -1275,6 +1313,9 @@ export function createPreviewController({
       activeFrameDocument = frameDocument;
       sourceMapDocument = null;
       sourceMap = [];
+      visualSourceMap = [];
+      sourceMapByElement = new WeakMap();
+      sourceNavigationCandidatesByRoot = new WeakMap();
       sourceMapDirty = true;
       frameEvents = new AbortController();
       const signal = frameEvents.signal;
@@ -1314,6 +1355,7 @@ export function createPreviewController({
       );
       scrollToTopController.setScrollElement(frameDocument.scrollingElement, frameDocument);
       frameDocument.body.tabIndex = -1;
+      syncSourceActiveLineBackground(frameDocument);
       attachPreviewMathViewports(frameDocument);
       syncPreviewCodeHighlight(frameDocument);
       frameDocument.addEventListener('scroll', () => {
@@ -1454,6 +1496,7 @@ export function createPreviewController({
       return;
     }
     const payload = latestPayload;
+    syncSourceActiveLineBackground(frameDocument);
     const scrollElement = frameDocument.scrollingElement;
     const preservedScrollTop = pendingPresentationScroll?.document === frameDocument
       ? pendingPresentationScroll.scrollTop
@@ -1717,11 +1760,18 @@ export function createPreviewController({
         // Source projection and binary search must not inherit DOM order:
         // footnotes and similar semantic blocks intentionally render elsewhere.
         .sort((left, right) => left.start - right.start || right.end - left.end || left.top - right.top);
+      visualSourceMap = [...sourceMap]
+        .sort((left, right) => left.top - right.top || left.bottom - right.bottom || left.start - right.start);
+      sourceMapByElement = new WeakMap();
+      for (const entry of sourceMap) sourceMapByElement.set(entry.element, entry);
+      sourceNavigationCandidatesByRoot = new WeakMap();
     }
     return sourceMap;
   };
-  const getVisualSourceMap = (): PreviewSourceMapEntry[] => [...getSourceMap()]
-    .sort((left, right) => left.top - right.top || left.bottom - right.bottom || left.start - right.start);
+  const getVisualSourceMap = (): PreviewSourceMapEntry[] => {
+    getSourceMap();
+    return visualSourceMap;
+  };
   const findVisualRangeProjection = (
     sourceRange: NonNullable<PreviewViewportPosition['sourceRange']>,
     viewportAnchor: number
@@ -1800,7 +1850,7 @@ export function createPreviewController({
     const rail = frameDocument.createElement('span');
     rail.className = 'meo-preview-source-position-rail';
     marker.append(cursor, rail);
-    frameDocument.body.appendChild(marker);
+    (frameDocument.querySelector('main.meo-export-doc') ?? frameDocument.body).appendChild(marker);
     sourcePositionMarker = marker;
     sourcePositionMarkerDocument = frameDocument;
     return marker;
@@ -1834,17 +1884,34 @@ export function createPreviewController({
       kind: entry.start === entry.end ? 'line' : 'block'
     };
   };
-  const clearSourceNavigationTimer = (): void => {
-    if (sourceNavigationTimer !== null) window.clearTimeout(sourceNavigationTimer);
-    sourceNavigationTimer = null;
+  const clearSourceNavigationFrame = (): void => {
+    if (sourceNavigationFrame !== null) window.cancelAnimationFrame(sourceNavigationFrame);
+    sourceNavigationFrame = null;
   };
   const hideSourceNavigation = (): void => {
-    clearSourceNavigationTimer();
+    clearSourceNavigationFrame();
     pendingSourceNavigationLine = null;
     sourceNavigationLine = null;
     sourcePositionMarker?.classList.remove('is-navigation-visible');
+    if (sourceNavigationHighlight) sourceNavigationHighlight.hidden = true;
     sourceNavigation?.classList.remove('is-visible');
     if (sourceNavigation) sourceNavigation.hidden = true;
+  };
+  const getSourceNavigationHighlight = (frameDocument: Document): HTMLElement => {
+    if (
+      sourceNavigationHighlightDocument === frameDocument
+      && sourceNavigationHighlight?.isConnected
+    ) {
+      return sourceNavigationHighlight;
+    }
+    const highlight = frameDocument.createElement('div');
+    highlight.className = 'meo-preview-source-navigation-highlight';
+    highlight.hidden = true;
+    highlight.setAttribute('aria-hidden', 'true');
+    (frameDocument.querySelector('main.meo-export-doc') ?? frameDocument.body).appendChild(highlight);
+    sourceNavigationHighlight = highlight;
+    sourceNavigationHighlightDocument = frameDocument;
+    return highlight;
   };
   const getSourceNavigation = (frameDocument: Document): HTMLButtonElement => {
     if (sourceNavigationDocument === frameDocument && sourceNavigation?.isConnected) {
@@ -1892,15 +1959,25 @@ export function createPreviewController({
       return;
     }
     const navigation = getSourceNavigation(frameDocument);
+    const highlight = getSourceNavigationHighlight(frameDocument);
     const height = Math.max(1, projection.bottom - projection.top);
-    const leadingHeight = Math.min(height, Math.max(18, projection.lineHeight));
+    const leadingHeight = Math.min(height, Math.max(22, projection.lineHeight));
+    const editingProjection = projectSourcePositionMarker(sourcePositionMarkerState.line);
+    const matchesEditingTarget = Boolean(
+      editingProjection
+      && Math.abs(editingProjection.top - projection.top) <= 0.5
+      && Math.abs(editingProjection.bottom - projection.bottom) <= 0.5
+    );
+    highlight.style.top = `${projection.top}px`;
+    highlight.style.height = `${height}px`;
+    highlight.hidden = matchesEditingTarget;
     navigation.dataset.meoSourceNavigationLine = String(line);
     navigation.style.left = `${Math.max(0, projection.left - 28)}px`;
     navigation.style.top = `${projection.top}px`;
     navigation.style.height = `${height}px`;
     navigation.style.setProperty(
       '--meo-preview-source-navigation-icon-top',
-      `${Math.max(0, (leadingHeight - 18) / 2)}px`
+      `${Math.max(0, (leadingHeight - 22) / 2)}px`
     );
     navigation.hidden = false;
     navigation.classList.add('is-visible');
@@ -1912,15 +1989,14 @@ export function createPreviewController({
   };
   const requestSourceNavigation = (line: number): void => {
     if (sourceNavigationLine === line && sourceNavigation?.classList.contains('is-visible')) return;
-    if (pendingSourceNavigationLine === line && sourceNavigationTimer !== null) return;
-    clearSourceNavigationTimer();
     pendingSourceNavigationLine = line;
-    sourceNavigationTimer = window.setTimeout(() => {
-      sourceNavigationTimer = null;
-      if (pendingSourceNavigationLine !== line) return;
+    if (sourceNavigationFrame !== null) return;
+    sourceNavigationFrame = window.requestAnimationFrame(() => {
+      sourceNavigationFrame = null;
+      const pendingLine = pendingSourceNavigationLine;
       pendingSourceNavigationLine = null;
-      showSourceNavigation(line);
-    }, 80);
+      if (pendingLine !== null) showSourceNavigation(pendingLine);
+    });
   };
   const isSourceNavigationGutterPoint = (
     frameDocument: Document,
@@ -1932,6 +2008,74 @@ export function createPreviewController({
     if (contentLeft === null) return false;
     const documentX = clientX + scrollElement.scrollLeft;
     return documentX >= Math.max(0, contentLeft - 28) && documentX <= contentLeft;
+  };
+  const getSourceNavigationCandidates = (
+    root: HTMLElement
+  ): PreviewSourceMapEntry[] => {
+    getSourceMap();
+    const cached = sourceNavigationCandidatesByRoot.get(root);
+    if (cached) return cached;
+
+    const descendants = Array.from(root.querySelectorAll<HTMLElement>('[data-source-line]'))
+      .map(element => sourceMapByElement.get(element) ?? null)
+      .filter((entry): entry is PreviewSourceMapEntry => entry !== null);
+    if (descendants.length === 0) {
+      const direct = sourceMapByElement.get(root);
+      const candidates = direct ? [direct] : [];
+      sourceNavigationCandidatesByRoot.set(root, candidates);
+      return candidates;
+    }
+
+    // Containers such as lists and block quotes span all of their children and
+    // map to the container's first source line. In their whitespace, use the
+    // nearest concrete descendant instead of jumping back to that first line.
+    const mappedElements = new Set(descendants.map(entry => entry.element));
+    const containers = new Set<HTMLElement>();
+    for (const entry of descendants) {
+      let ancestor = entry.element.parentElement;
+      while (ancestor && ancestor !== root) {
+        if (mappedElements.has(ancestor)) {
+          containers.add(ancestor);
+          break;
+        }
+        ancestor = ancestor.parentElement;
+      }
+    }
+    const candidates = descendants
+      .filter(entry => !containers.has(entry.element))
+      .sort((left, right) => left.top - right.top || left.bottom - right.bottom || left.start - right.start);
+    sourceNavigationCandidatesByRoot.set(root, candidates);
+    return candidates;
+  };
+  const findNearestSourceNavigationEntry = (
+    candidates: readonly PreviewSourceMapEntry[],
+    documentY: number
+  ): PreviewSourceMapEntry | null => {
+    let best: PreviewSourceMapEntry | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    let current: PreviewSourceMapEntry | null = null;
+    let currentDistance = Number.POSITIVE_INFINITY;
+    for (const entry of candidates) {
+      const distance = documentY < entry.top
+        ? entry.top - documentY
+        : documentY > entry.bottom
+          ? documentY - entry.bottom
+          : 0;
+      const height = entry.bottom - entry.top;
+      const bestHeight = best ? best.bottom - best.top : Number.POSITIVE_INFINITY;
+      if (distance < bestDistance || (distance === bestDistance && height < bestHeight)) {
+        best = entry;
+        bestDistance = distance;
+      }
+      if (entry.start === sourceNavigationLine && distance < currentDistance) {
+        current = entry;
+        currentDistance = distance;
+      }
+      if (entry.top > documentY && distance > bestDistance + 3) break;
+    }
+    // A small dead band prevents two neighbouring blocks from alternating when
+    // the pointer sits on their midpoint without making deliberate motion lag.
+    return current && currentDistance <= bestDistance + 3 ? current : best;
   };
   const findSourceNavigationEntry = (
     frameDocument: Document,
@@ -1948,18 +2092,29 @@ export function createPreviewController({
       ? (event.target as Element).closest<HTMLElement>('[data-source-line]')
       : null;
     if (mappedTarget && mappedRoot.contains(mappedTarget)) {
-      return getSourceMap().find(entry => entry.element === mappedTarget) ?? null;
+      getSourceMap();
+      const direct = sourceMapByElement.get(mappedTarget) ?? null;
+      const candidates = getSourceNavigationCandidates(mappedTarget);
+      if (candidates.length <= 1) return candidates[0] ?? direct;
+      const scrollElement = frameDocument.scrollingElement;
+      if (!scrollElement) return direct;
+      return findNearestSourceNavigationEntry(
+        candidates,
+        event.clientY + scrollElement.scrollTop
+      ) ?? direct;
     }
     const scrollElement = frameDocument.scrollingElement;
     if (!scrollElement) return null;
-    if (!isSourceNavigationGutterPoint(frameDocument, event.clientX)) return null;
+    const eventTarget = event.target as Node | null;
+    const isInsideMappedRoot = eventTarget ? mappedRoot.contains(eventTarget) : false;
+    if (!isInsideMappedRoot && !isSourceNavigationGutterPoint(frameDocument, event.clientX)) return null;
+    const rootRect = mappedRoot.getBoundingClientRect();
+    if (event.clientY < rootRect.top || event.clientY > rootRect.bottom) return null;
     const documentY = event.clientY + scrollElement.scrollTop;
-    return getVisualSourceMap()
-      .filter(entry => entry.top <= documentY && entry.bottom >= documentY)
-      .sort((left, right) => (
-        (left.bottom - left.top) - (right.bottom - right.top)
-        || right.start - left.start
-      ))[0] ?? null;
+    return findNearestSourceNavigationEntry(
+      getSourceNavigationCandidates(mappedRoot),
+      documentY
+    );
   };
   const bindSourceNavigation = (
     frameDocument: Document,
@@ -2028,9 +2183,7 @@ export function createPreviewController({
         }
       }
     }
-    // Keep the locator in the document's own left padding. Its rail remains
-    // eight pixels away from the content edge regardless of nested indentation.
-    marker.style.left = `${Math.max(0, projection.left - 28)}px`;
+    marker.style.left = '0px';
     marker.style.top = `${projection.top}px`;
     marker.style.height = `${projection.bottom - projection.top}px`;
     return revealed;
@@ -2356,6 +2509,9 @@ export function createPreviewController({
       commitPendingCodeHighlight = null;
       sourceMapDocument = null;
       sourceMap = [];
+      visualSourceMap = [];
+      sourceMapByElement = new WeakMap();
+      sourceNavigationCandidatesByRoot = new WeakMap();
       sourceMapDirty = true;
       sourceMapResizeObserver?.disconnect();
       sourceMapResizeObserver = null;
@@ -2365,6 +2521,9 @@ export function createPreviewController({
       sourcePositionMarker = null;
       sourcePositionMarkerDocument = null;
       hideSourceNavigation();
+      sourceNavigationHighlight?.remove();
+      sourceNavigationHighlight = null;
+      sourceNavigationHighlightDocument = null;
       sourceNavigation?.remove();
       sourceNavigation = null;
       sourceNavigationDocument = null;
