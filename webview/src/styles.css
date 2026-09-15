@@ -138,6 +138,21 @@ body {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
+/* Source prepares in its final grid column while the full Preview spans both
+   columns as the visible transition cover. */
+.editor-surface[data-source-preview-preparing] {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.editor-surface[data-source-preview-preparing] > .editor-host {
+  grid-area: 1 / 1;
+}
+
+.editor-surface[data-source-preview-preparing] > .preview-host {
+  grid-area: 1 / 1 / 2 / 3;
+  z-index: 1;
+}
+
 .editor-surface[data-source-preview] > .editor-host {
   grid-area: 1 / 1;
 }

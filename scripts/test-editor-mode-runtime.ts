@@ -12,6 +12,11 @@ const events: string[] = [];
 const errors: string[] = [];
 const viewportHandle = Object.freeze({});
 const capturedViewportTargets: Array<EditorMode | undefined> = [];
+const previewPresentations: Array<{
+  active: boolean;
+  mode: EditorMode | null;
+  previousMode: EditorMode | null;
+}> = [];
 let mountAttempts = 0;
 let failLiveOnce = true;
 let releaseLateApply: (() => void) | null = null;
@@ -36,7 +41,14 @@ const capabilities: EditorModeEffectCapabilities = {
       await new Promise<void>((resolve) => { releaseLateApply = resolve; });
     }
   },
-  setPreviewActive: (active) => events.push(`preview:${active}`),
+  setPreviewActive: (active, presentation) => {
+    events.push(`preview:${active}`);
+    previewPresentations.push({
+      active,
+      mode: presentation?.mode ?? null,
+      previousMode: presentation?.previousMode ?? null
+    });
+  },
   setEditorVisible: (visible) => events.push(`editor:${visible}`),
   presentModeControl: (mode) => events.push(`control:${mode}`),
   closeFind: () => events.push('close-find'),
@@ -126,6 +138,15 @@ assert.equal(events.includes('search:preview'), true);
 assert.equal(events.includes('outline:preview'), true);
 assert.equal(events.includes('replace:false'), true);
 assert.equal(events.includes('hide-selection-menu'), true);
+
+events.length = 0;
+await runtime.dispatch({ type: 'requestMode', mode: 'source', source: 'user' });
+assert.deepEqual(
+  previewPresentations.at(-1),
+  { active: false, mode: 'source', previousMode: 'preview' },
+  'the atomic Preview exit must retain its presentation context through the async editor apply'
+);
+await runtime.dispatch({ type: 'requestMode', mode: 'preview', source: 'user' });
 
 events.length = 0;
 const first = runtime.dispatch({ type: 'toggleMode', source: 'user' });

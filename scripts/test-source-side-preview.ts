@@ -301,6 +301,10 @@ try {
       offset: number | null;
       scrollTop: number;
       width: number;
+      split: boolean;
+      editorVisible: boolean;
+      editorOffset: number | null;
+      editorWidth: number;
     }> = [];
     let active = true;
     let started = false;
@@ -309,6 +313,12 @@ try {
       const host = document.querySelector<HTMLElement>('.preview-host')!;
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
       const frameDocument = frame.contentDocument!;
+      const editorHost = document.querySelector<HTMLElement>('.editor-host')!;
+      const editorScroller = document.querySelector<HTMLElement>('.cm-scroller');
+      const editorLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement'))
+        .find(element => Number(element.textContent) === line);
+      const editorViewport = editorScroller?.getBoundingClientRect() ?? null;
+      const editorLineRect = editorLine?.getBoundingClientRect() ?? null;
       const viewportOffset = frameDocument.documentElement.clientHeight / 3;
       const projection = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
         .filter(element => {
@@ -335,7 +345,13 @@ try {
         visible: !host.hidden && getComputedStyle(host).visibility !== 'hidden',
         offset: projection?.offset ?? null,
         scrollTop: frameDocument.scrollingElement?.scrollTop ?? 0,
-        width: frame.getBoundingClientRect().width
+        width: frame.getBoundingClientRect().width,
+        split: document.querySelector('.editor-surface')?.hasAttribute('data-source-preview') ?? false,
+        editorVisible: !editorHost.hidden && getComputedStyle(editorHost).visibility !== 'hidden',
+        editorOffset: editorViewport && editorLineRect
+          ? editorLineRect.top - editorViewport.top - editorViewport.height / 3
+          : null,
+        editorWidth: editorHost.getBoundingClientRect().width
       });
       requestAnimationFrame(sample);
     };
@@ -359,6 +375,10 @@ try {
           offset: number | null;
           scrollTop: number;
           width: number;
+          split: boolean;
+          editorVisible: boolean;
+          editorOffset: number | null;
+          editorWidth: number;
         }>;
         stop(): void;
       };
@@ -1423,9 +1443,36 @@ try {
     finalReadingAnchorOffset !== null && Math.abs(finalReadingAnchorOffset) <= 1,
     `Source-to-Preview must preserve the already-visible Preview reading anchor: ${JSON.stringify({ sourceToFullReadingAnchor, finalReadingAnchorOffset, sourceToFullPreviewFrames })}`
   );
-  await page.click('button[data-mode="source"]');
+  await startPreviewAnchorSampling(transitionTableAnchorLine);
+  await page.evaluate(() => {
+    (window as typeof window & {
+      __previewModeAnchorProbe: { markStarted(): void };
+    }).__previewModeAnchorProbe.markStarted();
+    document.querySelector<HTMLButtonElement>('button[data-mode="source"]')!.click();
+  });
   await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');
-  await new Promise(resolve => setTimeout(resolve, 120));
+  await new Promise(resolve => setTimeout(resolve, 220));
+  const fullPreviewToSourceFrames = await stopPreviewAnchorSampling();
+  const visibleReverseFrames = fullPreviewToSourceFrames.filter(frame => (
+    frame.started
+    && frame.mode === 'source'
+    && frame.split
+    && frame.visible
+    && frame.editorVisible
+    && frame.offset !== null
+    && frame.editorOffset !== null
+  ));
+  const finalReverseFrame = visibleReverseFrames.at(-1);
+  assert.ok(finalReverseFrame, JSON.stringify(fullPreviewToSourceFrames));
+  assert.ok(
+    visibleReverseFrames.every(frame => (
+      Math.abs(frame.width - finalReverseFrame.width) <= 1
+      && Math.abs(frame.editorWidth - finalReverseFrame.editorWidth) <= 1
+      && Math.abs((frame.offset as number) - (finalReverseFrame.offset as number)) <= 1
+      && Math.abs((frame.editorOffset as number) - (finalReverseFrame.editorOffset as number)) <= 1
+    )),
+    `Preview-to-Source must not expose intermediate split geometry or anchor movement: ${JSON.stringify(fullPreviewToSourceFrames)}`
+  );
 
   await page.evaluate(() => {
     const sourceScroller = document.querySelector<HTMLElement>('.cm-scroller')!;

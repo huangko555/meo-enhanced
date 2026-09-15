@@ -1475,8 +1475,12 @@ let sourcePreviewEnabled = false;
 // WebviewUiState so reopening the document starts from synchronized scrolling.
 let sourcePreviewScrollSyncEnabled = true;
 let sourcePreviewPosition = { line: 1, active: false };
-let splitModeTransitionViewport: EditorModeViewportToken | null = null;
+let splitModeTransition: {
+  readonly viewport: EditorModeViewportToken;
+  readonly editorScrollTop: number;
+} | null = null;
 let pendingEditorViewportAfterPreviewExit: EditorModeViewportToken | null = null;
+let pendingEditorScrollTopAfterPreviewExit: number | null = null;
 let deferEditorViewportUntilPreviewExit = false;
 let sourcePreviewRevealGeneration = 0;
 let pendingSourcePreviewReveal: {
@@ -1484,13 +1488,24 @@ let pendingSourcePreviewReveal: {
   editorReady: boolean;
   previewReady: boolean;
 } | null = null;
-const restorePendingEditorViewportAfterPreviewExit = (): void => {
+const restorePendingEditorViewportAfterPreviewExit = (
+  {
+    restoreCaptureSurface = true,
+    consume = true
+  }: {
+    readonly restoreCaptureSurface?: boolean;
+    readonly consume?: boolean;
+  } = {}
+): void => {
   const viewport = pendingEditorViewportAfterPreviewExit;
   if (!viewport) return;
-  pendingEditorViewportAfterPreviewExit = null;
-  deferEditorViewportUntilPreviewExit = false;
   editor?.restoreViewportAnchorToken?.(viewport, 'editor');
-  editor?.restoreModeRoundTripCaptureSurface?.(viewport);
+  if (restoreCaptureSurface) editor?.restoreModeRoundTripCaptureSurface?.(viewport);
+  if (consume) {
+    pendingEditorViewportAfterPreviewExit = null;
+    pendingEditorScrollTopAfterPreviewExit = null;
+    deferEditorViewportUntilPreviewExit = false;
+  }
 };
 const getActiveEditorMode = (): EditorMode => editorModeApplication.getState().mode;
 const isSidePreviewVisible = (): boolean => (
@@ -1580,12 +1595,19 @@ const markSourcePreviewEditorReady = (): void => {
 };
 const presentPreviewSurface = (
   fullPreview: boolean,
-  { atomicSplit = false }: { readonly atomicSplit?: boolean } = {}
+  {
+    atomicSplit = false,
+    deferSplitLinkage = false
+  }: {
+    readonly atomicSplit?: boolean;
+    readonly deferSplitLinkage?: boolean;
+  } = {}
 ): { readonly split: boolean; readonly visible: boolean } => {
   const split = !fullPreview && isSidePreviewVisible();
   const visible = fullPreview || split;
   const splitGeometryChanged = split !== editorSurface.hasAttribute('data-source-preview');
   if (visible !== !previewController.host.hidden || splitGeometryChanged) previewPaintReady = false;
+  editorSurface.removeAttribute('data-source-preview-preparing');
   editorSurface.toggleAttribute('data-source-preview', split);
   sourcePreviewButton.classList.toggle('is-active', split);
   sourcePreviewButton.setAttribute('aria-pressed', split ? 'true' : 'false');
@@ -1602,7 +1624,7 @@ const presentPreviewSurface = (
   }
   cancelSourcePreviewReveal();
   previewAdapter.setActive({ active: visible, text: getCurrentEditorText() });
-  if (split) {
+  if (split && !deferSplitLinkage) {
     activateSourcePreviewLinkage(
       deferEditorViewportUntilPreviewExit ? 'last-interaction' : 'editor'
     );
@@ -2333,12 +2355,23 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
   mountEditor: mountEditorForMode,
   async applyEditorMode(mode, viewport) {
     if (!editor) throw new Error('Editor is not mounted');
-    // Preview exits reveal the editor at its final width only after the mode
-    // change succeeds. Restoring before that reveal projects against the
-    // temporary full-width geometry and is then displaced by split reflow.
+    // Preview exits keep the old Preview as a cover while the editor changes
+    // mode. A Source split defers restoration until the covered editor already
+    // occupies its final grid column.
     const deferViewportRestore = deferEditorViewportUntilPreviewExit
       && pendingEditorViewportAfterPreviewExit === viewport;
     editor.setMode(mode, viewport, { deferViewportRestore });
+    const preparingSourceSplit = mode === 'source'
+      && editorSurface.hasAttribute('data-source-preview-preparing');
+    if (preparingSourceSplit && pendingEditorViewportAfterPreviewExit) {
+      // Prepare only the covered editor. The visible full Preview remains the
+      // transition cover until its own final split geometry is committed.
+      restorePendingEditorViewportAfterPreviewExit({
+        restoreCaptureSurface: false,
+        consume: false
+      });
+      (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
+    }
     if (mode === 'source' && pendingSourcePreviewReveal) {
       (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
       markSourcePreviewEditorReady();
@@ -2361,13 +2394,30 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
       && presentation?.mode === 'source'
       && presentation.previousMode !== 'source'
       && sourcePreviewEnabled;
-    presentPreviewSurface(active, { atomicSplit });
+    const commitsPreparedPreviewExit = atomicSplit && presentation?.previousMode === 'preview';
+    presentPreviewSurface(active, {
+      atomicSplit: atomicSplit && !commitsPreparedPreviewExit,
+      deferSplitLinkage: commitsPreparedPreviewExit
+    });
     if (active && pendingEditorViewportAfterPreviewExit) {
       pendingEditorViewportAfterPreviewExit = null;
+      pendingEditorScrollTopAfterPreviewExit = null;
       deferEditorViewportUntilPreviewExit = false;
     }
-    if (!active && pendingEditorViewportAfterPreviewExit && !atomicSplit) {
+    if (commitsPreparedPreviewExit) previewController.refreshLayout();
+    const exactEditorScrollTop = commitsPreparedPreviewExit
+      ? pendingEditorScrollTopAfterPreviewExit
+      : null;
+    if (!active && pendingEditorViewportAfterPreviewExit && (!atomicSplit || commitsPreparedPreviewExit)) {
       restorePendingEditorViewportAfterPreviewExit();
+    }
+    if (commitsPreparedPreviewExit && editor) {
+      (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
+      if (exactEditorScrollTop !== null) {
+        editor.view.scrollDOM.scrollTop = exactEditorScrollTop;
+      }
+      (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
+      activateSourcePreviewLinkage('last-interaction');
     }
     if (active) {
       // A Source split and the standalone Preview have different final widths.
@@ -2382,9 +2432,19 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     if (active) syncGitDiffDetails();
   },
   setEditorVisible(visible, interactive = visible) {
+    const preparingSourceSplit = visible
+      && !interactive
+      && sourcePreviewEnabled
+      && getActiveEditorMode() === 'source'
+      && !previewController.host.hidden
+      && !editorSurface.hasAttribute('data-source-preview');
+    editorSurface.toggleAttribute('data-source-preview-preparing', preparingSourceSplit);
     editorHost.toggleAttribute('data-preview-cover', !visible && !previewPaintReady);
     editorHost.inert = !interactive;
     editorHost.hidden = !visible;
+    if (preparingSourceSplit && editor) {
+      (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
+    }
   },
   presentModeControl(mode) {
     root.dataset.mode = mode;
@@ -2411,12 +2471,13 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     if (
       currentMode === 'preview'
       && targetMode !== 'preview'
-      && splitModeTransitionViewport
+      && splitModeTransition
     ) {
-      const viewport = splitModeTransitionViewport;
+      const { viewport, editorScrollTop } = splitModeTransition;
       if (editor?.prepareModeRoundTripReturn?.(viewport)) {
-        splitModeTransitionViewport = null;
+        splitModeTransition = null;
         pendingEditorViewportAfterPreviewExit = viewport;
+        pendingEditorScrollTopAfterPreviewExit = editorScrollTop;
         deferEditorViewportUntilPreviewExit = true;
         return viewport;
       }
@@ -2429,16 +2490,19 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
         : 'editor';
     const viewport = editor?.captureModeTransitionAnchorToken?.(owner) ?? null;
     if (currentMode === 'source' && isSidePreviewVisible() && targetMode === 'preview') {
-      splitModeTransitionViewport = viewport;
+      splitModeTransition = viewport && editor
+        ? { viewport, editorScrollTop: editor.view.scrollDOM.scrollTop }
+        : null;
     } else if (currentMode === 'preview' && targetMode !== 'preview') {
-      splitModeTransitionViewport = null;
+      splitModeTransition = null;
       pendingEditorViewportAfterPreviewExit = viewport;
+      pendingEditorScrollTopAfterPreviewExit = null;
       // Source split reaches its final width only after standalone Preview is
       // removed. Restore every Preview -> Source transition against that final
       // geometry, not just a direct split-mode round trip.
       deferEditorViewportUntilPreviewExit = targetMode === 'source' && sourcePreviewEnabled;
     } else {
-      splitModeTransitionViewport = null;
+      splitModeTransition = null;
     }
     return viewport;
   },

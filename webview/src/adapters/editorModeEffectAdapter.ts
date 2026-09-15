@@ -72,6 +72,7 @@ export function createEditorModeEffectAdapter(
   let pendingAtomicReveal: {
     readonly generation: number;
     readonly restoreEditorFocus: boolean;
+    readonly presentation: EditorModePresentation;
   } | null = null;
 
   const applyPresentation = (presentation: EditorModePresentation): void => {
@@ -82,7 +83,8 @@ export function createEditorModeEffectAdapter(
       capabilities.setEditorVisible(true, false);
       pendingAtomicReveal = {
         generation,
-        restoreEditorFocus: presentation.restoreEditorFocus
+        restoreEditorFocus: presentation.restoreEditorFocus,
+        presentation
       };
     } else {
       capabilities.setPreviewActive(presentation.previewActive, presentation);
@@ -158,7 +160,7 @@ export function createEditorModeEffectAdapter(
                   presentationGeneration === atomicReveal.generation
                 ) {
                   pendingAtomicReveal = null;
-                  capabilities.setPreviewActive(false);
+                  capabilities.setPreviewActive(false, atomicReveal.presentation);
                   capabilities.setEditorVisible(true, true);
                   if (atomicReveal.restoreEditorFocus) capabilities.focusEditor();
                 }
