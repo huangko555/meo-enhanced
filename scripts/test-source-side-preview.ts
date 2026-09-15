@@ -293,8 +293,17 @@ try {
     await new Promise(resolve => setTimeout(resolve, 100));
   };
   const startPreviewAnchorSampling = async (lineNumber: number) => page.evaluate(line => {
-    const samples: Array<{ visible: boolean; offset: number | null; scrollTop: number; width: number }> = [];
+    const samples: Array<{
+      started: boolean;
+      mode: string;
+      covered: boolean;
+      visible: boolean;
+      offset: number | null;
+      scrollTop: number;
+      width: number;
+    }> = [];
     let active = true;
+    let started = false;
     const sample = () => {
       if (!active) return;
       const host = document.querySelector<HTMLElement>('.preview-host')!;
@@ -320,6 +329,9 @@ try {
         })
         .sort((left, right) => left.span - right.span || left.height - right.height)[0];
       samples.push({
+        started,
+        mode: document.querySelector<HTMLElement>('#app')?.dataset.mode ?? '',
+        covered: document.querySelector<HTMLElement>('.editor-host')?.hasAttribute('data-preview-cover') ?? false,
         visible: !host.hidden && getComputedStyle(host).visibility !== 'hidden',
         offset: projection?.offset ?? null,
         scrollTop: frameDocument.scrollingElement?.scrollTop ?? 0,
@@ -328,14 +340,26 @@ try {
       requestAnimationFrame(sample);
     };
     (window as typeof window & {
-      __previewModeAnchorProbe?: { samples: typeof samples; stop(): void };
-    }).__previewModeAnchorProbe = { samples, stop: () => { active = false; } };
+      __previewModeAnchorProbe?: { samples: typeof samples; markStarted(): void; stop(): void };
+    }).__previewModeAnchorProbe = {
+      samples,
+      markStarted: () => { started = true; },
+      stop: () => { active = false; }
+    };
     requestAnimationFrame(sample);
   }, lineNumber);
   const stopPreviewAnchorSampling = async () => page.evaluate(() => {
     const probe = (window as typeof window & {
       __previewModeAnchorProbe: {
-        samples: Array<{ visible: boolean; offset: number | null; scrollTop: number; width: number }>;
+        samples: Array<{
+          started: boolean;
+          mode: string;
+          covered: boolean;
+          visible: boolean;
+          offset: number | null;
+          scrollTop: number;
+          width: number;
+        }>;
         stop(): void;
       };
     }).__previewModeAnchorProbe;
@@ -1345,14 +1369,38 @@ try {
   });
   assert.ok(sourceToFullReadingAnchor, 'Split Preview must expose a semantic reading anchor');
   await startPreviewAnchorSampling(transitionTableAnchorLine);
-  await page.click('button[data-mode="preview"]');
+  await page.evaluate(() => {
+    (window as typeof window & {
+      __previewModeAnchorProbe: { markStarted(): void };
+    }).__previewModeAnchorProbe.markStarted();
+    document.querySelector<HTMLButtonElement>('button[data-mode="preview"]')!.click();
+  });
   await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview');
   await new Promise(resolve => setTimeout(resolve, 220));
   const sourceToFullPreviewFrames = await stopPreviewAnchorSampling();
   const visibleSourceToFullPreviewFrames = sourceToFullPreviewFrames
-    .filter(frame => frame.visible && frame.offset !== null);
+    .filter(frame => frame.mode === 'preview' && frame.visible && frame.offset !== null);
   const finalFullPreviewFrame = visibleSourceToFullPreviewFrames.at(-1);
   assert.ok(finalFullPreviewFrame, JSON.stringify(sourceToFullPreviewFrames));
+  assert.ok(
+    sourceToFullPreviewFrames.some(frame => frame.started && frame.covered),
+    `Source-to-Preview must cover the resized iframe until its compositor is ready: ${JSON.stringify(sourceToFullPreviewFrames)}`
+  );
+  const uncoveredTransitionFrames = sourceToFullPreviewFrames
+    .filter(frame => frame.started && frame.visible && !frame.covered && frame.offset !== null);
+  assert.ok(
+    uncoveredTransitionFrames.every(frame => (
+      Math.abs(frame.width - finalFullPreviewFrame.width) <= 1
+      && Math.abs((frame.offset as number) - (finalFullPreviewFrame.offset as number)) <= 1
+    )),
+    `Source-to-Preview must keep the previous surface covering intermediate geometry: ${JSON.stringify(sourceToFullPreviewFrames)}`
+  );
+  const visibleSourceToFullPreviewOffsets = visibleSourceToFullPreviewFrames
+    .map(frame => frame.offset as number);
+  assert.ok(
+    Math.max(...visibleSourceToFullPreviewOffsets) - Math.min(...visibleSourceToFullPreviewOffsets) <= 1,
+    `Source-to-Preview must not move after its first visible frame: ${JSON.stringify(sourceToFullPreviewFrames)}`
+  );
   assert.ok(
     Math.abs(finalFullPreviewFrame.offset as number) <= 20,
     `Source-to-Preview must project the complex anchor after full-width layout: ${JSON.stringify(sourceToFullPreviewFrames)}`

@@ -1584,7 +1584,8 @@ const presentPreviewSurface = (
 ): { readonly split: boolean; readonly visible: boolean } => {
   const split = !fullPreview && isSidePreviewVisible();
   const visible = fullPreview || split;
-  if (visible !== !previewController.host.hidden) previewPaintReady = false;
+  const splitGeometryChanged = split !== editorSurface.hasAttribute('data-source-preview');
+  if (visible !== !previewController.host.hidden || splitGeometryChanged) previewPaintReady = false;
   editorSurface.toggleAttribute('data-source-preview', split);
   sourcePreviewButton.classList.toggle('is-active', split);
   sourcePreviewButton.setAttribute('aria-pressed', split ? 'true' : 'false');
