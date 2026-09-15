@@ -2003,6 +2003,21 @@ async function main(): Promise<void> {
     assert.deepEqual(afterUndo, beforeEdit);
     assert.deepEqual(afterRedo, beforeEdit);
 
+    const beforeInactiveTabReturn = await widths(page, tableSelector);
+    const inactivePage = await browser.newPage();
+    await inactivePage.setContent('<!doctype html><p>inactive tab</p>');
+    await inactivePage.bringToFront();
+    await page.waitForFunction(() => document.hidden, { timeout: 5000 });
+    await page.bringToFront();
+    await page.waitForFunction(() => !document.hidden, { timeout: 5000 });
+    await inactivePage.close();
+    await waitForTableLayout(page, tableSelector, 1, 3);
+    assert.deepEqual(
+      await widths(page, tableSelector),
+      beforeInactiveTabReturn,
+      'an inactive tab round trip must not collapse a settled Live table to minimum column widths'
+    );
+
     await page.evaluate(() => {
       (window as any).__widthTerminalEvents = [];
       for (const type of ['blur', 'lostpointercapture', 'pointercancel', 'pointerleave', 'pointerup']) {
