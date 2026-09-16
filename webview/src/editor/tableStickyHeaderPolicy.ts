@@ -47,8 +47,6 @@ export type TableStickyHeaderPolicy = {
   layout(input: TableStickyHeaderLayoutInput): TableStickyHeaderLayout;
 };
 
-const separatorDepth = 3;
-
 export const tableStickyHeaderPolicy: TableStickyHeaderPolicy = {
   layout(input) {
     const controlsHeight = Math.max(0, input.controlsHeight);
@@ -57,7 +55,7 @@ export const tableStickyHeaderPolicy: TableStickyHeaderPolicy = {
       return { visible: false, reason: 'before-threshold' };
     }
     const enoughContentRemains = (
-      input.table.bottom >= stickyHeaderTop + input.header.height + separatorDepth
+      input.table.bottom >= stickyHeaderTop + input.header.height
     );
     if (!enoughContentRemains) {
       return { visible: false, reason: 'insufficient-content' };
@@ -77,7 +75,7 @@ export const tableStickyHeaderPolicy: TableStickyHeaderPolicy = {
       top: Math.round(input.scroller.top),
       left: coveredLeft,
       width: coveredRight - coveredLeft,
-      height: Math.ceil(controlsHeight + input.header.height + separatorDepth),
+      height: Math.ceil(controlsHeight + input.header.height),
       headerHeight: Math.ceil(input.header.height),
       tableWidth: input.table.width,
       translateX: input.table.left - coveredLeft,

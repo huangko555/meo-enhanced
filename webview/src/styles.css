@@ -5370,16 +5370,6 @@ body.outline-resizing .preview-frame {
   display: block;
 }
 
-.cm-editor .meo-md-html-table-sticky-chrome::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 1px;
-  background: var(--meo-semantic-tableBorder, var(--vscode-panel-border, currentColor));
-}
-
 .cm-editor .meo-md-html-table-sticky-chrome * {
   cursor: default !important;
 }

@@ -22,7 +22,7 @@ assert.deepEqual(tableStickyHeaderPolicy.layout({
 
 assert.deepEqual(tableStickyHeaderPolicy.layout({
   ...common,
-  table: { ...common.table, bottom: 44 }
+  table: { ...common.table, bottom: 41 }
 }), { visible: false, reason: 'insufficient-content' });
 
 assert.deepEqual(tableStickyHeaderPolicy.layout({
@@ -35,7 +35,7 @@ assert.deepEqual(tableStickyHeaderPolicy.layout(common), {
   top: 10,
   left: 20,
   width: 400,
-  height: 35,
+  height: 32,
   headerHeight: 32,
   tableWidth: 560,
   translateX: -50,
@@ -51,7 +51,7 @@ assert.deepEqual(tableStickyHeaderPolicy.layout({
   top: 10,
   left: 20,
   width: 400,
-  height: 66,
+  height: 63,
   headerHeight: 32,
   tableWidth: 560,
   translateX: -50,

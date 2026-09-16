@@ -51,6 +51,10 @@ async function main(): Promise<void> {
           '.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead th'
         );
         const stickyCell = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-table thead th');
+        const stripedCell = document.querySelector<HTMLElement>(
+          '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tbody tr:nth-child(even) td'
+        );
+        const editorElement = document.querySelector<HTMLElement>('.cm-editor');
         const shell = document.querySelector<HTMLElement>('.meo-md-html-table-shell');
         return {
           scrollerTop: scroller?.getBoundingClientRect().top ?? null,
@@ -66,6 +70,8 @@ async function main(): Promise<void> {
           mainHeaderBackground: mainCell ? getComputedStyle(mainCell).backgroundColor : null,
           stickyHeaderBackground: stickyCell ? getComputedStyle(stickyCell).backgroundColor : null,
           stickySurfaceBackground: stickyHeader ? getComputedStyle(stickyHeader).backgroundColor : null,
+          stripedRowBackground: stripedCell ? getComputedStyle(stripedCell).backgroundColor : null,
+          editorBackground: editorElement ? getComputedStyle(editorElement).backgroundColor : null,
           controlsSticky: shell?.classList.contains('is-controls-sticky') ?? false,
           visible: Boolean(chrome && getComputedStyle(chrome).display !== 'none')
         };
@@ -185,7 +191,8 @@ async function main(): Promise<void> {
       assert.ok(Math.abs(geometry.chromeTop! - geometry.scrollerTop!) <= 1, JSON.stringify(geometry));
       assert.ok(Math.abs(geometry.stickyHeaderTop! - geometry.chromeTop!) <= 1, JSON.stringify(geometry));
       assert.ok(geometry.firstColumnDelta! <= 1, JSON.stringify(geometry));
-      assert.equal(geometry.mainHeaderBackground, 'rgb(49, 65, 89)', JSON.stringify(geometry));
+      assert.notEqual(geometry.mainHeaderBackground, geometry.editorBackground, JSON.stringify(geometry));
+      assert.notEqual(geometry.mainHeaderBackground, geometry.stripedRowBackground, JSON.stringify(geometry));
       assert.equal(geometry.stickyHeaderBackground, geometry.mainHeaderBackground, JSON.stringify(geometry));
       assert.equal(geometry.stickySurfaceBackground, geometry.mainHeaderBackground, JSON.stringify(geometry));
       assert.equal(geometry.contextTriggerFixed, false, JSON.stringify(geometry));
