@@ -155,34 +155,30 @@ async function main(): Promise<void> {
     }
 
     const stickyNavigationPoint = await page.$eval(
-      '.meo-md-html-table-sticky-table thead th:nth-child(4) .meo-md-html-table-cell-preview',
-      (preview) => {
-        const rect = preview.getBoundingClientRect();
-        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      '.meo-md-html-table-sticky-header',
+      (viewport) => {
+        const rect = viewport.getBoundingClientRect();
+        return { x: rect.left + rect.width * 0.43, y: rect.top + rect.height / 2 };
       }
     );
     await page.mouse.move(stickyNavigationPoint.x, stickyNavigationPoint.y);
     await waitForFrames(page, 2);
     const stickyNavigationHover = await page.evaluate((point) => {
-      const indicator = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-navigation-indicator')!;
       const viewport = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-header')!;
-      const rect = indicator.getBoundingClientRect();
+      const hit = document.elementFromPoint(point.x, point.y);
       return {
-        visible: indicator.classList.contains('is-visible') && getComputedStyle(indicator).opacity !== '0',
-        column: indicator.dataset.tableColumn ?? null,
-        leftOfPointer: rect.right <= point.x - 3,
-        verticallyAligned: Math.abs((rect.top + rect.bottom) / 2 - point.y) <= 2,
+        cursor: hit instanceof Element ? getComputedStyle(hit).cursor : getComputedStyle(viewport).cursor,
+        indicatorCount: document.querySelectorAll('.meo-md-html-table-sticky-navigation-indicator').length,
+        hit: hit instanceof Element ? `${hit.tagName}.${hit.className}` : null,
         title: viewport.title
       };
     }, stickyNavigationPoint);
     if (
-      !stickyNavigationHover.visible
-      || stickyNavigationHover.column !== '3'
-      || !stickyNavigationHover.leftOfPointer
-      || !stickyNavigationHover.verticallyAligned
+      stickyNavigationHover.cursor !== 'pointer'
+      || stickyNavigationHover.indicatorCount !== 0
       || !stickyNavigationHover.title
     ) {
-      throw new Error(`Floating table header navigation hint was not positioned correctly: ${JSON.stringify(stickyNavigationHover)}`);
+      throw new Error(`Floating table header did not expose one clean click surface: ${JSON.stringify(stickyNavigationHover)}`);
     }
     const scrollBeforeHeaderNavigation = await page.evaluate(() => (
       (window as any).__tableBodyInteractionEditor.view.scrollDOM.scrollTop
@@ -198,12 +194,10 @@ async function main(): Promise<void> {
       )!;
       const headerRect = header.getBoundingClientRect();
       const stickyChrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome')!;
-      const indicator = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-navigation-indicator')!;
       return {
         headerVisible: headerRect.top >= viewport.top - 0.5 && headerRect.bottom <= viewport.bottom + 0.5,
         scrollMovedUp: scroller.scrollTop < previousScrollTop,
         stickyHidden: !stickyChrome.classList.contains('is-visible'),
-        indicatorHidden: !indicator.classList.contains('is-visible'),
         stickyInputs: document.querySelectorAll('.meo-md-html-table-sticky-table textarea').length
       };
     }, scrollBeforeHeaderNavigation);
@@ -211,10 +205,9 @@ async function main(): Promise<void> {
       !stickyNavigationResult.headerVisible
       || !stickyNavigationResult.scrollMovedUp
       || !stickyNavigationResult.stickyHidden
-      || !stickyNavigationResult.indicatorHidden
       || stickyNavigationResult.stickyInputs !== 0
     ) {
-      throw new Error(`Clicking the floating table header did not reveal the source header: ${JSON.stringify(stickyNavigationResult)}`);
+      throw new Error(`Clicking the floating table header did not reveal the source header: ${JSON.stringify({ stickyNavigationHover, stickyNavigationResult })}`);
     }
 
     await page.evaluate(() => {

@@ -55,7 +55,7 @@ async function main(): Promise<void> {
         </div></div>
         <div class="sticky" id="sticky-${id}"><button class="sticky-toolbar-button">Toolbar</button><div class="sticky-viewport" id="viewport-${id}">
           <table id="sticky-table-${id}"><thead><tr id="sticky-row-${id}"></tr></thead></table>
-        </div><span id="sticky-indicator-${id}"></span></div>
+        </div></div>
       </section>`).join('')}</main>`);
     await page.addScriptTag({ path: path.join(tempDir, 'candidate.js') });
 
@@ -158,8 +158,7 @@ async function main(): Promise<void> {
         stickyChrome: document.getElementById(`sticky-${id}`)!,
         stickyHeaderViewport: document.getElementById(`viewport-${id}`)!,
         stickyTable: document.getElementById(`sticky-table-${id}`) as HTMLTableElement,
-        stickyHeaderRow: document.getElementById(`sticky-row-${id}`) as HTMLTableRowElement,
-        stickyNavigationIndicator: document.getElementById(`sticky-indicator-${id}`)!
+        stickyHeaderRow: document.getElementById(`sticky-row-${id}`) as HTMLTableRowElement
       });
       let adapter1: any;
       let sourceHeaderNavigations = 0;
@@ -221,29 +220,18 @@ async function main(): Promise<void> {
         }
       });
       const visible = elements(1).stickyChrome.classList.contains('is-visible');
-      const navigationCell = elements(1).stickyHeaderRow.cells[1];
-      const navigationRect = navigationCell.getBoundingClientRect();
-      navigationCell.dispatchEvent(new PointerEvent('pointermove', {
-        bubbles: true,
-        clientX: navigationRect.left + navigationRect.width / 2,
-        clientY: navigationRect.top + navigationRect.height / 2,
-        pointerType: 'mouse'
-      }));
-      const navigationIndicatorVisible = elements(1).stickyNavigationIndicator.classList.contains('is-visible');
-      const navigationIndicatorColumn = elements(1).stickyNavigationIndicator.dataset.tableColumn;
-      const navigationClickPrevented = !navigationCell.dispatchEvent(new MouseEvent('click', {
+      const navigationViewport = elements(1).stickyHeaderViewport;
+      const navigationClickPrevented = !navigationViewport.dispatchEvent(new MouseEvent('click', {
         bubbles: true,
         cancelable: true,
         button: 0
       }));
+      const navigationCell = elements(1).stickyHeaderRow.cells[1];
       const resizeHandle = navigationCell.querySelector<HTMLElement>('.meo-md-html-table-column-resize-handle')!;
       resizeHandle.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
       const navigation = {
-        indicatorVisible: navigationIndicatorVisible,
-        indicatorColumn: navigationIndicatorColumn,
         clickPrevented: navigationClickPrevented,
-        count: sourceHeaderNavigations,
-        hiddenAfterClick: !elements(1).stickyNavigationIndicator.classList.contains('is-visible')
+        count: sourceHeaderNavigations
       };
       const outer = document.getElementById('outer')!;
       await settle(() => {
@@ -650,11 +638,8 @@ async function main(): Promise<void> {
     assert.equal(result.outerScrollAligned, true, 'outer scrolling keeps Sticky geometry aligned to public scroller bounds');
     assert.equal(result.visible, true);
     assert.deepEqual(result.navigation, {
-      indicatorVisible: true,
-      indicatorColumn: '1',
       clickPrevented: true,
-      count: 1,
-      hiddenAfterClick: true
+      count: 1
     });
     assert.equal(result.transform, 'translateX(-45px)');
     assert.equal(result.controls.className, true);

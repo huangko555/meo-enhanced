@@ -98,7 +98,6 @@ import {
   Columns2,
   EllipsisVertical,
   Plus,
-  Pin,
   Rows2,
   X,
   createElement,
@@ -157,7 +156,6 @@ interface DomRefs {
   stickyHeaderViewport: HTMLDivElement;
   stickyTable: HTMLTableElement;
   stickyHeaderRow: HTMLTableRowElement;
-  stickyNavigationIndicator: HTMLSpanElement;
   contextTrigger: HTMLButtonElement;
   contextMenu: HTMLDivElement;
   contextPages: Record<TableContextPage, HTMLDivElement>;
@@ -2571,8 +2569,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       stickyChrome,
       stickyHeaderViewport,
       stickyTable,
-      stickyHeaderRow,
-      stickyNavigationIndicator
+      stickyHeaderRow
     } = this.domRefs;
     return {
       scroller: this.view.scrollDOM,
@@ -2581,8 +2578,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       stickyChrome,
       stickyHeaderViewport,
       stickyTable,
-      stickyHeaderRow,
-      stickyNavigationIndicator
+      stickyHeaderRow
     };
   }
 
@@ -4478,7 +4474,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const range = this.resolveCurrentTableRange(view, dom);
     if (!range) return null;
 
-    const tableStartLine = view.state.doc.lineAt(range.from).number;
+    const tableStartLine = this.resolveCurrentTableStartLine(view, 0, range);
+    if (tableStartLine === null) return null;
     const blankRow = `${this.tableData.indent}| ${new Array(colCount).fill('').join(' | ')} |`;
     const changes = this.collectPendingCellSourceChanges(view);
     const provenance = getTableTransactionProvenance(view.state);
@@ -5777,15 +5774,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     stickyThead.appendChild(stickyHeaderRow);
     stickyTable.append(stickyColgroupElement, stickyThead);
     stickyHeaderViewport.appendChild(stickyTable);
-    const stickyNavigationIndicator = document.createElement('span');
-    stickyNavigationIndicator.className = 'meo-md-html-table-sticky-navigation-indicator';
-    stickyNavigationIndicator.setAttribute('aria-hidden', 'true');
-    stickyNavigationIndicator.appendChild(createElement(Pin, {
-      width: 16,
-      height: 16,
-      'aria-hidden': 'true'
-    }));
-    stickyChrome.append(stickyHeaderViewport, stickyNavigationIndicator);
+    stickyChrome.append(stickyHeaderViewport);
 
     const lineNumberLayer = document.createElement('div');
     lineNumberLayer.className = 'meo-md-html-table-line-numbers';
@@ -5819,7 +5808,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       stickyHeaderViewport,
       stickyTable,
       stickyHeaderRow,
-      stickyNavigationIndicator,
       contextTrigger,
       contextMenu,
       contextPages,

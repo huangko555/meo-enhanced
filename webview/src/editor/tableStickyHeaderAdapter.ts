@@ -17,7 +17,6 @@ export type TableStickyHeaderElements = {
   readonly stickyHeaderViewport: HTMLElement;
   readonly stickyTable: HTMLTableElement;
   readonly stickyHeaderRow: HTMLTableRowElement;
-  readonly stickyNavigationIndicator: HTMLElement;
 };
 
 export type TableStickyHeaderAdapterOptions = {

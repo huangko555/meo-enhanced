@@ -46,11 +46,6 @@ function isColumnResizeInteraction(event: Event): boolean {
   );
 }
 
-function hideNavigationIndicator(elements: TableStickyHeaderElements): void {
-  elements.stickyNavigationIndicator.classList.remove('is-visible');
-  elements.stickyNavigationIndicator.removeAttribute('data-table-column');
-}
-
 function suppressStickyInteraction(event: Event): void {
   if (isColumnResizeInteraction(event)) return;
   event.preventDefault();
@@ -59,7 +54,6 @@ function suppressStickyInteraction(event: Event): void {
 
 function hide(elements: TableStickyHeaderElements): void {
   elements.stickyChrome.classList.remove('is-visible', 'has-sticky-controls');
-  hideNavigationIndicator(elements);
   for (const property of ['top', 'left', 'width', 'height']) {
     elements.stickyChrome.style.removeProperty(property);
   }
@@ -163,8 +157,7 @@ function areSameElements(
     left.stickyChrome === right.stickyChrome &&
     left.stickyHeaderViewport === right.stickyHeaderViewport &&
     left.stickyTable === right.stickyTable &&
-    left.stickyHeaderRow === right.stickyHeaderRow &&
-    left.stickyNavigationIndicator === right.stickyNavigationIndicator;
+    left.stickyHeaderRow === right.stickyHeaderRow;
 }
 
 export function createCodeMirrorDomTableStickyHeaderAdapter(
@@ -317,12 +310,9 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
           const shouldNavigate = eventName === 'click'
             && event instanceof MouseEvent
             && event.button === 0
-            && !isColumnResizeInteraction(event)
-            && event.target instanceof Element
-            && Boolean(event.target.closest('th'));
+            && !isColumnResizeInteraction(event);
           suppressStickyInteraction(event);
           if (shouldNavigate) {
-            hideNavigationIndicator(elements);
             options.navigateToSourceHeader?.();
           }
         };
@@ -331,39 +321,6 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
           elements.stickyHeaderViewport.removeEventListener(eventName, listener, true);
         });
       }
-
-      const previousPointerMove = elements.stickyHeaderViewport.onpointermove;
-      const previousPointerLeave = elements.stickyHeaderViewport.onpointerleave;
-      const showNavigationIndicator = (event: PointerEvent): void => {
-        if (event.pointerType === 'touch' || isColumnResizeInteraction(event)) {
-          hideNavigationIndicator(elements);
-          return;
-        }
-        const target = event.target instanceof Element ? event.target.closest('th') : null;
-        if (!(target instanceof HTMLTableCellElement) || !elements.stickyHeaderRow.contains(target)) {
-          hideNavigationIndicator(elements);
-          return;
-        }
-        const chromeRect = elements.stickyChrome.getBoundingClientRect();
-        const x = Math.min(Math.max(event.clientX - chromeRect.left - 8, 26), Math.max(26, chromeRect.width - 4));
-        const y = Math.min(Math.max(event.clientY - chromeRect.top, 14), Math.max(14, chromeRect.height - 14));
-        elements.stickyNavigationIndicator.style.left = `${x}px`;
-        elements.stickyNavigationIndicator.style.top = `${y}px`;
-        elements.stickyNavigationIndicator.dataset.tableColumn = String(target.cellIndex);
-        elements.stickyNavigationIndicator.classList.add('is-visible');
-      };
-      const hideNavigationIndicatorOnLeave = (): void => hideNavigationIndicator(elements);
-      elements.stickyHeaderViewport.onpointermove = showNavigationIndicator;
-      elements.stickyHeaderViewport.onpointerleave = hideNavigationIndicatorOnLeave;
-      cleanup.push(() => {
-        if (elements.stickyHeaderViewport.onpointermove === showNavigationIndicator) {
-          elements.stickyHeaderViewport.onpointermove = previousPointerMove;
-        }
-        if (elements.stickyHeaderViewport.onpointerleave === hideNavigationIndicatorOnLeave) {
-          elements.stickyHeaderViewport.onpointerleave = previousPointerLeave;
-        }
-        hideNavigationIndicator(elements);
-      });
 
       makeStickyContentPassive(elements.stickyHeaderViewport);
       elements.stickyHeaderRow.replaceChildren(...nextCells);
