@@ -577,6 +577,7 @@ function mermaidEditorOffsetToOuterOffset(sourceText: string, prefix: string, of
 
 type MermaidSourceProjectionLock = {
   scrollTop: number;
+  preserveScroll: boolean;
   releaseFrame: number | null;
   releaseOnInteraction: () => void;
   previousSelection: EditorSelection;
@@ -616,7 +617,7 @@ function releaseMermaidSourceProjectionLock(
       annotations: Transaction.addToHistory.of(false)
     });
   }
-  if (preserveScroll && outerView.dom.isConnected) {
+  if (preserveScroll && lock.preserveScroll && outerView.dom.isConnected) {
     getViewportController(outerView)?.lockScrollTop(
       lock.scrollTop,
       lock.isExplicitNavigationCurrent
@@ -626,7 +627,8 @@ function releaseMermaidSourceProjectionLock(
 
 function acquireMermaidSourceProjectionLock(
   outerView: EditorView,
-  anchor: number
+  anchor: number,
+  preserveScroll?: boolean
 ): MermaidSourceProjectionLock {
   let locks = mermaidSourceProjectionLocks.get(outerView);
   if (!locks) {
@@ -643,6 +645,7 @@ function acquireMermaidSourceProjectionLock(
     };
     lock = {
       scrollTop: outerView.scrollDOM.scrollTop,
+      preserveScroll: preserveScroll ?? true,
       releaseFrame: null,
       releaseOnInteraction,
       previousSelection: outerView.state.selection,
@@ -739,7 +742,16 @@ class MermaidEditingController {
           EditorView.lineWrapping,
           EditorView.domEventHandlers({
             beforeinput: () => {
-              acquireMermaidSourceProjectionLock(this.outerView, this.block.anchor);
+              const caret = this.innerView.coordsAtPos(this.innerView.state.selection.main.head);
+              const viewport = this.outerView.scrollDOM.getBoundingClientRect();
+              // A clipped caret belongs to nested-input continuity, which will
+              // reveal it once at the nearest edge. Letting the projection lock
+              // own that same input makes the two viewport intents visibly race.
+              acquireMermaidSourceProjectionLock(
+                this.outerView,
+                this.block.anchor,
+                Boolean(caret && caret.top >= viewport.top && caret.bottom <= viewport.bottom)
+              );
               return false;
             },
             blur: () => {
@@ -849,13 +861,15 @@ class MermaidEditingController {
                 currentController.innerView.contentDOM.focus({ preventScroll: true });
               }
             }
-            viewportController?.lockScrollTop(scrollTop, projectionLock.isExplicitNavigationCurrent);
+            if (projectionLock.preserveScroll) {
+              viewportController?.lockScrollTop(scrollTop, projectionLock.isExplicitNavigationCurrent);
+            }
             const outerView = this.outerView;
             queueMicrotask(() => {
               const lockIsCurrent = mermaidSourceProjectionLocks
                 .get(outerView)
                 ?.get(this.block.anchor) === projectionLock;
-              if (outerView.dom.isConnected && lockIsCurrent) {
+              if (outerView.dom.isConnected && lockIsCurrent && projectionLock.preserveScroll) {
                 viewportController?.lockScrollTop(scrollTop, projectionLock.isExplicitNavigationCurrent);
               }
             });
