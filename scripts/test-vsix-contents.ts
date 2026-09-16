@@ -48,6 +48,7 @@ if (!files.some((path) => path.startsWith('webview/dist/katex/fonts/'))) {
 const forbiddenPrefixes = [
   '.agents/',
   '.claude/',
+  '.codex/',
   '.codegraph/',
   '.github/',
   '.local/',
