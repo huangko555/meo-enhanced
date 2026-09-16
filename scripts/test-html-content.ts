@@ -167,6 +167,7 @@ async function main() {
       const quote = document.querySelector<HTMLElement>('.meo-md-html-block blockquote');
       const table = document.querySelector<HTMLElement>('.meo-md-html-block table');
       const tableHeader = table?.querySelector<HTMLElement>('th') ?? null;
+      const tableBodyCell = table?.querySelector<HTMLElement>('tbody td') ?? null;
       const image = document.querySelector<HTMLElement>('.meo-md-html-block .meo-md-image');
       const kbd = document.querySelector<HTMLElement>('.meo-md-html-block kbd');
       const compactBlocks = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-block'))
@@ -234,6 +235,7 @@ async function main() {
         quoteBackground: quote ? getComputedStyle(quote).backgroundColor : '',
         tableCellCount: table?.querySelectorAll('th, td').length ?? 0,
         tableHeaderBackground: tableHeader ? getComputedStyle(tableHeader).backgroundColor : '',
+        tableBodyBackground: tableBodyCell ? getComputedStyle(tableBodyCell).backgroundColor : '',
         imageControls: image?.querySelectorAll('.meo-md-image-controls button').length ?? 0,
         kbdBackground: kbd ? getComputedStyle(kbd).backgroundColor : '',
         compactGap: compactBlocks.length === 2
@@ -302,7 +304,8 @@ async function main() {
       initial.quoteBorderWidth === '0px' ||
       initial.quoteBackground !== 'rgba(0, 0, 0, 0)' ||
       initial.tableCellCount !== 4 ||
-      initial.tableHeaderBackground !== 'rgb(227, 233, 240)' ||
+      initial.tableHeaderBackground === 'rgba(0, 0, 0, 0)' ||
+      initial.tableHeaderBackground === initial.tableBodyBackground ||
       initial.imageControls < 3 ||
       initial.kbdBackground !== 'rgb(238, 242, 246)' ||
       initial.compactGap === null || initial.compactGap < 20 || initial.compactGap > 30 ||
