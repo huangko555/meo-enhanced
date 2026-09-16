@@ -49,6 +49,7 @@ type WidthIntent = {
   to: number;
   table: HTMLTableElement;
   signature: string | null;
+  source: 'automatic' | 'manual';
   snapshot: PreviewSnapshot;
 };
 
@@ -348,6 +349,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         });
         render(table, result.widths, result.totalWidth);
         storeIntent(table, {
+          source: 'automatic',
           snapshot: {
             widths: [...result.widths],
             intentWidths: [...preferredWidths],
@@ -364,7 +366,30 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       setOverflowState(table, currentFacts.availableWidth);
       return;
     }
-    const currentFacts = layoutFacts(table);
+    let currentFacts: TableLayoutFacts;
+    if (intent.source === 'automatic'
+      && availableWidth(table) > intent.snapshot.availableWidth + 0.5) {
+      // A retained or rebuilt webview can first bind while VS Code is still
+      // restoring a narrow host slot. Re-sample automatic layouts without the
+      // projected columns so that a later, wider host can raise that startup
+      // ceiling. Manual drag intent must never pass through this path.
+      reset(table);
+      const startupBaseline = refreshUncommittedStartupBaseline(table);
+      currentFacts = layoutFacts(table);
+      const preferredColumnWidth = preferredDefaultColumnWidth(table);
+      const preferredWidths = (startupBaseline?.widths ?? currentFacts.widths)
+        .map((width) => Math.max(width, preferredColumnWidth));
+      const preferredTotalWidth = preferredWidths.reduce((sum, width) => sum + width, 0);
+      if (preferredTotalWidth > intent.snapshot.preferredTotalWidth + 0.5) {
+        intent.snapshot = {
+          ...intent.snapshot,
+          intentWidths: preferredWidths,
+          preferredTotalWidth
+        };
+      }
+    } else {
+      currentFacts = layoutFacts(table);
+    }
     const currentPolicyState: TableColumnWidthPolicyState = intent.snapshot.policyState.elastic
       ? {
           elastic: true,
@@ -560,6 +585,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         // Keep the live drag intent available to a replacement widget. A DOM rebuild
         // may otherwise project the last committed width over the active pointer preview.
         storeIntent(table, {
+          source: 'manual',
           snapshot
         });
         render(table, result.widths, result.totalWidth);
@@ -590,6 +616,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         const committedSnapshot = lastPreview ?? stored?.snapshot ?? null;
         if (lastPreview) {
           storeIntent(table, {
+            source: 'manual',
             snapshot: lastPreview
           });
           table.dispatchEvent(new CustomEvent(projectionEventName));
