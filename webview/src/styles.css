@@ -1825,6 +1825,11 @@ button:focus-visible > .menu-switch {
   --meo-active-editor-font-size: var(--meo-font-live-size);
   --meo-active-editor-line-height: var(--meo-line-height-live);
   --meo-markdown-marker-font-weight: var(--meo-font-live-weight);
+  --meo-live-table-header-background: color-mix(
+    in srgb,
+    var(--meo-background) 66%,
+    var(--meo-color-base03, var(--meo-semantic-tableBorder)) 34%
+  );
 }
 
 .cm-editor.meo-mode-source {
@@ -3201,7 +3206,7 @@ button:focus-visible > .menu-switch {
 }
 
 .cm-editor .meo-md-html-block th {
-  background: var(--meo-semantic-tableHeaderBackground);
+  background: var(--meo-live-table-header-background, var(--meo-semantic-tableHeaderBackground));
   font-weight: 600;
 }
 
@@ -5194,7 +5199,7 @@ body.outline-resizing .preview-frame {
 }
 
 .cm-editor .meo-md-html-table thead th {
-  background-color: var(--meo-semantic-tableHeaderBackground);
+  background-color: var(--meo-live-table-header-background, var(--meo-semantic-tableHeaderBackground));
 }
 
 .cm-editor .meo-md-html-table tbody tr:nth-child(even) td {
@@ -5386,7 +5391,7 @@ body.outline-resizing .preview-frame {
 .cm-editor .meo-md-html-table-sticky-header {
   width: 100%;
   overflow: hidden;
-  background: var(--meo-semantic-tableHeaderBackground);
+  background: var(--meo-live-table-header-background, var(--meo-semantic-tableHeaderBackground));
   box-shadow: inset 0 -1px 0 var(--meo-semantic-tableBorder);
 }
 
@@ -5876,7 +5881,7 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-delet
 
 .cm-editor.meo-mode-live .cm-line.meo-md-table-header-line .meo-md-table-cell {
   border-top: 1px solid var(--meo-semantic-tableBorder);
-  background-color: var(--meo-semantic-tableHeaderBackground);
+  background-color: var(--meo-live-table-header-background, var(--meo-semantic-tableHeaderBackground));
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-table-line:not(.meo-md-table-delim-line) {
