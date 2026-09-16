@@ -1827,8 +1827,8 @@ button:focus-visible > .menu-switch {
   --meo-markdown-marker-font-weight: var(--meo-font-live-weight);
   --meo-live-table-header-background: color-mix(
     in srgb,
-    var(--meo-background) 88%,
-    var(--meo-foreground) 12%
+    var(--meo-background) 90%,
+    var(--meo-foreground) 10%
   );
 }
 
