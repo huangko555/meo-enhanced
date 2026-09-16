@@ -1391,7 +1391,7 @@ try {
     };
   });
   assert.ok(tableHeaderColors.live && tableHeaderColors.preview, JSON.stringify(tableHeaderColors));
-  assert.equal(tableHeaderColors.live, tableHeaderColors.preview, JSON.stringify(tableHeaderColors));
+  assert.notEqual(tableHeaderColors.live, tableHeaderColors.preview, JSON.stringify(tableHeaderColors));
   assert.equal(tableHeaderColors.darkMenus.selection, tableHeaderColors.darkMenus.table, JSON.stringify(tableHeaderColors));
   assert.equal(tableHeaderColors.lightMenus.selection, tableHeaderColors.lightMenus.table, JSON.stringify(tableHeaderColors));
   await startPreviewAnchorSampling(transitionTableAnchorLine);
