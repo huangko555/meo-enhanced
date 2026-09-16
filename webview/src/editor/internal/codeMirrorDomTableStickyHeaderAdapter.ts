@@ -40,13 +40,6 @@ function makeStickyContentPassive(root: HTMLElement): void {
   }
 }
 
-function suppressStickyInteraction(event: Event): void {
-  if (event.target instanceof Element &&
-    event.target.closest('.meo-md-html-table-column-resize-handle')) return;
-  event.preventDefault();
-  event.stopImmediatePropagation();
-}
-
 function hide(elements: TableStickyHeaderElements): void {
   elements.stickyChrome.classList.remove('is-visible', 'has-sticky-controls');
   for (const property of ['top', 'left', 'width', 'height']) {
@@ -57,15 +50,15 @@ function hide(elements: TableStickyHeaderElements): void {
 function applyLayout(
   elements: TableStickyHeaderElements,
   layout: ReturnType<TableStickyHeaderPolicy['layout']>
-): void {
+): boolean {
   if (!layout.visible) {
     hide(elements);
-    return;
+    return false;
   }
   const mapping = measureFixedContainingBlockMapping(elements.stickyChrome);
   if (!mapping) {
     hide(elements);
-    return;
+    return false;
   }
   const projection = projectFixedChromeGeometry(mapping, {
     rect: {
@@ -82,7 +75,7 @@ function applyLayout(
   });
   if (!projection.ok) {
     hide(elements);
-    return;
+    return false;
   }
   const [tableWidth, translate, headerHeight] = projection.geometry.vectors;
   elements.stickyChrome.classList.add('is-visible');
@@ -94,6 +87,7 @@ function applyLayout(
   elements.stickyHeaderViewport.style.height = `${headerHeight.y}px`;
   elements.stickyTable.style.width = `${tableWidth.x}px`;
   elements.stickyTable.style.transform = `translateX(${translate.x}px)`;
+  return true;
 }
 
 function throwLifecycleErrors(
@@ -142,6 +136,25 @@ function clonePassiveHeader(source: HTMLTableRowElement): HTMLTableCellElement[]
   });
 }
 
+function replaceProjectedHeaderCells(
+  row: HTMLTableRowElement,
+  cells: HTMLTableCellElement[],
+  interactive: { readonly column: number; readonly cell: HTMLTableCellElement } | null
+): void {
+  if (!interactive) {
+    row.replaceChildren(...cells);
+    return;
+  }
+  for (let column = 0; column < cells.length; column += 1) {
+    const next = cells[column];
+    const current = row.cells.item(column);
+    if (current === next) continue;
+    if (current) current.replaceWith(next);
+    else row.appendChild(next);
+  }
+  while (row.cells.length > cells.length) row.lastElementChild?.remove();
+}
+
 function areSameElements(
   left: TableStickyHeaderElements,
   right: TableStickyHeaderElements
@@ -163,6 +176,13 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
   let current: StickyGeneration | null = null;
   let dirty = false;
   let refreshing = false;
+  let visible = false;
+
+  const notifyVisibility = (nextVisible: boolean): void => {
+    if (visible === nextVisible) return;
+    visible = nextVisible;
+    options.visibilityChanged?.(visible);
+  };
 
   const registration = options.scheduler.register(() => {
     if (phase !== 'mounted' || !current || refreshing) return;
@@ -174,12 +194,13 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
       const bodyRows = elements.table.tBodies[0]?.rows.length ?? 0;
       if (!header || bodyRows === 0) {
         hide(elements);
+        notifyVisibility(false);
         return;
       }
       const scrollerRect = elements.scroller.getBoundingClientRect();
       const tableRect = elements.table.getBoundingClientRect();
       const headerRect = header.getBoundingClientRect();
-      applyLayout(elements, options.policy.layout({
+      notifyVisibility(applyLayout(elements, options.policy.layout({
         scroller: {
           top: scrollerRect.top, left: scrollerRect.left,
           right: scrollerRect.right, height: scrollerRect.height
@@ -190,7 +211,7 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
         },
         header: { top: headerRect.top, height: headerRect.height },
         controlsHeight: options.controlsHeight()
-      }));
+      })));
     } finally {
       refreshing = false;
       if (dirty && phase === 'mounted') registration.request();
@@ -214,6 +235,7 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
       try {
         delete previous.elements.stickyChrome.dataset.tableStickyHeaderOwner;
         hide(previous.elements);
+        notifyVisibility(false);
       } catch (error) {
         errors.push(error);
       }
@@ -232,6 +254,12 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
     try {
       const sourceHeader = elements.table.tHead?.rows[0];
       const nextCells = sourceHeader ? clonePassiveHeader(sourceHeader) : [];
+      const interactive = options.resolveInteractiveCell?.() ?? null;
+      if (interactive && interactive.column >= 0 && interactive.column < nextCells.length) {
+        interactive.cell.classList.add('meo-md-html-table-sticky-interactive-cell');
+        interactive.cell.removeAttribute('aria-hidden');
+        nextCells[interactive.column] = interactive.cell;
+      }
       const active = (): boolean => phase === 'mounted' && current?.id === id;
       const requestIfActive = (): void => {
         if (active()) invalidate();
@@ -299,16 +327,39 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
         ancestor = ancestor.parentElement;
       }
       cleanup.push(() => ancestorObserver.disconnect());
+      const handleStickyInteraction = (event: Event): void => {
+        if (!(event.target instanceof Element)) return;
+        if (event.target.closest('.meo-md-html-table-column-resize-handle')) return;
+        if (event.target.closest('.meo-md-html-table-sticky-interactive-cell')) return;
+        const cell = event.target.closest('th');
+        if (!(cell instanceof HTMLTableCellElement) || !elements.stickyHeaderRow.contains(cell)) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (event.type !== 'pointerdown' || !(event instanceof PointerEvent) || event.button !== 0) return;
+        const column = cell.cellIndex;
+        if (column < 0) return;
+        options.activateCell?.({
+          column,
+          projectedCell: cell,
+          clientX: event.clientX,
+          clientY: event.clientY
+        });
+      };
       const passiveEvents = ['pointerdown', 'click', 'dblclick'] as const;
       for (const eventName of passiveEvents) {
-        elements.stickyHeaderViewport.addEventListener(eventName, suppressStickyInteraction, true);
+        elements.stickyHeaderViewport.addEventListener(eventName, handleStickyInteraction, true);
         cleanup.push(() => {
-          elements.stickyHeaderViewport.removeEventListener(eventName, suppressStickyInteraction, true);
+          elements.stickyHeaderViewport.removeEventListener(eventName, handleStickyInteraction, true);
         });
       }
 
-      makeStickyContentPassive(elements.stickyHeaderViewport);
-      elements.stickyHeaderRow.replaceChildren(...nextCells);
+      if (interactive) {
+        elements.stickyHeaderViewport.removeAttribute('aria-hidden');
+        elements.stickyHeaderViewport.removeAttribute('contenteditable');
+      } else {
+        makeStickyContentPassive(elements.stickyHeaderViewport);
+      }
+      replaceProjectedHeaderCells(elements.stickyHeaderRow, nextCells, interactive);
       elements.stickyChrome.dataset.tableStickyHeaderOwner = 'adapter';
       current = { id, elements, cleanup };
       phase = 'mounted';
@@ -322,6 +373,7 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
       try {
         delete elements.stickyChrome.dataset.tableStickyHeaderOwner;
         hide(elements);
+        notifyVisibility(false);
       } catch (cleanupError) {
         cleanupErrors.push(cleanupError);
       }

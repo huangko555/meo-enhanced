@@ -5380,6 +5380,20 @@ html[data-editor-appearance='dark'] body.vscode-dark
   cursor: col-resize !important;
 }
 
+.cm-editor .meo-md-html-table-sticky-table
+  th:not(.meo-md-html-table-sticky-interactive-cell) .meo-md-html-table-cell-preview,
+.cm-editor .meo-md-html-table-sticky-table
+  th.meo-md-html-table-sticky-interactive-cell textarea {
+  cursor: text !important;
+}
+
+.cm-editor .meo-md-html-table-sticky-table
+  th.meo-md-html-table-sticky-interactive-cell,
+.cm-editor .meo-md-html-table-sticky-table
+  th.meo-md-html-table-sticky-interactive-cell * {
+  user-select: text;
+}
+
 .cm-editor .meo-md-html-table-sticky-header {
   width: 100%;
   overflow: hidden;

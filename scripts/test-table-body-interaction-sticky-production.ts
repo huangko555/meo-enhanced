@@ -104,12 +104,132 @@ async function main(): Promise<void> {
     ) {
       throw new Error(`Active header cell became empty in the floating header: ${JSON.stringify(activeHeaderStickyState)}`);
     }
+
+    const stickyHeaderClick = await page.$eval(
+      '.meo-md-html-table-sticky-table thead th:nth-child(4) .meo-md-html-table-cell-preview',
+      (preview) => {
+        const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+        const rect = preview.getBoundingClientRect();
+        return {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+          scrollTop: scroller.scrollTop
+        };
+      }
+    );
+    await page.mouse.click(stickyHeaderClick.x, stickyHeaderClick.y);
+    await waitForFrames(page, 3);
+    await page.keyboard.press('End');
+    await page.keyboard.type(' edited');
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await waitForFrames(page, 5);
+    const interactiveStickyHeader = await page.evaluate((expectedScrollTop) => {
+      const editor = (window as any).__tableBodyInteractionEditor;
+      const active = document.activeElement;
+      const input = active instanceof HTMLTextAreaElement ? active : null;
+      const trigger = document.querySelector<HTMLButtonElement>('.meo-md-html-table-context-trigger');
+      const triggerStyle = trigger ? getComputedStyle(trigger) : null;
+      return {
+        activeInSticky: Boolean(input?.closest('.meo-md-html-table-sticky-table')),
+        row: input?.dataset.tableRow ?? null,
+        col: input?.dataset.tableCol ?? null,
+        value: input?.value ?? null,
+        uniqueInputCount: document.querySelectorAll(
+          'textarea[data-table-row="0"][data-table-col="3"]'
+        ).length,
+        placeholderCount: document.querySelectorAll(
+          '.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead [data-meo-sticky-header-placeholder="true"]'
+        ).length,
+        triggerVisible: Boolean(
+          trigger && !trigger.hidden && triggerStyle?.visibility !== 'hidden' && triggerStyle?.opacity !== '0'
+        ),
+        scrollDelta: Math.abs(editor.view.scrollDOM.scrollTop - expectedScrollTop),
+        sourceUpdated: editor.getText().includes('Column 4 edited')
+      };
+    }, stickyHeaderClick.scrollTop);
+    if (
+      !interactiveStickyHeader.activeInSticky
+      || interactiveStickyHeader.row !== '0'
+      || interactiveStickyHeader.col !== '3'
+      || interactiveStickyHeader.value !== 'Column 4 edited'
+      || interactiveStickyHeader.uniqueInputCount !== 1
+      || interactiveStickyHeader.placeholderCount !== 1
+      || !interactiveStickyHeader.triggerVisible
+      || interactiveStickyHeader.scrollDelta > 1
+      || !interactiveStickyHeader.sourceUpdated
+    ) {
+      throw new Error(`Floating table header did not preserve one editable surface: ${JSON.stringify(interactiveStickyHeader)}`);
+    }
+    await page.click('.meo-md-html-table-context-trigger');
+    await waitForFrames(page, 2);
+    await page.click('.meo-md-html-table-context-next');
+    await waitForFrames(page, 1);
+    const stickyToolbar = await page.evaluate(() => {
+      const menu = document.querySelector<HTMLElement>('.meo-md-html-table-context-menu');
+      const activeInput = document.querySelector<HTMLTextAreaElement>(
+        '.meo-md-html-table-sticky-table textarea[data-table-row="0"][data-table-col="3"]'
+      );
+      return {
+        visible: Boolean(menu && !menu.hidden && getComputedStyle(menu).display !== 'none'),
+        activePage: menu?.dataset.activePage ?? null,
+        enabledButtons: menu?.querySelectorAll(
+          '[data-context-page="arrangement"] button:not(:disabled)'
+        ).length ?? 0,
+        editorStillProjected: Boolean(activeInput),
+        uniqueInputCount: document.querySelectorAll(
+          'textarea[data-table-row="0"][data-table-col="3"]'
+        ).length
+      };
+    });
+    if (
+      !stickyToolbar.visible
+      || stickyToolbar.activePage !== 'arrangement'
+      || stickyToolbar.enabledButtons === 0
+      || !stickyToolbar.editorStillProjected
+      || stickyToolbar.uniqueInputCount !== 1
+    ) {
+      throw new Error(`Floating header table actions were not reachable: ${JSON.stringify(stickyToolbar)}`);
+    }
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => {
+      const input = document.querySelector<HTMLTextAreaElement>(
+        '.meo-md-html-table-sticky-table textarea[data-table-row="0"][data-table-col="3"]'
+      )!;
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(2, 8, 'forward');
+    });
     await page.evaluate(() => {
       const editor = (window as any).__tableBodyInteractionEditor;
       editor.view.scrollDOM.scrollTop = 0;
       editor.view.scrollDOM.dispatchEvent(new Event('scroll'));
     });
     await waitForFrames(page, 4);
+    const restoredHeaderEditor = await page.evaluate(() => {
+      const active = document.activeElement;
+      const input = active instanceof HTMLTextAreaElement ? active : null;
+      return {
+        activeInPrimary: Boolean(input?.closest(
+          '.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead'
+        )),
+        value: input?.value ?? null,
+        selectionStart: input?.selectionStart ?? null,
+        selectionEnd: input?.selectionEnd ?? null,
+        uniqueInputCount: document.querySelectorAll(
+          'textarea[data-table-row="0"][data-table-col="3"]'
+        ).length,
+        placeholderCount: document.querySelectorAll('[data-meo-sticky-header-placeholder="true"]').length
+      };
+    });
+    if (
+      !restoredHeaderEditor.activeInPrimary
+      || restoredHeaderEditor.value !== 'Column 4 edited'
+      || restoredHeaderEditor.selectionStart !== 2
+      || restoredHeaderEditor.selectionEnd !== 8
+      || restoredHeaderEditor.uniqueInputCount !== 1
+      || restoredHeaderEditor.placeholderCount !== 0
+    ) {
+      throw new Error(`Floating header editor did not return to the primary table intact: ${JSON.stringify(restoredHeaderEditor)}`);
+    }
 
     const clickPoint = await page.$eval(
       '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tbody tr:nth-child(2) td:nth-child(8) .meo-md-html-table-cell-preview',
