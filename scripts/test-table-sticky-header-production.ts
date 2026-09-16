@@ -192,7 +192,7 @@ async function main(): Promise<void> {
       assert.ok(Math.abs(geometry.stickyHeaderTop! - geometry.chromeTop!) <= 1, JSON.stringify(geometry));
       assert.ok(geometry.firstColumnDelta! <= 1, JSON.stringify(geometry));
       assert.notEqual(geometry.mainHeaderBackground, geometry.editorBackground, JSON.stringify(geometry));
-      assert.notEqual(geometry.mainHeaderBackground, geometry.stripedRowBackground, JSON.stringify(geometry));
+      assert.equal(geometry.mainHeaderBackground, geometry.stripedRowBackground, JSON.stringify(geometry));
       assert.equal(geometry.stickyHeaderBackground, geometry.mainHeaderBackground, JSON.stringify(geometry));
       assert.equal(geometry.stickySurfaceBackground, geometry.mainHeaderBackground, JSON.stringify(geometry));
       assert.equal(geometry.contextTriggerFixed, false, JSON.stringify(geometry));
