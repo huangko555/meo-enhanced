@@ -4009,9 +4009,17 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         // A cell edit has already resized its row before the source transaction.
         // Re-anchoring to the document here interprets the widget replacement as
         // fresh layout and shifts the viewport by one source line. Keep the owned
-        // scroller absolute; the caret restore below will reveal only when needed.
+        // scroller absolute and restore focus without treating the autosave as
+        // navigation: typing must not make the document chase the caret.
         getViewportController(view)?.lockScrollTop(scrollTop);
-        this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget, input);
+        this.scheduleFocusCellAfterCommit(
+          view,
+          tableStartLine,
+          focusTarget,
+          input,
+          null,
+          { revealCaret: false }
+        );
       }
     }, tableCellAutoCommitDelayMs);
   }
@@ -4158,8 +4166,10 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     tableStartLine: number,
     focusTarget: PendingCellFocus,
     replacedInput: HTMLTextAreaElement | null = null,
-    replacedShell: HTMLElement | null = null
+    replacedShell: HTMLElement | null = null,
+    options: { revealCaret?: boolean } = {}
   ) {
+    const { revealCaret = true } = options;
     const viewport = getViewportController(view);
     const restoreContextMenu = this.pendingContextMenuRestore;
     const isRevealCurrent = restoreContextMenu
@@ -4201,7 +4211,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       // A contextual command is an in-place table operation. Revealing the
       // restored caret would make the document chase rows changed by the
       // command even though focus was restored with preventScroll.
-      if (!restoreContextMenu) this.revealTableCellCaretIfNeeded(input, isRevealCurrent);
+      if (revealCaret && !restoreContextMenu) this.revealTableCellCaretIfNeeded(input, isRevealCurrent);
       return true;
     };
 
@@ -4743,6 +4753,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
   wireInput(input: HTMLTextAreaElement, rowEl: HTMLTableRowElement, rowInputs: HTMLTextAreaElement[], container: HTMLElement, rowIndex: number, colIndex: number, preview: HTMLElement) {
     let compositionEndedAt = Number.NEGATIVE_INFINITY;
+    let scrollTopBeforeInput: number | null = null;
+    let revealCaretAfterInput = false;
     const refreshPreview = () => {
       this.renderCellPreview(
         preview,
@@ -4754,7 +4766,27 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const notifySelectionChange = () => {
       this.emitTableSelectionChange(container);
     };
+    input.addEventListener('beforeinput', () => {
+      const view = this.view;
+      if (!view || input.ownerDocument.activeElement !== input) {
+        scrollTopBeforeInput = null;
+        revealCaretAfterInput = false;
+        return;
+      }
+      const caret = tableCellCaretViewportBounds(input);
+      const viewport = tableUsableViewportBounds(view, input);
+      const caretIsVisible = (
+        caret.top >= viewport.top - tableCellCaretRevealEpsilon &&
+        caret.bottom <= viewport.bottom + tableCellCaretRevealEpsilon
+      );
+      scrollTopBeforeInput = caretIsVisible ? view.scrollDOM.scrollTop : null;
+      revealCaretAfterInput = !caretIsVisible;
+    });
     input.addEventListener('input', () => {
+      const preservedScrollTop = scrollTopBeforeInput;
+      const shouldRevealCaret = revealCaretAfterInput;
+      scrollTopBeforeInput = null;
+      revealCaretAfterInput = false;
       normalizeTableCellEditorInput(input);
       // Preedit belongs to the native textarea until the IME confirms it.
       // Save-triggered commits must not consume an unfinished candidate.
@@ -4777,6 +4809,14 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         this.scheduleLayout();
       };
       resizeAndSchedule();
+      if (preservedScrollTop !== null && input.ownerDocument.activeElement === input) {
+        const view = this.view;
+        const controller = view ? getViewportController(view) : null;
+        if (controller) controller.lockScrollTop(preservedScrollTop);
+        else if (view) view.scrollDOM.scrollTop = preservedScrollTop;
+      } else if (shouldRevealCaret) {
+        this.revealTableCellCaretIfNeeded(input);
+      }
       notifySelectionChange();
     });
     input.addEventListener('select', notifySelectionChange);

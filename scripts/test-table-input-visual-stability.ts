@@ -74,91 +74,185 @@ async function assertColumnReflowKeepsActiveCell(page: import('puppeteer-core').
 }
 
 async function assertWrappingCellGrowsDownward(page: import('puppeteer-core').Page): Promise<void> {
-  await page.setViewport({ width: 760, height: 560, deviceScaleFactor: 1 });
-  await page.evaluate(() => {
-    (window as any).__tableVisualEditor.destroy();
-    document.getElementById('app')!.replaceChildren();
-    const rows = Array.from({ length: 18 }, (_, index) => (
-      `| ${index + 1} | ${index === 8 ? 'TARGET' : `row-${index + 1}`} | alpha | beta |`
-    ));
-    const text = [
-      ...Array.from({ length: 50 }, (_, index) => `前置正文 ${index + 1}`),
-      '',
-      '| ID | 内容 | 状态一 | 状态二 |',
-      '| --- | --- | --- | --- |',
-      ...rows,
-      '',
-      ...Array.from({ length: 50 }, (_, index) => `后置正文 ${index + 1}`)
-    ].join('\n');
-    const editor = (window as any).EmbeddedInputViewportHarness.createEditor({
-      parent: document.getElementById('app')!,
-      text,
-      initialMode: 'live',
-      onApplyChanges() {}
+  await page.setViewport({ width: 760, height: 360, deviceScaleFactor: 1 });
+  const scenarios = [
+    { targetTop: 120, text: '继续输入内容以触发自动换行和高度变化' },
+    { targetTop: 190, text: '继续输入内容以触发自动换行和高度变化' },
+    { targetTop: 280, text: '继续输入内容以触发' }
+  ];
+  for (const { targetTop, text } of scenarios) {
+    await page.evaluate((targetTop) => {
+      (window as any).__tableVisualEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      const rows = Array.from({ length: 12 }, () => '|  |  |  |  |  |  |  |');
+      const text = [
+        ...Array.from({ length: 50 }, (_, index) => `前置正文 ${index + 1}`),
+        '',
+        '| 类型 | | 类型 |  |  | 内容 | 备注 |',
+        '| --- | --- | --- | --- | --- |',
+        ...rows,
+        '',
+        ...Array.from({ length: 50 }, (_, index) => `后置正文 ${index + 1}`)
+      ].join('\n');
+      const editor = (window as any).EmbeddedInputViewportHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      (window as any).__tableVisualEditor = editor;
+      editor.scrollToLine(63, 'center');
+      (window as any).__tableWrapTargetTop = targetTop;
+    }, targetTop);
+    await page.waitForSelector(
+      '.meo-md-html-table-shell tbody textarea[data-table-row="10"][data-table-col="3"]'
+    );
+    await waitForFrames(page, 10);
+
+    await page.evaluate(() => {
+      const editor = (window as any).__tableVisualEditor;
+      const input = document.querySelector<HTMLTextAreaElement>(
+        '.meo-md-html-table-shell tbody textarea[data-table-row="10"][data-table-col="3"]'
+      )!;
+      const cell = input.closest<HTMLTableCellElement>('td')!;
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      editor.view.scrollDOM.scrollTop += cell.getBoundingClientRect().top - viewport.top - (window as any).__tableWrapTargetTop;
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(input.value.length, input.value.length);
     });
-    (window as any).__tableVisualEditor = editor;
-    editor.scrollToLine(62, 'center');
-  });
-  await page.waitForFunction(() => Boolean(Array.from(
-    document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table textarea')
-  ).find((input) => input.value === 'TARGET')));
-  await waitForFrames(page, 10);
+    await waitForFrames(page, 8);
 
-  await page.evaluate(() => {
-    const editor = (window as any).__tableVisualEditor;
-    const input = Array.from(document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table textarea'))
-      .find((candidate) => candidate.value === 'TARGET')!;
-    const cell = input.closest<HTMLTableCellElement>('td')!;
-    const viewport = editor.view.scrollDOM.getBoundingClientRect();
-    editor.view.scrollDOM.scrollTop += cell.getBoundingClientRect().top - viewport.top - 390;
-    input.focus({ preventScroll: true });
-    input.setSelectionRange(input.value.length, input.value.length);
-  });
-  await waitForFrames(page, 8);
+    await page.evaluate(() => {
+      const editor = (window as any).__tableVisualEditor;
+      const input = document.activeElement as HTMLTextAreaElement;
+      const cell = input.closest<HTMLTableCellElement>('td')!;
+      const table = input.closest<HTMLTableElement>('table')!;
+      const cellRect = cell.getBoundingClientRect();
+      (window as any).__tableWrapDirectionInitial = {
+        cellTop: cellRect.top,
+        cellBottom: cellRect.bottom,
+        cellHeight: cellRect.height,
+        tableTop: table.getBoundingClientRect().top,
+        scrollTop: editor.view.scrollDOM.scrollTop
+      };
+    });
+    await page.keyboard.type(text, { delay: 45 });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await waitForFrames(page, 12);
 
-  await page.evaluate(() => {
-    const editor = (window as any).__tableVisualEditor;
-    const input = document.activeElement as HTMLTextAreaElement;
-    const cell = input.closest<HTMLTableCellElement>('td')!;
-    const table = input.closest<HTMLTableElement>('table')!;
-    const cellRect = cell.getBoundingClientRect();
-    (window as any).__tableWrapDirectionInitial = {
-      cellTop: cellRect.top,
-      cellBottom: cellRect.bottom,
-      cellHeight: cellRect.height,
-      tableTop: table.getBoundingClientRect().top,
-      scrollTop: editor.view.scrollDOM.scrollTop
-    };
-  });
-  await page.keyboard.type('这是一段会让当前单元格自动换行并增加高度的输入文字', { delay: 8 });
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  await waitForFrames(page, 12);
+    const result = await page.evaluate(() => {
+      const editor = (window as any).__tableVisualEditor;
+      const input = document.activeElement as HTMLTextAreaElement;
+      const cell = input.closest<HTMLTableCellElement>('td')!;
+      const table = input.closest<HTMLTableElement>('table')!;
+      const initial = (window as any).__tableWrapDirectionInitial;
+      const finalRect = cell.getBoundingClientRect();
+      return {
+        heightDelta: finalRect.height - initial.cellHeight,
+        bottomDelta: finalRect.bottom - initial.cellBottom,
+        cellTopDelta: finalRect.top - initial.cellTop,
+        tableTopDelta: table.getBoundingClientRect().top - initial.tableTop,
+        scrollDelta: editor.view.scrollDOM.scrollTop - initial.scrollTop,
+        focused: document.activeElement === input
+      };
+    });
+    if (
+      result.heightDelta < 10 ||
+      Math.abs(result.cellTopDelta) > 2 ||
+      Math.abs(result.tableTopDelta) > 2 ||
+      Math.abs(result.scrollDelta) > 2 ||
+      result.bottomDelta < result.heightDelta - 2 ||
+      !result.focused
+    ) {
+      throw new Error(`A wrapping table cell at ${targetTop}px did not keep its top fixed and grow downward: ${JSON.stringify(result)}`);
+    }
+  }
+}
 
-  const result = await page.evaluate(() => {
-    const editor = (window as any).__tableVisualEditor;
-    const input = document.activeElement as HTMLTextAreaElement;
-    const cell = input.closest<HTMLTableCellElement>('td')!;
-    const table = input.closest<HTMLTableElement>('table')!;
-    const initial = (window as any).__tableWrapDirectionInitial;
-    const finalRect = cell.getBoundingClientRect();
-    return {
-      heightDelta: finalRect.height - initial.cellHeight,
-      bottomDelta: finalRect.bottom - initial.cellBottom,
-      cellTopDelta: finalRect.top - initial.cellTop,
-      tableTopDelta: table.getBoundingClientRect().top - initial.tableTop,
-      scrollDelta: editor.view.scrollDOM.scrollTop - initial.scrollTop,
-      focused: document.activeElement === input
-    };
-  });
-  if (
-    result.heightDelta < 10 ||
-    Math.abs(result.cellTopDelta) > 2 ||
-    Math.abs(result.tableTopDelta) > 2 ||
-    Math.abs(result.scrollDelta) > 2 ||
-    result.bottomDelta < result.heightDelta - 2 ||
-    !result.focused
-  ) {
-    throw new Error(`A wrapping table cell did not keep its top fixed and grow downward: ${JSON.stringify(result)}`);
+async function assertOffscreenCellRevealsOnInput(page: import('puppeteer-core').Page): Promise<void> {
+  await page.setViewport({ width: 760, height: 360, deviceScaleFactor: 1 });
+  for (const side of ['above', 'below'] as const) {
+    await page.evaluate((side) => {
+      (window as any).__tableVisualEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      const rows = Array.from({ length: 20 }, (_, index) => `| ${index + 1} | ${index === 10 ? 'TARGET' : ''} |`);
+      const text = [
+        ...Array.from({ length: 50 }, (_, index) => `前置正文 ${index + 1}`),
+        '',
+        '| 序号 | 内容 |',
+        '| --- | --- |',
+        ...rows,
+        '',
+        ...Array.from({ length: 50 }, (_, index) => `后置正文 ${index + 1}`)
+      ].join('\n');
+      const editor = (window as any).EmbeddedInputViewportHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      (window as any).__tableVisualEditor = editor;
+      (window as any).__tableRevealSide = side;
+      editor.scrollToLine(64, 'center');
+    }, side);
+    await page.waitForFunction(() => Boolean(Array.from(
+      document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table textarea')
+    ).find((input) => input.value === 'TARGET')));
+    await waitForFrames(page, 10);
+
+    const initial = await page.evaluate(() => {
+      const editor = (window as any).__tableVisualEditor;
+      const input = Array.from(document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table textarea'))
+        .find((candidate) => candidate.value === 'TARGET')!;
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      const targetTop = (window as any).__tableRevealSide === 'above'
+        ? viewport.top - input.getBoundingClientRect().height - 60
+        : viewport.bottom + 60;
+      editor.view.scrollDOM.scrollTop += input.getBoundingClientRect().top - targetTop;
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(input.value.length, input.value.length);
+      const rect = input.getBoundingClientRect();
+      return {
+        side: (window as any).__tableRevealSide,
+        inputTop: rect.top,
+        inputBottom: rect.bottom,
+        viewportTop: viewport.top,
+        viewportBottom: viewport.bottom
+      };
+    });
+    if (
+      (side === 'above' && initial.inputBottom >= initial.viewportTop) ||
+      (side === 'below' && initial.inputTop <= initial.viewportBottom)
+    ) {
+      throw new Error(`Offscreen input fixture remained visible: ${JSON.stringify(initial)}`);
+    }
+
+    await page.keyboard.type('X');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await waitForFrames(page, 12);
+
+    const result = await page.evaluate(() => {
+      const editor = (window as any).__tableVisualEditor;
+      const input = document.activeElement as HTMLTextAreaElement;
+      const rect = input.getBoundingClientRect();
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      return {
+        value: input.value,
+        focused: input.matches('.meo-md-html-table textarea'),
+        inputTop: rect.top,
+        inputBottom: rect.bottom,
+        viewportTop: viewport.top,
+        viewportBottom: viewport.bottom
+      };
+    });
+    if (
+      !result.focused ||
+      result.value !== 'TARGETX' ||
+      result.inputBottom <= result.viewportTop ||
+      result.inputTop >= result.viewportBottom
+    ) {
+      throw new Error(`Typing did not reveal the ${side} table cell: ${JSON.stringify(result)}`);
+    }
   }
 }
 
@@ -277,6 +371,7 @@ async function main(): Promise<void> {
 
     await assertWrappingCellGrowsDownward(page);
     await assertColumnReflowKeepsActiveCell(page);
+    await assertOffscreenCellRevealsOnInput(page);
     console.log('table input visual stability regression passed');
   } catch (error) {
     primaryError = error;
