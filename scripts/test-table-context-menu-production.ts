@@ -221,6 +221,9 @@ async function main(): Promise<void> {
         menu.querySelectorAll<HTMLButtonElement>('[data-context-page="structure"] .meo-md-html-table-context-btn[data-command]'),
         (button) => button.dataset.command
       );
+      const insertRowAboveEnabledForBody = !menu.querySelector<HTMLButtonElement>(
+        'button[data-command="insert-row-above"]'
+      )!.disabled;
       const separatorCount = menu.querySelectorAll('[data-context-page="structure"] [role="separator"]').length;
       const defaultPage = menu.dataset.activePage;
       const pageNavigationShellTop = shell.getBoundingClientRect().top;
@@ -316,6 +319,9 @@ async function main(): Promise<void> {
       await frames(2);
       pointer(trigger);
       await frames(1);
+      const insertRowAboveDisabledForHeader = menu.querySelector<HTMLButtonElement>(
+        'button[data-command="insert-row-above"]'
+      )!.disabled;
       const originalHeaderRect = table.tHead!.rows[0].getBoundingClientRect();
       const editorViewportRect = editor.view.scrollDOM.getBoundingClientRect();
       editor.view.scrollDOM.dispatchEvent(new WheelEvent('wheel', { deltaY: 160, bubbles: true }));
@@ -325,14 +331,14 @@ async function main(): Promise<void> {
         'sticky table header'
       );
       await frames(2);
-      const triggerAvailableWithStickyHeader = !trigger.hidden;
-      const menuOpenWithStickyHeader = !menu.hidden;
+      const triggerHiddenWithStickyHeader = trigger.hidden;
+      const menuClosedWithStickyHeader = menu.hidden;
       editor.view.scrollDOM.dispatchEvent(new WheelEvent('wheel', { deltaY: -160, bubbles: true }));
       editor.view.scrollDOM.scrollTop = 0;
       await frames(6);
       firstInput.focus({ preventScroll: true });
       await frames(2);
-      if (menu.hidden) pointer(trigger);
+      pointer(trigger);
       await frames(1);
       pointer(menu.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
       await waitUntil(() => (
@@ -532,6 +538,8 @@ async function main(): Promise<void> {
         menuBackdropFilter: menuStyle.backdropFilter,
         shellHeightStable,
         commandOrder,
+        insertRowAboveEnabledForBody,
+        insertRowAboveDisabledForHeader,
         arrangementCommandOrder,
         separatorCount,
         arrangementSeparatorCount,
@@ -551,8 +559,8 @@ async function main(): Promise<void> {
         bodyRowControlsHiddenByStickyHeader,
         bodyRowTriggerActuallyHidden,
         triggerFollowsCaretLine,
-        triggerAvailableWithStickyHeader,
-        menuOpenWithStickyHeader,
+        triggerHiddenWithStickyHeader,
+        menuClosedWithStickyHeader,
         initialWidths,
         preferredColumnWidth: table.dataset.tablePreferredColumnWidth,
         rowCountAfterRepeatedInsert,
@@ -743,6 +751,10 @@ async function main(): Promise<void> {
       'insert-row-above', 'insert-row-below', 'delete-row',
       'insert-column-left', 'insert-column-right', 'delete-column'
     ]);
+    assert.equal(result.insertRowAboveEnabledForBody, true,
+      'insert row above must remain available for body cells');
+    assert.equal(result.insertRowAboveDisabledForHeader, true,
+      'insert row above must be disabled while a header cell is active');
     assert.deepEqual(result.arrangementCommandOrder, [
       'move-row-up', 'move-row-down',
       'move-column-left', 'move-column-right',
@@ -765,8 +777,8 @@ async function main(): Promise<void> {
     );
     assert.equal(result.menuClosedAfterTargetScroll, true, 'the menu must close when its target row leaves the viewport');
     assert.equal(result.triggerFollowsCaretLine, true, 'the row action trigger must follow the caret visual line in a tall cell');
-    assert.equal(result.triggerAvailableWithStickyHeader, true, 'the table action trigger must remain available when the header becomes sticky');
-    assert.equal(result.menuOpenWithStickyHeader, true, 'the expanded table action menu must follow an active sticky header');
+    assert.equal(result.triggerHiddenWithStickyHeader, true, 'the row action trigger must hide when its source header is replaced by the sticky header');
+    assert.equal(result.menuClosedWithStickyHeader, true, 'the expanded row action menu must close when the sticky header replaces its target');
     assert.ok(
       Math.max(...Object.values(trustedClickDeltas)) <= 0.5,
       `trusted table-menu clicks shifted the viewport: ${JSON.stringify(trustedClickDeltas)}`

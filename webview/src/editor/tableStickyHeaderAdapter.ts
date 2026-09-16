@@ -17,27 +17,14 @@ export type TableStickyHeaderElements = {
   readonly stickyHeaderViewport: HTMLElement;
   readonly stickyTable: HTMLTableElement;
   readonly stickyHeaderRow: HTMLTableRowElement;
-};
-
-export type TableStickyHeaderCellActivation = {
-  readonly column: number;
-  readonly projectedCell: HTMLTableCellElement;
-  readonly clientX: number;
-  readonly clientY: number;
-};
-
-export type TableStickyHeaderInteractiveCell = {
-  readonly column: number;
-  readonly cell: HTMLTableCellElement;
+  readonly stickyNavigationIndicator: HTMLElement;
 };
 
 export type TableStickyHeaderAdapterOptions = {
   readonly scheduler: TableWidgetLayoutScheduler;
   readonly resolveElements: () => TableStickyHeaderElements | null;
   readonly controlsHeight: () => number;
-  readonly activateCell?: (activation: TableStickyHeaderCellActivation) => void;
-  readonly resolveInteractiveCell?: () => TableStickyHeaderInteractiveCell | null;
-  readonly visibilityChanged?: (visible: boolean) => void;
+  readonly navigateToSourceHeader?: () => void;
 };
 
 /** Editor-internal lifecycle seam. DOM and scheduling details stay in the concrete adapter. */

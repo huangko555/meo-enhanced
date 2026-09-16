@@ -98,6 +98,7 @@ import {
   Columns2,
   EllipsisVertical,
   Plus,
+  Pin,
   Rows2,
   X,
   createElement,
@@ -156,6 +157,7 @@ interface DomRefs {
   stickyHeaderViewport: HTMLDivElement;
   stickyTable: HTMLTableElement;
   stickyHeaderRow: HTMLTableRowElement;
+  stickyNavigationIndicator: HTMLSpanElement;
   contextTrigger: HTMLButtonElement;
   contextMenu: HTMLDivElement;
   contextPages: Record<TableContextPage, HTMLDivElement>;
@@ -183,13 +185,6 @@ interface DomRefs {
 interface CellCoords {
   row: number;
   col: number;
-}
-
-interface StickyHeaderEditorProjection {
-  column: number;
-  cell: HTMLTableCellElement;
-  placeholder: HTMLTableCellElement;
-  sourceRow: HTMLTableRowElement;
 }
 
 interface CellMatrix {
@@ -387,9 +382,6 @@ function tableUsableViewportBounds(view: EditorView, element: Element) {
   const shell = element.closest('.meo-md-html-table-shell');
   const stickyChrome = shell?.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome.is-visible')
     ?? view.dom.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome.is-visible');
-  const elementIsInStickyHeader = Boolean(
-    element.closest('.meo-md-html-table-sticky-chrome.is-visible')
-  );
   const table = element.closest<HTMLTableElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
   const tableRect = table?.getBoundingClientRect();
   const headerRect = table?.tHead?.getBoundingClientRect();
@@ -407,13 +399,11 @@ function tableUsableViewportBounds(view: EditorView, element: Element) {
     ? viewport.top + headerRect.height
     : viewport.top;
   return {
-    top: elementIsInStickyHeader
-      ? viewport.top
-      : Math.max(
-          viewport.top,
-          stickyChrome?.getBoundingClientRect().bottom ?? viewport.top,
-          inferredStickyBottom
-        ),
+    top: Math.max(
+      viewport.top,
+      stickyChrome?.getBoundingClientRect().bottom ?? viewport.top,
+      inferredStickyBottom
+    ),
     bottom: viewport.bottom
   };
 }
@@ -2412,9 +2402,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   pendingContextMenuRestore: boolean;
   contextPage: TableContextPage;
   tableCaretRevealGeneration: number;
-  stickyHeaderEditorProjection: StickyHeaderEditorProjection | null;
-  stickyHeaderVisibilityGeneration: number;
-  movingStickyHeaderEditor: boolean;
 
   constructor(
     tableData: WidgetTableData,
@@ -2442,9 +2429,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     this.pendingContextMenuRestore = false;
     this.contextPage = 'structure';
     this.tableCaretRevealGeneration = 0;
-    this.stickyHeaderEditorProjection = null;
-    this.stickyHeaderVisibilityGeneration = 0;
-    this.movingStickyHeaderEditor = false;
     this.stickyHeaderAdapterFactory = stickyHeaderAdapterFactory;
     this.layoutTasks = new Set();
     this.layoutScheduler = {
@@ -2467,14 +2451,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       scheduler: this.layoutScheduler,
       resolveElements: () => this.resolveStickyHeaderElements(),
       controlsHeight: () => 0,
-      activateCell: (activation) => this.activateStickyHeaderCell(activation),
-      resolveInteractiveCell: () => this.stickyHeaderEditorProjection
-        ? {
-            column: this.stickyHeaderEditorProjection.column,
-            cell: this.stickyHeaderEditorProjection.cell
-          }
-        : null,
-      visibilityChanged: (visible) => this.handleStickyHeaderVisibility(visible)
+      navigateToSourceHeader: () => this.navigateToSourceHeader()
     });
   }
 
@@ -2594,7 +2571,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       stickyChrome,
       stickyHeaderViewport,
       stickyTable,
-      stickyHeaderRow
+      stickyHeaderRow,
+      stickyNavigationIndicator
     } = this.domRefs;
     return {
       scroller: this.view.scrollDOM,
@@ -2603,8 +2581,35 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       stickyChrome,
       stickyHeaderViewport,
       stickyTable,
-      stickyHeaderRow
+      stickyHeaderRow,
+      stickyNavigationIndicator
     };
+  }
+
+  navigateToSourceHeader(): void {
+    const view = this.view;
+    const header = this.domRefs?.table.tHead?.rows[0];
+    if (!view || !header?.isConnected) return;
+    this.tableCaretRevealGeneration += 1;
+    const margin = visualLineContextMargin(view, 0.75);
+    const viewport = getViewportController(view);
+    if (viewport) {
+      const isCurrent = viewport.beginNavigationReveal();
+      viewport.revealVerticalBounds(
+        () => header.isConnected
+          ? { top: header.getBoundingClientRect().top, bottom: header.getBoundingClientRect().bottom }
+          : null,
+        isCurrent,
+        { yMargin: margin }
+      );
+      return;
+    }
+    const scrollerRect = view.scrollDOM.getBoundingClientRect();
+    const headerRect = header.getBoundingClientRect();
+    view.scrollDOM.scrollTop = Math.max(
+      0,
+      view.scrollDOM.scrollTop + headerRect.top - scrollerRect.top - margin
+    );
   }
 
   getEditorView(dom?: HTMLElement): EditorView | null {
@@ -2770,144 +2775,16 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     };
   }
 
-  createStickyHeaderPlaceholder(cell: HTMLTableCellElement): HTMLTableCellElement {
-    const placeholder = cell.cloneNode(true) as HTMLTableCellElement;
-    placeholder.classList.remove(
-      'meo-md-html-table-sticky-interactive-cell',
-      'meo-md-html-table-cell-selected',
-      'meo-md-html-table-cell-selected-top',
-      'meo-md-html-table-cell-selected-right',
-      'meo-md-html-table-cell-selected-bottom',
-      'meo-md-html-table-cell-selected-left'
-    );
-    placeholder.dataset.meoStickyHeaderPlaceholder = 'true';
-    placeholder.setAttribute('aria-hidden', 'true');
-    for (const content of placeholder.querySelectorAll<HTMLElement>('.meo-md-html-table-cell-content.is-editing')) {
-      content.classList.remove('is-editing');
-    }
-    for (const interactive of placeholder.querySelectorAll('textarea, input, select, button')) {
-      interactive.remove();
-    }
-    for (const focusable of placeholder.querySelectorAll<HTMLElement>('[tabindex]')) {
-      focusable.removeAttribute('tabindex');
-    }
-    return placeholder;
-  }
-
-  restoreStickyHeaderEditorProjection({ preserveFocus = true } = {}) {
-    const projection = this.stickyHeaderEditorProjection;
-    if (!projection) return;
-    const input = projection.cell.querySelector<HTMLTextAreaElement>('textarea');
-    const focused = preserveFocus && document.activeElement === input;
-    const selection = focused && input
-      ? {
-          start: input.selectionStart ?? 0,
-          end: input.selectionEnd ?? input.selectionStart ?? 0,
-          direction: input.selectionDirection ?? 'none'
-        }
-      : null;
-    this.stickyHeaderEditorProjection = null;
-    projection.cell.classList.remove('meo-md-html-table-sticky-interactive-cell');
-    this.movingStickyHeaderEditor = true;
-    try {
-      if (projection.placeholder.isConnected) {
-        projection.placeholder.replaceWith(projection.cell);
-      } else if (projection.sourceRow.isConnected) {
-        const before = projection.sourceRow.cells.item(projection.column) ?? null;
-        projection.sourceRow.insertBefore(projection.cell, before);
-      }
-      this.stickyHeaderAdapter.update();
-    } finally {
-      this.movingStickyHeaderEditor = false;
-    }
-    if (focused && input && selection) {
-      input.focus({ preventScroll: true });
-      input.setSelectionRange(selection.start, selection.end, selection.direction);
-    }
-    this.scheduleLayout({ resizeRows: true });
-  }
-
-  projectStickyHeaderEditor(input: HTMLTextAreaElement): void {
-    if (!this.domRefs?.stickyChrome.classList.contains('is-visible')) return;
-    const coords = this.parseCellCoords(input.dataset.tableRow, input.dataset.tableCol);
-    if (!coords || coords.row !== 0) return;
-    const existing = this.stickyHeaderEditorProjection;
-    if (existing?.cell.contains(input)) return;
-    if (existing) this.restoreStickyHeaderEditorProjection({ preserveFocus: false });
-    const cell = this.domRefs.cellGrid[0]?.[coords.col];
-    const sourceRow = this.domRefs.rowEntries[0]?.row;
-    if (!cell || !sourceRow || !sourceRow.contains(cell)) return;
-    const placeholder = this.createStickyHeaderPlaceholder(cell);
-    this.movingStickyHeaderEditor = true;
-    try {
-      cell.replaceWith(placeholder);
-      cell.classList.add('meo-md-html-table-sticky-interactive-cell');
-      this.stickyHeaderEditorProjection = {
-        column: coords.col,
-        cell,
-        placeholder,
-        sourceRow
-      };
-      this.stickyHeaderAdapter.update();
-    } finally {
-      this.movingStickyHeaderEditor = false;
-    }
-    this.scheduleLayout({ resizeRows: true });
-  }
-
-  activateStickyHeaderCell({
-    column,
-    projectedCell,
-    clientX,
-    clientY
-  }: {
-    column: number;
-    projectedCell: HTMLTableCellElement;
-    clientX: number;
-    clientY: number;
-  }) {
-    const input = this.domRefs?.headerInputs[column];
-    const preview = projectedCell.querySelector<HTMLElement>('.meo-md-html-table-cell-preview');
-    if (!input || !preview) return;
-    const resolution = resolveInlineCaretAtPoint(preview, clientX, clientY, { nearestFallback: true });
-    const caret = resolution.sourceOffset === null
-      ? input.value.length
-      : tableCellSourceOffsetToEditorOffset(input.value, resolution.sourceOffset);
-    this.focusTableInput(input, caret, { scrollCellIntoView: false });
-  }
-
-  handleStickyHeaderVisibility(visible: boolean): void {
-    const generation = ++this.stickyHeaderVisibilityGeneration;
-    queueMicrotask(() => {
-      if (generation !== this.stickyHeaderVisibilityGeneration || !this.domRefs) return;
-      const currentlyVisible = this.domRefs.stickyChrome.classList.contains('is-visible');
-      if (visible !== currentlyVisible) return;
-      if (!visible) {
-        this.restoreStickyHeaderEditorProjection();
-        return;
-      }
-      const active = document.activeElement;
-      if (!(active instanceof HTMLTextAreaElement)) return;
-      const coords = this.parseCellCoords(active.dataset.tableRow, active.dataset.tableCol);
-      if (!coords || coords.row !== 0 || !this.domRefs.headerInputs.includes(active)) return;
-      const selectionStart = active.selectionStart ?? 0;
-      const selectionEnd = active.selectionEnd ?? selectionStart;
-      const selectionDirection = active.selectionDirection ?? 'none';
-      this.projectStickyHeaderEditor(active);
-      active.focus({ preventScroll: true });
-      active.setSelectionRange(selectionStart, selectionEnd, selectionDirection);
-    });
-  }
-
   updateContextMenuState() {
     if (!this.domRefs) return;
     const { contextButtons } = this.domRefs;
+    const targetRow = this.cellSelection.snapshot().anchor?.row ?? this.activeTarget.row;
     const rows = this.selectedBodyRows();
     const columns = this.selectedColumns();
     const hasRows = rows.length > 0;
     const hasColumns = columns.length > 0;
 
-    contextButtons.insertRowAbove.disabled = this.tableData.colCount === 0;
+    contextButtons.insertRowAbove.disabled = this.tableData.colCount === 0 || targetRow === 0;
     contextButtons.insertRowBelow.disabled = this.tableData.colCount === 0;
     contextButtons.moveRowUp.disabled = !hasRows || Math.min(...rows) <= 0;
     contextButtons.moveRowDown.disabled = !hasRows || Math.max(...rows) >= this.tableData.rows.length - 1;
@@ -2962,7 +2839,10 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
   requestInsertRowAbove(container: HTMLElement) {
     void container;
-    this.requestTableCommand('insert-row-above', this.tableData.colCount > 0);
+    this.requestTableCommand(
+      'insert-row-above',
+      this.tableData.colCount > 0 && this.currentCommandTarget().row !== 0
+    );
   }
 
   requestInsertRowBelow(container: HTMLElement) {
@@ -3036,7 +2916,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   findCellElement(node: EventTarget | null): HTMLTableCellElement | null {
     if (!this.domRefs || !(node instanceof Element)) return null;
     const cell = node.closest(tableCellSelector);
-    if (!cell || (!this.domRefs.table.contains(cell) && !this.domRefs.stickyTable.contains(cell))) return null;
+    if (!cell || !this.domRefs.table.contains(cell)) return null;
     return cell instanceof HTMLTableCellElement ? cell : null;
   }
 
@@ -3046,13 +2926,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
   focusTableInput(input: HTMLTextAreaElement, caret: number | null = null, { scrollCellIntoView = true }: { scrollCellIntoView?: boolean } = {}) {
     if (!(input instanceof HTMLTextAreaElement)) return false;
-    const coords = this.parseCellCoords(input.dataset.tableRow, input.dataset.tableCol);
-    if (coords?.row === 0 && this.domRefs?.stickyChrome.classList.contains('is-visible')) {
-      this.projectStickyHeaderEditor(input);
-      scrollCellIntoView = false;
-    } else if (this.stickyHeaderEditorProjection && !this.stickyHeaderEditorProjection.cell.contains(input)) {
-      this.restoreStickyHeaderEditorProjection({ preserveFocus: false });
-    }
     this.setCellEditingState(input, true);
     input.focus({ preventScroll: true });
     const nextCaret = Math.min(Math.max(caret ?? input.value.length, 0), input.value.length);
@@ -3069,7 +2942,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         }
       }
     }
-    const container = this.domRefs?.wrap ?? input.closest('.meo-md-html-table-wrap');
+    const container = input.closest('.meo-md-html-table-wrap');
     if (container instanceof HTMLElement) {
       this.emitTableSelectionChange(container);
     }
@@ -3364,12 +3237,10 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   exitTableInteraction(container: HTMLElement, reason: 'outside' | 'escape' | 'external' | 'replacement' = 'external') {
-    this.restoreStickyHeaderEditorProjection({ preserveFocus: false });
     this.clearSelection(reason);
   }
 
   transferTableInteraction(container: HTMLElement) {
-    this.restoreStickyHeaderEditorProjection({ preserveFocus: false });
     this.clearSelection('cross-table');
   }
 
@@ -3398,10 +3269,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const active = document.activeElement;
     if (!(active instanceof Element)) return false;
     if (!view.dom.contains(active)) return false;
-    return Boolean(
-      active instanceof HTMLTextAreaElement
-      && this.domRefs?.allRowInputs.some((row) => row.includes(active))
-    );
+    return active.closest('.meo-md-html-table-wrap') !== null;
   }
 
   tableCellCopyValue(row: number, col: number): TableCellCopyValue {
@@ -3579,9 +3447,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   wireTableSelection(table: HTMLTableElement) {
     const getWrap = () => this.domRefs?.wrap ?? table;
     const getContainer = () => this.domRefs?.container ?? getWrap();
-    const interactionTables = () => [table, this.domRefs?.stickyTable]
-      .filter((candidate): candidate is HTMLTableElement => candidate instanceof HTMLTableElement);
-    const isInsideOwnedTable = (target: Node): boolean => interactionTables().some((candidate) => candidate.contains(target));
     let pendingOutsidePointerId: number | null = null;
     let pendingTableSwitchPointerId: number | null = null;
     let outsidePointerExitTimer: number | null = null;
@@ -3622,7 +3487,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       const wrap = getWrap();
       const active = document.activeElement;
       this.exitTableInteraction(wrap, 'outside');
-      if (active instanceof HTMLElement && isInsideOwnedTable(active)) {
+      if (active instanceof HTMLElement && table.contains(active)) {
         active.blur();
       }
     };
@@ -3701,8 +3566,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         : null;
       const releaseCoords = releaseCell ? this.coordsFromCell(releaseCell) : null;
       const hit = event.type === 'pointerup' ? document.elementFromPoint(event.clientX, event.clientY) : null;
-      const endedInsideTable = (hit instanceof Node && isInsideOwnedTable(hit)) || (
-        !event.isTrusted && event.target instanceof Node && isInsideOwnedTable(event.target)
+      const endedInsideTable = (hit instanceof Node && table.contains(hit)) || (
+        !event.isTrusted && event.target instanceof Node && table.contains(event.target)
       );
       const transition = event.type === 'pointerup'
         ? this.cellSelection.accept({
@@ -3734,7 +3599,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     };
 
     const onPaste = (event: ClipboardEvent) => {
-      if (!(event.target instanceof Node) || !isInsideOwnedTable(event.target)) return;
+      if (!(event.target instanceof Node) || !table.contains(event.target)) return;
       const payload = this.clipboardPayload(event);
       if (!payload) return;
       const targetCell = this.findCellElement(event.target);
@@ -3784,7 +3649,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     };
 
     const onFocusOut = (event: FocusEvent) => {
-      if (this.movingStickyHeaderEditor) return;
       const nextTarget = event.relatedTarget;
       const wrap = this.domRefs?.wrap ?? table;
       const container = this.domRefs?.container ?? wrap;
@@ -3845,7 +3709,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
     const onDocumentPointerMove = (event: PointerEvent) => {
       if (table.hasPointerCapture?.(event.pointerId)) return;
-      if (event.target instanceof Node && isInsideOwnedTable(event.target)) return;
+      if (event.target instanceof Node && table.contains(event.target)) return;
       const transition = this.cellSelection.accept({
         type: 'move', pointerId: event.pointerId, cell: null
       });
@@ -3859,7 +3723,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
           if (pendingTableSwitchPointerId === pointerId) pendingTableSwitchPointerId = null;
         }, 0);
       }
-      const targetInsideTable = event.target instanceof Node && isInsideOwnedTable(event.target);
+      const targetInsideTable = event.target instanceof Node && table.contains(event.target);
       if (!table.hasPointerCapture?.(event.pointerId) || !targetInsideTable) {
         endPointerSelection(event);
       }
@@ -3874,19 +3738,17 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       }, 0);
     };
 
-    for (const interactionTable of interactionTables()) {
-      interactionTable.addEventListener('pointerdown', onPointerDown);
-      interactionTable.addEventListener('pointermove', onPointerMove);
-      interactionTable.addEventListener('pointerup', endPointerSelection);
-      interactionTable.addEventListener('pointercancel', endPointerSelection);
-      interactionTable.addEventListener('lostpointercapture', endPointerSelection);
-      interactionTable.addEventListener('dragstart', onDragStart);
-      interactionTable.addEventListener('keydown', onKeyDown, true);
-      interactionTable.addEventListener('focusout', onFocusOut);
-    }
+    table.addEventListener('pointerdown', onPointerDown);
+    table.addEventListener('pointermove', onPointerMove);
+    table.addEventListener('pointerup', endPointerSelection);
+    table.addEventListener('pointercancel', endPointerSelection);
+    table.addEventListener('lostpointercapture', endPointerSelection);
     document.addEventListener('copy', onCopy, true);
     document.addEventListener('paste', onPaste, true);
+    table.addEventListener('dragstart', onDragStart);
+    table.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('keydown', onDocumentKeyDown, true);
+    table.addEventListener('focusout', onFocusOut);
     document.addEventListener('pointerdown', onDocumentPointerDown, true);
     document.addEventListener('pointermove', onDocumentPointerMove, true);
     document.addEventListener('pointerup', onDocumentPointerEnd, true);
@@ -3910,19 +3772,17 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     };
     document.addEventListener('meo-commit-table-edits', onCommitTableEdits);
     this.cleanupFns.push(() => {
-      for (const interactionTable of interactionTables()) {
-        interactionTable.removeEventListener('pointerdown', onPointerDown);
-        interactionTable.removeEventListener('pointermove', onPointerMove);
-        interactionTable.removeEventListener('pointerup', endPointerSelection);
-        interactionTable.removeEventListener('pointercancel', endPointerSelection);
-        interactionTable.removeEventListener('lostpointercapture', endPointerSelection);
-        interactionTable.removeEventListener('dragstart', onDragStart);
-        interactionTable.removeEventListener('keydown', onKeyDown, true);
-        interactionTable.removeEventListener('focusout', onFocusOut);
-      }
+      table.removeEventListener('pointerdown', onPointerDown);
+      table.removeEventListener('pointermove', onPointerMove);
+      table.removeEventListener('pointerup', endPointerSelection);
+      table.removeEventListener('pointercancel', endPointerSelection);
+      table.removeEventListener('lostpointercapture', endPointerSelection);
       document.removeEventListener('copy', onCopy, true);
       document.removeEventListener('paste', onPaste, true);
+      table.removeEventListener('dragstart', onDragStart);
+      table.removeEventListener('keydown', onKeyDown, true);
       document.removeEventListener('keydown', onDocumentKeyDown, true);
+      table.removeEventListener('focusout', onFocusOut);
       document.removeEventListener('pointerdown', onDocumentPointerDown, true);
       document.removeEventListener('pointermove', onDocumentPointerMove, true);
       document.removeEventListener('pointerup', onDocumentPointerEnd, true);
@@ -4915,12 +4775,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       // then snap back after the row catches up.
       const resizeAndSchedule = () => {
         // Non-search previews stay untouched while editing so inline image DOM is not recreated.
-        if (rowIndex === 0) {
-          this.stickyHeaderAdapter.update();
-          this.resizeProjectedHeaderRows(rowEl, rowInputs);
-        } else {
-          this.resizeRow(rowEl, rowInputs);
-        }
+        this.resizeRow(rowEl, rowInputs);
+        if (rowIndex === 0) this.stickyHeaderAdapter.update();
         this.scheduleLayout();
       };
       resizeAndSchedule();
@@ -5049,9 +4905,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
           const view = this.view;
           const wrap = this.domRefs?.wrap;
           const activeInput = document.activeElement;
-          const activeBelongsToTable = activeInput instanceof HTMLTextAreaElement
-            && Boolean(this.domRefs?.allRowInputs.some((row) => row.includes(activeInput)));
-          if (!view || !wrap || !activeBelongsToTable) return;
+          if (!view || !wrap || !(activeInput instanceof HTMLTextAreaElement) || !wrap.contains(activeInput)) return;
           const activeCell = activeInput.closest<HTMLTableCellElement>(tableCellSelector);
           const focusTarget = activeCell ? this.coordsFromCell(activeCell) : null;
           if (!focusTarget || !this.hasPendingCellEdits) return;
@@ -5073,7 +4927,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       notifySelectionChange();
     });
     input.addEventListener('blur', (event) => {
-      if (this.movingStickyHeaderEditor) return;
       refreshPreview();
       this.setCellEditingState(input, false);
       notifySelectionChange();
@@ -5082,8 +4935,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         ? nextTarget.closest('.meo-md-html-table-shell')
         : null;
       if (nextTableShell) {
-        if (nextTarget instanceof Node && this.domRefs?.container.contains(nextTarget)) return;
-        this.transferTableInteraction(container);
+        if (nextTarget instanceof Node && !container.contains(nextTarget)) {
+          this.transferTableInteraction(container);
+        }
         return;
       }
       this.setTableInteractionActive(container, false);
@@ -5127,24 +4981,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
     for (const content of contents) {
       content.style.minHeight = `${maxHeight}px`;
-    }
-  }
-
-  resizeProjectedHeaderRows(sourceRow: HTMLTableRowElement, rowInputs: HTMLTextAreaElement[]) {
-    const stickyRow = this.stickyHeaderEditorProjection && this.domRefs?.stickyHeaderRow;
-    if (!stickyRow) {
-      this.resizeRow(sourceRow, rowInputs);
-      return;
-    }
-    this.resizeRow(stickyRow, rowInputs);
-    const projectedContents = Array.from(
-      stickyRow.querySelectorAll<HTMLElement>('.meo-md-html-table-cell-content')
-    );
-    const sourceContents = Array.from(
-      sourceRow.querySelectorAll<HTMLElement>('.meo-md-html-table-cell-content')
-    );
-    for (let index = 0; index < sourceContents.length; index += 1) {
-      sourceContents[index].style.minHeight = projectedContents[index]?.style.minHeight ?? '';
     }
   }
 
@@ -5455,10 +5291,11 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   refreshUiLanguage(language: UiLanguage) {
     if (!this.domRefs) return;
     const strings = getUiStrings(language);
-    const { contextTrigger, contextMenu, contextButtons } = this.domRefs;
+    const { contextTrigger, contextMenu, contextButtons, stickyHeaderViewport } = this.domRefs;
     contextTrigger.title = strings.tableActions;
     contextTrigger.setAttribute('aria-label', strings.tableActions);
     contextMenu.setAttribute('aria-label', strings.tableActions);
+    stickyHeaderViewport.title = strings.returnToTableHeader;
 
     const commandLabels: Array<[HTMLButtonElement, string]> = [
       [contextButtons.collapse, strings.tableCollapse],
@@ -5528,16 +5365,14 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       top: 0,
       bottom: window.innerHeight
     };
+    const rowRect = row.getBoundingClientRect();
     const stickyHeaderVisible = this.domRefs.stickyChrome.classList.contains('is-visible');
-    const targetsStickyHeader = rowIndex === 0 && stickyHeaderVisible;
-    const rowRect = targetsStickyHeader
-      ? this.domRefs.stickyHeaderRow.getBoundingClientRect()
-      : row.getBoundingClientRect();
-    const effectiveViewportTop = stickyHeaderVisible && !targetsStickyHeader
+    const effectiveViewportTop = stickyHeaderVisible
       ? Math.max(viewportRect.top, this.domRefs.stickyChrome.getBoundingClientRect().bottom)
       : viewportRect.top;
     const targetOutsideViewport = rowRect.bottom <= effectiveViewportTop || rowRect.top >= viewportRect.bottom;
-    contextTrigger.hidden = targetOutsideViewport;
+    const targetHiddenByStickyHeader = rowIndex === 0 && stickyHeaderVisible;
+    contextTrigger.hidden = targetOutsideViewport || targetHiddenByStickyHeader;
     if (contextTrigger.hidden && !contextMenu.hidden) this.setContextMenuOpen(false);
     if (contextTrigger.hidden) return;
     const visibleTop = Math.max(effectiveViewportTop, wrapRect.top);
@@ -5548,8 +5383,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       || selectionRange.fromCol !== selectionRange.toCol
     ));
     const focusedInput = document.activeElement;
-    const targetInput = focusedInput instanceof HTMLTextAreaElement
-      && this.domRefs.allRowInputs[rowIndex]?.includes(focusedInput)
+    const targetInput = focusedInput instanceof HTMLTextAreaElement && row.contains(focusedInput)
       ? focusedInput
       : this.domRefs.allRowInputs[rowIndex]?.[this.activeTarget.col] ?? null;
     const caretBounds = !hasMultiCellSelection && targetInput
@@ -5932,6 +5766,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     stickyChrome.setAttribute('aria-hidden', 'true');
     const stickyHeaderViewport = document.createElement('div');
     stickyHeaderViewport.className = 'meo-md-html-table-sticky-header';
+    stickyHeaderViewport.title = getUiStrings(view.state.facet(uiLanguageFacet)).returnToTableHeader;
     const stickyTable = document.createElement('table');
     stickyTable.className = 'meo-md-html-table meo-md-html-table-sticky-table';
     const stickyColgroupElement = document.createElement('colgroup');
@@ -5942,7 +5777,15 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     stickyThead.appendChild(stickyHeaderRow);
     stickyTable.append(stickyColgroupElement, stickyThead);
     stickyHeaderViewport.appendChild(stickyTable);
-    stickyChrome.append(stickyHeaderViewport);
+    const stickyNavigationIndicator = document.createElement('span');
+    stickyNavigationIndicator.className = 'meo-md-html-table-sticky-navigation-indicator';
+    stickyNavigationIndicator.setAttribute('aria-hidden', 'true');
+    stickyNavigationIndicator.appendChild(createElement(Pin, {
+      width: 16,
+      height: 16,
+      'aria-hidden': 'true'
+    }));
+    stickyChrome.append(stickyHeaderViewport, stickyNavigationIndicator);
 
     const lineNumberLayer = document.createElement('div');
     lineNumberLayer.className = 'meo-md-html-table-line-numbers';
@@ -5976,6 +5819,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       stickyHeaderViewport,
       stickyTable,
       stickyHeaderRow,
+      stickyNavigationIndicator,
       contextTrigger,
       contextMenu,
       contextPages,

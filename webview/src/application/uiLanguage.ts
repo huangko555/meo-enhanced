@@ -156,6 +156,7 @@ export type UiStrings = Readonly<{
   incomingVersion: (label: string) => string;
   alertLabel: (type: string) => string;
   tableActions: string;
+  returnToTableHeader: string;
   tableInsert: string;
   tableMove: string;
   tableDelete: string;
@@ -335,7 +336,8 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     currentVersion: (label: string) => `Current: ${label},`,
     incomingVersion: (label: string) => `Incoming: ${label}`,
     alertLabel: (type: string) => type,
-    tableActions: 'Table actions', tableInsert: 'Insert', tableMove: 'Move', tableDelete: 'Delete', tableBack: 'Back',
+    tableActions: 'Table actions', returnToTableHeader: 'Show original table header',
+    tableInsert: 'Insert', tableMove: 'Move', tableDelete: 'Delete', tableBack: 'Back',
     tableCollapse: 'Collapse table actions', tableMoreActions: 'More table actions',
     tablePreviousActions: 'Previous table actions',
     tableAlign: 'Align',
@@ -489,7 +491,8 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     currentVersion: (label: string) => `当前：${label}，`,
     incomingVersion: (label: string) => `传入：${label}`,
     alertLabel: (type: string) => ({ NOTE: '备注', TIP: '提示', IMPORTANT: '重要', WARNING: '警告', CAUTION: '注意' }[type] ?? type),
-    tableActions: '表格操作', tableInsert: '插入', tableMove: '移动', tableDelete: '删除', tableBack: '返回',
+    tableActions: '表格操作', returnToTableHeader: '显示原表头',
+    tableInsert: '插入', tableMove: '移动', tableDelete: '删除', tableBack: '返回',
     tableCollapse: '收起表格操作', tableMoreActions: '更多表格操作',
     tablePreviousActions: '上一页表格操作',
     tableAlign: '对齐',
