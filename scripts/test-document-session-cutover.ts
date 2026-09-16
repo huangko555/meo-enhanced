@@ -117,7 +117,7 @@ async function main(): Promise<void> {
     snapshot = await page.evaluate(() => (window as any).__documentSessionCandidate.snapshot());
     assert.equal(snapshot.editorText.endsWith('protected-draft'), true);
     assert.equal(snapshot.persistedDraft.endsWith('protected-draft'), true);
-    assert.deepEqual(snapshot.notices, ['Could not resynchronize the document. Local edits were kept.']);
+    assert.deepEqual(snapshot.notices, ['resync-failed']);
     await page.evaluate(() => (window as any).__documentSessionCandidate.releaseApplyChanges());
 
     snapshot = await page.evaluate(() => (window as any).__documentSessionCandidate.snapshot());
