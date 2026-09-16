@@ -73,6 +73,95 @@ async function assertColumnReflowKeepsActiveCell(page: import('puppeteer-core').
   if (!unwrappedCases) throw new Error('Column reflow fixture did not unwrap an earlier row');
 }
 
+async function assertWrappingCellGrowsDownward(page: import('puppeteer-core').Page): Promise<void> {
+  await page.setViewport({ width: 760, height: 560, deviceScaleFactor: 1 });
+  await page.evaluate(() => {
+    (window as any).__tableVisualEditor.destroy();
+    document.getElementById('app')!.replaceChildren();
+    const rows = Array.from({ length: 18 }, (_, index) => (
+      `| ${index + 1} | ${index === 8 ? 'TARGET' : `row-${index + 1}`} | alpha | beta |`
+    ));
+    const text = [
+      ...Array.from({ length: 50 }, (_, index) => `前置正文 ${index + 1}`),
+      '',
+      '| ID | 内容 | 状态一 | 状态二 |',
+      '| --- | --- | --- | --- |',
+      ...rows,
+      '',
+      ...Array.from({ length: 50 }, (_, index) => `后置正文 ${index + 1}`)
+    ].join('\n');
+    const editor = (window as any).EmbeddedInputViewportHarness.createEditor({
+      parent: document.getElementById('app')!,
+      text,
+      initialMode: 'live',
+      onApplyChanges() {}
+    });
+    (window as any).__tableVisualEditor = editor;
+    editor.scrollToLine(62, 'center');
+  });
+  await page.waitForFunction(() => Boolean(Array.from(
+    document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table textarea')
+  ).find((input) => input.value === 'TARGET')));
+  await waitForFrames(page, 10);
+
+  await page.evaluate(() => {
+    const editor = (window as any).__tableVisualEditor;
+    const input = Array.from(document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table textarea'))
+      .find((candidate) => candidate.value === 'TARGET')!;
+    const cell = input.closest<HTMLTableCellElement>('td')!;
+    const viewport = editor.view.scrollDOM.getBoundingClientRect();
+    editor.view.scrollDOM.scrollTop += cell.getBoundingClientRect().top - viewport.top - 390;
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(input.value.length, input.value.length);
+  });
+  await waitForFrames(page, 8);
+
+  await page.evaluate(() => {
+    const editor = (window as any).__tableVisualEditor;
+    const input = document.activeElement as HTMLTextAreaElement;
+    const cell = input.closest<HTMLTableCellElement>('td')!;
+    const table = input.closest<HTMLTableElement>('table')!;
+    const cellRect = cell.getBoundingClientRect();
+    (window as any).__tableWrapDirectionInitial = {
+      cellTop: cellRect.top,
+      cellBottom: cellRect.bottom,
+      cellHeight: cellRect.height,
+      tableTop: table.getBoundingClientRect().top,
+      scrollTop: editor.view.scrollDOM.scrollTop
+    };
+  });
+  await page.keyboard.type('这是一段会让当前单元格自动换行并增加高度的输入文字', { delay: 8 });
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  await waitForFrames(page, 12);
+
+  const result = await page.evaluate(() => {
+    const editor = (window as any).__tableVisualEditor;
+    const input = document.activeElement as HTMLTextAreaElement;
+    const cell = input.closest<HTMLTableCellElement>('td')!;
+    const table = input.closest<HTMLTableElement>('table')!;
+    const initial = (window as any).__tableWrapDirectionInitial;
+    const finalRect = cell.getBoundingClientRect();
+    return {
+      heightDelta: finalRect.height - initial.cellHeight,
+      bottomDelta: finalRect.bottom - initial.cellBottom,
+      cellTopDelta: finalRect.top - initial.cellTop,
+      tableTopDelta: table.getBoundingClientRect().top - initial.tableTop,
+      scrollDelta: editor.view.scrollDOM.scrollTop - initial.scrollTop,
+      focused: document.activeElement === input
+    };
+  });
+  if (
+    result.heightDelta < 10 ||
+    Math.abs(result.cellTopDelta) > 2 ||
+    Math.abs(result.tableTopDelta) > 2 ||
+    Math.abs(result.scrollDelta) > 2 ||
+    result.bottomDelta < result.heightDelta - 2 ||
+    !result.focused
+  ) {
+    throw new Error(`A wrapping table cell did not keep its top fixed and grow downward: ${JSON.stringify(result)}`);
+  }
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-live-embedded-input-viewport-entry.ts')],
@@ -186,6 +275,7 @@ async function main(): Promise<void> {
       throw new Error(`Table input moved while the caret remained visible: ${JSON.stringify(result)}`);
     }
 
+    await assertWrappingCellGrowsDownward(page);
     await assertColumnReflowKeepsActiveCell(page);
     console.log('table input visual stability regression passed');
   } catch (error) {

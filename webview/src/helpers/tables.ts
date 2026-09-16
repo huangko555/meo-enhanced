@@ -4777,9 +4777,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         this.scheduleLayout();
       };
       resizeAndSchedule();
-      if (document.activeElement === input) {
-        this.revealTableCellCaretIfNeeded(input);
-      }
       notifySelectionChange();
     });
     input.addEventListener('select', notifySelectionChange);
