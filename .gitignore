@@ -16,6 +16,7 @@ assets/
 # Local-only workspace material; never commit.
 /.local/
 /.codegraph/
+/.codex-remote-attachments/
 
 .claude/
 AGENTS.md
