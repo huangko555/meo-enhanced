@@ -583,6 +583,14 @@ async function main(): Promise<void> {
       /inset/,
       'the sticky header must paint its divider as an inset line so it survives fractional scaling'
     );
+    const stickyShadowPixels = Array.from(
+      result.domContract.boundary.headerShadow.matchAll(/(-?\d+(?:\.\d+)?)px/g),
+      (match: RegExpMatchArray) => Number(match[1])
+    );
+    assert.ok(
+      (stickyShadowPixels.at(-1) ?? -1) >= 0,
+      `the sticky header shadow must retain visible spread below its divider: ${result.domContract.boundary.headerShadow}`
+    );
     assert.equal(result.domContract.wrapOverflow, 'clip');
     assert.equal(result.domContract.lineNumbers, true);
     assert.equal(result.hiddenAtTail, true, JSON.stringify(result.tailState));
