@@ -454,7 +454,7 @@ if (!lightPreviewStyles.includes('--meo-code-keyword: #121212')
 }
 for (const token of ['fg', 'comment', 'keyword', 'string', 'number', 'type', 'property', 'link']) {
   if (!plainTextStyles.includes(
-    `--meo-code-${token}: color-mix(in srgb, #d8dee9 78%, #9aa4af 22%)`
+    `--meo-code-${token}: color-mix(in srgb, #d8dee9 74%, #9aa4af 26%)`
   )) {
     throw new Error(`Disabled Preview source coloring must use the adaptive body foreground for ${token}`);
   }
@@ -502,7 +502,7 @@ if (!darkPreviewStyles.includes('--meo-bg: #20252b')) {
   throw new Error('Dark Preview must use the current document background');
 }
 for (const expected of [
-  '--meo-fg: color-mix(in srgb, #d8dee9 78%, #9aa4af 22%)',
+  '--meo-fg: color-mix(in srgb, #d8dee9 74%, #9aa4af 26%)',
   '--meo-heading: #d8dee9',
   '--meo-link: #58a6ff'
 ]) {
@@ -516,7 +516,7 @@ if (darkPreviewStyles.includes('#171b20')) {
 if (!lightPreviewStyles.includes('--meo-bg: #ffffff')) {
   throw new Error('Light Preview must use a white reading background');
 }
-if (!lightPreviewStyles.includes('--meo-fg: color-mix(in srgb, #1f2328 78%, #59636e 22%)')
+if (!lightPreviewStyles.includes('--meo-fg: color-mix(in srgb, #1f2328 74%, #59636e 26%)')
   || !lightPreviewStyles.includes('--meo-heading: #1f2328')) {
   throw new Error('Light Preview must keep headings stronger than theme-adaptive body text');
 }

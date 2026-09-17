@@ -42,7 +42,7 @@ function buildReadingStyles(
   const editorBackgroundColor = appearance === 'light' ? '#ffffff' : darkBackgroundColor;
   const previewForegroundColor = appearance === 'light' ? '#1f2328' : '#d8dee9';
   const previewMutedColor = appearance === 'light' ? '#59636e' : '#9aa4af';
-  const readingForegroundColor = `color-mix(in srgb, ${previewForegroundColor} 78%, ${previewMutedColor} 22%)`;
+  const readingForegroundColor = `color-mix(in srgb, ${previewForegroundColor} 74%, ${previewMutedColor} 26%)`;
   const editorForegroundColor = previewForegroundColor;
   const previewCodePalette = environment.previewCodePalettes?.[appearance === 'auto' ? 'dark' : appearance];
   const sourceColoring = environment.previewSourceColoring !== false;
