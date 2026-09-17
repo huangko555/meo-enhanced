@@ -64,6 +64,10 @@ async function main(): Promise<void> {
           stickyToolbarBands: document.querySelectorAll('.meo-md-html-table-sticky-toolbar-band').length,
           chromeTop: chrome?.getBoundingClientRect().top ?? null,
           stickyHeaderTop: stickyHeader?.getBoundingClientRect().top ?? null,
+          stickyHeaderRect: stickyHeader ? (() => {
+            const rect = stickyHeader.getBoundingClientRect();
+            return { left: rect.left, bottom: rect.bottom, width: rect.width };
+          })() : null,
           firstColumnDelta: mainCell && stickyCell
             ? Math.abs(mainCell.getBoundingClientRect().left - stickyCell.getBoundingClientRect().left)
             : null,
@@ -180,11 +184,55 @@ async function main(): Promise<void> {
         }, () => true);
         after = geometry();
       }
-      editor.destroy();
+      (window as typeof window & { __disposeStickyGeometryEditor?: () => void })
+        .__disposeStickyGeometryEditor = () => editor.destroy();
       return { before, after, threshold };
       }, scenario);
+      let visualBoundary: null | { nearLuma: number; farLuma: number; contrast: number } = null;
+      if (scenario.dpr === 1 && scenario.zoom === 1 && !scenario.transform) {
+        const rect = result.before.stickyHeaderRect!;
+        const width = Math.max(1, Math.min(300, Math.floor(rect.width - 16)));
+        const screenshot = await geometryPage.screenshot({
+          encoding: 'base64',
+          clip: {
+            x: Math.max(0, Math.floor(rect.left + 8)),
+            y: Math.max(0, Math.floor(rect.bottom)),
+            width,
+            height: 8
+          }
+        }) as string;
+        visualBoundary = await geometryPage.evaluate(async (source) => {
+          const image = new Image();
+          image.src = source;
+          await image.decode();
+          const canvas = document.createElement('canvas');
+          canvas.width = image.width;
+          canvas.height = image.height;
+          const context = canvas.getContext('2d', { willReadFrequently: true })!;
+          context.drawImage(image, 0, 0);
+          const pixels = context.getImageData(0, 0, image.width, image.height).data;
+          const rowLuma = (row: number) => {
+            const values: number[] = [];
+            for (let column = 0; column < image.width; column += 1) {
+              const offset = (row * image.width + column) * 4;
+              values.push(
+                pixels[offset] * 0.2126 + pixels[offset + 1] * 0.7152 + pixels[offset + 2] * 0.0722
+              );
+            }
+            values.sort((left, right) => left - right);
+            return values[Math.floor(values.length / 2)] ?? 0;
+          };
+          const nearLuma = rowLuma(0);
+          const farLuma = rowLuma(image.height - 1);
+          return { nearLuma, farLuma, contrast: farLuma - nearLuma };
+        }, `data:image/png;base64,${screenshot}`);
+      }
+      await geometryPage.evaluate(() => {
+        (window as typeof window & { __disposeStickyGeometryEditor?: () => void })
+          .__disposeStickyGeometryEditor?.();
+      });
       await geometryPage.close();
-      return result;
+      return { ...result, visualBoundary };
     };
     const assertAlignedGeometry = (geometry: Awaited<ReturnType<typeof runGeometryScenario>>['before']) => {
       assert.equal(geometry.visible, true, JSON.stringify(geometry));
@@ -209,6 +257,12 @@ async function main(): Promise<void> {
         assert.equal(geometryResult.threshold!.afterVisible, true);
         assert.ok(geometryResult.threshold!.takeoverDelta <= 1, JSON.stringify(geometryResult.threshold));
         assertAlignedGeometry(geometryResult.before);
+        if (dpr === 1 && zoom === 1) {
+          assert.ok(
+            geometryResult.visualBoundary && geometryResult.visualBoundary.contrast >= 3,
+            `sticky-header shadow must be visibly darker than the surface below it: ${JSON.stringify(geometryResult.visualBoundary)}`
+          );
+        }
         if (dpr === 1.5 && zoom === 1.25) {
           assert.ok(Math.abs(geometryResult.before.scrollerTop! - 52.5) <= 1,
             JSON.stringify(geometryResult.before));
@@ -573,10 +627,10 @@ async function main(): Promise<void> {
       Math.abs(result.domContract.boundary.chromeBottom - result.domContract.boundary.headerBottom) <= 0.5,
       `sticky-header divider and shadow must share one physical edge: ${JSON.stringify(result.domContract.boundary)}`
     );
-    assert.equal(
+    assert.doesNotMatch(
       result.domContract.boundary.chromeShadow,
-      'none',
-      'the sticky chrome must not render a second, detached shadow edge'
+      /inset/,
+      'the sticky chrome must render only the outward shadow from the shared edge'
     );
     assert.match(
       result.domContract.boundary.headerShadow,
@@ -584,12 +638,12 @@ async function main(): Promise<void> {
       'the sticky header must paint its divider as an inset line so it survives fractional scaling'
     );
     const stickyShadowPixels = Array.from(
-      result.domContract.boundary.headerShadow.matchAll(/(-?\d+(?:\.\d+)?)px/g),
+      result.domContract.boundary.chromeShadow.matchAll(/(-?\d+(?:\.\d+)?)px/g),
       (match: RegExpMatchArray) => Number(match[1])
     );
     assert.ok(
-      (stickyShadowPixels.at(-1) ?? -1) >= 0,
-      `the sticky header shadow must retain visible spread below its divider: ${result.domContract.boundary.headerShadow}`
+      stickyShadowPixels.length >= 3 && stickyShadowPixels[2] > 0,
+      `the sticky chrome must retain visible blur below its divider: ${result.domContract.boundary.chromeShadow}`
     );
     assert.equal(result.domContract.wrapOverflow, 'clip');
     assert.equal(result.domContract.lineNumbers, true);

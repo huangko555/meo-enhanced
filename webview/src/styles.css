@@ -5371,7 +5371,12 @@ body.outline-resizing .preview-frame {
 
 .cm-editor .meo-md-html-table-sticky-chrome.is-visible {
   display: block;
-  box-shadow: none;
+  box-shadow: 0 3px 8px 0 rgb(0 0 0 / 22%);
+}
+
+html[data-editor-appearance='dark'] body.vscode-dark
+  .cm-editor .meo-md-html-table-sticky-chrome.is-visible {
+  box-shadow: 0 3px 9px 0 rgb(0 0 0 / 48%);
 }
 
 .cm-editor .meo-md-html-table-sticky-chrome * {
@@ -5391,16 +5396,7 @@ body.outline-resizing .preview-frame {
   width: 100%;
   overflow: hidden;
   background: var(--meo-live-table-header-background, var(--meo-semantic-tableHeaderBackground));
-  box-shadow:
-    inset 0 -1px 0 var(--meo-semantic-tableBorder),
-    0 3px 8px 0 rgb(0 0 0 / 22%);
-}
-
-html[data-editor-appearance='dark'] body.vscode-dark
-  .cm-editor .meo-md-html-table-sticky-header {
-  box-shadow:
-    inset 0 -1px 0 var(--meo-semantic-tableBorder),
-    0 3px 9px 0 rgb(0 0 0 / 48%);
+  box-shadow: inset 0 -1px 0 var(--meo-semantic-tableBorder);
 }
 
 .cm-editor .meo-md-html-table.meo-md-html-table-sticky-table thead th {
