@@ -3944,6 +3944,13 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   cursor: grab;
   color: var(--meo-foreground);
   background-color: var(--meo-code-background);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.meo-mermaid-fullscreen * {
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .meo-mermaid-fullscreen.meo-mermaid-light-theme {

@@ -253,6 +253,23 @@ async function assertFullscreenNavigationIsSessionLocal(page: Page): Promise<voi
   await page.click('.meo-mermaid-block .meo-mermaid-zoom-btn[aria-label="Reset zoom"]');
 }
 
+async function assertFullscreenDisablesTextSelection(page: Page): Promise<void> {
+  await enterMermaidFullscreen(page);
+  const selectionContract = await page.evaluate(() => {
+    const fullscreen = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen')!;
+    const label = fullscreen.querySelector<SVGTextElement>('svg text');
+    return {
+      fullscreen: getComputedStyle(fullscreen).userSelect,
+      label: label ? getComputedStyle(label).userSelect : null
+    };
+  });
+  if (selectionContract.fullscreen !== 'none' || selectionContract.label !== 'none') {
+    throw new Error(`Fullscreen Mermaid still permits drag text selection: ${JSON.stringify(selectionContract)}`);
+  }
+  await page.click('.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Exit fullscreen"]');
+  await page.waitForFunction(() => !document.querySelector('.meo-mermaid-fullscreen-scrim'));
+}
+
 async function assertFullscreenWheelKeepsPointerAnchored(page: Page): Promise<void> {
   await enterMermaidFullscreen(page);
   const before = await page.evaluate(() => {
@@ -1129,6 +1146,7 @@ async function main() {
       throw new Error(`Block toolbars were visible before hover: ${JSON.stringify(hiddenToolbarState)}`);
     }
           await assertEmbeddedMermaidSupportsPointerPanning(page);
+    await assertFullscreenDisablesTextSelection(page);
     await assertFullscreenNavigationIsSessionLocal(page);
     await assertFullscreenWheelKeepsPointerAnchored(page);
     await assertFullscreenPanStaysWithinDiagramBounds(page);
