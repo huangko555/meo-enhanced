@@ -23,14 +23,28 @@ async function positionPreviewElement(page: Page, selector: string, ratio = 0): 
     const rect = element.getBoundingClientRect();
     frameDocument.scrollingElement!.scrollTop += rect.top + rect.height * targetRatio;
   }, { targetSelector: selector, targetRatio: ratio });
+  await waitForFrames(page, 1);
   const previewPoint = await page.$eval('.preview-frame', (element) => {
     const rect = element.getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   });
+  const wheel = await page.evaluate(() => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const scrollElement = frameDocument.scrollingElement!;
+    const maximum = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
+    return {
+      before: scrollElement.scrollTop,
+      deltaY: scrollElement.scrollTop < maximum - 8 ? 8 : -8
+    };
+  });
   await page.mouse.move(previewPoint.x, previewPoint.y);
   // Programmatic positioning prepares the fixture; the trusted wheel event
   // models the user intent that owns the next mode-transition anchor.
-  await page.mouse.wheel({ deltaY: 1 });
+  await page.mouse.wheel({ deltaY: wheel.deltaY });
+  await page.waitForFunction((before) => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    return Math.abs(frameDocument.scrollingElement!.scrollTop - before) >= 1;
+  }, {}, wheel.before);
   await waitForFrames(page, 1);
 }
 
