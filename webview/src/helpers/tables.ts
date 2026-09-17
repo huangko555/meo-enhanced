@@ -4809,13 +4809,24 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         this.scheduleLayout();
       };
       resizeAndSchedule();
-      if (preservedScrollTop !== null && input.ownerDocument.activeElement === input) {
-        const view = this.view;
+      const view = this.view;
+      const caretAfterResize = view ? tableCellCaretViewportBounds(input) : null;
+      const viewportAfterResize = view ? tableUsableViewportBounds(view, input) : null;
+      const caretNeedsReveal = shouldRevealCaret || Boolean(
+        caretAfterResize && viewportAfterResize && (
+          caretAfterResize.top < viewportAfterResize.top - tableCellCaretRevealEpsilon ||
+          caretAfterResize.bottom > viewportAfterResize.bottom + tableCellCaretRevealEpsilon
+        )
+      );
+      // A character can create a new visual line even when the caret was visible
+      // before input. Recheck after the synchronous row growth so that the new
+      // line is revealed before paint instead of locking the now-stale viewport.
+      if (caretNeedsReveal) {
+        this.revealTableCellCaretIfNeeded(input);
+      } else if (preservedScrollTop !== null && input.ownerDocument.activeElement === input) {
         const controller = view ? getViewportController(view) : null;
         if (controller) controller.lockScrollTop(preservedScrollTop);
         else if (view) view.scrollDOM.scrollTop = preservedScrollTop;
-      } else if (shouldRevealCaret) {
-        this.revealTableCellCaretIfNeeded(input);
       }
       notifySelectionChange();
     });
