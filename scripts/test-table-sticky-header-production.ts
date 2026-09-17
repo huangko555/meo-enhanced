@@ -66,7 +66,7 @@ async function main(): Promise<void> {
           stickyHeaderTop: stickyHeader?.getBoundingClientRect().top ?? null,
           stickyHeaderRect: stickyHeader ? (() => {
             const rect = stickyHeader.getBoundingClientRect();
-            return { left: rect.left, bottom: rect.bottom, width: rect.width };
+            return { left: rect.left, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
           })() : null,
           firstColumnDelta: mainCell && stickyCell
             ? Math.abs(mainCell.getBoundingClientRect().left - stickyCell.getBoundingClientRect().left)
@@ -188,23 +188,32 @@ async function main(): Promise<void> {
         .__disposeStickyGeometryEditor = () => editor.destroy();
       return { before, after, threshold };
       }, scenario);
-      let visualBoundary: null | { nearLuma: number; farLuma: number; contrast: number } = null;
+      let visualBoundary: null | {
+        nearLuma: number;
+        farLuma: number;
+        contrast: number;
+        sideNearLuma: number;
+        sideFarLuma: number;
+        sideContrast: number;
+      } = null;
       if (scenario.dpr === 1 && scenario.zoom === 1 && !scenario.transform) {
         const rect = result.before.stickyHeaderRect!;
-        const width = Math.max(1, Math.min(300, Math.floor(rect.width - 16)));
         const screenshot = await geometryPage.screenshot({
           encoding: 'base64',
           clip: {
-            x: Math.max(0, Math.floor(rect.left + 8)),
-            y: Math.max(0, Math.floor(rect.bottom)),
-            width,
-            height: 8
+            x: Math.max(0, Math.floor(rect.left)),
+            y: Math.max(0, Math.floor(rect.top)),
+            width: Math.max(1, Math.floor(rect.width) + 8),
+            height: Math.max(1, Math.floor(rect.height) + 8)
           }
         }) as string;
-        visualBoundary = await geometryPage.evaluate(async (source) => {
+        visualBoundary = await geometryPage.evaluate(async ({ source, headerWidth, headerHeight }) => {
           const image = new Image();
-          image.src = source;
-          await image.decode();
+          await new Promise<void>((resolve, reject) => {
+            image.onload = () => resolve();
+            image.onerror = () => reject(new Error('Could not decode sticky-header screenshot'));
+            image.src = source;
+          });
           const canvas = document.createElement('canvas');
           canvas.width = image.width;
           canvas.height = image.height;
@@ -213,7 +222,7 @@ async function main(): Promise<void> {
           const pixels = context.getImageData(0, 0, image.width, image.height).data;
           const rowLuma = (row: number) => {
             const values: number[] = [];
-            for (let column = 0; column < image.width; column += 1) {
+            for (let column = 8; column < Math.min(image.width - 8, 308); column += 1) {
               const offset = (row * image.width + column) * 4;
               values.push(
                 pixels[offset] * 0.2126 + pixels[offset + 1] * 0.7152 + pixels[offset + 2] * 0.0722
@@ -222,10 +231,34 @@ async function main(): Promise<void> {
             values.sort((left, right) => left - right);
             return values[Math.floor(values.length / 2)] ?? 0;
           };
-          const nearLuma = rowLuma(0);
+          const columnLuma = (column: number) => {
+            const values: number[] = [];
+            for (let row = 8; row < Math.min(image.height - 8, Math.floor(headerHeight) - 8); row += 1) {
+              const offset = (row * image.width + column) * 4;
+              values.push(
+                pixels[offset] * 0.2126 + pixels[offset + 1] * 0.7152 + pixels[offset + 2] * 0.0722
+              );
+            }
+            values.sort((left, right) => left - right);
+            return values[Math.floor(values.length / 2)] ?? 0;
+          };
+          const nearLuma = rowLuma(Math.min(image.height - 1, Math.floor(headerHeight)));
           const farLuma = rowLuma(image.height - 1);
-          return { nearLuma, farLuma, contrast: farLuma - nearLuma };
-        }, `data:image/png;base64,${screenshot}`);
+          const sideNearLuma = columnLuma(Math.min(image.width - 1, Math.floor(headerWidth)));
+          const sideFarLuma = columnLuma(image.width - 1);
+          return {
+            nearLuma,
+            farLuma,
+            contrast: farLuma - nearLuma,
+            sideNearLuma,
+            sideFarLuma,
+            sideContrast: sideFarLuma - sideNearLuma
+          };
+        }, {
+          source: `data:image/png;base64,${screenshot}`,
+          headerWidth: rect.width,
+          headerHeight: rect.height
+        });
       }
       await geometryPage.evaluate(() => {
         (window as typeof window & { __disposeStickyGeometryEditor?: () => void })
@@ -261,6 +294,10 @@ async function main(): Promise<void> {
           assert.ok(
             geometryResult.visualBoundary && geometryResult.visualBoundary.contrast >= 3,
             `sticky-header shadow must be visibly darker than the surface below it: ${JSON.stringify(geometryResult.visualBoundary)}`
+          );
+          assert.ok(
+            geometryResult.visualBoundary.sideContrast <= 1,
+            `sticky-header shadow must not darken the side surface: ${JSON.stringify(geometryResult.visualBoundary)}`
           );
         }
         if (dpr === 1.5 && zoom === 1.25) {
@@ -445,6 +482,7 @@ async function main(): Promise<void> {
           chromeBottom: chrome.getBoundingClientRect().bottom,
           headerBottom: stickyHeader.getBoundingClientRect().bottom,
           chromeShadow: getComputedStyle(chrome).boxShadow,
+          chromeAfterBackground: getComputedStyle(chrome, '::after').backgroundImage,
           headerShadow: getComputedStyle(stickyHeader).boxShadow
         },
         firstColumnDelta: Math.abs(
@@ -627,23 +665,20 @@ async function main(): Promise<void> {
       Math.abs(result.domContract.boundary.chromeBottom - result.domContract.boundary.headerBottom) <= 0.5,
       `sticky-header divider and shadow must share one physical edge: ${JSON.stringify(result.domContract.boundary)}`
     );
-    assert.doesNotMatch(
+    assert.equal(
       result.domContract.boundary.chromeShadow,
-      /inset/,
-      'the sticky chrome must render only the outward shadow from the shared edge'
+      'none',
+      'the sticky chrome box must not spread shadow around its sides'
+    );
+    assert.match(
+      result.domContract.boundary.chromeAfterBackground,
+      /linear-gradient/,
+      'the sticky chrome must paint a downward-only gradient below the shared edge'
     );
     assert.match(
       result.domContract.boundary.headerShadow,
       /inset/,
       'the sticky header must paint its divider as an inset line so it survives fractional scaling'
-    );
-    const stickyShadowPixels = Array.from(
-      result.domContract.boundary.chromeShadow.matchAll(/(-?\d+(?:\.\d+)?)px/g),
-      (match: RegExpMatchArray) => Number(match[1])
-    );
-    assert.ok(
-      stickyShadowPixels.length >= 3 && stickyShadowPixels[2] > 0,
-      `the sticky chrome must retain visible blur below its divider: ${result.domContract.boundary.chromeShadow}`
     );
     assert.equal(result.domContract.wrapOverflow, 'clip');
     assert.equal(result.domContract.lineNumbers, true);
