@@ -387,6 +387,12 @@ async function main(): Promise<void> {
         horizontalScroll: wrap.scrollLeft,
         scrollWidth: wrap.scrollWidth,
         clientWidth: wrap.clientWidth,
+        boundary: {
+          chromeBottom: chrome.getBoundingClientRect().bottom,
+          headerBottom: stickyHeader.getBoundingClientRect().bottom,
+          chromeShadow: getComputedStyle(chrome).boxShadow,
+          headerShadow: getComputedStyle(stickyHeader).boxShadow
+        },
         firstColumnDelta: Math.abs(
           document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead th')!.getBoundingClientRect().left -
           document.querySelector<HTMLElement>('.meo-md-html-table-sticky-table thead th')!.getBoundingClientRect().left
@@ -563,6 +569,20 @@ async function main(): Promise<void> {
       `a table whose readable minimums fit must not expose horizontal overflow: ${JSON.stringify(result.domContract)}`
     );
     assert.ok(result.domContract.firstColumnDelta <= 1);
+    assert.ok(
+      Math.abs(result.domContract.boundary.chromeBottom - result.domContract.boundary.headerBottom) <= 0.5,
+      `sticky-header divider and shadow must share one physical edge: ${JSON.stringify(result.domContract.boundary)}`
+    );
+    assert.equal(
+      result.domContract.boundary.chromeShadow,
+      'none',
+      'the sticky chrome must not render a second, detached shadow edge'
+    );
+    assert.match(
+      result.domContract.boundary.headerShadow,
+      /inset/,
+      'the sticky header must paint its divider as an inset line so it survives fractional scaling'
+    );
     assert.equal(result.domContract.wrapOverflow, 'clip');
     assert.equal(result.domContract.lineNumbers, true);
     assert.equal(result.hiddenAtTail, true, JSON.stringify(result.tailState));
