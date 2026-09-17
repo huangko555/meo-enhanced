@@ -496,7 +496,7 @@ if (!darkPreviewStyles.includes('--meo-bg: #20252b')) {
   throw new Error('Dark Preview must use the current document background');
 }
 for (const expected of [
-  '--meo-fg: #d8dee9',
+  '--meo-fg: color-mix(in srgb, #d8dee9 88%, #9aa4af 12%)',
   '--meo-heading: #d8dee9',
   '--meo-link: #58a6ff'
 ]) {
@@ -509,6 +509,10 @@ if (darkPreviewStyles.includes('#171b20')) {
 }
 if (!lightPreviewStyles.includes('--meo-bg: #ffffff')) {
   throw new Error('Light Preview must use a white reading background');
+}
+if (!lightPreviewStyles.includes('--meo-fg: color-mix(in srgb, #1f2328 88%, #59636e 12%)')
+  || !lightPreviewStyles.includes('--meo-heading: #1f2328')) {
+  throw new Error('Light Preview must keep headings stronger than theme-adaptive body text');
 }
 if (!lightPreviewStyles.includes('--meo-link: #0969da')) {
   throw new Error('Light Preview links must use the shared blue reading color');

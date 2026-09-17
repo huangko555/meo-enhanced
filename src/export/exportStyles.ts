@@ -66,7 +66,7 @@ function buildReadingStyles(
     ? '#d0d7de'
     : `color-mix(in srgb, ${previewForegroundColor} 22%, transparent)`;
   const readingMutedColor = previewMutedColor;
-  const readingForegroundColor = previewForegroundColor;
+  const readingForegroundColor = `color-mix(in srgb, ${previewForegroundColor} 88%, ${previewMutedColor} 12%)`;
   const readingLinkColor = appearance === 'light' ? '#0969da' : '#58a6ff';
   const selectedFontFamily = normalizePreviewFontFamily(environment.previewFontFamily);
   const liveFont = selectedFontFamily
@@ -111,7 +111,7 @@ function buildReadingStyles(
   --meo-font-system-sans: ui-sans-serif, system-ui, sans-serif;
   --meo-font-system-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --meo-bg: ${editorBackgroundColor};
-  --meo-fg: ${editorForegroundColor};
+  --meo-fg: ${readingForegroundColor};
   --meo-code-fg: ${codeColor('foreground')};
   --meo-code-comment: ${codeColor('comment')};
   --meo-code-keyword: ${codeColor('keyword')};
@@ -140,7 +140,7 @@ function buildReadingStyles(
   --meo-alert-important: ${colors.base08};
   --meo-alert-warning: ${colors.base07};
   --meo-alert-caution: ${colors.base04};
-  --meo-heading: ${readingForegroundColor};
+  --meo-heading: ${previewForegroundColor};
   --meo-link: ${readingLinkColor};
   --meo-accent-2: ${readingForegroundColor};
   --meo-number: ${readingForegroundColor};
