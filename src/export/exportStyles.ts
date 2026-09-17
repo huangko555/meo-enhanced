@@ -42,13 +42,14 @@ function buildReadingStyles(
   const editorBackgroundColor = appearance === 'light' ? '#ffffff' : darkBackgroundColor;
   const previewForegroundColor = appearance === 'light' ? '#1f2328' : '#d8dee9';
   const previewMutedColor = appearance === 'light' ? '#59636e' : '#9aa4af';
+  const readingForegroundColor = `color-mix(in srgb, ${previewForegroundColor} 78%, ${previewMutedColor} 22%)`;
   const editorForegroundColor = previewForegroundColor;
   const previewCodePalette = environment.previewCodePalettes?.[appearance === 'auto' ? 'dark' : appearance];
   const sourceColoring = environment.previewSourceColoring !== false;
   const codeColor = (key: keyof NonNullable<typeof previewCodePalette>): string => (
     sourceColoring
       ? sanitizeCssColor(previewCodePalette?.[key] ?? '') || editorForegroundColor
-      : editorForegroundColor
+      : readingForegroundColor
   );
   const defaultCodeBlockColor = appearance === 'light'
     ? '#f6f8fa'
@@ -66,7 +67,6 @@ function buildReadingStyles(
     ? '#d0d7de'
     : `color-mix(in srgb, ${previewForegroundColor} 22%, transparent)`;
   const readingMutedColor = previewMutedColor;
-  const readingForegroundColor = `color-mix(in srgb, ${previewForegroundColor} 88%, ${previewMutedColor} 12%)`;
   const readingLinkColor = appearance === 'light' ? '#0969da' : '#58a6ff';
   const selectedFontFamily = normalizePreviewFontFamily(environment.previewFontFamily);
   const liveFont = selectedFontFamily

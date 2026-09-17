@@ -439,6 +439,10 @@ if (!/\.meo-export-frontmatter-value\.is-number[^}]*color:\s*var\(--meo-code-num
   || !/\.meo-export-frontmatter-value\.is-link[^}]*color:\s*var\(--meo-code-link\)/s.test(darkPreviewStyles)) {
   throw new Error('Preview Properties must expose semantic value colors through the source-coloring palette');
 }
+if (!/\.meo-export-frontmatter-value\.is-number[^}]*color:\s*var\(--meo-code-number\)/s.test(plainTextStyles)
+  || !/\.meo-export-frontmatter-value\.is-link[^}]*color:\s*var\(--meo-code-link\)/s.test(plainTextStyles)) {
+  throw new Error('Disabling Preview source coloring must route Front Matter values through the plain code palette');
+}
 if (!defaultFontStyles.includes('--meo-font-body: MEO Synthetic Mono')
   || maliciousFontStyles.includes('color:red')) {
   throw new Error('Empty or malicious Preview fonts must use the captured editor family without CSS injection');
@@ -449,8 +453,10 @@ if (!lightPreviewStyles.includes('--meo-code-keyword: #121212')
   throw new Error('Preview/export must use the frozen final code palette for each resolved appearance');
 }
 for (const token of ['fg', 'comment', 'keyword', 'string', 'number', 'type', 'property', 'link']) {
-  if (!plainTextStyles.includes(`--meo-code-${token}: #d8dee9`)) {
-    throw new Error(`Disabled Preview source coloring must use plain body text for ${token}`);
+  if (!plainTextStyles.includes(
+    `--meo-code-${token}: color-mix(in srgb, #d8dee9 78%, #9aa4af 22%)`
+  )) {
+    throw new Error(`Disabled Preview source coloring must use the adaptive body foreground for ${token}`);
   }
 }
 
@@ -496,7 +502,7 @@ if (!darkPreviewStyles.includes('--meo-bg: #20252b')) {
   throw new Error('Dark Preview must use the current document background');
 }
 for (const expected of [
-  '--meo-fg: color-mix(in srgb, #d8dee9 88%, #9aa4af 12%)',
+  '--meo-fg: color-mix(in srgb, #d8dee9 78%, #9aa4af 22%)',
   '--meo-heading: #d8dee9',
   '--meo-link: #58a6ff'
 ]) {
@@ -510,7 +516,7 @@ if (darkPreviewStyles.includes('#171b20')) {
 if (!lightPreviewStyles.includes('--meo-bg: #ffffff')) {
   throw new Error('Light Preview must use a white reading background');
 }
-if (!lightPreviewStyles.includes('--meo-fg: color-mix(in srgb, #1f2328 88%, #59636e 12%)')
+if (!lightPreviewStyles.includes('--meo-fg: color-mix(in srgb, #1f2328 78%, #59636e 22%)')
   || !lightPreviewStyles.includes('--meo-heading: #1f2328')) {
   throw new Error('Light Preview must keep headings stronger than theme-adaptive body text');
 }

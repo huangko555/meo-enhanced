@@ -540,6 +540,30 @@ async function assertPreviewProjectionTransactions(
         && getComputedStyle(span).color === getComputedStyle(source).color
         && getComputedStyle(span).fontWeight === getComputedStyle(source).fontWeight;
     }, { timeout: 3000 });
+    const disabledSemanticColors = await page.evaluate(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const root = doc.querySelector<HTMLElement>('.meo-export-doc')!;
+      const numberValue = doc.createElement('span');
+      const linkValue = doc.createElement('span');
+      numberValue.className = 'meo-export-frontmatter-value is-number';
+      linkValue.className = 'meo-export-frontmatter-value is-link';
+      root.append(numberValue, linkValue);
+      const result = {
+        body: getComputedStyle(root).color,
+        code: getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-code-line-source')!).color,
+        frontmatterNumber: getComputedStyle(numberValue).color,
+        frontmatterLink: getComputedStyle(linkValue).color
+      };
+      numberValue.remove();
+      linkValue.remove();
+      return result;
+    });
+    assert.deepEqual(disabledSemanticColors, {
+      body: disabledSemanticColors.body,
+      code: disabledSemanticColors.body,
+      frontmatterNumber: disabledSemanticColors.body,
+      frontmatterLink: disabledSemanticColors.body
+    }, 'Disabling Preview source coloring must use the adaptive body foreground for code and Front Matter');
     await page.evaluate(() => {
       document.querySelector<HTMLButtonElement>('.preview-source-coloring-dropdown')!.click();
       document.querySelector<HTMLButtonElement>(
