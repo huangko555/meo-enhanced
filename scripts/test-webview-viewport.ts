@@ -217,6 +217,16 @@ async function main() {
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
     await waitForFrames(page, 4);
+    const preInitAppearance = await page.evaluate(() => ({
+      background: getComputedStyle(document.body).backgroundColor,
+      rootAppearance: document.documentElement.dataset.editorAppearance ?? null
+    }));
+    if (
+      preInitAppearance.background !== 'rgb(255, 255, 255)'
+      || preInitAppearance.rootAppearance !== 'light'
+    ) {
+      throw new Error(`Light VS Code startup painted a dark pre-init frame: ${JSON.stringify(preInitAppearance)}`);
+    }
     const pendingLanguageProjection = await page.evaluate(() => {
       const toolbar = document.querySelector<HTMLElement>('.mode-toolbar')!;
       const visibleText = Array.from(toolbar.querySelectorAll<HTMLElement>('button, [role="button"], input'))

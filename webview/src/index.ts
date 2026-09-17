@@ -112,7 +112,12 @@ initializeImageHandling(vscode);
 initializeWikiLinkHandling(vscode);
 initializeLocalLinkHandling(vscode);
 
-applyBuiltInVisualBaseline();
+applyBuiltInVisualBaseline(
+  document.body.classList.contains('vscode-light')
+    || document.body.classList.contains('vscode-high-contrast-light')
+    ? 'light'
+    : 'dark'
+);
 setImageSrcResolver(resolveImageSrc);
 
 const root = document.getElementById('app');
