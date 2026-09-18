@@ -471,6 +471,26 @@ if (!/h1, h2\s*\{[^}]*padding-bottom:\s*0\.3em;/s.test(exportStyles)
   || /(?:h1, h2|h1|h2)\s*\{[^}]*border-bottom:\s*1px solid var\(--meo-hr\);/s.test(exportStyles)) {
   throw new Error('Export headings must inherit the divider-free Preview style');
 }
+if (/html\[data-meo-export-target='pdf'\]\s+hr,[^{]*\{[^}]*(?:break-before:\s*page|page-break-before:\s*always)/s.test(exportStyles)) {
+  throw new Error('PDF thematic breaks must not be treated as forced page breaks');
+}
+if (!/html\[data-meo-export-target='pdf'\]\s+:is\(h1, h2, h3, h4, h5, h6, hr\),[^{]*\{[^}]*break-after:\s*avoid-page;[^}]*page-break-after:\s*avoid;/s.test(exportStyles)
+  || !/html\[data-meo-export-target='pdf'\]\s+p,[^{]*\{[^}]*orphans:\s*2;[^}]*widows:\s*2;/s.test(exportStyles)
+  || !/html\[data-meo-export-target='pdf'\]\s+li,[^{]*\{[^}]*break-inside:\s*avoid-page;[^}]*page-break-inside:\s*avoid;/s.test(exportStyles)) {
+  throw new Error('Screen-emulated PDF export must receive heading, paragraph, and list pagination rules');
+}
+if (!/html\[data-meo-export-target='pdf'\]\s+:is\(pre, blockquote, table, img, \.meo-export-mermaid, \.meo-export-math-display\),[^{]*\{[^}]*break-inside:\s*avoid;[^}]*page-break-inside:\s*avoid;/s.test(exportStyles)) {
+  throw new Error('Screen-emulated PDF export must keep readable blocks together when possible');
+}
+if (!/h1, h2, h3, h4, h5, h6, hr\s*\{[^}]*break-after:\s*avoid-page;[^}]*page-break-after:\s*avoid;/s.test(exportStyles)) {
+  throw new Error('Printed headings and thematic breaks must stay with the content that follows them');
+}
+if (!/p\s*\{[^}]*orphans:\s*2;[^}]*widows:\s*2;/s.test(exportStyles)) {
+  throw new Error('Printed paragraphs must avoid single orphan and widow lines');
+}
+if (!/li\s*\{[^}]*break-inside:\s*avoid-page;[^}]*page-break-inside:\s*avoid;/s.test(exportStyles)) {
+  throw new Error('Printed lists must allow list-level pagination while keeping individual items together');
+}
 if (exportStyles !== lightPreviewStyles || darkExportStyles !== darkPreviewStyles) {
   throw new Error('HTML/PDF export must reuse the exact Preview reading styles for the resolved appearance');
 }

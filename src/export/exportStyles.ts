@@ -250,14 +250,28 @@ body[data-meo-export-target='pdf'] .meo-export-mermaid-svg svg {
   max-height: calc(297mm - 1in - 80px);
 }
 
-html[data-meo-export-target='pdf'] hr,
-body[data-meo-export-target='pdf'] hr {
-  height: 0;
-  margin: 0;
-  border: 0;
-  background: transparent;
-  break-before: page;
-  page-break-before: always;
+html[data-meo-export-target='pdf'] :is(h1, h2, h3, h4, h5, h6, hr),
+body[data-meo-export-target='pdf'] :is(h1, h2, h3, h4, h5, h6, hr) {
+  break-after: avoid-page;
+  page-break-after: avoid;
+}
+
+html[data-meo-export-target='pdf'] p,
+body[data-meo-export-target='pdf'] p {
+  orphans: 2;
+  widows: 2;
+}
+
+html[data-meo-export-target='pdf'] li,
+body[data-meo-export-target='pdf'] li {
+  break-inside: avoid-page;
+  page-break-inside: avoid;
+}
+
+html[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-mermaid, .meo-export-math-display),
+body[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-mermaid, .meo-export-math-display) {
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 .meo-export-doc {
@@ -1083,6 +1097,18 @@ th:empty::before {
   }
   .meo-export-page {
     min-height: auto;
+  }
+  h1, h2, h3, h4, h5, h6, hr {
+    break-after: avoid-page;
+    page-break-after: avoid;
+  }
+  p {
+    orphans: 2;
+    widows: 2;
+  }
+  li {
+    break-inside: avoid-page;
+    page-break-inside: avoid;
   }
   pre, blockquote, table, img, .meo-export-mermaid, .meo-export-math-display {
     break-inside: avoid;
