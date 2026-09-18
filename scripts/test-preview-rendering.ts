@@ -461,9 +461,8 @@ for (const token of ['fg', 'comment', 'keyword', 'string', 'number', 'type', 'pr
 }
 
 if (!/h1, h2\s*\{[^}]*padding-bottom:\s*0\.3em;/s.test(darkPreviewStyles)
-  || !/h2\s*\{[^}]*border-bottom:\s*1px solid var\(--meo-hr\);/s.test(darkPreviewStyles)
-  || /h1, h2\s*\{[^}]*border-bottom:/s.test(darkPreviewStyles)) {
-  throw new Error('Preview must keep heading spacing while omitting the level-one divider line');
+  || /(?:h1, h2|h1|h2)\s*\{[^}]*border-bottom:\s*1px solid var\(--meo-hr\);/s.test(darkPreviewStyles)) {
+  throw new Error('Preview must keep heading spacing without level-one or level-two divider lines');
 }
 if (!/u\s*\{[^}]*text-decoration:\s*underline;/s.test(darkPreviewStyles)) {
   throw new Error('Preview and export styles must render HTML underline tags');

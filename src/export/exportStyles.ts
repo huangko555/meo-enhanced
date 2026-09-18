@@ -108,7 +108,13 @@ function buildReadingStyles(
       return `h${level} { font-size: var(--meo-heading-${level}-size); font-weight: var(--meo-heading-${level}-weight);${opacity} }`;
     })
     .join('\n');
-  const dividedHeadingSelector = surface === 'preview' ? 'h2' : 'h1, h2';
+  const headingDividerStyles = surface === 'preview'
+    ? ''
+    : `
+  h1, h2 {
+    border-bottom: 1px solid var(--meo-hr);
+  }
+`;
   return `
 :root {
   color-scheme: ${appearance};
@@ -442,9 +448,7 @@ h1, h2 {
   padding-bottom: 0.3em;
 }
 
-${dividedHeadingSelector} {
-  border-bottom: 1px solid var(--meo-hr);
-}
+  ${headingDividerStyles}
 
 p, ul, ol, blockquote, pre, table, hr {
   margin: 0 0 1em;
