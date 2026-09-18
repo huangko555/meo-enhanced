@@ -49,6 +49,7 @@ import { createGitBaselineRefreshTimerAdapter } from './host/gitBaselineRefreshT
 import { createVscodeSavedRevisionFileAdapter } from './host/vscodeSavedRevisionFileAdapter';
 import { createSavedRevisionRefreshTimerAdapter } from './host/savedRevisionRefreshTimerAdapter';
 import { createVscodeDiagnosticsAdapter } from './host/vscodeDiagnosticsAdapter';
+import { runVscodeExportWithFeedback } from './host/vscodeExportFeedback';
 import { createDiffBaselineProtocolAdapter } from './host/diffBaselineProtocolAdapter';
 import { createVscodeViewNavigationAdapter } from './host/vscodeViewNavigationAdapter';
 import { createVscodeReadingPositionAdapter } from './host/vscodeReadingPositionAdapter';
@@ -65,8 +66,6 @@ import {
   resolveLocalLinkTargetUri
 } from './shared/documentLinks';
 import {
-  runWithTimedUiTimeout,
-  showTimedErrorMessage,
   showTimedInformationMessage,
   showTimedWarningMessage,
 } from './shared/timedUi';
@@ -368,7 +367,9 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
   async exportActiveDocument(format: ExportFormat): Promise<void> {
     const session = this.getActiveSession();
     if (!session) {
-      void showTimedWarningMessage('Open a Markdown file in MEO Enhanced before exporting.');
+      void showTimedWarningMessage(this.getUiLanguage() === 'zh-CN'
+        ? '请先在 MEO Enhanced 中打开 Markdown 文件再导出。'
+        : 'Open a Markdown file in MEO Enhanced before exporting.');
       return;
     }
 
@@ -543,10 +544,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         return exportRuntime.renderPreviewDocument(options);
       },
       getFindOptions: () => this.getFindOptions(),
-      getUiLanguage: () => resolveUiLanguage(
-        vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get('language', 'auto'),
-        vscode.env.language
-      ),
+      getUiLanguage: () => this.getUiLanguage(),
       getSourceLineNumbers: () => {
         const value = vscode.workspace
           .getConfiguration('editor', documentUri)
@@ -651,6 +649,13 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     return first.done ? null : first.value;
   }
 
+  private getUiLanguage(): ReadingSnapshot['uiLanguage'] {
+    return resolveUiLanguage(
+      vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get('language', 'auto'),
+      vscode.env.language
+    );
+  }
+
   private async exportSessionDocument(
     session: PanelSession,
     format: ExportFormat
@@ -658,78 +663,49 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     this.lastActivePanel = session.panel;
 
     if (session.documentUri.scheme !== 'file') {
-      void showTimedWarningMessage('Export is only supported for local Markdown files in the current version.');
+      void showTimedWarningMessage(this.getUiLanguage() === 'zh-CN'
+        ? '当前版本仅支持导出本地 Markdown 文件。'
+        : 'Export is only supported for local Markdown files in the current version.');
       return;
     }
 
-    const saveUri = await this.promptExportTargetUri(session.documentUri, format);
-    if (!saveUri) {
-      return;
-    }
+    await runVscodeExportWithFeedback({
+      sourceDocumentUri: session.documentUri,
+      format,
+      uiLanguage: this.getUiLanguage()
+    }, async ({ targetUri, report }) => {
+      report('collectingContent');
+      const snapshot = await session.requestExportSnapshot();
 
-    try {
-      await runWithTimedUiTimeout(() =>
-        vscode.window.withProgress(
-          {
-            location: vscode.ProgressLocation.Notification,
-            cancellable: false,
-            title: format === 'html' ? 'Exporting Markdown to HTML' : 'Exporting Markdown to PDF'
-          },
-          async (progress) => {
-            progress.report({ message: 'Collecting editor content…' });
-            const snapshot = await session.requestExportSnapshot();
+      report('renderingDocument');
+      const exportRuntime = await loadExportRuntimeModule(this.context.extensionUri);
+      const exportRender = await this.buildExportHtmlDocument(exportRuntime, {
+        readingSnapshot: snapshot,
+        sourceDocumentUri: session.documentUri,
+        outputFileUri: targetUri,
+        target: format
+      });
 
-            progress.report({ message: 'Rendering export document…' });
-            const exportRuntime = await loadExportRuntimeModule(this.context.extensionUri);
-            const exportRender = await this.buildExportHtmlDocument(exportRuntime, {
-              readingSnapshot: snapshot,
-              sourceDocumentUri: session.documentUri,
-              outputFileUri: saveUri,
-              target: format
-            });
+      if (format === 'html') {
+        report('writingHtml');
+        await exportRuntime.writeHtmlExport({
+          htmlDocument: exportRender.htmlDocument,
+          outputHtmlPath: targetUri.fsPath
+        });
+        return;
+      }
 
-            if (format === 'html') {
-              progress.report({ message: 'Writing HTML…' });
-              await exportRuntime.writeHtmlExport({
-                htmlDocument: exportRender.htmlDocument,
-                outputHtmlPath: saveUri.fsPath
-              });
-              return;
-            }
-
-            progress.report({ message: 'Rendering PDF in headless browser…' });
-            const puppeteerRuntimeModulePath = vscode.Uri.joinPath(
-              this.context.extensionUri,
-              'dist',
-              'puppeteer-runtime.js'
-            ).fsPath;
-            await exportRuntime.renderPdfFromHtmlExport({
-              htmlDocument: exportRender.htmlDocument,
-              outputPdfPath: saveUri.fsPath,
-              puppeteerRuntimeModulePath
-            });
-          }
-        )
-      );
-
-      void vscode.window.setStatusBarMessage(
-        `${format.toUpperCase()} export completed: ${saveUri.fsPath}`,
-        5000
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Export failed';
-      void showTimedErrorMessage(`${format.toUpperCase()} export failed: ${message}`);
-    }
-  }
-
-  private async promptExportTargetUri(documentUri: vscode.Uri, format: ExportFormat): Promise<vscode.Uri | undefined> {
-    const defaultUri = vscode.Uri.file(replaceFileExtension(documentUri.fsPath, format === 'html' ? '.html' : '.pdf'));
-    return vscode.window.showSaveDialog({
-      defaultUri,
-      filters: format === 'html'
-        ? { HTML: ['html', 'htm'] }
-        : { PDF: ['pdf'] },
-      saveLabel: format === 'html' ? 'Export HTML' : 'Export PDF'
+      report('renderingPdf');
+      const puppeteerRuntimeModulePath = vscode.Uri.joinPath(
+        this.context.extensionUri,
+        'dist',
+        'puppeteer-runtime.js'
+      ).fsPath;
+      await exportRuntime.renderPdfFromHtmlExport({
+        htmlDocument: exportRender.htmlDocument,
+        outputPdfPath: targetUri.fsPath,
+        puppeteerRuntimeModulePath
+      });
     });
   }
 
@@ -981,11 +957,6 @@ function collectLocalResourceRoots(distRoot: vscode.Uri, documentUri: vscode.Uri
   }
 
   return Array.from(roots.values());
-}
-
-function replaceFileExtension(filePath: string, ext: '.html' | '.pdf'): string {
-  const parsed = path.parse(filePath);
-  return path.join(parsed.dir, `${parsed.name}${ext}`);
 }
 
 function resolveWorktreeUri(document: vscode.TextDocument): vscode.Uri {

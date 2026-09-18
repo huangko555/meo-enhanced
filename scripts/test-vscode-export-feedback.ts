@@ -1,0 +1,127 @@
+import assert from 'node:assert/strict';
+import { mock } from 'bun:test';
+
+type FakeUri = { readonly fsPath: string };
+
+const targetUri: FakeUri = { fsPath: 'D:/exports/note.pdf' };
+const progressMessages: string[] = [];
+const informationMessages: Array<{ message: string; actions: string[] }> = [];
+const errorMessages: string[] = [];
+const openedUris: FakeUri[] = [];
+let selectedAction: string | undefined;
+let saveDialogResult: FakeUri | undefined = targetUri;
+let saveDialogOptions: Record<string, unknown> | undefined;
+let progressOptions: Record<string, unknown> | undefined;
+
+mock.module('vscode', () => ({
+  ProgressLocation: { Notification: 15 },
+  Uri: { file: (fsPath: string): FakeUri => ({ fsPath }) },
+  window: {
+    showSaveDialog: async (options: Record<string, unknown>) => {
+      saveDialogOptions = options;
+      return saveDialogResult;
+    },
+    withProgress: async (
+      options: Record<string, unknown>,
+      task: (progress: { report(value: { message: string }): void }) => Promise<void>
+    ) => {
+      progressOptions = options;
+      return task({ report: ({ message }) => progressMessages.push(message) });
+    },
+    showInformationMessage: async (message: string, ...actions: string[]) => {
+      informationMessages.push({ message, actions });
+      return selectedAction;
+    },
+    showErrorMessage: async (message: string) => {
+      errorMessages.push(message);
+      return undefined;
+    }
+  },
+  env: {
+    openExternal: async (uri: FakeUri) => {
+      openedUris.push(uri);
+      return true;
+    }
+  }
+}));
+
+const { runVscodeExportWithFeedback } = await import('../src/host/vscodeExportFeedback');
+const sourceDocumentUri = { fsPath: 'D:/docs/note.md' } as never;
+
+selectedAction = '直接打开';
+const zhOutcome = await runVscodeExportWithFeedback({
+  sourceDocumentUri,
+  format: 'pdf',
+  uiLanguage: 'zh-CN'
+}, async ({ targetUri: selectedUri, report }) => {
+  assert.equal(selectedUri, targetUri);
+  report('collectingContent');
+  report('renderingDocument');
+  report('renderingPdf');
+});
+
+assert.equal(zhOutcome, 'completed');
+assert.equal(saveDialogOptions?.saveLabel, '导出 PDF');
+assert.equal((saveDialogOptions?.defaultUri as FakeUri).fsPath.endsWith('note.pdf'), true);
+assert.deepEqual(progressOptions, {
+  location: 15,
+  cancellable: false,
+  title: '正在导出 Markdown 为 PDF'
+});
+assert.deepEqual(progressMessages, [
+  '正在获取编辑器内容…',
+  '正在生成导出文档…',
+  '正在生成 PDF…'
+]);
+assert.deepEqual(informationMessages.at(-1), {
+  message: 'PDF 导出完成。',
+  actions: ['直接打开', '打开所在文件夹']
+});
+assert.deepEqual(openedUris, [targetUri]);
+
+selectedAction = 'Show in Folder';
+progressMessages.length = 0;
+const enOutcome = await runVscodeExportWithFeedback({
+  sourceDocumentUri,
+  format: 'html',
+  uiLanguage: 'en'
+}, async ({ report }) => {
+  report('collectingContent');
+  report('renderingDocument');
+  report('writingHtml');
+});
+assert.equal(enOutcome, 'completed');
+assert.equal(saveDialogOptions?.saveLabel, 'Export HTML');
+assert.equal(progressOptions?.title, 'Exporting Markdown to HTML');
+assert.deepEqual(progressMessages, [
+  'Collecting editor content…',
+  'Rendering export document…',
+  'Writing HTML…'
+]);
+assert.deepEqual(informationMessages.at(-1), {
+  message: 'HTML export completed.',
+  actions: ['Open', 'Show in Folder']
+});
+assert.equal(openedUris.at(-1)?.fsPath.replaceAll('\\', '/'), 'D:/exports');
+
+const failedOutcome = await runVscodeExportWithFeedback({
+  sourceDocumentUri,
+  format: 'pdf',
+  uiLanguage: 'zh-CN'
+}, async () => {
+  throw new Error('browser unavailable');
+});
+assert.equal(failedOutcome, 'failed');
+assert.equal(errorMessages.at(-1), 'PDF 导出失败：browser unavailable');
+
+saveDialogResult = undefined;
+const cancelledOutcome = await runVscodeExportWithFeedback({
+  sourceDocumentUri,
+  format: 'pdf',
+  uiLanguage: 'en'
+}, async () => {
+  throw new Error('cancelled export must not run');
+});
+assert.equal(cancelledOutcome, 'cancelled');
+
+console.log('VS Code export feedback checks passed');
