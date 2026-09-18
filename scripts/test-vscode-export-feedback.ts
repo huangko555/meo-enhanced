@@ -14,6 +14,8 @@ let saveDialogResult: FakeUri | undefined = targetUri;
 let saveDialogOptions: Record<string, unknown> | undefined;
 let progressOptions: Record<string, unknown> | undefined;
 let rejectReveal = false;
+let notificationPainted = false;
+let saveDialogBarrier: Promise<void> = Promise.resolve();
 
 mock.module('vscode', () => ({
   ProgressLocation: { Notification: 15 },
@@ -21,6 +23,7 @@ mock.module('vscode', () => ({
   window: {
     showSaveDialog: async (options: Record<string, unknown>) => {
       saveDialogOptions = options;
+      await saveDialogBarrier;
       return saveDialogResult;
     },
     withProgress: async (
@@ -28,7 +31,10 @@ mock.module('vscode', () => ({
       task: (progress: { report(value: { message: string }): void }) => Promise<void>
     ) => {
       progressOptions = options;
-      return task({ report: ({ message }) => progressMessages.push(message) });
+      return task({ report: ({ message }) => {
+        progressMessages.push(message);
+        setTimeout(() => { notificationPainted = true; }, 0);
+      } });
     },
     showInformationMessage: async (message: string, ...actions: string[]) => {
       informationMessages.push({ message, actions });
@@ -58,16 +64,25 @@ const { runVscodeExportWithFeedback } = await import('../src/host/vscodeExportFe
 const sourceDocumentUri = { fsPath: 'D:/docs/note.md' } as never;
 
 selectedAction = '直接打开';
-const zhOutcome = await runVscodeExportWithFeedback({
+let releaseSaveDialog: (() => void) | undefined;
+saveDialogBarrier = new Promise<void>((resolve) => { releaseSaveDialog = resolve; });
+let exportTaskStarted = false;
+const zhOutcomePromise = runVscodeExportWithFeedback({
   sourceDocumentUri,
   format: 'pdf',
   uiLanguage: 'zh-CN'
 }, async ({ targetUri: selectedUri, report }) => {
+  exportTaskStarted = true;
   assert.equal(selectedUri, targetUri);
-  report('collectingContent');
-  report('renderingDocument');
+  assert.equal(notificationPainted, true, 'export work must start after the first progress notification can paint');
   report('renderingPdf');
 });
+await new Promise<void>((resolve) => setTimeout(resolve, 0));
+assert.deepEqual(progressMessages, ['等待选择保存位置…']);
+assert.equal(exportTaskStarted, false);
+releaseSaveDialog?.();
+const zhOutcome = await zhOutcomePromise;
+saveDialogBarrier = Promise.resolve();
 
 assert.equal(zhOutcome, 'completed');
 assert.equal(saveDialogOptions?.saveLabel, '导出 PDF');
@@ -78,8 +93,8 @@ assert.deepEqual(progressOptions, {
   title: '正在导出 Markdown 为 PDF'
 });
 assert.deepEqual(progressMessages, [
-  '正在获取编辑器内容…',
-  '正在生成导出文档…',
+  '等待选择保存位置…',
+  '正在准备 PDF 导出…',
   '正在生成 PDF…'
 ]);
 assert.deepEqual(informationMessages.at(-1), {
@@ -95,16 +110,14 @@ const enOutcome = await runVscodeExportWithFeedback({
   format: 'html',
   uiLanguage: 'en'
 }, async ({ report }) => {
-  report('collectingContent');
-  report('renderingDocument');
   report('writingHtml');
 });
 assert.equal(enOutcome, 'completed');
 assert.equal(saveDialogOptions?.saveLabel, 'Export HTML');
 assert.equal(progressOptions?.title, 'Exporting Markdown to HTML');
 assert.deepEqual(progressMessages, [
-  'Collecting editor content…',
-  'Rendering export document…',
+  'Waiting for an output location…',
+  'Preparing HTML export…',
   'Writing HTML…'
 ]);
 assert.deepEqual(informationMessages.at(-1), {

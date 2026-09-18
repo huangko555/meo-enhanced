@@ -674,10 +674,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       format,
       uiLanguage: this.getUiLanguage()
     }, async ({ targetUri, report }) => {
-      report('collectingContent');
       const snapshot = await session.requestExportSnapshot();
 
-      report('renderingDocument');
       const exportRuntime = await loadExportRuntimeModule(this.context.extensionUri);
       const exportRender = await this.buildExportHtmlDocument(exportRuntime, {
         readingSnapshot: snapshot,
