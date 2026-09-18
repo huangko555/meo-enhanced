@@ -45,6 +45,62 @@ export async function renderPdfFromHtmlExport(options: RenderPdfExportOptions): 
   });
 }
 
+export async function preparePdfPagination(page: any): Promise<void> {
+  await page.evaluate((pageHeight: number) => {
+    const documentRoot = document.querySelector<HTMLElement>('.meo-export-doc');
+    if (!documentRoot) return;
+
+    const numberFromStyle = (value: string): number => Number.parseFloat(value) || 0;
+    const outerHeight = (element: HTMLElement): number => {
+      const style = getComputedStyle(element);
+      return element.getBoundingClientRect().height
+        + numberFromStyle(style.marginTop)
+        + numberFromStyle(style.marginBottom);
+    };
+    const rootStyle = getComputedStyle(documentRoot);
+    const contentHeight = Math.max(
+      1,
+      pageHeight - numberFromStyle(rootStyle.paddingTop) - numberFromStyle(rootStyle.paddingBottom)
+    );
+    const maximumKeepTogetherHeight = contentHeight * 0.55;
+
+    for (const item of Array.from(documentRoot.querySelectorAll<HTMLElement>('li'))) {
+      const containsComplexBlock = item.querySelector(
+        ':scope > :is(pre, blockquote, table, img, .meo-export-mermaid, .meo-export-math-display, ul, ol), '
+        + ':scope > * :is(pre, blockquote, table, img, .meo-export-mermaid, .meo-export-math-display, ul, ol)'
+      ) !== null;
+      if (containsComplexBlock || outerHeight(item) > maximumKeepTogetherHeight) {
+        item.setAttribute('data-meo-pdf-allow-break', '');
+      }
+    }
+
+    for (const block of Array.from(
+      documentRoot.querySelectorAll<HTMLElement>('pre, blockquote, table')
+    )) {
+      if (outerHeight(block) > maximumKeepTogetherHeight) {
+        block.setAttribute('data-meo-pdf-allow-break', '');
+      }
+    }
+
+    for (const diagram of Array.from(
+      documentRoot.querySelectorAll<HTMLElement>('.meo-export-mermaid.is-rendered:not(.is-math)')
+    )) {
+      const heading = diagram.previousElementSibling as HTMLElement | null;
+      const graphic = diagram.querySelector('.meo-export-mermaid-svg > svg') as SVGSVGElement | null;
+      if (!heading?.matches('h1, h2, h3, h4, h5, h6') || !graphic) continue;
+
+      const graphicHeight = graphic.getBoundingClientRect().height;
+      const fixedPairHeight = outerHeight(heading) + outerHeight(diagram) - graphicHeight;
+      const maximumGraphicHeight = Math.max(160, Math.floor(contentHeight - fixedPairHeight - 8));
+      diagram.setAttribute('data-meo-pdf-heading-pair', '');
+      if (graphicHeight > maximumGraphicHeight) {
+        graphic.style.maxHeight = `${maximumGraphicHeight}px`;
+        graphic.style.width = 'auto';
+      }
+    }
+  }, PDF_VIEWPORT.height);
+}
+
 export async function fitBlockMathForPdf(page: any): Promise<void> {
   await page.setViewport(PDF_VIEWPORT);
   const failures = await page.evaluate(async () => {
@@ -189,6 +245,7 @@ async function withPreparedExportPage<T>(
       }
     });
     await fitBlockMathForPdf(page);
+    await preparePdfPagination(page);
 
     return await action(page);
   } catch (error) {

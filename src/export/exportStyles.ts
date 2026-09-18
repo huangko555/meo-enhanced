@@ -250,8 +250,8 @@ body[data-meo-export-target='pdf'] .meo-export-mermaid-svg svg {
   max-height: calc(297mm - 1in - 80px);
 }
 
-html[data-meo-export-target='pdf'] :is(h1, h2, h3, h4, h5, h6, hr),
-body[data-meo-export-target='pdf'] :is(h1, h2, h3, h4, h5, h6, hr) {
+html[data-meo-export-target='pdf'] :is(h1, h2, h3, h4, h5, h6),
+body[data-meo-export-target='pdf'] :is(h1, h2, h3, h4, h5, h6) {
   break-after: avoid-page;
   page-break-after: avoid;
 }
@@ -262,14 +262,14 @@ body[data-meo-export-target='pdf'] p {
   widows: 2;
 }
 
-html[data-meo-export-target='pdf'] li,
-body[data-meo-export-target='pdf'] li {
+html[data-meo-export-target='pdf'] li:not(:has(:is(pre, blockquote, table, img, .meo-export-mermaid, .meo-export-math-display, ul, ol))):not([data-meo-pdf-allow-break]),
+body[data-meo-export-target='pdf'] li:not(:has(:is(pre, blockquote, table, img, .meo-export-mermaid, .meo-export-math-display, ul, ol))):not([data-meo-pdf-allow-break]) {
   break-inside: avoid-page;
   page-break-inside: avoid;
 }
 
-html[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-mermaid, .meo-export-math-display),
-body[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-mermaid, .meo-export-math-display) {
+html[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-mermaid, .meo-export-math-display):not([data-meo-pdf-allow-break]),
+body[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-mermaid, .meo-export-math-display):not([data-meo-pdf-allow-break]) {
   break-inside: avoid;
   page-break-inside: avoid;
 }
@@ -1098,7 +1098,7 @@ th:empty::before {
   .meo-export-page {
     min-height: auto;
   }
-  h1, h2, h3, h4, h5, h6, hr {
+  h1, h2, h3, h4, h5, h6 {
     break-after: avoid-page;
     page-break-after: avoid;
   }
@@ -1106,7 +1106,7 @@ th:empty::before {
     orphans: 2;
     widows: 2;
   }
-  li {
+  li:not(:has(:is(pre, blockquote, table, img, .meo-export-mermaid, .meo-export-math-display, ul, ol))) {
     break-inside: avoid-page;
     page-break-inside: avoid;
   }

@@ -1,5 +1,6 @@
 import { launchTestBrowser } from './browser-test-helpers';
 import { buildExportStyles } from '../src/export/exportStyles';
+import { preparePdfPagination } from '../src/export/pdfRenderer';
 
 const styles = buildExportStyles({
   previewFontFamily: '',
@@ -31,9 +32,19 @@ try {
           ${svg('short', 408, 70)}
           ${svg('tall', 482, 1734)}
           ${svg('wide', 1734, 482)}
+          <pre class="short-block" style="height:300px">short</pre>
+          <pre class="long-block" style="height:650px">long</pre>
+          <ul>
+            <li class="simple-item">Simple item</li>
+            <li class="complex-item"><blockquote>Complex item</blockquote></li>
+          </ul>
+          <h2 class="paired-heading">Paired diagram</h2>
+          ${svg('paired', 482, 1734)}
         </main></div>
       </body>
     </html>`);
+
+  await preparePdfPagination(page);
 
   const layout = await page.evaluate(() => {
     const read = (selector: string) => {
@@ -45,7 +56,13 @@ try {
       documentWidth: document.querySelector<HTMLElement>('.meo-export-doc')?.clientWidth ?? 0,
       short: read('.short svg'),
       tall: read('.tall svg'),
-      wide: read('.wide svg')
+      wide: read('.wide svg'),
+      paired: read('.paired svg'),
+      shortBreakable: document.querySelector('.short-block')?.hasAttribute('data-meo-pdf-allow-break'),
+      longBreakable: document.querySelector('.long-block')?.hasAttribute('data-meo-pdf-allow-break'),
+      simpleItemBreakable: document.querySelector('.simple-item')?.hasAttribute('data-meo-pdf-allow-break'),
+      complexItemBreakable: document.querySelector('.complex-item')?.hasAttribute('data-meo-pdf-allow-break'),
+      pairedWithHeading: document.querySelector('.paired')?.hasAttribute('data-meo-pdf-heading-pair')
     };
   });
 
@@ -55,7 +72,13 @@ try {
     Math.abs(layout.short.height - 70) > 1 ||
     layout.tall.height > 950 ||
     Math.abs(tallRatio - expectedRatio) > 0.01 ||
-    layout.wide.width > layout.documentWidth + 1
+    layout.wide.width > layout.documentWidth + 1 ||
+    layout.paired.height > 900 ||
+    layout.shortBreakable !== false ||
+    layout.longBreakable !== true ||
+    layout.simpleItemBreakable !== false ||
+    layout.complexItemBreakable !== true ||
+    layout.pairedWithHeading !== true
   ) {
     throw new Error(`Unexpected PDF Mermaid layout: ${JSON.stringify(layout)}`);
   }
