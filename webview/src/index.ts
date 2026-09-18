@@ -790,19 +790,20 @@ exportHtmlOption.setAttribute('aria-expanded', 'false');
 
 const exportHtmlWithContentsOption = document.createElement('button');
 exportHtmlWithContentsOption.type = 'button';
-exportHtmlWithContentsOption.className = 'preview-export-menu-action';
+exportHtmlWithContentsOption.className = 'preview-export-menu-action preview-dropdown-option';
 exportHtmlWithContentsOption.setAttribute('role', 'menuitem');
 exportHtmlWithContentsOption.title = activeUiStrings.exportHtmlWithContents;
 exportHtmlWithContentsOption.setAttribute('aria-label', activeUiStrings.exportHtmlWithContents);
 const exportHtmlWithContentsLabel = document.createElement('span');
 exportHtmlWithContentsLabel.textContent = activeUiStrings.exportHtmlWithContents;
 exportHtmlWithContentsOption.append(
-  createElement(ListTree, { width: 15, height: 15, 'aria-hidden': 'true' }),
+  createElement(FileCode2, { width: 15, height: 15, 'aria-hidden': 'true' }),
   exportHtmlWithContentsLabel
 );
 
 const exportHtmlMenu = document.createElement('div');
-exportHtmlMenu.className = 'preview-export-menu';
+exportHtmlMenu.className = 'preview-export-menu preview-dropdown-panel';
+exportHtmlMenu.dataset.previewAppearance = 'dark';
 exportHtmlMenu.setAttribute('role', 'menu');
 exportHtmlMenu.setAttribute('aria-label', activeUiStrings.exportHtmlWithContents);
 exportHtmlMenu.appendChild(exportHtmlWithContentsOption);
@@ -830,19 +831,20 @@ exportPdfOption.setAttribute('aria-expanded', 'false');
 
 const exportPdfWithContentsOption = document.createElement('button');
 exportPdfWithContentsOption.type = 'button';
-exportPdfWithContentsOption.className = 'preview-export-menu-action';
+exportPdfWithContentsOption.className = 'preview-export-menu-action preview-dropdown-option';
 exportPdfWithContentsOption.setAttribute('role', 'menuitem');
 exportPdfWithContentsOption.title = activeUiStrings.exportPdfWithContents;
 exportPdfWithContentsOption.setAttribute('aria-label', activeUiStrings.exportPdfWithContents);
 const exportPdfWithContentsLabel = document.createElement('span');
 exportPdfWithContentsLabel.textContent = activeUiStrings.exportPdfWithContents;
 exportPdfWithContentsOption.append(
-  createElement(ListTree, { width: 15, height: 15, 'aria-hidden': 'true' }),
+  createElement(FileText, { width: 15, height: 15, 'aria-hidden': 'true' }),
   exportPdfWithContentsLabel
 );
 
 const exportPdfMenu = document.createElement('div');
-exportPdfMenu.className = 'preview-export-menu';
+exportPdfMenu.className = 'preview-export-menu preview-dropdown-panel';
+exportPdfMenu.dataset.previewAppearance = 'dark';
 exportPdfMenu.setAttribute('role', 'menu');
 exportPdfMenu.setAttribute('aria-label', activeUiStrings.exportPdfWithContents);
 exportPdfMenu.appendChild(exportPdfWithContentsOption);
@@ -852,23 +854,51 @@ exportPdfControl.className = 'preview-export-control';
 exportPdfControl.dataset.exportFormat = 'pdf';
 exportPdfControl.append(exportPdfOption, exportPdfMenu);
 
-const bindExportMenuAccessibility = (control: HTMLElement, trigger: HTMLButtonElement): void => {
+const bindExportMenuAccessibility = (
+  control: HTMLElement,
+  trigger: HTMLButtonElement,
+  action: HTMLButtonElement
+): (() => void) => {
   const setExpanded = (expanded: boolean): void => {
     trigger.setAttribute('aria-expanded', expanded ? 'true' : 'false');
   };
-  control.addEventListener('pointerenter', () => setExpanded(true));
+  control.addEventListener('pointerenter', () => {
+    if (!control.classList.contains('is-dismissed')) setExpanded(true);
+  });
   control.addEventListener('pointerleave', () => {
+    control.classList.remove('is-dismissed');
     if (!control.contains(document.activeElement)) setExpanded(false);
   });
-  control.addEventListener('focusin', () => setExpanded(true));
+  control.addEventListener('focusin', () => {
+    control.classList.remove('is-dismissed');
+    setExpanded(true);
+  });
   control.addEventListener('focusout', (event) => {
     if (!(event.relatedTarget instanceof Node) || !control.contains(event.relatedTarget)) {
       setExpanded(false);
+      if (!control.matches(':hover')) control.classList.remove('is-dismissed');
     }
   });
+  return () => {
+    control.classList.add('is-dismissed');
+    setExpanded(false);
+    if (control.contains(document.activeElement)) {
+      (document.activeElement as HTMLElement).blur();
+    } else {
+      action.blur();
+    }
+  };
 };
-bindExportMenuAccessibility(exportHtmlControl, exportHtmlOption);
-bindExportMenuAccessibility(exportPdfControl, exportPdfOption);
+const dismissExportHtmlMenu = bindExportMenuAccessibility(
+  exportHtmlControl,
+  exportHtmlOption,
+  exportHtmlWithContentsOption
+);
+const dismissExportPdfMenu = bindExportMenuAccessibility(
+  exportPdfControl,
+  exportPdfOption,
+  exportPdfWithContentsOption
+);
 
 const previewAppearanceSlot = document.createElement('span');
 const previewFontFamilySlot = document.createElement('span');
@@ -2713,7 +2743,11 @@ const exportAdapter = createExportWebviewAdapter({
 
 const themeAdapter = createAppearanceWebviewAdapter({
   setAppearanceControl: (appearance) => editorAppearanceControl.setActive(appearance),
-  applyAppearance: applyBuiltInVisualBaseline,
+  applyAppearance: (appearance) => {
+    applyBuiltInVisualBaseline(appearance);
+    exportHtmlMenu.dataset.previewAppearance = appearance;
+    exportPdfMenu.dataset.previewAppearance = appearance;
+  },
   resolveCodePalette: codePaletteAdapter.resolve,
   applyCodePalette: codePaletteAdapter.apply,
   refreshMermaidTheme: () => mermaidDiagramRenderPool.refreshTheme(),
@@ -3213,15 +3247,19 @@ wikiLinkBtn.addEventListener('click', () => handleFormatAction('wikiLink'));
 imageBtn.addEventListener('click', () => handleFormatAction('image'));
 exportHtmlOption.addEventListener('click', () => {
   exportAdapter.requestExport('html', { includeTableOfContents: false });
+  dismissExportHtmlMenu();
 });
 exportPdfOption.addEventListener('click', () => {
   exportAdapter.requestExport('pdf', { includeTableOfContents: false });
+  dismissExportPdfMenu();
 });
 exportHtmlWithContentsOption.addEventListener('click', () => {
   exportAdapter.requestExport('html', { includeTableOfContents: true });
+  dismissExportHtmlMenu();
 });
 exportPdfWithContentsOption.addEventListener('click', () => {
   exportAdapter.requestExport('pdf', { includeTableOfContents: true });
+  dismissExportPdfMenu();
 });
 const showOutlineAt = (position: 'left' | 'right') => {
   if (outlineController.isVisible() && outlineController.getPosition() === position) {

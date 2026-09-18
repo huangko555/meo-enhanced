@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 import sanitizeHtml from 'sanitize-html';
@@ -183,8 +184,16 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   bodySourceLines = preparedMarkdown.body.sourceLines;
   headings.length = 0;
   const bodyHtml = md.render(preparedMarkdown.body.markdown);
+  const tableOfContentsDocumentHref = options.target === 'html' && options.outputFilePath
+    ? `./${encodeURIComponent(path.basename(options.outputFilePath))}`
+    : '';
   const tableOfContentsHtml = options.includeTableOfContents === true && headings.length > 0
-    ? renderExportTableOfContents(headings, uiStrings.tableOfContents, uiStrings.untitledSection)
+    ? renderExportTableOfContents(
+        headings,
+        uiStrings.tableOfContents,
+        uiStrings.untitledSection,
+        tableOfContentsDocumentHref
+      )
     : '';
   const rawHtml = [
     tableOfContentsHtml,
@@ -597,7 +606,8 @@ function extractHeadingText(inlineToken: any): string {
 function renderExportTableOfContents(
   headings: readonly ExportHeading[],
   title: string,
-  untitledSection: string
+  untitledSection: string,
+  documentHref: string
 ): string {
   type TocNode = ExportHeading & { children: TocNode[] };
   const root: TocNode = { level: 0, id: '', text: '', children: [] };
@@ -616,7 +626,9 @@ function renderExportTableOfContents(
     '<ul class="meo-export-toc-list">',
     ...items.map((item) => [
       '<li class="meo-export-toc-item">',
-      `<a class="meo-export-toc-link" href="#${escapeHtmlAttr(item.id)}">${escapeHtml(item.text || untitledSection)}</a>`,
+      `<a class="meo-export-toc-link" href="${escapeHtmlAttr(documentHref)}#${escapeHtmlAttr(
+        documentHref ? encodeURIComponent(item.id) : item.id
+      )}">${escapeHtml(item.text || untitledSection)}</a>`,
       item.children.length > 0 ? renderList(item.children) : '',
       '</li>'
     ].join('')),

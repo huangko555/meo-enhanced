@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { buildExportStyles } from '../src/export/exportStyles';
 
@@ -20,19 +21,22 @@ const withoutContents = renderMarkdownToHtml({
 });
 assert.doesNotMatch(withoutContents.html, /meo-export-toc/);
 
+const htmlOutputFilePath = path.resolve('tmp/with-contents.html');
+const htmlDocumentHref = `./${encodeURIComponent(path.basename(htmlOutputFilePath))}`;
 const withContents = renderMarkdownToHtml({
   markdownText: markdown,
   markdownFilePath: 'C:/tmp/with-contents.md',
+  outputFilePath: htmlOutputFilePath,
   target: 'html',
   uiLanguage: 'en',
   includeTableOfContents: true
 });
 assert.match(withContents.html, /^<nav class="meo-export-toc" aria-label="Contents">/);
 assert.match(withContents.html, /<h2 class="meo-export-toc-title">Contents<\/h2>/);
-assert.match(withContents.html, /href="#intro">Intro<\/a>/);
-assert.match(withContents.html, /href="#setup">Setup<\/a>/);
-assert.match(withContents.html, /href="#deep-code">Deep code<\/a>/);
-assert.match(withContents.html, /href="#setup-2">Setup<\/a>/);
+assert.ok(withContents.html.includes(`href="${htmlDocumentHref}#intro">Intro</a>`));
+assert.ok(withContents.html.includes(`href="${htmlDocumentHref}#setup">Setup</a>`));
+assert.ok(withContents.html.includes(`href="${htmlDocumentHref}#deep-code">Deep code</a>`));
+assert.ok(withContents.html.includes(`href="${htmlDocumentHref}#setup-2">Setup</a>`));
 assert.ok(
   withContents.html.indexOf('class="meo-export-toc"') < withContents.html.indexOf('id="intro"'),
   'table of contents must precede the first heading'

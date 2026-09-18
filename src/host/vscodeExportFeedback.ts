@@ -38,34 +38,53 @@ export async function runVscodeExportWithFeedback(
   let targetUri: vscode.Uri | undefined;
 
   try {
-    targetUri = await vscode.window.withProgress(
+    let resolveDestination!: (uri: vscode.Uri | undefined) => void;
+    let rejectDestination!: (error: unknown) => void;
+    const destination = new Promise<vscode.Uri | undefined>((resolve, reject) => {
+      resolveDestination = resolve;
+      rejectDestination = reject;
+    });
+    const progressOperation = vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
         cancellable: false,
         title: strings.title
       },
       async (progress) => {
-        progress.report({ message: strings.progress.selectingDestination });
-        // Establish the notification before the native save dialog starts. On
-        // Windows the dialog can disappear before its promise finishes settling.
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        const selectedUri = await vscode.window.showSaveDialog({
-          defaultUri: vscode.Uri.file(replaceFileExtension(options.sourceDocumentUri.fsPath, options.format)),
-          filters: options.format === 'html'
-            ? { HTML: ['html', 'htm'] }
-            : { PDF: ['pdf'] },
-          saveLabel: strings.saveLabel
-        });
-        if (!selectedUri) return undefined;
+        try {
+          progress.report({ message: strings.progress.selectingDestination });
+          // Establish the notification before the native save dialog starts. On
+          // Windows the dialog can disappear before its promise finishes settling.
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          const selectedUri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file(replaceFileExtension(options.sourceDocumentUri.fsPath, options.format)),
+            filters: options.format === 'html'
+              ? { HTML: ['html', 'htm'] }
+              : { PDF: ['pdf'] },
+            saveLabel: strings.saveLabel
+          });
+          resolveDestination(selectedUri);
+          if (!selectedUri) return undefined;
 
-        progress.report({ message: strings.progress.preparingExport });
-        await task({
-          targetUri: selectedUri,
-          report: (stage) => progress.report({ message: strings.progress[stage] })
-        });
-        return selectedUri;
+          progress.report({ message: strings.progress.preparingExport });
+          await task({
+            targetUri: selectedUri,
+            report: (stage) => progress.report({ message: strings.progress[stage] })
+          });
+          return selectedUri;
+        } catch (error) {
+          rejectDestination(error);
+          throw error;
+        }
       }
     );
+    // The destination promise lets cancellation release the export command as
+    // soon as the dialog settles, without waiting for VS Code's notification
+    // lifecycle to finish. The operation remains awaited for real exports.
+    void Promise.resolve(progressOperation).catch(rejectDestination);
+    const selectedUri = await destination;
+    if (!selectedUri) return 'cancelled';
+    targetUri = await progressOperation;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error || 'Export failed');
     void vscode.window.showErrorMessage(strings.failed(message));

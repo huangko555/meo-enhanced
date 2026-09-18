@@ -68,13 +68,19 @@ function buildReadingStyles(
     : `color-mix(in srgb, ${previewForegroundColor} 22%, transparent)`;
   const readingMutedColor = previewMutedColor;
   const frontmatterKeyColor = sourceColoring
-    ? sanitizeCssColor(environment.frontmatterKeyColor ?? '') || colors.base07
+    ? appearance === 'light'
+      ? colors.base07
+      : sanitizeCssColor(environment.frontmatterKeyColor ?? '') || colors.base07
     : readingForegroundColor;
   const frontmatterValueColor = sourceColoring
-    ? sanitizeCssColor(environment.frontmatterValueColor ?? '') || colors.base01
+    ? appearance === 'light'
+      ? colors.base01
+      : sanitizeCssColor(environment.frontmatterValueColor ?? '') || colors.base01
     : readingForegroundColor;
   const frontmatterPillBackgroundColor = sourceColoring
-    ? sanitizeCssColor(environment.frontmatterPillBackgroundColor ?? '') || colors.base03
+    ? appearance === 'light'
+      ? colors.base03
+      : sanitizeCssColor(environment.frontmatterPillBackgroundColor ?? '') || colors.base03
     : panelBorderColor;
   const readingLinkColor = appearance === 'light' ? '#0969da' : '#58a6ff';
   const selectedFontFamily = normalizePreviewFontFamily(environment.previewFontFamily);

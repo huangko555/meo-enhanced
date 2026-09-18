@@ -13,9 +13,11 @@ let selectedAction: string | undefined;
 let saveDialogResult: FakeUri | undefined = targetUri;
 let saveDialogOptions: Record<string, unknown> | undefined;
 let progressOptions: Record<string, unknown> | undefined;
+let progressInvocationCount = 0;
 let rejectReveal = false;
 let notificationPainted = false;
 let saveDialogBarrier: Promise<void> = Promise.resolve();
+let progressCompletionBarrier: Promise<void> = Promise.resolve();
 
 mock.module('vscode', () => ({
   ProgressLocation: { Notification: 15 },
@@ -30,11 +32,14 @@ mock.module('vscode', () => ({
       options: Record<string, unknown>,
       task: (progress: { report(value: { message: string }): void }) => Promise<void>
     ) => {
+      progressInvocationCount += 1;
       progressOptions = options;
-      return task({ report: ({ message }) => {
+      const result = await task({ report: ({ message }) => {
         progressMessages.push(message);
         setTimeout(() => { notificationPainted = true; }, 0);
       } });
+      await progressCompletionBarrier;
+      return result;
     },
     showInformationMessage: async (message: string, ...actions: string[]) => {
       informationMessages.push({ message, actions });
@@ -146,6 +151,9 @@ assert.equal(failedOutcome, 'failed');
 assert.equal(errorMessages.at(-1), 'PDF 导出失败：browser unavailable');
 
 saveDialogResult = undefined;
+const progressCountBeforeCancellation = progressInvocationCount;
+let releaseCancelledProgress: (() => void) | undefined;
+progressCompletionBarrier = new Promise<void>((resolve) => { releaseCancelledProgress = resolve; });
 const cancelledOutcome = await runVscodeExportWithFeedback({
   sourceDocumentUri,
   format: 'pdf',
@@ -154,5 +162,25 @@ const cancelledOutcome = await runVscodeExportWithFeedback({
   throw new Error('cancelled export must not run');
 });
 assert.equal(cancelledOutcome, 'cancelled');
+assert.equal(
+  progressInvocationCount,
+  progressCountBeforeCancellation + 1,
+  'destination selection must retain the immediate progress notification'
+);
+
+saveDialogResult = targetUri;
+selectedAction = undefined;
+progressCompletionBarrier = Promise.resolve();
+let immediateRetryStarted = false;
+const immediateRetryOutcome = await runVscodeExportWithFeedback({
+  sourceDocumentUri,
+  format: 'pdf',
+  uiLanguage: 'en'
+}, async () => {
+  immediateRetryStarted = true;
+});
+assert.equal(immediateRetryOutcome, 'completed');
+assert.equal(immediateRetryStarted, true, 'export must be immediately retryable after destination cancellation');
+releaseCancelledProgress?.();
 
 console.log('VS Code export feedback checks passed');

@@ -809,16 +809,11 @@ body {
   top: calc(100% + 4px);
   left: 0;
   min-width: max-content;
-  padding: 4px;
-  border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
-  border-radius: 7px;
+  overflow: visible;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
   transform: translateY(-2px);
-  color: var(--vscode-menu-foreground, var(--vscode-editor-foreground));
-  background: var(--vscode-menu-background, var(--vscode-sideBar-background));
-  box-shadow: 0 6px 18px rgb(0 0 0 / 28%);
   transition:
     opacity 80ms ease,
     transform 80ms ease,
@@ -834,11 +829,6 @@ body {
   height: 5px;
 }
 
-.preview-export-control[data-export-format='pdf'] .preview-export-menu {
-  right: 0;
-  left: auto;
-}
-
 .preview-export-control:hover .preview-export-menu,
 .preview-export-control:focus-within .preview-export-menu {
   opacity: 1;
@@ -848,30 +838,19 @@ body {
   transition-delay: 0s;
 }
 
+.preview-export-control.is-dismissed .preview-export-menu {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: none;
+}
+
 .preview-export-menu-action {
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 7px;
-  width: 100%;
-  min-height: 28px;
-  padding: 5px 9px;
-  border: 0;
-  border-radius: 4px;
-  color: inherit;
-  background: transparent;
-  font: inherit;
-  font-size: 12px;
-  line-height: 1.2;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.preview-export-menu-action:hover,
-.preview-export-menu-action:focus-visible {
-  outline: none;
-  color: var(--vscode-menu-selectionForeground, var(--vscode-editor-foreground));
-  background: var(--vscode-menu-selectionBackground, var(--vscode-toolbar-hoverBackground));
 }
 
 @media (max-width: 960px) {

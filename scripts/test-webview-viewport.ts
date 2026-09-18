@@ -1691,19 +1691,47 @@ async function main() {
         const trigger = control.querySelector<HTMLButtonElement>('.preview-toolbar-action');
         const action = control.querySelector<HTMLButtonElement>('.preview-export-menu-action');
         const menu = control.querySelector<HTMLElement>('.preview-export-menu');
-        if (!trigger || !action || !menu) return null;
+        const referencePanel = document.querySelector<HTMLElement>('.preview-font-family-dropdown-panel');
+        if (!trigger || !action || !menu || !referencePanel) return null;
         const triggerBounds = trigger.getBoundingClientRect();
         const menuBounds = menu.getBoundingClientRect();
         const menuStyle = getComputedStyle(menu);
+        const referenceStyle = getComputedStyle(referencePanel);
         return {
           expanded: trigger.getAttribute('aria-expanded'),
           label: action.textContent?.trim(),
           visible: menuStyle.visibility === 'visible' && Number(menuStyle.opacity) > 0,
-          belowTrigger: menuBounds.top >= triggerBounds.bottom
+          belowTrigger: menuBounds.top >= triggerBounds.bottom,
+          leftAligned: Math.abs(menuBounds.left - triggerBounds.left) <= 0.5,
+          iconMatchesTrigger: action.querySelector('svg')?.innerHTML
+            === trigger.querySelector('svg')?.innerHTML,
+          surfaceMatchesToolbarMenu: [
+            menuStyle.backgroundColor,
+            menuStyle.borderTopColor,
+            menuStyle.borderRadius,
+            menuStyle.boxShadow
+          ].join('|') === [
+            referenceStyle.backgroundColor,
+            referenceStyle.borderTopColor,
+            referenceStyle.borderRadius,
+            referenceStyle.boxShadow
+          ].join('|')
         };
       }
     );
     await page.click('.preview-export-control[data-export-format="html"] .preview-export-menu-action');
+    const htmlMenuAfterClick = await page.$eval(
+      '.preview-export-control[data-export-format="html"]',
+      (control) => {
+        const trigger = control.querySelector<HTMLButtonElement>('.preview-toolbar-action')!;
+        const menu = control.querySelector<HTMLElement>('.preview-export-menu')!;
+        const style = getComputedStyle(menu);
+        return {
+          expanded: trigger.getAttribute('aria-expanded'),
+          hidden: style.visibility === 'hidden' && Number(style.opacity) === 0
+        };
+      }
+    );
     await page.hover('.preview-toolbar-action[data-format="pdf"]');
     await page.waitForFunction(() => {
       const menu = document.querySelector<HTMLElement>(
@@ -1719,19 +1747,47 @@ async function main() {
         const trigger = control.querySelector<HTMLButtonElement>('.preview-toolbar-action');
         const action = control.querySelector<HTMLButtonElement>('.preview-export-menu-action');
         const menu = control.querySelector<HTMLElement>('.preview-export-menu');
-        if (!trigger || !action || !menu) return null;
+        const referencePanel = document.querySelector<HTMLElement>('.preview-font-family-dropdown-panel');
+        if (!trigger || !action || !menu || !referencePanel) return null;
         const triggerBounds = trigger.getBoundingClientRect();
         const menuBounds = menu.getBoundingClientRect();
         const menuStyle = getComputedStyle(menu);
+        const referenceStyle = getComputedStyle(referencePanel);
         return {
           expanded: trigger.getAttribute('aria-expanded'),
           label: action.textContent?.trim(),
           visible: menuStyle.visibility === 'visible' && Number(menuStyle.opacity) > 0,
-          belowTrigger: menuBounds.top >= triggerBounds.bottom
+          belowTrigger: menuBounds.top >= triggerBounds.bottom,
+          leftAligned: Math.abs(menuBounds.left - triggerBounds.left) <= 0.5,
+          iconMatchesTrigger: action.querySelector('svg')?.innerHTML
+            === trigger.querySelector('svg')?.innerHTML,
+          surfaceMatchesToolbarMenu: [
+            menuStyle.backgroundColor,
+            menuStyle.borderTopColor,
+            menuStyle.borderRadius,
+            menuStyle.boxShadow
+          ].join('|') === [
+            referenceStyle.backgroundColor,
+            referenceStyle.borderTopColor,
+            referenceStyle.borderRadius,
+            referenceStyle.boxShadow
+          ].join('|')
         };
       }
     );
     await page.click('.preview-export-control[data-export-format="pdf"] .preview-export-menu-action');
+    const pdfMenuAfterClick = await page.$eval(
+      '.preview-export-control[data-export-format="pdf"]',
+      (control) => {
+        const trigger = control.querySelector<HTMLButtonElement>('.preview-toolbar-action')!;
+        const menu = control.querySelector<HTMLElement>('.preview-export-menu')!;
+        const style = getComputedStyle(menu);
+        return {
+          expanded: trigger.getAttribute('aria-expanded'),
+          hidden: style.visibility === 'hidden' && Number(style.opacity) === 0
+        };
+      }
+    );
     const previewExportRequests = await page.evaluate(() => (
       (window as typeof window & {
         __hostMessages?: Array<{ type?: string; format?: string; includeTableOfContents?: boolean }>;
@@ -1754,10 +1810,18 @@ async function main() {
         { enabled: true }
       ]) ||
       JSON.stringify(htmlContentsMenu) !== JSON.stringify({
-        expanded: 'true', label: '导出 HTML（含目录）', visible: true, belowTrigger: true
+        expanded: 'true', label: '导出 HTML（含目录）', visible: true, belowTrigger: true,
+        leftAligned: true, iconMatchesTrigger: true, surfaceMatchesToolbarMenu: true
+      }) ||
+      JSON.stringify(htmlMenuAfterClick) !== JSON.stringify({
+        expanded: 'false', hidden: true
       }) ||
       JSON.stringify(pdfContentsMenu) !== JSON.stringify({
-        expanded: 'true', label: '导出 PDF（含目录）', visible: true, belowTrigger: true
+        expanded: 'true', label: '导出 PDF（含目录）', visible: true, belowTrigger: true,
+        leftAligned: true, iconMatchesTrigger: true, surfaceMatchesToolbarMenu: true
+      }) ||
+      JSON.stringify(pdfMenuAfterClick) !== JSON.stringify({
+        expanded: 'false', hidden: true
       }) ||
       JSON.stringify(previewExportRequests) !== JSON.stringify([
         { format: 'html', includeTableOfContents: false },
@@ -1772,7 +1836,9 @@ async function main() {
         sourceColoringAfterPointer,
         sourceColoringAfterKeyboard,
         htmlContentsMenu,
+        htmlMenuAfterClick,
         pdfContentsMenu,
+        pdfMenuAfterClick,
         previewExportRequests
       })}`);
     }
