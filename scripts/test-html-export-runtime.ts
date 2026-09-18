@@ -9,7 +9,7 @@ const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-html-export-runti
 
 try {
   const outputHtmlPath = path.join(fixtureRoot, 'diagram.html');
-  const rendered = exportRuntime.renderExportHtmlDocument({
+  const rendered = await exportRuntime.renderExportHtmlDocument({
     readingSnapshot: {
       snapshotId: 'html-runtime',
       text: '```mermaid\ngraph TD\n  A --> B\n```',

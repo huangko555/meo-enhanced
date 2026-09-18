@@ -35,7 +35,8 @@ const adapter = createExportWebviewAdapter({
   whenDocumentIdle: () => idle.promise,
   getPreviewAppearance: () => currentAppearance,
   getUiLanguage: () => 'en',
-  getStyleEnvironment: () => currentEnvironment
+  getStyleEnvironment: () => currentEnvironment,
+  getCodeTheme: () => ({ name: `${currentAppearance} test`, type: currentAppearance, colors: {}, tokenColors: [] })
 });
 
 adapter.requestExport('html');
@@ -67,7 +68,8 @@ assert.deepEqual(posted.splice(0), [
         text: '# second',
         appearance: 'dark',
         uiLanguage: 'en',
-        environment: { previewFontFamily: '', editorBackgroundColor: '#111' }
+        environment: { previewFontFamily: '', editorBackgroundColor: '#111' },
+        codeTheme: { name: 'dark test', type: 'dark', colors: {}, tokenColors: [] }
       }
     }
   },
@@ -81,7 +83,8 @@ assert.deepEqual(posted.splice(0), [
         text: '# second',
         appearance: 'dark',
         uiLanguage: 'en',
-        environment: { previewFontFamily: '', editorBackgroundColor: '#111' }
+        environment: { previewFontFamily: '', editorBackgroundColor: '#111' },
+        codeTheme: { name: 'dark test', type: 'dark', colors: {}, tokenColors: [] }
       }
     }
   }
@@ -144,7 +147,8 @@ assert.deepEqual(posted.shift(), {
       text: '# next request',
       appearance: 'light',
       uiLanguage: 'en',
-      environment: { previewFontFamily: '', editorBackgroundColor: '#fafafa' }
+      environment: { previewFontFamily: '', editorBackgroundColor: '#fafafa' },
+      codeTheme: { name: 'light test', type: 'light', colors: {}, tokenColors: [] }
     }
   }
 });

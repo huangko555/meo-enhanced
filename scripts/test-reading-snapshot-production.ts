@@ -41,7 +41,8 @@ const createHarness = (initialText: string, initialAppearance: 'light' | 'dark',
     whenDocumentIdle: () => idle.promise,
     getPreviewAppearance: () => appearance,
     getUiLanguage: () => 'zh-CN',
-    getStyleEnvironment: () => environment
+    getStyleEnvironment: () => environment,
+    getCodeTheme: () => ({ name: `${appearance} test`, type: appearance, colors: {}, tokenColors: [] })
   });
   return {
     request: () => hostTransport.request(),
@@ -85,7 +86,8 @@ assert.deepEqual(firstSnapshot, {
   text: '# editor one current',
   appearance: 'dark',
   uiLanguage: 'zh-CN',
-  environment: { editorBackgroundColor: '#101010', previewFontFamily: 'MEO Synthetic Sans' }
+  environment: { editorBackgroundColor: '#101010', previewFontFamily: 'MEO Synthetic Sans' },
+  codeTheme: { name: 'dark test', type: 'dark', colors: {}, tokenColors: [] }
 });
 assert.equal(secondResult.value.text, '# editor two', 'two Editor/panel transports must remain isolated');
 assert.equal(secondResult.value.environment.previewFontFamily, 'MEO Synthetic Serif');
@@ -104,7 +106,7 @@ const commonOutput = {
   title: 'output'
 };
 for (const target of ['html', 'pdf'] as const) {
-  const rendered = exportRuntime.renderExportHtmlDocument({
+  const rendered = await exportRuntime.renderExportHtmlDocument({
     readingSnapshot: firstSnapshot,
     target,
     ...commonOutput

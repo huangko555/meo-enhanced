@@ -556,7 +556,8 @@ const protocolReadingSnapshot = {
   text: '# Export',
   appearance: 'dark' as const,
   uiLanguage: 'zh-CN' as const,
-  environment: { previewFontFamily: '', editorFontFamily: 'sans-serif' }
+  environment: { previewFontFamily: '', editorFontFamily: 'sans-serif' },
+  codeTheme: { name: 'Dark test', type: 'dark' as const, colors: {}, tokenColors: [] }
 };
 assert.deepEqual(decodeExportSnapshotResponse({
   type: 'exportSnapshotResult', requestId: 'export-1', result: {
@@ -591,6 +592,11 @@ assert.equal(decodeExportSnapshotResponse({
     ok: true, value: { ...protocolReadingSnapshot, uiLanguage: undefined }
   }
 }), null, 'Export snapshots without uiLanguage must be rejected');
+assert.equal(decodeExportSnapshotResponse({
+  type: 'exportSnapshotResult', requestId: 'export-1', result: {
+    ok: true, value: { ...protocolReadingSnapshot, codeTheme: { ...protocolReadingSnapshot.codeTheme, tokenColors: [() => undefined] } }
+  }
+}), null, 'Export snapshots must reject non-serializable code themes');
 let postedExportRequest: unknown;
 let scheduledExportTimeout: (() => void) | null = null;
 let canceledExportTimeouts = 0;

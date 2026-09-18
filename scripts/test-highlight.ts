@@ -9,7 +9,7 @@ const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-highlight-'));
 const richHighlight = '==高亮 **粗体** *斜体* ~~删除~~ [链接](https://example.com) `代码`==';
 
-const rendered = exportRuntime.renderExportHtmlDocument({
+const rendered = await exportRuntime.renderExportHtmlDocument({
   readingSnapshot: {
     snapshotId: 'highlight',
     text: [richHighlight, '', '**粗体里的 ==高亮==**', '', '====', '', '\\==不高亮=='].join('\n'),

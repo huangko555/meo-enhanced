@@ -14,6 +14,9 @@ export type EditorStyleEnvironment = {
   readonly sourceLineHeight?: number;
   readonly meoThemeColors?: Readonly<Record<string, string>>;
   readonly previewSourceColoring?: boolean;
+  readonly frontmatterKeyColor?: string;
+  readonly frontmatterValueColor?: string;
+  readonly frontmatterPillBackgroundColor?: string;
   readonly previewCodePalettes?: Readonly<Record<'light' | 'dark', Readonly<{
     foreground: string;
     comment: string;
@@ -57,6 +60,9 @@ const stringKeys = [
   'codeBlockBackgroundColor',
   'sideBarBackgroundColor',
   'panelBorderColor',
+  'frontmatterKeyColor',
+  'frontmatterValueColor',
+  'frontmatterPillBackgroundColor',
   'liveFontWeight',
   'sourceFontWeight'
 ] as const;

@@ -1,7 +1,7 @@
 import exportRuntime from '../src/export/runtime';
 import { launchTestBrowser } from './browser-test-helpers';
 
-const rendered = exportRuntime.renderExportHtmlDocument({
+const rendered = await exportRuntime.renderExportHtmlDocument({
   readingSnapshot: {
     snapshotId: 'export-colors',
     text: '# Heading\n\n**Bold**\n\n*Italic*\n\n~~Deleted~~\n\n`Code`\n\n[Link](https://example.com)\n\n[Linked `code`](https://example.com/code)',

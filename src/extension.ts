@@ -93,7 +93,7 @@ type ExportRuntimeModule = {
     katexStylesHref: string;
     baseHref: string;
     title: string;
-  }) => { htmlDocument: string; hasMermaid: boolean; hasMath: boolean };
+  }) => Promise<{ htmlDocument: string; hasMermaid: boolean; hasMath: boolean }>;
   renderPreviewDocument: (options: {
     markdownText: string;
     sourceDocumentPath: string;

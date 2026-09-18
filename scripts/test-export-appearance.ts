@@ -23,8 +23,8 @@ const baseOptions = {
   title: 'Export appearance'
 };
 
-const light = exportRuntime.renderExportHtmlDocument(baseOptions);
-const dark = exportRuntime.renderExportHtmlDocument({
+const light = await exportRuntime.renderExportHtmlDocument(baseOptions);
+const dark = await exportRuntime.renderExportHtmlDocument({
   ...baseOptions,
   readingSnapshot: { ...baseOptions.readingSnapshot, snapshotId: 'appearance-dark', appearance: 'dark' }
 });

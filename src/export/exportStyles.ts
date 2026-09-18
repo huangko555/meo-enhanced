@@ -67,6 +67,15 @@ function buildReadingStyles(
     ? '#d0d7de'
     : `color-mix(in srgb, ${previewForegroundColor} 22%, transparent)`;
   const readingMutedColor = previewMutedColor;
+  const frontmatterKeyColor = sourceColoring
+    ? sanitizeCssColor(environment.frontmatterKeyColor ?? '') || colors.base07
+    : readingForegroundColor;
+  const frontmatterValueColor = sourceColoring
+    ? sanitizeCssColor(environment.frontmatterValueColor ?? '') || colors.base01
+    : readingForegroundColor;
+  const frontmatterPillBackgroundColor = sourceColoring
+    ? sanitizeCssColor(environment.frontmatterPillBackgroundColor ?? '') || colors.base03
+    : panelBorderColor;
   const readingLinkColor = appearance === 'light' ? '#0969da' : '#58a6ff';
   const selectedFontFamily = normalizePreviewFontFamily(environment.previewFontFamily);
   const liveFont = selectedFontFamily
@@ -128,6 +137,9 @@ function buildReadingStyles(
   --meo-code-bracket-2: ${codeColor('bracket2')};
   --meo-code-bracket-3: ${codeColor('bracket3')};
   --meo-code-bracket-unexpected: ${codeColor('unexpectedBracket')};
+  --meo-frontmatter-key: ${frontmatterKeyColor};
+  --meo-frontmatter-value: ${frontmatterValueColor};
+  --meo-frontmatter-pill-bg: ${frontmatterPillBackgroundColor};
   --meo-muted: ${readingMutedColor};
   --meo-border: ${panelBorderColor};
   --meo-base04: ${readingForegroundColor};
@@ -342,7 +354,7 @@ body[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-
 }
 
 .meo-export-frontmatter-line.is-raw {
-  color: var(--meo-muted);
+  color: var(--meo-frontmatter-value);
   font-family: var(--meo-font-body);
   font-size: var(--meo-font-size-code);
   white-space: pre-wrap;
@@ -372,13 +384,13 @@ body[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-
 }
 
 .meo-export-frontmatter-key {
-  color: var(--meo-code-property);
+  color: var(--meo-frontmatter-key);
   font-weight: 500;
 }
 
 .meo-export-frontmatter-value {
   min-width: 0;
-  color: var(--meo-code-string);
+  color: var(--meo-frontmatter-value);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -399,24 +411,11 @@ body[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-
 }
 
 .meo-export-frontmatter-value-line.is-raw {
-  color: var(--meo-muted);
+  color: var(--meo-frontmatter-value);
   font-family: var(--meo-font-body);
   font-size: var(--meo-font-size-code);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-.meo-export-frontmatter-value.is-number,
-.meo-export-frontmatter-value.is-literal {
-  color: var(--meo-code-number);
-}
-
-.meo-export-frontmatter-value.is-link {
-  color: var(--meo-code-link);
-}
-
-.meo-export-frontmatter-value.is-comment {
-  color: var(--meo-muted);
 }
 
 .meo-export-frontmatter-array {
@@ -434,8 +433,8 @@ body[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-
   min-height: 1.35em;
   padding: 0 6px;
   border-radius: 999px;
-  color: var(--meo-code-string);
-  background: var(--meo-border);
+  color: var(--meo-frontmatter-value);
+  background: var(--meo-frontmatter-pill-bg);
   font-size: 0.92em;
   white-space: normal;
   overflow-wrap: anywhere;

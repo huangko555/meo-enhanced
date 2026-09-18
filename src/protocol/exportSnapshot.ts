@@ -2,6 +2,7 @@ import { decodeEditorStyleEnvironment, type EditorStyleEnvironment } from './edi
 import type { PreviewAppearance } from './previewRender';
 import { decodeRequestResult, type RequestResult } from './requestResult';
 import { isUiLanguage, type UiLanguage } from '../foundation/uiLanguage';
+import { decodeCodeTheme, type CodeThemeDto } from './hostConfigurationEvents';
 
 export const EXPORT_SNAPSHOT_TIMEOUT_MS = 20_000;
 
@@ -16,6 +17,7 @@ export type ReadingSnapshot = {
   readonly appearance: PreviewAppearance;
   readonly uiLanguage: UiLanguage;
   readonly environment: EditorStyleEnvironment;
+  readonly codeTheme?: CodeThemeDto;
 };
 
 export type ExportSnapshotValue = ReadingSnapshot;
@@ -51,12 +53,15 @@ export function decodeExportSnapshotResponse(value: unknown): ExportSnapshotResp
           || (candidate.appearance !== 'dark' && candidate.appearance !== 'light')) return null;
         const environment = decodeEditorStyleEnvironment(candidate.environment);
         if (environment === null) return null;
+        const codeTheme = decodeCodeTheme(candidate.codeTheme);
+        if (codeTheme === false || codeTheme === null) return null;
         return {
           snapshotId: candidate.snapshotId,
           text: candidate.text,
           appearance: candidate.appearance,
           uiLanguage: candidate.uiLanguage,
-          environment
+          environment,
+          ...(codeTheme ? { codeTheme } : {})
         };
       })
     : null;

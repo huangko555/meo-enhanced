@@ -16,19 +16,12 @@ import {
 } from '../shared/htmlPolicy';
 import type { UiLanguage } from '../foundation/uiLanguage';
 import { getReadingUiStrings } from './readingUiLanguage';
+import { normalizeFenceLanguage } from './fenceLanguage';
 
 const POWER_QUERY_KEYWORDS =
   'let in each if then else try otherwise error and or not as is type meta section shared';
 const POWER_QUERY_HASH_KEYWORDS =
   '#date #time #datetime #datetimezone #duration #table #binary #sections #shared';
-const FENCE_LANGUAGE_ALIASES: Record<string, string> = {
-  m: 'powerquery',
-  pq: 'powerquery',
-  rs: 'rust',
-  golang: 'go',
-  cs: 'csharp',
-  'c#': 'csharp'
-};
 const MATH_FENCE_LANGUAGES = new Set(['latex', 'tex', 'math', 'katex']);
 const OPENING_KBD_TAG_RE = /^<kbd\b[^>]*>$/i;
 const CLOSING_KBD_TAG_RE = /^<\/kbd\s*>$/i;
@@ -47,6 +40,8 @@ export type RenderMarkdownOptions = {
   uiLanguage?: UiLanguage;
   /** Preview resolves local and network images after the reading frame is ready. */
   deferImages?: boolean;
+  /** Standalone exports inject the same Shiki token presentation used by Live and Preview. */
+  highlightCode?: (source: string, language: string) => string;
 };
 
 export type RenderMarkdownResult = {
@@ -157,7 +152,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
       ].join('');
     }
 
-    const highlighted = highlightFence(source, language);
+    const highlighted = options.highlightCode?.(source, language) ?? highlightFence(source, language);
     const className = language ? ` class="hljs language-${escapeHtmlAttr(language)}"` : ' class="hljs"';
     const languageLabel = language
       ? `<div class="meo-export-code-language-label">${escapeHtml(language)}</div>`
@@ -280,7 +275,10 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
         'vertical-align': [/^-?\d*\.?\d+(?:px|em|rem|%)?$/i, /^baseline$/i, /^middle$/i],
         'border-bottom-width': [/^-?\d*\.?\d+(?:px|em|rem|%)?$/i, /^0$/],
         'background-color': [/^#[0-9a-f]{3,8}$/i],
-        color: [/^[-#(),.%\w\s]+$/]
+        color: [/^[-#(),.%\w\s]+$/],
+        'font-style': [/^(?:normal|italic)$/i],
+        'font-weight': [/^(?:normal|bold)$/i],
+        'text-decoration': [/^underline$/i]
       }
     },
     transformTags: {
@@ -934,12 +932,6 @@ function convertHtmlInlineTagTokenToText(token: any): void {
   token.type = 'text';
   token.tag = '';
   token.nesting = 0;
-}
-
-function normalizeFenceLanguage(info: string): string {
-  const first = `${info ?? ''}`.trim().split(/\s+/, 1)[0] ?? '';
-  const normalized = first.toLowerCase();
-  return FENCE_LANGUAGE_ALIASES[normalized] ?? normalized;
 }
 
 const ALERT_TYPES = ['NOTE', 'TIP', 'IMPORTANT', 'WARNING', 'CAUTION'] as const;

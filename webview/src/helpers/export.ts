@@ -7,6 +7,9 @@ export interface ExportStyleEnvironment extends Record<string, unknown> {
   codeBlockBackgroundColor: string;
   sideBarBackgroundColor: string;
   panelBorderColor: string;
+  frontmatterKeyColor: string;
+  frontmatterValueColor: string;
+  frontmatterPillBackgroundColor: string;
   editorFontFamily: string;
   editorFontWeight: string;
   editorFontSizePx: number | undefined;
@@ -38,6 +41,10 @@ export const getExportStyleEnvironment = (code: {
     const value = colorVar(name);
     return /^var\(/i.test(value) ? fallback : value || fallback;
   };
+  const semanticColor = (name: string, fallbackVariable: string, fallback = ''): string => {
+    const value = colorVar(`--meo-semantic-${name}`);
+    return value && !/\bvar\(/i.test(value) ? value : colorVar(fallbackVariable, fallback);
+  };
 
   const customEditorFontSizeRaw = rootStyles.getPropertyValue('--meo-user-editor-font-size').trim();
   const editorFontSizeRaw = customEditorFontSizeRaw || rootStyles.getPropertyValue('--vscode-editor-font-size').trim();
@@ -59,22 +66,30 @@ export const getExportStyleEnvironment = (code: {
       meoThemeColors[key] = value;
     }
   }
+  const editorForegroundColor = resolvedColorVar(
+    '--meo-color-base01',
+    editorStyles?.color || bodyStyles.color || colorVar('--vscode-editor-foreground', '')
+  );
 
   return {
     editorBackgroundColor: resolvedColorVar(
       '--meo-background',
       colorVar('--vscode-editor-background', bodyStyles.backgroundColor || '')
     ),
-    editorForegroundColor: resolvedColorVar(
-      '--meo-color-base01',
-      editorStyles?.color || bodyStyles.color || colorVar('--vscode-editor-foreground', '')
-    ),
+    editorForegroundColor,
     codeBlockBackgroundColor: resolvedColorVar(
       '--meo-code-background',
       colorVar('--vscode-sideBar-background', defaultCodeBlockBackgroundColor)
     ),
     sideBarBackgroundColor: resolvedColorVar('--meo-surface-background', colorVar('--vscode-sideBar-background', '')),
     panelBorderColor: colorVar('--vscode-panel-border', ''),
+    frontmatterKeyColor: semanticColor('frontmatterKey', '--meo-color-base07', editorForegroundColor),
+    frontmatterValueColor: semanticColor('frontmatterValue', '--meo-color-base01', editorForegroundColor),
+    frontmatterPillBackgroundColor: semanticColor(
+      'frontmatterPillBackground',
+      '--meo-color-base03',
+      colorVar('--vscode-panel-border', '')
+    ),
     editorFontFamily: capturedEditorFontFamily,
     editorFontWeight: editorFontWeightRaw || 'normal',
     editorFontSizePx: Number.isFinite(parsedFontSize) ? parsedFontSize : undefined,

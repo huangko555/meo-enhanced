@@ -2629,7 +2629,8 @@ const exportAdapter = createExportWebviewAdapter({
   whenDocumentIdle: () => documentSessionAdapter.whenIdle(),
   getPreviewAppearance: () => previewAdapter.getAppearance(),
   getUiLanguage: () => activeUiLanguage,
-  getStyleEnvironment: () => previewController.getStyleEnvironment()
+  getStyleEnvironment: () => previewController.getStyleEnvironment(),
+  getCodeTheme: () => themeAdapter.getCodePalette(previewAdapter.getAppearance()).sourceTheme
 });
 
 const themeAdapter = createAppearanceWebviewAdapter({

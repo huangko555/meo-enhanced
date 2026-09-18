@@ -26,13 +26,13 @@ const baseOptions = {
 
 try {
   const preview = exportRuntime.renderPreviewDocument({ ...baseOptions, markdownText, uiLanguage: 'en', styleEnvironment: { previewFontFamily: '' } });
-  const exported = exportRuntime.renderExportHtmlDocument({
+  const exported = await exportRuntime.renderExportHtmlDocument({
     ...baseOptions,
     readingSnapshot: { snapshotId: 'images-html', text: markdownText, appearance: 'dark', uiLanguage: 'en', environment: { previewFontFamily: '' } },
     outputFilePath: path.join(tempDir, 'export.html'),
     target: 'html' as const
   });
-  const pdf = exportRuntime.renderExportHtmlDocument({
+  const pdf = await exportRuntime.renderExportHtmlDocument({
     ...baseOptions,
     readingSnapshot: { snapshotId: 'images-pdf', text: markdownText, appearance: 'dark', uiLanguage: 'en', environment: { previewFontFamily: '' } },
     outputFilePath: path.join(tempDir, 'export.pdf'),
@@ -79,10 +79,10 @@ try {
       throw new Error(`Preview did not defer both network image syntaxes: ${source}`);
     }
     for (const target of ['html', 'pdf'] as const) {
-      const exportedVariant = exportRuntime.renderExportHtmlDocument({
+      const exportedVariant = (await exportRuntime.renderExportHtmlDocument({
         ...baseOptions, target, outputFilePath: path.join(tempDir, `variant.${target}`),
         readingSnapshot: { snapshotId: `network-${target}`, text, appearance: 'dark', uiLanguage: 'en', environment: {} }
-      }).htmlDocument;
+      })).htmlDocument;
       if (exportedVariant.includes('data-meo-deferred-image-src=')) {
         throw new Error(`${target} export depends on Preview's resource lifecycle: ${source}`);
       }

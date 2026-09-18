@@ -435,13 +435,14 @@ if (!darkPreviewStyles.includes('--meo-font-body: "MEO Synthetic Sans", MEO Synt
 if (!/\.meo-export-frontmatter-line\.is-raw\s*\{[^}]*font-family:\s*var\(--meo-font-body\)/s.test(darkPreviewStyles)) {
   throw new Error('Structured and raw Frontmatter must use the selected Preview prose family');
 }
-if (!/\.meo-export-frontmatter-value\.is-number[^}]*color:\s*var\(--meo-code-number\)/s.test(darkPreviewStyles)
-  || !/\.meo-export-frontmatter-value\.is-link[^}]*color:\s*var\(--meo-code-link\)/s.test(darkPreviewStyles)) {
-  throw new Error('Preview Properties must expose semantic value colors through the source-coloring palette');
+if (!/\.meo-export-frontmatter-key\s*\{[^}]*color:\s*var\(--meo-frontmatter-key\)/s.test(darkPreviewStyles)
+  || !/\.meo-export-frontmatter-value\s*\{[^}]*color:\s*var\(--meo-frontmatter-value\)/s.test(darkPreviewStyles)
+  || !/\.meo-export-frontmatter-pill\s*\{[^}]*background:\s*var\(--meo-frontmatter-pill-bg\)/s.test(darkPreviewStyles)) {
+  throw new Error('Preview Properties must preserve the Live Frontmatter semantic palette');
 }
-if (!/\.meo-export-frontmatter-value\.is-number[^}]*color:\s*var\(--meo-code-number\)/s.test(plainTextStyles)
-  || !/\.meo-export-frontmatter-value\.is-link[^}]*color:\s*var\(--meo-code-link\)/s.test(plainTextStyles)) {
-  throw new Error('Disabling Preview source coloring must route Front Matter values through the plain code palette');
+if (!plainTextStyles.includes('--meo-frontmatter-key: color-mix(in srgb,')
+  || !plainTextStyles.includes('--meo-frontmatter-value: color-mix(in srgb,')) {
+  throw new Error('Disabling source coloring must route Front Matter through the adaptive reading foreground');
 }
 if (!defaultFontStyles.includes('--meo-font-body: MEO Synthetic Mono')
   || maliciousFontStyles.includes('color:red')) {

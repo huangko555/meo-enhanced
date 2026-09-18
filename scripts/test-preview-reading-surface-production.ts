@@ -2176,7 +2176,7 @@ async function main(): Promise<void> {
       currentInvalidCss: false
     });
 
-    const exportedFallback = exportRuntime.renderExportHtmlDocument({
+    const exportedFallback = await exportRuntime.renderExportHtmlDocument({
       readingSnapshot: {
         snapshotId: 'g2a-mermaid-fallback',
         text: `\`\`\`mermaid\n${mermaidFallbackSource}\`\`\``,

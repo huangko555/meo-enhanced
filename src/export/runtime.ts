@@ -5,6 +5,8 @@ import { writeHtmlExport } from './htmlExport';
 import { renderPdfFromHtmlExport } from './pdfRenderer';
 import type { PreviewAppearance, PreviewRenderResult } from '../shared/preview';
 import type { ReadingSnapshot } from '../protocol/exportSnapshot';
+import type { CodeThemeDto } from '../protocol/hostConfigurationEvents';
+import { createExportCodeHighlighter } from './shikiCodeHighlighter';
 
 export type ExportRuntimeBuildHtmlOptions = {
   readingSnapshot: ReadingSnapshot;
@@ -17,17 +19,30 @@ export type ExportRuntimeBuildHtmlOptions = {
   title: string;
 };
 
-function renderExportHtmlDocument(
+async function renderExportHtmlDocument(
   options: ExportRuntimeBuildHtmlOptions
-): { htmlDocument: string; hasMermaid: boolean; hasMath: boolean } {
+): Promise<{ htmlDocument: string; hasMermaid: boolean; hasMath: boolean }> {
   const snapshot = options.readingSnapshot;
-  const { html: bodyHtml, hasMermaid, hasMath } = renderMarkdownToHtml({
-    markdownText: snapshot.text,
-    markdownFilePath: options.sourceDocumentPath,
-    outputFilePath: options.outputFilePath,
-    target: options.target,
-    uiLanguage: snapshot.uiLanguage
-  });
+  const fallbackTheme = snapshot.codeTheme ?? (snapshot.appearance === 'light'
+    ? (await import('@shikijs/themes/light-plus')).default as CodeThemeDto
+    : (await import('@shikijs/themes/dark-plus')).default as CodeThemeDto);
+  const highlighter = snapshot.environment.previewSourceColoring === false
+    ? null
+    : await createExportCodeHighlighter(snapshot.text, fallbackTheme);
+  let rendered: ReturnType<typeof renderMarkdownToHtml>;
+  try {
+    rendered = renderMarkdownToHtml({
+      markdownText: snapshot.text,
+      markdownFilePath: options.sourceDocumentPath,
+      outputFilePath: options.outputFilePath,
+      target: options.target,
+      uiLanguage: snapshot.uiLanguage,
+      ...(highlighter ? { highlightCode: highlighter.highlight } : {})
+    });
+  } finally {
+    highlighter?.dispose();
+  }
+  const { html: bodyHtml, hasMermaid, hasMath } = rendered;
 
   const stylesCss = buildExportStyles(snapshot.environment, snapshot.appearance);
 

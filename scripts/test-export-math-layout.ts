@@ -19,7 +19,7 @@ const fencedControlFormula = 'x^2 + y^2 = z^2';
 const katexStylesHref = `data:text/css;base64,${Buffer.from(
   fs.readFileSync(path.resolve('node_modules/katex/dist/katex.min.css'), 'utf8')
 ).toString('base64')}`;
-const rendered = exportRuntime.renderExportHtmlDocument({
+const rendered = await exportRuntime.renderExportHtmlDocument({
   readingSnapshot: {
     snapshotId: 'math-layout',
     text: [

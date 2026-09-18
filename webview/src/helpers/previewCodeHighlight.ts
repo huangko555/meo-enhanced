@@ -3,19 +3,19 @@ import {
   getShikiTokens,
   getShikiThemeVersion,
   requestShikiTokens,
-  resolveShikiLang,
-  type ShikiToken
+  resolveShikiLang
 } from './shikiHighlighter';
+import { projectShikiTokenLines, type ShikiPresentationRun } from '../../../src/shared/shikiTokenPresentation';
 
 const FONT_STYLE_ITALIC = 1;
 const FONT_STYLE_BOLD = 2;
 const FONT_STYLE_UNDERLINE = 4;
 
-function applyTokenStyle(element: HTMLElement, syntaxToken: ShikiToken, color?: string): void {
+function applyTokenStyle(element: HTMLElement, run: ShikiPresentationRun): void {
   // Shiki has already resolved the active VS Code TextMate theme at token
   // scope precision. Reclassifying it here loses theme-specific distinctions.
-  element.style.color = color ?? syntaxToken.color ?? 'var(--meo-code-fg)';
-  const fontStyle = syntaxToken.fontStyle ?? 0;
+  element.style.color = run.color ?? 'var(--meo-code-fg)';
+  const fontStyle = run.fontStyle ?? 0;
   if (fontStyle & FONT_STYLE_ITALIC) element.style.fontStyle = 'italic';
   if (fontStyle & FONT_STYLE_BOLD) element.style.fontWeight = 'bold';
   if (fontStyle & FONT_STYLE_UNDERLINE) element.style.textDecoration = 'underline';
@@ -80,43 +80,14 @@ export function applyPreviewCodeHighlight(frameDocument: Document, nearViewportO
       continue;
     }
 
-    const meta = getShikiThemeMeta('preview');
-    let bracketDepth = 0;
+    const projectedLines = projectShikiTokenLines(lines, getShikiThemeMeta('preview'));
     for (const [lineIndex, sourceElement] of sources.entries()) {
       const fragment = frameDocument.createDocumentFragment();
-      for (const syntaxToken of lines[lineIndex] ?? []) {
-        let runStart = 0;
-        for (let index = 0; index < syntaxToken.content.length; index += 1) {
-          const character = syntaxToken.content[index];
-          const opening = character === '(' || character === '[' || character === '{';
-          const closing = character === ')' || character === ']' || character === '}';
-          if ((!opening && !closing) || syntaxToken.isStringComment) continue;
-          if (index > runStart) {
-            const span = frameDocument.createElement('span');
-            applyTokenStyle(span, syntaxToken);
-            span.textContent = syntaxToken.content.slice(runStart, index);
-            fragment.append(span);
-          }
-          const bracket = frameDocument.createElement('span');
-          let bracketColor = meta.unexpectedBracket;
-          if (opening) {
-            bracketColor = meta.bracketColors[bracketDepth % meta.bracketColors.length] ?? syntaxToken.color;
-            bracketDepth += 1;
-          } else if (bracketDepth > 0) {
-            bracketDepth -= 1;
-            bracketColor = meta.bracketColors[bracketDepth % meta.bracketColors.length] ?? syntaxToken.color;
-          }
-          applyTokenStyle(bracket, syntaxToken, bracketColor);
-          bracket.textContent = character;
-          fragment.append(bracket);
-          runStart = index + 1;
-        }
-        if (runStart < syntaxToken.content.length) {
-          const span = frameDocument.createElement('span');
-          applyTokenStyle(span, syntaxToken);
-          span.textContent = syntaxToken.content.slice(runStart);
-          fragment.append(span);
-        }
+      for (const run of projectedLines[lineIndex] ?? []) {
+        const span = frameDocument.createElement('span');
+        applyTokenStyle(span, run);
+        span.textContent = run.content;
+        fragment.append(span);
       }
       sourceElement.replaceChildren(fragment);
       sourceElement.dataset.meoShiki = themeVersion;

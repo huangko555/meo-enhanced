@@ -4,6 +4,7 @@ import type { PreviewAppearance } from '../../../src/protocol/previewRender';
 import type { ExportSnapshotResolution } from '../../../src/protocol/exportSnapshot';
 import { createExportSnapshotResponder } from './exportSnapshotTransport';
 import type { UiLanguage } from '../../../src/foundation/uiLanguage';
+import type { CodeThemeDto } from '../../../src/protocol/hostConfigurationEvents';
 
 export type ExportWebviewAdapterDependencies = {
   readonly postMessage: (message: WebviewToHostMessage) => void;
@@ -12,6 +13,7 @@ export type ExportWebviewAdapterDependencies = {
   readonly getPreviewAppearance: () => PreviewAppearance;
   readonly getUiLanguage: () => UiLanguage;
   readonly getStyleEnvironment: () => EditorStyleEnvironment;
+  readonly getCodeTheme: () => CodeThemeDto;
 };
 
 export type ExportWebviewAdapter = {
@@ -64,6 +66,7 @@ export function createExportWebviewAdapter(
         if (!pendingSnapshots.has(requestId) || disposed) return;
         try {
           const environment = structuredClone(dependencies.getStyleEnvironment());
+          const codeTheme = structuredClone(dependencies.getCodeTheme());
           settle(requestId, {
             ok: true,
             value: Object.freeze({
@@ -71,7 +74,8 @@ export function createExportWebviewAdapter(
               text: dependencies.getCurrentText(),
               appearance: dependencies.getPreviewAppearance(),
               uiLanguage: dependencies.getUiLanguage(),
-              environment: Object.freeze(environment)
+              environment: Object.freeze(environment),
+              codeTheme: Object.freeze(codeTheme)
             })
           });
         } catch (error) {
