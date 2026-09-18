@@ -70,7 +70,11 @@ export async function runVscodeExportWithFeedback(
   if (selected === strings.open) {
     await vscode.env.openExternal(targetUri);
   } else if (selected === strings.reveal) {
-    await vscode.env.openExternal(vscode.Uri.file(path.dirname(targetUri.fsPath)));
+    try {
+      await vscode.commands.executeCommand('revealFileInOS', targetUri);
+    } catch {
+      await vscode.env.openExternal(vscode.Uri.file(path.dirname(targetUri.fsPath)));
+    }
   }
   return 'completed';
 }

@@ -8,10 +8,12 @@ const progressMessages: string[] = [];
 const informationMessages: Array<{ message: string; actions: string[] }> = [];
 const errorMessages: string[] = [];
 const openedUris: FakeUri[] = [];
+const revealedUris: FakeUri[] = [];
 let selectedAction: string | undefined;
 let saveDialogResult: FakeUri | undefined = targetUri;
 let saveDialogOptions: Record<string, unknown> | undefined;
 let progressOptions: Record<string, unknown> | undefined;
+let rejectReveal = false;
 
 mock.module('vscode', () => ({
   ProgressLocation: { Notification: 15 },
@@ -41,6 +43,13 @@ mock.module('vscode', () => ({
     openExternal: async (uri: FakeUri) => {
       openedUris.push(uri);
       return true;
+    }
+  },
+  commands: {
+    executeCommand: async (command: string, uri: FakeUri) => {
+      assert.equal(command, 'revealFileInOS');
+      if (rejectReveal) throw new Error('reveal unavailable');
+      revealedUris.push(uri);
     }
   }
 }));
@@ -102,6 +111,15 @@ assert.deepEqual(informationMessages.at(-1), {
   message: 'HTML export completed.',
   actions: ['Open', 'Show in Folder']
 });
+assert.equal(revealedUris.at(-1), targetUri);
+
+rejectReveal = true;
+selectedAction = '打开所在文件夹';
+await runVscodeExportWithFeedback({
+  sourceDocumentUri,
+  format: 'pdf',
+  uiLanguage: 'zh-CN'
+}, async () => undefined);
 assert.equal(openedUris.at(-1)?.fsPath.replaceAll('\\', '/'), 'D:/exports');
 
 const failedOutcome = await runVscodeExportWithFeedback({
