@@ -4,6 +4,7 @@ This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
 ## 0.3.22
+- Added optional HTML and PDF exports with a clickable table of contents, with PDF body content starting on a fresh page after the contents.
 - Improved PDF pagination for long code, tables, complex lists, headings, and large Mermaid diagrams while keeping thematic breaks natural.
 - Prevented long unbroken content in headings, paragraphs, lists, links, and inline code from being clipped in Preview and exports.
 - Added localized export progress spanning output-path selection through file generation, plus completion notifications with actions to open the exported file or reveal and select it in its folder.

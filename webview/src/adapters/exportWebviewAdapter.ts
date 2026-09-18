@@ -17,7 +17,10 @@ export type ExportWebviewAdapterDependencies = {
 };
 
 export type ExportWebviewAdapter = {
-  requestExport(format: 'html' | 'pdf'): void;
+  requestExport(
+    format: 'html' | 'pdf',
+    options: { readonly includeTableOfContents: boolean }
+  ): void;
   accept(message: HostToWebviewMessage): boolean;
   dispose(): void;
 };
@@ -101,11 +104,12 @@ export function createExportWebviewAdapter(
   };
 
   return {
-    requestExport(format) {
+    requestExport(format, options) {
       if (disposed) return;
       dependencies.postMessage({
         type: 'exportDocument',
-        format
+        format,
+        includeTableOfContents: options.includeTableOfContents
       });
     },
     accept(message) {

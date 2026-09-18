@@ -118,8 +118,18 @@ for (const target of ['html', 'pdf'] as const) {
   assert.doesNotMatch(rendered.htmlDocument, /MEO Synthetic Serif/);
 }
 
-assert.equal(decodeWebviewToHostMessage({ type: 'exportDocument', format: 'html', appearance: 'light' }), null);
-assert.equal(decodeWebviewToHostMessage({ type: 'exportDocument', format: 'html' })?.type, 'exportDocument');
+assert.equal(decodeWebviewToHostMessage({
+  type: 'exportDocument',
+  format: 'html',
+  includeTableOfContents: false,
+  appearance: 'light'
+}), null);
+assert.equal(decodeWebviewToHostMessage({ type: 'exportDocument', format: 'html' }), null);
+assert.equal(decodeWebviewToHostMessage({
+  type: 'exportDocument',
+  format: 'html',
+  includeTableOfContents: false
+})?.type, 'exportDocument');
 for (const invalid of [
   { text: '# split', appearance: 'dark', uiLanguage: 'en', environment: { previewFontFamily: '' } },
   { snapshotId: 'request-1', text: '# split', appearance: 'dark', environment: { previewFontFamily: '' } },

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import exportRuntime from '../src/export/runtime';
 import { buildExportHtmlDocument } from '../src/export/exportHtmlTemplate';
+import './test-export-table-of-contents';
 
 const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-html-export-runtime-'));
 

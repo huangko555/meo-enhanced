@@ -2,6 +2,8 @@ import type { UiLanguage } from '../foundation/uiLanguage';
 
 export type ReadingUiStrings = Readonly<{
   properties: string;
+  tableOfContents: string;
+  untitledSection: string;
   alertLabel: (type: string) => string;
   colorLabel: (value: string) => string;
   backToReference: string;
@@ -11,6 +13,8 @@ export type ReadingUiStrings = Readonly<{
 const CATALOG: Readonly<Record<UiLanguage, ReadingUiStrings>> = Object.freeze({
   en: Object.freeze({
     properties: 'Properties',
+    tableOfContents: 'Contents',
+    untitledSection: 'Untitled section',
     alertLabel: (type: string) => type,
     colorLabel: (value: string) => `Color ${value}`,
     backToReference: 'Back to reference',
@@ -18,6 +22,8 @@ const CATALOG: Readonly<Record<UiLanguage, ReadingUiStrings>> = Object.freeze({
   }),
   'zh-CN': Object.freeze({
     properties: 'Properties',
+    tableOfContents: '目录',
+    untitledSection: '未命名章节',
     alertLabel: (type: string) => ({ NOTE: '备注', TIP: '提示', IMPORTANT: '重要', WARNING: '警告', CAUTION: '注意' }[type] ?? type),
     colorLabel: (value: string) => `颜色 ${value}`,
     backToReference: '返回脚注引用',

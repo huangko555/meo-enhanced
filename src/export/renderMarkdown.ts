@@ -38,6 +38,7 @@ export type RenderMarkdownOptions = {
   outputFilePath?: string;
   target: RenderMarkdownTarget;
   uiLanguage?: UiLanguage;
+  includeTableOfContents?: boolean;
   /** Preview resolves local and network images after the reading frame is ready. */
   deferImages?: boolean;
   /** Standalone exports inject the same Shiki token presentation used by Live and Preview. */
@@ -50,11 +51,18 @@ export type RenderMarkdownResult = {
   hasMath: boolean;
 };
 
+type ExportHeading = Readonly<{
+  level: number;
+  id: string;
+  text: string;
+}>;
+
 export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMarkdownResult {
   const uiStrings = getReadingUiStrings(options.uiLanguage ?? 'en');
   let hasMermaid = false;
   let hasMath = false;
   let bodySourceLines: number[] | null = null;
+  const headings: ExportHeading[] = [];
   const embeddedImageDataUrlCache = new Map<string, string | null>();
   const rewriteImageSrc = (rawSrc: string): string => rewriteExportImageSrc(rawSrc, {
     markdownFilePath: options.markdownFilePath,
@@ -82,7 +90,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   installSourcePositionAndHeadingAnchorTransform(md, (startIndex, endIndex) => ({
     start: bodySourceLines?.[startIndex] ?? 0,
     end: bodySourceLines?.[Math.max(startIndex, endIndex - 1)] ?? 0
-  }));
+  }), (heading) => headings.push(heading));
   installTableContainerTransform(md, (sourceLine) => (
     countLeadingIndentColumns(originalSourceLines[sourceLine - 1] ?? '')
   ));
@@ -173,8 +181,13 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     backToNumberedReference: uiStrings.backToNumberedReference
   });
   bodySourceLines = preparedMarkdown.body.sourceLines;
+  headings.length = 0;
   const bodyHtml = md.render(preparedMarkdown.body.markdown);
+  const tableOfContentsHtml = options.includeTableOfContents === true && headings.length > 0
+    ? renderExportTableOfContents(headings, uiStrings.tableOfContents, uiStrings.untitledSection)
+    : '';
   const rawHtml = [
+    tableOfContentsHtml,
     extractedFrontmatter.frontmatterHtml,
     bodyHtml,
     preparedMarkdown.footnotesHtml
@@ -203,6 +216,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
       'code',
       'span',
       'div',
+      'nav',
       'hr',
       'svg',
       'path',
@@ -225,6 +239,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
       code: ['class'],
       p: ['align'],
       div: ['class', 'data-source-b64', 'align'],
+      nav: ['class', 'aria-label'],
       svg: [
         'xmlns',
         'width',
@@ -428,7 +443,8 @@ function installSafeHtmlTransform(
 
 function installSourcePositionAndHeadingAnchorTransform(
   md: MarkdownIt,
-  resolveSourceRange: (startIndex: number, endIndex: number) => { start: number; end: number }
+  resolveSourceRange: (startIndex: number, endIndex: number) => { start: number; end: number },
+  onHeading?: (heading: ExportHeading) => void
 ): void {
   md.core.ruler.after('inline', 'meo-heading-anchors', (state: any) => {
     const slugCounts = new Map<string, number>();
@@ -453,7 +469,13 @@ function installSourcePositionAndHeadingAnchorTransform(
       const baseSlug = slugifyHeading(inlineContent?.content ?? '') || 'section';
       const occurrence = (slugCounts.get(baseSlug) ?? 0) + 1;
       slugCounts.set(baseSlug, occurrence);
-      headingOpen.attrSet('id', occurrence === 1 ? baseSlug : `${baseSlug}-${occurrence}`);
+      const id = occurrence === 1 ? baseSlug : `${baseSlug}-${occurrence}`;
+      headingOpen.attrSet('id', id);
+      onHeading?.({
+        level: Number.parseInt(String(headingOpen.tag).slice(1), 10),
+        id,
+        text: extractHeadingText(inlineContent)
+      });
 
     }
   });
@@ -557,6 +579,56 @@ function slugifyHeading(value: string): string {
     .replace(/[^\p{Letter}\p{Number}\s-]/gu, '')
     .replace(/[\s_-]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+function extractHeadingText(inlineToken: any): string {
+  const collect = (tokens: any[]): string => tokens.map((token) => {
+    if (token.type === 'softbreak' || token.type === 'hardbreak') return ' ';
+    if (token.type === 'text' || token.type === 'code_inline' || token.type === 'image') {
+      return String(token.content ?? '');
+    }
+    return Array.isArray(token.children) ? collect(token.children) : '';
+  }).join('');
+  return collect(Array.isArray(inlineToken?.children) ? inlineToken.children : [])
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function renderExportTableOfContents(
+  headings: readonly ExportHeading[],
+  title: string,
+  untitledSection: string
+): string {
+  type TocNode = ExportHeading & { children: TocNode[] };
+  const root: TocNode = { level: 0, id: '', text: '', children: [] };
+  const stack: TocNode[] = [root];
+
+  for (const heading of headings) {
+    while (stack.length > 1 && stack[stack.length - 1].level >= heading.level) {
+      stack.pop();
+    }
+    const node: TocNode = { ...heading, children: [] };
+    stack[stack.length - 1].children.push(node);
+    stack.push(node);
+  }
+
+  const renderList = (items: readonly TocNode[]): string => [
+    '<ul class="meo-export-toc-list">',
+    ...items.map((item) => [
+      '<li class="meo-export-toc-item">',
+      `<a class="meo-export-toc-link" href="#${escapeHtmlAttr(item.id)}">${escapeHtml(item.text || untitledSection)}</a>`,
+      item.children.length > 0 ? renderList(item.children) : '',
+      '</li>'
+    ].join('')),
+    '</ul>'
+  ].join('');
+
+  return [
+    `<nav class="meo-export-toc" aria-label="${escapeHtmlAttr(title)}">`,
+    `<h2 class="meo-export-toc-title">${escapeHtml(title)}</h2>`,
+    renderList(root.children),
+    '</nav>'
+  ].join('');
 }
 
 function normalizeMarkdownForExport(markdownText: string): string {

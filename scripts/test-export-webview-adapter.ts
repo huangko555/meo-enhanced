@@ -39,8 +39,18 @@ const adapter = createExportWebviewAdapter({
   getCodeTheme: () => ({ name: `${currentAppearance} test`, type: currentAppearance, colors: {}, tokenColors: [] })
 });
 
-adapter.requestExport('html');
-assert.deepEqual(posted.shift(), { type: 'exportDocument', format: 'html' });
+adapter.requestExport('html', { includeTableOfContents: false });
+assert.deepEqual(posted.shift(), {
+  type: 'exportDocument',
+  format: 'html',
+  includeTableOfContents: false
+});
+adapter.requestExport('pdf', { includeTableOfContents: true });
+assert.deepEqual(posted.shift(), {
+  type: 'exportDocument',
+  format: 'pdf',
+  includeTableOfContents: true
+});
 assert.equal(adapter.accept({ type: 'focusEditor' } as HostToWebviewMessage), false);
 
 assert.equal(adapter.accept({ type: 'requestExportSnapshot', requestId: 'snapshot-1' }), true);
@@ -183,7 +193,7 @@ idle.resolve();
 await Promise.resolve();
 await Promise.resolve();
 assert.equal(posted.length, 0, 'late idle completion must not emit a second response');
-adapter.requestExport('pdf');
+adapter.requestExport('pdf', { includeTableOfContents: true });
 assert.equal(posted.length, 0, 'disposed adapter must reject new user actions');
 
 console.log('Export Webview Adapter checks passed');

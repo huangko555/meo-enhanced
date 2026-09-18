@@ -785,6 +785,32 @@ exportHtmlOption.append(
   createElement(FileCode2, { width: 15, height: 15, 'aria-hidden': 'true' }),
   exportHtmlLabel
 );
+exportHtmlOption.setAttribute('aria-haspopup', 'menu');
+exportHtmlOption.setAttribute('aria-expanded', 'false');
+
+const exportHtmlWithContentsOption = document.createElement('button');
+exportHtmlWithContentsOption.type = 'button';
+exportHtmlWithContentsOption.className = 'preview-export-menu-action';
+exportHtmlWithContentsOption.setAttribute('role', 'menuitem');
+exportHtmlWithContentsOption.title = activeUiStrings.exportHtmlWithContents;
+exportHtmlWithContentsOption.setAttribute('aria-label', activeUiStrings.exportHtmlWithContents);
+const exportHtmlWithContentsLabel = document.createElement('span');
+exportHtmlWithContentsLabel.textContent = activeUiStrings.exportHtmlWithContents;
+exportHtmlWithContentsOption.append(
+  createElement(ListTree, { width: 15, height: 15, 'aria-hidden': 'true' }),
+  exportHtmlWithContentsLabel
+);
+
+const exportHtmlMenu = document.createElement('div');
+exportHtmlMenu.className = 'preview-export-menu';
+exportHtmlMenu.setAttribute('role', 'menu');
+exportHtmlMenu.setAttribute('aria-label', activeUiStrings.exportHtmlWithContents);
+exportHtmlMenu.appendChild(exportHtmlWithContentsOption);
+
+const exportHtmlControl = document.createElement('div');
+exportHtmlControl.className = 'preview-export-control';
+exportHtmlControl.dataset.exportFormat = 'html';
+exportHtmlControl.append(exportHtmlOption, exportHtmlMenu);
 
 const exportPdfOption = document.createElement('button');
 exportPdfOption.type = 'button';
@@ -799,6 +825,50 @@ exportPdfOption.append(
   createElement(FileText, { width: 15, height: 15, 'aria-hidden': 'true' }),
   exportPdfLabel
 );
+exportPdfOption.setAttribute('aria-haspopup', 'menu');
+exportPdfOption.setAttribute('aria-expanded', 'false');
+
+const exportPdfWithContentsOption = document.createElement('button');
+exportPdfWithContentsOption.type = 'button';
+exportPdfWithContentsOption.className = 'preview-export-menu-action';
+exportPdfWithContentsOption.setAttribute('role', 'menuitem');
+exportPdfWithContentsOption.title = activeUiStrings.exportPdfWithContents;
+exportPdfWithContentsOption.setAttribute('aria-label', activeUiStrings.exportPdfWithContents);
+const exportPdfWithContentsLabel = document.createElement('span');
+exportPdfWithContentsLabel.textContent = activeUiStrings.exportPdfWithContents;
+exportPdfWithContentsOption.append(
+  createElement(ListTree, { width: 15, height: 15, 'aria-hidden': 'true' }),
+  exportPdfWithContentsLabel
+);
+
+const exportPdfMenu = document.createElement('div');
+exportPdfMenu.className = 'preview-export-menu';
+exportPdfMenu.setAttribute('role', 'menu');
+exportPdfMenu.setAttribute('aria-label', activeUiStrings.exportPdfWithContents);
+exportPdfMenu.appendChild(exportPdfWithContentsOption);
+
+const exportPdfControl = document.createElement('div');
+exportPdfControl.className = 'preview-export-control';
+exportPdfControl.dataset.exportFormat = 'pdf';
+exportPdfControl.append(exportPdfOption, exportPdfMenu);
+
+const bindExportMenuAccessibility = (control: HTMLElement, trigger: HTMLButtonElement): void => {
+  const setExpanded = (expanded: boolean): void => {
+    trigger.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  };
+  control.addEventListener('pointerenter', () => setExpanded(true));
+  control.addEventListener('pointerleave', () => {
+    if (!control.contains(document.activeElement)) setExpanded(false);
+  });
+  control.addEventListener('focusin', () => setExpanded(true));
+  control.addEventListener('focusout', (event) => {
+    if (!(event.relatedTarget instanceof Node) || !control.contains(event.relatedTarget)) {
+      setExpanded(false);
+    }
+  });
+};
+bindExportMenuAccessibility(exportHtmlControl, exportHtmlOption);
+bindExportMenuAccessibility(exportPdfControl, exportPdfOption);
 
 const previewAppearanceSlot = document.createElement('span');
 const previewFontFamilySlot = document.createElement('span');
@@ -812,8 +882,8 @@ previewFormatGroup.append(
   previewFontFamilySlot,
   previewSourceColoringSlot,
   previewAppearanceSlot,
-  exportHtmlOption,
-  exportPdfOption
+  exportHtmlControl,
+  exportPdfControl
 );
 
 const moreToolsButton = document.createElement('button');
@@ -967,6 +1037,14 @@ const applyUiLanguage = (language: UiLanguage): void => {
   exportPdfOption.title = strings.exportAsPdf;
   exportPdfOption.setAttribute('aria-label', strings.exportAsPdf);
   exportPdfLabel.textContent = strings.exportPdf;
+  exportHtmlWithContentsOption.title = strings.exportHtmlWithContents;
+  exportHtmlWithContentsOption.setAttribute('aria-label', strings.exportHtmlWithContents);
+  exportHtmlWithContentsLabel.textContent = strings.exportHtmlWithContents;
+  exportHtmlMenu.setAttribute('aria-label', strings.exportHtmlWithContents);
+  exportPdfWithContentsOption.title = strings.exportPdfWithContents;
+  exportPdfWithContentsOption.setAttribute('aria-label', strings.exportPdfWithContents);
+  exportPdfWithContentsLabel.textContent = strings.exportPdfWithContents;
+  exportPdfMenu.setAttribute('aria-label', strings.exportPdfWithContents);
   previewFormatGroup.setAttribute('aria-label', strings.previewTools);
   moreToolsButton.title = strings.more;
   moreToolsButton.setAttribute('aria-label', strings.moreTools);
@@ -3134,10 +3212,16 @@ linkBtn.addEventListener('click', () => handleFormatAction('link'));
 wikiLinkBtn.addEventListener('click', () => handleFormatAction('wikiLink'));
 imageBtn.addEventListener('click', () => handleFormatAction('image'));
 exportHtmlOption.addEventListener('click', () => {
-  exportAdapter.requestExport('html');
+  exportAdapter.requestExport('html', { includeTableOfContents: false });
 });
 exportPdfOption.addEventListener('click', () => {
-  exportAdapter.requestExport('pdf');
+  exportAdapter.requestExport('pdf', { includeTableOfContents: false });
+});
+exportHtmlWithContentsOption.addEventListener('click', () => {
+  exportAdapter.requestExport('html', { includeTableOfContents: true });
+});
+exportPdfWithContentsOption.addEventListener('click', () => {
+  exportAdapter.requestExport('pdf', { includeTableOfContents: true });
 });
 const showOutlineAt = (position: 'left' | 'right') => {
   if (outlineController.isVisible() && outlineController.getPosition() === position) {

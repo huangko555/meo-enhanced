@@ -301,6 +301,55 @@ body[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-
 .meo-export-doc > :first-child { margin-top: 0; }
 .meo-export-doc > :last-child { margin-bottom: 0; }
 
+.meo-export-toc {
+  margin: 0 0 2.25em;
+  padding: 0 0 1.5em;
+  border-bottom: 1px solid var(--meo-hr);
+}
+
+.meo-export-toc-title {
+  margin: 0 0 0.9em;
+  color: var(--meo-heading);
+  font-size: var(--meo-heading-2-size);
+  font-weight: var(--meo-heading-2-weight);
+  line-height: 1.25;
+}
+
+.meo-export-toc-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.meo-export-toc-list .meo-export-toc-list {
+  margin-top: 0.35em;
+  padding-left: 1.35em;
+  border-left: 1px solid color-mix(in srgb, var(--meo-border) 58%, transparent);
+}
+
+.meo-export-toc-item {
+  margin: 0.42em 0;
+}
+
+.meo-export-toc-link {
+  color: var(--meo-link);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.meo-export-toc-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
+}
+
+body[data-meo-export-target='pdf'] .meo-export-toc {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: 0;
+  break-after: page;
+  page-break-after: always;
+}
+
 .meo-export-frontmatter {
   --meo-properties-key-width: 124px;
   margin: 0 0 1.35em;

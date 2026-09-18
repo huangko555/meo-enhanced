@@ -84,6 +84,10 @@ import { decodeWebviewToHostMessage, type WebviewToHostMessage } from '../protoc
 import { normalizeUiLanguagePreference, resolveUiLanguage } from '../foundation/uiLanguage';
 export type EditorMode = 'live' | 'source' | 'preview';
 export type ExportFormat = 'html' | 'pdf';
+export type ExportOptions = Readonly<{
+  format: ExportFormat;
+  includeTableOfContents: boolean;
+}>;
 
 const EDITOR_MODE_STATE_KEY = 'editorMode';
 
@@ -118,7 +122,7 @@ type PanelSessionControllerParams = {
   viewNavigation: HostViewNavigationPort<vscode.TextEditor>;
   readingPosition: ReadingPositionPort;
   saveDocument: () => Promise<boolean>;
-  onExportDocument: (session: PanelSession, format: ExportFormat) => Promise<void>;
+  onExportDocument: (session: PanelSession, options: ExportOptions) => Promise<void>;
   renderPreview: (options: {
     markdownText: string;
     sourceDocumentPath: string;
@@ -651,7 +655,10 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       }
       case 'exportDocument':
-        await onExportDocument(session, raw.format);
+        await onExportDocument(session, {
+          format: raw.format,
+          includeTableOfContents: raw.includeTableOfContents
+        });
         return;
       case 'setPreviewAppearance':
         await setPreviewAppearance(raw.appearance);

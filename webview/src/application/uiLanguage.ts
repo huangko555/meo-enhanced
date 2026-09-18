@@ -34,6 +34,8 @@ export type UiStrings = Readonly<{
   exportPdf: string;
   exportAsHtml: string;
   exportAsPdf: string;
+  exportHtmlWithContents: string;
+  exportPdfWithContents: string;
   findAndReplace: string;
   more: string;
   moreTools: string;
@@ -275,7 +277,8 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     previewGenerating: 'Generating preview…',
     previewFailed: 'Preview generation failed', previewTools: 'Preview tools',
     exportHtml: 'Export HTML', exportPdf: 'Export PDF', exportAsHtml: 'Export as HTML',
-    exportAsPdf: 'Export as PDF', findAndReplace: 'Find and Replace', more: 'Settings',
+    exportAsPdf: 'Export as PDF', exportHtmlWithContents: 'Export HTML with Contents',
+    exportPdfWithContents: 'Export PDF with Contents', findAndReplace: 'Find and Replace', more: 'Settings',
     moreTools: 'Settings', toolbarOverflow: 'More tools', feedbackPrompt: 'Having trouble?', reportIssue: 'Report an issue',
     editorAppearance: 'Editor appearance', editorFontSize: 'Font size',
     custom: 'Custom', decreaseFontSize: 'Decrease font size', increaseFontSize: 'Increase font size',
@@ -430,6 +433,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     previewGenerating: '正在生成预览…',
     previewFailed: '预览生成失败', previewTools: '预览工具', exportHtml: '导出 HTML',
     exportPdf: '导出 PDF', exportAsHtml: '导出为 HTML', exportAsPdf: '导出为 PDF',
+    exportHtmlWithContents: '导出 HTML（含目录）', exportPdfWithContents: '导出 PDF（含目录）',
     findAndReplace: '查找和替换', more: '设置', moreTools: '设置', toolbarOverflow: '更多工具',
     feedbackPrompt: '使用中遇到问题？', reportIssue: '欢迎反馈',
     editorAppearance: '编辑器外观', editorFontSize: '字号大小', custom: '自定义',

@@ -1676,9 +1676,70 @@ async function main() {
     }));
     await page.mouse.click(previewToolbarReachability.html.center.x, previewToolbarReachability.html.center.y);
     await page.mouse.click(previewToolbarReachability.pdf.center.x, previewToolbarReachability.pdf.center.y);
+    await page.hover('.preview-toolbar-action[data-format="html"]');
+    await page.waitForFunction(() => {
+      const menu = document.querySelector<HTMLElement>(
+        '.preview-export-control[data-export-format="html"] .preview-export-menu'
+      );
+      if (!menu) return false;
+      const style = getComputedStyle(menu);
+      return style.visibility === 'visible' && Number(style.opacity) > 0;
+    });
+    const htmlContentsMenu = await page.$eval(
+      '.preview-export-control[data-export-format="html"]',
+      (control) => {
+        const trigger = control.querySelector<HTMLButtonElement>('.preview-toolbar-action');
+        const action = control.querySelector<HTMLButtonElement>('.preview-export-menu-action');
+        const menu = control.querySelector<HTMLElement>('.preview-export-menu');
+        if (!trigger || !action || !menu) return null;
+        const triggerBounds = trigger.getBoundingClientRect();
+        const menuBounds = menu.getBoundingClientRect();
+        const menuStyle = getComputedStyle(menu);
+        return {
+          expanded: trigger.getAttribute('aria-expanded'),
+          label: action.textContent?.trim(),
+          visible: menuStyle.visibility === 'visible' && Number(menuStyle.opacity) > 0,
+          belowTrigger: menuBounds.top >= triggerBounds.bottom
+        };
+      }
+    );
+    await page.click('.preview-export-control[data-export-format="html"] .preview-export-menu-action');
+    await page.hover('.preview-toolbar-action[data-format="pdf"]');
+    await page.waitForFunction(() => {
+      const menu = document.querySelector<HTMLElement>(
+        '.preview-export-control[data-export-format="pdf"] .preview-export-menu'
+      );
+      if (!menu) return false;
+      const style = getComputedStyle(menu);
+      return style.visibility === 'visible' && Number(style.opacity) > 0;
+    });
+    const pdfContentsMenu = await page.$eval(
+      '.preview-export-control[data-export-format="pdf"]',
+      (control) => {
+        const trigger = control.querySelector<HTMLButtonElement>('.preview-toolbar-action');
+        const action = control.querySelector<HTMLButtonElement>('.preview-export-menu-action');
+        const menu = control.querySelector<HTMLElement>('.preview-export-menu');
+        if (!trigger || !action || !menu) return null;
+        const triggerBounds = trigger.getBoundingClientRect();
+        const menuBounds = menu.getBoundingClientRect();
+        const menuStyle = getComputedStyle(menu);
+        return {
+          expanded: trigger.getAttribute('aria-expanded'),
+          label: action.textContent?.trim(),
+          visible: menuStyle.visibility === 'visible' && Number(menuStyle.opacity) > 0,
+          belowTrigger: menuBounds.top >= triggerBounds.bottom
+        };
+      }
+    );
+    await page.click('.preview-export-control[data-export-format="pdf"] .preview-export-menu-action');
     const previewExportRequests = await page.evaluate(() => (
-      (window as typeof window & { __hostMessages?: Array<{ type?: string; format?: string }> }).__hostMessages ?? []
-    ).filter((message) => message.type === 'exportDocument').map((message) => ({ format: message.format })));
+      (window as typeof window & {
+        __hostMessages?: Array<{ type?: string; format?: string; includeTableOfContents?: boolean }>;
+      }).__hostMessages ?? []
+    ).filter((message) => message.type === 'exportDocument').map((message) => ({
+      format: message.format,
+      includeTableOfContents: message.includeTableOfContents
+    })));
     const toolbarTargets = Object.values(previewToolbarReachability);
     if (
       toolbarTargets.some((target) => (
@@ -1692,13 +1753,26 @@ async function main() {
         { enabled: false },
         { enabled: true }
       ]) ||
-      JSON.stringify(previewExportRequests) !== JSON.stringify([{ format: 'html' }, { format: 'pdf' }])
+      JSON.stringify(htmlContentsMenu) !== JSON.stringify({
+        expanded: 'true', label: '导出 HTML（含目录）', visible: true, belowTrigger: true
+      }) ||
+      JSON.stringify(pdfContentsMenu) !== JSON.stringify({
+        expanded: 'true', label: '导出 PDF（含目录）', visible: true, belowTrigger: true
+      }) ||
+      JSON.stringify(previewExportRequests) !== JSON.stringify([
+        { format: 'html', includeTableOfContents: false },
+        { format: 'pdf', includeTableOfContents: false },
+        { format: 'html', includeTableOfContents: true },
+        { format: 'pdf', includeTableOfContents: true }
+      ])
     ) {
       throw new Error(`Preview toolbar commands are not pointer reachable at 900px: ${JSON.stringify({
         previewToolbarReachability,
         previewFontFocused,
         sourceColoringAfterPointer,
         sourceColoringAfterKeyboard,
+        htmlContentsMenu,
+        pdfContentsMenu,
         previewExportRequests
       })}`);
     }
@@ -1796,7 +1870,7 @@ async function main() {
       return {
         overflowIndicatorVisible: !document.querySelector<HTMLElement>('.toolbar-overflow-indicator')!.hidden,
         migratedCount: document.querySelectorAll('.toolbar-overflow-panel > .is-toolbar-overflow-item').length,
-        pdfMigrated: pdfNode.parentElement?.classList.contains('toolbar-overflow-panel') === true,
+        pdfMigrated: pdfNode.closest('.preview-export-control')?.parentElement?.classList.contains('toolbar-overflow-panel') === true,
         moreVisible: getComputedStyle(moreButton).display !== 'none',
         moreHit: Boolean(moreHit && moreButton.contains(moreHit)),
         moreCenter,
@@ -1831,12 +1905,19 @@ async function main() {
     }
     await page.mouse.click(migratedPdfTarget.center.x, migratedPdfTarget.center.y);
     const narrowExportRequests = await page.evaluate(() => (
-      (window as typeof window & { __hostMessages?: Array<{ type?: string; format?: string }> }).__hostMessages ?? []
-    ).filter((message) => message.type === 'exportDocument').map((message) => ({ format: message.format })));
+      (window as typeof window & {
+        __hostMessages?: Array<{ type?: string; format?: string; includeTableOfContents?: boolean }>;
+      }).__hostMessages ?? []
+    ).filter((message) => message.type === 'exportDocument').map((message) => ({
+      format: message.format,
+      includeTableOfContents: message.includeTableOfContents
+    })));
     if (JSON.stringify(narrowExportRequests) !== JSON.stringify([
-      { format: 'html' },
-      { format: 'pdf' },
-      { format: 'pdf' }
+      { format: 'html', includeTableOfContents: false },
+      { format: 'pdf', includeTableOfContents: false },
+      { format: 'html', includeTableOfContents: true },
+      { format: 'pdf', includeTableOfContents: true },
+      { format: 'pdf', includeTableOfContents: false }
     ])) {
       throw new Error(`Migrated Preview PDF action lost its command identity: ${JSON.stringify(narrowExportRequests)}`);
     }
@@ -1882,7 +1963,7 @@ async function main() {
       };
       return {
         overflowIndicatorHidden: document.querySelector<HTMLElement>('.toolbar-overflow-indicator')!.hidden,
-        pdfRestored: pdfNode.parentElement?.classList.contains('preview-format-group') === true,
+        pdfRestored: pdfNode.closest('.preview-export-control')?.parentElement?.classList.contains('preview-format-group') === true,
         overflowSectionEmpty: document.querySelector('.toolbar-overflow-panel')?.childElementCount === 0,
         html: describe(document.querySelector<HTMLButtonElement>('.preview-toolbar-action[data-format="html"]')!),
         pdf: describe(document.querySelector<HTMLButtonElement>('.preview-toolbar-action[data-format="pdf"]')!),

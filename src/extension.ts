@@ -43,7 +43,12 @@ import {
   isMarkdownDocumentPath,
   migrateLegacyToggleSettings
 } from './shared/extensionConfig';
-import { createPanelSessionController, type ExportFormat, type PanelSession } from './extension/panelSession';
+import {
+  createPanelSessionController,
+  type ExportFormat,
+  type ExportOptions,
+  type PanelSession
+} from './extension/panelSession';
 import { createVscodePendingDraftRecoveryAdapter } from './host/vscodePendingDraftRecoveryAdapter';
 import { createGitBaselineRefreshTimerAdapter } from './host/gitBaselineRefreshTimerAdapter';
 import { createVscodeSavedRevisionFileAdapter } from './host/vscodeSavedRevisionFileAdapter';
@@ -93,6 +98,7 @@ type ExportRuntimeModule = {
     katexStylesHref: string;
     baseHref: string;
     title: string;
+    includeTableOfContents: boolean;
   }) => Promise<{ htmlDocument: string; hasMermaid: boolean; hasMath: boolean }>;
   renderPreviewDocument: (options: {
     markdownText: string;
@@ -373,7 +379,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       return;
     }
 
-    await this.exportSessionDocument(session, format);
+    await this.exportSessionDocument(session, { format, includeTableOfContents: false });
   }
 
   async redirectOpenEditorsForCopilotReview(triggerUri: vscode.Uri): Promise<void> {
@@ -538,7 +544,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         getRestoreReadingPositionOnOpen
       ),
       saveDocument: async () => document.save(),
-      onExportDocument: (session, format) => this.exportSessionDocument(session, format),
+      onExportDocument: (session, options) => this.exportSessionDocument(session, options),
       renderPreview: async (options) => {
         const exportRuntime = await loadExportRuntimeModule(this.context.extensionUri);
         return exportRuntime.renderPreviewDocument(options);
@@ -658,8 +664,9 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
 
   private async exportSessionDocument(
     session: PanelSession,
-    format: ExportFormat
+    options: ExportOptions
   ): Promise<void> {
+    const { format, includeTableOfContents } = options;
     this.lastActivePanel = session.panel;
 
     if (session.documentUri.scheme !== 'file') {
@@ -681,7 +688,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         readingSnapshot: snapshot,
         sourceDocumentUri: session.documentUri,
         outputFileUri: targetUri,
-        target: format
+        target: format,
+        includeTableOfContents
       });
 
       if (format === 'html') {
@@ -714,6 +722,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       sourceDocumentUri: vscode.Uri;
       outputFileUri: vscode.Uri;
       target: ExportFormat;
+      includeTableOfContents: boolean;
     }
   ): Promise<{ htmlDocument: string; hasMermaid: boolean; hasMath: boolean }> {
     const mermaidRuntimeSrc = pathToFileURL(
@@ -731,7 +740,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       mermaidRuntimeSrc,
       katexStylesHref,
       baseHref,
-      title: path.basename(params.outputFileUri.fsPath)
+      title: path.basename(params.outputFileUri.fsPath),
+      includeTableOfContents: params.includeTableOfContents
     });
   }
 

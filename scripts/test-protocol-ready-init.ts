@@ -691,7 +691,7 @@ for (const command of [
   { type: 'openLink', href: 'docs/readme.md', source: 'preview' },
   { type: 'openImageExternally', url: 'file:///image.png' },
   { type: 'reloadDocumentFromDisk', topLine: 1 },
-{ type: 'exportDocument', format: 'pdf' },
+{ type: 'exportDocument', format: 'pdf', includeTableOfContents: true },
 { type: 'setPreviewAppearance', appearance: 'auto' },
 { type: 'setPreviewFontFamily', fontFamily: 'MEO Synthetic Sans' },
 { type: 'setPreviewSourceColoring', enabled: false },
@@ -726,6 +726,8 @@ assert.equal(decodeEditorCommand({ type: 'setPreviewFontFamily', fontFamily: 'ME
 assert.equal(decodeEditorCommand({ type: 'setPreviewFontFamily', fontFamily: 'MEO</style>Synthetic' }), null);
 assert.equal(decodeEditorCommand({ type: 'setPreviewFontFamily', fontFamily: 'x'.repeat(MAX_PREVIEW_FONT_FAMILY_LENGTH + 1) }), null);
 assert.equal(decodeEditorCommand({ type: 'setPreviewFontFamily', previewFontFamily: 'MEO Synthetic Sans' }), null);
+assert.equal(decodeEditorCommand({ type: 'exportDocument', format: 'pdf' }), null);
+assert.equal(decodeEditorCommand({ type: 'exportDocument', format: 'pdf', includeTableOfContents: 'yes' }), null);
 for (const event of [
   { type: 'focusEditor' },
   { type: 'externalFileStatusChanged', status: 'modified-while-dirty' },

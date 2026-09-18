@@ -17,6 +17,7 @@ export type ExportRuntimeBuildHtmlOptions = {
   katexStylesHref?: string;
   baseHref: string;
   title: string;
+  includeTableOfContents?: boolean;
 };
 
 async function renderExportHtmlDocument(
@@ -37,6 +38,7 @@ async function renderExportHtmlDocument(
       outputFilePath: options.outputFilePath,
       target: options.target,
       uiLanguage: snapshot.uiLanguage,
+      includeTableOfContents: options.includeTableOfContents === true,
       ...(highlighter ? { highlightCode: highlighter.highlight } : {})
     });
   } finally {
