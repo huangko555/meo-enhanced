@@ -334,10 +334,10 @@ try {
         : value;
     };
     return {
-      darkNodeFill: node ? frameDocument?.defaultView?.getComputedStyle(node).fill ?? '' : '',
-      darkNodeText: nodeLabel ? frameDocument?.defaultView?.getComputedStyle(nodeLabel).color ?? '' : '',
+      darkNodeFill: node ? normalizeColor(frameDocument?.defaultView?.getComputedStyle(node).fill ?? '') : '',
+      darkNodeText: nodeLabel ? normalizeColor(frameDocument?.defaultView?.getComputedStyle(nodeLabel).color ?? '') : '',
       darkPaletteFill: fillProbe ? normalizeColor(frameDocument?.defaultView?.getComputedStyle(fillProbe).color ?? '') : '',
-      darkPaletteText: textProbe ? frameDocument?.defaultView?.getComputedStyle(textProbe).color ?? '' : ''
+      darkPaletteText: textProbe ? normalizeColor(frameDocument?.defaultView?.getComputedStyle(textProbe).color ?? '') : ''
     };
   });
   if (
@@ -373,6 +373,12 @@ try {
   const lightPalette = await page.evaluate(() => {
     const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
     const page = frameDocument?.querySelector<HTMLElement>('.meo-export-page');
+    const normalizeColor = (value: string) => {
+      const srgb = /^color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\)$/i.exec(value);
+      return srgb
+        ? `rgb(${srgb.slice(1).map((channel) => Math.round(Number(channel) * 255)).join(', ')})`
+        : value;
+    };
     const readPaletteColor = (name: string) => {
       const probe = frameDocument?.createElement('span');
       if (!page || !probe) return '';
@@ -380,13 +386,13 @@ try {
       page.appendChild(probe);
       const value = frameDocument.defaultView?.getComputedStyle(probe).color ?? '';
       probe.remove();
-      return value;
+      return normalizeColor(value);
     };
     const node = frameDocument?.querySelector<SVGElement>('.meo-export-mermaid.is-rendered .node rect');
     const label = frameDocument?.querySelector<HTMLElement>('.meo-export-mermaid.is-rendered .nodeLabel');
     return {
-      nodeFill: node ? frameDocument?.defaultView?.getComputedStyle(node).fill ?? '' : '',
-      nodeText: label ? frameDocument?.defaultView?.getComputedStyle(label).color ?? '' : '',
+      nodeFill: node ? normalizeColor(frameDocument?.defaultView?.getComputedStyle(node).fill ?? '') : '',
+      nodeText: label ? normalizeColor(frameDocument?.defaultView?.getComputedStyle(label).color ?? '') : '',
       paletteFill: readPaletteColor('--meo-mermaid-node-background'),
       paletteText: readPaletteColor('--meo-mermaid-foreground')
     };

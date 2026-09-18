@@ -454,7 +454,7 @@ if (!lightPreviewStyles.includes('--meo-code-keyword: #121212')
 }
 for (const token of ['fg', 'comment', 'keyword', 'string', 'number', 'type', 'property', 'link']) {
   if (!plainTextStyles.includes(
-    `--meo-code-${token}: color-mix(in srgb, #d8dee9 65%, #9aa4af 35%)`
+    `--meo-code-${token}: color-mix(in srgb, #d8dee9 60%, #9aa4af 40%)`
   )) {
     throw new Error(`Disabled Preview source coloring must use the adaptive body foreground for ${token}`);
   }
@@ -468,8 +468,11 @@ if (!/u\s*\{[^}]*text-decoration:\s*underline;/s.test(darkPreviewStyles)) {
   throw new Error('Preview and export styles must render HTML underline tags');
 }
 if (!/h1, h2\s*\{[^}]*padding-bottom:\s*0\.3em;/s.test(exportStyles)
-  || !/h1, h2\s*\{[^}]*border-bottom:\s*1px solid var\(--meo-hr\);/s.test(exportStyles)) {
-  throw new Error('Export headings must retain the level-one and level-two divider lines');
+  || /(?:h1, h2|h1|h2)\s*\{[^}]*border-bottom:\s*1px solid var\(--meo-hr\);/s.test(exportStyles)) {
+  throw new Error('Export headings must inherit the divider-free Preview style');
+}
+if (exportStyles !== lightPreviewStyles || darkExportStyles !== darkPreviewStyles) {
+  throw new Error('HTML/PDF export must reuse the exact Preview reading styles for the resolved appearance');
 }
 for (const [preview, exported, color] of [
   [lightPreviewStyles, exportStyles, '#0969da'],
@@ -505,7 +508,7 @@ if (!darkPreviewStyles.includes('--meo-bg: #20252b')) {
   throw new Error('Dark Preview must use the current document background');
 }
 for (const expected of [
-  '--meo-fg: color-mix(in srgb, #d8dee9 65%, #9aa4af 35%)',
+  '--meo-fg: color-mix(in srgb, #d8dee9 60%, #9aa4af 40%)',
   '--meo-heading: #d8dee9',
   '--meo-link: #58a6ff'
 ]) {
@@ -519,13 +522,13 @@ if (darkPreviewStyles.includes('#171b20')) {
 if (!lightPreviewStyles.includes('--meo-bg: #ffffff')) {
   throw new Error('Light Preview must use a white reading background');
 }
-if (!lightPreviewStyles.includes('--meo-fg: color-mix(in srgb, #1f2328 65%, #59636e 35%)')
+if (!lightPreviewStyles.includes('--meo-fg: color-mix(in srgb, #1f2328 60%, #59636e 40%)')
   || !lightPreviewStyles.includes('--meo-heading: #1f2328')) {
   throw new Error('Light Preview must keep headings stronger than theme-adaptive body text');
 }
-if (!exportStyles.includes('--meo-fg: #1f2328')
-  || !darkExportStyles.includes('--meo-fg: #d8dee9')) {
-  throw new Error('Export body text must retain its full foreground contrast after Preview-only tuning');
+if (!exportStyles.includes('--meo-fg: color-mix(in srgb, #1f2328 60%, #59636e 40%)')
+  || !darkExportStyles.includes('--meo-fg: color-mix(in srgb, #d8dee9 60%, #9aa4af 40%)')) {
+  throw new Error('Export body text must inherit the theme-adaptive Preview foreground');
 }
 if (!lightPreviewStyles.includes('--meo-link: #0969da')) {
   throw new Error('Light Preview links must use the shared blue reading color');

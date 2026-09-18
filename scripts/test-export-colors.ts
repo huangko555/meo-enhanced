@@ -29,9 +29,15 @@ try {
   const page = await browser.newPage();
   await page.setContent(rendered.htmlDocument, { waitUntil: 'domcontentloaded' });
   const readColors = () => page.evaluate(() => {
+    const normalizeColor = (value: string) => {
+      const srgb = /^color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\)$/i.exec(value);
+      return srgb
+        ? `rgb(${srgb.slice(1).map((channel) => Math.round(Number(channel) * 255)).join(', ')})`
+        : value;
+    };
     const read = (selector: string) => {
       const element = document.querySelector(selector);
-      return element ? getComputedStyle(element).color : `missing:${selector}`;
+      return element ? normalizeColor(getComputedStyle(element).color) : `missing:${selector}`;
     };
     return {
       heading: read('h1'),
@@ -49,12 +55,20 @@ try {
     document.body.dataset.meoExportTarget = 'pdf';
   });
   const pdfColors = await readColors();
-  const expected = 'rgb(216, 222, 233)';
+  const expectedColors = {
+    heading: 'rgb(216, 222, 233)',
+    strong: 'rgb(191, 199, 210)',
+    emphasis: 'rgb(191, 199, 210)',
+    deleted: 'rgb(191, 199, 210)',
+    code: 'rgb(191, 199, 210)',
+    link: 'rgb(88, 166, 255)',
+    linkedCode: 'rgb(88, 166, 255)'
+  };
   for (const [target, colors] of Object.entries({ html: htmlColors, pdf: pdfColors })) {
-    for (const [kind, color] of Object.entries(colors)) {
-      const expectedColor = kind === 'link' || kind === 'linkedCode' ? 'rgb(88, 166, 255)' : expected;
+    for (const [kind, color] of Object.entries(colors) as Array<[keyof typeof expectedColors, string]>) {
+      const expectedColor = expectedColors[kind];
       if (color !== expectedColor) {
-        throw new Error(`Dark ${target} export ${kind} color leaked from the editor theme: ${color}`);
+        throw new Error(`Dark ${target} export ${kind} did not inherit the Preview palette: ${color}`);
       }
     }
   }

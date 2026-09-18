@@ -16,20 +16,19 @@ export function buildExportStyles(
   environment: ExportStyleEnvironment = { previewFontFamily: '' },
   appearance: PreviewAppearance = 'light'
 ): string {
-  return buildReadingStyles(environment, appearance, 'export');
+  return buildPreviewStyles(environment, appearance);
 }
 
 export function buildPreviewStyles(
   environment: ExportStyleEnvironment = { previewFontFamily: '' },
   appearance: PreviewAppearance = 'dark'
 ): string {
-  return buildReadingStyles(environment, appearance, 'preview');
+  return buildReadingStyles(environment, appearance);
 }
 
 function buildReadingStyles(
   environment: ExportStyleEnvironment,
-  appearance: PreviewAppearance,
-  surface: 'preview' | 'export'
+  appearance: PreviewAppearance
 ): string {
   const theme = getBuiltInVisuals(appearance === 'light' ? 'light' : 'dark');
   const colors = resolveThemeColors(theme, environment);
@@ -43,9 +42,7 @@ function buildReadingStyles(
   const editorBackgroundColor = appearance === 'light' ? '#ffffff' : darkBackgroundColor;
   const previewForegroundColor = appearance === 'light' ? '#1f2328' : '#d8dee9';
   const previewMutedColor = appearance === 'light' ? '#59636e' : '#9aa4af';
-  const readingForegroundColor = surface === 'preview'
-    ? `color-mix(in srgb, ${previewForegroundColor} 65%, ${previewMutedColor} 35%)`
-    : previewForegroundColor;
+  const readingForegroundColor = `color-mix(in srgb, ${previewForegroundColor} 60%, ${previewMutedColor} 40%)`;
   const editorForegroundColor = previewForegroundColor;
   const previewCodePalette = environment.previewCodePalettes?.[appearance === 'auto' ? 'dark' : appearance];
   const sourceColoring = environment.previewSourceColoring !== false;
@@ -108,13 +105,6 @@ function buildReadingStyles(
       return `h${level} { font-size: var(--meo-heading-${level}-size); font-weight: var(--meo-heading-${level}-weight);${opacity} }`;
     })
     .join('\n');
-  const headingDividerStyles = surface === 'preview'
-    ? ''
-    : `
-  h1, h2 {
-    border-bottom: 1px solid var(--meo-hr);
-  }
-`;
   return `
 :root {
   color-scheme: ${appearance};
@@ -447,8 +437,6 @@ ${headingRulesCss}
 h1, h2 {
   padding-bottom: 0.3em;
 }
-
-  ${headingDividerStyles}
 
 p, ul, ol, blockquote, pre, table, hr {
   margin: 0 0 1em;
