@@ -302,10 +302,12 @@ body[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-
 .meo-export-doc > :last-child { margin-bottom: 0; }
 
 .meo-export-frontmatter {
+  --meo-properties-key-width: 124px;
   margin: 0 0 1.35em;
-  padding: 10px 12px 12px;
+  padding: 0;
   border: 1px solid color-mix(in srgb, var(--meo-border) 72%, transparent);
   border-radius: 6px;
+  overflow: hidden;
   background: color-mix(in srgb, var(--meo-bg) 92%, var(--meo-border) 8%);
   color: var(--meo-fg);
   font-family: var(--meo-font-body);
@@ -322,13 +324,19 @@ body[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 22px;
-  margin-bottom: 5px;
-  padding: 0 6px;
+  min-height: max(1.7em, calc(1lh + 11px));
+  margin-bottom: 0;
+  padding: 5px 12px;
   color: var(--meo-muted);
-  font-size: 0.82em;
+  font-size: inherit;
   font-weight: 600;
+  line-height: inherit;
   letter-spacing: 0.01em;
+}
+
+.meo-export-frontmatter-header > span:last-child {
+  font-size: 0.82em;
+  line-height: 1.2;
 }
 
 .meo-export-frontmatter-header-icon {
@@ -342,15 +350,17 @@ body[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-
 
 .meo-export-frontmatter-line {
   min-height: 1.7em;
-  padding: 3px 6px;
-  border-radius: 4px;
+  padding: 5px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--meo-border) 62%, transparent);
+  border-radius: 0;
 }
 
 .meo-export-frontmatter-line.is-property {
   display: grid;
-  grid-template-columns: minmax(110px, 0.32fr) minmax(0, 1fr);
+  grid-template-columns: var(--meo-properties-key-width) minmax(0, 1fr);
   align-items: start;
-  column-gap: 16px;
+  column-gap: 0;
+  padding: 0 12px 0 0;
 }
 
 .meo-export-frontmatter-line.is-raw {
@@ -373,10 +383,22 @@ body[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-
 }
 
 .meo-export-frontmatter-key-cell {
+  box-sizing: border-box;
   min-width: 0;
+  min-height: 100%;
+  padding: 5px 10px 5px 12px;
+  border-right: 1px solid color-mix(in srgb, var(--meo-border) 82%, transparent);
+  background: color-mix(in srgb, var(--meo-border) 13%, transparent);
   color: var(--meo-muted);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.meo-export-frontmatter-line.is-property > :is(
+  .meo-export-frontmatter-value,
+  .meo-export-frontmatter-value-group
+) {
+  padding: 5px 0 5px 16px;
 }
 
 .meo-export-frontmatter-prefix {
@@ -403,6 +425,10 @@ body[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-
 
 .meo-export-frontmatter-value-line {
   min-width: 0;
+}
+
+.meo-export-frontmatter-value-line + .meo-export-frontmatter-value-line {
+  margin-top: 2px;
 }
 
 .meo-export-frontmatter-value-line.is-list-item {
@@ -451,6 +477,10 @@ ${headingRulesCss}
 
 h1, h2 {
   padding-bottom: 0.3em;
+}
+
+.meo-export-frontmatter-line:is(.is-list-item, .is-raw) {
+  padding-left: calc(var(--meo-properties-key-width) + 16px);
 }
 
 p, ul, ol, blockquote, pre, table, hr {
@@ -1080,10 +1110,10 @@ th:empty::before {
 @media (max-width: 700px) {
   .meo-export-page { padding: 12px; }
   .meo-export-doc { padding: 16px; }
-  .meo-export-frontmatter-line.is-property {
-    grid-template-columns: minmax(90px, 0.36fr) minmax(0, 1fr);
-    column-gap: 10px;
-  }
+}
+
+@media (max-width: 520px) {
+  .meo-export-frontmatter { --meo-properties-key-width: 92px; }
 }
 
 @page {

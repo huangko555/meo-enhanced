@@ -637,72 +637,6 @@ const previewLatexMathViewportStyles = `
 }
 `;
 
-const previewPropertiesStyles = `
-.meo-export-frontmatter {
-  --meo-preview-properties-key-width: 124px;
-  padding-inline: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-  overflow: hidden;
-}
-
-.meo-export-frontmatter-header {
-  margin-bottom: 0;
-  padding: 5px 12px;
-  font-size: inherit;
-  line-height: inherit;
-  /* Match one property line plus its vertical padding and separator. Keep
-     the smaller title font independent of the row's height. */
-  min-height: max(1.7em, calc(1lh + 11px));
-}
-
-.meo-export-frontmatter-header > span:last-child {
-  font-size: 0.82em;
-  line-height: 1.2;
-}
-
-.meo-export-frontmatter-line {
-  padding: 5px 12px;
-  border-radius: 0;
-  border-top: 1px solid color-mix(in srgb, var(--meo-border) 62%, transparent);
-}
-
-.meo-export-frontmatter-line.is-property {
-  grid-template-columns: var(--meo-preview-properties-key-width) minmax(0, 1fr);
-  column-gap: 0;
-  padding: 0 12px 0 0;
-}
-
-.meo-export-frontmatter-key-cell {
-  box-sizing: border-box;
-  min-height: 100%;
-  padding: 5px 10px 5px 12px;
-  border-right: 1px solid color-mix(in srgb, var(--meo-border) 82%, transparent);
-  background: color-mix(in srgb, var(--meo-border) 13%, transparent);
-}
-
-.meo-export-frontmatter-line.is-property > :is(
-  .meo-export-frontmatter-value,
-  .meo-export-frontmatter-value-group
-) {
-  padding: 5px 0 5px 16px;
-}
-
-.meo-export-frontmatter-value-line + .meo-export-frontmatter-value-line {
-  margin-top: 2px;
-}
-
-.meo-export-frontmatter-line:is(.is-list-item, .is-raw) {
-  padding-left: calc(var(--meo-preview-properties-key-width) + 16px);
-}
-
-@media (max-width: 520px) {
-  .meo-export-frontmatter {
-    --meo-preview-properties-key-width: 92px;
-  }
-}
-`;
-
 function collectPreviewKatexStyles(katexHref: string): string {
   if (!katexHref) {
     return '';
@@ -1485,7 +1419,7 @@ export function createPreviewController({
     previewTableLayout?.dispose();
     previewTableLayout = null;
     frame.onload = () => initializeFrame();
-    frame.srcdoc = `<!DOCTYPE html><html lang="${uiLanguage}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewLatexMathViewportStyles}${previewPropertiesStyles}${previewSourcePositionMarkerStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${payload.html}</main></div></body></html>`;
+    frame.srcdoc = `<!DOCTYPE html><html lang="${uiLanguage}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewLatexMathViewportStyles}${previewSourcePositionMarkerStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${payload.html}</main></div></body></html>`;
   };
 
   const applyAppearanceToFrame = () => {

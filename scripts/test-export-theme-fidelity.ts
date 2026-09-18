@@ -78,6 +78,10 @@ const browser = await launchTestBrowser();
 try {
   const page = await browser.newPage();
   await page.setContent(rendered.htmlDocument, { waitUntil: 'domcontentloaded' });
+  await page.evaluate(() => {
+    document.documentElement.setAttribute('data-meo-export-target', 'pdf');
+    document.body.setAttribute('data-meo-export-target', 'pdf');
+  });
   const actual = await page.evaluate(() => {
     const lines = Array.from(document.querySelectorAll<HTMLElement>('.meo-export-code-line-source')).map((line) => {
       const chars: Array<{ char: string; color: string }> = [];
@@ -97,7 +101,18 @@ try {
       frontmatter: {
         key: color('.meo-export-frontmatter-key'),
         value: color('.meo-export-frontmatter-value'),
-        pillBackground: color('.meo-export-frontmatter-pill', 'backgroundColor')
+        pillBackground: color('.meo-export-frontmatter-pill', 'backgroundColor'),
+        containerPaddingLeft: getComputedStyle(
+          document.querySelector<HTMLElement>('.meo-export-frontmatter')!
+        ).paddingLeft,
+        rowBorderTopWidth: getComputedStyle(
+          document.querySelector<HTMLElement>('.meo-export-frontmatter-line')!
+        ).borderTopWidth,
+        keyBorderRightWidth: getComputedStyle(
+          document.querySelector<HTMLElement>('.meo-export-frontmatter-key-cell')!
+        ).borderRightWidth,
+        keyColumnWidth: document.querySelector<HTMLElement>('.meo-export-frontmatter-key-cell')!
+          .getBoundingClientRect().width
       }
     };
   });
@@ -126,7 +141,11 @@ try {
   const expectedFrontmatter = {
     key: toRgb(frontmatterColors.key),
     value: toRgb(frontmatterColors.value),
-    pillBackground: toRgb(frontmatterColors.pillBackground)
+    pillBackground: toRgb(frontmatterColors.pillBackground),
+    containerPaddingLeft: '0px',
+    rowBorderTopWidth: '1px',
+    keyBorderRightWidth: '1px',
+    keyColumnWidth: 124
   };
   if (mismatches.length > 0 || JSON.stringify(actual.frontmatter) !== JSON.stringify(expectedFrontmatter)) {
     throw new Error(`Export theme differs from Live/Preview: ${JSON.stringify({
