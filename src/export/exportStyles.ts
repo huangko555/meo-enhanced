@@ -279,6 +279,8 @@ body[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-
   max-width: 900px;
   margin: 0 auto;
   padding: 48px 40px 72px;
+  overflow-wrap: anywhere;
+  word-break: normal;
   border: 0;
   border-radius: 0;
   background: var(--meo-bg);

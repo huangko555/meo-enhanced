@@ -5,6 +5,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
 ## 0.3.22
 - Improved PDF pagination for long code, tables, complex lists, headings, and large Mermaid diagrams while keeping thematic breaks natural.
+- Prevented long unbroken content in headings, paragraphs, lists, links, and inline code from being clipped in Preview and exports.
 - Added localized export progress and completion notifications with actions to open the exported file or reveal it in its folder.
 - Added an early warning when an open document changes on disk, with localized actions for reviewing or reloading the external version.
 - Added a persistent Source-to-Preview edit-position highlight and click-to-source navigation, with smoother semantic targeting while moving across Preview content.

@@ -574,6 +574,9 @@ if (!darkExportStyles.includes('--meo-bg: #20252b')) {
 if (!exportStyles.includes('max-width: 900px')) {
   throw new Error('Meo Reading must constrain HTML documents to a readable measure');
 }
+if (!/\.meo-export-doc\s*\{[^}]*\boverflow-wrap:\s*anywhere;[^}]*\bword-break:\s*normal;/s.test(exportStyles)) {
+  throw new Error('Preview and exports must wrap unbroken content instead of clipping it');
+}
 if (!exportStyles.includes('.meo-table-scroll') || !exportStyles.includes('overflow-wrap: anywhere')) {
   throw new Error('HTML and PDF exports must fit wide tables to the printable reading surface');
 }
