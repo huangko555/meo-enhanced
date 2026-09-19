@@ -13,6 +13,7 @@ type VscodeExportStrings = {
   readonly title: string;
   readonly saveLabel: string;
   readonly completed: string;
+  readonly queuedRetry: string;
   readonly failed: (message: string) => string;
   readonly open: string;
   readonly reveal: string;
@@ -40,6 +41,7 @@ type PendingExportRequest = {
 // Serialize requests and retain the latest retry so a click in that gap is not lost.
 let exportRequestActive = false;
 let queuedCancelledExportRetry: PendingExportRequest | null = null;
+let activeDestinationProgress: vscode.Progress<{ message?: string; increment?: number }> | null = null;
 
 export function runVscodeExportWithFeedback(
   options: {
@@ -54,6 +56,9 @@ export function runVscodeExportWithFeedback(
     if (exportRequestActive) {
       queuedCancelledExportRetry?.resolve('cancelled');
       queuedCancelledExportRetry = request;
+      activeDestinationProgress?.report({
+        message: getStrings(options.uiLanguage, options.format).queuedRetry
+      });
       return;
     }
 
@@ -111,13 +116,19 @@ async function performVscodeExportWithFeedback(
         try {
           progress.report({ message: strings.progress.selectingDestination });
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
-          const selectedUri = await vscode.window.showSaveDialog({
-            defaultUri: vscode.Uri.file(replaceFileExtension(options.sourceDocumentUri.fsPath, options.format)),
-            filters: options.format === 'html'
-              ? { HTML: ['html', 'htm'] }
-              : { PDF: ['pdf'] },
-            saveLabel: strings.saveLabel
-          });
+          activeDestinationProgress = progress;
+          let selectedUri: vscode.Uri | undefined;
+          try {
+            selectedUri = await vscode.window.showSaveDialog({
+              defaultUri: vscode.Uri.file(replaceFileExtension(options.sourceDocumentUri.fsPath, options.format)),
+              filters: options.format === 'html'
+                ? { HTML: ['html', 'htm'] }
+                : { PDF: ['pdf'] },
+              saveLabel: strings.saveLabel
+            });
+          } finally {
+            if (activeDestinationProgress === progress) activeDestinationProgress = null;
+          }
           resolveDestination(selectedUri);
           if (!selectedUri) return undefined;
 
@@ -168,6 +179,7 @@ function getStrings(uiLanguage: UiLanguage, format: VscodeExportFormat): VscodeE
       title: `正在导出 Markdown 为 ${label}`,
       saveLabel: `导出 ${label}`,
       completed: `${label} 导出完成。`,
+      queuedRetry: '正在等待系统关闭上一次保存窗口…',
       failed: (message) => `${label} 导出失败：${message}`,
       open: '直接打开',
       reveal: '打开所在文件夹',
@@ -184,6 +196,7 @@ function getStrings(uiLanguage: UiLanguage, format: VscodeExportFormat): VscodeE
     title: `Exporting Markdown to ${label}`,
     saveLabel: `Export ${label}`,
     completed: `${label} export completed.`,
+    queuedRetry: 'Waiting for the previous save dialog to close…',
     failed: (message) => `${label} export failed: ${message}`,
     open: 'Open',
     reveal: 'Show in Folder',

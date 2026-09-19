@@ -214,6 +214,7 @@ const queuedNativeRetry = runVscodeExportWithFeedback({
 });
 await new Promise<void>((resolve) => setTimeout(resolve, 0));
 const attemptsBeforeNativeCancellationSettled = nativeDialogAttempt;
+const feedbackBeforeNativeCancellationSettled = progressMessages.at(-1);
 releaseNativeCancellation?.();
 assert.equal(await firstNativeOutcome, 'cancelled');
 assert.equal(await queuedNativeRetry, 'completed');
@@ -221,6 +222,11 @@ assert.equal(
   attemptsBeforeNativeCancellationSettled,
   1,
   'a retry click must queue instead of opening a second save dialog while native cancellation is still settling'
+);
+assert.equal(
+  feedbackBeforeNativeCancellationSettled,
+  'Waiting for the previous save dialog to close…',
+  'a queued cold-start retry must acknowledge the click before the native dialog finishes settling'
 );
 assert.equal(nativeDialogAttempt, 2);
 assert.equal(queuedRetryStarted, true, 'the queued retry must open automatically after cancellation settles');
