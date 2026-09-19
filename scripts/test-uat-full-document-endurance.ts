@@ -690,7 +690,29 @@ async function editRendered(
     await page.keyboard.press('ArrowUp');
     await page.keyboard.type(`%% ${operation.marker}`);
   }
-  await page.waitForFunction((marker) => (window as any).__fullUatEditor.getText().includes(marker), {}, operation.marker);
+  try {
+    await page.waitForFunction(
+      (marker) => (window as any).__fullUatEditor.getText().includes(marker),
+      { timeout: 30_000 },
+      operation.marker
+    );
+  } catch (error) {
+    const diagnostics = await page.evaluate(({ label, marker }) => {
+      const region = document.querySelector<HTMLElement>(`[role="region"][aria-label="${label}"]`);
+      const content = region?.querySelector<HTMLElement>('.cm-content') ?? null;
+      return {
+        activeClass: document.activeElement?.className ?? null,
+        activeTag: document.activeElement?.tagName ?? null,
+        contentText: content?.textContent ?? null,
+        documentContainsMarker: (window as any).__fullUatEditor.getText().includes(marker),
+        focusInsideRegion: Boolean(region?.contains(document.activeElement)),
+        regionConnected: Boolean(region?.isConnected)
+      };
+    }, { label: regionLabel, marker: operation.marker });
+    throw new Error(`Rendered edit did not reach the document: ${JSON.stringify({ operation, openingLine, diagnostics })}`, {
+      cause: error
+    });
+  }
   await waitForFrames(page, 10);
   const focus = await page.evaluate(({ label, controls }) => {
     const region = document.querySelector<HTMLElement>(`[role="region"][aria-label="${label}"]`);

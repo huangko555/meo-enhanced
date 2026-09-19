@@ -804,12 +804,13 @@ class MermaidEditingController {
             );
             const scrollTop = projectionLock.scrollTop;
             viewportController?.markInteraction();
-            // A replacement widget taller than CodeMirror's viewport can be
-            // virtualized around the hidden outer selection even while its
-            // nested editor owns DOM focus. Only that exceptional geometry
-            // needs a temporary outer selection pin; normal blocks retain the
-            // user's unrelated outer command target.
+            const retainInnerFocus = this.root.contains(document.activeElement);
+            const innerSelection = update.state.selection.main;
+            // The replacement widget must remain in CodeMirror's rendered
+            // viewport while its nested editor owns focus. The projection lock
+            // restores the unrelated outer selection after focus leaves.
             const needsOuterSelectionKeepAlive = (
+              retainInnerFocus ||
               this.root.getBoundingClientRect().height > this.outerView.scrollDOM.clientHeight
             );
             const projection = this.outerView.state.update({
@@ -839,8 +840,6 @@ class MermaidEditingController {
             });
             projectionLock.previousSelection = projectionLock.previousSelection.map(projection.changes);
             projectionLock.pinnedSelection = projection.newSelection;
-            const retainInnerFocus = this.root.contains(document.activeElement);
-            const innerSelection = update.state.selection.main;
             this.outerView.dispatch(projection);
             // Mapping the replaced outer range can briefly transfer DOM focus
             // back to CodeMirror even when updateDOM retains this controller.

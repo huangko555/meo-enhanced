@@ -1,4 +1,4 @@
-import { EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
+import { EditorSelection, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
 import { defaultKeymap, indentLess, indentMore } from '@codemirror/commands';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
@@ -488,6 +488,9 @@ class LatexMathEditingController {
   private previewViewport: LatexMathViewportController | null = null;
   private syncingFromOuter = false;
   private innerInteractionContinuity: EditorInteractionContinuity | null = null;
+  private projectionPreviousSelection: EditorSelection | null = null;
+  private projectionPinnedSelection: EditorSelection | null = null;
+  private projectionRestoreFrame: number | null = null;
 
   constructor(
     outerView: EditorView,
@@ -529,6 +532,12 @@ class LatexMathEditingController {
           shikiDocumentHighlight('latex'),
           innerLatexMathSearchField,
           EditorView.lineWrapping,
+          EditorView.domEventHandlers({
+            blur: () => {
+              this.scheduleProjectionSelectionRestore();
+              return false;
+            }
+          }),
           keymap.of([
             { key: 'Mod-z', run: () => consumeEditorHistoryCommand(this.outerView, 'undo') },
             { key: 'Mod-y', run: () => consumeEditorHistoryCommand(this.outerView, 'redo') },
@@ -556,8 +565,16 @@ class LatexMathEditingController {
               sourceText
             };
             this.block = nextBlock;
-            this.outerView.dispatch({
+            const retainInnerFocus = this.root.contains(document.activeElement);
+            const innerSelection = update.state.selection.main;
+            if (retainInnerFocus && !this.projectionPreviousSelection) {
+              this.projectionPreviousSelection = this.outerView.state.selection;
+            }
+            const projection = this.outerView.state.update({
               changes: { from: contentFrom, to: contentTo, insert: sourceText },
+              selection: retainInnerFocus
+                ? { anchor: nextBlock.contentFrom + innerSelection.head }
+                : undefined,
               effects: replaceLiveInputNestedDecoration(
                 nextBlock.contentFrom,
                 nextBlock.contentTo,
@@ -572,6 +589,22 @@ class LatexMathEditingController {
                 markLiveInputNestedProjection()
               ]
             });
+            if (this.projectionPreviousSelection) {
+              this.projectionPreviousSelection = this.projectionPreviousSelection.map(projection.changes);
+            }
+            this.projectionPinnedSelection = retainInnerFocus ? projection.newSelection : null;
+            this.outerView.dispatch(projection);
+            if (retainInnerFocus && !this.innerView.hasFocus) {
+              const currentBlock = this.outerView.dom.querySelector<LatexMathEditingBlockElement>(
+                `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${nextBlock.anchor}"]`
+              );
+              const currentController = currentBlock?.__meoLatexMathEditingController;
+              if (currentController && !currentController.innerView.hasFocus) {
+                const head = Math.min(innerSelection.head, currentController.innerView.state.doc.length);
+                currentController.innerView.dispatch({ selection: { anchor: head } });
+                currentController.innerView.contentDOM.focus({ preventScroll: true });
+              }
+            }
             this.renderPreview();
           })
         ]
@@ -740,6 +773,29 @@ class LatexMathEditingController {
     });
   }
 
+  private scheduleProjectionSelectionRestore(): void {
+    if (this.projectionRestoreFrame !== null) {
+      window.cancelAnimationFrame(this.projectionRestoreFrame);
+    }
+    this.projectionRestoreFrame = window.requestAnimationFrame(() => {
+      this.projectionRestoreFrame = null;
+      if (this.root.contains(document.activeElement)) return;
+      const previousSelection = this.projectionPreviousSelection;
+      const pinnedSelection = this.projectionPinnedSelection;
+      this.projectionPreviousSelection = null;
+      this.projectionPinnedSelection = null;
+      if (
+        previousSelection && pinnedSelection && this.outerView.dom.isConnected &&
+        this.outerView.state.selection.eq(pinnedSelection)
+      ) {
+        this.outerView.dispatch({
+          selection: previousSelection,
+          annotations: Transaction.addToHistory.of(false)
+        });
+      }
+    });
+  }
+
   private renderPreview(): void {
     if (this.mode !== 'split' || !this.previewHost) {
       return;
@@ -769,6 +825,7 @@ class LatexMathEditingController {
   }
 
   destroy(): void {
+    this.scheduleProjectionSelectionRestore();
     this.innerInteractionContinuity?.dispose();
     this.innerInteractionContinuity = null;
     this.previewViewport?.destroy();
