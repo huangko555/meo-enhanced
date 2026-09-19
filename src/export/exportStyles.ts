@@ -9,6 +9,8 @@ import { normalizePreviewFontFamily, type PreviewAppearance } from '../shared/pr
 import type { EditorStyleEnvironment } from '../protocol/editorStyleEnvironment';
 
 const styleValueInjectionPattern = /[\n\r;{}]/g;
+const isolatedDarkBackgroundColor = '#20252b';
+const isolatedDarkForegroundColor = '#d8dee9';
 
 export type ExportStyleEnvironment = EditorStyleEnvironment;
 
@@ -38,15 +40,15 @@ function buildReadingStyles(
   const useCapturedThemeColors = !isolatePreviewTheme && (
     editorAppearanceIsDark === null || editorAppearanceIsDark === previewAppearanceIsDark
   );
-  const colors = resolveThemeColors(theme, environment, useCapturedThemeColors);
+  const colors = resolveThemeColors(theme, environment, useCapturedThemeColors, isolatePreviewTheme);
   const fonts = theme.typography;
   const editorFontFamily = sanitizeCssFont(environment.editorFontFamily ?? '');
   const editorFontWeight = sanitizeFontWeight(environment.editorFontWeight, 'normal');
   const darkBackgroundColor = !isolatePreviewTheme && isDarkCssColor(capturedEditorBackground) === true
     ? capturedEditorBackground
-    : sanitizeCssColor(theme.backgroundColor) || colors.base03;
+    : sanitizeStandaloneCssColor(theme.backgroundColor) || isolatedDarkBackgroundColor;
   const editorBackgroundColor = appearance === 'light' ? '#ffffff' : darkBackgroundColor;
-  const previewForegroundColor = appearance === 'light' ? '#1f2328' : '#d8dee9';
+  const previewForegroundColor = appearance === 'light' ? '#1f2328' : isolatedDarkForegroundColor;
   const previewMutedColor = appearance === 'light' ? '#59636e' : '#9aa4af';
   const readingForegroundColor = `color-mix(in srgb, ${previewForegroundColor} 60%, ${previewMutedColor} 40%)`;
   const editorForegroundColor = previewForegroundColor;
@@ -73,28 +75,29 @@ function buildReadingStyles(
     ? '#d0d7de'
     : `color-mix(in srgb, ${previewForegroundColor} 22%, transparent)`;
   const readingMutedColor = previewMutedColor;
+  const semanticColor = isolatePreviewTheme ? sanitizeStandaloneCssColor : sanitizeCssColor;
   const capturedFrontmatterKeyColor = useCapturedThemeColors
-    ? sanitizeCssColor(environment.frontmatterKeyColor ?? '')
+    ? semanticColor(environment.frontmatterKeyColor ?? '')
     : '';
   const capturedFrontmatterValueColor = useCapturedThemeColors
-    ? sanitizeCssColor(environment.frontmatterValueColor ?? '')
+    ? semanticColor(environment.frontmatterValueColor ?? '')
     : '';
   const capturedFrontmatterPillBackgroundColor = useCapturedThemeColors
-    ? sanitizeCssColor(environment.frontmatterPillBackgroundColor ?? '')
+    ? semanticColor(environment.frontmatterPillBackgroundColor ?? '')
     : '';
   const frontmatterKeyColor = sourceColoring
     ? capturedFrontmatterKeyColor
-      || sanitizeCssColor(theme.semanticColors.frontmatterKey)
+      || semanticColor(theme.semanticColors.frontmatterKey)
       || colors.base07
     : readingForegroundColor;
   const frontmatterValueColor = sourceColoring
     ? capturedFrontmatterValueColor
-      || sanitizeCssColor(theme.semanticColors.frontmatterValue)
+      || semanticColor(theme.semanticColors.frontmatterValue)
       || colors.base01
     : readingForegroundColor;
   const frontmatterPillBackgroundColor = sourceColoring
     ? capturedFrontmatterPillBackgroundColor
-      || sanitizeCssColor(theme.semanticColors.frontmatterPillBackground)
+      || semanticColor(theme.semanticColors.frontmatterPillBackground)
       || colors.base03
     : panelBorderColor;
   const readingLinkColor = appearance === 'light' ? '#0969da' : '#58a6ff';
@@ -1222,17 +1225,20 @@ th:empty::before {
 function resolveThemeColors(
   theme: BuiltInVisuals,
   environment: ExportStyleEnvironment,
-  useCapturedThemeColors: boolean
+  useCapturedThemeColors: boolean,
+  standalone: boolean
 ): VisualColors {
   const themeColors = theme.colors;
   const envColors = useCapturedThemeColors ? environment.meoThemeColors ?? {} : {};
   const resolved = {} as Record<VisualColorKey, string>;
+  const color = standalone ? sanitizeStandaloneCssColor : sanitizeCssColor;
 
   for (const key of Object.keys(defaultThemeColors) as VisualColorKey[]) {
     resolved[key] =
-      sanitizeCssColor(envColors[key] ?? '') ||
-      sanitizeCssColor(themeColors[key] ?? '') ||
-      defaultThemeColors[key];
+      color(envColors[key] ?? '') ||
+      color(themeColors[key] ?? '') ||
+      color(defaultThemeColors[key]) ||
+      (key === 'base01' ? isolatedDarkForegroundColor : isolatedDarkBackgroundColor);
   }
 
   return Object.freeze(resolved);
@@ -1276,6 +1282,11 @@ function sanitizeCssColor(value: string): string {
     return '';
   }
   return trimmed.replace(styleValueInjectionPattern, ' ');
+}
+
+function sanitizeStandaloneCssColor(value: string): string {
+  const sanitized = sanitizeCssColor(value);
+  return /\bvar\(/i.test(sanitized) ? '' : sanitized;
 }
 
 function isDarkCssColor(value: string): boolean | null {

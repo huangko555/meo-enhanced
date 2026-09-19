@@ -1019,10 +1019,22 @@ async function main(): Promise<void> {
       const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
       return {
         scheme: doc.documentElement.style.colorScheme || getComputedStyle(doc.documentElement).colorScheme,
+        body: getComputedStyle(doc.body).backgroundColor,
         tableHeader: getComputedStyle(doc.querySelector<HTMLTableCellElement>('thead th')!).backgroundColor,
         codeBlock: getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-code-block-wrap')!).backgroundColor
       };
     });
+    assert.equal(initialPreviewSurfaceColors.body, 'rgb(255, 255, 255)');
+    assert.notEqual(
+      initialPreviewSurfaceColors.tableHeader,
+      initialPreviewSurfaceColors.body,
+      `Light Preview table headers must retain their semantic surface: ${JSON.stringify(initialPreviewSurfaceColors)}`
+    );
+    assert.notEqual(
+      initialPreviewSurfaceColors.codeBlock,
+      initialPreviewSurfaceColors.body,
+      `Light Preview code blocks must retain their semantic surface: ${JSON.stringify(initialPreviewSurfaceColors)}`
+    );
     await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
       data: {
         type: 'vscodeCodeThemeChanged',
@@ -1048,12 +1060,14 @@ async function main(): Promise<void> {
       const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
       return {
         scheme: getComputedStyle(doc.documentElement).colorScheme,
+        body: getComputedStyle(doc.body).backgroundColor,
         tableHeader: getComputedStyle(doc.querySelector<HTMLTableCellElement>('thead th')!).backgroundColor,
         codeBlock: getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-code-block-wrap')!).backgroundColor
       };
     });
     assert.deepEqual(refreshedPreviewSurfaceColors, {
       scheme: 'light',
+      body: initialPreviewSurfaceColors.body,
       tableHeader: initialPreviewSurfaceColors.tableHeader,
       codeBlock: initialPreviewSurfaceColors.codeBlock
     }, 'Preview reading-surface colors must stay on the selected Preview theme');
@@ -1180,6 +1194,29 @@ async function main(): Promise<void> {
       { border: 'rgb(122, 132, 144)', chevron: 'rgb(122, 132, 144)' }
     ], 'Inactive Preview dropdown borders and chevrons must share the requested neutral color');
     await page.select('.preview-appearance-select', 'dark');
+    const darkPreviewSurfaceColors = await page.evaluate(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      return {
+        body: getComputedStyle(doc.body).backgroundColor,
+        tableHeader: getComputedStyle(doc.querySelector<HTMLTableCellElement>('thead th')!).backgroundColor,
+        codeBlock: getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-code-block-wrap')!).backgroundColor
+      };
+    });
+    assert.equal(
+      darkPreviewSurfaceColors.body,
+      'rgb(32, 37, 43)',
+      `Dark Preview must provide its own reading background: ${JSON.stringify(darkPreviewSurfaceColors)}`
+    );
+    assert.notEqual(
+      darkPreviewSurfaceColors.tableHeader,
+      darkPreviewSurfaceColors.body,
+      `Dark Preview table headers must retain their semantic surface: ${JSON.stringify(darkPreviewSurfaceColors)}`
+    );
+    assert.notEqual(
+      darkPreviewSurfaceColors.codeBlock,
+      darkPreviewSurfaceColors.body,
+      `Dark Preview code blocks must retain their semantic surface: ${JSON.stringify(darkPreviewSurfaceColors)}`
+    );
     await page.click('.preview-font-family-dropdown');
     assert.deepEqual(await page.evaluate(() => ({
       previewAppearance: document.querySelector<HTMLSelectElement>('.preview-appearance-select')!.value,

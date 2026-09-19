@@ -414,6 +414,10 @@ const environment = {
   }
 };
 const darkPreviewStyles = buildPreviewStyles(environment, 'dark');
+const isolatedDarkPreviewStyles = buildPreviewStyles({
+  ...environment,
+  previewThemeIsolation: true
+}, 'dark');
 const lightPreviewStyles = buildPreviewStyles(environment, 'light');
 const exportStyles = buildExportStyles(environment, 'light');
 const darkExportStyles = buildExportStyles(environment, 'dark');
@@ -564,6 +568,11 @@ if (!darkPreviewStyles.includes('--meo-alert-note: #61afef')
 
 if (!darkPreviewStyles.includes('--meo-bg: #20252b')) {
   throw new Error('Dark Preview must use the current document background');
+}
+if (isolatedDarkPreviewStyles.includes('var(--vscode-')
+  || !isolatedDarkPreviewStyles.includes('--meo-bg: #20252b')
+  || !isolatedDarkPreviewStyles.includes('--meo-frontmatter-value: #d8dee9')) {
+  throw new Error('Isolated dark Preview styles must not depend on parent VS Code variables');
 }
 for (const expected of [
   '--meo-fg: color-mix(in srgb, #d8dee9 60%, #9aa4af 40%)',
