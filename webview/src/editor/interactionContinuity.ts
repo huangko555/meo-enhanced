@@ -96,10 +96,9 @@ export function createEditorInteractionContinuity(input: {
     !disposed && active === candidate && candidate.generation === nextGeneration
   );
 
-  const schedule = (candidate: ActiveMainInput): void => {
+  const schedule = (candidate: ActiveMainInput, immediate = false): void => {
     if (!isCurrent(candidate) || candidate.frame !== null) return;
-    candidate.frame = requestAnimationFrame(() => {
-      candidate.frame = null;
+    const measure = () => {
       if (!isCurrent(candidate) || getMode() !== 'live' || !view.hasFocus) {
         cancel();
         return;
@@ -160,7 +159,14 @@ export function createEditorInteractionContinuity(input: {
           schedule(candidate);
         }
       });
-    });
+    };
+    if (immediate) measure();
+    else {
+      candidate.frame = requestAnimationFrame(() => {
+        candidate.frame = null;
+        measure();
+      });
+    }
   };
 
   const beginInputSettlement = (): void => {
@@ -195,7 +201,7 @@ export function createEditorInteractionContinuity(input: {
       stableFrames: 0
     };
     active = candidate;
-    schedule(candidate);
+    schedule(candidate, true);
   };
 
   const resumeAfterDerivedPresentation = (): void => {
@@ -205,7 +211,7 @@ export function createEditorInteractionContinuity(input: {
     candidate.awaitingDerivedPresentation = false;
     candidate.remainingFrames = MAX_SETTLE_FRAMES;
     candidate.stableFrames = 0;
-    schedule(candidate);
+    schedule(candidate, true);
   };
 
   const captureScrollTopBeforeInput = (): void => {
