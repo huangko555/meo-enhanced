@@ -10,6 +10,35 @@ if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
 try {
   const page = await browser.newPage();
+  const waitFor = async (
+    label: string,
+    predicate: () => unknown,
+    options?: Parameters<typeof page.waitForFunction>[1]
+  ) => {
+    try {
+      await page.waitForFunction(predicate, options);
+    } catch (error) {
+      const state = await page.evaluate(() => {
+        const status = document.querySelector<HTMLElement>('.preview-status');
+        const editor = document.querySelector<HTMLElement>('.editor-host');
+        const preview = document.querySelector<HTMLElement>('.preview-host');
+        return {
+          mode: document.querySelector<HTMLElement>('.editor-root')?.dataset.mode ?? null,
+          statusHidden: status?.hidden ?? null,
+          statusText: status?.textContent ?? null,
+          editorHidden: editor?.hidden ?? null,
+          editorCovered: editor?.hasAttribute('data-preview-cover') ?? null,
+          previewHidden: preview?.hidden ?? null,
+          contentIncludesChanged: document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-content')
+            ?.textContent?.includes('changed') ?? null
+        };
+      });
+      throw new Error(
+        `Preview transition wait failed: ${label}; ${JSON.stringify({ state })}`,
+        { cause: error }
+      );
+    }
+  };
   await page.setViewport({ width: 800, height: 600 });
   const pendingRemoteImages: Array<() => Promise<void>> = [];
   let holdRemoteImages = true;
@@ -121,7 +150,7 @@ try {
       holdInitialRender = false;
       releaseInitialRender();
     }
-    await page.waitForFunction(() =>
+    await waitFor(`${phase} preview ready`, () =>
       document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent?.includes('Paragraph 39')
       && !document.querySelector('.editor-host')?.hasAttribute('data-preview-cover')
     , { timeout: 5000 });
@@ -141,7 +170,7 @@ try {
     });
     holdRemoteImages = false;
     await Promise.all(pendingRemoteImages.splice(0).map(respond => respond()));
-    await page.waitForFunction(() => {
+    await waitFor(`${phase} images ready`, () => {
       const images = Array.from(
         document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.images ?? []
       );
@@ -200,7 +229,7 @@ try {
   });
   await page.click('button[data-mode="source"]');
   await page.click('button[data-mode="preview"]');
-  await page.waitForFunction(() => !document.querySelector<HTMLElement>('.preview-host')?.hidden);
+  await waitFor('source-preview visible', () => !document.querySelector<HTMLElement>('.preview-host')?.hidden);
   holdLiveImageResolution = true;
   const liveRevealTrace = await page.evaluate(async () => {
     const preview = document.querySelector<HTMLElement>('.preview-host')!;
@@ -217,7 +246,7 @@ try {
     firstHiddenFrame === -1 || firstHiddenFrame >= 3,
     `Preview cover must remain through two Live layout observations: ${JSON.stringify(liveRevealTrace)}`
   );
-  await page.waitForFunction(() => document.querySelector<HTMLElement>('.preview-host')?.hidden);
+  await waitFor('live hidden', () => document.querySelector<HTMLElement>('.preview-host')?.hidden);
   const pendingLiveReveal = await page.evaluate(() => {
     const editor = document.querySelector<HTMLElement>('.editor-host')!;
     const preview = document.querySelector<HTMLElement>('.preview-host')!;
@@ -280,7 +309,7 @@ try {
   assert.equal(pendingLiveImageResolutions.length, 0, 'warm Live image resources must not resolve or load again');
   holdLiveImageResolution = false;
   pendingLiveImageResolutions.splice(0).forEach((release) => release());
-  await page.waitForFunction(() => document.querySelector<HTMLElement>('.preview-host')?.hidden);
+  await waitFor('warm live hidden', () => document.querySelector<HTMLElement>('.preview-host')?.hidden);
   assert.deepEqual(await page.evaluate(() => {
     const editor = document.querySelector<HTMLElement>('.editor-host')!;
     return { hidden: editor.hidden, inert: editor.inert };
@@ -288,11 +317,11 @@ try {
 
   await page.click('button[data-mode="source"]');
   await page.click('button[data-mode="preview"]');
-  await page.waitForFunction(() => !document.querySelector<HTMLElement>('.preview-host')?.hidden);
+  await waitFor('timeout preview visible', () => !document.querySelector<HTMLElement>('.preview-host')?.hidden);
   holdLiveImageResolution = true;
   const timeoutRevealStartedAt = Date.now();
   await page.click('button[data-mode="live"]');
-  await page.waitForFunction(() => document.querySelector<HTMLElement>('.preview-host')?.hidden, { timeout: 1000 });
+  await waitFor('timeout live hidden', () => document.querySelector<HTMLElement>('.preview-host')?.hidden, { timeout: 1000 });
   const timeoutRevealElapsed = Date.now() - timeoutRevealStartedAt;
   assert.ok(
     timeoutRevealElapsed <= 260,
@@ -301,10 +330,10 @@ try {
   holdLiveImageResolution = false;
   pendingLiveImageResolutions.splice(0).forEach((release) => release());
   failRender = true;
-  await page.click('.cm-content');
+  await page.focus('.editor-host > .cm-editor .cm-content');
   await page.keyboard.type('changed');
   await page.click('button[data-mode="preview"]');
-  await page.waitForFunction(() => {
+  await waitFor('failure status visible', () => {
     const status = document.querySelector<HTMLElement>('.preview-status');
     return status && !status.hidden && !document.querySelector('.editor-host')?.hasAttribute('data-preview-cover');
   });
