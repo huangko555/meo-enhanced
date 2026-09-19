@@ -94,7 +94,7 @@ async function drag(
   const pointerId = await page.evaluate(() => (window as any).__tableWidthTestPointerId as number);
   if (!Number.isInteger(pointerId)) throw new Error('Table width drag did not observe pointerdown');
   const started = await page.$eval(selector, (handle: Element) => (
-    (handle.closest('.cm-editor') ?? handle).classList.contains('meo-table-column-resizing')
+    Boolean(handle.closest('.meo-table-column-resizing'))
   ));
   if (!started) throw new Error(`Table width drag did not start: ${selector}`);
   await page.mouse.move(point.x + delta, point.y, { steps: 4 });

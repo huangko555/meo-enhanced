@@ -5292,7 +5292,9 @@ body.outline-resizing .preview-frame {
 }
 
 .cm-editor.meo-table-column-resizing,
-.cm-editor.meo-table-column-resizing * {
+.cm-editor.meo-table-column-resizing *,
+.meo-table-column-resizing .cm-editor,
+.meo-table-column-resizing .cm-editor * {
   cursor: col-resize !important;
 }
 
