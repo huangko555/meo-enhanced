@@ -31,16 +31,18 @@ function buildReadingStyles(
   appearance: PreviewAppearance
 ): string {
   const theme = getBuiltInVisuals(appearance === 'light' ? 'light' : 'dark');
+  const isolatePreviewTheme = environment.previewThemeIsolation === true;
   const capturedEditorBackground = sanitizeCssColor(environment.editorBackgroundColor ?? '');
   const editorAppearanceIsDark = isDarkCssColor(capturedEditorBackground);
   const previewAppearanceIsDark = appearance !== 'light';
-  const useCapturedThemeColors = editorAppearanceIsDark === null
-    || editorAppearanceIsDark === previewAppearanceIsDark;
+  const useCapturedThemeColors = !isolatePreviewTheme && (
+    editorAppearanceIsDark === null || editorAppearanceIsDark === previewAppearanceIsDark
+  );
   const colors = resolveThemeColors(theme, environment, useCapturedThemeColors);
   const fonts = theme.typography;
   const editorFontFamily = sanitizeCssFont(environment.editorFontFamily ?? '');
   const editorFontWeight = sanitizeFontWeight(environment.editorFontWeight, 'normal');
-  const darkBackgroundColor = isDarkCssColor(capturedEditorBackground) === true
+  const darkBackgroundColor = !isolatePreviewTheme && isDarkCssColor(capturedEditorBackground) === true
     ? capturedEditorBackground
     : sanitizeCssColor(theme.backgroundColor) || colors.base03;
   const editorBackgroundColor = appearance === 'light' ? '#ffffff' : darkBackgroundColor;

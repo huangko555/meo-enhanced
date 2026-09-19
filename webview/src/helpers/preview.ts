@@ -1932,6 +1932,16 @@ export function createPreviewController({
       if (pendingLine !== null) showSourceNavigation(pendingLine);
     });
   };
+
+  const refreshTheme = (): void => {
+    const text = hasPendingRequest ? pendingText : latestAcceptedText;
+    if (text === null) return;
+    void requestRender(text, {
+      force: true,
+      preserveViewport: true,
+      preserveFrame: true
+    });
+  };
   const isSourceNavigationGutterPoint = (
     frameDocument: Document,
     clientX: number
@@ -2360,7 +2370,9 @@ export function createPreviewController({
         applyCodeTheme(appearance);
         updateThemeToggle();
       }
+      refreshTheme();
     },
+    refreshTheme,
     getAppearance: () => appearance,
     getSourceColoring: () => sourceColoring,
     getStyleEnvironment,

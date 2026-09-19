@@ -900,6 +900,7 @@ async function main(): Promise<void> {
   const browser = await launchTestBrowser();
   let openLinkWaiter: ReturnType<typeof createOpenLinkWaiter> | null = null;
   const previewFontFamilyCommands: string[] = [];
+  let previewRenderRequestCount = 0;
   try {
     await assertPreviewProjectionTransactions(browser, path.join(temp, 'bundle.js'));
     if (process.argv.includes('--projection-only')) {
@@ -953,6 +954,7 @@ async function main(): Promise<void> {
         return null;
       }
       if (message.type !== 'requestPreviewRender') return null;
+      previewRenderRequestCount += 1;
       const rendered = exportRuntime.renderPreviewDocument({
         markdownText: message.text,
         sourceDocumentPath,
@@ -1012,6 +1014,49 @@ async function main(): Promise<void> {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
       return frame?.contentDocument?.body.textContent?.includes('continues */') === true;
     });
+    const initialPreviewRenderRequestCount = previewRenderRequestCount;
+    const initialPreviewSurfaceColors = await page.evaluate(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      return {
+        scheme: doc.documentElement.style.colorScheme || getComputedStyle(doc.documentElement).colorScheme,
+        tableHeader: getComputedStyle(doc.querySelector<HTMLTableCellElement>('thead th')!).backgroundColor,
+        codeBlock: getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-code-block-wrap')!).backgroundColor
+      };
+    });
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+      data: {
+        type: 'vscodeCodeThemeChanged',
+        appearance: 'dark',
+        vscodeTheme: {
+          name: 'Synthetic Dark Theme',
+          type: 'dark',
+          colors: {
+            'editor.background': '#301010',
+            'editor.foreground': '#ffe5e5',
+            'editorGroup.border': '#ff0000',
+            'editorWidget.background': '#401515'
+          },
+          tokenColors: []
+        }
+      }
+    })));
+    assert.ok(
+      previewRenderRequestCount > initialPreviewRenderRequestCount,
+      'VS Code theme changes must regenerate the Preview style payload'
+    );
+    const refreshedPreviewSurfaceColors = await page.evaluate(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      return {
+        scheme: getComputedStyle(doc.documentElement).colorScheme,
+        tableHeader: getComputedStyle(doc.querySelector<HTMLTableCellElement>('thead th')!).backgroundColor,
+        codeBlock: getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-code-block-wrap')!).backgroundColor
+      };
+    });
+    assert.deepEqual(refreshedPreviewSurfaceColors, {
+      scheme: 'light',
+      tableHeader: initialPreviewSurfaceColors.tableHeader,
+      codeBlock: initialPreviewSurfaceColors.codeBlock
+    }, 'Preview reading-surface colors must stay on the selected Preview theme');
     const propertiesGeometry = await page.evaluate(() => {
       const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
       const properties = doc.createElement('section');
