@@ -158,12 +158,30 @@ function addTokenDecorations(
     requestShikiTokens(lang, code);
     // Keep the mapped presentation until this revision's tokens are ready.
     // Only matching language/theme identities may enter the rebuilt result.
+    let preservedPresentation = false;
     previous.between(contentFrom, contentTo, (from, to, decoration) => {
       if (decoration.spec.shikiLanguage !== lang || decoration.spec.shikiThemeVersion !== getShikiThemeVersion()) return;
       const start = Math.max(contentFrom, from);
       const end = Math.min(contentTo, to);
-      if (start < end) builder.add(start, end, decoration);
+      if (start < end) {
+        preservedPresentation = true;
+        builder.add(start, end, decoration);
+      }
     });
+    // On first paint there is no completed Shiki presentation to preserve.
+    // Cover the block with one neutral foreground until the requested token
+    // set arrives, so CodeMirror's language parser cannot briefly expose a
+    // different semantic palette.
+    if (!preservedPresentation) {
+      const pending = pendingDocumentTokenDecoration(lang);
+      let offset = 0;
+      for (const line of code.split('\n')) {
+        if (line.length > 0) {
+          builder.add(contentFrom + offset, contentFrom + offset + line.length, pending);
+        }
+        offset += line.length + 1;
+      }
+    }
     return;
   }
 

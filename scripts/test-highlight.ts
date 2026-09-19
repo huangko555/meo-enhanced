@@ -262,7 +262,9 @@ try {
         { scope: 'markup.bold', settings: { foreground: '#adbac7', fontStyle: 'bold' } },
         { scope: 'markup.italic', settings: { foreground: '#adbac7', fontStyle: 'italic' } },
         { scope: 'markup.inline.raw', settings: { foreground: '#6cb6ff' } },
-        { scope: 'constant.numeric', settings: { foreground: '#39d353' } }
+        { scope: 'constant.numeric', settings: { foreground: '#39d353' } },
+        { scope: 'variable', settings: { foreground: '#ff3344' } },
+        { scope: 'keyword.operator', settings: { foreground: '#33cc66' } }
       ]
     }, 'dark');
     paletteAdapter.apply(darkPalette);
@@ -279,6 +281,10 @@ try {
         '',
         '**粗体内容** *斜体内容*',
         '',
+        '```shell',
+        'code --install-extension huangko555.meo-enhanced',
+        '```',
+        '',
         '```',
         'plainFenceToken',
         '```',
@@ -291,16 +297,29 @@ try {
         'native_value = 73',
         '```'
       ].join('\n'),
-      initialMode: 'source',
+      initialMode: 'live',
       onApplyChanges() {}
     });
+    const initialShellLine = Array.from(editor.view.dom.querySelectorAll<HTMLElement>('.cm-line'))
+      .find((line) => line.textContent?.includes('code --install-extension'));
+    const initialShellColors: string[] = [];
+    if (initialShellLine) {
+      const walker = document.createTreeWalker(initialShellLine, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.textContent?.trim()) continue;
+        const element = node.parentElement ?? initialShellLine;
+        const color = getComputedStyle(element).color;
+        if (!initialShellColors.includes(color)) initialShellColors.push(color);
+      }
+    }
+    editor.setMode('source');
     (window as any).__nativePaletteEditor = editor;
     (window as any).__nativePaletteAdapter = paletteAdapter;
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     const codeTokenReady = async (): Promise<void> => {
       for (let attempt = 0; attempt < 200; attempt += 1) {
         if (Array.from(editor.view.dom.querySelectorAll<HTMLElement>('span[style*="color:"]'))
-          .some((node) => node.textContent?.includes('42'))) return;
+          .some((node) => node.textContent?.includes('42') && getComputedStyle(node).color === 'rgb(57, 211, 83)')) return;
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
       throw new Error('Source code block did not receive the shared native token palette');
@@ -329,7 +348,8 @@ try {
       italic: colorForText('斜体内容'),
       sourcePlainCode: colorForText('plainFenceToken'),
       sourceCodeNumber: colorForText('42'),
-      sourceRubyNumber: colorForText('73')
+      sourceRubyNumber: colorForText('73'),
+      initialShellColors
     };
   });
   const expectedNativePaletteVisuals = {
@@ -341,7 +361,8 @@ try {
     italic: 'rgb(173, 186, 199)',
     sourcePlainCode: 'rgb(173, 186, 199)',
     sourceCodeNumber: 'rgb(57, 211, 83)',
-    sourceRubyNumber: 'rgb(57, 211, 83)'
+    sourceRubyNumber: 'rgb(57, 211, 83)',
+    initialShellColors: ['rgb(173, 186, 199)']
   };
   if (JSON.stringify(nativePaletteVisuals) !== JSON.stringify(expectedNativePaletteVisuals)) {
     throw new Error(`Source did not reproduce the native VS Code Markdown palette: ${JSON.stringify(nativePaletteVisuals)}`);
