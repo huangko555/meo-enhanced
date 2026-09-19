@@ -235,24 +235,29 @@ function updateLatexMathModeButton(
   renderRenderedBlockModeButton(button, decision);
 }
 
+function findLatexMathToolbar(view: EditorView, controlsLabel: string | null): HTMLElement | null {
+  if (!controlsLabel) return null;
+  return Array.from(view.dom.querySelectorAll<HTMLElement>('.meo-latex-math-toolbar'))
+    .find((candidate) => candidate.getAttribute('aria-label') === controlsLabel) ?? null;
+}
+
 function preserveToolbarWhileDispatching(
   view: EditorView,
   toolbar: HTMLElement,
-  anchor: number,
-  effects: StateEffect<unknown> | readonly StateEffect<unknown>[]
+  effects: StateEffect<unknown> | readonly StateEffect<unknown>[],
+  isCurrent: () => boolean
 ): void {
   const controller = getViewportController(view);
   if (!controller) {
     view.dispatch({ effects });
     return;
   }
-  controller.preserveElementPositionWhileMutation(
+  const controlsLabel = toolbar.getAttribute('aria-label');
+  controller.retainElementTopWhileMutation(
     toolbar,
-    () => view.dom.querySelector<HTMLElement>(
-      `.meo-latex-math-toolbar[data-meo-block-from="${anchor}"]`
-    ),
+    () => findLatexMathToolbar(view, controlsLabel),
     () => view.dispatch({ effects }),
-    'immediate'
+    isCurrent
   );
 }
 
@@ -331,11 +336,11 @@ class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
       preserveToolbarWhileDispatching(
         view,
         toolbar,
-        currentAnchor,
         [
           supersedeLiveInputDerivedWork(),
           setLatexMathBlockModeEffect.of({ anchor: currentAnchor, mode: nextMode })
-        ]
+        ],
+        isRevealCurrent
       );
       requestAnimationFrame(() => {
         if (!isRevealCurrent()) return;
@@ -361,11 +366,11 @@ class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
       preserveToolbarWhileDispatching(
         view,
         toolbar,
-        currentAnchor,
         [
           supersedeLiveInputDerivedWork(),
           setLatexMathBlockModeEffect.of({ anchor: currentAnchor, mode: 'source' })
-        ]
+        ],
+        isRevealCurrent
       );
       requestAnimationFrame(() => {
         if (!isRevealCurrent()) return;

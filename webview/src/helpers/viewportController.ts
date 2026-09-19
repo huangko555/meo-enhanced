@@ -173,6 +173,7 @@ interface ActiveScrollTarget {
   changedSinceFrame: boolean;
   frameScheduled: boolean;
   generation: number;
+  isCurrent?: () => boolean;
   position: ScrollPosition;
   remainingFrames: number;
   stableFrames: number;
@@ -356,6 +357,9 @@ export class ViewportController {
   private pendingNavigationTarget: { position: number; generation: number } | null = null;
   private scrollLockGeneration = 0;
   private activeScrollLockGeneration: number | null = null;
+  private activeScrollLockCorrection: (() => void) | null = null;
+  private elementRetentionGeneration = 0;
+  private activeElementRetentionObserver: MutationObserver | null = null;
   private activeScrollTarget: ActiveScrollTarget | null = null;
   private activeLayoutAnchor: ActiveLayoutAnchor | null = null;
   private anchorStabilizationGeneration: number | null = null;
@@ -443,6 +447,8 @@ export class ViewportController {
     this.pendingNavigationTarget = null;
     this.scrollLockGeneration += 1;
     this.activeScrollLockGeneration = null;
+    this.activeScrollLockCorrection = null;
+    this.cancelElementRetention();
     this.generation += 1;
     this.activeScrollTarget = null;
     this.activeLayoutAnchor = null;
@@ -486,6 +492,7 @@ export class ViewportController {
     }
     this.scrollLockGeneration += 1;
     this.activeScrollLockGeneration = null;
+    this.activeScrollLockCorrection = null;
     this.lastWheelAt = Number.NEGATIVE_INFINITY;
     this.lastTouchMoveAt = Number.NEGATIVE_INFINITY;
     this.lastTouchY = null;
@@ -546,6 +553,10 @@ export class ViewportController {
 
   /** Reconciles after CodeMirror has finished its own height and scroll anchoring. */
   reconcileAfterEditorUpdate(mapPosition?: (position: number) => number): void {
+    // View updates emitted from CodeMirror's measurement pass run after its
+    // internal height-map anchoring and before the browser paints. Reconcile an
+    // active history lock here so no intermediate anchored position is visible.
+    this.activeScrollLockCorrection?.();
     const activeAnchor = this.activeLayoutAnchor;
     if (activeAnchor) {
       if (mapPosition) activeAnchor.position = mapPosition(activeAnchor.position);
@@ -585,38 +596,113 @@ export class ViewportController {
     this.startScrollTopLock(targetTop, isCurrent);
   }
 
+  /** Retains one presentation element across a replacement without superseding its navigation intent. */
+  retainElementTopWhileMutation(
+    element: HTMLElement,
+    resolveCurrentElement: () => HTMLElement | null,
+    mutate: () => void,
+    isCurrent: () => boolean = () => true
+  ): void {
+    const beforeTop = element.isConnected ? element.getBoundingClientRect().top : null;
+    if (this.destroyed || beforeTop === null || !isCurrent()) {
+      mutate();
+      return;
+    }
+    this.cancelElementRetention();
+    const retentionGeneration = ++this.elementRetentionGeneration;
+    // Rendered source/preview shells can commit one frame after the ordinary
+    // CodeMirror settlement window. Keep this low-frequency transition bounded
+    // while still covering that second layout phase.
+    let remainingFrames = MAX_SETTLE_FRAMES * 2;
+    const isRetentionCurrent = () => (
+      !this.destroyed &&
+      retentionGeneration === this.elementRetentionGeneration &&
+      isCurrent()
+    );
+    const finish = () => {
+      if (retentionGeneration !== this.elementRetentionGeneration) return;
+      this.activeElementRetentionObserver?.disconnect();
+      this.activeElementRetentionObserver = null;
+    };
+    const reconcile = () => {
+      if (!isRetentionCurrent()) {
+        finish();
+        return;
+      }
+      const currentElement = resolveCurrentElement();
+      if (currentElement?.isConnected) {
+        const current = this.readScrollPosition();
+        const target = this.resolveScrollTarget({
+          top: current.top + currentElement.getBoundingClientRect().top - beforeTop
+        }, current);
+        this.writeScrollPosition(target);
+      }
+      remainingFrames -= 1;
+      if (remainingFrames > 0) {
+        requestAnimationFrame(reconcile);
+      } else {
+        finish();
+      }
+    };
+    const MutationObserverConstructor = element.ownerDocument.defaultView?.MutationObserver;
+    if (MutationObserverConstructor) {
+      this.activeElementRetentionObserver = new MutationObserverConstructor(() => reconcile());
+      this.activeElementRetentionObserver.observe(this.view.dom, {
+        attributes: true,
+        childList: true,
+        subtree: true
+      });
+    }
+    mutate();
+    if (!isRetentionCurrent()) {
+      finish();
+      return;
+    }
+    reconcile();
+  }
+
+  private cancelElementRetention(): void {
+    this.elementRetentionGeneration += 1;
+    this.activeElementRetentionObserver?.disconnect();
+    this.activeElementRetentionObserver = null;
+  }
+
   private startScrollTopLock(targetTop: number, isCurrent: () => boolean): void {
     const lockGeneration = ++this.scrollLockGeneration;
     this.activeScrollLockGeneration = lockGeneration;
     let remainingFrames = MAX_SETTLE_FRAMES;
-    const write = () => {
-      if (
-        this.destroyed ||
-        lockGeneration !== this.scrollLockGeneration ||
-        !isCurrent()
-      ) {
-        if (this.activeScrollLockGeneration === lockGeneration) {
-          this.activeScrollLockGeneration = null;
-        }
-        return;
+    const lockIsCurrent = () => (
+      !this.destroyed &&
+      lockGeneration === this.scrollLockGeneration &&
+      isCurrent()
+    );
+    const finish = () => {
+      if (this.activeScrollLockGeneration === lockGeneration) {
+        this.activeScrollLockGeneration = null;
+        this.activeScrollLockCorrection = null;
       }
+    };
+    const correctScrollTop = () => {
+      if (!lockIsCurrent()) return;
       const nextScrollTop = Math.max(0, Math.min(
         targetTop,
         this.view.scrollDOM.scrollHeight - this.view.scrollDOM.clientHeight
       ));
-      // Reassigning an unchanged scroll offset can still invalidate Chromium's
-      // independently painted content and gutter layers. Keep the late-layout
-      // guard alive for all settle frames, but only touch the scroller when its
-      // measured position actually drifted.
       if (Math.abs(this.view.scrollDOM.scrollTop - nextScrollTop) > 0.1) {
         this.view.scrollDOM.scrollTop = nextScrollTop;
       }
+    };
+    const write = () => {
+      if (!lockIsCurrent()) {
+        finish();
+        return;
+      }
+      correctScrollTop();
       remainingFrames -= 1;
       if (remainingFrames > 0 && isCurrent()) requestAnimationFrame(write);
-      else if (this.activeScrollLockGeneration === lockGeneration) {
-        this.activeScrollLockGeneration = null;
-      }
+      else finish();
     };
+    this.activeScrollLockCorrection = correctScrollTop;
     write();
   }
 
@@ -1330,6 +1416,7 @@ export class ViewportController {
 
   destroy(): void {
     this.destroyed = true;
+    this.cancelElementRetention();
     this.modeTransitionChain = null;
     this.linkedPreviewEnabled = false;
     this.linkedViewportMap = null;
@@ -1543,7 +1630,15 @@ export class ViewportController {
             }
             this.markNavigationScrollStart();
             state.ownerGeneration = ++this.generation;
-            this.activeScrollTarget = null;
+            this.activeScrollTarget = {
+              changedSinceFrame: false,
+              frameScheduled: false,
+              generation: state.ownerGeneration,
+              isCurrent: state.isCurrent,
+              position: target,
+              remainingFrames: MAX_SETTLE_FRAMES,
+              stableFrames: 0
+            };
             this.activeLayoutAnchor = null;
             this.anchorStabilizationGeneration = null;
             state.phase = 'adopted';
@@ -1552,7 +1647,15 @@ export class ViewportController {
             finish();
             return;
           }
+          const activeTarget = this.activeScrollTarget;
+          if (this.isActiveScrollTargetValid(activeTarget)) {
+            activeTarget.position = target;
+          }
           const changed = this.writeScrollPosition(target);
+          if (this.isActiveScrollTargetValid(activeTarget)) {
+            activeTarget.changedSinceFrame ||= changed;
+            this.scheduleActiveScrollFrame();
+          }
           state.phase = 'settling';
           completeFrame(measure, changed);
         }
@@ -1605,6 +1708,7 @@ export class ViewportController {
   ): activeTarget is ActiveScrollTarget {
     if (
       activeTarget && !this.destroyed && activeTarget.generation === this.generation &&
+      (activeTarget.isCurrent?.() ?? true) &&
       activeTarget.remainingFrames > 0
     ) return true;
     this.activeScrollTarget = null;
@@ -1779,6 +1883,8 @@ export class ViewportController {
     // command look like it is still part of the earlier wheel gesture.
     this.scrollLockGeneration += 1;
     this.activeScrollLockGeneration = null;
+    this.activeScrollLockCorrection = null;
+    this.cancelElementRetention();
     this.explicitNavigationGeneration += 1;
     this.lastWheelAt = Number.NEGATIVE_INFINITY;
     this.lastTouchMoveAt = Number.NEGATIVE_INFINITY;

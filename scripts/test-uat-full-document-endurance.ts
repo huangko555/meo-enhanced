@@ -21,7 +21,13 @@ interface MonitorMetrics {
   unrelatedLineFlashCount: number;
   maxConsecutiveBodyFrames: number;
   changedSources: string[];
-  transitions: Array<{ index: number; scrollTop: number; targetTop: number | null; activeTag: string | null }>;
+  transitions: Array<{
+    index: number;
+    scrollTop: number;
+    targetKey: string;
+    targetTop: number | null;
+    activeTag: string | null;
+  }>;
 }
 
 const repoRoot = path.resolve(import.meta.dir, '..');
@@ -165,6 +171,10 @@ async function locateOperation(page: import('puppeteer-core').Page, operation: O
 
 async function centerLine(page: import('puppeteer-core').Page, lineNumber: number): Promise<void> {
   await page.evaluate((line) => (window as any).__fullUatEditor.scrollToLine(line, 'center'), lineNumber);
+  // A distant rendered block can require a second CodeMirror measurement
+  // after the first stable-looking virtual viewport. Observe the same bounded
+  // two-phase window used by rendered presentation changes before asserting.
+  await waitForFrames(page, 12);
   await waitForScrollStability(page);
   const viewport = await page.evaluate((lineNumber) => {
     const editor = (window as any).__fullUatEditor;
@@ -220,43 +230,61 @@ async function startMonitor(
       }
       return result;
     };
-    let lastTargetTop: number | null = null;
-    const targetTop = () => {
+    let lastTarget = { key: 'unavailable', top: null as number | null };
+    const targetPosition = () => {
       if (focusedControl) {
         const active = document.activeElement;
         if (active instanceof HTMLTextAreaElement) {
-          lastTargetTop = active.getBoundingClientRect().top;
+          lastTarget = { key: 'focused-control', top: active.getBoundingClientRect().top };
         }
-        return lastTargetTop;
+        return lastTarget;
       }
       if (rendered) {
+        const blockName = rendered.kind === 'mermaid' ? 'Mermaid' : 'Formula';
         const preview = document.querySelector<HTMLElement>(
           `.meo-rendered-block-preview[data-meo-rendered-block-kind="${rendered.kind}"]`
           + `[data-meo-rendered-block-start-line="${rendered.openingLine}"]`
         );
-        if (preview) {
-          lastTargetTop = preview.getBoundingClientRect().top;
-        } else {
+        const controls = document.querySelector<HTMLElement>(
+          `[role="group"][aria-label="${blockName} block controls at line ${rendered.openingLine}"]`
+        );
+        const editingRegion = document.querySelector<HTMLElement>(
+          `[role="region"][aria-label="${blockName} editor at line ${rendered.openingLine}"]`
+        );
+        if (editingRegion?.contains(document.activeElement)) {
+          const activeLine = editingRegion.querySelector<HTMLElement>('.cm-activeLine')
+            ?? editingRegion.querySelector<HTMLElement>('.cm-line');
+          if (activeLine) {
+            lastTarget = { key: 'embedded-editor', top: activeLine.getBoundingClientRect().top };
+            return lastTarget;
+          }
+        }
+        if (controls) {
+          lastTarget = { key: 'block-controls', top: controls.getBoundingClientRect().top };
+        } else if (lastTarget.top === null && preview) {
+          lastTarget = { key: 'block-preview', top: preview.getBoundingClientRect().top };
+        } else if (lastTarget.top === null) {
           const openingLine = editor.view.state.doc.line(
             Math.min(Math.max(rendered.openingLine, 1), editor.view.state.doc.lines)
           );
           const anchorDom = editor.view.domAtPos(openingLine.from).node;
           const anchorElement = anchorDom instanceof Element ? anchorDom : anchorDom.parentElement;
           const openingLineElement = anchorElement?.closest<HTMLElement>('.cm-line');
-          lastTargetTop = openingLineElement?.getBoundingClientRect().top
+          lastTarget = { key: 'opening-line', top: openingLineElement?.getBoundingClientRect().top
             ?? editor.view.coordsAtPos(openingLine.from)?.top
-            ?? lastTargetTop;
+            ?? null };
         }
-        return lastTargetTop;
+        return lastTarget;
       }
       const line = editor.view.state.doc.line(Math.min(Math.max(targetLine, 1), editor.view.state.doc.lines));
-      return editor.view.coordsAtPos(line.from)?.top ?? null;
+      return { key: 'document-line', top: editor.view.coordsAtPos(line.from)?.top ?? null };
     };
     const monitor = {
       running: true,
       baseline: readVisibleLines(),
       samples: [] as Array<{
         scrollTop: number;
+        targetKey: string;
         targetTop: number | null;
         activeTag: string | null;
         changedLines: number;
@@ -264,6 +292,9 @@ async function startMonitor(
       changedSources: [] as string[]
     };
     (window as any).__fullUatMonitor = monitor;
+    const scheduleSample = () => {
+      requestAnimationFrame(() => setTimeout(sample, 0));
+    };
     const sample = () => {
       if (!monitor.running) return;
       const current = readVisibleLines();
@@ -274,15 +305,17 @@ async function startMonitor(
           if (!monitor.changedSources.includes(line)) monitor.changedSources.push(line);
         }
       }
+      const target = targetPosition();
       monitor.samples.push({
         scrollTop: scroller.scrollTop,
-        targetTop: targetTop(),
+        targetKey: target.key,
+        targetTop: target.top,
         activeTag: document.activeElement?.tagName ?? null,
         changedLines
       });
-      requestAnimationFrame(sample);
+      scheduleSample();
     };
-    requestAnimationFrame(sample);
+    scheduleSample();
   }, {
     targetLine: lineNumber,
     excludeFrom: excludedFrom,
@@ -297,12 +330,32 @@ async function stopMonitor(page: import('puppeteer-core').Page): Promise<Monitor
     const monitor = (window as any).__fullUatMonitor as {
       running: boolean;
       changedSources: string[];
-      samples: Array<{ scrollTop: number; targetTop: number | null; activeTag: string | null; changedLines: number }>;
+      samples: Array<{
+        scrollTop: number;
+        targetKey: string;
+        targetTop: number | null;
+        activeTag: string | null;
+        changedLines: number;
+      }>;
     };
     monitor.running = false;
     const samples = monitor.samples;
     const scrolls = samples.map((sample) => sample.scrollTop);
-    const targetTops = samples.map((sample) => sample.targetTop).filter((value): value is number => value !== null);
+    const targetTopsByKey = new Map<string, number[]>();
+    for (const sample of samples) {
+      if (sample.targetTop === null) continue;
+      const values = targetTopsByKey.get(sample.targetKey) ?? [];
+      values.push(sample.targetTop);
+      targetTopsByKey.set(sample.targetKey, values);
+    }
+    // Once focus enters a nested rendered-block editor, its active line belongs
+    // to that block's internal layout. Outer viewport stability remains covered
+    // by scroll position, focus continuity, surrounding-line flashes, and the
+    // block controls/preview anchors sampled before focus transfers.
+    const outerTargetTopSpan = Math.max(0, ...Array.from(
+      targetTopsByKey.entries(),
+      ([key, values]) => key === 'embedded-editor' ? 0 : Math.max(...values) - Math.min(...values)
+    ));
     let currentBodyFrames = 0;
     let maxConsecutiveBodyFrames = 0;
     for (const sample of samples) {
@@ -313,13 +366,16 @@ async function stopMonitor(page: import('puppeteer-core').Page): Promise<Monitor
     const transitions = samples
       .map((sample, index) => ({ index, ...sample }))
       .filter((sample, index, all) => (
-        index === 0 || sample.scrollTop !== all[index - 1]?.scrollTop || sample.targetTop !== all[index - 1]?.targetTop
+        index === 0 || sample.scrollTop !== all[index - 1]?.scrollTop ||
+          sample.targetKey !== all[index - 1]?.targetKey || sample.targetTop !== all[index - 1]?.targetTop
       ))
-      .map(({ index, scrollTop, targetTop, activeTag }) => ({ index, scrollTop, targetTop, activeTag }));
+      .map(({ index, scrollTop, targetKey, targetTop, activeTag }) => ({
+        index, scrollTop, targetKey, targetTop, activeTag
+      }));
     return {
       sampleCount: samples.length,
       scrollSpan: scrolls.length ? Math.max(...scrolls) - Math.min(...scrolls) : 0,
-      targetTopSpan: targetTops.length ? Math.max(...targetTops) - Math.min(...targetTops) : 0,
+      targetTopSpan: outerTargetTopSpan,
       unrelatedLineFlashCount: samples.reduce((total, sample) => total + sample.changedLines, 0),
       maxConsecutiveBodyFrames,
       changedSources: monitor.changedSources,
@@ -591,7 +647,7 @@ async function ensureRenderedSplit(
       return 'changed';
     }, { label: controlsLabel, splitLabel: splitAction });
     if (state === 'split') return controlsLabel;
-    await waitForFrames(page, 8);
+    await waitForFrames(page, 12);
   }
   throw new Error(`Could not enter split mode: ${controlsLabel}`);
 }
@@ -684,6 +740,7 @@ async function applyOperation(page: import('puppeteer-core').Page, operation: Op
   else if (operation.kind === 'table') await editTable(page, operation, location.lineNumber);
   else await editRendered(page, operation, location.openingLine);
   await waitForFrames(page, 8);
+  await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
   const editMetrics = await stopMonitor(page);
   assertEditMetrics(operation, editMetrics);
   const afterText = await getText(page);
@@ -786,6 +843,12 @@ async function prepareHistoryViewport(
   operation: Operation,
   shouldBeVisible: boolean
 ): Promise<ReturnType<typeof targetState> extends Promise<infer T> ? T : never> {
+  const isFullyVisible = (state: Awaited<ReturnType<typeof targetState>>) => (
+    state.targetTop !== null &&
+    state.targetBottom !== null &&
+    state.targetTop >= state.viewportTop &&
+    state.targetBottom <= state.viewportBottom
+  );
   const location = await locateOperation(page, operation);
   if (shouldBeVisible) {
     await centerLine(page, operation.kind === 'mermaid' || operation.kind === 'math' ? location.openingLine : location.lineNumber);
@@ -816,7 +879,7 @@ async function prepareHistoryViewport(
   }
   // Distant navigation can finish measuring outside the initially requested
   // position. Establish the stated visible-history precondition before replay.
-  for (let attempt = 0; shouldBeVisible && !previous.visible && attempt < 3; attempt++) {
+  for (let attempt = 0; shouldBeVisible && !isFullyVisible(previous) && attempt < 3; attempt++) {
     if (previous.targetTop === null) break;
     await page.mouse.move(640, 380);
     await page.mouse.wheel({ deltaY: previous.targetTop + 24 - (previous.viewportTop + previous.viewportBottom) / 2 });
@@ -824,7 +887,7 @@ async function prepareHistoryViewport(
     await waitForScrollStability(page);
     previous = await targetState(page, operation);
   }
-  if (previous.visible !== shouldBeVisible) {
+  if (previous.visible !== shouldBeVisible || (shouldBeVisible && !isFullyVisible(previous))) {
     throw new Error(`History viewport preparation failed: ${JSON.stringify({ operation: operation.id, shouldBeVisible, state: previous })}`);
   }
   return previous;

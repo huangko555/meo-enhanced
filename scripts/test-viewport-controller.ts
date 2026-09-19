@@ -1025,7 +1025,7 @@ if (revealScrollDOM.scrollTop !== 420) {
   throw new Error(`A stale reveal moved the viewport to ${revealScrollDOM.scrollTop}`);
 }
 
-type GeometryShiftInterruption = 'none' | 'stale-frame' | 'destroy' | 'late-measure';
+type GeometryShiftInterruption = 'none' | 'stale-frame' | 'destroy' | 'late-measure' | 'editor-update-overwrite';
 
 const runGeometryShiftReveal = async (
   kind: 'ordinary' | 'settled',
@@ -1092,6 +1092,13 @@ const runGeometryShiftReveal = async (
       flushMeasure(() => { controller.beginNavigationReveal(); });
     } else {
       flushMeasure();
+      if (interruption === 'editor-update-overwrite') {
+        scrollTop = 1000;
+        controller.reconcileAfterEditorUpdate();
+        await flushAll();
+        const targetVisible = targetTop >= scrollTop && targetTop + 20 <= scrollTop + 500;
+        return { scrollTop, writes, targetVisible };
+      }
       targetTop += 600;
       if (interruption === 'stale-frame') controller.beginNavigationReveal();
       if (interruption === 'destroy') controller.destroy();
@@ -1119,6 +1126,15 @@ if (
   JSON.stringify(settledGeometryReveal.writes) !== '[1360,1960]'
 ) {
   throw new Error(`Settled reveal did not restore the shifted target: ${JSON.stringify(settledGeometryReveal)}`);
+}
+const reconciledGeometryReveal = await runGeometryShiftReveal('settled', 'editor-update-overwrite');
+if (
+  !reconciledGeometryReveal.targetVisible ||
+  JSON.stringify(reconciledGeometryReveal.writes) !== '[1360,1360]'
+) {
+  throw new Error(
+    `Editor measurement overrode an active reveal: ${JSON.stringify(reconciledGeometryReveal)}`
+  );
 }
 for (const interruption of ['stale-frame', 'destroy', 'late-measure'] as const) {
   const interruptedReveal = await runGeometryShiftReveal('settled', interruption);
@@ -1178,7 +1194,12 @@ if (!retainedNavigation()) {
   throw new Error('Retaining scroll superseded its navigation intent');
 }
 wheelScrollDOM.scrollTop = 476;
-wheelFrames.shift()?.(0);
+wheelController.reconcileAfterEditorUpdate();
+if (wheelScrollDOM.scrollTop !== 500) {
+  throw new Error(`Editor measurement overrode a retained viewport: ${wheelScrollDOM.scrollTop}`);
+}
+wheelScrollDOM.scrollTop = 476;
+await flushFrames(wheelFrames);
 if (wheelScrollDOM.scrollTop !== 500) {
   throw new Error(`Retained presentation drifted to ${wheelScrollDOM.scrollTop}`);
 }
@@ -2008,6 +2029,67 @@ for (const settledShift of [0, 40]) {
     await flushFrames(frames);
     if (scrollTop !== 1000 + settledShift || writes.some((value) => value !== 1000 + settledShift)) {
       throw new Error(`Toolbar preservation painted stale geometry: ${JSON.stringify({ settledShift, writes })}`);
+    }
+  } finally {
+    controller.destroy();
+    globalThis.requestAnimationFrame = previousRaf;
+  }
+}
+
+// Rendered mode switches replace the toolbar before their final layout pass.
+// Keep the replacement at the same viewport coordinate until the bounded
+// retention window settles, and yield immediately to a real interaction.
+{
+  const frames: FrameRequestCallback[] = [];
+  const previousRaf = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = (callback) => {
+    frames.push(callback);
+    return frames.length;
+  };
+  let layoutTop = 1350;
+  let scrollTop = 1000;
+  const makeToolbar = () => ({
+    isConnected: true,
+    ownerDocument: { defaultView: null },
+    getBoundingClientRect: () => ({ top: layoutTop - scrollTop })
+  });
+  const originalToolbar = makeToolbar();
+  let currentToolbar = originalToolbar;
+  const controller = new ViewportController({
+    dom: {},
+    scrollDOM: {
+      get scrollTop() { return scrollTop; },
+      set scrollTop(value: number) { scrollTop = value; },
+      scrollLeft: 0,
+      scrollHeight: 5000,
+      scrollWidth: 900,
+      clientHeight: 700,
+      clientWidth: 900
+    },
+    requestMeasure: () => undefined
+  } as any, { attachInteractions: false });
+  try {
+    controller.retainElementTopWhileMutation(
+      originalToolbar as any,
+      () => currentToolbar as any,
+      () => {
+        layoutTop += 240;
+        currentToolbar = makeToolbar();
+      }
+    );
+    if (scrollTop !== 1240) {
+      throw new Error(`Replacement toolbar initially moved the viewport to ${scrollTop}`);
+    }
+    layoutTop += 40;
+    frames.shift()?.(0);
+    if (scrollTop !== 1280) {
+      throw new Error(`Late replacement layout moved the toolbar at ${scrollTop}`);
+    }
+    controller.markInteraction();
+    layoutTop += 60;
+    await flushFrames(frames);
+    if (scrollTop !== 1280) {
+      throw new Error(`Interaction did not cancel toolbar retention at ${scrollTop}`);
     }
   } finally {
     controller.destroy();
