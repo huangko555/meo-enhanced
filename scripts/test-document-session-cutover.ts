@@ -8,6 +8,14 @@ import { darkBuiltInVisuals } from '../src/shared/builtInVisualBaseline';
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-document-session-cutover-'));
 
+async function waitForFrames(page: import('puppeteer-core').Page, count = 8): Promise<void> {
+  await page.evaluate(async (frameCount) => {
+    for (let index = 0; index < frameCount; index += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  }, count);
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-document-session-cutover-entry.ts')],
@@ -286,6 +294,11 @@ async function main(): Promise<void> {
       (text) => (window as any).__documentSessionCandidate.externalChange(text),
       mermaidBaseText
     );
+    // The long Mermaid revision schedules presentation and syntax-decoration
+    // commits. Start the rapid-input assertion only after that external
+    // presentation is stable, so it measures Document Session ordering rather
+    // than a bootstrap DOM-selection handoff.
+    await waitForFrames(page);
     await page.click('.cm-content');
     await page.keyboard.down('Control');
     await page.keyboard.press('End');
