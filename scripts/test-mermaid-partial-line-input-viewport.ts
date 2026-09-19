@@ -38,6 +38,10 @@ async function runMode(page: import('puppeteer-core').Page, mode: 'split' | 'sou
   });
   await page.evaluate(() => (window as any).__mermaidPartialLineEditor.scrollToLine(50, 'center'));
   await page.waitForSelector('.meo-mermaid-block svg');
+  // Initial Mermaid presentation and Shiki decoration commits can replace the
+  // toolbar widget. Click only after those presentation frames have settled so
+  // the test exercises partial-line input, not a detached bootstrap button.
+  await waitForFrames(page, 8);
   await page.click('.meo-mermaid-mode-btn');
   await page.waitForSelector('.meo-mermaid-editing-block.is-split');
   if (mode === 'source') {
