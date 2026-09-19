@@ -18,25 +18,29 @@ export function buildExportStyles(
   environment: ExportStyleEnvironment = { previewFontFamily: '' },
   appearance: PreviewAppearance = 'light'
 ): string {
-  return buildPreviewStyles(environment, appearance);
+  return buildReadingStyles(environment, appearance, false);
 }
 
 export function buildPreviewStyles(
   environment: ExportStyleEnvironment = { previewFontFamily: '' },
   appearance: PreviewAppearance = 'dark'
 ): string {
-  return buildReadingStyles(environment, appearance);
+  return buildReadingStyles(environment, appearance, true);
 }
 
 function buildReadingStyles(
   environment: ExportStyleEnvironment,
-  appearance: PreviewAppearance
+  appearance: PreviewAppearance,
+  matchEditorBackground: boolean
 ): string {
   const theme = getBuiltInVisuals(appearance === 'light' ? 'light' : 'dark');
   const isolatePreviewTheme = environment.previewThemeIsolation === true;
   const capturedEditorBackground = sanitizeCssColor(environment.editorBackgroundColor ?? '');
   const editorAppearanceIsDark = isDarkCssColor(capturedEditorBackground);
   const previewAppearanceIsDark = appearance !== 'light';
+  const useCapturedPreviewBackground = matchEditorBackground
+    && editorAppearanceIsDark !== null
+    && editorAppearanceIsDark === previewAppearanceIsDark;
   const useCapturedThemeColors = !isolatePreviewTheme && (
     editorAppearanceIsDark === null || editorAppearanceIsDark === previewAppearanceIsDark
   );
@@ -49,10 +53,13 @@ function buildReadingStyles(
   const fonts = theme.typography;
   const editorFontFamily = sanitizeCssFont(environment.editorFontFamily ?? '');
   const editorFontWeight = sanitizeFontWeight(environment.editorFontWeight, 'normal');
-  const darkBackgroundColor = !isolatePreviewTheme && isDarkCssColor(capturedEditorBackground) === true
+  const darkBackgroundColor = (!isolatePreviewTheme || useCapturedPreviewBackground)
+    && isDarkCssColor(capturedEditorBackground) === true
     ? capturedEditorBackground
     : sanitizeStandaloneCssColor(theme.backgroundColor) || isolatedDarkBackgroundColor;
-  const editorBackgroundColor = appearance === 'light' ? '#ffffff' : darkBackgroundColor;
+  const editorBackgroundColor = appearance === 'light'
+    ? (useCapturedPreviewBackground ? capturedEditorBackground : '#ffffff')
+    : darkBackgroundColor;
   const previewForegroundColor = appearance === 'light' ? '#1f2328' : isolatedDarkForegroundColor;
   const previewMutedColor = appearance === 'light' ? '#59636e' : '#9aa4af';
   const readingForegroundColor = `color-mix(in srgb, ${previewForegroundColor} 60%, ${previewMutedColor} 40%)`;

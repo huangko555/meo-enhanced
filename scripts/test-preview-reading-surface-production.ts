@@ -1259,6 +1259,7 @@ async function main(): Promise<void> {
       const result = {
         codeKeyword: keyword.style.color.toLowerCase(),
         body: getComputedStyle(doc.body).backgroundColor,
+        editorBackground: getComputedStyle(document.querySelector<HTMLElement>('.cm-editor')!).backgroundColor,
         tableHeader: getComputedStyle(doc.querySelector<HTMLTableCellElement>('thead th')!).backgroundColor,
         codeBlock: getComputedStyle(doc.querySelector<HTMLElement>('pre.meo-export-code-block')!).backgroundColor,
         frontmatterKey: getComputedStyle(properties.querySelector<HTMLElement>('.meo-export-frontmatter-key')!).color,
@@ -1281,8 +1282,8 @@ async function main(): Promise<void> {
     `Dark Live and Preview Front Matter colors must match: ${JSON.stringify({ darkLiveFrontmatterColors, darkPreviewSurfaceColors })}`);
     assert.equal(
       darkPreviewSurfaceColors.body,
-      'rgb(32, 37, 43)',
-      `Dark Preview must provide its own reading background: ${JSON.stringify(darkPreviewSurfaceColors)}`
+      darkPreviewSurfaceColors.editorBackground,
+      `Dark Preview must keep the same document background as Live and Source: ${JSON.stringify(darkPreviewSurfaceColors)}`
     );
     assert.notEqual(
       darkPreviewSurfaceColors.tableHeader,
@@ -1315,6 +1316,21 @@ async function main(): Promise<void> {
     }, 'Preview content appearance must not recolor toolbar dropdowns');
     await page.keyboard.press('Escape');
     await page.select('.preview-appearance-select', 'light');
+    await page.waitForFunction(() => (
+      getComputedStyle(document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.documentElement)
+        .colorScheme === 'light'
+    ));
+    const lightMatchingBackgrounds = await page.evaluate(() => ({
+      preview: getComputedStyle(
+        document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.body
+      ).backgroundColor,
+      editor: getComputedStyle(document.querySelector<HTMLElement>('.cm-editor')!).backgroundColor
+    }));
+    assert.equal(
+      lightMatchingBackgrounds.preview,
+      lightMatchingBackgrounds.editor,
+      `Light Preview must keep the same document background as Live and Source: ${JSON.stringify(lightMatchingBackgrounds)}`
+    );
     assert.equal(await page.evaluate(() => {
       document.querySelector<HTMLSelectElement>('.preview-font-family-select')!
         .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
