@@ -10,7 +10,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Prevented long unbroken content in headings, paragraphs, lists, links, and inline code from being clipped in Preview and exports.
 - Added localized export progress spanning output-path selection through file generation, plus completion notifications with actions to open the exported file or reveal and select it in its folder.
 - Kept exported code blocks and Front Matter colors and layout aligned with the active Live and Preview theme.
-- Kept light Preview and export Front Matter readable when source coloring comes from a dark editor theme.
+- Kept Preview and export semantic colors readable and appearance-correct when their selected light or dark appearance differs from VS Code.
 - Added an early warning when an open document changes on disk, with localized actions for reviewing or reloading the external version.
 - Added a persistent Source-to-Preview edit-position highlight and click-to-source navigation, with smoother semantic targeting while moving across Preview content.
 - Stabilized reading position and first-frame rendering when switching among Live, Source, Preview, and Source split Preview, including transitions back to Live.

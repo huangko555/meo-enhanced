@@ -133,7 +133,7 @@ const initMessage = {
   previewAppearance: 'light',
   previewFontFamily: '',
   previewSourceColoring: true,
-  editorAppearance: 'light',
+  editorAppearance: 'dark',
   gitChangesGutter: false,
   gitDiffLineHighlights: false,
   gitDiffDetailsVisible: false,
@@ -145,7 +145,7 @@ const initMessage = {
   outlinePosition: 'right',
   outlineVisible: false,
   outlineWidth: 260,
-  vscodeTheme: null
+  vscodeTheme: { name: 'Host Dark', type: 'dark', colors: {}, tokenColors: [] }
 } as const;
 
 type PreviewOpenLink = { readonly type: 'openLink'; readonly href: string; readonly source: 'preview' };
@@ -1019,8 +1019,8 @@ async function main(): Promise<void> {
       properties.innerHTML = [
         '<div class="meo-export-frontmatter-header"><span class="meo-export-frontmatter-header-icon"></span><span>Properties</span></div>',
         '<div class="meo-export-frontmatter-line is-property">',
-        '<span class="meo-export-frontmatter-key-cell">key</span>',
-        '<div class="meo-export-frontmatter-value-group">value</div>',
+        '<span class="meo-export-frontmatter-key-cell"><span class="meo-export-frontmatter-key">key</span></span>',
+        '<div class="meo-export-frontmatter-value-group"><span class="meo-export-frontmatter-value">value</span></div>',
         '</div>'
       ].join('');
       doc.body.append(properties);
@@ -1032,9 +1032,37 @@ async function main(): Promise<void> {
       const header = properties.querySelector<HTMLElement>('.meo-export-frontmatter-header')!.getBoundingClientRect();
       const label = properties.querySelector<HTMLElement>('.meo-export-frontmatter-header > span:last-child')!.getBoundingClientRect();
       const rowHeight = lastRow.getBoundingClientRect().height;
+      const rgb = (value: string): [number, number, number] => {
+        const components = value.match(/[\d.]+/g)?.slice(0, 3).map(Number) ?? [];
+        const scale = value.startsWith('color(srgb ') ? 255 : 1;
+        return [
+          (components[0] ?? 0) * scale,
+          (components[1] ?? 0) * scale,
+          (components[2] ?? 0) * scale
+        ];
+      };
+      const luminance = (value: string): number => {
+        const channels = rgb(value).map((channel) => {
+          const normalized = channel / 255;
+          return normalized <= 0.04045
+            ? normalized / 12.92
+            : ((normalized + 0.055) / 1.055) ** 2.4;
+        });
+        return channels[0]! * 0.2126 + channels[1]! * 0.7152 + channels[2]! * 0.0722;
+      };
+      const contrast = (foreground: string, background: string): number => {
+        const brighter = Math.max(luminance(foreground), luminance(background));
+        const darker = Math.min(luminance(foreground), luminance(background));
+        return (brighter + 0.05) / (darker + 0.05);
+      };
+      const background = getComputedStyle(doc.body).backgroundColor;
+      const keyColor = getComputedStyle(properties.querySelector<HTMLElement>('.meo-export-frontmatter-key')!).color;
+      const valueColor = getComputedStyle(properties.querySelector<HTMLElement>('.meo-export-frontmatter-value')!).color;
       properties.remove();
       return { gap, rowHeight, headerHeight: header.height,
-        centerOffset: (label.top + label.bottom - header.top - header.bottom) / 2 };
+        centerOffset: (label.top + label.bottom - header.top - header.bottom) / 2,
+        keyContrast: contrast(keyColor, background),
+        valueContrast: contrast(valueColor, background) };
     });
     assert.ok(
       propertiesGeometry.gap <= 0.5,
@@ -1044,6 +1072,13 @@ async function main(): Promise<void> {
       `Preview Properties header must match a single property row: ${JSON.stringify(propertiesGeometry)}`);
     assert.ok(Math.abs(propertiesGeometry.centerOffset) <= 0.5,
       `Preview Properties title must remain centered: ${JSON.stringify(propertiesGeometry)}`);
+    assert.ok(propertiesGeometry.keyContrast >= 4.5 && propertiesGeometry.valueContrast >= 4.5,
+      `Light Preview Properties must remain readable under a dark VS Code theme: ${JSON.stringify(propertiesGeometry)}`);
+    await page.$eval(
+      '.editor-appearance-button[data-editor-appearance="light"]',
+      (button) => (button as HTMLButtonElement).click()
+    );
+    await page.waitForFunction(() => document.documentElement.dataset.editorAppearance === 'light');
     const fontControlContract = await page.evaluate(() => ({
       selectCount: document.querySelectorAll('select.preview-font-family-select').length,
       inputCount: document.querySelectorAll('.preview-font-family-input').length,

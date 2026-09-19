@@ -6,6 +6,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import exportRuntime from '../src/export/runtime';
 import type { CodeThemeDto } from '../src/protocol/hostConfigurationEvents';
+import { getBuiltInVisuals } from '../src/shared/builtInVisualBaseline';
 import { resolveFinalCodePalette, type RawCodeTheme } from '../webview/src/application/finalCodePalette';
 import { launchTestBrowser } from './browser-test-helpers';
 
@@ -87,6 +88,7 @@ const lightRenderedSnapshot = {
     codeBlockBackgroundColor: '#1e1e1e',
     sideBarBackgroundColor: '#252526',
     panelBorderColor: '#454545',
+    meoThemeColors: getBuiltInVisuals('dark').colors,
     previewSourceColoring: true,
     previewCodePalettes: { light: palette, dark: palette },
     frontmatterKeyColor: frontmatterColors.key,
@@ -203,7 +205,12 @@ try {
   const lightFrontmatterContrast = await page.evaluate(() => {
     const rgb = (value: string): [number, number, number] => {
       const components = value.match(/[\d.]+/g)?.slice(0, 3).map(Number) ?? [];
-      return [components[0] ?? 0, components[1] ?? 0, components[2] ?? 0];
+      const scale = value.startsWith('color(srgb ') ? 255 : 1;
+      return [
+        (components[0] ?? 0) * scale,
+        (components[1] ?? 0) * scale,
+        (components[2] ?? 0) * scale
+      ];
     };
     const luminance = (value: string): number => {
       const channels = rgb(value).map((channel) => {

@@ -31,11 +31,15 @@ function buildReadingStyles(
   appearance: PreviewAppearance
 ): string {
   const theme = getBuiltInVisuals(appearance === 'light' ? 'light' : 'dark');
-  const colors = resolveThemeColors(theme, environment);
+  const capturedEditorBackground = sanitizeCssColor(environment.editorBackgroundColor ?? '');
+  const editorAppearanceIsDark = isDarkCssColor(capturedEditorBackground);
+  const previewAppearanceIsDark = appearance !== 'light';
+  const useCapturedThemeColors = editorAppearanceIsDark === null
+    || editorAppearanceIsDark === previewAppearanceIsDark;
+  const colors = resolveThemeColors(theme, environment, useCapturedThemeColors);
   const fonts = theme.typography;
   const editorFontFamily = sanitizeCssFont(environment.editorFontFamily ?? '');
   const editorFontWeight = sanitizeFontWeight(environment.editorFontWeight, 'normal');
-  const capturedEditorBackground = sanitizeCssColor(environment.editorBackgroundColor ?? '');
   const darkBackgroundColor = isDarkCssColor(capturedEditorBackground) === true
     ? capturedEditorBackground
     : sanitizeCssColor(theme.backgroundColor) || colors.base03;
@@ -67,20 +71,29 @@ function buildReadingStyles(
     ? '#d0d7de'
     : `color-mix(in srgb, ${previewForegroundColor} 22%, transparent)`;
   const readingMutedColor = previewMutedColor;
+  const capturedFrontmatterKeyColor = useCapturedThemeColors
+    ? sanitizeCssColor(environment.frontmatterKeyColor ?? '')
+    : '';
+  const capturedFrontmatterValueColor = useCapturedThemeColors
+    ? sanitizeCssColor(environment.frontmatterValueColor ?? '')
+    : '';
+  const capturedFrontmatterPillBackgroundColor = useCapturedThemeColors
+    ? sanitizeCssColor(environment.frontmatterPillBackgroundColor ?? '')
+    : '';
   const frontmatterKeyColor = sourceColoring
-    ? appearance === 'light'
-      ? colors.base07
-      : sanitizeCssColor(environment.frontmatterKeyColor ?? '') || colors.base07
+    ? capturedFrontmatterKeyColor
+      || sanitizeCssColor(theme.semanticColors.frontmatterKey)
+      || colors.base07
     : readingForegroundColor;
   const frontmatterValueColor = sourceColoring
-    ? appearance === 'light'
-      ? colors.base01
-      : sanitizeCssColor(environment.frontmatterValueColor ?? '') || colors.base01
+    ? capturedFrontmatterValueColor
+      || sanitizeCssColor(theme.semanticColors.frontmatterValue)
+      || colors.base01
     : readingForegroundColor;
   const frontmatterPillBackgroundColor = sourceColoring
-    ? appearance === 'light'
-      ? colors.base03
-      : sanitizeCssColor(environment.frontmatterPillBackgroundColor ?? '') || colors.base03
+    ? capturedFrontmatterPillBackgroundColor
+      || sanitizeCssColor(theme.semanticColors.frontmatterPillBackground)
+      || colors.base03
     : panelBorderColor;
   const readingLinkColor = appearance === 'light' ? '#0969da' : '#58a6ff';
   const selectedFontFamily = normalizePreviewFontFamily(environment.previewFontFamily);
@@ -1204,9 +1217,13 @@ th:empty::before {
 `.trim();
 }
 
-function resolveThemeColors(theme: BuiltInVisuals, environment: ExportStyleEnvironment): VisualColors {
+function resolveThemeColors(
+  theme: BuiltInVisuals,
+  environment: ExportStyleEnvironment,
+  useCapturedThemeColors: boolean
+): VisualColors {
   const themeColors = theme.colors;
-  const envColors = environment.meoThemeColors ?? {};
+  const envColors = useCapturedThemeColors ? environment.meoThemeColors ?? {} : {};
   const resolved = {} as Record<VisualColorKey, string>;
 
   for (const key of Object.keys(defaultThemeColors) as VisualColorKey[]) {

@@ -427,6 +427,43 @@ const maliciousFontStyles = buildPreviewStyles({
   previewFontFamily: 'MEO Synthetic Sans";color:red;}'
 }, 'dark');
 const customSizeStyles = buildPreviewStyles({ ...environment, editorFontSizePx: 12 }, 'dark');
+const lightVisuals = getBuiltInVisuals('light');
+const darkVisuals = getBuiltInVisuals('dark');
+const lightPreviewWithDarkEditorTheme = buildPreviewStyles({
+  ...environment,
+  meoThemeColors: darkVisuals.colors,
+  frontmatterKeyColor: darkVisuals.semanticColors.frontmatterKey,
+  frontmatterValueColor: darkVisuals.semanticColors.frontmatterValue,
+  frontmatterPillBackgroundColor: darkVisuals.semanticColors.frontmatterPillBackground
+}, 'light');
+const darkPreviewWithLightEditorTheme = buildPreviewStyles({
+  ...environment,
+  editorBackgroundColor: '#ffffff',
+  editorForegroundColor: '#24292f',
+  meoThemeColors: lightVisuals.colors,
+  frontmatterKeyColor: lightVisuals.semanticColors.frontmatterKey,
+  frontmatterValueColor: lightVisuals.semanticColors.frontmatterValue,
+  frontmatterPillBackgroundColor: lightVisuals.semanticColors.frontmatterPillBackground
+}, 'dark');
+
+for (const [styles, visuals, label] of [
+  [lightPreviewWithDarkEditorTheme, lightVisuals, 'light Preview with dark VS Code'],
+  [darkPreviewWithLightEditorTheme, darkVisuals, 'dark Preview with light VS Code']
+] as const) {
+  for (const [variable, expected] of [
+    ['--meo-frontmatter-key', visuals.semanticColors.frontmatterKey],
+    ['--meo-frontmatter-value', visuals.semanticColors.frontmatterValue],
+    ['--meo-frontmatter-pill-bg', visuals.semanticColors.frontmatterPillBackground],
+    ['--meo-alert-note', visuals.colors.base05],
+    ['--meo-alert-tip', visuals.colors.base09],
+    ['--meo-alert-warning', visuals.colors.base07],
+    ['--meo-alert-caution', visuals.colors.base04]
+  ] as const) {
+    if (!styles.includes(`${variable}: ${expected}`)) {
+      throw new Error(`${label} must resolve ${variable} from the Preview appearance`);
+    }
+  }
+}
 
 if (!darkPreviewStyles.includes('--meo-font-body: "MEO Synthetic Sans", MEO Synthetic Mono')
   || !darkPreviewStyles.includes('--meo-font-code: MEO Synthetic Mono')) {

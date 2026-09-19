@@ -7,6 +7,7 @@ const targetUri: FakeUri = { fsPath: 'D:/exports/note.pdf' };
 const progressMessages: string[] = [];
 const informationMessages: Array<{ message: string; actions: string[] }> = [];
 const errorMessages: string[] = [];
+const statusBarMessages: string[] = [];
 const openedUris: FakeUri[] = [];
 const revealedUris: FakeUri[] = [];
 let selectedAction: string | undefined;
@@ -14,6 +15,7 @@ let saveDialogResult: FakeUri | undefined = targetUri;
 let saveDialogOptions: Record<string, unknown> | undefined;
 let progressOptions: Record<string, unknown> | undefined;
 let progressInvocationCount = 0;
+let statusBarDisposeCount = 0;
 let rejectReveal = false;
 let notificationPainted = false;
 let saveDialogBarrier: Promise<void> = Promise.resolve();
@@ -27,6 +29,10 @@ mock.module('vscode', () => ({
       saveDialogOptions = options;
       await saveDialogBarrier;
       return saveDialogResult;
+    },
+    setStatusBarMessage: (message: string) => {
+      statusBarMessages.push(message);
+      return { dispose: () => { statusBarDisposeCount += 1; } };
     },
     withProgress: async (
       options: Record<string, unknown>,
@@ -83,7 +89,8 @@ const zhOutcomePromise = runVscodeExportWithFeedback({
   report('renderingPdf');
 });
 await new Promise<void>((resolve) => setTimeout(resolve, 0));
-assert.deepEqual(progressMessages, ['等待选择保存位置…']);
+assert.deepEqual(progressMessages, [], 'destination selection must not create a notification lifecycle');
+assert.equal(statusBarMessages.at(-1), '$(sync~spin) 正在准备 PDF 导出…');
 assert.equal(exportTaskStarted, false);
 releaseSaveDialog?.();
 const zhOutcome = await zhOutcomePromise;
@@ -98,7 +105,6 @@ assert.deepEqual(progressOptions, {
   title: '正在导出 Markdown 为 PDF'
 });
 assert.deepEqual(progressMessages, [
-  '等待选择保存位置…',
   '正在准备 PDF 导出…',
   '正在生成 PDF…'
 ]);
@@ -121,7 +127,6 @@ assert.equal(enOutcome, 'completed');
 assert.equal(saveDialogOptions?.saveLabel, 'Export HTML');
 assert.equal(progressOptions?.title, 'Exporting Markdown to HTML');
 assert.deepEqual(progressMessages, [
-  'Waiting for an output location…',
   'Preparing HTML export…',
   'Writing HTML…'
 ]);
@@ -152,8 +157,7 @@ assert.equal(errorMessages.at(-1), 'PDF 导出失败：browser unavailable');
 
 saveDialogResult = undefined;
 const progressCountBeforeCancellation = progressInvocationCount;
-let releaseCancelledProgress: (() => void) | undefined;
-progressCompletionBarrier = new Promise<void>((resolve) => { releaseCancelledProgress = resolve; });
+const statusDisposeCountBeforeCancellation = statusBarDisposeCount;
 const cancelledOutcome = await runVscodeExportWithFeedback({
   sourceDocumentUri,
   format: 'pdf',
@@ -164,13 +168,13 @@ const cancelledOutcome = await runVscodeExportWithFeedback({
 assert.equal(cancelledOutcome, 'cancelled');
 assert.equal(
   progressInvocationCount,
-  progressCountBeforeCancellation + 1,
-  'destination selection must retain the immediate progress notification'
+  progressCountBeforeCancellation,
+  'cancelling destination selection must not leave a notification lifecycle behind'
 );
+assert.equal(statusBarDisposeCount, statusDisposeCountBeforeCancellation + 1);
 
 saveDialogResult = targetUri;
 selectedAction = undefined;
-progressCompletionBarrier = Promise.resolve();
 let immediateRetryStarted = false;
 const immediateRetryOutcome = await runVscodeExportWithFeedback({
   sourceDocumentUri,
@@ -181,6 +185,5 @@ const immediateRetryOutcome = await runVscodeExportWithFeedback({
 });
 assert.equal(immediateRetryOutcome, 'completed');
 assert.equal(immediateRetryStarted, true, 'export must be immediately retryable after destination cancellation');
-releaseCancelledProgress?.();
 
 console.log('VS Code export feedback checks passed');

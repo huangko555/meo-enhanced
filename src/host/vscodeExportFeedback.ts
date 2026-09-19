@@ -4,7 +4,6 @@ import type { UiLanguage } from '../foundation/uiLanguage';
 
 export type VscodeExportFormat = 'html' | 'pdf';
 export type VscodeExportProgressStage =
-  | 'selectingDestination'
   | 'preparingExport'
   | 'writingHtml'
   | 'renderingPdf';
@@ -38,53 +37,41 @@ export async function runVscodeExportWithFeedback(
   let targetUri: vscode.Uri | undefined;
 
   try {
-    let resolveDestination!: (uri: vscode.Uri | undefined) => void;
-    let rejectDestination!: (error: unknown) => void;
-    const destination = new Promise<vscode.Uri | undefined>((resolve, reject) => {
-      resolveDestination = resolve;
-      rejectDestination = reject;
-    });
-    const progressOperation = vscode.window.withProgress(
+    const destinationStatus = vscode.window.setStatusBarMessage(
+      `$(sync~spin) ${strings.progress.preparingExport}`
+    );
+    let selectedUri: vscode.Uri | undefined;
+    try {
+      selectedUri = await vscode.window.showSaveDialog({
+        defaultUri: vscode.Uri.file(replaceFileExtension(options.sourceDocumentUri.fsPath, options.format)),
+        filters: options.format === 'html'
+          ? { HTML: ['html', 'htm'] }
+          : { PDF: ['pdf'] },
+        saveLabel: strings.saveLabel
+      });
+    } finally {
+      destinationStatus.dispose();
+    }
+    if (!selectedUri) return 'cancelled';
+    targetUri = selectedUri;
+
+    await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
         cancellable: false,
         title: strings.title
       },
       async (progress) => {
-        try {
-          progress.report({ message: strings.progress.selectingDestination });
-          // Establish the notification before the native save dialog starts. On
-          // Windows the dialog can disappear before its promise finishes settling.
-          await new Promise<void>((resolve) => setTimeout(resolve, 0));
-          const selectedUri = await vscode.window.showSaveDialog({
-            defaultUri: vscode.Uri.file(replaceFileExtension(options.sourceDocumentUri.fsPath, options.format)),
-            filters: options.format === 'html'
-              ? { HTML: ['html', 'htm'] }
-              : { PDF: ['pdf'] },
-            saveLabel: strings.saveLabel
-          });
-          resolveDestination(selectedUri);
-          if (!selectedUri) return undefined;
-
-          progress.report({ message: strings.progress.preparingExport });
-          await task({
-            targetUri: selectedUri,
-            report: (stage) => progress.report({ message: strings.progress[stage] })
-          });
-          return selectedUri;
-        } catch (error) {
-          rejectDestination(error);
-          throw error;
-        }
+        progress.report({ message: strings.progress.preparingExport });
+        // Let VS Code paint the notification before snapshot collection or the
+        // export runtime can occupy the extension host.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        await task({
+          targetUri: selectedUri,
+          report: (stage) => progress.report({ message: strings.progress[stage] })
+        });
       }
     );
-    // The destination promise lets cancellation release the export command as
-    // soon as the dialog settles, without waiting for VS Code's notification
-    // lifecycle to finish. The operation remains awaited for real exports.
-    void Promise.resolve(progressOperation).catch(rejectDestination);
-    const selectedUri = await destination;
-    if (!selectedUri) return 'cancelled';
-    targetUri = await progressOperation;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error || 'Export failed');
     void vscode.window.showErrorMessage(strings.failed(message));
@@ -120,7 +107,6 @@ function getStrings(uiLanguage: UiLanguage, format: VscodeExportFormat): VscodeE
       open: '直接打开',
       reveal: '打开所在文件夹',
       progress: {
-        selectingDestination: '等待选择保存位置…',
         preparingExport: `正在准备 ${label} 导出…`,
         writingHtml: '正在写入 HTML…',
         renderingPdf: '正在生成 PDF…'
@@ -136,7 +122,6 @@ function getStrings(uiLanguage: UiLanguage, format: VscodeExportFormat): VscodeE
     open: 'Open',
     reveal: 'Show in Folder',
     progress: {
-      selectingDestination: 'Waiting for an output location…',
       preparingExport: `Preparing ${label} export…`,
       writingHtml: 'Writing HTML…',
       renderingPdf: 'Rendering PDF…'
