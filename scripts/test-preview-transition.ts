@@ -93,6 +93,13 @@ try {
   await page.waitForSelector('.cm-content');
   const preloadWidth = await page.$eval('.preview-frame', frame => frame.getBoundingClientRect().width);
   for (const phase of ['pending-render', 'cached']) {
+    await page.evaluate(async () => {
+      const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+      scroller.scrollTop = Math.max(240, scroller.scrollHeight * 0.72 - scroller.clientHeight);
+      for (let index = 0; index < 3; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
     const cdp = await page.createCDPSession();
     const frames: string[] = [];
     cdp.on('Page.screencastFrame', event => {
@@ -118,6 +125,14 @@ try {
       document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent?.includes('Paragraph 39')
       && !document.querySelector('.editor-host')?.hasAttribute('data-preview-cover')
     , { timeout: 5000 });
+    const activatedPreviewScrollTop = await page.$eval(
+      '.preview-frame',
+      (frame: HTMLIFrameElement) => frame.contentDocument?.scrollingElement?.scrollTop ?? 0
+    );
+    assert.ok(
+      activatedPreviewScrollTop > 100,
+      `${phase}: Live to Preview must preserve a deep reading position instead of jumping to the document start`
+    );
     // Text must become readable while the network image requests are unresolved.
     // Release them only after the previous-surface cover is gone.
     await page.evaluate(() => {

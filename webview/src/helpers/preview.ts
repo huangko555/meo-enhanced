@@ -63,6 +63,11 @@ type PreviewViewportRestore = PreviewViewportPosition & {
   readonly isCurrent: () => boolean;
 };
 
+type PendingExternalViewportRestore = {
+  readonly restore: PreviewViewportRestore;
+  readonly requestGeneration: number;
+};
+
 type PreviewViewportProjectionSlot = {
   restore: PreviewViewportRestore | null;
 };
@@ -791,6 +796,7 @@ export function createPreviewController({
   } | null = null;
   let hasPendingRequest = false;
   let acceptingViewportProjection: PreviewViewportProjectionSlot | null = null;
+  let pendingExternalViewportRestore: PendingExternalViewportRestore | null = null;
   let pendingText = '';
   let latestAcceptedText: string | null = null;
   let frameRenderedText: string | null = null;
@@ -861,15 +867,40 @@ export function createPreviewController({
     if (paintFrame !== null) window.cancelAnimationFrame(paintFrame);
     paintFrame = null;
   };
+  const getCurrentPendingExternalViewportRestore = (): PreviewViewportRestore | null => {
+    const pending = pendingExternalViewportRestore;
+    if (!pending) return null;
+    if (pending.requestGeneration !== requestGeneration || !pending.restore.isCurrent()) {
+      pendingExternalViewportRestore = null;
+      return null;
+    }
+    return pending.restore;
+  };
   const schedulePaintReady = () => {
     cancelPaintReady();
     if (disposed || host.hidden) return;
+    const stabilizePendingExternalViewport = () => {
+      const restore = getCurrentPendingExternalViewportRestore();
+      if (!restore) return;
+      restoreTopLine(
+        restore.line,
+        restore.lineOffset,
+        restore.viewportOffset,
+        restore.sourceRange
+      );
+      retainViewportProjection(restore);
+    };
     // A visible iframe can still have no compositor surface in this frame.
     // Keep the previous reading surface until the browser has painted it.
     paintFrame = window.requestAnimationFrame(() => {
+      stabilizePendingExternalViewport();
       paintFrame = window.requestAnimationFrame(() => {
         paintFrame = null;
-        if (!disposed && !host.hidden) onPaintReady?.();
+        if (!disposed && !host.hidden) {
+          stabilizePendingExternalViewport();
+          onPaintReady?.();
+          if (!hasPendingRequest) pendingExternalViewportRestore = null;
+        }
       });
     });
   };
@@ -1304,6 +1335,7 @@ export function createPreviewController({
         }
         viewportInteractionGeneration += 1;
         retainedViewportProjection = null;
+        pendingExternalViewportRestore = null;
         pendingPresentationScroll = null;
         onViewportInteraction?.();
       };
@@ -1335,7 +1367,7 @@ export function createPreviewController({
           disposed ||
           !isCurrent()
         ) return;
-        const viewportRestore = viewportSlot?.restore;
+        const viewportRestore = getCurrentPendingExternalViewportRestore() ?? viewportSlot?.restore;
         if (viewportRestore?.isCurrent()) {
           restoreTopLine(
             viewportRestore.line,
@@ -1543,6 +1575,11 @@ export function createPreviewController({
     cancelPaintReady();
     const requestText = text;
     requestGeneration = generation;
+    if (pendingExternalViewportRestore) {
+      pendingExternalViewportRestore = pendingExternalViewportRestore.restore.isCurrent()
+        ? { ...pendingExternalViewportRestore, requestGeneration: generation }
+        : null;
+    }
     hasPendingRequest = true;
     pendingText = text;
     setPendingStatus(background);
@@ -2267,7 +2304,15 @@ export function createPreviewController({
     isCurrent: () => boolean
   ): void => {
     const restore = { ...position, isCurrent };
-    if (acceptingViewportProjection) acceptingViewportProjection.restore = restore;
+    if (acceptingViewportProjection) {
+      acceptingViewportProjection.restore = restore;
+      return;
+    }
+    const hasUsableFrame = frameRenderedText !== null && getSourceMap().length > 0;
+    pendingExternalViewportRestore = hasPendingRequest || !hasUsableFrame
+      ? { restore, requestGeneration }
+      : null;
+    if (!hasUsableFrame) return;
     if (restore.isCurrent()) {
       restoreTopLine(
         restore.line,
@@ -2452,6 +2497,7 @@ export function createPreviewController({
       releasePreviewCodeHighlighting();
       activeFrameDocument = null;
       retainedViewportProjection = null;
+      pendingExternalViewportRestore = null;
       commitPendingCodeHighlight = null;
       sourceMapDocument = null;
       sourceMap = [];

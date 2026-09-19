@@ -13,7 +13,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Kept Preview and export semantic colors readable and appearance-correct when their selected light or dark appearance differs from VS Code.
 - Added an early warning when an open document changes on disk, with localized actions for reviewing or reloading the external version.
 - Added a persistent Source-to-Preview edit-position highlight and click-to-source navigation, with smoother semantic targeting while moving across Preview content.
-- Stabilized reading position and first-frame rendering when switching among Live, Source, Preview, and Source split Preview, including transitions back to Live.
+- Stabilized reading position and first-frame rendering when switching among Live, Source, Preview, and Source split Preview, including the first pending Preview render and transitions back to Live.
 - Restored Live table column widths after editor-tab visibility changes and refined sticky-header editing, row insertion, contextual tools, and restrained header styling.
 - Kept wrapping table cells and offscreen carets anchored predictably during input instead of applying a typewriter-style viewport shift.
 - Prevented partially visible Mermaid source editing from competing for the viewport or flashing unrelated rendered content.
