@@ -257,6 +257,7 @@ function preserveToolbarWhileDispatching(
     view.dispatch({ effects });
     return;
   }
+  const scrollTop = view.scrollDOM.scrollTop;
   controller.preserveElementPositionWhileMutation(
     toolbar,
     () => view.dom.querySelector<HTMLElement>(
@@ -265,6 +266,12 @@ function preserveToolbarWhileDispatching(
     () => view.dispatch({ effects }),
     'immediate'
   );
+  // The mode effect can synchronously move the outer scroller before the
+  // measured toolbar stabilizer starts. Correct that same-task drift so a
+  // one-line intermediate position never reaches paint.
+  if (Math.abs(view.scrollDOM.scrollTop - scrollTop) > 0.1) {
+    view.scrollDOM.scrollTop = scrollTop;
+  }
 }
 
 class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
