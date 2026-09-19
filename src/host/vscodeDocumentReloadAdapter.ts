@@ -13,8 +13,8 @@ export type VscodeDocumentReloadAdapterOptions = {
 /**
  * Uses VS Code's active-editor revert command without opening or revealing a
  * different editor. VS Code exposes no resource-bound revert for text documents,
- * so the dispatch guard refuses to run after the initiating custom editor loses
- * activation or while another dirty document could be harmed by an activation race.
+ * so the synchronous dispatch guard binds the command to the initiating active
+ * custom editor. Unrelated dirty documents do not participate in this decision.
  */
 export function createVscodeDocumentReloadAdapter(
   document: vscode.TextDocument,
@@ -31,23 +31,22 @@ export function createVscodeDocumentReloadAdapter(
     if (!isTargetDocumentActive()) {
       throw new Error('the target document is no longer active');
     }
-    const targetUri = document.uri.toString();
-    const ambiguousDirtyDocument = vscode.workspace.textDocuments.some((candidate) => (
-      candidate.isDirty && candidate.uri.toString() !== targetUri
-    ));
-    if (ambiguousDirtyDocument) {
-      throw new Error('another dirty document makes the active-editor revert unsafe');
-    }
     return vscode.commands.executeCommand('workbench.action.files.revert');
+  };
+
+  const waitForReloadConfirmation = async (): Promise<void> => {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      if (!document.isDirty) return;
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error('VS Code did not confirm that the target document was reloaded');
   };
 
   return {
     async reloadFromDisk() {
       try {
         await executeTargetRevert();
-        if (!isTargetDocumentActive() || document.isDirty) {
-          throw new Error('VS Code did not confirm that the target document was reloaded');
-        }
+        await waitForReloadConfirmation();
       } catch (error) {
         const message = error instanceof Error ? error.message : 'VS Code did not reload the document';
         throw new Error(`Could not reload the document from disk: ${message}`);

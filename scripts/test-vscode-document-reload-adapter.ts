@@ -19,8 +19,8 @@ const target = createDocument('file:///target.md', 'local unsaved', 3);
 const other = createDocument('file:///other.md', 'other local unsaved', 8);
 let activeDocument = other;
 let targetEditorActive = true;
-let switchFocusAfterTargetCheck = false;
 let skipRevertMutation = false;
+let revertMutationDelayMs = 0;
 let commandFailure: Error | null = null;
 const commands: Array<{ command: string; target?: string }> = [];
 
@@ -35,11 +35,19 @@ mock.module('vscode', () => ({
       }
       if (command === 'workbench.action.files.revert') {
         if (skipRevertMutation) return;
-        activeDocument.text = activeDocument === target
-          ? 'disk version from external tool'
-          : 'other disk version';
-        activeDocument.version += 1;
-        activeDocument.dirty = false;
+        const revertedDocument = activeDocument;
+        const applyRevert = () => {
+          revertedDocument.text = revertedDocument === target
+            ? 'disk version from external tool'
+            : 'other disk version';
+          revertedDocument.version += 1;
+          revertedDocument.dirty = false;
+        };
+        if (revertMutationDelayMs > 0) {
+          setTimeout(applyRevert, revertMutationDelayMs);
+        } else {
+          applyRevert();
+        }
       }
     }
   },
@@ -47,22 +55,9 @@ mock.module('vscode', () => ({
     tabGroups: {
       activeTabGroup: {
         get activeTab() {
-          const checkedDocument = activeDocument;
-          if (switchFocusAfterTargetCheck && checkedDocument === target) {
-            switchFocusAfterTargetCheck = false;
-            activeDocument = other;
-          }
-          return { input: { uri: checkedDocument.uri } };
+          return { input: { uri: activeDocument.uri } };
         }
       }
-    }
-  },
-  workspace: {
-    get textDocuments() {
-      return [
-        { uri: target.uri, get isDirty() { return target.dirty; } },
-        { uri: other.uri, get isDirty() { return other.dirty; } }
-      ];
     }
   }
 }));
@@ -93,16 +88,31 @@ target.text = 'second local draft';
 target.dirty = true;
 other.text = 'other second local draft';
 other.dirty = true;
-switchFocusAfterTargetCheck = true;
-await assert.rejects(
-  () => adapter.reloadFromDisk(),
-  /another dirty document makes the active-editor revert unsafe/
-);
-assert.equal(target.text, 'second local draft');
-assert.equal(target.dirty, true, 'a failed target check must preserve the target Draft');
+activeDocument = target;
+assert.deepEqual(await adapter.reloadFromDisk(), {
+  version: 5,
+  text: 'disk version from external tool'
+});
 assert.equal(other.text, 'other second local draft');
-assert.equal(other.dirty, true, 'a post-check focus race must not revert the newly active dirty tab');
-assert.deepEqual(commands.splice(0), []);
+assert.equal(other.dirty, true, 'reloading the target must not inspect or mutate another dirty document');
+assert.deepEqual(commands.splice(0), [
+  { command: 'workbench.action.files.revert', target: undefined }
+]);
+
+target.text = 'third local draft';
+target.dirty = true;
+revertMutationDelayMs = 15;
+assert.deepEqual(await adapter.reloadFromDisk(), {
+  version: 6,
+  text: 'disk version from external tool'
+});
+assert.equal(target.dirty, false, 'reload must wait briefly for VS Code to publish the clean document state');
+assert.equal(other.text, 'other second local draft');
+assert.equal(other.dirty, true);
+assert.deepEqual(commands.splice(0), [
+  { command: 'workbench.action.files.revert', target: undefined }
+]);
+revertMutationDelayMs = 0;
 
 activeDocument = other;
 other.dirty = false;
@@ -114,6 +124,7 @@ assert.equal(activeDocument, other, 'Reload must not activate or replace another
 assert.deepEqual(commands.splice(0), []);
 
 activeDocument = target;
+target.dirty = true;
 targetEditorActive = false;
 await assert.rejects(
   () => adapter.reloadFromDisk(),
