@@ -2408,6 +2408,11 @@ export function createEditor({
     runNativeHistory(direction) {
       const guard = viewportController.captureHistorySnapshot();
       historyScrollGuard = guard;
+      // Undo/Redo is a new navigation intent. Cancel any input settlement or
+      // bounded scrollToLine observation before the native transaction can
+      // replace a rendered target and schedule its own history reveal.
+      interactionContinuity?.cancel();
+      viewportController.beginNavigationReveal();
       const beforeDocument = view.state.doc;
       try {
         const applied = direction === 'undo' ? undo(view) : redo(view);
