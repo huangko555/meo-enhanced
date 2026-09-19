@@ -125,8 +125,13 @@ export function createEditorInteractionContinuity(input: {
   };
 
   const beginInputSettlement = (): void => {
+    // A burst of keyboard input is one viewport interaction. If an earlier
+    // character triggered a delayed height-map correction, the next
+    // `beforeinput` observes that transient scroll offset. Keep the original
+    // baseline until the burst settles instead of ratcheting toward the drift.
+    const continuingScrollTop = active?.scrollTopBeforeInput ?? null;
     const scrollTopBeforeInput = (
-      pendingScrollTopBeforeInput ?? view.scrollDOM.scrollTop
+      continuingScrollTop ?? pendingScrollTopBeforeInput ?? view.scrollDOM.scrollTop
     );
     pendingScrollTopBeforeInput = null;
     cancel();
@@ -282,7 +287,10 @@ export function createNestedEditorInteractionContinuity(input: {
   };
 
   const beginInputSettlement = (): void => {
-    const scrollTopBeforeInput = pendingScrollTopBeforeInput ?? viewport.readScrollTop();
+    const continuingScrollTop = active?.scrollTopBeforeInput ?? null;
+    const scrollTopBeforeInput = continuingScrollTop
+      ?? pendingScrollTopBeforeInput
+      ?? viewport.readScrollTop();
     pendingScrollTopBeforeInput = null;
     cancel();
     const candidate: ActiveNestedInput = {

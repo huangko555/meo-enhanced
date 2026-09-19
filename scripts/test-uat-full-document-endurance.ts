@@ -1189,10 +1189,17 @@ async function main(): Promise<void> {
       : phase === 'table-mixed'
         ? allOperations.filter((operation) => operation.kind !== 'mermaid' && operation.kind !== 'math')
         : allOperations;
+    const configuredOperationId = process.env.MEO_UAT_ENDURANCE_OPERATION?.trim();
+    const filteredOperations = configuredOperationId
+      ? operations.filter((operation) => operation.id === configuredOperationId)
+      : operations;
+    if (configuredOperationId && filteredOperations.length !== 1) {
+      throw new Error(`Missing endurance operation: ${configuredOperationId}`);
+    }
     const configuredLimit = Number.parseInt(process.env.MEO_UAT_ENDURANCE_LIMIT ?? '', 10);
     const selectedOperations = Number.isInteger(configuredLimit) && configuredLimit > 0
-      ? operations.slice(0, configuredLimit)
-      : operations;
+      ? filteredOperations.slice(0, configuredLimit)
+      : filteredOperations;
     const records: OperationRecord[] = [];
     const versions = [baselineText];
     for (const operation of selectedOperations) {

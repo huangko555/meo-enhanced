@@ -349,6 +349,42 @@ async function main(): Promise<void> {
       })}`);
     }
 
+    const rapidInputOrigin = await page.evaluate(async () => {
+      const editor = (window as any).__editor;
+      const view = editor.view;
+      const target = view.state.doc.line(800);
+      editor.scrollToLine(target.number, 'center');
+      view.dispatch({ selection: { anchor: target.to } });
+      view.focus();
+      for (let index = 0; index < 8; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      return view.scrollDOM.scrollTop;
+    });
+    await page.keyboard.type('A');
+    const rapidInputShifted = await page.evaluate(() => {
+      const view = (window as any).__editor.view;
+      view.scrollDOM.scrollTop = Math.max(0, view.scrollDOM.scrollTop - 120);
+      return view.scrollDOM.scrollTop;
+    });
+    await page.keyboard.type('B');
+    await page.evaluate(async () => {
+      for (let index = 0; index < 8; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+    const rapidInputSettled = await page.evaluate(() => (window as any).__editor.view.scrollDOM.scrollTop as number);
+    if (
+      Math.abs(rapidInputShifted - rapidInputOrigin) < 60 ||
+      Math.abs(rapidInputSettled - rapidInputOrigin) > 1
+    ) {
+      throw new Error(`Rapid Live input adopted a transient layout correction as its new origin: ${JSON.stringify({
+        rapidInputOrigin,
+        rapidInputShifted,
+        rapidInputSettled
+      })}`);
+    }
+
     const formulaText = [
       ...Array.from({ length: 799 }, (_, index) => `公式前正文 ${index + 1}`),
       '$$',

@@ -3435,19 +3435,24 @@ export function createEditor({
           isRevealCurrent
         );
         // A late Live decoration measurement can supersede that first request.
-        // Retry only while the entire target remains offscreen so settled,
-        // clickable controls never move under an in-progress pointer gesture.
-        let remainingRevealFrames = 8;
+        // Large documents can finish a second virtual-height correction after
+        // the target first becomes visible. Keep observing a bounded window,
+        // but issue another scroll only while the target is outside, so settled
+        // clickable controls do not move under an in-progress pointer gesture.
+        let remainingRevealFrames = 16;
         const ensureTargetVisible = () => {
           if (!isRevealCurrent() || remainingRevealFrames <= 0) return;
           const targetLine = view.state.doc.line(Math.min(line.number, view.state.doc.lines));
           const targetBlock = view.lineBlockAt(targetLine.from);
           const viewportTop = view.scrollDOM.scrollTop;
+          remainingRevealFrames -= 1;
           if (
             targetBlock.bottom > viewportTop &&
             targetBlock.top < viewportTop + view.scrollDOM.clientHeight
-          ) return;
-          remainingRevealFrames -= 1;
+          ) {
+            requestAnimationFrame(ensureTargetVisible);
+            return;
+          }
           view.dispatch({ effects: EditorView.scrollIntoView(targetLine.from, { y: 'center' }) });
           viewportController.revealPositionUntilStable(
             targetLine.from,
