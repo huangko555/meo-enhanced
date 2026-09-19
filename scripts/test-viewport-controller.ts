@@ -1171,6 +1171,24 @@ if (isolatedReveal()) {
   throw new Error('Destroy left a navigation reveal current');
 }
 
+wheelScrollDOM.scrollTop = 500;
+const retainedNavigation = wheelController.beginNavigationReveal();
+wheelController.retainScrollTop(500, retainedNavigation);
+if (!retainedNavigation()) {
+  throw new Error('Retaining scroll superseded its navigation intent');
+}
+wheelScrollDOM.scrollTop = 476;
+wheelFrames.shift()?.(0);
+if (wheelScrollDOM.scrollTop !== 500) {
+  throw new Error(`Retained presentation drifted to ${wheelScrollDOM.scrollTop}`);
+}
+wheelController.markInteraction();
+wheelScrollDOM.scrollTop = 450;
+await flushFrames(wheelFrames);
+if (wheelScrollDOM.scrollTop !== 450) {
+  throw new Error(`A user interaction did not cancel retained scroll: ${wheelScrollDOM.scrollTop}`);
+}
+
 wheelController.lockScrollTop(200);
 dispatchWheel(-80);
 wheelScrollDOM.scrollTop = 0;

@@ -576,6 +576,16 @@ export class ViewportController {
     // markInteraction cancels the lock as soon as the user acts again.
     if (this.destroyed || !isCurrent()) return;
     this.markInteraction();
+    this.startScrollTopLock(targetTop, isCurrent);
+  }
+
+  /** Holds a presentation's scroll offset without superseding its navigation intent. */
+  retainScrollTop(targetTop: number, isCurrent: () => boolean = () => true): void {
+    if (this.destroyed || !isCurrent()) return;
+    this.startScrollTopLock(targetTop, isCurrent);
+  }
+
+  private startScrollTopLock(targetTop: number, isCurrent: () => boolean): void {
     const lockGeneration = ++this.scrollLockGeneration;
     this.activeScrollLockGeneration = lockGeneration;
     let remainingFrames = MAX_SETTLE_FRAMES;

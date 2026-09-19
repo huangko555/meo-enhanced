@@ -246,11 +246,10 @@ function updateMermaidModeButton(
   renderRenderedBlockModeButton(button, decision);
 }
 
-function preserveToolbarWhileDispatching(
+function dispatchModeWhileRetainingViewport(
   view: EditorView,
-  toolbar: HTMLElement,
-  anchor: number,
-  effects: StateEffect<unknown> | readonly StateEffect<unknown>[]
+  effects: StateEffect<unknown> | readonly StateEffect<unknown>[],
+  isCurrent: () => boolean
 ): void {
   const controller = getViewportController(view);
   if (!controller) {
@@ -258,20 +257,11 @@ function preserveToolbarWhileDispatching(
     return;
   }
   const scrollTop = view.scrollDOM.scrollTop;
-  controller.preserveElementPositionWhileMutation(
-    toolbar,
-    () => view.dom.querySelector<HTMLElement>(
-      `.meo-mermaid-toolbar[data-meo-block-from="${anchor}"]`
-    ),
-    () => view.dispatch({ effects }),
-    'immediate'
-  );
-  // The mode effect can synchronously move the outer scroller before the
-  // measured toolbar stabilizer starts. Correct that same-task drift so a
-  // one-line intermediate position never reaches paint.
-  if (Math.abs(view.scrollDOM.scrollTop - scrollTop) > 0.1) {
-    view.scrollDOM.scrollTop = scrollTop;
-  }
+  view.dispatch({ effects });
+  // The mode effect can move the outer scroller before delayed block geometry
+  // settles. Retain the click's viewport without superseding the same
+  // navigation intent that restores toolbar focus.
+  controller.retainScrollTop(scrollTop, isCurrent);
 }
 
 class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
@@ -347,14 +337,13 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
         uiLanguage
       }).nextManualMode;
       const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
-      preserveToolbarWhileDispatching(
+      dispatchModeWhileRetainingViewport(
         view,
-        toolbar,
-        currentAnchor,
         [
           supersedeLiveInputDerivedWork(),
           setMermaidBlockModeEffect.of({ anchor: currentAnchor, mode: nextMode })
-        ]
+        ],
+        isRevealCurrent
       );
       requestAnimationFrame(() => {
         if (!isRevealCurrent()) return;
@@ -380,14 +369,13 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
       if (currentAnchor === null) return;
       const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
       const scrollTop = view.scrollDOM.scrollTop;
-      preserveToolbarWhileDispatching(
+      dispatchModeWhileRetainingViewport(
         view,
-        toolbar,
-        currentAnchor,
         [
           supersedeLiveInputDerivedWork(),
           setMermaidBlockModeEffect.of({ anchor: currentAnchor, mode: 'source' })
-        ]
+        ],
+        isRevealCurrent
       );
       requestAnimationFrame(() => {
         if (!isRevealCurrent()) return;
