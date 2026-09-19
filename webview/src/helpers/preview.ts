@@ -927,6 +927,16 @@ export function createPreviewController({
     try {
       if (runViewportTransaction) runViewportTransaction(() => mutate(slot), documentChange);
       else mutate(slot);
+      const restore = slot.restore;
+      if (restore?.isCurrent()) {
+        restoreTopLine(
+          restore.line,
+          restore.lineOffset,
+          restore.viewportOffset,
+          restore.sourceRange
+        );
+        retainViewportProjection(restore);
+      }
     } finally {
       acceptingViewportProjection = previousSlot;
     }
