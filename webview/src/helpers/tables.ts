@@ -534,17 +534,23 @@ export function focusTableHistoryChange(
       }
       return 'restored' as const;
     }
-    const caretIsVisible = (
-      caretRect.top >= usableViewport.top - tableCellCaretRevealEpsilon &&
-      caretRect.bottom <= usableViewport.bottom + tableCellCaretRevealEpsilon
+    // CodeMirror may have already moved an offscreen history target just
+    // inside the viewport. Reveal the restored cell editor, rather than only
+    // its caret line, so a late textarea resize cannot consume the promised
+    // reading context. Only the `caretWasVisible` branch above may retain a
+    // tighter existing viewport.
+    const inputRect = input.getBoundingClientRect();
+    const inputHasRevealContext = (
+      inputRect.top >= usableViewport.top + historyContextMargin - tableCellCaretRevealEpsilon &&
+      inputRect.bottom <= usableViewport.bottom - historyContextMargin + tableCellCaretRevealEpsilon
     );
-    if (!caretIsVisible) {
+    if (!inputHasRevealContext) {
       const viewportController = getViewportController(view);
       const isNavigationCurrent = viewportController?.beginNavigationReveal();
       if (viewportController && isNavigationCurrent) {
         const canReveal = () => isCurrent() && isNavigationCurrent();
         viewportController.revealVerticalBounds(
-          () => canReveal() && input.isConnected ? tableCellCaretViewportBounds(input) : null,
+          () => canReveal() && input.isConnected ? input.getBoundingClientRect() : null,
           canReveal,
           {
             yMargin: historyContextMargin,
@@ -552,10 +558,10 @@ export function focusTableHistoryChange(
           }
         );
       } else {
-        const delta = caretRect.top < usableViewport.top
-          ? caretRect.top - usableViewport.top - historyContextMargin
-          : caretRect.bottom > usableViewport.bottom
-            ? caretRect.bottom - usableViewport.bottom + historyContextMargin
+        const delta = inputRect.top < usableViewport.top + historyContextMargin
+          ? inputRect.top - usableViewport.top - historyContextMargin
+          : inputRect.bottom > usableViewport.bottom - historyContextMargin
+            ? inputRect.bottom - usableViewport.bottom + historyContextMargin
             : 0;
         if (Math.abs(delta) >= 1) view.scrollDOM.scrollTop += delta;
       }
