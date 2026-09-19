@@ -2738,7 +2738,10 @@ const exportAdapter = createExportWebviewAdapter({
   getPreviewAppearance: () => previewAdapter.getAppearance(),
   getUiLanguage: () => activeUiLanguage,
   getStyleEnvironment: () => previewController.getStyleEnvironment(),
-  getCodeTheme: () => themeAdapter.getCodePalette(previewAdapter.getAppearance()).sourceTheme
+  getCodeTheme: () => codePaletteAdapter.resolve(
+    undefined,
+    previewAdapter.getAppearance()
+  ).sourceTheme
 });
 
 const themeAdapter = createAppearanceWebviewAdapter({
@@ -2765,9 +2768,11 @@ const themeAdapter = createAppearanceWebviewAdapter({
   }
 });
 resolveEditorAppearanceForPreview = () => themeAdapter.getAppearance();
-resolveCodePaletteForPreview = (appearance) => themeAdapter.getCodePalette(appearance).preview;
+// Preview is a standalone reading surface. Its code palette follows the
+// selected Preview appearance instead of borrowing the current VS Code theme.
+resolveCodePaletteForPreview = (appearance) => codePaletteAdapter.resolve(undefined, appearance).preview;
 applyCodeThemeForPreview = (appearance) => {
-  setShikiTheme(themeAdapter.getCodePalette(appearance).sourceTheme, 'preview');
+  setShikiTheme(codePaletteAdapter.resolve(undefined, appearance).sourceTheme, 'preview');
 };
 
 const withMessageErrorBoundary = (context: string, action: () => void): void => {

@@ -7,10 +7,21 @@ import { decodeHostToWebviewMessage, decodeWebviewToHostMessage } from '../src/p
 import type { PreviewRenderRequest } from '../src/protocol/previewRender';
 import exportRuntime from '../src/export/runtime';
 import { buildExportHtmlDocument } from '../src/export/exportHtmlTemplate';
+import darkPlus from '@shikijs/themes/dark-plus';
+import lightPlus from '@shikijs/themes/light-plus';
+import { codeToTokens } from 'shiki';
 
 const root = path.resolve(import.meta.dirname, '..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-preview-reading-surface-'));
 const sourceDocumentPath = path.join(temp, 'preview-reading-surface.md');
+const expectedDarkPreviewKeyword = hexColorToRgb((await codeToTokens(
+  'type User = { id: string; };',
+  { lang: 'ts', theme: darkPlus }
+)).tokens[0]![0]!.color!);
+const expectedLightPreviewKeyword = hexColorToRgb((await codeToTokens(
+  'type User = { id: string; };',
+  { lang: 'ts', theme: lightPlus }
+)).tokens[0]![0]!.color!);
 const longToken = 'wrappable'.repeat(90);
 const longKbdToken = 'K'.repeat(500);
 const longLinkToken = 'linked'.repeat(80);
@@ -28,6 +39,11 @@ const mermaidFallbackSource = `invalid ${longToken}\n`;
 const mermaidWideSource = 'flowchart LR\n  wide_fit_start --> wide_fit_end\n';
 const mermaidTallSource = 'flowchart TD\n  tall_fit_start --> tall_fit_end\n';
 const dataImage = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
+function hexColorToRgb(value: string): string {
+  const hex = value.replace(/^#/, '');
+  return `rgb(${Number.parseInt(hex.slice(0, 2), 16)}, ${Number.parseInt(hex.slice(2, 4), 16)}, ${Number.parseInt(hex.slice(4, 6), 16)})`;
+}
 const safeHtmlWideImage = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="120" viewBox="0 0 1600 120"><rect width="1600" height="120" fill="#999"/></svg>',
   'utf8'
@@ -1021,7 +1037,7 @@ async function main(): Promise<void> {
         scheme: doc.documentElement.style.colorScheme || getComputedStyle(doc.documentElement).colorScheme,
         body: getComputedStyle(doc.body).backgroundColor,
         tableHeader: getComputedStyle(doc.querySelector<HTMLTableCellElement>('thead th')!).backgroundColor,
-        codeBlock: getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-code-block-wrap')!).backgroundColor
+        codeBlock: getComputedStyle(doc.querySelector<HTMLElement>('pre.meo-export-code-block')!).backgroundColor
       };
     });
     assert.equal(initialPreviewSurfaceColors.body, 'rgb(255, 255, 255)');
@@ -1048,7 +1064,11 @@ async function main(): Promise<void> {
             'editorGroup.border': '#ff0000',
             'editorWidget.background': '#401515'
           },
-          tokenColors: []
+          tokenColors: [
+            { scope: 'keyword', settings: { foreground: '#ff00ff' } },
+            { scope: 'entity.name.type', settings: { foreground: '#00ffff' } },
+            { scope: 'variable', settings: { foreground: '#ff8080' } }
+          ]
         }
       }
     })));
@@ -1062,7 +1082,7 @@ async function main(): Promise<void> {
         scheme: getComputedStyle(doc.documentElement).colorScheme,
         body: getComputedStyle(doc.body).backgroundColor,
         tableHeader: getComputedStyle(doc.querySelector<HTMLTableCellElement>('thead th')!).backgroundColor,
-        codeBlock: getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-code-block-wrap')!).backgroundColor
+        codeBlock: getComputedStyle(doc.querySelector<HTMLElement>('pre.meo-export-code-block')!).backgroundColor
       };
     });
     assert.deepEqual(refreshedPreviewSurfaceColors, {
@@ -1193,15 +1213,61 @@ async function main(): Promise<void> {
       { border: 'rgb(122, 132, 144)', chevron: 'rgb(122, 132, 144)' },
       { border: 'rgb(122, 132, 144)', chevron: 'rgb(122, 132, 144)' }
     ], 'Inactive Preview dropdown borders and chevrons must share the requested neutral color');
+    await page.evaluate(() => {
+      document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+        .querySelector('code.language-typescript')?.scrollIntoView({ block: 'center' });
+    });
     await page.select('.preview-appearance-select', 'dark');
+    await page.waitForFunction(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const keyword = Array.from(doc.querySelectorAll<HTMLElement>(
+        'code.language-typescript .meo-export-code-line-source[data-meo-shiki] > span'
+      )).find((token) => token.textContent?.trim() === 'type');
+      return keyword && keyword.style.color !== 'rgb(0, 0, 255)';
+    });
     const darkPreviewSurfaceColors = await page.evaluate(() => {
       const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
-      return {
+      const properties = doc.createElement('section');
+      properties.className = 'meo-export-frontmatter';
+      properties.innerHTML = [
+        '<div class="meo-export-frontmatter-line is-property">',
+        '<span class="meo-export-frontmatter-key-cell"><span class="meo-export-frontmatter-key">key</span></span>',
+        '<div class="meo-export-frontmatter-value-group">',
+        '<span class="meo-export-frontmatter-value">value</span>',
+        '<span class="meo-export-frontmatter-pill">tag</span>',
+        '</div></div>'
+      ].join('');
+      doc.body.append(properties);
+      const tokens = Array.from(doc.querySelectorAll<HTMLElement>(
+        'code.language-typescript .meo-export-code-line-source[data-meo-shiki] > span'
+      ));
+      const keyword = tokens.find((token) => token.textContent?.trim() === 'type')!;
+      const result = {
+        codeKeyword: keyword.style.color.toLowerCase(),
         body: getComputedStyle(doc.body).backgroundColor,
         tableHeader: getComputedStyle(doc.querySelector<HTMLTableCellElement>('thead th')!).backgroundColor,
-        codeBlock: getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-code-block-wrap')!).backgroundColor
+        codeBlock: getComputedStyle(doc.querySelector<HTMLElement>('pre.meo-export-code-block')!).backgroundColor,
+        frontmatterKey: getComputedStyle(properties.querySelector<HTMLElement>('.meo-export-frontmatter-key')!).color,
+        frontmatterValue: getComputedStyle(properties.querySelector<HTMLElement>('.meo-export-frontmatter-value')!).color,
+        frontmatterPill: getComputedStyle(properties.querySelector<HTMLElement>('.meo-export-frontmatter-pill')!).backgroundColor
       };
+      properties.remove();
+      return result;
     });
+    assert.equal(
+      darkPreviewSurfaceColors.codeKeyword,
+      expectedDarkPreviewKeyword,
+      `Dark Preview code colors must be owned by the Preview theme: ${JSON.stringify(darkPreviewSurfaceColors)}`
+    );
+    assert.deepEqual({
+      key: darkPreviewSurfaceColors.frontmatterKey,
+      value: darkPreviewSurfaceColors.frontmatterValue,
+      pill: darkPreviewSurfaceColors.frontmatterPill
+    }, {
+      key: 'rgb(229, 192, 123)',
+      value: 'rgb(216, 222, 233)',
+      pill: 'rgb(62, 68, 77)'
+    }, `Dark Preview Front Matter colors must be owned by the Preview theme: ${JSON.stringify(darkPreviewSurfaceColors)}`);
     assert.equal(
       darkPreviewSurfaceColors.body,
       'rgb(32, 37, 43)',
@@ -1366,6 +1432,11 @@ async function main(): Promise<void> {
     });
     assert.ok(previewShikiColors.unique.length >= 4, JSON.stringify(previewShikiColors));
     assert.ok(previewShikiColors.keyword && previewShikiColors.typeName && previewShikiColors.bracket);
+    assert.equal(
+      previewShikiColors.keyword,
+      expectedLightPreviewKeyword,
+      `Light Preview code colors must be owned by the Preview theme: ${JSON.stringify(previewShikiColors)}`
+    );
     assert.notEqual(previewShikiColors.keyword, previewShikiColors.typeName);
     const currentFrame = await page.$('.preview-frame');
     assert.ok(currentFrame, 'Preview iframe must exist before Mermaid settlement');
