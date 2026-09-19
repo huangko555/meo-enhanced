@@ -7,7 +7,6 @@ const targetUri: FakeUri = { fsPath: 'D:/exports/note.pdf' };
 const progressMessages: string[] = [];
 const informationMessages: Array<{ message: string; actions: string[] }> = [];
 const errorMessages: string[] = [];
-const statusBarMessages: string[] = [];
 const openedUris: FakeUri[] = [];
 const revealedUris: FakeUri[] = [];
 let selectedAction: string | undefined;
@@ -15,11 +14,11 @@ let saveDialogResult: FakeUri | undefined = targetUri;
 let saveDialogOptions: Record<string, unknown> | undefined;
 let progressOptions: Record<string, unknown> | undefined;
 let progressInvocationCount = 0;
-let statusBarDisposeCount = 0;
 let rejectReveal = false;
 let notificationPainted = false;
 let saveDialogBarrier: Promise<void> = Promise.resolve();
 let progressCompletionBarrier: Promise<void> = Promise.resolve();
+let saveDialogHandler: (() => Promise<FakeUri | undefined>) | undefined;
 
 mock.module('vscode', () => ({
   ProgressLocation: { Notification: 15 },
@@ -27,12 +26,9 @@ mock.module('vscode', () => ({
   window: {
     showSaveDialog: async (options: Record<string, unknown>) => {
       saveDialogOptions = options;
+      if (saveDialogHandler) return saveDialogHandler();
       await saveDialogBarrier;
       return saveDialogResult;
-    },
-    setStatusBarMessage: (message: string) => {
-      statusBarMessages.push(message);
-      return { dispose: () => { statusBarDisposeCount += 1; } };
     },
     withProgress: async (
       options: Record<string, unknown>,
@@ -89,8 +85,7 @@ const zhOutcomePromise = runVscodeExportWithFeedback({
   report('renderingPdf');
 });
 await new Promise<void>((resolve) => setTimeout(resolve, 0));
-assert.deepEqual(progressMessages, [], 'destination selection must not create a notification lifecycle');
-assert.equal(statusBarMessages.at(-1), '$(sync~spin) 正在准备 PDF 导出…');
+assert.deepEqual(progressMessages, ['等待选择保存位置…']);
 assert.equal(exportTaskStarted, false);
 releaseSaveDialog?.();
 const zhOutcome = await zhOutcomePromise;
@@ -105,6 +100,7 @@ assert.deepEqual(progressOptions, {
   title: '正在导出 Markdown 为 PDF'
 });
 assert.deepEqual(progressMessages, [
+  '等待选择保存位置…',
   '正在准备 PDF 导出…',
   '正在生成 PDF…'
 ]);
@@ -127,6 +123,7 @@ assert.equal(enOutcome, 'completed');
 assert.equal(saveDialogOptions?.saveLabel, 'Export HTML');
 assert.equal(progressOptions?.title, 'Exporting Markdown to HTML');
 assert.deepEqual(progressMessages, [
+  'Waiting for an output location…',
   'Preparing HTML export…',
   'Writing HTML…'
 ]);
@@ -157,7 +154,8 @@ assert.equal(errorMessages.at(-1), 'PDF 导出失败：browser unavailable');
 
 saveDialogResult = undefined;
 const progressCountBeforeCancellation = progressInvocationCount;
-const statusDisposeCountBeforeCancellation = statusBarDisposeCount;
+let releaseCancelledProgress: (() => void) | undefined;
+progressCompletionBarrier = new Promise<void>((resolve) => { releaseCancelledProgress = resolve; });
 const cancelledOutcome = await runVscodeExportWithFeedback({
   sourceDocumentUri,
   format: 'pdf',
@@ -168,13 +166,13 @@ const cancelledOutcome = await runVscodeExportWithFeedback({
 assert.equal(cancelledOutcome, 'cancelled');
 assert.equal(
   progressInvocationCount,
-  progressCountBeforeCancellation,
-  'cancelling destination selection must not leave a notification lifecycle behind'
+  progressCountBeforeCancellation + 1,
+  'destination selection must retain the immediate progress notification'
 );
-assert.equal(statusBarDisposeCount, statusDisposeCountBeforeCancellation + 1);
 
 saveDialogResult = targetUri;
 selectedAction = undefined;
+progressCompletionBarrier = Promise.resolve();
 let immediateRetryStarted = false;
 const immediateRetryOutcome = await runVscodeExportWithFeedback({
   sourceDocumentUri,
@@ -185,5 +183,46 @@ const immediateRetryOutcome = await runVscodeExportWithFeedback({
 });
 assert.equal(immediateRetryOutcome, 'completed');
 assert.equal(immediateRetryStarted, true, 'export must be immediately retryable after destination cancellation');
+releaseCancelledProgress?.();
+
+let releaseNativeCancellation: (() => void) | undefined;
+const nativeCancellationBarrier = new Promise<void>((resolve) => { releaseNativeCancellation = resolve; });
+let nativeDialogAttempt = 0;
+saveDialogHandler = async () => {
+  nativeDialogAttempt += 1;
+  if (nativeDialogAttempt === 1) {
+    await nativeCancellationBarrier;
+    return undefined;
+  }
+  return targetUri;
+};
+const firstNativeOutcome = runVscodeExportWithFeedback({
+  sourceDocumentUri,
+  format: 'pdf',
+  uiLanguage: 'en'
+}, async () => {
+  throw new Error('the visually cancelled export must not run');
+});
+await new Promise<void>((resolve) => setTimeout(resolve, 0));
+let queuedRetryStarted = false;
+const queuedNativeRetry = runVscodeExportWithFeedback({
+  sourceDocumentUri,
+  format: 'pdf',
+  uiLanguage: 'en'
+}, async () => {
+  queuedRetryStarted = true;
+});
+await new Promise<void>((resolve) => setTimeout(resolve, 0));
+const attemptsBeforeNativeCancellationSettled = nativeDialogAttempt;
+releaseNativeCancellation?.();
+assert.equal(await firstNativeOutcome, 'cancelled');
+assert.equal(await queuedNativeRetry, 'completed');
+assert.equal(
+  attemptsBeforeNativeCancellationSettled,
+  1,
+  'a retry click must queue instead of opening a second save dialog while native cancellation is still settling'
+);
+assert.equal(nativeDialogAttempt, 2);
+assert.equal(queuedRetryStarted, true, 'the queued retry must open automatically after cancellation settles');
 
 console.log('VS Code export feedback checks passed');

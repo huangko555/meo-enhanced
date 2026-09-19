@@ -4,6 +4,7 @@ import type { UiLanguage } from '../foundation/uiLanguage';
 
 export type VscodeExportFormat = 'html' | 'pdf';
 export type VscodeExportProgressStage =
+  | 'selectingDestination'
   | 'preparingExport'
   | 'writingHtml'
   | 'renderingPdf';
@@ -25,7 +26,64 @@ type VscodeExportTaskContext = {
 
 export type VscodeExportOutcome = 'cancelled' | 'completed' | 'failed';
 
-export async function runVscodeExportWithFeedback(
+type PendingExportRequest = {
+  readonly options: {
+    readonly sourceDocumentUri: vscode.Uri;
+    readonly format: VscodeExportFormat;
+    readonly uiLanguage: UiLanguage;
+  };
+  readonly task: (context: VscodeExportTaskContext) => Promise<void>;
+  readonly resolve: (outcome: VscodeExportOutcome) => void;
+};
+
+// On Windows the native dialog can disappear before showSaveDialog settles.
+// Serialize requests and retain the latest retry so a click in that gap is not lost.
+let exportRequestActive = false;
+let queuedCancelledExportRetry: PendingExportRequest | null = null;
+
+export function runVscodeExportWithFeedback(
+  options: {
+    readonly sourceDocumentUri: vscode.Uri;
+    readonly format: VscodeExportFormat;
+    readonly uiLanguage: UiLanguage;
+  },
+  task: (context: VscodeExportTaskContext) => Promise<void>
+): Promise<VscodeExportOutcome> {
+  return new Promise<VscodeExportOutcome>((resolve) => {
+    const request = { options, task, resolve } satisfies PendingExportRequest;
+    if (exportRequestActive) {
+      queuedCancelledExportRetry?.resolve('cancelled');
+      queuedCancelledExportRetry = request;
+      return;
+    }
+
+    exportRequestActive = true;
+    void drainExportRequests(request);
+  });
+}
+
+async function drainExportRequests(initialRequest: PendingExportRequest): Promise<void> {
+  let request: PendingExportRequest | null = initialRequest;
+  try {
+    while (request) {
+      const outcome = await performVscodeExportWithFeedback(request.options, request.task);
+      request.resolve(outcome);
+
+      const queued = queuedCancelledExportRetry;
+      queuedCancelledExportRetry = null;
+      if (outcome === 'cancelled' && queued) {
+        request = queued;
+      } else {
+        queued?.resolve('cancelled');
+        request = null;
+      }
+    }
+  } finally {
+    exportRequestActive = false;
+  }
+}
+
+async function performVscodeExportWithFeedback(
   options: {
     readonly sourceDocumentUri: vscode.Uri;
     readonly format: VscodeExportFormat;
@@ -37,41 +95,48 @@ export async function runVscodeExportWithFeedback(
   let targetUri: vscode.Uri | undefined;
 
   try {
-    const destinationStatus = vscode.window.setStatusBarMessage(
-      `$(sync~spin) ${strings.progress.preparingExport}`
-    );
-    let selectedUri: vscode.Uri | undefined;
-    try {
-      selectedUri = await vscode.window.showSaveDialog({
-        defaultUri: vscode.Uri.file(replaceFileExtension(options.sourceDocumentUri.fsPath, options.format)),
-        filters: options.format === 'html'
-          ? { HTML: ['html', 'htm'] }
-          : { PDF: ['pdf'] },
-        saveLabel: strings.saveLabel
-      });
-    } finally {
-      destinationStatus.dispose();
-    }
-    if (!selectedUri) return 'cancelled';
-    targetUri = selectedUri;
-
-    await vscode.window.withProgress(
+    let resolveDestination!: (uri: vscode.Uri | undefined) => void;
+    let rejectDestination!: (error: unknown) => void;
+    const destination = new Promise<vscode.Uri | undefined>((resolve, reject) => {
+      resolveDestination = resolve;
+      rejectDestination = reject;
+    });
+    const progressOperation = vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
         cancellable: false,
         title: strings.title
       },
       async (progress) => {
-        progress.report({ message: strings.progress.preparingExport });
-        // Let VS Code paint the notification before snapshot collection or the
-        // export runtime can occupy the extension host.
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        await task({
-          targetUri: selectedUri,
-          report: (stage) => progress.report({ message: strings.progress[stage] })
-        });
+        try {
+          progress.report({ message: strings.progress.selectingDestination });
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          const selectedUri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file(replaceFileExtension(options.sourceDocumentUri.fsPath, options.format)),
+            filters: options.format === 'html'
+              ? { HTML: ['html', 'htm'] }
+              : { PDF: ['pdf'] },
+            saveLabel: strings.saveLabel
+          });
+          resolveDestination(selectedUri);
+          if (!selectedUri) return undefined;
+
+          progress.report({ message: strings.progress.preparingExport });
+          await task({
+            targetUri: selectedUri,
+            report: (stage) => progress.report({ message: strings.progress[stage] })
+          });
+          return selectedUri;
+        } catch (error) {
+          rejectDestination(error);
+          throw error;
+        }
       }
     );
+    void Promise.resolve(progressOperation).catch(rejectDestination);
+    const selectedUri = await destination;
+    if (!selectedUri) return 'cancelled';
+    targetUri = await progressOperation;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error || 'Export failed');
     void vscode.window.showErrorMessage(strings.failed(message));
@@ -107,6 +172,7 @@ function getStrings(uiLanguage: UiLanguage, format: VscodeExportFormat): VscodeE
       open: '直接打开',
       reveal: '打开所在文件夹',
       progress: {
+        selectingDestination: '等待选择保存位置…',
         preparingExport: `正在准备 ${label} 导出…`,
         writingHtml: '正在写入 HTML…',
         renderingPdf: '正在生成 PDF…'
@@ -122,6 +188,7 @@ function getStrings(uiLanguage: UiLanguage, format: VscodeExportFormat): VscodeE
     open: 'Open',
     reveal: 'Show in Folder',
     progress: {
+      selectingDestination: 'Waiting for an output location…',
       preparingExport: `Preparing ${label} export…`,
       writingHtml: 'Writing HTML…',
       renderingPdf: 'Rendering PDF…'

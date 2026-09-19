@@ -8,7 +8,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Refined table-of-contents export menus to match the toolbar, close immediately after selection, and keep local HTML contents links inside the exported document.
 - Improved PDF pagination for long code, tables, complex lists, headings, and large Mermaid diagrams while keeping thematic breaks natural.
 - Prevented long unbroken content in headings, paragraphs, lists, links, and inline code from being clipped in Preview and exports.
-- Added localized export progress spanning output-path selection through file generation, plus completion notifications with actions to open the exported file or reveal and select it in its folder.
+- Added localized export progress spanning output-path selection through file generation, plus completion notifications with actions to open the exported file or reveal and select it in its folder; retry clicks after cancelling the native path dialog are retained instead of being lost during Windows dialog cleanup.
 - Kept exported code blocks and Front Matter colors and layout aligned with the active Live and Preview theme.
 - Kept Preview and export semantic colors readable and appearance-correct when their selected light or dark appearance differs from VS Code.
 - Added an early warning when an open document changes on disk, with localized actions for reviewing or reloading the external version.
