@@ -175,6 +175,9 @@ async function centerLine(page: import('puppeteer-core').Page, lineNumber: numbe
   // after the first stable-looking virtual viewport. Observe the same bounded
   // two-phase window used by rendered presentation changes before asserting.
   await waitForFrames(page, 12);
+  await page.evaluate(async () => {
+    await (window as any).__fullUatEditor.whenVisiblePresentationReady(1_200);
+  });
   await waitForScrollStability(page);
   const viewport = await page.evaluate((lineNumber) => {
     const editor = (window as any).__fullUatEditor;
@@ -417,6 +420,10 @@ async function prepareOuterSelection(page: import('puppeteer-core').Page, operat
     editor.view.contentDOM.focus({ preventScroll: true });
   }, { needle: operation.needle, marker: operation.marker });
   await waitForFrames(page, 5);
+  await page.evaluate(async () => {
+    await (window as any).__fullUatEditor.whenVisiblePresentationReady(1_200);
+  });
+  await waitForScrollStability(page);
 }
 
 async function editOuter(page: import('puppeteer-core').Page, operation: Operation, lineNumber: number): Promise<void> {

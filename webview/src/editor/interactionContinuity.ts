@@ -2,6 +2,11 @@ import type { EditorView, ViewUpdate } from '@codemirror/view';
 import { isLiveInputDerivedWorkRefresh } from './liveInputDerivedWork';
 
 export type InteractionContinuityViewport = {
+  retainCaretTop(
+    position: number,
+    top: number,
+    isCurrent: () => boolean
+  ): void;
   revealCaret(
     position: number,
     isCurrent: () => boolean,
@@ -35,6 +40,8 @@ type ActiveInput = {
 };
 
 type ActiveMainInput = ActiveInput & {
+  caretTopBeforeInput: number | null;
+  retainingCaretTop: boolean;
   scrollTopBeforeInput: number;
   viewportMoved: boolean;
 };
@@ -62,15 +69,27 @@ export function createEditorInteractionContinuity(input: {
   let nextGeneration = 0;
   let active: ActiveMainInput | null = null;
   let pendingScrollTopBeforeInput: number | null = null;
+  let pendingCaretTopBeforeInput: number | null = null;
+  let inputSessionScrollTop: number | null = null;
+  let inputSessionCaretTop: number | null = null;
+  let inputSessionPosition: number | null = null;
   let disposed = false;
 
-  const cancel = (): void => {
+  const cancelActive = (): void => {
     nextGeneration += 1;
     if (active?.frame !== null && active?.frame !== undefined) {
       cancelAnimationFrame(active.frame);
     }
     active = null;
+  };
+
+  const cancel = (): void => {
+    cancelActive();
     pendingScrollTopBeforeInput = null;
+    pendingCaretTopBeforeInput = null;
+    inputSessionScrollTop = null;
+    inputSessionCaretTop = null;
+    inputSessionPosition = null;
   };
 
   const isCurrent = (candidate: ActiveMainInput): boolean => (
@@ -92,6 +111,7 @@ export function createEditorInteractionContinuity(input: {
           const coords = view.coordsAtPos(position);
           const scroller = view.scrollDOM.getBoundingClientRect();
           return {
+            caretTop: coords?.top ?? null,
             position,
             visible: Boolean(coords && coords.top >= scroller.top && coords.bottom <= scroller.bottom),
             viewportMoved: candidate.viewportMoved || (
@@ -103,7 +123,26 @@ export function createEditorInteractionContinuity(input: {
           if (!measurement || !isCurrent(candidate)) return;
           candidate.remainingFrames -= 1;
           candidate.viewportMoved = measurement.viewportMoved;
-          if (!measurement.visible || measurement.viewportMoved) {
+          const largeLayoutShift = (
+            candidate.caretTopBeforeInput !== null && measurement.caretTop !== null &&
+            Math.abs(measurement.caretTop - candidate.caretTopBeforeInput) > view.defaultLineHeight * 1.5
+          );
+          candidate.retainingCaretTop ||= largeLayoutShift;
+          if (candidate.retainingCaretTop && candidate.caretTopBeforeInput !== null) {
+            if (
+              measurement.caretTop !== null &&
+              Math.abs(measurement.caretTop - candidate.caretTopBeforeInput) <= 0.5
+            ) {
+              candidate.stableFrames += 1;
+            } else {
+              candidate.stableFrames = 0;
+              viewport.retainCaretTop(
+                measurement.position,
+                candidate.caretTopBeforeInput,
+                () => isCurrent(candidate)
+              );
+            }
+          } else if (!measurement.visible || measurement.viewportMoved) {
             candidate.stableFrames = 0;
             viewport.revealCaret(
               measurement.position,
@@ -129,15 +168,25 @@ export function createEditorInteractionContinuity(input: {
     // character triggered a delayed height-map correction, the next
     // `beforeinput` observes that transient scroll offset. Keep the original
     // baseline until the burst settles instead of ratcheting toward the drift.
-    const continuingScrollTop = active?.scrollTopBeforeInput ?? null;
     const scrollTopBeforeInput = (
-      continuingScrollTop ?? pendingScrollTopBeforeInput ?? view.scrollDOM.scrollTop
+      inputSessionScrollTop ?? pendingScrollTopBeforeInput ?? view.scrollDOM.scrollTop
     );
+    const caretTopBeforeInput = inputSessionCaretTop
+      ?? pendingCaretTopBeforeInput
+      ?? view.coordsAtPos(view.state.selection.main.head)?.top
+      ?? null;
+    inputSessionScrollTop = scrollTopBeforeInput;
+    inputSessionCaretTop = caretTopBeforeInput;
     pendingScrollTopBeforeInput = null;
-    cancel();
+    pendingCaretTopBeforeInput = null;
+    cancelActive();
+    const position = view.state.selection.main.head;
+    inputSessionPosition = position;
     const candidate: ActiveMainInput = {
       generation: nextGeneration,
-      position: view.state.selection.main.head,
+      position,
+      caretTopBeforeInput,
+      retainingCaretTop: false,
       scrollTopBeforeInput,
       viewportMoved: false,
       awaitingDerivedPresentation: true,
@@ -160,11 +209,11 @@ export function createEditorInteractionContinuity(input: {
   };
 
   const captureScrollTopBeforeInput = (): void => {
-    pendingScrollTopBeforeInput = (
-      getMode() === 'live' && view.hasFocus
-        ? view.scrollDOM.scrollTop
-        : null
-    );
+    const canCapture = getMode() === 'live' && view.hasFocus;
+    pendingScrollTopBeforeInput = canCapture ? view.scrollDOM.scrollTop : null;
+    pendingCaretTopBeforeInput = canCapture
+      ? view.coordsAtPos(view.state.selection.main.head)?.top ?? null
+      : null;
   };
   const cancelOnInteraction = () => cancel();
   view.dom.addEventListener('beforeinput', captureScrollTopBeforeInput, true);
@@ -193,7 +242,14 @@ export function createEditorInteractionContinuity(input: {
         return;
       }
 
-      if (update.selectionSet) cancel();
+      if (update.selectionSet) {
+        const selection = view.state.selection.main;
+        if (
+          inputSessionPosition !== null && selection.empty &&
+          selection.head === inputSessionPosition
+        ) return;
+        cancel();
+      }
     },
     cancel,
     dispose() {
@@ -224,15 +280,23 @@ export function createNestedEditorInteractionContinuity(input: {
   let nextGeneration = 0;
   let active: ActiveNestedInput | null = null;
   let pendingScrollTopBeforeInput: number | null = null;
+  let inputSessionScrollTop: number | null = null;
+  let inputSessionPosition: number | null = null;
   let disposed = false;
 
-  const cancel = (): void => {
+  const cancelActive = (): void => {
     nextGeneration += 1;
     if (active?.frame !== null && active?.frame !== undefined) {
       cancelAnimationFrame(active.frame);
     }
     active = null;
+  };
+
+  const cancel = (): void => {
+    cancelActive();
     pendingScrollTopBeforeInput = null;
+    inputSessionScrollTop = null;
+    inputSessionPosition = null;
   };
 
   const isCurrent = (candidate: ActiveNestedInput): boolean => (
@@ -287,15 +351,17 @@ export function createNestedEditorInteractionContinuity(input: {
   };
 
   const beginInputSettlement = (): void => {
-    const continuingScrollTop = active?.scrollTopBeforeInput ?? null;
-    const scrollTopBeforeInput = continuingScrollTop
+    const scrollTopBeforeInput = inputSessionScrollTop
       ?? pendingScrollTopBeforeInput
       ?? viewport.readScrollTop();
+    inputSessionScrollTop = scrollTopBeforeInput;
     pendingScrollTopBeforeInput = null;
-    cancel();
+    cancelActive();
+    const position = view.state.selection.main.head;
+    inputSessionPosition = position;
     const candidate: ActiveNestedInput = {
       generation: nextGeneration,
-      position: view.state.selection.main.head,
+      position,
       scrollTopBeforeInput,
       viewportMoved: false,
       awaitingDerivedPresentation: false,
@@ -328,7 +394,11 @@ export function createNestedEditorInteractionContinuity(input: {
       if (directInput && isActive() && view.hasFocus && view.state.selection.main.empty) {
         beginInputSettlement();
       } else if (update.selectionSet && !directInput) {
-        cancel();
+        const selection = view.state.selection.main;
+        if (
+          inputSessionPosition === null || !selection.empty ||
+          selection.head !== inputSessionPosition
+        ) cancel();
       }
     },
     cancel,

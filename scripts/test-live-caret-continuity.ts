@@ -362,6 +362,11 @@ async function main(): Promise<void> {
       return view.scrollDOM.scrollTop;
     });
     await page.keyboard.type('A');
+    await page.evaluate(async () => {
+      for (let index = 0; index < 8; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
     const rapidInputShifted = await page.evaluate(() => {
       const view = (window as any).__editor.view;
       view.scrollDOM.scrollTop = Math.max(0, view.scrollDOM.scrollTop - 120);

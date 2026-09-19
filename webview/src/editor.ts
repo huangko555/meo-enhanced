@@ -2384,6 +2384,9 @@ export function createEditor({
   interactionContinuity = createEditorInteractionContinuity({
     view,
     viewport: {
+      retainCaretTop(position, top, isCurrent) {
+        viewportController.retainPositionTop(position, top, isCurrent);
+      },
       revealCaret(position, isCurrent, originScrollTop) {
         viewportController.revealPosition(position, {
           y: 'nearest',
@@ -3440,11 +3443,13 @@ export function createEditor({
           isRevealCurrent
         );
         // A late Live decoration measurement can supersede that first request.
-        // Large documents can finish a second virtual-height correction after
-        // the target first becomes visible. Keep observing a bounded window,
-        // but issue another scroll only while the target is outside, so settled
-        // clickable controls do not move under an in-progress pointer gesture.
-        let remainingRevealFrames = 16;
+        // Settle the immediate virtual viewport quickly, then perform one later
+        // offscreen check for large documents whose second height correction
+        // lands after the target first looks stable. New interaction or
+        // navigation invalidates both phases through `isRevealCurrent`.
+        let remainingRevealFrames = 8;
+        let previousVisibleSignature: string | null = null;
+        let stableVisibleFrames = 0;
         const ensureTargetVisible = () => {
           if (!isRevealCurrent() || remainingRevealFrames <= 0) return;
           const targetLine = view.state.doc.line(Math.min(line.number, view.state.doc.lines));
@@ -3455,9 +3460,22 @@ export function createEditor({
             targetBlock.bottom > viewportTop &&
             targetBlock.top < viewportTop + view.scrollDOM.clientHeight
           ) {
+            const signature = [
+              Math.round(targetBlock.top * 2) / 2,
+              Math.round(targetBlock.bottom * 2) / 2,
+              view.scrollDOM.scrollHeight,
+              Math.round(view.contentHeight * 2) / 2
+            ].join(':');
+            stableVisibleFrames = signature === previousVisibleSignature
+              ? stableVisibleFrames + 1
+              : 0;
+            previousVisibleSignature = signature;
+            if (stableVisibleFrames >= 3) return;
             requestAnimationFrame(ensureTargetVisible);
             return;
           }
+          previousVisibleSignature = null;
+          stableVisibleFrames = 0;
           view.dispatch({ effects: EditorView.scrollIntoView(targetLine.from, { y: 'center' }) });
           viewportController.revealPositionUntilStable(
             targetLine.from,
@@ -3467,6 +3485,29 @@ export function createEditor({
           requestAnimationFrame(ensureTargetVisible);
         };
         requestAnimationFrame(ensureTargetVisible);
+        let lateCheckFrames = 16;
+        const verifyTargetStillVisible = () => {
+          if (!isRevealCurrent()) return;
+          lateCheckFrames -= 1;
+          if (lateCheckFrames > 0) {
+            requestAnimationFrame(verifyTargetStillVisible);
+            return;
+          }
+          const targetLine = view.state.doc.line(Math.min(line.number, view.state.doc.lines));
+          const targetBlock = view.lineBlockAt(targetLine.from);
+          const viewportTop = view.scrollDOM.scrollTop;
+          if (
+            targetBlock.bottom > viewportTop &&
+            targetBlock.top < viewportTop + view.scrollDOM.clientHeight
+          ) return;
+          view.dispatch({ effects: EditorView.scrollIntoView(targetLine.from, { y: 'center' }) });
+          viewportController.revealPositionUntilStable(
+            targetLine.from,
+            { y: 'center' },
+            isRevealCurrent
+          );
+        };
+        requestAnimationFrame(verifyTargetStillVisible);
         return;
       }
       const targetIsVisible = align === 'upper' && isPositionVisible(line.from);

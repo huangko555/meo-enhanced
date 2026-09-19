@@ -1912,6 +1912,25 @@ export class ViewportController {
     this.revealPositionInternal(position, options, isCurrent, true);
   }
 
+  /** Retains a caret-like document position at its pre-layout viewport Y. */
+  retainPositionTop(
+    position: number,
+    viewportTop: number,
+    isCurrent: () => boolean = () => true
+  ): void {
+    const targetPosition = Math.max(0, Math.min(position, this.view.state.doc.length));
+    this.runNavigationReveal(() => {
+      const coords = this.view.coordsAtPos(targetPosition);
+      if (!coords) return { kind: 'unavailable' };
+      const delta = coords.top - viewportTop;
+      if (Math.abs(delta) <= POSITION_EPSILON) return { kind: 'stable' };
+      return {
+        kind: 'target',
+        target: { top: this.view.scrollDOM.scrollTop + delta }
+      };
+    }, { settle: true }, isCurrent);
+  }
+
   private revealPositionInternal(
     position: number,
     {
