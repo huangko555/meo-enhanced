@@ -434,15 +434,36 @@ async function main(): Promise<void> {
     );
     assert.equal(nestedAfter.focused, true, 'nested normalization must keep focus in the rich editor');
     assert.equal(nestedAfter.frames.length, 8);
+    const projectedSelectionLines = new Set(
+      nestedAfter.frames
+        .filter((frame) => frame.text === nestedExpected)
+        .map((frame) => frame.outerSelectionLine)
+    );
+    assert.equal(
+      projectedSelectionLines.size,
+      1,
+      `the hidden outer projection anchor must stay stable while nested input owns focus: ${JSON.stringify(nestedAfter.frames)}`
+    );
     for (const frame of nestedAfter.frames) {
       assert.equal(frame.sameBlock, true, 'the rendered block must remain mounted on every frame');
       assert.deepEqual(frame.visibleOuterSource, [], 'outer Markdown source must remain hidden on every frame');
       assert.equal(frame.innerFocused, true, 'nested focus must not move during normalization');
-      assert.equal(frame.outerSelectionLine, nestedBefore.outerSelectionLine);
       assert.ok(Math.abs(Number(frame.scrollTop) - nestedBefore.scrollTop) <= 1);
       assert.ok(Math.abs(Number(frame.blockTop) - nestedBefore.blockTop) <= 1);
       assert.ok(frame.text === nestedDocument || frame.text === nestedExpected, 'a frame observed a partial edit');
     }
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    });
+    await waitForFrames(page, 4);
+    assert.equal(
+      await page.evaluate(() => {
+        const editor = (window as any).__nestedRichListEditor;
+        return editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number;
+      }),
+      nestedBefore.outerSelectionLine,
+      'nested input blur must restore the unrelated outer selection'
+    );
     assert.equal(await page.evaluate(() => (window as any).__nestedRichListEditor.undo()), true);
     await waitForFrames(page, 4);
     assert.equal(
