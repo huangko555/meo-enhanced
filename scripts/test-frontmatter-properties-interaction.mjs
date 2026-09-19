@@ -67,7 +67,13 @@ if (!address || typeof address === 'string') throw new Error('Test server did no
 const browser = await puppeteer.launch({
   executablePath,
   headless: true,
-  args: ['--no-sandbox', '--edge-skip-compat-layer-relaunch']
+  // Windows may assign an ephemeral port that Chromium classifies as unsafe
+  // (for example 2049). This server is loopback-only and owned by this test.
+  args: [
+    '--no-sandbox',
+    '--edge-skip-compat-layer-relaunch',
+    `--explicitly-allowed-ports=${address.port}`
+  ]
 });
 try {
   const page = await browser.newPage();
