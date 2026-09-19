@@ -15,6 +15,12 @@ const currentDark: CodeThemeDto = {
   ]
 };
 const currentLight: CodeThemeDto = { name: 'Current Light', type: 'light', colors: {}, tokenColors: [] };
+const usableCurrentLight: CodeThemeDto = {
+  name: 'Usable Current Light',
+  type: 'light',
+  colors: { 'editor.foreground': '#202020' },
+  tokenColors: [{ scope: 'keyword', settings: { foreground: '#aa2200' } }]
+};
 const fallbackLight: CodeThemeDto = {
   name: 'Fallback Light',
   type: 'light',
@@ -97,6 +103,25 @@ assert.equal(
   productionDarkInversePalette.sourceTheme.name,
   'dark-plus',
   'Source and fenced code must share the bundled VS Code Dark+ fallback'
+);
+const productionCurrentLightPalette = codePaletteAdapter.resolve(usableCurrentLight, 'light');
+assert.equal(productionCurrentLightPalette.sourceTheme, usableCurrentLight);
+assert.equal(productionCurrentLightPalette.sourceTokens.keyword, '#aa2200');
+assert.equal(
+  productionCurrentLightPalette.preview.keyword,
+  productionCurrentLightPalette.sourceTokens.keyword,
+  'Light Live and Preview must share the usable current VS Code palette'
+);
+const productionInverseFromLightPalette = codePaletteAdapter.resolve(usableCurrentLight, 'dark');
+assert.equal(
+  productionInverseFromLightPalette.sourceTheme.name,
+  'dark-plus',
+  'Dark Live and Preview must use the bundled Dark+ fallback under a light VS Code theme'
+);
+assert.equal(
+  productionInverseFromLightPalette.preview.keyword,
+  productionInverseFromLightPalette.sourceTokens.keyword,
+  'Inverse dark Live and Preview must share one fallback palette'
 );
 const unresolvedCurrentTheme = codePaletteAdapter.resolve({
   name: 'Unresolved Current Dark',

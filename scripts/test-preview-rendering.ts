@@ -435,6 +435,7 @@ const lightVisuals = getBuiltInVisuals('light');
 const darkVisuals = getBuiltInVisuals('dark');
 const lightPreviewWithDarkEditorTheme = buildPreviewStyles({
   ...environment,
+  previewThemeIsolation: true,
   meoThemeColors: darkVisuals.colors,
   frontmatterKeyColor: darkVisuals.semanticColors.frontmatterKey,
   frontmatterValueColor: darkVisuals.semanticColors.frontmatterValue,
@@ -442,6 +443,7 @@ const lightPreviewWithDarkEditorTheme = buildPreviewStyles({
 }, 'light');
 const darkPreviewWithLightEditorTheme = buildPreviewStyles({
   ...environment,
+  previewThemeIsolation: true,
   editorBackgroundColor: '#ffffff',
   editorForegroundColor: '#24292f',
   meoThemeColors: lightVisuals.colors,
@@ -449,14 +451,41 @@ const darkPreviewWithLightEditorTheme = buildPreviewStyles({
   frontmatterValueColor: lightVisuals.semanticColors.frontmatterValue,
   frontmatterPillBackgroundColor: lightVisuals.semanticColors.frontmatterPillBackground
 }, 'dark');
+const matchingDarkFrontmatterStyles = buildPreviewStyles({
+  ...environment,
+  previewThemeIsolation: true,
+  frontmatterKeyColor: '#f0c674',
+  frontmatterValueColor: '#f8f8f2',
+  frontmatterPillBackgroundColor: '#3b4048'
+}, 'dark');
+const matchingLightFrontmatterStyles = buildPreviewStyles({
+  ...environment,
+  previewThemeIsolation: true,
+  editorBackgroundColor: '#ffffff',
+  frontmatterKeyColor: '#8a5a00',
+  frontmatterValueColor: '#24292f',
+  frontmatterPillBackgroundColor: '#d0d7de'
+}, 'light');
 
-for (const [styles, visuals, label] of [
-  [lightPreviewWithDarkEditorTheme, lightVisuals, 'light Preview with dark VS Code'],
-  [darkPreviewWithLightEditorTheme, darkVisuals, 'dark Preview with light VS Code']
+for (const [styles, expected, label] of [
+  [matchingDarkFrontmatterStyles, ['#f0c674', '#f8f8f2', '#3b4048'], 'dark'],
+  [matchingLightFrontmatterStyles, ['#8a5a00', '#24292f', '#d0d7de'], 'light']
+] as const) {
+  const [key, value, pill] = expected;
+  if (!styles.includes(`--meo-frontmatter-key: ${key}`)
+    || !styles.includes(`--meo-frontmatter-value: ${value}`)
+    || !styles.includes(`--meo-frontmatter-pill-bg: ${pill}`)) {
+    throw new Error(`${label} Live and Preview Front Matter palettes must match when their appearances match`);
+  }
+}
+
+for (const [styles, visuals, frontmatterValue, label] of [
+  [lightPreviewWithDarkEditorTheme, lightVisuals, '#24292f', 'light Preview with dark VS Code'],
+  [darkPreviewWithLightEditorTheme, darkVisuals, '#d8dee9', 'dark Preview with light VS Code']
 ] as const) {
   for (const [variable, expected] of [
     ['--meo-frontmatter-key', visuals.semanticColors.frontmatterKey],
-    ['--meo-frontmatter-value', visuals.semanticColors.frontmatterValue],
+    ['--meo-frontmatter-value', frontmatterValue],
     ['--meo-frontmatter-pill-bg', visuals.semanticColors.frontmatterPillBackground],
     ['--meo-alert-note', visuals.colors.base05],
     ['--meo-alert-tip', visuals.colors.base09],

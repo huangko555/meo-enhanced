@@ -40,6 +40,11 @@ function buildReadingStyles(
   const useCapturedThemeColors = !isolatePreviewTheme && (
     editorAppearanceIsDark === null || editorAppearanceIsDark === previewAppearanceIsDark
   );
+  const useCapturedFrontmatterColors = useCapturedThemeColors || (
+    isolatePreviewTheme
+    && editorAppearanceIsDark !== null
+    && editorAppearanceIsDark === previewAppearanceIsDark
+  );
   const colors = resolveThemeColors(theme, environment, useCapturedThemeColors, isolatePreviewTheme);
   const fonts = theme.typography;
   const editorFontFamily = sanitizeCssFont(environment.editorFontFamily ?? '');
@@ -76,13 +81,13 @@ function buildReadingStyles(
     : `color-mix(in srgb, ${previewForegroundColor} 22%, transparent)`;
   const readingMutedColor = previewMutedColor;
   const semanticColor = isolatePreviewTheme ? sanitizeStandaloneCssColor : sanitizeCssColor;
-  const capturedFrontmatterKeyColor = useCapturedThemeColors
+  const capturedFrontmatterKeyColor = useCapturedFrontmatterColors
     ? semanticColor(environment.frontmatterKeyColor ?? '')
     : '';
-  const capturedFrontmatterValueColor = useCapturedThemeColors
+  const capturedFrontmatterValueColor = useCapturedFrontmatterColors
     ? semanticColor(environment.frontmatterValueColor ?? '')
     : '';
-  const capturedFrontmatterPillBackgroundColor = useCapturedThemeColors
+  const capturedFrontmatterPillBackgroundColor = useCapturedFrontmatterColors
     ? semanticColor(environment.frontmatterPillBackgroundColor ?? '')
     : '';
   const frontmatterKeyColor = sourceColoring

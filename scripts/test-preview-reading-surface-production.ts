@@ -7,7 +7,7 @@ import { decodeHostToWebviewMessage, decodeWebviewToHostMessage } from '../src/p
 import type { PreviewRenderRequest } from '../src/protocol/previewRender';
 import exportRuntime from '../src/export/runtime';
 import { buildExportHtmlDocument } from '../src/export/exportHtmlTemplate';
-import darkPlus from '@shikijs/themes/dark-plus';
+import githubDark from '@shikijs/themes/github-dark';
 import lightPlus from '@shikijs/themes/light-plus';
 import { codeToTokens } from 'shiki';
 
@@ -16,7 +16,7 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-preview-reading-surface-
 const sourceDocumentPath = path.join(temp, 'preview-reading-surface.md');
 const expectedDarkPreviewKeyword = hexColorToRgb((await codeToTokens(
   'type User = { id: string; };',
-  { lang: 'ts', theme: darkPlus }
+  { lang: 'ts', theme: githubDark }
 )).tokens[0]![0]!.color!);
 const expectedLightPreviewKeyword = hexColorToRgb((await codeToTokens(
   'type User = { id: string; };',
@@ -1051,27 +1051,18 @@ async function main(): Promise<void> {
       initialPreviewSurfaceColors.body,
       `Light Preview code blocks must retain their semantic surface: ${JSON.stringify(initialPreviewSurfaceColors)}`
     );
-    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
-      data: {
-        type: 'vscodeCodeThemeChanged',
-        appearance: 'dark',
-        vscodeTheme: {
-          name: 'Synthetic Dark Theme',
-          type: 'dark',
-          colors: {
-            'editor.background': '#301010',
-            'editor.foreground': '#ffe5e5',
-            'editorGroup.border': '#ff0000',
-            'editorWidget.background': '#401515'
-          },
-          tokenColors: [
-            { scope: 'keyword', settings: { foreground: '#ff00ff' } },
-            { scope: 'entity.name.type', settings: { foreground: '#00ffff' } },
-            { scope: 'variable', settings: { foreground: '#ff8080' } }
-          ]
+    await page.evaluate((vscodeTheme) => {
+      const rootStyle = document.documentElement.style;
+      rootStyle.setProperty('--vscode-editor-background', vscodeTheme.colors['editor.background'] ?? '#24292e');
+      rootStyle.setProperty('--vscode-editor-foreground', vscodeTheme.colors['editor.foreground'] ?? '#e1e4e8');
+      window.dispatchEvent(new MessageEvent('message', {
+        data: {
+          type: 'vscodeCodeThemeChanged',
+          appearance: 'dark',
+          vscodeTheme
         }
-      }
-    })));
+      }));
+    }, githubDark);
     assert.ok(
       previewRenderRequestCount > initialPreviewRenderRequestCount,
       'VS Code theme changes must regenerate the Preview style payload'
@@ -1091,6 +1082,21 @@ async function main(): Promise<void> {
       tableHeader: initialPreviewSurfaceColors.tableHeader,
       codeBlock: initialPreviewSurfaceColors.codeBlock
     }, 'Preview reading-surface colors must stay on the selected Preview theme');
+    const darkLiveFrontmatterColors = await page.evaluate(() => {
+      const probe = (property: 'color' | 'backgroundColor', value: string): string => {
+        const element = document.createElement('span');
+        element.style[property] = value;
+        document.body.append(element);
+        const resolved = getComputedStyle(element)[property];
+        element.remove();
+        return resolved;
+      };
+      return {
+        key: probe('color', 'var(--meo-semantic-frontmatterKey)'),
+        value: probe('color', 'var(--meo-semantic-frontmatterValue)'),
+        pill: probe('backgroundColor', 'var(--meo-semantic-frontmatterPillBackground)')
+      };
+    });
     const propertiesGeometry = await page.evaluate(() => {
       const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
       const properties = doc.createElement('section');
@@ -1213,18 +1219,26 @@ async function main(): Promise<void> {
       { border: 'rgb(122, 132, 144)', chevron: 'rgb(122, 132, 144)' },
       { border: 'rgb(122, 132, 144)', chevron: 'rgb(122, 132, 144)' }
     ], 'Inactive Preview dropdown borders and chevrons must share the requested neutral color');
-    await page.evaluate(() => {
-      document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
-        .querySelector('code.language-typescript')?.scrollIntoView({ block: 'center' });
+    await page.$eval(
+      '.editor-appearance-button[data-editor-appearance="dark"]',
+      (button) => (button as HTMLButtonElement).click()
+    );
+    await page.waitForFunction(() => document.documentElement.dataset.editorAppearance === 'dark');
+    const previousPreviewThemeVersion = await page.evaluate(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      doc.querySelector('code.language-typescript')?.scrollIntoView({ block: 'center' });
+      return doc.querySelector<HTMLElement>(
+        'code.language-typescript .meo-export-code-line-source[data-meo-shiki]'
+      )?.dataset.meoShiki ?? null;
     });
     await page.select('.preview-appearance-select', 'dark');
-    await page.waitForFunction(() => {
+    await page.waitForFunction((previousVersion) => {
       const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
-      const keyword = Array.from(doc.querySelectorAll<HTMLElement>(
-        'code.language-typescript .meo-export-code-line-source[data-meo-shiki] > span'
-      )).find((token) => token.textContent?.trim() === 'type');
-      return keyword && keyword.style.color !== 'rgb(0, 0, 255)';
-    });
+      const version = doc.querySelector<HTMLElement>(
+        'code.language-typescript .meo-export-code-line-source[data-meo-shiki]'
+      )?.dataset.meoShiki;
+      return version !== undefined && version !== previousVersion;
+    }, {}, previousPreviewThemeVersion);
     const darkPreviewSurfaceColors = await page.evaluate(() => {
       const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
       const properties = doc.createElement('section');
@@ -1263,11 +1277,8 @@ async function main(): Promise<void> {
       key: darkPreviewSurfaceColors.frontmatterKey,
       value: darkPreviewSurfaceColors.frontmatterValue,
       pill: darkPreviewSurfaceColors.frontmatterPill
-    }, {
-      key: 'rgb(229, 192, 123)',
-      value: 'rgb(216, 222, 233)',
-      pill: 'rgb(62, 68, 77)'
-    }, `Dark Preview Front Matter colors must be owned by the Preview theme: ${JSON.stringify(darkPreviewSurfaceColors)}`);
+    }, darkLiveFrontmatterColors,
+    `Dark Live and Preview Front Matter colors must match: ${JSON.stringify({ darkLiveFrontmatterColors, darkPreviewSurfaceColors })}`);
     assert.equal(
       darkPreviewSurfaceColors.body,
       'rgb(32, 37, 43)',
@@ -1283,6 +1294,11 @@ async function main(): Promise<void> {
       darkPreviewSurfaceColors.body,
       `Dark Preview code blocks must retain their semantic surface: ${JSON.stringify(darkPreviewSurfaceColors)}`
     );
+    await page.$eval(
+      '.editor-appearance-button[data-editor-appearance="light"]',
+      (button) => (button as HTMLButtonElement).click()
+    );
+    await page.waitForFunction(() => document.documentElement.dataset.editorAppearance === 'light');
     await page.click('.preview-font-family-dropdown');
     assert.deepEqual(await page.evaluate(() => ({
       previewAppearance: document.querySelector<HTMLSelectElement>('.preview-appearance-select')!.value,

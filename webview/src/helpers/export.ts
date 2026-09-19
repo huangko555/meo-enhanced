@@ -44,7 +44,7 @@ export const getExportStyleEnvironment = (code: {
   };
   const semanticColor = (name: string, fallbackVariable: string, fallback = ''): string => {
     const value = colorVar(`--meo-semantic-${name}`);
-    return value && !/\bvar\(/i.test(value) ? value : colorVar(fallbackVariable, fallback);
+    return value && !/\bvar\(/i.test(value) ? value : resolvedColorVar(fallbackVariable, fallback);
   };
 
   const customEditorFontSizeRaw = rootStyles.getPropertyValue('--meo-user-editor-font-size').trim();
