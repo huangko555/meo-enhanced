@@ -1492,6 +1492,7 @@ const previewController = createPreviewController({
   onPaintReady: () => {
     previewPaintReady = true;
     editorHost.removeAttribute('data-preview-cover');
+    editorSurface.removeAttribute('data-source-preview-exit-cover');
     markSourcePreviewSurfaceReady();
   },
   onRendered: (options) => {
@@ -1718,7 +1719,13 @@ const presentPreviewSurface = (
 ): { readonly split: boolean; readonly visible: boolean } => {
   const split = !fullPreview && isSidePreviewVisible();
   const visible = fullPreview || split;
-  const splitGeometryChanged = split !== editorSurface.hasAttribute('data-source-preview');
+  const hadSplit = editorSurface.hasAttribute('data-source-preview');
+  const splitGeometryChanged = split !== hadSplit;
+  // Keep the Source cover in its already-painted split column while the
+  // existing Preview iframe adopts full width underneath it. Expanding the
+  // cover itself would reflow CodeMirror and expose a different Source
+  // position for the one or two frames before Preview is ready.
+  editorSurface.toggleAttribute('data-source-preview-exit-cover', fullPreview && hadSplit);
   if (visible !== !previewController.host.hidden || splitGeometryChanged) previewPaintReady = false;
   editorSurface.removeAttribute('data-source-preview-preparing');
   editorSurface.toggleAttribute('data-source-preview', split);

@@ -347,7 +347,8 @@ try {
         scrollTop: frameDocument.scrollingElement?.scrollTop ?? 0,
         width: frame.getBoundingClientRect().width,
         split: document.querySelector('.editor-surface')?.hasAttribute('data-source-preview') ?? false,
-        editorVisible: !editorHost.hidden && getComputedStyle(editorHost).visibility !== 'hidden',
+        editorVisible: getComputedStyle(editorHost).display !== 'none'
+          && getComputedStyle(editorHost).visibility !== 'hidden',
         editorOffset: editorViewport && editorLineRect
           ? editorLineRect.top - editorViewport.top - editorViewport.height / 3
           : null,
@@ -1457,6 +1458,20 @@ try {
   await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview');
   await new Promise(resolve => setTimeout(resolve, 220));
   const sourceToFullPreviewFrames = await stopPreviewAnchorSampling();
+  const lastSplitFrame = sourceToFullPreviewFrames
+    .filter(frame => !frame.started && frame.split && frame.editorVisible && frame.editorOffset !== null)
+    .at(-1);
+  const coveredSourceFrames = sourceToFullPreviewFrames.filter(frame => (
+    frame.started && frame.covered && frame.editorVisible && frame.editorOffset !== null
+  ));
+  assert.ok(lastSplitFrame && coveredSourceFrames.length > 0, JSON.stringify(sourceToFullPreviewFrames));
+  assert.ok(
+    coveredSourceFrames.every(frame => (
+      Math.abs(frame.editorWidth - lastSplitFrame.editorWidth) <= 1
+      && Math.abs((frame.editorOffset as number) - (lastSplitFrame.editorOffset as number)) <= 1
+    )),
+    `Source-to-Preview must not reflow the visible Source cover before Preview paints: ${JSON.stringify(sourceToFullPreviewFrames)}`
+  );
   const visibleSourceToFullPreviewFrames = sourceToFullPreviewFrames
     .filter(frame => frame.mode === 'preview' && frame.visible && frame.offset !== null);
   const finalFullPreviewFrame = visibleSourceToFullPreviewFrames.at(-1);

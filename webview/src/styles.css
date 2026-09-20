@@ -144,6 +144,20 @@ body {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
+/* During Source split -> Preview, keep the old Source half at its painted
+   width while the Preview iframe prepares its full-width compositor frame. */
+.editor-surface[data-source-preview-exit-cover] {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.editor-surface[data-source-preview-exit-cover] > .editor-host {
+  grid-area: 1 / 1;
+}
+
+.editor-surface[data-source-preview-exit-cover] > .preview-host {
+  grid-area: 1 / 1 / 2 / 3;
+}
+
 .editor-surface[data-source-preview-preparing] > .editor-host {
   grid-area: 1 / 1;
 }
