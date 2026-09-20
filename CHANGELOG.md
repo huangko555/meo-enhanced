@@ -3,6 +3,13 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.24
+- Fixed Shift+Enter line breaks in Live table cells so rows expand downward and the viewport moves only when the caret would leave the visible area.
+- Stabilized outline navigation and fixed/floating outline mode changes to prevent brief viewport jumps.
+- Matched Source table header typography to ordinary body text.
+- Prevented the Source split Preview to Preview transition from briefly flashing stale Source content.
+- Rendered Preview table borders as solid lines so intersections no longer appear as dark dots.
+
 ## 0.3.23
 - Added optional HTML and PDF exports with a clickable table of contents, with PDF body content starting on a fresh page after the contents.
 - Improved PDF pagination and overflow handling for long code, tables, complex lists, headings, large Mermaid diagrams, and unbroken inline content.
