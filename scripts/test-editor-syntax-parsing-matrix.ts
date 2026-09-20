@@ -128,6 +128,43 @@ async function main(): Promise<void> {
       'initial Source must not synchronously request whole-document parsing'
     );
 
+    const sourceTableHeaderTypography = await page.evaluate(() => {
+      const lines = Array.from(document.querySelectorAll<HTMLElement>('#source .cm-line'));
+      const headerLine = lines.find((line) => line.textContent === '| A | B |');
+      const bodyLine = lines.find((line) => line.textContent === '| one | two |');
+      const headerCell = headerLine?.querySelector<HTMLElement>('.meo-md-source-table-header-cell') ?? null;
+      const headerText = headerCell?.querySelector<HTMLElement>('span') ?? headerCell;
+      if (!headerLine || !bodyLine || !headerText) return null;
+      const headerStyle = getComputedStyle(headerText);
+      const bodyStyle = getComputedStyle(bodyLine);
+      return {
+        headerColor: headerStyle.color,
+        bodyColor: bodyStyle.color,
+        headerFontSize: headerStyle.fontSize,
+        bodyFontSize: bodyStyle.fontSize,
+        headerFontWeight: headerStyle.fontWeight,
+        bodyFontWeight: bodyStyle.fontWeight,
+        headerFontStyle: headerStyle.fontStyle,
+        bodyFontStyle: bodyStyle.fontStyle
+      };
+    });
+    assert.ok(sourceTableHeaderTypography, 'Source table header typography fixture was not rendered');
+    assert.deepEqual(
+      {
+        color: sourceTableHeaderTypography.headerColor,
+        fontSize: sourceTableHeaderTypography.headerFontSize,
+        fontWeight: sourceTableHeaderTypography.headerFontWeight,
+        fontStyle: sourceTableHeaderTypography.headerFontStyle
+      },
+      {
+        color: sourceTableHeaderTypography.bodyColor,
+        fontSize: sourceTableHeaderTypography.bodyFontSize,
+        fontWeight: sourceTableHeaderTypography.bodyFontWeight,
+        fontStyle: sourceTableHeaderTypography.bodyFontStyle
+      },
+      'Source table header text must use ordinary body typography rather than heading styling'
+    );
+
     const sourceEditedText = largeText.replace('plain source line 0', 'plain Source line 0');
     const sourceDocumentChange = await page.evaluate((text) => {
       const editor = (window as any).__syntaxSourceEditor;

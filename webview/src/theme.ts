@@ -42,7 +42,10 @@ export const sourceHighlightStyle = HighlightStyle.define([
 // processing instruction, so Source must correct that one parser tag before
 // applying the native palette.
 export const sourceMarkdownHighlightProps = styleTags({
-  HeaderMark: headerMarkTag
+  HeaderMark: headerMarkTag,
+  // Lezer marks every descendant of TableHeader as a heading. A Markdown
+  // table header is structural table content, not a document heading.
+  'TableHeader/...': tags.content
 });
 
 // Live Mode owns rendered Markdown presentation through decorations and line styles.
