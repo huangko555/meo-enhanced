@@ -3408,10 +3408,10 @@ export function createEditor({
         return;
       }
       if (align === 'top') {
-        // Keep the first distant jump atomic inside CodeMirror. Directly
-        // writing scrollTop after a separate selection transaction can paint
-        // target content beside gutters from the previous viewport for one
-        // frame. The controller only owns later height-map settlement.
+        // Let CodeMirror choose the first atomic landing for content and
+        // gutters, then retain that exact on-screen Y while late height-map
+        // measurements settle. A second forced line-top restore would expose
+        // two nearby target positions on consecutive frames.
         const isRevealCurrent = viewportController.beginNavigationReveal();
         view.dispatch({
           selection: { anchor: line.from, head: line.from },
@@ -3421,7 +3421,20 @@ export function createEditor({
         requestAnimationFrame(() => {
           if (!isRevealCurrent()) return;
           const targetLine = view.state.doc.line(Math.min(line.number, view.state.doc.lines));
-          viewportController.restoreTopVisibleLine(targetLine.number, 0, undefined, { force: true });
+          const coords = view.coordsAtPos(targetLine.from);
+          if (!coords) return;
+          const viewport = view.scrollDOM.getBoundingClientRect();
+          const landedInsideViewport = (
+            coords.top >= viewport.top - 1 &&
+            coords.bottom <= viewport.bottom + 1
+          );
+          const retainedTop = landedInsideViewport ? coords.top : viewport.top;
+          if (!landedInsideViewport) {
+            // A backward jump can be estimated from the old virtual viewport.
+            // Correct that estimate in the same animation frame, before paint.
+            view.scrollDOM.scrollTop += coords.top - retainedTop;
+          }
+          viewportController.retainPositionTop(targetLine.from, retainedTop, isRevealCurrent);
         });
         return;
       }
@@ -3539,6 +3552,10 @@ export function createEditor({
     },
     preserveViewport(mutate: () => void) {
       viewportController.preserveDocumentAnchorWhileMutation(mutate);
+    },
+    preserveViewportLayout(mutate: () => void) {
+      const anchor = viewportController.captureDocumentAnchor();
+      viewportController.preservePositionWhileMutation(anchor.position, mutate, 'immediate');
     },
     setDiagnostics(diagnostics: EditorDiagnostic[]) {
       currentDiagnostics = Array.isArray(diagnostics) ? diagnostics : [];

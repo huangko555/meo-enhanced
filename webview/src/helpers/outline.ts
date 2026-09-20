@@ -17,6 +17,8 @@ interface EditorApi {
   getVisibleDocumentRange(): { from: number; to: number; fromLine: number; toLine: number };
   getScrollElement(): EventTarget;
   scrollToLine(line: number, position: string): void;
+  preserveViewport?(mutate: () => void): void;
+  preserveViewportLayout?(mutate: () => void): void;
 }
 
 type OutlineMode = 'floating' | 'fixed';
@@ -181,6 +183,12 @@ export function createOutlineController({
   let scrollFrame = 0;
 
   const notifyUiState = () => onUiStateChange?.({ mode, width });
+  const mutateLayoutWithViewportPreserved = (mutate: () => void) => {
+    const editor = getEditor();
+    if (editor?.preserveViewportLayout) editor.preserveViewportLayout(mutate);
+    else if (editor?.preserveViewport) editor.preserveViewport(mutate);
+    else mutate();
+  };
   const applyOutlineWidth = () => {
     outlineSidebar.style.width = `${width}px`;
     editorWrapper.style.setProperty('--meo-outline-width', `${width}px`);
@@ -440,8 +448,12 @@ export function createOutlineController({
 
   const setVisible = (nextVisible: boolean) => {
     const changed = visible !== (nextVisible === true);
-    visible = nextVisible === true;
-    updateOutlineUI();
+    const update = () => {
+      visible = nextVisible === true;
+      updateOutlineUI();
+    };
+    if (changed && mode === 'fixed') mutateLayoutWithViewportPreserved(update);
+    else update();
     if (visible && changed) refresh();
   };
 
@@ -454,16 +466,27 @@ export function createOutlineController({
   const setMode = (nextMode: OutlineMode) => {
     const normalizedMode = nextMode === 'floating' ? 'floating' : 'fixed';
     if (mode === normalizedMode) return;
-    mode = normalizedMode;
-    updateOutlineUI();
+    const update = () => {
+      mode = normalizedMode;
+      updateOutlineUI();
+    };
+    if (visible && (mode === 'fixed' || normalizedMode === 'fixed')) {
+      mutateLayoutWithViewportPreserved(update);
+    } else {
+      update();
+    }
     notifyUiState();
   };
 
   const setWidth = (nextWidth: number) => {
     const normalizedWidth = normalizeOutlineWidth(nextWidth);
     if (width === normalizedWidth) return;
-    width = normalizedWidth;
-    applyOutlineWidth();
+    const update = () => {
+      width = normalizedWidth;
+      applyOutlineWidth();
+    };
+    if (visible && mode === 'fixed') mutateLayoutWithViewportPreserved(update);
+    else update();
     notifyUiState();
   };
 

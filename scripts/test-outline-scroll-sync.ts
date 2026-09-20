@@ -26,6 +26,127 @@ function createDocument(): string {
   return lines.join('\n');
 }
 
+async function assertOutlineViewportStability(page: Page, mode: 'source' | 'live'): Promise<void> {
+  await page.evaluate(({ text, nextMode }) => {
+    (window as any).__outlineEditor?.destroy?.();
+    const root = document.getElementById('app')!;
+    root.replaceChildren();
+    const editorWrapper = document.createElement('div');
+    editorWrapper.className = 'editor-wrapper';
+    editorWrapper.style.height = '100%';
+    const editorHost = document.createElement('div');
+    editorHost.className = 'editor-host';
+    editorHost.style.height = '100%';
+    const outlineButton = document.createElement('button');
+    root.appendChild(editorWrapper);
+    editorWrapper.appendChild(editorHost);
+    const editor = (window as any).EditorStabilityHarness.createEditor({
+      parent: editorHost,
+      text,
+      initialMode: nextMode,
+      initialGitGutter: false,
+      onApplyChanges() {}
+    });
+    const outline = (window as any).EditorStabilityHarness.createOutlineController({
+      root,
+      editorWrapper,
+      outlineButton,
+      getEditor: () => editor
+    });
+    editorWrapper.appendChild(outline.sidebar);
+    outline.setMode('fixed');
+    outline.setVisible(true);
+    (window as any).__outlineEditor = editor;
+    (window as any).__outlineController = outline;
+  }, {
+    nextMode: mode,
+    text: [
+      '# Heading 1',
+      ...Array.from({ length: 180 }, (_, index) => (
+        index % 12 === 0
+          ? `# Heading ${index / 12 + 2}`
+          : `long paragraph ${index + 1} ${'word '.repeat(18)}`
+      ))
+    ].join('\n')
+  });
+  await waitForFrames(page, 16);
+
+  const jumpTrace = await page.evaluate(async () => {
+    const editor = (window as any).__outlineEditor;
+    const outline = (window as any).__outlineController;
+    editor.scrollToLine(1, 'top');
+    for (let frame = 0; frame < 12; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    const target = Array.from(outline.sidebar.querySelectorAll<HTMLButtonElement>('.outline-item')).at(-2)!;
+    const heading = editor.getHeadings().find((candidate: { text: string }) => candidate.text === target.title);
+    if (!heading) throw new Error(`Missing outline target: ${target.title}`);
+    const position = editor.view.state.doc.line(heading.line).from;
+    const offsets: number[] = [];
+    target.click();
+    for (let frame = 0; frame < 12; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const coords = editor.view.coordsAtPos(position);
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      if (coords) offsets.push(coords.top - viewport.top);
+    }
+    return { title: target.title, offsets };
+  });
+  if (
+    jumpTrace.offsets.length < 2 ||
+    jumpTrace.offsets.some((offset) => offset < -1 || offset > 20) ||
+    Math.max(...jumpTrace.offsets) - Math.min(...jumpTrace.offsets) > 1
+  ) {
+    throw new Error(`Outline heading jump painted more than one target position in ${mode}: ${JSON.stringify(jumpTrace)}`);
+  }
+
+  for (const scenario of ['hidden-to-fixed', 'floating-to-fixed'] as const) {
+    const layoutTrace = await page.evaluate(async (kind) => {
+      const editor = (window as any).__outlineEditor;
+      const outline = (window as any).__outlineController;
+      if (kind === 'hidden-to-fixed') {
+        outline.setMode('fixed');
+        outline.setVisible(false);
+      } else {
+        outline.setMode('floating');
+        outline.setVisible(true);
+      }
+      for (let frame = 0; frame < 12; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      editor.scrollToLine(90, 'top');
+      for (let frame = 0; frame < 12; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const topVisibleBefore = editor.getTopVisiblePosition();
+      const position = editor.view.state.doc.line(topVisibleBefore.line).from;
+      const viewportBefore = editor.view.scrollDOM.getBoundingClientRect();
+      const before = editor.view.coordsAtPos(position)?.top ?? null;
+      if (before === null) throw new Error('Missing layout anchor before outline transition');
+      const expectedOffset = before - viewportBefore.top;
+      if (expectedOffset < -100 || expectedOffset > 20) {
+        throw new Error(`Outline layout anchor was not positioned at the viewport top: ${expectedOffset}`);
+      }
+      const offsets: Array<number | null> = [];
+      if (kind === 'hidden-to-fixed') outline.setVisible(true);
+      else outline.setMode('fixed');
+      for (let frame = 0; frame < 12; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const viewport = editor.view.scrollDOM.getBoundingClientRect();
+        const top = editor.view.coordsAtPos(position)?.top ?? null;
+        offsets.push(top === null ? null : top - viewport.top);
+      }
+      return { kind, expectedOffset, topVisibleBefore, topVisibleAfter: editor.getTopVisiblePosition(), offsets };
+    }, scenario);
+    if (
+      layoutTrace.offsets.some((offset) => offset === null) ||
+      layoutTrace.offsets.some((offset) => Math.abs((offset ?? 0) - layoutTrace.expectedOffset) > 2)
+    ) {
+      throw new Error(`Outline ${scenario} exposed an intermediate document position in ${mode}: ${JSON.stringify(layoutTrace)}`);
+    }
+  }
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-editor-stability-entry.ts')],
@@ -147,6 +268,10 @@ async function main(): Promise<void> {
       if (fallbackHeading !== 'Heading 1') {
         throw new Error(`A one-line rendered block must retain its owning heading: ${fallbackHeading}`);
       }
+    }
+
+    for (const mode of ['source', 'live'] as const) {
+      await assertOutlineViewportStability(page, mode);
     }
 
     console.log('outline scroll sync checks passed');

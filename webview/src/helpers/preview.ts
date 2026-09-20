@@ -2380,6 +2380,17 @@ export function createPreviewController({
     },
     getVisibleDocumentRange,
     getScrollElement: () => getFrameDocument() ?? frame,
+    preserveViewportLayout: (mutate: () => void) => {
+      const position = getTopVisiblePosition();
+      mutate();
+      if (!position) return;
+      restoreTopVisiblePosition({
+        line: position.topLine,
+        lineOffset: position.topLineOffset,
+        viewportOffset: position.viewportOffset,
+        sourceRange: position.sourceRange
+      }, () => true);
+    },
     scrollToLine: (line: number) => {
       getFrameDocument()?.querySelector<HTMLElement>(`[data-source-line="${line}"]`)?.scrollIntoView({ block: 'start' });
     }
