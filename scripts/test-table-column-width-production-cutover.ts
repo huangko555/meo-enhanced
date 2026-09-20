@@ -222,7 +222,31 @@ async function dragWithCommittedSamples(
       started: document.querySelector('.cm-editor')?.classList.contains('meo-table-column-resizing') ?? false
     };
   });
-  if (!pointer.started) throw new Error(`Synthetic table width drag did not start: ${selector}`);
+  if (!pointer.started) {
+    const diagnostics = await page.evaluate(({ handleSelector, x, y }) => {
+      const handle = document.querySelector<HTMLElement>(handleSelector);
+      const chrome = handle?.closest<HTMLElement>('.meo-md-html-table-sticky-chrome');
+      const table = document.querySelector<HTMLElement>(
+        '.meo-md-html-table:not(.meo-md-html-table-sticky-table):first-of-type'
+      );
+      const scroller = document.querySelector<HTMLElement>('.cm-scroller');
+      const bounds = (element: HTMLElement | null | undefined) => {
+        if (!element) return null;
+        const rect = element.getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
+      };
+      const hit = document.elementFromPoint(x, y);
+      return {
+        handle: bounds(handle),
+        chrome: bounds(chrome),
+        chromeClass: chrome?.className ?? null,
+        table: bounds(table),
+        scrollTop: scroller?.scrollTop ?? null,
+        hitClass: hit instanceof HTMLElement ? hit.className : null
+      };
+    }, { handleSelector: selector, x: pointer.x, y: pointer.y });
+    throw new Error(`Synthetic table width drag did not start: ${selector}; ${JSON.stringify(diagnostics)}`);
+  }
   await page.evaluate(({ x, y, pointerId, requestedDelta }) => {
     window.dispatchEvent(new PointerEvent('pointermove', {
       bubbles: true, cancelable: true, buttons: 1,
@@ -848,8 +872,9 @@ async function main(): Promise<void> {
     const firstHandle = `${tableSelector}:first-of-type th:first-child .meo-md-html-table-column-resize-handle`;
     const firstStickyHandle = '.meo-md-html-table-sticky-table th:first-child .meo-md-html-table-column-resize-handle';
     await waitForTableLayout(page, tableSelector, 1, 3);
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
       (window as any).__columnWidthProduction.scrollToLine(26, 'top');
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
       scroller.scrollTop += 32;
       scroller.dispatchEvent(new Event('scroll'));
@@ -1111,7 +1136,11 @@ async function main(): Promise<void> {
     const cssZoomSession = await page.createCDPSession();
     await cssZoomSession.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1.25 });
     const zoomedMiddleBefore = (await widths(page, tableSelector))[1];
-    await drag(page, `${tableSelector}:first-of-type th:nth-child(2) .meo-md-html-table-column-resize-handle`, 24);
+    await drag(
+      page,
+      '.meo-md-html-table-sticky-table th:nth-child(2) .meo-md-html-table-column-resize-handle',
+      24
+    );
     const zoomedMiddleAfter = (await widths(page, tableSelector))[1];
     assert.ok(
       Math.abs(zoomedMiddleAfter - zoomedMiddleBefore - 24) < 2,
@@ -2082,8 +2111,9 @@ async function main(): Promise<void> {
     assert.ok(richWidthsAfterMiddle[1] < richWidthsBefore[1] - 60);
     assert.equal(await page.evaluate(() => (window as any).__columnWidthProduction.getText()), richTable);
 
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
       (window as any).__columnWidthProduction.scrollToLine(3, 'top');
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
       scroller.scrollTop += 32;
       scroller.dispatchEvent(new Event('scroll'));
