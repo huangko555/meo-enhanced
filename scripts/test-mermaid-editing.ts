@@ -962,9 +962,11 @@ async function main() {
           (window as any).__mermaidThemeConfig = config;
         },
         async render(_id: string, text: string) {
-          const height = text.includes('TALL_PREVIEW') ? 900 : 120;
-          const width = text.includes('TALL_PREVIEW') ? 320 : 1200;
-          const resolvedHeight = text.includes('TALL_PREVIEW') ? height : 400;
+          const tallPreview = text.includes('TALL_PREVIEW');
+          const widePreview = text.includes('WIDE_PREVIEW');
+          const height = tallPreview ? 900 : widePreview ? 180 : 120;
+          const width = tallPreview ? 320 : widePreview ? 2400 : 1200;
+          const resolvedHeight = tallPreview ? height : widePreview ? 180 : 400;
           const variables = (window as any).__mermaidThemeConfig?.themeVariables ?? {};
           const coloredNode = '<g class="node custom"><rect data-custom-node width="160" height="80" style="fill:#1e293b;stroke:#60a5fa"></rect><foreignObject><div class="nodeLabel" style="color:#f8fafc">Custom</div></foreignObject></g>';
           const themedNode = `<rect data-themed-node x="180" width="160" height="80" fill="${variables.primaryColor ?? '#ffffff'}" stroke="${variables.primaryBorderColor ?? '#000000'}"></rect>`;
@@ -1498,9 +1500,6 @@ async function main() {
         sourceStickyPosition: sourceSticky ? getComputedStyle(sourceSticky).position : null,
         previewHeight: previewBlock?.getBoundingClientRect().height ?? 0,
         previewFrameHeight: sticky?.getBoundingClientRect().height ?? 0,
-        availablePreviewHeight: source
-          ? Math.min(source.getBoundingClientRect().height, window.innerHeight - 48)
-          : 0,
         stickyPosition: sticky ? getComputedStyle(sticky).position : null,
         hasInternalVerticalScroll: Boolean(scroller && scroller.scrollHeight > scroller.clientHeight + 1),
         nextLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label')
@@ -1524,10 +1523,10 @@ async function main() {
     }
     if (
       Math.abs(splitMode.sourcePaneHeight - splitMode.sourceHeight) > 1 ||
-      splitMode.previewHeight > splitMode.previewFrameHeight + 2 ||
-      splitMode.previewFrameHeight >= splitMode.availablePreviewHeight
+      Math.abs(splitMode.previewFrameHeight - splitMode.sourcePaneHeight) > 1 ||
+      Math.abs(splitMode.previewHeight - splitMode.previewFrameHeight) > 1
     ) {
-      throw new Error(`Split preview retained the old floating viewport layout: ${JSON.stringify({ defaultMode, splitMode })}`);
+      throw new Error(`Split preview did not span the fenced block height: ${JSON.stringify({ defaultMode, splitMode })}`);
     }
 
     const lightSplitTheme = await page.$eval(
@@ -2548,6 +2547,71 @@ async function main() {
       (window as any).__localizedRenderedBlockEditor.destroy();
       document.getElementById('localized-rendered-block-actions')?.remove();
     });
+
+    await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 1 });
+    await page.evaluate(() => {
+      (window as any).__mermaidEditingEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: [
+          '```mermaid',
+          'flowchart LR',
+          'A[Input and project materials] --> B[Complete rules and defaults]',
+          'C[Selected language] --> D[Choose representative pages]',
+          'B --> E{Diagram problem exists}',
+          'D --> E',
+          'E -- Yes --> F[Clarify centrally]',
+          'E -- No --> G[Generate chapter and page allocation]',
+          'F --> G',
+          'G --> H[Copy template pages and fill content]',
+          'H --> I[Critical issue inspection]',
+          'I --> J[Deliver editable draft and replacement list]',
+          '%% WIDE_PREVIEW',
+          '```'
+        ].join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    });
+    await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-block svg[width="2400"]')));
+    await page.click('.meo-mermaid-mode-btn');
+    await waitForFrames(page, 12);
+    const wideSplitBounds = await page.evaluate(() => {
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
+      const source = block.querySelector<HTMLElement>('.meo-mermaid-source-pane')!;
+      const preview = block.querySelector<HTMLElement>('.meo-mermaid-preview-shell')!;
+      const previewViewport = block.querySelector<HTMLElement>('.meo-mermaid-preview-sticky')!;
+      const previewBlock = previewViewport.querySelector<HTMLElement>('.meo-mermaid-block')!;
+      const root = block.getBoundingClientRect();
+      const sourceRect = source.getBoundingClientRect();
+      const previewRect = preview.getBoundingClientRect();
+      const previewViewportRect = previewViewport.getBoundingClientRect();
+      const previewBlockRect = previewBlock.getBoundingClientRect();
+      return {
+        root: { top: root.top, bottom: root.bottom, height: root.height },
+        source: { top: sourceRect.top, bottom: sourceRect.bottom, height: sourceRect.height },
+        preview: { top: previewRect.top, bottom: previewRect.bottom, height: previewRect.height },
+        previewViewport: {
+          top: previewViewportRect.top,
+          bottom: previewViewportRect.bottom,
+          height: previewViewportRect.height
+        },
+        previewBlock: { top: previewBlockRect.top, bottom: previewBlockRect.bottom, height: previewBlockRect.height }
+      };
+    });
+    if (
+      Math.abs(wideSplitBounds.source.top - wideSplitBounds.root.top) > 1 ||
+      Math.abs(wideSplitBounds.preview.top - wideSplitBounds.root.top) > 1 ||
+      Math.abs(wideSplitBounds.source.bottom - wideSplitBounds.root.bottom) > 1 ||
+      Math.abs(wideSplitBounds.preview.bottom - wideSplitBounds.root.bottom) > 1 ||
+      Math.abs(wideSplitBounds.previewViewport.top - wideSplitBounds.root.top) > 1 ||
+      Math.abs(wideSplitBounds.previewViewport.bottom - wideSplitBounds.root.bottom) > 1 ||
+      Math.abs(wideSplitBounds.previewBlock.top - wideSplitBounds.root.top) > 1 ||
+      Math.abs(wideSplitBounds.previewBlock.bottom - wideSplitBounds.root.bottom) > 1
+    ) {
+      throw new Error(`Wide Mermaid split panes did not span the fenced block: ${JSON.stringify(wideSplitBounds)}`);
+    }
 
     console.log('Mermaid editing checks passed');
   } finally {

@@ -5065,6 +5065,12 @@ body.outline-resizing .preview-frame {
   max-height: 100%;
 }
 
+@media (min-width: 761px) {
+  .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-mermaid-preview-sticky {
+    height: 100%;
+  }
+}
+
 .cm-editor .meo-mermaid-source-editor > .cm-editor,
 .cm-editor .meo-latex-math-source-editor > .cm-editor {
   height: auto;
