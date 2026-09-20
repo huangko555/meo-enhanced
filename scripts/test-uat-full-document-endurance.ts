@@ -85,9 +85,9 @@ const shuffledWave: Operation[] = [
   { id: 'shuffle-nested-quote', kind: 'outer', needle: 'NESTED', marker: '__S05__' },
   { id: 'shuffle-code', kind: 'outer', needle: 'id: number', marker: '__S06__' },
   { id: 'shuffle-long-code', kind: 'outer', needle: 'return value_01 + value_25', marker: '__S07__' },
-  { id: 'shuffle-relative-link', kind: 'outer', needle: './meo-undo-redo-uat.md', marker: '__S08__' },
-  { id: 'shuffle-svg-image', kind: 'outer', needle: 'assets/local-preview.svg', marker: '__S08A__' },
-  { id: 'shuffle-png-image', kind: 'outer', needle: 'assets/1785549139805.png', marker: '__S08B__' },
+  { id: 'shuffle-relative-link', kind: 'outer', needle: '[返回本测试文档](./meo-undo-redo-uat.md)', marker: '__S08__' },
+  { id: 'shuffle-svg-image', kind: 'outer', needle: '![本地预览 SVG](assets/local-preview.svg "local-preview")', marker: '__S08A__' },
+  { id: 'shuffle-png-image', kind: 'outer', needle: '![本地测试 PNG](assets/1785549139805.png "undo-redo-image")', marker: '__S08B__' },
   { id: 'shuffle-footnote', kind: 'outer', needle: 'Redo 脚注原始内容', marker: '__S09__' },
   { id: 'shuffle-math', kind: 'math', needle: '\\sqrt{\\pi}', marker: 'MATH_S10' },
   { id: 'shuffle-mermaid', kind: 'mermaid', needle: 'E-->>U: Restore edit', marker: 'MERMAID_S11' },
@@ -430,7 +430,7 @@ async function editOuter(page: import('puppeteer-core').Page, operation: Operati
   await page.keyboard.type(operation.marker);
   await page.waitForFunction(({ needle, marker }) => (
     (window as any).__fullUatEditor.getText().includes(`${needle}${marker}`)
-  ), {}, { needle: operation.needle, marker: operation.marker });
+  ), { timeout: 3_000 }, { needle: operation.needle, marker: operation.marker });
   const focus = await page.evaluate((expectedLine) => {
     const editor = (window as any).__fullUatEditor;
     return {
@@ -1218,12 +1218,22 @@ async function main(): Promise<void> {
       : phase === 'table-mixed'
         ? allOperations.filter((operation) => operation.kind !== 'mermaid' && operation.kind !== 'math')
         : allOperations;
-    const configuredOperationId = process.env.MEO_UAT_ENDURANCE_OPERATION?.trim();
-    const filteredOperations = configuredOperationId
-      ? operations.filter((operation) => operation.id === configuredOperationId)
+    const configuredOperationIds = (
+      process.env.MEO_UAT_ENDURANCE_OPERATIONS
+      ?? process.env.MEO_UAT_ENDURANCE_OPERATION
+      ?? ''
+    )
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+    const configuredOperationIdSet = new Set(configuredOperationIds);
+    const filteredOperations = configuredOperationIds.length > 0
+      ? operations.filter((operation) => configuredOperationIdSet.has(operation.id))
       : operations;
-    if (configuredOperationId && filteredOperations.length !== 1) {
-      throw new Error(`Missing endurance operation: ${configuredOperationId}`);
+    if (configuredOperationIds.length > 0 && filteredOperations.length !== configuredOperationIdSet.size) {
+      const foundIds = new Set(filteredOperations.map((operation) => operation.id));
+      const missingIds = configuredOperationIds.filter((id) => !foundIds.has(id));
+      throw new Error(`Missing endurance operation: ${missingIds.join(', ')}`);
     }
     const configuredLimit = Number.parseInt(process.env.MEO_UAT_ENDURANCE_LIMIT ?? '', 10);
     const selectedOperations = Number.isInteger(configuredLimit) && configuredLimit > 0
