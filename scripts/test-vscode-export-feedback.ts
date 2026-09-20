@@ -12,6 +12,7 @@ const revealedUris: FakeUri[] = [];
 let selectedAction: string | undefined;
 let saveDialogResult: FakeUri | undefined = targetUri;
 let saveDialogOptions: Record<string, unknown> | undefined;
+let saveDialogInvocationCount = 0;
 let progressOptions: Record<string, unknown> | undefined;
 let progressInvocationCount = 0;
 let rejectReveal = false;
@@ -19,12 +20,14 @@ let notificationPainted = false;
 let saveDialogBarrier: Promise<void> = Promise.resolve();
 let progressCompletionBarrier: Promise<void> = Promise.resolve();
 let saveDialogHandler: (() => Promise<FakeUri | undefined>) | undefined;
+let informationMessageHandler: (() => Promise<string | undefined>) | undefined;
 
 mock.module('vscode', () => ({
   ProgressLocation: { Notification: 15 },
   Uri: { file: (fsPath: string): FakeUri => ({ fsPath }) },
   window: {
     showSaveDialog: async (options: Record<string, unknown>) => {
+      saveDialogInvocationCount += 1;
       saveDialogOptions = options;
       if (saveDialogHandler) return saveDialogHandler();
       await saveDialogBarrier;
@@ -45,6 +48,7 @@ mock.module('vscode', () => ({
     },
     showInformationMessage: async (message: string, ...actions: string[]) => {
       informationMessages.push({ message, actions });
+      if (informationMessageHandler) return informationMessageHandler();
       return selectedAction;
     },
     showErrorMessage: async (message: string) => {
@@ -108,6 +112,7 @@ assert.deepEqual(informationMessages.at(-1), {
   message: 'PDF 导出完成。',
   actions: ['直接打开', '打开所在文件夹']
 });
+await new Promise<void>((resolve) => setTimeout(resolve, 0));
 assert.deepEqual(openedUris, [targetUri]);
 
 selectedAction = 'Show in Folder';
@@ -131,6 +136,7 @@ assert.deepEqual(informationMessages.at(-1), {
   message: 'HTML export completed.',
   actions: ['Open', 'Show in Folder']
 });
+await new Promise<void>((resolve) => setTimeout(resolve, 0));
 assert.equal(revealedUris.at(-1), targetUri);
 
 rejectReveal = true;
@@ -140,6 +146,7 @@ await runVscodeExportWithFeedback({
   format: 'pdf',
   uiLanguage: 'zh-CN'
 }, async () => undefined);
+await new Promise<void>((resolve) => setTimeout(resolve, 0));
 assert.equal(openedUris.at(-1)?.fsPath.replaceAll('\\', '/'), 'D:/exports');
 
 const failedOutcome = await runVscodeExportWithFeedback({
@@ -230,5 +237,87 @@ assert.equal(
 );
 assert.equal(nativeDialogAttempt, 2);
 assert.equal(queuedRetryStarted, true, 'the queued retry must open automatically after cancellation settles');
+
+saveDialogHandler = undefined;
+saveDialogResult = targetUri;
+selectedAction = undefined;
+informationMessageHandler = undefined;
+let releaseActiveExport: (() => void) | undefined;
+let noteActiveExportStarted: (() => void) | undefined;
+const activeExportStarted = new Promise<void>((resolve) => {
+  noteActiveExportStarted = resolve;
+});
+const activeExportBarrier = new Promise<void>((resolve) => {
+  releaseActiveExport = resolve;
+});
+const activeExport = runVscodeExportWithFeedback({
+  sourceDocumentUri,
+  format: 'pdf',
+  uiLanguage: 'zh-CN'
+}, async () => {
+  noteActiveExportStarted?.();
+  await activeExportBarrier;
+});
+await activeExportStarted;
+const dialogsBeforeBusyClick = saveDialogInvocationCount;
+let busyTaskStarted = false;
+const busyOutcome = await runVscodeExportWithFeedback({
+  sourceDocumentUri,
+  format: 'html',
+  uiLanguage: 'en'
+}, async () => {
+  busyTaskStarted = true;
+});
+assert.equal(busyOutcome, 'busy');
+assert.equal(busyTaskStarted, false);
+assert.equal(saveDialogInvocationCount, dialogsBeforeBusyClick);
+assert.equal(progressMessages.at(-1), 'An export is already in progress. Please wait…');
+releaseActiveExport?.();
+assert.equal(await activeExport, 'completed');
+
+saveDialogHandler = undefined;
+const firstCompletedTarget: FakeUri = { fsPath: 'D:/exports/first.pdf' };
+const secondCompletedTarget: FakeUri = { fsPath: 'D:/exports/second.pdf' };
+const completionTargets = [firstCompletedTarget, secondCompletedTarget];
+saveDialogHandler = async () => completionTargets.shift();
+selectedAction = undefined;
+let releaseCompletionNotification: (() => void) | undefined;
+let noteCompletionNotificationShown: (() => void) | undefined;
+const completionNotificationShown = new Promise<void>((resolve) => {
+  noteCompletionNotificationShown = resolve;
+});
+const completionNotificationBarrier = new Promise<void>((resolve) => {
+  releaseCompletionNotification = resolve;
+});
+informationMessageHandler = async () => {
+  noteCompletionNotificationShown?.();
+  await completionNotificationBarrier;
+  return 'Open';
+};
+const exportWithPendingCompletion = runVscodeExportWithFeedback({
+  sourceDocumentUri,
+  format: 'pdf',
+  uiLanguage: 'en'
+}, async () => undefined);
+await completionNotificationShown;
+informationMessageHandler = undefined;
+const dialogsBeforeCompletionRetry = saveDialogInvocationCount;
+const completionRetry = runVscodeExportWithFeedback({
+  sourceDocumentUri,
+  format: 'pdf',
+  uiLanguage: 'en'
+}, async () => undefined);
+await new Promise<void>((resolve) => setTimeout(resolve, 0));
+const dialogsAfterCompletionRetry = saveDialogInvocationCount;
+releaseCompletionNotification?.();
+const completionOutcomes = await Promise.all([exportWithPendingCompletion, completionRetry]);
+await new Promise<void>((resolve) => setTimeout(resolve, 0));
+assert.equal(
+  dialogsAfterCompletionRetry,
+  dialogsBeforeCompletionRetry + 1,
+  'a visible completion notification must not block the next export destination dialog'
+);
+assert.deepEqual(completionOutcomes, ['completed', 'completed']);
+assert.equal(openedUris.at(-1), firstCompletedTarget);
 
 console.log('VS Code export feedback checks passed');

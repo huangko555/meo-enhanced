@@ -14,7 +14,9 @@ type VscodeExportStrings = {
   readonly saveLabel: string;
   readonly completed: string;
   readonly queuedRetry: string;
+  readonly alreadyRunning: string;
   readonly failed: (message: string) => string;
+  readonly completionActionFailed: (message: string) => string;
   readonly open: string;
   readonly reveal: string;
   readonly progress: Readonly<Record<VscodeExportProgressStage, string>>;
@@ -25,7 +27,13 @@ type VscodeExportTaskContext = {
   readonly report: (stage: VscodeExportProgressStage) => void;
 };
 
-export type VscodeExportOutcome = 'cancelled' | 'completed' | 'failed';
+export type VscodeExportOutcome = 'busy' | 'cancelled' | 'completed' | 'failed';
+
+type VscodeExportAttemptResult =
+  | { readonly outcome: 'cancelled' | 'failed' }
+  | { readonly outcome: 'completed'; readonly targetUri: vscode.Uri };
+
+type ActiveExportPhase = 'idle' | 'selectingDestination' | 'exporting';
 
 type PendingExportRequest = {
   readonly options: {
@@ -41,7 +49,8 @@ type PendingExportRequest = {
 // Serialize requests and retain the latest retry so a click in that gap is not lost.
 let exportRequestActive = false;
 let queuedCancelledExportRetry: PendingExportRequest | null = null;
-let activeDestinationProgress: vscode.Progress<{ message?: string; increment?: number }> | null = null;
+let activeExportPhase: ActiveExportPhase = 'idle';
+let activeExportProgress: vscode.Progress<{ message?: string; increment?: number }> | null = null;
 
 export function runVscodeExportWithFeedback(
   options: {
@@ -54,11 +63,15 @@ export function runVscodeExportWithFeedback(
   return new Promise<VscodeExportOutcome>((resolve) => {
     const request = { options, task, resolve } satisfies PendingExportRequest;
     if (exportRequestActive) {
-      queuedCancelledExportRetry?.resolve('cancelled');
-      queuedCancelledExportRetry = request;
-      activeDestinationProgress?.report({
-        message: getStrings(options.uiLanguage, options.format).queuedRetry
-      });
+      const strings = getStrings(options.uiLanguage, options.format);
+      if (activeExportPhase === 'selectingDestination') {
+        queuedCancelledExportRetry?.resolve('cancelled');
+        queuedCancelledExportRetry = request;
+        activeExportProgress?.report({ message: strings.queuedRetry });
+      } else {
+        activeExportProgress?.report({ message: strings.alreadyRunning });
+        request.resolve('busy');
+      }
       return;
     }
 
@@ -69,14 +82,21 @@ export function runVscodeExportWithFeedback(
 
 async function drainExportRequests(initialRequest: PendingExportRequest): Promise<void> {
   let request: PendingExportRequest | null = initialRequest;
+  let completedExport: { readonly targetUri: vscode.Uri; readonly strings: VscodeExportStrings } | null = null;
   try {
     while (request) {
-      const outcome = await performVscodeExportWithFeedback(request.options, request.task);
-      request.resolve(outcome);
+      const result = await performVscodeExportWithFeedback(request.options, request.task);
+      request.resolve(result.outcome);
+      if (result.outcome === 'completed') {
+        completedExport = {
+          targetUri: result.targetUri,
+          strings: getStrings(request.options.uiLanguage, request.options.format)
+        };
+      }
 
       const queued = queuedCancelledExportRetry;
       queuedCancelledExportRetry = null;
-      if (outcome === 'cancelled' && queued) {
+      if (result.outcome === 'cancelled' && queued) {
         request = queued;
       } else {
         queued?.resolve('cancelled');
@@ -85,6 +105,12 @@ async function drainExportRequests(initialRequest: PendingExportRequest): Promis
     }
   } finally {
     exportRequestActive = false;
+    activeExportPhase = 'idle';
+    activeExportProgress = null;
+  }
+
+  if (completedExport) {
+    void showCompletedExportFeedback(completedExport.targetUri, completedExport.strings);
   }
 }
 
@@ -95,9 +121,10 @@ async function performVscodeExportWithFeedback(
     readonly uiLanguage: UiLanguage;
   },
   task: (context: VscodeExportTaskContext) => Promise<void>
-): Promise<VscodeExportOutcome> {
+): Promise<VscodeExportAttemptResult> {
   const strings = getStrings(options.uiLanguage, options.format);
   let targetUri: vscode.Uri | undefined;
+  activeExportPhase = 'selectingDestination';
 
   try {
     let resolveDestination!: (uri: vscode.Uri | undefined) => void;
@@ -113,25 +140,21 @@ async function performVscodeExportWithFeedback(
         title: strings.title
       },
       async (progress) => {
+        activeExportProgress = progress;
         try {
           progress.report({ message: strings.progress.selectingDestination });
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
-          activeDestinationProgress = progress;
-          let selectedUri: vscode.Uri | undefined;
-          try {
-            selectedUri = await vscode.window.showSaveDialog({
-              defaultUri: vscode.Uri.file(replaceFileExtension(options.sourceDocumentUri.fsPath, options.format)),
-              filters: options.format === 'html'
-                ? { HTML: ['html', 'htm'] }
-                : { PDF: ['pdf'] },
-              saveLabel: strings.saveLabel
-            });
-          } finally {
-            if (activeDestinationProgress === progress) activeDestinationProgress = null;
-          }
+          const selectedUri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file(replaceFileExtension(options.sourceDocumentUri.fsPath, options.format)),
+            filters: options.format === 'html'
+              ? { HTML: ['html', 'htm'] }
+              : { PDF: ['pdf'] },
+            saveLabel: strings.saveLabel
+          });
           resolveDestination(selectedUri);
           if (!selectedUri) return undefined;
 
+          activeExportPhase = 'exporting';
           progress.report({ message: strings.progress.preparingExport });
           await task({
             targetUri: selectedUri,
@@ -141,35 +164,50 @@ async function performVscodeExportWithFeedback(
         } catch (error) {
           rejectDestination(error);
           throw error;
+        } finally {
+          if (activeExportProgress === progress) activeExportProgress = null;
         }
       }
     );
     void Promise.resolve(progressOperation).catch(rejectDestination);
     const selectedUri = await destination;
-    if (!selectedUri) return 'cancelled';
+    if (!selectedUri) return { outcome: 'cancelled' };
     targetUri = await progressOperation;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error || 'Export failed');
     void vscode.window.showErrorMessage(strings.failed(message));
-    return 'failed';
+    return { outcome: 'failed' };
   }
-  if (!targetUri) return 'cancelled';
+  if (!targetUri) return { outcome: 'cancelled' };
 
-  const selected = await vscode.window.showInformationMessage(
-    strings.completed,
-    strings.open,
-    strings.reveal
-  );
-  if (selected === strings.open) {
-    await vscode.env.openExternal(targetUri);
-  } else if (selected === strings.reveal) {
-    try {
-      await vscode.commands.executeCommand('revealFileInOS', targetUri);
-    } catch {
-      await vscode.env.openExternal(vscode.Uri.file(path.dirname(targetUri.fsPath)));
+  return { outcome: 'completed', targetUri };
+}
+
+async function showCompletedExportFeedback(
+  targetUri: vscode.Uri,
+  strings: VscodeExportStrings
+): Promise<void> {
+  try {
+    const selected = await vscode.window.showInformationMessage(
+      strings.completed,
+      strings.open,
+      strings.reveal
+    );
+    if (selected === strings.open) {
+      const opened = await vscode.env.openExternal(targetUri);
+      if (!opened) throw new Error('The exported file could not be opened.');
+    } else if (selected === strings.reveal) {
+      try {
+        await vscode.commands.executeCommand('revealFileInOS', targetUri);
+      } catch {
+        const opened = await vscode.env.openExternal(vscode.Uri.file(path.dirname(targetUri.fsPath)));
+        if (!opened) throw new Error('The export folder could not be opened.');
+      }
     }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || 'Export action failed');
+    void vscode.window.showErrorMessage(strings.completionActionFailed(message));
   }
-  return 'completed';
 }
 
 function getStrings(uiLanguage: UiLanguage, format: VscodeExportFormat): VscodeExportStrings {
@@ -180,7 +218,9 @@ function getStrings(uiLanguage: UiLanguage, format: VscodeExportFormat): VscodeE
       saveLabel: `导出 ${label}`,
       completed: `${label} 导出完成。`,
       queuedRetry: '正在等待系统关闭上一次保存窗口…',
+      alreadyRunning: '当前已有导出正在进行，请稍候…',
       failed: (message) => `${label} 导出失败：${message}`,
+      completionActionFailed: (message) => `${label} 已导出，但无法执行完成操作：${message}`,
       open: '直接打开',
       reveal: '打开所在文件夹',
       progress: {
@@ -197,7 +237,9 @@ function getStrings(uiLanguage: UiLanguage, format: VscodeExportFormat): VscodeE
     saveLabel: `Export ${label}`,
     completed: `${label} export completed.`,
     queuedRetry: 'Waiting for the previous save dialog to close…',
+    alreadyRunning: 'An export is already in progress. Please wait…',
     failed: (message) => `${label} export failed: ${message}`,
+    completionActionFailed: (message) => `${label} was exported, but the completion action failed: ${message}`,
     open: 'Open',
     reveal: 'Show in Folder',
     progress: {
