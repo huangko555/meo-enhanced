@@ -4772,7 +4772,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const notifySelectionChange = () => {
       this.emitTableSelectionChange(container);
     };
-    input.addEventListener('beforeinput', () => {
+    const captureInputViewportIntent = () => {
       const view = this.view;
       if (!view || input.ownerDocument.activeElement !== input) {
         scrollTopBeforeInput = null;
@@ -4787,7 +4787,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       );
       scrollTopBeforeInput = caretIsVisible ? view.scrollDOM.scrollTop : null;
       revealCaretAfterInput = !caretIsVisible;
-    });
+    };
+    input.addEventListener('beforeinput', captureInputViewportIntent);
     input.addEventListener('input', () => {
       const preservedScrollTop = scrollTopBeforeInput;
       const shouldRevealCaret = revealCaretAfterInput;
@@ -4887,6 +4888,10 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       if (keyboard?.type === 'insert-line-break') {
         event.preventDefault();
         event.stopPropagation();
+        // This keyboard path mutates the textarea with setRangeText and emits a
+        // synthetic input event, so the browser does not provide beforeinput.
+        // Capture the same viewport intent as native typing before row growth.
+        captureInputViewportIntent();
         if (!continueTableCellList(input)) replaceTableCellEditorSelection(input, '<br>\n');
         return;
       }

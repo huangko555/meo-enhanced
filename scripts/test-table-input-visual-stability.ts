@@ -169,6 +169,103 @@ async function assertWrappingCellGrowsDownward(page: import('puppeteer-core').Pa
   }
 }
 
+async function assertForcedLineBreakGrowsDownward(page: import('puppeteer-core').Page): Promise<void> {
+  await page.setViewport({ width: 760, height: 360, deviceScaleFactor: 1 });
+  for (const targetTop of [80, 160, 250]) {
+    await page.evaluate((top) => {
+      (window as any).__tableVisualEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      const text = [
+        ...Array.from({ length: 30 }, (_, index) => `强制换行前置正文 ${index + 1}`),
+        '',
+        '| 第一列 | 第二列 | 第三列 |',
+        '| --- | --- | --- |',
+        '| TARGET | 短内容 | 备注 |',
+        '',
+        ...Array.from({ length: 30 }, (_, index) => `强制换行后置正文 ${index + 1}`)
+      ].join('\n');
+      const editor = (window as any).EmbeddedInputViewportHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      (window as any).__tableVisualEditor = editor;
+      (window as any).__forcedBreakTargetTop = top;
+      editor.scrollToLine(34, 'center');
+    }, targetTop);
+    await page.waitForFunction(() => Boolean(Array.from(
+      document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table textarea')
+    ).find((input) => input.value === 'TARGET')));
+    await waitForFrames(page, 10);
+
+    const initial = await page.evaluate(() => {
+      const editor = (window as any).__tableVisualEditor;
+      const input = Array.from(document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table textarea'))
+        .find((candidate) => candidate.value === 'TARGET')!;
+      const cell = input.closest<HTMLTableCellElement>('td')!;
+      const table = input.closest<HTMLTableElement>('table')!;
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      editor.view.scrollDOM.scrollTop += (
+        cell.getBoundingClientRect().top - viewport.top - (window as any).__forcedBreakTargetTop
+      );
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(input.value.length, input.value.length);
+      const rect = cell.getBoundingClientRect();
+      return {
+        cellTop: rect.top,
+        cellBottom: rect.bottom,
+        cellHeight: rect.height,
+        tableTop: table.getBoundingClientRect().top,
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        viewportTop: viewport.top,
+        viewportBottom: viewport.bottom
+      };
+    });
+    await page.keyboard.down('Shift');
+    await page.keyboard.press('Enter');
+    await page.keyboard.up('Shift');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await waitForFrames(page, 10);
+
+    const result = await page.evaluate((before) => {
+      const editor = (window as any).__tableVisualEditor;
+      const input = document.activeElement as HTMLTextAreaElement;
+      const cell = input.closest<HTMLTableCellElement>('td')!;
+      const table = input.closest<HTMLTableElement>('table')!;
+      const rect = cell.getBoundingClientRect();
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      return {
+        value: input.value,
+        focused: input.matches('.meo-md-html-table textarea'),
+        heightDelta: rect.height - before.cellHeight,
+        bottomDelta: rect.bottom - before.cellBottom,
+        cellTopDelta: rect.top - before.cellTop,
+        tableTopDelta: table.getBoundingClientRect().top - before.tableTop,
+        scrollDelta: editor.view.scrollDOM.scrollTop - before.scrollTop,
+        cellTop: rect.top,
+        cellBottom: rect.bottom,
+        viewportTop: viewport.top,
+        viewportBottom: viewport.bottom
+      };
+    }, initial);
+    const remainsVisible = (
+      result.cellTop >= result.viewportTop - 1 &&
+      result.cellBottom <= result.viewportBottom + 1
+    );
+    if (
+      !result.focused || !result.value.includes('<br>\n') ||
+      result.heightDelta < 10 || !remainsVisible ||
+      Math.abs(result.cellTopDelta) > 2 ||
+      Math.abs(result.tableTopDelta) > 2 ||
+      Math.abs(result.scrollDelta) > 2 ||
+      result.bottomDelta < result.heightDelta - 2
+    ) {
+      throw new Error(`Shift+Enter at ${targetTop}px did not grow the cell downward with a stable visible viewport: ${JSON.stringify(result)}`);
+    }
+  }
+}
+
 async function assertOffscreenCellRevealsOnInput(page: import('puppeteer-core').Page): Promise<void> {
   await page.setViewport({ width: 760, height: 360, deviceScaleFactor: 1 });
   for (const side of ['above', 'below'] as const) {
@@ -370,6 +467,7 @@ async function main(): Promise<void> {
     }
 
     await assertWrappingCellGrowsDownward(page);
+    await assertForcedLineBreakGrowsDownward(page);
     await assertColumnReflowKeepsActiveCell(page);
     await assertOffscreenCellRevealsOnInput(page);
     console.log('table input visual stability regression passed');
