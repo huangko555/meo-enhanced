@@ -86,6 +86,9 @@ function buildReadingStyles(
   const panelBorderColor = appearance === 'light'
     ? '#d0d7de'
     : `color-mix(in srgb, ${previewForegroundColor} 22%, transparent)`;
+  const tableBorderColor = appearance === 'light'
+    ? panelBorderColor
+    : `color-mix(in srgb, ${previewForegroundColor} 22%, ${editorBackgroundColor} 78%)`;
   const readingMutedColor = previewMutedColor;
   const semanticColor = isolatePreviewTheme ? sanitizeStandaloneCssColor : sanitizeCssColor;
   const capturedFrontmatterKeyColor = useCapturedFrontmatterColors
@@ -216,7 +219,7 @@ ${headingWeightVarsCss}
   --meo-doc-border: color-mix(in srgb, var(--meo-panel-border) 55%, transparent);
   --meo-code-border: color-mix(in srgb, var(--meo-panel-border) 45%, transparent);
   --meo-hr: color-mix(in srgb, var(--meo-border) 70%, transparent);
-  --meo-table-border: var(--meo-panel-border);
+  --meo-table-border: ${tableBorderColor};
   --meo-table-header-bg: var(--meo-sidebar-bg);
   --meo-kbd-bg: color-mix(in srgb, var(--meo-sidebar-bg) 88%, var(--meo-bg) 12%);
   --meo-kbd-border: color-mix(in srgb, var(--meo-border) 85%, transparent);

@@ -11,7 +11,11 @@ const markdown = [
   '',
   '$$',
   'x^2 + y^2 = z^2',
-  '$$'
+  '$$',
+  '',
+  '| Left | Right |',
+  '| --- | --- |',
+  '| One | Two |'
 ].join('\n');
 const rendered = renderMarkdownToHtml({
   markdownText: markdown,
@@ -37,6 +41,15 @@ try {
     const headingCodes = Array.from(heading?.querySelectorAll<HTMLElement>('code') ?? []);
     const codeBlock = document.querySelector<HTMLElement>('pre.meo-export-code-block');
     const mathBlock = document.querySelector<HTMLElement>('.meo-export-math-fenced-display');
+    const tableCell = document.querySelector<HTMLTableCellElement>('td');
+    const tableBorder = tableCell ? getComputedStyle(tableCell).borderTopColor : '';
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext('2d')!;
+    context.clearRect(0, 0, 1, 1);
+    context.fillStyle = tableBorder;
+    context.fillRect(0, 0, 1, 1);
     return {
       headingFontSize: heading ? Number.parseFloat(getComputedStyle(heading).fontSize) : 0,
       codeFontSizes: headingCodes.map((code) => Number.parseFloat(getComputedStyle(code).fontSize)),
@@ -44,7 +57,9 @@ try {
       italicCodeStyle: headingCodes[2] ? getComputedStyle(headingCodes[2]).fontStyle : '',
       deletedCodeDecoration: headingCodes[3] ? getComputedStyle(headingCodes[3]).textDecorationLine : '',
       codeBlockRadius: codeBlock ? getComputedStyle(codeBlock).borderRadius : '',
-      mathBlockRadius: mathBlock ? getComputedStyle(mathBlock).borderRadius : ''
+      mathBlockRadius: mathBlock ? getComputedStyle(mathBlock).borderRadius : '',
+      tableBorder,
+      tableBorderAlpha: context.getImageData(0, 0, 1, 1).data[3]
     };
   });
   if (
@@ -53,7 +68,8 @@ try {
     layout.italicCodeStyle !== 'italic' ||
     !layout.deletedCodeDecoration.includes('line-through') ||
     layout.codeBlockRadius !== '6px' ||
-    layout.mathBlockRadius !== '6px'
+    layout.mathBlockRadius !== '6px' ||
+    layout.tableBorderAlpha !== 255
   ) {
     throw new Error(`Unexpected Preview reading layout: ${JSON.stringify(layout)}`);
   }
