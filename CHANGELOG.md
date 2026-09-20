@@ -3,18 +3,20 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
-## 0.3.22
+## 0.3.23
 - Added optional HTML and PDF exports with a clickable table of contents, with PDF body content starting on a fresh page after the contents.
-- Refined table-of-contents export menus to match the toolbar, close immediately after selection, and keep local HTML contents links inside the exported document.
-- Improved PDF pagination for long code, tables, complex lists, headings, and large Mermaid diagrams while keeping thematic breaks natural.
-- Prevented long unbroken content in headings, paragraphs, lists, links, and inline code from being clipped in Preview and exports.
-- Added localized export progress spanning output-path selection through file generation, plus completion notifications with actions to open the exported file or reveal and select it in its folder; retry clicks after cancelling the native path dialog are acknowledged immediately and retained during Windows dialog cleanup.
-- Kept exported code blocks and Front Matter colors and layout aligned with the active Live and Preview theme.
-- Kept Preview and export semantic colors readable and appearance-correct when their selected light or dark appearance differs from VS Code.
-- Kept the Preview document background aligned with Live and Source when they use the same light or dark appearance, without coupling mismatched appearances.
+- Improved PDF pagination and overflow handling for long code, tables, complex lists, headings, large Mermaid diagrams, and unbroken inline content.
+- Added localized export progress and completion actions, including opening the exported file or revealing it in its folder, while keeping cancellation and repeated export clicks responsive.
+- Kept exported code blocks, Front Matter, semantic surfaces, and light/dark colors aligned with Live and Preview, including when the Preview appearance differs from VS Code or changes at runtime.
+- Stabilized Preview activation, document backgrounds, reading position, and first-frame code colors across Live, Source, Preview, and Source split Preview transitions.
+- Scoped disk reloads to the active document and preserved embedded editor focus, table state, history context, and long-document viewport continuity during asynchronous presentation work.
+- Fixed installed HTML and PDF exports by resolving bundled Shiki and browser runtime assets from the extension package, while reusing language assets to limit package growth.
+- Fixed Mermaid split Preview so the rendered viewport fills the complete fenced-block height on wide layouts.
+
+## 0.3.22
 - Added an early warning when an open document changes on disk, with localized actions for reviewing or reloading the external version.
 - Added a persistent Source-to-Preview edit-position highlight and click-to-source navigation, with smoother semantic targeting while moving across Preview content.
-- Stabilized reading position and first-frame rendering when switching among Live, Source, Preview, and Source split Preview, including the first pending Preview render and transitions back to Live.
+- Stabilized reading position and first-frame rendering when switching among Live, Source, Preview, and Source split Preview, including transitions back to Live.
 - Restored Live table column widths after editor-tab visibility changes and refined sticky-header editing, row insertion, contextual tools, and restrained header styling.
 - Kept wrapping table cells and offscreen carets anchored predictably during input instead of applying a typewriter-style viewport shift.
 - Prevented partially visible Mermaid source editing from competing for the viewport or flashing unrelated rendered content.
