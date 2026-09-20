@@ -1,4 +1,7 @@
 import MarkdownIt from 'markdown-it';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { CodeThemeDto } from '../protocol/hostConfigurationEvents';
 import {
   projectShikiTokenLines,
@@ -22,6 +25,15 @@ type LanguageRegistry = Readonly<{
   ids: ReadonlyMap<string, string>;
 }>;
 
+type LanguageAssetManifest = Readonly<{
+  version: 1;
+  languages: readonly Readonly<{
+    id: string;
+    aliases: readonly string[];
+    module: string;
+  }>[];
+}>;
+
 export type ExportCodeHighlighter = Readonly<{
   highlight(source: string, language: string): string;
   dispose(): void;
@@ -31,6 +43,55 @@ function resolveShikiLanguage(language: string, registry: LanguageRegistry): str
   const normalized = normalizeFenceLanguage(language);
   if (!normalized || PLAIN_TEXT_LANGUAGE_IDS.has(normalized)) return null;
   return registry.ids.get(normalized) ?? null;
+}
+
+function readLanguageAssetManifest(): { manifest: LanguageAssetManifest; root: string } | null {
+  const candidates = [
+    path.resolve(__dirname, '..', 'webview', 'dist', 'shiki-language-assets.json'),
+    path.resolve(__dirname, '..', '..', 'webview', 'dist', 'shiki-language-assets.json')
+  ];
+  for (const manifestPath of candidates) {
+    if (!existsSync(manifestPath)) continue;
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as LanguageAssetManifest;
+    if (manifest.version !== 1 || !Array.isArray(manifest.languages)) {
+      throw new Error(`Unsupported Shiki language asset manifest: ${manifestPath}`);
+    }
+    return { manifest, root: path.dirname(manifestPath) };
+  }
+  return null;
+}
+
+async function createLanguageRegistry(): Promise<LanguageRegistry> {
+  const assets = readLanguageAssetManifest();
+  if (assets) {
+    const loaders: Record<string, LanguageLoader> = {};
+    const ids = new Map<string, string>();
+    for (const language of assets.manifest.languages) {
+      const modulePath = path.resolve(assets.root, language.module);
+      if (path.dirname(modulePath) !== assets.root) {
+        throw new Error(`Invalid Shiki language asset path: ${language.module}`);
+      }
+      loaders[language.id] = () => import(pathToFileURL(modulePath).href) as Promise<{ default: unknown }>;
+      ids.set(language.id.toLowerCase(), language.id);
+      for (const alias of language.aliases ?? []) ids.set(alias.toLowerCase(), language.id);
+    }
+    return { loaders, ids };
+  }
+
+  // Source-only fallback for tests or local scripts that run before the
+  // Webview build. Keeping the specifier non-literal prevents the production
+  // export bundle from embedding the complete language catalog again.
+  const languageModule = 'shiki/langs';
+  const languages = await import(languageModule);
+  const ids = new Map<string, string>();
+  for (const language of languages.bundledLanguagesInfo) {
+    ids.set(language.id.toLowerCase(), language.id);
+    for (const alias of language.aliases ?? []) ids.set(alias.toLowerCase(), language.id);
+  }
+  return {
+    loaders: languages.bundledLanguages as unknown as Readonly<Record<string, LanguageLoader>>,
+    ids
+  };
 }
 
 function collectLanguages(markdownText: string, registry: LanguageRegistry): string[] {
@@ -116,20 +177,11 @@ export async function createExportCodeHighlighter(
   markdownText: string,
   theme: CodeThemeDto
 ): Promise<ExportCodeHighlighter> {
-  const [{ createHighlighterCore }, { createOnigurumaEngine }, languages] = await Promise.all([
+  const [{ createHighlighterCore }, { createOnigurumaEngine }, registry] = await Promise.all([
     import('shiki/core'),
     import('shiki/engine/oniguruma'),
-    import('shiki/langs')
+    createLanguageRegistry()
   ]);
-  const languageIds = new Map<string, string>();
-  for (const language of languages.bundledLanguagesInfo) {
-    languageIds.set(language.id.toLowerCase(), language.id);
-    for (const alias of language.aliases ?? []) languageIds.set(alias.toLowerCase(), language.id);
-  }
-  const registry: LanguageRegistry = {
-    loaders: languages.bundledLanguages as unknown as Readonly<Record<string, LanguageLoader>>,
-    ids: languageIds
-  };
   const highlighter = await createHighlighterCore({
     themes: [toShikiTheme(theme) as any],
     langs: [],

@@ -31,6 +31,8 @@ const requiredFiles = [
   'webview/dist/index.js',
   'webview/dist/index.css',
   'webview/dist/mermaid.min.js',
+  'webview/dist/package.json',
+  'webview/dist/shiki-language-assets.json',
   'webview/dist/katex/katex.min.css'
 ];
 for (const path of requiredFiles) {
