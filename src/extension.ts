@@ -99,6 +99,7 @@ type ExportRuntimeModule = {
     baseHref: string;
     title: string;
     includeTableOfContents: boolean;
+    shikiLanguageAssetsRoot: string;
   }) => Promise<{ htmlDocument: string; hasMermaid: boolean; hasMath: boolean }>;
   renderPreviewDocument: (options: {
     markdownText: string;
@@ -114,7 +115,7 @@ type ExportRuntimeModule = {
     htmlDocument: string;
     outputPdfPath: string;
     browserExecutablePath?: string;
-    puppeteerRuntimeModulePath?: string;
+    puppeteerRuntimeModulePath: string;
     timeoutMs?: number;
   }) => Promise<void>;
 };
@@ -741,7 +742,12 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       katexStylesHref,
       baseHref,
       title: path.basename(params.outputFileUri.fsPath),
-      includeTableOfContents: params.includeTableOfContents
+      includeTableOfContents: params.includeTableOfContents,
+      shikiLanguageAssetsRoot: vscode.Uri.joinPath(
+        this.context.extensionUri,
+        'webview',
+        'dist'
+      ).fsPath
     });
   }
 

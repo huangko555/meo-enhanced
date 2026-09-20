@@ -7,7 +7,7 @@ import { findPdfBrowserExecutablePath } from './browserDiscovery';
 export type HeadlessExportOptions = {
   htmlDocument: string;
   browserExecutablePath?: string;
-  puppeteerRuntimeModulePath?: string;
+  puppeteerRuntimeModulePath: string;
   timeoutMs?: number;
 };
 
@@ -263,9 +263,8 @@ async function withPreparedExportPage<T>(
   }
 }
 
-async function loadBundledPuppeteerRuntime(explicitRuntimePath?: string): Promise<any> {
+async function loadBundledPuppeteerRuntime(runtimePath: string): Promise<any> {
   if (!puppeteerRuntimePromise) {
-    const runtimePath = explicitRuntimePath || path.join(__dirname, 'puppeteer-runtime.js');
     const runtimeUrl = pathToFileURL(runtimePath).toString();
     puppeteerRuntimePromise = import(runtimeUrl)
       .then((mod: any) => unwrapPuppeteerRuntime(mod))

@@ -39,6 +39,14 @@ for (const path of requiredFiles) {
   if (!included.has(path)) throw new Error(`VSIX listing is missing required file ${path}`);
 }
 
+const escapedRepoRoot = JSON.stringify(repoRoot).slice(1, -1);
+for (const path of ['dist/extension.js', 'dist/export-runtime.js', 'webview/dist/index.js']) {
+  const contents = readFileSync(resolve(repoRoot, path), 'utf8');
+  if (contents.includes(repoRoot) || contents.includes(escapedRepoRoot)) {
+    throw new Error(`Production bundle contains the build checkout path: ${path}`);
+  }
+}
+
 const main = packageJson.main?.replace(/^\.\//, '');
 if (!main || !included.has(main)) {
   throw new Error('VSIX listing must contain the package main entry');

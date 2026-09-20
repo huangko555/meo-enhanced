@@ -109,7 +109,8 @@ const rendered = await runtime.renderExportHtmlDocument({
   target: 'html',
   mermaidRuntimeSrc: '',
   baseHref: 'file:///C:/tmp/',
-  title: 'Export Shiki language assets'
+  title: 'Export Shiki language assets',
+  shikiLanguageAssetsRoot: webviewDist
 });
 assert.equal((rendered.htmlDocument.match(/<div class="meo-export-code-block-wrap/g) ?? []).length, 3);
 assert.ok(

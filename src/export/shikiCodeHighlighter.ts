@@ -45,25 +45,22 @@ function resolveShikiLanguage(language: string, registry: LanguageRegistry): str
   return registry.ids.get(normalized) ?? null;
 }
 
-function readLanguageAssetManifest(): { manifest: LanguageAssetManifest; root: string } | null {
-  const candidates = [
-    path.resolve(__dirname, '..', 'webview', 'dist', 'shiki-language-assets.json'),
-    path.resolve(__dirname, '..', '..', 'webview', 'dist', 'shiki-language-assets.json')
-  ];
-  for (const manifestPath of candidates) {
-    if (!existsSync(manifestPath)) continue;
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as LanguageAssetManifest;
-    if (manifest.version !== 1 || !Array.isArray(manifest.languages)) {
-      throw new Error(`Unsupported Shiki language asset manifest: ${manifestPath}`);
-    }
-    return { manifest, root: path.dirname(manifestPath) };
+function readLanguageAssetManifest(root: string): { manifest: LanguageAssetManifest; root: string } {
+  const resolvedRoot = path.resolve(root);
+  const manifestPath = path.join(resolvedRoot, 'shiki-language-assets.json');
+  if (!existsSync(manifestPath)) {
+    throw new Error(`Missing Shiki language asset manifest: ${manifestPath}`);
   }
-  return null;
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as LanguageAssetManifest;
+  if (manifest.version !== 1 || !Array.isArray(manifest.languages)) {
+    throw new Error(`Unsupported Shiki language asset manifest: ${manifestPath}`);
+  }
+  return { manifest, root: resolvedRoot };
 }
 
-async function createLanguageRegistry(): Promise<LanguageRegistry> {
-  const assets = readLanguageAssetManifest();
-  if (assets) {
+async function createLanguageRegistry(languageAssetsRoot?: string): Promise<LanguageRegistry> {
+  if (languageAssetsRoot) {
+    const assets = readLanguageAssetManifest(languageAssetsRoot);
     const loaders: Record<string, LanguageLoader> = {};
     const ids = new Map<string, string>();
     for (const language of assets.manifest.languages) {
@@ -175,12 +172,13 @@ function renderRuns(lines: ReturnType<typeof projectShikiTokenLines>): string {
 
 export async function createExportCodeHighlighter(
   markdownText: string,
-  theme: CodeThemeDto
+  theme: CodeThemeDto,
+  languageAssetsRoot?: string
 ): Promise<ExportCodeHighlighter> {
   const [{ createHighlighterCore }, { createOnigurumaEngine }, registry] = await Promise.all([
     import('shiki/core'),
     import('shiki/engine/oniguruma'),
-    createLanguageRegistry()
+    createLanguageRegistry(languageAssetsRoot)
   ]);
   const highlighter = await createHighlighterCore({
     themes: [toShikiTheme(theme) as any],

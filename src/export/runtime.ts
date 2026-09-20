@@ -18,6 +18,7 @@ export type ExportRuntimeBuildHtmlOptions = {
   baseHref: string;
   title: string;
   includeTableOfContents?: boolean;
+  shikiLanguageAssetsRoot: string;
 };
 
 async function renderExportHtmlDocument(
@@ -29,7 +30,7 @@ async function renderExportHtmlDocument(
     : (await import('@shikijs/themes/dark-plus')).default as CodeThemeDto);
   const highlighter = snapshot.environment.previewSourceColoring === false
     ? null
-    : await createExportCodeHighlighter(snapshot.text, fallbackTheme);
+    : await createExportCodeHighlighter(snapshot.text, fallbackTheme, options.shikiLanguageAssetsRoot);
   let rendered: ReturnType<typeof renderMarkdownToHtml>;
   try {
     rendered = renderMarkdownToHtml({
