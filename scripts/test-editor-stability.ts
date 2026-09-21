@@ -416,7 +416,7 @@ async function main() {
     const configuredStrongColors = await page.evaluate(() => {
       document.documentElement.style.setProperty(
         '--meo-semantic-strongForeground',
-        'color-mix(in srgb, var(--meo-foreground) 92%, #e5c07b 8%)'
+        'color-mix(in srgb, var(--meo-foreground) 80%, #e5c07b 20%)'
       );
       document.documentElement.classList.add('meo-live-strong-coloring');
       const bodyLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
