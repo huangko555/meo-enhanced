@@ -144,6 +144,10 @@ body {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
+.editor-wrapper.meo-preload-editor-shell {
+  opacity: 0;
+}
+
 /* During Source split -> Preview, keep the old Source half at its painted
    width while the Preview iframe prepares its full-width compositor frame. */
 .editor-surface[data-source-preview-exit-cover] {

@@ -1595,6 +1595,21 @@ let applyCodeThemeForPreview = (appearance: 'light' | 'dark') => {
   setShikiTheme(codePaletteAdapter.resolve(undefined, appearance).sourceTheme, 'preview');
 };
 let previewPaintReady = false;
+let resolveInitialPreviewPaint: (() => void) | null = null;
+const waitForInitialPreviewPaint = (): Promise<void> => {
+  if (previewPaintReady) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (resolveInitialPreviewPaint === finish) resolveInitialPreviewPaint = null;
+      resolve();
+    };
+    resolveInitialPreviewPaint = finish;
+    window.setTimeout(finish, 600);
+  });
+};
 let previewViewportInteractionGeneration = 0;
 const previewController = createPreviewController({
   vscode,
@@ -1618,6 +1633,7 @@ const previewController = createPreviewController({
   },
   onPaintReady: () => {
     previewPaintReady = true;
+    resolveInitialPreviewPaint?.();
     editorHost.removeAttribute('data-preview-cover');
     editorSurface.removeAttribute('data-source-preview-exit-cover');
     markSourcePreviewSurfaceReady();
@@ -2817,10 +2833,6 @@ const handleInit = (message: InitMessage) => {
     enabled: message.restoreReadingPositionOnOpen,
     restore: message.readingPositionRestore
   });
-  toolbar.classList.remove('meo-preload-toolbar');
-  toolbar.removeAttribute('aria-hidden');
-  editorWrapper.classList.remove('meo-preload-editor-shell');
-  editorWrapper.removeAttribute('aria-hidden');
   if (typeof message.contentMaxWidthEnabled === 'boolean') {
     setContentMaxWidthEnabled(message.contentMaxWidthEnabled, { post: false });
   }
@@ -2946,9 +2958,26 @@ window.addEventListener('message', (event) => {
 
       handleInit(message);
       void editorModeRuntime.dispatch({ type: 'initialize', hostMode: message.mode })
-        .then(() => {
+        .then(async () => {
+          const initializedMode = editorModeApplication.getState().mode;
           readingPositionLifecycle?.surfaceReady();
+          if (initializedMode === 'preview') {
+            await waitForInitialPreviewPaint();
+          } else {
+            await editor?.whenVisiblePresentationReady(LIVE_IMAGE_REVEAL_WAIT_MS);
+          }
+          toolbar.classList.remove('meo-preload-toolbar');
+          toolbar.removeAttribute('aria-hidden');
+          editorWrapper.classList.remove('meo-preload-editor-shell');
+          editorWrapper.removeAttribute('aria-hidden');
           failureNotice.updateEditorNotice();
+        })
+        .catch((error) => {
+          logWebviewRenderError('editorMode.initialReveal', error);
+          toolbar.classList.remove('meo-preload-toolbar');
+          toolbar.removeAttribute('aria-hidden');
+          editorWrapper.classList.remove('meo-preload-editor-shell');
+          editorWrapper.removeAttribute('aria-hidden');
         });
     });
     return;

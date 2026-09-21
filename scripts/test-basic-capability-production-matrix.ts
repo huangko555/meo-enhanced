@@ -11,9 +11,9 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-basic-capability-index-'
 const target = 'format target';
 const actions = [['bold', `**${target}**`], ['italic', `*${target}*`], ['lineover', `~~${target}~~`], ['highlight', `==${target}==`], ['inlineCode', `\`${target}\``], ['link', `[${target}]()`], ['wikiLink', `[[${target}]]`], ['kbd', `<kbd>${target}</kbd>`], ['underline', `<u>${target}</u>`]] as const;
 
-const init = (text: string, mode: 'live' | 'source', sourceLineNumbers: SourceLineNumberMode = 'on') => ({ type: 'init', documentId: `file:///basic-${mode}.md`, text, version: 1, savedRevision: { version: 1, text }, diagnostics: [], mode, uiLanguage: 'en', sourceLineNumbers, previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'light', gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, largeDocumentOptimizationEnabled: true, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null });
+const init = (text: string, mode: 'live' | 'source' | 'preview', sourceLineNumbers: SourceLineNumberMode = 'on') => ({ type: 'init', documentId: `file:///basic-${mode}.md`, text, version: 1, savedRevision: { version: 1, text }, diagnostics: [], mode, uiLanguage: 'en', sourceLineNumbers, previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'light', gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, largeDocumentOptimizationEnabled: true, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null });
 
-async function open(browser: Browser, text: string, mode: 'live' | 'source', sourceLineNumbers: SourceLineNumberMode = 'on'): Promise<Page> {
+async function open(browser: Browser, text: string, mode: 'live' | 'source' | 'preview', sourceLineNumbers: SourceLineNumberMode = 'on', observeStartup = false): Promise<Page> {
   const page = await browser.newPage();
   await page.setViewport({ width: 1000, height: 700, deviceScaleFactor: 1 });
   await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>');
@@ -34,8 +34,28 @@ async function open(browser: Browser, text: string, mode: 'live' | 'source', sou
     });
   ` });
   await page.addScriptTag({ path: path.join(temp, 'bundle.js') });
+  if (observeStartup) {
+    await page.evaluate(() => {
+      (window as any).__startupFrames = [];
+      const sample = () => {
+        const wrapper = document.querySelector<HTMLElement>('.editor-wrapper');
+        const editor = document.querySelector<HTMLElement>('.cm-editor');
+        const preview = document.querySelector<HTMLElement>('.preview-host');
+        (window as any).__startupFrames.push({
+          revealed: wrapper ? getComputedStyle(wrapper).opacity !== '0' : false,
+          rootMode: document.querySelector<HTMLElement>('#app')?.dataset.mode ?? null,
+          editorMode: editor?.classList.contains('meo-mode-live') ? 'live'
+            : editor?.classList.contains('meo-mode-source') ? 'source' : null,
+          previewVisible: preview ? !preview.hidden : false
+        });
+        if (wrapper?.classList.contains('meo-preload-editor-shell')) requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+  }
   await page.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), init(text, mode, sourceLineNumbers));
   await page.waitForSelector('.editor-host > .cm-editor');
+  await page.waitForSelector('.editor-wrapper:not(.meo-preload-editor-shell)');
   return page;
 }
 
@@ -300,5 +320,30 @@ async function largeDocumentStartupPreference(browser: Browser): Promise<void> {
   }
 }
 
-async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { await blockquotePressLayout(browser); await alertPressLayout(browser); await matrix(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); await largeDocumentStartupPreference(browser); } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
+async function startupModeVisibility(browser: Browser): Promise<void> {
+  for (const mode of ['live', 'source', 'preview'] as const) {
+    const page = await open(browser, `# ${mode} startup\n\nbody`, mode, 'on', true);
+    try {
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+      const frames = await page.evaluate(() => (window as any).__startupFrames as Array<{
+        revealed: boolean;
+        rootMode: string | null;
+        editorMode: string | null;
+        previewVisible: boolean;
+      }>);
+      const revealed = frames.filter((frame) => frame.revealed);
+      assert.ok(revealed.length > 0, `${mode} startup never revealed a frame`);
+      assert.ok(revealed.every((frame) => frame.rootMode === mode), `${mode} exposed another mode: ${JSON.stringify(frames)}`);
+      if (mode === 'preview') {
+        assert.ok(revealed.every((frame) => frame.previewVisible), `Preview exposed its editor surface: ${JSON.stringify(frames)}`);
+      } else {
+        assert.ok(revealed.every((frame) => frame.editorMode === mode), `${mode} exposed another editor mode: ${JSON.stringify(frames)}`);
+      }
+    } finally {
+      await page.close();
+    }
+  }
+}
+
+async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { await startupModeVisibility(browser); await blockquotePressLayout(browser); await alertPressLayout(browser); await matrix(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); await largeDocumentStartupPreference(browser); } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
 main().finally(() => fs.rmSync(temp, { recursive: true, force: true })).catch((e) => { console.error(e instanceof Error ? e.stack : e); process.exitCode = 1; });
