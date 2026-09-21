@@ -51,6 +51,12 @@ assert.deepEqual(posted.shift(), {
   format: 'pdf',
   includeTableOfContents: true
 });
+adapter.requestExport('docx', { includeTableOfContents: true });
+assert.deepEqual(posted.shift(), {
+  type: 'exportDocument',
+  format: 'docx',
+  includeTableOfContents: true
+});
 assert.equal(adapter.accept({ type: 'focusEditor' } as HostToWebviewMessage), false);
 
 assert.equal(adapter.accept({ type: 'requestExportSnapshot', requestId: 'snapshot-1' }), true);

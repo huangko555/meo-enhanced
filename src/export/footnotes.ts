@@ -2,7 +2,7 @@ import path from 'node:path';
 import type { SourceMappedMarkdown } from './sourceMappedMarkdown';
 
 export type PrepareMarkdownWithFootnotesOptions = {
-  target: 'html' | 'pdf';
+  target: 'html' | 'pdf' | 'docx';
   outputFilePath?: string;
   renderMarkdown: (markdownText: string) => string;
   normalizeMarkdown: (markdownText: string) => string;

@@ -2,12 +2,13 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { UiLanguage } from '../foundation/uiLanguage';
 
-export type VscodeExportFormat = 'html' | 'pdf';
+export type VscodeExportFormat = 'html' | 'pdf' | 'docx';
 export type VscodeExportProgressStage =
   | 'selectingDestination'
   | 'preparingExport'
   | 'writingHtml'
-  | 'renderingPdf';
+  | 'renderingPdf'
+  | 'writingDocx';
 
 type VscodeExportStrings = {
   readonly title: string;
@@ -148,7 +149,9 @@ async function performVscodeExportWithFeedback(
             defaultUri: vscode.Uri.file(replaceFileExtension(options.sourceDocumentUri.fsPath, options.format)),
             filters: options.format === 'html'
               ? { HTML: ['html', 'htm'] }
-              : { PDF: ['pdf'] },
+              : options.format === 'pdf'
+                ? { PDF: ['pdf'] }
+                : { Word: ['docx'] },
             saveLabel: strings.saveLabel
           });
           resolveDestination(selectedUri);
@@ -227,7 +230,8 @@ function getStrings(uiLanguage: UiLanguage, format: VscodeExportFormat): VscodeE
         selectingDestination: '等待选择保存位置…',
         preparingExport: `正在准备 ${label} 导出…`,
         writingHtml: '正在写入 HTML…',
-        renderingPdf: '正在生成 PDF…'
+        renderingPdf: '正在生成 PDF…',
+        writingDocx: '正在生成 Word 文档…'
       }
     };
   }
@@ -246,7 +250,8 @@ function getStrings(uiLanguage: UiLanguage, format: VscodeExportFormat): VscodeE
       selectingDestination: 'Waiting for an output location…',
       preparingExport: `Preparing ${label} export…`,
       writingHtml: 'Writing HTML…',
-      renderingPdf: 'Rendering PDF…'
+      renderingPdf: 'Rendering PDF…',
+      writingDocx: 'Writing Word document…'
     }
   };
 }

@@ -21,6 +21,7 @@ export type UiStrings = Readonly<{
   previewTitle: string;
   previewAppearance: string;
   previewSourceColoring: string;
+  strongColoring: string;
   previewCodeColors: string;
   previewCodeColorsOn: string;
   previewCodeColorsOff: string;
@@ -32,10 +33,13 @@ export type UiStrings = Readonly<{
   previewTools: string;
   exportHtml: string;
   exportPdf: string;
+  exportDocx: string;
   exportAsHtml: string;
   exportAsPdf: string;
+  exportAsDocx: string;
   exportHtmlWithContents: string;
   exportPdfWithContents: string;
+  exportDocxWithContents: string;
   findAndReplace: string;
   more: string;
   moreTools: string;
@@ -269,16 +273,16 @@ export type UiStrings = Readonly<{
 const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
   en: Object.freeze({
     auto: 'Auto', light: 'Light', dark: 'Dark', previewTitle: 'Markdown Preview',
-    previewAppearance: 'Theme', previewSourceColoring: 'Preview source coloring',
+    previewAppearance: 'Theme', previewSourceColoring: 'Preview source coloring', strongColoring: 'Color bold text',
     previewCodeColors: 'Code color', previewCodeColorsOn: 'On', previewCodeColorsOff: 'Off',
     previewFontFamily: 'Font',
     previewFontPlaceholder: 'VS Code editor font',
     previewFontUnavailable: 'Local font list unavailable; type a family name',
     previewGenerating: 'Generating preview…',
     previewFailed: 'Preview generation failed', previewTools: 'Preview tools',
-    exportHtml: 'Export HTML', exportPdf: 'Export PDF', exportAsHtml: 'Export as HTML',
-    exportAsPdf: 'Export as PDF', exportHtmlWithContents: 'Export HTML with Contents',
-    exportPdfWithContents: 'Export PDF with Contents', findAndReplace: 'Find and Replace', more: 'Settings',
+    exportHtml: 'Export HTML', exportPdf: 'Export PDF', exportDocx: 'Export Word', exportAsHtml: 'Export as HTML',
+    exportAsPdf: 'Export as PDF', exportAsDocx: 'Export as Word document', exportHtmlWithContents: 'Export HTML with Contents',
+    exportPdfWithContents: 'Export PDF with Contents', exportDocxWithContents: 'Export Word with Contents', findAndReplace: 'Find and Replace', more: 'Settings',
     moreTools: 'Settings', toolbarOverflow: 'More tools', feedbackPrompt: 'Having trouble?', reportIssue: 'Report an issue',
     editorAppearance: 'Editor appearance', editorFontSize: 'Font size',
     custom: 'Custom', decreaseFontSize: 'Decrease font size', increaseFontSize: 'Increase font size',
@@ -425,15 +429,16 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
   }),
   'zh-CN': Object.freeze({
     auto: '自动', light: '浅色', dark: '深色', previewTitle: 'Markdown 预览',
-    previewAppearance: '预览外观', previewSourceColoring: '预览源码着色',
+    previewAppearance: '预览外观', previewSourceColoring: '预览源码着色', strongColoring: '粗体文字着色',
     previewCodeColors: '代码着色', previewCodeColorsOn: '开启', previewCodeColorsOff: '关闭',
     previewFontFamily: '预览字体',
     previewFontPlaceholder: 'VS Code 编辑器字体',
     previewFontUnavailable: '无法获取本地字体列表；请手动输入字体名称',
     previewGenerating: '正在生成预览…',
     previewFailed: '预览生成失败', previewTools: '预览工具', exportHtml: '导出 HTML',
-    exportPdf: '导出 PDF', exportAsHtml: '导出为 HTML', exportAsPdf: '导出为 PDF',
-    exportHtmlWithContents: '导出 HTML（含目录）', exportPdfWithContents: '导出 PDF（含目录）',
+    exportPdf: '导出 PDF', exportDocx: '导出 Word', exportAsHtml: '导出为 HTML', exportAsPdf: '导出为 PDF',
+    exportAsDocx: '导出为 Word 文档', exportHtmlWithContents: '导出 HTML（含目录）', exportPdfWithContents: '导出 PDF（含目录）',
+    exportDocxWithContents: '导出 Word（含目录）',
     findAndReplace: '查找和替换', more: '设置', moreTools: '设置', toolbarOverflow: '更多工具',
     feedbackPrompt: '使用中遇到问题？', reportIssue: '欢迎反馈',
     editorAppearance: '编辑器外观', editorFontSize: '字号大小', custom: '自定义',

@@ -36,12 +36,13 @@ export type EditorCommand =
   | { readonly type: 'reloadDocumentFromDisk'; readonly topLine: number; readonly topLineOffset?: number }
   | {
       readonly type: 'exportDocument';
-      readonly format: 'html' | 'pdf';
+      readonly format: 'html' | 'pdf' | 'docx';
       readonly includeTableOfContents: boolean;
     }
   | { readonly type: 'setPreviewAppearance'; readonly appearance: EditorAppearance }
   | { readonly type: 'setPreviewFontFamily'; readonly fontFamily: string }
   | { readonly type: 'setPreviewSourceColoring'; readonly enabled: boolean }
+  | { readonly type: 'setLiveStrongColoring'; readonly enabled: boolean }
   | { readonly type: 'setEditorAppearance'; readonly appearance: EditorAppearance }
   | { readonly type: 'setEditorFontSize'; readonly mode: EditorFontSizeMode; readonly value: number }
   | { readonly type: 'setUiLanguagePreference'; readonly language: UiLanguagePreference }
@@ -108,7 +109,7 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
     case 'openImageExternally':
       return typeof value.url === 'string' && value.url.length > 0 ? value as EditorCommand : null;
     case 'exportDocument':
-      return (value.format === 'html' || value.format === 'pdf')
+      return (value.format === 'html' || value.format === 'pdf' || value.format === 'docx')
         && typeof value.includeTableOfContents === 'boolean'
         && value.appearance === undefined
         ? value as EditorCommand
@@ -124,6 +125,7 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
         ? value as EditorCommand
         : null;
     case 'setPreviewSourceColoring':
+    case 'setLiveStrongColoring':
       return typeof value.enabled === 'boolean' ? value as EditorCommand : null;
     case 'setPreviewFontFamily': {
       if (typeof value.fontFamily !== 'string') return null;

@@ -62,7 +62,7 @@ function buildReadingStyles(
     : darkBackgroundColor;
   const previewForegroundColor = appearance === 'light' ? '#1f2328' : isolatedDarkForegroundColor;
   const previewMutedColor = appearance === 'light' ? '#59636e' : '#9aa4af';
-  const readingForegroundColor = `color-mix(in srgb, ${previewForegroundColor} 60%, ${previewMutedColor} 40%)`;
+  const readingForegroundColor = `color-mix(in srgb, ${previewForegroundColor} 70%, ${previewMutedColor} 30%)`;
   const editorForegroundColor = previewForegroundColor;
   const previewCodePalette = environment.previewCodePalettes?.[appearance === 'auto' ? 'dark' : appearance];
   const sourceColoring = environment.previewSourceColoring !== false;

@@ -3,6 +3,7 @@ import { buildExportHtmlDocument as buildStandaloneExportHtmlDocument } from './
 import { buildExportStyles, buildPreviewStyles, type ExportStyleEnvironment } from './exportStyles';
 import { writeHtmlExport } from './htmlExport';
 import { renderPdfFromHtmlExport } from './pdfRenderer';
+import { writeDocxExport } from './docxRenderer';
 import type { PreviewAppearance, PreviewRenderResult } from '../shared/preview';
 import type { ReadingSnapshot } from '../protocol/exportSnapshot';
 import type { CodeThemeDto } from '../protocol/hostConfigurationEvents';
@@ -12,7 +13,7 @@ export type ExportRuntimeBuildHtmlOptions = {
   readingSnapshot: ReadingSnapshot;
   sourceDocumentPath: string;
   outputFilePath: string;
-  target: 'html' | 'pdf';
+  target: 'html' | 'pdf' | 'docx';
   mermaidRuntimeSrc: string;
   katexStylesHref?: string;
   baseHref: string;
@@ -39,7 +40,7 @@ async function renderExportHtmlDocument(
       outputFilePath: options.outputFilePath,
       target: options.target,
       uiLanguage: snapshot.uiLanguage,
-      includeTableOfContents: options.includeTableOfContents === true,
+      includeTableOfContents: options.target !== 'docx' && options.includeTableOfContents === true,
       ...(highlighter ? { highlightCode: highlighter.highlight } : {})
     });
   } finally {
@@ -91,7 +92,8 @@ const exportRuntime = {
   renderExportHtmlDocument,
   renderPreviewDocument,
   writeHtmlExport,
-  renderPdfFromHtmlExport
+  renderPdfFromHtmlExport,
+  writeDocxExport
 };
 
 export default exportRuntime;

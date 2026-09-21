@@ -66,15 +66,15 @@ function platformBrowserCandidates(
     const programFilesX86 = env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)';
 
     return [
+      path.win32.join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      path.win32.join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      path.win32.join(local, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
       path.win32.join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
       path.win32.join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
       path.win32.join(local, 'Google', 'Chrome', 'Application', 'chrome.exe'),
       path.win32.join(programFiles, 'Chromium', 'Application', 'chrome.exe'),
       path.win32.join(programFilesX86, 'Chromium', 'Application', 'chrome.exe'),
-      path.win32.join(local, 'Chromium', 'Application', 'chrome.exe'),
-      path.win32.join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-      path.win32.join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-      path.win32.join(local, 'Microsoft', 'Edge', 'Application', 'msedge.exe')
+      path.win32.join(local, 'Chromium', 'Application', 'chrome.exe')
     ];
   }
 

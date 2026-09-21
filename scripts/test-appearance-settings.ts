@@ -7,6 +7,7 @@ import {
   EDITOR_APPEARANCE_SETTING_KEY,
   EDITOR_FONT_SIZE_MODE_SETTING_KEY,
   EDITOR_FONT_SIZE_SETTING_KEY,
+  LIVE_STRONG_COLORING_SETTING_KEY,
   PREVIEW_APPEARANCE_SETTING_KEY,
   PREVIEW_FONT_FAMILY_SETTING_KEY,
   PREVIEW_SOURCE_COLORING_SETTING_KEY,
@@ -84,6 +85,7 @@ const legacyValues = {
       [PREVIEW_APPEARANCE_SETTING_KEY]: properties[`meoEnhanced.${PREVIEW_APPEARANCE_SETTING_KEY}`]?.default,
       [PREVIEW_FONT_FAMILY_SETTING_KEY]: properties[`meoEnhanced.${PREVIEW_FONT_FAMILY_SETTING_KEY}`]?.default,
       [PREVIEW_SOURCE_COLORING_SETTING_KEY]: properties[`meoEnhanced.${PREVIEW_SOURCE_COLORING_SETTING_KEY}`]?.default,
+      [LIVE_STRONG_COLORING_SETTING_KEY]: properties[`meoEnhanced.${LIVE_STRONG_COLORING_SETTING_KEY}`]?.default,
       [EDITOR_FONT_SIZE_MODE_SETTING_KEY]: properties[`meoEnhanced.${EDITOR_FONT_SIZE_MODE_SETTING_KEY}`]?.default,
       [EDITOR_FONT_SIZE_SETTING_KEY]: properties[`meoEnhanced.${EDITOR_FONT_SIZE_SETTING_KEY}`]?.default
     },
@@ -92,6 +94,7 @@ const legacyValues = {
       [PREVIEW_APPEARANCE_SETTING_KEY]: 'auto',
       [PREVIEW_FONT_FAMILY_SETTING_KEY]: '',
       [PREVIEW_SOURCE_COLORING_SETTING_KEY]: true,
+      [LIVE_STRONG_COLORING_SETTING_KEY]: false,
       [EDITOR_FONT_SIZE_MODE_SETTING_KEY]: 'auto',
       [EDITOR_FONT_SIZE_SETTING_KEY]: 14
     },
@@ -107,9 +110,10 @@ const legacyValues = {
       owner.getEditorAppearance(),
       owner.getPreviewAppearance(),
       owner.getPreviewFontFamily(),
-      owner.getPreviewSourceColoring()
+      owner.getPreviewSourceColoring(),
+      owner.getLiveStrongColoring()
     ],
-    ['dark', 'light', 'Noto Sans', false]
+    ['dark', 'light', 'Noto Sans', false, false]
   );
   assert.equal(legacy.size, 0, 'successful migration must clear every legacy key');
   assert.deepEqual(Object.fromEntries(configuration), {
@@ -123,6 +127,7 @@ const legacyValues = {
   await owner.setPreviewAppearance('dark');
   await owner.setPreviewFontFamily('Inter');
   await owner.setPreviewSourceColoring(true);
+  await owner.setLiveStrongColoring(true);
   await owner.setEditorFontSizePreference({ mode: 'custom', value: 18 });
   assert.deepEqual(
     [
@@ -130,9 +135,10 @@ const legacyValues = {
       owner.getPreviewAppearance(),
       owner.getPreviewFontFamily(),
       owner.getPreviewSourceColoring(),
+      owner.getLiveStrongColoring(),
       owner.getEditorFontSizePreference()
     ],
-    ['light', 'dark', 'Inter', true, { mode: 'custom', value: 18 }]
+    ['light', 'dark', 'Inter', true, true, { mode: 'custom', value: 18 }]
   );
 }
 

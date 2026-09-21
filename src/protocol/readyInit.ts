@@ -45,6 +45,7 @@ export type InitMessage = {
   readonly previewAppearance: PreviewAppearance;
   readonly previewFontFamily: string;
   readonly previewSourceColoring: boolean;
+  readonly liveStrongColoring: boolean;
   readonly editorAppearance: PreviewAppearance;
   readonly editorFontSizeMode: EditorFontSizeMode;
   readonly editorFontSize: number;
@@ -102,6 +103,11 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     : isRecord(value) && typeof value.tableStickyHeaderEnabled === 'boolean'
       ? value.tableStickyHeaderEnabled
       : null;
+  const liveStrongColoring = isRecord(value) && value.liveStrongColoring === undefined
+    ? false
+    : isRecord(value) && typeof value.liveStrongColoring === 'boolean'
+      ? value.liveStrongColoring
+      : null;
   const restoreReadingPositionOnOpen = isRecord(value) && value.restoreReadingPositionOnOpen === undefined
     ? true
     : isRecord(value) && typeof value.restoreReadingPositionOnOpen === 'boolean'
@@ -136,6 +142,7 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || !isPreviewAppearance(value.previewAppearance)
     || previewFontFamily === null
     || typeof value.previewSourceColoring !== 'boolean'
+    || liveStrongColoring === null
     || !isPreviewAppearance(value.editorAppearance)
     || editorFontSizeMode === null
     || editorFontSize === null
@@ -175,6 +182,7 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     uiLanguagePreference: value.uiLanguagePreference ?? 'auto',
     automaticUiLanguage: value.automaticUiLanguage ?? value.uiLanguage,
     previewFontFamily,
+    liveStrongColoring,
     editorFontSizeMode,
     editorFontSize,
     tableStickyHeaderEnabled,

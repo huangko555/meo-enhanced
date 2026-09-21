@@ -70,6 +70,11 @@
         "command": "meoEnhanced.exportPdf",
         "title": "%command.exportPdf%",
         "icon": "$(file-pdf)"
+      },
+      {
+        "command": "meoEnhanced.exportDocx",
+        "title": "%command.exportDocx%",
+        "icon": "$(file)"
       }
     ],
     "keybindings": [
@@ -211,6 +216,12 @@
           "order": 5,
           "description": "%config.preview.sourceColoring%"
         },
+        "meoEnhanced.appearance.strongColoring": {
+          "type": "boolean",
+          "default": false,
+          "order": 6,
+          "description": "%config.appearance.strongColoring%"
+        },
         "meoEnhanced.appearance.fontSizeMode": {
           "type": "string",
           "enum": [
@@ -222,7 +233,7 @@
             "%config.fontSize.custom%"
           ],
           "default": "auto",
-          "order": 6,
+          "order": 7,
           "description": "%config.fontSize.mode%"
         },
         "meoEnhanced.appearance.fontSize": {
@@ -230,7 +241,7 @@
           "default": 14,
           "minimum": 10,
           "maximum": 32,
-          "order": 7,
+          "order": 8,
           "description": "%config.fontSize.value%"
         },
         "meoEnhanced.useAsDefault": {
@@ -327,6 +338,8 @@
     "test:reading-position": "bun scripts/test-reading-position-memory.ts && bun scripts/test-reading-position-lifecycle.ts && bun scripts/test-vscode-reading-position-adapter.ts && bun scripts/test-panel-session-reading-position.ts && bun scripts/test-reading-position-production.ts",
     "test:external-file-notice": "bun scripts/test-panel-session-external-file-notice.ts && bun scripts/test-protocol-ready-init.ts && bun scripts/test-document-session-actions.ts && bun scripts/test-document-session-webview-adapter.ts && bun scripts/test-ui-language.ts && bun scripts/test-editor-notice.ts",
     "test:targeted": "bun scripts/test-workflow.ts targeted",
+    "test:docx-export": "bun scripts/test-docx-export-runtime.ts",
+    "test:docx-export:browser": "bun scripts/test-docx-export-browser.ts",
     "test:release": "bun scripts/test-workflow.ts release",
     "test:endurance": "bun scripts/test-workflow.ts endurance",
     "test:large-document": "bun scripts/test-workflow.ts large-document",
@@ -404,7 +417,10 @@
     "@lezer/highlight": "^1.2.3",
     "@lezer/markdown": "1.6.3",
     "@types/vscode": "^1.109.0",
+    "docx": "^9.7.1",
     "highlight.js": "^11.11.1",
+    "htmlparser2": "10.0.0",
+    "image-size": "^2.0.4",
     "js-yaml": "4.1.1",
     "katex": "^0.16.28",
     "lucide": "^1.25.0",
@@ -421,6 +437,7 @@
     "@types/markdown-it": "^14.1.2",
     "@types/sanitize-html": "^2.16.0",
     "@vscode/vsce": "3.9.2",
+    "jszip": "^3.10.2",
     "typescript": "^5.9.3"
   }
 }

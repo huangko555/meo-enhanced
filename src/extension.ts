@@ -118,6 +118,16 @@ type ExportRuntimeModule = {
     puppeteerRuntimeModulePath: string;
     timeoutMs?: number;
   }) => Promise<void>;
+  writeDocxExport: (options: {
+    htmlDocument: string;
+    outputDocxPath: string;
+    title: string;
+    uiLanguage: ReadingSnapshot['uiLanguage'];
+    includeTableOfContents: boolean;
+    browserExecutablePath?: string;
+    puppeteerRuntimeModulePath: string;
+    timeoutMs?: number;
+  }) => Promise<void>;
 };
 
 let exportRuntimeModulePromise: Promise<ExportRuntimeModule> | null = null;
@@ -344,6 +354,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await provider.exportActiveDocument('pdf');
     })
   );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('meoEnhanced.exportDocx', async () => {
+      await provider.exportActiveDocument('docx');
+    })
+  );
 }
 
 class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
@@ -565,6 +581,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       setPreviewFontFamily: this.appearanceSettings.setPreviewFontFamily,
       getPreviewSourceColoring: this.appearanceSettings.getPreviewSourceColoring,
       setPreviewSourceColoring: this.appearanceSettings.setPreviewSourceColoring,
+      getLiveStrongColoring: this.appearanceSettings.getLiveStrongColoring,
+      setLiveStrongColoring: this.appearanceSettings.setLiveStrongColoring,
       getEditorAppearance: this.appearanceSettings.getEditorAppearance,
       setEditorAppearance: this.appearanceSettings.setEditorAppearance,
       getEditorFontSizePreference: this.appearanceSettings.getEditorFontSizePreference,
@@ -702,12 +720,25 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         return;
       }
 
-      report('renderingPdf');
       const puppeteerRuntimeModulePath = vscode.Uri.joinPath(
         this.context.extensionUri,
         'dist',
         'puppeteer-runtime.js'
       ).fsPath;
+      if (format === 'docx') {
+        report('writingDocx');
+        await exportRuntime.writeDocxExport({
+          htmlDocument: exportRender.htmlDocument,
+          outputDocxPath: targetUri.fsPath,
+          title: path.basename(targetUri.fsPath),
+          uiLanguage: snapshot.uiLanguage,
+          includeTableOfContents,
+          puppeteerRuntimeModulePath
+        });
+        return;
+      }
+
+      report('renderingPdf');
       await exportRuntime.renderPdfFromHtmlExport({
         htmlDocument: exportRender.htmlDocument,
         outputPdfPath: targetUri.fsPath,

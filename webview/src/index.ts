@@ -211,6 +211,7 @@ let gitDiffSummary: ChangesReviewDiffSummary = { status: 'pending', added: 0, de
 let gitBaselineState: GitBaselinePayload | null = null;
 let changesReviewMode: 'live' | 'source' | 'preview' = 'live';
 let contentMaxWidthEnabled = false;
+let liveStrongColoring = false;
 let tableStickyHeaderEnabled = true;
 let restoreReadingPositionOnOpen = true;
 let outlineUiState: { mode: 'floating' | 'fixed'; width: number } = { mode: 'fixed', width: 260 };
@@ -257,6 +258,15 @@ contentMaxWidthBtn.dataset.action = 'contentMaxWidth';
 contentMaxWidthBtn.title = activeUiStrings.constrainContentWidth;
 contentMaxWidthBtn.setAttribute('role', 'menuitemcheckbox');
 appendMoreToolsOptionContent(contentMaxWidthBtn, PanelLeftRightDashed, activeUiStrings.constrainContentWidth);
+
+const liveStrongColoringBtn = document.createElement('button');
+liveStrongColoringBtn.type = 'button';
+liveStrongColoringBtn.className = 'more-tools-option more-tools-toggle-option';
+liveStrongColoringBtn.dataset.action = 'liveStrongColoring';
+liveStrongColoringBtn.title = activeUiStrings.strongColoring;
+liveStrongColoringBtn.setAttribute('role', 'menuitemcheckbox');
+liveStrongColoringBtn.setAttribute('aria-checked', 'false');
+appendMoreToolsOptionContent(liveStrongColoringBtn, Bold, activeUiStrings.strongColoring);
 
 const sourceLineNumbersBtn = document.createElement('button');
 sourceLineNumbersBtn.type = 'button';
@@ -390,6 +400,16 @@ const setGitDiffDetailsVisibleState = (
   syncGitDiffLineHighlights();
   presentChangesReview();
   if (post) vscode.postMessage({ type: 'setGitDiffDetailsVisible', visible: gitDiffDetailsVisible });
+};
+
+const setLiveStrongColoring = (enabled: boolean, { post = true }: PostUpdateOptions = {}) => {
+  const nextEnabled = enabled === true;
+  const changed = nextEnabled !== liveStrongColoring;
+  liveStrongColoring = nextEnabled;
+  document.documentElement.classList.toggle('meo-live-strong-coloring', liveStrongColoring);
+  liveStrongColoringBtn.classList.toggle('is-active', liveStrongColoring);
+  liveStrongColoringBtn.setAttribute('aria-checked', liveStrongColoring ? 'true' : 'false');
+  if (post && changed) vscode.postMessage({ type: 'setLiveStrongColoring', enabled: liveStrongColoring });
 };
 
 const updateTableStickyHeaderUI = () => {
@@ -854,6 +874,47 @@ exportPdfControl.className = 'preview-export-control';
 exportPdfControl.dataset.exportFormat = 'pdf';
 exportPdfControl.append(exportPdfOption, exportPdfMenu);
 
+const exportDocxOption = document.createElement('button');
+exportDocxOption.type = 'button';
+exportDocxOption.className = 'preview-toolbar-action';
+exportDocxOption.dataset.format = 'docx';
+exportDocxOption.title = activeUiStrings.exportAsDocx;
+exportDocxOption.setAttribute('aria-label', activeUiStrings.exportAsDocx);
+const exportDocxLabel = document.createElement('span');
+exportDocxLabel.className = 'preview-toolbar-action-label';
+exportDocxLabel.textContent = activeUiStrings.exportDocx;
+exportDocxOption.append(
+  createElement(FileText, { width: 15, height: 15, 'aria-hidden': 'true' }),
+  exportDocxLabel
+);
+exportDocxOption.setAttribute('aria-haspopup', 'menu');
+exportDocxOption.setAttribute('aria-expanded', 'false');
+
+const exportDocxWithContentsOption = document.createElement('button');
+exportDocxWithContentsOption.type = 'button';
+exportDocxWithContentsOption.className = 'preview-export-menu-action preview-dropdown-option';
+exportDocxWithContentsOption.setAttribute('role', 'menuitem');
+exportDocxWithContentsOption.title = activeUiStrings.exportDocxWithContents;
+exportDocxWithContentsOption.setAttribute('aria-label', activeUiStrings.exportDocxWithContents);
+const exportDocxWithContentsLabel = document.createElement('span');
+exportDocxWithContentsLabel.textContent = activeUiStrings.exportDocxWithContents;
+exportDocxWithContentsOption.append(
+  createElement(FileText, { width: 15, height: 15, 'aria-hidden': 'true' }),
+  exportDocxWithContentsLabel
+);
+
+const exportDocxMenu = document.createElement('div');
+exportDocxMenu.className = 'preview-export-menu preview-dropdown-panel';
+exportDocxMenu.dataset.previewAppearance = 'dark';
+exportDocxMenu.setAttribute('role', 'menu');
+exportDocxMenu.setAttribute('aria-label', activeUiStrings.exportDocxWithContents);
+exportDocxMenu.appendChild(exportDocxWithContentsOption);
+
+const exportDocxControl = document.createElement('div');
+exportDocxControl.className = 'preview-export-control';
+exportDocxControl.dataset.exportFormat = 'docx';
+exportDocxControl.append(exportDocxOption, exportDocxMenu);
+
 const bindExportMenuAccessibility = (
   control: HTMLElement,
   trigger: HTMLButtonElement,
@@ -899,6 +960,11 @@ const dismissExportPdfMenu = bindExportMenuAccessibility(
   exportPdfOption,
   exportPdfWithContentsOption
 );
+const dismissExportDocxMenu = bindExportMenuAccessibility(
+  exportDocxControl,
+  exportDocxOption,
+  exportDocxWithContentsOption
+);
 
 const previewAppearanceSlot = document.createElement('span');
 const previewFontFamilySlot = document.createElement('span');
@@ -913,7 +979,8 @@ previewFormatGroup.append(
   previewSourceColoringSlot,
   previewAppearanceSlot,
   exportHtmlControl,
-  exportPdfControl
+  exportPdfControl,
+  exportDocxControl
 );
 
 const moreToolsButton = document.createElement('button');
@@ -1046,6 +1113,8 @@ const applyUiLanguage = (language: UiLanguage): void => {
   discardBtn.setAttribute('aria-label', strings.reloadDiskVersion);
   contentMaxWidthBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.constrainContentWidth;
   sourceLineNumbersBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.showLineNumbers;
+  liveStrongColoringBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.strongColoring;
+  liveStrongColoringBtn.title = strings.strongColoring;
   longCodeBlockFoldingBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.foldLongCodeBlocks;
   tableStickyHeaderBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.stickyTableHeader;
   restoreReadingPositionBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.resumeFromLastPosition;
@@ -1067,6 +1136,9 @@ const applyUiLanguage = (language: UiLanguage): void => {
   exportPdfOption.title = strings.exportAsPdf;
   exportPdfOption.setAttribute('aria-label', strings.exportAsPdf);
   exportPdfLabel.textContent = strings.exportPdf;
+  exportDocxOption.title = strings.exportAsDocx;
+  exportDocxOption.setAttribute('aria-label', strings.exportAsDocx);
+  exportDocxLabel.textContent = strings.exportDocx;
   exportHtmlWithContentsOption.title = strings.exportHtmlWithContents;
   exportHtmlWithContentsOption.setAttribute('aria-label', strings.exportHtmlWithContents);
   exportHtmlWithContentsLabel.textContent = strings.exportHtmlWithContents;
@@ -1075,6 +1147,10 @@ const applyUiLanguage = (language: UiLanguage): void => {
   exportPdfWithContentsOption.setAttribute('aria-label', strings.exportPdfWithContents);
   exportPdfWithContentsLabel.textContent = strings.exportPdfWithContents;
   exportPdfMenu.setAttribute('aria-label', strings.exportPdfWithContents);
+  exportDocxWithContentsOption.title = strings.exportDocxWithContents;
+  exportDocxWithContentsOption.setAttribute('aria-label', strings.exportDocxWithContents);
+  exportDocxWithContentsLabel.textContent = strings.exportDocxWithContents;
+  exportDocxMenu.setAttribute('aria-label', strings.exportDocxWithContents);
   previewFormatGroup.setAttribute('aria-label', strings.previewTools);
   moreToolsButton.title = strings.more;
   moreToolsButton.setAttribute('aria-label', strings.moreTools);
@@ -1153,6 +1229,7 @@ moreToolsPanel.append(
   sourceLineNumbersBtn,
   longCodeBlockFoldingBtn,
   contentMaxWidthBtn,
+  liveStrongColoringBtn,
   tableStickyHeaderBtn,
   restoreReadingPositionBtn,
   editorAppearanceRow,
@@ -2683,6 +2760,7 @@ const handleInit = (message: InitMessage) => {
   sourceLineNumbersBtn.setAttribute('aria-checked', message.sourceLineNumbers !== 'off' ? 'true' : 'false');
   longCodeBlockFoldingBtn.setAttribute('aria-checked', longCodeBlockFoldingEnabled ? 'true' : 'false');
   setTableStickyHeaderEnabled(message.tableStickyHeaderEnabled, { post: false });
+  setLiveStrongColoring(message.liveStrongColoring, { post: false });
   setRestoreReadingPositionOnOpen(message.restoreReadingPositionOnOpen, { post: false });
   readingPositionLifecycle?.start({
     enabled: message.restoreReadingPositionOnOpen,
@@ -2754,6 +2832,7 @@ const themeAdapter = createAppearanceWebviewAdapter({
     applyBuiltInVisualBaseline(appearance);
     exportHtmlMenu.dataset.previewAppearance = appearance;
     exportPdfMenu.dataset.previewAppearance = appearance;
+    exportDocxMenu.dataset.previewAppearance = appearance;
   },
   resolveCodePalette: codePaletteAdapter.resolve,
   applyCodePalette: codePaletteAdapter.apply,
@@ -3260,6 +3339,10 @@ exportPdfOption.addEventListener('click', () => {
   exportAdapter.requestExport('pdf', { includeTableOfContents: false });
   dismissExportPdfMenu();
 });
+exportDocxOption.addEventListener('click', () => {
+  exportAdapter.requestExport('docx', { includeTableOfContents: false });
+  dismissExportDocxMenu();
+});
 exportHtmlWithContentsOption.addEventListener('click', () => {
   exportAdapter.requestExport('html', { includeTableOfContents: true });
   dismissExportHtmlMenu();
@@ -3267,6 +3350,10 @@ exportHtmlWithContentsOption.addEventListener('click', () => {
 exportPdfWithContentsOption.addEventListener('click', () => {
   exportAdapter.requestExport('pdf', { includeTableOfContents: true });
   dismissExportPdfMenu();
+});
+exportDocxWithContentsOption.addEventListener('click', () => {
+  exportAdapter.requestExport('docx', { includeTableOfContents: true });
+  dismissExportDocxMenu();
 });
 const showOutlineAt = (position: 'left' | 'right') => {
   if (outlineController.isVisible() && outlineController.getPosition() === position) {
@@ -3282,6 +3369,9 @@ previewOutlineLeftBtn.addEventListener('click', () => showOutlineAt('left'));
 outlineBtn.addEventListener('click', () => showOutlineAt('right'));
 contentMaxWidthBtn.addEventListener('click', () => {
   setContentMaxWidthEnabled(!contentMaxWidthEnabled);
+});
+liveStrongColoringBtn.addEventListener('click', () => {
+  setLiveStrongColoring(!liveStrongColoring);
 });
 sourceLineNumbersBtn.addEventListener('click', () => {
   const nextMode = pendingSourceLineNumbers === 'off' ? previousVisibleSourceLineNumbers : 'off';

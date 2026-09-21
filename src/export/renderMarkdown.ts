@@ -31,7 +31,7 @@ const DEFERRED_IMAGE_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAA
 
 registerExportLanguages();
 
-export type RenderMarkdownTarget = 'html' | 'pdf';
+export type RenderMarkdownTarget = 'html' | 'pdf' | 'docx';
 
 export type RenderMarkdownOptions = {
   markdownText: string;

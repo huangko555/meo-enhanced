@@ -2,7 +2,7 @@ export type BuildExportHtmlDocumentOptions = {
   title: string;
   bodyHtml: string;
   stylesCss: string;
-  target: 'html' | 'pdf';
+  target: 'html' | 'pdf' | 'docx';
   hasMermaid: boolean;
   hasMath: boolean;
   mermaidRuntimeSrc?: string;

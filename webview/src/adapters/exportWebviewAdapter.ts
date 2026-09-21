@@ -18,7 +18,7 @@ export type ExportWebviewAdapterDependencies = {
 
 export type ExportWebviewAdapter = {
   requestExport(
-    format: 'html' | 'pdf',
+    format: 'html' | 'pdf' | 'docx',
     options: { readonly includeTableOfContents: boolean }
   ): void;
   accept(message: HostToWebviewMessage): boolean;

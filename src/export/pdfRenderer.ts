@@ -45,6 +45,36 @@ export async function renderPdfFromHtmlExport(options: RenderPdfExportOptions): 
   });
 }
 
+export async function materializeDocxBodyFromHtmlExport(options: HeadlessExportOptions): Promise<string> {
+  return withPreparedExportPage(options, async (page) => {
+    const handles = await page.$$('.meo-export-mermaid.is-rendered, .meo-export-math-display, img');
+    for (const [index, handle] of handles.entries()) {
+      const bounds = await handle.boundingBox();
+      if (!bounds || bounds.width <= 0 || bounds.height <= 0) continue;
+      let data: string;
+      try {
+        data = await handle.screenshot({ type: 'png', encoding: 'base64', omitBackground: true });
+      } catch (error) {
+        const descriptor = await handle.evaluate((element: Element) => (
+          `${element.tagName.toLowerCase()}.${Array.from(element.classList).join('.')}`
+        )).catch(() => `element-${index + 1}`);
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Word export could not capture ${descriptor}: ${message}`, { cause: error });
+      }
+      await handle.evaluate((element: Element, pngBase64: string) => {
+        const image = document.createElement('img');
+        image.src = `data:image/png;base64,${pngBase64}`;
+        image.alt = element instanceof HTMLImageElement
+          ? element.alt
+          : element.getAttribute('data-source') ?? '';
+        image.setAttribute('data-meo-docx-materialized', '');
+        element.replaceWith(image);
+      }, data);
+    }
+    return page.$eval('.meo-export-doc', (element: Element) => element.outerHTML);
+  }, 'docx');
+}
+
 export async function preparePdfPagination(page: any): Promise<void> {
   await page.evaluate((pageHeight: number) => {
     const documentRoot = document.querySelector<HTMLElement>('.meo-export-doc');
@@ -193,30 +223,40 @@ export async function fitBlockMathForPdf(page: any): Promise<void> {
 
 async function withPreparedExportPage<T>(
   options: HeadlessExportOptions,
-  action: (page: any) => Promise<T>
+  action: (page: any) => Promise<T>,
+  target: 'pdf' | 'docx' = 'pdf'
 ): Promise<T> {
   const timeoutMs = Math.max(1000, options.timeoutMs ?? 30000);
   const browserExecutablePath = await findPdfBrowserExecutablePath(options.browserExecutablePath);
+  const browserArgs = [
+    '--allow-file-access-from-files',
+    '--disable-web-security',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--no-sandbox'
+  ];
+  if (process.platform === 'win32' && path.basename(browserExecutablePath).toLowerCase() === 'msedge.exe') {
+    browserArgs.push('--edge-skip-compat-layer-relaunch');
+  }
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'meo-export-'));
   const tempHtmlPath = path.join(tempDir, 'render.html');
 
   let browser: any = null;
   let operationFailed = false;
+  let stage = 'launching the browser';
   try {
     await fs.writeFile(tempHtmlPath, options.htmlDocument, 'utf8');
     const puppeteer = await loadBundledPuppeteerRuntime(options.puppeteerRuntimeModulePath);
 
     browser = await puppeteer.launch({
       executablePath: browserExecutablePath,
+      userDataDir: path.join(tempDir, 'browser-profile'),
       headless: true,
-      args: [
-        '--allow-file-access-from-files',
-        '--disable-web-security',
-        '--no-first-run',
-        '--no-default-browser-check'
-      ]
+      timeout: timeoutMs,
+      args: browserArgs
     });
 
+    stage = 'loading the rendered document';
     const page = await browser.newPage();
     page.setDefaultNavigationTimeout(timeoutMs);
     page.setDefaultTimeout(timeoutMs);
@@ -226,11 +266,12 @@ async function withPreparedExportPage<T>(
       waitUntil: 'domcontentloaded'
     });
 
-    await page.evaluate(() => {
-      document.documentElement.setAttribute('data-meo-export-target', 'pdf');
-      document.body.setAttribute('data-meo-export-target', 'pdf');
-    });
+    await page.evaluate((exportTarget: string) => {
+      document.documentElement.setAttribute('data-meo-export-target', exportTarget);
+      document.body.setAttribute('data-meo-export-target', exportTarget);
+    }, target);
 
+    stage = 'waiting for diagrams, formulas, and images';
     await page.waitForFunction(() => (window as any).__MEO_EXPORT_READY__ === true, {
       timeout: timeoutMs
     });
@@ -244,13 +285,18 @@ async function withPreparedExportPage<T>(
         await refitMath();
       }
     });
-    await fitBlockMathForPdf(page);
-    await preparePdfPagination(page);
+    stage = 'preparing the final document';
+    if (target === 'pdf') {
+      await fitBlockMathForPdf(page);
+      await preparePdfPagination(page);
+    }
 
+    stage = 'writing the export';
     return await action(page);
   } catch (error) {
     operationFailed = true;
-    throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Export browser failed while ${stage}: ${message}`, { cause: error });
   } finally {
     const cleanupErrors: unknown[] = [];
     if (browser) {

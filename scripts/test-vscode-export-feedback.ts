@@ -139,6 +139,24 @@ assert.deepEqual(informationMessages.at(-1), {
 await new Promise<void>((resolve) => setTimeout(resolve, 0));
 assert.equal(revealedUris.at(-1), targetUri);
 
+progressMessages.length = 0;
+const docxOutcome = await runVscodeExportWithFeedback({
+  sourceDocumentUri,
+  format: 'docx',
+  uiLanguage: 'zh-CN'
+}, async ({ report }) => {
+  report('writingDocx');
+});
+assert.equal(docxOutcome, 'completed');
+assert.equal(saveDialogOptions?.saveLabel, '导出 DOCX');
+assert.equal((saveDialogOptions?.defaultUri as FakeUri).fsPath.endsWith('note.docx'), true);
+assert.deepEqual(saveDialogOptions?.filters, { Word: ['docx'] });
+assert.deepEqual(progressMessages, [
+  '等待选择保存位置…',
+  '正在准备 DOCX 导出…',
+  '正在生成 Word 文档…'
+]);
+
 rejectReveal = true;
 selectedAction = '打开所在文件夹';
 await runVscodeExportWithFeedback({

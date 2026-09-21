@@ -29,6 +29,7 @@ export const EDITOR_APPEARANCE_SETTING_KEY = 'appearance.editor';
 export const PREVIEW_APPEARANCE_SETTING_KEY = 'appearance.preview';
 export const PREVIEW_FONT_FAMILY_SETTING_KEY = 'preview.fontFamily';
 export const PREVIEW_SOURCE_COLORING_SETTING_KEY = 'preview.sourceColoring';
+export const LIVE_STRONG_COLORING_SETTING_KEY = 'appearance.strongColoring';
 export const EDITOR_FONT_SIZE_MODE_SETTING_KEY = 'appearance.fontSizeMode';
 export const EDITOR_FONT_SIZE_SETTING_KEY = 'appearance.fontSize';
 export const APPEARANCE_SETTINGS_MIGRATION_STATE_KEY = 'appearanceSettingsMigration';
@@ -38,6 +39,7 @@ export type AppearanceSettings = {
   previewAppearance: PreviewAppearance;
   previewFontFamily: string;
   previewSourceColoring: boolean;
+  liveStrongColoring: boolean;
   editorFontSizeMode: EditorFontSizeMode;
   editorFontSize: number;
 };
@@ -64,6 +66,8 @@ export type AppearanceSettingsOwner = {
   setPreviewFontFamily: (fontFamily: string) => Promise<void>;
   getPreviewSourceColoring: () => boolean;
   setPreviewSourceColoring: (enabled: boolean) => Promise<void>;
+  getLiveStrongColoring: () => boolean;
+  setLiveStrongColoring: (enabled: boolean) => Promise<void>;
   getEditorFontSizePreference: () => EditorFontSizePreference;
   setEditorFontSizePreference: (preference: EditorFontSizePreference) => Promise<void>;
 };
@@ -133,6 +137,7 @@ const resolveSettings = (store: AppearanceSettingsStore, preferLegacy: boolean):
     previewAppearance: normalizePreviewAppearance(resolve(PREVIEW_APPEARANCE_SETTING_KEY, PREVIEW_APPEARANCE_STATE_KEY)),
     previewFontFamily: normalizeStoredPreviewFontFamily(resolve(PREVIEW_FONT_FAMILY_SETTING_KEY, PREVIEW_FONT_FAMILY_STATE_KEY)),
     previewSourceColoring: normalizeSourceColoring(resolve(PREVIEW_SOURCE_COLORING_SETTING_KEY, PREVIEW_SOURCE_COLORING_STATE_KEY)),
+    liveStrongColoring: store.readConfiguration(LIVE_STRONG_COLORING_SETTING_KEY).value === true,
     editorFontSizeMode: normalizeEditorFontSizeMode(resolve(EDITOR_FONT_SIZE_MODE_SETTING_KEY, EDITOR_FONT_SIZE_MODE_STATE_KEY)),
     editorFontSize: normalizeEditorFontSize(resolve(EDITOR_FONT_SIZE_SETTING_KEY, EDITOR_FONT_SIZE_STATE_KEY))
   };
@@ -338,6 +343,12 @@ export async function createAppearanceSettingsOwner(
     setPreviewSourceColoring: (enabled) => write(
       'previewSourceColoring',
       PREVIEW_SOURCE_COLORING_SETTING_KEY,
+      enabled === true
+    ),
+    getLiveStrongColoring: () => readSettings().liveStrongColoring,
+    setLiveStrongColoring: (enabled) => write(
+      'liveStrongColoring',
+      LIVE_STRONG_COLORING_SETTING_KEY,
       enabled === true
     ),
     getEditorFontSizePreference: () => ({

@@ -413,6 +413,33 @@ async function main() {
     ) {
       throw new Error(`Strong text did not inherit its context color: ${JSON.stringify(contextualStrongColors)}`);
     }
+    const configuredStrongColors = await page.evaluate(() => {
+      document.documentElement.style.setProperty('--meo-semantic-strongForeground', '#e5c07b');
+      document.documentElement.classList.add('meo-live-strong-coloring');
+      const bodyLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((line) => line.textContent?.includes('粗体一')) ?? null;
+      const headingLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((line) => line.textContent?.includes('标题里的')) ?? null;
+      const bodyStrong = bodyLine?.querySelector<HTMLElement>('.meo-md-strong') ?? null;
+      const headingStrong = headingLine?.querySelector<HTMLElement>('.meo-md-strong') ?? null;
+      const colors = bodyStrong && headingStrong && headingLine
+        ? {
+            bodyStrong: getComputedStyle(bodyStrong).color,
+            heading: getComputedStyle(headingLine).color,
+            headingStrong: getComputedStyle(headingStrong).color
+          }
+        : null;
+      document.documentElement.classList.remove('meo-live-strong-coloring');
+      document.documentElement.style.removeProperty('--meo-semantic-strongForeground');
+      return colors;
+    });
+    if (
+      !configuredStrongColors ||
+      configuredStrongColors.bodyStrong !== 'rgb(229, 192, 123)' ||
+      configuredStrongColors.headingStrong !== configuredStrongColors.heading
+    ) {
+      throw new Error(`Configured strong coloring did not preserve heading color: ${JSON.stringify(configuredStrongColors)}`);
+    }
     const frontmatterProperties = await page.evaluate(() => {
       const host = document.createElement('div');
       host.style.width = '760px';

@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 const REMOTE_OR_INLINE_RE = /^(?:https?:|data:|blob:)/i;
 
-type ExportImageTarget = 'html' | 'pdf';
+type ExportImageTarget = 'html' | 'pdf' | 'docx';
 
 const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
   '.avif': 'image/avif',

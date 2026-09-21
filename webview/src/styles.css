@@ -2354,6 +2354,22 @@ button:focus-visible > .menu-switch {
   font-weight: 700;
 }
 
+.meo-live-strong-coloring .cm-editor.meo-mode-live .meo-md-strong {
+  color: var(--meo-semantic-strongForeground) !important;
+  -webkit-text-fill-color: var(--meo-semantic-strongForeground) !important;
+}
+
+.meo-live-strong-coloring .cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-strong {
+  color: var(--meo-semantic-headingForeground, #79b8ff) !important;
+  -webkit-text-fill-color: var(--meo-semantic-headingForeground, #79b8ff) !important;
+}
+
+.meo-live-strong-coloring .cm-editor.meo-mode-live :is(.meo-md-link, .meo-md-wiki-link) .meo-md-strong,
+.meo-live-strong-coloring .cm-editor.meo-mode-live .meo-md-strong:is(.meo-md-link, .meo-md-wiki-link) {
+  color: var(--meo-semantic-linkForeground) !important;
+  -webkit-text-fill-color: var(--meo-semantic-linkForeground) !important;
+}
+
 .cm-editor.meo-mode-live :is(.meo-md-marker, .meo-md-marker-active, .meo-md-code-marker, .meo-md-code-marker-active),
 .cm-editor.meo-mode-live :is(.meo-md-marker, .meo-md-marker-active, .meo-md-code-marker, .meo-md-code-marker-active) * {
   font-style: normal !important;

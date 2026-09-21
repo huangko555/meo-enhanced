@@ -83,7 +83,7 @@ import type { DiagnosticsChangedEvent, SerializedDiagnostic } from '../protocol/
 import { decodeWebviewToHostMessage, type WebviewToHostMessage } from '../protocol/messages';
 import { normalizeUiLanguagePreference, resolveUiLanguage } from '../foundation/uiLanguage';
 export type EditorMode = 'live' | 'source' | 'preview';
-export type ExportFormat = 'html' | 'pdf';
+export type ExportFormat = 'html' | 'pdf' | 'docx';
 export type ExportOptions = Readonly<{
   format: ExportFormat;
   includeTableOfContents: boolean;
@@ -139,6 +139,8 @@ type PanelSessionControllerParams = {
   setPreviewFontFamily: (fontFamily: string) => Promise<void>;
   getPreviewSourceColoring: () => boolean;
   setPreviewSourceColoring: (enabled: boolean) => Promise<void>;
+  getLiveStrongColoring?: () => boolean;
+  setLiveStrongColoring?: (enabled: boolean) => Promise<void>;
   getEditorAppearance: () => EditorAppearance;
   setEditorAppearance: (appearance: EditorAppearance) => Promise<void>;
   getEditorFontSizePreference: () => EditorFontSizePreference;
@@ -194,6 +196,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     setPreviewFontFamily,
     getPreviewSourceColoring,
     setPreviewSourceColoring,
+    getLiveStrongColoring = () => false,
+    setLiveStrongColoring = async () => undefined,
     getEditorAppearance,
     setEditorAppearance,
     getEditorFontSizePreference,
@@ -408,6 +412,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       previewAppearance: getPreviewAppearance(),
       previewFontFamily: getPreviewFontFamily(),
       previewSourceColoring: getPreviewSourceColoring(),
+      liveStrongColoring: getLiveStrongColoring(),
       editorAppearance: getEditorAppearance(),
       editorFontSizeMode: editorFontSizePreference.mode,
       editorFontSize: editorFontSizePreference.value,
@@ -668,6 +673,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       case 'setPreviewSourceColoring':
         await setPreviewSourceColoring(raw.enabled);
+        return;
+      case 'setLiveStrongColoring':
+        await setLiveStrongColoring(raw.enabled);
         return;
       case 'setEditorAppearance':
         await setEditorAppearance(raw.appearance);

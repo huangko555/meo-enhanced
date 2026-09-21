@@ -39,6 +39,7 @@ const completeInit = {
   previewAppearance: 'dark' as const,
   previewFontFamily: '' as const,
   previewSourceColoring: true,
+  liveStrongColoring: false,
   editorAppearance: 'dark' as const,
   editorFontSizeMode: 'auto' as const,
   editorFontSize: 14,
@@ -73,6 +74,8 @@ assert.deepEqual(initializedSession.handle({
 }), []);
 assert.equal(decodeInitMessage({ ...completeInit, version: -1 }), null);
 assert.equal(decodeInitMessage({ ...completeInit, previewSourceColoring: undefined }), null);
+assert.equal(decodeInitMessage({ ...completeInit, liveStrongColoring: undefined })?.liveStrongColoring, false);
+assert.equal(decodeInitMessage({ ...completeInit, liveStrongColoring: 'yes' }), null);
 assert.equal(decodeInitMessage({ ...completeInit, editorFontSizeMode: 'invalid' }), null);
 assert.equal(decodeInitMessage({ ...completeInit, editorFontSize: 9 }), null);
 assert.equal(decodeInitMessage({ ...completeInit, editorFontSize: 14.5 }), null);
@@ -157,6 +160,14 @@ assert.deepEqual(
 assert.deepEqual(
   decodeWebviewToHostMessage({ type: 'setSourceLineNumbers', mode: 'off' }),
   { type: 'setSourceLineNumbers', mode: 'off' }
+);
+assert.deepEqual(
+  decodeWebviewToHostMessage({ type: 'setLiveStrongColoring', enabled: true }),
+  { type: 'setLiveStrongColoring', enabled: true }
+);
+assert.deepEqual(
+  decodeWebviewToHostMessage({ type: 'exportDocument', format: 'docx', includeTableOfContents: true }),
+  { type: 'exportDocument', format: 'docx', includeTableOfContents: true }
 );
 assert.deepEqual(decodeDocumentSyncMessage({ type: 'docChanged', text: 'next', version: 4 }), {
   type: 'docChanged', text: 'next', version: 4
