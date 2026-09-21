@@ -192,22 +192,24 @@ async function main(): Promise<void> {
         nearLuma: number;
         farLuma: number;
         contrast: number;
+        dividerContrast: number;
         sideNearLuma: number;
         sideFarLuma: number;
         sideContrast: number;
       } = null;
-      if (scenario.dpr === 1 && scenario.zoom === 1 && !scenario.transform) {
+      if (!scenario.expectFailure) {
         const rect = result.before.stickyHeaderRect!;
+        const clip = {
+          x: Math.max(0, Math.floor(rect.left)),
+          y: Math.max(0, Math.floor(rect.top)),
+          width: Math.max(1, Math.floor(rect.width) + 8),
+          height: Math.max(1, Math.floor(rect.height) + 8)
+        };
         const screenshot = await geometryPage.screenshot({
           encoding: 'base64',
-          clip: {
-            x: Math.max(0, Math.floor(rect.left)),
-            y: Math.max(0, Math.floor(rect.top)),
-            width: Math.max(1, Math.floor(rect.width) + 8),
-            height: Math.max(1, Math.floor(rect.height) + 8)
-          }
+          clip
         }) as string;
-        visualBoundary = await geometryPage.evaluate(async ({ source, headerWidth, headerHeight }) => {
+        visualBoundary = await geometryPage.evaluate(async ({ source, headerWidth, headerHeight, clipWidth, clipHeight }) => {
           const image = new Image();
           await new Promise<void>((resolve, reject) => {
             image.onload = () => resolve();
@@ -220,9 +222,11 @@ async function main(): Promise<void> {
           const context = canvas.getContext('2d', { willReadFrequently: true })!;
           context.drawImage(image, 0, 0);
           const pixels = context.getImageData(0, 0, image.width, image.height).data;
+          const scaleX = image.width / clipWidth;
+          const scaleY = image.height / clipHeight;
           const rowLuma = (row: number) => {
             const values: number[] = [];
-            for (let column = 8; column < Math.min(image.width - 8, 308); column += 1) {
+            for (let column = Math.ceil(8 * scaleX); column < Math.min(image.width - 8 * scaleX, 308 * scaleX); column += 1) {
               const offset = (row * image.width + column) * 4;
               values.push(
                 pixels[offset] * 0.2126 + pixels[offset + 1] * 0.7152 + pixels[offset + 2] * 0.0722
@@ -233,7 +237,7 @@ async function main(): Promise<void> {
           };
           const columnLuma = (column: number) => {
             const values: number[] = [];
-            for (let row = 8; row < Math.min(image.height - 8, Math.floor(headerHeight) - 8); row += 1) {
+            for (let row = Math.ceil(8 * scaleY); row < Math.min(image.height - 8 * scaleY, (headerHeight - 8) * scaleY); row += 1) {
               const offset = (row * image.width + column) * 4;
               values.push(
                 pixels[offset] * 0.2126 + pixels[offset + 1] * 0.7152 + pixels[offset + 2] * 0.0722
@@ -242,14 +246,17 @@ async function main(): Promise<void> {
             values.sort((left, right) => left - right);
             return values[Math.floor(values.length / 2)] ?? 0;
           };
-          const nearLuma = rowLuma(Math.min(image.height - 1, Math.floor(headerHeight)));
+          const dividerRow = Math.min(image.height - 1, Math.max(0, Math.floor((headerHeight - 1) * scaleY)));
+          const interiorRow = Math.max(0, Math.floor((headerHeight - 4) * scaleY));
+          const nearLuma = rowLuma(Math.min(image.height - 1, Math.floor(headerHeight * scaleY)));
           const farLuma = rowLuma(image.height - 1);
-          const sideNearLuma = columnLuma(Math.min(image.width - 1, Math.floor(headerWidth)));
+          const sideNearLuma = columnLuma(Math.min(image.width - 1, Math.floor(headerWidth * scaleX)));
           const sideFarLuma = columnLuma(image.width - 1);
           return {
             nearLuma,
             farLuma,
             contrast: farLuma - nearLuma,
+            dividerContrast: Math.abs(rowLuma(interiorRow) - rowLuma(dividerRow)),
             sideNearLuma,
             sideFarLuma,
             sideContrast: sideFarLuma - sideNearLuma
@@ -257,7 +264,9 @@ async function main(): Promise<void> {
         }, {
           source: `data:image/png;base64,${screenshot}`,
           headerWidth: rect.width,
-          headerHeight: rect.height
+          headerHeight: rect.height,
+          clipWidth: clip.width,
+          clipHeight: clip.height
         });
       }
       await geometryPage.evaluate(() => {
@@ -290,9 +299,13 @@ async function main(): Promise<void> {
         assert.equal(geometryResult.threshold!.afterVisible, true);
         assert.ok(geometryResult.threshold!.takeoverDelta <= 1, JSON.stringify(geometryResult.threshold));
         assertAlignedGeometry(geometryResult.before);
+        assert.ok(
+          geometryResult.visualBoundary.dividerContrast >= 3,
+          `sticky-header divider must remain visible at DPR ${dpr} and zoom ${zoom}: ${JSON.stringify(geometryResult.visualBoundary)}`
+        );
         if (dpr === 1 && zoom === 1) {
           assert.ok(
-            geometryResult.visualBoundary && geometryResult.visualBoundary.contrast >= 3,
+            geometryResult.visualBoundary.contrast >= 3,
             `sticky-header shadow must be visibly darker than the surface below it: ${JSON.stringify(geometryResult.visualBoundary)}`
           );
           assert.ok(
@@ -312,6 +325,10 @@ async function main(): Promise<void> {
       transform: 'translate(13px, 7px) scale(1.25, 0.9)'
     });
     assertAlignedGeometry(nestedResult.before);
+    assert.ok(
+      nestedResult.visualBoundary && nestedResult.visualBoundary.dividerContrast >= 3,
+      `sticky-header divider must remain visible under transformed ancestors: ${JSON.stringify(nestedResult.visualBoundary)}`
+    );
     const dynamicZoomResult = await runGeometryScenario({
       dpr: 2,
       zoom: 1,
@@ -675,10 +692,10 @@ async function main(): Promise<void> {
       /linear-gradient/,
       'the sticky chrome must paint a downward-only gradient below the shared edge'
     );
-    assert.match(
+    assert.equal(
       result.domContract.boundary.headerShadow,
-      /inset/,
-      'the sticky header must paint its divider as an inset line so it survives fractional scaling'
+      'none',
+      'the sticky header divider must not depend on a fractional inset shadow'
     );
     assert.equal(result.domContract.wrapOverflow, 'clip');
     assert.equal(result.domContract.lineNumbers, true);
