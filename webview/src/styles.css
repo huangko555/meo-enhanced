@@ -6329,7 +6329,7 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-delet
 }
 
 .cm-editor.meo-mode-live .cm-activeLine.meo-md-alert:has(> .meo-md-alert-marker:first-child) {
-  padding-left: 5ch;
+  padding-left: 3ch;
   text-indent: -2ch;
 }
 

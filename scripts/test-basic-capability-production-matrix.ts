@@ -195,9 +195,26 @@ async function alertPressLayout(browser: Browser): Promise<void> {
     }
     return null;
   }, needle);
+  const measureLeadingMarker = (needle: string) => page.evaluate((target) => {
+    const line = [...document.querySelectorAll<HTMLElement>('.cm-line')]
+      .find((candidate) => candidate.textContent?.includes(target));
+    if (!line) return null;
+    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode as Text;
+      const offset = node.data.indexOf('>');
+      if (offset < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, offset);
+      range.setEnd(node, offset + 1);
+      return range.getBoundingClientRect().left;
+    }
+    return null;
+  }, needle);
   try {
     await page.waitForFunction((count) => document.querySelectorAll('.meo-md-alert-icon').length === count, {}, types.length);
     for (const type of types) {
+      const activeMarkerLeft: number[] = [];
       for (const needle of [type, `${type.toLowerCase()} body`]) {
         const neutral = await measure('neutral anchor');
         assert.ok(neutral);
@@ -216,12 +233,27 @@ async function alertPressLayout(browser: Browser): Promise<void> {
         await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
         const released = await measure(needle);
         assert.ok(released);
+        const activeLeft = pressedFrames[0]?.left;
+        assert.equal(typeof activeLeft, 'number');
         assert.ok(
-          pressedFrames.every((frame) => frame && Math.abs(frame.left - before.left) <= 1)
-            && Math.abs(released.left - before.left) <= 1,
-          `Pressing alert ${type} ${needle} changed its content inset: ${JSON.stringify({ before, pressedFrames, released })}`
+          pressedFrames.every((frame) => frame && Math.abs(frame.left - activeLeft) <= 1)
+            && Math.abs(released.left - activeLeft) <= 1,
+          `Pressing alert ${type} ${needle} produced intermediate layout movement: ${JSON.stringify({ before, pressedFrames, released })}`
         );
+        if (needle !== type) {
+          assert.ok(
+            Math.abs(activeLeft - before.left) <= 1,
+            `Pressing alert ${type} body changed its content inset: ${JSON.stringify({ before, pressedFrames, released })}`
+          );
+        }
+        const markerLeft = await measureLeadingMarker(needle);
+        assert.ok(markerLeft !== null, `Alert ${type} ${needle} did not expose its leading marker`);
+        activeMarkerLeft.push(markerLeft);
       }
+      assert.ok(
+        Math.abs(activeMarkerLeft[0] - activeMarkerLeft[1]) <= 1,
+        `Alert ${type} title and body markers were not aligned: ${JSON.stringify(activeMarkerLeft)}`
+      );
     }
   } finally {
     await page.mouse.up().catch(() => {});
