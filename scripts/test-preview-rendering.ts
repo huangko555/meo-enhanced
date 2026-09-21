@@ -433,6 +433,12 @@ const maliciousFontStyles = buildPreviewStyles({
 const customSizeStyles = buildPreviewStyles({ ...environment, editorFontSizePx: 12 }, 'dark');
 const lightVisuals = getBuiltInVisuals('light');
 const darkVisuals = getBuiltInVisuals('dark');
+if (lightVisuals.semanticColors.strongForeground !== 'var(--meo-foreground)') {
+  throw new Error('Light strong text should use the ordinary body foreground.');
+}
+if (darkVisuals.semanticColors.strongForeground !== 'color-mix(in srgb, var(--meo-foreground) 92%, #e5c07b 8%)') {
+  throw new Error('Dark strong text should mix a small amount of yellow into the body foreground.');
+}
 const lightPreviewWithDarkEditorTheme = buildPreviewStyles({
   ...environment,
   previewThemeIsolation: true,

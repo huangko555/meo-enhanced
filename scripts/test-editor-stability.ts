@@ -414,7 +414,10 @@ async function main() {
       throw new Error(`Strong text did not inherit its context color: ${JSON.stringify(contextualStrongColors)}`);
     }
     const configuredStrongColors = await page.evaluate(() => {
-      document.documentElement.style.setProperty('--meo-semantic-strongForeground', '#e5c07b');
+      document.documentElement.style.setProperty(
+        '--meo-semantic-strongForeground',
+        'color-mix(in srgb, var(--meo-foreground) 92%, #e5c07b 8%)'
+      );
       document.documentElement.classList.add('meo-live-strong-coloring');
       const bodyLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
         .find((line) => line.textContent?.includes('粗体一')) ?? null;
@@ -422,20 +425,27 @@ async function main() {
         .find((line) => line.textContent?.includes('标题里的')) ?? null;
       const bodyStrong = bodyLine?.querySelector<HTMLElement>('.meo-md-strong') ?? null;
       const headingStrong = headingLine?.querySelector<HTMLElement>('.meo-md-strong') ?? null;
+      const expected = document.createElement('span');
+      expected.style.color = 'var(--meo-semantic-strongForeground)';
+      bodyLine?.appendChild(expected);
       const colors = bodyStrong && headingStrong && headingLine
         ? {
+            body: getComputedStyle(bodyLine).color,
             bodyStrong: getComputedStyle(bodyStrong).color,
             heading: getComputedStyle(headingLine).color,
-            headingStrong: getComputedStyle(headingStrong).color
+            headingStrong: getComputedStyle(headingStrong).color,
+            expectedBodyStrong: getComputedStyle(expected).color
           }
         : null;
+      expected.remove();
       document.documentElement.classList.remove('meo-live-strong-coloring');
       document.documentElement.style.removeProperty('--meo-semantic-strongForeground');
       return colors;
     });
     if (
       !configuredStrongColors ||
-      configuredStrongColors.bodyStrong !== 'rgb(229, 192, 123)' ||
+      configuredStrongColors.bodyStrong !== configuredStrongColors.expectedBodyStrong ||
+      configuredStrongColors.bodyStrong === configuredStrongColors.body ||
       configuredStrongColors.headingStrong !== configuredStrongColors.heading
     ) {
       throw new Error(`Configured strong coloring did not preserve heading color: ${JSON.stringify(configuredStrongColors)}`);
