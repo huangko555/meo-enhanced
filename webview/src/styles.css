@@ -5581,7 +5581,7 @@ html[data-editor-appearance='dark'] body.vscode-dark
   right: 0;
   bottom: 0;
   left: 0;
-  height: 2px;
+  height: 1px;
   background: var(--meo-semantic-tableBorder);
   pointer-events: none;
 }

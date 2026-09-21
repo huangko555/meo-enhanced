@@ -500,7 +500,8 @@ async function main(): Promise<void> {
           headerBottom: stickyHeader.getBoundingClientRect().bottom,
           chromeShadow: getComputedStyle(chrome).boxShadow,
           chromeAfterBackground: getComputedStyle(chrome, '::after').backgroundImage,
-          headerShadow: getComputedStyle(stickyHeader).boxShadow
+          headerShadow: getComputedStyle(stickyHeader).boxShadow,
+          headerAfterHeight: getComputedStyle(stickyHeader, '::after').height
         },
         firstColumnDelta: Math.abs(
           document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead th')!.getBoundingClientRect().left -
@@ -696,6 +697,11 @@ async function main(): Promise<void> {
       result.domContract.boundary.headerShadow,
       'none',
       'the sticky header divider must not depend on a fractional inset shadow'
+    );
+    assert.equal(
+      result.domContract.boundary.headerAfterHeight,
+      '1px',
+      'the sticky header divider must remain a single CSS pixel'
     );
     assert.equal(result.domContract.wrapOverflow, 'clip');
     assert.equal(result.domContract.lineNumbers, true);
