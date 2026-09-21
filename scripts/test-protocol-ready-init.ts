@@ -51,6 +51,7 @@ const completeInit = {
   fixedBaselineActive: false,
   fixedBaselineUpdatedAt: null,
   contentMaxWidthEnabled: true,
+  largeDocumentOptimizationEnabled: true,
   tableStickyHeaderEnabled: true,
   restoreReadingPositionOnOpen: true,
   readingPositionRestore: { line: 42, lineOffset: 6.5 },
@@ -84,6 +85,11 @@ assert.deepEqual(
   decodeInitMessage({ ...completeInit, editorFontSizeMode: undefined, editorFontSize: undefined }),
   completeInit
 );
+assert.equal(
+  decodeInitMessage({ ...completeInit, largeDocumentOptimizationEnabled: undefined })?.largeDocumentOptimizationEnabled,
+  true
+);
+assert.equal(decodeInitMessage({ ...completeInit, largeDocumentOptimizationEnabled: 'yes' }), null);
 assert.equal(
   decodeInitMessage({ ...completeInit, tableStickyHeaderEnabled: undefined })?.tableStickyHeaderEnabled,
   true
@@ -697,6 +703,7 @@ for (const command of [
   { type: 'setOutlineWidth', width: 240 },
   { type: 'setContentMaxWidth', enabled: true },
   { type: 'setTableStickyHeader', enabled: false },
+  { type: 'setLargeDocumentOptimization', enabled: false },
   { type: 'setRestoreReadingPositionOnOpen', enabled: false },
   { type: 'setFindOptions', findOptions: { wholeWord: true, caseSensitive: false } },
   { type: 'openLink', href: 'docs/readme.md', source: 'preview' },
@@ -773,6 +780,10 @@ assert.equal(decodeHostConfigurationEvent({ type: 'vscodeCodeThemeChanged', vsco
 assert.equal(decodeHostConfigurationEvent({ type: 'themeChanged', theme: {}, codeTheme }), null);
 assert.equal(decodeHostConfigurationEvent({ type: 'shikiCodeBlocksChanged', enabled: true, codeTheme }), null);
 assert.deepEqual(decodeHostConfigurationEvent({ type: 'toggleMode' }), { type: 'toggleMode' });
+assert.deepEqual(
+  decodeHostConfigurationEvent({ type: 'largeDocumentOptimizationChanged', enabled: false }),
+  { type: 'largeDocumentOptimizationChanged', enabled: false }
+);
 assert.deepEqual(
   decodeHostConfigurationEvent({ type: 'tableStickyHeaderChanged', enabled: false }),
   { type: 'tableStickyHeaderChanged', enabled: false }

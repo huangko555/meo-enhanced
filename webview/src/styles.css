@@ -1326,6 +1326,7 @@ body {
 }
 
 .more-tools-option {
+  position: relative;
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) 14px;
   align-items: center;
@@ -2352,6 +2353,60 @@ button:focus-visible > .menu-switch {
   color: inherit !important;
   -webkit-text-fill-color: inherit !important;
   font-weight: 700;
+}
+
+.more-tools-option-text {
+  display: inline-flex;
+  min-width: 0;
+  overflow: visible;
+  align-items: center;
+  gap: 5px;
+}
+
+.more-tools-option-text > .more-tools-option-label {
+  min-width: 0;
+}
+
+.more-tools-option-info {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--vscode-descriptionForeground);
+  cursor: help;
+}
+
+.more-tools-option-tooltip {
+  position: absolute;
+  z-index: 20;
+  right: 8px;
+  top: calc(100% + 7px);
+  box-sizing: border-box;
+  width: calc(100% - 16px);
+  padding: 7px 9px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: 4px;
+  color: var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground));
+  background: var(--vscode-editorHoverWidget-background, var(--vscode-editor-background));
+  box-shadow: 0 3px 10px rgb(0 0 0 / 24%);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  white-space: normal;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.more-tools-option-info:hover .more-tools-option-tooltip,
+.more-tools-option:focus-visible .more-tools-option-tooltip {
+  visibility: visible;
+  opacity: 1;
+}
+
+.more-tools-option:has(.more-tools-option-info:hover),
+.more-tools-option:focus-visible {
+  z-index: 1;
 }
 
 .meo-live-strong-coloring .cm-editor.meo-mode-live .meo-md-strong {

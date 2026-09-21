@@ -50,6 +50,10 @@ assert.deepEqual(
   ['Sticky table header', '表格浮动表头']
 );
 assert.deepEqual(
+  [english.largeDocumentStartup, chinese.largeDocumentStartup],
+  ['Large file startup', '大文档启动优化']
+);
+assert.deepEqual(
   [english.resumeFromLastPosition, chinese.resumeFromLastPosition],
   ['Resume from last position', '打开时恢复上一次阅读位置']
 );

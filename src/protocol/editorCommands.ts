@@ -23,6 +23,7 @@ export type EditorCommand =
   | { readonly type: 'setOutlinePosition'; readonly position: OutlinePosition }
   | { readonly type: 'setOutlineWidth'; readonly width: number }
   | { readonly type: 'setContentMaxWidth'; readonly enabled: boolean }
+  | { readonly type: 'setLargeDocumentOptimization'; readonly enabled: boolean }
   | { readonly type: 'setTableStickyHeader'; readonly enabled: boolean }
   | { readonly type: 'setRestoreReadingPositionOnOpen'; readonly enabled: boolean }
   | {
@@ -77,6 +78,7 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
       return isBoolean(value.visible) ? value as EditorCommand : null;
     case 'setFixedBaseline':
     case 'setContentMaxWidth':
+    case 'setLargeDocumentOptimization':
     case 'setTableStickyHeader':
     case 'setRestoreReadingPositionOnOpen':
       return isBoolean(value.enabled) ? value as EditorCommand : null;

@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Unlink, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, HardDriveUpload, PanelLeftRightDashed, SquareSplitHorizontal, Settings, Check, Ellipsis, Sun, Moon, ExternalLink, History } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Unlink, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, HardDriveUpload, PanelLeftRightDashed, SquareSplitHorizontal, Settings, Check, Ellipsis, Sun, Moon, ExternalLink, History, Info } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -212,6 +212,7 @@ let gitBaselineState: GitBaselinePayload | null = null;
 let changesReviewMode: 'live' | 'source' | 'preview' = 'live';
 let contentMaxWidthEnabled = false;
 let liveStrongColoring = false;
+let largeDocumentOptimizationEnabled = true;
 let tableStickyHeaderEnabled = true;
 let restoreReadingPositionOnOpen = true;
 let outlineUiState: { mode: 'floating' | 'fixed'; width: number } = { mode: 'fixed', width: 260 };
@@ -237,7 +238,8 @@ const outlineBtn = createOutlineButton('right');
 const appendMoreToolsOptionContent = (
   button: HTMLButtonElement,
   icon: Parameters<typeof createElement>[0],
-  labelText: string
+  labelText: string,
+  description?: { readonly id: string; readonly text: string }
 ) => {
   const iconElement = document.createElement('span');
   iconElement.className = 'more-tools-option-icon';
@@ -248,7 +250,25 @@ const appendMoreToolsOptionContent = (
   const toggle = document.createElement('span');
   toggle.className = 'menu-switch';
   toggle.setAttribute('aria-hidden', 'true');
-  button.append(iconElement, label, toggle);
+  if (!description) {
+    button.append(iconElement, label, toggle);
+    return;
+  }
+  const text = document.createElement('span');
+  text.className = 'more-tools-option-text';
+  const info = document.createElement('span');
+  info.className = 'more-tools-option-info';
+  info.appendChild(createElement(Info, { width: 13, height: 13, 'aria-hidden': 'true' }));
+  const tooltip = document.createElement('span');
+  tooltip.id = description.id;
+  tooltip.className = 'more-tools-option-tooltip';
+  tooltip.setAttribute('role', 'tooltip');
+  tooltip.textContent = description.text;
+  info.appendChild(tooltip);
+  info.addEventListener('click', (event) => event.stopPropagation());
+  text.append(label, info);
+  button.setAttribute('aria-describedby', description.id);
+  button.append(iconElement, text, toggle);
 };
 
 const contentMaxWidthBtn = document.createElement('button');
@@ -281,6 +301,19 @@ longCodeBlockFoldingBtn.className = 'more-tools-option more-tools-toggle-option 
 longCodeBlockFoldingBtn.dataset.action = 'longCodeBlockFolding';
 longCodeBlockFoldingBtn.setAttribute('role', 'menuitemcheckbox');
 appendMoreToolsOptionContent(longCodeBlockFoldingBtn, Code, activeUiStrings.foldLongCodeBlocks);
+
+const largeDocumentOptimizationBtn = document.createElement('button');
+largeDocumentOptimizationBtn.type = 'button';
+largeDocumentOptimizationBtn.className = 'more-tools-option more-tools-toggle-option is-active';
+largeDocumentOptimizationBtn.dataset.action = 'largeDocumentOptimization';
+largeDocumentOptimizationBtn.setAttribute('role', 'menuitemcheckbox');
+largeDocumentOptimizationBtn.setAttribute('aria-checked', 'true');
+appendMoreToolsOptionContent(
+  largeDocumentOptimizationBtn,
+  FileCode2,
+  activeUiStrings.largeDocumentStartup,
+  { id: 'large-document-startup-tooltip', text: activeUiStrings.largeDocumentStartupDescription }
+);
 
 const tableStickyHeaderBtn = document.createElement('button');
 tableStickyHeaderBtn.type = 'button';
@@ -410,6 +443,20 @@ const setLiveStrongColoring = (enabled: boolean, { post = true }: PostUpdateOpti
   liveStrongColoringBtn.classList.toggle('is-active', liveStrongColoring);
   liveStrongColoringBtn.setAttribute('aria-checked', liveStrongColoring ? 'true' : 'false');
   if (post && changed) vscode.postMessage({ type: 'setLiveStrongColoring', enabled: liveStrongColoring });
+};
+
+const setLargeDocumentOptimizationEnabled = (
+  enabled: boolean,
+  { post = true }: PostUpdateOptions = {}
+) => {
+  const nextEnabled = enabled === true;
+  const changed = nextEnabled !== largeDocumentOptimizationEnabled;
+  largeDocumentOptimizationEnabled = nextEnabled;
+  largeDocumentOptimizationBtn.classList.toggle('is-active', nextEnabled);
+  largeDocumentOptimizationBtn.setAttribute('aria-checked', nextEnabled ? 'true' : 'false');
+  if (post && changed) {
+    vscode.postMessage({ type: 'setLargeDocumentOptimization', enabled: nextEnabled });
+  }
 };
 
 const updateTableStickyHeaderUI = () => {
@@ -1116,6 +1163,8 @@ const applyUiLanguage = (language: UiLanguage): void => {
   liveStrongColoringBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.strongColoring;
   liveStrongColoringBtn.title = strings.strongColoring;
   longCodeBlockFoldingBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.foldLongCodeBlocks;
+  largeDocumentOptimizationBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.largeDocumentStartup;
+  largeDocumentOptimizationBtn.querySelector<HTMLElement>('.more-tools-option-tooltip')!.textContent = strings.largeDocumentStartupDescription;
   tableStickyHeaderBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.stickyTableHeader;
   restoreReadingPositionBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.resumeFromLastPosition;
   changesReviewControl.setUiLanguage(language);
@@ -1228,6 +1277,7 @@ moreToolsPanel.append(
   displaySettingsHeading,
   sourceLineNumbersBtn,
   longCodeBlockFoldingBtn,
+  largeDocumentOptimizationBtn,
   contentMaxWidthBtn,
   liveStrongColoringBtn,
   tableStickyHeaderBtn,
@@ -2761,6 +2811,7 @@ const handleInit = (message: InitMessage) => {
   longCodeBlockFoldingBtn.setAttribute('aria-checked', longCodeBlockFoldingEnabled ? 'true' : 'false');
   setTableStickyHeaderEnabled(message.tableStickyHeaderEnabled, { post: false });
   setLiveStrongColoring(message.liveStrongColoring, { post: false });
+  setLargeDocumentOptimizationEnabled(message.largeDocumentOptimizationEnabled, { post: false });
   setRestoreReadingPositionOnOpen(message.restoreReadingPositionOnOpen, { post: false });
   readingPositionLifecycle?.start({
     enabled: message.restoreReadingPositionOnOpen,
@@ -2983,6 +3034,11 @@ window.addEventListener('message', (event) => {
 
   if (message.type === 'tableStickyHeaderChanged') {
     setTableStickyHeaderEnabled(message.enabled, { post: false });
+    return;
+  }
+
+  if (message.type === 'largeDocumentOptimizationChanged') {
+    setLargeDocumentOptimizationEnabled(message.enabled, { post: false });
     return;
   }
 
@@ -3387,6 +3443,9 @@ longCodeBlockFoldingBtn.addEventListener('click', () => {
   longCodeBlockFoldingBtn.classList.toggle('is-active', longCodeBlockFoldingEnabled);
   longCodeBlockFoldingBtn.setAttribute('aria-checked', longCodeBlockFoldingEnabled ? 'true' : 'false');
   editor?.setLongCodeBlockFolding(longCodeBlockFoldingEnabled);
+});
+largeDocumentOptimizationBtn.addEventListener('click', () => {
+  setLargeDocumentOptimizationEnabled(!largeDocumentOptimizationEnabled);
 });
 tableStickyHeaderBtn.addEventListener('click', () => {
   setTableStickyHeaderEnabled(!tableStickyHeaderEnabled);

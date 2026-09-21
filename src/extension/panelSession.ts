@@ -24,6 +24,7 @@ import {
   GIT_DIFF_DETAILS_VISIBLE_SETTING_KEY,
   DIFF_BASELINE_MODE_SETTING_KEY,
   CONTENT_MAX_WIDTH_SETTING_KEY,
+  LARGE_DOCUMENT_OPTIMIZATION_SETTING_KEY,
   TABLE_STICKY_HEADER_SETTING_KEY,
   RESTORE_READING_POSITION_SETTING_KEY,
   OUTLINE_WIDTH_KEY,
@@ -424,6 +425,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       fixedBaselineActive: diffBaselineState.fixedActive,
       fixedBaselineUpdatedAt: diffBaselineState.fixedUpdatedAt,
       contentMaxWidthEnabled: getContentMaxWidthEnabled(context),
+      largeDocumentOptimizationEnabled: getLargeDocumentOptimizationEnabled(),
       tableStickyHeaderEnabled: getTableStickyHeaderEnabled(),
       restoreReadingPositionOnOpen,
       readingPositionRestore,
@@ -636,6 +638,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         await vscode.workspace
           .getConfiguration(EXTENSION_CONFIG_SECTION)
           .update(CONTENT_MAX_WIDTH_SETTING_KEY, raw.enabled === true, vscode.ConfigurationTarget.Global);
+        return;
+      case 'setLargeDocumentOptimization':
+        await vscode.workspace
+          .getConfiguration(EXTENSION_CONFIG_SECTION)
+          .update(LARGE_DOCUMENT_OPTIMIZATION_SETTING_KEY, raw.enabled === true, vscode.ConfigurationTarget.Global);
         return;
       case 'setTableStickyHeader':
         await vscode.workspace

@@ -54,6 +54,8 @@ export type UiStrings = Readonly<{
   interfaceLanguage: string;
   showLineNumbers: string;
   foldLongCodeBlocks: string;
+  largeDocumentStartup: string;
+  largeDocumentStartupDescription: string;
   stickyTableHeader: string;
   findAndReplacePanel: string;
   find: string;
@@ -287,7 +289,9 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     editorAppearance: 'Editor appearance', editorFontSize: 'Font size',
     custom: 'Custom', decreaseFontSize: 'Decrease font size', increaseFontSize: 'Increase font size',
     interfaceLanguage: 'Interface language', showLineNumbers: 'Show line numbers',
-    foldLongCodeBlocks: 'Fold long code blocks', stickyTableHeader: 'Sticky table header',
+    foldLongCodeBlocks: 'Fold long code blocks', largeDocumentStartup: 'Large file startup',
+    largeDocumentStartupDescription: 'Open large documents in Source mode for a faster start. Applies the next time a document opens.',
+    stickyTableHeader: 'Sticky table header',
     findAndReplacePanel: 'Find and replace', find: 'Find', replace: 'Replace',
     clearFind: 'Clear Find', clearReplace: 'Clear Replace', wholeWord: 'Whole Word',
     caseSensitive: 'Case Sensitive', previousMatch: 'Previous Match', nextMatch: 'Next Match',
@@ -444,7 +448,9 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     editorAppearance: '编辑器外观', editorFontSize: '字号大小', custom: '自定义',
     decreaseFontSize: '减小字号', increaseFontSize: '增大字号',
     interfaceLanguage: '界面语言', showLineNumbers: '显示行号',
-    foldLongCodeBlocks: '折叠长代码块', stickyTableHeader: '表格浮动表头',
+    foldLongCodeBlocks: '折叠长代码块', largeDocumentStartup: '大文档启动优化',
+    largeDocumentStartupDescription: '打开大文档时优先进入源码模式，以提升启动响应速度。对之后打开的文档生效。',
+    stickyTableHeader: '表格浮动表头',
     findAndReplacePanel: '查找和替换', find: '查找',
     replace: '替换', clearFind: '清除查找内容', clearReplace: '清除替换内容',
     wholeWord: '全字匹配', caseSensitive: '区分大小写', previousMatch: '上一个匹配项',

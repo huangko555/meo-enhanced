@@ -11,7 +11,7 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-basic-capability-index-'
 const target = 'format target';
 const actions = [['bold', `**${target}**`], ['italic', `*${target}*`], ['lineover', `~~${target}~~`], ['highlight', `==${target}==`], ['inlineCode', `\`${target}\``], ['link', `[${target}]()`], ['wikiLink', `[[${target}]]`], ['kbd', `<kbd>${target}</kbd>`], ['underline', `<u>${target}</u>`]] as const;
 
-const init = (text: string, mode: 'live' | 'source', sourceLineNumbers: SourceLineNumberMode = 'on') => ({ type: 'init', documentId: `file:///basic-${mode}.md`, text, version: 1, savedRevision: { version: 1, text }, diagnostics: [], mode, uiLanguage: 'en', sourceLineNumbers, previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'light', gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null });
+const init = (text: string, mode: 'live' | 'source', sourceLineNumbers: SourceLineNumberMode = 'on') => ({ type: 'init', documentId: `file:///basic-${mode}.md`, text, version: 1, savedRevision: { version: 1, text }, diagnostics: [], mode, uiLanguage: 'en', sourceLineNumbers, previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'light', gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, largeDocumentOptimizationEnabled: true, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null });
 
 async function open(browser: Browser, text: string, mode: 'live' | 'source', sourceLineNumbers: SourceLineNumberMode = 'on'): Promise<Page> {
   const page = await browser.newPage();
@@ -248,5 +248,57 @@ async function sourceLineNumberPreference(browser: Browser): Promise<void> {
   }
 }
 
-async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { await blockquotePressLayout(browser); await alertPressLayout(browser); await matrix(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
+async function largeDocumentStartupPreference(browser: Browser): Promise<void> {
+  const page = await open(browser, 'settings fixture', 'live');
+  try {
+    await page.click('[data-action="settings"]');
+    const option = await page.$('[data-action="largeDocumentOptimization"]');
+    assert.ok(option, 'Large-document startup option was not present');
+    assert.equal(
+      await option.evaluate((element) => element.querySelector('.more-tools-option-label')?.textContent),
+      'Large file startup'
+    );
+    await page.hover('[data-action="largeDocumentOptimization"] .more-tools-option-info');
+    await page.waitForFunction(() => getComputedStyle(
+      document.querySelector<HTMLElement>('#large-document-startup-tooltip')!
+    ).visibility === 'visible');
+    const tooltip = await page.$eval('#large-document-startup-tooltip', (element) => element.textContent ?? '');
+    assert.match(tooltip, /Source mode/);
+    const tooltipBounds = await page.$eval('#large-document-startup-tooltip', (element) => {
+      const rect = element.getBoundingClientRect();
+      const panelRect = element.closest('.more-tools-panel')!.getBoundingClientRect();
+      return {
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        left: rect.left,
+        panelTop: panelRect.top,
+        panelRight: panelRect.right,
+        panelBottom: panelRect.bottom,
+        panelLeft: panelRect.left
+      };
+    });
+    assert.ok(
+      tooltipBounds.top >= tooltipBounds.panelTop
+        && tooltipBounds.right <= tooltipBounds.panelRight
+        && tooltipBounds.bottom <= tooltipBounds.panelBottom
+        && tooltipBounds.left >= tooltipBounds.panelLeft,
+      `Large-document tooltip was clipped by the settings panel: ${JSON.stringify(tooltipBounds)}`
+    );
+    await page.click('[data-action="largeDocumentOptimization"] .more-tools-option-label');
+    const posted = await page.evaluate(() => (window as any).__hostMessages.filter(
+      (message: any) => message.type === 'setLargeDocumentOptimization'
+    ));
+    assert.deepEqual(posted, [{ type: 'setLargeDocumentOptimization', enabled: false }]);
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'largeDocumentOptimizationChanged', enabled: true }
+    })));
+    await page.waitForFunction(() => document.querySelector('[data-action="largeDocumentOptimization"]')
+      ?.getAttribute('aria-checked') === 'true');
+  } finally {
+    await page.close();
+  }
+}
+
+async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { await blockquotePressLayout(browser); await alertPressLayout(browser); await matrix(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); await largeDocumentStartupPreference(browser); } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
 main().finally(() => fs.rmSync(temp, { recursive: true, force: true })).catch((e) => { console.error(e instanceof Error ? e.stack : e); process.exitCode = 1; });

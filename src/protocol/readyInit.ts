@@ -57,6 +57,7 @@ export type InitMessage = {
   readonly fixedBaselineActive: boolean;
   readonly fixedBaselineUpdatedAt?: number | null;
   readonly contentMaxWidthEnabled: boolean;
+  readonly largeDocumentOptimizationEnabled: boolean;
   readonly tableStickyHeaderEnabled: boolean;
   readonly restoreReadingPositionOnOpen: boolean;
   readonly readingPositionRestore: ReadingPositionDto | null;
@@ -102,6 +103,11 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     ? true
     : isRecord(value) && typeof value.tableStickyHeaderEnabled === 'boolean'
       ? value.tableStickyHeaderEnabled
+      : null;
+  const largeDocumentOptimizationEnabled = isRecord(value) && value.largeDocumentOptimizationEnabled === undefined
+    ? true
+    : isRecord(value) && typeof value.largeDocumentOptimizationEnabled === 'boolean'
+      ? value.largeDocumentOptimizationEnabled
       : null;
   const liveStrongColoring = isRecord(value) && value.liveStrongColoring === undefined
     ? false
@@ -160,6 +166,7 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
       && value.fixedBaselineUpdatedAt !== null
       && (typeof value.fixedBaselineUpdatedAt !== 'number' || !Number.isFinite(value.fixedBaselineUpdatedAt)))
     || typeof value.contentMaxWidthEnabled !== 'boolean'
+    || largeDocumentOptimizationEnabled === null
     || tableStickyHeaderEnabled === null
     || restoreReadingPositionOnOpen === null
     || (value.readingPositionRestore !== undefined
@@ -185,6 +192,7 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     liveStrongColoring,
     editorFontSizeMode,
     editorFontSize,
+    largeDocumentOptimizationEnabled,
     tableStickyHeaderEnabled,
     restoreReadingPositionOnOpen,
     readingPositionRestore
