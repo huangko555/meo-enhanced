@@ -1,23 +1,8 @@
 import * as fs from 'node:fs/promises';
-import {
-  Document,
-  ExternalHyperlink,
-  HeadingLevel,
-  HighlightColor,
-  ImageRun,
-  Packer,
-  Paragraph,
-  Table,
-  TableCell,
-  TableOfContents,
-  TableRow,
-  TextRun,
-  WidthType,
-  type ParagraphChild
-} from 'docx';
-import { DomUtils, ElementType, parseDocument } from 'htmlparser2';
-import type { Element } from 'domhandler';
-import { imageSize } from 'image-size';
+import { pathToFileURL } from 'node:url';
+import { DomUtils, parseDocument } from 'htmlparser2';
+import { Element } from 'domhandler';
+import JSZip from 'jszip';
 import type { UiLanguage } from '../foundation/uiLanguage';
 import { materializeDocxBodyFromHtmlExport } from './pdfRenderer';
 
@@ -27,35 +12,36 @@ export type WriteDocxExportOptions = {
   readonly title: string;
   readonly uiLanguage: UiLanguage;
   readonly includeTableOfContents: boolean;
+  readonly docxRuntimeModulePath: string;
   readonly browserExecutablePath?: string;
   readonly puppeteerRuntimeModulePath: string;
   readonly timeoutMs?: number;
 };
 
-type InlineStyle = {
-  readonly bold?: boolean;
-  readonly italics?: boolean;
-  readonly strike?: boolean;
-  readonly code?: boolean;
-  readonly color?: string;
-  readonly highlight?: boolean;
-  readonly preserveWhitespace?: boolean;
+type TocEntry = {
+  readonly id: string;
+  readonly level: number;
+  readonly text: string;
 };
 
-type Block = Paragraph | Table;
+const TOC_BEGIN_BOOKMARK = 'meo_toc_begin';
+const TOC_END_BOOKMARK = 'meo_toc_end';
+let docxRuntimePromise: Promise<DocxRuntimeModule> | null = null;
 
-const HEADING_LEVELS = [
-  HeadingLevel.HEADING_1,
-  HeadingLevel.HEADING_2,
-  HeadingLevel.HEADING_3,
-  HeadingLevel.HEADING_4,
-  HeadingLevel.HEADING_5,
-  HeadingLevel.HEADING_6
-] as const;
+type DocxRuntimeModule = {
+  readonly convertHtmlToDocx: (html: string, options: {
+    readonly pageSize: 'a4';
+    readonly lang: string;
+    readonly metadata: { readonly title: string; readonly creator: string };
+    readonly tocHtml?: string;
+    readonly onWarning: null;
+  }) => Promise<Buffer>;
+};
 
 export async function writeDocxExport(options: WriteDocxExportOptions): Promise<void> {
   const stagedRoot = findExportRoot(options.htmlDocument);
   if (!stagedRoot) throw new Error('Word export could not find the rendered document body.');
+
   const needsMaterialization = DomUtils.findOne((element) => (
     (element.name === 'img' && !/^data:image\/(?:png|jpe?g|gif|bmp);base64,/i.test(element.attribs.src ?? ''))
     || classNames(element).includes('meo-export-mermaid')
@@ -72,46 +58,76 @@ export async function writeDocxExport(options: WriteDocxExportOptions): Promise<
   const root = findExportRoot(bodyHtml);
   if (!root) throw new Error('Word export could not find the rendered document body.');
 
-  const blocks = await convertBlockChildren(root.children);
+  normalizeCodeBlocks(root);
+  const headings = prepareHeadingBookmarks(root);
+  const includeTableOfContents = options.includeTableOfContents && headings.length > 0;
   const contentsLabel = options.uiLanguage === 'zh-CN' ? '目录' : 'Contents';
-  const children = options.includeTableOfContents
-    ? [
-        new Paragraph({
-          children: [new TextRun({ text: contentsLabel, bold: true, size: 30 })],
-          spacing: { after: 180 }
-        }),
-        new TableOfContents(contentsLabel, {
-          hyperlink: true,
-          headingStyleRange: '1-6',
-          beginDirty: true
-        }),
-        new Paragraph({ children: [], spacing: { after: 240 } }),
-        ...blocks
-      ]
-    : blocks;
-
-  const document = new Document({
-    title: options.title,
-    creator: 'MEO Enhanced',
-    features: { updateFields: true },
-    styles: {
-      default: {
-        document: {
-          run: { font: 'Aptos', size: 22 },
-          paragraph: { spacing: { line: 300, after: 120 } }
-        }
-      }
+  const { convertHtmlToDocx } = await loadDocxRuntime(options.docxRuntimeModulePath);
+  const generated = await convertHtmlToDocx(DomUtils.getInnerHTML(root), {
+    pageSize: 'a4',
+    lang: options.uiLanguage === 'zh-CN' ? 'zh-CN' : 'en-US',
+    metadata: {
+      title: options.title,
+      creator: 'MEO Enhanced'
     },
-    sections: [{
-      properties: {
-        page: {
-          margin: { top: 1080, right: 1080, bottom: 1080, left: 1080 }
-        }
-      },
-      children
-    }]
+    ...(includeTableOfContents ? { tocHtml: buildTableOfContentsHtml(contentsLabel, headings) } : {}),
+    onWarning: null
   });
-  await fs.writeFile(options.outputDocxPath, await Packer.toBuffer(document));
+  const output = includeTableOfContents ? await markVisibleContentsAsNativeToc(generated) : generated;
+  await fs.writeFile(options.outputDocxPath, output);
+}
+
+async function loadDocxRuntime(modulePath: string): Promise<DocxRuntimeModule> {
+  if (!docxRuntimePromise) {
+    docxRuntimePromise = import(pathToFileURL(modulePath).href).then((loaded) => {
+      let candidate: unknown = loaded;
+      for (let depth = 0; depth < 5; depth += 1) {
+        if (
+          candidate
+          && typeof candidate === 'object'
+          && 'convertHtmlToDocx' in candidate
+          && typeof candidate.convertHtmlToDocx === 'function'
+        ) {
+          return candidate as DocxRuntimeModule;
+        }
+        if (!candidate || typeof candidate !== 'object' || !('default' in candidate)) break;
+        candidate = candidate.default;
+      }
+      throw new Error('Bundled Word conversion runtime did not expose convertHtmlToDocx.');
+    });
+  }
+  return docxRuntimePromise;
+}
+
+function normalizeCodeBlocks(root: Element): void {
+  const wrappers = DomUtils.findAll((element) => (
+    classNames(element).includes('meo-export-code-block-wrap')
+  ), root.children);
+  for (const wrapper of wrappers) {
+    const label = wrapper.children.find((child): child is Element => (
+      isElement(child) && classNames(child).includes('meo-export-code-language-label')
+    ));
+    if (label) DomUtils.removeElement(label);
+    const pre = DomUtils.findOne((element) => element.name === 'pre', wrapper.children, true);
+    if (!pre) continue;
+    const code = DomUtils.findOne((element) => element.name === 'code', pre.children, true);
+    if (code) {
+      const lines = DomUtils.findAll((element) => (
+        classNames(element).includes('meo-export-code-line')
+      ), code.children);
+      for (const line of lines.slice(0, -1)) {
+        DomUtils.appendChild(line, new Element('br', {}, []));
+      }
+    }
+    pre.name = 'p';
+    pre.attribs.style = [
+      pre.attribs.style,
+      'font-family:Consolas,monospace',
+      'background-color:#f6f8fa',
+      'white-space:pre-wrap',
+      'padding:8pt'
+    ].filter(Boolean).join(';');
+  }
 }
 
 function findExportRoot(html: string): Element | null {
@@ -122,217 +138,96 @@ function findExportRoot(html: string): Element | null {
   ), document.children, true) ?? null;
 }
 
-async function convertBlockChildren(nodes: readonly any[]): Promise<Block[]> {
-  const blocks: Block[] = [];
-  for (const node of nodes) {
-    if (node.type === ElementType.Text && node.data.trim()) {
-      blocks.push(new Paragraph({ children: textRuns(node.data.trim(), {}) }));
-      continue;
-    }
-    if (!isElement(node)) continue;
-    blocks.push(...await convertBlock(node));
-  }
-  return blocks;
-}
-
-async function convertBlock(element: Element): Promise<Block[]> {
-  const tag = element.name.toLowerCase();
-  const heading = /^h([1-6])$/.exec(tag);
-  if (heading) {
-    const level = Number.parseInt(heading[1] ?? '1', 10) - 1;
-    return [new Paragraph({
-      heading: HEADING_LEVELS[level] ?? HeadingLevel.HEADING_1,
-      children: await convertInlineChildren(element.children),
-      spacing: { before: level <= 1 ? 280 : 180, after: 100 }
-    })];
-  }
-  if (tag === 'p') {
-    return [new Paragraph({ children: await convertInlineChildren(element.children) })];
-  }
-  if (tag === 'pre') {
-    return [new Paragraph({
-      children: await convertInlineChildren(element.children, { code: true, preserveWhitespace: true }),
-      shading: { fill: 'F6F8FA' },
-      spacing: { before: 100, after: 160, line: 260 }
-    })];
-  }
-  if (classNames(element).includes('meo-export-code-block-wrap')) {
-    const pre = DomUtils.findOne((child) => child.name === 'pre', element.children, true);
-    return pre ? convertBlock(pre) : [];
-  }
-  if (tag === 'blockquote') {
-    return [new Paragraph({
-      children: await convertInlineChildren(element.children, { italics: true }),
-      indent: { left: 420 },
-      shading: { fill: 'F6F8FA' }
-    })];
-  }
-  if (tag === 'ul' || tag === 'ol') return convertList(element, tag === 'ol');
-  if (tag === 'table') return [await convertTable(element)];
-  if (tag === 'hr') return [new Paragraph({ thematicBreak: true })];
-  if (tag === 'img') {
-    const image = await convertImage(element);
-    return [new Paragraph({ children: image ? [image] : textRuns(element.attribs.alt ?? '', {}) })];
-  }
-  if (classNames(element).includes('meo-table-scroll')) {
-    const table = element.children.find((child: any) => isElement(child) && child.name === 'table');
-    return table && isElement(table) ? [await convertTable(table)] : [];
-  }
-  if (classNames(element).some((name) => name.startsWith('meo-export-math'))) {
-    return [new Paragraph({ children: textRuns(decodeSource(element) || DomUtils.getText(element), { code: true }) })];
-  }
-  if (classNames(element).includes('meo-export-mermaid')) {
-    return [new Paragraph({ children: textRuns(decodeSource(element) || DomUtils.getText(element), { code: true }) })];
-  }
-  return convertBlockChildren(element.children);
-}
-
-async function convertList(list: Element, ordered: boolean, level = 0): Promise<Block[]> {
-  const blocks: Block[] = [];
-  const items = list.children.filter((child: any) => isElement(child) && child.name === 'li') as Element[];
-  for (const [index, item] of items.entries()) {
-    const inlineNodes = item.children.filter((child: any) => !isElement(child) || (child.name !== 'ul' && child.name !== 'ol'));
-    const children = await convertInlineChildren(inlineNodes);
-    if (ordered) children.unshift(new TextRun({ text: `${index + 1}. ` }));
-    blocks.push(new Paragraph({
-      children,
-      ...(ordered ? { indent: { left: 360 + level * 300, hanging: 240 } } : { bullet: { level } })
-    }));
-    for (const nested of item.children.filter((child: any) => isElement(child) && (child.name === 'ul' || child.name === 'ol')) as Element[]) {
-      blocks.push(...await convertList(nested, nested.name === 'ol', Math.min(level + 1, 8)));
-    }
-  }
-  return blocks;
-}
-
-async function convertTable(table: Element): Promise<Table> {
-  const rowElements = DomUtils.findAll((element) => element.name === 'tr', table.children);
-  const rows: TableRow[] = [];
-  for (const row of rowElements) {
-    const cells = row.children.filter((child: any) => isElement(child) && (child.name === 'th' || child.name === 'td')) as Element[];
-    rows.push(new TableRow({
-      children: await Promise.all(cells.map(async (cell) => {
-        const hasBlockContent = cell.children.some((child: any) => (
-          isElement(child) && ['p', 'ul', 'ol', 'pre', 'blockquote', 'table'].includes(child.name)
-        ));
-        const cellChildren = hasBlockContent
-          ? await convertBlockChildren(cell.children)
-          : [new Paragraph({ children: await convertInlineChildren(cell.children) })];
-        return new TableCell({
-          children: cellChildren,
-          ...(cell.name === 'th' ? { shading: { fill: 'EDEFF2' } } : {})
-        });
-      }))
-    }));
-  }
-  return new Table({
-    rows: rows.length > 0 ? rows : [new TableRow({ children: [new TableCell({ children: [new Paragraph('')] })] })],
-    width: { size: 100, type: WidthType.PERCENTAGE }
+function prepareHeadingBookmarks(root: Element): TocEntry[] {
+  const headings = DomUtils.findAll((element) => /^h[1-6]$/i.test(element.name), root.children);
+  const usedIds = new Set<string>();
+  return headings.flatMap((heading, index) => {
+    const text = DomUtils.textContent(heading).replace(/\s+/g, ' ').trim();
+    if (!text) return [];
+    const existingId = heading.attribs.id?.trim();
+    let id = existingId || `meo-heading-${index + 1}`;
+    if (usedIds.has(id)) id = `meo-heading-${index + 1}`;
+    usedIds.add(id);
+    heading.attribs.id = id;
+    return [{
+      id,
+      level: Number.parseInt(heading.name.slice(1), 10),
+      text
+    }];
   });
 }
 
-async function convertInlineChildren(nodes: readonly any[], inherited: InlineStyle = {}): Promise<ParagraphChild[]> {
-  const children: ParagraphChild[] = [];
-  for (const node of nodes) {
-    if (node.type === ElementType.Text) {
-      children.push(...textRuns(node.data, inherited));
-      continue;
-    }
-    if (!isElement(node)) continue;
-    const tag = node.name.toLowerCase();
-    if (tag === 'br') {
-      children.push(new TextRun({ break: 1 }));
-      continue;
-    }
-    if (tag === 'img') {
-      const image = await convertImage(node);
-      if (image) children.push(image);
-      else children.push(...textRuns(node.attribs.alt ?? '', inherited));
-      continue;
-    }
-    if (tag === 'a') {
-      const linkChildren = await convertInlineChildren(node.children, {
-        ...inherited,
-        color: inherited.color ?? '0563C1'
-      });
-      children.push(new ExternalHyperlink({ children: linkChildren, link: node.attribs.href ?? '' }));
-      continue;
-    }
-    if (classNames(node).some((name) => name.startsWith('meo-export-math-inline'))) {
-      children.push(...textRuns(decodeSource(node) || DomUtils.getText(node), { ...inherited, code: true }));
-      continue;
-    }
-    const style: InlineStyle = {
-      ...inherited,
-      ...(tag === 'strong' || tag === 'b' ? { bold: true } : {}),
-      ...(tag === 'em' || tag === 'i' ? { italics: true } : {}),
-      ...(tag === 's' || tag === 'del' ? { strike: true } : {}),
-      ...(tag === 'code' ? { code: true, preserveWhitespace: true } : {}),
-      ...(tag === 'mark' ? { highlight: true } : {}),
-      ...(extractColor(node.attribs.style) ? { color: extractColor(node.attribs.style)! } : {})
-    };
-    children.push(...await convertInlineChildren(node.children, style));
+function buildTableOfContentsHtml(label: string, entries: readonly TocEntry[]): string {
+  const links = entries.map((entry, index) => {
+    const indentation = Math.max(0, entry.level - 1) * 0.28;
+    const beginMarker = index === 0 ? `<span id="${TOC_BEGIN_BOOKMARK}"></span>` : '';
+    const endMarker = index === entries.length - 1 ? `<span id="${TOC_END_BOOKMARK}"></span>` : '';
+    return `<p style="margin-left:${indentation}in;margin-top:0;margin-bottom:4pt">`
+      + beginMarker
+      + `<a href="#${escapeHtmlAttribute(entry.id)}">${escapeHtml(entry.text)}</a>`
+      + `${endMarker}</p>`;
+  }).join('');
+  return `<p><strong>${escapeHtml(label)}</strong></p>${links}`;
+}
+
+async function markVisibleContentsAsNativeToc(buffer: Buffer): Promise<Buffer> {
+  const archive = await JSZip.loadAsync(buffer);
+  const documentEntry = archive.file('word/document.xml');
+  const settingsEntry = archive.file('word/settings.xml');
+  if (!documentEntry || !settingsEntry) throw new Error('Word export produced an incomplete DOCX package.');
+
+  const documentXml = await documentEntry.async('string');
+  const beginIndex = documentXml.indexOf(`w:name="${TOC_BEGIN_BOOKMARK}"`);
+  const endIndex = documentXml.indexOf(`w:name="${TOC_END_BOOKMARK}"`);
+  if (beginIndex < 0 || endIndex < 0 || beginIndex >= endIndex) {
+    throw new Error('Word export could not cache the generated table of contents.');
   }
-  return children;
-}
-
-function textRuns(rawText: string, style: InlineStyle): TextRun[] {
-  const normalized = style.preserveWhitespace ? rawText.replace(/\r\n/g, '\n') : rawText.replace(/\s+/g, ' ');
-  if (!normalized) return [];
-  return normalized.split('\n').flatMap((text, index) => [
-    ...(index > 0 ? [new TextRun({ break: 1 })] : []),
-    ...(text ? [new TextRun({
-      text,
-      bold: style.bold,
-      italics: style.italics,
-      strike: style.strike,
-      color: style.color,
-      font: style.code ? 'Consolas' : undefined,
-      size: style.code ? 19 : undefined,
-      highlight: style.highlight ? HighlightColor.YELLOW : undefined,
-      ...(style.code ? { shading: { fill: 'EEF1F4' } } : {})
-    })] : [])
-  ]);
-}
-
-async function convertImage(element: Element): Promise<ImageRun | null> {
-  const match = /^data:image\/(png|jpe?g|gif|bmp);base64,([a-z0-9+/=]+)$/i.exec(element.attribs.src ?? '');
-  if (!match?.[1] || !match[2]) return null;
-  const data = Buffer.from(match[2], 'base64');
-  const measured = imageSize(data);
-  const naturalWidth = measured.width || 560;
-  const naturalHeight = measured.height || 315;
-  const scale = Math.min(1, 560 / naturalWidth, 720 / naturalHeight);
-  const mime = match[1].toLowerCase();
-  return new ImageRun({
-    type: mime === 'jpeg' ? 'jpg' : mime as 'png' | 'jpg' | 'gif' | 'bmp',
-    data,
-    transformation: {
-      width: Math.max(1, Math.round(naturalWidth * scale)),
-      height: Math.max(1, Math.round(naturalHeight * scale))
-    }
-  });
-}
-
-function extractColor(style: string | undefined): string | null {
-  const match = /(?:^|;)\s*color\s*:\s*#([0-9a-f]{6})(?:\s*!important)?/i.exec(style ?? '');
-  return match?.[1]?.toUpperCase() ?? null;
-}
-
-function decodeSource(element: Element): string {
-  const encoded = element.attribs['data-source-b64'];
-  if (!encoded) return '';
-  try {
-    return Buffer.from(encoded, 'base64').toString('utf8');
-  } catch {
-    return '';
+  const beginBookmarkStart = documentXml.lastIndexOf('<w:bookmarkStart', beginIndex);
+  const endBookmarkStartEnd = documentXml.indexOf('/>', endIndex) + 2;
+  const endBookmarkEnd = documentXml.indexOf('/>', endBookmarkStartEnd) + 2;
+  if (beginBookmarkStart < 0 || endBookmarkEnd < 2) {
+    throw new Error('Word export could not locate the table-of-contents field boundaries.');
   }
+  const fieldBegin = '<w:r><w:fldChar w:fldCharType="begin" w:dirty="true"/></w:r>'
+    + '<w:r><w:instrText xml:space="preserve"> TOC \\h \\o "1-6" \\z \\u </w:instrText></w:r>'
+    + '<w:r><w:fldChar w:fldCharType="separate"/></w:r>';
+  const fieldEnd = '<w:r><w:fldChar w:fldCharType="end"/></w:r>';
+  const withBegin = documentXml.slice(0, beginBookmarkStart)
+    + fieldBegin
+    + documentXml.slice(beginBookmarkStart);
+  const shiftedEndBookmarkEnd = endBookmarkEnd + fieldBegin.length;
+  const withField = withBegin.slice(0, shiftedEndBookmarkEnd)
+    + fieldEnd
+    + withBegin.slice(shiftedEndBookmarkEnd);
+  archive.file('word/document.xml', withField);
+
+  const settingsXml = await settingsEntry.async('string');
+  if (!/<w:updateFields\b/.test(settingsXml)) {
+    archive.file('word/settings.xml', settingsXml.replace(
+      '</w:settings>',
+      '<w:updateFields w:val="true"/></w:settings>'
+    ));
+  }
+  return archive.generateAsync({ type: 'nodebuffer' });
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return escapeHtml(value);
 }
 
 function classNames(element: Element): string[] {
   return (element.attribs.class ?? '').split(/\s+/).filter(Boolean);
 }
 
-function isElement(node: any): node is Element {
-  return node?.type === ElementType.Tag || node?.type === ElementType.Script || node?.type === ElementType.Style;
+function isElement(node: unknown): node is Element {
+  return typeof node === 'object' && node !== null && 'name' in node && 'attribs' in node;
 }

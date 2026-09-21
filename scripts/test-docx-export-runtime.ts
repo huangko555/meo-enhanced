@@ -13,6 +13,7 @@ const markdown = [
   '',
   '```ts',
   'const answer = 42;',
+  'const doubled = answer * 2;',
   '```',
   '',
   '| Name | Value |',
@@ -22,11 +23,11 @@ const markdown = [
   '![pixel](pixel.png)'
 ].join('\n');
 
-const render = async (sourceColoring: boolean) => exportRuntime.renderExportHtmlDocument({
+const render = async (sourceColoring: boolean, appearance: 'light' | 'dark' = 'light') => exportRuntime.renderExportHtmlDocument({
   readingSnapshot: {
     snapshotId: `docx-${sourceColoring}`,
     text: markdown,
-    appearance: 'light',
+    appearance,
     uiLanguage: 'en',
     environment: { previewFontFamily: '', previewSourceColoring: sourceColoring }
   },
@@ -47,6 +48,14 @@ const readArchiveXml = async (filePath: string, entryPath: string): Promise<stri
   return entry!.async('string');
 };
 
+const paragraphContaining = (xml: string, text: string): string => {
+  const paragraph = xml.match(/<w:p\b[^>]*>(?:(?!<\/w:p>)[^])*<\/w:p>/g)?.find((value) => (
+    value.replace(/<[^>]+>/g, '').includes(text)
+  ));
+  assert.notEqual(paragraph, undefined, `DOCX must contain a paragraph with ${text}`);
+  return paragraph!;
+};
+
 try {
   fs.writeFileSync(
     path.join(fixtureRoot, 'pixel.png'),
@@ -61,17 +70,26 @@ try {
     title: 'Document title',
     uiLanguage: 'en',
     includeTableOfContents: true,
+    docxRuntimeModulePath: path.join(import.meta.dir, '..', 'src', 'export', 'docxRuntime.mts'),
     puppeteerRuntimeModulePath: ''
   });
   assert.deepEqual(fs.readFileSync(coloredPath).subarray(0, 2).toString('ascii'), 'PK');
   const coloredXml = await readArchiveXml(coloredPath, 'word/document.xml');
-  assert.match(coloredXml, /<w:instrText[^>]*>TOC[^<]*\\h[^<]*\\o &quot;1-6&quot;/);
+  assert.match(coloredXml, /<w:instrText[^>]*> TOC \\h \\o "1-6" \\z \\u <\/w:instrText>/);
+  assert.match(coloredXml, /<w:hyperlink[^>]*w:anchor="document-title"[^>]*>[^]*Document title/, 'cached TOC entries must be visible and link to heading bookmarks');
+  assert.doesNotMatch(coloredXml, /<w:pPr>(?:(?!<\/w:pPr>)[^])*<w:fldChar/, 'TOC field runs must not be nested inside paragraph properties');
   assert.match(await readArchiveXml(coloredPath, 'word/settings.xml'), /<w:updateFields(?:\s+w:val="true")?\/>/);
   assert.match(coloredXml, /<w:pStyle w:val="Heading1"/);
+  assert.equal((coloredXml.match(/<w:pStyle w:val="Heading1"/g) ?? []).length, 1, 'the TOC label must not become a document heading');
   assert.match(coloredXml, /<w:tbl>/, 'Markdown tables must remain editable Word tables');
   assert.match(coloredXml, /<w:drawing>/, 'embedded Markdown images must remain embedded in DOCX');
   assert.match(coloredXml, /<w:b\/>[^]*bold text/, 'Markdown strong text must remain native bold text');
-  assert.match(coloredXml, /<w:color w:val="[0-9A-F]{6}"/, 'enabled code coloring must produce Word run colors');
+  assert.match(paragraphContaining(coloredXml, 'const answer = 42;'), /<w:color w:val="[0-9A-F]{6}"/, 'enabled code coloring must produce Word run colors');
+  assert.match(paragraphContaining(coloredXml, 'const answer = 42;'), /<w:br\/>/, 'multi-line code blocks must preserve line breaks');
+
+  const darkPreviewDocx = await render(true, 'dark');
+  assert.match(darkPreviewDocx.htmlDocument, /--meo-bg:\s*#ffffff/, 'DOCX staging must always use the light document background');
+  assert.match(darkPreviewDocx.htmlDocument, /style="color:#0000FF"/, 'DOCX staging must use a light syntax theme even when Preview is dark');
 
   const plainPath = path.join(fixtureRoot, 'plain.docx');
   const plain = await render(false);
@@ -81,11 +99,12 @@ try {
     title: 'Document title',
     uiLanguage: 'en',
     includeTableOfContents: false,
+    docxRuntimeModulePath: path.join(import.meta.dir, '..', 'src', 'export', 'docxRuntime.mts'),
     puppeteerRuntimeModulePath: ''
   });
   const plainXml = await readArchiveXml(plainPath, 'word/document.xml');
   assert.doesNotMatch(plainXml, /<w:instrText[^>]*>TOC/);
-  assert.doesNotMatch(plainXml, /<w:color w:val="[0-9A-F]{6}"/, 'disabled code coloring must not add Word run colors');
+  assert.doesNotMatch(paragraphContaining(plainXml, 'const answer = 42;'), /<w:color w:val="[0-9A-F]{6}"/, 'disabled code coloring must not add Word run colors');
 
   console.log('DOCX export runtime checks passed.');
 } finally {

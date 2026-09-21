@@ -15,7 +15,7 @@ try {
     readingSnapshot: {
       snapshotId: 'docx-rich-media',
       text: '```mermaid\ngraph LR\n  A --> B\n```\n\n$$x^2 + y^2 = z^2$$',
-      appearance: 'light',
+      appearance: 'dark',
       uiLanguage: 'en',
       environment: { previewFontFamily: '', previewSourceColoring: true }
     },
@@ -38,6 +38,7 @@ try {
     title: 'Rich media',
     uiLanguage: 'en',
     includeTableOfContents: false,
+    docxRuntimeModulePath: path.join(repoRoot, 'dist', 'docx-runtime.js'),
     puppeteerRuntimeModulePath: path.join(repoRoot, 'dist', 'puppeteer-runtime.js'),
     timeoutMs: 60000
   });

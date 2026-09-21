@@ -384,10 +384,11 @@
     "build": "bun run build:webview && bun run build:extension",
     "build:webview": "bun scripts/build-webview.mjs",
     "build:webview:clean": "bun scripts/build-webview.mjs --clean",
-    "build:extension": "bun run build:extension:main && bun run build:extension:export-runtime && bun run build:extension:puppeteer-runtime",
+    "build:extension": "bun run build:extension:main && bun run build:extension:export-runtime && bun run build:extension:docx-runtime && bun run build:extension:puppeteer-runtime",
     "build:extension:main": "bun build src/extension.ts --target=node --format=cjs --minify --outfile=dist/extension.js -e vscode",
     "build:extension:main:debug": "bun build src/extension.ts --target=node --format=cjs --minify --outfile=dist/extension.js -e vscode --sourcemap=inline",
     "build:extension:export-runtime": "bun build src/export/runtime.ts --target=node --format=cjs --minify --outfile=dist/export-runtime.js",
+    "build:extension:docx-runtime": "bun build src/export/docxRuntime.mts --target=node --format=cjs --minify --outfile=dist/docx-runtime.js -e playwright",
     "build:extension:puppeteer-runtime": "bun build src/export/puppeteerRuntime.ts --target=node --format=cjs --minify --outfile=dist/puppeteer-runtime.js",
     "architecture:check": "bun scripts/check-architecture.ts",
     "architecture:check:staged": "bun scripts/check-architecture.ts --staged",
@@ -417,10 +418,9 @@
     "@lezer/highlight": "^1.2.3",
     "@lezer/markdown": "1.6.3",
     "@types/vscode": "^1.109.0",
-    "docx": "^9.7.1",
+    "dom-docx": "1.0.3",
     "highlight.js": "^11.11.1",
     "htmlparser2": "10.0.0",
-    "image-size": "^2.0.4",
     "js-yaml": "4.1.1",
     "katex": "^0.16.28",
     "lucide": "^1.25.0",
@@ -437,7 +437,7 @@
     "@types/markdown-it": "^14.1.2",
     "@types/sanitize-html": "^2.16.0",
     "@vscode/vsce": "3.9.2",
-    "jszip": "^3.10.2",
+    "jszip": "3.10.2",
     "typescript": "^5.9.3"
   }
 }

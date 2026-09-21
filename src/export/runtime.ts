@@ -26,9 +26,12 @@ async function renderExportHtmlDocument(
   options: ExportRuntimeBuildHtmlOptions
 ): Promise<{ htmlDocument: string; hasMermaid: boolean; hasMath: boolean }> {
   const snapshot = options.readingSnapshot;
-  const fallbackTheme = snapshot.codeTheme ?? (snapshot.appearance === 'light'
+  const exportAppearance = options.target === 'docx' ? 'light' : snapshot.appearance;
+  const fallbackTheme = options.target === 'docx'
     ? (await import('@shikijs/themes/light-plus')).default as CodeThemeDto
-    : (await import('@shikijs/themes/dark-plus')).default as CodeThemeDto);
+    : snapshot.codeTheme ?? (exportAppearance === 'light'
+      ? (await import('@shikijs/themes/light-plus')).default as CodeThemeDto
+      : (await import('@shikijs/themes/dark-plus')).default as CodeThemeDto);
   const highlighter = snapshot.environment.previewSourceColoring === false
     ? null
     : await createExportCodeHighlighter(snapshot.text, fallbackTheme, options.shikiLanguageAssetsRoot);
@@ -48,7 +51,7 @@ async function renderExportHtmlDocument(
   }
   const { html: bodyHtml, hasMermaid, hasMath } = rendered;
 
-  const stylesCss = buildExportStyles(snapshot.environment, snapshot.appearance);
+  const stylesCss = buildExportStyles(snapshot.environment, exportAppearance);
 
   const htmlDocument = buildStandaloneExportHtmlDocument({
     title: options.title,

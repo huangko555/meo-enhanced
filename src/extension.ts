@@ -124,6 +124,7 @@ type ExportRuntimeModule = {
     title: string;
     uiLanguage: ReadingSnapshot['uiLanguage'];
     includeTableOfContents: boolean;
+    docxRuntimeModulePath: string;
     browserExecutablePath?: string;
     puppeteerRuntimeModulePath: string;
     timeoutMs?: number;
@@ -727,12 +728,18 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       ).fsPath;
       if (format === 'docx') {
         report('writingDocx');
+        const docxRuntimeModulePath = vscode.Uri.joinPath(
+          this.context.extensionUri,
+          'dist',
+          'docx-runtime.js'
+        ).fsPath;
         await exportRuntime.writeDocxExport({
           htmlDocument: exportRender.htmlDocument,
           outputDocxPath: targetUri.fsPath,
           title: path.basename(targetUri.fsPath),
           uiLanguage: snapshot.uiLanguage,
           includeTableOfContents,
+          docxRuntimeModulePath,
           puppeteerRuntimeModulePath
         });
         return;

@@ -27,6 +27,7 @@ const requiredFiles = [
   'logo.png',
   'dist/extension.js',
   'dist/export-runtime.js',
+  'dist/docx-runtime.js',
   'dist/puppeteer-runtime.js',
   'webview/dist/index.js',
   'webview/dist/index.css',
