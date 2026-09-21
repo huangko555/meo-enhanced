@@ -261,6 +261,139 @@ async function alertPressLayout(browser: Browser): Promise<void> {
   }
 }
 
+async function blockquoteEnterFirstFrame(browser: Browser): Promise<void> {
+  const cases = [
+    {
+      name: 'blockquote',
+      text: '> ordinary quote remains visually stable',
+      target: 'visually',
+      expectedClass: 'meo-md-quote'
+    },
+    {
+      name: 'GitHub alert',
+      text: '> [!TIP]\n> alert body remains visually stable',
+      target: 'visually',
+      expectedClass: 'meo-md-alert-tip'
+    }
+  ] as const;
+
+  for (const testCase of cases) {
+    const page = await open(browser, testCase.text, 'live');
+    try {
+      await page.waitForFunction((expectedClass) => (
+        [...document.querySelectorAll<HTMLElement>('.cm-line')]
+          .some((line) => line.textContent?.includes('visually') && line.classList.contains(expectedClass))
+      ), {}, testCase.expectedClass);
+      const point = await page.evaluate((target) => {
+        const line = [...document.querySelectorAll<HTMLElement>('.cm-line')]
+          .find((candidate) => candidate.textContent?.includes(target));
+        const walker = line ? document.createTreeWalker(line, NodeFilter.SHOW_TEXT) : null;
+        while (walker?.nextNode()) {
+          const node = walker.currentNode as Text;
+          const offset = node.data.indexOf(target);
+          if (offset < 0) continue;
+          const range = document.createRange();
+          range.setStart(node, offset);
+          range.setEnd(node, offset + 1);
+          const rect = range.getBoundingClientRect();
+          return { x: rect.left + 1, y: rect.top + rect.height / 2 };
+        }
+        return null;
+      }, testCase.target);
+      assert.ok(point, `${testCase.name} split point was not measurable`);
+      await page.mouse.click(point.x, point.y);
+      const baselineLeft = await page.evaluate(() => {
+        const line = [...document.querySelectorAll<HTMLElement>('.cm-line')]
+          .find((candidate) => /remains|visually/.test(candidate.textContent ?? ''));
+        if (!line) return null;
+        const text = line.textContent ?? '';
+        const contentOffset = text.search(/[A-Za-z]/);
+        const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+        let traversed = 0;
+        while (walker.nextNode()) {
+          const node = walker.currentNode as Text;
+          if (contentOffset < traversed + node.length) {
+            const range = document.createRange();
+            range.setStart(node, contentOffset - traversed);
+            range.setEnd(node, contentOffset - traversed + 1);
+            return range.getBoundingClientRect().left;
+          }
+          traversed += node.length;
+        }
+        return null;
+      });
+      assert.equal(typeof baselineLeft, 'number', `${testCase.name} baseline was not measurable`);
+      await page.evaluate(() => {
+        (window as any).__blockquoteEnterFrames = [];
+        const sample = () => {
+          const lines = [...document.querySelectorAll<HTMLElement>('.cm-line')]
+            .filter((candidate) => /remains|visually/.test(candidate.textContent ?? ''));
+          const measurements = lines.map((line) => {
+            const text = line.textContent ?? '';
+            const contentOffset = text.search(/[A-Za-z]/);
+            const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+            let traversed = 0;
+            let contentLeft: number | null = null;
+            while (walker.nextNode()) {
+              const node = walker.currentNode as Text;
+              if (contentOffset < traversed + node.length) {
+                const range = document.createRange();
+                range.setStart(node, contentOffset - traversed);
+                range.setEnd(node, contentOffset - traversed + 1);
+                contentLeft = range.getBoundingClientRect().left;
+                break;
+              }
+              traversed += node.length;
+            }
+            return {
+              text,
+              classes: [...line.classList],
+              contentLeft,
+              markerClasses: [...line.querySelectorAll<HTMLElement>(':scope > span')]
+                .map((element) => element.className)
+            };
+          });
+          if (measurements.length > 0) (window as any).__blockquoteEnterFrames.push(measurements);
+        };
+        (window as any).__blockquoteEnterObserver = new MutationObserver(sample);
+        (window as any).__blockquoteEnterObserver.observe(
+          document.querySelector('.cm-content')!,
+          { attributes: true, characterData: true, childList: true, subtree: true }
+        );
+      });
+      await page.keyboard.press('Enter');
+      await page.evaluate(async () => {
+        for (let frame = 0; frame < 6; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      });
+      const frames = await page.evaluate(() => {
+        (window as any).__blockquoteEnterObserver.disconnect();
+        return (window as any).__blockquoteEnterFrames as Array<Array<{
+          text: string;
+          classes: string[];
+          contentLeft: number | null;
+          markerClasses: string[];
+        }>>;
+      });
+      const quotedFrames = frames.flat().filter((frame) => frame.text.trimStart().startsWith('>'));
+      assert.ok(quotedFrames.length > 0, `${testCase.name} did not expose its continued line`);
+      assert.ok(
+        quotedFrames.every((frame) => frame.classes.includes(testCase.expectedClass)),
+        `${testCase.name} exposed an unstyled first frame: ${JSON.stringify(frames)}`
+      );
+      assert.ok(
+        quotedFrames.every((frame) => (
+          frame.contentLeft !== null && Math.abs(frame.contentLeft - baselineLeft) <= 1
+        )),
+        `${testCase.name} changed indentation while Enter settled: ${JSON.stringify({ baselineLeft, frames })}`
+      );
+    } finally {
+      await page.close();
+    }
+  }
+}
+
 async function sourceLineNumberPreference(browser: Browser): Promise<void> {
   const text = Array.from({ length: 12 }, (_, index) => `line ${index + 1}`).join('\n');
   const page = await open(browser, text, 'source', 'off');
@@ -377,5 +510,5 @@ async function startupModeVisibility(browser: Browser): Promise<void> {
   }
 }
 
-async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { await startupModeVisibility(browser); await blockquotePressLayout(browser); await alertPressLayout(browser); await matrix(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); await largeDocumentStartupPreference(browser); } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
+async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { await startupModeVisibility(browser); await blockquotePressLayout(browser); await alertPressLayout(browser); await blockquoteEnterFirstFrame(browser); await matrix(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); await largeDocumentStartupPreference(browser); } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
 main().finally(() => fs.rmSync(temp, { recursive: true, force: true })).catch((e) => { console.error(e instanceof Error ? e.stack : e); process.exitCode = 1; });

@@ -3128,6 +3128,98 @@ function codeBlockAtInputPosition(tree: Tree, position: number): SyntaxNode | nu
   return null;
 }
 
+function blockquoteLineDecorationsAtInputPosition(
+  state: EditorState,
+  tree: Tree,
+  position: number
+): Decoration[] {
+  const blockquotes = new Map<string, SyntaxNode>();
+  for (const side of [-1, 1] as const) {
+    let node: SyntaxNode | null = tree.resolveInner(position, side);
+    while (node) {
+      if (node.name === 'Blockquote') blockquotes.set(`${node.from}:${node.to}`, node);
+      node = node.parent;
+    }
+  }
+
+  const decorations = new Map<string, Decoration>();
+  for (const blockquote of blockquotes.values()) {
+    const firstLine = state.doc.lineAt(blockquote.from);
+    const firstLineText = state.doc.sliceString(firstLine.from, firstLine.to).trimStart();
+    if (firstLineText.startsWith('>>>>>>>')) continue;
+    const alertBlock = detectAlertInBlockquote(state, blockquote);
+    const decoration = alertBlock ? alertLineDecos[alertBlock.type] : lineStyleDecos.quote;
+    decorations.set(decoration.spec.class as string, decoration);
+  }
+  return [...decorations.values()];
+}
+
+/**
+ * A continued blockquote line is visible before deferred Live decorations are
+ * rebuilt. Carry the enclosing line style and refresh the affected quote marks
+ * so that the split lines match the authoritative refresh on their first frame.
+ */
+function projectInputBlockquoteLines(
+  decorations: DecorationSet,
+  transaction: Transaction
+): DecorationSet {
+  const startDocument = transaction.startState.doc;
+  const nextDocument = transaction.newDoc;
+  const tree = resolvedSyntaxTree(transaction.startState);
+  const activeLines = collectActiveLines(transaction.state);
+  const lineAdditions = new Map<string, Range<Decoration>>();
+  const markerAdditions = new Map<string, Range<Decoration>>();
+  const markerRanges = new Set<string>();
+  let markerFilterFrom = nextDocument.length;
+  let markerFilterTo = 0;
+
+  transaction.changes.iterChangedRanges((fromA, _toA, fromB, toB) => {
+    if (nextDocument.sliceString(fromB, toB).search(/[\r\n]/) < 0) return;
+    const lineDecorations = blockquoteLineDecorationsAtInputPosition(
+      transaction.startState,
+      tree,
+      Math.min(fromA, startDocument.length)
+    );
+    if (lineDecorations.length === 0) return;
+
+    const changedLine = nextDocument.lineAt(Math.min(fromB, nextDocument.length));
+    const firstInsertedLine = changedLine.number + 1;
+    const lastInsertedLine = nextDocument.lineAt(Math.min(toB, nextDocument.length)).number;
+    for (let lineNumber = changedLine.number; lineNumber <= lastInsertedLine; lineNumber += 1) {
+      const line = nextDocument.line(lineNumber);
+      const prefix = /^[ \t]{0,3}(?:>[ \t]?)+/.exec(line.text)?.[0];
+      if (!prefix) continue;
+      if (lineNumber >= firstInsertedLine) {
+        for (const decoration of lineDecorations) {
+          lineAdditions.set(`${line.from}:${decoration.spec.class as string}`, decoration.range(line.from));
+        }
+      }
+      const markerDecoration = activeLines.has(lineNumber) ? activeLineMarkerDeco : markerDeco;
+      for (let offset = 0; offset < prefix.length; offset += 1) {
+        if (prefix[offset] !== '>') continue;
+        const from = line.from + offset;
+        const key = `${from}:${from + 1}`;
+        markerRanges.add(key);
+        markerAdditions.set(key, markerDecoration.range(from, from + 1));
+        markerFilterFrom = Math.min(markerFilterFrom, from);
+        markerFilterTo = Math.max(markerFilterTo, from + 1);
+      }
+    }
+  });
+
+  if (lineAdditions.size === 0 && markerAdditions.size === 0) return decorations;
+  const markerClasses = new Set([markerDeco.spec.class, activeLineMarkerDeco.spec.class]);
+  return decorations.update({
+    filterFrom: markerFilterFrom,
+    filterTo: markerFilterTo,
+    filter: (from, to, decoration) => (
+      !markerRanges.has(`${from}:${to}`) || !markerClasses.has(decoration.spec.class)
+    ),
+    add: [...lineAdditions.values(), ...markerAdditions.values()],
+    sort: true
+  });
+}
+
 /**
  * Input-derived work intentionally waits for an idle frame, but a newline in a
  * code block creates a visible line immediately. Project just that block's line
@@ -3229,7 +3321,10 @@ const liveDecorationField = StateField.define<DecorationSet>({
               });
             }, inputDecorations.map(transaction.changes))
           : projectInputCodeBlockLineNumbers(
-            mapLiveInputDerivedDecorations(inputDecorations, transaction),
+            projectInputBlockquoteLines(
+              mapLiveInputDerivedDecorations(inputDecorations, transaction),
+              transaction
+            ),
             transaction
           )
         : inputDecorations;
