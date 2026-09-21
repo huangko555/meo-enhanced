@@ -150,6 +150,65 @@ async function blockquotePressLayout(browser: Browser): Promise<void> {
   }
 }
 
+async function alertPressLayout(browser: Browser): Promise<void> {
+  const types = ['NOTE', 'TIP', 'IMPORTANT', 'WARNING', 'CAUTION'] as const;
+  const text = [
+    'neutral anchor',
+    '',
+    ...types.flatMap((type) => [`> [!${type}]`, `> ${type.toLowerCase()} body`, ''])
+  ].join('\n');
+  const page = await open(browser, text, 'live');
+  const measure = (needle: string) => page.evaluate((target) => {
+    const line = [...document.querySelectorAll<HTMLElement>('.cm-line')]
+      .find((candidate) => candidate.textContent?.includes(target));
+    if (!line) return null;
+    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode as Text;
+      const offset = node.data.indexOf(target);
+      if (offset < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, offset);
+      range.setEnd(node, offset + 1);
+      const rect = range.getBoundingClientRect();
+      return { left: rect.left, x: rect.left + 3, y: rect.top + rect.height / 2 };
+    }
+    return null;
+  }, needle);
+  try {
+    await page.waitForFunction((count) => document.querySelectorAll('.meo-md-alert-icon').length === count, {}, types.length);
+    for (const type of types) {
+      for (const needle of [type, `${type.toLowerCase()} body`]) {
+        const neutral = await measure('neutral anchor');
+        assert.ok(neutral);
+        await page.mouse.click(neutral.x, neutral.y);
+        await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+        const before = await measure(needle);
+        assert.ok(before, `Alert ${type} ${needle} was not measurable before pointerdown`);
+        await page.mouse.move(before.x, before.y);
+        await page.mouse.down();
+        const pressedFrames = [];
+        for (let frame = 0; frame < 4; frame += 1) {
+          await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+          pressedFrames.push(await measure(needle));
+        }
+        await page.mouse.up();
+        await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+        const released = await measure(needle);
+        assert.ok(released);
+        assert.ok(
+          pressedFrames.every((frame) => frame && Math.abs(frame.left - before.left) <= 1)
+            && Math.abs(released.left - before.left) <= 1,
+          `Pressing alert ${type} ${needle} changed its content inset: ${JSON.stringify({ before, pressedFrames, released })}`
+        );
+      }
+    }
+  } finally {
+    await page.mouse.up().catch(() => {});
+    await page.close();
+  }
+}
+
 async function sourceLineNumberPreference(browser: Browser): Promise<void> {
   const text = Array.from({ length: 12 }, (_, index) => `line ${index + 1}`).join('\n');
   const page = await open(browser, text, 'source', 'off');
@@ -189,5 +248,5 @@ async function sourceLineNumberPreference(browser: Browser): Promise<void> {
   }
 }
 
-async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { await blockquotePressLayout(browser); await matrix(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
+async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { await blockquotePressLayout(browser); await alertPressLayout(browser); await matrix(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
 main().finally(() => fs.rmSync(temp, { recursive: true, force: true })).catch((e) => { console.error(e instanceof Error ? e.stack : e); process.exitCode = 1; });

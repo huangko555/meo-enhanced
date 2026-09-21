@@ -6265,8 +6265,12 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-delet
   display: none;
 }
 
-.cm-editor .cm-activeLine.meo-md-alert {
-  padding-left: 3ch;
+.cm-editor.meo-mode-live .cm-activeLine.meo-md-alert:has(> .meo-md-marker-active:first-child) {
+  text-indent: -2ch;
+}
+
+.cm-editor.meo-mode-live .cm-activeLine.meo-md-alert:has(> .meo-md-alert-marker:first-child) {
+  padding-left: 5ch;
   text-indent: -2ch;
 }
 
