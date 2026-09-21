@@ -62,9 +62,10 @@ export async function writeDocxExport(options: WriteDocxExportOptions): Promise<
 
   removeExecutableContent(document.children);
   normalizeCodeBlocks(root);
+  normalizeFrontmatter(root);
   normalizeTables(root);
-  const headings = prepareHeadingBookmarks(root);
-  const includeTableOfContents = options.includeTableOfContents && headings.length > 0;
+  const headings = options.includeTableOfContents ? prepareHeadingBookmarks(root) : [];
+  const includeTableOfContents = headings.length > 0;
   if (includeTableOfContents) {
     prependTableOfContents(root, options.uiLanguage === 'zh-CN' ? '目录' : 'Contents', headings);
   }
@@ -74,9 +75,7 @@ export async function writeDocxExport(options: WriteDocxExportOptions): Promise<
     lang: options.uiLanguage === 'zh-CN' ? 'zh-CN' : 'en-US',
     title: options.title
   });
-  const output = includeTableOfContents
-    ? await addNativeTableOfContents(generated, headings)
-    : generated;
+  const output = await finalizeWordDocument(generated, headings);
   await fs.writeFile(options.outputDocxPath, output);
 }
 
@@ -125,10 +124,11 @@ function normalizeCodeBlocks(root: Element): void {
 
     const pre = DomUtils.findOne((element) => element.name === 'pre', wrapper.children, true);
     if (!pre) continue;
+    removeClassNames(pre, ['meo-export-code-block']);
     pre.attribs.style = appendInlineStyles(pre.attribs.style, [
       'font-family:Consolas,monospace',
-      'font-size:20pt',
-      'line-height:1.35',
+      'font-size:10pt',
+      'line-height:1.3',
       'text-align:left',
       'background-color:#f6f8fa',
       'white-space:pre-wrap',
@@ -137,10 +137,11 @@ function normalizeCodeBlocks(root: Element): void {
 
     const code = DomUtils.findOne((element) => element.name === 'code', pre.children, true);
     if (!code) continue;
+    delete code.attribs.class;
     code.attribs.style = appendInlineStyles(code.attribs.style, [
       'font-family:Consolas,monospace',
-      'font-size:20pt',
-      'line-height:1.35',
+      'font-size:10pt',
+      'line-height:1.3',
       'white-space:pre-wrap'
     ]);
 
@@ -152,22 +153,24 @@ function normalizeCodeBlocks(root: Element): void {
         classNames(element).includes('meo-export-code-line-number')
       ), line.children, true);
       if (lineNumber) DomUtils.removeElement(lineNumber);
+      removeClassNames(line, ['meo-export-code-line']);
       line.attribs.style = appendInlineStyles(line.attribs.style, [
         'display:inline',
         'font-family:Consolas,monospace',
-        'font-size:inherit',
-        'line-height:inherit',
+        'font-size:10pt',
+        'line-height:1.3',
         'white-space:pre-wrap'
       ]);
       const source = DomUtils.findOne((element) => (
         classNames(element).includes('meo-export-code-line-source')
       ), line.children, true);
       if (source) {
+        removeClassNames(source, ['meo-export-code-line-source']);
         source.attribs.style = appendInlineStyles(source.attribs.style, [
           'display:inline',
           'font-family:Consolas,monospace',
-          'font-size:inherit',
-          'line-height:inherit',
+          'font-size:10pt',
+          'line-height:1.3',
           'white-space:pre-wrap'
         ]);
       }
@@ -176,8 +179,49 @@ function normalizeCodeBlocks(root: Element): void {
   }
 }
 
+function normalizeFrontmatter(root: Element): void {
+  const sections = DomUtils.findAll((element) => (
+    classNames(element).includes('meo-export-frontmatter')
+  ), root.children);
+  for (const section of sections) {
+    const header = DomUtils.findOne((element) => (
+      classNames(element).includes('meo-export-frontmatter-header')
+    ), section.children, true);
+    const label = header ? DomUtils.textContent(header).replace(/\s+/g, ' ').trim() : 'Properties';
+    const lines = section.children.filter((child): child is Element => (
+      isElement(child) && classNames(child).includes('meo-export-frontmatter-line')
+    ));
+    const rows = lines.map((line) => {
+      if (classNames(line).includes('is-property')) {
+        const key = DomUtils.findOne((element) => (
+          classNames(element).includes('meo-export-frontmatter-key-cell')
+        ), line.children, true);
+        const value = DomUtils.findOne((element) => (
+          classNames(element).includes('meo-export-frontmatter-value-group')
+        ), line.children, true);
+        if (key && value) {
+          return `<tr><td>${DomUtils.getInnerHTML(key)}</td><td>${DomUtils.getInnerHTML(value)}</td></tr>`;
+        }
+      }
+      return `<tr><td colspan="2">${DomUtils.getInnerHTML(line)}</td></tr>`;
+    }).join('');
+    const fragment = parseDocument(
+      `<table class="meo-docx-frontmatter"><thead><tr><th colspan="2">${escapeHtml(label || 'Properties')}</th></tr></thead>`
+        + `<tbody>${rows}</tbody></table>`
+    );
+    const table = fragment.children.find(isElement);
+    if (table) DomUtils.replaceElement(section, table);
+  }
+}
+
 function appendInlineStyles(current: string | undefined, additions: readonly string[]): string {
   return [current, ...additions].filter(Boolean).join(';');
+}
+
+function removeClassNames(element: Element, names: readonly string[]): void {
+  const filtered = classNames(element).filter((name) => !names.includes(name));
+  if (filtered.length > 0) element.attribs.class = filtered.join(' ');
+  else delete element.attribs.class;
 }
 
 function removeExecutableContent(nodes: ChildNode[]): void {
@@ -264,52 +308,63 @@ function markerSpan(marker: string): Element {
   return new Element('span', { style: 'font-size:1px;color:#ffffff' }, [new Text(marker)]);
 }
 
-async function addNativeTableOfContents(buffer: Buffer, entries: readonly TocEntry[]): Promise<Buffer> {
+async function finalizeWordDocument(buffer: Buffer, entries: readonly TocEntry[]): Promise<Buffer> {
   const archive = await JSZip.loadAsync(buffer);
   const documentEntry = archive.file('word/document.xml');
   const settingsEntry = archive.file('word/settings.xml');
-  if (!documentEntry || !settingsEntry) throw new Error('Word export produced an incomplete DOCX package.');
-
-  let documentXml = await documentEntry.async('string');
-  for (const [index, entry] of entries.entries()) {
-    documentXml = replaceParagraphContainingMarker(documentXml, entry.headingMarker, (paragraph) => {
-      const withoutMarker = removeMarkerRun(paragraph, entry.headingMarker);
-      const bookmarkId = 1000 + index;
-      return insertAroundParagraphContent(
-        withoutMarker,
-        `<w:bookmarkStart w:id="${bookmarkId}" w:name="${entry.bookmarkName}"/>`,
-        `<w:bookmarkEnd w:id="${bookmarkId}"/>`
-      );
-    });
+  const stylesEntry = archive.file('word/styles.xml');
+  if (!documentEntry || !settingsEntry || !stylesEntry) {
+    throw new Error('Word export produced an incomplete DOCX package.');
   }
 
-  for (const [index, entry] of entries.entries()) {
-    documentXml = replaceParagraphContainingMarker(documentXml, entry.tocMarker, (paragraph) => {
-      const withoutMarker = removeMarkerRun(paragraph, entry.tocMarker);
-      return wrapParagraphContent(withoutMarker, (content) => {
-        const fieldBegin = index === 0
-          ? '<w:r><w:fldChar w:fldCharType="begin" w:dirty="true"/></w:r>'
-            + '<w:r><w:instrText xml:space="preserve"> TOC \\h \\o "1-6" \\z \\u </w:instrText></w:r>'
-            + '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
-          : '';
-        const fieldEnd = index === entries.length - 1
-          ? '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
-          : '';
-        return fieldBegin
-          + `<w:hyperlink w:anchor="${entry.bookmarkName}" w:history="1">${content}</w:hyperlink>`
-          + fieldEnd;
+  if (entries.length > 0) {
+    let documentXml = await documentEntry.async('string');
+    for (const [index, entry] of entries.entries()) {
+      documentXml = replaceParagraphContainingMarker(documentXml, entry.headingMarker, (paragraph) => {
+        const withoutMarker = removeMarkerRun(paragraph, entry.headingMarker);
+        const bookmarkId = 1000 + index;
+        return insertAroundParagraphContent(
+          withoutMarker,
+          `<w:bookmarkStart w:id="${bookmarkId}" w:name="${entry.bookmarkName}"/>`,
+          `<w:bookmarkEnd w:id="${bookmarkId}"/>`
+        );
       });
-    });
-  }
-  archive.file('word/document.xml', documentXml);
+    }
 
-  const settingsXml = await settingsEntry.async('string');
-  if (!/<w:updateFields\b/.test(settingsXml)) {
-    archive.file('word/settings.xml', settingsXml.replace(
-      '</w:settings>',
-      '<w:updateFields w:val="true"/></w:settings>'
-    ));
+    for (const [index, entry] of entries.entries()) {
+      documentXml = replaceParagraphContainingMarker(documentXml, entry.tocMarker, (paragraph) => {
+        const withoutMarker = removeMarkerRun(paragraph, entry.tocMarker);
+        return wrapParagraphContent(withoutMarker, (content) => {
+          const fieldBegin = index === 0
+            ? '<w:r><w:fldChar w:fldCharType="begin" w:dirty="true"/></w:r>'
+              + '<w:r><w:instrText xml:space="preserve"> TOC \\h \\o "1-6" \\z \\u </w:instrText></w:r>'
+              + '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+            : '';
+          const fieldEnd = index === entries.length - 1
+            ? '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
+            : '';
+          return fieldBegin
+            + `<w:hyperlink w:anchor="${entry.bookmarkName}" w:history="1">${content}</w:hyperlink>`
+            + fieldEnd;
+        });
+      });
+    }
+    archive.file('word/document.xml', documentXml);
+
+    const settingsXml = await settingsEntry.async('string');
+    if (!/<w:updateFields\b/.test(settingsXml)) {
+      archive.file('word/settings.xml', settingsXml.replace(
+        '</w:settings>',
+        '<w:updateFields w:val="true"/></w:settings>'
+      ));
+    }
   }
+
+  const stylesXml = await stylesEntry.async('string');
+  archive.file('word/styles.xml', stylesXml.replace(
+    /<w:style\b[^>]*w:styleId="Heading[1-6]"[\s\S]*?<\/w:style>/g,
+    (style) => style.replace(/\s*<w:(?:keepNext|keepLines)(?:\s[^>]*)?\/>/g, '')
+  ));
   return archive.generateAsync({ type: 'nodebuffer' });
 }
 

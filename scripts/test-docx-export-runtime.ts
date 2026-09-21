@@ -7,6 +7,17 @@ import exportRuntime from '../src/export/runtime';
 
 const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-docx-export-'));
 const markdown = [
+  '---',
+  'title: MEO Enhanced',
+  'tags:',
+  '  - VS Code',
+  '  - Markdown',
+  'document:',
+  '  language: zh-CN',
+  '  formats: [Markdown, HTML, PDF]',
+  '  tableOfContents: true',
+  '---',
+  '',
   '# Document title',
   '',
   'A paragraph with **bold text**.',
@@ -58,6 +69,14 @@ const paragraphContaining = (xml: string, text: string): string => {
   return paragraph!;
 };
 
+const tableContaining = (xml: string, text: string): string => {
+  const table = xml.match(/<w:tbl\b[^>]*>(?:(?!<\/w:tbl>)[^])*<\/w:tbl>/g)?.find((value) => (
+    value.replace(/<[^>]+>/g, '').replace(/\s+/g, '').includes(text.replace(/\s+/g, ''))
+  ));
+  assert.notEqual(table, undefined, `DOCX must contain a table with ${text}`);
+  return table!;
+};
+
 try {
   fs.writeFileSync(
     path.join(fixtureRoot, 'pixel.png'),
@@ -82,6 +101,11 @@ try {
   assert.match(coloredXml, /<w:bookmarkStart[^>]*w:name="meo_heading_1"/, 'TOC headings must expose native Word bookmarks');
   assert.doesNotMatch(coloredXml, /<w:pPr>(?:(?!<\/w:pPr>)[^])*<w:fldChar/, 'TOC field runs must not be nested inside paragraph properties');
   assert.match(await readArchiveXml(coloredPath, 'word/settings.xml'), /<w:updateFields(?:\s+w:val="true")?\/>/);
+  const coloredStyles = await readArchiveXml(coloredPath, 'word/styles.xml');
+  for (const level of [1, 2, 3, 4, 5, 6]) {
+    const headingStyle = coloredStyles.match(new RegExp(`<w:style\\b[^>]*w:styleId="Heading${level}"[^]*?<\\/w:style>`))?.[0] ?? '';
+    assert.doesNotMatch(headingStyle, /<w:(?:keepNext|keepLines)\b/, `Heading ${level} must not show Word paragraph pagination marks`);
+  }
   assert.match(coloredXml, /<w:pStyle w:val="Heading1"/);
   assert.equal((coloredXml.match(/<w:pStyle w:val="Heading1"/g) ?? []).length, 1, 'the TOC label must not become a document heading');
   assert.match(coloredXml, /<w:tbl>/, 'Markdown tables must remain editable Word tables');
@@ -91,9 +115,14 @@ try {
   assert.match(coloredXml, /<w:b\/>[^]*bold text/, 'Markdown strong text must remain native bold text');
   assert.match(coloredXml, /Visible summary[^]*Visible HTML body/, 'safe HTML content must remain visible in DOCX');
   assert.doesNotMatch(coloredXml, /__MEO_EXPORT_READY__/, 'export runtime scripts must not leak into DOCX text');
-  assert.match(paragraphContaining(coloredXml, 'const answer = 42;'), /<w:color w:val="[0-9A-F]{6}"/, 'enabled code coloring must produce Word run colors');
-  assert.match(paragraphContaining(coloredXml, 'const answer = 42;'), /<w:br(?:\s+w:type="textWrapping")?\/>/, 'multi-line code blocks must preserve line breaks');
-  assert.doesNotMatch(paragraphContaining(coloredXml, 'const answer = 42;'), /<w:jc w:val="(?:both|distribute)"/, 'code blocks must never distribute tokens across the line');
+  const coloredCodeParagraph = paragraphContaining(coloredXml, 'const answer = 42;');
+  assert.match(coloredCodeParagraph, /<w:color w:val="[0-9A-F]{6}"/, 'enabled code coloring must produce Word run colors');
+  assert.match(coloredCodeParagraph, /<w:br(?:\s+w:type="textWrapping")?\/>/, 'multi-line code blocks must preserve line breaks');
+  assert.doesNotMatch(coloredCodeParagraph, /<w:jc w:val="(?:both|distribute)"/, 'code blocks must never distribute tokens across the line');
+  const codeSizes = [...coloredCodeParagraph.matchAll(/<w:sz w:val="(\d+)"/g)].map((match) => Number(match[1]));
+  assert.ok(codeSizes.length > 0 && codeSizes.every((size) => size === 20), 'Word code must render consistently at 10pt');
+  const propertiesTable = tableContaining(coloredXml, 'Properties');
+  assert.match(propertiesTable, /title[^]*MEO Enhanced[^]*tags[^]*VS Code[^]*document[^]*language[^]*zh-CN/, 'front matter must become a readable two-column Word table');
   const tocFieldEnd = coloredXml.indexOf('<w:fldChar w:fldCharType="end"/>');
   const tocPageBreak = coloredXml.indexOf('<w:br w:type="page"/>', tocFieldEnd);
   const firstHeading = coloredXml.indexOf('w:name="meo_heading_1"', tocPageBreak);
@@ -116,6 +145,7 @@ try {
   });
   const plainXml = await readArchiveXml(plainPath, 'word/document.xml');
   assert.doesNotMatch(plainXml, /<w:instrText[^>]*>TOC/);
+  assert.doesNotMatch(plainXml, /MEOHEADINGMARKER/, 'documents without a TOC must not contain internal heading markers');
   assert.doesNotMatch(paragraphContaining(plainXml, 'const answer = 42;'), /<w:color w:val="[0-9A-F]{6}"/, 'disabled code coloring must not add Word run colors');
 
   console.log('DOCX export runtime checks passed.');
