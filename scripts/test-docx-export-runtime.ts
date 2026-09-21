@@ -20,6 +20,8 @@ const markdown = [
   '| --- | --- |',
   '| answer | 42 |',
   '',
+  '<details open><summary><strong>Visible summary</strong></summary><p>Visible HTML body</p></details>',
+  '',
   '![pixel](pixel.png)'
 ].join('\n');
 
@@ -50,7 +52,7 @@ const readArchiveXml = async (filePath: string, entryPath: string): Promise<stri
 
 const paragraphContaining = (xml: string, text: string): string => {
   const paragraph = xml.match(/<w:p\b[^>]*>(?:(?!<\/w:p>)[^])*<\/w:p>/g)?.find((value) => (
-    value.replace(/<[^>]+>/g, '').includes(text)
+    value.replace(/<[^>]+>/g, '').replace(/\s+/g, '').includes(text.replace(/\s+/g, ''))
   ));
   assert.notEqual(paragraph, undefined, `DOCX must contain a paragraph with ${text}`);
   return paragraph!;
@@ -76,16 +78,26 @@ try {
   assert.deepEqual(fs.readFileSync(coloredPath).subarray(0, 2).toString('ascii'), 'PK');
   const coloredXml = await readArchiveXml(coloredPath, 'word/document.xml');
   assert.match(coloredXml, /<w:instrText[^>]*> TOC \\h \\o "1-6" \\z \\u <\/w:instrText>/);
-  assert.match(coloredXml, /<w:hyperlink[^>]*w:anchor="document-title"[^>]*>[^]*Document title/, 'cached TOC entries must be visible and link to heading bookmarks');
+  assert.match(coloredXml, /<w:hyperlink[^>]*w:anchor="meo_heading_1"[^>]*>[^]*Document title/, 'cached TOC entries must be visible and link to heading bookmarks');
+  assert.match(coloredXml, /<w:bookmarkStart[^>]*w:name="meo_heading_1"/, 'TOC headings must expose native Word bookmarks');
   assert.doesNotMatch(coloredXml, /<w:pPr>(?:(?!<\/w:pPr>)[^])*<w:fldChar/, 'TOC field runs must not be nested inside paragraph properties');
   assert.match(await readArchiveXml(coloredPath, 'word/settings.xml'), /<w:updateFields(?:\s+w:val="true")?\/>/);
   assert.match(coloredXml, /<w:pStyle w:val="Heading1"/);
   assert.equal((coloredXml.match(/<w:pStyle w:val="Heading1"/g) ?? []).length, 1, 'the TOC label must not become a document heading');
   assert.match(coloredXml, /<w:tbl>/, 'Markdown tables must remain editable Word tables');
+  assert.match(coloredXml, /<w:tcBorders>/, 'Word table cells must keep visible borders');
+  assert.match(coloredXml, /<w:shd[^>]*w:fill="f6f8fa"/, 'Word table headers must keep the light header background');
   assert.match(coloredXml, /<w:drawing>/, 'embedded Markdown images must remain embedded in DOCX');
   assert.match(coloredXml, /<w:b\/>[^]*bold text/, 'Markdown strong text must remain native bold text');
+  assert.match(coloredXml, /Visible summary[^]*Visible HTML body/, 'safe HTML content must remain visible in DOCX');
+  assert.doesNotMatch(coloredXml, /__MEO_EXPORT_READY__/, 'export runtime scripts must not leak into DOCX text');
   assert.match(paragraphContaining(coloredXml, 'const answer = 42;'), /<w:color w:val="[0-9A-F]{6}"/, 'enabled code coloring must produce Word run colors');
-  assert.match(paragraphContaining(coloredXml, 'const answer = 42;'), /<w:br\/>/, 'multi-line code blocks must preserve line breaks');
+  assert.match(paragraphContaining(coloredXml, 'const answer = 42;'), /<w:br(?:\s+w:type="textWrapping")?\/>/, 'multi-line code blocks must preserve line breaks');
+  assert.doesNotMatch(paragraphContaining(coloredXml, 'const answer = 42;'), /<w:jc w:val="(?:both|distribute)"/, 'code blocks must never distribute tokens across the line');
+  const tocFieldEnd = coloredXml.indexOf('<w:fldChar w:fldCharType="end"/>');
+  const tocPageBreak = coloredXml.indexOf('<w:br w:type="page"/>', tocFieldEnd);
+  const firstHeading = coloredXml.indexOf('w:name="meo_heading_1"', tocPageBreak);
+  assert.ok(tocFieldEnd >= 0 && tocPageBreak > tocFieldEnd && firstHeading > tocPageBreak, 'the document body must start on the page after the TOC');
 
   const darkPreviewDocx = await render(true, 'dark');
   assert.match(darkPreviewDocx.htmlDocument, /--meo-bg:\s*#ffffff/, 'DOCX staging must always use the light document background');

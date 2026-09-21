@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { DomUtils, parseDocument } from 'htmlparser2';
-import { Element } from 'domhandler';
+import { Element, Text, type ChildNode } from 'domhandler';
 import JSZip from 'jszip';
 import type { UiLanguage } from '../foundation/uiLanguage';
 import { materializeDocxBodyFromHtmlExport } from './pdfRenderer';
@@ -19,22 +19,19 @@ export type WriteDocxExportOptions = {
 };
 
 type TocEntry = {
-  readonly id: string;
   readonly level: number;
   readonly text: string;
+  readonly bookmarkName: string;
+  readonly headingMarker: string;
+  readonly tocMarker: string;
 };
 
-const TOC_BEGIN_BOOKMARK = 'meo_toc_begin';
-const TOC_END_BOOKMARK = 'meo_toc_end';
 let docxRuntimePromise: Promise<DocxRuntimeModule> | null = null;
 
 type DocxRuntimeModule = {
   readonly convertHtmlToDocx: (html: string, options: {
-    readonly pageSize: 'a4';
     readonly lang: string;
-    readonly metadata: { readonly title: string; readonly creator: string };
-    readonly tocHtml?: string;
-    readonly onWarning: null;
+    readonly title: string;
   }) => Promise<Buffer>;
 };
 
@@ -47,33 +44,39 @@ export async function writeDocxExport(options: WriteDocxExportOptions): Promise<
     || classNames(element).includes('meo-export-mermaid')
     || classNames(element).includes('meo-export-math-display')
   ), stagedRoot.children, true) !== null;
-  const bodyHtml = needsMaterialization
-    ? await materializeDocxBodyFromHtmlExport({
-        htmlDocument: options.htmlDocument,
-        browserExecutablePath: options.browserExecutablePath,
-        puppeteerRuntimeModulePath: options.puppeteerRuntimeModulePath,
-        timeoutMs: options.timeoutMs
-      })
+  const documentHtml = needsMaterialization
+    ? replaceExportRoot(
+        options.htmlDocument,
+        await materializeDocxBodyFromHtmlExport({
+          htmlDocument: options.htmlDocument,
+          browserExecutablePath: options.browserExecutablePath,
+          puppeteerRuntimeModulePath: options.puppeteerRuntimeModulePath,
+          timeoutMs: options.timeoutMs
+        })
+      )
     : options.htmlDocument;
-  const root = findExportRoot(bodyHtml);
-  if (!root) throw new Error('Word export could not find the rendered document body.');
 
+  const document = parseDocument(documentHtml);
+  const root = findExportRootInNodes(document.children);
+  if (!root) throw new Error('Word export could not prepare the rendered document body.');
+
+  removeExecutableContent(document.children);
   normalizeCodeBlocks(root);
+  normalizeTables(root);
   const headings = prepareHeadingBookmarks(root);
   const includeTableOfContents = options.includeTableOfContents && headings.length > 0;
-  const contentsLabel = options.uiLanguage === 'zh-CN' ? '目录' : 'Contents';
+  if (includeTableOfContents) {
+    prependTableOfContents(root, options.uiLanguage === 'zh-CN' ? '目录' : 'Contents', headings);
+  }
+
   const { convertHtmlToDocx } = await loadDocxRuntime(options.docxRuntimeModulePath);
-  const generated = await convertHtmlToDocx(DomUtils.getInnerHTML(root), {
-    pageSize: 'a4',
+  const generated = await convertHtmlToDocx(DomUtils.getOuterHTML(document), {
     lang: options.uiLanguage === 'zh-CN' ? 'zh-CN' : 'en-US',
-    metadata: {
-      title: options.title,
-      creator: 'MEO Enhanced'
-    },
-    ...(includeTableOfContents ? { tocHtml: buildTableOfContentsHtml(contentsLabel, headings) } : {}),
-    onWarning: null
+    title: options.title
   });
-  const output = includeTableOfContents ? await markVisibleContentsAsNativeToc(generated) : generated;
+  const output = includeTableOfContents
+    ? await addNativeTableOfContents(generated, headings)
+    : generated;
   await fs.writeFile(options.outputDocxPath, output);
 }
 
@@ -99,6 +102,17 @@ async function loadDocxRuntime(modulePath: string): Promise<DocxRuntimeModule> {
   return docxRuntimePromise;
 }
 
+function replaceExportRoot(originalHtml: string, replacementRootHtml: string): string {
+  const document = parseDocument(originalHtml);
+  const originalRoot = findExportRootInNodes(document.children);
+  const replacementRoot = findExportRoot(replacementRootHtml);
+  if (!originalRoot || !replacementRoot) {
+    throw new Error('Word export could not merge materialized document content.');
+  }
+  DomUtils.replaceElement(originalRoot, replacementRoot);
+  return DomUtils.getOuterHTML(document);
+}
+
 function normalizeCodeBlocks(root: Element): void {
   const wrappers = DomUtils.findAll((element) => (
     classNames(element).includes('meo-export-code-block-wrap')
@@ -108,98 +122,186 @@ function normalizeCodeBlocks(root: Element): void {
       isElement(child) && classNames(child).includes('meo-export-code-language-label')
     ));
     if (label) DomUtils.removeElement(label);
+
     const pre = DomUtils.findOne((element) => element.name === 'pre', wrapper.children, true);
     if (!pre) continue;
-    const code = DomUtils.findOne((element) => element.name === 'code', pre.children, true);
-    if (code) {
-      const lines = DomUtils.findAll((element) => (
-        classNames(element).includes('meo-export-code-line')
-      ), code.children);
-      for (const line of lines.slice(0, -1)) {
-        DomUtils.appendChild(line, new Element('br', {}, []));
-      }
-    }
-    pre.name = 'p';
-    pre.attribs.style = [
-      pre.attribs.style,
+    pre.attribs.style = appendInlineStyles(pre.attribs.style, [
       'font-family:Consolas,monospace',
+      'font-size:20pt',
+      'line-height:1.35',
+      'text-align:left',
       'background-color:#f6f8fa',
       'white-space:pre-wrap',
       'padding:8pt'
-    ].filter(Boolean).join(';');
+    ]);
+
+    const code = DomUtils.findOne((element) => element.name === 'code', pre.children, true);
+    if (!code) continue;
+    code.attribs.style = appendInlineStyles(code.attribs.style, [
+      'font-family:Consolas,monospace',
+      'font-size:20pt',
+      'line-height:1.35',
+      'white-space:pre-wrap'
+    ]);
+
+    const lines = DomUtils.findAll((element) => (
+      classNames(element).includes('meo-export-code-line')
+    ), code.children);
+    for (const [index, line] of lines.entries()) {
+      const lineNumber = DomUtils.findOne((element) => (
+        classNames(element).includes('meo-export-code-line-number')
+      ), line.children, true);
+      if (lineNumber) DomUtils.removeElement(lineNumber);
+      line.attribs.style = appendInlineStyles(line.attribs.style, [
+        'display:inline',
+        'font-family:Consolas,monospace',
+        'font-size:inherit',
+        'line-height:inherit',
+        'white-space:pre-wrap'
+      ]);
+      const source = DomUtils.findOne((element) => (
+        classNames(element).includes('meo-export-code-line-source')
+      ), line.children, true);
+      if (source) {
+        source.attribs.style = appendInlineStyles(source.attribs.style, [
+          'display:inline',
+          'font-family:Consolas,monospace',
+          'font-size:inherit',
+          'line-height:inherit',
+          'white-space:pre-wrap'
+        ]);
+      }
+      if (index < lines.length - 1) DomUtils.appendChild(line, new Element('br', {}, []));
+    }
+  }
+}
+
+function appendInlineStyles(current: string | undefined, additions: readonly string[]): string {
+  return [current, ...additions].filter(Boolean).join(';');
+}
+
+function removeExecutableContent(nodes: ChildNode[]): void {
+  const scripts = DomUtils.findAll((element) => element.name === 'script', nodes);
+  for (const script of scripts) DomUtils.removeElement(script);
+}
+
+function normalizeTables(root: Element): void {
+  const tables = DomUtils.findAll((element) => element.name === 'table', root.children);
+  for (const table of tables) {
+    table.attribs.style = appendInlineStyles(table.attribs.style, [
+      'width:100%',
+      'border-collapse:collapse',
+      'table-layout:auto',
+      'margin-bottom:12pt'
+    ]);
+    const cells = DomUtils.findAll((element) => element.name === 'th' || element.name === 'td', table.children);
+    for (const cell of cells) {
+      cell.attribs.style = appendInlineStyles(cell.attribs.style, [
+        'border:1px solid #d0d7de',
+        'padding:5pt 7pt',
+        'text-align:left',
+        'vertical-align:top'
+      ]);
+      if (cell.name === 'th') {
+        cell.attribs.style = appendInlineStyles(cell.attribs.style, [
+          'background-color:#f6f8fa',
+          'font-weight:700'
+        ]);
+      }
+    }
   }
 }
 
 function findExportRoot(html: string): Element | null {
-  const document = parseDocument(html);
+  return findExportRootInNodes(parseDocument(html).children);
+}
+
+function findExportRootInNodes(nodes: ChildNode[]): Element | null {
   return DomUtils.findOne((element) => (
     element.attribs?.id === 'meo-export-root'
     || classNames(element).includes('meo-export-doc')
-  ), document.children, true) ?? null;
+  ), nodes, true) ?? null;
 }
 
 function prepareHeadingBookmarks(root: Element): TocEntry[] {
   const headings = DomUtils.findAll((element) => /^h[1-6]$/i.test(element.name), root.children);
-  const usedIds = new Set<string>();
   return headings.flatMap((heading, index) => {
     const text = DomUtils.textContent(heading).replace(/\s+/g, ' ').trim();
     if (!text) return [];
-    const existingId = heading.attribs.id?.trim();
-    let id = existingId || `meo-heading-${index + 1}`;
-    if (usedIds.has(id)) id = `meo-heading-${index + 1}`;
-    usedIds.add(id);
-    heading.attribs.id = id;
-    return [{
-      id,
+    const entryNumber = index + 1;
+    const entry = {
       level: Number.parseInt(heading.name.slice(1), 10),
-      text
-    }];
+      text,
+      bookmarkName: `meo_heading_${entryNumber}`,
+      headingMarker: `MEOHEADINGMARKER${entryNumber}`,
+      tocMarker: `MEOTOCENTRYMARKER${entryNumber}`
+    };
+    DomUtils.prependChild(heading, markerSpan(entry.headingMarker));
+    return [entry];
   });
 }
 
-function buildTableOfContentsHtml(label: string, entries: readonly TocEntry[]): string {
-  const links = entries.map((entry, index) => {
+function prependTableOfContents(root: Element, label: string, entries: readonly TocEntry[]): void {
+  const links = entries.map((entry) => {
     const indentation = Math.max(0, entry.level - 1) * 0.28;
-    const beginMarker = index === 0 ? `<span id="${TOC_BEGIN_BOOKMARK}"></span>` : '';
-    const endMarker = index === entries.length - 1 ? `<span id="${TOC_END_BOOKMARK}"></span>` : '';
     return `<p style="margin-left:${indentation}in;margin-top:0;margin-bottom:4pt">`
-      + beginMarker
-      + `<a href="#${escapeHtmlAttribute(entry.id)}">${escapeHtml(entry.text)}</a>`
-      + `${endMarker}</p>`;
+      + `<span style="font-size:1px;color:#ffffff">${entry.tocMarker}</span>`
+      + `${escapeHtml(entry.text)}</p>`;
   }).join('');
-  return `<p><strong>${escapeHtml(label)}</strong></p>${links}`;
+  const fragment = parseDocument(
+    `<div class="meo-docx-toc">`
+      + `<p style="font-size:20pt;font-weight:700;margin-top:0;margin-bottom:12pt">${escapeHtml(label)}</p>`
+      + links
+      + '<div class="page-break"></div>'
+      + '</div>'
+  );
+  const toc = fragment.children.find(isElement);
+  if (!toc) throw new Error('Word export could not construct the table of contents.');
+  DomUtils.prependChild(root, toc);
 }
 
-async function markVisibleContentsAsNativeToc(buffer: Buffer): Promise<Buffer> {
+function markerSpan(marker: string): Element {
+  return new Element('span', { style: 'font-size:1px;color:#ffffff' }, [new Text(marker)]);
+}
+
+async function addNativeTableOfContents(buffer: Buffer, entries: readonly TocEntry[]): Promise<Buffer> {
   const archive = await JSZip.loadAsync(buffer);
   const documentEntry = archive.file('word/document.xml');
   const settingsEntry = archive.file('word/settings.xml');
   if (!documentEntry || !settingsEntry) throw new Error('Word export produced an incomplete DOCX package.');
 
-  const documentXml = await documentEntry.async('string');
-  const beginIndex = documentXml.indexOf(`w:name="${TOC_BEGIN_BOOKMARK}"`);
-  const endIndex = documentXml.indexOf(`w:name="${TOC_END_BOOKMARK}"`);
-  if (beginIndex < 0 || endIndex < 0 || beginIndex >= endIndex) {
-    throw new Error('Word export could not cache the generated table of contents.');
+  let documentXml = await documentEntry.async('string');
+  for (const [index, entry] of entries.entries()) {
+    documentXml = replaceParagraphContainingMarker(documentXml, entry.headingMarker, (paragraph) => {
+      const withoutMarker = removeMarkerRun(paragraph, entry.headingMarker);
+      const bookmarkId = 1000 + index;
+      return insertAroundParagraphContent(
+        withoutMarker,
+        `<w:bookmarkStart w:id="${bookmarkId}" w:name="${entry.bookmarkName}"/>`,
+        `<w:bookmarkEnd w:id="${bookmarkId}"/>`
+      );
+    });
   }
-  const beginBookmarkStart = documentXml.lastIndexOf('<w:bookmarkStart', beginIndex);
-  const endBookmarkStartEnd = documentXml.indexOf('/>', endIndex) + 2;
-  const endBookmarkEnd = documentXml.indexOf('/>', endBookmarkStartEnd) + 2;
-  if (beginBookmarkStart < 0 || endBookmarkEnd < 2) {
-    throw new Error('Word export could not locate the table-of-contents field boundaries.');
+
+  for (const [index, entry] of entries.entries()) {
+    documentXml = replaceParagraphContainingMarker(documentXml, entry.tocMarker, (paragraph) => {
+      const withoutMarker = removeMarkerRun(paragraph, entry.tocMarker);
+      return wrapParagraphContent(withoutMarker, (content) => {
+        const fieldBegin = index === 0
+          ? '<w:r><w:fldChar w:fldCharType="begin" w:dirty="true"/></w:r>'
+            + '<w:r><w:instrText xml:space="preserve"> TOC \\h \\o "1-6" \\z \\u </w:instrText></w:r>'
+            + '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+          : '';
+        const fieldEnd = index === entries.length - 1
+          ? '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
+          : '';
+        return fieldBegin
+          + `<w:hyperlink w:anchor="${entry.bookmarkName}" w:history="1">${content}</w:hyperlink>`
+          + fieldEnd;
+      });
+    });
   }
-  const fieldBegin = '<w:r><w:fldChar w:fldCharType="begin" w:dirty="true"/></w:r>'
-    + '<w:r><w:instrText xml:space="preserve"> TOC \\h \\o "1-6" \\z \\u </w:instrText></w:r>'
-    + '<w:r><w:fldChar w:fldCharType="separate"/></w:r>';
-  const fieldEnd = '<w:r><w:fldChar w:fldCharType="end"/></w:r>';
-  const withBegin = documentXml.slice(0, beginBookmarkStart)
-    + fieldBegin
-    + documentXml.slice(beginBookmarkStart);
-  const shiftedEndBookmarkEnd = endBookmarkEnd + fieldBegin.length;
-  const withField = withBegin.slice(0, shiftedEndBookmarkEnd)
-    + fieldEnd
-    + withBegin.slice(shiftedEndBookmarkEnd);
-  archive.file('word/document.xml', withField);
+  archive.file('word/document.xml', documentXml);
 
   const settingsXml = await settingsEntry.async('string');
   if (!/<w:updateFields\b/.test(settingsXml)) {
@@ -211,6 +313,45 @@ async function markVisibleContentsAsNativeToc(buffer: Buffer): Promise<Buffer> {
   return archive.generateAsync({ type: 'nodebuffer' });
 }
 
+function replaceParagraphContainingMarker(
+  xml: string,
+  marker: string,
+  transform: (paragraph: string) => string
+): string {
+  const paragraphs = /<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g;
+  for (const match of xml.matchAll(paragraphs)) {
+    if (!match[0].includes(marker) || match.index === undefined) continue;
+    return xml.slice(0, match.index) + transform(match[0]) + xml.slice(match.index + match[0].length);
+  }
+  throw new Error(`Word export could not locate generated marker ${marker}.`);
+}
+
+function removeMarkerRun(paragraph: string, marker: string): string {
+  const runs = /<w:r(?:\s[^>]*)?>[\s\S]*?<\/w:r>/g;
+  for (const match of paragraph.matchAll(runs)) {
+    if (!match[0].includes(marker) || match.index === undefined) continue;
+    return paragraph.slice(0, match.index) + paragraph.slice(match.index + match[0].length);
+  }
+  throw new Error(`Word export could not remove generated marker ${marker}.`);
+}
+
+function insertAroundParagraphContent(paragraph: string, before: string, after: string): string {
+  return wrapParagraphContent(paragraph, (content) => before + content + after);
+}
+
+function wrapParagraphContent(paragraph: string, transform: (content: string) => string): string {
+  const paragraphOpenEnd = paragraph.indexOf('>') + 1;
+  const propertiesEnd = paragraph.indexOf('</w:pPr>');
+  const contentStart = propertiesEnd >= 0 ? propertiesEnd + '</w:pPr>'.length : paragraphOpenEnd;
+  const contentEnd = paragraph.lastIndexOf('</w:p>');
+  if (paragraphOpenEnd <= 0 || contentEnd < contentStart) {
+    throw new Error('Word export encountered an invalid paragraph while constructing the table of contents.');
+  }
+  return paragraph.slice(0, contentStart)
+    + transform(paragraph.slice(contentStart, contentEnd))
+    + paragraph.slice(contentEnd);
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -220,14 +361,10 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-function escapeHtmlAttribute(value: string): string {
-  return escapeHtml(value);
-}
-
 function classNames(element: Element): string[] {
   return (element.attribs.class ?? '').split(/\s+/).filter(Boolean);
 }
 
-function isElement(node: unknown): node is Element {
-  return typeof node === 'object' && node !== null && 'name' in node && 'attribs' in node;
+function isElement(node: ChildNode): node is Element {
+  return node.type === 'tag' || node.type === 'script' || node.type === 'style';
 }
