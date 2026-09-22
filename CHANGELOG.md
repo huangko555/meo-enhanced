@@ -3,6 +3,15 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.25
+- Added Word (`.docx`) export with light document styling, a native table of contents, formatted Front Matter, code blocks, tables, images, diagrams, formulas, links, and footnotes.
+- Added optional bold-text coloring in Live mode, disabled by default, with body-derived colors tuned separately for light and dark appearances.
+- Added an enabled-by-default large-file startup optimization setting with a compact explanatory tooltip.
+- Opened Live, Source, and Preview directly in the requested startup mode without briefly exposing Source presentation.
+- Stabilized ordinary blockquotes and all GitHub Alert variants during activation and Enter, preserving marker alignment, text inset, color, and first-frame styling.
+- Kept the floating table header's one-pixel bottom divider visible across display scales.
+- Shifted Preview body foreground blending to the requested 70/30 balance.
+
 ## 0.3.24
 - Fixed Shift+Enter line breaks in Live table cells so rows expand downward and the viewport moves only when the caret would leave the visible area.
 - Stabilized outline navigation and fixed/floating outline mode changes to prevent brief viewport jumps.
