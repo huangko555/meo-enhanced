@@ -26,6 +26,8 @@ type TocEntry = {
   readonly tocMarker: string;
 };
 
+const wordBodyFonts = '<w:rFonts w:ascii="DengXian" w:hAnsi="DengXian" w:eastAsia="等线" w:cs="DengXian"/>';
+
 let docxRuntimePromise: Promise<DocxRuntimeModule> | null = null;
 
 type DocxRuntimeModule = {
@@ -360,12 +362,27 @@ async function finalizeWordDocument(buffer: Buffer, entries: readonly TocEntry[]
     }
   }
 
-  const stylesXml = await stylesEntry.async('string');
-  archive.file('word/styles.xml', stylesXml.replace(
+  const stylesXml = normalizeWordBodyFonts(await stylesEntry.async('string')).replace(
     /<w:style\b[^>]*w:styleId="Heading[1-6]"[\s\S]*?<\/w:style>/g,
     (style) => style.replace(/\s*<w:(?:keepNext|keepLines)(?:\s[^>]*)?\/>/g, '')
-  ));
+  );
+  archive.file('word/styles.xml', stylesXml);
   return archive.generateAsync({ type: 'nodebuffer' });
+}
+
+function normalizeWordBodyFonts(stylesXml: string): string {
+  const defaultsPattern = /<w:docDefaults\b[^>]*>[\s\S]*?<\/w:docDefaults>/;
+  const defaults = defaultsPattern.exec(stylesXml)?.[0];
+  if (!defaults) throw new Error('Word export did not provide document default styles.');
+
+  const fontPattern = /<w:rFonts\b[^>]*(?:\/>|>[\s\S]*?<\/w:rFonts>)/;
+  const normalizedDefaults = fontPattern.test(defaults)
+    ? defaults.replace(fontPattern, wordBodyFonts)
+    : defaults.replace(/<w:rPr\b[^>]*>/, (runProperties) => `${runProperties}${wordBodyFonts}`);
+  if (normalizedDefaults === defaults && !fontPattern.test(normalizedDefaults)) {
+    throw new Error('Word export could not set the document default font.');
+  }
+  return stylesXml.replace(defaultsPattern, normalizedDefaults);
 }
 
 function replaceParagraphContainingMarker(

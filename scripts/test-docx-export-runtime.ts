@@ -22,6 +22,8 @@ const markdown = [
   '',
   'A paragraph with **bold text**.',
   '',
+  '中文正文与 English text.',
+  '',
   '```ts',
   'const answer = 42;',
   'const doubled = answer * 2;',
@@ -102,6 +104,12 @@ try {
   assert.doesNotMatch(coloredXml, /<w:pPr>(?:(?!<\/w:pPr>)[^])*<w:fldChar/, 'TOC field runs must not be nested inside paragraph properties');
   assert.match(await readArchiveXml(coloredPath, 'word/settings.xml'), /<w:updateFields(?:\s+w:val="true")?\/>/);
   const coloredStyles = await readArchiveXml(coloredPath, 'word/styles.xml');
+  const documentDefaults = coloredStyles.match(/<w:docDefaults\b[^>]*>[^]*?<\/w:docDefaults>/)?.[0] ?? '';
+  assert.match(documentDefaults, /<w:rFonts\b[^>]*w:ascii="DengXian"/);
+  assert.match(documentDefaults, /<w:rFonts\b[^>]*w:hAnsi="DengXian"/);
+  assert.match(documentDefaults, /<w:rFonts\b[^>]*w:eastAsia="等线"/);
+  assert.match(documentDefaults, /<w:rFonts\b[^>]*w:cs="DengXian"/);
+  assert.doesNotMatch(documentDefaults, /w:(?:ascii|hAnsi|eastAsia|cs)Theme=/, 'Word body fonts must not fall back to theme fonts');
   for (const level of [1, 2, 3, 4, 5, 6]) {
     const headingStyle = coloredStyles.match(new RegExp(`<w:style\\b[^>]*w:styleId="Heading${level}"[^]*?<\\/w:style>`))?.[0] ?? '';
     assert.doesNotMatch(headingStyle, /<w:(?:keepNext|keepLines)\b/, `Heading ${level} must not show Word paragraph pagination marks`);
@@ -116,6 +124,7 @@ try {
   assert.match(coloredXml, /Visible summary[^]*Visible HTML body/, 'safe HTML content must remain visible in DOCX');
   assert.doesNotMatch(coloredXml, /__MEO_EXPORT_READY__/, 'export runtime scripts must not leak into DOCX text');
   const coloredCodeParagraph = paragraphContaining(coloredXml, 'const answer = 42;');
+  assert.match(coloredCodeParagraph, /<w:rFonts\b[^>]*w:ascii="Consolas"[^>]*w:hAnsi="Consolas"/, 'Word code must keep the Consolas override');
   assert.match(coloredCodeParagraph, /<w:color w:val="[0-9A-F]{6}"/, 'enabled code coloring must produce Word run colors');
   assert.match(coloredCodeParagraph, /<w:br(?:\s+w:type="textWrapping")?\/>/, 'multi-line code blocks must preserve line breaks');
   assert.doesNotMatch(coloredCodeParagraph, /<w:jc w:val="(?:both|distribute)"/, 'code blocks must never distribute tokens across the line');

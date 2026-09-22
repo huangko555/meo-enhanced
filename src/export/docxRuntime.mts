@@ -13,7 +13,7 @@ export async function convertHtmlToDocx(
     },
     title: options.title,
     creator: 'MEO Enhanced',
-    font: 'Aptos',
+    font: 'DengXian',
     fontSize: 22,
     lineHeight: 1.15,
     paragraphSpacingAfter: 160,
