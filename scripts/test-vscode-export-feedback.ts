@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import { mock } from 'bun:test';
 
-type FakeUri = { readonly fsPath: string };
+type FakeUri = { readonly fsPath: string; readonly scheme: 'file' };
 
-const targetUri: FakeUri = { fsPath: 'D:/exports/note.pdf' };
+const fileUri = (fsPath: string): FakeUri => ({ fsPath, scheme: 'file' });
+const targetUri = fileUri('D:/exports/note.pdf');
 const progressMessages: string[] = [];
 const informationMessages: Array<{ message: string; actions: string[] }> = [];
 const errorMessages: string[] = [];
 const openedUris: FakeUri[] = [];
+const systemOpenedPaths: string[] = [];
 const revealedUris: FakeUri[] = [];
 let selectedAction: string | undefined;
 let saveDialogResult: FakeUri | undefined = targetUri;
@@ -22,9 +24,18 @@ let progressCompletionBarrier: Promise<void> = Promise.resolve();
 let saveDialogHandler: (() => Promise<FakeUri | undefined>) | undefined;
 let informationMessageHandler: (() => Promise<string | undefined>) | undefined;
 
+Object.defineProperty(process, 'platform', { value: 'win32' });
+
+mock.module('open', () => ({
+  default: async (target: string) => {
+    systemOpenedPaths.push(target);
+    return {};
+  }
+}));
+
 mock.module('vscode', () => ({
   ProgressLocation: { Notification: 15 },
-  Uri: { file: (fsPath: string): FakeUri => ({ fsPath }) },
+  Uri: { file: (fsPath: string): FakeUri => fileUri(fsPath) },
   window: {
     showSaveDialog: async (options: Record<string, unknown>) => {
       saveDialogInvocationCount += 1;
@@ -157,8 +168,27 @@ assert.deepEqual(progressMessages, [
   '正在生成 Word 文档…'
 ]);
 
+selectedAction = '直接打开';
+for (const [format, extension] of [['pdf', 'pdf'], ['docx', 'docx'], ['html', 'html']] as const) {
+  const nonAsciiTarget = fileUri(`D:/海螺岛一期_PPTMaster模板/templates/design_specdeckhailuodao_phase1.${extension}`);
+  saveDialogResult = nonAsciiTarget;
+  const externalOpenCount = openedUris.length;
+  const systemOpenCount = systemOpenedPaths.length;
+  const outcome = await runVscodeExportWithFeedback({
+    sourceDocumentUri,
+    format,
+    uiLanguage: 'zh-CN'
+  }, async () => undefined);
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  assert.equal(outcome, 'completed');
+  assert.equal(systemOpenedPaths.length, systemOpenCount + 1);
+  assert.equal(systemOpenedPaths.at(-1), nonAsciiTarget.fsPath);
+  assert.equal(openedUris.length, externalOpenCount, `${format} must bypass encoded URI opening on Windows`);
+}
+
 rejectReveal = true;
 selectedAction = '打开所在文件夹';
+saveDialogResult = targetUri;
 await runVscodeExportWithFeedback({
   sourceDocumentUri,
   format: 'pdf',
@@ -166,6 +196,18 @@ await runVscodeExportWithFeedback({
 }, async () => undefined);
 await new Promise<void>((resolve) => setTimeout(resolve, 0));
 assert.equal(openedUris.at(-1)?.fsPath.replaceAll('\\', '/'), 'D:/exports');
+
+const nonAsciiFolderTarget = fileUri('D:/海螺岛一期_PPTMaster模板/templates/note.pdf');
+saveDialogResult = nonAsciiFolderTarget;
+const externalOpenCountBeforeFallback = openedUris.length;
+await runVscodeExportWithFeedback({
+  sourceDocumentUri,
+  format: 'pdf',
+  uiLanguage: 'zh-CN'
+}, async () => undefined);
+await new Promise<void>((resolve) => setTimeout(resolve, 0));
+assert.equal(systemOpenedPaths.at(-1)?.replaceAll('\\', '/'), 'D:/海螺岛一期_PPTMaster模板/templates');
+assert.equal(openedUris.length, externalOpenCountBeforeFallback);
 
 const failedOutcome = await runVscodeExportWithFeedback({
   sourceDocumentUri,
@@ -294,8 +336,8 @@ releaseActiveExport?.();
 assert.equal(await activeExport, 'completed');
 
 saveDialogHandler = undefined;
-const firstCompletedTarget: FakeUri = { fsPath: 'D:/exports/first.pdf' };
-const secondCompletedTarget: FakeUri = { fsPath: 'D:/exports/second.pdf' };
+const firstCompletedTarget = fileUri('D:/exports/first.pdf');
+const secondCompletedTarget = fileUri('D:/exports/second.pdf');
 const completionTargets = [firstCompletedTarget, secondCompletedTarget];
 saveDialogHandler = async () => completionTargets.shift();
 selectedAction = undefined;

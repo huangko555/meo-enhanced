@@ -197,13 +197,13 @@ async function showCompletedExportFeedback(
       strings.reveal
     );
     if (selected === strings.open) {
-      const opened = await vscode.env.openExternal(targetUri);
+      const opened = await openLocalResource(targetUri);
       if (!opened) throw new Error('The exported file could not be opened.');
     } else if (selected === strings.reveal) {
       try {
         await vscode.commands.executeCommand('revealFileInOS', targetUri);
       } catch {
-        const opened = await vscode.env.openExternal(vscode.Uri.file(path.dirname(targetUri.fsPath)));
+        const opened = await openLocalResource(vscode.Uri.file(path.dirname(targetUri.fsPath)));
         if (!opened) throw new Error('The export folder could not be opened.');
       }
     }
@@ -211,6 +211,23 @@ async function showCompletedExportFeedback(
     const message = error instanceof Error ? error.message : String(error || 'Export action failed');
     void vscode.window.showErrorMessage(strings.completionActionFailed(message));
   }
+}
+
+async function openLocalResource(targetUri: vscode.Uri): Promise<boolean> {
+  // VS Code encodes non-ASCII file URIs before handing them to Windows, which can
+  // make the shell look for a literal percent-encoded path. Pass the fsPath to the
+  // system opener so Chinese and other Unicode paths remain intact.
+  if (
+    process.platform === 'win32'
+    && targetUri.scheme === 'file'
+    && /[^\u0000-\u007f]/u.test(targetUri.fsPath)
+  ) {
+    const { default: openPath } = await import('open');
+    await openPath(targetUri.fsPath);
+    return true;
+  }
+
+  return vscode.env.openExternal(targetUri);
 }
 
 function getStrings(uiLanguage: UiLanguage, format: VscodeExportFormat): VscodeExportStrings {
