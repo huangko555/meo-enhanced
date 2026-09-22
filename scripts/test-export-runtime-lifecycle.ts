@@ -94,21 +94,28 @@ try {
   assert.equal(success.error, undefined);
   assert.equal(success.events.at(-1), 'close');
 
-  for (const stage of ['launch', 'newPage', 'goto', 'wait', 'action']) {
+  const failureStages = {
+    launch: 'launching the browser',
+    newPage: 'loading the rendered document',
+    goto: 'loading the rendered document',
+    wait: 'waiting for diagrams, formulas, and images',
+    action: 'writing the export'
+  } as const;
+  for (const [stage, runtimeStage] of Object.entries(failureStages)) {
     const result = await run({ failStage: stage });
-    assert.equal((result.error as Error | undefined)?.message, `${stage} failed`);
+    assert.equal((result.error as Error | undefined)?.message, `Export browser failed while ${runtimeStage}: ${stage} failed`);
     assert.equal(result.events.includes('close'), stage !== 'launch');
   }
 
   const pageFailure = await run({ pageError: 'page runtime failed' });
-  assert.equal((pageFailure.error as Error | undefined)?.message, 'Export render failed: page runtime failed');
+  assert.equal((pageFailure.error as Error | undefined)?.message, 'Export browser failed while waiting for diagrams, formulas, and images: Export render failed: page runtime failed');
   assert.equal(pageFailure.events.at(-1), 'close');
 
   const cleanupFailure = await run({ cleanupFail: true });
   assert.equal((cleanupFailure.error as Error | undefined)?.message, 'close failed');
 
   const primaryFailure = await run({ failStage: 'action', cleanupFail: true });
-  assert.equal((primaryFailure.error as Error | undefined)?.message, 'action failed');
+  assert.equal((primaryFailure.error as Error | undefined)?.message, 'Export browser failed while writing the export: action failed');
 
   console.log('Export runtime lifecycle checks passed');
 } finally {

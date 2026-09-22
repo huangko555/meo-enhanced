@@ -137,6 +137,11 @@ try {
     });
     await cdp.send('Page.startScreencast', { format: 'png', everyNthFrame: 1 });
     await new Promise(resolve => setTimeout(resolve, 100));
+    assert.ok(frames.length > 0, `${phase}: screencast must capture a warm-up frame`);
+    // CDP may emit an empty initialization frame before the user action. The
+    // transition contract starts with the click, so keep only frames captured
+    // while the two product surfaces are actually switching.
+    frames.length = 0;
     await page.click('button[data-mode="preview"]');
     if (phase === 'pending-render') {
       const pending = await page.evaluate(() => {

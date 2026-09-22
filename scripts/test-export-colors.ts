@@ -57,10 +57,10 @@ try {
   const pdfColors = await readColors();
   const expectedColors = {
     heading: 'rgb(216, 222, 233)',
-    strong: 'rgb(191, 199, 210)',
-    emphasis: 'rgb(191, 199, 210)',
-    deleted: 'rgb(191, 199, 210)',
-    code: 'rgb(191, 199, 210)',
+    strong: 'rgb(197, 205, 216)',
+    emphasis: 'rgb(197, 205, 216)',
+    deleted: 'rgb(197, 205, 216)',
+    code: 'rgb(197, 205, 216)',
     link: 'rgb(88, 166, 255)',
     linkedCode: 'rgb(88, 166, 255)'
   };

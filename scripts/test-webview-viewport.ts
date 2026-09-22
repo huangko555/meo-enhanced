@@ -304,7 +304,7 @@ async function main() {
       language: 'zh-CN',
       previewTools: '预览工具',
       sourceColoring: '代码着色',
-      exports: ['导出 HTML', '导出 PDF'],
+      exports: ['导出 HTML', '导出 PDF', '导出 Word'],
       previewFrameTitle: 'Markdown 预览',
       previewAppearance: '预览外观',
       editorAppearance: '编辑器外观',
@@ -843,7 +843,8 @@ async function main() {
     });
     if (
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
-        '显示行号', '折叠长代码块', '限制内容宽度', '表格浮动表头', '打开时恢复上一次阅读位置'
+        '显示行号', '折叠长代码块', '大文档启动优化', '限制内容宽度', '粗体文字着色',
+        '表格浮动表头', '打开时恢复上一次阅读位置'
       ]) ||
       moreToolsLayout.topHeading !== '编辑器设置' ||
       moreToolsLayout.languageAutoLabel !== '自动' ||

@@ -58,8 +58,12 @@ try {
       outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null
     }})), text);
     await page.waitForSelector('.cm-content');
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')!.dataset.mode === 'source'
+      && document.querySelector<HTMLElement>('.preview-host')!.hidden);
     await page.click('button[data-mode="preview"]');
-    await page.waitForFunction(() => !document.querySelector('.editor-host')!.hasAttribute('data-preview-cover'));
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')!.dataset.mode === 'preview'
+      && !document.querySelector<HTMLElement>('.preview-host')!.hidden
+      && !document.querySelector('.editor-host')!.hasAttribute('data-preview-cover'));
     const frameBox = await (await page.$('.preview-frame'))!.boundingBox();
     assert.ok(frameBox);
     await page.mouse.move(frameBox.x + frameBox.width / 2, frameBox.y + frameBox.height / 2);
