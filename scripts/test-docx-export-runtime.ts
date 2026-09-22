@@ -22,6 +22,10 @@ const markdown = [
   '',
   'A paragraph with **bold text**.',
   '',
+  '## Overview',
+  '',
+  '### Details',
+  '',
   '中文正文与 English text.',
   '',
   '```ts',
@@ -113,7 +117,14 @@ try {
   for (const level of [1, 2, 3, 4, 5, 6]) {
     const headingStyle = coloredStyles.match(new RegExp(`<w:style\\b[^>]*w:styleId="Heading${level}"[^]*?<\\/w:style>`))?.[0] ?? '';
     assert.doesNotMatch(headingStyle, /<w:(?:keepNext|keepLines)\b/, `Heading ${level} must not show Word paragraph pagination marks`);
+    const tocStyle = coloredStyles.match(new RegExp(`<w:style\\b[^>]*w:styleId="TOC${level}"[^]*?<\\/w:style>`))?.[0] ?? '';
+    assert.match(tocStyle, new RegExp(`<w:name w:val="toc ${level}"\\s*\\/>`), `TOC ${level} must be defined as a native Word style`);
+    assert.match(tocStyle, /<w:tab\b[^>]*w:val="right"[^>]*w:leader="dot"/, `TOC ${level} must use a right-aligned dotted tab stop`);
   }
+  assert.match(paragraphContaining(coloredXml, 'Document title'), /<w:pStyle w:val="TOC1"\s*\/>/, 'top-level TOC entries must use TOC 1');
+  assert.match(paragraphContaining(coloredXml, 'Overview'), /<w:pStyle w:val="TOC2"\s*\/>/, 'second-level TOC entries must use TOC 2');
+  assert.match(paragraphContaining(coloredXml, 'Details'), /<w:pStyle w:val="TOC3"\s*\/>/, 'third-level TOC entries must use TOC 3');
+  assert.match(coloredXml, /<w:instrText[^>]*> PAGEREF meo_heading_1 \\h <\/w:instrText>/, 'TOC entries must carry native page references');
   assert.match(coloredXml, /<w:pStyle w:val="Heading1"/);
   assert.equal((coloredXml.match(/<w:pStyle w:val="Heading1"/g) ?? []).length, 1, 'the TOC label must not become a document heading');
   assert.match(coloredXml, /<w:tbl>/, 'Markdown tables must remain editable Word tables');
@@ -153,7 +164,9 @@ try {
     puppeteerRuntimeModulePath: ''
   });
   const plainXml = await readArchiveXml(plainPath, 'word/document.xml');
+  const plainStyles = await readArchiveXml(plainPath, 'word/styles.xml');
   assert.doesNotMatch(plainXml, /<w:instrText[^>]*>TOC/);
+  assert.doesNotMatch(plainStyles, /w:styleId="TOC[1-6]"/, 'documents without a TOC must not add unused TOC styles');
   assert.doesNotMatch(plainXml, /MEOHEADINGMARKER/, 'documents without a TOC must not contain internal heading markers');
   assert.doesNotMatch(paragraphContaining(plainXml, 'const answer = 42;'), /<w:color w:val="[0-9A-F]{6}"/, 'disabled code coloring must not add Word run colors');
 

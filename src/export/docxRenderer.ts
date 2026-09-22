@@ -289,8 +289,7 @@ function prepareHeadingBookmarks(root: Element): TocEntry[] {
 
 function prependTableOfContents(root: Element, label: string, entries: readonly TocEntry[]): void {
   const links = entries.map((entry) => {
-    const indentation = Math.max(0, entry.level - 1) * 0.28;
-    return `<p style="margin-left:${indentation}in;margin-top:0;margin-bottom:4pt">`
+    return '<p>'
       + `<span style="font-size:1px;color:#ffffff">${entry.tocMarker}</span>`
       + `${escapeHtml(entry.text)}</p>`;
   }).join('');
@@ -335,8 +334,11 @@ async function finalizeWordDocument(buffer: Buffer, entries: readonly TocEntry[]
 
     for (const [index, entry] of entries.entries()) {
       documentXml = replaceParagraphContainingMarker(documentXml, entry.tocMarker, (paragraph) => {
-        const withoutMarker = removeMarkerRun(paragraph, entry.tocMarker);
-        return wrapParagraphContent(withoutMarker, (content) => {
+        const styledParagraph = applyParagraphStyle(
+          removeMarkerRun(paragraph, entry.tocMarker),
+          `TOC${entry.level}`
+        );
+        return wrapParagraphContent(styledParagraph, (content) => {
           const fieldBegin = index === 0
             ? '<w:r><w:fldChar w:fldCharType="begin" w:dirty="true"/></w:r>'
               + '<w:r><w:instrText xml:space="preserve"> TOC \\h \\o "1-6" \\z \\u </w:instrText></w:r>'
@@ -346,7 +348,15 @@ async function finalizeWordDocument(buffer: Buffer, entries: readonly TocEntry[]
             ? '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
             : '';
           return fieldBegin
-            + `<w:hyperlink w:anchor="${entry.bookmarkName}" w:history="1">${content}</w:hyperlink>`
+            + `<w:hyperlink w:anchor="${entry.bookmarkName}" w:history="1">`
+              + content
+              + '<w:r><w:tab/></w:r>'
+              + '<w:r><w:fldChar w:fldCharType="begin" w:dirty="true"/></w:r>'
+              + `<w:r><w:instrText xml:space="preserve"> PAGEREF ${entry.bookmarkName} \\h </w:instrText></w:r>`
+              + '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+              + '<w:r><w:t>1</w:t></w:r>'
+              + '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
+              + '</w:hyperlink>'
             + fieldEnd;
         });
       });
@@ -362,12 +372,46 @@ async function finalizeWordDocument(buffer: Buffer, entries: readonly TocEntry[]
     }
   }
 
-  const stylesXml = normalizeWordBodyFonts(await stylesEntry.async('string')).replace(
+  const normalizedStylesXml = normalizeWordBodyFonts(await stylesEntry.async('string'));
+  const stylesXml = (entries.length > 0
+    ? addWordTableOfContentsStyles(normalizedStylesXml)
+    : normalizedStylesXml).replace(
     /<w:style\b[^>]*w:styleId="Heading[1-6]"[\s\S]*?<\/w:style>/g,
     (style) => style.replace(/\s*<w:(?:keepNext|keepLines)(?:\s[^>]*)?\/>/g, '')
   );
   archive.file('word/styles.xml', stylesXml);
   return archive.generateAsync({ type: 'nodebuffer' });
+}
+
+function addWordTableOfContentsStyles(stylesXml: string): string {
+  const styles = Array.from({ length: 6 }, (_, index) => {
+    const level = index + 1;
+    const leftIndent = index * 440;
+    return `<w:style w:type="paragraph" w:styleId="TOC${level}">`
+      + `<w:name w:val="toc ${level}"/>`
+      + '<w:basedOn w:val="Normal"/>'
+      + '<w:next w:val="Normal"/>'
+      + '<w:autoRedefine/>'
+      + '<w:uiPriority w:val="39"/>'
+      + '<w:unhideWhenUsed/>'
+      + '<w:pPr>'
+        + '<w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9638"/></w:tabs>'
+        + '<w:spacing w:after="80" w:line="276" w:lineRule="auto"/>'
+        + `<w:ind w:left="${leftIndent}"/>`
+      + '</w:pPr>'
+      + '<w:rPr>'
+        + wordBodyFonts
+        + '<w:color w:val="000000"/>'
+        + '<w:noProof/>'
+        + '<w:sz w:val="22"/>'
+        + '<w:szCs w:val="22"/>'
+      + '</w:rPr>'
+      + '</w:style>';
+  }).join('');
+  if (!stylesXml.includes('</w:styles>')) {
+    throw new Error('Word export could not add table of contents styles.');
+  }
+  return stylesXml.replace('</w:styles>', `${styles}</w:styles>`);
 }
 
 function normalizeWordBodyFonts(stylesXml: string): string {
@@ -383,6 +427,29 @@ function normalizeWordBodyFonts(stylesXml: string): string {
     throw new Error('Word export could not set the document default font.');
   }
   return stylesXml.replace(defaultsPattern, normalizedDefaults);
+}
+
+function applyParagraphStyle(paragraph: string, styleId: string): string {
+  const paragraphProperties = /<w:pPr(?:\s[^>]*)?>[\s\S]*?<\/w:pPr>/;
+  if (paragraphProperties.test(paragraph)) {
+    return paragraph.replace(paragraphProperties, (properties) => {
+      if (/<w:pStyle\b/.test(properties)) {
+        return properties.replace(/<w:pStyle\b[^>]*(?:\/>|>[\s\S]*?<\/w:pStyle>)/, `<w:pStyle w:val="${styleId}"/>`);
+      }
+      const propertiesOpenEnd = properties.indexOf('>') + 1;
+      return properties.slice(0, propertiesOpenEnd)
+        + `<w:pStyle w:val="${styleId}"/>`
+        + properties.slice(propertiesOpenEnd);
+    });
+  }
+
+  const paragraphOpenEnd = paragraph.indexOf('>') + 1;
+  if (paragraphOpenEnd <= 0) {
+    throw new Error('Word export encountered an invalid table of contents paragraph.');
+  }
+  return paragraph.slice(0, paragraphOpenEnd)
+    + `<w:pPr><w:pStyle w:val="${styleId}"/></w:pPr>`
+    + paragraph.slice(paragraphOpenEnd);
 }
 
 function replaceParagraphContainingMarker(
