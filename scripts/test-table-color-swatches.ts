@@ -111,6 +111,9 @@ async function main() {
     await page.click('tbody button.meo-md-color-swatch-interactive[data-color-value="#336699"]');
     await page.waitForSelector('.meo-hex-color-adjustment');
     const tableInteraction = await page.evaluate(async () => {
+      for (let index = 0; index < 2; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
       const app = document.getElementById('app')!;
       const editor = (window as any).tableColorEditor;
       const dialog = app.querySelector<HTMLElement>('.meo-hex-color-adjustment')!;
@@ -160,6 +163,86 @@ async function main() {
     });
     if (Object.values(tableInteraction).some((value) => !value)) {
       throw new Error(`Table HEX click/apply/undo and passive sticky header failed: ${JSON.stringify(tableInteraction)}`);
+    }
+
+    await page.evaluate(async () => {
+      const app = document.getElementById('app')!;
+      app.replaceChildren();
+      const before = Array.from({ length: 80 }, (_, index) => `Before table ${index}`);
+      const after = Array.from({ length: 80 }, (_, index) => `After table ${index}`);
+      const editor = (window as any).TableStabilityHarness.createEditor({
+        parent: app,
+        initialMode: 'live',
+        text: [...before, '| Color |', '| --- |', '| #336699 |', ...after].join('\n'),
+        onApplyChanges() {}
+      });
+      (window as any).tableViewportEditor = editor;
+      const view = editor.view;
+      const tablePos = before.join('\n').length + 1;
+      view.scrollDOM.scrollTop = view.lineBlockAt(tablePos).top - 120;
+      for (let index = 0; index < 4; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const swatch = app.querySelector<HTMLButtonElement>('tbody button[data-color-value="#336699"]');
+      if (!swatch) throw new Error('Scrolled table swatch not rendered');
+    });
+    await page.click('tbody button[data-color-value="#336699"]');
+    await page.waitForSelector('.meo-hex-color-adjustment');
+    await page.evaluate(() => {
+      const app = document.getElementById('app')!;
+      const view = (window as any).tableViewportEditor.view;
+      const opacity = app.querySelector<HTMLInputElement>('.meo-hex-color-adjustment-opacity')!;
+      opacity.value = '128';
+      opacity.dispatchEvent(new Event('input', { bubbles: true }));
+      const initialScrollTop = view.scrollDOM.scrollTop;
+      const samples = [initialScrollTop];
+      const recordScroll = () => samples.push(view.scrollDOM.scrollTop);
+      view.scrollDOM.addEventListener('scroll', recordScroll);
+      const table = app.querySelector('tbody')!;
+      const tableRect = () => table.getBoundingClientRect().top;
+      const tableTop = [tableRect()];
+      const removedTables: string[] = [];
+      const observer = new MutationObserver((records) => {
+        for (const record of records) {
+          for (const node of record.removedNodes) {
+            if (node instanceof Element && (node.matches('.meo-md-html-table') || node.querySelector('.meo-md-html-table'))) {
+              removedTables.push(node.className);
+            }
+          }
+        }
+      });
+      observer.observe(view.dom, { childList: true, subtree: true });
+      (window as any).__tableViewportProbe = { initialScrollTop, samples, tableTop, removedTables, observer, table, recordScroll };
+    });
+    await page.click('.meo-hex-color-adjustment-apply');
+    const tableViewport = await page.evaluate(async () => {
+      const view = (window as any).tableViewportEditor.view;
+      const probe = (window as any).__tableViewportProbe;
+      probe.samples.push(view.scrollDOM.scrollTop);
+      for (let index = 0; index < 8; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        probe.samples.push(view.scrollDOM.scrollTop);
+        probe.tableTop.push(probe.table.getBoundingClientRect().top);
+      }
+      view.scrollDOM.removeEventListener('scroll', probe.recordScroll);
+      probe.observer.disconnect();
+      const result = {
+        initialScrollTop: probe.initialScrollTop,
+        samples: probe.samples,
+        tableTop: probe.tableTop,
+        removedTables: probe.removedTables,
+        tableConnected: probe.table.isConnected,
+        selectedLine: view.state.doc.lineAt(view.state.selection.main.head).text,
+        changed: (window as any).tableViewportEditor.getText().includes('| #33669980 |')
+      };
+      (window as any).tableViewportEditor.destroy();
+      return result;
+    });
+    if (!tableViewport.changed || tableViewport.initialScrollTop < 100 ||
+      tableViewport.samples.some((value) => Math.abs(value - tableViewport.initialScrollTop) > 20) ||
+      tableViewport.tableTop.some((value) => Math.abs(value - tableViewport.tableTop[0]!) > 20) ||
+      !tableViewport.tableConnected || tableViewport.removedTables.length > 0) {
+      throw new Error(`Table HEX apply flashed or moved the document viewport: ${JSON.stringify(tableViewport)}`);
     }
 
     const liveResult = await page.evaluate(async () => {

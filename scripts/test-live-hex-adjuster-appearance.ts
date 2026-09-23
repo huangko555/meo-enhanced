@@ -57,9 +57,15 @@ async function main(): Promise<void> {
             swatch.click();
             await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
             const dialog = app.querySelector<HTMLElement>('.meo-hex-color-adjustment')!;
+            const toolbarProbe = document.createElement('div');
+            toolbarProbe.className = 'meo-md-html-table-context-menu';
+            editor.view.dom.appendChild(toolbarProbe);
             dialogs.push({
               background: getComputedStyle(dialog).backgroundColor,
               foreground: getComputedStyle(dialog).color,
+              border: getComputedStyle(dialog).borderTopColor,
+              toolbarBackground: getComputedStyle(toolbarProbe).backgroundColor,
+              toolbarBorder: getComputedStyle(toolbarProbe).borderTopColor,
               width: dialog.getBoundingClientRect().width,
               height: dialog.getBoundingClientRect().height,
               applyBackground: getComputedStyle(dialog.querySelector<HTMLButtonElement>('.meo-hex-color-adjustment-apply')!).backgroundColor,
@@ -71,6 +77,7 @@ async function main(): Promise<void> {
               label: dialog.getAttribute('aria-label'),
               horizontalOverflow: dialog.scrollWidth > dialog.clientWidth
             });
+            toolbarProbe.remove();
           }
           return dialogs;
         }, language);
@@ -97,10 +104,12 @@ async function main(): Promise<void> {
           result.some((dialog) => !dialog.label?.includes(expectedLabel))) {
           throw new Error(`${appearance}/${language} opacity and localized labels must match the source: ${JSON.stringify(result)}`);
         }
-        const targetBackground = dark ? 'rgb(36, 41, 47)' : 'rgb(247, 248, 250)';
+        const editorBackground = dark ? 'rgb(36, 41, 47)' : 'rgb(247, 248, 250)';
         const targetForeground = dark ? 'rgb(240, 242, 244)' : 'rgb(34, 38, 43)';
-        if (result.some((dialog) => dialog.background !== targetBackground || dialog.foreground !== targetForeground)) {
-          throw new Error(`${appearance}/${language} popover must follow editor colors, not conflicting widget tokens: ${JSON.stringify(result)}`);
+        if (result.some((dialog) => dialog.background !== dialog.toolbarBackground ||
+          dialog.border !== dialog.toolbarBorder || dialog.background === editorBackground ||
+          dialog.foreground !== targetForeground)) {
+          throw new Error(`${appearance}/${language} popover must share the table toolbar surface: ${JSON.stringify(result)}`);
         }
         const luminance = (color: string) => {
           const channels = color.match(/[\d.]+/g)?.slice(0, 3).map(Number);

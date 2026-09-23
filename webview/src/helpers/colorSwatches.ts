@@ -107,7 +107,7 @@ function replaceActiveHexColor(view: EditorView, current: ActiveHexColorAdjustme
     ...(normalizedValue === current.value ? {} : { changes: { from: current.from, to: current.to, insert: normalizedValue } }),
     effects: setActiveHexColorAdjustment.of(null),
     annotations: isolateHistory.of('full'),
-    userEvent: 'input'
+    userEvent: 'change.color'
   });
 }
 

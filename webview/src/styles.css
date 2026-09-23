@@ -2916,7 +2916,7 @@ button:focus-visible > .menu-switch {
 .cm-tooltip.meo-hex-color-adjustment {
   width: min(324px, calc(100vw - 16px));
   padding: 14px;
-  border: 1px solid var(--vscode-editorWidget-border, color-mix(in srgb, var(--vscode-editor-foreground) 20%, transparent));
+  border: 1px solid var(--meo-table-context-border);
   border-radius: 10px;
   box-shadow: 0 10px 28px var(--vscode-widget-shadow, rgb(0 0 0 / 0.18));
   box-sizing: border-box;
@@ -2926,8 +2926,8 @@ button:focus-visible > .menu-switch {
 
 /* CodeMirror's light tooltip skin can remain active while the Webview editor uses a dark appearance. */
 body .cm-tooltip.meo-hex-color-adjustment {
-  color: var(--vscode-editor-foreground);
-  background: var(--vscode-editor-background);
+  color: var(--meo-foreground);
+  background: var(--meo-table-context-surface);
 }
 
 html[data-editor-appearance='dark'] .cm-tooltip.meo-hex-color-adjustment {
@@ -5974,7 +5974,8 @@ html[data-editor-appearance='dark'] body.vscode-dark
 
 .selection-inline-menu,
 .cm-editor .meo-md-html-table-context-trigger,
-.cm-editor .meo-md-html-table-context-menu {
+.cm-editor .meo-md-html-table-context-menu,
+.cm-tooltip.meo-hex-color-adjustment {
   --meo-table-context-surface: color-mix(
     in srgb,
     var(--meo-background) 84%,
@@ -5999,7 +6000,8 @@ html[data-editor-appearance='dark'] body.vscode-dark
 
 html[data-editor-appearance='light'] .selection-inline-menu,
 html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-trigger,
-html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-menu {
+html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-menu,
+html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   --meo-table-context-surface: color-mix(
     in srgb,
     var(--meo-background) 84%,
