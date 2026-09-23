@@ -171,6 +171,7 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
       const saturation = makeRange(strings.saturation, 0, 100);
       const brightness = makeRange(strings.brightness, 0, 100);
       const opacity = makeRange(strings.opacity, 0, 255);
+      opacity.input.classList.add('meo-hex-color-adjustment-opacity');
       const actions = document.createElement('div');
       actions.className = 'meo-hex-color-adjustment-actions';
       const cancelButton = document.createElement('button');
@@ -205,15 +206,23 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
         }
         const currentHue = Number(hue.input.value);
         const currentSaturation = Number(saturation.input.value);
+        const currentBrightness = Number(brightness.input.value);
         hue.output.textContent = `${currentHue}°`;
         saturation.output.textContent = `${currentSaturation}%`;
         brightness.output.textContent = `${brightness.input.value}%`;
         opacity.output.textContent = `${Math.round((Number(opacity.input.value) / 255) * 100)}%`;
-        const fullSaturation = hsvToRgb({ hue: currentHue, saturation: 100, brightness: 100 });
+        const fullSaturation = hsvToRgb({ hue: currentHue, saturation: 100, brightness: currentBrightness });
         const fullBrightness = hsvToRgb({ hue: currentHue, saturation: currentSaturation, brightness: 100 });
-        saturation.input.style.background = `linear-gradient(to right, #808080, rgb(${fullSaturation.red} ${fullSaturation.green} ${fullSaturation.blue}))`;
-        brightness.input.style.background = `linear-gradient(to right, #000, rgb(${fullBrightness.red} ${fullBrightness.green} ${fullBrightness.blue}))`;
-        opacity.input.style.background = `linear-gradient(to right, transparent, rgb(${parsed.rgb.red} ${parsed.rgb.green} ${parsed.rgb.blue}))`;
+        const neutral = Math.round((currentBrightness / 100) * 255);
+        const currentColor = `rgb(${parsed.rgb.red} ${parsed.rgb.green} ${parsed.rgb.blue})`;
+        hue.input.style.setProperty('--meo-range-thumb-color', `rgb(${fullSaturation.red} ${fullSaturation.green} ${fullSaturation.blue})`);
+        saturation.input.style.setProperty('--meo-range-start', `rgb(${neutral} ${neutral} ${neutral})`);
+        saturation.input.style.setProperty('--meo-range-end', `rgb(${fullSaturation.red} ${fullSaturation.green} ${fullSaturation.blue})`);
+        saturation.input.style.setProperty('--meo-range-thumb-color', currentColor);
+        brightness.input.style.setProperty('--meo-range-end', `rgb(${fullBrightness.red} ${fullBrightness.green} ${fullBrightness.blue})`);
+        brightness.input.style.setProperty('--meo-range-thumb-color', currentColor);
+        opacity.input.style.setProperty('--meo-range-opaque', currentColor);
+        opacity.input.style.setProperty('--meo-range-thumb-color', draftValue);
       };
 
       const updateFromControls = () => {
@@ -289,7 +298,6 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
           document.addEventListener('pointerdown', onDocumentPointerDown, true);
           document.addEventListener('keydown', onDocumentKeyDown, true);
           valueInput.focus();
-          valueInput.select();
         },
         destroy() {
           document.removeEventListener('pointerdown', onDocumentPointerDown, true);
