@@ -118,25 +118,146 @@ async function main() {
       const swatches = Array.from(app.querySelectorAll<HTMLElement>('.meo-md-color-swatch'));
       const before = editor.getText();
       swatches[0]?.click();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const textUnchangedAfterOpen = editor.getText() === before;
+      const firstDialog = app.querySelector<HTMLElement>('.meo-hex-color-adjustment');
+      const firstValueInput = firstDialog?.querySelector<HTMLInputElement>('.meo-hex-color-adjustment-value');
+      const sixDigitOpacity = firstDialog?.querySelector<HTMLInputElement>('input[aria-label="Opacity"]')?.closest<HTMLElement>('label');
+      const sixDigitOpacityHidden = Boolean(sixDigitOpacity && getComputedStyle(sixDigitOpacity).display === 'none');
+      if (firstValueInput) {
+        firstValueInput.value = '#11223344';
+        firstValueInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      const invalidLengthRejected = firstValueInput?.getAttribute('aria-invalid') === 'true' &&
+        firstDialog?.querySelector<HTMLButtonElement>('.meo-hex-color-adjustment-apply')?.disabled === true;
+      if (firstValueInput) {
+        firstValueInput.value = '#112233';
+        firstValueInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const draftDoesNotWrite = editor.getText() === before;
+      const draftFocusRetained = document.activeElement === firstValueInput;
+      firstDialog?.querySelector<HTMLButtonElement>('.meo-hex-color-adjustment-apply')?.click();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const alphaSwatch = app.querySelector<HTMLButtonElement>('[data-color-value="#aabbccdd"]');
+      alphaSwatch?.click();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const secondDialog = app.querySelector<HTMLElement>('.meo-hex-color-adjustment');
+      const alphaInput = secondDialog?.querySelector<HTMLInputElement>('input[aria-label="Opacity"]');
+      if (alphaInput) {
+        alphaInput.value = '128';
+        alphaInput.dispatchEvent(new Event('input', { bubbles: true }));
+        alphaInput.value = '64';
+        alphaInput.dispatchEvent(new Event('input', { bubbles: true }));
+        alphaInput.value = '128';
+        alphaInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const alphaDraftDoesNotWrite = editor.getText().includes('#aabbccdd');
+      secondDialog?.querySelector<HTMLButtonElement>('.meo-hex-color-adjustment-apply')?.click();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const adjustedText = editor.getText();
+      app.querySelector<HTMLButtonElement>('[data-color-value="#010203"]')?.click();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const thirdValueInput = app.querySelector<HTMLInputElement>('.meo-hex-color-adjustment-value');
+      if (thirdValueInput) {
+        thirdValueInput.value = '#445566';
+        thirdValueInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      const canceledSwatch = app.querySelector<HTMLButtonElement>('[data-color-value="#010203"]');
+      const cancelRestoredPreview = canceledSwatch?.style.backgroundColor === 'rgb(1, 2, 3)';
+      const escapeCanceledDraft = editor.getText() === adjustedText;
+      const dialogClosed = !app.querySelector('.meo-hex-color-adjustment');
+      const undoAlpha = await editor.undo();
+      const textAfterFirstUndo = editor.getText();
+      const undoSixDigit = await editor.undo();
+      const textAfterSecondUndo = editor.getText();
+      const redoSixDigit = await editor.redo();
+      const redoAlpha = await editor.redo();
       const result = {
-        colors: swatches.map((swatch) => swatch.title),
-        roles: swatches.map((swatch) => swatch.getAttribute('role')),
+        colors: swatches.map((swatch) => swatch.dataset.colorValue),
+        tags: swatches.map((swatch) => swatch.tagName),
+        popupKinds: swatches.map((swatch) => swatch.getAttribute('aria-haspopup')),
         interactiveDescendants: swatches.reduce(
           (count, swatch) => count + swatch.querySelectorAll('input, button, select, textarea').length,
           0
         ),
-        textUnchanged: editor.getText() === before,
+        textUnchangedAfterOpen,
+        draftDoesNotWrite,
+        draftFocusRetained,
+        alphaDraftDoesNotWrite,
+        firstDialogVisible: Boolean(firstDialog),
+        sixDigitOpacityHidden,
+        invalidLengthRejected,
+        opacityVisible: Boolean(alphaInput && getComputedStyle(alphaInput.closest<HTMLElement>('label')!).display !== 'none'),
+        adjustedSixDigit: adjustedText.includes('#112233'),
+        adjustedEightDigit: adjustedText.includes('#aabbcc80'),
+        escapeCanceledDraft,
+        dialogClosed,
+        cancelRestoredPreview,
+        undoAlpha: undoAlpha && textAfterFirstUndo.includes('#aabbccdd') && textAfterFirstUndo.includes('#112233'),
+        undoSixDigit: undoSixDigit && textAfterSecondUndo === before,
+        redoBoth: redoSixDigit && redoAlpha && editor.getText() === adjustedText,
         applyCount
       };
       editor.destroy();
       return result;
     });
     if (JSON.stringify(liveResult.colors) !== JSON.stringify(['#aabbcc', '#aabbccdd', '#010203', '#00bb00'])
-      || liveResult.roles.some((role) => role !== 'img')
+      || liveResult.tags.some((tag) => tag !== 'BUTTON')
+      || liveResult.popupKinds.some((kind) => kind !== 'dialog')
       || liveResult.interactiveDescendants !== 0
-      || !liveResult.textUnchanged
-      || liveResult.applyCount !== 0) {
-      throw new Error(`Live HEX swatches must be read-only and exclusive: ${JSON.stringify(liveResult)}`);
+      || !liveResult.textUnchangedAfterOpen
+      || !liveResult.draftDoesNotWrite
+      || !liveResult.draftFocusRetained
+      || !liveResult.alphaDraftDoesNotWrite
+      || !liveResult.firstDialogVisible
+      || !liveResult.sixDigitOpacityHidden
+      || !liveResult.invalidLengthRejected
+      || !liveResult.opacityVisible
+      || !liveResult.adjustedSixDigit
+      || !liveResult.adjustedEightDigit
+      || !liveResult.escapeCanceledDraft
+      || !liveResult.dialogClosed
+      || !liveResult.cancelRestoredPreview
+      || !liveResult.undoAlpha
+      || !liveResult.undoSixDigit
+      || !liveResult.redoBoth
+      || liveResult.applyCount < 2) {
+      throw new Error(`Live HEX swatches must provide bounded color adjustment: ${JSON.stringify(liveResult)}`);
+    }
+
+    await page.evaluate(async () => {
+      const harness = (window as any).TableStabilityHarness;
+      const app = document.getElementById('app')!;
+      app.replaceChildren();
+      (window as any).colorShortcutEditor = harness.createEditor({
+        parent: app,
+        initialMode: 'live',
+        text: 'Live swatches\nHEX #123456',
+        onApplyChanges() {}
+      });
+      for (let index = 0; index < 3; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+    await page.waitForSelector('.meo-md-color-swatch-interactive');
+    await page.focus('.meo-md-color-swatch-interactive');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('.meo-hex-color-adjustment');
+    await page.keyboard.press('Escape');
+    const keyboardResult = await page.evaluate(() => ({
+      closed: !document.querySelector('.meo-hex-color-adjustment'),
+      unchanged: (window as any).colorShortcutEditor.getText() === 'Live swatches\nHEX #123456'
+    }));
+    await page.click('.meo-md-color-swatch-interactive');
+    await page.waitForSelector('.meo-hex-color-adjustment');
+    await page.click('#outside');
+    const outsideClosed = await page.evaluate(() => !document.querySelector('.meo-hex-color-adjustment'));
+    await page.evaluate(() => (window as any).colorShortcutEditor.destroy());
+    if (!keyboardResult.closed || !keyboardResult.unchanged || !outsideClosed) {
+      throw new Error(`Swatch keyboard/outside dismissal failed: ${JSON.stringify({ keyboardResult, outsideClosed })}`);
     }
 
     const blockBoundaryResult = await page.evaluate(async () => {
@@ -154,7 +275,10 @@ async function main() {
         for (let index = 0; index < 3; index += 1) {
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         }
-        results.push(Array.from(app.querySelectorAll<HTMLElement>('.meo-md-color-swatch'), (swatch) => swatch.title));
+        results.push(Array.from(
+          app.querySelectorAll<HTMLElement>('.meo-md-color-swatch'),
+          (swatch) => swatch.dataset.colorValue ?? swatch.title
+        ));
         editor.destroy();
       }
       return results;
@@ -173,7 +297,10 @@ async function main() {
       for (let index = 0; index < 3; index += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
-      const swatches = Array.from(app.querySelectorAll<HTMLElement>('.meo-md-color-swatch'), (swatch) => swatch.title);
+      const swatches = Array.from(
+        app.querySelectorAll<HTMLElement>('.meo-md-color-swatch'),
+        (swatch) => swatch.dataset.colorValue ?? swatch.title
+      );
       const result = {
         count: swatches.length,
         onlyExternalHex: swatches.every((value) => value === '#ddeeff')

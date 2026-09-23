@@ -155,6 +155,16 @@ export type UiStrings = Readonly<{
   fullscreenImage: string;
   refreshImage: string;
   colorLabel: (value: string) => string;
+  adjustColor: (value: string) => string;
+  colorControls: (value: string) => string;
+  hexColorValue: string;
+  hue: string;
+  saturation: string;
+  brightness: string;
+  opacity: string;
+  closeColorControls: string;
+  cancelColorAdjustment: string;
+  applyColorAdjustment: string;
   showHtmlPreview: string;
   unsupportedHtmlSource: string;
   acceptCurrent: string;
@@ -341,6 +351,11 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     mermaidError: (message: string) => `Mermaid error: ${message}`,
     openWithSystemApp: 'Open with system app', fullscreenImage: 'Fullscreen image', refreshImage: 'Refresh image',
     colorLabel: (value: string) => `Color ${value}`,
+    adjustColor: (value: string) => `Adjust color ${value}`,
+    colorControls: (value: string) => `Color controls for ${value}`,
+    hexColorValue: 'HEX color value', hue: 'Hue', saturation: 'Saturation',
+    brightness: 'Brightness', opacity: 'Opacity', closeColorControls: 'Close color controls',
+    cancelColorAdjustment: 'Cancel', applyColorAdjustment: 'Apply',
     showHtmlPreview: 'Show HTML preview',
     unsupportedHtmlSource: 'This HTML stays as source because it contains unsupported or invalid markup.',
     acceptCurrent: 'Accept Current', acceptIncoming: 'Accept Incoming', acceptBoth: 'Accept Both',
@@ -500,6 +515,11 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     mermaidError: (message: string) => `Mermaid 错误：${message}`,
     openWithSystemApp: '使用系统应用打开', fullscreenImage: '全屏查看图片', refreshImage: '刷新图片',
     colorLabel: (value: string) => `颜色 ${value}`,
+    adjustColor: (value: string) => `调整颜色 ${value}`,
+    colorControls: (value: string) => `${value} 的颜色调整器`,
+    hexColorValue: 'HEX 色值', hue: '色相', saturation: '饱和度',
+    brightness: '明度', opacity: '透明度', closeColorControls: '关闭颜色调整器',
+    cancelColorAdjustment: '取消', applyColorAdjustment: '应用',
     showHtmlPreview: '显示 HTML 预览',
     unsupportedHtmlSource: '此 HTML 包含不支持或无效的标记，因此保留为源码。',
     acceptCurrent: '接受当前更改', acceptIncoming: '接受传入更改', acceptBoth: '接受两者',

@@ -94,7 +94,7 @@ import {
 } from './helpers/mermaidEditing';
 import { collectPunctuationClosingInlineStyles, type ParsedInlineStyleRange } from './helpers/inlineStyleFallback';
 import { collectHexColorRangesFromText } from '../../src/shared/hexColorSwatches';
-import { addColorSwatchDecoration } from './helpers/colorSwatches';
+import { addColorSwatchDecoration, hexColorAdjustmentExtension } from './helpers/colorSwatches';
 import { longCodeBlockSessionUiExtension } from './helpers/longCodeBlocks';
 import { attachLatexMathViewport, type LatexMathViewportController } from './helpers/latexMathViewport';
 import {
@@ -3593,6 +3593,7 @@ export function liveModeExtensions(options: { readonly largeDocument?: boolean }
     liveDocumentIdleField,
     mermaidEditingStateField,
     latexMathEditingStateField,
+    hexColorAdjustmentExtension(),
     ...htmlContentExtensions(),
     liveDecorationField,
     renderedBlockLineNumberMarker,

@@ -55,7 +55,7 @@ function expectedLabels(language: UiLanguage, mermaidLine: number, formulaLine: 
     mermaidMode: strings.editMermaidSplit,
     formulaControls: strings.formulaBlockControls(formulaLine),
     formulaMode: strings.editFormulaSplit,
-    color: strings.colorLabel('#ff0000')
+    color: strings.adjustColor('#ff0000')
   };
 }
 

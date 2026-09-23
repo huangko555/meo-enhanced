@@ -2146,9 +2146,9 @@ for (const path of customThemeCapabilityScope) {
   }
 }
 
-// Product deletion guard: swatches are read-only HEX decorations only. Non-HEX color
-// parsers/decorators and every MEO-owned picker/chooser/palette/editor UI must stay absent.
-// Ordinary CSS color text, external "pick a color" prose and current theme/code palettes remain.
+// Product boundary guard: Live HEX adjustment is the only supported color editing UI.
+// Non-HEX decorators and generic picker/chooser/palette owners remain retired.
+// Ordinary CSS color text and current theme/code palettes remain.
 const removedColorCapabilityScope = projectFilesForCapabilityGuard().filter((path) => (
   path === 'package.json' ||
   /^README(?:\.[^/]+)?\.md$/i.test(path) ||
@@ -2240,7 +2240,7 @@ for (const path of removedColorCapabilityScope) {
   const isDocumentationPath = /^README(?:\.[^/]+)?\.md$/i.test(path) || /^docs\/.*\.md$/i.test(path);
   if (isProductionPath && (hasRemovedColorCapabilityAlias(path, path)
     || removedColorCapabilityTokens.some((pattern) => pattern.test(path)))) {
-    failures.push(`ARCH021 已删除的非 HEX color swatch 或颜色 picker 能力重新出现: ${path}:1`);
+    failures.push(`ARCH021 已删除的非 HEX color swatch 或通用颜色 picker 能力重新出现: ${path}:1`);
     continue;
   }
   const lines = readTrackedProjectFile(path).split(/\r?\n/);
@@ -2249,7 +2249,7 @@ for (const path of removedColorCapabilityScope) {
     if ((isProductionPath && hasRemovedColorCapabilityAlias(lines[index], path))
       || (isDocumentationPath && hasCurrentRemovedColorDocumentationClaim(lines[index]))
       || (!isDocumentationPath && removedColorCapabilityTokens.some((pattern) => pattern.test(lines[index])))) {
-      failures.push(`ARCH021 已删除的非 HEX color swatch 或颜色 picker 能力重新出现: ${path}:${index + 1}`);
+      failures.push(`ARCH021 已删除的非 HEX color swatch 或通用颜色 picker 能力重新出现: ${path}:${index + 1}`);
     }
   }
 }
