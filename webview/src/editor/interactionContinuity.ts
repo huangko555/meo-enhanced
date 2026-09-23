@@ -41,6 +41,8 @@ type ActiveInput = {
 
 type ActiveMainInput = ActiveInput & {
   caretTopBeforeInput: number | null;
+  inputLineHeightBefore: number | null;
+  inputLineNumberBefore: number | null;
   retainingCaretTop: boolean;
   scrollTopBeforeInput: number;
   viewportMoved: boolean;
@@ -70,6 +72,8 @@ export function createEditorInteractionContinuity(input: {
   let active: ActiveMainInput | null = null;
   let pendingScrollTopBeforeInput: number | null = null;
   let pendingCaretTopBeforeInput: number | null = null;
+  let pendingInputLineHeight: number | null = null;
+  let pendingInputLineNumber: number | null = null;
   let inputSessionScrollTop: number | null = null;
   let inputSessionCaretTop: number | null = null;
   let inputSessionPosition: number | null = null;
@@ -87,6 +91,8 @@ export function createEditorInteractionContinuity(input: {
     cancelActive();
     pendingScrollTopBeforeInput = null;
     pendingCaretTopBeforeInput = null;
+    pendingInputLineHeight = null;
+    pendingInputLineNumber = null;
     inputSessionScrollTop = null;
     inputSessionCaretTop = null;
     inputSessionPosition = null;
@@ -111,6 +117,8 @@ export function createEditorInteractionContinuity(input: {
           const scroller = view.scrollDOM.getBoundingClientRect();
           return {
             caretTop: coords?.top ?? null,
+            inputLineHeight: view.lineBlockAt(position).height,
+            inputLineNumber: view.state.doc.lineAt(position).number,
             position,
             visible: Boolean(coords && coords.top >= scroller.top && coords.bottom <= scroller.bottom),
             viewportMoved: candidate.viewportMoved || (
@@ -122,6 +130,22 @@ export function createEditorInteractionContinuity(input: {
           if (!measurement || !isCurrent(candidate)) return;
           candidate.remainingFrames -= 1;
           candidate.viewportMoved = measurement.viewportMoved;
+          const inputLineReflowed = (
+            candidate.inputLineHeightBefore !== null &&
+            Math.abs(measurement.inputLineHeight - candidate.inputLineHeightBefore) > 0.5
+          ) || (
+            candidate.inputLineNumberBefore !== null &&
+            measurement.inputLineNumber !== candidate.inputLineNumberBefore
+          );
+          if (inputLineReflowed && measurement.caretTop !== null) {
+            // The caret moved because the edited line wrapped or changed lines,
+            // not because an upstream layout correction displaced the viewport.
+            candidate.caretTopBeforeInput = measurement.caretTop;
+            inputSessionCaretTop = measurement.caretTop;
+            candidate.retainingCaretTop = false;
+            candidate.inputLineHeightBefore = measurement.inputLineHeight;
+            candidate.inputLineNumberBefore = measurement.inputLineNumber;
+          }
           const largeLayoutShift = (
             candidate.caretTopBeforeInput !== null && measurement.caretTop !== null &&
             Math.abs(measurement.caretTop - candidate.caretTopBeforeInput) > view.defaultLineHeight * 1.5
@@ -181,10 +205,14 @@ export function createEditorInteractionContinuity(input: {
       ?? pendingCaretTopBeforeInput
       ?? view.coordsAtPos(view.state.selection.main.head)?.top
       ?? null;
+    const inputLineHeightBefore = pendingInputLineHeight;
+    const inputLineNumberBefore = pendingInputLineNumber;
     inputSessionScrollTop = scrollTopBeforeInput;
     inputSessionCaretTop = caretTopBeforeInput;
     pendingScrollTopBeforeInput = null;
     pendingCaretTopBeforeInput = null;
+    pendingInputLineHeight = null;
+    pendingInputLineNumber = null;
     cancelActive();
     const position = view.state.selection.main.head;
     inputSessionPosition = position;
@@ -192,6 +220,8 @@ export function createEditorInteractionContinuity(input: {
       generation: nextGeneration,
       position,
       caretTopBeforeInput,
+      inputLineHeightBefore,
+      inputLineNumberBefore,
       retainingCaretTop: false,
       scrollTopBeforeInput,
       viewportMoved: false,
@@ -216,10 +246,13 @@ export function createEditorInteractionContinuity(input: {
 
   const captureScrollTopBeforeInput = (): void => {
     const canCapture = getMode() === 'live' && view.hasFocus;
+    const position = view.state.selection.main.head;
     pendingScrollTopBeforeInput = canCapture ? view.scrollDOM.scrollTop : null;
     pendingCaretTopBeforeInput = canCapture
-      ? view.coordsAtPos(view.state.selection.main.head)?.top ?? null
+      ? view.coordsAtPos(position)?.top ?? null
       : null;
+    pendingInputLineHeight = canCapture ? view.lineBlockAt(position).height : null;
+    pendingInputLineNumber = canCapture ? view.state.doc.lineAt(position).number : null;
   };
   const cancelOnInteraction = () => cancel();
   view.dom.addEventListener('beforeinput', captureScrollTopBeforeInput, true);

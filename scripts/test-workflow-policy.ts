@@ -129,6 +129,7 @@ function targetedCommands(
       return [
         packageScript('test:reading-position'),
         script('scripts/test-viewport-controller.ts'),
+        script('scripts/test-line-number-typing-stability.ts'),
         script('scripts/test-document-reload-mermaid-viewport.ts'),
         script('scripts/test-uat-viewport-stability.ts'),
         script('scripts/test-live-embedded-input-viewport.ts'),
@@ -221,6 +222,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-rendered-block-mode-shell.ts'),
           script('scripts/test-live-input-derived-work.ts'),
           script('scripts/test-viewport-controller.ts'),
+          script('scripts/test-line-number-typing-stability.ts'),
           script('scripts/test-uat-viewport-stability.ts'),
           script('scripts/test-virtual-block-scroll-stability.ts')
         ])]
