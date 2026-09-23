@@ -45,7 +45,7 @@ async function main() {
       const previews = document.querySelectorAll<HTMLElement>('tbody .meo-md-html-table-cell-preview');
       const swatchTitles = (root: ParentNode) => Array.from(
         root.querySelectorAll<HTMLElement>('.meo-md-color-swatch'),
-        (swatch) => swatch.title
+        (swatch) => swatch.dataset.colorValue ?? swatch.title
       );
       const tagTexts = (root: ParentNode) => Array.from(
         root.querySelectorAll<HTMLElement>('.meo-md-tag'),
@@ -58,6 +58,11 @@ async function main() {
         protectedColors: previews[2].querySelectorAll('.meo-md-color-swatch').length,
         protectedColorTitles: swatchTitles(previews[2])
       };
+
+      const tableSwatch = previews[0].querySelector<HTMLElement>('.meo-md-color-swatch');
+      tableSwatch?.click();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const tableDialogOpened = Boolean(app.querySelector('.meo-hex-color-adjustment'));
 
       const input = document.querySelector<HTMLTextAreaElement>('tbody textarea')!;
       input.focus();
@@ -73,7 +78,7 @@ async function main() {
         tags: tagTexts(preview)
       };
       editor.destroy();
-      return { initial, updated };
+      return { initial, updated, tableDialogOpened };
     });
 
     const expectedInitial = {
@@ -88,6 +93,73 @@ async function main() {
     }
     if (JSON.stringify(result.updated) !== JSON.stringify({ colors: ['#00ff00'], tags: ['#todo'] })) {
       throw new Error(`Edited table colors were not refreshed: ${JSON.stringify(result.updated)}`);
+    }
+
+    await page.evaluate(async () => {
+      const app = document.getElementById('app')!;
+      app.replaceChildren();
+      (window as any).tableColorEditor = (window as any).TableStabilityHarness.createEditor({
+        parent: app,
+        initialMode: 'live',
+        text: '| #AABBCC | Note |\n| --- | --- |\n| #336699 and #33669988 | text |',
+        onApplyChanges() {}
+      });
+      for (let index = 0; index < 3; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+    await page.click('tbody button.meo-md-color-swatch-interactive[data-color-value="#336699"]');
+    await page.waitForSelector('.meo-hex-color-adjustment');
+    const tableInteraction = await page.evaluate(async () => {
+      const app = document.getElementById('app')!;
+      const editor = (window as any).tableColorEditor;
+      const dialog = app.querySelector<HTMLElement>('.meo-hex-color-adjustment')!;
+      const swatch = app.querySelector<HTMLElement>('tbody button[data-color-value="#336699"]')!;
+      const popupBounds = dialog.getBoundingClientRect();
+      const swatchBounds = swatch.getBoundingClientRect();
+      const stickySwatch = app.querySelector<HTMLElement>('.meo-md-html-table-sticky-table .meo-md-color-swatch');
+      const input = dialog.querySelector<HTMLInputElement>('.meo-hex-color-adjustment-value')!;
+      input.value = '#112233';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      const beforeApply = editor.getText();
+      dialog.querySelector<HTMLButtonElement>('.meo-hex-color-adjustment-apply')!.click();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const afterApply = editor.getText();
+      const undo = await editor.undo();
+      const afterUndo = editor.getText();
+      app.querySelector<HTMLButtonElement>('tbody button[data-color-value="#33669988"]')?.click();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const eightDialog = app.querySelector<HTMLElement>('.meo-hex-color-adjustment');
+      const eightInput = eightDialog?.querySelector<HTMLInputElement>('.meo-hex-color-adjustment-value');
+      if (eightInput) {
+        eightInput.value = '#44556677';
+        eightInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      eightDialog?.querySelector<HTMLButtonElement>('.meo-hex-color-adjustment-apply')?.click();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const afterEightApply = editor.getText();
+      const undoEight = await editor.undo();
+      const afterEightUndo = editor.getText();
+      app.querySelector<HTMLButtonElement>('thead button[data-color-value="#AABBCC"]')?.click();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const result = {
+        popupNearSwatch: Math.abs(popupBounds.left - swatchBounds.left) < 300 &&
+          Math.abs(popupBounds.bottom - swatchBounds.top) < 350,
+        previewExposed: !swatch.closest('.meo-md-html-table-cell-preview')?.hasAttribute('aria-hidden'),
+        stickySwatchPassive: stickySwatch?.tagName === 'SPAN' &&
+          !app.querySelector('.meo-md-html-table-sticky-table button.meo-md-color-swatch-interactive'),
+        draftIsolated: beforeApply.includes('#336699 and #33669988'),
+        changedOnlyTarget: afterApply.includes('#112233 and #33669988'),
+        undoRestored: undo && afterUndo.includes('#336699 and #33669988'),
+        changedOnlyEight: afterEightApply.includes('#336699 and #44556677'),
+        undoEightRestored: undoEight && afterEightUndo.includes('#336699 and #33669988'),
+        headerOpens: Boolean(app.querySelector('.meo-hex-color-adjustment'))
+      };
+      editor.destroy();
+      return result;
+    });
+    if (Object.values(tableInteraction).some((value) => !value)) {
+      throw new Error(`Table HEX click/apply/undo and passive sticky header failed: ${JSON.stringify(tableInteraction)}`);
     }
 
     const liveResult = await page.evaluate(async () => {
@@ -116,6 +188,26 @@ async function main() {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
       const swatches = Array.from(app.querySelectorAll<HTMLElement>('.meo-md-color-swatch'));
+      const inlineSwatch = swatches[0];
+      const line = inlineSwatch?.closest('.cm-line');
+      const walker = line ? document.createTreeWalker(line, NodeFilter.SHOW_TEXT) : null;
+      let adjacentText: Text | null = null;
+      while (walker?.nextNode()) {
+        if (walker.currentNode.textContent?.includes('#aabbcc')) {
+          adjacentText = walker.currentNode as Text;
+          break;
+        }
+      }
+      const textRange = document.createRange();
+      if (adjacentText) {
+        const offset = adjacentText.textContent!.indexOf('#aabbcc');
+        textRange.setStart(adjacentText, offset);
+        textRange.setEnd(adjacentText, offset + '#aabbcc'.length);
+      }
+      const swatchRect = inlineSwatch?.getBoundingClientRect();
+      const textRect = adjacentText ? textRange.getBoundingClientRect() : null;
+      const verticalCenterOffset = swatchRect && textRect
+        ? (swatchRect.top + swatchRect.height / 2) - (textRect.top + textRect.height / 2) : null;
       const before = editor.getText();
       swatches[0]?.click();
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -199,7 +291,8 @@ async function main() {
         undoAlpha: undoAlpha && textAfterFirstUndo.includes('#aabbccdd') && textAfterFirstUndo.includes('#112233'),
         undoSixDigit: undoSixDigit && textAfterSecondUndo === before,
         redoBoth: redoSixDigit && redoAlpha && editor.getText() === adjustedText,
-        applyCount
+        applyCount,
+        verticalCenterOffset
       };
       editor.destroy();
       return result;
@@ -226,6 +319,12 @@ async function main() {
       || !liveResult.redoBoth
       || liveResult.applyCount < 2) {
       throw new Error(`Live HEX swatches must provide bounded color adjustment: ${JSON.stringify(liveResult)}`);
+    }
+    if (liveResult.verticalCenterOffset === null || Math.abs(liveResult.verticalCenterOffset) > 1.5) {
+      throw new Error(`Live swatch must be vertically centered with adjacent text: ${JSON.stringify(liveResult)}`);
+    }
+    if (!result.tableDialogOpened) {
+      throw new Error(`Table HEX swatch click must open the adjustment dialog: ${JSON.stringify(result)}`);
     }
 
     await page.evaluate(async () => {

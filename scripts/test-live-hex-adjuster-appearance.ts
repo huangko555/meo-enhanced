@@ -60,6 +60,8 @@ async function main(): Promise<void> {
             dialogs.push({
               background: getComputedStyle(dialog).backgroundColor,
               foreground: getComputedStyle(dialog).color,
+              width: dialog.getBoundingClientRect().width,
+              height: dialog.getBoundingClientRect().height,
               applyBackground: getComputedStyle(dialog.querySelector<HTMLButtonElement>('.meo-hex-color-adjustment-apply')!).backgroundColor,
               applyForeground: getComputedStyle(dialog.querySelector<HTMLButtonElement>('.meo-hex-color-adjustment-apply')!).color,
               sliderCount: dialog.querySelectorAll('input[type="range"]').length,
@@ -86,8 +88,9 @@ async function main(): Promise<void> {
         }
         await page.evaluate(() => (window as any).__hexAppearanceEditor.destroy());
         await page.close();
-        if (result.length !== 2 || result.some((dialog) => dialog.sliderCount !== 4 || dialog.visibleSliderCount !== 4 || dialog.horizontalOverflow)) {
-          throw new Error(`${appearance}/${language} must show four fitting sliders for both HEX lengths: ${JSON.stringify(result)}`);
+        if (result.length !== 2 || result.some((dialog) => dialog.sliderCount !== 4 || dialog.visibleSliderCount !== 4 ||
+          dialog.horizontalOverflow || dialog.width > 324 || dialog.height > 270)) {
+          throw new Error(`${appearance}/${language} must show four fitting sliders in a compact popover: ${JSON.stringify(result)}`);
         }
         const expectedLabel = language === 'en' ? 'Color controls for' : '的颜色调整器';
         if (result[0]?.opacity !== '255' || result[1]?.opacity !== '128' ||

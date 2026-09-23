@@ -13,7 +13,7 @@ import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage
 
 type RgbColor = { red: number; green: number; blue: number };
 type HsvColor = { hue: number; saturation: number; brightness: number };
-type ActiveHexColorAdjustment = HexColorRange;
+type ActiveHexColorAdjustment = HexColorRange & { anchor?: HTMLButtonElement };
 type HexColorAdjustmentState = {
   range: ActiveHexColorAdjustment;
   tooltip: Tooltip;
@@ -184,7 +184,7 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
       actions.append(cancelButton, applyButton);
       dom.append(header, controls, actions);
 
-      const sourceSwatch = view.dom.querySelector<HTMLButtonElement>(
+      const sourceSwatch = active.anchor?.isConnected ? active.anchor : view.dom.querySelector<HTMLButtonElement>(
         `.meo-md-color-swatch-interactive[data-color-from="${active.from}"]`
       );
       let draftValue = active.value;
@@ -294,6 +294,9 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
       syncPreview(active.value, true);
       return {
         dom,
+        getCoords: () => active.anchor?.isConnected
+          ? active.anchor.getBoundingClientRect()
+          : view.coordsAtPos(active.from) ?? view.dom.getBoundingClientRect(),
         mount() {
           document.addEventListener('pointerdown', onDocumentPointerDown, true);
           document.addEventListener('keydown', onDocumentKeyDown, true);
@@ -342,7 +345,8 @@ export function createColorSwatchElement(value: string, uiLanguage: UiLanguage =
   return swatch;
 }
 
-function createInteractiveColorSwatchElement(
+/** The range must address the current document, including when rendered inside a table cell preview. */
+export function createInteractiveColorSwatchElement(
   view: EditorView,
   range: HexColorRange
 ): HTMLButtonElement {
@@ -363,7 +367,7 @@ function createInteractiveColorSwatchElement(
   swatch.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
-    view.dispatch({ effects: setActiveHexColorAdjustment.of(range) });
+    view.dispatch({ effects: setActiveHexColorAdjustment.of({ ...range, anchor: swatch }) });
   });
   return swatch;
 }

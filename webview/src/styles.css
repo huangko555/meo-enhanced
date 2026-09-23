@@ -2888,7 +2888,7 @@ button:focus-visible > .menu-switch {
   width: 0.78em;
   height: 0.78em;
   margin: 0 0.28em 0 0.08em;
-  vertical-align: -0.08em;
+  vertical-align: 0.08em;
   border: 1px solid color-mix(in srgb, currentColor 55%, transparent);
   border-radius: 2px;
   box-sizing: border-box;
@@ -2914,8 +2914,8 @@ button:focus-visible > .menu-switch {
 }
 
 .cm-tooltip.meo-hex-color-adjustment {
-  width: min(340px, calc(100vw - 16px));
-  padding: 16px;
+  width: min(324px, calc(100vw - 16px));
+  padding: 14px;
   border: 1px solid var(--vscode-editorWidget-border, color-mix(in srgb, var(--vscode-editor-foreground) 20%, transparent));
   border-radius: 10px;
   box-shadow: 0 10px 28px var(--vscode-widget-shadow, rgb(0 0 0 / 0.18));
@@ -2940,15 +2940,15 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 
 .meo-hex-color-adjustment-header {
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) 26px;
+  grid-template-columns: 34px minmax(0, 1fr) 24px;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
 .meo-hex-color-adjustment-preview {
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 28%, transparent);
   border-radius: 6px;
@@ -2967,7 +2967,7 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 
 .meo-hex-color-adjustment-value {
   min-width: 0;
-  height: 34px;
+  height: 32px;
   padding: 6px 10px;
   color: var(--vscode-input-foreground, var(--vscode-editor-foreground));
   background: var(--vscode-input-background, var(--vscode-editor-background));
@@ -2988,8 +2988,8 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 }
 
 .meo-hex-color-adjustment-close {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   color: inherit;
   background: transparent;
@@ -3008,7 +3008,7 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 
 .meo-hex-color-adjustment-controls {
   display: grid;
-  gap: 8px;
+  gap: 7px;
 }
 
 .meo-hex-color-adjustment-row {
@@ -3016,7 +3016,7 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   grid-template-columns: 78px minmax(80px, 1fr) 42px;
   align-items: center;
   gap: 10px;
-  min-height: 30px;
+  min-height: 28px;
 }
 
 .meo-hex-color-adjustment-row > span,
@@ -3081,13 +3081,13 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 16px;
+  margin-top: 12px;
 }
 
 .meo-hex-color-adjustment-actions button {
-  min-width: 72px;
-  min-height: 32px;
-  padding: 5px 14px;
+  min-width: 68px;
+  min-height: 30px;
+  padding: 4px 12px;
   color: var(--vscode-editor-foreground);
   background: transparent;
   border: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 50%, transparent);

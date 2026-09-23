@@ -134,6 +134,16 @@ function runCleanupInReverse(cleanup: Array<() => void>): unknown[] {
 function clonePassiveHeader(source: HTMLTableRowElement): HTMLTableCellElement[] {
   return Array.from(source.cells, (cell) => {
     const clone = cell.cloneNode(true) as HTMLTableCellElement;
+    // Keep the color preview visible while the floating header stays a passive navigation surface.
+    for (const button of Array.from(clone.querySelectorAll<HTMLButtonElement>(
+      'button.meo-md-color-swatch-interactive'
+    ))) {
+      const swatch = document.createElement('span');
+      swatch.className = 'meo-md-color-swatch';
+      swatch.style.backgroundColor = button.style.backgroundColor;
+      swatch.title = button.dataset.colorValue ?? '';
+      button.replaceWith(swatch);
+    }
     // The floating header is a passive projection, even when its source cell is
     // currently being edited. Keeping the transient editing class would hide
     // the cloned preview, while passive cleanup removes the cloned textarea.

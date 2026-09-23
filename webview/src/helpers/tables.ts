@@ -19,7 +19,7 @@ import { getViewportController, visualLineContextMargin } from './viewportContro
 import { changedDocumentRange, runEditorHistoryCommand } from './historyCommands';
 import { createOpenLinkButton } from './linkOpenButton';
 import { collectHexColorRangesFromText, isHexColorLikeLiteral } from '../../../src/shared/hexColorSwatches';
-import { createColorSwatchElement } from './colorSwatches';
+import { createColorSwatchElement, createInteractiveColorSwatchElement } from './colorSwatches';
 import {
   createMissingLocalLinkIndicator,
   isMissingLocalLinkTarget
@@ -276,7 +276,7 @@ const sourceTableHeaderLineDeco = Decoration.line({ class: 'meo-md-source-table-
 const sourceTableHeaderCellDeco = Decoration.mark({ class: 'meo-md-source-table-header-cell' });
 const tableDelimiterRegex = /^\s*\|?\s*[:]?\-+[:]?\s*(\|\s*[:]?\-+[:]?\s*)*\|?$/;
 const tableCellSelector = 'th[data-table-row][data-table-col], td[data-table-row][data-table-col]';
-const tableControlSelector = '.meo-md-html-table-context-trigger, .meo-md-html-table-context-menu, .meo-md-html-table-context-btn, .meo-md-link-open-btn, .meo-md-html-table-column-resize-handle';
+const tableControlSelector = '.meo-md-html-table-context-trigger, .meo-md-html-table-context-menu, .meo-md-html-table-context-btn, .meo-md-link-open-btn, .meo-md-color-swatch-interactive, .meo-md-html-table-column-resize-handle';
 const tableCellAutoCommitDelayMs = 250;
 // Chromium reports fractional caret bounds while scrollTop is effectively
 // quantized. Treat sub-pixel differences as visible so reveal retries settle.
@@ -1649,6 +1649,7 @@ function appendTableInlinePreviewLink(parent: HTMLElement, label: string, href: 
   sourceRange?: TableCellRange | null;
   presentationFactory: ImagePresentationFactory;
   uiLanguage: UiLanguage;
+  view: EditorView;
 }) {
   const el = document.createElement('span');
   el.className = 'meo-md-link';
@@ -1714,6 +1715,7 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
   sourceRange?: TableCellRange | null;
   presentationFactory: ImagePresentationFactory;
   uiLanguage: UiLanguage;
+  view: EditorView;
 }) {
   const { baseOffset = 0, diagnostics = [], disableLinkParsers = false, searchState = null, sourceRange = null } = options;
   const colorRangesByStart = new Map(collectHexColorRangesFromText(text).map((range) => [range.from, range]));
@@ -1913,7 +1915,14 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
     const color = colorRangesByStart.get(i);
     if (color && (!tag || tag[0].length === color.value.length)) {
       flushBuffer();
-      parent.appendChild(createColorSwatchElement(color.value, options.uiLanguage));
+      const from = sourceRange ? sourceRange.from + baseOffset + i : -1;
+      const to = from + color.value.length;
+      const current = sourceRange && from >= sourceRange.from && to <= sourceRange.to &&
+        to <= options.view.state.doc.length &&
+        options.view.state.doc.sliceString(from, to) === color.value;
+      parent.appendChild(current
+        ? createInteractiveColorSwatchElement(options.view, { from, to, value: color.value })
+        : createColorSwatchElement(color.value, options.uiLanguage));
       appendTablePlainText(parent, color.value, baseOffset + i, diagnostics, searchState, sourceRange);
       i = color.to;
       continue;
@@ -1995,7 +2004,8 @@ function appendTableCellRenderedPreview(
   searchState: TableSearchState | null,
   sourceRange: TableCellRange | null,
   presentationFactory: ImagePresentationFactory,
-  uiLanguage: UiLanguage
+  uiLanguage: UiLanguage,
+  view: EditorView
 ) {
   const listStack: Array<{ indentColumns: number; type: 'ul' | 'ol'; list: HTMLUListElement | HTMLOListElement; lastItem: HTMLLIElement | null }> = [];
   const appendInline = (parent: HTMLElement, content: string, baseOffset: number) => {
@@ -2005,7 +2015,8 @@ function appendTableCellRenderedPreview(
       searchState,
       sourceRange,
       presentationFactory,
-      uiLanguage
+      uiLanguage,
+      view
     });
   };
 
@@ -2083,7 +2094,8 @@ function renderTableCellInlinePreview(
   searchState: TableSearchState | null = null,
   sourceRange: TableCellRange | null,
   presentationFactory: ImagePresentationFactory,
-  uiLanguage: UiLanguage
+  uiLanguage: UiLanguage,
+  view: EditorView
 ) {
   if (!(previewEl instanceof HTMLElement)) return;
   disposeImagePresentations(previewEl);
@@ -2103,7 +2115,8 @@ function renderTableCellInlinePreview(
     searchState,
     sourceRange,
     presentationFactory,
-    uiLanguage
+    uiLanguage,
+    view
   );
 }
 
@@ -5175,8 +5188,12 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       this.searchState,
       sourceRange,
       getImagePresentationFactory(this.view!.state),
-      this.view!.state.facet(uiLanguageFacet)
+      this.view!.state.facet(uiLanguageFacet),
+      this.view!
     );
+    // A focusable color button cannot live inside an aria-hidden preview.
+    if (preview.querySelector('.meo-md-color-swatch-interactive')) preview.removeAttribute('aria-hidden');
+    else if (preview.getAttribute('aria-hidden') !== 'true') preview.setAttribute('aria-hidden', 'true');
   }
 
   refreshCellPreviewFromInput(input: HTMLTextAreaElement) {
