@@ -2913,46 +2913,65 @@ button:focus-visible > .menu-switch {
   outline-offset: 1px;
 }
 
-.meo-hex-color-adjustment {
-  width: 276px;
-  padding: 10px;
-  color: var(--vscode-editorWidget-foreground, var(--vscode-editor-foreground));
-  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
-  border: 1px solid var(--vscode-editorWidget-border, var(--vscode-widget-border, transparent));
-  border-radius: 7px;
-  box-shadow: 0 8px 24px color-mix(in srgb, #000 28%, transparent);
+.cm-tooltip.meo-hex-color-adjustment {
+  width: 294px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 22%, transparent);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.18);
   box-sizing: border-box;
   font-family: var(--vscode-font-family, sans-serif);
   font-size: 12px;
 }
 
+/* CodeMirror's light tooltip skin can remain active while the Webview editor uses a dark appearance. */
+body .cm-tooltip.meo-hex-color-adjustment {
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-editor-background);
+}
+
+html[data-editor-appearance='dark'] .cm-tooltip.meo-hex-color-adjustment {
+  color-scheme: dark;
+}
+
+html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
+  color-scheme: light;
+}
+
 .meo-hex-color-adjustment-header {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 24px;
+  grid-template-columns: 32px minmax(0, 1fr) 22px;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 9px;
+  gap: 9px;
+  margin-bottom: 12px;
 }
 
 .meo-hex-color-adjustment-preview {
-  width: 28px;
-  height: 28px;
-  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
-  border-radius: 5px;
+  width: 32px;
+  height: 32px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 28%, transparent);
+  border-radius: 4px;
   box-sizing: border-box;
-  background-image: linear-gradient(45deg, #aaa 25%, transparent 25%, transparent 75%, #aaa 75%), linear-gradient(45deg, #aaa 25%, transparent 25%, transparent 75%, #aaa 75%);
+  background-color: var(--vscode-editor-background);
+  background-image: linear-gradient(45deg, color-mix(in srgb, var(--vscode-editor-foreground) 18%, transparent) 25%, transparent 25%, transparent 75%, color-mix(in srgb, var(--vscode-editor-foreground) 18%, transparent) 75%), linear-gradient(45deg, color-mix(in srgb, var(--vscode-editor-foreground) 18%, transparent) 25%, transparent 25%, transparent 75%, color-mix(in srgb, var(--vscode-editor-foreground) 18%, transparent) 75%);
   background-position: 0 0, 4px 4px;
   background-size: 8px 8px;
-  background-blend-mode: multiply;
+}
+
+.meo-hex-color-adjustment-preview-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .meo-hex-color-adjustment-value {
   min-width: 0;
-  height: 28px;
-  padding: 3px 7px;
-  color: var(--vscode-input-foreground, inherit);
-  background: var(--vscode-input-background, transparent);
-  border: 1px solid var(--vscode-input-border, color-mix(in srgb, currentColor 25%, transparent));
+  height: 30px;
+  padding: 4px 8px;
+  color: var(--vscode-editor-foreground);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 28%, transparent);
   border-radius: 4px;
   box-sizing: border-box;
   font-family: var(--vscode-editor-font-family, monospace);
@@ -2968,15 +2987,15 @@ button:focus-visible > .menu-switch {
 }
 
 .meo-hex-color-adjustment-close {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   color: inherit;
   background: transparent;
   border: 0;
   border-radius: 4px;
-  font-size: 18px;
-  line-height: 22px;
+  font-size: 17px;
+  line-height: 20px;
   cursor: pointer;
 }
 
@@ -2988,24 +3007,20 @@ button:focus-visible > .menu-switch {
 
 .meo-hex-color-adjustment-controls {
   display: grid;
-  gap: 7px;
+  gap: 9px;
 }
 
 .meo-hex-color-adjustment-row {
   display: grid;
-  grid-template-columns: 68px minmax(0, 1fr) 35px;
+  grid-template-columns: 68px minmax(0, 1fr) 38px;
   align-items: center;
-  gap: 6px;
-}
-
-.meo-hex-color-adjustment-row[hidden] {
-  display: none;
+  gap: 8px;
 }
 
 .meo-hex-color-adjustment-row > span,
 .meo-hex-color-adjustment-row > output {
   overflow: hidden;
-  color: var(--vscode-descriptionForeground, currentColor);
+  color: color-mix(in srgb, var(--vscode-editor-foreground) 78%, var(--vscode-editor-background));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3017,21 +3032,22 @@ button:focus-visible > .menu-switch {
 
 .meo-hex-color-adjustment-row input[type='range'] {
   width: 100%;
-  height: 5px;
+  height: 6px;
   margin: 0;
   border-radius: 999px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vscode-editor-foreground) 16%, transparent);
   appearance: none;
   cursor: pointer;
 }
 
 .meo-hex-color-adjustment-row input[type='range']::-webkit-slider-thumb {
-  width: 13px;
-  height: 13px;
-  border: 2px solid var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--vscode-editor-background);
   border-radius: 50%;
-  box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 65%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--vscode-editor-foreground) 65%, transparent);
   appearance: none;
-  background: currentColor;
+  background: var(--vscode-editor-foreground);
 }
 
 .meo-hex-color-adjustment-row input[type='range']:focus-visible {
@@ -3047,23 +3063,33 @@ button:focus-visible > .menu-switch {
   display: flex;
   justify-content: flex-end;
   gap: 6px;
-  margin-top: 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 15%, transparent);
 }
 
 .meo-hex-color-adjustment-actions button {
-  min-width: 52px;
-  padding: 4px 8px;
-  color: var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground));
-  background: var(--vscode-button-secondaryBackground, transparent);
-  border: 1px solid var(--vscode-widget-border, color-mix(in srgb, currentColor 25%, transparent));
+  min-width: 48px;
+  padding: 4px 10px;
+  color: var(--vscode-editor-foreground);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 4px;
   cursor: pointer;
+}
+
+.meo-hex-color-adjustment-actions button:hover {
+  background: color-mix(in srgb, var(--vscode-editor-foreground) 10%, transparent);
 }
 
 .meo-hex-color-adjustment-actions .meo-hex-color-adjustment-apply {
   color: var(--vscode-button-foreground, #fff);
   background: var(--vscode-button-background, #0e639c);
   border-color: transparent;
+}
+
+.meo-hex-color-adjustment-actions .meo-hex-color-adjustment-apply:hover {
+  background: var(--vscode-button-hoverBackground, var(--vscode-button-background, #0e639c));
 }
 
 .meo-hex-color-adjustment-actions button:focus-visible {

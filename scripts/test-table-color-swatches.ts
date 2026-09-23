@@ -123,7 +123,7 @@ async function main() {
       const firstDialog = app.querySelector<HTMLElement>('.meo-hex-color-adjustment');
       const firstValueInput = firstDialog?.querySelector<HTMLInputElement>('.meo-hex-color-adjustment-value');
       const sixDigitOpacity = firstDialog?.querySelector<HTMLInputElement>('input[aria-label="Opacity"]')?.closest<HTMLElement>('label');
-      const sixDigitOpacityHidden = Boolean(sixDigitOpacity && getComputedStyle(sixDigitOpacity).display === 'none');
+      const sixDigitOpacityVisible = Boolean(sixDigitOpacity && getComputedStyle(sixDigitOpacity).display !== 'none');
       if (firstValueInput) {
         firstValueInput.value = '#11223344';
         firstValueInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -188,7 +188,7 @@ async function main() {
         draftFocusRetained,
         alphaDraftDoesNotWrite,
         firstDialogVisible: Boolean(firstDialog),
-        sixDigitOpacityHidden,
+        sixDigitOpacityVisible,
         invalidLengthRejected,
         opacityVisible: Boolean(alphaInput && getComputedStyle(alphaInput.closest<HTMLElement>('label')!).display !== 'none'),
         adjustedSixDigit: adjustedText.includes('#112233'),
@@ -213,7 +213,7 @@ async function main() {
       || !liveResult.draftFocusRetained
       || !liveResult.alphaDraftDoesNotWrite
       || !liveResult.firstDialogVisible
-      || !liveResult.sixDigitOpacityHidden
+      || !liveResult.sixDigitOpacityVisible
       || !liveResult.invalidLengthRejected
       || !liveResult.opacityVisible
       || !liveResult.adjustedSixDigit
@@ -258,6 +258,61 @@ async function main() {
     await page.evaluate(() => (window as any).colorShortcutEditor.destroy());
     if (!keyboardResult.closed || !keyboardResult.unchanged || !outsideClosed) {
       throw new Error(`Swatch keyboard/outside dismissal failed: ${JSON.stringify({ keyboardResult, outsideClosed })}`);
+    }
+
+    const opacityResult = await page.evaluate(async () => {
+      const harness = (window as any).TableStabilityHarness;
+      const app = document.getElementById('app')!;
+      app.replaceChildren();
+      const editor = harness.createEditor({
+        parent: app,
+        initialMode: 'live',
+        text: 'Live swatches\nHEX #112233 and #aabbcc80',
+        onApplyChanges() {}
+      });
+      const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      for (let index = 0; index < 3; index += 1) await frame();
+      const open = (value: string) => app.querySelector<HTMLButtonElement>(`[data-color-value="${value}"]`)?.click();
+      const setOpacity = (value: number) => {
+        const slider = app.querySelector<HTMLInputElement>('input[aria-label="Opacity"]')!;
+        slider.value = String(value);
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      const draft = () => app.querySelector<HTMLInputElement>('.meo-hex-color-adjustment-value')?.value;
+      const apply = () => app.querySelector<HTMLButtonElement>('.meo-hex-color-adjustment-apply')?.click();
+      open('#112233');
+      await frame();
+      setOpacity(128);
+      const transparentDraft = draft() === '#11223380' && editor.getText().includes('#112233 and');
+      const valueInput = app.querySelector<HTMLInputElement>('.meo-hex-color-adjustment-value')!;
+      valueInput.value = '#112233ff';
+      valueInput.dispatchEvent(new Event('input', { bubbles: true }));
+      const typedFullAlphaNormalizes = draft() === '#112233';
+      setOpacity(128);
+      setOpacity(255);
+      const restoredDraft = draft() === '#112233';
+      apply();
+      await frame();
+      const opaqueRemainsSix = editor.getText().includes('#112233 and');
+      open('#112233');
+      await frame();
+      setOpacity(128);
+      apply();
+      await frame();
+      const convertedToEight = editor.getText().includes('#11223380 and');
+      const undone = await editor.undo() && editor.getText().includes('#112233 and');
+      const redone = await editor.redo() && editor.getText().includes('#11223380 and');
+      open('#aabbcc80');
+      await frame();
+      setOpacity(255);
+      apply();
+      await frame();
+      const existingEightStaysEight = editor.getText().includes('#aabbccff');
+      editor.destroy();
+      return { transparentDraft, typedFullAlphaNormalizes, restoredDraft, opaqueRemainsSix, convertedToEight, undone, redone, existingEightStaysEight };
+    });
+    if (Object.values(opacityResult).some((value) => !value)) {
+      throw new Error(`Six/eight-digit opacity semantics failed: ${JSON.stringify(opacityResult)}`);
     }
 
     const blockBoundaryResult = await page.evaluate(async () => {

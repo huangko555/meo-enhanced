@@ -90,14 +90,21 @@ function formatHexColor(rgb: RgbColor, alpha: number, includeAlpha: boolean, upp
   return `#${uppercase ? digits.toUpperCase() : digits}`;
 }
 
+function normalizeHexForSource(value: string, source: string): string {
+  return source.length === 7 && value.length === 9 && value.slice(-2).toLowerCase() === 'ff'
+    ? value.slice(0, 7) : value;
+}
+
 function replaceActiveHexColor(view: EditorView, current: ActiveHexColorAdjustment, value: string): void {
-  if (!supportedHexColor.test(value) || value.length !== current.value.length) return;
+  if (!supportedHexColor.test(value) ||
+    (value.length !== current.value.length && !(current.value.length === 7 && value.length === 9))) return;
   if (view.state.doc.sliceString(current.from, current.to) !== current.value) {
     closeHexColorAdjustment(view);
     return;
   }
+  const normalizedValue = normalizeHexForSource(value, current.value);
   view.dispatch({
-    ...(value === current.value ? {} : { changes: { from: current.from, to: current.to, insert: value } }),
+    ...(normalizedValue === current.value ? {} : { changes: { from: current.from, to: current.to, insert: normalizedValue } }),
     effects: setActiveHexColorAdjustment.of(null),
     annotations: isolateHistory.of('full'),
     userEvent: 'input'
@@ -113,7 +120,6 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
     pos: active.from,
     end: active.to,
     above: true,
-    arrow: true,
     create(view) {
       const strings = getUiStrings(view.state.facet(uiLanguageFacet));
       const dom = document.createElement('div');
@@ -125,6 +131,9 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
       header.className = 'meo-hex-color-adjustment-header';
       const preview = document.createElement('span');
       preview.className = 'meo-hex-color-adjustment-preview';
+      const previewFill = document.createElement('span');
+      previewFill.className = 'meo-hex-color-adjustment-preview-fill';
+      preview.appendChild(previewFill);
       const valueInput = document.createElement('input');
       valueInput.className = 'meo-hex-color-adjustment-value';
       valueInput.type = 'text';
@@ -162,7 +171,6 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
       const saturation = makeRange(strings.saturation, 0, 100);
       const brightness = makeRange(strings.brightness, 0, 100);
       const opacity = makeRange(strings.opacity, 0, 255);
-      opacity.row.hidden = active.value.length !== 9;
       const actions = document.createElement('div');
       actions.className = 'meo-hex-color-adjustment-actions';
       const cancelButton = document.createElement('button');
@@ -182,12 +190,12 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
       const syncPreview = (next: string, syncSliders: boolean) => {
         const parsed = parseHexColor(next);
         if (!parsed) return;
-        draftValue = next;
-        valueInput.value = next;
+        draftValue = normalizeHexForSource(next, active.value);
+        valueInput.value = draftValue;
         valueInput.removeAttribute('aria-invalid');
         applyButton.disabled = false;
-        preview.style.backgroundColor = next;
-        if (sourceSwatch) sourceSwatch.style.backgroundColor = next;
+        previewFill.style.backgroundColor = draftValue;
+        if (sourceSwatch) sourceSwatch.style.backgroundColor = draftValue;
         if (syncSliders) {
           const hsv = rgbToHsv(parsed.rgb);
           hue.input.value = String(hsv.hue);
@@ -215,13 +223,17 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
           brightness: Number(brightness.input.value)
         });
         syncPreview(formatHexColor(
-          rgb, Number(opacity.input.value), active.value.length === 9, usesUppercaseHex(active.value)
+          rgb, Number(opacity.input.value), active.value.length === 9 || Number(opacity.input.value) < 255,
+          usesUppercaseHex(active.value)
         ), false);
       };
       const updateOpacity = () => {
         const parsed = parseHexColor(draftValue);
         if (!parsed) return;
-        syncPreview(formatHexColor(parsed.rgb, Number(opacity.input.value), true, usesUppercaseHex(active.value)), false);
+        const alpha = Number(opacity.input.value);
+        syncPreview(formatHexColor(
+          parsed.rgb, alpha, active.value.length === 9 || alpha < 255, usesUppercaseHex(active.value)
+        ), false);
       };
       const apply = () => {
         if (applyButton.disabled) return;
@@ -235,7 +247,7 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
       opacity.input.addEventListener('input', updateOpacity);
       valueInput.addEventListener('input', () => {
         const next = valueInput.value.trim();
-        const valid = supportedHexColor.test(next) && next.length === active.value.length;
+        const valid = supportedHexColor.test(next) && next.length === draftValue.length;
         if (valid) valueInput.removeAttribute('aria-invalid');
         else valueInput.setAttribute('aria-invalid', 'true');
         applyButton.disabled = !valid;
