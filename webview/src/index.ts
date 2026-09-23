@@ -2492,6 +2492,7 @@ saveBtn.addEventListener('click', () => {
 const shortcutHandlerContext: ShortcutHandlerContext = {
   get editor() { return editor; },
   get editableMode() { return getActiveEditableMode(); },
+  get editorSurfaceActive() { return getActiveEditorMode() !== 'preview'; },
   requestSave,
   openFindPanel: (target) => findPanelController.open(target),
   requestMode: (mode) => {

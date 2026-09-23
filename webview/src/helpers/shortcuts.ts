@@ -13,6 +13,7 @@ export const normalizeEol = (text: string): string => text.replace(/\r\n?/g, '\n
 export interface ShortcutHandlerContext {
   editor: any;
   editableMode: 'live' | 'source';
+  editorSurfaceActive: boolean;
   requestSave: () => void;
   openFindPanel: (target: 'find' | 'replace') => void;
   requestMode: (mode: 'live' | 'source') => void;
@@ -30,6 +31,10 @@ export const handleEditorShortcut = (
   
   const hasPrimaryModifier = isPrimaryModifier(event);
   const editorFocused = editor.hasFocus();
+  // Scrolling can detach the focused Live table textarea. The Webview still
+  // owns history when the browser leaves focus on body, not on another control.
+  const detachedEditorFocus = context.editorSurfaceActive
+    && (event.target as Node | null)?.nodeName === 'BODY';
   const isPlainAltShiftChord =
     event.altKey &&
     event.shiftKey &&
@@ -71,7 +76,7 @@ export const handleEditorShortcut = (
     return true;
   }
 
-  if (!editorFocused) {
+  if (!editorFocused && !detachedEditorFocus) {
     return false;
   }
 
@@ -79,7 +84,7 @@ export const handleEditorShortcut = (
     return false;
   }
 
-  if (isShortcutKey(event, 'a', 'KeyA') && !event.altKey) {
+  if (editorFocused && isShortcutKey(event, 'a', 'KeyA') && !event.altKey) {
     event.preventDefault();
     event.stopPropagation();
     editor.selectAll();

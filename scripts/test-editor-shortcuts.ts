@@ -12,6 +12,7 @@ type ShortcutCase = {
   readonly event: Partial<KeyboardEvent> & Pick<KeyboardEvent, 'key' | 'code'>;
   readonly editableMode?: 'live' | 'source';
   readonly focused?: boolean;
+  readonly editorSurfaceActive?: boolean;
   readonly expectedHandled: boolean;
   readonly expectedEffects?: readonly string[];
 };
@@ -80,6 +81,39 @@ const cases: readonly ShortcutCase[] = [
     expectedHandled: false
   },
   {
+    name: 'detached table focus leaves body as history shortcut target',
+    focused: false,
+    event: { key: 'z', code: 'KeyZ', ctrlKey: true, target: { nodeName: 'BODY' } as EventTarget },
+    expectedHandled: true,
+    expectedEffects: ['undo']
+  },
+  {
+    name: 'body redo restores editor history after detached table focus',
+    focused: false,
+    event: { key: 'y', code: 'KeyY', ctrlKey: true, target: { nodeName: 'BODY' } as EventTarget },
+    expectedHandled: true,
+    expectedEffects: ['redo']
+  },
+  {
+    name: 'body focus does not steal select all',
+    focused: false,
+    event: { key: 'a', code: 'KeyA', ctrlKey: true, target: { nodeName: 'BODY' } as EventTarget },
+    expectedHandled: false
+  },
+  {
+    name: 'other unfocused input keeps its own history',
+    focused: false,
+    event: { key: 'z', code: 'KeyZ', ctrlKey: true, target: { nodeName: 'INPUT' } as EventTarget },
+    expectedHandled: false
+  },
+  {
+    name: 'Preview body does not replay hidden editor history',
+    focused: false,
+    editorSurfaceActive: false,
+    event: { key: 'z', code: 'KeyZ', ctrlKey: true, target: { nodeName: 'BODY' } as EventTarget },
+    expectedHandled: false
+  },
+  {
     name: 'IME composition has priority over save',
     event: { key: 's', code: 'KeyS', ctrlKey: true, isComposing: true },
     expectedHandled: false
@@ -103,6 +137,7 @@ for (const testCase of cases) {
       redo: () => effects.push('redo')
     },
     editableMode: testCase.editableMode ?? 'source',
+    editorSurfaceActive: testCase.editorSurfaceActive ?? true,
     requestSave: () => effects.push('save'),
     openFindPanel: (target: 'find' | 'replace') => effects.push(`find:${target}`),
     requestMode: (mode: 'live' | 'source') => effects.push(`mode:${mode}`)

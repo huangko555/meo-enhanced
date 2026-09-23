@@ -81,12 +81,14 @@ function targetedCommands(
   switch (area) {
     case 'history':
       return [
+        script('scripts/test-editor-shortcuts.ts'),
         script('scripts/test-editor-history-runtime.ts'),
         script('scripts/test-editor-history-production-cutover.ts'),
         script('scripts/test-history-rendered-block-interaction.ts'),
         script('scripts/test-editor-history-runtime-browser.ts'),
         script('scripts/test-rendered-content-history-roundtrip.ts'),
-        script('scripts/test-history-matrix.ts')
+        script('scripts/test-history-matrix.ts'),
+        script('scripts/test-table-body-history-shortcut.ts')
       ];
     case 'table':
       return [
@@ -97,6 +99,7 @@ function targetedCommands(
         script('scripts/test-table-body-interaction-sticky-production.ts'),
         script('scripts/test-table-input-visual-stability.ts'),
         script('scripts/test-table-visible-history-viewport.ts'),
+        script('scripts/test-table-body-history-shortcut.ts'),
         script('scripts/test-virtual-block-scroll-stability.ts')
       ];
     case 'rendered':
@@ -209,6 +212,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
         longRunning: false,
         stages: [serialStage('Quick regression contracts', [
           packageScript('typecheck'),
+          script('scripts/test-editor-shortcuts.ts'),
           packageScript('test:reading-position'),
           script('scripts/test-test-workflow.ts'),
           script('scripts/test-document-auto-save-concurrency.ts'),
