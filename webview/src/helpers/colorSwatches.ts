@@ -90,21 +90,14 @@ function formatHexColor(rgb: RgbColor, alpha: number, includeAlpha: boolean, upp
   return `#${uppercase ? digits.toUpperCase() : digits}`;
 }
 
-function normalizeHexForSource(value: string, source: string): string {
-  return source.length === 7 && value.length === 9 && value.slice(-2).toLowerCase() === 'ff'
-    ? value.slice(0, 7) : value;
-}
-
 function replaceActiveHexColor(view: EditorView, current: ActiveHexColorAdjustment, value: string): void {
-  if (!supportedHexColor.test(value) ||
-    (value.length !== current.value.length && !(current.value.length === 7 && value.length === 9))) return;
+  if (!supportedHexColor.test(value)) return;
   if (view.state.doc.sliceString(current.from, current.to) !== current.value) {
     closeHexColorAdjustment(view);
     return;
   }
-  const normalizedValue = normalizeHexForSource(value, current.value);
   view.dispatch({
-    ...(normalizedValue === current.value ? {} : { changes: { from: current.from, to: current.to, insert: normalizedValue } }),
+    ...(value === current.value ? {} : { changes: { from: current.from, to: current.to, insert: value } }),
     effects: setActiveHexColorAdjustment.of(null),
     annotations: isolateHistory.of('full'),
     userEvent: 'change.color'
@@ -188,10 +181,12 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
         `.meo-md-color-swatch-interactive[data-color-from="${active.from}"]`
       );
       let draftValue = active.value;
+      // Explicitly typed width remains the opaque format after later slider adjustments.
+      let includeAlphaWhenOpaque = active.value.length === 9;
       const syncPreview = (next: string, syncSliders: boolean) => {
         const parsed = parseHexColor(next);
         if (!parsed) return;
-        draftValue = normalizeHexForSource(next, active.value);
+        draftValue = next;
         valueInput.value = draftValue;
         valueInput.removeAttribute('aria-invalid');
         applyButton.disabled = false;
@@ -232,8 +227,8 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
           brightness: Number(brightness.input.value)
         });
         syncPreview(formatHexColor(
-          rgb, Number(opacity.input.value), active.value.length === 9 || Number(opacity.input.value) < 255,
-          usesUppercaseHex(active.value)
+          rgb, Number(opacity.input.value), includeAlphaWhenOpaque || Number(opacity.input.value) < 255,
+          usesUppercaseHex(draftValue)
         ), false);
       };
       const updateOpacity = () => {
@@ -241,7 +236,7 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
         if (!parsed) return;
         const alpha = Number(opacity.input.value);
         syncPreview(formatHexColor(
-          parsed.rgb, alpha, active.value.length === 9 || alpha < 255, usesUppercaseHex(active.value)
+          parsed.rgb, alpha, includeAlphaWhenOpaque || alpha < 255, usesUppercaseHex(draftValue)
         ), false);
       };
       const apply = () => {
@@ -256,11 +251,14 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
       opacity.input.addEventListener('input', updateOpacity);
       valueInput.addEventListener('input', () => {
         const next = valueInput.value.trim();
-        const valid = supportedHexColor.test(next) && next.length === draftValue.length;
+        const valid = supportedHexColor.test(next);
         if (valid) valueInput.removeAttribute('aria-invalid');
         else valueInput.setAttribute('aria-invalid', 'true');
         applyButton.disabled = !valid;
-        if (valid) syncPreview(next, true);
+        if (valid) {
+          includeAlphaWhenOpaque = next.length === 9;
+          syncPreview(next, true);
+        }
       });
       valueInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {

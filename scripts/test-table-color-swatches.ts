@@ -143,6 +143,18 @@ async function main() {
       const afterEightApply = editor.getText();
       const undoEight = await editor.undo();
       const afterEightUndo = editor.getText();
+      app.querySelector<HTMLButtonElement>('tbody button[data-color-value="#33669988"]')?.click();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const sixInput = app.querySelector<HTMLInputElement>('.meo-hex-color-adjustment-value');
+      if (sixInput) {
+        sixInput.value = '#445566';
+        sixInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      app.querySelector<HTMLButtonElement>('.meo-hex-color-adjustment-apply')?.click();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const afterSixApply = editor.getText();
+      const undoSix = await editor.undo();
+      const afterSixUndo = editor.getText();
       app.querySelector<HTMLButtonElement>('thead button[data-color-value="#AABBCC"]')?.click();
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const result = {
@@ -156,6 +168,8 @@ async function main() {
         undoRestored: undo && afterUndo.includes('#336699 and #33669988'),
         changedOnlyEight: afterEightApply.includes('#336699 and #44556677'),
         undoEightRestored: undoEight && afterEightUndo.includes('#336699 and #33669988'),
+        changedEightToSix: afterSixApply.includes('#336699 and #445566 |'),
+        undoSixRestored: undoSix && afterSixUndo.includes('#336699 and #33669988'),
         headerOpens: Boolean(app.querySelector('.meo-hex-color-adjustment'))
       };
       editor.destroy();
@@ -300,10 +314,10 @@ async function main() {
       const sixDigitOpacity = firstDialog?.querySelector<HTMLInputElement>('input[aria-label="Opacity"]')?.closest<HTMLElement>('label');
       const sixDigitOpacityVisible = Boolean(sixDigitOpacity && getComputedStyle(sixDigitOpacity).display !== 'none');
       if (firstValueInput) {
-        firstValueInput.value = '#11223344';
+        firstValueInput.value = '#1122334';
         firstValueInput.dispatchEvent(new Event('input', { bubbles: true }));
       }
-      const invalidLengthRejected = firstValueInput?.getAttribute('aria-invalid') === 'true' &&
+      const incompleteHexRejected = firstValueInput?.getAttribute('aria-invalid') === 'true' &&
         firstDialog?.querySelector<HTMLButtonElement>('.meo-hex-color-adjustment-apply')?.disabled === true;
       if (firstValueInput) {
         firstValueInput.value = '#112233';
@@ -364,7 +378,7 @@ async function main() {
         alphaDraftDoesNotWrite,
         firstDialogVisible: Boolean(firstDialog),
         sixDigitOpacityVisible,
-        invalidLengthRejected,
+        incompleteHexRejected,
         opacityVisible: Boolean(alphaInput && getComputedStyle(alphaInput.closest<HTMLElement>('label')!).display !== 'none'),
         adjustedSixDigit: adjustedText.includes('#112233'),
         adjustedEightDigit: adjustedText.includes('#aabbcc80'),
@@ -390,7 +404,7 @@ async function main() {
       || !liveResult.alphaDraftDoesNotWrite
       || !liveResult.firstDialogVisible
       || !liveResult.sixDigitOpacityVisible
-      || !liveResult.invalidLengthRejected
+      || !liveResult.incompleteHexRejected
       || !liveResult.opacityVisible
       || !liveResult.adjustedSixDigit
       || !liveResult.adjustedEightDigit
@@ -466,11 +480,6 @@ async function main() {
       await frame();
       setOpacity(128);
       const transparentDraft = draft() === '#11223380' && editor.getText().includes('#112233 and');
-      const valueInput = app.querySelector<HTMLInputElement>('.meo-hex-color-adjustment-value')!;
-      valueInput.value = '#112233ff';
-      valueInput.dispatchEvent(new Event('input', { bubbles: true }));
-      const typedFullAlphaNormalizes = draft() === '#112233';
-      setOpacity(128);
       setOpacity(255);
       const restoredDraft = draft() === '#112233';
       apply();
@@ -491,10 +500,60 @@ async function main() {
       await frame();
       const existingEightStaysEight = editor.getText().includes('#aabbccff');
       editor.destroy();
-      return { transparentDraft, typedFullAlphaNormalizes, restoredDraft, opaqueRemainsSix, convertedToEight, undone, redone, existingEightStaysEight };
+      return { transparentDraft, restoredDraft, opaqueRemainsSix, convertedToEight, undone, redone, existingEightStaysEight };
     });
     if (Object.values(opacityResult).some((value) => !value)) {
       throw new Error(`Six/eight-digit opacity semantics failed: ${JSON.stringify(opacityResult)}`);
+    }
+
+    const manualWidthResults = await page.evaluate(async () => {
+      const app = document.getElementById('app')!;
+      const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const cases = [
+        { source: '#112233', typed: '#11223380', opacity: '128', opaque: '#112233ff' },
+        { source: '#112233', typed: '#112233ff', opacity: '255', opaque: '#112233ff' },
+        { source: '#aabbcc80', typed: '#aabbcc', opacity: '255', opaque: '#aabbcc' }
+      ];
+      const results = [];
+      for (const testCase of cases) {
+        app.replaceChildren();
+        const editor = (window as any).TableStabilityHarness.createEditor({
+          parent: app, initialMode: 'live', text: `Intro\nColor ${testCase.source}`, onApplyChanges() {}
+        });
+        for (let index = 0; index < 3; index += 1) await frame();
+        app.querySelector<HTMLButtonElement>(`.meo-md-color-swatch-interactive[data-color-value="${testCase.source}"]`)!.click();
+        await frame();
+        const valueInput = app.querySelector<HTMLInputElement>('.meo-hex-color-adjustment-value')!;
+        valueInput.value = testCase.typed;
+        valueInput.dispatchEvent(new Event('input', { bubbles: true }));
+        const ready = app.querySelector<HTMLButtonElement>('.meo-hex-color-adjustment-apply')?.disabled === false;
+        const preview = app.querySelector<HTMLInputElement>('.meo-hex-color-adjustment-opacity')?.value === testCase.opacity;
+        app.querySelector<HTMLButtonElement>('.meo-hex-color-adjustment-apply')?.click();
+        await frame();
+        const applied = editor.getText() === `Intro\nColor ${testCase.typed}`;
+        const undone = applied && await editor.undo() && editor.getText() === `Intro\nColor ${testCase.source}`;
+        let opaqueAfterSlider = false;
+        if (undone) {
+          app.querySelector<HTMLButtonElement>(`.meo-md-color-swatch-interactive[data-color-value="${testCase.source}"]`)!.click();
+          await frame();
+          const nextInput = app.querySelector<HTMLInputElement>('.meo-hex-color-adjustment-value')!;
+          nextInput.value = testCase.typed;
+          nextInput.dispatchEvent(new Event('input', { bubbles: true }));
+          const slider = app.querySelector<HTMLInputElement>('.meo-hex-color-adjustment-opacity')!;
+          slider.value = '128';
+          slider.dispatchEvent(new Event('input', { bubbles: true }));
+          slider.value = '255';
+          slider.dispatchEvent(new Event('input', { bubbles: true }));
+          opaqueAfterSlider = nextInput.value === testCase.opaque;
+        }
+        results.push({ source: testCase.source, typed: testCase.typed, ready, preview, applied, undone, opaqueAfterSlider });
+        editor.destroy();
+      }
+      return results;
+    });
+    if (manualWidthResults.some((result) => !result.ready || !result.preview || !result.applied ||
+      !result.undone || !result.opaqueAfterSlider)) {
+      throw new Error(`Manual HEX width conversion failed: ${JSON.stringify(manualWidthResults)}`);
     }
 
     const blockBoundaryResult = await page.evaluate(async () => {
