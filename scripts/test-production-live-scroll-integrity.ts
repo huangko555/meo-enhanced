@@ -52,7 +52,8 @@ async function assertVisibleIntegrity(page: Page, step: string, failOnMismatch =
       scroller.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement')
     ).map((element) => ({
       line: Number(element.textContent?.trim()),
-      rect: element.getBoundingClientRect()
+      rect: element.getBoundingClientRect(),
+      outer: element.closest('.cm-scroller') === scroller
     })).filter((item) => Number.isFinite(item.line));
     const mismatches: Array<Record<string, unknown>> = [];
     const invalidStyles: Array<Record<string, unknown>> = [];
@@ -81,7 +82,10 @@ async function assertVisibleIntegrity(page: Page, step: string, failOnMismatch =
         return distance < closestDistance ? item : closest;
       }, null);
       if (gutter && Math.abs(gutter.line - expectedLine) > 3) {
-        mismatches.push({ text, expectedLine, gutterLine: gutter.line });
+        mismatches.push({
+          text, expectedLine, gutterLine: gutter.line, outerGutter: gutter.outer,
+          gutterTop: Math.round(gutter.rect.top - viewport.top)
+        });
       }
     }
     const invalidBlocks = Array.from(content.querySelectorAll<HTMLElement>(
@@ -100,9 +104,16 @@ async function assertVisibleIntegrity(page: Page, step: string, failOnMismatch =
       startLine: element.dataset.meoRenderedBlockStartLine ?? null,
       height: element.getBoundingClientRect().height
     }));
+    const outerGutters = gutters.filter((item) => item.outer && item.line !== 9999);
+    const visibleOuterGutters = outerGutters.filter((item) => (
+      item.rect.bottom > viewport.top && item.rect.top < viewport.bottom
+    ));
     return {
       mismatches, invalidBlocks, invalidStyles,
-      visibleText: visibleText.slice(0, 12), scrollTop: scroller.scrollTop
+      visibleText: visibleText.slice(0, 12), scrollTop: scroller.scrollTop,
+      outerGutterRange: [outerGutters[0]?.line ?? null, outerGutters.at(-1)?.line ?? null],
+      visibleOuterGutterRange: [visibleOuterGutters[0]?.line ?? null, visibleOuterGutters.at(-1)?.line ?? null],
+      nestedGutterCount: gutters.filter((item) => !item.outer).length
     };
   });
   if ((result.mismatches.length || result.invalidBlocks.length || result.invalidStyles.length) && failOnMismatch) {
