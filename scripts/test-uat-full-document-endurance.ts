@@ -521,7 +521,9 @@ async function prepareTableInput(page: import('puppeteer-core').Page, operation:
   await page.waitForFunction(({ sourceLine, value }) => {
     const editor = (window as any).__fullUatEditor;
     const sourceValues = editor.view.state.doc.line(sourceLine).text
-      .trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell: string) => cell.trim());
+      .trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell: string) => (
+        cell.trim().replace(/<br\s*\/?\s*>/gi, (breakTag: string) => `${breakTag}\n`)
+      ));
     return Array.from(document.querySelectorAll<HTMLElement>(
       '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tr'
     )).some((row) => {
@@ -550,7 +552,9 @@ async function prepareTableInput(page: import('puppeteer-core').Page, operation:
   const initialTarget = await page.evaluate(({ sourceLine, value, target }) => {
     const editor = (window as any).__fullUatEditor;
     const sourceValues = editor.view.state.doc.line(sourceLine).text
-      .trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell: string) => cell.trim());
+      .trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell: string) => (
+        cell.trim().replace(/<br\s*\/?\s*>/gi, (breakTag: string) => `${breakTag}\n`)
+      ));
     const row = Array.from(document.querySelectorAll<HTMLElement>(
       '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tr'
     )).find((candidate) => {
@@ -813,7 +817,9 @@ async function targetState(page: import('puppeteer-core').Page, operation: Opera
     let tableInput: HTMLTextAreaElement | null = null;
     if (operationKind === 'table') {
       const sourceValues = editor.view.state.doc.line(lineNumber).text
-        .trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell: string) => cell.trim());
+        .trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell: string) => (
+          cell.trim().replace(/<br\s*\/?\s*>/gi, (breakTag: string) => `${breakTag}\n`)
+        ));
       const row = Array.from(document.querySelectorAll<HTMLElement>(
         '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tr'
       )).find((candidate) => {
