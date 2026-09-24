@@ -258,42 +258,75 @@ async function main() {
         swatchBottom: swatchBounds.bottom
       };
     });
-    const popoverAfterSyntheticWheel = await page.evaluate(async () => {
+    const popoverWheelProgress = await page.evaluate(async () => {
+      const scroller = (window as any).tableColorPopoverEditor.view.scrollDOM as HTMLElement;
+      const samples = [scroller.scrollTop];
       document.querySelector('.meo-hex-color-adjustment-hue')!.dispatchEvent(new WheelEvent('wheel', {
         bubbles: true,
         cancelable: true,
         deltaY: 90,
         deltaMode: WheelEvent.DOM_DELTA_PIXEL
       }));
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      return {
-        scrollTop: (window as any).tableColorPopoverEditor.view.scrollDOM.scrollTop
-      };
+      samples.push(scroller.scrollTop);
+      for (let index = 0; index < 18; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        samples.push(scroller.scrollTop);
+      }
+      return samples;
     });
     const colorPopoverBounds = await page.$eval('.meo-hex-color-adjustment-hue', (element) => {
       const bounds = element.getBoundingClientRect();
       return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
     });
     await page.mouse.move(colorPopoverBounds.x, colorPopoverBounds.y);
-    await page.mouse.wheel({ deltaY: 180 });
+    await page.mouse.wheel({ deltaY: 60 });
     await page.evaluate(async () => {
       for (let index = 0; index < 3; index += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
     });
-    const popoverAfterWheel = await page.evaluate(() => ({
-      scrollTop: (window as any).tableColorPopoverEditor.view.scrollDOM.scrollTop
-    }));
+    const popoverAfterWheel = await page.evaluate(async () => {
+      const editor = (window as any).tableColorPopoverEditor;
+      const afterWheel = editor.view.scrollDOM.scrollTop;
+      editor.view.scrollDOM.scrollTop = afterWheel + 500;
+      for (let index = 0; index < 4; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const closedAfterLeavingAnchor = !document.querySelector('.meo-hex-color-adjustment');
+      const afterLeavingAnchor = editor.view.scrollDOM.scrollTop;
+      editor.view.scrollDOM.scrollTop = afterWheel;
+      for (let index = 0; index < 4; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const stayedClosedAfterReturn = !document.querySelector('.meo-hex-color-adjustment');
+      const swatch = document.querySelector<HTMLButtonElement>('tbody button[data-color-value="#336699"]');
+      swatch?.click();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      return {
+        afterWheel,
+        afterLeavingAnchor,
+        closedAfterLeavingAnchor,
+        stayedClosedAfterReturn,
+        reopenedAfterClick: Boolean(document.querySelector('.meo-hex-color-adjustment'))
+      };
+    });
     await page.evaluate(() => (window as any).tableColorPopoverEditor.destroy());
     if (popoverBeforeWheel.popoverTop < popoverBeforeWheel.toolbarBottom) {
       throw new Error(`Table HEX dialog overlapped the editor toolbar: ${JSON.stringify(popoverBeforeWheel)}`);
     }
-    if (popoverAfterSyntheticWheel.scrollTop <= popoverBeforeWheel.scrollTop ||
-      popoverAfterWheel.scrollTop <= popoverAfterSyntheticWheel.scrollTop) {
+    if (!popoverAfterWheel.closedAfterLeavingAnchor || !popoverAfterWheel.stayedClosedAfterReturn ||
+      !popoverAfterWheel.reopenedAfterClick) {
+      throw new Error(`Table HEX dialog did not end its session after the anchor left the viewport: ${JSON.stringify(popoverAfterWheel)}`);
+    }
+    const smoothIntermediatePositions = new Set(popoverWheelProgress.slice(1, -1));
+    if (popoverWheelProgress.at(-1)! <= popoverBeforeWheel.scrollTop ||
+      popoverWheelProgress[1] === popoverWheelProgress.at(-1) ||
+      smoothIntermediatePositions.size < 2 ||
+      popoverAfterWheel.afterWheel <= popoverWheelProgress.at(-1)!) {
       throw new Error(`Wheel over the table HEX dialog did not scroll the document: ${JSON.stringify({
         before: popoverBeforeWheel.scrollTop,
-        afterSynthetic: popoverAfterSyntheticWheel.scrollTop,
-        after: popoverAfterWheel.scrollTop
+        progress: popoverWheelProgress,
+        after: popoverAfterWheel.afterWheel
       })}`);
     }
 

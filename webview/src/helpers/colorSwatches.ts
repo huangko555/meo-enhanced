@@ -196,6 +196,11 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
       const sourceSwatch = active.anchor?.isConnected ? active.anchor : view.dom.querySelector<HTMLButtonElement>(
         `.meo-md-color-swatch-interactive[data-color-from="${active.from}"]`
       );
+      const currentSourceSwatch = () => active.anchor?.isConnected
+        ? active.anchor
+        : view.dom.querySelector<HTMLButtonElement>(
+          `.meo-md-color-swatch-interactive[data-color-from="${active.from}"]`
+        );
       let draftValue = active.value;
       // Explicitly typed width remains the opaque format after later slider adjustments.
       let includeAlphaWhenOpaque = active.value.length === 9;
@@ -312,28 +317,53 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
             ? view.scrollDOM.clientHeight
             : 1;
         const before = view.scrollDOM.scrollTop;
-        view.scrollDOM.scrollTop = before + event.deltaY * multiplier;
-        if (view.scrollDOM.scrollTop === before) return;
+        const delta = event.deltaY * multiplier;
+        const target = clamp(before + delta, 0, view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight);
+        if (target === before) return;
+        view.scrollDOM.scrollBy({ top: delta, behavior: 'smooth' });
         event.preventDefault();
         event.stopPropagation();
+      };
+      let visibilityFrame = 0;
+      const onEditorScroll = () => {
+        if (visibilityFrame) return;
+        visibilityFrame = requestAnimationFrame(() => {
+          visibilityFrame = 0;
+          const anchor = currentSourceSwatch();
+          if (!anchor) {
+            closeHexColorAdjustment(view);
+            return;
+          }
+          const anchorBounds = anchor.getBoundingClientRect();
+          const scrollBounds = view.scrollDOM.getBoundingClientRect();
+          const tooltipSpace = hexColorTooltipSpace(view);
+          const visible = anchorBounds.bottom > Math.max(scrollBounds.top, tooltipSpace.top) &&
+            anchorBounds.top < Math.min(scrollBounds.bottom, tooltipSpace.bottom) &&
+            anchorBounds.right > Math.max(scrollBounds.left, tooltipSpace.left) &&
+            anchorBounds.left < Math.min(scrollBounds.right, tooltipSpace.right);
+          if (!visible) closeHexColorAdjustment(view);
+        });
       };
 
       syncPreview(active.value, true);
       return {
         dom,
-        getCoords: () => active.anchor?.isConnected
-          ? active.anchor.getBoundingClientRect()
-          : view.coordsAtPos(active.from) ?? view.dom.getBoundingClientRect(),
+        getCoords: () => currentSourceSwatch()?.getBoundingClientRect()
+          ?? view.coordsAtPos(active.from)
+          ?? view.dom.getBoundingClientRect(),
         mount() {
           document.addEventListener('pointerdown', onDocumentPointerDown, true);
           document.addEventListener('keydown', onDocumentKeyDown, true);
           dom.addEventListener('wheel', onWheel, { passive: false });
+          view.scrollDOM.addEventListener('scroll', onEditorScroll, { passive: true });
           valueInput.focus();
         },
         destroy() {
           document.removeEventListener('pointerdown', onDocumentPointerDown, true);
           document.removeEventListener('keydown', onDocumentKeyDown, true);
           dom.removeEventListener('wheel', onWheel);
+          view.scrollDOM.removeEventListener('scroll', onEditorScroll);
+          if (visibilityFrame) cancelAnimationFrame(visibilityFrame);
           if (sourceSwatch?.isConnected && view.state.doc.sliceString(active.from, active.to) === active.value) {
             sourceSwatch.style.backgroundColor = active.value;
           }
