@@ -4,7 +4,9 @@ import {
   Decoration,
   WidgetType,
   showTooltip,
+  tooltips,
   type EditorView,
+  type Rect,
   type Tooltip
 } from '@codemirror/view';
 import type { HexColorRange } from '../../../src/shared/hexColorSwatches';
@@ -22,6 +24,20 @@ type HexColorAdjustmentState = {
 const supportedHexColor = /^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i;
 
 const setActiveHexColorAdjustment = StateEffect.define<ActiveHexColorAdjustment | null>();
+
+function hexColorTooltipSpace(view: EditorView): Rect {
+  const documentElement = view.dom.ownerDocument.documentElement;
+  const toolbar = view.dom.ownerDocument.querySelector('.mode-toolbar');
+  const inset = 8;
+  const toolbarBottom = toolbar instanceof HTMLElement ? toolbar.getBoundingClientRect().bottom : 0;
+  const bottom = Math.max(inset, documentElement.clientHeight - inset);
+  return {
+    top: Math.min(bottom, Math.max(inset, toolbarBottom + inset)),
+    left: inset,
+    bottom,
+    right: Math.max(inset, documentElement.clientWidth - inset)
+  };
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -288,6 +304,19 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
         closeHexColorAdjustment(view);
         view.focus();
       };
+      const onWheel = (event: WheelEvent) => {
+        if (event.ctrlKey || event.deltaY === 0) return;
+        const multiplier = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+          ? view.defaultLineHeight
+          : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+            ? view.scrollDOM.clientHeight
+            : 1;
+        const before = view.scrollDOM.scrollTop;
+        view.scrollDOM.scrollTop = before + event.deltaY * multiplier;
+        if (view.scrollDOM.scrollTop === before) return;
+        event.preventDefault();
+        event.stopPropagation();
+      };
 
       syncPreview(active.value, true);
       return {
@@ -298,11 +327,13 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
         mount() {
           document.addEventListener('pointerdown', onDocumentPointerDown, true);
           document.addEventListener('keydown', onDocumentKeyDown, true);
+          dom.addEventListener('wheel', onWheel, { passive: false });
           valueInput.focus();
         },
         destroy() {
           document.removeEventListener('pointerdown', onDocumentPointerDown, true);
           document.removeEventListener('keydown', onDocumentKeyDown, true);
+          dom.removeEventListener('wheel', onWheel);
           if (sourceSwatch?.isConnected && view.state.doc.sliceString(active.from, active.to) === active.value) {
             sourceSwatch.style.backgroundColor = active.value;
           }
@@ -330,7 +361,10 @@ const activeHexColorAdjustmentField = StateField.define<HexColorAdjustmentState 
 });
 
 export function hexColorAdjustmentExtension(): Extension {
-  return activeHexColorAdjustmentField;
+  return [
+    tooltips({ tooltipSpace: hexColorTooltipSpace }),
+    activeHexColorAdjustmentField
+  ];
 }
 
 export function createColorSwatchElement(value: string, uiLanguage: UiLanguage = 'en'): HTMLSpanElement {

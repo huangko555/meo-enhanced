@@ -224,6 +224,82 @@ async function main() {
     await page.evaluate(async () => {
       const app = document.getElementById('app')!;
       app.replaceChildren();
+      const before = Array.from({ length: 40 }, (_, index) => `Before color ${index}`);
+      const after = Array.from({ length: 40 }, (_, index) => `After color ${index}`);
+      const editor = (window as any).TableStabilityHarness.createEditor({
+        parent: app,
+        initialMode: 'live',
+        text: [...before, '| Color |', '| --- |', '| #336699 |', ...after].join('\n'),
+        onApplyChanges() {}
+      });
+      (window as any).tableColorPopoverEditor = editor;
+      const tablePos = before.join('\n').length + 1;
+      editor.view.scrollDOM.scrollTop = editor.view.lineBlockAt(tablePos).top - 150;
+      for (let index = 0; index < 4; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+    await page.click('tbody button.meo-md-color-swatch-interactive[data-color-value="#336699"]');
+    await page.waitForSelector('.meo-hex-color-adjustment');
+    const popoverBeforeWheel = await page.evaluate(async () => {
+      for (let index = 0; index < 2; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const editor = (window as any).tableColorPopoverEditor;
+      const toolbarBounds = document.querySelector('.mode-toolbar')!.getBoundingClientRect();
+      const popoverBounds = document.querySelector('.meo-hex-color-adjustment')!.getBoundingClientRect();
+      const swatchBounds = document.querySelector('tbody button[data-color-value="#336699"]')!.getBoundingClientRect();
+      return {
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        toolbarBottom: toolbarBounds.bottom,
+        popoverTop: popoverBounds.top,
+        popoverHeight: popoverBounds.height,
+        swatchTop: swatchBounds.top,
+        swatchBottom: swatchBounds.bottom
+      };
+    });
+    const popoverAfterSyntheticWheel = await page.evaluate(async () => {
+      document.querySelector('.meo-hex-color-adjustment-hue')!.dispatchEvent(new WheelEvent('wheel', {
+        bubbles: true,
+        cancelable: true,
+        deltaY: 90,
+        deltaMode: WheelEvent.DOM_DELTA_PIXEL
+      }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      return {
+        scrollTop: (window as any).tableColorPopoverEditor.view.scrollDOM.scrollTop
+      };
+    });
+    const colorPopoverBounds = await page.$eval('.meo-hex-color-adjustment-hue', (element) => {
+      const bounds = element.getBoundingClientRect();
+      return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
+    });
+    await page.mouse.move(colorPopoverBounds.x, colorPopoverBounds.y);
+    await page.mouse.wheel({ deltaY: 180 });
+    await page.evaluate(async () => {
+      for (let index = 0; index < 3; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+    const popoverAfterWheel = await page.evaluate(() => ({
+      scrollTop: (window as any).tableColorPopoverEditor.view.scrollDOM.scrollTop
+    }));
+    await page.evaluate(() => (window as any).tableColorPopoverEditor.destroy());
+    if (popoverBeforeWheel.popoverTop < popoverBeforeWheel.toolbarBottom) {
+      throw new Error(`Table HEX dialog overlapped the editor toolbar: ${JSON.stringify(popoverBeforeWheel)}`);
+    }
+    if (popoverAfterSyntheticWheel.scrollTop <= popoverBeforeWheel.scrollTop ||
+      popoverAfterWheel.scrollTop <= popoverAfterSyntheticWheel.scrollTop) {
+      throw new Error(`Wheel over the table HEX dialog did not scroll the document: ${JSON.stringify({
+        before: popoverBeforeWheel.scrollTop,
+        afterSynthetic: popoverAfterSyntheticWheel.scrollTop,
+        after: popoverAfterWheel.scrollTop
+      })}`);
+    }
+
+    await page.evaluate(async () => {
+      const app = document.getElementById('app')!;
+      app.replaceChildren();
       const before = Array.from({ length: 80 }, (_, index) => `Before table ${index}`);
       const after = Array.from({ length: 80 }, (_, index) => `After table ${index}`);
       const editor = (window as any).TableStabilityHarness.createEditor({
