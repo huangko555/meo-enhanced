@@ -358,14 +358,22 @@ export function createInteractiveColorSwatchElement(
   swatch.dataset.colorFrom = String(range.from);
   swatch.setAttribute('aria-label', strings.adjustColor(range.value));
   swatch.setAttribute('aria-haspopup', 'dialog');
+  const openAdjustment = () => {
+    view.dispatch({ effects: setActiveHexColorAdjustment.of({ ...range, anchor: swatch }) });
+  };
   swatch.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
+    // Table selection finishes on pointerup and may refresh the cell preview
+    // before click. Open while this button is still the authoritative anchor.
+    openAdjustment();
   });
   swatch.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
-    view.dispatch({ effects: setActiveHexColorAdjustment.of({ ...range, anchor: swatch }) });
+    // Keyboard and programmatic activation do not produce pointerdown.
+    if (event.detail === 0) openAdjustment();
   });
   return swatch;
 }

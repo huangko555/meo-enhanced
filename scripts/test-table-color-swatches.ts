@@ -21,7 +21,17 @@ async function main() {
   const browser = await launchTestBrowser();
   try {
     const page = await browser.newPage();
-    await page.setContent('<!doctype html><button id="outside">outside</button><div id="app"></div>');
+    await page.setContent(`<!doctype html>
+      <button id="outside">outside</button>
+      <div class="editor-root" data-mode="live">
+        <div class="mode-toolbar">toolbar</div>
+        <div class="editor-notice"></div>
+        <div class="editor-wrapper">
+          <div class="editor-surface">
+            <div id="app" class="editor-host"></div>
+          </div>
+        </div>
+      </div>`);
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
@@ -108,8 +118,40 @@ async function main() {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
     });
-    await page.click('tbody button.meo-md-color-swatch-interactive[data-color-value="#336699"]');
+    const tableSwatchBounds = await page.$eval(
+      'tbody button.meo-md-color-swatch-interactive[data-color-value="#336699"]',
+      (element) => {
+        const bounds = element.getBoundingClientRect();
+        return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
+      }
+    );
+    await page.mouse.move(tableSwatchBounds.x, tableSwatchBounds.y);
+    await page.mouse.down();
+    const openedOnPointerDown = await page.evaluate(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      return Boolean(document.querySelector('.meo-hex-color-adjustment'));
+    });
+    await page.mouse.up();
+    if (!openedOnPointerDown) {
+      throw new Error('Table HEX dialog must open before the table pointer lifecycle can replace the swatch');
+    }
     await page.waitForSelector('.meo-hex-color-adjustment');
+    const tableDialogPresentation = await page.evaluate(() => {
+      const dialog = document.querySelector<HTMLElement>('.meo-hex-color-adjustment')!;
+      const bounds = dialog.getBoundingClientRect();
+      const centerX = Math.max(0, Math.min(innerWidth - 1, bounds.left + bounds.width / 2));
+      const centerY = Math.max(0, Math.min(innerHeight - 1, bounds.top + bounds.height / 2));
+      const topmost = document.elementFromPoint(centerX, centerY);
+      const style = getComputedStyle(dialog);
+      return {
+        visible: style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) > 0 &&
+          bounds.width > 0 && bounds.height > 0,
+        topmost: Boolean(topmost && (topmost === dialog || dialog.contains(topmost)))
+      };
+    });
+    if (!tableDialogPresentation.visible || !tableDialogPresentation.topmost) {
+      throw new Error(`Table HEX dialog was mounted but not visibly interactive: ${JSON.stringify(tableDialogPresentation)}`);
+    }
     const tableInteraction = await page.evaluate(async () => {
       for (let index = 0; index < 2; index += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
