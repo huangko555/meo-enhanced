@@ -271,6 +271,17 @@ export type UiStrings = Readonly<{
   noticeInfoTitle: string;
   noticeWarningTitle: string;
   noticeErrorTitle: string;
+  noticeLiveModeUnavailableTitle: string;
+  noticeEditorUpdateFailedTitle: string;
+  noticeLiveRenderIssueTitle: string;
+  noticeEditorRecoveringTitle: string;
+  noticeEditorLoadFailedTitle: string;
+  noticeDocumentSyncFailedTitle: string;
+  noticeExternalConflictTitle: string;
+  noticeReloadDiskFailedTitle: string;
+  noticeExternalFileModifiedTitle: string;
+  noticeExternalFileDeletedTitle: string;
+  noticePasteImageFailedTitle: string;
   retryLiveMode: string;
   restartEditor: string;
   switchToSourceMode: string;
@@ -443,7 +454,18 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     noticeInfoTitle: 'Status',
     noticeWarningTitle: 'Action needed',
     noticeErrorTitle: 'Editor issue',
-    retryLiveMode: 'Retry Live Mode',
+    noticeLiveModeUnavailableTitle: 'Live Mode unavailable',
+    noticeEditorUpdateFailedTitle: 'Editor update failed',
+    noticeLiveRenderIssueTitle: 'Live rendering interrupted',
+    noticeEditorRecoveringTitle: 'Recovering the editor',
+    noticeEditorLoadFailedTitle: 'Editor failed to load',
+    noticeDocumentSyncFailedTitle: 'Document sync failed',
+    noticeExternalConflictTitle: 'External change detected',
+    noticeReloadDiskFailedTitle: 'Disk reload failed',
+    noticeExternalFileModifiedTitle: 'File changed on disk',
+    noticeExternalFileDeletedTitle: 'File deleted on disk',
+    noticePasteImageFailedTitle: 'Image paste failed',
+    retryLiveMode: 'Retry',
     restartEditor: 'Restart Editor',
     switchToSourceMode: 'Switch to Source',
     liveModeFailure: 'Live mode failed to render this document. Switched to Source mode.',
@@ -611,7 +633,18 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     noticeInfoTitle: '状态',
     noticeWarningTitle: '需要处理',
     noticeErrorTitle: '编辑器问题',
-    retryLiveMode: '重试实时模式',
+    noticeLiveModeUnavailableTitle: '实时模式不可用',
+    noticeEditorUpdateFailedTitle: '编辑器更新失败',
+    noticeLiveRenderIssueTitle: '实时渲染暂时中断',
+    noticeEditorRecoveringTitle: '正在恢复编辑器',
+    noticeEditorLoadFailedTitle: '编辑器加载失败',
+    noticeDocumentSyncFailedTitle: '文档同步失败',
+    noticeExternalConflictTitle: '检测到外部修改',
+    noticeReloadDiskFailedTitle: '磁盘重新加载失败',
+    noticeExternalFileModifiedTitle: '磁盘文件已修改',
+    noticeExternalFileDeletedTitle: '磁盘文件已删除',
+    noticePasteImageFailedTitle: '图片粘贴失败',
+    retryLiveMode: '重试',
     restartEditor: '重启编辑器',
     switchToSourceMode: '切换到源码',
     liveModeFailure: '实时模式无法渲染此文档，已切换到源码模式。',

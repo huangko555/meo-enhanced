@@ -133,11 +133,67 @@ assert.deepEqual(
 assert.equal(chinese.pasteImageFailure('格式错误'), '无法粘贴图片：格式错误');
 assert.deepEqual(
   [english.dismissNotificationButton, english.noticeWarningTitle, english.retryLiveMode, english.restartEditor, english.switchToSourceMode],
-  ['Dismiss', 'Action needed', 'Retry Live Mode', 'Restart Editor', 'Switch to Source']
+  ['Dismiss', 'Action needed', 'Retry', 'Restart Editor', 'Switch to Source']
 );
 assert.deepEqual(
   [chinese.dismissNotificationButton, chinese.noticeWarningTitle, chinese.retryLiveMode, chinese.restartEditor, chinese.switchToSourceMode],
-  ['关闭', '需要处理', '重试实时模式', '重启编辑器', '切换到源码']
+  ['关闭', '需要处理', '重试', '重启编辑器', '切换到源码']
+);
+assert.deepEqual(
+  [
+    english.noticeLiveModeUnavailableTitle,
+    english.noticeEditorUpdateFailedTitle,
+    english.noticeLiveRenderIssueTitle,
+    english.noticeEditorRecoveringTitle,
+    english.noticeEditorLoadFailedTitle,
+    english.noticeDocumentSyncFailedTitle,
+    english.noticeExternalConflictTitle,
+    english.noticeReloadDiskFailedTitle,
+    english.noticeExternalFileModifiedTitle,
+    english.noticeExternalFileDeletedTitle,
+    english.noticePasteImageFailedTitle
+  ],
+  [
+    'Live Mode unavailable',
+    'Editor update failed',
+    'Live rendering interrupted',
+    'Recovering the editor',
+    'Editor failed to load',
+    'Document sync failed',
+    'External change detected',
+    'Disk reload failed',
+    'File changed on disk',
+    'File deleted on disk',
+    'Image paste failed'
+  ]
+);
+assert.deepEqual(
+  [
+    chinese.noticeLiveModeUnavailableTitle,
+    chinese.noticeEditorUpdateFailedTitle,
+    chinese.noticeLiveRenderIssueTitle,
+    chinese.noticeEditorRecoveringTitle,
+    chinese.noticeEditorLoadFailedTitle,
+    chinese.noticeDocumentSyncFailedTitle,
+    chinese.noticeExternalConflictTitle,
+    chinese.noticeReloadDiskFailedTitle,
+    chinese.noticeExternalFileModifiedTitle,
+    chinese.noticeExternalFileDeletedTitle,
+    chinese.noticePasteImageFailedTitle
+  ],
+  [
+    '实时模式不可用',
+    '编辑器更新失败',
+    '实时渲染暂时中断',
+    '正在恢复编辑器',
+    '编辑器加载失败',
+    '文档同步失败',
+    '检测到外部修改',
+    '磁盘重新加载失败',
+    '磁盘文件已修改',
+    '磁盘文件已删除',
+    '图片粘贴失败'
+  ]
 );
 assert.deepEqual(
   [

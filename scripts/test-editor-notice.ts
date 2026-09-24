@@ -19,7 +19,27 @@ async function main() {
   const browser = await launchTestBrowser();
   try {
     const page = await browser.newPage();
-    await page.setContent('<!doctype html><div id="notice" class="editor-notice"></div>');
+    await page.setViewport({ width: 1100, height: 800 });
+    await page.setContent(`<!doctype html>
+      <html data-editor-appearance="dark">
+        <head><style>
+          :root {
+            --meo-background: rgb(30, 30, 30);
+            --meo-foreground: rgb(220, 220, 220);
+            --vscode-editor-background: rgb(30, 30, 30);
+            --vscode-sideBar-background: rgb(37, 37, 38);
+            --vscode-banner-background: rgb(49, 54, 59);
+            --vscode-banner-foreground: rgb(238, 241, 244);
+            --vscode-button-background: rgb(0, 100, 200);
+            --vscode-button-foreground: rgb(255, 255, 255);
+            --vscode-focusBorder: rgb(0, 127, 212);
+            --vscode-notificationsWarningIcon-foreground: rgb(204, 167, 0);
+            --vscode-notificationsErrorIcon-foreground: rgb(241, 76, 76);
+          }
+          body { margin: 0; }
+        </style></head>
+        <body><div class="mode-toolbar"><div id="notice" class="editor-notice"></div></div></body>
+      </html>`);
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
     const result = await page.evaluate(async () => {
@@ -30,6 +50,7 @@ async function main() {
         dismissCount += 1;
       });
       controller.setEditorNotice({
+        title: '实时渲染暂时中断',
         message: 'First warning',
         actions: [{
           id: 'retry',
@@ -40,16 +61,48 @@ async function main() {
       }, 'warning');
       const closeButton = banner.querySelector<HTMLButtonElement>('.editor-notice-close');
       const retryButton = banner.querySelector<HTMLButtonElement>('[data-action="retry"]');
+      const content = banner.querySelector<HTMLElement>('.editor-notice-content');
+      const icon = banner.querySelector<HTMLElement>('.editor-notice-icon');
+      const title = banner.querySelector<HTMLElement>('.editor-notice-title');
+      const message = banner.querySelector<HTMLElement>('.editor-notice-message');
+      const bannerStyle = getComputedStyle(banner);
+      const retryStyle = retryButton ? getComputedStyle(retryButton) : null;
+      const titleRect = title?.getBoundingClientRect();
+      const messageRect = message?.getBoundingClientRect();
+      const bannerRect = banner.getBoundingClientRect();
+      const toolbarBottom = document.querySelector('.mode-toolbar')?.getBoundingClientRect().bottom ?? 0;
       const firstState = {
         visible: banner.classList.contains('is-visible') && !banner.hidden,
-        text: banner.querySelector('.editor-notice-message')?.textContent ?? '',
-        title: banner.querySelector('.editor-notice-title')?.textContent ?? '',
+        text: message?.textContent ?? '',
+        title: title?.textContent ?? '',
         closeText: closeButton?.textContent ?? '',
         closeLabel: closeButton?.getAttribute('aria-label') ?? '',
         closeIsLast: closeButton?.parentElement?.lastElementChild === closeButton,
         role: banner.getAttribute('role'),
         live: banner.getAttribute('aria-live'),
-        retryText: retryButton?.textContent ?? ''
+        retryText: retryButton?.textContent ?? '',
+        fontSize: bannerStyle.fontSize,
+        contentHeight: content?.getBoundingClientRect().height ?? 0,
+        titleTop: titleRect?.top ?? 0,
+        messageTop: messageRect?.top ?? 0,
+        background: bannerStyle.backgroundColor,
+        expectedBackground: getComputedStyle(document.documentElement).getPropertyValue('--vscode-banner-background').trim(),
+        editorBackground: getComputedStyle(document.documentElement).getPropertyValue('--meo-background').trim(),
+        primaryBackground: retryStyle?.backgroundColor ?? '',
+        primaryForeground: retryStyle?.color ?? '',
+        primaryBoxShadow: retryStyle?.boxShadow ?? '',
+        primaryHeight: retryButton?.getBoundingClientRect().height ?? 0,
+        productPrimaryBackground: getComputedStyle(document.documentElement).getPropertyValue('--vscode-button-background').trim(),
+        expectedPrimaryForeground: getComputedStyle(document.documentElement).getPropertyValue('--vscode-button-foreground').trim(),
+        iconBackground: icon ? getComputedStyle(icon).backgroundColor : '',
+        iconWidth: icon?.getBoundingClientRect().width ?? 0,
+        iconColor: icon ? getComputedStyle(icon).color : '',
+        expectedIconColor: getComputedStyle(document.documentElement).getPropertyValue('--vscode-notificationsWarningIcon-foreground').trim(),
+        borderLeftWidth: bannerStyle.borderLeftWidth,
+        left: bannerRect.left,
+        right: bannerRect.right,
+        top: bannerRect.top,
+        toolbarBottom
       };
       retryButton?.click();
       await Promise.resolve();
@@ -62,7 +115,9 @@ async function main() {
         title: banner.querySelector('.editor-notice-title')?.textContent ?? '',
         kind: banner.dataset.kind,
         role: banner.getAttribute('role'),
-        live: banner.getAttribute('aria-live')
+        live: banner.getAttribute('aria-live'),
+        background: getComputedStyle(banner).backgroundColor,
+        iconColor: getComputedStyle(banner.querySelector('.editor-notice-icon') as HTMLElement).color
       };
       controller.clearEditorNotice();
 
@@ -94,18 +149,36 @@ async function main() {
     });
 
     if (!result.firstState.visible || result.firstState.text !== 'First warning' ||
-      result.firstState.title !== '需要处理' || result.firstState.closeText !== '关闭' ||
+      result.firstState.title !== '实时渲染暂时中断' || result.firstState.closeText !== '关闭' ||
       result.firstState.closeLabel !== '关闭通知' || !result.firstState.closeIsLast ||
       result.firstState.role !== 'status' || result.firstState.live !== 'polite' ||
       result.firstState.retryText !== '重试') {
       throw new Error(`notice close control was incorrect: ${JSON.stringify(result.firstState)}`);
+    }
+    if (result.firstState.fontSize !== '14px' || result.firstState.contentHeight > 21 ||
+      Math.abs(result.firstState.titleTop - result.firstState.messageTop) > 2 ||
+      result.firstState.background === result.firstState.editorBackground ||
+      result.firstState.background !== result.firstState.expectedBackground ||
+      result.firstState.primaryBackground === 'rgba(0, 0, 0, 0)' ||
+      result.firstState.primaryBackground === result.firstState.background ||
+      result.firstState.primaryBackground !== result.firstState.productPrimaryBackground ||
+      result.firstState.primaryForeground !== result.firstState.expectedPrimaryForeground ||
+      result.firstState.primaryBoxShadow !== 'none' || result.firstState.primaryHeight !== 28 ||
+      result.firstState.iconBackground !== 'rgba(0, 0, 0, 0)' || result.firstState.iconWidth !== 18 ||
+      result.firstState.iconColor !== result.firstState.expectedIconColor ||
+      result.firstState.borderLeftWidth !== '0px' || result.firstState.left !== 0 ||
+      result.firstState.right !== 1100 || result.firstState.top > result.firstState.toolbarBottom ||
+      result.firstState.top < result.firstState.toolbarBottom - 4) {
+      throw new Error(`notice presentation was incorrect: ${JSON.stringify(result.firstState)}`);
     }
     if (!result.dismissed || result.dismissCount !== 1 || result.actionCount !== 1) {
       throw new Error('notice actions could not be invoked or dismissed');
     }
     if (!result.secondState.visible || result.secondState.text !== 'Second warning' ||
       result.secondState.title !== '编辑器问题' || result.secondState.kind !== 'error' ||
-      result.secondState.role !== 'alert' || result.secondState.live !== 'assertive') {
+      result.secondState.role !== 'alert' || result.secondState.live !== 'assertive' ||
+      result.secondState.background !== result.firstState.background ||
+      result.secondState.iconColor === result.firstState.iconColor) {
       throw new Error(`notice did not reopen: ${JSON.stringify(result.secondState)}`);
     }
     if (result.persistentText !== '磁盘文件已修改' || result.failureText !== '临时错误' ||

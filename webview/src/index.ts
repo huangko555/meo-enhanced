@@ -2381,6 +2381,7 @@ const setEditorTextSafely = async (
         logWebviewRenderError('setText.retryInLive', retryInLiveError, { context });
         if (!shouldAutoFallbackToSourceForLiveError(retryInLiveError)) {
           failureNotice.setFailureNotice(() => ({
+            title: activeUiStrings.noticeLiveRenderIssueTitle,
             message: activeUiStrings.transientUpdateFailure,
             actions: [switchToSourceAction()]
           }), 'warning');
@@ -2389,6 +2390,7 @@ const setEditorTextSafely = async (
       }
 
       failureNotice.setFailureNotice(() => ({
+        title: activeUiStrings.noticeLiveModeUnavailableTitle,
         message: activeUiStrings.liveModeFailure,
         actions: [retryLiveModeAction()]
       }), 'warning');
@@ -2401,12 +2403,18 @@ const setEditorTextSafely = async (
         return true;
       } catch (retryError) {
         logWebviewRenderError('setText.retryInSource', retryError, { context });
-        failureNotice.setFailureNotice(() => activeUiStrings.editorUpdateFailure, 'error');
+        failureNotice.setFailureNotice(() => ({
+          title: activeUiStrings.noticeEditorUpdateFailedTitle,
+          message: activeUiStrings.editorUpdateFailure
+        }), 'error');
         return false;
       }
     }
 
-    failureNotice.setFailureNotice(() => activeUiStrings.editorUpdateFailure, 'error');
+    failureNotice.setFailureNotice(() => ({
+      title: activeUiStrings.noticeEditorUpdateFailedTitle,
+      message: activeUiStrings.editorUpdateFailure
+    }), 'error');
     return false;
   }
 };
@@ -2493,9 +2501,22 @@ const documentSessionAdapter = createDocumentSessionWebviewAdapter({
   showNotice: (notice) => {
     pendingReloadPreviewViewport = null;
     const resolveMessage = () => {
-      if (notice === 'external-conflict') return activeUiStrings.externalConflictNotice;
-      if (notice === 'resync-failed') return activeUiStrings.resyncFailureNotice;
-      return activeUiStrings.reloadDiskFailureNotice;
+      if (notice === 'external-conflict') {
+        return {
+          title: activeUiStrings.noticeExternalConflictTitle,
+          message: activeUiStrings.externalConflictNotice
+        };
+      }
+      if (notice === 'resync-failed') {
+        return {
+          title: activeUiStrings.noticeDocumentSyncFailedTitle,
+          message: activeUiStrings.resyncFailureNotice
+        };
+      }
+      return {
+        title: activeUiStrings.noticeReloadDiskFailedTitle,
+        message: activeUiStrings.reloadDiskFailureNotice
+      };
     };
     failureNotice.setFailureNotice(resolveMessage, 'warning');
   },
@@ -2812,23 +2833,30 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
   showNotice(notice) {
     if (notice === 'transient-live') {
       failureNotice.setFailureNotice(() => ({
+        title: activeUiStrings.noticeLiveRenderIssueTitle,
         message: activeUiStrings.transientModeFailure,
         actions: [retryLiveModeAction(), switchToSourceAction()]
       }), 'warning');
     } else if (notice === 'live-fallback') {
       failureNotice.setFailureNotice(() => ({
+        title: activeUiStrings.noticeLiveModeUnavailableTitle,
         message: activeUiStrings.liveModeFailure,
         actions: [retryLiveModeAction()]
       }), 'warning');
     } else if (notice === 'mount-retry') {
-      failureNotice.setFailureNotice(() => activeUiStrings.transientLoadRetry, 'info');
+      failureNotice.setFailureNotice(() => ({
+        title: activeUiStrings.noticeEditorRecoveringTitle,
+        message: activeUiStrings.transientLoadRetry
+      }), 'info');
     } else if (notice === 'mount-failure') {
       failureNotice.setFailureNotice(() => ({
+        title: activeUiStrings.noticeEditorLoadFailedTitle,
         message: activeUiStrings.transientLoadFailure,
         actions: [restartEditorAction(), switchToSourceAction()]
       }), 'warning');
     } else {
       failureNotice.setFailureNotice(() => ({
+        title: activeUiStrings.noticeEditorUpdateFailedTitle,
         message: activeUiStrings.editorUpdateFailure,
         actions: editorModeApplication.getState().editorMount === 'unmounted'
           ? getActiveEditorMode() === 'source'
@@ -3057,8 +3085,14 @@ window.addEventListener('message', (event) => {
     } else {
       failureNotice.setPersistentNotice(
         () => message.status === 'deleted-while-dirty'
-          ? activeUiStrings.externalFileDeletedNotice
-          : activeUiStrings.externalFileModifiedNotice,
+          ? {
+              title: activeUiStrings.noticeExternalFileDeletedTitle,
+              message: activeUiStrings.externalFileDeletedNotice
+            }
+          : {
+              title: activeUiStrings.noticeExternalFileModifiedTitle,
+              message: activeUiStrings.externalFileModifiedNotice
+            },
         'warning'
       );
     }
@@ -3204,7 +3238,10 @@ window.addEventListener('paste', async (event) => {
     lineNumber: lineNumberAtPaste,
     lineOffset: lineOffsetAtPaste,
     onError: (message) => failureNotice.setFailureNotice(
-      () => activeUiStrings.pasteImageFailure(message),
+      () => ({
+        title: activeUiStrings.noticePasteImageFailedTitle,
+        message: activeUiStrings.pasteImageFailure(message)
+      }),
       'warning'
     )
   });
