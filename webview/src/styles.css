@@ -5080,7 +5080,7 @@ body.outline-resizing .preview-frame {
   width: 13px;
   min-width: 13px;
   max-width: 13px;
-  height: 100%;
+  height: calc(var(--meo-active-editor-line-height) * 1em);
   color: var(--git-added);
   pointer-events: none;
   user-select: none;
@@ -5108,7 +5108,7 @@ body.outline-resizing .preview-frame {
 
 .cm-editor:not(:has(.cm-lineNumbers)) .meo-git-diff-sign-gutter-cell {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-end;
 }
 

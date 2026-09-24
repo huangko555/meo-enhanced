@@ -147,6 +147,40 @@ async function assertDetailRowAlignment(page: Page, label: string): Promise<void
   if (mismatches.length) throw new Error(`${label} detail gutters were misaligned: ${JSON.stringify(mismatches)}`);
 }
 
+async function assertWrappedDetailSignsMatchFirstVisualLine(page: Page, label: string): Promise<void> {
+  const mismatches = await page.evaluate(() => (['original', 'current'] as const).flatMap((kind) => {
+    const row = document.querySelector<HTMLElement>(`.meo-git-diff-${kind}-line`);
+    const sign = document.querySelector<HTMLElement>(`.meo-git-diff-sign.is-${kind}`);
+    const lineNumber = document.querySelector<HTMLElement>(
+      `.cm-lineNumbers .meo-git-diff-${kind}-gutter-row`
+    );
+    if (!row || !sign) return [{ kind, missing: true }];
+    const rowRect = row.getBoundingClientRect();
+    const lineHeight = Number.parseFloat(getComputedStyle(row).lineHeight);
+    const signRect = sign.getBoundingClientRect();
+    const numberRect = lineNumber ? (() => {
+      const range = document.createRange();
+      range.selectNodeContents(lineNumber);
+      return range.getBoundingClientRect();
+    })() : null;
+    const geometry = {
+      kind,
+      visualRows: Math.round(rowRect.height / lineHeight),
+      signCenter: signRect.top + signRect.height / 2,
+      firstLineCenter: rowRect.top + lineHeight / 2,
+      lineNumberCenter: numberRect ? numberRect.top + numberRect.height / 2 : null
+    };
+    return geometry.visualRows < 2 ||
+      Math.abs(geometry.signCenter - geometry.firstLineCenter) > 1 ||
+      (geometry.lineNumberCenter !== null && Math.abs(geometry.signCenter - geometry.lineNumberCenter) > 2)
+      ? [geometry]
+      : [];
+  }));
+  if (mismatches.length) {
+    throw new Error(`${label} diff signs did not align with the first visual line: ${JSON.stringify(mismatches)}`);
+  }
+}
+
 async function assertConstrainedContentMatchesWindow(page: Page): Promise<void> {
   for (const mode of ['live', 'source'] as const) {
     for (const numbers of ['on', 'off'] as const) {
@@ -806,10 +840,12 @@ async function main() {
       (window as any).__editor.setGitGutterVisible(true);
     });
     await waitForFrames(page, 3);
+    await assertWrappedDetailSignsMatchFirstVisualLine(page, 'wrapped modified without line numbers');
     await page.evaluate(() => {
       (window as any).__editor.setSourceLineNumbers('on');
     });
     await waitForFrames(page, 4);
+    await assertWrappedDetailSignsMatchFirstVisualLine(page, 'wrapped modified with line numbers');
 
     await page.evaluate(() => {
       const editor = (window as any).__editor;
