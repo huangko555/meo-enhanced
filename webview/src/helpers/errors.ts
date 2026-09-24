@@ -1,5 +1,20 @@
+export type EditorNoticeKind = 'info' | 'warning' | 'error';
+
+export type EditorNoticeAction = Readonly<{
+  id: string;
+  label: string;
+  run: () => void | Promise<void>;
+  emphasis?: 'primary' | 'secondary';
+}>;
+
+export type EditorNoticeContent = Readonly<{
+  message: string;
+  title?: string;
+  actions?: readonly EditorNoticeAction[];
+}>;
+
 export interface EditorNotice {
-  setEditorNotice: (message: string, kind?: string) => void;
+  setEditorNotice: (notice: string | EditorNoticeContent, kind?: EditorNoticeKind) => void;
   clearEditorNotice: () => void;
 }
 
@@ -42,16 +57,17 @@ export const logWebviewRenderError = (context: string, error: unknown, extra: Re
 
 export interface FailureNoticeState {
   message: NoticeMessage;
-  kind: string;
+  kind: EditorNoticeKind;
 }
 
-export type NoticeMessage = string | (() => string);
+export type NoticeContent = string | EditorNoticeContent;
+export type NoticeMessage = NoticeContent | (() => NoticeContent);
 
 export const createFailureNoticeManager = (notice: EditorNotice) => {
   let failureNotice: FailureNoticeState = { message: '', kind: 'error' };
   let persistentNotice: FailureNoticeState = { message: '', kind: 'warning' };
 
-  const resolveMessage = (message: NoticeMessage): string => (
+  const resolveMessage = (message: NoticeMessage): NoticeContent => (
     typeof message === 'function' ? message() : message
   );
 
@@ -64,7 +80,7 @@ export const createFailureNoticeManager = (notice: EditorNotice) => {
     notice.clearEditorNotice();
   };
 
-  const setFailureNotice = (message: NoticeMessage, kind: 'error' | 'warning' = 'error'): void => {
+  const setFailureNotice = (message: NoticeMessage, kind: EditorNoticeKind = 'error'): void => {
     failureNotice = { message, kind };
     updateEditorNotice();
   };
@@ -77,7 +93,7 @@ export const createFailureNoticeManager = (notice: EditorNotice) => {
     updateEditorNotice();
   };
 
-  const setPersistentNotice = (message: NoticeMessage, kind: 'warning' = 'warning'): void => {
+  const setPersistentNotice = (message: NoticeMessage, kind: EditorNoticeKind = 'warning'): void => {
     persistentNotice = { message, kind };
     updateEditorNotice();
   };

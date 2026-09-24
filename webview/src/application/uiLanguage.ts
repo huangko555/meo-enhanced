@@ -267,6 +267,13 @@ export type UiStrings = Readonly<{
   comparedWith: (baseline: string) => string;
   changesComparedWith: (summary: string, baseline: string) => string;
   dismissNotification: string;
+  dismissNotificationButton: string;
+  noticeInfoTitle: string;
+  noticeWarningTitle: string;
+  noticeErrorTitle: string;
+  retryLiveMode: string;
+  restartEditor: string;
+  switchToSourceMode: string;
   liveModeFailure: string;
   editorUpdateFailure: string;
   transientUpdateFailure: string;
@@ -432,6 +439,13 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     comparedWith: (baseline: string) => `vs. ${baseline}`,
     changesComparedWith: (summary: string, baseline: string) => `${summary} · Compared with ${baseline}`,
     dismissNotification: 'Dismiss notification',
+    dismissNotificationButton: 'Dismiss',
+    noticeInfoTitle: 'Status',
+    noticeWarningTitle: 'Action needed',
+    noticeErrorTitle: 'Editor issue',
+    retryLiveMode: 'Retry Live Mode',
+    restartEditor: 'Restart Editor',
+    switchToSourceMode: 'Switch to Source',
     liveModeFailure: 'Live mode failed to render this document. Switched to Source mode.',
     editorUpdateFailure: 'Editor failed to update this document. Try reopening the file.',
     transientUpdateFailure: 'Live mode hit a transient render error while updating. Try again.',
@@ -593,6 +607,13 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     comparedWith: (baseline: string) => `与${baseline}对比`,
     changesComparedWith: (summary: string, baseline: string) => `${summary} · 与${baseline}对比`,
     dismissNotification: '关闭通知',
+    dismissNotificationButton: '关闭',
+    noticeInfoTitle: '状态',
+    noticeWarningTitle: '需要处理',
+    noticeErrorTitle: '编辑器问题',
+    retryLiveMode: '重试实时模式',
+    restartEditor: '重启编辑器',
+    switchToSourceMode: '切换到源码',
     liveModeFailure: '实时模式无法渲染此文档，已切换到源码模式。',
     editorUpdateFailure: '编辑器无法更新此文档，请重新打开文件。',
     transientUpdateFailure: '实时模式更新时遇到临时渲染错误，请重试。',

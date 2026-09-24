@@ -230,7 +230,7 @@ export function createEditorModeApplication(): EditorModeApplication {
       return [];
     }
     const manual = source === 'user' || source === 'host-command';
-    if (!options.force && targetMode === requestedMode) {
+    if (!options.force && targetMode === requestedMode && editorMount !== 'unmounted') {
       const pendingTargetMode = pendingTransition?.fallbackToSource
         ? 'source'
         : pendingTransition?.requestedMode;

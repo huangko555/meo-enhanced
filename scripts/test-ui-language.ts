@@ -132,6 +132,14 @@ assert.deepEqual(
 );
 assert.equal(chinese.pasteImageFailure('格式错误'), '无法粘贴图片：格式错误');
 assert.deepEqual(
+  [english.dismissNotificationButton, english.noticeWarningTitle, english.retryLiveMode, english.restartEditor, english.switchToSourceMode],
+  ['Dismiss', 'Action needed', 'Retry Live Mode', 'Restart Editor', 'Switch to Source']
+);
+assert.deepEqual(
+  [chinese.dismissNotificationButton, chinese.noticeWarningTitle, chinese.retryLiveMode, chinese.restartEditor, chinese.switchToSourceMode],
+  ['关闭', '需要处理', '重试实时模式', '重启编辑器', '切换到源码']
+);
+assert.deepEqual(
   [
     chinese.externalFileModifiedNotice,
     chinese.externalFileDeletedNotice,

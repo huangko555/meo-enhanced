@@ -7,7 +7,7 @@ import { initializeLocalLinkHandling, requestLocalLinkStatuses, scheduleLocalLin
 import { setGitDiffLineHighlightsEnabled } from './helpers/gitDiffLineHighlights';
 import { applyBuiltInVisualBaseline } from './helpers/theme';
 import { setShikiTheme } from './helpers/shikiHighlighter';
-import { createFailureNoticeManager, getErrorMessage, isTransientMermaidRuntimeError, shouldAutoFallbackToSourceForLiveError, logWebviewRenderError, type FailureNoticeManager } from './helpers/errors';
+import { createFailureNoticeManager, getErrorMessage, isTransientMermaidRuntimeError, shouldAutoFallbackToSourceForLiveError, logWebviewRenderError, type EditorNoticeAction, type FailureNoticeManager } from './helpers/errors';
 import { isPrimaryModifier, isShortcutKey, handleEditorShortcut, type ShortcutHandlerContext } from './helpers/shortcuts';
 import { createFindPanel, createFindPanelController, type FindPanelController } from './helpers/findPanel';
 import { createSelectionMenu, createSelectionMenuController, type SelectionMenuController } from './helpers/selectionMenu';
@@ -1918,6 +1918,31 @@ const LIVE_IMAGE_REVEAL_WAIT_MS = 120;
 const failureNotice = createFailureNoticeManager(editorNotice);
 handleEditorNoticeDismiss = failureNotice.dismissCurrentNotice;
 
+const requestModeFromNotice = async (mode: 'live' | 'source'): Promise<void> => {
+  failureNotice.clearFailureNotice();
+  await editorModeRuntime.dispatch({ type: 'requestMode', mode, source: 'user' });
+};
+
+const retryLiveModeAction = (): EditorNoticeAction => ({
+  id: 'retry-live-mode',
+  label: activeUiStrings.retryLiveMode,
+  emphasis: 'primary',
+  run: () => requestModeFromNotice('live')
+});
+
+const restartEditorAction = (): EditorNoticeAction => ({
+  id: 'restart-editor',
+  label: activeUiStrings.restartEditor,
+  emphasis: 'primary',
+  run: () => requestModeFromNotice(getActiveEditableMode())
+});
+
+const switchToSourceAction = (): EditorNoticeAction => ({
+  id: 'switch-to-source',
+  label: activeUiStrings.switchToSourceMode,
+  run: () => requestModeFromNotice('source')
+});
+
 const syncEditorFontSizeControls = (): void => {
   const custom = editorFontSizePreference.mode === 'custom';
   editorFontSizeModeControl.setActive(editorFontSizePreference.mode);
@@ -2355,12 +2380,18 @@ const setEditorTextSafely = async (
       } catch (retryInLiveError) {
         logWebviewRenderError('setText.retryInLive', retryInLiveError, { context });
         if (!shouldAutoFallbackToSourceForLiveError(retryInLiveError)) {
-          failureNotice.setFailureNotice(() => activeUiStrings.transientUpdateFailure, 'warning');
+          failureNotice.setFailureNotice(() => ({
+            message: activeUiStrings.transientUpdateFailure,
+            actions: [switchToSourceAction()]
+          }), 'warning');
           return false;
         }
       }
 
-      failureNotice.setFailureNotice(() => activeUiStrings.liveModeFailure, 'warning');
+      failureNotice.setFailureNotice(() => ({
+        message: activeUiStrings.liveModeFailure,
+        actions: [retryLiveModeAction()]
+      }), 'warning');
       await editorModeRuntime.dispatch({
         type: 'requestMode', mode: 'source', source: 'render-failure', basisManualIntentId
       });
@@ -2780,15 +2811,31 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
   postMode: (mode) => vscode.postMessage({ type: 'setMode', mode }),
   showNotice(notice) {
     if (notice === 'transient-live') {
-      failureNotice.setFailureNotice(() => activeUiStrings.transientModeFailure, 'warning');
+      failureNotice.setFailureNotice(() => ({
+        message: activeUiStrings.transientModeFailure,
+        actions: [retryLiveModeAction(), switchToSourceAction()]
+      }), 'warning');
     } else if (notice === 'live-fallback') {
-      failureNotice.setFailureNotice(() => activeUiStrings.liveModeFailure, 'warning');
+      failureNotice.setFailureNotice(() => ({
+        message: activeUiStrings.liveModeFailure,
+        actions: [retryLiveModeAction()]
+      }), 'warning');
     } else if (notice === 'mount-retry') {
-      failureNotice.setFailureNotice(() => activeUiStrings.transientLoadRetry, 'warning');
+      failureNotice.setFailureNotice(() => activeUiStrings.transientLoadRetry, 'info');
     } else if (notice === 'mount-failure') {
-      failureNotice.setFailureNotice(() => activeUiStrings.transientLoadFailure, 'warning');
+      failureNotice.setFailureNotice(() => ({
+        message: activeUiStrings.transientLoadFailure,
+        actions: [restartEditorAction(), switchToSourceAction()]
+      }), 'warning');
     } else {
-      failureNotice.setFailureNotice(() => activeUiStrings.editorUpdateFailure, 'error');
+      failureNotice.setFailureNotice(() => ({
+        message: activeUiStrings.editorUpdateFailure,
+        actions: editorModeApplication.getState().editorMount === 'unmounted'
+          ? getActiveEditorMode() === 'source'
+            ? [restartEditorAction()]
+            : [restartEditorAction(), switchToSourceAction()]
+          : getActiveEditorMode() === 'live' ? [switchToSourceAction()] : []
+      }), 'error');
     }
     failureNotice.updateEditorNotice();
   },

@@ -339,6 +339,13 @@ const exhaustedMountEffects = mountRetry.dispatch({
 assert.deepEqual(effectTypes(exhaustedMountEffects), ['showNotice']);
 assert.deepEqual(exhaustedMountEffects[0], { type: 'showNotice', notice: 'mount-failure' });
 assert.equal(mountRetry.getState().editorMount, 'unmounted', 'mount retry must be bounded');
+const manualRestartEffects = mountRetry.dispatch({ type: 'requestMode', mode: 'live', source: 'user' });
+assert.deepEqual(
+  effectTypes(manualRestartEffects),
+  ['scheduleEditorMount', 'commitTransientEdits', 'presentMode'],
+  'an explicit retry must restart an editor that exhausted automatic mount recovery'
+);
+assert.equal(mountRetry.getState().editorMount, 'scheduled');
 
 const mountFallback = createEditorModeApplication();
 mountFallback.dispatch({ type: 'initialize', hostMode: 'live' });
