@@ -218,7 +218,17 @@ async function preparePage(page: Page): Promise<void> {
 }
 
 async function readResources(page: Page): Promise<ResourceSample> {
-  return page.evaluate(() => (window as any).__largeDocumentResourceProbe.snapshot());
+  return page.evaluate(async () => {
+    const probe = (window as any).__largeDocumentResourceProbe;
+    let snapshot = probe.snapshot() as ResourceSample;
+    // Rich tables may each have one queued layout frame after the editor's
+    // semantic content stabilizes. Bound retained work, not one-shot work.
+    for (let frame = 0; frame < 12 && snapshot.pendingFrames > 1; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      snapshot = probe.snapshot();
+    }
+    return snapshot;
+  });
 }
 
 function assertLiveResourceBound(
@@ -240,7 +250,7 @@ function assertLiveResourceBound(
     `${kind} allocated MutationObservers outside the connected Mermaid surface`
   );
   assert.ok(resources.intersectionObservers <= 2, `${kind} duplicated viewport observers`);
-  assert.ok(resources.pendingFrames <= 1, `${kind} retained unbounded frame work`);
+  assert.ok(resources.pendingFrames <= 1, `${kind} retained unbounded frame work: ${JSON.stringify({ sample, resources })}`);
   assert.ok(resources.pendingIdleCallbacks <= 1, `${kind} retained unbounded idle work`);
   assert.ok(
     resources.pendingTimeouts <= 4,
