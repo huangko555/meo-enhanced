@@ -28,8 +28,8 @@ async function main() {
             --meo-foreground: rgb(220, 220, 220);
             --vscode-editor-background: rgb(30, 30, 30);
             --vscode-sideBar-background: rgb(37, 37, 38);
-            --vscode-banner-background: rgb(49, 54, 59);
-            --vscode-banner-foreground: rgb(238, 241, 244);
+            --vscode-banner-background: rgba(73, 82, 91, 0.58);
+            --vscode-banner-foreground: rgba(238, 241, 244, 0.72);
             --vscode-button-background: rgb(0, 100, 200);
             --vscode-button-foreground: rgb(255, 255, 255);
             --vscode-focusBorder: rgb(0, 127, 212);
@@ -43,10 +43,12 @@ async function main() {
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
     const result = await page.evaluate(async () => {
+      const harness = (window as any).EditorNoticeHarness;
+      harness.applyBuiltInVisualBaseline('dark');
       const banner = document.getElementById('notice') as HTMLElement;
       let dismissCount = 0;
       let actionCount = 0;
-      const controller = (window as any).EditorNoticeHarness.createEditorNoticeController(banner, 'zh-CN', () => {
+      const controller = harness.createEditorNoticeController(banner, 'zh-CN', () => {
         dismissCount += 1;
       });
       controller.setEditorNotice({
@@ -82,28 +84,39 @@ async function main() {
         live: banner.getAttribute('aria-live'),
         retryText: retryButton?.textContent ?? '',
         fontSize: bannerStyle.fontSize,
+        opacity: bannerStyle.opacity,
         contentHeight: content?.getBoundingClientRect().height ?? 0,
         titleTop: titleRect?.top ?? 0,
         messageTop: messageRect?.top ?? 0,
         background: bannerStyle.backgroundColor,
-        expectedBackground: getComputedStyle(document.documentElement).getPropertyValue('--vscode-banner-background').trim(),
+        injectedBannerBackground: getComputedStyle(document.documentElement).getPropertyValue('--vscode-banner-background').trim(),
         editorBackground: getComputedStyle(document.documentElement).getPropertyValue('--meo-background').trim(),
+        titleColor: title ? getComputedStyle(title).color : '',
+        messageColor: message ? getComputedStyle(message).color : '',
         primaryBackground: retryStyle?.backgroundColor ?? '',
         primaryForeground: retryStyle?.color ?? '',
         primaryBoxShadow: retryStyle?.boxShadow ?? '',
         primaryHeight: retryButton?.getBoundingClientRect().height ?? 0,
-        productPrimaryBackground: getComputedStyle(document.documentElement).getPropertyValue('--vscode-button-background').trim(),
-        expectedPrimaryForeground: getComputedStyle(document.documentElement).getPropertyValue('--vscode-button-foreground').trim(),
         iconBackground: icon ? getComputedStyle(icon).backgroundColor : '',
         iconWidth: icon?.getBoundingClientRect().width ?? 0,
         iconColor: icon ? getComputedStyle(icon).color : '',
-        expectedIconColor: getComputedStyle(document.documentElement).getPropertyValue('--vscode-notificationsWarningIcon-foreground').trim(),
         borderLeftWidth: bannerStyle.borderLeftWidth,
         left: bannerRect.left,
         right: bannerRect.right,
         top: bannerRect.top,
         toolbarBottom
       };
+      harness.applyBuiltInVisualBaseline('light');
+      const lightState = {
+        appearance: document.documentElement.dataset.editorAppearance,
+        background: getComputedStyle(banner).backgroundColor,
+        titleColor: title ? getComputedStyle(title).color : '',
+        messageColor: message ? getComputedStyle(message).color : '',
+        primaryBackground: retryButton ? getComputedStyle(retryButton).backgroundColor : '',
+        primaryForeground: retryButton ? getComputedStyle(retryButton).color : '',
+        iconColor: icon ? getComputedStyle(icon).color : ''
+      };
+      harness.applyBuiltInVisualBaseline('dark');
       retryButton?.click();
       await Promise.resolve();
       closeButton?.click();
@@ -166,7 +179,7 @@ async function main() {
       keyedManager.setPersistentNotice('deleted on disk', 'warning', 'external-file-deleted');
       const differentPersistentOccurrenceShown = keyedRenders === 5;
       return {
-        firstState, dismissed, dismissCount, actionCount, secondState,
+        firstState, lightState, dismissed, dismissCount, actionCount, secondState,
         localizedChrome,
         persistentText, failureText, restoredPersistentText, relocalizedText, persistentDismissed,
         duplicateCoalesced, dismissedOccurrenceSuppressed,
@@ -182,21 +195,31 @@ async function main() {
       result.firstState.retryText !== '重试') {
       throw new Error(`notice close control was incorrect: ${JSON.stringify(result.firstState)}`);
     }
-    if (result.firstState.fontSize !== '14px' || result.firstState.contentHeight > 21 ||
+    if (result.firstState.fontSize !== '14px' || result.firstState.opacity !== '1' ||
+      result.firstState.contentHeight > 21 ||
       Math.abs(result.firstState.titleTop - result.firstState.messageTop) > 2 ||
       result.firstState.background === result.firstState.editorBackground ||
-      result.firstState.background !== result.firstState.expectedBackground ||
+      result.firstState.background === result.firstState.injectedBannerBackground ||
+      result.firstState.messageColor !== result.firstState.titleColor ||
       result.firstState.primaryBackground === 'rgba(0, 0, 0, 0)' ||
       result.firstState.primaryBackground === result.firstState.background ||
-      result.firstState.primaryBackground !== result.firstState.productPrimaryBackground ||
-      result.firstState.primaryForeground !== result.firstState.expectedPrimaryForeground ||
       result.firstState.primaryBoxShadow !== 'none' || result.firstState.primaryHeight !== 28 ||
       result.firstState.iconBackground !== 'rgba(0, 0, 0, 0)' || result.firstState.iconWidth !== 18 ||
-      result.firstState.iconColor !== result.firstState.expectedIconColor ||
       result.firstState.borderLeftWidth !== '0px' || result.firstState.left !== 0 ||
       result.firstState.right !== 1100 || result.firstState.top > result.firstState.toolbarBottom ||
       result.firstState.top < result.firstState.toolbarBottom - 4) {
       throw new Error(`notice presentation was incorrect: ${JSON.stringify(result.firstState)}`);
+    }
+    if (result.lightState.appearance !== 'light' ||
+      result.lightState.background === result.firstState.background ||
+      result.lightState.titleColor === result.firstState.titleColor ||
+      result.lightState.messageColor !== result.lightState.titleColor ||
+      result.lightState.primaryBackground === result.firstState.primaryBackground ||
+      result.lightState.iconColor === result.firstState.iconColor) {
+      throw new Error(`notice did not follow the editor appearance: ${JSON.stringify({
+        dark: result.firstState,
+        light: result.lightState
+      })}`);
     }
     if (!result.dismissed || result.dismissCount !== 1 || result.actionCount !== 1) {
       throw new Error('notice actions could not be invoked or dismissed');

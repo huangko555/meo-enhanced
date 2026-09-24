@@ -306,17 +306,17 @@ body {
   left: 0;
   right: 0;
   box-sizing: border-box;
-  --editor-notice-accent: var(--vscode-notificationsInfoIcon-foreground, #3794ff);
+  --editor-notice-accent: var(--meo-notice-info, #3794ff);
   --editor-notice-surface: var(
-    --vscode-banner-background,
+    --meo-notice-surface,
     color-mix(
       in srgb,
-      var(--vscode-sideBar-background, var(--meo-background)) 82%,
-      var(--meo-foreground) 18%
+      var(--meo-surface-background, var(--vscode-sideBar-background, var(--meo-background))) 88%,
+      var(--meo-foreground) 12%
     )
   );
   --editor-notice-foreground: var(
-    --vscode-banner-foreground,
+    --meo-notice-foreground,
     var(--meo-foreground, var(--vscode-editor-foreground))
   );
   --editor-notice-hover-surface: color-mix(
@@ -325,15 +325,15 @@ body {
     var(--editor-notice-foreground) 10%
   );
   --editor-notice-action-surface: var(
-    --vscode-button-background,
+    --meo-notice-action-surface,
     #0e639c
   );
   --editor-notice-action-foreground: var(
-    --vscode-button-foreground,
+    --meo-notice-action-foreground,
     white
   );
   --editor-notice-action-hover-surface: var(
-    --vscode-button-hoverBackground,
+    --meo-notice-action-hover-surface,
     color-mix(
       in srgb,
       var(--editor-notice-action-surface) 88%,
@@ -396,7 +396,7 @@ html[data-editor-appearance='light'] .editor-notice {
 .editor-notice-message {
   min-width: 0;
   overflow-wrap: anywhere;
-  color: color-mix(in srgb, var(--editor-notice-foreground) 82%, transparent);
+  color: var(--editor-notice-foreground);
 }
 
 .editor-notice-actions {
@@ -465,20 +465,18 @@ html[data-editor-appearance='light'] .editor-notice {
 }
 
 .editor-notice[data-kind='warning'] {
-  --editor-notice-accent: var(--vscode-notificationsWarningIcon-foreground, #cca700);
+  --editor-notice-accent: var(--meo-notice-warning, #cca700);
 }
 
 .editor-notice[data-kind='error'] {
-  --editor-notice-accent: var(--vscode-notificationsErrorIcon-foreground, #f14c4c);
+  --editor-notice-accent: var(--meo-notice-error, #f14c4c);
 }
 
 @keyframes editor-notice-enter {
   from {
-    opacity: 0;
     transform: translateY(-3px);
   }
   to {
-    opacity: 1;
     transform: translateY(0);
   }
 }
