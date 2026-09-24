@@ -8,6 +8,7 @@ const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-production-live-scroll-integrity-'));
 const documentArgument = process.argv.find((argument) => argument.startsWith('--document='));
 if (!documentArgument) throw new Error('Expected --document=<absolute markdown path>');
+const jumpOnly = process.argv.includes('--jump-only');
 const source = fs.readFileSync(documentArgument.slice('--document='.length), 'utf8');
 
 async function waitForFrames(page: Page, count: number): Promise<void> {
@@ -182,6 +183,10 @@ async function main(): Promise<void> {
     await assertVisibleIntegrity(page, 'initial-outline-jump-frame-3', false);
     await waitForFrames(page, 5);
     await assertVisibleIntegrity(page, 'initial-outline-jump-settled');
+    if (jumpOnly) {
+      console.log('production Live outline jump integrity test passed');
+      return;
+    }
     for (let step = 0; step < 180; step += 1) {
       const top = await page.$eval('.editor-host > .cm-editor .cm-scroller', (element) => element.scrollTop);
       if (top <= 1) break;
