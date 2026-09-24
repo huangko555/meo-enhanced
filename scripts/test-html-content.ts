@@ -143,7 +143,7 @@ async function main() {
 
     const initial = await page.evaluate(() => {
       const editor = (window as any).__htmlContentEditor;
-      const block = document.querySelector<HTMLElement>('.meo-md-html-block[data-meo-html-from]');
+      const block = document.querySelector<HTMLElement>('.meo-md-html-block[data-meo-rendered-block-start-line]');
       const blockStyle = block ? getComputedStyle(block) : null;
       const inlineStrong = document.querySelector<HTMLElement>('.meo-md-html-strong');
       const inlineUnderline = document.querySelector<HTMLElement>('.meo-md-html-u');
@@ -329,8 +329,8 @@ async function main() {
       throw new Error(`Initial HTML document-flow rendering was incorrect: ${JSON.stringify(initial)}`);
     }
 
-    await page.hover('.meo-md-html-block[data-meo-html-from] .meo-md-html-source-toggle');
-    const hoveredBlockRange = await page.$eval('.meo-md-html-block[data-meo-html-from]', (element) => {
+    await page.hover('.meo-md-html-block[data-meo-rendered-block-start-line] .meo-md-html-source-toggle');
+    const hoveredBlockRange = await page.$eval('.meo-md-html-block[data-meo-rendered-block-start-line]', (element) => {
       const style = getComputedStyle(element);
       return { background: style.backgroundColor, boxShadow: style.boxShadow };
     });
@@ -339,7 +339,7 @@ async function main() {
     }
 
     const actionRailPoint = await page.evaluate(() => {
-      const block = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-block[data-meo-html-from]'))
+      const block = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-block[data-meo-rendered-block-start-line]'))
         .find((candidate) => {
           const button = candidate.querySelector<HTMLElement>('.meo-md-html-source-toggle');
           return Boolean(button && candidate.getBoundingClientRect().height > button.getBoundingClientRect().height + 24);
@@ -370,7 +370,7 @@ async function main() {
       throw new Error(`HTML action rail below the edit button did not keep the button visible: ${JSON.stringify(actionRailHover)}`);
     }
 
-    const selectionPoints = await page.$eval('.meo-md-html-block[data-meo-html-from] .meo-md-html-link', (element) => {
+    const selectionPoints = await page.$eval('.meo-md-html-block[data-meo-rendered-block-start-line] .meo-md-html-link', (element) => {
       const text = element.firstChild;
       if (!text) return null;
       const start = document.createRange();
@@ -444,7 +444,7 @@ async function main() {
     await page.click('.meo-md-html-block details > summary');
     await waitForFrames(page, 8);
 
-    const blockRect = await page.$eval('.meo-md-html-block[data-meo-html-from]', (element) => {
+    const blockRect = await page.$eval('.meo-md-html-block[data-meo-rendered-block-start-line]', (element) => {
       const rect = element.getBoundingClientRect();
       return { x: rect.left + 8, y: rect.top + Math.min(10, rect.height / 2) };
     });
@@ -453,7 +453,7 @@ async function main() {
     const afterOrdinaryClick = await page.evaluate(() => {
       const editor = (window as any).__htmlContentEditor;
       return {
-        blockVisible: Boolean(document.querySelector('.meo-md-html-block[data-meo-html-from]')),
+        blockVisible: Boolean(document.querySelector('.meo-md-html-block[data-meo-rendered-block-start-line]')),
         scrollTop: editor.view.scrollDOM.scrollTop
       };
     });
@@ -461,7 +461,7 @@ async function main() {
       throw new Error(`Ordinary HTML preview click changed mode or viewport: ${JSON.stringify(afterOrdinaryClick)}`);
     }
 
-    const sourceButton = await page.$('.meo-md-html-block[data-meo-html-from] .meo-md-html-source-toggle');
+    const sourceButton = await page.$('.meo-md-html-block[data-meo-rendered-block-start-line] .meo-md-html-source-toggle');
     if (!sourceButton) throw new Error('HTML source toggle was not rendered');
     await sourceButton.click();
     await waitForFrames(page, 10);

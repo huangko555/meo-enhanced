@@ -449,9 +449,13 @@ async function prepareHtmlSource(page: import('puppeteer-core').Page, operation:
     if (sourcePosition < 0) throw new Error(`Missing HTML edit needle: ${needle}`);
     const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('.meo-md-html-source-toggle'));
     const ranked = buttons.map((button) => {
-      const block = button.closest<HTMLElement>('.meo-md-html-block[data-meo-html-from]');
-      const blockFrom = Number(block?.dataset.meoHtmlFrom);
-      const blockTo = Number(block?.dataset.meoHtmlTo);
+      const block = button.closest<HTMLElement>('.meo-md-html-block[data-meo-rendered-block-start-line]');
+      const startLine = Number(block?.dataset.meoRenderedBlockStartLine);
+      const endLine = Number(block?.dataset.meoRenderedBlockEndLine);
+      const blockFrom = Number.isInteger(startLine) && startLine >= 1 && startLine <= editor.view.state.doc.lines
+        ? editor.view.state.doc.line(startLine).from : NaN;
+      const blockTo = Number.isInteger(endLine) && endLine >= 1 && endLine <= editor.view.state.doc.lines
+        ? editor.view.state.doc.line(endLine).to : NaN;
       if (Number.isFinite(blockFrom) && Number.isFinite(blockTo) && sourcePosition >= blockFrom && sourcePosition <= blockTo) {
         return { button, distance: 0 };
       }

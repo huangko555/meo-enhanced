@@ -1,11 +1,12 @@
-import { StateEffect, StateField, type EditorState } from '@codemirror/state';
+import { StateEffect, StateField, type ChangeDesc, type EditorState } from '@codemirror/state';
 import {
   Decoration,
   EditorView,
   GutterMarker,
   WidgetType,
   keymap,
-  lineNumberWidgetMarker
+  lineNumberWidgetMarker,
+  type DecorationSet
 } from '@codemirror/view';
 import type { SyntaxNodeRef } from '@lezer/common';
 import { createElement, AlertTriangle, Code2, Eye } from 'lucide';
@@ -123,6 +124,13 @@ export function collectRenderableHtmlBlocks(state: EditorState): RenderableHtmlB
   return blocks;
 }
 
+function currentHtmlBlock(view: EditorView, source: string, startLine: number): RenderableHtmlBlock | undefined {
+  // A retained widget may outlive edits before it; absolute offsets in its original block then go stale.
+  return collectRenderableHtmlBlocks(view.state).find((block) => (
+    block.startLine === startLine && block.source === source
+  ));
+}
+
 function sanitizeElementTree(root: ParentNode): void {
   for (const element of Array.from(root.querySelectorAll<HTMLElement>('*'))) {
     const tagName = element.tagName.toLowerCase();
@@ -183,8 +191,11 @@ function enhanceLinks(root: ParentNode, inline: boolean, uiLanguage: UiLanguage)
   }
 }
 
-function enhanceImages(root: ParentNode, view: EditorView, sourceFrom: number): ImageWidget[] {
+function enhanceImages(
+  root: ParentNode, view: EditorView, sourceFrom: number, sourceStartLine: number, source: string
+): ImageWidget[] {
   const widgets: ImageWidget[] = [];
+  const resolveSourceFrom = () => currentHtmlBlock(view, source, sourceStartLine)?.from ?? null;
   for (const image of Array.from(root.querySelectorAll<HTMLImageElement>('img[src]'))) {
     const rawSrc = image.getAttribute('src')?.trim() ?? '';
     if (!isSafeHtmlUrl(rawSrc, 'src')) continue;
@@ -196,7 +207,7 @@ function enhanceImages(root: ParentNode, view: EditorView, sourceFrom: number): 
       isSafeHtmlUrl(linkUrl, 'href') ? linkUrl : '',
       sourceFrom,
       getImagePresentationFactory(view.state),
-      { uiLanguage: view.state.facet(uiLanguageFacet) }
+      { uiLanguage: view.state.facet(uiLanguageFacet), sourceFromResolver: resolveSourceFrom }
     );
     const container = widget.toDOM(view);
     container.classList.add('meo-md-html-image');
@@ -230,7 +241,9 @@ function createSanitizedHtml(
   template.innerHTML = source;
   sanitizeElementTree(template.content);
   annotateHtmlSourceLines(template.content, source, sourceStartLine);
-  const imageWidgets = view ? enhanceImages(template.content, view, sourceFrom) : [];
+  const imageWidgets = view
+    ? enhanceImages(template.content, view, sourceFrom, sourceStartLine, source)
+    : [];
   enhanceLinks(template.content, inline, uiLanguage);
   return { fragment: template.content, imageWidgets };
 }
@@ -281,6 +294,13 @@ class HtmlBlockWidget extends UiLanguageSensitiveWidget {
     super();
   }
 
+  seedHeight(previous: HtmlBlockWidget): void {
+    if (previous.block.source === this.block.source &&
+        previous.block.detailsCollapsed === this.block.detailsCollapsed) {
+      this.measuredHeight = previous.measuredHeight;
+    }
+  }
+
   get estimatedHeight(): number {
     return estimateBlockWidgetHeight({
       kind: 'html-block',
@@ -293,8 +313,7 @@ class HtmlBlockWidget extends UiLanguageSensitiveWidget {
   eq(other: WidgetType): boolean {
     return other instanceof HtmlBlockWidget &&
       this.hasSameUiLanguageEpoch(other) &&
-      other.block.from === this.block.from &&
-      other.block.to === this.block.to &&
+      other.block.startLine === this.block.startLine &&
       other.block.source === this.block.source &&
       other.block.detailsCollapsed === this.block.detailsCollapsed;
   }
@@ -303,8 +322,6 @@ class HtmlBlockWidget extends UiLanguageSensitiveWidget {
     const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     const root = document.createElement('div');
     root.className = 'meo-md-html-block';
-    root.dataset.meoHtmlFrom = String(this.block.from);
-    root.dataset.meoHtmlTo = String(this.block.to);
     root.dataset.meoRenderedBlockKind = 'html';
     root.dataset.meoRenderedBlockStartLine = String(this.block.startLine);
     root.dataset.meoRenderedBlockEndLine = String(this.block.endLine);
@@ -341,10 +358,12 @@ class HtmlBlockWidget extends UiLanguageSensitiveWidget {
     if (details && this.block.detailsCollapsed !== null) {
       details.open = !this.block.detailsCollapsed;
       details.addEventListener('toggle', () => {
+        const currentBlock = currentHtmlBlock(view, this.block.source, this.block.startLine);
+        if (!currentBlock) return;
         const collapsed = getDetailsBlocks(view.state)
-          .find((block) => block.anchorFrom === this.block.from)?.collapsed;
+          .find((block) => block.anchorFrom === currentBlock.from)?.collapsed;
         if (collapsed === undefined || details.open === !collapsed) return;
-        toggleDetailsBlock(view, this.block.from);
+        toggleDetailsBlock(view, currentBlock.from);
       });
     }
 
@@ -356,7 +375,8 @@ class HtmlBlockWidget extends UiLanguageSensitiveWidget {
     button.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      enterHtmlSource(view, this.block);
+      const currentBlock = currentHtmlBlock(view, this.block.source, this.block.startLine);
+      if (currentBlock) enterHtmlSource(view, currentBlock);
     });
     root.appendChild(button);
     if (typeof ResizeObserver !== 'undefined') {
@@ -407,7 +427,6 @@ class HtmlBlockLineNumberMarker extends GutterMarker {
 
   eq(other: GutterMarker): boolean {
     return other instanceof HtmlBlockLineNumberMarker &&
-      other.block.from === this.block.from &&
       other.block.startLine === this.block.startLine &&
       other.block.source === this.block.source &&
       other.block.detailsCollapsed === this.block.detailsCollapsed;
@@ -427,7 +446,7 @@ class HtmlBlockLineNumberMarker extends GutterMarker {
     const sync = (): boolean => {
       const outerMarker = column.closest<HTMLElement>('.cm-gutterElement');
       const root = view.dom.querySelector<HTMLElement>(
-        `.meo-md-html-block[data-meo-html-from="${this.block.from}"]`
+        `.meo-md-html-block[data-meo-rendered-block-start-line="${this.block.startLine}"]`
       );
       const details = root?.querySelector<HTMLDetailsElement>(':scope > .meo-md-html-content > details');
       if (!outerMarker || !root || !details) return false;
@@ -581,7 +600,9 @@ function addInlineHtmlDecorations(
 export function addHtmlContentDecorations(
   ranges: any[],
   state: EditorState,
-  activeLines: ReadonlySet<number>
+  activeLines: ReadonlySet<number>,
+  previousDecorations?: DecorationSet,
+  changes?: ChangeDesc
 ): RenderableHtmlBlock[] {
   const editingRange = getHtmlEditingRange(state);
   const blocks = collectRenderableHtmlBlocks(state);
@@ -603,6 +624,9 @@ export function addHtmlContentDecorations(
     }).range(startLine.from));
   };
   let editingBlockFound = false;
+  const previous = blocks.length && previousDecorations && changes
+    ? previousDecorations.map(changes)
+    : previousDecorations;
   for (const block of blocks) {
     const isEditing = editingRange && editingRange.from === block.from;
     if (isEditing) {
@@ -610,9 +634,15 @@ export function addHtmlContentDecorations(
       addSourceRange(editingRange);
       continue;
     }
+    const widget = new HtmlBlockWidget(block);
+    previous?.between(block.from, block.to, (_from, _to, decoration) => {
+      if (decoration.spec.widget instanceof HtmlBlockWidget) {
+        widget.seedHeight(decoration.spec.widget);
+      }
+    });
     ranges.push(Decoration.replace({
       block: true,
-      widget: new HtmlBlockWidget(block)
+      widget
     }).range(block.from, block.to));
   }
   if (editingRange && !editingBlockFound) {

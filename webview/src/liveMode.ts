@@ -1,4 +1,4 @@
-import { RangeSetBuilder, StateEffect, StateField, EditorState, type Range, type RangeSet, type Extension, type EditorSelection, type Transaction } from '@codemirror/state';
+import { RangeSetBuilder, StateEffect, StateField, EditorState, type ChangeDesc, type Range, type RangeSet, type Extension, type EditorSelection, type Transaction } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting } from '@codemirror/language';
 import {
@@ -1860,7 +1860,7 @@ function addListLineDecorations(
   }
 }
 
-function buildDecorations(state: EditorState): DecorationSet {
+function buildDecorations(state: EditorState, previous?: DecorationSet, changes?: ChangeDesc): DecorationSet {
   const ranges: DecorationCollector = [];
   const diagnostics = state.field(diagnosticDataField, false) ?? [];
   const activeLines = collectActiveLines(state);
@@ -1899,7 +1899,7 @@ function buildDecorations(state: EditorState): DecorationSet {
   }
   addForcedThematicBreakDecorations(ranges, state, activeLines, frontmatter, codeBlockLines);
   const mathRanges = collectMathRanges(state, tree, renderedTableRanges, frontmatter);
-  const renderedHtmlBlocks = addHtmlContentDecorations(ranges, state, activeLines);
+  const renderedHtmlBlocks = addHtmlContentDecorations(ranges, state, activeLines, previous, changes);
 
   tree.iterate({
     enter: (node: SyntaxNodeRef) => {
@@ -2383,10 +2383,10 @@ function safeBuildDecorations(
   state: EditorState,
   fallback: DecorationSet,
   context: 'create' | 'update',
-  extra: { docChanged?: boolean; selection?: EditorSelection } = {}
+  extra: { docChanged?: boolean; selection?: EditorSelection; changes?: ChangeDesc } = {}
 ): DecorationSet {
   try {
-    return buildDecorations(state);
+    return buildDecorations(state, fallback, extra.changes);
   } catch (error) {
     console.error('[MEO liveMode] decoration build failed', {
       context,
@@ -3338,7 +3338,8 @@ const liveDecorationField = StateField.define<DecorationSet>({
     }
     const next = safeBuildDecorations(transaction.state, decorations, 'update', {
       docChanged: transaction.docChanged,
-      selection: transaction.selection
+      selection: transaction.selection,
+      changes: transaction.docChanged ? transaction.changes : undefined
     });
 
     // Guard against transient empty parse results on selection-only transactions.

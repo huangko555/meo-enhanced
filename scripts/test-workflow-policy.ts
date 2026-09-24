@@ -130,6 +130,7 @@ function targetedCommands(
         packageScript('test:reading-position'),
         script('scripts/test-viewport-controller.ts'),
         script('scripts/test-line-number-typing-stability.ts'),
+        script('scripts/test-line-number-no-wrap-stability.ts'),
         script('scripts/test-document-reload-mermaid-viewport.ts'),
         script('scripts/test-uat-viewport-stability.ts'),
         script('scripts/test-live-embedded-input-viewport.ts'),
@@ -223,6 +224,8 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-live-input-derived-work.ts'),
           script('scripts/test-viewport-controller.ts'),
           script('scripts/test-line-number-typing-stability.ts'),
+          script('scripts/test-line-number-no-wrap-stability.ts'),
+          script('scripts/test-html-enter-gutter-stability.ts'),
           script('scripts/test-uat-viewport-stability.ts'),
           script('scripts/test-virtual-block-scroll-stability.ts')
         ])]
@@ -324,6 +327,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
         expectedDuration: 'about 1-3 minutes',
         longRunning: true,
         stages: [serialStage('Large-document stress contracts', [
+          { args: ['scripts/test-line-number-typing-stability.ts', '--long'] },
           packageScript('benchmark:large-document'),
           {
             args: ['scripts/test-uat-full-document-endurance.ts', documentPath],

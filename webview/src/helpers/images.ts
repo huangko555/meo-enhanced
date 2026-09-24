@@ -292,7 +292,8 @@ export class ImageWidget extends WidgetType {
   url: string;
   altText: string;
   linkUrl: string;
-  sourceFrom: number | null;
+  private readonly initialSourceFrom: number | null;
+  private readonly sourceFromResolver?: () => number | null;
   pointerInteractionOwner: 'widget' | 'parent';
   fullscreenOverlay: HTMLElement | null;
   fullscreenCleanup: (() => void) | null;
@@ -309,13 +310,15 @@ export class ImageWidget extends WidgetType {
     options: {
       pointerInteractionOwner?: 'widget' | 'parent';
       uiLanguage?: UiLanguage;
+      sourceFromResolver?: () => number | null;
     } = {}
   ) {
     super();
     this.url = url?.trim() ?? '';
     this.altText = altText ?? '';
     this.linkUrl = linkUrl?.trim() ?? '';
-    this.sourceFrom = Number.isInteger(sourceFrom) ? sourceFrom : null;
+    this.initialSourceFrom = Number.isInteger(sourceFrom) ? sourceFrom : null;
+    this.sourceFromResolver = options.sourceFromResolver;
     this.pointerInteractionOwner = options.pointerInteractionOwner ?? 'widget';
     this.fullscreenOverlay = null;
     this.fullscreenCleanup = null;
@@ -471,6 +474,10 @@ export class ImageWidget extends WidgetType {
     const projected = apply();
     view.requestMeasure();
     return projected;
+  }
+
+  get sourceFrom(): number | null {
+    return this.sourceFromResolver ? this.sourceFromResolver() : this.initialSourceFrom;
   }
 
   fallbackText(): string {

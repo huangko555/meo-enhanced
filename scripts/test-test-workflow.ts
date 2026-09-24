@@ -19,6 +19,9 @@ assert.doesNotThrow(() => validateTestWorkflowAuthorization(quick, false, false)
 assert.ok(quickCommands.some((command) => (
   command.args.includes('scripts/test-virtual-block-scroll-stability.ts')
 )));
+assert.ok(quickCommands.some((command) => (
+  command.args.includes('scripts/test-html-enter-gutter-stability.ts')
+)));
 
 const history = createTestWorkflowPlan(
   parseTestWorkflowRequest(['targeted', 'history'])
@@ -152,6 +155,7 @@ assert.equal(largeDocument.longRunning, true);
 assert.equal(largeDocument.stages.length, 1);
 assert.equal(largeDocument.stages[0]?.maxConcurrency, 1);
 assert.deepEqual(flattenTestWorkflowCommands(largeDocument), [
+  { args: ['scripts/test-line-number-typing-stability.ts', '--long'] },
   { args: ['run', 'benchmark:large-document'] },
   {
     args: [
