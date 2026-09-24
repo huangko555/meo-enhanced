@@ -63,6 +63,21 @@
   --meo-editor-inline-end-padding: 28px;
   --meo-task-checkbox-size: 17px;
   --meo-live-highlight-background: color-mix(in srgb, #ffd60a 42%, transparent);
+  /* Global editor layers follow interaction ownership. Component-internal
+     painting (icons, selections, cursors) keeps its own small local scale. */
+  --meo-editor-toolbar-height: 40px;
+  --meo-layer-document-base: 0;
+  --meo-layer-document-overlay: 200;
+  --meo-layer-document-floating: 240;
+  --meo-layer-document-chrome: 350;
+  --meo-layer-document-popover: 400;
+  --meo-layer-document-status: 450;
+  --meo-layer-window-chrome: 500;
+  --meo-layer-window-popover: 600;
+  --meo-layer-modal: 1000;
+  --meo-layer-toolbar-floating-panel: 5;
+  --meo-layer-toolbar-control: 10;
+  --meo-layer-toolbar-popover: 20;
   --git-added: #4a9e82;
   --git-changed: #317ae7;
   --git-deleted: #e05252;
@@ -95,12 +110,14 @@ body {
 
 .editor-root {
   position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
 }
 
 .editor-wrapper {
   position: relative;
+  z-index: var(--meo-layer-document-base);
   display: flex;
   flex: 1;
   min-height: 0;
@@ -196,7 +213,7 @@ body {
   position: absolute;
   right: 18px;
   bottom: 18px;
-  z-index: 240;
+  z-index: var(--meo-layer-document-floating);
   display: inline-flex;
   width: 36px;
   height: 36px;
@@ -252,7 +269,7 @@ body {
   opacity: 0;
   pointer-events: none;
   transform: translateY(-100%);
-  z-index: 400;
+  z-index: var(--meo-layer-document-popover);
 }
 
 .selection-inline-menu.is-visible {
@@ -289,10 +306,10 @@ body {
 .mode-toolbar {
   box-sizing: border-box;
   position: relative;
-  z-index: 500;
+  z-index: var(--meo-layer-window-chrome);
   display: flex;
   align-items: center;
-  min-height: 40px;
+  min-height: var(--meo-editor-toolbar-height);
   padding: 7px 14px 7px 10px;
   background-color: var(--vscode-sideBar-background);
   user-select: none;
@@ -302,7 +319,7 @@ body {
 .editor-notice {
   display: none;
   position: absolute;
-  top: 100%;
+  top: var(--meo-editor-toolbar-height);
   left: 0;
   right: 0;
   box-sizing: border-box;
@@ -354,7 +371,7 @@ body {
   box-shadow: 0 4px 10px rgb(0 0 0 / 18%);
   font-size: 14px;
   line-height: 1.4;
-  z-index: 275;
+  z-index: var(--meo-layer-document-status);
 }
 
 html[data-editor-appearance='light'] .editor-notice {
@@ -525,8 +542,8 @@ html[data-editor-appearance='light'] .editor-notice {
   border-radius: 8px;
   background-color: var(--vscode-sideBar-background);
   box-shadow: var(--meo-elevated-shadow, 0 4px 12px rgba(0, 0, 0, 0.24));
-  /* Keep below the toolbar-right stacking context and its dropdown menus. */
-  z-index: 1;
+  /* Right-side controls intentionally stay above Find when their menus cross. */
+  z-index: var(--meo-layer-toolbar-floating-panel);
 }
 
 .find-panel.is-visible {
@@ -869,7 +886,8 @@ html[data-editor-appearance='light'] .editor-notice {
 
 .preview-dropdown-panel {
   position: fixed;
-  z-index: 1000;
+  /* Custom toolbar selects are portalled to body, outside toolbar stacking. */
+  z-index: var(--meo-layer-window-popover);
   box-sizing: border-box;
   overflow: auto;
   padding: 4px;
@@ -967,7 +985,7 @@ html[data-editor-appearance='light'] .editor-notice {
 
 .preview-export-menu {
   position: absolute;
-  z-index: 1200;
+  z-index: var(--meo-layer-toolbar-popover);
   top: calc(100% + 4px);
   left: 0;
   min-width: max-content;
@@ -1079,7 +1097,7 @@ html[data-editor-appearance='light'] .editor-notice {
 
 .toolbar-right {
   position: absolute;
-  z-index: 3;
+  z-index: var(--meo-layer-toolbar-control);
   top: 7px;
   right: 14px;
   display: inline-flex;
@@ -1216,7 +1234,7 @@ html[data-editor-appearance='light'] .editor-notice {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  z-index: 310;
+  z-index: var(--meo-layer-toolbar-popover);
   box-sizing: border-box;
   width: min(268px, calc(100vw - 24px));
   padding: 4px;
@@ -1427,7 +1445,7 @@ html[data-editor-appearance='light'] .editor-notice {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  z-index: 300;
+  z-index: var(--meo-layer-toolbar-popover);
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -1450,7 +1468,7 @@ html[data-editor-appearance='light'] .editor-notice {
 .toolbar-overflow-panel {
   position: absolute;
   top: 38px;
-  z-index: 300;
+  z-index: var(--meo-layer-toolbar-popover);
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -1722,7 +1740,7 @@ button:focus-visible > .menu-switch {
   left: calc(50% + 1px);
   transform: translateX(-50%);
   padding: 5px 25px;
-  z-index: 100;
+  z-index: var(--meo-layer-toolbar-popover);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s ease;
@@ -1753,7 +1771,7 @@ button:focus-visible > .menu-switch {
   left: calc(50% + 1px);
   transform: translateX(-50%);
   padding: 5px 25px;
-  z-index: 100;
+  z-index: var(--meo-layer-toolbar-popover);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s ease;
@@ -1961,7 +1979,7 @@ button:focus-visible > .menu-switch {
 
 .meo-long-code-floating-action {
   position: fixed;
-  z-index: 220;
+  z-index: calc(var(--meo-layer-document-overlay) + 20);
   border: 1px solid color-mix(in srgb, var(--meo-foreground) 18%, transparent);
   background: var(--meo-code-background);
   transform: translateX(-50%);
@@ -4407,7 +4425,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
 .meo-md-image-fullscreen-scrim {
   position: fixed;
   inset: 0;
-  z-index: 9999;
+  z-index: var(--meo-layer-modal);
   background: var(--meo-background);
 }
 
@@ -4441,7 +4459,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
 .meo-mermaid-fullscreen-scrim {
   position: fixed;
   inset: 0;
-  z-index: 9999;
+  z-index: var(--meo-layer-modal);
   background-color: var(--meo-background);
 }
 
@@ -4471,7 +4489,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
 .meo-latex-math-fullscreen-scrim {
   position: fixed;
   inset: 0;
-  z-index: 9999;
+  z-index: var(--meo-layer-modal);
   background-color: var(--meo-background);
 }
 
@@ -4522,7 +4540,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   background-color: var(--meo-outline-background);
   color: var(--meo-foreground);
   user-select: none;
-  z-index: 350;
+  z-index: var(--meo-layer-document-chrome);
 }
 
 .editor-root.outline-visible .outline-sidebar {
@@ -5810,7 +5828,7 @@ body.outline-resizing .preview-frame {
 
 .source-preview-scroll-sync-button {
   position: absolute;
-  z-index: 250;
+  z-index: calc(var(--meo-layer-document-floating) + 10);
   top: 2px;
   left: 2px;
   display: none;

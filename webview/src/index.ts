@@ -1476,7 +1476,7 @@ const editorNotice = createEditorNoticeController(
   () => handleEditorNoticeDismiss()
 );
 
-toolbar.replaceChildren(formatGroup, previewFormatGroup, toolbarOverflowIndicator, toolbarOverflowSection, toolbarRight, findPanelElements.panel, editorNoticeBanner);
+toolbar.replaceChildren(formatGroup, previewFormatGroup, toolbarOverflowIndicator, toolbarOverflowSection, toolbarRight, findPanelElements.panel);
 
 const toolbarOverflowHomes = new Map<HTMLElement, Comment>();
 let toolbarOverflowLayoutKey = '';
@@ -1733,7 +1733,7 @@ const editorSurface = document.createElement('div');
 editorSurface.className = 'editor-surface';
 editorSurface.append(editorHost, previewController.host);
 editorWrapper.replaceChildren(editorSurface, outlineController.sidebar, selectionMenuElements.menu);
-root.replaceChildren(toolbar, editorWrapper);
+root.replaceChildren(toolbar, editorNoticeBanner, editorWrapper);
 
 const editorModeApplication = createEditorModeApplication();
 let editorModeRuntime: EditorModeRuntime;

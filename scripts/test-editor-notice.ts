@@ -37,8 +37,33 @@ async function main() {
             --vscode-notificationsErrorIcon-foreground: rgb(241, 76, 76);
           }
           body { margin: 0; }
+          #portal-menu, #find-menu, #settings-menu, #document-menu {
+            box-sizing: border-box;
+            left: 20px;
+            width: 220px;
+            height: 72px;
+          }
+          #portal-menu { top: 48px; }
+          #find-menu { right: auto; }
+          #window-controls { left: 20px; right: auto; width: 220px; }
+          #settings-menu { left: 0; right: auto; }
+          #document-menu { top: 48px; transform: none; }
         </style></head>
-        <body><div class="mode-toolbar"><div id="notice" class="editor-notice"></div></div></body>
+        <body><div class="editor-root">
+          <div class="mode-toolbar">
+            <div id="window-controls" class="toolbar-right">
+              <div id="settings-menu" class="more-tools-panel">Settings menu</div>
+            </div>
+            <div id="find-menu" class="find-panel is-visible">Find menu</div>
+          </div>
+          <div id="notice" class="editor-notice"></div>
+          <div class="editor-wrapper">
+            <div id="document-menu" class="selection-inline-menu is-visible is-below">Document menu</div>
+          </div>
+        </div>
+        <div id="portal-menu" class="preview-dropdown-panel">Portalled window menu</div>
+        <div id="modal" class="meo-md-image-fullscreen-scrim" hidden></div>
+        </body>
       </html>`);
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
@@ -105,6 +130,38 @@ async function main() {
         right: bannerRect.right,
         top: bannerRect.top,
         toolbarBottom
+      };
+      const portalMenu = document.getElementById('portal-menu') as HTMLElement;
+      const findMenu = document.getElementById('find-menu') as HTMLElement;
+      const windowControls = document.getElementById('window-controls') as HTMLElement;
+      const modal = document.getElementById('modal') as HTMLElement;
+      const hitAtOverlap = () => document.elementFromPoint(30, 60)?.id ?? '';
+      const portalMenuHit = hitAtOverlap();
+      portalMenu.style.display = 'none';
+      const settingsMenuHit = hitAtOverlap();
+      windowControls.style.display = 'none';
+      const findMenuHit = hitAtOverlap();
+      findMenu.style.display = 'none';
+      const noticeHit = hitAtOverlap();
+      banner.hidden = true;
+      banner.classList.remove('is-visible');
+      const documentMenuHit = hitAtOverlap();
+      banner.hidden = false;
+      banner.classList.add('is-visible');
+      modal.hidden = false;
+      const modalHit = hitAtOverlap();
+      modal.hidden = true;
+      windowControls.style.display = '';
+      findMenu.style.display = '';
+      portalMenu.style.display = '';
+      const layerState = {
+        portalMenuHit,
+        findMenuHit,
+        settingsMenuHit,
+        noticeHit,
+        documentMenuHit,
+        modalHit,
+        noticeParent: banner.parentElement?.className ?? ''
       };
       harness.applyBuiltInVisualBaseline('light');
       const lightState = {
@@ -179,7 +236,7 @@ async function main() {
       keyedManager.setPersistentNotice('deleted on disk', 'warning', 'external-file-deleted');
       const differentPersistentOccurrenceShown = keyedRenders === 5;
       return {
-        firstState, lightState, dismissed, dismissCount, actionCount, secondState,
+        firstState, layerState, lightState, dismissed, dismissCount, actionCount, secondState,
         localizedChrome,
         persistentText, failureText, restoredPersistentText, relocalizedText, persistentDismissed,
         duplicateCoalesced, dismissedOccurrenceSuppressed,
@@ -209,6 +266,15 @@ async function main() {
       result.firstState.right !== 1100 || result.firstState.top > result.firstState.toolbarBottom ||
       result.firstState.top < result.firstState.toolbarBottom - 4) {
       throw new Error(`notice presentation was incorrect: ${JSON.stringify(result.firstState)}`);
+    }
+    if (result.layerState.portalMenuHit !== 'portal-menu' ||
+      result.layerState.findMenuHit !== 'find-menu' ||
+      result.layerState.settingsMenuHit !== 'settings-menu' ||
+      result.layerState.noticeHit !== 'notice' ||
+      result.layerState.documentMenuHit !== 'document-menu' ||
+      result.layerState.modalHit !== 'modal' ||
+      result.layerState.noticeParent !== 'editor-root') {
+      throw new Error(`editor layer ownership was incorrect: ${JSON.stringify(result.layerState)}`);
     }
     if (result.lightState.appearance !== 'light' ||
       result.lightState.background === result.firstState.background ||
@@ -244,6 +310,11 @@ async function main() {
     if (result.localizedChrome.title !== 'Action needed' || result.localizedChrome.closeText !== 'Dismiss' ||
       result.localizedChrome.closeLabel !== 'Dismiss notification') {
       throw new Error(`notice chrome did not relocalize: ${JSON.stringify(result.localizedChrome)}`);
+    }
+    const productionSource = fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'index.ts'), 'utf8');
+    if (!productionSource.includes('root.replaceChildren(toolbar, editorNoticeBanner, editorWrapper)') ||
+      productionSource.includes('toolbar.replaceChildren(formatGroup, previewFormatGroup, toolbarOverflowIndicator, toolbarOverflowSection, toolbarRight, findPanelElements.panel, editorNoticeBanner)')) {
+      throw new Error('production editor notice was not mounted as a root document-status layer');
     }
     console.log('editor notice checks passed');
   } finally {
