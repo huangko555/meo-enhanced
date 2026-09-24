@@ -717,7 +717,14 @@ async function main() {
         let interactionTimer: number | undefined;
 
         window.removeEventListener = ((type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | EventListenerOptions) => {
-          if (harness.active && type === 'resize') {
+          // EditorView also removes its own resize measurement listener while
+          // destroying. Only this named closure belongs to the table's sticky owner.
+          if (
+            harness.active &&
+            type === 'resize' &&
+            typeof listener === 'function' &&
+            listener.name === 'requestIfActive'
+          ) {
             laterOwnerRan.sticky = true;
             if (faultKind === 'sticky') throw new Error('controlled sticky owner failure');
           }
