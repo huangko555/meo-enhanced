@@ -22,6 +22,9 @@ assert.ok(quickCommands.some((command) => (
 assert.ok(quickCommands.some((command) => (
   command.args.includes('scripts/test-html-enter-gutter-stability.ts')
 )));
+assert.ok(quickCommands.some((command) => (
+  command.args.includes('scripts/test-fenced-block-enter-stability.ts')
+)));
 
 const history = createTestWorkflowPlan(
   parseTestWorkflowRequest(['targeted', 'history'])

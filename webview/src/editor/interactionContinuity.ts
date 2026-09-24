@@ -137,7 +137,7 @@ export function createEditorInteractionContinuity(input: {
             candidate.inputLineNumberBefore !== null &&
             measurement.inputLineNumber !== candidate.inputLineNumberBefore
           );
-          if (inputLineReflowed && measurement.caretTop !== null) {
+          if (inputLineReflowed && measurement.caretTop !== null && measurement.visible) {
             // The caret moved because the edited line wrapped or changed lines,
             // not because an upstream layout correction displaced the viewport.
             candidate.caretTopBeforeInput = measurement.caretTop;
@@ -150,6 +150,15 @@ export function createEditorInteractionContinuity(input: {
             candidate.caretTopBeforeInput !== null && measurement.caretTop !== null &&
             Math.abs(measurement.caretTop - candidate.caretTopBeforeInput) > view.defaultLineHeight * 1.5
           );
+          if (candidate.awaitingDerivedPresentation && largeLayoutShift) {
+            // A structural Live edit can temporarily project the new caret
+            // through the old decorations. Wait for the derived presentation
+            // instead of revealing an offscreen coordinate that cannot be
+            // visible in the final layout.
+            candidate.stableFrames = 0;
+            schedule(candidate);
+            return;
+          }
           candidate.retainingCaretTop ||= largeLayoutShift;
           if (candidate.retainingCaretTop && candidate.caretTopBeforeInput !== null) {
             if (
@@ -254,7 +263,21 @@ export function createEditorInteractionContinuity(input: {
     pendingInputLineHeight = canCapture ? view.lineBlockAt(position).height : null;
     pendingInputLineNumber = canCapture ? view.state.doc.lineAt(position).number : null;
   };
+  const captureKeyCommandInput = (event: KeyboardEvent): void => {
+    if (
+      !(event.target instanceof Node) || !view.dom.contains(event.target) ||
+      event.isComposing || event.ctrlKey || event.metaKey || event.altKey ||
+      !['Enter', 'Tab', 'Backspace', 'Delete'].includes(event.key)
+    ) return;
+    // CodeMirror applies these commands during keydown and prevents the native
+    // beforeinput event. Capture the pre-command geometry while the old
+    // selection and its Live decorations still agree.
+    captureScrollTopBeforeInput();
+  };
   const cancelOnInteraction = () => cancel();
+  // Observe from the document capture phase so CodeMirror's own keydown
+  // handler cannot commit the command before the old geometry is sampled.
+  view.dom.ownerDocument.addEventListener('keydown', captureKeyCommandInput, true);
   view.dom.addEventListener('beforeinput', captureScrollTopBeforeInput, true);
   view.scrollDOM.addEventListener('wheel', cancelOnInteraction, { capture: true, passive: true });
   view.scrollDOM.addEventListener('touchstart', cancelOnInteraction, { capture: true, passive: true });
@@ -295,6 +318,7 @@ export function createEditorInteractionContinuity(input: {
       if (disposed) return;
       disposed = true;
       cancel();
+      view.dom.ownerDocument.removeEventListener('keydown', captureKeyCommandInput, true);
       view.dom.removeEventListener('beforeinput', captureScrollTopBeforeInput, true);
       view.scrollDOM.removeEventListener('wheel', cancelOnInteraction, true);
       view.scrollDOM.removeEventListener('touchstart', cancelOnInteraction, true);

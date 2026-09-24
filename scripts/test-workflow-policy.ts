@@ -131,6 +131,7 @@ function targetedCommands(
         script('scripts/test-viewport-controller.ts'),
         script('scripts/test-line-number-typing-stability.ts'),
         script('scripts/test-line-number-no-wrap-stability.ts'),
+        script('scripts/test-fenced-block-enter-stability.ts'),
         script('scripts/test-document-reload-mermaid-viewport.ts'),
         script('scripts/test-uat-viewport-stability.ts'),
         script('scripts/test-live-embedded-input-viewport.ts'),
@@ -225,6 +226,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-viewport-controller.ts'),
           script('scripts/test-line-number-typing-stability.ts'),
           script('scripts/test-line-number-no-wrap-stability.ts'),
+          script('scripts/test-fenced-block-enter-stability.ts'),
           script('scripts/test-html-enter-gutter-stability.ts'),
           script('scripts/test-uat-viewport-stability.ts'),
           script('scripts/test-virtual-block-scroll-stability.ts')
