@@ -3109,6 +3109,8 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 }
 
 .meo-hex-color-adjustment-preview {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   width: 34px;
   height: 34px;
   overflow: hidden;
@@ -3125,6 +3127,10 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.meo-hex-color-adjustment-preview-fill.is-current {
+  box-shadow: inset 1px 0 color-mix(in srgb, var(--vscode-editor-foreground) 30%, transparent);
 }
 
 .meo-hex-color-adjustment-value {

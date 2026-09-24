@@ -57,6 +57,17 @@ async function main(): Promise<void> {
             swatch.click();
             await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
             const dialog = app.querySelector<HTMLElement>('.meo-hex-color-adjustment')!;
+            const newValue = dialog.querySelector<HTMLInputElement>('.meo-hex-color-adjustment-value')!;
+            const preview = dialog.querySelector<HTMLElement>('.meo-hex-color-adjustment-preview')!;
+            const fills = dialog.querySelectorAll<HTMLElement>('.meo-hex-color-adjustment-preview-fill');
+            const previewBounds = preview.getBoundingClientRect();
+            const originalBounds = fills[0]!.getBoundingClientRect();
+            const newBounds = fills[1]!.getBoundingClientRect();
+            const originalBackgroundBefore = getComputedStyle(fills[0]!).backgroundColor;
+            const newBackgroundBefore = getComputedStyle(fills[1]!).backgroundColor;
+            const hue = dialog.querySelector<HTMLInputElement>('.meo-hex-color-adjustment-hue')!;
+            hue.value = String((Number(hue.value) + 60) % 360);
+            hue.dispatchEvent(new Event('input', { bubbles: true }));
             const toolbarProbe = document.createElement('div');
             toolbarProbe.className = 'meo-md-html-table-context-menu';
             editor.view.dom.appendChild(toolbarProbe);
@@ -75,6 +86,16 @@ async function main(): Promise<void> {
                 .filter((input) => getComputedStyle(input.closest('label')!).display !== 'none').length,
               opacity: dialog.querySelector<HTMLInputElement>('input[aria-label="Opacity"], input[aria-label="透明度"]')?.value,
               label: dialog.getAttribute('aria-label'),
+              previewFillCount: fills.length,
+              splitWidths: [originalBounds.width, newBounds.width],
+              splitGap: newBounds.left - originalBounds.right,
+              previewWidth: previewBounds.width,
+              newValueBefore: swatch.dataset.colorValue,
+              newValueAfter: newValue.value,
+              originalBackgroundBefore,
+              originalBackgroundAfter: getComputedStyle(fills[0]!).backgroundColor,
+              newBackgroundBefore,
+              newBackgroundAfter: getComputedStyle(fills[1]!).backgroundColor,
               horizontalOverflow: dialog.scrollWidth > dialog.clientWidth
             });
             toolbarProbe.remove();
@@ -103,6 +124,14 @@ async function main(): Promise<void> {
         if (result[0]?.opacity !== '255' || result[1]?.opacity !== '128' ||
           result.some((dialog) => !dialog.label?.includes(expectedLabel))) {
           throw new Error(`${appearance}/${language} opacity and localized labels must match the source: ${JSON.stringify(result)}`);
+        }
+        if (result.some((dialog) => dialog.previewFillCount !== 2 ||
+          dialog.splitWidths.some((width) => Math.abs(width - (dialog.previewWidth - 2) / 2) > 0.5) ||
+          Math.abs(dialog.splitGap) > 0.5 ||
+          dialog.newValueAfter === dialog.newValueBefore ||
+          dialog.originalBackgroundAfter !== dialog.originalBackgroundBefore ||
+          dialog.newBackgroundAfter === dialog.newBackgroundBefore)) {
+          throw new Error(`${appearance}/${language} must preserve the original sample while updating the new sample: ${JSON.stringify(result)}`);
         }
         const editorBackground = dark ? 'rgb(36, 41, 47)' : 'rgb(247, 248, 250)';
         const targetForeground = dark ? 'rgb(240, 242, 244)' : 'rgb(34, 38, 43)';

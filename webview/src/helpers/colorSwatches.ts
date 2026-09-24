@@ -140,9 +140,15 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
       header.className = 'meo-hex-color-adjustment-header';
       const preview = document.createElement('span');
       preview.className = 'meo-hex-color-adjustment-preview';
-      const previewFill = document.createElement('span');
-      previewFill.className = 'meo-hex-color-adjustment-preview-fill';
-      preview.appendChild(previewFill);
+      preview.setAttribute('role', 'img');
+      preview.setAttribute('aria-label', strings.colorControls(active.value));
+      const originalPreviewFill = document.createElement('span');
+      originalPreviewFill.className = 'meo-hex-color-adjustment-preview-fill is-original';
+      originalPreviewFill.style.backgroundColor = active.value;
+      const currentPreviewFill = document.createElement('span');
+      currentPreviewFill.className = 'meo-hex-color-adjustment-preview-fill is-current';
+      currentPreviewFill.style.backgroundColor = active.value;
+      preview.append(originalPreviewFill, currentPreviewFill);
       const valueInput = document.createElement('input');
       valueInput.className = 'meo-hex-color-adjustment-value';
       valueInput.type = 'text';
@@ -211,7 +217,7 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
         valueInput.value = draftValue;
         valueInput.removeAttribute('aria-invalid');
         applyButton.disabled = false;
-        previewFill.style.backgroundColor = draftValue;
+        currentPreviewFill.style.backgroundColor = draftValue;
         if (sourceSwatch) sourceSwatch.style.backgroundColor = draftValue;
         if (syncSliders) {
           const hsv = rgbToHsv(parsed.rgb);
