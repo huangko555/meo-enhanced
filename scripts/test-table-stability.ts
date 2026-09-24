@@ -107,6 +107,28 @@ async function main() {
       };
       nestedInlineEditor.destroy();
 
+      const underscoreBoundaryEditor = await create([
+        '| Boundary |',
+        '| --- |',
+        '| alpha_beta_gamma |',
+        '| 第一段_第二段_第三段 |',
+        '| α_β_γ |',
+        '| абв_где_жзи |',
+        '| café_crème_été |',
+        '| 中文__加粗__中文 |',
+        '| _单独斜体_ |',
+        '| __单独粗体__ |'
+      ].join('\n'));
+      const underscoreBoundaryPreviews = Array.from(document.querySelectorAll<HTMLElement>(
+        'tbody .meo-md-html-table-cell-preview'
+      ));
+      const underscoreBoundaryState = underscoreBoundaryPreviews.map((preview) => ({
+        text: preview.textContent ?? '',
+        emphasis: preview.querySelectorAll('em').length,
+        strong: preview.querySelectorAll('strong').length
+      }));
+      underscoreBoundaryEditor.destroy();
+
       const tableImageMarkdown = '![pixel](https://example.com/pixel.png)';
       const tableImageEditor = await create(`| Image |\n| --- |\n| ${tableImageMarkdown} |`);
       const tableImageCell = document.querySelector<HTMLTableCellElement>(
@@ -1083,6 +1105,7 @@ async function main() {
         linkButtonsPreservedEditingCell,
         inlineEditingPreviewVisibility,
         nestedInlineState,
+        underscoreBoundaryState,
         tableImageClickState,
         bodyLinkButtons,
         bodyOpenedHrefs,
@@ -1196,6 +1219,18 @@ async function main() {
       !result.nestedInlineState.strikeStrong
     ) {
       failures.push(`nested table inline styles did not compose: ${JSON.stringify(result.nestedInlineState)}`);
+    }
+    if (JSON.stringify(result.underscoreBoundaryState) !== JSON.stringify([
+      { text: 'alpha_beta_gamma', emphasis: 0, strong: 0 },
+      { text: '第一段_第二段_第三段', emphasis: 0, strong: 0 },
+      { text: 'α_β_γ', emphasis: 0, strong: 0 },
+      { text: 'абв_где_жзи', emphasis: 0, strong: 0 },
+      { text: 'café_crème_été', emphasis: 0, strong: 0 },
+      { text: '中文__加粗__中文', emphasis: 0, strong: 0 },
+      { text: '单独斜体', emphasis: 1, strong: 0 },
+      { text: '单独粗体', emphasis: 0, strong: 1 }
+    ])) {
+      failures.push(`Unicode table underscore boundaries were inconsistent: ${JSON.stringify(result.underscoreBoundaryState)}`);
     }
     if (
       !result.tableImageClickState.rendered ||

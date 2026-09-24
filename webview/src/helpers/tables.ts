@@ -792,8 +792,8 @@ function isTableInlineEscaped(text: string, index: number): boolean {
   return (slashCount % 2) === 1;
 }
 
-function isTableInlineAsciiAlnum(char: string): boolean {
-  return Boolean(char) && /[A-Za-z0-9]/.test(char);
+function isTableInlineWordCharacter(char: string): boolean {
+  return Boolean(char) && /[\p{L}\p{N}\p{M}]/u.test(char);
 }
 
 function canOpenTableInlineDelimiter(text: string, index: number, marker: string): boolean {
@@ -801,7 +801,7 @@ function canOpenTableInlineDelimiter(text: string, index: number, marker: string
   const markerLen = marker.length;
   const next = text[index + markerLen] ?? '';
   if (!next || /\s/.test(next)) return false;
-  if (marker.includes('_') && isTableInlineAsciiAlnum(text[index - 1] ?? '')) return false;
+  if (marker.includes('_') && isTableInlineWordCharacter(text[index - 1] ?? '')) return false;
   return true;
 }
 
@@ -809,7 +809,7 @@ function canCloseTableInlineDelimiter(text: string, index: number, marker: strin
   if (isTableInlineEscaped(text, index)) return false;
   const previous = text[index - 1] ?? '';
   if (!previous || /\s/.test(previous)) return false;
-  if (marker.includes('_') && isTableInlineAsciiAlnum(text[index + marker.length] ?? '')) return false;
+  if (marker.includes('_') && isTableInlineWordCharacter(text[index + marker.length] ?? '')) return false;
   return true;
 }
 
