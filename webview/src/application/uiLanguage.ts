@@ -274,7 +274,6 @@ export type UiStrings = Readonly<{
   noticeLiveModeUnavailableTitle: string;
   noticeEditorUpdateFailedTitle: string;
   noticeLiveRenderIssueTitle: string;
-  noticeEditorRecoveringTitle: string;
   noticeEditorLoadFailedTitle: string;
   noticeDocumentSyncFailedTitle: string;
   noticeExternalConflictTitle: string;
@@ -289,7 +288,6 @@ export type UiStrings = Readonly<{
   editorUpdateFailure: string;
   transientUpdateFailure: string;
   transientModeFailure: string;
-  transientLoadRetry: string;
   transientLoadFailure: string;
   pasteImageFailure: (message: string) => string;
   properties: string;
@@ -457,7 +455,6 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     noticeLiveModeUnavailableTitle: 'Live Mode unavailable',
     noticeEditorUpdateFailedTitle: 'Editor update failed',
     noticeLiveRenderIssueTitle: 'Live rendering interrupted',
-    noticeEditorRecoveringTitle: 'Recovering the editor',
     noticeEditorLoadFailedTitle: 'Editor failed to load',
     noticeDocumentSyncFailedTitle: 'Document sync failed',
     noticeExternalConflictTitle: 'External change detected',
@@ -472,7 +469,6 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     editorUpdateFailure: 'Editor failed to update this document. Try reopening the file.',
     transientUpdateFailure: 'Live mode hit a transient render error while updating. Try again.',
     transientModeFailure: 'Live mode hit a transient render error. Staying in current mode; try again.',
-    transientLoadRetry: 'Live mode hit a transient render error while loading. Retrying...',
     transientLoadFailure: 'Live mode hit a transient render error while loading. Try reopening or switching modes.',
     pasteImageFailure: (message: string) => `Could not paste image: ${message}`,
     properties: 'Properties',
@@ -636,7 +632,6 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     noticeLiveModeUnavailableTitle: '实时模式不可用',
     noticeEditorUpdateFailedTitle: '编辑器更新失败',
     noticeLiveRenderIssueTitle: '实时渲染暂时中断',
-    noticeEditorRecoveringTitle: '正在恢复编辑器',
     noticeEditorLoadFailedTitle: '编辑器加载失败',
     noticeDocumentSyncFailedTitle: '文档同步失败',
     noticeExternalConflictTitle: '检测到外部修改',
@@ -651,7 +646,6 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     editorUpdateFailure: '编辑器无法更新此文档，请重新打开文件。',
     transientUpdateFailure: '实时模式更新时遇到临时渲染错误，请重试。',
     transientModeFailure: '实时模式遇到临时渲染错误，将保持当前模式；请重试。',
-    transientLoadRetry: '实时模式加载时遇到临时渲染错误，正在重试…',
     transientLoadFailure: '实时模式加载时遇到临时渲染错误，请重新打开文件或切换模式。',
     pasteImageFailure: (message: string) => `无法粘贴图片：${message}`,
     properties: 'Properties',

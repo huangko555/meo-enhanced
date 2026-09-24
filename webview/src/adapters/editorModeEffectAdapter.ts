@@ -7,7 +7,7 @@ import type {
   EditorModeViewportToken
 } from '../application/editorMode';
 
-export type EditorModeFailure = 'transient-live' | 'live-incompatible' | 'fatal';
+export type EditorModeFailure = 'transient-load' | 'transient-live' | 'live-incompatible' | 'fatal';
 
 export type EditorModeEffectExecution = {
   readonly immediate?: EditorModeInput;

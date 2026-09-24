@@ -52,14 +52,14 @@ export type EditorModeInput =
   | {
       readonly type: 'editorModeFailed';
       readonly transitionId: number;
-      readonly failure: 'transient-live' | 'live-incompatible' | 'fatal';
+      readonly failure: 'transient-load' | 'transient-live' | 'live-incompatible' | 'fatal';
     }
   | { readonly type: 'editorMountStarted'; readonly mountId: number }
   | { readonly type: 'editorMountSucceeded'; readonly mountId: number }
   | {
       readonly type: 'editorMountFailed';
       readonly mountId: number;
-      readonly failure: 'transient-live' | 'live-incompatible' | 'fatal';
+      readonly failure: 'transient-load' | 'transient-live' | 'live-incompatible' | 'fatal';
     }
   | { readonly type: 'dispose' };
 
@@ -96,7 +96,7 @@ export type EditorModeEffect =
   | { readonly type: 'postMode'; readonly mode: EditorMode }
   | {
       readonly type: 'showNotice';
-      readonly notice: 'transient-live' | 'live-fallback' | 'editor-failure' | 'mount-retry' | 'mount-failure';
+      readonly notice: 'transient-live' | 'live-fallback' | 'editor-failure' | 'mount-failure';
     }
   | { readonly type: 'scheduleEditorMount'; readonly mountId: number; readonly mode: EditableMode }
   | { readonly type: 'disposeMode' };
@@ -522,14 +522,14 @@ export function createEditorModeApplication(): EditorModeApplication {
           || input.mountId !== pendingMount.id) return [];
         const failedMount = pendingMount;
         pendingMount = null;
-        if (mode === 'live' && !mountRecoveryAttempted && input.failure === 'transient-live') {
+        const retryableMountFailure = input.failure === 'transient-load'
+          || (mode === 'live' && input.failure === 'transient-live');
+        if (!mountRecoveryAttempted && retryableMountFailure) {
           mountRecoveryAttempted = true;
-          pendingMount = { ...failedMount, id: ++mountSequence, mode: 'live' };
+          const retryMount = { ...failedMount, id: ++mountSequence };
+          pendingMount = retryMount;
           editorMount = 'scheduled';
-          return [
-            { type: 'showNotice', notice: 'mount-retry' },
-            { type: 'scheduleEditorMount', mountId: pendingMount.id, mode: 'live' }
-          ];
+          return [{ type: 'scheduleEditorMount', mountId: retryMount.id, mode: retryMount.mode }];
         }
         if (mode === 'live' && !mountRecoveryAttempted && input.failure === 'live-incompatible') {
           mountRecoveryAttempted = true;
@@ -545,7 +545,7 @@ export function createEditorModeApplication(): EditorModeApplication {
         editorMount = 'unmounted';
         return [{
           type: 'showNotice',
-          notice: mode === 'live' && input.failure === 'transient-live'
+          notice: retryableMountFailure
             ? 'mount-failure'
             : 'editor-failure'
         }];

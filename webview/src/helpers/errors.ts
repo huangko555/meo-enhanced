@@ -58,14 +58,17 @@ export const logWebviewRenderError = (context: string, error: unknown, extra: Re
 export interface FailureNoticeState {
   message: NoticeMessage;
   kind: EditorNoticeKind;
+  key: string | null;
 }
 
 export type NoticeContent = string | EditorNoticeContent;
 export type NoticeMessage = NoticeContent | (() => NoticeContent);
 
 export const createFailureNoticeManager = (notice: EditorNotice) => {
-  let failureNotice: FailureNoticeState = { message: '', kind: 'error' };
-  let persistentNotice: FailureNoticeState = { message: '', kind: 'warning' };
+  let failureNotice: FailureNoticeState = { message: '', kind: 'error', key: null };
+  let persistentNotice: FailureNoticeState = { message: '', kind: 'warning', key: null };
+  let dismissedFailureKey: string | null = null;
+  let dismissedPersistentKey: string | null = null;
 
   const resolveMessage = (message: NoticeMessage): NoticeContent => (
     typeof message === 'function' ? message() : message
@@ -80,36 +83,77 @@ export const createFailureNoticeManager = (notice: EditorNotice) => {
     notice.clearEditorNotice();
   };
 
-  const setFailureNotice = (message: NoticeMessage, kind: EditorNoticeKind = 'error'): void => {
-    failureNotice = { message, kind };
+  const setFailureNotice = (
+    message: NoticeMessage,
+    kind: EditorNoticeKind = 'error',
+    key: string | null = null
+  ): void => {
+    if (key !== null && dismissedFailureKey === key) return;
+    const duplicate = key !== null
+      && Boolean(failureNotice.message)
+      && failureNotice.key === key
+      && failureNotice.kind === kind;
+    if (key !== dismissedFailureKey) dismissedFailureKey = null;
+    failureNotice = { message, kind, key };
+    if (duplicate) return;
     updateEditorNotice();
   };
 
-  const clearFailureNotice = (): void => {
-    if (!failureNotice.message) {
+  const clearFailureNotice = (key: string | null = null): void => {
+    if (key !== null && failureNotice.key !== key) {
+      if (dismissedFailureKey === key) dismissedFailureKey = null;
       return;
     }
-    failureNotice = { message: '', kind: 'error' };
+    if (!failureNotice.message) {
+      if (key === null || dismissedFailureKey === key) dismissedFailureKey = null;
+      return;
+    }
+    failureNotice = { message: '', kind: 'error', key: null };
+    if (key === null || dismissedFailureKey === key) dismissedFailureKey = null;
     updateEditorNotice();
   };
 
-  const setPersistentNotice = (message: NoticeMessage, kind: EditorNoticeKind = 'warning'): void => {
-    persistentNotice = { message, kind };
+  const setPersistentNotice = (
+    message: NoticeMessage,
+    kind: EditorNoticeKind = 'warning',
+    key: string | null = null
+  ): void => {
+    if (key !== null && dismissedPersistentKey === key) return;
+    const duplicate = key !== null
+      && Boolean(persistentNotice.message)
+      && persistentNotice.key === key
+      && persistentNotice.kind === kind;
+    if (key !== dismissedPersistentKey) dismissedPersistentKey = null;
+    persistentNotice = { message, kind, key };
+    if (duplicate) return;
     updateEditorNotice();
   };
 
-  const clearPersistentNotice = (): void => {
-    if (!persistentNotice.message) return;
-    persistentNotice = { message: '', kind: 'warning' };
+  const clearPersistentNotice = (key: string | null = null): void => {
+    if (key !== null && persistentNotice.key !== key) {
+      if (dismissedPersistentKey === key) dismissedPersistentKey = null;
+      return;
+    }
+    if (!persistentNotice.message) {
+      if (key === null || dismissedPersistentKey === key) dismissedPersistentKey = null;
+      return;
+    }
+    persistentNotice = { message: '', kind: 'warning', key: null };
+    if (key === null || dismissedPersistentKey === key) dismissedPersistentKey = null;
     updateEditorNotice();
   };
 
   const dismissCurrentNotice = (): void => {
     if (failureNotice.message) {
-      clearFailureNotice();
+      dismissedFailureKey = failureNotice.key;
+      failureNotice = { message: '', kind: 'error', key: null };
+      updateEditorNotice();
       return;
     }
-    clearPersistentNotice();
+    if (!persistentNotice.message) return;
+    dismissedPersistentKey = persistentNotice.key;
+    persistentNotice = { message: '', kind: 'warning', key: null };
+    updateEditorNotice();
   };
 
   const hasFailureNotice = (): boolean => Boolean(failureNotice.message);

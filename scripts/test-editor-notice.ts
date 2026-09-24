@@ -141,10 +141,37 @@ async function main() {
       };
       manager.dismissCurrentNotice();
       const persistentDismissed = banner.hidden;
+
+      let keyedRenders = 0;
+      const keyedManager = (window as any).EditorNoticeHarness.createFailureNoticeManager({
+        setEditorNotice: () => { keyedRenders += 1; },
+        clearEditorNotice: () => undefined
+      });
+      keyedManager.setFailureNotice('retrying', 'warning', 'editor-mount');
+      keyedManager.setFailureNotice('retrying', 'warning', 'editor-mount');
+      const duplicateCoalesced = keyedRenders === 1;
+      keyedManager.dismissCurrentNotice();
+      keyedManager.setFailureNotice('retrying', 'warning', 'editor-mount');
+      const dismissedOccurrenceSuppressed = keyedRenders === 1;
+      keyedManager.setFailureNotice('different issue', 'error', 'editor-update');
+      const differentOccurrenceShown = keyedRenders === 2;
+      keyedManager.clearFailureNotice('editor-update');
+      keyedManager.setFailureNotice('new occurrence', 'error', 'editor-update');
+      const recoveredOccurrenceCanReopen = keyedRenders === 3;
+      keyedManager.clearFailureNotice('editor-update');
+      keyedManager.setPersistentNotice('changed on disk', 'warning', 'external-file-modified');
+      keyedManager.dismissCurrentNotice();
+      keyedManager.setPersistentNotice('changed on disk', 'warning', 'external-file-modified');
+      const dismissedPersistentOccurrenceSuppressed = keyedRenders === 4;
+      keyedManager.setPersistentNotice('deleted on disk', 'warning', 'external-file-deleted');
+      const differentPersistentOccurrenceShown = keyedRenders === 5;
       return {
         firstState, dismissed, dismissCount, actionCount, secondState,
         localizedChrome,
-        persistentText, failureText, restoredPersistentText, relocalizedText, persistentDismissed
+        persistentText, failureText, restoredPersistentText, relocalizedText, persistentDismissed,
+        duplicateCoalesced, dismissedOccurrenceSuppressed,
+        differentOccurrenceShown, recoveredOccurrenceCanReopen,
+        dismissedPersistentOccurrenceSuppressed, differentPersistentOccurrenceShown
       };
     });
 
@@ -185,6 +212,11 @@ async function main() {
       result.restoredPersistentText !== '磁盘文件已修改' || result.relocalizedText !== 'The file changed on disk' ||
       !result.persistentDismissed) {
       throw new Error(`persistent or localized notice lifecycle was incorrect: ${JSON.stringify(result)}`);
+    }
+    if (!result.duplicateCoalesced || !result.dismissedOccurrenceSuppressed ||
+      !result.differentOccurrenceShown || !result.recoveredOccurrenceCanReopen ||
+      !result.dismissedPersistentOccurrenceSuppressed || !result.differentPersistentOccurrenceShown) {
+      throw new Error(`keyed notice escalation was incorrect: ${JSON.stringify(result)}`);
     }
     if (result.localizedChrome.title !== 'Action needed' || result.localizedChrome.closeText !== 'Dismiss' ||
       result.localizedChrome.closeLabel !== 'Dismiss notification') {

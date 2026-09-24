@@ -330,7 +330,7 @@ let mountRetryId = pendingMountId(mountRetry);
 mountRetry.dispatch({ type: 'editorMountStarted', mountId: mountRetryId });
 assert.deepEqual(effectTypes(mountRetry.dispatch({
   type: 'editorMountFailed', mountId: mountRetryId, failure: 'transient-live'
-})), ['showNotice', 'scheduleEditorMount']);
+})), ['scheduleEditorMount'], 'an in-budget automatic recovery must remain silent');
 mountRetryId = pendingMountId(mountRetry);
 mountRetry.dispatch({ type: 'editorMountStarted', mountId: mountRetryId });
 const exhaustedMountEffects = mountRetry.dispatch({
@@ -346,6 +346,20 @@ assert.deepEqual(
   'an explicit retry must restart an editor that exhausted automatic mount recovery'
 );
 assert.equal(mountRetry.getState().editorMount, 'scheduled');
+
+const sourceLoadRetry = createEditorModeApplication();
+sourceLoadRetry.dispatch({ type: 'initialize', hostMode: 'source' });
+let sourceLoadRetryId = pendingMountId(sourceLoadRetry);
+sourceLoadRetry.dispatch({ type: 'editorMountStarted', mountId: sourceLoadRetryId });
+assert.deepEqual(effectTypes(sourceLoadRetry.dispatch({
+  type: 'editorMountFailed', mountId: sourceLoadRetryId, failure: 'transient-load'
+})), ['scheduleEditorMount'], 'a transient editor asset failure must retry silently in Source mode too');
+assert.equal(sourceLoadRetry.getState().pendingMount?.mode, 'source');
+sourceLoadRetryId = pendingMountId(sourceLoadRetry);
+sourceLoadRetry.dispatch({ type: 'editorMountStarted', mountId: sourceLoadRetryId });
+assert.deepEqual(sourceLoadRetry.dispatch({
+  type: 'editorMountFailed', mountId: sourceLoadRetryId, failure: 'transient-load'
+}), [{ type: 'showNotice', notice: 'mount-failure' }], 'asset retries must remain bounded');
 
 const mountFallback = createEditorModeApplication();
 mountFallback.dispatch({ type: 'initialize', hostMode: 'live' });

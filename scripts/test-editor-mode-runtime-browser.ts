@@ -94,7 +94,11 @@ async function main(): Promise<void> {
     assert.equal(snapshot.state.mode, 'live', 'local preference must win over Host Init');
     assert.equal(snapshot.state.editorMount, 'mounted');
     assert.equal(snapshot.editorMounted, true);
-    assert.equal(snapshot.notices.includes('mount-retry'), true);
+    assert.equal(
+      snapshot.notices.length,
+      0,
+      'an in-budget automatic mount recovery must not surface a notice'
+    );
     assert.match(snapshot.persisted, /"mode":"live"/);
     assert.ok(snapshot.events.indexOf('persist:live:live') < snapshot.events.indexOf('post:live'));
 

@@ -61,6 +61,16 @@ import { createReadingPositionLifecycle, type ReadingPositionLifecycle } from '.
 
 type CreateEditorFactory = (typeof import('./editor'))['createEditor'];
 
+class TransientEditorLoadError extends Error {
+  readonly originalError: unknown;
+
+  constructor(originalError: unknown) {
+    super('Editor bundle failed to load');
+    this.name = 'TransientEditorLoadError';
+    this.originalError = originalError;
+  }
+}
+
 type CompatibleVsCodeWebviewApi = {
   postMessage: (message: WebviewMessage) => void;
   getState: () => unknown;
@@ -1918,6 +1928,15 @@ const LIVE_IMAGE_REVEAL_WAIT_MS = 120;
 const failureNotice = createFailureNoticeManager(editorNotice);
 handleEditorNoticeDismiss = failureNotice.dismissCurrentNotice;
 
+const editorNoticeIssue = Object.freeze({
+  documentPresentation: 'document-presentation',
+  editorModeTransition: 'editor-mode-transition',
+  editorMount: 'editor-mount',
+  externalFileDeleted: 'external-file-deleted',
+  externalFileModified: 'external-file-modified',
+  liveModeUnavailable: 'live-mode-unavailable'
+});
+
 const requestModeFromNotice = async (mode: 'live' | 'source'): Promise<void> => {
   failureNotice.clearFailureNotice();
   await editorModeRuntime.dispatch({ type: 'requestMode', mode, source: 'user' });
@@ -2034,7 +2053,7 @@ const loadCreateEditorFactory = async (): Promise<CreateEditorFactory> => {
       .then((mod) => mod.createEditor)
       .catch((error) => {
         createEditorFactoryPromise = null;
-        throw error;
+        throw new TransientEditorLoadError(error);
       });
   }
 
@@ -2368,6 +2387,10 @@ const setEditorTextSafely = async (
 
   try {
     editor.setText(text, resetHistory);
+    failureNotice.clearFailureNotice(editorNoticeIssue.documentPresentation);
+    if (getActiveEditorMode() === 'live') {
+      failureNotice.clearFailureNotice(editorNoticeIssue.liveModeUnavailable);
+    }
     return true;
   } catch (error) {
     logWebviewRenderError('setText', error, { context });
@@ -2375,7 +2398,8 @@ const setEditorTextSafely = async (
     if (getActiveEditorMode() === 'live') {
       try {
         editor.setText(text, resetHistory);
-        failureNotice.clearFailureNotice();
+        failureNotice.clearFailureNotice(editorNoticeIssue.documentPresentation);
+        failureNotice.clearFailureNotice(editorNoticeIssue.liveModeUnavailable);
         return true;
       } catch (retryInLiveError) {
         logWebviewRenderError('setText.retryInLive', retryInLiveError, { context });
@@ -2384,7 +2408,7 @@ const setEditorTextSafely = async (
             title: activeUiStrings.noticeLiveRenderIssueTitle,
             message: activeUiStrings.transientUpdateFailure,
             actions: [switchToSourceAction()]
-          }), 'warning');
+          }), 'warning', editorNoticeIssue.documentPresentation);
           return false;
         }
       }
@@ -2393,20 +2417,21 @@ const setEditorTextSafely = async (
         title: activeUiStrings.noticeLiveModeUnavailableTitle,
         message: activeUiStrings.liveModeFailure,
         actions: [retryLiveModeAction()]
-      }), 'warning');
+      }), 'warning', editorNoticeIssue.liveModeUnavailable);
       await editorModeRuntime.dispatch({
         type: 'requestMode', mode: 'source', source: 'render-failure', basisManualIntentId
       });
       if (!editor || getActiveEditorMode() !== 'source') return false;
       try {
         editor.setText(text, resetHistory);
+        failureNotice.clearFailureNotice(editorNoticeIssue.documentPresentation);
         return true;
       } catch (retryError) {
         logWebviewRenderError('setText.retryInSource', retryError, { context });
         failureNotice.setFailureNotice(() => ({
           title: activeUiStrings.noticeEditorUpdateFailedTitle,
           message: activeUiStrings.editorUpdateFailure
-        }), 'error');
+        }), 'error', editorNoticeIssue.documentPresentation);
         return false;
       }
     }
@@ -2414,7 +2439,7 @@ const setEditorTextSafely = async (
     failureNotice.setFailureNotice(() => ({
       title: activeUiStrings.noticeEditorUpdateFailedTitle,
       message: activeUiStrings.editorUpdateFailure
-    }), 'error');
+    }), 'error', editorNoticeIssue.documentPresentation);
     return false;
   }
 };
@@ -2634,7 +2659,8 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
   syncGitDiffLineHighlights();
   editor.focus();
   pendingInitialText = null;
-  if (mode === 'live') failureNotice.clearFailureNotice();
+  failureNotice.clearFailureNotice(editorNoticeIssue.editorMount);
+  if (mode === 'live') failureNotice.clearFailureNotice(editorNoticeIssue.liveModeUnavailable);
   requestWikiLinkStatuses(initialText);
   requestLocalLinkStatuses(initialText);
   if (pendingRevealSelection) applyRevealSelectionFromHost(pendingRevealSelection);
@@ -2702,7 +2728,8 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     syncGitDiffDetails();
     syncGitDiffLineHighlights();
     if (outlineController.isVisible()) outlineController.refresh();
-    if (mode === 'live') failureNotice.clearFailureNotice();
+    failureNotice.clearFailureNotice(editorNoticeIssue.editorModeTransition);
+    if (mode === 'live') failureNotice.clearFailureNotice(editorNoticeIssue.liveModeUnavailable);
     failureNotice.updateEditorNotice();
   },
   setPreviewActive(active, presentation) {
@@ -2836,24 +2863,19 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
         title: activeUiStrings.noticeLiveRenderIssueTitle,
         message: activeUiStrings.transientModeFailure,
         actions: [retryLiveModeAction(), switchToSourceAction()]
-      }), 'warning');
+      }), 'warning', editorNoticeIssue.editorModeTransition);
     } else if (notice === 'live-fallback') {
       failureNotice.setFailureNotice(() => ({
         title: activeUiStrings.noticeLiveModeUnavailableTitle,
         message: activeUiStrings.liveModeFailure,
         actions: [retryLiveModeAction()]
-      }), 'warning');
-    } else if (notice === 'mount-retry') {
-      failureNotice.setFailureNotice(() => ({
-        title: activeUiStrings.noticeEditorRecoveringTitle,
-        message: activeUiStrings.transientLoadRetry
-      }), 'info');
+      }), 'warning', editorNoticeIssue.liveModeUnavailable);
     } else if (notice === 'mount-failure') {
       failureNotice.setFailureNotice(() => ({
         title: activeUiStrings.noticeEditorLoadFailedTitle,
         message: activeUiStrings.transientLoadFailure,
         actions: [restartEditorAction(), switchToSourceAction()]
-      }), 'warning');
+      }), 'warning', editorNoticeIssue.editorMount);
     } else {
       failureNotice.setFailureNotice(() => ({
         title: activeUiStrings.noticeEditorUpdateFailedTitle,
@@ -2863,13 +2885,16 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
             ? [restartEditorAction()]
             : [restartEditorAction(), switchToSourceAction()]
           : getActiveEditorMode() === 'live' ? [switchToSourceAction()] : []
-      }), 'error');
+      }), 'error', editorModeApplication.getState().editorMount === 'unmounted'
+        ? editorNoticeIssue.editorMount
+        : editorNoticeIssue.editorModeTransition);
     }
-    failureNotice.updateEditorNotice();
   },
   reportError: (operation, error) => logWebviewRenderError(`editorMode.${operation}`, error),
   classifyError(error, operation) {
     logWebviewRenderError(`editorMode.${operation}`, error);
+    if ((operation === 'mount-live' || operation === 'mount-source')
+      && error instanceof TransientEditorLoadError) return 'transient-load';
     if (operation === 'apply-source' || operation === 'mount-source') return 'fatal';
     return shouldAutoFallbackToSourceForLiveError(error) ? 'live-incompatible' : 'transient-live';
   },
@@ -3093,7 +3118,10 @@ window.addEventListener('message', (event) => {
               title: activeUiStrings.noticeExternalFileModifiedTitle,
               message: activeUiStrings.externalFileModifiedNotice
             },
-        'warning'
+        'warning',
+        message.status === 'deleted-while-dirty'
+          ? editorNoticeIssue.externalFileDeleted
+          : editorNoticeIssue.externalFileModified
       );
     }
     return;
