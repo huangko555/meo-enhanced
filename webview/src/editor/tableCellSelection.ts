@@ -369,6 +369,10 @@ export class TableCellSelection {
     return { phase: this.phase, anchor: this.anchor, range: this.range };
   }
 
+  ownsPointer(pointerId: number): boolean {
+    return this.pointerId === pointerId;
+  }
+
   copy(cells: readonly (readonly TableCellCopyValue[])[]): SerializedTableCellSelection | null {
     if (!this.range || this.phase === 'disposed') return null;
     const cellCount = (this.range.toRow - this.range.fromRow + 1) * (this.range.toCol - this.range.fromCol + 1);

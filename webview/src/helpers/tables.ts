@@ -3525,6 +3525,16 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       this.setContextMenuOpen(false);
       const current = this.coordsFromCell(cell);
       if (!current) return;
+      const selectionPhase = this.cellSelection.snapshot().phase;
+      if (
+        this.cellSelection.ownsPointer(event.pointerId) &&
+        (selectionPhase === 'text-candidate' || selectionPhase === 'dragging')
+      ) {
+        // A window-focus change can swallow pointerup/pointercancel and leave the
+        // previous gesture owning the state machine forever. A renewed press from
+        // that same pointer is a definitive boundary, so retire it first.
+        this.clearSelection('replacement');
+      }
       if (event.target instanceof HTMLTextAreaElement) {
         const transition = this.cellSelection.accept({
           type: 'activate', pointerId: event.pointerId, cell: current, origin: 'textarea'

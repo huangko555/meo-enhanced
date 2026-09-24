@@ -41,6 +41,45 @@ async function main() {
     const first = 'tbody tr:first-child td:first-child textarea';
     const second = 'tbody tr:first-child td:nth-child(2) textarea';
     const last = 'tbody tr:nth-child(2) td:nth-child(2) textarea';
+    const firstPreview = 'tbody tr:first-child td:first-child .meo-md-html-table-cell-preview';
+    const secondPreview = 'tbody tr:first-child td:nth-child(2) .meo-md-html-table-cell-preview';
+
+    await page.evaluate((selector) => {
+      const preview = document.querySelector<HTMLElement>(selector)!;
+      const rect = preview.getBoundingClientRect();
+      preview.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 1,
+        pointerType: 'mouse',
+        isPrimary: true,
+        button: 0,
+        buttons: 1,
+        clientX: rect.left + 8,
+        clientY: rect.top + 8
+      }));
+      window.dispatchEvent(new Event('blur'));
+    }, firstPreview);
+    await page.click(secondPreview);
+    const recoveredEntry = await page.evaluate(() => {
+      const active = document.activeElement as HTMLTextAreaElement | null;
+      return {
+        tag: active?.tagName ?? '',
+        row: active?.dataset.tableRow,
+        col: active?.dataset.tableCol,
+        editing: active?.parentElement?.classList.contains('is-editing') ?? false
+      };
+    });
+    if (
+      recoveredEntry.tag !== 'TEXTAREA' ||
+      recoveredEntry.row !== '1' ||
+      recoveredEntry.col !== '1' ||
+      !recoveredEntry.editing
+    ) {
+      throw new Error(`Interrupted pointer blocked later table entry: ${JSON.stringify(recoveredEntry)}`);
+    }
+    await page.keyboard.press('Escape');
+
     const wrappedMetrics = await page.evaluate((selector) => {
       const input = document.querySelector<HTMLTextAreaElement>(selector)!;
       const rect = input.getBoundingClientRect();
