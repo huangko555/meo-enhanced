@@ -350,6 +350,13 @@ body[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-
 
 aside.meo-export-comment { margin: 0.7em 0; }
 .meo-export-comment-inline { display: inline; padding: 0.1em 0.35em; }
+.meo-export-html-block p + .meo-export-comment-inline,
+.meo-export-html-block .meo-export-comment-inline:has(+ p) {
+  display: block;
+  width: fit-content;
+}
+.meo-export-html-block p + .meo-export-comment-inline { margin-top: 0.4em; }
+.meo-export-html-block .meo-export-comment-inline:has(+ p) { margin-bottom: 0.4em; }
 .meo-export-comment-label { font-weight: 600; margin-right: 0.45em; }
 .meo-export-comment-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 
@@ -588,7 +595,10 @@ p, ul, ol, blockquote, pre, table, hr {
   margin: 0 0 1em;
 }
 .meo-export-doc p:has(+ .meo-export-comment-inline) {
-  margin-bottom: 0.4em;
+  margin-bottom: 0;
+}
+.meo-export-doc p:has(+ .meo-export-html-block > aside.meo-export-comment) {
+  margin-bottom: 0;
 }
 ul { padding-inline-start: 1.5em; }
 ol { padding-inline-start: 1.8em; }

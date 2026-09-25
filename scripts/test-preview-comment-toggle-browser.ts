@@ -63,15 +63,31 @@ try {
     const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
     const paragraph = Array.from(doc.querySelectorAll<HTMLParagraphElement>('p'))
       .find(element => element.textContent === 'First paragraph')!;
-    const next = paragraph.nextElementSibling;
-    const style = doc.defaultView!.getComputedStyle(paragraph);
+    const comment = paragraph.nextElementSibling as HTMLElement;
+    const following = comment.nextElementSibling as HTMLElement;
     return {
-      nextIsComment: next?.classList.contains('meo-export-comment-inline'),
-      ratio: parseFloat(style.marginBottom) / parseFloat(style.fontSize)
+      nextIsComment: comment.classList.contains('meo-export-comment-inline'),
+      before: comment.getBoundingClientRect().top - paragraph.getBoundingClientRect().bottom,
+      after: following.getBoundingClientRect().top - comment.getBoundingClientRect().bottom
     };
   });
   assert.equal(htmlCommentGap.nextIsComment, true);
-  assert.ok(Math.abs(htmlCommentGap.ratio - 0.4) < 0.01);
+  const standaloneCommentGap = await page.evaluate(() => {
+    const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const paragraph = Array.from(doc.querySelectorAll<HTMLParagraphElement>('p'))
+      .find(element => element.textContent === 'Before')!;
+    const wrapper = paragraph.nextElementSibling as HTMLElement;
+    const comment = wrapper.querySelector<HTMLElement>('aside.meo-export-comment')!;
+    const following = wrapper.nextElementSibling as HTMLElement;
+    return {
+      nextIsComment: wrapper.classList.contains('meo-export-html-block') && Boolean(comment),
+      before: comment.getBoundingClientRect().top - paragraph.getBoundingClientRect().bottom,
+      after: following.getBoundingClientRect().top - comment.getBoundingClientRect().bottom
+    };
+  });
+  assert.equal(standaloneCommentGap.nextIsComment, true, JSON.stringify(standaloneCommentGap));
+  assert.ok(Math.abs(htmlCommentGap.before - htmlCommentGap.after) <= 2, JSON.stringify({ htmlCommentGap, standaloneCommentGap }));
+  assert.ok(Math.abs(standaloneCommentGap.before - standaloneCommentGap.after) <= 2, JSON.stringify(standaloneCommentGap));
   await page.click('.preview-show-comments');
   await waitFor('comment hidden again', () => {
     const text = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body?.textContent;

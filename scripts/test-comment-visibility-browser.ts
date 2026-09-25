@@ -55,15 +55,16 @@ try {
     const htmlCommentGap = await page.evaluate(() => {
       const paragraph = Array.from(document.querySelectorAll<HTMLParagraphElement>('.meo-md-html-block p'))
         .find(element => element.textContent === 'First paragraph')!;
-      const next = paragraph.nextElementSibling;
-      const style = getComputedStyle(paragraph);
+      const comment = paragraph.nextElementSibling as HTMLElement;
+      const following = comment.nextElementSibling as HTMLElement;
       return {
-        nextIsComment: next?.classList.contains('meo-md-html-comment'),
-        ratio: parseFloat(style.marginBottom) / parseFloat(style.fontSize)
+        nextIsComment: comment.classList.contains('meo-md-html-comment'),
+        before: comment.getBoundingClientRect().top - paragraph.getBoundingClientRect().bottom,
+        after: following.getBoundingClientRect().top - comment.getBoundingClientRect().bottom
       };
     });
     assert.equal(htmlCommentGap.nextIsComment, true);
-    assert.ok(Math.abs(htmlCommentGap.ratio - 0.4) < 0.01);
+    assert.ok(Math.abs(htmlCommentGap.before - htmlCommentGap.after) <= 2, JSON.stringify(htmlCommentGap));
     const inlineHtml = await page.$eval('.meo-md-html-strong', element => ({
       text: element.textContent,
       note: element.querySelector('.meo-md-html-comment')?.textContent

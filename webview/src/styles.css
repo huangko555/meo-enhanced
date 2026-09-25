@@ -3693,6 +3693,14 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 }
 
 .cm-editor .meo-md-html-content p:where(:has(+ .meo-md-html-comment[data-display='block'])) {
+  margin-bottom: 0;
+}
+
+.cm-editor .meo-md-html-content p + .meo-md-html-comment[data-display='block'] {
+  margin-top: 0.4em;
+}
+
+.cm-editor .meo-md-html-content .meo-md-html-comment[data-display='block']:has(+ p) {
   margin-bottom: 0.4em;
 }
 
