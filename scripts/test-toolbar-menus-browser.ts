@@ -37,9 +37,13 @@ try {
   const formatIconColors = await page.$$eval('.preview-export-menu-action', elements => elements.map(element => {
     const icon = element.querySelector('img');
     const svg = icon ? decodeURIComponent(icon.src.split(',')[1] ?? '') : '';
-    return [element.getAttribute('data-format'), icon?.getAttribute('src')?.startsWith('data:image/svg+xml,'), svg.includes('fill="#ffffff"'), svg.match(/fill="(#(?:e65100|ef5350|01579b))"/)?.[1]];
+    const pageFill = svg.match(/<path fill="(#[0-9a-f]{6})" d="M6 2h8l6 6/)?.[1];
+    return [element.getAttribute('data-format'), icon?.getAttribute('src')?.startsWith('data:image/svg+xml,'), pageFill, svg.match(/fill="(#(?:e65100|ef5350|01579b))"/)?.[1]];
   }));
-  assert.deepEqual(formatIconColors, options.map(([format]) => [format, true, true, { html: '#e65100', pdf: '#ef5350', docx: '#01579b' }[format]]));
+  assert.deepEqual(formatIconColors, options.map(([format]) => [format, true,
+    { html: '#ffab91', pdf: '#ffb3b1', docx: '#90caf9' }[format],
+    { html: '#e65100', pdf: '#ef5350', docx: '#01579b' }[format]
+  ]));
   for (const [format, includeTableOfContents] of options) {
     await page.hover('.preview-export-trigger');
     await page.waitForFunction(() => getComputedStyle(document.querySelector<HTMLElement>('.preview-export-menu')!).visibility === 'visible');
