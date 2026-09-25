@@ -19,11 +19,21 @@ Install the locked dependencies with the same command used by CI:
 bun install --frozen-lockfile
 ```
 
-For visual CSS work, start the `Run` launch configuration once with F5 and open
-a Markdown file in the Extension Development Host. Saving
-`webview/src/styles.css` updates open MEO editors immediately without rebuilding
-or reloading the window. This live style path runs only in extension development
-mode; TypeScript changes still require a build and relaunch.
+For visual CSS work, follow [the UI design guidelines](docs/ui-design-guidelines.md).
+Start the `Run` launch configuration with F5; its prelaunch task builds the
+extension and webview. In the **Extension Development Host** window, open a
+Markdown file with MEO Enhanced. Keep the original window for editing source
+and the new Development Host window for checking the result. Saving
+`webview/src/styles.css` updates its open MEO editors immediately, without a
+rebuild or window reload. The development extension watches that source file and
+sends the new stylesheet to each open editor; the normal installed extension
+uses the built CSS instead.
+
+This live path covers CSS only. After changing Webview TypeScript, run
+`bun run build:webview` and restart the `Run` session to load the new JavaScript.
+If a CSS edit does not appear, check that the file was saved and that the visible
+window is the Extension Development Host with a MEO editor open. The focused
+contract for the live style path is `bun scripts/test-development-style-refresh.ts`.
 
 ## Develop and verify
 
