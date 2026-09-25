@@ -150,6 +150,76 @@ async function main(): Promise<void> {
     assert.ok(result.nestedTable.cells >= 2 && result.nestedTable.text.includes('visible nested cell'));
     assert.equal(result.nestedTable.source, result.nestedTableSource);
 
+    const sameLine = await page.evaluate(async () => {
+      const source = [
+        '- 1. bullet then ordered',
+        '1. - ordered then bullet',
+        '- 1. - three list markers',
+        '- 1. [ ] task after two lists',
+        '> - 1. quote then two lists',
+        '- > 1. list quote ordered',
+        '1. > - [x] ordered quote task',
+        '- 1. - 2. [ ] five markers',
+        '- [ ] 1. task first keeps ordered text'
+      ].join('\n');
+      const editor = (window as any).ListEditingHarness.createEditor({
+        parent: document.getElementById('host')!, text: source,
+        initialMode: 'live', uiLanguage: 'zh-CN', onApplyChanges() {}
+      });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      const items = Array.from(document.querySelectorAll<HTMLElement>('#host .cm-line')).map((line) => ({
+        text: line.innerText,
+        markers: line.querySelectorAll('.meo-md-list-marker').length,
+        checkboxes: line.querySelectorAll('.meo-task-checkbox').length,
+        markerRects: Array.from(line.querySelectorAll<HTMLElement>('.meo-md-list-marker'))
+          .map((marker) => ({ left: marker.getBoundingClientRect().left, right: marker.getBoundingClientRect().right }))
+      }));
+      editor.destroy();
+      return items;
+    });
+    assert.deepEqual(sameLine.map((line) => line.markers), [2, 2, 3, 1, 2, 2, 1, 3, 0],
+      `same-line list markers must all render: ${JSON.stringify(sameLine)}`);
+    assert.equal(sameLine[3]?.checkboxes, 1);
+    assert.equal(sameLine[6]?.checkboxes, 1);
+    assert.equal(sameLine[7]?.checkboxes, 1);
+    assert.equal(sameLine[8]?.checkboxes, 1);
+    for (const line of sameLine) {
+      for (let index = 1; index < line.markerRects.length; index += 1) {
+        assert.ok(line.markerRects[index].left >= line.markerRects[index - 1].right - 1,
+          `same-line markers overlap: ${JSON.stringify(line)}`);
+      }
+    }
+    for (const text of [
+      'bullet then ordered', 'ordered then bullet', 'three list markers', 'task after two lists',
+      'quote then two lists', 'list quote ordered', 'ordered quote task', 'five markers',
+      '1. task first keeps ordered text'
+    ]) {
+      assert.ok(sameLine.some((line) => line.text.includes(text)), `same-line content lost: ${text}`);
+    }
+
+    const sameLineTable = await page.evaluate(async () => {
+      const source = '| Items |\n| --- |\n| - 1. forward<br>1. - reverse<br>> - 1. quoted<br>- 1. [ ] task<br>- [ ] 1. task first<br>- > 1. list quote<br>1. - [x] reverse task |';
+      const editor = (window as any).ListEditingHarness.createEditor({
+        parent: document.getElementById('table-host')!, text: source,
+        initialMode: 'live', uiLanguage: 'zh-CN', onApplyChanges() {}
+      });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      const cell = document.querySelector<HTMLElement>('#table-host tbody td .meo-md-html-table-cell-preview')!;
+      const result = {
+        listItems: cell.querySelectorAll('li').length,
+        checkboxes: cell.querySelectorAll('input[type=checkbox]').length,
+        text: cell.innerText,
+        source: editor.getText()
+      };
+      editor.destroy();
+      return result;
+    });
+    assert.equal(sameLineTable.listItems, 13, 'table cell must retain every parsed same-line nested list');
+    assert.equal(sameLineTable.checkboxes, 3);
+    assert.ok(['forward', 'reverse', 'quoted', 'task first', 'list quote', 'reverse task']
+      .every((text) => sameLineTable.text.includes(text)));
+    assert.equal(sameLineTable.source, '| Items |\n| --- |\n| - 1. forward<br>1. - reverse<br>> - 1. quoted<br>- 1. [ ] task<br>- [ ] 1. task first<br>- > 1. list quote<br>1. - [x] reverse task |');
+
     await page.evaluate(() => {
       const editor = (window as any).ListEditingHarness.createEditor({
         parent: document.getElementById('edit-host')!, text: '> - [ ] task',

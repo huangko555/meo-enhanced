@@ -1888,12 +1888,14 @@ function addListLineDecorations(
     legacyOrderedCountsByLevel.length = 0;
     const inFrontmatterContent = isInsideFrontmatterContent(frontmatter, line.from);
     let deepest: { marker: NonNullable<ReturnType<typeof listMarkerData>>; depth: number; hiddenQuoteColumns: number } | null = null;
+    let previousMarkerEnd = line.from;
     for (const entry of entries) {
       const precedingQuoteEnds = (quoteMarksByLine.get(lineNo) ?? []).filter((end) => end <= entry.listMarkFrom);
       const quoteEnd = Math.max(line.from, ...precedingQuoteEnds);
-      const markerOffset = quoteEnd - line.from;
+      const markerOffset = Math.max(quoteEnd, previousMarkerEnd) - line.from;
       const marker = listMarkerData(lineText, null, style, markerOffset);
       if (!marker || line.from + marker.fromOffset !== entry.listMarkFrom) continue;
+      previousMarkerEnd = line.from + marker.toOffset;
       const previousCount = orderedCountsByContainer.get(entry.containerKey);
       const orderedDisplayIndex = marker.orderedNumber === undefined
         ? null

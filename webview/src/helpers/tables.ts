@@ -2064,10 +2064,6 @@ function appendTableCellRenderedPreview(
 
   const appendItemContent = (parent: HTMLLIElement, content: string, from: number, baseQuoteDepth: number) => {
     const nestedQuote = parseTableCellQuotePrefix({ text: content, from, breakText: '' });
-    if (!nestedQuote.indents.length) {
-      appendTaskContent(parent, content, from);
-      return;
-    }
     let quoteParent: HTMLElement = parent;
     for (let depth = 0; depth < nestedQuote.indents.length; depth += 1) {
       const quote = document.createElement('blockquote');
@@ -2079,14 +2075,14 @@ function appendTableCellRenderedPreview(
     quoteStack.length = baseQuoteDepth + nestedQuote.indents.length;
     const nestedItem = parseTableCellListItem(nestedQuote.line);
     if (!nestedItem) {
-      appendInline(quoteParent, nestedQuote.line.text, nestedQuote.line.from);
+      appendTaskContent(quoteParent, nestedQuote.line.text, nestedQuote.line.from);
       return;
     }
     const list = document.createElement(nestedItem.type);
     list.className = 'meo-md-html-table-cell-list';
     if (list instanceof HTMLOListElement && nestedItem.start !== 1) list.start = nestedItem.start;
     const child = document.createElement('li');
-    appendTaskContent(child, nestedItem.content, nestedItem.contentFrom);
+    appendItemContent(child, nestedItem.content, nestedItem.contentFrom, baseQuoteDepth + nestedQuote.indents.length);
     list.appendChild(child);
     quoteParent.appendChild(list);
     listStackFor(quoteParent).push({
