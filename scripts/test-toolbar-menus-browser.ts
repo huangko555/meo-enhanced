@@ -31,7 +31,7 @@ try {
   const options = [
     ['html', false], ['html', true], ['pdf', false], ['pdf', true], ['docx', false], ['docx', true]
   ] as const;
-  assert.equal(await page.$eval('.preview-export-trigger', element => element.textContent?.trim()), '导出…');
+  assert.equal(await page.$eval('.preview-export-trigger', element => element.textContent?.trim()), '导出为...');
   assert.equal(await page.$eval('.preview-export-trigger svg path', path => path.getAttribute('d')?.startsWith('M14 17a1 1 0 1 0 0 2z') && path.getAttribute('fill') === 'currentColor'), true);
   assert.equal(await page.$$eval('.preview-export-menu-action', elements => elements.length), 6);
   const formatIconColors = await page.$$eval('.preview-export-menu-action', elements => elements.map(element => {
@@ -67,6 +67,11 @@ try {
       .map(({ format, includeTableOfContents }) => [format, includeTableOfContents])
   ));
   assert.deepEqual(requests, options.map(option => [...option]));
+  await page.hover('.preview-export-trigger');
+  await page.click('.preview-export-trigger');
+  await page.mouse.move(0, 0);
+  await page.waitForFunction(() => getComputedStyle(document.querySelector<HTMLElement>('.preview-export-menu')!).visibility === 'hidden');
+  assert.equal(await page.$eval('.preview-export-trigger', element => element.getAttribute('aria-expanded')), 'false');
   await page.setViewport({ width: 420, height: 700 });
   await page.waitForFunction(() => document.querySelector('.toolbar-overflow-panel .preview-export-control'));
   await page.click('.toolbar-overflow-indicator');

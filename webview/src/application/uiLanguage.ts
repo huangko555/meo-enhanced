@@ -262,10 +262,8 @@ export type UiStrings = Readonly<{
   updateSnapshot: string;
   showChangeLocations: string;
   showBeforeChangeContent: string;
-  sourceModeOnly: string;
   noChanges: string;
   noComparison: string;
-  selectComparisonToEnable: string;
   comparisonUnavailable: string;
   comparisonUnavailableReason: (reason: ChangesReviewUnavailableReason) => string;
   addedCount: (count: number) => string;
@@ -313,10 +311,10 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     previewFontPlaceholder: 'VS Code editor font',
     previewFontUnavailable: 'Local font list unavailable; type a family name',
     previewGenerating: 'Generating preview…',
-    previewFailed: 'Preview generation failed', previewTools: 'Preview tools', exportDocument: 'Export…',
-    exportHtml: 'Export HTML', exportPdf: 'Export PDF', exportDocx: 'Export Word', exportAsHtml: 'Export as HTML',
-    exportAsPdf: 'Export as PDF', exportAsDocx: 'Export as Word document', exportHtmlWithContents: 'Export HTML with Contents',
-    exportPdfWithContents: 'Export PDF with Contents', exportDocxWithContents: 'Export Word with Contents', findAndReplace: 'Find and Replace', more: 'Settings',
+    previewFailed: 'Preview generation failed', previewTools: 'Preview tools', exportDocument: 'Export as...',
+    exportHtml: 'Export as HTML', exportPdf: 'Export as PDF', exportDocx: 'Export as Word', exportAsHtml: 'Export as HTML',
+    exportAsPdf: 'Export as PDF', exportAsDocx: 'Export as Word document', exportHtmlWithContents: 'Export as HTML with Contents',
+    exportPdfWithContents: 'Export as PDF with Contents', exportDocxWithContents: 'Export as Word with Contents', findAndReplace: 'Find and Replace', more: 'Settings',
     moreTools: 'Settings', toolbarOverflow: 'More tools', feedbackPrompt: 'Having trouble?', reportIssue: 'Report an issue',
     editorAppearance: 'UI theme', editorFontSize: 'Font size',
     custom: 'Custom', decreaseFontSize: 'Decrease font size', increaseFontSize: 'Increase font size',
@@ -437,9 +435,8 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     clickToCreateSnapshot: 'Click to Create', updateSnapshot: 'Update',
     showChangeLocations: 'Mark Change Locations',
     showBeforeChangeContent: 'Show Original · Source Only',
-    sourceModeOnly: 'Available in Source mode only', noChanges: 'No Changes', noComparison: 'No comparison',
+    noChanges: 'No Changes', noComparison: 'No comparison',
     comparisonUnavailable: 'Unable to Compare',
-    selectComparisonToEnable: 'Select a comparison version to enable',
     comparisonUnavailableReason: (reason: ChangesReviewUnavailableReason) => ({
       'git-unavailable': 'Git Unavailable',
       'not-repo': 'Not a Git Repo',
@@ -493,10 +490,10 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     previewFontPlaceholder: 'VS Code 编辑器字体',
     previewFontUnavailable: '无法获取本地字体列表；请手动输入字体名称',
     previewGenerating: '正在生成预览…',
-    previewFailed: '预览生成失败', previewTools: '预览工具', exportDocument: '导出…', exportHtml: '导出 HTML',
-    exportPdf: '导出 PDF', exportDocx: '导出 Word', exportAsHtml: '导出为 HTML', exportAsPdf: '导出为 PDF',
-    exportAsDocx: '导出为 Word 文档', exportHtmlWithContents: '导出 HTML（含目录）', exportPdfWithContents: '导出 PDF（含目录）',
-    exportDocxWithContents: '导出 Word（含目录）',
+    previewFailed: '预览生成失败', previewTools: '预览工具', exportDocument: '导出为...', exportHtml: '导出为 HTML',
+    exportPdf: '导出为 PDF', exportDocx: '导出为 Word', exportAsHtml: '导出为 HTML', exportAsPdf: '导出为 PDF',
+    exportAsDocx: '导出为 Word 文档', exportHtmlWithContents: '导出为 HTML（含目录）', exportPdfWithContents: '导出为 PDF（含目录）',
+    exportDocxWithContents: '导出为 Word（含目录）',
     findAndReplace: '查找和替换', more: '设置', moreTools: '设置', toolbarOverflow: '更多工具',
     feedbackPrompt: '使用中遇到问题？', reportIssue: '欢迎反馈',
     editorAppearance: '界面主题', editorFontSize: '字号大小', custom: '自定义',
@@ -615,9 +612,8 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     gitHeadOptionWithStatus: (status: string) => `与 Git HEAD 比较 · ${status}`,
     createSnapshot: '创建', clickToCreateSnapshot: '点击创建', updateSnapshot: '更新',
     showChangeLocations: '标记更改位置',
-    showBeforeChangeContent: '显示修改前内容 · 仅源码模式', sourceModeOnly: '仅在源码模式下可用', noChanges: '无更改', noComparison: '不比较',
+    showBeforeChangeContent: '显示修改前内容 · 仅源码模式', noChanges: '无更改', noComparison: '不比较',
     comparisonUnavailable: '无法比较',
-    selectComparisonToEnable: '选择比较版本后生效',
     comparisonUnavailableReason: (reason: ChangesReviewUnavailableReason) => ({
       'git-unavailable': 'Git 不可用',
       'not-repo': '非 Git 仓库',

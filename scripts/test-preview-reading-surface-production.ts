@@ -1171,25 +1171,38 @@ async function main(): Promise<void> {
       const panel = document.querySelector<HTMLElement>('.preview-font-family-dropdown-panel')!;
       const panelStyle = getComputedStyle(panel);
       const triggerStyle = getComputedStyle(trigger);
+      const exportMenuStyle = getComputedStyle(document.querySelector<HTMLElement>('.preview-export-menu')!);
       return {
         controlAppearance: control.dataset.previewAppearance,
         panelAppearance: panel.dataset.previewAppearance,
         panelHidden: panel.hidden,
         panelBackground: panelStyle.backgroundColor,
+        triggerBackground: triggerStyle.backgroundColor,
+        exportMenuBackground: exportMenuStyle.backgroundColor,
         panelRadius: Number.parseFloat(panelStyle.borderRadius),
         panelShadow: panelStyle.boxShadow,
         triggerShadow: triggerStyle.boxShadow
       };
     });
-    assert.deepEqual(dropdownThemeContract, {
+    assert.equal(dropdownThemeContract.panelBackground, dropdownThemeContract.exportMenuBackground,
+      'Preview font dropdown must use the export menu surface');
+    assert.equal(dropdownThemeContract.triggerBackground, dropdownThemeContract.exportMenuBackground,
+      'Preview font trigger must use the export menu surface');
+    assert.deepEqual({
+      controlAppearance: dropdownThemeContract.controlAppearance,
+      panelAppearance: dropdownThemeContract.panelAppearance,
+      panelHidden: dropdownThemeContract.panelHidden,
+      panelRadius: dropdownThemeContract.panelRadius,
+      panelShadow: dropdownThemeContract.panelShadow,
+      triggerShadow: dropdownThemeContract.triggerShadow
+    }, {
       controlAppearance: 'light',
       panelAppearance: 'light',
       panelHidden: false,
-      panelBackground: 'rgb(255, 255, 255)',
       panelRadius: 9,
       panelShadow: 'none',
       triggerShadow: 'none'
-    }, 'Preview dropdown popup must use the editor toolbar appearance with rounded, shadowless surfaces');
+    }, 'Preview dropdown popup must keep rounded, shadowless surfaces');
     await page.keyboard.press('Escape');
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await page.mouse.move(0, 0);
@@ -1288,18 +1301,26 @@ async function main(): Promise<void> {
     );
     await page.waitForFunction(() => document.documentElement.dataset.editorAppearance === 'light');
     await page.click('.preview-font-family-dropdown');
-    assert.deepEqual(await page.evaluate(() => ({
+    const previewThemeIndependentDropdown = await page.evaluate(() => ({
       previewAppearance: document.querySelector<HTMLSelectElement>('.preview-appearance-select')!.value,
       controlAppearance: document.querySelector<HTMLElement>('.preview-font-family-control')!.dataset.previewAppearance,
       panelAppearance: document.querySelector<HTMLElement>('.preview-font-family-dropdown-panel')!.dataset.previewAppearance,
       panelBackground: getComputedStyle(
         document.querySelector<HTMLElement>('.preview-font-family-dropdown-panel')!
+      ).backgroundColor,
+      exportMenuBackground: getComputedStyle(
+        document.querySelector<HTMLElement>('.preview-export-menu')!
       ).backgroundColor
-    })), {
+    }));
+    assert.equal(previewThemeIndependentDropdown.panelBackground, previewThemeIndependentDropdown.exportMenuBackground);
+    assert.deepEqual({
+      previewAppearance: previewThemeIndependentDropdown.previewAppearance,
+      controlAppearance: previewThemeIndependentDropdown.controlAppearance,
+      panelAppearance: previewThemeIndependentDropdown.panelAppearance
+    }, {
       previewAppearance: 'dark',
       controlAppearance: 'light',
-      panelAppearance: 'light',
-      panelBackground: 'rgb(255, 255, 255)'
+      panelAppearance: 'light'
     }, 'Preview content appearance must not recolor toolbar dropdowns');
     await page.keyboard.press('Escape');
     await page.select('.preview-appearance-select', 'light');

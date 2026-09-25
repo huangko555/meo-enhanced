@@ -922,7 +922,10 @@ exportControl.addEventListener('pointerenter', () => {
 });
 exportControl.addEventListener('pointerleave', () => {
   exportControl.classList.remove('is-dismissed');
-  if (!exportControl.contains(document.activeElement)) setExportMenuExpanded(false);
+  if (exportControl.contains(document.activeElement)) {
+    (document.activeElement as HTMLElement).blur();
+  }
+  setExportMenuExpanded(false);
 });
 exportControl.addEventListener('focusin', () => {
   positionExportMenu();

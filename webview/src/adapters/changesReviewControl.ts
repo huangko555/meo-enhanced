@@ -10,6 +10,7 @@ import {
   Plus,
   SquareSplitVertical,
   GitCommitHorizontal,
+  Info,
   Save,
   createElement
 } from 'lucide';
@@ -212,7 +213,6 @@ export function createChangesReviewControl(options: {
     button.type = 'button';
     button.className = 'changes-review-option changes-review-baseline-option';
     button.dataset.baseline = baseline;
-    if (baseline === 'current-edit') button.title = strings().currentDiskVersionDescription;
     button.setAttribute('role', 'menuitemradio');
     const selected = state.markersVisible ? state.baseline === baseline : baseline === 'none';
     button.classList.toggle('is-selected', selected);
@@ -221,8 +221,25 @@ export function createChangesReviewControl(options: {
     icon.className = 'changes-review-option-icon';
     appendIcon(icon, iconData);
     const text = document.createElement('span');
-    text.className = 'changes-review-option-label';
-    text.textContent = label;
+    text.className = 'changes-review-option-text';
+    const textLabel = document.createElement('span');
+    textLabel.className = 'changes-review-option-label';
+    textLabel.textContent = label;
+    text.appendChild(textLabel);
+    if (baseline === 'current-edit') {
+      const info = document.createElement('span');
+      info.className = 'changes-review-option-info';
+      appendIcon(info, Info, 13);
+      const tooltip = document.createElement('span');
+      tooltip.className = 'changes-review-option-tooltip';
+      tooltip.id = 'changes-review-current-disk-description';
+      tooltip.setAttribute('role', 'tooltip');
+      tooltip.textContent = strings().currentDiskVersionDescription;
+      info.appendChild(tooltip);
+      info.addEventListener('click', event => event.stopPropagation());
+      button.setAttribute('aria-describedby', tooltip.id);
+      text.appendChild(info);
+    }
     const check = document.createElement('span');
     check.className = 'changes-review-check';
     if (warning) {
@@ -291,7 +308,6 @@ export function createChangesReviewControl(options: {
     } else {
       accessibleSummary = appendCounts(triggerSummary, state.summary);
     }
-    trigger.title = accessibleSummary;
     trigger.setAttribute('aria-label', accessibleSummary);
     trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
     trigger.classList.toggle('is-open', open);
@@ -368,10 +384,6 @@ export function createChangesReviewControl(options: {
     const snapshotLabel = document.createElement('span');
     snapshotLabel.className = 'changes-review-option-label';
     snapshotLabel.textContent = formatManualSnapshotLabel();
-    if (language !== 'zh-CN' && state.manualSnapshot.exists && state.manualSnapshot.updatedAt !== null) {
-      const time = formatSnapshotTime(state.manualSnapshot.updatedAt);
-      if (time) snapshotSelect.title = `${value.manualSnapshot} (${time})`;
-    }
     const snapshotCheck = document.createElement('span');
     snapshotCheck.className = 'changes-review-check';
     if (!state.manualSnapshot.exists) {
@@ -380,7 +392,6 @@ export function createChangesReviewControl(options: {
       const createDescription = language === 'zh-CN'
         ? `${value.createSnapshot}${value.manualSnapshot}`
         : `${value.createSnapshot} ${value.manualSnapshot}`;
-      snapshotSelect.title = createDescription;
       snapshotSelect.setAttribute('aria-label', createDescription);
     } else if (state.markersVisible && state.baseline === 'manual') {
       appendIcon(snapshotCheck, Check, 14);
@@ -395,20 +406,15 @@ export function createChangesReviewControl(options: {
       ? `${snapshotActionText}${value.manualSnapshot}`
       : `${snapshotActionText} ${value.manualSnapshot}`;
     snapshotAction.textContent = snapshotActionText;
-    snapshotAction.title = snapshotActionDescription;
     snapshotAction.setAttribute('aria-label', snapshotActionDescription);
     snapshotRow.append(snapshotSelect);
     if (state.manualSnapshot.exists) snapshotRow.append(snapshotAction);
     baselineSection.appendChild(snapshotRow);
 
     displayHeading.textContent = value.displaySettings;
-    const sourceOnly = state.mode !== 'source';
     beforeContent.querySelector('.changes-review-option-label')!.textContent = value.showBeforeChangeContent;
     beforeContent.setAttribute('aria-checked', state.beforeContentVisible ? 'true' : 'false');
     beforeContent.disabled = !state.markersVisible;
-    beforeContent.removeAttribute('title');
-    if (!state.markersVisible) beforeContent.title = value.selectComparisonToEnable;
-    else if (sourceOnly) beforeContent.title = value.sourceModeOnly;
     if (panel.firstElementChild) {
       panel.children[0].replaceWith(header);
       panel.children[1].replaceWith(baselineSection);

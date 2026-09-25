@@ -304,7 +304,7 @@ async function main() {
       language: 'zh-CN',
       previewTools: '预览工具',
       sourceColoring: '代码着色',
-      exports: ['导出…'],
+      exports: ['导出为...'],
       previewFrameTitle: 'Markdown 预览',
       previewAppearance: '预览主题',
       editorAppearance: '界面主题',
@@ -474,6 +474,17 @@ async function main() {
     })));
     await waitForFrames(page, 2);
     await page.click('.changes-review-trigger');
+    const changesHoverHints = await page.$$eval(
+      '.changes-review-control [title]',
+      elements => elements.map(element => element.getAttribute('title'))
+    );
+    if (changesHoverHints.length) throw new Error(`Changes menu should not show native hover hints: ${JSON.stringify(changesHoverHints)}`);
+    await page.hover('.changes-review-option-info');
+    const changesInfoVisible = await page.$eval('.changes-review-option-tooltip', element => getComputedStyle(element).visibility);
+    if (changesInfoVisible !== 'visible') throw new Error('Changes explanation must appear only at its info icon');
+    await page.mouse.move(0, 0);
+    const changesInfoHidden = await page.$eval('.changes-review-option-tooltip', element => getComputedStyle(element).visibility);
+    if (changesInfoHidden !== 'hidden') throw new Error('Changes explanation must close when leaving its info icon');
     const inactiveMarkerSetting = await page.evaluate(() => {
       const button = document.querySelector<HTMLElement>('[data-baseline="none"]')!;
       const sourceOnlyButton = document.querySelector<HTMLButtonElement>('[data-toggle="before-content"]')!;
@@ -755,8 +766,8 @@ async function main() {
             label: optionLabel.textContent,
             header: header.textContent,
             disabled: panel.querySelector<HTMLButtonElement>('[data-baseline="git-head"]')!.disabled,
-            warning: optionLabel.parentElement?.querySelectorAll('.changes-review-check.is-warning svg').length === 1,
-            check: optionLabel.parentElement?.querySelectorAll('.changes-review-check:not(.is-warning) svg').length === 1,
+            warning: optionLabel.closest('.changes-review-option')?.querySelectorAll('.changes-review-check.is-warning svg').length === 1,
+            check: optionLabel.closest('.changes-review-option')?.querySelectorAll('.changes-review-check:not(.is-warning) svg').length === 1,
             clipped: optionLabel.scrollWidth > optionLabel.clientWidth
               || headerBaseline.scrollWidth > headerBaseline.clientWidth
               || header.scrollWidth > header.clientWidth
@@ -1129,7 +1140,7 @@ async function main() {
       activeSnapshot.action !== '更新' ||
       activeSnapshot.actionIconCount !== 0 ||
       activeSnapshot.actionAriaLabel !== '更新手动快照' ||
-      activeSnapshot.actionTitle !== '更新手动快照' ||
+      activeSnapshot.actionTitle !== '' ||
       activeSnapshot.selectHeight !== 28 ||
       activeSnapshot.actionHeight !== 28 ||
       activeSnapshot.actionGap !== 2 ||
@@ -1574,10 +1585,9 @@ async function main() {
     if (Object.values(previewHeadingFoldControls).some((count) => count !== 0)) {
       throw new Error(`Preview exposed custom heading folding: ${JSON.stringify(previewHeadingFoldControls)}`);
     }
-    const previewOverflowAtNarrow = await page.evaluate(() => (
+    await page.waitForFunction(() => (
       document.querySelectorAll('.toolbar-overflow-panel .preview-setting-control').length > 0
     ));
-    if (!previewOverflowAtNarrow) throw new Error('Preview settings should move into toolbar overflow at 900px');
     await page.setViewport({ width: 1600, height: 520, deviceScaleFactor: 1 });
     await page.waitForFunction(() => document.querySelector<HTMLButtonElement>('.toolbar-overflow-indicator')?.hidden === true);
     const previewToolbarLayout = await page.evaluate(() => {

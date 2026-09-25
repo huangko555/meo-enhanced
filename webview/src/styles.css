@@ -89,7 +89,7 @@ html[data-editor-appearance='dark'] body.vscode-dark {
 }
 
 html[data-editor-appearance='dark'] {
-  --meo-segmented-control-background: color-mix(in srgb, var(--vscode-sideBar-background) 87%, var(--meo-foreground) 13%);
+  --meo-segmented-control-background: color-mix(in srgb, var(--vscode-sideBar-background) 88.5%, var(--meo-foreground) 11.5%);
 }
 
 html,
@@ -800,19 +800,12 @@ html[data-editor-appearance='light'] .segmented-control-button:not(.is-active):i
   gap: 5px;
   min-width: 0;
   height: 26px;
-  color-scheme: dark;
-  --preview-select-background: #252a30;
-  --preview-select-foreground: #f0f3f6;
+  color-scheme: inherit;
+  --preview-select-background: var(--vscode-sideBar-background);
+  --preview-select-foreground: var(--vscode-editor-foreground);
   --preview-select-border: var(--meo-segmented-control-background);
   --preview-select-hover-border: var(--meo-segmented-control-background);
-  --preview-select-label-foreground: #d4d9df;
-}
-
-.preview-select-control[data-preview-appearance="light"] {
-  color-scheme: light;
-  --preview-select-background: #ffffff;
-  --preview-select-foreground: #20242a;
-  --preview-select-label-foreground: #4d5662;
+  --preview-select-label-foreground: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
 }
 
 .preview-select-label {
@@ -912,17 +905,10 @@ html[data-editor-appearance='light'] .segmented-control-button:not(.is-active):i
   padding: 4px;
   border: 1px solid var(--meo-segmented-control-background);
   border-radius: 9px;
-  color: #f0f3f6;
-  background: #252a30;
-  color-scheme: dark;
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-sideBar-background);
+  color-scheme: inherit;
   box-shadow: none;
-}
-
-.preview-dropdown-panel[data-preview-appearance="light"] {
-  border-color: var(--meo-segmented-control-background);
-  color: #20242a;
-  background: #ffffff;
-  color-scheme: light;
 }
 
 .preview-dropdown-panel[hidden] {
@@ -949,16 +935,11 @@ html[data-editor-appearance='light'] .segmented-control-button:not(.is-active):i
 .preview-dropdown-option:hover,
 .preview-dropdown-option:focus-visible {
   outline: none;
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.preview-dropdown-panel[data-preview-appearance="light"] .preview-dropdown-option:hover,
-.preview-dropdown-panel[data-preview-appearance="light"] .preview-dropdown-option:focus-visible {
-  background: rgba(32, 36, 42, 0.08);
+  background: var(--vscode-toolbar-hoverBackground);
 }
 
 .preview-dropdown-option.is-selected {
-  background: rgba(90, 150, 255, 0.2);
+  background: color-mix(in srgb, var(--vscode-editor-foreground) 14%, transparent);
 }
 
 .editor-appearance-button {
@@ -1033,7 +1014,7 @@ html[data-editor-appearance='light'] .segmented-control-button:not(.is-active):i
 }
 
 .preview-export-control:hover .preview-export-menu,
-.preview-export-control:focus-within .preview-export-menu {
+.preview-export-control:has(:focus-visible) .preview-export-menu {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
@@ -1371,6 +1352,52 @@ html[data-editor-appearance='light'] .segmented-control-button:not(.is-active):i
   min-width: 0;
   overflow: visible;
   white-space: nowrap;
+}
+
+.changes-review-option-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.changes-review-option-info {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+  cursor: help;
+}
+
+.changes-review-option-tooltip {
+  position: absolute;
+  z-index: 2;
+  right: 2px;
+  top: calc(100% + 3px);
+  box-sizing: border-box;
+  width: calc(100% - 4px);
+  padding: 7px 9px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px;
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-sideBar-background);
+  box-shadow: var(--meo-elevated-shadow, 0 4px 12px rgba(0, 0, 0, 0.24));
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: normal;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.changes-review-option:has(.changes-review-option-info:hover) {
+  position: relative;
+  z-index: 2;
+}
+
+.changes-review-option-info:hover .changes-review-option-tooltip {
+  visibility: visible;
+  opacity: 1;
 }
 
 .changes-review-option:disabled {
