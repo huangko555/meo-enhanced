@@ -1354,52 +1354,6 @@ html[data-editor-appearance='light'] .segmented-control-button:not(.is-active):i
   white-space: nowrap;
 }
 
-.changes-review-option-text {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-}
-
-.changes-review-option-info {
-  display: inline-flex;
-  align-items: center;
-  flex: none;
-  color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
-  cursor: help;
-}
-
-.changes-review-option-tooltip {
-  position: absolute;
-  z-index: 2;
-  right: 2px;
-  top: calc(100% + 3px);
-  box-sizing: border-box;
-  width: calc(100% - 4px);
-  padding: 7px 9px;
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: 6px;
-  color: var(--vscode-editor-foreground);
-  background: var(--vscode-sideBar-background);
-  box-shadow: var(--meo-elevated-shadow, 0 4px 12px rgba(0, 0, 0, 0.24));
-  font-size: 11px;
-  line-height: 1.4;
-  white-space: normal;
-  visibility: hidden;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.changes-review-option:has(.changes-review-option-info:hover) {
-  position: relative;
-  z-index: 2;
-}
-
-.changes-review-option-info:hover .changes-review-option-tooltip {
-  visibility: visible;
-  opacity: 1;
-}
-
 .changes-review-option:disabled {
   color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
   cursor: default;

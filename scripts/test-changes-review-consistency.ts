@@ -132,6 +132,10 @@ async function main(): Promise<void> {
     await assertCountsMatchMarkers(page, 'Manual snapshot baseline');
 
     await page.click('.changes-review-trigger');
+    const hoverHintCount = await page.evaluate(() => document.querySelectorAll(
+      '.changes-review-option-info, .changes-review-option-tooltip, .changes-review-control [title]'
+    ).length);
+    if (hoverHintCount !== 0) throw new Error(`Changes menu still has hover hints: ${hoverHintCount}`);
     const changesMenuGeometry = await page.evaluate(() => {
       const panel = document.querySelector<HTMLElement>('.changes-review-panel')!;
       const header = panel.querySelector<HTMLElement>('.changes-review-header')!;

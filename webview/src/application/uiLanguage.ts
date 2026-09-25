@@ -248,7 +248,6 @@ export type UiStrings = Readonly<{
   openingDocumentsSettings: string;
   interfaceSettings: string;
   currentDiskVersionOption: string;
-  currentDiskVersionDescription: string;
   beforeLastSaveVersionOption: string;
   gitHeadOption: string;
   gitHeadStatus: (status: GitHeadDisplayStatus) => string;
@@ -414,7 +413,6 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     compareWithVersion: 'Compare Against', displaySettings: 'Display Settings', editorSettings: 'Editor Settings',
     documentDisplaySettings: 'Document display', openingDocumentsSettings: 'When opening documents', interfaceSettings: 'Interface settings',
     currentDiskVersionOption: 'Last Saved Version',
-    currentDiskVersionDescription: 'Compare with the latest file contents saved on disk, including external changes',
     beforeLastSaveVersionOption: 'Before Agent Edits',
     gitHeadOption: 'Git HEAD', manualSnapshot: 'Manual Snapshot',
     manualSnapshotOption: 'Manual Snapshot', disableComparison: 'Turn Off Comparison',
@@ -593,7 +591,6 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     compareWithVersion: '比较方式', displaySettings: '显示设置', editorSettings: '编辑器设置',
     documentDisplaySettings: '文档显示', openingDocumentsSettings: '打开文档时', interfaceSettings: '界面设置',
     currentDiskVersionOption: '与最近保存版本比较',
-    currentDiskVersionDescription: '与磁盘上最新保存的文件内容比较，包含外部修改',
     beforeLastSaveVersionOption: '与 Agent 编辑前版本比较',
     gitHeadOption: '与 Git HEAD 比较', manualSnapshot: '手动快照',
     manualSnapshotOption: '与手动快照比较', disableComparison: '关闭比较',

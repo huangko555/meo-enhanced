@@ -10,7 +10,6 @@ import {
   Plus,
   SquareSplitVertical,
   GitCommitHorizontal,
-  Info,
   Save,
   createElement
 } from 'lucide';
@@ -221,25 +220,8 @@ export function createChangesReviewControl(options: {
     icon.className = 'changes-review-option-icon';
     appendIcon(icon, iconData);
     const text = document.createElement('span');
-    text.className = 'changes-review-option-text';
-    const textLabel = document.createElement('span');
-    textLabel.className = 'changes-review-option-label';
-    textLabel.textContent = label;
-    text.appendChild(textLabel);
-    if (baseline === 'current-edit') {
-      const info = document.createElement('span');
-      info.className = 'changes-review-option-info';
-      appendIcon(info, Info, 13);
-      const tooltip = document.createElement('span');
-      tooltip.className = 'changes-review-option-tooltip';
-      tooltip.id = 'changes-review-current-disk-description';
-      tooltip.setAttribute('role', 'tooltip');
-      tooltip.textContent = strings().currentDiskVersionDescription;
-      info.appendChild(tooltip);
-      info.addEventListener('click', event => event.stopPropagation());
-      button.setAttribute('aria-describedby', tooltip.id);
-      text.appendChild(info);
-    }
+    text.className = 'changes-review-option-label';
+    text.textContent = label;
     const check = document.createElement('span');
     check.className = 'changes-review-check';
     if (warning) {

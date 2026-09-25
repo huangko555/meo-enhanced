@@ -479,12 +479,6 @@ async function main() {
       elements => elements.map(element => element.getAttribute('title'))
     );
     if (changesHoverHints.length) throw new Error(`Changes menu should not show native hover hints: ${JSON.stringify(changesHoverHints)}`);
-    await page.hover('.changes-review-option-info');
-    const changesInfoVisible = await page.$eval('.changes-review-option-tooltip', element => getComputedStyle(element).visibility);
-    if (changesInfoVisible !== 'visible') throw new Error('Changes explanation must appear only at its info icon');
-    await page.mouse.move(0, 0);
-    const changesInfoHidden = await page.$eval('.changes-review-option-tooltip', element => getComputedStyle(element).visibility);
-    if (changesInfoHidden !== 'hidden') throw new Error('Changes explanation must close when leaving its info icon');
     const inactiveMarkerSetting = await page.evaluate(() => {
       const button = document.querySelector<HTMLElement>('[data-baseline="none"]')!;
       const sourceOnlyButton = document.querySelector<HTMLButtonElement>('[data-toggle="before-content"]')!;
