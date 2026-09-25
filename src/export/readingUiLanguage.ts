@@ -2,6 +2,7 @@ import type { UiLanguage } from '../foundation/uiLanguage';
 
 export type ReadingUiStrings = Readonly<{
   properties: string;
+  comment: string;
   tableOfContents: string;
   untitledSection: string;
   alertLabel: (type: string) => string;
@@ -13,6 +14,7 @@ export type ReadingUiStrings = Readonly<{
 const CATALOG: Readonly<Record<UiLanguage, ReadingUiStrings>> = Object.freeze({
   en: Object.freeze({
     properties: 'Properties',
+    comment: 'Comment',
     tableOfContents: 'Contents',
     untitledSection: 'Untitled section',
     alertLabel: (type: string) => type,
@@ -22,6 +24,7 @@ const CATALOG: Readonly<Record<UiLanguage, ReadingUiStrings>> = Object.freeze({
   }),
   'zh-CN': Object.freeze({
     properties: 'Properties',
+    comment: '注释',
     tableOfContents: '目录',
     untitledSection: '未命名章节',
     alertLabel: (type: string) => ({ NOTE: '备注', TIP: '提示', IMPORTANT: '重要', WARNING: '警告', CAUTION: '注意' }[type] ?? type),

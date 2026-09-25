@@ -9,6 +9,7 @@ type ResolvedPreviewAppearance = Exclude<PreviewAppearance, 'auto'>;
 export type PreviewSurface = {
   setAppearance(appearance: PreviewAppearance): void;
   setSourceColoring(enabled: boolean): void;
+  setShowComments(enabled: boolean): void;
   setFontFamily(fontFamily: string): void;
   getAppearance(): ResolvedPreviewAppearance;
   setVisible(visible: boolean): void;
@@ -24,7 +25,7 @@ export type PreviewSurface = {
 };
 
 export type PreviewWebviewAdapter = {
-  start(input: { text: string; appearance: PreviewAppearance; fontFamily: string; sourceColoring: boolean; active: boolean }): void;
+  start(input: { text: string; appearance: PreviewAppearance; fontFamily: string; sourceColoring: boolean; showComments: boolean; active: boolean }): void;
   setActive(input: {
     active: boolean;
     text: string;
@@ -106,6 +107,7 @@ export function createPreviewWebviewAdapter(
       active = input.active;
       surface.setAppearance(input.appearance);
       surface.setSourceColoring(input.sourceColoring);
+      surface.setShowComments(input.showComments);
       surface.setFontFamily(input.fontFamily);
       if (!input.active) trackBackgroundRender(surface.preload(input.text));
     },

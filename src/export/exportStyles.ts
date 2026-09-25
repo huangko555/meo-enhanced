@@ -340,6 +340,19 @@ body[data-meo-export-target='pdf'] :is(pre, blockquote, table, img, .meo-export-
 .meo-export-doc > :first-child { margin-top: 0; }
 .meo-export-doc > :last-child { margin-bottom: 0; }
 
+.meo-export-comment {
+  border: 1px solid var(--meo-border);
+  border-radius: 5px;
+  background: var(--meo-panel-bg);
+  color: var(--meo-muted);
+  padding: 0.35em 0.55em;
+}
+
+aside.meo-export-comment { margin: 0.7em 0; }
+.meo-export-comment-inline { display: inline; padding: 0.1em 0.35em; }
+.meo-export-comment-label { font-weight: 600; margin-right: 0.45em; }
+.meo-export-comment-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
 .meo-export-toc {
   margin: 0 0 2.25em;
   padding: 0 0 1.5em;

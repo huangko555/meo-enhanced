@@ -653,6 +653,7 @@ export function addHtmlContentDecorations(
       if (node.name !== 'HTMLBlock') return;
       const source = state.doc.sliceString(node.from, node.to);
       if (isSupportedHtmlSource(source)) return;
+      if (source.includes('<!--') && isSupportedHtmlSource(source.replace(/<!--[\s\S]*?-->/g, ''))) return;
       ranges.push(Decoration.widget({
         widget: new HtmlWarningWidget(),
         side: -1

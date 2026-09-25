@@ -21,6 +21,7 @@ const markdown = [
   '# Document title',
   '',
   'A paragraph with **bold text**.',
+  '<!-- Review comment for DOCX -->',
   '',
   '## Overview',
   '',
@@ -48,7 +49,7 @@ const render = async (sourceColoring: boolean, appearance: 'light' | 'dark' = 'l
     text: markdown,
     appearance,
     uiLanguage: 'en',
-    environment: { previewFontFamily: '', previewSourceColoring: sourceColoring }
+    environment: { previewFontFamily: '', previewSourceColoring: sourceColoring, previewShowComments: sourceColoring }
   },
   sourceDocumentPath: path.join(fixtureRoot, 'document.md'),
   outputFilePath: path.join(fixtureRoot, 'document.docx'),
@@ -102,6 +103,7 @@ try {
   });
   assert.deepEqual(fs.readFileSync(coloredPath).subarray(0, 2).toString('ascii'), 'PK');
   const coloredXml = await readArchiveXml(coloredPath, 'word/document.xml');
+  assert.match(coloredXml, /Review comment for DOCX/, 'visible Preview comments must be visible in DOCX');
   assert.match(coloredXml, /<w:instrText[^>]*> TOC \\h \\o "1-6" \\z \\u <\/w:instrText>/);
   assert.match(coloredXml, /<w:hyperlink[^>]*w:anchor="meo_heading_1"[^>]*>[^]*Document title/, 'cached TOC entries must be visible and link to heading bookmarks');
   assert.match(coloredXml, /<w:bookmarkStart[^>]*w:name="meo_heading_1"/, 'TOC headings must expose native Word bookmarks');
@@ -164,6 +166,7 @@ try {
     puppeteerRuntimeModulePath: ''
   });
   const plainXml = await readArchiveXml(plainPath, 'word/document.xml');
+  assert.doesNotMatch(plainXml, /Review comment for DOCX/, 'hidden Preview comments must stay out of DOCX');
   const plainStyles = await readArchiveXml(plainPath, 'word/styles.xml');
   assert.doesNotMatch(plainXml, /<w:instrText[^>]*>TOC/);
   assert.doesNotMatch(plainStyles, /w:styleId="TOC[1-6]"/, 'documents without a TOC must not add unused TOC styles');

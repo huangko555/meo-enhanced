@@ -14,6 +14,7 @@ export type EditorStyleEnvironment = {
   readonly sourceLineHeight?: number;
   readonly meoThemeColors?: Readonly<Record<string, string>>;
   readonly previewSourceColoring?: boolean;
+  readonly previewShowComments?: boolean;
   /** Preview surface colors are owned by the selected Preview appearance. */
   readonly previewThemeIsolation?: boolean;
   readonly frontmatterKeyColor?: string;
@@ -91,6 +92,7 @@ export function decodeEditorStyleEnvironment(value: unknown): EditorStyleEnviron
       || Object.values(value.meoThemeColors).some((color) => typeof color !== 'string')) return null;
   }
   if (value.previewSourceColoring !== undefined && typeof value.previewSourceColoring !== 'boolean') return null;
+  if (value.previewShowComments !== undefined && typeof value.previewShowComments !== 'boolean') return null;
   if (value.previewThemeIsolation !== undefined && typeof value.previewThemeIsolation !== 'boolean') return null;
   if (value.previewCodePalettes !== undefined) {
     if (!isRecord(value.previewCodePalettes)) return null;

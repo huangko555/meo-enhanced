@@ -1,5 +1,5 @@
 import morphdom from 'morphdom';
-import { createElement as createIconElement, PenLine, TextCursor } from 'lucide';
+import { createElement as createIconElement, MessageSquareText, PenLine, TextCursor } from 'lucide';
 import { getExportStyleEnvironment } from './export';
 import { createPreviewMermaidRenderer } from './previewMermaid';
 import { logWebviewRenderError } from './errors';
@@ -729,6 +729,12 @@ export function createPreviewController({
     sourceColoringSelect.append(option);
   }
   sourceColoringSelectControl.refreshOptions();
+  const showCommentsControl = document.createElement('button');
+  showCommentsControl.type = 'button';
+  showCommentsControl.className = 'format-button preview-show-comments';
+  showCommentsControl.title = uiStrings.showComments;
+  showCommentsControl.setAttribute('aria-label', uiStrings.showComments);
+  showCommentsControl.appendChild(createIconElement(MessageSquareText, { width: 16, height: 16 }));
   const fontFamilySelectControl = createToolbarDropdown('preview-font-family-control', uiStrings.previewFontFamily);
   const fontFamilyControl = fontFamilySelectControl.element;
   const fontFamilyLabel = fontFamilySelectControl.label;
@@ -765,6 +771,8 @@ export function createPreviewController({
     sourceColoringSelect.options[0].textContent = uiStrings.previewCodeColorsOn;
     sourceColoringSelect.options[1].textContent = uiStrings.previewCodeColorsOff;
     sourceColoringSelectControl.refreshOptions();
+    showCommentsControl.title = uiStrings.showComments;
+    showCommentsControl.setAttribute('aria-label', uiStrings.showComments);
     fontFamilySelectControl.setLabel(uiStrings.previewFontFamily);
     defaultFontOption.textContent = uiStrings.previewFontPlaceholder;
     fontFamilySelectControl.refreshOptions();
@@ -781,6 +789,7 @@ export function createPreviewController({
   let appearancePreference: PreviewAppearance = 'auto';
   let appearance: 'light' | 'dark' = 'dark';
   let sourceColoring = true;
+  let showComments = false;
   let fontFamilyPreference = '';
   let requestGeneration = 0;
   let frameGeneration = 0;
@@ -1551,6 +1560,7 @@ export function createPreviewController({
   const getStyleEnvironment = () => getExportStyleEnvironment({
     previewFontFamily: fontFamilyPreference,
     previewSourceColoring: sourceColoring,
+    previewShowComments: showComments,
     previewCodePalettes: {
       light: getCodePalette('light'),
       dark: getCodePalette('dark')
@@ -1749,6 +1759,18 @@ export function createPreviewController({
     }
     return sourceMap;
   };
+
+  const setShowComments = (enabled: boolean, { post = false }: { readonly post?: boolean } = {}): void => {
+    const changed = showComments !== enabled;
+    showComments = enabled;
+    showCommentsControl.classList.toggle('is-active', enabled);
+    showCommentsControl.setAttribute('aria-pressed', String(enabled));
+    const text = hasPendingRequest ? pendingText : latestAcceptedText;
+    if (changed && text !== null) requestRender(text, { force: true, preserveViewport: true, preserveFrame: true });
+    if (changed && post) vscode.postMessage({ type: 'setPreviewShowComments', enabled });
+  };
+  showCommentsControl.addEventListener('click', () => setShowComments(!showComments, { post: true }));
+  setShowComments(false);
   const getVisualSourceMap = (): PreviewSourceMapEntry[] => {
     getSourceMap();
     return visualSourceMap;
@@ -2401,11 +2423,13 @@ export function createPreviewController({
     appearanceControl,
     fontFamilyControl,
     sourceColoringControl,
+    showCommentsControl,
     requestRender,
     preload: (text: string) => requestRender(text, { background: true }),
     acceptRenderResponse,
     setAppearance,
     setSourceColoring,
+    setShowComments,
     setFontFamily,
     setUiLanguage: applyUiLanguage,
     setSourcePositionMarker: (

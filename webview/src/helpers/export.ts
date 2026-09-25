@@ -20,6 +20,7 @@ export interface ExportStyleEnvironment extends Record<string, unknown> {
   sourceLineHeight: number | undefined;
   meoThemeColors: Record<string, string>;
   previewSourceColoring: boolean;
+  previewShowComments: boolean;
   previewThemeIsolation: boolean;
   previewCodePalettes: Readonly<Record<'light' | 'dark', PreviewCodePalette>>;
 }
@@ -27,6 +28,7 @@ export interface ExportStyleEnvironment extends Record<string, unknown> {
 export const getExportStyleEnvironment = (code: {
   readonly previewFontFamily: string;
   readonly previewSourceColoring: boolean;
+  readonly previewShowComments: boolean;
   readonly previewCodePalettes: Readonly<Record<'light' | 'dark', PreviewCodePalette>>;
 }): ExportStyleEnvironment => {
   const rootStyles = getComputedStyle(document.documentElement);
@@ -101,6 +103,7 @@ export const getExportStyleEnvironment = (code: {
     sourceLineHeight: Number.isFinite(parsedSourceLineHeight) ? parsedSourceLineHeight : undefined,
     meoThemeColors,
     previewSourceColoring: code.previewSourceColoring,
+    previewShowComments: code.previewShowComments,
     previewThemeIsolation: true,
     previewCodePalettes: code.previewCodePalettes
   };

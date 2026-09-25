@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Unlink, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, HardDriveUpload, PanelLeftRightDashed, SquareSplitHorizontal, Settings, Check, Ellipsis, Sun, Moon, ExternalLink, History, Info } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Unlink, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, HardDriveUpload, PanelLeftRightDashed, SquareSplitHorizontal, Settings, Check, Ellipsis, Sun, Moon, ExternalLink, History, Info, MessageSquareText } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -222,6 +222,7 @@ let gitBaselineState: GitBaselinePayload | null = null;
 let changesReviewMode: 'live' | 'source' | 'preview' = 'live';
 let contentMaxWidthEnabled = false;
 let liveStrongColoring = false;
+let liveShowComments = true;
 let largeDocumentOptimizationEnabled = true;
 let tableStickyHeaderEnabled = true;
 let restoreReadingPositionOnOpen = true;
@@ -297,6 +298,15 @@ liveStrongColoringBtn.title = activeUiStrings.strongColoring;
 liveStrongColoringBtn.setAttribute('role', 'menuitemcheckbox');
 liveStrongColoringBtn.setAttribute('aria-checked', 'false');
 appendMoreToolsOptionContent(liveStrongColoringBtn, Bold, activeUiStrings.strongColoring);
+
+const liveShowCommentsBtn = document.createElement('button');
+liveShowCommentsBtn.type = 'button';
+liveShowCommentsBtn.className = 'more-tools-option more-tools-toggle-option is-active';
+liveShowCommentsBtn.dataset.action = 'liveShowComments';
+liveShowCommentsBtn.title = activeUiStrings.showComments;
+liveShowCommentsBtn.setAttribute('role', 'menuitemcheckbox');
+liveShowCommentsBtn.setAttribute('aria-checked', 'true');
+appendMoreToolsOptionContent(liveShowCommentsBtn, MessageSquareText, activeUiStrings.showComments);
 
 const sourceLineNumbersBtn = document.createElement('button');
 sourceLineNumbersBtn.type = 'button';
@@ -453,6 +463,15 @@ const setLiveStrongColoring = (enabled: boolean, { post = true }: PostUpdateOpti
   liveStrongColoringBtn.classList.toggle('is-active', liveStrongColoring);
   liveStrongColoringBtn.setAttribute('aria-checked', liveStrongColoring ? 'true' : 'false');
   if (post && changed) vscode.postMessage({ type: 'setLiveStrongColoring', enabled: liveStrongColoring });
+};
+
+const setLiveShowComments = (enabled: boolean, { post = true }: PostUpdateOptions = {}) => {
+  const changed = liveShowComments !== enabled;
+  liveShowComments = enabled;
+  liveShowCommentsBtn.classList.toggle('is-active', enabled);
+  liveShowCommentsBtn.setAttribute('aria-checked', String(enabled));
+  editor?.setLiveShowComments(enabled);
+  if (changed && post) vscode.postMessage({ type: 'setLiveShowComments', enabled });
 };
 
 const setLargeDocumentOptimizationEnabled = (
@@ -1026,6 +1045,7 @@ const dismissExportDocxMenu = bindExportMenuAccessibility(
 const previewAppearanceSlot = document.createElement('span');
 const previewFontFamilySlot = document.createElement('span');
 const previewSourceColoringSlot = document.createElement('span');
+const previewShowCommentsSlot = document.createElement('span');
 const previewFormatGroup = document.createElement('div');
 previewFormatGroup.className = 'preview-format-group';
 previewFormatGroup.setAttribute('role', 'group');
@@ -1034,6 +1054,7 @@ previewFormatGroup.append(
   previewOutlineLeftBtn,
   previewFontFamilySlot,
   previewSourceColoringSlot,
+  previewShowCommentsSlot,
   previewAppearanceSlot,
   exportHtmlControl,
   exportPdfControl,
@@ -1172,6 +1193,8 @@ const applyUiLanguage = (language: UiLanguage): void => {
   sourceLineNumbersBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.showLineNumbers;
   liveStrongColoringBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.strongColoring;
   liveStrongColoringBtn.title = strings.strongColoring;
+  liveShowCommentsBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.showComments;
+  liveShowCommentsBtn.title = strings.showComments;
   longCodeBlockFoldingBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.foldLongCodeBlocks;
   largeDocumentOptimizationBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.largeDocumentStartup;
   largeDocumentOptimizationBtn.querySelector<HTMLElement>('.more-tools-option-tooltip')!.textContent = strings.largeDocumentStartupDescription;
@@ -1290,6 +1313,7 @@ moreToolsPanel.append(
   largeDocumentOptimizationBtn,
   contentMaxWidthBtn,
   liveStrongColoringBtn,
+  liveShowCommentsBtn,
   tableStickyHeaderBtn,
   restoreReadingPositionBtn,
   editorAppearanceRow,
@@ -1698,6 +1722,7 @@ const previewAdapter = createPreviewWebviewAdapter(previewController);
 previewAppearanceSlot.replaceWith(previewController.appearanceControl);
 previewFontFamilySlot.replaceWith(previewController.fontFamilyControl);
 previewSourceColoringSlot.replaceWith(previewController.sourceColoringControl);
+previewShowCommentsSlot.replaceWith(previewController.showCommentsControl);
 previewController.host.append(sourcePreviewScrollSyncButton);
 outlineController = createOutlineController({
   root,
@@ -2596,6 +2621,7 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     initialMode: mode,
     initialGitGutter: gitChangesGutterVisible,
     initialLongCodeBlockFolding: longCodeBlockFoldingEnabled,
+    initialLiveShowComments: liveShowComments,
     initialTableStickyHeaderEnabled: tableStickyHeaderEnabled,
     initialDiagnostics: pendingDiagnostics,
     onApplyChanges: handleLocalEditorChange,
@@ -2928,6 +2954,7 @@ const handleInit = (message: InitMessage) => {
   longCodeBlockFoldingBtn.setAttribute('aria-checked', longCodeBlockFoldingEnabled ? 'true' : 'false');
   setTableStickyHeaderEnabled(message.tableStickyHeaderEnabled, { post: false });
   setLiveStrongColoring(message.liveStrongColoring, { post: false });
+  setLiveShowComments(message.liveShowComments, { post: false });
   setLargeDocumentOptimizationEnabled(message.largeDocumentOptimizationEnabled, { post: false });
   setRestoreReadingPositionOnOpen(message.restoreReadingPositionOnOpen, { post: false });
   readingPositionLifecycle?.start({
@@ -3054,6 +3081,7 @@ window.addEventListener('message', (event) => {
         appearance: message.previewAppearance,
         fontFamily: message.previewFontFamily,
         sourceColoring: message.previewSourceColoring,
+        showComments: message.previewShowComments,
         active: false
       });
 
@@ -3570,6 +3598,9 @@ contentMaxWidthBtn.addEventListener('click', () => {
 });
 liveStrongColoringBtn.addEventListener('click', () => {
   setLiveStrongColoring(!liveStrongColoring);
+});
+liveShowCommentsBtn.addEventListener('click', () => {
+  setLiveShowComments(!liveShowComments);
 });
 sourceLineNumbersBtn.addEventListener('click', () => {
   const nextMode = pendingSourceLineNumbers === 'off' ? previousVisibleSourceLineNumbers : 'off';

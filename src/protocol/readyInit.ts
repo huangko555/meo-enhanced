@@ -45,6 +45,8 @@ export type InitMessage = {
   readonly previewAppearance: PreviewAppearance;
   readonly previewFontFamily: string;
   readonly previewSourceColoring: boolean;
+  readonly previewShowComments: boolean;
+  readonly liveShowComments: boolean;
   readonly liveStrongColoring: boolean;
   readonly editorAppearance: PreviewAppearance;
   readonly editorFontSizeMode: EditorFontSizeMode;
@@ -148,6 +150,8 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || !isPreviewAppearance(value.previewAppearance)
     || previewFontFamily === null
     || typeof value.previewSourceColoring !== 'boolean'
+    || (value.previewShowComments !== undefined && typeof value.previewShowComments !== 'boolean')
+    || (value.liveShowComments !== undefined && typeof value.liveShowComments !== 'boolean')
     || liveStrongColoring === null
     || !isPreviewAppearance(value.editorAppearance)
     || editorFontSizeMode === null
@@ -189,6 +193,8 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     uiLanguagePreference: value.uiLanguagePreference ?? 'auto',
     automaticUiLanguage: value.automaticUiLanguage ?? value.uiLanguage,
     previewFontFamily,
+    previewShowComments: value.previewShowComments ?? false,
+    liveShowComments: value.liveShowComments ?? true,
     liveStrongColoring,
     editorFontSizeMode,
     editorFontSize,

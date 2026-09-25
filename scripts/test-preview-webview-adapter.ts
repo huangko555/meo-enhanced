@@ -15,6 +15,9 @@ const surface = {
   setSourceColoring(enabled: boolean) {
     calls.push({ type: 'sourceColoring', enabled });
   },
+  setShowComments(enabled: boolean) {
+    calls.push({ type: 'showComments', enabled });
+  },
   setFontFamily(fontFamily: string) {
     calls.push({ type: 'fontFamily', fontFamily });
   },
@@ -49,16 +52,17 @@ const surface = {
 };
 
 const adapter = createPreviewWebviewAdapter(surface);
-adapter.start({ text: 'hidden', appearance: 'auto', fontFamily: 'MEO Synthetic Sans', sourceColoring: false, active: false });
+adapter.start({ text: 'hidden', appearance: 'auto', fontFamily: 'MEO Synthetic Sans', sourceColoring: false, showComments: true, active: false });
 assert.deepEqual(calls, [
   { type: 'appearance', appearance: 'auto' },
   { type: 'sourceColoring', enabled: false },
+  { type: 'showComments', enabled: true },
   { type: 'fontFamily', fontFamily: 'MEO Synthetic Sans' },
   { type: 'preload', text: 'hidden' }
 ]);
 
 adapter.setActive({ active: true, text: 'visible' });
-assert.deepEqual(calls.slice(4), [
+assert.deepEqual(calls.slice(5), [
   { type: 'visible', visible: true },
   { type: 'render', text: 'visible', force: false, preserveViewport: false, preserveFrame: false }
 ]);

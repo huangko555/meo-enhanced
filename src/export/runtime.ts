@@ -43,6 +43,7 @@ async function renderExportHtmlDocument(
       outputFilePath: options.outputFilePath,
       target: options.target,
       uiLanguage: snapshot.uiLanguage,
+      showComments: snapshot.environment.previewShowComments === true,
       includeTableOfContents: options.target !== 'docx' && options.includeTableOfContents === true,
       ...(highlighter ? { highlightCode: highlighter.highlight } : {})
     });
@@ -79,6 +80,7 @@ function renderPreviewDocument(options: {
     markdownFilePath: options.sourceDocumentPath,
     target: 'html',
     uiLanguage: options.uiLanguage,
+    showComments: options.styleEnvironment?.previewShowComments === true,
     deferImages: true
   });
   return {

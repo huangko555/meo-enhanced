@@ -18,6 +18,8 @@
   "config.appearance.preview": "Default appearance for Preview in newly opened editor panels.",
   "config.preview.fontFamily": "Default prose font family for Preview and exports. Leave empty to use the editor or system fallback.",
   "config.preview.sourceColoring": "Use syntax colors for code in Preview and exports by default.",
+  "config.preview.showComments": "Show HTML comments in Preview and exports.",
+  "config.live.showComments": "Show HTML comments in Live mode.",
   "config.appearance.strongColoring": "Color bold Markdown text in Live mode.",
   "config.fontSize.auto": "Follow the VS Code editor font size.",
   "config.fontSize.custom": "Use a custom content font size.",

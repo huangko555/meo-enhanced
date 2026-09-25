@@ -140,6 +140,10 @@ type PanelSessionControllerParams = {
   setPreviewFontFamily: (fontFamily: string) => Promise<void>;
   getPreviewSourceColoring: () => boolean;
   setPreviewSourceColoring: (enabled: boolean) => Promise<void>;
+  getPreviewShowComments?: () => boolean;
+  setPreviewShowComments?: (enabled: boolean) => Promise<void>;
+  getLiveShowComments?: () => boolean;
+  setLiveShowComments?: (enabled: boolean) => Promise<void>;
   getLiveStrongColoring?: () => boolean;
   setLiveStrongColoring?: (enabled: boolean) => Promise<void>;
   getEditorAppearance: () => EditorAppearance;
@@ -197,6 +201,10 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     setPreviewFontFamily,
     getPreviewSourceColoring,
     setPreviewSourceColoring,
+    getPreviewShowComments = () => false,
+    setPreviewShowComments = async () => undefined,
+    getLiveShowComments = () => true,
+    setLiveShowComments = async () => undefined,
     getLiveStrongColoring = () => false,
     setLiveStrongColoring = async () => undefined,
     getEditorAppearance,
@@ -413,6 +421,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       previewAppearance: getPreviewAppearance(),
       previewFontFamily: getPreviewFontFamily(),
       previewSourceColoring: getPreviewSourceColoring(),
+      previewShowComments: getPreviewShowComments(),
+      liveShowComments: getLiveShowComments(),
       liveStrongColoring: getLiveStrongColoring(),
       editorAppearance: getEditorAppearance(),
       editorFontSizeMode: editorFontSizePreference.mode,
@@ -680,6 +690,12 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       case 'setPreviewSourceColoring':
         await setPreviewSourceColoring(raw.enabled);
+        return;
+      case 'setPreviewShowComments':
+        await setPreviewShowComments(raw.enabled);
+        return;
+      case 'setLiveShowComments':
+        await setLiveShowComments(raw.enabled);
         return;
       case 'setLiveStrongColoring':
         await setLiveStrongColoring(raw.enabled);

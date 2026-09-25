@@ -12,7 +12,7 @@ import { longCodeBlockEnabledFacet } from './helpers/longCodeBlocks';
 import type { SourceLineNumberMode } from '../../src/protocol/readyInit';
 import { assessLargeDocument } from '../../src/foundation/largeDocument';
 import { uiLanguageFacet } from './editor/uiLanguage';
-import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
+import { liveModeExtensions, liveShowCommentsFacet, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
 import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
 import { insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
 import { sourceStrikeMarkerField } from './helpers/strikeMarkers';
@@ -198,6 +198,7 @@ type CreateEditorOptions = {
   initialMode?: EditableEditorMode;
   initialGitGutter?: boolean;
   initialLongCodeBlockFolding?: boolean;
+  initialLiveShowComments?: boolean;
   initialTableStickyHeaderEnabled?: boolean;
   initialDiagnostics?: readonly EditorDiagnostic[];
   mermaidDiagramPresentationFactory: MermaidDiagramPresentationFactory;
@@ -345,6 +346,7 @@ export function createEditor({
   initialMode = 'source',
   initialGitGutter = true,
   initialLongCodeBlockFolding = true,
+  initialLiveShowComments = true,
   initialTableStickyHeaderEnabled = true,
   initialDiagnostics = [],
   mermaidDiagramPresentationFactory,
@@ -365,6 +367,7 @@ export function createEditor({
   const gitGutterCompartment = new Compartment();
   const lineNumberCompartment = new Compartment();
   const longCodeBlockPreferenceCompartment = new Compartment();
+  const liveCommentsCompartment = new Compartment();
   const uiLanguageCompartment = new Compartment();
   let currentSourceLineNumbers = sourceLineNumbers;
   const startMode = initialMode === 'live' ? 'live' : 'source';
@@ -2002,6 +2005,7 @@ export function createEditor({
       historyCompartment.of(history()),
       lineNumberCompartment.of(lineNumberExtensions(startMode, currentSourceLineNumbers)),
       longCodeBlockPreferenceCompartment.of(longCodeBlockEnabledFacet.of(initialLongCodeBlockFolding)),
+      liveCommentsCompartment.of(liveShowCommentsFacet.of(initialLiveShowComments)),
       tableTransactionProvenanceAdapter.extension,
       tableHistoryFocusAdapter.extension,
       ...gitDiffGutterBaselineExtensions(),
@@ -3279,6 +3283,10 @@ export function createEditor({
       view.dispatch({
         effects: longCodeBlockPreferenceCompartment.reconfigure(longCodeBlockEnabledFacet.of(enabled))
       });
+    },
+    setLiveShowComments(enabled: boolean) {
+      if (view.state.facet(liveShowCommentsFacet) === enabled) return;
+      view.dispatch({ effects: liveCommentsCompartment.reconfigure(liveShowCommentsFacet.of(enabled)) });
     },
     setTableStickyHeaderEnabled(enabled: boolean) {
       tableStickyHeaderAdapterFactory.setEnabled(enabled);

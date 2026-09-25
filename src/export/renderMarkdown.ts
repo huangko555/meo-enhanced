@@ -2,6 +2,8 @@ import * as path from 'node:path';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 import sanitizeHtml from 'sanitize-html';
+import { parseDocument } from 'htmlparser2';
+import type { ChildNode } from 'domhandler';
 import { isLocalImageSrc, rewriteExportImageSrc } from './assetPaths';
 import { extractExportFrontmatter } from './frontmatter';
 import { prepareMarkdownWithFootnotes } from './footnotes';
@@ -42,6 +44,7 @@ export type RenderMarkdownOptions = {
   includeTableOfContents?: boolean;
   /** Preview resolves local and network images after the reading frame is ready. */
   deferImages?: boolean;
+  showComments?: boolean;
   /** Standalone exports inject the same Shiki token presentation used by Live and Preview. */
   highlightCode?: (source: string, language: string) => string;
 };
@@ -105,7 +108,9 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     (startIndex, endIndex) => ({
       start: bodySourceLines?.[startIndex] ?? 0,
       end: bodySourceLines?.[Math.max(startIndex, endIndex - 1)] ?? 0
-    })
+    }),
+    options.showComments === true,
+    uiStrings.comment
   );
   if (shouldEnableMathTransform) {
     installMathTransform(md, {
@@ -389,7 +394,9 @@ function renderHighlightedCodeLines(highlighted: string, source: string): string
 function installSafeHtmlTransform(
   md: MarkdownIt,
   rewriteImageSrc: (rawSrc: string) => { src: string; deferredSrc?: string },
-  resolveSourceRange: (startIndex: number, endIndex: number) => { start: number; end: number }
+  resolveSourceRange: (startIndex: number, endIndex: number) => { start: number; end: number },
+  showComments: boolean,
+  commentLabel: string
 ): void {
   const allowedAttributes = Object.fromEntries(
     [...supportedHtmlTags].map((tagName) => [tagName, getSupportedHtmlAttributes(tagName)])
@@ -418,6 +425,50 @@ function installSafeHtmlTransform(
     }
   };
   const sanitizeRawSource = (source: string, tokenType: string): string => {
+    if (source.includes('<!--')) {
+      const comments: Array<{ from: number; to: number; raw: string }> = [];
+      const visit = (nodes: readonly ChildNode[]): void => {
+        for (const node of nodes) {
+          if (node.type === 'comment' && node.startIndex !== null && node.endIndex !== null) {
+            const raw = source.slice(node.startIndex, node.endIndex + 1);
+            if (/^<!--[\s\S]*?-->$/.test(raw)) comments.push({ from: node.startIndex, to: node.endIndex + 1, raw });
+          }
+          if ('children' in node) visit(node.children);
+        }
+      };
+      visit(parseDocument(source, { withStartIndices: true, withEndIndices: true }).children);
+      if (comments.length) {
+        let markerPrefix = 'MEOHTMLCOMMENTTOKEN';
+        while (source.includes(markerPrefix)) markerPrefix += 'X';
+        const onlyComment = comments.length === 1 && source.trim() === comments[0].raw;
+        let cursor = 0;
+        let policySource = '';
+        let renderSource = '';
+        const replacements: Array<{ marker: string; html: string }> = [];
+        for (const [index, comment] of comments.entries()) {
+          const before = source.slice(cursor, comment.from);
+          policySource += before;
+          renderSource += before;
+          if (showComments) {
+            const marker = `${markerPrefix}${index}END`;
+            const content = escapeHtml(comment.raw.slice(4, -3).trim());
+            const label = escapeHtml(commentLabel);
+            const block = onlyComment && tokenType === 'html_block';
+            replacements.push({ marker, html: block
+              ? `<aside class="meo-export-comment"><span class="meo-export-comment-label">${label}</span><span class="meo-export-comment-text">${content}</span></aside>`
+              : `<span class="meo-export-comment meo-export-comment-inline"><span class="meo-export-comment-label">${label}</span><span class="meo-export-comment-text">${content}</span></span>` });
+            renderSource += marker;
+          }
+          cursor = comment.to;
+        }
+        policySource += source.slice(cursor);
+        renderSource += source.slice(cursor);
+        const rendered = isSupportedHtmlSource(policySource)
+          ? sanitizeHtml(renderSource, safeHtmlSanitizerOptions)
+          : escapeHtml(renderSource);
+        return replacements.reduce((html, replacement) => html.replace(replacement.marker, replacement.html), rendered);
+      }
+    }
     if (!isSupportedHtmlSource(source)) return escapeHtml(source);
     if (tokenType !== 'html_inline') return sanitizeHtml(source, safeHtmlSanitizerOptions);
 
@@ -441,6 +492,7 @@ function installSafeHtmlTransform(
     const source = String(htmlNode?.content ?? '');
     if (htmlNode?.meta?.meoTrustedHtml === true) return source;
     const rendered = sanitizeRawSource(source, String(htmlNode?.type ?? ''));
+    if (rendered === '') return '';
     if (htmlNode?.type !== 'html_block' || !Array.isArray(htmlNode.map)) return rendered;
     const sourceRange = resolveSourceRange(Number(htmlNode.map[0]), Number(htmlNode.map[1]));
     if (sourceRange.start <= 0) return rendered;
