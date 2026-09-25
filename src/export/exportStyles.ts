@@ -587,6 +587,9 @@ h1, h2 {
 p, ul, ol, blockquote, pre, table, hr {
   margin: 0 0 1em;
 }
+.meo-export-doc p:has(+ .meo-export-comment-inline) {
+  margin-bottom: 0.4em;
+}
 ul { padding-inline-start: 1.5em; }
 ol { padding-inline-start: 1.8em; }
 li + li { margin-top: 0.2em; }

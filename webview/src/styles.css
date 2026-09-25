@@ -3692,6 +3692,10 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   margin: 0 0 1em;
 }
 
+.cm-editor .meo-md-html-content p:where(:has(+ .meo-md-html-comment[data-display='block'])) {
+  margin-bottom: 0.4em;
+}
+
 /* Details are an editor disclosure surface: adjacent visible source rows keep
    the editor's line rhythm instead of inheriting reading-page paragraph gaps. */
 .cm-editor .meo-md-html-content details p {

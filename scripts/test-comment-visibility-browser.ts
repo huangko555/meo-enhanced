@@ -52,6 +52,18 @@ try {
     ]);
     assert.equal(rendered.sourceVisible, false);
     assert.equal(rendered.injectedScript, false);
+    const htmlCommentGap = await page.evaluate(() => {
+      const paragraph = Array.from(document.querySelectorAll<HTMLParagraphElement>('.meo-md-html-block p'))
+        .find(element => element.textContent === 'First paragraph')!;
+      const next = paragraph.nextElementSibling;
+      const style = getComputedStyle(paragraph);
+      return {
+        nextIsComment: next?.classList.contains('meo-md-html-comment'),
+        ratio: parseFloat(style.marginBottom) / parseFloat(style.fontSize)
+      };
+    });
+    assert.equal(htmlCommentGap.nextIsComment, true);
+    assert.ok(Math.abs(htmlCommentGap.ratio - 0.4) < 0.01);
     const inlineHtml = await page.$eval('.meo-md-html-strong', element => ({
       text: element.textContent,
       note: element.querySelector('.meo-md-html-comment')?.textContent

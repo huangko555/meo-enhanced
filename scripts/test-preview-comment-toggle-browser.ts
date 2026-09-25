@@ -42,7 +42,7 @@ try {
       throw new Error(`${label}: ${JSON.stringify(state)}`, { cause: error });
     }
   };
-  const text = 'Before\n\n<!-- visible when enabled -->\n\nAfter';
+  const text = 'Before\n\n<!-- visible when enabled -->\n\nAfter\n\n<div>\n<p>First paragraph</p>\n<!-- nested note -->\n<p>Second paragraph</p>\n</div>';
   await page.evaluate(text => window.dispatchEvent(new MessageEvent('message', { data: {
     type: 'init', documentId: 'file:///preview-comment-toggle.md', text, version: 1,
     savedRevision: { version: 1, text }, diagnostics: [], mode: 'preview', uiLanguage: 'en',
@@ -59,6 +59,19 @@ try {
   await page.click('.preview-show-comments');
   await waitFor('comment render', () => document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body?.textContent?.includes('visible when enabled'));
   assert.equal(await page.$eval('.preview-show-comments', element => element.getAttribute('aria-pressed')), 'true');
+  const htmlCommentGap = await page.evaluate(() => {
+    const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const paragraph = Array.from(doc.querySelectorAll<HTMLParagraphElement>('p'))
+      .find(element => element.textContent === 'First paragraph')!;
+    const next = paragraph.nextElementSibling;
+    const style = doc.defaultView!.getComputedStyle(paragraph);
+    return {
+      nextIsComment: next?.classList.contains('meo-export-comment-inline'),
+      ratio: parseFloat(style.marginBottom) / parseFloat(style.fontSize)
+    };
+  });
+  assert.equal(htmlCommentGap.nextIsComment, true);
+  assert.ok(Math.abs(htmlCommentGap.ratio - 0.4) < 0.01);
   await page.click('.preview-show-comments');
   await waitFor('comment hidden again', () => {
     const text = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body?.textContent;
