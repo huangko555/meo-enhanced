@@ -63,10 +63,32 @@ try {
     assert.match(sourceText, /Inline <!-- secret --> text/);
     assert.match(sourceText, /<!-- blocksecret -->/);
     assert.match(sourceText, /<!-- trailing note -->/);
-    assert.equal(await page.$eval('.meo-md-html-comment', note => {
-      const style = getComputedStyle(note);
-      return style.backgroundColor === 'rgba(0, 0, 0, 0)' && style.borderLeftWidth === '0px';
-    }), true);
+    const commentStyles = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(element => element.textContent?.includes('Inline <!-- secret --> text'))!;
+      const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+      let sourceComment: HTMLElement | null = null;
+      while (walker.nextNode()) {
+        if (!walker.currentNode.textContent?.includes('secret')) continue;
+        sourceComment = walker.currentNode.parentElement;
+        break;
+      }
+      const htmlComment = document.querySelector<HTMLElement>('.meo-md-html-comment')!;
+      const inlineHtmlComment = document.querySelector<HTMLElement>('.meo-md-html-strong .meo-md-html-comment')!;
+      const sourceStyle = getComputedStyle(sourceComment!);
+      const htmlStyle = getComputedStyle(htmlComment);
+      const inlineHtmlStyle = getComputedStyle(inlineHtmlComment);
+      return {
+        source: { color: sourceStyle.color, fontStyle: sourceStyle.fontStyle },
+        html: { color: htmlStyle.color, fontStyle: htmlStyle.fontStyle },
+        inlineHtml: { color: inlineHtmlStyle.color, fontStyle: inlineHtmlStyle.fontStyle, fontWeight: inlineHtmlStyle.fontWeight },
+        plain: htmlStyle.backgroundColor === 'rgba(0, 0, 0, 0)' && htmlStyle.borderLeftWidth === '0px'
+      };
+    });
+    assert.deepEqual(commentStyles.html, commentStyles.source);
+    assert.deepEqual({ color: commentStyles.inlineHtml.color, fontStyle: commentStyles.inlineHtml.fontStyle }, commentStyles.source);
+    assert.equal(commentStyles.inlineHtml.fontWeight, '400');
+    assert.equal(commentStyles.plain, true);
     const structured = await page.evaluate(() => {
       const table = document.querySelector('.meo-md-html-block table');
       const list = document.querySelector('.meo-md-html-block ul');

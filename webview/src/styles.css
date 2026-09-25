@@ -3664,6 +3664,9 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 }
 
 .cm-editor .meo-md-html-comment {
+  color: var(--meo-token-comment-color, #676f7d);
+  font-style: italic;
+  font-weight: normal;
   white-space: pre-wrap;
   cursor: pointer;
 }
