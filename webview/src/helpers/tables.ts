@@ -2044,7 +2044,9 @@ function appendTableCellRenderedPreview(
     });
   };
 
-  const appendTaskContent = (parent: HTMLElement, content: string, from: number) => {
+  const appendTaskContent = (
+    parent: HTMLElement, content: string, from: number, nestedListOnLine: boolean
+  ) => {
     const task = /^\[([ xX~\-])\][ \t]+/.exec(content);
     if (task && parent instanceof HTMLLIElement) {
       const status = task[1].toLowerCase() === 'x' ? 'done'
@@ -2055,6 +2057,7 @@ function appendTableCellRenderedPreview(
       checkbox.checked = status === 'done';
       checkbox.className = `meo-task-checkbox meo-md-html-table-cell-task-checkbox is-${status}`;
       parent.classList.add('meo-md-html-table-cell-task', `is-${status}`);
+      if (nestedListOnLine) parent.classList.add('meo-md-html-table-cell-task-show-marker');
       parent.appendChild(checkbox);
       appendInline(parent, content.slice(task[0].length), from + task[0].length);
       return;
@@ -2062,7 +2065,10 @@ function appendTableCellRenderedPreview(
     appendInline(parent, content, from);
   };
 
-  const appendItemContent = (parent: HTMLLIElement, content: string, from: number, baseQuoteDepth: number) => {
+  const appendItemContent = (
+    parent: HTMLLIElement, content: string, from: number,
+    baseQuoteDepth: number, nestedListOnLine = false
+  ) => {
     const nestedQuote = parseTableCellQuotePrefix({ text: content, from, breakText: '' });
     let quoteParent: HTMLElement = parent;
     for (let depth = 0; depth < nestedQuote.indents.length; depth += 1) {
@@ -2075,14 +2081,15 @@ function appendTableCellRenderedPreview(
     quoteStack.length = baseQuoteDepth + nestedQuote.indents.length;
     const nestedItem = parseTableCellListItem(nestedQuote.line);
     if (!nestedItem) {
-      appendTaskContent(quoteParent, nestedQuote.line.text, nestedQuote.line.from);
+      appendTaskContent(quoteParent, nestedQuote.line.text, nestedQuote.line.from, nestedListOnLine);
       return;
     }
     const list = document.createElement(nestedItem.type);
     list.className = 'meo-md-html-table-cell-list';
     if (list instanceof HTMLOListElement && nestedItem.start !== 1) list.start = nestedItem.start;
     const child = document.createElement('li');
-    appendItemContent(child, nestedItem.content, nestedItem.contentFrom, baseQuoteDepth + nestedQuote.indents.length);
+    appendItemContent(child, nestedItem.content, nestedItem.contentFrom,
+      baseQuoteDepth + nestedQuote.indents.length, true);
     list.appendChild(child);
     quoteParent.appendChild(list);
     listStackFor(quoteParent).push({

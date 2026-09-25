@@ -2933,6 +2933,29 @@ button:focus-visible > .menu-switch {
   text-indent: -1ch;
 }
 
+.cm-editor .cm-line.meo-md-quote.meo-md-quote-nested {
+  position: relative;
+}
+
+.cm-editor .cm-line.meo-md-quote.meo-md-quote-nested:not(.meo-md-list-line) {
+  padding-left: calc(3ch + var(--meo-quote-extra-width));
+}
+
+.cm-editor .cm-line.meo-md-quote.meo-md-quote-nested::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 1ch;
+  width: var(--meo-quote-extra-width);
+  background: repeating-linear-gradient(
+    to right,
+    var(--meo-semantic-blockquoteBorder) 0 3px,
+    transparent 3px 1ch
+  );
+  pointer-events: none;
+}
+
 .cm-editor .cm-line.meo-md-quote:not(.meo-md-code-block):not(.meo-mermaid-block) *,
 .cm-editor .cm-line.meo-md-quote:not(.meo-md-code-block):not(.meo-mermaid-block) {
   color: var(--meo-semantic-blockquoteForeground) !important;
@@ -6029,6 +6052,14 @@ html[data-editor-appearance='dark'] body.vscode-dark
 
 .cm-editor .meo-md-html-table-cell-task {
   list-style: none;
+}
+
+.cm-editor .meo-md-html-table-cell-list:is(ol) > li.meo-md-html-table-cell-task-show-marker {
+  list-style-type: decimal;
+}
+
+.cm-editor .meo-md-html-table-cell-list:is(ul) > li.meo-md-html-table-cell-task-show-marker {
+  list-style-type: disc;
 }
 
 .cm-editor .meo-md-html-table-cell-list {

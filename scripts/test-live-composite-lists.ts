@@ -160,7 +160,11 @@ async function main(): Promise<void> {
         '- > 1. list quote ordered',
         '1. > - [x] ordered quote task',
         '- 1. - 2. [ ] five markers',
-        '- [ ] 1. task first keeps ordered text'
+        '- [ ] 1. task first keeps ordered text',
+        '> > - two quote levels',
+        '> > nested quote paragraph',
+        '- 1. [ ] composite task alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu',
+        '> > > three quote levels'
       ].join('\n');
       const editor = (window as any).ListEditingHarness.createEditor({
         parent: document.getElementById('host')!, text: source,
@@ -171,19 +175,43 @@ async function main(): Promise<void> {
         text: line.innerText,
         markers: line.querySelectorAll('.meo-md-list-marker').length,
         checkboxes: line.querySelectorAll('.meo-task-checkbox').length,
+        quoteDepthIndicator: getComputedStyle(line, '::before').width,
         markerRects: Array.from(line.querySelectorAll<HTMLElement>('.meo-md-list-marker'))
           .map((marker) => ({ left: marker.getBoundingClientRect().left, right: marker.getBoundingClientRect().right }))
       }));
+      const wrappedLine = Array.from(document.querySelectorAll<HTMLElement>('#host .cm-line'))
+        .find((line) => line.textContent?.includes('composite task alpha'))!;
+      const textNode = Array.from(wrappedLine.childNodes)
+        .find((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.includes('composite task alpha'))!;
+      const bodyRange = document.createRange();
+      bodyRange.setStart(textNode, textNode.textContent!.indexOf('composite task alpha'));
+      bodyRange.setEnd(textNode, textNode.textContent!.length);
+      const bodyRects = Array.from(bodyRange.getClientRects()).filter((rect) => rect.width > 1);
+      const wrappedAlignment = {
+        count: bodyRects.length,
+        first: bodyRects[0]?.left ?? NaN,
+        continuation: bodyRects[1]?.left ?? NaN
+      };
       editor.destroy();
-      return items;
+      return { items, wrappedAlignment };
     });
-    assert.deepEqual(sameLine.map((line) => line.markers), [2, 2, 3, 1, 2, 2, 1, 3, 0],
+    assert.deepEqual(sameLine.items.map((line) => line.markers), [2, 2, 3, 2, 2, 2, 2, 4, 0, 1, 0, 2, 0],
       `same-line list markers must all render: ${JSON.stringify(sameLine)}`);
-    assert.equal(sameLine[3]?.checkboxes, 1);
-    assert.equal(sameLine[6]?.checkboxes, 1);
-    assert.equal(sameLine[7]?.checkboxes, 1);
-    assert.equal(sameLine[8]?.checkboxes, 1);
-    for (const line of sameLine) {
+    assert.equal(sameLine.items[3]?.checkboxes, 1);
+    assert.equal(sameLine.items[6]?.checkboxes, 1);
+    assert.equal(sameLine.items[7]?.checkboxes, 1);
+    assert.equal(sameLine.items[8]?.checkboxes, 1);
+    assert.equal(sameLine.items[11]?.checkboxes, 1);
+    assert.ok(Number.parseFloat(sameLine.items[9]?.quoteDepthIndicator ?? '') > 0
+      && Number.parseFloat(sameLine.items[10]?.quoteDepthIndicator ?? '') > 0,
+      'the second quote level needs a visible depth indicator');
+    assert.ok(Number.parseFloat(sameLine.items[12]?.quoteDepthIndicator ?? '')
+      > Number.parseFloat(sameLine.items[10]?.quoteDepthIndicator ?? ''),
+    'the third quote level needs an additional visible depth indicator');
+    assert.ok(sameLine.wrappedAlignment.count >= 2
+      && Math.abs(sameLine.wrappedAlignment.first - sameLine.wrappedAlignment.continuation) <= 1,
+    `same-line task continuation is misaligned: ${JSON.stringify(sameLine.wrappedAlignment)}`);
+    for (const line of sameLine.items) {
       for (let index = 1; index < line.markerRects.length; index += 1) {
         assert.ok(line.markerRects[index].left >= line.markerRects[index - 1].right - 1,
           `same-line markers overlap: ${JSON.stringify(line)}`);
@@ -192,9 +220,10 @@ async function main(): Promise<void> {
     for (const text of [
       'bullet then ordered', 'ordered then bullet', 'three list markers', 'task after two lists',
       'quote then two lists', 'list quote ordered', 'ordered quote task', 'five markers',
-      '1. task first keeps ordered text'
+      '1. task first keeps ordered text', 'two quote levels', 'nested quote paragraph',
+      'composite task alpha', 'three quote levels'
     ]) {
-      assert.ok(sameLine.some((line) => line.text.includes(text)), `same-line content lost: ${text}`);
+      assert.ok(sameLine.items.some((line) => line.text.includes(text)), `same-line content lost: ${text}`);
     }
 
     const sameLineTable = await page.evaluate(async () => {
@@ -208,6 +237,8 @@ async function main(): Promise<void> {
       const result = {
         listItems: cell.querySelectorAll('li').length,
         checkboxes: cell.querySelectorAll('input[type=checkbox]').length,
+        taskMarkerStyles: Array.from(cell.querySelectorAll<HTMLElement>('li.meo-md-html-table-cell-task'))
+          .map((item) => getComputedStyle(item).listStyleType),
         text: cell.innerText,
         source: editor.getText()
       };
@@ -216,9 +247,47 @@ async function main(): Promise<void> {
     });
     assert.equal(sameLineTable.listItems, 13, 'table cell must retain every parsed same-line nested list');
     assert.equal(sameLineTable.checkboxes, 3);
+    assert.deepEqual(sameLineTable.taskMarkerStyles, ['decimal', 'none', 'disc'],
+      'same-line nested tasks must retain their ordered or bullet list marker');
     assert.ok(['forward', 'reverse', 'quoted', 'task first', 'list quote', 'reverse task']
       .every((text) => sameLineTable.text.includes(text)));
     assert.equal(sameLineTable.source, '| Items |\n| --- |\n| - 1. forward<br>1. - reverse<br>> - 1. quoted<br>- 1. [ ] task<br>- [ ] 1. task first<br>- > 1. list quote<br>1. - [x] reverse task |');
+
+    const taskBoundary = await page.evaluate(async () => {
+      const source = [
+        'plain [ ] middle', '',
+        '- list text [ ] middle', '',
+        '1. list text [x] middle', '',
+        '> - quote text [ ] middle', '',
+        '- [ ] actual task', '',
+        '- [ ] 1. task body keeps number as text'
+      ].join('\n');
+      const editor = (window as any).ListEditingHarness.createEditor({
+        parent: document.getElementById('host')!, text: source,
+        initialMode: 'live', uiLanguage: 'zh-CN', onApplyChanges() {}
+      });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      const lines = Array.from(document.querySelectorAll<HTMLElement>('#host .cm-line'))
+        .filter((line) => line.innerText.trim())
+        .map((line) => ({ text: line.innerText, boxes: line.querySelectorAll('.meo-task-checkbox').length }));
+      editor.destroy();
+      const tableEditor = (window as any).ListEditingHarness.createEditor({
+        parent: document.getElementById('table-host')!,
+        text: '| Plain | List text | Actual task |\n| --- | --- | --- |\n| plain [ ] middle | - list text [x] middle | - [ ] actual task |',
+        initialMode: 'live', uiLanguage: 'zh-CN', onApplyChanges() {}
+      });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const cells = Array.from(document.querySelectorAll<HTMLElement>('#table-host tbody td'))
+        .map((cell) => ({ text: cell.innerText, boxes: cell.querySelectorAll('input[type=checkbox]').length }));
+      tableEditor.destroy();
+      return { lines, cells };
+    });
+    assert.deepEqual(taskBoundary.lines.map((line) => line.boxes), [0, 0, 0, 0, 1, 1],
+      'checkbox syntax inside ordinary text must remain text');
+    assert.deepEqual(taskBoundary.cells.map((cell) => cell.boxes), [0, 0, 1]);
+    assert.ok(taskBoundary.lines[0]?.text.includes('[ ]') && taskBoundary.lines[1]?.text.includes('[ ]')
+      && taskBoundary.lines[2]?.text.includes('[x]') && taskBoundary.lines[3]?.text.includes('[ ]')
+      && taskBoundary.lines[5]?.text.includes('1. task body'));
 
     await page.evaluate(() => {
       const editor = (window as any).ListEditingHarness.createEditor({

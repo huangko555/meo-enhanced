@@ -49,6 +49,7 @@ interface ParsedListMarkerParts {
 
 interface ListMarkerDecorationOptions {
   useSourceStyleLiteral?: boolean;
+  showTaskListMarker?: boolean;
 }
 
 interface ListTextChange {
@@ -601,11 +602,21 @@ export function addListMarkerDecoration(
   if (marker.taskBracketStart !== undefined) {
     const bracketStart = line.from + marker.taskBracketStart;
     const taskStatus = marker.taskStatus ?? 'todo';
+    if (options?.showTaskListMarker) {
+      builder.push(Decoration.replace({
+        widget: new ListMarkerWidget(
+          marker.markerText,
+          marker.classes,
+          marker.taskBracketStart - marker.fromOffset
+        ),
+        inclusive: false
+      }).range(indentEnd, bracketStart));
+    }
     builder.push(
       Decoration.replace({
         widget: new CheckboxWidget(taskStatus, bracketStart),
         inclusive: false
-      }).range(indentEnd, markerTo)
+      }).range(options?.showTaskListMarker ? bracketStart : indentEnd, markerTo)
     );
 
     if (taskStatus === 'done' || taskStatus === 'dropped') {

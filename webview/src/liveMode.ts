@@ -1887,7 +1887,7 @@ function addListLineDecorations(
     }
     legacyOrderedCountsByLevel.length = 0;
     const inFrontmatterContent = isInsideFrontmatterContent(frontmatter, line.from);
-    let deepest: { marker: NonNullable<ReturnType<typeof listMarkerData>>; depth: number; hiddenQuoteColumns: number } | null = null;
+    let deepest: { marker: NonNullable<ReturnType<typeof listMarkerData>>; depth: number; hiddenQuoteColumns: number; showTaskListMarker: boolean } | null = null;
     let previousMarkerEnd = line.from;
     for (const entry of entries) {
       const precedingQuoteEnds = (quoteMarksByLine.get(lineNo) ?? []).filter((end) => end <= entry.listMarkFrom);
@@ -1913,20 +1913,24 @@ function addListLineDecorations(
           inclusive: false
         }).range(line.from + markerOffset, line.from + marker.fromOffset));
       }
-      addListMarkerDecoration(builder, state, line.from, orderedDisplayIndex, style, null, markerOffset);
+      const showTaskListMarker = marker.isTask && entries.length > 1;
+      addListMarkerDecoration(builder, state, line.from, orderedDisplayIndex, style,
+        showTaskListMarker ? { showTaskListMarker: true } : null, markerOffset);
       if (!deepest || entry.depth >= deepest.depth) {
-        deepest = { marker, depth: entry.depth, hiddenQuoteColumns: precedingQuoteEnds.length };
+        deepest = { marker, depth: entry.depth, hiddenQuoteColumns: precedingQuoteEnds.length, showTaskListMarker };
       }
     }
     if (deepest && !inFrontmatterContent) {
-      const { marker, hiddenQuoteColumns } = deepest;
+      const { marker, hiddenQuoteColumns, showTaskListMarker } = deepest;
       builder.push(listLineDeco(
         marker.contentOffsetColumns - hiddenQuoteColumns,
         marker.indentColumns,
         style?.columns ?? 2,
         indentSelectedLines.has(lineNo),
         marker.isTask,
-        marker.taskHiddenPrefixColumns,
+        showTaskListMarker && marker.taskBracketStart !== undefined
+          ? Math.max(0, marker.toOffset - marker.taskBracketStart - 1)
+          : marker.taskHiddenPrefixColumns,
         Boolean(marker.orderedNumber)
       ).range(line.from));
     }
@@ -1957,6 +1961,7 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
   );
   const activeImageGroups = new Map<number, ActiveImageGroup>();
   const parsedTableRanges: SourceRange[] = [];
+  const quoteDepthByLine = new Map<number, number>();
   let tableDepth = 0;
 
   let frontmatter: FrontmatterInfo | null = null;
@@ -2022,6 +2027,16 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
         if (lineText.startsWith('>>>>>>>')) {
           addLineClass(ranges, state, node.from, node.to, lineStyleDecos.mergeIncomingHeader);
           return;
+        }
+        let depth = 1;
+        for (let parent = node.node.parent; parent; parent = parent.parent) {
+          if (parent.name === 'Blockquote') depth += 1;
+        }
+        if (depth > 1) {
+          const lastLine = state.doc.lineAt(Math.max(node.from, node.to - 1)).number;
+          for (let lineNo = line.number; lineNo <= lastLine; lineNo += 1) {
+            quoteDepthByLine.set(lineNo, Math.max(depth, quoteDepthByLine.get(lineNo) ?? 0));
+          }
         }
         const alertBlock = detectAlertInBlockquote(state, node);
         if (alertBlock) {
@@ -2348,6 +2363,15 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
       }
     },
   });
+
+  for (const [lineNo, depth] of quoteDepthByLine) {
+    ranges.push(Decoration.line({
+      attributes: {
+        class: 'meo-md-quote-nested',
+        style: `--meo-quote-extra-width:${depth - 1}ch;`
+      }
+    }).range(state.doc.line(lineNo).from));
+  }
 
   for (const { line, items } of activeImageGroups.values()) {
     const widget = items.length === 1
