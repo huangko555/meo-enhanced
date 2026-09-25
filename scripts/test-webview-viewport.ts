@@ -2402,6 +2402,8 @@ async function main() {
     await waitForFrames(page, 4);
     await page.evaluate(() => {
       const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+      // The fixture's exact alignment represents a new scroll intent after the mode transition.
+      scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 1 }));
       const tallHeading = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
         .find((line) => line.textContent === '## Tall Mermaid');
       if (tallHeading) {
