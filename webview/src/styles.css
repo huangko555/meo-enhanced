@@ -6014,6 +6014,23 @@ html[data-editor-appearance='dark'] body.vscode-dark
   min-height: 1lh;
 }
 
+.cm-editor .meo-md-html-table-cell-quote {
+  margin: 0;
+  padding-inline-start: 1ch;
+  border-inline-start: 3px solid var(--meo-semantic-blockquoteBorder);
+  color: var(--meo-semantic-blockquoteForeground);
+}
+
+.cm-editor .meo-md-html-table-cell-task-checkbox {
+  margin-inline-end: 0.5ch;
+  pointer-events: none;
+  vertical-align: middle;
+}
+
+.cm-editor .meo-md-html-table-cell-task {
+  list-style: none;
+}
+
 .cm-editor .meo-md-html-table-cell-list {
   margin: 0;
   padding-inline-start: 1.5em;

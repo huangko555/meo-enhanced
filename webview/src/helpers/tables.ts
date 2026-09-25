@@ -14,7 +14,7 @@ import { isPrimaryModifierPointerClick } from './linkNavigation';
 import { wikiLinkScheme } from './wikiLinks';
 import { normalizeSourceHref } from './rawUrls';
 import type { EditorDiagnostic } from './diagnostics';
-import { continuedListMarker, listMarkerData, nextOrderedSequenceNumber } from './listMarkers';
+import { continuedListMarker, listMarkerData, listMarkerDataInContainerLine, nextOrderedSequenceNumber } from './listMarkers';
 import { getViewportController, visualLineContextMargin } from './viewportController';
 import { changedDocumentRange, runEditorHistoryCommand } from './historyCommands';
 import { createOpenLinkButton } from './linkOpenButton';
@@ -770,7 +770,7 @@ const tableInlineRawUrlRe = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|file:|www\.)[^\s
 const tableInlineTagRe = /^#([\p{L}\p{N}_][\p{L}\p{N}_/-]*)/u;
 const tableInlineTagPrefixRe = /[\p{L}\p{N}_/-]/u;
 const tableCellBreakAtRe = /^<br\s*\/?>/i;
-const tableCellListItemRe = /^([ \t]*)(?:(?<bullet>[-+*])|(?<number>\d+)\.)\s+(?<content>.*)$/;
+const tableCellListItemRe = /^([ \t]*)(?:(?<bullet>[-+*])|(?<number>\d+)[.)])\s+(?<content>.*)$/;
 const tableInlineEscapableChars = new Set(['\\', '*', '_', '~', '`', '[', ']', '(', ')', '!', '|', '<', '>']);
 const tableSearchStateEventName = 'meo-search-state-change';
 const tableDiagnosticSeverityClasses = [
@@ -1068,9 +1068,9 @@ function continueTableCellList(input: HTMLTextAreaElement) {
     return true;
   }
 
-  const currentMarker = listMarkerData(lineText);
+  const currentMarker = listMarkerDataInContainerLine(lineText);
   if (!currentMarker || lineText.slice(currentMarker.toOffset).trim()) return false;
-  input.setSelectionRange(lineStart, lineStart + currentMarker.toOffset);
+  input.setSelectionRange(lineStart + currentMarker.fromOffset, lineStart + currentMarker.toOffset);
   replaceTableCellEditorSelection(input, '');
   return true;
 }
@@ -1983,6 +1983,20 @@ function parseTableCellListItem(line: TableCellLogicalLine) {
   } as const;
 }
 
+function parseTableCellQuotePrefix(line: TableCellLogicalLine) {
+  let text = line.text;
+  let from = line.from;
+  const indents: number[] = [];
+  while (true) {
+    const match = /^([ \t]{0,3})>[ \t]?/.exec(text);
+    if (!match) break;
+    indents.push(tableCellIndentColumns(match[1]));
+    text = text.slice(match[0].length);
+    from += match[0].length;
+  }
+  return { line: { text, from, breakText: line.breakText }, indents };
+}
+
 function appendTableCellSourcePreview(
   previewEl: HTMLElement,
   text: string,
@@ -2007,7 +2021,17 @@ function appendTableCellRenderedPreview(
   uiLanguage: UiLanguage,
   view: EditorView
 ) {
-  const listStack: Array<{ indentColumns: number; type: 'ul' | 'ol'; list: HTMLUListElement | HTMLOListElement; lastItem: HTMLLIElement | null }> = [];
+  type ListEntry = { indentColumns: number; type: 'ul' | 'ol'; list: HTMLUListElement | HTMLOListElement; lastItem: HTMLLIElement | null };
+  const listsByParent = new WeakMap<HTMLElement, ListEntry[]>();
+  const quoteStack: HTMLElement[] = [];
+  const listStackFor = (parent: HTMLElement): ListEntry[] => {
+    let stack = listsByParent.get(parent);
+    if (!stack) {
+      stack = [];
+      listsByParent.set(parent, stack);
+    }
+    return stack;
+  };
   const appendInline = (parent: HTMLElement, content: string, baseOffset: number) => {
     appendTableInlinePreviewNodes(parent, content, {
       baseOffset,
@@ -2020,27 +2044,97 @@ function appendTableCellRenderedPreview(
     });
   };
 
-  for (const line of splitTableCellLogicalLines(text)) {
+  const appendTaskContent = (parent: HTMLElement, content: string, from: number) => {
+    const task = /^\[([ xX~\-])\][ \t]+/.exec(content);
+    if (task && parent instanceof HTMLLIElement) {
+      const status = task[1].toLowerCase() === 'x' ? 'done'
+        : task[1] === '~' ? 'inprogress' : task[1] === '-' ? 'dropped' : 'todo';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.disabled = true;
+      checkbox.checked = status === 'done';
+      checkbox.className = `meo-task-checkbox meo-md-html-table-cell-task-checkbox is-${status}`;
+      parent.classList.add('meo-md-html-table-cell-task', `is-${status}`);
+      parent.appendChild(checkbox);
+      appendInline(parent, content.slice(task[0].length), from + task[0].length);
+      return;
+    }
+    appendInline(parent, content, from);
+  };
+
+  const appendItemContent = (parent: HTMLLIElement, content: string, from: number, baseQuoteDepth: number) => {
+    const nestedQuote = parseTableCellQuotePrefix({ text: content, from, breakText: '' });
+    if (!nestedQuote.indents.length) {
+      appendTaskContent(parent, content, from);
+      return;
+    }
+    let quoteParent: HTMLElement = parent;
+    for (let depth = 0; depth < nestedQuote.indents.length; depth += 1) {
+      const quote = document.createElement('blockquote');
+      quote.className = 'meo-md-html-table-cell-quote';
+      quoteParent.appendChild(quote);
+      quoteParent = quote;
+      quoteStack[baseQuoteDepth + depth] = quote;
+    }
+    quoteStack.length = baseQuoteDepth + nestedQuote.indents.length;
+    const nestedItem = parseTableCellListItem(nestedQuote.line);
+    if (!nestedItem) {
+      appendInline(quoteParent, nestedQuote.line.text, nestedQuote.line.from);
+      return;
+    }
+    const list = document.createElement(nestedItem.type);
+    list.className = 'meo-md-html-table-cell-list';
+    if (list instanceof HTMLOListElement && nestedItem.start !== 1) list.start = nestedItem.start;
+    const child = document.createElement('li');
+    appendTaskContent(child, nestedItem.content, nestedItem.contentFrom);
+    list.appendChild(child);
+    quoteParent.appendChild(list);
+    listStackFor(quoteParent).push({
+      indentColumns: nestedItem.indentColumns, type: nestedItem.type, list, lastItem: child
+    });
+  };
+
+  for (const sourceLine of splitTableCellLogicalLines(text)) {
+    const quoted = parseTableCellQuotePrefix(sourceLine);
+    let parent: HTMLElement = previewEl;
+    for (let depth = 0; depth < quoted.indents.length; depth += 1) {
+      const previousList = listStackFor(parent).at(-1);
+      const quoteParent = previousList?.lastItem && quoted.indents[depth] > previousList.indentColumns
+        ? previousList.lastItem : parent;
+      if (quoteParent === parent) listStackFor(parent).length = 0;
+      let quote = quoteStack[depth];
+      if (!quote || quote.parentElement !== quoteParent) {
+        quoteStack.length = depth;
+        quote = document.createElement('blockquote');
+        quote.className = 'meo-md-html-table-cell-quote';
+        quoteParent.appendChild(quote);
+        quoteStack[depth] = quote;
+      }
+      parent = quote;
+    }
+    quoteStack.length = quoted.indents.length;
+    const line = quoted.line;
+    const listStack = listStackFor(parent);
     const item = parseTableCellListItem(line);
     if (!item) {
       const indentColumns = tableCellIndentColumns(line.text);
-      let parent: HTMLElement = previewEl;
+      let contentParent: HTMLElement = parent;
       if (line.text.trim() && indentColumns > 0) {
         for (let index = listStack.length - 1; index >= 0; index -= 1) {
           const entry = listStack[index];
           if (entry.lastItem && indentColumns > entry.indentColumns) {
             listStack.length = index + 1;
-            parent = entry.lastItem;
+            contentParent = entry.lastItem;
             break;
           }
         }
       }
-      if (parent === previewEl) listStack.length = 0;
+      if (contentParent === parent) listStack.length = 0;
       const lineEl = document.createElement('div');
       lineEl.className = 'meo-md-html-table-cell-line';
       appendInline(lineEl, line.text, line.from);
       if (!line.text) lineEl.appendChild(document.createElement('br'));
-      parent.appendChild(lineEl);
+      contentParent.appendChild(lineEl);
       continue;
     }
 
@@ -2060,8 +2154,8 @@ function appendTableCellRenderedPreview(
     let entry = listStack[level];
     if (!entry || entry.indentColumns !== item.indentColumns || entry.type !== item.type) {
       listStack.length = level;
-      const parent = level > 0 ? listStack[level - 1]?.lastItem : previewEl;
-      if (!(parent instanceof HTMLElement)) {
+      const listParent = level > 0 ? listStack[level - 1]?.lastItem : parent;
+      if (!(listParent instanceof HTMLElement)) {
         level = 0;
         listStack.length = 0;
       }
@@ -2074,13 +2168,13 @@ function appendTableCellRenderedPreview(
         const parentIndent = listStack[level - 1].indentColumns;
         list.style.paddingInlineStart = `${Math.max(2, item.indentColumns - parentIndent)}ch`;
       }
-      (level > 0 ? listStack[level - 1].lastItem! : previewEl).appendChild(list);
+      (level > 0 ? listStack[level - 1].lastItem! : parent).appendChild(list);
       entry = { indentColumns: item.indentColumns, type: item.type, list, lastItem: null };
       listStack[level] = entry;
     }
 
     const listItem = document.createElement('li');
-    appendInline(listItem, item.content, item.contentFrom);
+    appendItemContent(listItem, item.content, item.contentFrom, quoted.indents.length);
     entry.list.appendChild(listItem);
     entry.lastItem = listItem;
     listStack.length = level + 1;
@@ -2160,6 +2254,11 @@ function findTableRowSeparatorPipes(text: string, startIndex: number, endIndex: 
 }
 
 function parseTableRowCells(lineText: string, lineFrom = 0): ParsedTableRowCells {
+  const quoted = parseTableCellQuotePrefix({ text: lineText, from: lineFrom, breakText: '' });
+  if (quoted.indents.length) {
+    lineText = quoted.line.text;
+    lineFrom = quoted.line.from;
+  }
   const leadingWhitespaceLen = /^(\s*)/.exec(lineText)?.[1].length ?? 0;
   let contentStart = leadingWhitespaceLen;
   let contentEnd = lineText.length;
@@ -2258,8 +2357,10 @@ function serializeTableMarkdown(indent: string, headerCells: string[], alignment
 }
 
 function parseTableLine(lineNo: number, from: number, to: number, text: string): ParsedTableLine {
-  const { cells, pipes, segments } = parseTableRowCells(text, from);
-  return { lineNo, from, to, text, cells, pipes, segments };
+  const quoted = parseTableCellQuotePrefix({ text, from, breakText: '' });
+  const content = quoted.indents.length ? quoted.line : { text, from };
+  const { cells, pipes, segments } = parseTableRowCells(content.text, content.from);
+  return { lineNo, from, to, text: content.text, cells, pipes, segments };
 }
 
 function isTableContentLine(lineText: string): boolean {
@@ -2281,10 +2382,11 @@ function buildTableDataForLineRange(state: EditorState, startLineNo: number, end
   for (let lineNo = startLine.number; lineNo <= endLine.number; lineNo++) {
     const line = state.doc.line(lineNo);
     const text = state.doc.sliceString(line.from, line.to);
-    if (delimiterIdx === -1 && isTableDelimiterLine(text)) {
+    const parsed = parseTableLine(lineNo, line.from, line.to, text);
+    if (delimiterIdx === -1 && isTableDelimiterLine(parsed.text)) {
       delimiterIdx = lines.length;
     }
-    lines.push(parseTableLine(lineNo, line.from, line.to, text));
+    lines.push(parsed);
   }
 
   const headerLine = delimiterIdx > 0 ? lines[delimiterIdx - 1] : null;
@@ -2339,7 +2441,11 @@ function buildWidgetTableData(
 ): WidgetTableData | null {
   const { from, to, headerLine, dataLines, alignments, colCount, startLine, endLine } = data;
   if (colCount === 0 || !headerLine) return null;
-  const indent = /^(\s*)/.exec(headerLine.text)?.[1] ?? '';
+  const sourceHeader = state.doc.sliceString(headerLine.from, headerLine.to);
+  const quotePrefix = parseTableCellQuotePrefix({ text: sourceHeader, from: headerLine.from, breakText: '' });
+  const indent = quotePrefix.indents.length
+    ? sourceHeader.slice(0, quotePrefix.line.from - headerLine.from)
+    : /^(\s*)/.exec(sourceHeader)?.[1] ?? '';
   const blockIndent = getLiveBlockIndent(state, headerLine.from);
   const visualIndent = blockIndent.footnoteNumber === null
     ? tableCellIndentColumns(indent)
@@ -4092,8 +4198,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
     const cells = parsed.cells.map((cell) => cell.trim());
     cells[edit.col] = insert;
-    const indent = /^\s*/.exec(line.text)?.[0] ?? '';
-    return { from: line.from, to: line.to, insert: `${indent}| ${cells.join(' | ')} |` };
+    return { from: line.from, to: line.to, insert: `${this.tableData.indent}| ${cells.join(' | ')} |` };
   }
 
   collectPendingCellSourceChanges(view: EditorView, excludedBodyRows = new Set<number>()) {

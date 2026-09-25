@@ -406,9 +406,10 @@ function buildListMarkerText(
 export function listMarkerData(
   lineText: string,
   orderedDisplayIndex: OrderedDisplayIndex = null,
-  style: ListIndentStyle = defaultListIndentStyle
+  style: ListIndentStyle = defaultListIndentStyle,
+  markerOffset = 0
 ): ListMarkerData | null {
-  const match = listMarkerRegex.exec(lineText);
+  const match = listMarkerRegex.exec(lineText.slice(markerOffset));
   if (!match) {
     return null;
   }
@@ -430,19 +431,19 @@ export function listMarkerData(
   const markerCharLength = match[2]?.length ?? (orderedNumber?.length ?? 0) + (orderedSuffix?.length ?? 0);
   const markerEndOffset = indent + markerCharLength;
   const indentColumns = indentationColumns(leadingWhitespace, style);
-  const contentOffsetColumns = indentColumns + (match[0].length - indent);
+  const contentOffsetColumns = markerOffset + indentColumns + (match[0].length - indent);
   const indentLevel = Math.floor(indentColumns / style.columns);
   if (!orderedNumber && indentLevel % 2 === 1) {
     classes += ' meo-md-list-marker-bullet-hollow';
   }
 
   const result: ListMarkerData = {
-    fromOffset: indent,
+    fromOffset: markerOffset + indent,
     leadingWhitespace,
     indentLevel,
     indentColumns,
-    markerEndOffset,
-    toOffset: match[0].length,
+    markerEndOffset: markerOffset + markerEndOffset,
+    toOffset: markerOffset + match[0].length,
     contentOffsetColumns,
     markerText,
     classes,
@@ -453,13 +454,26 @@ export function listMarkerData(
 
   if (taskMarker !== undefined) {
     const hiddenTaskPrefixLength = Math.max(0, (match[0].length - indent) - 1);
-    result.taskBracketStart = markerEndOffset + 1;
+    result.taskBracketStart = markerOffset + markerEndOffset + 1;
     result.taskStatus = taskStatusFromMarker(taskMarker);
     result.isTask = true;
     result.taskHiddenPrefixColumns = hiddenTaskPrefixLength;
   }
 
   return result;
+}
+
+function quotePrefixOffset(lineText: string): number {
+  let offset = 0;
+  while (true) {
+    const match = /^[ \t]{0,3}>[ \t]?/.exec(lineText.slice(offset));
+    if (!match) return offset;
+    offset += match[0].length;
+  }
+}
+
+export function listMarkerDataInContainerLine(lineText: string): ListMarkerData | null {
+  return listMarkerData(lineText, null, defaultListIndentStyle, quotePrefixOffset(lineText));
 }
 
 class ListMarkerWidget extends WidgetType {
@@ -563,11 +577,12 @@ export function addListMarkerDecoration(
   from: number,
   orderedDisplayIndex: OrderedDisplayIndex = null,
   style: ListIndentStyle = defaultListIndentStyle,
-  options: ListMarkerDecorationOptions | null = null
+  options: ListMarkerDecorationOptions | null = null,
+  markerOffset = 0
 ): void {
   const line = state.doc.lineAt(from);
   const lineText = state.doc.sliceString(line.from, line.to);
-  const marker = listMarkerData(lineText, orderedDisplayIndex, style);
+  const marker = listMarkerData(lineText, orderedDisplayIndex, style, markerOffset);
   if (!marker) {
     return;
   }
@@ -615,11 +630,12 @@ export function addListMarkerDecoration(
 }
 
 export function continuedListMarker(lineText: string): string | null {
-  const parts = parseListMarkerParts(lineText);
+  const prefixOffset = quotePrefixOffset(lineText);
+  const parts = parseListMarkerParts(lineText.slice(prefixOffset));
   if (!parts) {
     return null;
   }
-  const marker = listMarkerData(lineText);
+  const marker = listMarkerDataInContainerLine(lineText);
   if (!marker) {
     return null;
   }
@@ -630,18 +646,22 @@ export function continuedListMarker(lineText: string): string | null {
   }
 
   if (!parts.orderedNumber) {
-    return buildListMarkerText(parts);
+    const next = buildListMarkerText(parts);
+    return next === null ? null : lineText.slice(0, prefixOffset) + next;
   }
 
   const nextNumber = Number.parseInt(parts.orderedNumber, 10) + 1;
   if (!Number.isFinite(nextNumber)) {
     return null;
   }
-  return buildListMarkerText(parts, String(nextNumber));
+  const next = buildListMarkerText(parts, String(nextNumber));
+  return next === null ? null : lineText.slice(0, prefixOffset) + next;
 }
 
 function sameLevelListMarker(lineText: string): string | null {
-  return buildListMarkerText(parseListMarkerParts(lineText));
+  const prefixOffset = quotePrefixOffset(lineText);
+  const marker = buildListMarkerText(parseListMarkerParts(lineText.slice(prefixOffset)));
+  return marker === null ? null : lineText.slice(0, prefixOffset) + marker;
 }
 
 export function handleEnterContinueList(view: EditorView): boolean {
@@ -681,7 +701,7 @@ export function handleEnterOnEmptyListItem(view: EditorView): boolean {
   const position = selection.head;
   const line = state.doc.lineAt(position);
   const lineText = state.doc.sliceString(line.from, line.to);
-  const marker = listMarkerData(lineText);
+  const marker = listMarkerDataInContainerLine(lineText);
   if (!marker) {
     return false;
   }
@@ -696,8 +716,8 @@ export function handleEnterOnEmptyListItem(view: EditorView): boolean {
   }
 
   view.dispatch({
-    changes: { from: line.from, to: contentStart, insert: '' },
-    selection: { anchor: line.from }
+    changes: { from: line.from + quotePrefixOffset(lineText), to: contentStart, insert: '' },
+    selection: { anchor: line.from + quotePrefixOffset(lineText) }
   });
   return true;
 }
@@ -825,7 +845,7 @@ export function handleEnterAtListContentStart(view: EditorView): boolean {
   const position = selection.head;
   const line = state.doc.lineAt(position);
   const lineText = state.doc.sliceString(line.from, line.to);
-  const marker = listMarkerData(lineText);
+  const marker = listMarkerDataInContainerLine(lineText);
   if (!marker) {
     return false;
   }
