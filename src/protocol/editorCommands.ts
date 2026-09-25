@@ -44,7 +44,6 @@ export type EditorCommand =
   | { readonly type: 'setPreviewFontFamily'; readonly fontFamily: string }
   | { readonly type: 'setPreviewSourceColoring'; readonly enabled: boolean }
   | { readonly type: 'setPreviewShowComments'; readonly enabled: boolean }
-  | { readonly type: 'setLiveShowComments'; readonly enabled: boolean }
   | { readonly type: 'setLiveStrongColoring'; readonly enabled: boolean }
   | { readonly type: 'setEditorAppearance'; readonly appearance: EditorAppearance }
   | { readonly type: 'setEditorFontSize'; readonly mode: EditorFontSizeMode; readonly value: number }
@@ -130,7 +129,6 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
         : null;
     case 'setPreviewSourceColoring':
     case 'setPreviewShowComments':
-    case 'setLiveShowComments':
     case 'setLiveStrongColoring':
       return typeof value.enabled === 'boolean' ? value as EditorCommand : null;
     case 'setPreviewFontFamily': {

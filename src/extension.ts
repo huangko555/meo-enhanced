@@ -593,8 +593,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       setPreviewSourceColoring: this.appearanceSettings.setPreviewSourceColoring,
       getPreviewShowComments: () => vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get<boolean>('preview.showComments', false),
       setPreviewShowComments: async (enabled) => { await vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).update('preview.showComments', enabled, vscode.ConfigurationTarget.Global); },
-      getLiveShowComments: () => vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get<boolean>('live.showComments', true),
-      setLiveShowComments: async (enabled) => { await vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).update('live.showComments', enabled, vscode.ConfigurationTarget.Global); },
       getLiveStrongColoring: this.appearanceSettings.getLiveStrongColoring,
       setLiveStrongColoring: this.appearanceSettings.setLiveStrongColoring,
       getEditorAppearance: this.appearanceSettings.getEditorAppearance,

@@ -32,15 +32,13 @@ try {
         onApplyChanges() {}
       });
     });
+    const visibleText = await page.$eval('.cm-content', element => element.textContent ?? '');
+    assert.match(visibleText, /<!-- secret -->/);
+    assert.match(visibleText, /<!-- blocksecret -->/);
+    assert.match(visibleText, /<!-- nested -->/);
+    assert.match(visibleText, /<!-- nested multilinecomment -->/);
+    assert.match(visibleText, /<!-- example -->/);
     assert.equal((await page.$$('.meo-md-collapsed-comment')).length, 0);
-    await page.evaluate(() => (window as any).__commentEditor.setLiveShowComments(false));
-    await page.waitForFunction(() => document.querySelectorAll('.meo-md-collapsed-comment').length === 4);
-    await page.evaluate(() => (window as any).__commentEditor.setUiLanguage('zh-CN'));
-    await page.waitForFunction(() => document.querySelector('.meo-md-collapsed-comment')?.textContent === '注释');
-    await page.click('.meo-md-collapsed-comment');
-    await page.waitForFunction(() => document.querySelectorAll('.meo-md-collapsed-comment').length === 3);
-    await page.evaluate(() => (window as any).__commentEditor.setLiveShowComments(true));
-    await page.waitForFunction(() => document.querySelectorAll('.meo-md-collapsed-comment').length === 0);
     await page.evaluate(() => (window as any).__commentEditor.destroy());
     await page.close();
   } finally {

@@ -40,7 +40,6 @@ const completeInit = {
   previewFontFamily: '' as const,
   previewSourceColoring: true,
   previewShowComments: false,
-  liveShowComments: true,
   liveStrongColoring: false,
   editorAppearance: 'dark' as const,
   editorFontSizeMode: 'auto' as const,
@@ -80,9 +79,7 @@ assert.equal(decodeInitMessage({ ...completeInit, previewSourceColoring: undefin
 assert.equal(decodeInitMessage({ ...completeInit, liveStrongColoring: undefined })?.liveStrongColoring, false);
 assert.equal(decodeInitMessage({ ...completeInit, liveStrongColoring: 'yes' }), null);
 assert.equal(decodeInitMessage({ ...completeInit, previewShowComments: undefined })?.previewShowComments, false);
-assert.equal(decodeInitMessage({ ...completeInit, liveShowComments: undefined })?.liveShowComments, true);
 assert.equal(decodeInitMessage({ ...completeInit, previewShowComments: 'yes' }), null);
-assert.equal(decodeInitMessage({ ...completeInit, liveShowComments: 'yes' }), null);
 assert.equal(decodeInitMessage({ ...completeInit, editorFontSizeMode: 'invalid' }), null);
 assert.equal(decodeInitMessage({ ...completeInit, editorFontSize: 9 }), null);
 assert.equal(decodeInitMessage({ ...completeInit, editorFontSize: 14.5 }), null);

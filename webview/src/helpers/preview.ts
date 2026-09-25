@@ -1766,7 +1766,7 @@ export function createPreviewController({
     showCommentsControl.classList.toggle('is-active', enabled);
     showCommentsControl.setAttribute('aria-pressed', String(enabled));
     const text = hasPendingRequest ? pendingText : latestAcceptedText;
-    if (changed && text !== null) requestRender(text, { force: true, preserveViewport: true, preserveFrame: true });
+    if (changed && text !== null) requestRender(text, { force: true, preserveViewport: true });
     if (changed && post) vscode.postMessage({ type: 'setPreviewShowComments', enabled });
   };
   showCommentsControl.addEventListener('click', () => setShowComments(!showComments, { post: true }));

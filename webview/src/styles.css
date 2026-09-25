@@ -6892,13 +6892,3 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-delet
   width: calc(100% - var(--meo-live-block-indent));
   margin-left: var(--meo-live-block-indent);
 }
-.cm-editor.meo-mode-live .meo-md-collapsed-comment {
-  display: inline-block;
-  border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border));
-  border-radius: 4px;
-  padding: 0 0.35em;
-  background: var(--vscode-editorWidget-background, transparent);
-  color: var(--vscode-descriptionForeground);
-  font: inherit;
-  cursor: pointer;
-}

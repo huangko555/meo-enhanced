@@ -1,7 +1,5 @@
-import { Facet, RangeSetBuilder, StateEffect, StateField, EditorState, type ChangeDesc, type Range, type RangeSet, type Extension, type EditorSelection, type Transaction } from '@codemirror/state';
+import { RangeSetBuilder, StateEffect, StateField, EditorState, type ChangeDesc, type Range, type RangeSet, type Extension, type EditorSelection, type Transaction } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { parseDocument } from 'htmlparser2';
-import type { ChildNode } from 'domhandler';
 import { syntaxHighlighting } from '@codemirror/language';
 import {
   Decoration,
@@ -145,29 +143,6 @@ import {
 } from './editor/liveInputDerivedWork';
 
 const markerDeco = Decoration.mark({ class: 'meo-md-marker' });
-export const liveShowCommentsFacet = Facet.define<boolean, boolean>({ combine: (values) => values[0] ?? true });
-
-class CollapsedCommentWidget extends WidgetType {
-  constructor(readonly from: number, readonly label: string) { super(); }
-
-  eq(other: WidgetType): boolean {
-    return other instanceof CollapsedCommentWidget && other.from === this.from && other.label === this.label;
-  }
-
-  toDOM(view: EditorView): HTMLElement {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'meo-md-collapsed-comment';
-    button.textContent = this.label;
-    button.addEventListener('click', () => {
-      view.dispatch({ selection: { anchor: this.from } });
-      view.focus();
-    });
-    return button;
-  }
-
-  ignoreEvent(): boolean { return true; }
-}
 // The benchmark viewport exposes at most ~70 CodeMirror lines. Retaining 80
 // lines on either side keeps the current surface live without mapping the file.
 const largeDocumentInputLineRadius = 80;
@@ -2489,42 +2464,6 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
       htmlEditingRange.to === detailsBlock.sectionTo
     ))
   );
-  if (!state.facet(liveShowCommentsFacet)) {
-    tree.iterate({
-      enter(node: SyntaxNodeRef) {
-        if (node.name === 'HTMLBlock') {
-          const htmlSource = state.doc.sliceString(node.from, node.to);
-          if (!htmlSource.includes('<!--')) return;
-          const visit = (nodes: readonly ChildNode[]): void => {
-            for (const child of nodes) {
-              if (child.type === 'comment' && child.startIndex !== null && child.endIndex !== null) {
-                const from = node.from + child.startIndex;
-                const to = node.from + child.endIndex + 1;
-                if (state.doc.sliceString(from, to).endsWith('-->')
-                  && !state.selection.ranges.some((selection) => selection.from <= to && selection.to >= from)) {
-                  ranges.push(Decoration.replace({ widget: new CollapsedCommentWidget(
-                    from,
-                    getUiStrings(state.facet(uiLanguageFacet)).comment
-                  ) }).range(from, to));
-                }
-              }
-              if ('children' in child) visit(child.children);
-            }
-          };
-          visit(parseDocument(htmlSource, { withStartIndices: true, withEndIndices: true }).children);
-          return;
-        }
-        if (node.name !== 'Comment' && node.name !== 'CommentBlock') return;
-        const source = state.doc.sliceString(node.from, node.to).trim();
-        if (!/^<!--[\s\S]*?-->$/.test(source)) return;
-        if (state.selection.ranges.some((selection) => selection.from <= node.to && selection.to >= node.from)) return;
-        ranges.push(Decoration.replace({
-          widget: new CollapsedCommentWidget(node.from, getUiStrings(state.facet(uiLanguageFacet)).comment),
-          block: node.name === 'CommentBlock'
-        }).range(node.from, node.to));
-      }
-    });
-  }
   const result = Decoration.set(ranges, true);
   return filterDecorationsOutsideMergeConflicts(state, result);
 }
