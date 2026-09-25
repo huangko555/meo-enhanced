@@ -32,6 +32,7 @@ export type UiStrings = Readonly<{
   previewGenerating: string;
   previewFailed: string;
   previewTools: string;
+  exportDocument: string;
   exportHtml: string;
   exportPdf: string;
   exportDocx: string;
@@ -236,12 +237,16 @@ export type UiStrings = Readonly<{
   constrainWidth: string;
   disableConstrainedWidth: string;
   resumeFromLastPosition: string;
+  resumeReadingPositionLabel: string;
   currentEdits: string;
   recentSave: string;
   gitHead: string;
   compareWithVersion: string;
   displaySettings: string;
   editorSettings: string;
+  documentDisplaySettings: string;
+  openingDocumentsSettings: string;
+  interfaceSettings: string;
   currentDiskVersionOption: string;
   currentDiskVersionDescription: string;
   beforeLastSaveVersionOption: string;
@@ -302,23 +307,23 @@ export type UiStrings = Readonly<{
 const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
   en: Object.freeze({
     auto: 'Auto', light: 'Light', dark: 'Dark', previewTitle: 'Markdown Preview',
-    previewAppearance: 'Theme', previewSourceColoring: 'Preview source coloring', strongColoring: 'Color bold text', showComments: 'Show comments',
+    previewAppearance: 'Preview theme', previewSourceColoring: 'Preview source coloring', strongColoring: 'Color bold text', showComments: 'Show comments',
     previewCodeColors: 'Code color', previewCodeColorsOn: 'On', previewCodeColorsOff: 'Off',
     previewFontFamily: 'Font',
     previewFontPlaceholder: 'VS Code editor font',
     previewFontUnavailable: 'Local font list unavailable; type a family name',
     previewGenerating: 'Generating preview…',
-    previewFailed: 'Preview generation failed', previewTools: 'Preview tools',
+    previewFailed: 'Preview generation failed', previewTools: 'Preview tools', exportDocument: 'Export…',
     exportHtml: 'Export HTML', exportPdf: 'Export PDF', exportDocx: 'Export Word', exportAsHtml: 'Export as HTML',
     exportAsPdf: 'Export as PDF', exportAsDocx: 'Export as Word document', exportHtmlWithContents: 'Export HTML with Contents',
     exportPdfWithContents: 'Export PDF with Contents', exportDocxWithContents: 'Export Word with Contents', findAndReplace: 'Find and Replace', more: 'Settings',
     moreTools: 'Settings', toolbarOverflow: 'More tools', feedbackPrompt: 'Having trouble?', reportIssue: 'Report an issue',
-    editorAppearance: 'Editor appearance', editorFontSize: 'Font size',
+    editorAppearance: 'UI theme', editorFontSize: 'Font size',
     custom: 'Custom', decreaseFontSize: 'Decrease font size', increaseFontSize: 'Increase font size',
-    interfaceLanguage: 'Interface language', showLineNumbers: 'Show line numbers',
-    foldLongCodeBlocks: 'Fold long code blocks', largeDocumentStartup: 'Large file startup',
+    interfaceLanguage: 'Language', showLineNumbers: 'Show line numbers',
+    foldLongCodeBlocks: 'Fold long code blocks', largeDocumentStartup: 'Open large documents faster',
     largeDocumentStartupDescription: 'Open large documents in Source mode for a faster start. Applies the next time a document opens.',
-    stickyTableHeader: 'Sticky table header',
+    stickyTableHeader: 'Keep table headers visible',
     findAndReplacePanel: 'Find and replace', find: 'Find', replace: 'Replace',
     clearFind: 'Clear Find', clearReplace: 'Clear Replace', wholeWord: 'Whole Word',
     caseSensitive: 'Case Sensitive', previousMatch: 'Previous Match', nextMatch: 'Next Match',
@@ -403,12 +408,13 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     link: 'Link', wikiLink: 'Wiki Link', image: 'Image', table: 'Table', line: 'Lines',
     goToLine: 'Go to line', editInSource: 'Edit in Source', save: 'Save (Ctrl+S)', saveDocument: 'Save document',
     reloadDiskVersion: 'Reload from disk and discard unsaved changes', reloadDiskVersionDoubleClick: 'Click again to discard unsaved changes and reload from disk',
-    constrainContentWidth: 'Constrain Content Width', constrainWidth: 'Constrain Width',
+    constrainContentWidth: 'Constrain Content Width', constrainWidth: 'Limit content width',
     disableConstrainedWidth: 'Disable Constrained Width',
-    resumeFromLastPosition: 'Resume from last position',
+    resumeFromLastPosition: 'Resume from last position', resumeReadingPositionLabel: 'Resume from last position',
     currentEdits: 'Last Saved Version', recentSave: 'Before Agent Edits',
     gitHead: 'Git HEAD (Latest Commit)',
     compareWithVersion: 'Compare Against', displaySettings: 'Display Settings', editorSettings: 'Editor Settings',
+    documentDisplaySettings: 'Document display', openingDocumentsSettings: 'When opening documents', interfaceSettings: 'Interface settings',
     currentDiskVersionOption: 'Last Saved Version',
     currentDiskVersionDescription: 'Compare with the latest file contents saved on disk, including external changes',
     beforeLastSaveVersionOption: 'Before Agent Edits',
@@ -481,22 +487,22 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
   }),
   'zh-CN': Object.freeze({
     auto: '自动', light: '浅色', dark: '深色', previewTitle: 'Markdown 预览',
-    previewAppearance: '预览外观', previewSourceColoring: '预览源码着色', strongColoring: '粗体文字着色', showComments: '显示注释',
-    previewCodeColors: '代码着色', previewCodeColorsOn: '开启', previewCodeColorsOff: '关闭',
+    previewAppearance: '预览主题', previewSourceColoring: '预览源码着色', strongColoring: '粗体文字着色', showComments: '显示注释',
+    previewCodeColors: '代码着色', previewCodeColorsOn: '开', previewCodeColorsOff: '关',
     previewFontFamily: '预览字体',
     previewFontPlaceholder: 'VS Code 编辑器字体',
     previewFontUnavailable: '无法获取本地字体列表；请手动输入字体名称',
     previewGenerating: '正在生成预览…',
-    previewFailed: '预览生成失败', previewTools: '预览工具', exportHtml: '导出 HTML',
+    previewFailed: '预览生成失败', previewTools: '预览工具', exportDocument: '导出…', exportHtml: '导出 HTML',
     exportPdf: '导出 PDF', exportDocx: '导出 Word', exportAsHtml: '导出为 HTML', exportAsPdf: '导出为 PDF',
     exportAsDocx: '导出为 Word 文档', exportHtmlWithContents: '导出 HTML（含目录）', exportPdfWithContents: '导出 PDF（含目录）',
     exportDocxWithContents: '导出 Word（含目录）',
     findAndReplace: '查找和替换', more: '设置', moreTools: '设置', toolbarOverflow: '更多工具',
     feedbackPrompt: '使用中遇到问题？', reportIssue: '欢迎反馈',
-    editorAppearance: '编辑器外观', editorFontSize: '字号大小', custom: '自定义',
+    editorAppearance: '界面主题', editorFontSize: '字号大小', custom: '自定义',
     decreaseFontSize: '减小字号', increaseFontSize: '增大字号',
     interfaceLanguage: '界面语言', showLineNumbers: '显示行号',
-    foldLongCodeBlocks: '折叠长代码块', largeDocumentStartup: '大文档启动优化',
+    foldLongCodeBlocks: '折叠长代码块', largeDocumentStartup: '快速打开大文档',
     largeDocumentStartupDescription: '打开大文档时优先进入源码模式，以提升启动响应速度。对之后打开的文档生效。',
     stickyTableHeader: '表格浮动表头',
     findAndReplacePanel: '查找和替换', find: '查找',
@@ -584,10 +590,11 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     reloadDiskVersion: '从磁盘重新加载，放弃未保存的更改', reloadDiskVersionDoubleClick: '再次点击将放弃未保存的更改，并从磁盘重新加载',
     constrainContentWidth: '限制内容宽度', constrainWidth: '限制宽度',
     disableConstrainedWidth: '取消内容宽度限制',
-    resumeFromLastPosition: '打开时恢复上一次阅读位置',
+    resumeFromLastPosition: '打开时恢复上一次阅读位置', resumeReadingPositionLabel: '恢复阅读位置',
     currentEdits: '最近保存版本', recentSave: 'Agent 编辑前版本',
     gitHead: 'Git HEAD（最新提交）',
     compareWithVersion: '比较方式', displaySettings: '显示设置', editorSettings: '编辑器设置',
+    documentDisplaySettings: '文档显示', openingDocumentsSettings: '打开文档时', interfaceSettings: '界面设置',
     currentDiskVersionOption: '与最近保存版本比较',
     currentDiskVersionDescription: '与磁盘上最新保存的文件内容比较，包含外部修改',
     beforeLastSaveVersionOption: '与 Agent 编辑前版本比较',

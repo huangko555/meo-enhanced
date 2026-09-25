@@ -55,10 +55,14 @@ try {
   } })), text);
   await waitFor('preview mode', () => document.querySelector<HTMLElement>('.editor-root')?.dataset.mode === 'preview');
   await waitFor('initial render', () => document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body?.textContent?.includes('After'));
-  assert.equal(await page.$eval('.preview-show-comments', element => element.getAttribute('aria-pressed')), 'false');
-  await page.click('.preview-show-comments');
+  await page.click('[data-preview-source-coloring="false"]');
+  assert.equal(await page.$eval('[data-preview-source-coloring="false"]', element => element.getAttribute('aria-pressed')), 'true');
+  await page.click('[data-preview-source-coloring="true"]');
+  assert.equal(await page.$eval('[data-preview-source-coloring="true"]', element => element.getAttribute('aria-pressed')), 'true');
+  assert.equal(await page.$eval('[data-preview-comments="false"]', element => element.getAttribute('aria-pressed')), 'true');
+  await page.click('[data-preview-comments="true"]');
   await waitFor('comment render', () => document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body?.textContent?.includes('visible when enabled'));
-  assert.equal(await page.$eval('.preview-show-comments', element => element.getAttribute('aria-pressed')), 'true');
+  assert.equal(await page.$eval('[data-preview-comments="true"]', element => element.getAttribute('aria-pressed')), 'true');
   const visibleComments = await page.evaluate(() => {
     const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
     return Array.from(doc.querySelectorAll<HTMLElement>('.meo-export-comment')).map(comment => {
@@ -104,12 +108,12 @@ try {
   assert.equal(standaloneCommentGap.nextIsComment, true, JSON.stringify(standaloneCommentGap));
   assert.ok(Math.abs(htmlCommentGap.before - htmlCommentGap.after) <= 2, JSON.stringify({ htmlCommentGap, standaloneCommentGap }));
   assert.ok(Math.abs(standaloneCommentGap.before - standaloneCommentGap.after) <= 2, JSON.stringify(standaloneCommentGap));
-  await page.click('.preview-show-comments');
+  await page.click('[data-preview-comments="false"]');
   await waitFor('comment hidden again', () => {
     const text = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body?.textContent;
     return text?.includes('After') && !text.includes('visible when enabled');
   });
-  assert.equal(await page.$eval('.preview-show-comments', element => element.getAttribute('aria-pressed')), 'false');
+  assert.equal(await page.$eval('[data-preview-comments="false"]', element => element.getAttribute('aria-pressed')), 'true');
   await page.close();
   console.log('Preview comment toggle browser test passed.');
 } finally {

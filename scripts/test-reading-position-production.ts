@@ -123,7 +123,7 @@ async function main(): Promise<void> {
       '[data-action="restoreReadingPosition"] .more-tools-option-label',
       (element) => element.textContent
     );
-    if (chineseLabel !== '打开时恢复上一次阅读位置') {
+    if (chineseLabel !== '恢复阅读位置') {
       throw new Error(`Unexpected Chinese reading-position label: ${chineseLabel}`);
     }
     await page.click('[data-action="restoreReadingPosition"]');

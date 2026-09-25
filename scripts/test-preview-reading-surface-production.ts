@@ -530,22 +530,16 @@ async function assertPreviewProjectionTransactions(
     }
 
     await page.evaluate(() => {
-      document.querySelector<HTMLButtonElement>('.preview-appearance-dropdown')!.click();
-      document.querySelector<HTMLButtonElement>(
-        '.preview-appearance-dropdown-panel .preview-dropdown-option[data-value="dark"]'
-      )!.click();
+      document.querySelector<HTMLButtonElement>('[data-preview-appearance-choice="dark"]')!.click();
     });
     await page.waitForFunction(() => (
       getComputedStyle(document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.documentElement)
         .colorScheme === 'dark'
     ));
     await page.evaluate(() => {
-      document.querySelector<HTMLButtonElement>('.preview-source-coloring-dropdown')!.click();
-      document.querySelector<HTMLButtonElement>(
-        '.preview-source-coloring-dropdown-panel .preview-dropdown-option[data-value="false"]'
-      )!.click();
+      document.querySelector<HTMLButtonElement>('[data-preview-source-coloring="false"]')!.click();
     });
-    const disabledColoringRequest = await nextRequest('disabled source coloring from custom dropdown');
+    const disabledColoringRequest = await nextRequest('disabled source coloring from segmented control');
     assert.equal(disabledColoringRequest.message.environment.previewSourceColoring, false);
     await resolveRequest(disabledColoringRequest);
     await page.waitForFunction(() => {
@@ -581,12 +575,9 @@ async function assertPreviewProjectionTransactions(
       frontmatterLink: disabledSemanticColors.body
     }, 'Disabling Preview source coloring must use the adaptive body foreground for code and Front Matter');
     await page.evaluate(() => {
-      document.querySelector<HTMLButtonElement>('.preview-source-coloring-dropdown')!.click();
-      document.querySelector<HTMLButtonElement>(
-        '.preview-source-coloring-dropdown-panel .preview-dropdown-option[data-value="true"]'
-      )!.click();
+      document.querySelector<HTMLButtonElement>('[data-preview-source-coloring="true"]')!.click();
     });
-    await resolveRequest(await nextRequest('enabled source coloring from custom dropdown'));
+    await resolveRequest(await nextRequest('enabled source coloring from segmented control'));
     await page.waitForFunction(() => (
       document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
         .querySelector('.meo-export-code-line-source[data-meo-shiki]') !== null
@@ -595,10 +586,7 @@ async function assertPreviewProjectionTransactions(
       getComputedStyle(frame.contentDocument!.querySelector<HTMLElement>('.meo-export-code-line-source span')!).color
     ));
     await page.evaluate(() => {
-      document.querySelector<HTMLButtonElement>('.preview-appearance-dropdown')!.click();
-      document.querySelector<HTMLButtonElement>(
-        '.preview-appearance-dropdown-panel .preview-dropdown-option[data-value="light"]'
-      )!.click();
+      document.querySelector<HTMLButtonElement>('[data-preview-appearance-choice="light"]')!.click();
     });
     await page.waitForFunction((previousColor) => {
       const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
@@ -1205,20 +1193,19 @@ async function main(): Promise<void> {
     await page.keyboard.press('Escape');
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await page.mouse.move(0, 0);
-    assert.deepEqual(await page.evaluate(() => Array.from(
-      document.querySelectorAll<HTMLElement>('.preview-toolbar-dropdown'),
-      (trigger) => {
+    const dropdownBorderContract = await page.evaluate(() => ({
+      segmentedBackground: getComputedStyle(document.querySelector<HTMLElement>('.preview-setting-segmented')!).backgroundColor,
+      dropdowns: Array.from(document.querySelectorAll<HTMLElement>('.preview-toolbar-dropdown'), (trigger) => {
         const chevron = trigger.querySelector<HTMLElement>('.preview-toolbar-dropdown-chevron')!;
         return {
           border: getComputedStyle(trigger).borderTopColor,
           chevron: getComputedStyle(chevron).borderRightColor
         };
-      }
-    )), [
-      { border: 'rgb(122, 132, 144)', chevron: 'rgb(122, 132, 144)' },
-      { border: 'rgb(122, 132, 144)', chevron: 'rgb(122, 132, 144)' },
-      { border: 'rgb(122, 132, 144)', chevron: 'rgb(122, 132, 144)' }
-    ], 'Inactive Preview dropdown borders and chevrons must share the requested neutral color');
+      })
+    }));
+    assert.deepEqual(dropdownBorderContract.dropdowns, [
+      { border: dropdownBorderContract.segmentedBackground, chevron: dropdownBorderContract.segmentedBackground }
+    ], 'The remaining Preview font dropdown border and chevron must share the segmented control background color');
     await page.$eval(
       '.editor-appearance-button[data-editor-appearance="dark"]',
       (button) => (button as HTMLButtonElement).click()

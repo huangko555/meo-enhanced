@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Unlink, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, HardDriveUpload, PanelLeftRightDashed, SquareSplitHorizontal, Settings, Check, Ellipsis, Sun, Moon, ExternalLink, History, Info } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Unlink, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, Save, HardDriveUpload, PanelLeftRightDashed, SquareSplitHorizontal, Settings, Check, Ellipsis, Sun, Moon, SunMoon, Languages, Type, ExternalLink, History, Info } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -27,6 +27,8 @@ import { createPreviewController } from './helpers/preview';
 import type { ViewportAnchorToken } from './helpers/viewportController';
 import { createDocumentScrollToTopController } from './helpers/scrollToTop';
 import { createSegmentedControl } from './helpers/segmentedControl';
+import { createExportButtonIcon, createExportFormatIcon } from './helpers/exportIcons';
+import { createMenuSwitch } from './adapters/menuSwitch';
 import { createCodePaletteWebviewAdapter } from './adapters/codePaletteWebviewAdapter';
 import { createExportWebviewAdapter } from './adapters/exportWebviewAdapter';
 import { createDocumentSessionWebviewAdapter } from './adapters/documentSessionWebviewAdapter';
@@ -257,9 +259,7 @@ const appendMoreToolsOptionContent = (
   const label = document.createElement('span');
   label.className = 'more-tools-option-label';
   label.textContent = labelText;
-  const toggle = document.createElement('span');
-  toggle.className = 'menu-switch';
-  toggle.setAttribute('aria-hidden', 'true');
+  const toggle = createMenuSwitch();
   if (!description) {
     button.append(iconElement, label, toggle);
     return;
@@ -281,19 +281,27 @@ const appendMoreToolsOptionContent = (
   button.append(iconElement, text, toggle);
 };
 
+const createMoreToolsControlHeading = (icon: Parameters<typeof createElement>[0], label: HTMLElement): HTMLElement => {
+  const heading = document.createElement('span');
+  heading.className = 'more-tools-control-heading';
+  const iconElement = document.createElement('span');
+  iconElement.className = 'more-tools-control-icon';
+  iconElement.appendChild(createElement(icon, { width: 16, height: 16, 'aria-hidden': 'true' }));
+  heading.append(iconElement, label);
+  return heading;
+};
+
 const contentMaxWidthBtn = document.createElement('button');
 contentMaxWidthBtn.type = 'button';
 contentMaxWidthBtn.className = 'more-tools-option more-tools-toggle-option';
 contentMaxWidthBtn.dataset.action = 'contentMaxWidth';
-contentMaxWidthBtn.title = activeUiStrings.constrainContentWidth;
 contentMaxWidthBtn.setAttribute('role', 'menuitemcheckbox');
-appendMoreToolsOptionContent(contentMaxWidthBtn, PanelLeftRightDashed, activeUiStrings.constrainContentWidth);
+appendMoreToolsOptionContent(contentMaxWidthBtn, PanelLeftRightDashed, activeUiStrings.constrainWidth);
 
 const liveStrongColoringBtn = document.createElement('button');
 liveStrongColoringBtn.type = 'button';
 liveStrongColoringBtn.className = 'more-tools-option more-tools-toggle-option';
 liveStrongColoringBtn.dataset.action = 'liveStrongColoring';
-liveStrongColoringBtn.title = activeUiStrings.strongColoring;
 liveStrongColoringBtn.setAttribute('role', 'menuitemcheckbox');
 liveStrongColoringBtn.setAttribute('aria-checked', 'false');
 appendMoreToolsOptionContent(liveStrongColoringBtn, Bold, activeUiStrings.strongColoring);
@@ -339,7 +347,7 @@ restoreReadingPositionBtn.className = 'more-tools-option more-tools-toggle-optio
 restoreReadingPositionBtn.dataset.action = 'restoreReadingPosition';
 restoreReadingPositionBtn.setAttribute('role', 'menuitemcheckbox');
 restoreReadingPositionBtn.setAttribute('aria-checked', 'true');
-appendMoreToolsOptionContent(restoreReadingPositionBtn, History, activeUiStrings.resumeFromLastPosition);
+appendMoreToolsOptionContent(restoreReadingPositionBtn, History, activeUiStrings.resumeReadingPositionLabel);
 
 const changesReviewControl = createChangesReviewControl({
   uiLanguage: activeUiLanguage,
@@ -413,9 +421,6 @@ const setFixedBaselineState = (pinned: boolean, active: boolean, updatedAt?: num
 const updateContentMaxWidthUI = () => {
   contentMaxWidthBtn.classList.toggle('is-active', contentMaxWidthEnabled);
   contentMaxWidthBtn.setAttribute('aria-checked', contentMaxWidthEnabled ? 'true' : 'false');
-  contentMaxWidthBtn.title = contentMaxWidthEnabled
-    ? activeUiStrings.disableConstrainedWidth
-    : activeUiStrings.constrainContentWidth;
 };
 
 const syncGitDiffLineHighlights = () => {
@@ -477,7 +482,6 @@ const updateTableStickyHeaderUI = () => {
 const updateRestoreReadingPositionUI = () => {
   restoreReadingPositionBtn.classList.toggle('is-active', restoreReadingPositionOnOpen);
   restoreReadingPositionBtn.setAttribute('aria-checked', restoreReadingPositionOnOpen ? 'true' : 'false');
-  restoreReadingPositionBtn.title = activeUiStrings.resumeFromLastPosition;
 };
 
 type PostUpdateOptions = { post?: boolean };
@@ -849,179 +853,104 @@ findToggleBtn.dataset.action = 'find';
 findToggleBtn.title = activeUiStrings.findAndReplace;
 findToggleBtn.appendChild(createElement(Search, { width: 18, height: 18 }));
 
-const exportHtmlOption = document.createElement('button');
-exportHtmlOption.type = 'button';
-exportHtmlOption.className = 'preview-toolbar-action';
-exportHtmlOption.dataset.format = 'html';
-exportHtmlOption.title = activeUiStrings.exportAsHtml;
-exportHtmlOption.setAttribute('aria-label', activeUiStrings.exportAsHtml);
-const exportHtmlLabel = document.createElement('span');
-exportHtmlLabel.className = 'preview-toolbar-action-label';
-exportHtmlLabel.textContent = activeUiStrings.exportHtml;
-exportHtmlOption.append(
-  createElement(FileCode2, { width: 15, height: 15, 'aria-hidden': 'true' }),
-  exportHtmlLabel
-);
-exportHtmlOption.setAttribute('aria-haspopup', 'menu');
-exportHtmlOption.setAttribute('aria-expanded', 'false');
-
-const exportHtmlWithContentsOption = document.createElement('button');
-exportHtmlWithContentsOption.type = 'button';
-exportHtmlWithContentsOption.className = 'preview-export-menu-action preview-dropdown-option';
-exportHtmlWithContentsOption.setAttribute('role', 'menuitem');
-exportHtmlWithContentsOption.title = activeUiStrings.exportHtmlWithContents;
-exportHtmlWithContentsOption.setAttribute('aria-label', activeUiStrings.exportHtmlWithContents);
-const exportHtmlWithContentsLabel = document.createElement('span');
-exportHtmlWithContentsLabel.textContent = activeUiStrings.exportHtmlWithContents;
-exportHtmlWithContentsOption.append(
-  createElement(FileCode2, { width: 15, height: 15, 'aria-hidden': 'true' }),
-  exportHtmlWithContentsLabel
+const exportButton = document.createElement('button');
+exportButton.type = 'button';
+exportButton.className = 'preview-toolbar-action preview-export-trigger';
+exportButton.title = activeUiStrings.exportDocument;
+exportButton.setAttribute('aria-label', activeUiStrings.exportDocument);
+exportButton.setAttribute('aria-haspopup', 'menu');
+exportButton.setAttribute('aria-expanded', 'false');
+exportButton.setAttribute('aria-controls', 'preview-export-menu');
+const exportButtonLabel = document.createElement('span');
+exportButtonLabel.className = 'preview-toolbar-action-label';
+exportButtonLabel.textContent = activeUiStrings.exportDocument;
+const exportIcon = createExportButtonIcon();
+exportButton.append(
+  exportIcon,
+  exportButtonLabel
 );
 
-const exportHtmlMenu = document.createElement('div');
-exportHtmlMenu.className = 'preview-export-menu preview-dropdown-panel';
-exportHtmlMenu.dataset.previewAppearance = 'dark';
-exportHtmlMenu.setAttribute('role', 'menu');
-exportHtmlMenu.setAttribute('aria-label', activeUiStrings.exportHtmlWithContents);
-exportHtmlMenu.appendChild(exportHtmlWithContentsOption);
+const exportMenu = document.createElement('div');
+exportMenu.id = 'preview-export-menu';
+exportMenu.className = 'preview-export-menu preview-dropdown-panel';
+exportMenu.setAttribute('role', 'menu');
+exportMenu.setAttribute('aria-label', activeUiStrings.exportDocument);
 
-const exportHtmlControl = document.createElement('div');
-exportHtmlControl.className = 'preview-export-control';
-exportHtmlControl.dataset.exportFormat = 'html';
-exportHtmlControl.append(exportHtmlOption, exportHtmlMenu);
+const exportOptionDefinitions = [
+  { format: 'html', includeTableOfContents: false, labelKey: 'exportHtml' },
+  { format: 'html', includeTableOfContents: true, labelKey: 'exportHtmlWithContents' },
+  { format: 'pdf', includeTableOfContents: false, labelKey: 'exportPdf' },
+  { format: 'pdf', includeTableOfContents: true, labelKey: 'exportPdfWithContents' },
+  { format: 'docx', includeTableOfContents: false, labelKey: 'exportDocx' },
+  { format: 'docx', includeTableOfContents: true, labelKey: 'exportDocxWithContents' }
+] as const;
+const exportMenuItems = exportOptionDefinitions.map(({ format, includeTableOfContents, labelKey }) => {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'preview-export-menu-action preview-dropdown-option';
+  button.dataset.format = format;
+  button.dataset.includeTableOfContents = String(includeTableOfContents);
+  button.setAttribute('role', 'menuitem');
+  button.setAttribute('aria-label', activeUiStrings[labelKey]);
+  const label = document.createElement('span');
+  label.textContent = activeUiStrings[labelKey];
+  button.append(createExportFormatIcon(format), label);
+  exportMenu.appendChild(button);
+  return { button, label, labelKey, format, includeTableOfContents };
+});
 
-const exportPdfOption = document.createElement('button');
-exportPdfOption.type = 'button';
-exportPdfOption.className = 'preview-toolbar-action';
-exportPdfOption.dataset.format = 'pdf';
-exportPdfOption.title = activeUiStrings.exportAsPdf;
-exportPdfOption.setAttribute('aria-label', activeUiStrings.exportAsPdf);
-const exportPdfLabel = document.createElement('span');
-exportPdfLabel.className = 'preview-toolbar-action-label';
-exportPdfLabel.textContent = activeUiStrings.exportPdf;
-exportPdfOption.append(
-  createElement(FileText, { width: 15, height: 15, 'aria-hidden': 'true' }),
-  exportPdfLabel
-);
-exportPdfOption.setAttribute('aria-haspopup', 'menu');
-exportPdfOption.setAttribute('aria-expanded', 'false');
+const exportControl = document.createElement('div');
+exportControl.className = 'preview-export-control';
+exportControl.append(exportButton, exportMenu);
 
-const exportPdfWithContentsOption = document.createElement('button');
-exportPdfWithContentsOption.type = 'button';
-exportPdfWithContentsOption.className = 'preview-export-menu-action preview-dropdown-option';
-exportPdfWithContentsOption.setAttribute('role', 'menuitem');
-exportPdfWithContentsOption.title = activeUiStrings.exportPdfWithContents;
-exportPdfWithContentsOption.setAttribute('aria-label', activeUiStrings.exportPdfWithContents);
-const exportPdfWithContentsLabel = document.createElement('span');
-exportPdfWithContentsLabel.textContent = activeUiStrings.exportPdfWithContents;
-exportPdfWithContentsOption.append(
-  createElement(FileText, { width: 15, height: 15, 'aria-hidden': 'true' }),
-  exportPdfWithContentsLabel
-);
-
-const exportPdfMenu = document.createElement('div');
-exportPdfMenu.className = 'preview-export-menu preview-dropdown-panel';
-exportPdfMenu.dataset.previewAppearance = 'dark';
-exportPdfMenu.setAttribute('role', 'menu');
-exportPdfMenu.setAttribute('aria-label', activeUiStrings.exportPdfWithContents);
-exportPdfMenu.appendChild(exportPdfWithContentsOption);
-
-const exportPdfControl = document.createElement('div');
-exportPdfControl.className = 'preview-export-control';
-exportPdfControl.dataset.exportFormat = 'pdf';
-exportPdfControl.append(exportPdfOption, exportPdfMenu);
-
-const exportDocxOption = document.createElement('button');
-exportDocxOption.type = 'button';
-exportDocxOption.className = 'preview-toolbar-action';
-exportDocxOption.dataset.format = 'docx';
-exportDocxOption.title = activeUiStrings.exportAsDocx;
-exportDocxOption.setAttribute('aria-label', activeUiStrings.exportAsDocx);
-const exportDocxLabel = document.createElement('span');
-exportDocxLabel.className = 'preview-toolbar-action-label';
-exportDocxLabel.textContent = activeUiStrings.exportDocx;
-exportDocxOption.append(
-  createElement(FileText, { width: 15, height: 15, 'aria-hidden': 'true' }),
-  exportDocxLabel
-);
-exportDocxOption.setAttribute('aria-haspopup', 'menu');
-exportDocxOption.setAttribute('aria-expanded', 'false');
-
-const exportDocxWithContentsOption = document.createElement('button');
-exportDocxWithContentsOption.type = 'button';
-exportDocxWithContentsOption.className = 'preview-export-menu-action preview-dropdown-option';
-exportDocxWithContentsOption.setAttribute('role', 'menuitem');
-exportDocxWithContentsOption.title = activeUiStrings.exportDocxWithContents;
-exportDocxWithContentsOption.setAttribute('aria-label', activeUiStrings.exportDocxWithContents);
-const exportDocxWithContentsLabel = document.createElement('span');
-exportDocxWithContentsLabel.textContent = activeUiStrings.exportDocxWithContents;
-exportDocxWithContentsOption.append(
-  createElement(FileText, { width: 15, height: 15, 'aria-hidden': 'true' }),
-  exportDocxWithContentsLabel
-);
-
-const exportDocxMenu = document.createElement('div');
-exportDocxMenu.className = 'preview-export-menu preview-dropdown-panel';
-exportDocxMenu.dataset.previewAppearance = 'dark';
-exportDocxMenu.setAttribute('role', 'menu');
-exportDocxMenu.setAttribute('aria-label', activeUiStrings.exportDocxWithContents);
-exportDocxMenu.appendChild(exportDocxWithContentsOption);
-
-const exportDocxControl = document.createElement('div');
-exportDocxControl.className = 'preview-export-control';
-exportDocxControl.dataset.exportFormat = 'docx';
-exportDocxControl.append(exportDocxOption, exportDocxMenu);
-
-const bindExportMenuAccessibility = (
-  control: HTMLElement,
-  trigger: HTMLButtonElement,
-  action: HTMLButtonElement
-): (() => void) => {
-  const setExpanded = (expanded: boolean): void => {
-    trigger.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-  };
-  control.addEventListener('pointerenter', () => {
-    if (!control.classList.contains('is-dismissed')) setExpanded(true);
-  });
-  control.addEventListener('pointerleave', () => {
-    control.classList.remove('is-dismissed');
-    if (!control.contains(document.activeElement)) setExpanded(false);
-  });
-  control.addEventListener('focusin', () => {
-    control.classList.remove('is-dismissed');
-    setExpanded(true);
-  });
-  control.addEventListener('focusout', (event) => {
-    if (!(event.relatedTarget instanceof Node) || !control.contains(event.relatedTarget)) {
-      setExpanded(false);
-      if (!control.matches(':hover')) control.classList.remove('is-dismissed');
-    }
-  });
-  return () => {
-    control.classList.add('is-dismissed');
-    setExpanded(false);
-    if (control.contains(document.activeElement)) {
-      (document.activeElement as HTMLElement).blur();
-    } else {
-      action.blur();
-    }
-  };
+const setExportMenuExpanded = (expanded: boolean): void => {
+  exportButton.setAttribute('aria-expanded', expanded ? 'true' : 'false');
 };
-const dismissExportHtmlMenu = bindExportMenuAccessibility(
-  exportHtmlControl,
-  exportHtmlOption,
-  exportHtmlWithContentsOption
-);
-const dismissExportPdfMenu = bindExportMenuAccessibility(
-  exportPdfControl,
-  exportPdfOption,
-  exportPdfWithContentsOption
-);
-const dismissExportDocxMenu = bindExportMenuAccessibility(
-  exportDocxControl,
-  exportDocxOption,
-  exportDocxWithContentsOption
-);
+const positionExportMenu = (): void => {
+  exportMenu.style.left = '0px';
+  const bounds = exportMenu.getBoundingClientRect();
+  const viewportPadding = 8;
+  if (bounds.right > window.innerWidth - viewportPadding) {
+    exportMenu.style.left = `${window.innerWidth - viewportPadding - bounds.right}px`;
+  } else if (bounds.left < viewportPadding) {
+    exportMenu.style.left = `${viewportPadding - bounds.left}px`;
+  }
+};
+exportControl.addEventListener('pointerenter', () => {
+  positionExportMenu();
+  if (!exportControl.classList.contains('is-dismissed')) setExportMenuExpanded(true);
+});
+exportControl.addEventListener('pointerleave', () => {
+  exportControl.classList.remove('is-dismissed');
+  if (!exportControl.contains(document.activeElement)) setExportMenuExpanded(false);
+});
+exportControl.addEventListener('focusin', () => {
+  positionExportMenu();
+  exportControl.classList.remove('is-dismissed');
+  setExportMenuExpanded(true);
+});
+exportControl.addEventListener('focusout', (event) => {
+  if (!(event.relatedTarget instanceof Node) || !exportControl.contains(event.relatedTarget)) {
+    setExportMenuExpanded(false);
+    if (!exportControl.matches(':hover')) exportControl.classList.remove('is-dismissed');
+  }
+});
+exportButton.addEventListener('keydown', (event) => {
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    exportMenuItems[0]?.button.focus();
+  }
+});
+const dismissExportMenu = (): void => {
+  exportControl.classList.add('is-dismissed');
+  setExportMenuExpanded(false);
+  if (exportControl.contains(document.activeElement)) {
+    (document.activeElement as HTMLElement).blur();
+  }
+};
+exportControl.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') dismissExportMenu();
+});
 
 const previewAppearanceSlot = document.createElement('span');
 const previewFontFamilySlot = document.createElement('span');
@@ -1034,12 +963,10 @@ previewFormatGroup.setAttribute('aria-label', activeUiStrings.previewTools);
 previewFormatGroup.append(
   previewOutlineLeftBtn,
   previewFontFamilySlot,
+  previewAppearanceSlot,
   previewSourceColoringSlot,
   previewShowCommentsSlot,
-  previewAppearanceSlot,
-  exportHtmlControl,
-  exportPdfControl,
-  exportDocxControl
+  exportControl
 );
 
 const moreToolsButton = document.createElement('button');
@@ -1065,28 +992,28 @@ toolbarOverflowSection.setAttribute('aria-label', activeUiStrings.toolbarOverflo
 toolbarOverflowSection.hidden = true;
 const displaySettingsHeading = document.createElement('div');
 displaySettingsHeading.className = 'more-tools-section-label';
-displaySettingsHeading.textContent = activeUiStrings.editorSettings;
+displaySettingsHeading.textContent = activeUiStrings.documentDisplaySettings;
+const openingDocumentsHeading = document.createElement('div');
+openingDocumentsHeading.className = 'more-tools-section-label';
+openingDocumentsHeading.textContent = activeUiStrings.openingDocumentsSettings;
+const interfaceSettingsHeading = document.createElement('div');
+interfaceSettingsHeading.className = 'more-tools-section-label';
+interfaceSettingsHeading.textContent = activeUiStrings.interfaceSettings;
 const editorAppearanceControl = createSegmentedControl<EditorAppearance>({
   ariaLabel: activeUiStrings.editorAppearance,
   className: 'editor-appearance-control',
   buttonClassName: 'editor-appearance-button',
   datasetKey: 'editorAppearance',
   role: 'group',
+  width: '100%',
+  buttonTitles: false,
   options: [
     {
       value: 'auto',
       label: activeUiStrings.auto
     },
-    {
-      value: 'light',
-      label: activeUiStrings.light,
-      renderLeading: () => createElement(Sun, { width: 14, height: 14, 'aria-hidden': 'true' })
-    },
-    {
-      value: 'dark',
-      label: activeUiStrings.dark,
-      renderLeading: () => createElement(Moon, { width: 14, height: 14, 'aria-hidden': 'true' })
-    }
+    { value: 'light', label: activeUiStrings.light, renderLeading: () => createElement(Sun, { width: 12, height: 12, 'aria-hidden': 'true' }) },
+    { value: 'dark', label: activeUiStrings.dark, renderLeading: () => createElement(Moon, { width: 12, height: 12, 'aria-hidden': 'true' }) }
   ]
 });
 editorAppearanceControl.setActive('auto');
@@ -1097,6 +1024,8 @@ const uiLanguageControl = createSegmentedControl<UiLanguagePreference>({
   buttonClassName: 'ui-language-button',
   datasetKey: 'uiLanguage',
   role: 'group',
+  width: '100%',
+  buttonTitles: false,
   options: [
     { value: 'auto', label: activeUiStrings.auto },
     { value: 'zh-CN', label: '简体中文' },
@@ -1111,6 +1040,8 @@ const editorFontSizeModeControl = createSegmentedControl<EditorFontSizeMode>({
   buttonClassName: 'editor-font-size-mode-button',
   datasetKey: 'editorFontSizeMode',
   role: 'group',
+  width: '100%',
+  buttonTitles: false,
   options: [
     { value: 'auto', label: activeUiStrings.auto },
     { value: 'custom', label: activeUiStrings.custom }
@@ -1170,15 +1101,14 @@ const applyUiLanguage = (language: UiLanguage): void => {
     ? strings.reloadDiskVersionDoubleClick
     : strings.reloadDiskVersion;
   discardBtn.setAttribute('aria-label', strings.reloadDiskVersion);
-  contentMaxWidthBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.constrainContentWidth;
+  contentMaxWidthBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.constrainWidth;
   sourceLineNumbersBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.showLineNumbers;
   liveStrongColoringBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.strongColoring;
-  liveStrongColoringBtn.title = strings.strongColoring;
   longCodeBlockFoldingBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.foldLongCodeBlocks;
   largeDocumentOptimizationBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.largeDocumentStartup;
   largeDocumentOptimizationBtn.querySelector<HTMLElement>('.more-tools-option-tooltip')!.textContent = strings.largeDocumentStartupDescription;
   tableStickyHeaderBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.stickyTableHeader;
-  restoreReadingPositionBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.resumeFromLastPosition;
+  restoreReadingPositionBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.resumeReadingPositionLabel;
   changesReviewControl.setUiLanguage(language);
   updateGitChangesGutterUI();
   updateContentMaxWidthUI();
@@ -1191,34 +1121,22 @@ const applyUiLanguage = (language: UiLanguage): void => {
   selectionMenuElements.setUiLanguage(language);
   editorScrollToTopController.setUiLanguage(language);
   findToggleBtn.title = strings.findAndReplace;
-  exportHtmlOption.title = strings.exportAsHtml;
-  exportHtmlOption.setAttribute('aria-label', strings.exportAsHtml);
-  exportHtmlLabel.textContent = strings.exportHtml;
-  exportPdfOption.title = strings.exportAsPdf;
-  exportPdfOption.setAttribute('aria-label', strings.exportAsPdf);
-  exportPdfLabel.textContent = strings.exportPdf;
-  exportDocxOption.title = strings.exportAsDocx;
-  exportDocxOption.setAttribute('aria-label', strings.exportAsDocx);
-  exportDocxLabel.textContent = strings.exportDocx;
-  exportHtmlWithContentsOption.title = strings.exportHtmlWithContents;
-  exportHtmlWithContentsOption.setAttribute('aria-label', strings.exportHtmlWithContents);
-  exportHtmlWithContentsLabel.textContent = strings.exportHtmlWithContents;
-  exportHtmlMenu.setAttribute('aria-label', strings.exportHtmlWithContents);
-  exportPdfWithContentsOption.title = strings.exportPdfWithContents;
-  exportPdfWithContentsOption.setAttribute('aria-label', strings.exportPdfWithContents);
-  exportPdfWithContentsLabel.textContent = strings.exportPdfWithContents;
-  exportPdfMenu.setAttribute('aria-label', strings.exportPdfWithContents);
-  exportDocxWithContentsOption.title = strings.exportDocxWithContents;
-  exportDocxWithContentsOption.setAttribute('aria-label', strings.exportDocxWithContents);
-  exportDocxWithContentsLabel.textContent = strings.exportDocxWithContents;
-  exportDocxMenu.setAttribute('aria-label', strings.exportDocxWithContents);
+  exportButton.title = strings.exportDocument;
+  exportButton.setAttribute('aria-label', strings.exportDocument);
+  exportButtonLabel.textContent = strings.exportDocument;
+  exportMenu.setAttribute('aria-label', strings.exportDocument);
+  for (const { button, label, labelKey } of exportMenuItems) {
+    button.setAttribute('aria-label', strings[labelKey]);
+    label.textContent = strings[labelKey];
+  }
   previewFormatGroup.setAttribute('aria-label', strings.previewTools);
   moreToolsButton.title = strings.more;
   moreToolsButton.setAttribute('aria-label', strings.moreTools);
   moreToolsPanel.setAttribute('aria-label', strings.moreTools);
-  displaySettingsHeading.textContent = strings.editorSettings;
+  displaySettingsHeading.textContent = strings.documentDisplaySettings;
+  openingDocumentsHeading.textContent = strings.openingDocumentsSettings;
+  interfaceSettingsHeading.textContent = strings.interfaceSettings;
   feedbackPrompt.textContent = strings.feedbackPrompt;
-  reportIssueButton.title = strings.reportIssue;
   reportIssueButton.setAttribute('aria-label', strings.reportIssue);
   reportIssueLabel.textContent = strings.reportIssue;
   toolbarOverflowIndicator.title = strings.toolbarOverflow;
@@ -1234,9 +1152,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   editorFontSizeLabel.textContent = strings.editorFontSize;
   editorFontSizeModeControl.element.setAttribute('aria-label', strings.editorFontSize);
   editorFontSizeModeControl.setLabels({ auto: strings.auto, custom: strings.custom });
-  decreaseEditorFontSizeBtn.title = strings.decreaseFontSize;
   decreaseEditorFontSizeBtn.setAttribute('aria-label', strings.decreaseFontSize);
-  increaseEditorFontSizeBtn.title = strings.increaseFontSize;
   increaseEditorFontSizeBtn.setAttribute('aria-label', strings.increaseFontSize);
   uiLanguageLabel.textContent = strings.interfaceLanguage;
   uiLanguageControl.element.setAttribute('aria-label', strings.interfaceLanguage);
@@ -1252,13 +1168,13 @@ editorAppearanceRow.className = 'more-tools-appearance-row';
 const editorAppearanceLabel = document.createElement('span');
 editorAppearanceLabel.className = 'more-tools-control-label';
 editorAppearanceLabel.textContent = activeUiStrings.editorAppearance;
-editorAppearanceRow.append(editorAppearanceLabel, editorAppearanceControl.element);
+editorAppearanceRow.append(createMoreToolsControlHeading(SunMoon, editorAppearanceLabel), editorAppearanceControl.element);
 const uiLanguageRow = document.createElement('div');
 uiLanguageRow.className = 'more-tools-appearance-row';
 const uiLanguageLabel = document.createElement('span');
 uiLanguageLabel.className = 'more-tools-control-label';
 uiLanguageLabel.textContent = activeUiStrings.interfaceLanguage;
-uiLanguageRow.append(uiLanguageLabel, uiLanguageControl.element);
+uiLanguageRow.append(createMoreToolsControlHeading(Languages, uiLanguageLabel), uiLanguageControl.element);
 const editorFontSizeRow = document.createElement('div');
 editorFontSizeRow.className = 'more-tools-appearance-row editor-font-size-row';
 const editorFontSizeLabel = document.createElement('span');
@@ -1267,7 +1183,7 @@ editorFontSizeLabel.textContent = activeUiStrings.editorFontSize;
 const editorFontSizeControls = document.createElement('div');
 editorFontSizeControls.className = 'editor-font-size-controls';
 editorFontSizeControls.append(editorFontSizeModeControl.element, editorFontSizeStepper);
-editorFontSizeRow.append(editorFontSizeLabel, editorFontSizeControls);
+editorFontSizeRow.append(createMoreToolsControlHeading(Type, editorFontSizeLabel), editorFontSizeControls);
 const feedbackSeparator = document.createElement('div');
 feedbackSeparator.className = 'more-tools-separator';
 feedbackSeparator.setAttribute('role', 'separator');
@@ -1279,7 +1195,6 @@ feedbackPrompt.textContent = activeUiStrings.feedbackPrompt;
 const reportIssueButton = document.createElement('button');
 reportIssueButton.type = 'button';
 reportIssueButton.className = 'more-tools-feedback-link';
-reportIssueButton.title = activeUiStrings.reportIssue;
 reportIssueButton.setAttribute('aria-label', activeUiStrings.reportIssue);
 const reportIssueLabel = document.createElement('span');
 reportIssueLabel.textContent = activeUiStrings.reportIssue;
@@ -1289,11 +1204,13 @@ moreToolsPanel.append(
   displaySettingsHeading,
   sourceLineNumbersBtn,
   longCodeBlockFoldingBtn,
-  largeDocumentOptimizationBtn,
   contentMaxWidthBtn,
   liveStrongColoringBtn,
   tableStickyHeaderBtn,
+  openingDocumentsHeading,
   restoreReadingPositionBtn,
+  largeDocumentOptimizationBtn,
+  interfaceSettingsHeading,
   editorAppearanceRow,
   uiLanguageRow,
   editorFontSizeRow,
@@ -1366,6 +1283,7 @@ const modeControl = createSegmentedControl<EditorMode>({
   buttonClassName: 'mode-button',
   datasetKey: 'mode',
   role: 'tablist',
+  width: '170px',
   options: [
     { value: 'live', label: activeUiStrings.live },
     { value: 'source', label: activeUiStrings.source },
@@ -1518,7 +1436,7 @@ const syncToolbarOverflow = () => {
 
   if (!hasOverflow) {
     toolbarOverflowIndicator.hidden = true;
-    if (visibleLeftGroup === previewFormatGroup) setMoreToolsVisible(false);
+    if (!moreToolsPanel.hidden) setMoreToolsVisible(true);
     return;
   }
 
@@ -1544,6 +1462,7 @@ const syncToolbarOverflow = () => {
     : leftGroupBounds.left - toolbarBounds.left;
   toolbarOverflowIndicator.style.left = `${indicatorLeft}px`;
   toolbarOverflowIndicator.hidden = false;
+  if (!moreToolsPanel.hidden) setMoreToolsVisible(true);
 };
 
 const toolbarResizeObserver = new ResizeObserver(syncToolbarOverflow);
@@ -2997,9 +2916,6 @@ const themeAdapter = createAppearanceWebviewAdapter({
   setAppearanceControl: (appearance) => editorAppearanceControl.setActive(appearance),
   applyAppearance: (appearance) => {
     applyBuiltInVisualBaseline(appearance);
-    exportHtmlMenu.dataset.previewAppearance = appearance;
-    exportPdfMenu.dataset.previewAppearance = appearance;
-    exportDocxMenu.dataset.previewAppearance = appearance;
   },
   resolveCodePalette: codePaletteAdapter.resolve,
   applyCodePalette: codePaletteAdapter.apply,
@@ -3544,30 +3460,12 @@ hrBtn.addEventListener('click', () => handleFormatAction('hr'));
 linkBtn.addEventListener('click', () => handleFormatAction('link'));
 wikiLinkBtn.addEventListener('click', () => handleFormatAction('wikiLink'));
 imageBtn.addEventListener('click', () => handleFormatAction('image'));
-exportHtmlOption.addEventListener('click', () => {
-  exportAdapter.requestExport('html', { includeTableOfContents: false });
-  dismissExportHtmlMenu();
-});
-exportPdfOption.addEventListener('click', () => {
-  exportAdapter.requestExport('pdf', { includeTableOfContents: false });
-  dismissExportPdfMenu();
-});
-exportDocxOption.addEventListener('click', () => {
-  exportAdapter.requestExport('docx', { includeTableOfContents: false });
-  dismissExportDocxMenu();
-});
-exportHtmlWithContentsOption.addEventListener('click', () => {
-  exportAdapter.requestExport('html', { includeTableOfContents: true });
-  dismissExportHtmlMenu();
-});
-exportPdfWithContentsOption.addEventListener('click', () => {
-  exportAdapter.requestExport('pdf', { includeTableOfContents: true });
-  dismissExportPdfMenu();
-});
-exportDocxWithContentsOption.addEventListener('click', () => {
-  exportAdapter.requestExport('docx', { includeTableOfContents: true });
-  dismissExportDocxMenu();
-});
+for (const { button, format, includeTableOfContents } of exportMenuItems) {
+  button.addEventListener('click', () => {
+    exportAdapter.requestExport(format, { includeTableOfContents });
+    dismissExportMenu();
+  });
+}
 const showOutlineAt = (position: 'left' | 'right') => {
   if (outlineController.isVisible() && outlineController.getPosition() === position) {
     setOutlineVisible(false);

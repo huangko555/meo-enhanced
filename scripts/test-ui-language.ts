@@ -30,9 +30,10 @@ assert.equal(english.properties, 'Properties');
 assert.equal(chinese.properties, 'Properties');
 assert.equal(getReadingUiStrings('en').properties, 'Properties');
 assert.equal(english.exportHtml, 'Export HTML');
+assert.equal(english.exportDocument, 'Export…');
 assert.deepEqual(
   [english.previewFontFamily, english.previewCodeColors, english.previewAppearance],
-  ['Font', 'Code color', 'Theme']
+  ['Font', 'Code color', 'Preview theme']
 );
 assert.deepEqual([english.more, english.moreTools], ['Settings', 'Settings']);
 assert.deepEqual([chinese.more, chinese.moreTools], ['设置', '设置']);
@@ -47,11 +48,11 @@ assert.deepEqual(
 );
 assert.deepEqual(
   [english.stickyTableHeader, chinese.stickyTableHeader],
-  ['Sticky table header', '表格浮动表头']
+  ['Keep table headers visible', '表格浮动表头']
 );
 assert.deepEqual(
   [english.largeDocumentStartup, chinese.largeDocumentStartup],
-  ['Large file startup', '大文档启动优化']
+  ['Open large documents faster', '快速打开大文档']
 );
 assert.deepEqual(
   [english.resumeFromLastPosition, chinese.resumeFromLastPosition],
@@ -62,6 +63,7 @@ assert.deepEqual([chinese.feedbackPrompt, chinese.reportIssue], ['使用中遇�
 assert.equal(english.line, 'Lines');
 assert.equal(chinese.line, '行号');
 assert.equal(chinese.exportHtml, '导出 HTML');
+assert.equal(chinese.exportDocument, '导出…');
 assert.equal(english.findMatches(2), '2 matches');
 assert.equal(chinese.findMatches(2), '2 个匹配项');
 assert.equal(chinese.replacedRemaining(3), '已替换 • 剩余 3 个');
@@ -212,8 +214,7 @@ assert.equal(Object.isFrozen(chinese), true);
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const webviewIndexText = fs.readFileSync(path.join(repoRoot, 'webview/src/index.ts'), 'utf8');
-assert.match(webviewIndexText, /appendMoreToolsOptionContent\([^\n]+constrainContentWidth\)/);
-assert.doesNotMatch(webviewIndexText, /more-tools-option-label[^\n]+constrainWidth/);
+assert.match(webviewIndexText, /appendMoreToolsOptionContent\([^\n]+constrainWidth\)/);
 const packageText = fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8');
 const packageManifest = JSON.parse(packageText) as {
   contributes?: {

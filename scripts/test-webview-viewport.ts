@@ -281,9 +281,9 @@ async function main() {
       language: document.documentElement.lang,
       previewTools: document.querySelector('.preview-format-group')?.getAttribute('aria-label'),
       sourceColoring: document.querySelector('.preview-source-coloring .preview-select-label')?.textContent?.trim(),
-      exports: Array.from(document.querySelectorAll('[data-format]')).map((element) => element.textContent?.trim()),
+      exports: Array.from(document.querySelectorAll('.preview-export-trigger')).map((element) => element.textContent?.trim()),
       previewFrameTitle: document.querySelector('iframe.preview-frame')?.getAttribute('title'),
-      previewAppearance: document.querySelector('.preview-appearance-control')?.getAttribute('aria-label'),
+      previewAppearance: document.querySelector('.preview-appearance-control .segmented-control')?.getAttribute('aria-label'),
       editorAppearance: document.querySelector('.editor-appearance-control')?.getAttribute('aria-label'),
       outline: document.querySelector('.outline-sidebar')?.getAttribute('aria-label'),
       outlineLabel: document.querySelector('.outline-header-label')?.textContent,
@@ -304,10 +304,10 @@ async function main() {
       language: 'zh-CN',
       previewTools: '预览工具',
       sourceColoring: '代码着色',
-      exports: ['导出 HTML', '导出 PDF', '导出 Word'],
+      exports: ['导出…'],
       previewFrameTitle: 'Markdown 预览',
-      previewAppearance: '预览外观',
-      editorAppearance: '编辑器外观',
+      previewAppearance: '预览主题',
+      editorAppearance: '界面主题',
       outline: '文档目录',
       outlineLabel: '目录',
       outlineClose: '关闭目录',
@@ -621,8 +621,8 @@ async function main() {
         'Show Original · Source Only'
       ],
       headerText: 'No Changes·vs. Last Saved Version',
-      settingsHeading: 'Editor Settings',
-      stickyHeaderLabel: 'Sticky table header',
+      settingsHeading: 'Document display',
+      stickyHeaderLabel: 'Keep table headers visible',
       clipped: false
     })) {
       throw new Error(`English change review labels did not fit the shared menu width: ${JSON.stringify(englishReviewMenu)}`);
@@ -843,16 +843,16 @@ async function main() {
     });
     if (
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
-        '显示行号', '折叠长代码块', '大文档启动优化', '限制内容宽度', '粗体文字着色',
-        '表格浮动表头', '打开时恢复上一次阅读位置'
+        '显示行号', '折叠长代码块', '限制宽度', '粗体文字着色',
+        '表格浮动表头', '恢复阅读位置', '快速打开大文档'
       ]) ||
-      moreToolsLayout.topHeading !== '编辑器设置' ||
+      moreToolsLayout.topHeading !== '文档显示' ||
       moreToolsLayout.languageAutoLabel !== '自动' ||
       !moreToolsLayout.directChildren ||
       moreToolsLayout.separatorCount !== 1 ||
       moreToolsLayout.feedbackPrompt !== '使用中遇到问题？' ||
       moreToolsLayout.feedbackLabel !== '欢迎反馈' ||
-      moreToolsLayout.width > 268 ||
+      moreToolsLayout.width > 288 ||
       moreToolsLayout.scrollWidth > moreToolsLayout.clientWidth ||
       moreToolsLayout.fontSizeModeHeight !== 26 ||
       moreToolsLayout.fontSizeStepperHeight !== 26
@@ -930,12 +930,12 @@ async function main() {
       initialToolbarStart.paddingLeft !== 10 ||
       Math.abs(initialToolbarStart.firstButtonOffset - 10) > 0.5 ||
       initialToolbarStart.toolbarHeight !== 40 ||
-      initialToolbarStart.modeControlHeight !== 26 ||
+      initialToolbarStart.modeControlHeight !== 28 ||
       initialToolbarStart.modeControlRadius !== 8 ||
-      initialToolbarStart.activeModeRadius !== 5 ||
+      initialToolbarStart.activeModeRadius !== 6 ||
       initialToolbarStart.activeModeLabelOffset !== 0.5 ||
       Object.values(initialToolbarStart.modeButtonWidths).some((width) => width !== 56) ||
-      JSON.stringify(initialToolbarStart.activeModeInsets) !== JSON.stringify({ top: 3, bottom: 3, left: 4 }) ||
+      JSON.stringify(initialToolbarStart.activeModeInsets) !== JSON.stringify({ top: 2, bottom: 2, left: 3 }) ||
       initialToolbarStart.modeSegmentGap !== 0 ||
       !initialToolbarStart.modeUsesSharedComponent ||
       inactiveModeHoverBackground !== 'rgba(0, 0, 0, 0)' ||
@@ -977,6 +977,9 @@ async function main() {
     await page.click('.more-tools-wrapper > .format-button');
     await page.click('.editor-appearance-button[data-editor-appearance="light"]');
     await waitForFrames(page, 2);
+    await page.$eval('.editor-appearance-button.is-active .segmented-control-button-indicator', async (indicator) => {
+      await Promise.all(indicator.getAnimations().map((animation) => animation.finished.catch(() => undefined)));
+    });
     const lightAppearanceState = await page.evaluate(() => ({
       appearance: document.documentElement.dataset.editorAppearance,
       background: getComputedStyle(document.body).backgroundColor,
@@ -1025,7 +1028,7 @@ async function main() {
       }) ||
       lightAppearanceState.active !== 'light' ||
       lightAppearanceState.labelExists ||
-      Object.values(lightAppearanceState.indicatorInsets).some((inset) => Math.abs(inset - 3) > 0.5) ||
+      JSON.stringify(lightAppearanceState.indicatorInsets) !== JSON.stringify({ top: 2, right: 0, bottom: 2, left: 0 }) ||
       JSON.stringify(lightAppearanceState.messages) !== JSON.stringify(['light'])
     ) {
       throw new Error(`Editor light appearance did not preserve established accents: ${JSON.stringify({ darkAppearanceState, lightAppearanceState })}`);
@@ -1571,6 +1574,12 @@ async function main() {
     if (Object.values(previewHeadingFoldControls).some((count) => count !== 0)) {
       throw new Error(`Preview exposed custom heading folding: ${JSON.stringify(previewHeadingFoldControls)}`);
     }
+    const previewOverflowAtNarrow = await page.evaluate(() => (
+      document.querySelectorAll('.toolbar-overflow-panel .preview-setting-control').length > 0
+    ));
+    if (!previewOverflowAtNarrow) throw new Error('Preview settings should move into toolbar overflow at 900px');
+    await page.setViewport({ width: 1600, height: 520, deviceScaleFactor: 1 });
+    await page.waitForFunction(() => document.querySelector<HTMLButtonElement>('.toolbar-overflow-indicator')?.hidden === true);
     const previewToolbarLayout = await page.evaluate(() => {
       const group = document.querySelector<HTMLElement>('.preview-format-group')!;
       const selects = Array.from(group.querySelectorAll<HTMLButtonElement>('.preview-toolbar-dropdown'));
@@ -1581,6 +1590,8 @@ async function main() {
         selectCount: selects.length,
         selectHeights: selects.map((select) => select.getBoundingClientRect().height),
         selectRadii: selects.map((select) => Number.parseFloat(getComputedStyle(select).borderRadius)),
+        segmentedCount: group.querySelectorAll('.preview-setting-segmented').length,
+        segmentedHeights: Array.from(group.querySelectorAll('.preview-setting-segmented')).map((control) => control.getBoundingClientRect().height),
         labels: Array.from(group.querySelectorAll('.preview-select-label')).map((label) => label.textContent?.trim()),
         appearance: group.querySelector<HTMLSelectElement>('.preview-appearance-select')?.value,
         colorSchemes: selects.map((select) => getComputedStyle(select.closest<HTMLElement>('.preview-select-control')!).colorScheme),
@@ -1602,10 +1613,12 @@ async function main() {
     if (
       !previewToolbarLayout.visible ||
       Math.abs(previewToolbarLayout.toolbarHeight - initialToolbarStart.toolbarHeight) > 0.5 ||
-      previewToolbarLayout.selectCount !== 3 ||
+      previewToolbarLayout.selectCount !== 1 ||
       previewToolbarLayout.selectHeights.some((height) => height !== 26) ||
       previewToolbarLayout.selectRadii.some((radius) => radius !== 8) ||
-      JSON.stringify(previewToolbarLayout.labels) !== JSON.stringify(['预览字体', '代码着色', '预览外观']) ||
+      previewToolbarLayout.segmentedCount !== 3 ||
+      previewToolbarLayout.segmentedHeights.some((height) => height !== 26) ||
+      JSON.stringify(previewToolbarLayout.labels) !== JSON.stringify(['预览字体', '预览主题', '代码着色', '显示注释']) ||
       previewToolbarLayout.appearance !== 'light' ||
       previewToolbarLayout.colorSchemes.some((scheme) => scheme !== 'dark') ||
       previewToolbarLayout.oldAppearanceButtons !== 0 ||
@@ -1646,9 +1659,8 @@ async function main() {
       };
       return {
         font: describe(document.querySelector<HTMLButtonElement>('.preview-font-family-dropdown')!),
-        sourceColoring: describe(document.querySelector<HTMLButtonElement>('.preview-source-coloring-dropdown')!),
-        html: describe(document.querySelector<HTMLButtonElement>('.preview-toolbar-action[data-format="html"]')!),
-        pdf: describe(document.querySelector<HTMLButtonElement>('.preview-toolbar-action[data-format="pdf"]')!)
+        sourceColoring: describe(document.querySelector<HTMLButtonElement>('[data-preview-source-coloring="false"]')!),
+        export: describe(document.querySelector<HTMLButtonElement>('.preview-export-trigger')!)
       };
     });
     await page.mouse.click(previewToolbarReachability.font.center.x, previewToolbarReachability.font.center.y);
@@ -1675,120 +1687,39 @@ async function main() {
       ).filter((message) => message.type === 'setPreviewSourceColoring')
         .map((message) => ({ enabled: message.enabled }))
     }));
-    await page.mouse.click(previewToolbarReachability.html.center.x, previewToolbarReachability.html.center.y);
-    await page.mouse.click(previewToolbarReachability.pdf.center.x, previewToolbarReachability.pdf.center.y);
-    await page.hover('.preview-toolbar-action[data-format="html"]');
-    await page.waitForFunction(() => {
-      const menu = document.querySelector<HTMLElement>(
-        '.preview-export-control[data-export-format="html"] .preview-export-menu'
-      );
-      if (!menu) return false;
-      const style = getComputedStyle(menu);
-      return style.visibility === 'visible' && Number(style.opacity) > 0;
+    const exportOptions = [
+      ['html', false], ['html', true], ['pdf', false], ['pdf', true], ['docx', false], ['docx', true]
+    ] as const;
+    await page.hover('.preview-export-trigger');
+    await page.waitForFunction(() => getComputedStyle(document.querySelector<HTMLElement>('.preview-export-menu')!).visibility === 'visible');
+    const exportMenuState = await page.$eval('.preview-export-control', control => {
+      const trigger = control.querySelector<HTMLElement>('.preview-export-trigger')!;
+      const menu = control.querySelector<HTMLElement>('.preview-export-menu')!;
+      const triggerBounds = trigger.getBoundingClientRect();
+      const menuBounds = menu.getBoundingClientRect();
+      const referencePanel = document.querySelector<HTMLElement>('.table-dropdown')!;
+      const menuStyle = getComputedStyle(menu);
+      const referenceStyle = getComputedStyle(referencePanel);
+      return {
+        expanded: trigger.getAttribute('aria-expanded'),
+        visible: menuStyle.visibility === 'visible',
+        belowTrigger: menuBounds.top >= triggerBounds.bottom,
+        leftAligned: Math.abs(menuBounds.left - triggerBounds.left) <= 0.5,
+        itemCount: menu.querySelectorAll('[role="menuitem"]').length,
+        surfaceMatchesToolbarMenu: [
+          menuStyle.backgroundColor, menuStyle.borderTopColor, menuStyle.borderRadius, menuStyle.boxShadow
+        ].join('|') === [
+          referenceStyle.backgroundColor, referenceStyle.borderTopColor, referenceStyle.borderRadius, referenceStyle.boxShadow
+        ].join('|')
+      };
     });
-    const htmlContentsMenu = await page.$eval(
-      '.preview-export-control[data-export-format="html"]',
-      (control) => {
-        const trigger = control.querySelector<HTMLButtonElement>('.preview-toolbar-action');
-        const action = control.querySelector<HTMLButtonElement>('.preview-export-menu-action');
-        const menu = control.querySelector<HTMLElement>('.preview-export-menu');
-        const referencePanel = document.querySelector<HTMLElement>('.preview-font-family-dropdown-panel');
-        if (!trigger || !action || !menu || !referencePanel) return null;
-        const triggerBounds = trigger.getBoundingClientRect();
-        const menuBounds = menu.getBoundingClientRect();
-        const menuStyle = getComputedStyle(menu);
-        const referenceStyle = getComputedStyle(referencePanel);
-        return {
-          expanded: trigger.getAttribute('aria-expanded'),
-          label: action.textContent?.trim(),
-          visible: menuStyle.visibility === 'visible' && Number(menuStyle.opacity) > 0,
-          belowTrigger: menuBounds.top >= triggerBounds.bottom,
-          leftAligned: Math.abs(menuBounds.left - triggerBounds.left) <= 0.5,
-          iconMatchesTrigger: action.querySelector('svg')?.innerHTML
-            === trigger.querySelector('svg')?.innerHTML,
-          surfaceMatchesToolbarMenu: [
-            menuStyle.backgroundColor,
-            menuStyle.borderTopColor,
-            menuStyle.borderRadius,
-            menuStyle.boxShadow
-          ].join('|') === [
-            referenceStyle.backgroundColor,
-            referenceStyle.borderTopColor,
-            referenceStyle.borderRadius,
-            referenceStyle.boxShadow
-          ].join('|')
-        };
-      }
-    );
-    await page.click('.preview-export-control[data-export-format="html"] .preview-export-menu-action');
-    const htmlMenuAfterClick = await page.$eval(
-      '.preview-export-control[data-export-format="html"]',
-      (control) => {
-        const trigger = control.querySelector<HTMLButtonElement>('.preview-toolbar-action')!;
-        const menu = control.querySelector<HTMLElement>('.preview-export-menu')!;
-        const style = getComputedStyle(menu);
-        return {
-          expanded: trigger.getAttribute('aria-expanded'),
-          hidden: style.visibility === 'hidden' && Number(style.opacity) === 0
-        };
-      }
-    );
-    await page.hover('.preview-toolbar-action[data-format="pdf"]');
-    await page.waitForFunction(() => {
-      const menu = document.querySelector<HTMLElement>(
-        '.preview-export-control[data-export-format="pdf"] .preview-export-menu'
+    for (const [format, includeTableOfContents] of exportOptions) {
+      await page.hover('.preview-export-trigger');
+      await page.click(
+        `.preview-export-menu-action[data-format="${format}"][data-include-table-of-contents="${includeTableOfContents}"]`
       );
-      if (!menu) return false;
-      const style = getComputedStyle(menu);
-      return style.visibility === 'visible' && Number(style.opacity) > 0;
-    });
-    const pdfContentsMenu = await page.$eval(
-      '.preview-export-control[data-export-format="pdf"]',
-      (control) => {
-        const trigger = control.querySelector<HTMLButtonElement>('.preview-toolbar-action');
-        const action = control.querySelector<HTMLButtonElement>('.preview-export-menu-action');
-        const menu = control.querySelector<HTMLElement>('.preview-export-menu');
-        const referencePanel = document.querySelector<HTMLElement>('.preview-font-family-dropdown-panel');
-        if (!trigger || !action || !menu || !referencePanel) return null;
-        const triggerBounds = trigger.getBoundingClientRect();
-        const menuBounds = menu.getBoundingClientRect();
-        const menuStyle = getComputedStyle(menu);
-        const referenceStyle = getComputedStyle(referencePanel);
-        return {
-          expanded: trigger.getAttribute('aria-expanded'),
-          label: action.textContent?.trim(),
-          visible: menuStyle.visibility === 'visible' && Number(menuStyle.opacity) > 0,
-          belowTrigger: menuBounds.top >= triggerBounds.bottom,
-          leftAligned: Math.abs(menuBounds.left - triggerBounds.left) <= 0.5,
-          iconMatchesTrigger: action.querySelector('svg')?.innerHTML
-            === trigger.querySelector('svg')?.innerHTML,
-          surfaceMatchesToolbarMenu: [
-            menuStyle.backgroundColor,
-            menuStyle.borderTopColor,
-            menuStyle.borderRadius,
-            menuStyle.boxShadow
-          ].join('|') === [
-            referenceStyle.backgroundColor,
-            referenceStyle.borderTopColor,
-            referenceStyle.borderRadius,
-            referenceStyle.boxShadow
-          ].join('|')
-        };
-      }
-    );
-    await page.click('.preview-export-control[data-export-format="pdf"] .preview-export-menu-action');
-    const pdfMenuAfterClick = await page.$eval(
-      '.preview-export-control[data-export-format="pdf"]',
-      (control) => {
-        const trigger = control.querySelector<HTMLButtonElement>('.preview-toolbar-action')!;
-        const menu = control.querySelector<HTMLElement>('.preview-export-menu')!;
-        const style = getComputedStyle(menu);
-        return {
-          expanded: trigger.getAttribute('aria-expanded'),
-          hidden: style.visibility === 'hidden' && Number(style.opacity) === 0
-        };
-      }
-    );
+      await page.mouse.move(0, 0);
+    }
     const previewExportRequests = await page.evaluate(() => (
       (window as typeof window & {
         __hostMessages?: Array<{ type?: string; format?: string; includeTableOfContents?: boolean }>;
@@ -1810,39 +1741,24 @@ async function main() {
         { enabled: false },
         { enabled: true }
       ]) ||
-      JSON.stringify(htmlContentsMenu) !== JSON.stringify({
-        expanded: 'true', label: '导出 HTML（含目录）', visible: true, belowTrigger: true,
-        leftAligned: true, iconMatchesTrigger: true, surfaceMatchesToolbarMenu: true
+      JSON.stringify(exportMenuState) !== JSON.stringify({
+        expanded: 'true', visible: true, belowTrigger: true, leftAligned: true,
+        itemCount: 6, surfaceMatchesToolbarMenu: true
       }) ||
-      JSON.stringify(htmlMenuAfterClick) !== JSON.stringify({
-        expanded: 'false', hidden: true
-      }) ||
-      JSON.stringify(pdfContentsMenu) !== JSON.stringify({
-        expanded: 'true', label: '导出 PDF（含目录）', visible: true, belowTrigger: true,
-        leftAligned: true, iconMatchesTrigger: true, surfaceMatchesToolbarMenu: true
-      }) ||
-      JSON.stringify(pdfMenuAfterClick) !== JSON.stringify({
-        expanded: 'false', hidden: true
-      }) ||
-      JSON.stringify(previewExportRequests) !== JSON.stringify([
-        { format: 'html', includeTableOfContents: false },
-        { format: 'pdf', includeTableOfContents: false },
-        { format: 'html', includeTableOfContents: true },
-        { format: 'pdf', includeTableOfContents: true }
-      ])
+      JSON.stringify(previewExportRequests) !== JSON.stringify(
+        exportOptions.map(([format, includeTableOfContents]) => ({ format, includeTableOfContents }))
+      )
     ) {
-      throw new Error(`Preview toolbar commands are not pointer reachable at 900px: ${JSON.stringify({
+      throw new Error(`Preview toolbar commands are not pointer reachable at 1600px: ${JSON.stringify({
         previewToolbarReachability,
         previewFontFocused,
         sourceColoringAfterPointer,
         sourceColoringAfterKeyboard,
-        htmlContentsMenu,
-        htmlMenuAfterClick,
-        pdfContentsMenu,
-        pdfMenuAfterClick,
+        exportMenuState,
         previewExportRequests
       })}`);
     }
+    await page.setViewport({ width: 900, height: 520, deviceScaleFactor: 1 });
     let previewRequestId = await page.evaluate(() => {
       const messages = (window as typeof window & { __hostMessages?: Array<{ type?: string; requestId?: string }> }).__hostMessages ?? [];
       return messages.findLast((message) => message.type === 'requestPreviewRender')?.requestId ?? '';
@@ -1925,11 +1841,11 @@ async function main() {
     if (!darkPreviewMermaidFill || darkPreviewMermaidFill === '#ffffff') {
       throw new Error(`Dark Preview Mermaid used a light node fill: ${darkPreviewMermaidFill}`);
     }
-    const previewPdfNode = await page.$('.preview-toolbar-action[data-format="pdf"]');
-    if (!previewPdfNode) throw new Error('Preview PDF action is missing before toolbar migration');
+    const previewExportNode = await page.$('.preview-export-trigger');
+    if (!previewExportNode) throw new Error('Preview export action is missing before toolbar migration');
     await page.setViewport({ width: 420, height: 720, deviceScaleFactor: 1 });
     await waitForFrames(page, 4);
-    const narrowPreviewToolbar = await page.evaluate((pdfNode) => {
+    const narrowPreviewToolbar = await page.evaluate((exportNode) => {
       const moreButton = document.querySelector<HTMLButtonElement>('.more-tools-wrapper > .format-button')!;
       const moreBounds = moreButton.getBoundingClientRect();
       const moreCenter = { x: moreBounds.left + moreBounds.width / 2, y: moreBounds.top + moreBounds.height / 2 };
@@ -1937,18 +1853,18 @@ async function main() {
       return {
         overflowIndicatorVisible: !document.querySelector<HTMLElement>('.toolbar-overflow-indicator')!.hidden,
         migratedCount: document.querySelectorAll('.toolbar-overflow-panel > .is-toolbar-overflow-item').length,
-        pdfMigrated: pdfNode.closest('.preview-export-control')?.parentElement?.classList.contains('toolbar-overflow-panel') === true,
+        exportMigrated: exportNode.closest('.preview-export-control')?.parentElement?.classList.contains('toolbar-overflow-panel') === true,
         moreVisible: getComputedStyle(moreButton).display !== 'none',
         moreHit: Boolean(moreHit && moreButton.contains(moreHit)),
         moreCenter,
         toolbarHeight: document.querySelector<HTMLElement>('.mode-toolbar')!.getBoundingClientRect().height,
         pageFitsViewport: document.documentElement.scrollWidth <= window.innerWidth
       };
-    }, previewPdfNode);
+    }, previewExportNode);
     if (
       !narrowPreviewToolbar.overflowIndicatorVisible ||
       narrowPreviewToolbar.migratedCount === 0 ||
-      !narrowPreviewToolbar.pdfMigrated ||
+      !narrowPreviewToolbar.exportMigrated ||
       !narrowPreviewToolbar.moreVisible ||
       !narrowPreviewToolbar.moreHit ||
       narrowPreviewToolbar.toolbarHeight !== 40 ||
@@ -1966,11 +1882,13 @@ async function main() {
         hit: Boolean(hit && pdfNode.contains(hit)),
         center
       };
-    }, previewPdfNode);
+    }, previewExportNode);
     if (!migratedPdfTarget.panelOpen || !migratedPdfTarget.hit) {
-      throw new Error(`Migrated Preview PDF action is not reachable: ${JSON.stringify(migratedPdfTarget)}`);
+      throw new Error(`Migrated Preview export action is not reachable: ${JSON.stringify(migratedPdfTarget)}`);
     }
     await page.mouse.click(migratedPdfTarget.center.x, migratedPdfTarget.center.y);
+    await page.waitForFunction(() => getComputedStyle(document.querySelector<HTMLElement>('.preview-export-menu')!).visibility === 'visible');
+    await page.click('.preview-export-menu-action[data-format="pdf"][data-include-table-of-contents="false"]');
     const narrowExportRequests = await page.evaluate(() => (
       (window as typeof window & {
         __hostMessages?: Array<{ type?: string; format?: string; includeTableOfContents?: boolean }>;
@@ -1980,13 +1898,10 @@ async function main() {
       includeTableOfContents: message.includeTableOfContents
     })));
     if (JSON.stringify(narrowExportRequests) !== JSON.stringify([
-      { format: 'html', includeTableOfContents: false },
-      { format: 'pdf', includeTableOfContents: false },
-      { format: 'html', includeTableOfContents: true },
-      { format: 'pdf', includeTableOfContents: true },
+      ...exportOptions.map(([format, includeTableOfContents]) => ({ format, includeTableOfContents })),
       { format: 'pdf', includeTableOfContents: false }
     ])) {
-      throw new Error(`Migrated Preview PDF action lost its command identity: ${JSON.stringify(narrowExportRequests)}`);
+      throw new Error(`Migrated Preview export menu lost its PDF command: ${JSON.stringify(narrowExportRequests)}`);
     }
     const previewMathFit = await page.evaluate(() => {
       const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
@@ -2018,7 +1933,7 @@ async function main() {
     }
     await page.setViewport({ width: 1100, height: 720, deviceScaleFactor: 1 });
     await waitForFrames(page, 4);
-    const widePreviewToolbar = await page.evaluate((pdfNode) => {
+    const widePreviewToolbar = await page.evaluate((exportNode) => {
       const describe = (element: HTMLElement) => {
         const bounds = element.getBoundingClientRect();
         const center = { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
@@ -2030,20 +1945,18 @@ async function main() {
       };
       return {
         overflowIndicatorHidden: document.querySelector<HTMLElement>('.toolbar-overflow-indicator')!.hidden,
-        pdfRestored: pdfNode.closest('.preview-export-control')?.parentElement?.classList.contains('preview-format-group') === true,
+        exportRestored: exportNode.closest('.preview-export-control')?.parentElement?.classList.contains('preview-format-group') === true,
         overflowSectionEmpty: document.querySelector('.toolbar-overflow-panel')?.childElementCount === 0,
-        html: describe(document.querySelector<HTMLButtonElement>('.preview-toolbar-action[data-format="html"]')!),
-        pdf: describe(document.querySelector<HTMLButtonElement>('.preview-toolbar-action[data-format="pdf"]')!),
+        export: describe(document.querySelector<HTMLButtonElement>('.preview-export-trigger')!),
         labelsVisible: Array.from(document.querySelectorAll<HTMLElement>('.preview-toolbar-action-label'))
           .every((label) => getComputedStyle(label).display !== 'none')
       };
-    }, previewPdfNode);
+    }, previewExportNode);
     if (
       !widePreviewToolbar.overflowIndicatorHidden ||
-      !widePreviewToolbar.pdfRestored ||
+      !widePreviewToolbar.exportRestored ||
       !widePreviewToolbar.overflowSectionEmpty ||
-      !widePreviewToolbar.html.visible || !widePreviewToolbar.html.hit ||
-      !widePreviewToolbar.pdf.visible || !widePreviewToolbar.pdf.hit ||
+      !widePreviewToolbar.export.visible || !widePreviewToolbar.export.hit ||
       !widePreviewToolbar.labelsVisible
     ) {
       throw new Error(`Wide Preview toolbar layout regressed: ${JSON.stringify(widePreviewToolbar)}`);

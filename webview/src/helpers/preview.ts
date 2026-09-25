@@ -1,5 +1,5 @@
 import morphdom from 'morphdom';
-import { createElement as createIconElement, MessageSquareText, PenLine, TextCursor } from 'lucide';
+import { createElement as createIconElement, PenLine, TextCursor } from 'lucide';
 import { getExportStyleEnvironment } from './export';
 import { createPreviewMermaidRenderer } from './previewMermaid';
 import { logWebviewRenderError } from './errors';
@@ -20,6 +20,7 @@ import {
 } from './previewCodeHighlight';
 import { activateShikiCodeHighlighting, subscribeShikiRefresh } from './shikiHighlighter';
 import { createToolbarDropdown } from './toolbarDropdown';
+import { createSegmentedControl } from './segmentedControl';
 import { resolveEmbeddedImageSrc } from './images';
 import {
   createPreviewTableLayoutController,
@@ -705,36 +706,82 @@ export function createPreviewController({
   frame.title = uiStrings.previewTitle;
   frame.setAttribute('sandbox', 'allow-same-origin');
 
-  const appearanceSelectControl = createToolbarDropdown('preview-appearance-control', uiStrings.previewAppearance);
-  const appearanceControl = appearanceSelectControl.element;
-  const appearanceSelect = appearanceSelectControl.select;
-  appearanceSelect.classList.add('preview-appearance-select');
+  const appearanceControl = document.createElement('div');
+  appearanceControl.className = 'preview-select-control preview-setting-control preview-appearance-control';
+  const appearanceLabel = document.createElement('span');
+  appearanceLabel.className = 'preview-select-label';
+  appearanceLabel.textContent = uiStrings.previewAppearance;
+  const appearanceSelect = document.createElement('select');
+  appearanceSelect.className = 'preview-toolbar-native-select preview-appearance-select';
+  appearanceSelect.setAttribute('aria-hidden', 'true');
+  appearanceSelect.tabIndex = -1;
   for (const value of ['auto', 'light', 'dark'] as const) {
     const option = document.createElement('option');
     option.value = value;
     option.textContent = value === 'auto' ? uiStrings.auto : value === 'light' ? uiStrings.light : uiStrings.dark;
     appearanceSelect.append(option);
   }
-  appearanceSelectControl.refreshOptions();
+  const appearanceSegments = createSegmentedControl<PreviewAppearance>({
+    ariaLabel: uiStrings.previewAppearance,
+    className: 'preview-setting-segmented',
+    buttonClassName: 'preview-setting-button',
+    datasetKey: 'previewAppearanceChoice',
+    role: 'group',
+    buttonTitles: false,
+    options: [
+      { value: 'auto', label: uiStrings.auto },
+      { value: 'light', label: uiStrings.light },
+      { value: 'dark', label: uiStrings.dark }
+    ]
+  });
+  appearanceControl.append(appearanceLabel, appearanceSegments.element, appearanceSelect);
 
-  const sourceColoringSelectControl = createToolbarDropdown('preview-source-coloring-control', uiStrings.previewCodeColors);
-  const sourceColoringControl = sourceColoringSelectControl.element;
-  sourceColoringControl.classList.add('preview-source-coloring');
-  const sourceColoringSelect = sourceColoringSelectControl.select;
-  sourceColoringSelect.classList.add('preview-source-coloring-select');
+  const sourceColoringControl = document.createElement('div');
+  sourceColoringControl.className = 'preview-select-control preview-setting-control preview-source-coloring';
+  const sourceColoringLabel = document.createElement('span');
+  sourceColoringLabel.className = 'preview-select-label';
+  sourceColoringLabel.textContent = uiStrings.previewCodeColors;
+  const sourceColoringSelect = document.createElement('select');
+  sourceColoringSelect.className = 'preview-toolbar-native-select preview-source-coloring-select';
+  sourceColoringSelect.setAttribute('aria-hidden', 'true');
+  sourceColoringSelect.tabIndex = -1;
   for (const enabled of [true, false]) {
     const option = document.createElement('option');
     option.value = String(enabled);
     option.textContent = enabled ? uiStrings.previewCodeColorsOn : uiStrings.previewCodeColorsOff;
     sourceColoringSelect.append(option);
   }
-  sourceColoringSelectControl.refreshOptions();
-  const showCommentsControl = document.createElement('button');
-  showCommentsControl.type = 'button';
-  showCommentsControl.className = 'format-button preview-show-comments';
-  showCommentsControl.title = uiStrings.showComments;
-  showCommentsControl.setAttribute('aria-label', uiStrings.showComments);
-  showCommentsControl.appendChild(createIconElement(MessageSquareText, { width: 16, height: 16 }));
+  const sourceColoringSegments = createSegmentedControl<'true' | 'false'>({
+    ariaLabel: uiStrings.previewCodeColors,
+    className: 'preview-setting-segmented',
+    buttonClassName: 'preview-setting-button',
+    datasetKey: 'previewSourceColoring',
+    role: 'group',
+    buttonTitles: false,
+    options: [
+      { value: 'true', label: uiStrings.previewCodeColorsOn },
+      { value: 'false', label: uiStrings.previewCodeColorsOff }
+    ]
+  });
+  sourceColoringControl.append(sourceColoringLabel, sourceColoringSegments.element, sourceColoringSelect);
+  const showCommentsControl = document.createElement('div');
+  showCommentsControl.className = 'preview-select-control preview-setting-control preview-show-comments';
+  const showCommentsLabel = document.createElement('span');
+  showCommentsLabel.className = 'preview-select-label';
+  showCommentsLabel.textContent = uiStrings.showComments;
+  const showCommentsSegments = createSegmentedControl<'true' | 'false'>({
+    ariaLabel: uiStrings.showComments,
+    className: 'preview-setting-segmented',
+    buttonClassName: 'preview-setting-button',
+    datasetKey: 'previewComments',
+    role: 'group',
+    buttonTitles: false,
+    options: [
+      { value: 'true', label: uiStrings.previewCodeColorsOn },
+      { value: 'false', label: uiStrings.previewCodeColorsOff }
+    ]
+  });
+  showCommentsControl.append(showCommentsLabel, showCommentsSegments.element);
   const fontFamilySelectControl = createToolbarDropdown('preview-font-family-control', uiStrings.previewFontFamily);
   const fontFamilyControl = fontFamilySelectControl.element;
   const fontFamilyLabel = fontFamilySelectControl.label;
@@ -762,17 +809,20 @@ export function createPreviewController({
     uiLanguage = language;
     uiStrings = getUiStrings(language);
     frame.title = uiStrings.previewTitle;
-    appearanceSelectControl.setLabel(uiStrings.previewAppearance);
+    appearanceLabel.textContent = uiStrings.previewAppearance;
+    appearanceSegments.element.setAttribute('aria-label', uiStrings.previewAppearance);
     appearanceSelect.options[0].textContent = uiStrings.auto;
     appearanceSelect.options[1].textContent = uiStrings.light;
     appearanceSelect.options[2].textContent = uiStrings.dark;
-    appearanceSelectControl.refreshOptions();
-    sourceColoringSelectControl.setLabel(uiStrings.previewCodeColors);
+    appearanceSegments.setLabels({ auto: uiStrings.auto, light: uiStrings.light, dark: uiStrings.dark });
+    sourceColoringLabel.textContent = uiStrings.previewCodeColors;
+    sourceColoringSegments.element.setAttribute('aria-label', uiStrings.previewCodeColors);
     sourceColoringSelect.options[0].textContent = uiStrings.previewCodeColorsOn;
     sourceColoringSelect.options[1].textContent = uiStrings.previewCodeColorsOff;
-    sourceColoringSelectControl.refreshOptions();
-    showCommentsControl.title = uiStrings.showComments;
-    showCommentsControl.setAttribute('aria-label', uiStrings.showComments);
+    sourceColoringSegments.setLabels({ true: uiStrings.previewCodeColorsOn, false: uiStrings.previewCodeColorsOff });
+    showCommentsLabel.textContent = uiStrings.showComments;
+    showCommentsSegments.element.setAttribute('aria-label', uiStrings.showComments);
+    showCommentsSegments.setLabels({ true: uiStrings.previewCodeColorsOn, false: uiStrings.previewCodeColorsOff });
     fontFamilySelectControl.setLabel(uiStrings.previewFontFamily);
     defaultFontOption.textContent = uiStrings.previewFontPlaceholder;
     fontFamilySelectControl.refreshOptions();
@@ -1195,10 +1245,11 @@ export function createPreviewController({
   const updateThemeToggle = () => {
     appearanceSelect.value = appearancePreference;
     const toolbarAppearance = getEditorAppearance();
-    for (const control of [appearanceSelectControl, sourceColoringSelectControl, fontFamilySelectControl]) {
-      control.setAppearance(toolbarAppearance);
+    for (const control of [appearanceControl, sourceColoringControl, showCommentsControl]) {
+      control.dataset.previewAppearance = toolbarAppearance;
     }
-    appearanceSelectControl.syncFromSelect();
+    fontFamilySelectControl.setAppearance(toolbarAppearance);
+    appearanceSegments.setActive(appearancePreference);
   };
 
   const syncPreviewCodeHighlight = (frameDocument: Document): void => {
@@ -1659,7 +1710,7 @@ export function createPreviewController({
 
   const updateSourceColoringControl = (): void => {
     sourceColoringSelect.value = String(sourceColoring);
-    sourceColoringSelectControl.syncFromSelect();
+    sourceColoringSegments.setActive(String(sourceColoring) as 'true' | 'false');
   };
 
   const setSourceColoring = (
@@ -1720,8 +1771,18 @@ export function createPreviewController({
     setAppearance(nextAppearance, { post: true });
   };
   appearanceSelect.addEventListener('change', handleAppearanceControlChange);
+  const handleAppearanceSegmentClick = (event: MouseEvent) => {
+    const value = (event.target as Element).closest<HTMLButtonElement>('[data-preview-appearance-choice]')?.dataset.previewAppearanceChoice;
+    if (value === 'auto' || value === 'light' || value === 'dark') setAppearance(value, { post: true });
+  };
+  appearanceSegments.element.addEventListener('click', handleAppearanceSegmentClick);
   const handleSourceColoringChange = () => setSourceColoring(sourceColoringSelect.value === 'true', { post: true });
   sourceColoringSelect.addEventListener('change', handleSourceColoringChange);
+  const handleSourceColoringSegmentClick = (event: MouseEvent) => {
+    const value = (event.target as Element).closest<HTMLButtonElement>('[data-preview-source-coloring]')?.dataset.previewSourceColoring;
+    if (value === 'true' || value === 'false') setSourceColoring(value === 'true', { post: true });
+  };
+  sourceColoringSegments.element.addEventListener('click', handleSourceColoringSegmentClick);
   const handleFontFamilyChange = () => setFontFamily(fontFamilySelect.value, { post: true });
   fontFamilySelect.addEventListener('change', handleFontFamilyChange);
   updateThemeToggle();
@@ -1763,13 +1824,16 @@ export function createPreviewController({
   const setShowComments = (enabled: boolean, { post = false }: { readonly post?: boolean } = {}): void => {
     const changed = showComments !== enabled;
     showComments = enabled;
-    showCommentsControl.classList.toggle('is-active', enabled);
-    showCommentsControl.setAttribute('aria-pressed', String(enabled));
+    showCommentsSegments.setActive(String(enabled) as 'true' | 'false');
     const text = hasPendingRequest ? pendingText : latestAcceptedText;
     if (changed && text !== null) requestRender(text, { force: true, preserveViewport: true });
     if (changed && post) vscode.postMessage({ type: 'setPreviewShowComments', enabled });
   };
-  showCommentsControl.addEventListener('click', () => setShowComments(!showComments, { post: true }));
+  const handleShowCommentsSegmentClick = (event: MouseEvent) => {
+    const value = (event.target as Element).closest<HTMLButtonElement>('[data-preview-comments]')?.dataset.previewComments;
+    if (value === 'true' || value === 'false') setShowComments(value === 'true', { post: true });
+  };
+  showCommentsSegments.element.addEventListener('click', handleShowCommentsSegmentClick);
   setShowComments(false);
   const getVisualSourceMap = (): PreviewSourceMapEntry[] => {
     getSourceMap();
@@ -2570,9 +2634,10 @@ export function createPreviewController({
       previewRenderTransport.cancelAll('Preview closed');
       appearanceSelect.removeEventListener('change', handleAppearanceControlChange);
       sourceColoringSelect.removeEventListener('change', handleSourceColoringChange);
+      appearanceSegments.element.removeEventListener('click', handleAppearanceSegmentClick);
+      sourceColoringSegments.element.removeEventListener('click', handleSourceColoringSegmentClick);
+      showCommentsSegments.element.removeEventListener('click', handleShowCommentsSegmentClick);
       fontFamilySelect.removeEventListener('change', handleFontFamilyChange);
-      appearanceSelectControl.dispose();
-      sourceColoringSelectControl.dispose();
       fontFamilySelectControl.dispose();
       frame.onload = null;
       disposePreviewMathViewports();

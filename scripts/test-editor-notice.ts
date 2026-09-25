@@ -260,7 +260,7 @@ async function main() {
       result.firstState.messageColor !== result.firstState.titleColor ||
       result.firstState.primaryBackground === 'rgba(0, 0, 0, 0)' ||
       result.firstState.primaryBackground === result.firstState.background ||
-      result.firstState.primaryBoxShadow !== 'none' || result.firstState.primaryHeight !== 28 ||
+      result.firstState.primaryBoxShadow !== 'none' || result.firstState.primaryHeight !== 30 ||
       result.firstState.iconBackground !== 'rgba(0, 0, 0, 0)' || result.firstState.iconWidth !== 18 ||
       result.firstState.borderLeftWidth !== '0px' || result.firstState.left !== 0 ||
       result.firstState.right !== 1100 || result.firstState.top > result.firstState.toolbarBottom ||

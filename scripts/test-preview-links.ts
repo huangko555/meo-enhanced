@@ -44,7 +44,7 @@ try {
   if (!stalePreload.promoted) throw new Error('Promoted preload must complete after Preview becomes visible');
   await page.evaluate(() => {
     const controller = (window as any).__previewController;
-    document.body.prepend(controller.appearanceControl);
+    document.body.prepend(controller.appearanceControl, controller.fontFamilyControl);
     const messages = (window as any).__previewMessages as Array<{ type?: string; requestId?: string }>;
     const html = [
       '<div class="meo-export-doc">',
@@ -92,17 +92,18 @@ try {
       throw new Error('Preview refresh must reuse the loaded document');
     }
   }
-  await page.click('.preview-appearance-dropdown');
-  await page.click('.preview-appearance-dropdown-panel [data-value="dark"]');
+  await page.click('[data-preview-appearance-choice="dark"]');
+  await page.click('.preview-font-family-dropdown');
+  await page.click('.preview-font-family-dropdown-panel .preview-dropdown-option:nth-child(2)');
   if (!await page.evaluate(() =>
     document.querySelector<HTMLSelectElement>('.preview-appearance-select')?.value === 'dark'
-    && document.querySelector('.preview-appearance-dropdown')?.getAttribute('aria-expanded') === 'false'
-  )) throw new Error('Clicking a dropdown option did not select and close it');
+    && document.querySelector('.preview-font-family-dropdown')?.getAttribute('aria-expanded') === 'false'
+  )) throw new Error('Preview controls did not select and close');
   // Use real pointer input: DOM click() bypasses the outside-pointer dismissal contract.
   for (const targetId of ['plain', 'fragment']) {
-    await page.click('.preview-appearance-dropdown');
+    await page.click('.preview-font-family-dropdown');
     if (!await page.evaluate(() =>
-      document.querySelector('.preview-appearance-dropdown')?.getAttribute('aria-expanded') === 'true'
+      document.querySelector('.preview-font-family-dropdown')?.getAttribute('aria-expanded') === 'true'
     )) throw new Error('Preview dropdown did not open');
     const point = await page.evaluate((id) => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
@@ -114,7 +115,7 @@ try {
     }, targetId);
     await page.mouse.click(point.x, point.y);
     if (!await page.evaluate(() =>
-      document.querySelector('.preview-appearance-dropdown')?.getAttribute('aria-expanded') === 'false'
+      document.querySelector('.preview-font-family-dropdown')?.getAttribute('aria-expanded') === 'false'
     )) throw new Error(`Preview ${targetId} click did not dismiss the dropdown`);
   }
   await page.evaluate(() => {
@@ -133,7 +134,7 @@ try {
   await page.evaluate(() => {
     ((window as any).__previewMessages as unknown[]).length = 0;
   });
-  await page.click('.preview-appearance-dropdown');
+  await page.click('.preview-font-family-dropdown');
   await page.mouse.click(clickPoint.x, clickPoint.y);
   await new Promise((resolve) => setTimeout(resolve, 50));
   const trustedClickResult = await page.evaluate(() => {
@@ -145,7 +146,7 @@ try {
     const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
     const link = frame.contentDocument?.getElementById('changelog') as HTMLAnchorElement | null;
     return {
-      dropdownClosed: document.querySelector('.preview-appearance-dropdown')?.getAttribute('aria-expanded') === 'false',
+      dropdownClosed: document.querySelector('.preview-font-family-dropdown')?.getAttribute('aria-expanded') === 'false',
       messages: messages.map(({ type, href, source }) => ({ type, href, source })),
       documentPresent: Boolean(frame.contentDocument?.querySelector('.meo-export-doc')),
       nativeHref: link?.getAttribute('href') ?? null,

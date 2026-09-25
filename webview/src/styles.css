@@ -54,6 +54,7 @@
   --meo-active-editor-font-weight: var(--vscode-editor-font-weight);
   --meo-active-editor-font-size: var(--vscode-editor-font-size, 13px);
   --meo-foreground: var(--meo-semantic-foreground, var(--meo-color-base01, var(--vscode-editor-foreground)));
+  --meo-segmented-control-background: color-mix(in srgb, var(--vscode-sideBar-background) 88%, var(--meo-foreground) 12%);
   --meo-muted-foreground: var(--meo-semantic-mutedForeground, var(--meo-color-base02, var(--vscode-descriptionForeground)));
   --meo-caret-color: var(--meo-foreground);
   --meo-line-height-live: 1.5;
@@ -85,6 +86,10 @@
 
 html[data-editor-appearance='dark'] body.vscode-dark {
   --meo-outline-background: color-mix(in srgb, var(--meo-code-background) 82%, black 18%);
+}
+
+html[data-editor-appearance='dark'] {
+  --meo-segmented-control-background: color-mix(in srgb, var(--vscode-sideBar-background) 87%, var(--meo-foreground) 13%);
 }
 
 html,
@@ -420,7 +425,7 @@ html[data-editor-appearance='light'] .editor-notice {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 2px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -439,11 +444,12 @@ html[data-editor-appearance='light'] .editor-notice {
   align-items: center;
   justify-content: center;
   gap: 5px;
-  min-height: 28px;
+  min-width: 68px;
+  min-height: 30px;
   box-sizing: border-box;
-  padding: 3px 7px;
+  padding: 4px 12px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 7px;
   color: inherit;
   background: transparent;
   font: inherit;
@@ -471,14 +477,18 @@ html[data-editor-appearance='light'] .editor-notice {
   opacity: 0.55;
 }
 
+.editor-notice-action[data-emphasis='secondary'] {
+  border: 1px solid color-mix(in srgb, var(--editor-notice-foreground) 50%, transparent);
+}
+
 .editor-notice-action[data-emphasis='primary'] {
-  color: var(--editor-notice-action-foreground);
-  background: var(--editor-notice-action-surface);
+  color: var(--editor-notice-surface);
+  background: var(--editor-notice-foreground);
   box-shadow: none;
 }
 
 .editor-notice-action[data-emphasis='primary']:hover:not(:disabled) {
-  background: var(--editor-notice-action-hover-surface);
+  background: color-mix(in srgb, var(--editor-notice-foreground) 88%, var(--editor-notice-surface));
 }
 
 .editor-notice[data-kind='warning'] {
@@ -674,7 +684,7 @@ html[data-editor-appearance='light'] .editor-notice {
 }
 
 .segmented-control {
-  --segmented-control-inset: 3px;
+  --segmented-control-inset: 2px;
   --segmented-control-radius: 8px;
   --segmented-control-indicator-radius: calc(
     var(--segmented-control-radius) - var(--segmented-control-inset)
@@ -688,19 +698,7 @@ html[data-editor-appearance='light'] .editor-notice {
   padding: 0;
   border: 0;
   border-radius: var(--segmented-control-radius);
-  background: color-mix(
-    in srgb,
-    var(--vscode-input-background, var(--vscode-sideBar-background)) 62%,
-    var(--vscode-sideBar-background)
-  );
-  box-shadow: inset 0 0 0 1px color-mix(
-    in srgb,
-    var(
-      --vscode-button-secondaryBackground,
-      var(--vscode-toolbar-activeBackground, var(--vscode-panel-border, rgba(127, 127, 127, 0.32)))
-    ) 78%,
-    var(--vscode-panel-border, transparent)
-  );
+  background: var(--meo-segmented-control-background);
   overflow: hidden;
 }
 
@@ -711,13 +709,13 @@ html[data-editor-appearance='light'] .editor-notice {
   align-items: center;
   justify-content: center;
   width: auto;
-  min-width: 56px;
+  min-width: 0;
   height: 26px;
   margin: 0;
-  padding: 0 16px;
+  padding: 0 8px;
   border: 0;
   border-radius: 0;
-  color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+  color: color-mix(in srgb, var(--meo-foreground) 72%, var(--vscode-sideBar-background) 28%);
   background: transparent;
   font: inherit;
   font-size: 12px;
@@ -728,6 +726,11 @@ html[data-editor-appearance='light'] .editor-notice {
   transition: color 0.12s ease;
 }
 
+.segmented-control.has-explicit-width > .segmented-control-button {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 .segmented-control-button-indicator {
   position: absolute;
   inset: var(--segmented-control-inset);
@@ -735,7 +738,15 @@ html[data-editor-appearance='light'] .editor-notice {
   border-radius: var(--segmented-control-indicator-radius);
   background: transparent;
   pointer-events: none;
-  transition: background-color 0.12s ease;
+  transform-origin: left center;
+}
+
+.segmented-control-button:not(:first-child) .segmented-control-button-indicator {
+  left: 0;
+}
+
+.segmented-control-button:not(:last-child) .segmented-control-button-indicator {
+  right: 0;
 }
 
 .segmented-control-button-content {
@@ -754,19 +765,25 @@ html[data-editor-appearance='light'] .editor-notice {
 
 .segmented-control-button.is-active {
   z-index: 1;
-  color: var(--vscode-button-foreground, var(--vscode-editor-foreground));
+  color: var(--meo-foreground);
 }
 
 .segmented-control-button.is-active .segmented-control-button-indicator {
-  background: var(
-    --vscode-button-secondaryBackground,
-    var(--vscode-toolbar-activeBackground, rgba(127, 127, 127, 0.32))
-  );
+  background: var(--meo-background);
 }
 
-.segmented-control-button:not(.is-active):hover {
-  color: var(--vscode-editor-foreground);
+html[data-editor-appearance='light'] .segmented-control-button:not(.is-active) {
+  color: color-mix(in srgb, var(--meo-foreground) 62%, var(--vscode-sideBar-background) 38%);
+}
+
+.segmented-control-button:not(.is-active):hover,
+.segmented-control-button:not(.is-active):focus-visible {
+  color: var(--meo-foreground);
   background: transparent;
+}
+
+html[data-editor-appearance='light'] .segmented-control-button:not(.is-active):is(:hover, :focus-visible) {
+  color: var(--meo-foreground);
 }
 
 .segmented-control-button:focus-visible {
@@ -786,8 +803,8 @@ html[data-editor-appearance='light'] .editor-notice {
   color-scheme: dark;
   --preview-select-background: #252a30;
   --preview-select-foreground: #f0f3f6;
-  --preview-select-border: #59636f;
-  --preview-select-hover-border: #8b97a4;
+  --preview-select-border: var(--meo-segmented-control-background);
+  --preview-select-hover-border: var(--meo-segmented-control-background);
   --preview-select-label-foreground: #d4d9df;
 }
 
@@ -795,8 +812,6 @@ html[data-editor-appearance='light'] .editor-notice {
   color-scheme: light;
   --preview-select-background: #ffffff;
   --preview-select-foreground: #20242a;
-  --preview-select-border: #7a8490;
-  --preview-select-hover-border: #59636f;
   --preview-select-label-foreground: #4d5662;
 }
 
@@ -806,6 +821,17 @@ html[data-editor-appearance='light'] .editor-notice {
   font-size: 11px;
   line-height: 1;
   white-space: nowrap;
+}
+
+.preview-setting-segmented .segmented-control-button {
+  min-width: 44px;
+  padding-inline: 8px;
+}
+
+.preview-source-coloring .segmented-control-button,
+.preview-show-comments .segmented-control-button {
+  min-width: 30px;
+  padding-inline: 8px;
 }
 
 .preview-select-shell {
@@ -841,14 +867,6 @@ html[data-editor-appearance='light'] .editor-notice {
   width: clamp(112px, 13vw, 156px);
 }
 
-.preview-source-coloring-dropdown {
-  width: 64px;
-}
-
-.preview-appearance-dropdown {
-  width: 76px;
-}
-
 .preview-toolbar-dropdown:hover,
 .preview-toolbar-dropdown[aria-expanded="true"] {
   border-color: var(--preview-select-hover-border);
@@ -856,7 +874,8 @@ html[data-editor-appearance='light'] .editor-notice {
 
 .preview-toolbar-dropdown:focus-visible {
   border-color: var(--preview-select-hover-border);
-  outline: none;
+  outline: 1px solid color-mix(in srgb, var(--meo-segmented-control-background) 45%, var(--meo-foreground) 55%);
+  outline-offset: 1px;
   box-shadow: none;
 }
 
@@ -891,7 +910,7 @@ html[data-editor-appearance='light'] .editor-notice {
   box-sizing: border-box;
   overflow: auto;
   padding: 4px;
-  border: 1px solid #4a515b;
+  border: 1px solid var(--meo-segmented-control-background);
   border-radius: 9px;
   color: #f0f3f6;
   background: #252a30;
@@ -900,7 +919,7 @@ html[data-editor-appearance='light'] .editor-notice {
 }
 
 .preview-dropdown-panel[data-preview-appearance="light"] {
-  border-color: #c5cbd3;
+  border-color: var(--meo-segmented-control-background);
   color: #20242a;
   background: #ffffff;
   color-scheme: light;
@@ -994,6 +1013,10 @@ html[data-editor-appearance='light'] .editor-notice {
   visibility: hidden;
   pointer-events: none;
   transform: translateY(-2px);
+  border-color: var(--vscode-panel-border);
+  border-radius: 8px;
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-sideBar-background);
   transition:
     opacity 80ms ease,
     transform 80ms ease,
@@ -1033,12 +1056,17 @@ html[data-editor-appearance='light'] .editor-notice {
   gap: 7px;
 }
 
+.preview-export-menu-action:hover,
+.preview-export-menu-action:focus-visible {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
 @media (max-width: 960px) {
   .preview-format-group {
     gap: 4px;
   }
 
-  .preview-toolbar-action[data-format] {
+  .preview-export-trigger {
     width: 26px;
     padding-inline: 0;
     gap: 0;
@@ -1451,7 +1479,7 @@ html[data-editor-appearance='light'] .editor-notice {
   align-items: stretch;
   gap: 2px;
   box-sizing: border-box;
-  width: min(268px, calc(100vw - 24px));
+  width: min(288px, calc(100vw - 16px));
   max-height: calc(100vh - 64px);
   padding: 4px;
   border: 1px solid var(--vscode-panel-border);
@@ -1494,11 +1522,11 @@ html[data-editor-appearance='light'] .editor-notice {
 .more-tools-option {
   position: relative;
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) 14px;
+  grid-template-columns: 16px minmax(0, 1fr) 28px;
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 30px;
+  min-height: 26px;
   padding: 0 8px;
   border: 0;
   border-radius: 6px;
@@ -1517,11 +1545,13 @@ html[data-editor-appearance='light'] .editor-notice {
 }
 
 .more-tools-appearance-row {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 5px;
-  padding: 5px 8px;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 170px);
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 2px 8px;
 }
 
 .editor-appearance-control,
@@ -1530,32 +1560,39 @@ html[data-editor-appearance='light'] .editor-notice {
   display: flex;
   align-items: stretch;
   height: 26px;
-  width: 100%;
+  width: max-content;
+  max-width: 100%;
+  justify-self: start;
+}
+
+.editor-appearance-control {
+  --segmented-control-content-gap: 3px;
 }
 
 .editor-appearance-control .segmented-control-button,
 .ui-language-control .segmented-control-button,
 .editor-font-size-mode-control .segmented-control-button {
-  flex: 1 1 0;
   min-width: 0;
   padding-inline: 6px;
+  font-size: 11px;
 }
 
 .editor-font-size-controls {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .editor-font-size-stepper {
   box-sizing: border-box;
   display: inline-grid;
-  grid-template-columns: 24px 28px 24px;
+  grid-template-columns: 18px 20px 18px;
   align-items: stretch;
   height: 26px;
-  border: 1px solid var(--vscode-panel-border);
+  padding: 2px;
   border-radius: 8px;
+  background: color-mix(in srgb, var(--vscode-sideBar-background) 88%, var(--meo-foreground) 12%);
   overflow: hidden;
 }
 
@@ -1578,12 +1615,13 @@ html[data-editor-appearance='light'] .editor-notice {
 
 .editor-font-size-stepper-button {
   padding: 0;
+  border-radius: 4px;
   cursor: pointer;
 }
 
 .editor-font-size-stepper-button:hover:not(:disabled),
 .editor-font-size-stepper-button:focus-visible {
-  background: var(--vscode-toolbar-hoverBackground);
+  background: color-mix(in srgb, var(--vscode-editor-background) 72%, transparent);
   outline: none;
 }
 
@@ -1592,19 +1630,46 @@ html[data-editor-appearance='light'] .editor-notice {
 }
 
 .editor-font-size-value {
-  border-inline: 1px solid var(--vscode-panel-border);
   font-variant-numeric: tabular-nums;
 }
 
 .more-tools-control-label {
-  color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
-  font-size: 11px;
+  overflow: hidden;
+  color: var(--vscode-editor-foreground);
+  font-size: 12px;
   line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.more-tools-control-heading {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.more-tools-control-icon {
+  display: inline-flex;
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
 }
 
 .mode-group {
+  height: 28px;
   margin-inline: -1px;
   padding-inline: 1px;
+}
+
+.mode-group .mode-button {
+  height: 28px;
+  min-width: 0;
+  padding-inline: 9px;
+}
+
+html[lang='zh-CN'] .mode-group .segmented-control-button-label {
+  letter-spacing: 0.8px;
 }
 
 .more-tools-option:disabled {
@@ -1630,10 +1695,26 @@ html[data-editor-appearance='light'] .editor-notice {
 }
 
 .more-tools-section-label {
-  padding: 5px 8px 2px;
+  padding: 7px 8px 2px;
   color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
   font-size: 11px;
   line-height: 14px;
+  white-space: nowrap;
+}
+
+.more-tools-section-label:not(:first-child) {
+  position: relative;
+  margin-top: 4px;
+}
+
+.more-tools-section-label:not(:first-child)::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 6px;
+  left: 6px;
+  height: 1px;
+  background: var(--meo-divider-color, #474b50);
 }
 
 .more-tools-feedback {
@@ -1683,6 +1764,7 @@ html[data-editor-appearance='light'] .editor-notice {
   border-radius: 999px;
   background: color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent);
   pointer-events: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .menu-switch::after {
@@ -1694,6 +1776,7 @@ html[data-editor-appearance='light'] .editor-notice {
   height: 10px;
   border-radius: 50%;
   background: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+  transition: transform 0.15s ease, background-color 0.15s ease;
 }
 
 [aria-checked='true'] > .menu-switch {
@@ -2572,7 +2655,7 @@ button:focus-visible > .menu-switch {
 
 .more-tools-option:has(.more-tools-option-info:hover),
 .more-tools-option:focus-visible {
-  z-index: 1;
+  z-index: 3;
 }
 
 .meo-live-strong-coloring .cm-editor.meo-mode-live .meo-md-strong {
@@ -3141,7 +3224,7 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 
 .meo-hex-color-adjustment-header {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 24px;
+  grid-template-columns: 32px minmax(0, 1fr) 24px;
   align-items: center;
   gap: 10px;
   margin-bottom: 12px;
@@ -3150,8 +3233,8 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 .meo-hex-color-adjustment-preview {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 28%, transparent);
   border-radius: 6px;
@@ -3215,7 +3298,7 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 
 .meo-hex-color-adjustment-controls {
   display: grid;
-  gap: 7px;
+  gap: 4px;
 }
 
 .meo-hex-color-adjustment-row {
@@ -3223,7 +3306,7 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   grid-template-columns: 78px minmax(80px, 1fr) 42px;
   align-items: center;
   gap: 10px;
-  min-height: 28px;
+  min-height: 26px;
 }
 
 .meo-hex-color-adjustment-row > span,
@@ -3298,7 +3381,7 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   color: var(--vscode-editor-foreground);
   background: transparent;
   border: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 50%, transparent);
-  border-radius: 999px;
+  border-radius: 7px;
   font: inherit;
   font-weight: 600;
   cursor: pointer;

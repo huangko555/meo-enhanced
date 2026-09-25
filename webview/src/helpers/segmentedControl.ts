@@ -11,12 +11,19 @@ type SegmentedControlOptions<Value extends string> = {
   buttonClassName: string;
   datasetKey: string;
   role: 'group' | 'tablist';
+  /** CSS width for the whole control; omitted controls size to their content. */
+  width?: string;
+  buttonTitles?: boolean;
   options: readonly SegmentedControlOption<Value>[];
 };
 
 export const createSegmentedControl = <Value extends string>(options: SegmentedControlOptions<Value>) => {
   const element = document.createElement('div');
   element.className = `segmented-control ${options.className}`;
+  if (options.width !== undefined) {
+    element.classList.add('has-explicit-width');
+    element.style.width = options.width;
+  }
   element.setAttribute('role', options.role);
   element.setAttribute('aria-label', options.ariaLabel);
 
@@ -26,7 +33,7 @@ export const createSegmentedControl = <Value extends string>(options: SegmentedC
     button.type = 'button';
     button.className = `segmented-control-button ${options.buttonClassName}`;
     button.dataset[options.datasetKey] = option.value;
-    button.title = option.title ?? option.label;
+    if (options.buttonTitles !== false) button.title = option.title ?? option.label;
     if (options.role === 'tablist') {
       button.setAttribute('role', 'tab');
     }
@@ -58,6 +65,12 @@ export const createSegmentedControl = <Value extends string>(options: SegmentedC
       return button;
     },
     setActive(value: Value) {
+      const previousButton = element.querySelector<HTMLButtonElement>('.segmented-control-button.is-active');
+      const nextButton = buttons.get(value);
+      const previousIndicator = previousButton?.querySelector<HTMLElement>('.segmented-control-button-indicator');
+      const nextIndicator = nextButton?.querySelector<HTMLElement>('.segmented-control-button-indicator');
+      const previousBounds = previousButton !== nextButton ? previousIndicator?.getBoundingClientRect() : undefined;
+      if (previousBounds) nextIndicator?.getAnimations?.().forEach((animation) => animation.cancel());
       for (const [buttonValue, button] of buttons) {
         const active = buttonValue === value;
         button.classList.toggle('is-active', active);
@@ -68,12 +81,20 @@ export const createSegmentedControl = <Value extends string>(options: SegmentedC
           button.setAttribute('aria-pressed', active ? 'true' : 'false');
         }
       }
+      if (!previousBounds || !nextIndicator || !element.isConnected || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+      const nextBounds = nextIndicator.getBoundingClientRect();
+      if (previousBounds.width === 0 || nextBounds.width === 0 || typeof nextIndicator.animate !== 'function') return;
+      // The buttons can have different widths, so move and resize the pill from its previous position.
+      nextIndicator.animate([
+        { transform: `translateX(${previousBounds.left - nextBounds.left}px) scaleX(${previousBounds.width / nextBounds.width})` },
+        { transform: 'translateX(0) scaleX(1)' }
+      ], { duration: 150, easing: 'ease-out' });
     },
     setLabels(labels: Readonly<Partial<Record<Value, string>>>) {
       for (const [value, button] of buttons) {
         const label = labels[value];
         if (label === undefined) continue;
-        button.title = label;
+        if (options.buttonTitles !== false) button.title = label;
         const labelElement = button.querySelector<HTMLElement>('.segmented-control-button-label');
         if (labelElement) labelElement.textContent = label;
       }

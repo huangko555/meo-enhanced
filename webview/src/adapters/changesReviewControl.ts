@@ -23,6 +23,7 @@ import {
   type GitHeadDisplayStatus,
   type UiLanguage
 } from '../application/uiLanguage';
+import { createMenuSwitch } from './menuSwitch';
 
 const beforeContentIcon: typeof SquareSplitVertical = [
   // Balance the visible gaps: the plus extends above its center, unlike the minus.
@@ -251,12 +252,17 @@ export function createChangesReviewControl(options: {
     const text = document.createElement('span');
     text.className = 'changes-review-option-label';
     text.textContent = label;
-    const toggle = document.createElement('span');
-    toggle.className = 'menu-switch';
-    toggle.setAttribute('aria-hidden', 'true');
+    const toggle = createMenuSwitch();
     button.append(icon, text, toggle);
     return button;
   };
+
+  const displaySection = document.createElement('div');
+  displaySection.className = 'changes-review-section';
+  const displayHeading = document.createElement('div');
+  displayHeading.className = 'changes-review-section-label';
+  const beforeContent = createToggleOption('before-content', '', false);
+  displaySection.append(displayHeading, beforeContent);
 
   const render = (): void => {
     const value = strings();
@@ -292,7 +298,6 @@ export function createChangesReviewControl(options: {
     panel.hidden = !open;
     if (!open) return;
 
-    panel.replaceChildren();
     const header = document.createElement('div');
     header.className = 'changes-review-header';
     const headerCounts = document.createElement('span');
@@ -396,20 +401,20 @@ export function createChangesReviewControl(options: {
     if (state.manualSnapshot.exists) snapshotRow.append(snapshotAction);
     baselineSection.appendChild(snapshotRow);
 
-    const displaySection = document.createElement('div');
-    displaySection.className = 'changes-review-section';
-    const displayHeading = document.createElement('div');
-    displayHeading.className = 'changes-review-section-label';
     displayHeading.textContent = value.displaySettings;
     const sourceOnly = state.mode !== 'source';
-    const beforeContent = createToggleOption(
-      'before-content', value.showBeforeChangeContent, state.beforeContentVisible
-    );
+    beforeContent.querySelector('.changes-review-option-label')!.textContent = value.showBeforeChangeContent;
+    beforeContent.setAttribute('aria-checked', state.beforeContentVisible ? 'true' : 'false');
     beforeContent.disabled = !state.markersVisible;
+    beforeContent.removeAttribute('title');
     if (!state.markersVisible) beforeContent.title = value.selectComparisonToEnable;
     else if (sourceOnly) beforeContent.title = value.sourceModeOnly;
-    displaySection.append(displayHeading, beforeContent);
-    panel.append(header, baselineSection, displaySection);
+    if (panel.firstElementChild) {
+      panel.children[0].replaceWith(header);
+      panel.children[1].replaceWith(baselineSection);
+    } else {
+      panel.append(header, baselineSection, displaySection);
+    }
   };
 
   const setOpen = (nextOpen: boolean): void => {
