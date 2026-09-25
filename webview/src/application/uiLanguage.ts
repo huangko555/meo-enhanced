@@ -101,6 +101,7 @@ export type UiStrings = Readonly<{
   source: string;
   preview: string;
   sidePreview: string;
+  sidePreviewMore: string;
   exitSidePreview: string;
   showSidePreview: string;
   hideSidePreview: string;
@@ -340,7 +341,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     backToTop: 'Back to top',
     editorToolbar: 'Editor toolbar', formatting: 'Formatting', markdownMode: 'Markdown mode',
     live: 'Live', source: 'Source', preview: 'Preview',
-    sidePreview: 'Split preview', exitSidePreview: 'Exit split',
+    sidePreview: 'Split preview', sidePreviewMore: 'More', exitSidePreview: 'Exit split',
     showSidePreview: 'Show side preview', hideSidePreview: 'Hide side preview',
     disableSynchronizedScrolling: 'Synchronized scrolling is on; click for independent scrolling',
     enableSynchronizedScrolling: 'Independent scrolling is on; click to restore synchronized scrolling',
@@ -519,7 +520,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     backToTop: '回到顶部',
     editorToolbar: '编辑器工具栏', formatting: '格式', markdownMode: 'Markdown 模式',
     live: '实时', source: '源码', preview: '预览',
-    sidePreview: '分栏预览', exitSidePreview: '退出分栏',
+    sidePreview: '分栏预览', sidePreviewMore: '更多菜单', exitSidePreview: '退出分栏',
     showSidePreview: '显示侧边预览', hideSidePreview: '关闭侧边预览',
     disableSynchronizedScrolling: '当前为同步滚动，点击切换为独立滚动',
     enableSynchronizedScrolling: '当前为独立滚动，点击恢复同步滚动',

@@ -1133,6 +1133,9 @@ const applyUiLanguage = (language: UiLanguage): void => {
     label.textContent = strings[labelKey];
   }
   previewFormatGroup.setAttribute('aria-label', strings.previewTools);
+  sourcePreviewMoreButton.textContent = strings.sidePreviewMore;
+  sourcePreviewMoreButton.setAttribute('aria-label', strings.sidePreviewMore);
+  sourcePreviewMorePanel.setAttribute('aria-label', strings.previewTools);
   moreToolsButton.title = strings.more;
   moreToolsButton.setAttribute('aria-label', strings.moreTools);
   moreToolsPanel.setAttribute('aria-label', strings.moreTools);
@@ -1322,6 +1325,46 @@ const sourcePreviewScrollSyncButton = document.createElement('button');
 sourcePreviewScrollSyncButton.type = 'button';
 sourcePreviewScrollSyncButton.className = 'format-button source-preview-scroll-sync-button';
 sourcePreviewScrollSyncButton.setAttribute('aria-pressed', 'true');
+const sourcePreviewTools = document.createElement('div');
+sourcePreviewTools.className = 'source-preview-tools';
+const sourcePreviewMoreButton = document.createElement('button');
+sourcePreviewMoreButton.type = 'button';
+sourcePreviewMoreButton.className = 'source-preview-more-button';
+sourcePreviewMoreButton.textContent = activeUiStrings.sidePreviewMore;
+sourcePreviewMoreButton.setAttribute('aria-label', activeUiStrings.sidePreviewMore);
+sourcePreviewMoreButton.setAttribute('aria-haspopup', 'dialog');
+sourcePreviewMoreButton.setAttribute('aria-expanded', 'false');
+const sourcePreviewMorePanel = document.createElement('div');
+sourcePreviewMorePanel.id = 'source-preview-more-panel';
+sourcePreviewMorePanel.className = 'source-preview-more-panel';
+sourcePreviewMorePanel.setAttribute('role', 'dialog');
+sourcePreviewMorePanel.setAttribute('aria-label', activeUiStrings.previewTools);
+sourcePreviewMorePanel.hidden = true;
+sourcePreviewMoreButton.setAttribute('aria-controls', sourcePreviewMorePanel.id);
+sourcePreviewTools.append(sourcePreviewScrollSyncButton, sourcePreviewMoreButton, sourcePreviewMorePanel);
+const setSourcePreviewMoreOpen = (open: boolean): void => {
+  sourcePreviewMorePanel.hidden = !open;
+  sourcePreviewMoreButton.setAttribute('aria-expanded', String(open));
+  if (open) {
+    sourcePreviewMorePanel.style.left = '0px';
+    const bounds = sourcePreviewMorePanel.getBoundingClientRect();
+    sourcePreviewMorePanel.style.left = `${Math.max(8 - bounds.left, Math.min(0, window.innerWidth - bounds.right - 8))}px`;
+  }
+};
+sourcePreviewMoreButton.addEventListener('click', () => {
+  setSourcePreviewMoreOpen(sourcePreviewMorePanel.hidden);
+});
+document.addEventListener('pointerdown', (event) => {
+  if (sourcePreviewMorePanel.hidden || !(event.target instanceof Node)) return;
+  if (sourcePreviewTools.contains(event.target)) return;
+  if (event.target instanceof Element && event.target.closest('.preview-font-family-dropdown-panel')) return;
+  setSourcePreviewMoreOpen(false);
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || sourcePreviewMorePanel.hidden) return;
+  setSourcePreviewMoreOpen(false);
+  sourcePreviewMoreButton.focus({ preventScroll: true });
+});
 
 const toolbarOverflowIndicator = document.createElement('button');
 toolbarOverflowIndicator.type = 'button';
@@ -1623,7 +1666,7 @@ previewAppearanceSlot.replaceWith(previewController.appearanceControl);
 previewFontFamilySlot.replaceWith(previewController.fontFamilyControl);
 previewSourceColoringSlot.replaceWith(previewController.sourceColoringControl);
 previewShowCommentsSlot.replaceWith(previewController.showCommentsControl);
-previewController.host.append(sourcePreviewScrollSyncButton);
+previewController.host.append(sourcePreviewTools);
 outlineController = createOutlineController({
   root,
   editorWrapper,
@@ -1810,6 +1853,22 @@ const presentPreviewSurface = (
   sourcePreviewButton.classList.toggle('is-active', split);
   sourcePreviewButton.setAttribute('aria-pressed', split ? 'true' : 'false');
   presentSourcePreviewControls();
+  if (split && previewController.fontFamilyControl.parentElement !== sourcePreviewMorePanel) {
+    sourcePreviewMorePanel.append(
+      previewController.fontFamilyControl,
+      previewController.appearanceControl,
+      previewController.sourceColoringControl,
+      previewController.showCommentsControl
+    );
+  } else if (!split && previewController.fontFamilyControl.parentElement !== previewFormatGroup) {
+    setSourcePreviewMoreOpen(false);
+    for (const control of [
+      previewController.fontFamilyControl,
+      previewController.appearanceControl,
+      previewController.sourceColoringControl,
+      previewController.showCommentsControl
+    ]) previewFormatGroup.insertBefore(control, exportControl);
+  }
   if (atomicSplit && split) {
     const generation = ++sourcePreviewRevealGeneration;
     pendingSourcePreviewReveal = { generation, editorReady: false, previewReady: false };

@@ -5964,12 +5964,24 @@ body.outline-resizing .preview-frame {
   color: var(--vscode-editor-foreground);
 }
 
-.source-preview-scroll-sync-button {
+.source-preview-tools {
   position: absolute;
   z-index: calc(var(--meo-layer-document-floating) + 10);
   top: 2px;
   left: 2px;
   display: none;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.editor-surface[data-source-preview] > .preview-host > .source-preview-tools {
+  display: flex;
+}
+
+.source-preview-scroll-sync-button {
+  position: static;
+  display: flex;
   width: 20px;
   height: 20px;
   box-sizing: border-box;
@@ -5980,10 +5992,6 @@ body.outline-resizing .preview-frame {
   background: var(--meo-background);
   box-shadow: 0 2px 6px rgb(0 0 0 / 16%);
   cursor: pointer;
-}
-
-.editor-surface[data-source-preview] > .preview-host > .source-preview-scroll-sync-button {
-  display: flex;
 }
 
 .source-preview-scroll-sync-button:hover,
@@ -5998,6 +6006,60 @@ body.outline-resizing .preview-frame {
 .source-preview-scroll-sync-button svg {
   opacity: 0.8;
   pointer-events: none;
+}
+
+.source-preview-more-button {
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--meo-foreground) 22%, transparent);
+  border-radius: 7px;
+  color: var(--meo-foreground);
+  background: var(--meo-background);
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 16%);
+  cursor: pointer;
+}
+
+.source-preview-more-button:hover,
+.source-preview-more-button:focus-visible {
+  background: color-mix(in srgb, var(--meo-background) 80%, var(--meo-foreground) 20%);
+}
+
+.source-preview-more-button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, currentColor);
+  outline-offset: 1px;
+}
+
+.source-preview-more-panel {
+  position: absolute;
+  top: 52px;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  padding: 8px;
+  border: 1px solid var(--meo-segmented-control-background);
+  border-radius: 9px;
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-sideBar-background);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 18%);
+}
+
+.source-preview-more-panel[hidden] {
+  display: none;
+}
+
+.source-preview-more-panel .preview-select-control {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.source-preview-more-panel .preview-font-family-dropdown {
+  width: 132px;
 }
 
 .preview-frame {

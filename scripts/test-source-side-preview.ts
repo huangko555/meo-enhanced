@@ -232,6 +232,27 @@ try {
   assert.ok(Math.abs(layout.syncOffset.top - 2) <= 0.5, JSON.stringify(layout));
   assert.equal(layout.focusedInEditor, true, 'Opening side Preview should restore editor focus');
   assert.ok(Math.abs(layout.editorWidth - layout.previewWidth) <= 2, JSON.stringify(layout));
+  await page.click('.source-preview-more-button');
+  const sideTools = await page.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>('.source-preview-more-panel')!;
+    const sync = document.querySelector<HTMLElement>('.source-preview-scroll-sync-button')!;
+    const more = document.querySelector<HTMLElement>('.source-preview-more-button')!;
+    return {
+      expanded: more.getAttribute('aria-expanded'),
+      open: !panel.hidden,
+      rows: Array.from(panel.children, child => child.querySelector('.preview-select-label')?.textContent),
+      hasExport: !!panel.querySelector('.preview-export-control'),
+      belowSync: more.getBoundingClientRect().top >= sync.getBoundingClientRect().bottom,
+      controlsVisible: Array.from(panel.children, child => (child as HTMLElement).offsetParent !== null)
+    };
+  });
+  assert.deepEqual(sideTools, {
+    expanded: 'true', open: true,
+    rows: ['Font', 'Preview theme', 'Code color', 'Show comments'],
+    hasExport: false, belowSync: true, controlsVisible: [true, true, true, true]
+  });
+  await page.click('.source-preview-more-button');
+  assert.equal(await page.$eval('.source-preview-more-panel', panel => (panel as HTMLElement).hidden), true);
   const tableFit = await page.evaluate(() => {
     const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
     return Array.from(frameDocument.querySelectorAll<HTMLTableElement>('table')).map(table => {
@@ -1818,12 +1839,14 @@ try {
   );
   await page.click('button[data-mode="preview"]');
   await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview');
+  assert.equal(await page.$eval('.preview-format-group .preview-font-family-control', element => element.offsetParent !== null), true);
   await page.click('button[data-mode="source"]');
   await page.waitForFunction(() => (
     document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source'
     && document.querySelector('.editor-surface')?.hasAttribute('data-source-preview')
     && document.querySelector<HTMLElement>('.preview-host')?.inert === false
   ));
+  assert.equal(await page.$eval('.source-preview-more-panel .preview-font-family-control', element => element.isConnected), true);
   assert.equal(
     await page.$eval('.source-preview-scroll-sync-button', button => button.getAttribute('aria-pressed')),
     'false',
@@ -1835,6 +1858,21 @@ try {
   await new Promise(resolve => setTimeout(resolve, 450));
   assert.equal(previewRenderCount, closedRenderCount, 'Closed side Preview must add no typing work');
   assert.ok(preloadCount >= 1, 'The fixture should exercise the existing hidden preload path');
+  await page.click('.source-preview-button');
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('.preview-host')?.inert === false);
+  await page.click('.source-preview-more-button');
+  await page.click('.source-preview-more-panel [data-preview-comments="true"]');
+  assert.equal(await page.$eval('.source-preview-more-button', button => button.getAttribute('aria-expanded')), 'true');
+  assert.equal(await page.$eval('.source-preview-more-panel [data-preview-comments="true"]', button => button.getAttribute('aria-pressed')), 'true');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.$eval('.source-preview-more-panel', panel => (panel as HTMLElement).hidden), true);
+  await page.setViewport({ width: 420, height: 760 });
+  await page.click('.source-preview-more-button');
+  const narrowMenuBounds = await page.$eval('.source-preview-more-panel', panel => {
+    const rect = panel.getBoundingClientRect();
+    return { left: rect.left, right: rect.right, viewportWidth: window.innerWidth };
+  });
+  assert.ok(narrowMenuBounds.left >= 8 && narrowMenuBounds.right <= narrowMenuBounds.viewportWidth - 8, JSON.stringify(narrowMenuBounds));
 } catch (error) {
   primaryError = error;
 } finally {
