@@ -143,6 +143,38 @@ import {
 } from './editor/liveInputDerivedWork';
 
 const markerDeco = Decoration.mark({ class: 'meo-md-marker' });
+
+class LiveCommentNoteWidget extends WidgetType {
+  constructor(readonly from: number, readonly text: string, readonly label: string, readonly block: boolean) { super(); }
+
+  eq(other: WidgetType): boolean {
+    return other instanceof LiveCommentNoteWidget &&
+      other.from === this.from && other.text === this.text &&
+      other.label === this.label && other.block === this.block;
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const note = document.createElement('span');
+    note.className = 'meo-md-comment-note';
+    note.dataset.display = this.block ? 'block' : 'inline';
+    note.setAttribute('role', 'button');
+    note.tabIndex = 0;
+    note.textContent = `${this.label} · ${this.text}`;
+    const edit = (event: Event): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      view.dispatch({ selection: { anchor: this.from } });
+      view.focus();
+    };
+    note.addEventListener('click', edit);
+    note.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') edit(event);
+    });
+    return note;
+  }
+
+  ignoreEvent(): boolean { return true; }
+}
 // The benchmark viewport exposes at most ~70 CodeMirror lines. Retaining 80
 // lines on either side keeps the current surface live without mapping the file.
 const largeDocumentInputLineRadius = 80;
@@ -1979,7 +2011,8 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
   }
   addForcedThematicBreakDecorations(ranges, state, activeLines, frontmatter, codeBlockLines);
   const mathRanges = collectMathRanges(state, tree, renderedTableRanges, frontmatter);
-  const renderedHtmlBlocks = addHtmlContentDecorations(ranges, state, activeLines, previous, changes);
+  const inlineHtmlRanges: Array<{ from: number; to: number }> = [];
+  const renderedHtmlBlocks = addHtmlContentDecorations(ranges, state, activeLines, previous, changes, inlineHtmlRanges);
 
   tree.iterate({
     enter: (node: SyntaxNodeRef) => {
@@ -2464,6 +2497,47 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
       htmlEditingRange.to === detailsBlock.sectionTo
     ))
   );
+  const addCommentNote = (from: number, to: number, source: string, block: boolean): void => {
+    if (state.selection.ranges.some(selection => selection.from <= to && selection.to >= from)) return;
+    ranges.push(Decoration.replace({
+      widget: new LiveCommentNoteWidget(
+        from,
+        source.slice(4, -3).trim(),
+        getUiStrings(state.facet(uiLanguageFacet)).comment,
+        block
+      ),
+      block
+    }).range(from, to));
+  };
+  tree.iterate({
+    enter(node: SyntaxNodeRef) {
+      if (node.name !== 'HTMLBlock' && node.name !== 'Comment' && node.name !== 'CommentBlock') return;
+      if (node.name !== 'HTMLBlock' && hasCodeBlockAncestor(node)) return;
+      if (node.name === 'HTMLBlock') {
+        const renderedRoot = renderedHtmlBlocks.find(block => block.from === node.from);
+        if (renderedRoot && renderedRoot.to < node.to) {
+          const trailing = state.doc.sliceString(renderedRoot.to, node.to);
+          const comments = /<!--[\s\S]*?-->/g;
+          let cursor = 0;
+          let match: RegExpExecArray | null;
+          while ((match = comments.exec(trailing))) {
+            if (trailing.slice(cursor, match.index).trim() || match[0].slice(4, -3).includes('<!--')) break;
+            const from = renderedRoot.to + match.index;
+            addCommentNote(from, from + match[0].length, match[0], true);
+            cursor = comments.lastIndex;
+          }
+          return false;
+        }
+      }
+      if (renderedHtmlBlocks.some(block => node.from >= block.from && node.to <= block.to)) return false;
+      if (inlineHtmlRanges.some(range => node.from >= range.from && node.to <= range.to)) return false;
+      if (node.name !== 'HTMLBlock' && node.node.parent?.name === 'HTMLBlock') return;
+      const source = state.doc.sliceString(node.from, node.to).trim();
+      if (!/^<!--[\s\S]*?-->$/.test(source) || source.slice(4, -3).includes('<!--')) return node.name === 'HTMLBlock' ? false : undefined;
+      addCommentNote(node.from, node.to, source, node.name !== 'Comment');
+      return node.name === 'HTMLBlock' ? false : undefined;
+    }
+  });
   const result = Decoration.set(ranges, true);
   return filterDecorationsOutsideMergeConflicts(state, result);
 }

@@ -9,6 +9,8 @@ import {
   type DecorationSet
 } from '@codemirror/view';
 import type { SyntaxNodeRef } from '@lezer/common';
+import { parseDocument } from 'htmlparser2';
+import type { ChildNode } from 'domhandler';
 import { createElement, AlertTriangle, Code2, Eye } from 'lucide';
 import {
   getHtmlRootTagName,
@@ -48,6 +50,42 @@ const renderableHtmlBlockCache = new WeakMap<EditorState, {
   tree: any;
   blocks: RenderableHtmlBlock[];
 }>();
+
+type HtmlCommentRange = { from: number; to: number; text: string };
+
+function maskHtmlComments(source: string): { source: string; comments: HtmlCommentRange[] } | null {
+  if (!source.includes('<!--')) return { source, comments: [] };
+  const comments: HtmlCommentRange[] = [];
+  const visit = (nodes: readonly ChildNode[]): void => {
+    for (const node of nodes) {
+      if (node.type === 'comment' && node.startIndex !== null && node.endIndex !== null) {
+        const raw = source.slice(node.startIndex, node.endIndex + 1);
+        if (raw.startsWith('<!--') && raw.endsWith('-->')) {
+          comments.push({ from: node.startIndex, to: node.endIndex + 1, text: raw.slice(4, -3).trim() });
+        }
+      }
+      if ('children' in node) visit(node.children);
+    }
+  };
+  visit(parseDocument(source, { withStartIndices: true, withEndIndices: true }).children);
+  comments.sort((left, right) => left.from - right.from);
+  if (comments.length === 0) return null;
+  let cursor = 0;
+  let masked = '';
+  for (const comment of comments) {
+    if (source.slice(cursor, comment.from).includes('<!--')) return null;
+    masked += source.slice(cursor, comment.from);
+    masked += source.slice(comment.from, comment.to).replace(/[^\r\n]/g, ' ');
+    cursor = comment.to;
+  }
+  if (source.slice(cursor).includes('<!--')) return null;
+  return { source: masked + source.slice(cursor), comments };
+}
+
+function isSupportedHtmlWithComments(source: string): boolean {
+  const masked = maskHtmlComments(source);
+  return masked !== null && isSupportedHtmlSource(masked.source);
+}
 
 function findHtmlRootEnd(source: string, rootTagName: string): number | null {
   let depth = 0;
@@ -102,12 +140,14 @@ export function collectRenderableHtmlBlocks(state: EditorState): RenderableHtmlB
     enter(node: SyntaxNodeRef) {
       if (node.name !== 'HTMLBlock') return;
       const parsedSource = state.doc.sliceString(node.from, node.to);
-      const rootTagName = getHtmlRootTagName(parsedSource);
+      const masked = maskHtmlComments(parsedSource);
+      if (!masked) return;
+      const rootTagName = getHtmlRootTagName(masked.source);
       if (!rootTagName) return;
-      const rootEnd = findHtmlRootEnd(parsedSource, rootTagName);
+      const rootEnd = findHtmlRootEnd(masked.source, rootTagName);
       if (rootEnd === null) return;
       const source = parsedSource.slice(0, rootEnd);
-      if (!isSupportedHtmlBlockSource(source)) return;
+      if (!isSupportedHtmlBlockSource(masked.source.slice(0, rootEnd))) return;
       const to = node.from + rootEnd;
       const detailsBlock = detailsByAnchor.get(node.from) ?? null;
       blocks.push({
@@ -168,6 +208,66 @@ function annotateHtmlSourceLines(root: ParentNode, source: string, startLine: nu
     tagCursor = tagIndex + 1;
     const relativeLine = source.slice(0, tag.from).split('\n').length - 1;
     element.dataset.meoHtmlSourceLine = String(startLine + relativeLine);
+  }
+}
+
+function showHtmlComments(
+  root: DocumentFragment,
+  comments: readonly HtmlCommentRange[],
+  view: EditorView,
+  source: string,
+  sourceFrom: number,
+  inline: boolean,
+  sourceStartLine: number
+): void {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
+  const nodes: Comment[] = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode as Comment);
+  const sidecarTails = new Map<Element, Element>();
+  const strings = getUiStrings(view.state.facet(uiLanguageFacet));
+  for (const [index, comment] of comments.entries()) {
+    const note = document.createElement('span');
+    note.className = 'meo-md-html-comment';
+    note.setAttribute('role', 'button');
+    note.tabIndex = 0;
+    note.title = strings.showHtmlSource;
+    note.dataset.meoHtmlSourceLine = String(sourceStartLine + source.slice(0, comment.from).split('\n').length - 1);
+    note.textContent = `${strings.comment} · ${comment.text}`;
+    const openSource = (event: Event): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (inline) {
+        view.dispatch({ selection: { anchor: sourceFrom + comment.from } });
+        view.focus();
+        return;
+      }
+      const current = currentHtmlBlock(view, source, sourceStartLine);
+      if (current) enterHtmlSource(view, current, current.from + comment.from);
+    };
+    note.addEventListener('click', openSource);
+    note.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') openSource(event);
+    });
+    const node = nodes[index];
+    if (!node) {
+      note.dataset.display = 'block';
+      root.append(note);
+      continue;
+    }
+    const parent = node.parentElement;
+    const structuralParent = parent?.closest('table')
+      ?? parent?.closest('ul, ol')
+      ?? parent?.closest('a, summary');
+    if (structuralParent) {
+      note.dataset.display = 'block';
+      const tail = sidecarTails.get(structuralParent) ?? structuralParent;
+      tail.after(note);
+      sidecarTails.set(structuralParent, note);
+      node.remove();
+      continue;
+    }
+    note.dataset.display = parent?.matches('p, span, strong, b, em, i, code, kbd, li, td, th') ? 'inline' : 'block';
+    node.replaceWith(note);
   }
 }
 
@@ -236,11 +336,15 @@ function createSanitizedHtml(
   sourceFrom = 0,
   sourceStartLine = 1
 ): { fragment: DocumentFragment; imageWidgets: ImageWidget[] } | null {
-  if (!isSupportedHtmlSource(source)) return null;
+  const masked = maskHtmlComments(source);
+  if (!masked || !isSupportedHtmlSource(masked.source)) return null;
   const template = document.createElement('template');
   template.innerHTML = source;
   sanitizeElementTree(template.content);
-  annotateHtmlSourceLines(template.content, source, sourceStartLine);
+  annotateHtmlSourceLines(template.content, masked.source, sourceStartLine);
+  if (view && masked.comments.length) {
+    showHtmlComments(template.content, masked.comments, view, source, sourceFrom, inline, sourceStartLine);
+  }
   const imageWidgets = view
     ? enhanceImages(template.content, view, sourceFrom, sourceStartLine, source)
     : [];
@@ -254,10 +358,10 @@ function preserveHtmlPosition(view: EditorView, mutate: () => void): void {
   else mutate();
 }
 
-export function enterHtmlSource(view: EditorView, block: HtmlEditingRange): void {
+export function enterHtmlSource(view: EditorView, block: HtmlEditingRange, anchor = block.from): void {
   preserveHtmlPosition(view, () => {
     view.dispatch({
-      selection: { anchor: block.from },
+      selection: { anchor },
       effects: setHtmlEditingRangeEffect.of({ from: block.from, to: block.to }),
       scrollIntoView: false
     });
@@ -546,20 +650,22 @@ class HtmlWarningWidget extends WidgetType {
 }
 
 class InlineHtmlWidget extends UiLanguageSensitiveWidget {
-  constructor(readonly source: string) {
+  constructor(readonly source: string, readonly from: number, readonly startLine: number) {
     super();
   }
 
   eq(other: WidgetType): boolean {
     return other instanceof InlineHtmlWidget &&
       this.hasSameUiLanguageEpoch(other) &&
-      other.source === this.source;
+      other.source === this.source && other.from === this.from;
   }
 
   toDOM(view: EditorView): HTMLElement {
     const wrapper = document.createElement('span');
     wrapper.className = 'meo-md-html-inline';
-    const content = createSanitizedHtml(this.source, true, view.state.facet(uiLanguageFacet));
+    const content = createSanitizedHtml(
+      this.source, true, view.state.facet(uiLanguageFacet), view, this.from, this.startLine
+    );
     if (content) wrapper.appendChild(content.fragment);
     const firstElement = wrapper.firstElementChild;
     if (firstElement) {
@@ -578,7 +684,8 @@ function addInlineHtmlDecorations(
   ranges: any[],
   state: EditorState,
   activeLines: ReadonlySet<number>,
-  blockRanges: readonly RenderableHtmlBlock[]
+  blockRanges: readonly RenderableHtmlBlock[],
+  inlineRanges: Array<{ from: number; to: number }>
 ): void {
   const pattern = /<(strong|b|em|i|del|s|mark|code|span|sub|sup|u|a)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
   for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
@@ -588,11 +695,14 @@ function addInlineHtmlDecorations(
     pattern.lastIndex = 0;
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(line.text))) {
-      if (!isSupportedHtmlSource(match[0])) continue;
+      if (!isSupportedHtmlWithComments(match[0])) continue;
+      const from = line.from + match.index;
+      const to = from + match[0].length;
       ranges.push(Decoration.replace({
-        widget: new InlineHtmlWidget(match[0]),
+        widget: new InlineHtmlWidget(match[0], from, lineNo),
         inclusive: false
-      }).range(line.from + match.index, line.from + match.index + match[0].length));
+      }).range(from, to));
+      inlineRanges.push({ from, to });
     }
   }
 }
@@ -602,7 +712,8 @@ export function addHtmlContentDecorations(
   state: EditorState,
   activeLines: ReadonlySet<number>,
   previousDecorations?: DecorationSet,
-  changes?: ChangeDesc
+  changes?: ChangeDesc,
+  inlineRanges: Array<{ from: number; to: number }> = []
 ): RenderableHtmlBlock[] {
   const editingRange = getHtmlEditingRange(state);
   const blocks = collectRenderableHtmlBlocks(state);
@@ -652,15 +763,14 @@ export function addHtmlContentDecorations(
     enter(node: SyntaxNodeRef) {
       if (node.name !== 'HTMLBlock') return;
       const source = state.doc.sliceString(node.from, node.to);
-      if (isSupportedHtmlSource(source)) return;
-      if (source.includes('<!--') && isSupportedHtmlSource(source.replace(/<!--[\s\S]*?-->/g, ''))) return;
+      if (isSupportedHtmlWithComments(source)) return;
       ranges.push(Decoration.widget({
         widget: new HtmlWarningWidget(),
         side: -1
       }).range(state.doc.lineAt(node.from).to));
     }
   });
-  addInlineHtmlDecorations(ranges, state, activeLines, blocks);
+  addInlineHtmlDecorations(ranges, state, activeLines, blocks, inlineRanges);
   return blocks;
 }
 

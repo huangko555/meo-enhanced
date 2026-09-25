@@ -23,6 +23,7 @@ export type UiStrings = Readonly<{
   previewSourceColoring: string;
   strongColoring: string;
   showComments: string;
+  comment: string;
   previewCodeColors: string;
   previewCodeColorsOn: string;
   previewCodeColorsOff: string;
@@ -302,7 +303,7 @@ export type UiStrings = Readonly<{
 const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
   en: Object.freeze({
     auto: 'Auto', light: 'Light', dark: 'Dark', previewTitle: 'Markdown Preview',
-    previewAppearance: 'Theme', previewSourceColoring: 'Preview source coloring', strongColoring: 'Color bold text', showComments: 'Show comments',
+    previewAppearance: 'Theme', previewSourceColoring: 'Preview source coloring', strongColoring: 'Color bold text', showComments: 'Show comments', comment: 'Comment',
     previewCodeColors: 'Code color', previewCodeColorsOn: 'On', previewCodeColorsOff: 'Off',
     previewFontFamily: 'Font',
     previewFontPlaceholder: 'VS Code editor font',
@@ -481,7 +482,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
   }),
   'zh-CN': Object.freeze({
     auto: '自动', light: '浅色', dark: '深色', previewTitle: 'Markdown 预览',
-    previewAppearance: '预览外观', previewSourceColoring: '预览源码着色', strongColoring: '粗体文字着色', showComments: '显示注释',
+    previewAppearance: '预览外观', previewSourceColoring: '预览源码着色', strongColoring: '粗体文字着色', showComments: '显示注释', comment: '注释',
     previewCodeColors: '代码着色', previewCodeColorsOn: '开启', previewCodeColorsOff: '关闭',
     previewFontFamily: '预览字体',
     previewFontPlaceholder: 'VS Code 编辑器字体',
