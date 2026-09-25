@@ -1803,13 +1803,13 @@ interface ParsedListMarker {
 
 function parsedListMarkersByLine(state: EditorState, tree: Tree) {
   const markers = new Map<number, ParsedListMarker[]>();
-  const quoteMarks = new Map<number, number[]>();
+  const quoteMarks = new Map<number, Array<{ from: number; to: number }>>();
   tree.iterate({
     enter(node: SyntaxNodeRef) {
       if (node.name === 'QuoteMark') {
         const lineNo = state.doc.lineAt(node.from).number;
         const ends = quoteMarks.get(lineNo) ?? [];
-        ends.push(node.to);
+        ends.push({ from: node.from, to: node.to });
         quoteMarks.set(lineNo, ends);
         return;
       }
@@ -1839,12 +1839,12 @@ function addListLineDecorations(
   builder: DecorationCollector,
   state: EditorState,
   indentSelectedLines: Set<number>,
-  tree: Tree,
+  parsedContainers: ReturnType<typeof parsedListMarkersByLine>,
   frontmatter: FrontmatterInfo | null = null,
   codeBlockLines: Set<number> | null = null
 ): void {
   const stylesByLine = detectListIndentStylesByLine(state);
-  const { markers: parsedMarkers, quoteMarks: quoteMarksByLine } = parsedListMarkersByLine(state, tree);
+  const { markers: parsedMarkers, quoteMarks: quoteMarksByLine } = parsedContainers;
   const orderedCountsByContainer = new Map<string, number>();
   const legacyOrderedCountsByLevel: Array<number | null> = [];
 
@@ -1890,8 +1890,8 @@ function addListLineDecorations(
     let deepest: { marker: NonNullable<ReturnType<typeof listMarkerData>>; depth: number; hiddenQuoteColumns: number; showTaskListMarker: boolean } | null = null;
     let previousMarkerEnd = line.from;
     for (const entry of entries) {
-      const precedingQuoteEnds = (quoteMarksByLine.get(lineNo) ?? []).filter((end) => end <= entry.listMarkFrom);
-      const quoteEnd = Math.max(line.from, ...precedingQuoteEnds);
+      const precedingQuoteMarks = (quoteMarksByLine.get(lineNo) ?? []).filter((mark) => mark.to <= entry.listMarkFrom);
+      const quoteEnd = Math.max(line.from, ...precedingQuoteMarks.map((mark) => mark.to));
       const markerOffset = Math.max(quoteEnd, previousMarkerEnd) - line.from;
       const marker = listMarkerData(lineText, null, style, markerOffset);
       if (!marker || line.from + marker.fromOffset !== entry.listMarkFrom) continue;
@@ -1917,7 +1917,7 @@ function addListLineDecorations(
       addListMarkerDecoration(builder, state, line.from, orderedDisplayIndex, style,
         showTaskListMarker ? { showTaskListMarker: true } : null, markerOffset);
       if (!deepest || entry.depth >= deepest.depth) {
-        deepest = { marker, depth: entry.depth, hiddenQuoteColumns: precedingQuoteEnds.length, showTaskListMarker };
+        deepest = { marker, depth: entry.depth, hiddenQuoteColumns: precedingQuoteMarks.length, showTaskListMarker };
       }
     }
     if (deepest && !inFrontmatterContent) {
@@ -1959,9 +1959,11 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
     state,
     getLiveRenderedBlocks(state)
   );
+  const parsedContainers = parsedListMarkersByLine(state, tree);
   const activeImageGroups = new Map<number, ActiveImageGroup>();
   const parsedTableRanges: SourceRange[] = [];
   const quoteDepthByLine = new Map<number, number>();
+  const quoteBarsByLine = new Map<number, { columns: number[]; insideList: boolean }>();
   let tableDepth = 0;
 
   let frontmatter: FrontmatterInfo | null = null;
@@ -2029,14 +2031,30 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
           return;
         }
         let depth = 1;
+        let insideList = false;
         for (let parent = node.node.parent; parent; parent = parent.parent) {
           if (parent.name === 'Blockquote') depth += 1;
+          if (parent.name === 'ListItem') insideList = true;
         }
-        if (depth > 1) {
-          const lastLine = state.doc.lineAt(Math.max(node.from, node.to - 1)).number;
-          for (let lineNo = line.number; lineNo <= lastLine; lineNo += 1) {
+        const firstLineMarks = parsedContainers.quoteMarks.get(line.number) ?? [];
+        // List widgets retain their source width; inactive quote glyphs collapse.
+        const initialColumn = node.from - line.from
+          - firstLineMarks.filter((mark) => mark.from < node.from).length;
+        const lastLine = state.doc.lineAt(Math.max(node.from, node.to - 1)).number;
+        for (let lineNo = line.number; lineNo <= lastLine; lineNo += 1) {
+          if (depth > 1) {
             quoteDepthByLine.set(lineNo, Math.max(depth, quoteDepthByLine.get(lineNo) ?? 0));
           }
+          const lineStart = state.doc.line(lineNo).from;
+          const marks = parsedContainers.quoteMarks.get(lineNo) ?? [];
+          const explicitMark = marks[depth - 1];
+          const column = explicitMark
+            ? explicitMark.from - lineStart - (activeLines.has(lineNo) ? 0 : depth - 1)
+            : initialColumn;
+          const bars = quoteBarsByLine.get(lineNo) ?? { columns: [], insideList: false };
+          bars.columns.push(Math.max(0, column));
+          bars.insideList ||= insideList;
+          quoteBarsByLine.set(lineNo, bars);
         }
         const alertBlock = detectAlertInBlockquote(state, node);
         if (alertBlock) {
@@ -2373,6 +2391,21 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
     }).range(state.doc.line(lineNo).from));
   }
 
+  // An inner quote belongs after its enclosing list marker, even on continuation lines.
+  for (const [lineNo, bars] of quoteBarsByLine) {
+    if (!bars.insideList) continue;
+    const columns = [...new Set(bars.columns)].sort((left, right) => left - right);
+    const first = columns[0];
+    const ruleColor = 'var(--meo-quote-rule-color, var(--meo-semantic-blockquoteBorder))';
+    const backgrounds = columns.map((column) =>
+      `linear-gradient(${ruleColor}, ${ruleColor}) ${column - first}ch 0 / 3px 100% no-repeat`
+    ).join(',');
+    ranges.push(Decoration.line({ attributes: {
+      class: 'meo-md-quote-source-order',
+      style: `--meo-quote-first-column:${first}ch;--meo-quote-bars:${backgrounds};`
+    } }).range(state.doc.line(lineNo).from));
+  }
+
   for (const { line, items } of activeImageGroups.values()) {
     const widget = items.length === 1
       ? new ImageWidget(
@@ -2405,7 +2438,7 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
     frontmatter
   );
   addSingleTildeStrikeDecorations(ranges, state, activeLines, strikeRanges, codeBlockLines);
-  addListLineDecorations(ranges, state, indentSelectedLines, tree, frontmatter, codeBlockLines);
+  addListLineDecorations(ranges, state, indentSelectedLines, parsedContainers, frontmatter, codeBlockLines);
   addMathDecorations(ranges, state, mathRanges, activeLines);
   addColorSwatchDecorations(
     ranges,
@@ -2467,7 +2500,7 @@ function addAlertBlockDecorations(
       Decoration.widget({
         widget: new AlertIconWidget(alertBlock.type),
         side: -1
-      }).range(startLine.from)
+      }).range(alertBlock.directiveFrom)
     );
     addRange(builder, alertBlock.directiveFrom, alertBlock.directiveTo, hiddenAlertMarkerDeco);
   } else {

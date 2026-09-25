@@ -2956,6 +2956,22 @@ button:focus-visible > .menu-switch {
   pointer-events: none;
 }
 
+.cm-editor .cm-line.meo-md-quote-source-order:is(.meo-md-quote, .meo-md-alert) {
+  position: relative;
+  border-left: 0;
+}
+
+.cm-editor .cm-line.meo-md-quote-source-order:is(.meo-md-quote, .meo-md-alert)::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--meo-quote-first-column);
+  width: calc(100% - var(--meo-quote-first-column));
+  background: var(--meo-quote-bars);
+  pointer-events: none;
+}
+
 .cm-editor .cm-line.meo-md-quote:not(.meo-md-code-block):not(.meo-mermaid-block) *,
 .cm-editor .cm-line.meo-md-quote:not(.meo-md-code-block):not(.meo-mermaid-block) {
   color: var(--meo-semantic-blockquoteForeground) !important;
@@ -2974,7 +2990,7 @@ button:focus-visible > .menu-switch {
   -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;
 }
 
-.cm-editor.meo-mode-live .cm-activeLine.meo-md-quote:not(.meo-md-code-block):not(.meo-mermaid-block):has(> .meo-md-marker-active:first-child) {
+.cm-editor.meo-mode-live .cm-activeLine.meo-md-quote:not(.meo-md-list-line):not(.meo-md-code-block):not(.meo-mermaid-block):has(> .meo-md-marker-active:first-child) {
   text-indent: -2ch;
 }
 
@@ -6775,30 +6791,35 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-delet
 
 .cm-editor .meo-md-alert-note {
   --meo-alert-color: var(--meo-semantic-alertNoteForeground);
+  --meo-quote-rule-color: var(--meo-semantic-alertNoteBorder);
   border-left-color: var(--meo-semantic-alertNoteBorder);
   background-color: var(--meo-semantic-alertNoteBackground);
 }
 
 .cm-editor .meo-md-alert-tip {
   --meo-alert-color: var(--meo-semantic-alertTipForeground);
+  --meo-quote-rule-color: var(--meo-semantic-alertTipBorder);
   border-left-color: var(--meo-semantic-alertTipBorder);
   background-color: var(--meo-semantic-alertTipBackground);
 }
 
 .cm-editor .meo-md-alert-important {
   --meo-alert-color: var(--meo-semantic-alertImportantForeground);
+  --meo-quote-rule-color: var(--meo-semantic-alertImportantBorder);
   border-left-color: var(--meo-semantic-alertImportantBorder);
   background-color: var(--meo-semantic-alertImportantBackground);
 }
 
 .cm-editor .meo-md-alert-warning {
   --meo-alert-color: var(--meo-semantic-alertWarningForeground);
+  --meo-quote-rule-color: var(--meo-semantic-alertWarningBorder);
   border-left-color: var(--meo-semantic-alertWarningBorder);
   background-color: var(--meo-semantic-alertWarningBackground);
 }
 
 .cm-editor .meo-md-alert-caution {
   --meo-alert-color: var(--meo-semantic-alertCautionForeground);
+  --meo-quote-rule-color: var(--meo-semantic-alertCautionBorder);
   border-left-color: var(--meo-semantic-alertCautionBorder);
   background-color: var(--meo-semantic-alertCautionBackground);
 }

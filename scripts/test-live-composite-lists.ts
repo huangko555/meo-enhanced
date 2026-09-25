@@ -33,10 +33,11 @@ async function main(): Promise<void> {
   const browser = await launchTestBrowser();
   try {
     const page = await browser.newPage();
-    await page.setContent('<!doctype html><div id="host"></div><div id="table-host"></div><div id="nested-table-host"></div><div id="edit-host"></div>');
+    await page.setContent('<!doctype html><div id="host"></div><div id="order-host"></div><div id="table-host"></div><div id="nested-table-host"></div><div id="edit-host"></div>');
     await page.addStyleTag({ path: path.join(root, 'webview', 'src', 'styles.css') });
     await page.addStyleTag({ content: ':root { --meo-semantic-blockquoteBorder: #777; --meo-semantic-blockquoteForeground: #444; }' });
     await page.addStyleTag({ content: '#host { width: 280px; } #host .cm-editor { width: 280px; } #host .cm-gutters { display: none; }' });
+    await page.addStyleTag({ content: '#order-host { width: 280px; } #order-host .cm-editor { width: 280px; } #order-host .cm-gutters { display: none; }' });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
     const result = await page.evaluate(async (markdown) => {
       const editor = (window as any).ListEditingHarness.createEditor({
@@ -226,6 +227,108 @@ async function main(): Promise<void> {
       assert.ok(sameLine.items.some((line) => line.text.includes(text)), `same-line content lost: ${text}`);
     }
 
+    const quoteOrder = await page.evaluate(async () => {
+      const editor = (window as any).ListEditingHarness.createEditor({
+        parent: document.getElementById('order-host')!,
+        text: ['1. > - [ ] ordered quote task', '', '> 1. - [ ] quote ordered task', '',
+          '- > 1. - [ ] bullet quote ordered task', '', '1. > > - [ ] nested quote task', '',
+          '> 1. > - [ ] interleaved quote task', '', '1. > quote starts', '   > quote continues', '',
+          '1. > [!NOTE] alert quote', '',
+          '1. > - [ ] wrapped quote task alpha beta gamma delta epsilon zeta eta theta'].join('\n'),
+        initialMode: 'live', uiLanguage: 'zh-CN', onApplyChanges() {}
+      });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const lines = Array.from(document.querySelectorAll<HTMLElement>('#order-host .cm-line'))
+        .filter((line) => line.innerText.includes('task'))
+        .map((line) => {
+          const rect = line.getBoundingClientRect();
+          const before = getComputedStyle(line, '::before');
+          const markers = Array.from(line.querySelectorAll<HTMLElement>('.meo-md-list-marker'))
+            .map((marker) => ({ left: marker.getBoundingClientRect().left, right: marker.getBoundingClientRect().right }));
+          const quoteLeft = line.classList.contains('meo-md-quote-source-order')
+            ? rect.left + Number.parseFloat(before.left)
+            : rect.left;
+          return {
+            text: line.innerText, quoteLeft, markers,
+            quoteBarPositions: before.backgroundPositionX.split(',').map((position) => Number.parseFloat(position)),
+            checkboxes: line.querySelectorAll('.meo-task-checkbox').length
+          };
+        });
+      const continuations = Array.from(document.querySelectorAll<HTMLElement>('#order-host .cm-line'))
+        .filter((line) => line.innerText.includes('quote starts') || line.innerText.includes('quote continues'))
+        .map((line) => ({
+          text: line.innerText,
+          quoteLeft: line.getBoundingClientRect().left + Number.parseFloat(getComputedStyle(line, '::before').left),
+          sourced: line.classList.contains('meo-md-quote-source-order')
+        }));
+      editor.view.dispatch({ selection: { anchor: editor.view.state.doc.line(9).from + 4 } });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const activeLine = Array.from(document.querySelectorAll<HTMLElement>('#order-host .cm-line'))
+        .find((line) => line.innerText.includes('interleaved quote task'))!;
+      const activeBefore = getComputedStyle(activeLine, '::before');
+      const activeQuoteLeft = activeLine.getBoundingClientRect().left + Number.parseFloat(activeBefore.left);
+      const activeQuoteBarPositions = activeBefore.backgroundPositionX.split(',')
+        .map((position) => Number.parseFloat(position));
+      const activeMarkerRects = Array.from(activeLine.querySelectorAll<HTMLElement>('.meo-md-list-marker'))
+        .map((marker) => ({ left: marker.getBoundingClientRect().left, right: marker.getBoundingClientRect().right }));
+      const alertLine = Array.from(document.querySelectorAll<HTMLElement>('#order-host .cm-line'))
+        .find((line) => line.innerText.includes('alert quote'))!;
+      const alertMarker = alertLine.querySelector<HTMLElement>('.meo-md-list-marker')!;
+      const alert = {
+        className: alertLine.className,
+        quoteLeft: alertLine.getBoundingClientRect().left + Number.parseFloat(getComputedStyle(alertLine, '::before').left),
+        markerRight: alertMarker.getBoundingClientRect().right,
+        borderLeftWidth: getComputedStyle(alertLine).borderLeftWidth,
+        quoteBackground: getComputedStyle(alertLine, '::before').backgroundImage
+      };
+      const wrappedLine = Array.from(document.querySelectorAll<HTMLElement>('#order-host .cm-line'))
+        .find((line) => line.innerText.includes('wrapped quote task'))!;
+      const wrapped = {
+        lineHeight: wrappedLine.getBoundingClientRect().height,
+        quoteHeight: Number.parseFloat(getComputedStyle(wrappedLine, '::before').height),
+        quoteLeft: wrappedLine.getBoundingClientRect().left
+          + Number.parseFloat(getComputedStyle(wrappedLine, '::before').left),
+        markerRight: wrappedLine.querySelector<HTMLElement>('.meo-md-list-marker')!
+          .getBoundingClientRect().right
+      };
+      editor.destroy();
+      return { lines, continuations, activeQuoteLeft, activeQuoteBarPositions, activeMarkerRects,
+        alert, wrapped };
+    });
+    assert.equal(quoteOrder.lines.length, 6);
+    for (const index of [0, 2, 3]) {
+      const line = quoteOrder.lines[index]!;
+      assert.ok(line.quoteLeft >= line.markers[0]!.right - 1
+        && line.quoteLeft <= line.markers[1]!.left + 1,
+      `a quote inside a list must follow the outer marker: ${JSON.stringify(line)}`);
+      assert.equal(line.checkboxes, 1);
+    }
+    assert.ok(quoteOrder.lines[1]!.quoteLeft < quoteOrder.lines[1]!.markers[0]!.left,
+      `an outer quote must precede the list marker: ${JSON.stringify(quoteOrder.lines[1])}`);
+    assert.ok(quoteOrder.continuations.length === 2
+      && quoteOrder.continuations.every((line) => line.sourced)
+      && Math.abs(quoteOrder.continuations[0]!.quoteLeft - quoteOrder.continuations[1]!.quoteLeft) <= 1,
+      `a quote nested in a list must keep its border across source lines: ${JSON.stringify(quoteOrder.continuations)}`);
+    const interleaved = quoteOrder.lines[4]!;
+    assert.ok(interleaved.quoteLeft < interleaved.markers[0]!.left
+      && interleaved.quoteBarPositions.length === 2
+      && interleaved.quoteLeft + interleaved.quoteBarPositions[1]! >= interleaved.markers[0]!.right - 1
+      && interleaved.quoteLeft + interleaved.quoteBarPositions[1]! <= interleaved.markers[1]!.left + 1,
+      `an outer quote and inner quote must remain separate: ${JSON.stringify(interleaved)}`);
+    assert.ok(quoteOrder.activeQuoteBarPositions.length === 2
+      && quoteOrder.activeQuoteLeft + quoteOrder.activeQuoteBarPositions[1]!
+        >= quoteOrder.activeMarkerRects[0]!.right - 1,
+      `the inner quote must stay after the list marker while editing: ${JSON.stringify(quoteOrder)}`);
+    assert.ok(quoteOrder.alert.className.includes('meo-md-alert')
+      && quoteOrder.alert.quoteLeft >= quoteOrder.alert.markerRight - 1
+      && quoteOrder.alert.borderLeftWidth === '0px'
+      && quoteOrder.alert.quoteBackground !== 'none',
+      `an alert quote inside a list must follow the same order: ${JSON.stringify(quoteOrder.alert)}`);
+    assert.ok(quoteOrder.wrapped.lineHeight > 40
+      && Math.abs(quoteOrder.wrapped.quoteHeight - quoteOrder.wrapped.lineHeight) <= 1
+      && quoteOrder.wrapped.quoteLeft >= quoteOrder.wrapped.markerRight - 1,
+      `an inner quote rule must span wrapped lines: ${JSON.stringify(quoteOrder.wrapped)}`);
+
     const sameLineTable = await page.evaluate(async () => {
       const source = '| Items |\n| --- |\n| - 1. forward<br>1. - reverse<br>> - 1. quoted<br>- 1. [ ] task<br>- [ ] 1. task first<br>- > 1. list quote<br>1. - [x] reverse task |';
       const editor = (window as any).ListEditingHarness.createEditor({
@@ -252,6 +355,27 @@ async function main(): Promise<void> {
     assert.ok(['forward', 'reverse', 'quoted', 'task first', 'list quote', 'reverse task']
       .every((text) => sameLineTable.text.includes(text)));
     assert.equal(sameLineTable.source, '| Items |\n| --- |\n| - 1. forward<br>1. - reverse<br>> - 1. quoted<br>- 1. [ ] task<br>- [ ] 1. task first<br>- > 1. list quote<br>1. - [x] reverse task |');
+
+    const tableQuoteOrder = await page.evaluate(async () => {
+      const source = '| Item |\n| --- |\n| 1. > - [ ] list then quote<br>> 1. - [ ] quote then list |';
+      const editor = (window as any).ListEditingHarness.createEditor({
+        parent: document.getElementById('table-host')!, text: source,
+        initialMode: 'live', uiLanguage: 'zh-CN', onApplyChanges() {}
+      });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const cell = document.querySelector<HTMLElement>('#table-host tbody td .meo-md-html-table-cell-preview')!;
+      const result = {
+        listThenQuote: Boolean(cell.querySelector('ol > li > blockquote > ul > li > input[type=checkbox]')),
+        quoteThenList: Boolean(cell.querySelector('blockquote > ol > li > ul > li > input[type=checkbox]')),
+        source: editor.getText()
+      };
+      editor.destroy();
+      return result;
+    });
+    assert.ok(tableQuoteOrder.listThenQuote && tableQuoteOrder.quoteThenList,
+      `table-cell containers must follow source nesting: ${JSON.stringify(tableQuoteOrder)}`);
+    assert.equal(tableQuoteOrder.source,
+      '| Item |\n| --- |\n| 1. > - [ ] list then quote<br>> 1. - [ ] quote then list |');
 
     const taskBoundary = await page.evaluate(async () => {
       const source = [
