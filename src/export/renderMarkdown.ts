@@ -109,8 +109,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
       start: bodySourceLines?.[startIndex] ?? 0,
       end: bodySourceLines?.[Math.max(startIndex, endIndex - 1)] ?? 0
     }),
-    options.showComments === true,
-    uiStrings.comment
+    options.showComments === true
   );
   if (shouldEnableMathTransform) {
     installMathTransform(md, {
@@ -395,8 +394,7 @@ function installSafeHtmlTransform(
   md: MarkdownIt,
   rewriteImageSrc: (rawSrc: string) => { src: string; deferredSrc?: string },
   resolveSourceRange: (startIndex: number, endIndex: number) => { start: number; end: number },
-  showComments: boolean,
-  commentLabel: string
+  showComments: boolean
 ): void {
   const allowedAttributes = Object.fromEntries(
     [...supportedHtmlTags].map((tagName) => [tagName, getSupportedHtmlAttributes(tagName)])
@@ -451,12 +449,11 @@ function installSafeHtmlTransform(
           renderSource += before;
           if (showComments) {
             const marker = `${markerPrefix}${index}END`;
-            const content = escapeHtml(comment.raw.slice(4, -3).trim());
-            const label = escapeHtml(commentLabel);
+            const content = escapeHtml(comment.raw);
             const block = onlyComment && tokenType === 'html_block';
             replacements.push({ marker, html: block
-              ? `<aside class="meo-export-comment"><span class="meo-export-comment-label">${label}</span><span class="meo-export-comment-text">${content}</span></aside>`
-              : `<span class="meo-export-comment meo-export-comment-inline"><span class="meo-export-comment-label">${label}</span><span class="meo-export-comment-text">${content}</span></span>` });
+              ? `<aside class="meo-export-comment" role="note">${content}</aside>`
+              : `<span class="meo-export-comment meo-export-comment-inline" role="note">${content}</span>` });
             renderSource += marker;
           }
           cursor = comment.to;

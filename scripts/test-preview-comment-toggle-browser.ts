@@ -59,6 +59,22 @@ try {
   await page.click('.preview-show-comments');
   await waitFor('comment render', () => document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body?.textContent?.includes('visible when enabled'));
   assert.equal(await page.$eval('.preview-show-comments', element => element.getAttribute('aria-pressed')), 'true');
+  const visibleComments = await page.evaluate(() => {
+    const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    return Array.from(doc.querySelectorAll<HTMLElement>('.meo-export-comment')).map(comment => {
+      const style = doc.defaultView!.getComputedStyle(comment);
+      return {
+        text: comment.textContent,
+        border: style.borderTopWidth,
+        background: style.backgroundColor,
+        fontStyle: style.fontStyle
+      };
+    });
+  });
+  assert.ok(visibleComments.some(comment => comment.text === '<!-- visible when enabled -->'));
+  assert.ok(visibleComments.some(comment => comment.text === '<!-- nested note -->'));
+  assert.ok(visibleComments.every(comment => comment.border === '0px' &&
+    comment.background === 'rgba(0, 0, 0, 0)' && comment.fontStyle === 'italic'));
   const htmlCommentGap = await page.evaluate(() => {
     const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
     const paragraph = Array.from(doc.querySelectorAll<HTMLParagraphElement>('p'))

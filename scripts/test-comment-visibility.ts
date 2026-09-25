@@ -38,9 +38,11 @@ for (const showComments of [false, true]) {
   assert.match(preview, /Unfinished/, 'unfinished comments remain visible');
   if (showComments) {
     assert.match(preview, /meo-export-comment-inline/);
-    assert.match(preview, /block line one\nblock line two/);
-    assert.match(preview, /inline &lt;script&gt;/, 'comment text is escaped');
-    assert.match(preview, /<div>before<span class="meo-export-comment meo-export-comment-inline">/, 'comments inside HTML stay visible without escaping the containing element');
+    assert.match(preview, /&lt;!-- block line one\nblock line two --&gt;/);
+    assert.match(preview, /&lt;!-- inline &lt;script&gt; --&gt;/, 'raw comment text is escaped');
+    assert.match(preview, /<div>before<span class="meo-export-comment meo-export-comment-inline"[^>]*>&lt;!-- nested note --&gt;<\/span>after<\/div>/,
+      'comments inside HTML keep their original markers without escaping the containing element');
+    assert.doesNotMatch(preview, /meo-export-comment-label|>Comment<|>注释</, 'no translated prefix is added');
   } else {
     assert.doesNotMatch(preview, /inline &lt;script&gt;|block line one/);
     assert.match(preview, /<div>beforeafter<\/div>/, 'comments inside HTML are removed without escaping the containing element');
