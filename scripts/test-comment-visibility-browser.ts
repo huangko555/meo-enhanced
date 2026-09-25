@@ -47,8 +47,8 @@ try {
     });
     assert.equal(rendered.paragraphs, 2);
     assert.deepEqual(rendered.notes, [
-      'Comment · nested multiline\ncomment',
-      'Comment · second <script>window.__commentInjected=true</script> note'
+      '<!-- nested multiline\ncomment -->',
+      '<!-- second <script>window.__commentInjected=true</script> note -->'
     ]);
     assert.equal(rendered.sourceVisible, false);
     assert.equal(rendered.injectedScript, false);
@@ -56,10 +56,17 @@ try {
       text: element.textContent,
       note: element.querySelector('.meo-md-html-comment')?.textContent
     }));
-    assert.equal(inlineHtml.text, 'beforeComment · inline html noteafter');
-    assert.equal(inlineHtml.note, 'Comment · inline html note');
-    const standaloneNotes = await page.$$eval('.meo-md-comment-note', notes => notes.map(note => note.textContent));
-    assert.deepEqual(standaloneNotes, ['Comment · secret', 'Comment · block\nsecret', 'Comment · trailing note']);
+    assert.equal(inlineHtml.text, 'before<!-- inline html note -->after');
+    assert.equal(inlineHtml.note, '<!-- inline html note -->');
+    assert.equal((await page.$$('.meo-md-comment-note')).length, 0);
+    const sourceText = await page.$eval('.cm-content', element => element.textContent ?? '');
+    assert.match(sourceText, /Inline <!-- secret --> text/);
+    assert.match(sourceText, /<!-- blocksecret -->/);
+    assert.match(sourceText, /<!-- trailing note -->/);
+    assert.equal(await page.$eval('.meo-md-html-comment', note => {
+      const style = getComputedStyle(note);
+      return style.backgroundColor === 'rgba(0, 0, 0, 0)' && style.borderLeftWidth === '0px';
+    }), true);
     const structured = await page.evaluate(() => {
       const table = document.querySelector('.meo-md-html-block table');
       const list = document.querySelector('.meo-md-html-block ul');
@@ -106,6 +113,32 @@ try {
       const editor = (window as any).__commentEditor;
       return editor.view.state.selection.main.head === editor.view.state.doc.toString().indexOf('<!-- table note');
     }), true);
+    const commentPoint = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(element => element.textContent?.includes('Inline <!-- secret --> text'))!;
+      const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+      let node: Text | null;
+      while ((node = walker.nextNode() as Text | null)) {
+        const index = node.textContent?.indexOf('secret') ?? -1;
+        if (index < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, index + 3);
+        range.setEnd(node, index + 4);
+        const rect = range.getBoundingClientRect();
+        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      }
+      throw new Error('Editable comment text was not found');
+    });
+    await page.mouse.click(commentPoint.x, commentPoint.y);
+    assert.equal(await page.evaluate(() => {
+      const editor = (window as any).__commentEditor;
+      const head = editor.view.state.selection.main.head;
+      const source = editor.view.state.doc.toString();
+      return head > source.indexOf('<!-- secret -->') && head < source.indexOf('<!-- secret -->') + '<!-- secret -->'.length;
+    }), true);
+    await page.keyboard.type('X');
+    assert.equal(await page.evaluate(() => (window as any).__commentEditor.view.state.doc.toString()
+      .includes('<!-- secXret -->')), true);
     await page.evaluate(() => (window as any).__commentEditor.destroy());
     await page.close();
   } finally {

@@ -51,7 +51,7 @@ const renderableHtmlBlockCache = new WeakMap<EditorState, {
   blocks: RenderableHtmlBlock[];
 }>();
 
-type HtmlCommentRange = { from: number; to: number; text: string };
+type HtmlCommentRange = { from: number; to: number };
 
 function maskHtmlComments(source: string): { source: string; comments: HtmlCommentRange[] } | null {
   if (!source.includes('<!--')) return { source, comments: [] };
@@ -61,7 +61,7 @@ function maskHtmlComments(source: string): { source: string; comments: HtmlComme
       if (node.type === 'comment' && node.startIndex !== null && node.endIndex !== null) {
         const raw = source.slice(node.startIndex, node.endIndex + 1);
         if (raw.startsWith('<!--') && raw.endsWith('-->')) {
-          comments.push({ from: node.startIndex, to: node.endIndex + 1, text: raw.slice(4, -3).trim() });
+          comments.push({ from: node.startIndex, to: node.endIndex + 1 });
         }
       }
       if ('children' in node) visit(node.children);
@@ -232,7 +232,7 @@ function showHtmlComments(
     note.tabIndex = 0;
     note.title = strings.showHtmlSource;
     note.dataset.meoHtmlSourceLine = String(sourceStartLine + source.slice(0, comment.from).split('\n').length - 1);
-    note.textContent = `${strings.comment} · ${comment.text}`;
+    note.textContent = source.slice(comment.from, comment.to);
     const openSource = (event: Event): void => {
       event.preventDefault();
       event.stopPropagation();

@@ -3663,30 +3663,16 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   -webkit-user-select: text;
 }
 
-.cm-editor .meo-md-html-comment,
-.cm-editor .meo-md-comment-note {
-  padding: 0.1em 0.4em;
-  border-left: 2px solid var(--meo-border);
-  border-radius: 3px;
-  color: var(--vscode-descriptionForeground, var(--meo-foreground));
-  background: color-mix(in srgb, var(--meo-background) 88%, var(--meo-foreground));
-  font: inherit;
-  font-style: italic;
+.cm-editor .meo-md-html-comment {
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
   cursor: pointer;
 }
 
-.cm-editor .meo-md-html-comment[data-display='block'],
-.cm-editor .meo-md-comment-note[data-display='block'] {
+.cm-editor .meo-md-html-comment[data-display='block'] {
   display: block;
-  width: fit-content;
-  max-width: 100%;
-  margin: 0.3em 0;
 }
 
-.cm-editor .meo-md-html-comment:focus-visible,
-.cm-editor .meo-md-comment-note:focus-visible {
+.cm-editor .meo-md-html-comment:focus-visible {
   outline: 1px solid var(--vscode-focusBorder);
   outline-offset: 2px;
 }
