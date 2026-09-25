@@ -1,4 +1,4 @@
-import { StateField, EditorState } from '@codemirror/state';
+import { StateField, EditorState, type Annotation } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import { StreamLanguage } from '@codemirror/language';
 import { javascript } from '@codemirror/lang-javascript';
@@ -517,7 +517,11 @@ export function resolveLiveCodeLanguage(info: string | null | undefined): any {
   return languageMap[normalized] ?? null;
 }
 
-export function insertCodeBlock(view: EditorView, selection: { from: number; to: number; empty?: boolean }): void {
+export function insertCodeBlock(
+  view: EditorView,
+  selection: { from: number; to: number; empty?: boolean },
+  userEvent?: Annotation<string>
+): void {
   const { state } = view;
   const line = state.doc.lineAt(selection.from);
   const lineText = state.doc.sliceString(line.from, line.to);
@@ -528,7 +532,8 @@ export function insertCodeBlock(view: EditorView, selection: { from: number; to:
     const insert = `\n${leadingWhitespace}\`\`\`\n${selectedText}\n${leadingWhitespace}\`\`\`\n`;
     view.dispatch({
       changes: { from: selection.from, to: selection.to, insert },
-      selection: { anchor: selection.from + leadingWhitespace.length + 4 }
+      selection: { anchor: selection.from + leadingWhitespace.length + 4 },
+      annotations: userEvent
     });
     return;
   }
@@ -538,7 +543,8 @@ export function insertCodeBlock(view: EditorView, selection: { from: number; to:
   const cursorPos = line.from + leadingWhitespace.length + 4;
   view.dispatch({
     changes: { from: line.from, to: line.to, insert },
-    selection: { anchor: cursorPos }
+    selection: { anchor: cursorPos },
+    annotations: userEvent
   });
 }
 

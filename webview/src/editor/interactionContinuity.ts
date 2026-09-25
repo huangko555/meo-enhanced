@@ -40,7 +40,9 @@ type ActiveInput = {
 };
 
 type ActiveMainInput = ActiveInput & {
+  settleInSource: boolean;
   caretTopBeforeInput: number | null;
+  caretVisibleBeforeInput: boolean;
   inputLineHeightBefore: number | null;
   inputLineNumberBefore: number | null;
   retainingCaretTop: boolean;
@@ -72,10 +74,12 @@ export function createEditorInteractionContinuity(input: {
   let active: ActiveMainInput | null = null;
   let pendingScrollTopBeforeInput: number | null = null;
   let pendingCaretTopBeforeInput: number | null = null;
+  let pendingCaretVisibleBeforeInput: boolean | null = null;
   let pendingInputLineHeight: number | null = null;
   let pendingInputLineNumber: number | null = null;
   let inputSessionScrollTop: number | null = null;
   let inputSessionCaretTop: number | null = null;
+  let inputSessionCaretVisible: boolean | null = null;
   let inputSessionPosition: number | null = null;
   let disposed = false;
 
@@ -91,10 +95,12 @@ export function createEditorInteractionContinuity(input: {
     cancelActive();
     pendingScrollTopBeforeInput = null;
     pendingCaretTopBeforeInput = null;
+    pendingCaretVisibleBeforeInput = null;
     pendingInputLineHeight = null;
     pendingInputLineNumber = null;
     inputSessionScrollTop = null;
     inputSessionCaretTop = null;
+    inputSessionCaretVisible = null;
     inputSessionPosition = null;
   };
 
@@ -105,7 +111,10 @@ export function createEditorInteractionContinuity(input: {
   const schedule = (candidate: ActiveMainInput, immediate = false): void => {
     if (!isCurrent(candidate) || candidate.frame !== null) return;
     const measure = () => {
-      if (!isCurrent(candidate) || getMode() !== 'live' || !view.hasFocus) {
+      if (
+        !isCurrent(candidate) || !view.hasFocus ||
+        (getMode() !== 'live' && !candidate.settleInSource)
+      ) {
         cancel();
         return;
       }
@@ -141,7 +150,9 @@ export function createEditorInteractionContinuity(input: {
             // The caret moved because the edited line wrapped or changed lines,
             // not because an upstream layout correction displaced the viewport.
             candidate.caretTopBeforeInput = measurement.caretTop;
+            candidate.caretVisibleBeforeInput = true;
             inputSessionCaretTop = measurement.caretTop;
+            inputSessionCaretVisible = true;
             candidate.retainingCaretTop = false;
             candidate.inputLineHeightBefore = measurement.inputLineHeight;
             candidate.inputLineNumberBefore = measurement.inputLineNumber;
@@ -159,7 +170,10 @@ export function createEditorInteractionContinuity(input: {
             schedule(candidate);
             return;
           }
-          candidate.retainingCaretTop ||= largeLayoutShift;
+          // Retaining a previous Y only makes sense when that Y was visible.
+          // An offscreen edit must reveal its caret instead of preserving the
+          // very position that made the edit invisible.
+          candidate.retainingCaretTop ||= largeLayoutShift && candidate.caretVisibleBeforeInput;
           if (candidate.retainingCaretTop && candidate.caretTopBeforeInput !== null) {
             if (
               measurement.caretTop !== null &&
@@ -202,7 +216,7 @@ export function createEditorInteractionContinuity(input: {
     }
   };
 
-  const beginInputSettlement = (): void => {
+  const beginInputSettlement = (settleInSource = false): void => {
     // A burst of keyboard input is one viewport interaction. If an earlier
     // character triggered a delayed height-map correction, the next
     // `beforeinput` observes that transient scroll offset. Keep the original
@@ -214,12 +228,21 @@ export function createEditorInteractionContinuity(input: {
       ?? pendingCaretTopBeforeInput
       ?? view.coordsAtPos(view.state.selection.main.head)?.top
       ?? null;
+    const caretVisibleBeforeInput = inputSessionCaretVisible
+      ?? pendingCaretVisibleBeforeInput
+      ?? (() => {
+        const coords = view.coordsAtPos(view.state.selection.main.head);
+        const viewport = view.scrollDOM.getBoundingClientRect();
+        return Boolean(coords && coords.top >= viewport.top && coords.bottom <= viewport.bottom);
+      })();
     const inputLineHeightBefore = pendingInputLineHeight;
     const inputLineNumberBefore = pendingInputLineNumber;
     inputSessionScrollTop = scrollTopBeforeInput;
     inputSessionCaretTop = caretTopBeforeInput;
+    inputSessionCaretVisible = caretVisibleBeforeInput;
     pendingScrollTopBeforeInput = null;
     pendingCaretTopBeforeInput = null;
+    pendingCaretVisibleBeforeInput = null;
     pendingInputLineHeight = null;
     pendingInputLineNumber = null;
     cancelActive();
@@ -228,13 +251,15 @@ export function createEditorInteractionContinuity(input: {
     const candidate: ActiveMainInput = {
       generation: nextGeneration,
       position,
+      settleInSource,
       caretTopBeforeInput,
+      caretVisibleBeforeInput,
       inputLineHeightBefore,
       inputLineNumberBefore,
       retainingCaretTop: false,
       scrollTopBeforeInput,
       viewportMoved: false,
-      awaitingDerivedPresentation: true,
+      awaitingDerivedPresentation: getMode() === 'live',
       frame: null,
       remainingFrames: MAX_SETTLE_FRAMES,
       stableFrames: 0
@@ -257,8 +282,11 @@ export function createEditorInteractionContinuity(input: {
     const canCapture = getMode() === 'live' && view.hasFocus;
     const position = view.state.selection.main.head;
     pendingScrollTopBeforeInput = canCapture ? view.scrollDOM.scrollTop : null;
-    pendingCaretTopBeforeInput = canCapture
-      ? view.coordsAtPos(position)?.top ?? null
+    const coords = canCapture ? view.coordsAtPos(position) : null;
+    const viewport = canCapture ? view.scrollDOM.getBoundingClientRect() : null;
+    pendingCaretTopBeforeInput = coords?.top ?? null;
+    pendingCaretVisibleBeforeInput = canCapture
+      ? Boolean(coords && viewport && coords.top >= viewport.top && coords.bottom <= viewport.bottom)
       : null;
     pendingInputLineHeight = canCapture ? view.lineBlockAt(position).height : null;
     pendingInputLineNumber = canCapture ? view.state.doc.lineAt(position).number : null;
@@ -290,9 +318,18 @@ export function createEditorInteractionContinuity(input: {
       const directInput = update.transactions.some((transaction) => (
         transaction.docChanged && transaction.isUserEvent('input')
       ));
+      const toolbarInput = update.transactions.some((transaction) => (
+        transaction.docChanged && transaction.isUserEvent('input.toolbar')
+      ));
       if (directInput) {
-        if (getMode() === 'live' && view.hasFocus && view.state.selection.main.empty) {
-          beginInputSettlement();
+        // Native Source typing owns its own reveal. Toolbar edits are
+        // programmatic, so they opt into this shared continuity path in both
+        // editable modes.
+        if (
+          (getMode() === 'live' || toolbarInput) &&
+          view.hasFocus && view.state.selection.main.empty
+        ) {
+          beginInputSettlement(toolbarInput);
         } else {
           cancel();
         }

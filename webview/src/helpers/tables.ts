@@ -1,4 +1,4 @@
-import { EditorState, RangeSet, RangeValue, StateEffect, StateField, type Range, type SelectionRange as CodeMirrorSelectionRange, type Transaction } from '@codemirror/state';
+import { EditorState, RangeSet, RangeValue, StateEffect, StateField, type Annotation, type Range, type SelectionRange as CodeMirrorSelectionRange, type Transaction } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
 import type { SyntaxNode, SyntaxNodeRef, Tree } from '@lezer/common';
@@ -6288,7 +6288,13 @@ export const sourceTableHeaderLineField = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field)
 });
 
-export function insertTable(view: EditorView, selection: CodeMirrorSelectionRange, cols = 3, rows = 2) {
+export function insertTable(
+  view: EditorView,
+  selection: CodeMirrorSelectionRange,
+  cols = 3,
+  rows = 2,
+  userEvent?: Annotation<string>
+) {
   const line = view.state.doc.lineAt(selection.from);
   const lineText = view.state.doc.sliceString(line.from, line.to);
   const leadingWhitespace = /^(\s*)/.exec(lineText)?.[1] ?? '';
@@ -6304,6 +6310,7 @@ export function insertTable(view: EditorView, selection: CodeMirrorSelectionRang
 
   view.dispatch({
     changes: { from: line.from, to: line.to, insert: table },
-    selection: { anchor: line.from + leadingWhitespace.length + 2 }
+    selection: { anchor: line.from + leadingWhitespace.length + 2 },
+    annotations: userEvent
   });
 }

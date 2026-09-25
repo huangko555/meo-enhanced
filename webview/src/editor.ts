@@ -1,4 +1,4 @@
-import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type ChangeSpec, type EditorSelection, type Extension, type SelectionRange, type Text } from '@codemirror/state';
+import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type Annotation, type ChangeSpec, type EditorSelection, type Extension, type SelectionRange, type Text } from '@codemirror/state';
 import { EditorView, keymap, highlightActiveLine, lineNumbers, highlightActiveLineGutter, Decoration, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
@@ -1274,12 +1274,13 @@ export function createEditor({
   };
 
   const dispatchSelectedListFormatChanges = (
-    changes: ChangeSpec[]
+    changes: ChangeSpec[],
+    userEvent: Annotation<string>
   ): void => {
     if (!changes.length) {
       return;
     }
-    view.dispatch({ changes });
+    view.dispatch({ changes, annotations: userEvent });
   };
 
   const isSearchMatchSelection = (from: number, to: number) => {
@@ -3294,6 +3295,7 @@ export function createEditor({
         return insertFormatInActiveTableInput(activeTableInput, action);
       }
 
+      const userEvent = Transaction.userEvent.of('input.toolbar');
       const { state } = view;
       const selection = state.selection.main;
       let cachedInlineSelection: InlineSelectionRange | null = null;
@@ -3322,44 +3324,45 @@ export function createEditor({
           insert = '- [ ] ';
           break;
         case 'codeBlock':
-          return insertCodeBlock(view, selection);
+          return insertCodeBlock(view, selection, userEvent);
         case 'inlineCode':
-          return insertInlineCode(view, inlineSelection());
+          return insertInlineCode(view, inlineSelection(), userEvent);
         case 'kbd':
-          return insertKbd(view, inlineSelection());
+          return insertKbd(view, inlineSelection(), userEvent);
         case 'underline':
-          return insertUnderline(view, inlineSelection());
+          return insertUnderline(view, inlineSelection(), userEvent);
         case 'bold':
-          return insertInlineFence(view, inlineSelection(), '**');
+          return insertInlineFence(view, inlineSelection(), '**', userEvent);
         case 'italic':
-          return insertInlineFence(view, inlineSelection(), '*');
+          return insertInlineFence(view, inlineSelection(), '*', userEvent);
         case 'lineover':
         case 'strike':
-          return insertInlineFence(view, inlineSelection(), '~~');
+          return insertInlineFence(view, inlineSelection(), '~~', userEvent);
         case 'highlight':
-          return insertInlineFence(view, inlineSelection(), '==');
+          return insertInlineFence(view, inlineSelection(), '==', userEvent);
         case 'quote':
-          return insertQuote(view, selection);
+          return insertQuote(view, selection, userEvent);
         case 'hr':
-          return insertHr(view, selection);
+          return insertHr(view, selection, userEvent);
         case 'table':
           return insertTable(
             view,
             selection,
             typeof level === 'object' ? level.cols : undefined,
-            typeof level === 'object' ? level.rows : undefined
+            typeof level === 'object' ? level.rows : undefined,
+            userEvent
           );
         case 'link':
-          return insertLink(view, inlineSelection());
+          return insertLink(view, inlineSelection(), userEvent);
         case 'wikiLink':
-          return insertWikiLink(view, inlineSelection());
+          return insertWikiLink(view, inlineSelection(), userEvent);
         case 'image':
-          return insertImage(view, inlineSelection());
+          return insertImage(view, inlineSelection(), userEvent);
       }
 
       if (!selection.empty && (action === 'bulletList' || action === 'numberedList')) {
         const changes = buildListFormatChangesForSelection(state, insert);
-        dispatchSelectedListFormatChanges(changes);
+        dispatchSelectedListFormatChanges(changes, userEvent);
         return;
       }
 
@@ -3375,7 +3378,8 @@ export function createEditor({
 
       view.dispatch({
         changes: { from: contentStart, to: contentStart + oldMarkerLen, insert },
-        selection: { anchor: newCursorPos }
+        selection: { anchor: newCursorPos },
+        annotations: userEvent
       });
     },
     getHeadings() {
@@ -3906,7 +3910,11 @@ function normalizeLiveInlineSelectionForListContent(
   return { from, to, anchor: to, head: from, empty: false };
 }
 
-function insertInlineCode(view: EditorView, selection: InlineSelectionRange | SelectionRange): void {
+function insertInlineCode(
+  view: EditorView,
+  selection: InlineSelectionRange | SelectionRange,
+  userEvent: Annotation<string>
+): void {
   const { state } = view;
 
   if (!selection.empty) {
@@ -3919,7 +3927,8 @@ function insertInlineCode(view: EditorView, selection: InlineSelectionRange | Se
     const insert = `\`${selectedText}\``;
     view.dispatch({
       changes: { from, to, insert },
-      selection: { anchor: from + insert.length }
+      selection: { anchor: from + insert.length },
+      annotations: userEvent
     });
     return;
   }
@@ -3927,7 +3936,8 @@ function insertInlineCode(view: EditorView, selection: InlineSelectionRange | Se
   const insert = '``';
   view.dispatch({
     changes: { from: selection.from, insert },
-    selection: { anchor: selection.from + 1 }
+    selection: { anchor: selection.from + 1 },
+    annotations: userEvent
   });
 }
 
@@ -3935,7 +3945,8 @@ function toggleInlineWrapper(
   view: EditorView,
   selection: InlineSelectionRange | SelectionRange,
   openMarker: string,
-  closeMarker = openMarker
+  closeMarker: string,
+  userEvent: Annotation<string>
 ): void {
   const { state } = view;
 
@@ -3943,7 +3954,8 @@ function toggleInlineWrapper(
     const insert = `${openMarker}${closeMarker}`;
     view.dispatch({
       changes: { from: selection.from, insert },
-      selection: { anchor: selection.from + openMarker.length }
+      selection: { anchor: selection.from + openMarker.length },
+      annotations: userEvent
     });
     return;
   }
@@ -3967,7 +3979,8 @@ function toggleInlineWrapper(
       selection: {
         anchor: from - openMarker.length,
         head: to - openMarker.length
-      }
+      },
+      annotations: userEvent
     });
     return;
   }
@@ -3980,12 +3993,17 @@ function toggleInlineWrapper(
     selection: {
       anchor: from + openMarker.length,
       head: to + openMarker.length
-    }
+    },
+    annotations: userEvent
   });
 }
 
-function insertKbd(view: EditorView, selection: InlineSelectionRange | SelectionRange): void {
-  return toggleInlineWrapper(view, selection, '<kbd>', '</kbd>');
+function insertKbd(
+  view: EditorView,
+  selection: InlineSelectionRange | SelectionRange,
+  userEvent: Annotation<string>
+): void {
+  return toggleInlineWrapper(view, selection, '<kbd>', '</kbd>', userEvent);
 }
 
 const changedCodeMirrorDocumentRange = (before: Text, after: Text): { from: number; to: number } | null => {
@@ -4010,15 +4028,28 @@ const changedCodeMirrorDocumentRange = (before: Text, after: Text): { from: numb
   return { from, to: after.length - suffixLow };
 };
 
-function insertUnderline(view: EditorView, selection: InlineSelectionRange | SelectionRange): void {
-  return toggleInlineWrapper(view, selection, '<u>', '</u>');
+function insertUnderline(
+  view: EditorView,
+  selection: InlineSelectionRange | SelectionRange,
+  userEvent: Annotation<string>
+): void {
+  return toggleInlineWrapper(view, selection, '<u>', '</u>', userEvent);
 }
 
-function insertInlineFence(view: EditorView, selection: InlineSelectionRange | SelectionRange, marker: string): void {
-  return toggleInlineWrapper(view, selection, marker);
+function insertInlineFence(
+  view: EditorView,
+  selection: InlineSelectionRange | SelectionRange,
+  marker: string,
+  userEvent: Annotation<string>
+): void {
+  return toggleInlineWrapper(view, selection, marker, marker, userEvent);
 }
 
-function insertQuote(view: EditorView, selection: InlineSelectionRange | SelectionRange): void {
+function insertQuote(
+  view: EditorView,
+  selection: InlineSelectionRange | SelectionRange,
+  userEvent: Annotation<string>
+): void {
   const { state } = view;
   const line = state.doc.lineAt(selection.from);
   const lineText = state.doc.sliceString(line.from, line.to);
@@ -4035,11 +4066,16 @@ function insertQuote(view: EditorView, selection: InlineSelectionRange | Selecti
 
   view.dispatch({
     changes: { from: contentStart, insert },
-    selection: { anchor: contentStart + insert.length + cursorOffset }
+    selection: { anchor: contentStart + insert.length + cursorOffset },
+    annotations: userEvent
   });
 }
 
-function insertHr(view: EditorView, selection: InlineSelectionRange | SelectionRange): void {
+function insertHr(
+  view: EditorView,
+  selection: InlineSelectionRange | SelectionRange,
+  userEvent: Annotation<string>
+): void {
   const { state } = view;
   const line = state.doc.lineAt(selection.from);
   const lineText = state.doc.sliceString(line.from, line.to);
@@ -4050,19 +4086,25 @@ function insertHr(view: EditorView, selection: InlineSelectionRange | SelectionR
     const cursorPos = line.from + insert.length;
     view.dispatch({
       changes: { from: line.from, to: line.to, insert },
-      selection: { anchor: cursorPos }
+      selection: { anchor: cursorPos },
+      annotations: userEvent
     });
   } else {
     const insert = '\n---';
     const cursorPos = line.to + insert.length;
     view.dispatch({
       changes: { from: line.to, insert },
-      selection: { anchor: cursorPos }
+      selection: { anchor: cursorPos },
+      annotations: userEvent
     });
   }
 }
 
-function insertLink(view: EditorView, selection: InlineSelectionRange | SelectionRange): void {
+function insertLink(
+  view: EditorView,
+  selection: InlineSelectionRange | SelectionRange,
+  userEvent: Annotation<string>
+): void {
   const { state } = view;
 
   if (!selection.empty) {
@@ -4075,7 +4117,8 @@ function insertLink(view: EditorView, selection: InlineSelectionRange | Selectio
     const insert = `[${selectedText}]()`;
     view.dispatch({
       changes: { from, to, insert },
-      selection: { anchor: from + insert.length - 1 }
+      selection: { anchor: from + insert.length - 1 },
+      annotations: userEvent
     });
     return;
   }
@@ -4083,11 +4126,16 @@ function insertLink(view: EditorView, selection: InlineSelectionRange | Selectio
   const insert = '[]()';
   view.dispatch({
     changes: { from: selection.from, insert },
-    selection: { anchor: selection.from + 3 }
+    selection: { anchor: selection.from + 3 },
+    annotations: userEvent
   });
 }
 
-function insertImage(view: EditorView, selection: InlineSelectionRange | SelectionRange): void {
+function insertImage(
+  view: EditorView,
+  selection: InlineSelectionRange | SelectionRange,
+  userEvent: Annotation<string>
+): void {
   const { state } = view;
 
   if (!selection.empty) {
@@ -4100,7 +4148,8 @@ function insertImage(view: EditorView, selection: InlineSelectionRange | Selecti
     const insert = `![${selectedText}]()`;
     view.dispatch({
       changes: { from, to, insert },
-      selection: { anchor: from + insert.length - 1 }
+      selection: { anchor: from + insert.length - 1 },
+      annotations: userEvent
     });
     return;
   }
@@ -4108,11 +4157,16 @@ function insertImage(view: EditorView, selection: InlineSelectionRange | Selecti
   const insert = '![]()';
   view.dispatch({
     changes: { from: selection.from, insert },
-    selection: { anchor: selection.from + 4 }
+    selection: { anchor: selection.from + 4 },
+    annotations: userEvent
   });
 }
 
-function insertWikiLink(view: EditorView, selection: InlineSelectionRange | SelectionRange): void {
+function insertWikiLink(
+  view: EditorView,
+  selection: InlineSelectionRange | SelectionRange,
+  userEvent: Annotation<string>
+): void {
   const { state } = view;
 
   if (!selection.empty) {
@@ -4125,7 +4179,8 @@ function insertWikiLink(view: EditorView, selection: InlineSelectionRange | Sele
     const insert = `[[${selectedText}]]`;
     view.dispatch({
       changes: { from, to, insert },
-      selection: { anchor: from + insert.length }
+      selection: { anchor: from + insert.length },
+      annotations: userEvent
     });
     return;
   }
@@ -4133,7 +4188,8 @@ function insertWikiLink(view: EditorView, selection: InlineSelectionRange | Sele
   const insert = '[[]]';
   view.dispatch({
     changes: { from: selection.from, insert },
-    selection: { anchor: selection.from + 2 }
+    selection: { anchor: selection.from + 2 },
+    annotations: userEvent
   });
 }
 
