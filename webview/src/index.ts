@@ -1133,7 +1133,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
     label.textContent = strings[labelKey];
   }
   previewFormatGroup.setAttribute('aria-label', strings.previewTools);
-  sourcePreviewMoreButton.textContent = strings.sidePreviewMore;
+  sourcePreviewMoreButton.title = strings.sidePreviewMore;
   sourcePreviewMoreButton.setAttribute('aria-label', strings.sidePreviewMore);
   sourcePreviewMorePanel.setAttribute('aria-label', strings.previewTools);
   moreToolsButton.title = strings.more;
@@ -1323,17 +1323,23 @@ rightGroup.insertBefore(sourcePreviewButton, changesControls);
 
 const sourcePreviewScrollSyncButton = document.createElement('button');
 sourcePreviewScrollSyncButton.type = 'button';
-sourcePreviewScrollSyncButton.className = 'format-button source-preview-scroll-sync-button';
+sourcePreviewScrollSyncButton.className = 'format-button source-preview-tool-button source-preview-scroll-sync-button';
 sourcePreviewScrollSyncButton.setAttribute('aria-pressed', 'true');
 const sourcePreviewTools = document.createElement('div');
 sourcePreviewTools.className = 'source-preview-tools';
 const sourcePreviewMoreButton = document.createElement('button');
 sourcePreviewMoreButton.type = 'button';
-sourcePreviewMoreButton.className = 'source-preview-more-button';
-sourcePreviewMoreButton.textContent = activeUiStrings.sidePreviewMore;
+sourcePreviewMoreButton.className = 'format-button source-preview-tool-button source-preview-more-button';
+sourcePreviewMoreButton.title = activeUiStrings.sidePreviewMore;
 sourcePreviewMoreButton.setAttribute('aria-label', activeUiStrings.sidePreviewMore);
 sourcePreviewMoreButton.setAttribute('aria-haspopup', 'dialog');
 sourcePreviewMoreButton.setAttribute('aria-expanded', 'false');
+sourcePreviewMoreButton.append(createElement(Ellipsis, {
+  width: 14,
+  height: 14,
+  'aria-hidden': 'true',
+  'data-icon': 'ellipsis'
+}));
 const sourcePreviewMorePanel = document.createElement('div');
 sourcePreviewMorePanel.id = 'source-preview-more-panel';
 sourcePreviewMorePanel.className = 'source-preview-more-panel';

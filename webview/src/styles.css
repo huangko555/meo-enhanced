@@ -5979,7 +5979,7 @@ body.outline-resizing .preview-frame {
   display: flex;
 }
 
-.source-preview-scroll-sync-button {
+.source-preview-tool-button {
   position: static;
   display: flex;
   width: 20px;
@@ -5994,41 +5994,18 @@ body.outline-resizing .preview-frame {
   cursor: pointer;
 }
 
-.source-preview-scroll-sync-button:hover,
-.source-preview-scroll-sync-button:focus-visible {
+.source-preview-tool-button:hover,
+.source-preview-tool-button:focus-visible {
   background-color: color-mix(in srgb, var(--meo-background) 80%, var(--meo-foreground) 20%);
 }
 
-.source-preview-scroll-sync-button:active {
+.source-preview-tool-button:active {
   background-color: color-mix(in srgb, var(--meo-background) 72%, var(--meo-foreground) 28%);
 }
 
-.source-preview-scroll-sync-button svg {
+.source-preview-tool-button svg {
   opacity: 0.8;
   pointer-events: none;
-}
-
-.source-preview-more-button {
-  padding: 3px 7px;
-  border: 1px solid color-mix(in srgb, var(--meo-foreground) 22%, transparent);
-  border-radius: 7px;
-  color: var(--meo-foreground);
-  background: var(--meo-background);
-  font: inherit;
-  font-size: 11px;
-  white-space: nowrap;
-  box-shadow: 0 2px 6px rgb(0 0 0 / 16%);
-  cursor: pointer;
-}
-
-.source-preview-more-button:hover,
-.source-preview-more-button:focus-visible {
-  background: color-mix(in srgb, var(--meo-background) 80%, var(--meo-foreground) 20%);
-}
-
-.source-preview-more-button:focus-visible {
-  outline: 1px solid var(--vscode-focusBorder, currentColor);
-  outline-offset: 1px;
 }
 
 .source-preview-more-panel {

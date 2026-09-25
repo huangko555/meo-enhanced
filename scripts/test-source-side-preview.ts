@@ -243,13 +243,19 @@ try {
       rows: Array.from(panel.children, child => child.querySelector('.preview-select-label')?.textContent),
       hasExport: !!panel.querySelector('.preview-export-control'),
       belowSync: more.getBoundingClientRect().top >= sync.getBoundingClientRect().bottom,
+      icon: more.querySelector('svg')?.getAttribute('data-icon'),
+      text: more.textContent,
+      size: { width: more.getBoundingClientRect().width, height: more.getBoundingClientRect().height },
+      borderRadius: getComputedStyle(more).borderRadius,
       controlsVisible: Array.from(panel.children, child => (child as HTMLElement).offsetParent !== null)
     };
   });
   assert.deepEqual(sideTools, {
     expanded: 'true', open: true,
     rows: ['Font', 'Preview theme', 'Code color', 'Show comments'],
-    hasExport: false, belowSync: true, controlsVisible: [true, true, true, true]
+    hasExport: false, belowSync: true, icon: 'ellipsis', text: '',
+    size: { width: 20, height: 20 }, borderRadius: '50%',
+    controlsVisible: [true, true, true, true]
   });
   await page.click('.source-preview-more-button');
   assert.equal(await page.$eval('.source-preview-more-panel', panel => (panel as HTMLElement).hidden), true);
