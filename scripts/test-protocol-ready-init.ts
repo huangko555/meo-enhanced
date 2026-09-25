@@ -784,6 +784,11 @@ assert.equal(decodeHostConfigurationEvent({ type: 'themeChanged', theme: {}, cod
 assert.equal(decodeHostConfigurationEvent({ type: 'shikiCodeBlocksChanged', enabled: true, codeTheme }), null);
 assert.deepEqual(decodeHostConfigurationEvent({ type: 'toggleMode' }), { type: 'toggleMode' });
 assert.deepEqual(
+  decodeHostToWebviewMessage({ type: 'developmentStylesChanged', css: '.mode-group { color: red; }' }),
+  { type: 'developmentStylesChanged', css: '.mode-group { color: red; }' }
+);
+assert.equal(decodeHostToWebviewMessage({ type: 'developmentStylesChanged', css: 42 }), null);
+assert.deepEqual(
   decodeHostConfigurationEvent({ type: 'largeDocumentOptimizationChanged', enabled: false }),
   { type: 'largeDocumentOptimizationChanged', enabled: false }
 );

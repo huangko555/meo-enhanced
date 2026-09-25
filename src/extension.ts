@@ -189,6 +189,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const provider = new MarkdownWebviewProvider(context, agentReviewHandoff, appearanceSettings);
   void provider.initializeGitWatcher();
+  provider.initializeDevelopmentStyleWatcher();
 
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(VIEW_TYPE, provider, {
@@ -390,6 +391,30 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     }
   }
 
+  initializeDevelopmentStyleWatcher(): void {
+    if (this.context.extensionMode !== vscode.ExtensionMode.Development) return;
+
+    const stylesDirectory = vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'src');
+    const stylesUri = vscode.Uri.joinPath(stylesDirectory, 'styles.css');
+    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(stylesDirectory, 'styles.css'));
+    let refreshGeneration = 0;
+    const refresh = async (): Promise<void> => {
+      const generation = ++refreshGeneration;
+      try {
+        const css = Buffer.from(await vscode.workspace.fs.readFile(stylesUri)).toString('utf8');
+        if (generation !== refreshGeneration) return;
+        this.broadcast({ type: 'developmentStylesChanged', css });
+      } catch (error) {
+        console.warn('[MEO] Could not refresh development styles.', error);
+      }
+    };
+    this.context.subscriptions.push(
+      watcher,
+      watcher.onDidChange(() => { void refresh(); }),
+      watcher.onDidCreate(() => { void refresh(); })
+    );
+  }
+
   async exportActiveDocument(format: ExportFormat): Promise<void> {
     const session = this.getActiveSession();
     if (!session) {
@@ -523,9 +548,13 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
 
     const documentUri = resolveWorktreeUri(document);
     const distRoot = vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist');
+    const developmentStylesRoot = vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'src');
     panel.webview.options = {
       enableScripts: true,
-      localResourceRoots: collectLocalResourceRoots(distRoot, documentUri, document.getText())
+      localResourceRoots: [
+        ...collectLocalResourceRoots(distRoot, documentUri, document.getText()),
+        ...(this.context.extensionMode === vscode.ExtensionMode.Development ? [developmentStylesRoot] : [])
+      ]
     };
 
     const controller = createPanelSessionController({
@@ -870,8 +899,11 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     const scriptUri = webview
       .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'index.js'))
       .toString();
+    const stylesPath = this.context.extensionMode === vscode.ExtensionMode.Development
+      ? ['webview', 'src', 'styles.css']
+      : ['webview', 'dist', 'index.css'];
     const styleUri = webview
-      .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'index.css'))
+      .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, ...stylesPath))
       .toString();
     const katexStyleUri = webview
       .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'katex', 'katex-embedded.css'))

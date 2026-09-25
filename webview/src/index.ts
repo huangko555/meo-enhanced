@@ -3043,6 +3043,17 @@ window.addEventListener('message', (event) => {
     return;
   }
 
+  if (message.type === 'developmentStylesChanged') {
+    let style = document.getElementById('meo-development-styles');
+    if (!(style instanceof HTMLStyleElement)) {
+      style = document.createElement('style');
+      style.id = 'meo-development-styles';
+      document.head.append(style);
+    }
+    style.textContent = message.css;
+    return;
+  }
+
   if (message.type === 'init') {
     acknowledgeReadyHandshake();
     withMessageErrorBoundary('init handler', () => {

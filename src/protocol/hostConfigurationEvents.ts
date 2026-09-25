@@ -7,6 +7,7 @@ export type CodeThemeDto = {
 
 export type HostConfigurationEvent =
   | { readonly type: 'toggleMode' }
+  | { readonly type: 'developmentStylesChanged'; readonly css: string }
   | { readonly type: 'largeDocumentOptimizationChanged'; readonly enabled: boolean }
   | { readonly type: 'tableStickyHeaderChanged'; readonly enabled: boolean }
   | { readonly type: 'restoreReadingPositionOnOpenChanged'; readonly enabled: boolean }
@@ -44,6 +45,8 @@ export function decodeHostConfigurationEvent(value: unknown): HostConfigurationE
   switch (value.type) {
     case 'toggleMode':
       return { type: 'toggleMode' };
+    case 'developmentStylesChanged':
+      return typeof value.css === 'string' ? { type: 'developmentStylesChanged', css: value.css } : null;
     case 'largeDocumentOptimizationChanged':
     case 'tableStickyHeaderChanged':
     case 'restoreReadingPositionOnOpenChanged':
