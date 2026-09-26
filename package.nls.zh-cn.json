@@ -20,6 +20,7 @@
   "config.preview.sourceColoring": "默认在 Preview 与导出中使用代码语法颜色。",
   "config.preview.showComments": "在 Preview 和导出中显示 HTML 注释。",
   "config.appearance.strongColoring": "在 Live 模式中为 Markdown 粗体文字着色。",
+  "config.appearance.boldHeadings": "在实时和源码模式中将标题显示为粗体；预览模式使用固定的标题样式。",
   "config.fontSize.auto": "跟随 VS Code 编辑器字号。",
   "config.fontSize.custom": "使用自定义内容字号。",
   "config.fontSize.mode": "选择编辑器内容跟随 VS Code 字号或使用自定义字号。",

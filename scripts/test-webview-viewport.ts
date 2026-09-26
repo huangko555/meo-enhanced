@@ -661,6 +661,36 @@ async function main() {
     if (JSON.stringify(restoredStickyHeaderSetting) !== JSON.stringify([true, 'true'])) {
       throw new Error(`Sticky table header host update was not applied: ${JSON.stringify(restoredStickyHeaderSetting)}`);
     }
+    const boldHeadingSetting = await page.evaluate(() => {
+      const messages = (window as typeof window & { __hostMessages?: Array<Record<string, unknown>> })
+        .__hostMessages ?? [];
+      const button = document.querySelector<HTMLButtonElement>('[data-action="boldHeadings"]')!;
+      button.click();
+      return {
+        active: button.classList.contains('is-active'),
+        checked: button.getAttribute('aria-checked'),
+        weight: document.documentElement.style.getPropertyValue('--meo-editor-heading-weight'),
+        message: messages.at(-1)
+      };
+    });
+    if (JSON.stringify(boldHeadingSetting) !== JSON.stringify({
+      active: false,
+      checked: 'false',
+      weight: '400',
+      message: { type: 'setBoldHeadings', enabled: false }
+    })) {
+      throw new Error(`Bold heading setting did not post its disabled state: ${JSON.stringify(boldHeadingSetting)}`);
+    }
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'boldHeadingsChanged', enabled: true }
+    })));
+    const restoredBoldHeadingSetting = await page.$eval<HTMLElement, [boolean, string | null]>(
+      '[data-action="boldHeadings"]',
+      (button) => [button.classList.contains('is-active'), button.getAttribute('aria-checked')]
+    );
+    if (JSON.stringify(restoredBoldHeadingSetting) !== JSON.stringify([true, 'true'])) {
+      throw new Error(`Bold heading host update was not applied: ${JSON.stringify(restoredBoldHeadingSetting)}`);
+    }
     const recentSaveHeaders = await page.evaluate(() => {
       const read = () => {
         const header = document.querySelector<HTMLElement>('.changes-review-header')!;
@@ -848,7 +878,7 @@ async function main() {
     });
     if (
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
-        '显示行号', '折叠长代码块', '限制宽度', '粗体文字着色',
+        '显示行号', '折叠长代码块', '限制宽度', '粗体文字着色', '标题加粗',
         '表格浮动表头', '恢复阅读位置', '快速打开大文档'
       ]) ||
       moreToolsLayout.topHeading !== '文档显示' ||
@@ -1548,6 +1578,47 @@ async function main() {
       ));
       if (persistedMode !== mode) {
         throw new Error(`Webview did not persist ${mode} mode: ${persistedMode}`);
+      }
+      await page.evaluate(() => {
+        const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+        scroller.scrollTop = scroller.scrollHeight * (77 / 280);
+      });
+      await waitForFrames(page, 3);
+      const readHeadingWeight = () => page.evaluate(() => {
+        const line = Array.from(document.querySelectorAll<HTMLElement>('.editor-host .cm-line'))
+          .find((element) => element.textContent?.includes('Short Mermaid'));
+        if (!line) return null;
+        return {
+          headingWeightVariable: getComputedStyle(line).getPropertyValue('--meo-heading-token-weight').trim(),
+          line: getComputedStyle(line).fontWeight,
+          spans: Array.from(line.querySelectorAll('span')).map((span) => getComputedStyle(span).fontWeight)
+        };
+      });
+      const before = await readHeadingWeight();
+      await page.evaluate(() => document.querySelector<HTMLButtonElement>('[data-action="boldHeadings"]')!.click());
+      await waitForFrames(page, 2);
+      const off = await readHeadingWeight();
+      await page.evaluate(() => document.querySelector<HTMLButtonElement>('[data-action="boldHeadings"]')!.click());
+      await waitForFrames(page, 2);
+      const restored = await readHeadingWeight();
+      const headingWeights = { before, off, restored };
+      if (
+        !before || !off || !restored
+        || before.headingWeightVariable !== '700'
+        || off.headingWeightVariable !== '400'
+        || restored.headingWeightVariable !== '700'
+        || (mode === 'live' && (
+          before.line !== '700'
+          || off.line !== '400'
+          || restored.line !== '700'
+        ))
+        || (mode === 'source' && (
+          before.spans.at(-1) !== '700'
+          || off.spans.at(-1) !== '400'
+          || restored.spans.at(-1) !== '700'
+        ))
+      ) {
+        throw new Error(`${mode} heading weight did not follow the setting: ${JSON.stringify(headingWeights)}`);
       }
       const headingFoldControls = await page.evaluate(() => ({
         gutterCount: document.querySelectorAll('.meo-md-fold-gutter').length,

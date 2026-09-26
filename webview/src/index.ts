@@ -224,6 +224,7 @@ let gitBaselineState: GitBaselinePayload | null = null;
 let changesReviewMode: 'live' | 'source' | 'preview' = 'live';
 let contentMaxWidthEnabled = false;
 let liveStrongColoring = false;
+let boldHeadingsEnabled = true;
 let largeDocumentOptimizationEnabled = true;
 let tableStickyHeaderEnabled = true;
 let restoreReadingPositionOnOpen = true;
@@ -305,6 +306,14 @@ liveStrongColoringBtn.dataset.action = 'liveStrongColoring';
 liveStrongColoringBtn.setAttribute('role', 'menuitemcheckbox');
 liveStrongColoringBtn.setAttribute('aria-checked', 'false');
 appendMoreToolsOptionContent(liveStrongColoringBtn, Bold, activeUiStrings.strongColoring);
+
+const boldHeadingsBtn = document.createElement('button');
+boldHeadingsBtn.type = 'button';
+boldHeadingsBtn.className = 'more-tools-option more-tools-toggle-option is-active';
+boldHeadingsBtn.dataset.action = 'boldHeadings';
+boldHeadingsBtn.setAttribute('role', 'menuitemcheckbox');
+boldHeadingsBtn.setAttribute('aria-checked', 'true');
+appendMoreToolsOptionContent(boldHeadingsBtn, Heading, activeUiStrings.boldHeadings);
 
 const sourceLineNumbersBtn = document.createElement('button');
 sourceLineNumbersBtn.type = 'button';
@@ -458,6 +467,23 @@ const setLiveStrongColoring = (enabled: boolean, { post = true }: PostUpdateOpti
   liveStrongColoringBtn.classList.toggle('is-active', liveStrongColoring);
   liveStrongColoringBtn.setAttribute('aria-checked', liveStrongColoring ? 'true' : 'false');
   if (post && changed) vscode.postMessage({ type: 'setLiveStrongColoring', enabled: liveStrongColoring });
+};
+
+const setBoldHeadingsEnabled = (enabled: boolean, { post = true }: PostUpdateOptions = {}) => {
+  const nextEnabled = enabled === true;
+  const changed = nextEnabled !== boldHeadingsEnabled;
+  boldHeadingsEnabled = nextEnabled;
+  const mutate = () => document.documentElement.style.setProperty(
+    '--meo-editor-heading-weight', nextEnabled ? '700' : '400'
+  );
+  if (changed && editor?.preserveViewport && getActiveEditorMode() !== 'preview') {
+    editor.preserveViewport(mutate, true);
+  } else {
+    mutate();
+  }
+  boldHeadingsBtn.classList.toggle('is-active', nextEnabled);
+  boldHeadingsBtn.setAttribute('aria-checked', nextEnabled ? 'true' : 'false');
+  if (post && changed) vscode.postMessage({ type: 'setBoldHeadings', enabled: nextEnabled });
 };
 
 const setLargeDocumentOptimizationEnabled = (
@@ -1107,6 +1133,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   contentMaxWidthBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.constrainWidth;
   sourceLineNumbersBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.showLineNumbers;
   liveStrongColoringBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.strongColoring;
+  boldHeadingsBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.boldHeadings;
   longCodeBlockFoldingBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.foldLongCodeBlocks;
   largeDocumentOptimizationBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.largeDocumentStartup;
   largeDocumentOptimizationBtn.querySelector<HTMLElement>('.more-tools-option-tooltip')!.textContent = strings.largeDocumentStartupDescription;
@@ -1212,6 +1239,7 @@ moreToolsPanel.append(
   longCodeBlockFoldingBtn,
   contentMaxWidthBtn,
   liveStrongColoringBtn,
+  boldHeadingsBtn,
   tableStickyHeaderBtn,
   openingDocumentsHeading,
   restoreReadingPositionBtn,
@@ -2918,6 +2946,7 @@ const handleInit = (message: InitMessage) => {
   longCodeBlockFoldingBtn.setAttribute('aria-checked', longCodeBlockFoldingEnabled ? 'true' : 'false');
   setTableStickyHeaderEnabled(message.tableStickyHeaderEnabled, { post: false });
   setLiveStrongColoring(message.liveStrongColoring, { post: false });
+  setBoldHeadingsEnabled(message.boldHeadingsEnabled, { post: false });
   setLargeDocumentOptimizationEnabled(message.largeDocumentOptimizationEnabled, { post: false });
   setRestoreReadingPositionOnOpen(message.restoreReadingPositionOnOpen, { post: false });
   readingPositionLifecycle?.start({
@@ -3172,6 +3201,11 @@ window.addEventListener('message', (event) => {
 
   if (message.type === 'tableStickyHeaderChanged') {
     setTableStickyHeaderEnabled(message.enabled, { post: false });
+    return;
+  }
+
+  if (message.type === 'boldHeadingsChanged') {
+    setBoldHeadingsEnabled(message.enabled, { post: false });
     return;
   }
 
@@ -3551,6 +3585,9 @@ contentMaxWidthBtn.addEventListener('click', () => {
 });
 liveStrongColoringBtn.addEventListener('click', () => {
   setLiveStrongColoring(!liveStrongColoring);
+});
+boldHeadingsBtn.addEventListener('click', () => {
+  setBoldHeadingsEnabled(!boldHeadingsEnabled);
 });
 sourceLineNumbersBtn.addEventListener('click', () => {
   const nextMode = pendingSourceLineNumbers === 'off' ? previousVisibleSourceLineNumbers : 'off';

@@ -20,6 +20,7 @@
   "config.preview.sourceColoring": "Use syntax colors for code in Preview and exports by default.",
   "config.preview.showComments": "Show HTML comments in Preview and exports.",
   "config.appearance.strongColoring": "Color bold Markdown text in Live mode.",
+  "config.appearance.boldHeadings": "Show headings in bold in Live and Source modes. Preview uses its own fixed heading style.",
   "config.fontSize.auto": "Follow the VS Code editor font size.",
   "config.fontSize.custom": "Use a custom content font size.",
   "config.fontSize.mode": "Choose whether editor content follows the VS Code font size or uses a custom size.",

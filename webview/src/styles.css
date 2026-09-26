@@ -50,6 +50,7 @@
   --meo-heading-5-weight: 400;
   --meo-heading-6-weight: 400;
   --meo-heading-token-weight: 400;
+  --meo-editor-heading-weight: 700;
   --meo-active-editor-font: var(--vscode-editor-font-family);
   --meo-active-editor-font-weight: var(--vscode-editor-font-weight);
   --meo-active-editor-font-size: var(--vscode-editor-font-size, 13px);
@@ -2526,7 +2527,13 @@ button:focus-visible > .menu-switch {
   --meo-heading-token-weight: var(--meo-heading-6-weight);
 }
 
+.cm-editor.meo-mode-source,
+.cm-editor.meo-mode-source .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) {
+  --meo-heading-token-weight: var(--meo-editor-heading-weight);
+}
+
 .cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) {
+  --meo-heading-token-weight: var(--meo-editor-heading-weight);
   font-weight: var(--meo-heading-token-weight);
   color: var(--meo-semantic-headingForeground, #79b8ff);
   -webkit-text-fill-color: var(--meo-semantic-headingForeground, #79b8ff);

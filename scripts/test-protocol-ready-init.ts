@@ -41,6 +41,7 @@ const completeInit = {
   previewSourceColoring: true,
   previewShowComments: false,
   liveStrongColoring: false,
+  boldHeadingsEnabled: true,
   editorAppearance: 'dark' as const,
   editorFontSizeMode: 'auto' as const,
   editorFontSize: 14,
@@ -78,6 +79,9 @@ assert.equal(decodeInitMessage({ ...completeInit, version: -1 }), null);
 assert.equal(decodeInitMessage({ ...completeInit, previewSourceColoring: undefined }), null);
 assert.equal(decodeInitMessage({ ...completeInit, liveStrongColoring: undefined })?.liveStrongColoring, false);
 assert.equal(decodeInitMessage({ ...completeInit, liveStrongColoring: 'yes' }), null);
+assert.equal(decodeInitMessage({ ...completeInit, boldHeadingsEnabled: undefined })?.boldHeadingsEnabled, true);
+assert.equal(decodeInitMessage({ ...completeInit, boldHeadingsEnabled: false })?.boldHeadingsEnabled, false);
+assert.equal(decodeInitMessage({ ...completeInit, boldHeadingsEnabled: 'yes' }), null);
 assert.equal(decodeInitMessage({ ...completeInit, previewShowComments: undefined })?.previewShowComments, false);
 assert.equal(decodeInitMessage({ ...completeInit, previewShowComments: 'yes' }), null);
 assert.equal(decodeInitMessage({ ...completeInit, editorFontSizeMode: 'invalid' }), null);
@@ -174,6 +178,11 @@ assert.deepEqual(
   decodeWebviewToHostMessage({ type: 'setLiveStrongColoring', enabled: true }),
   { type: 'setLiveStrongColoring', enabled: true }
 );
+assert.deepEqual(
+  decodeWebviewToHostMessage({ type: 'setBoldHeadings', enabled: false }),
+  { type: 'setBoldHeadings', enabled: false }
+);
+assert.equal(decodeWebviewToHostMessage({ type: 'setBoldHeadings', enabled: 'no' }), null);
 assert.deepEqual(
   decodeWebviewToHostMessage({ type: 'exportDocument', format: 'docx', includeTableOfContents: true }),
   { type: 'exportDocument', format: 'docx', includeTableOfContents: true }
@@ -706,6 +715,7 @@ for (const command of [
   { type: 'setOutlineWidth', width: 240 },
   { type: 'setContentMaxWidth', enabled: true },
   { type: 'setTableStickyHeader', enabled: false },
+  { type: 'setBoldHeadings', enabled: false },
   { type: 'setLargeDocumentOptimization', enabled: false },
   { type: 'setRestoreReadingPositionOnOpen', enabled: false },
   { type: 'setFindOptions', findOptions: { wholeWord: true, caseSensitive: false } },
@@ -796,6 +806,11 @@ assert.deepEqual(
   decodeHostConfigurationEvent({ type: 'tableStickyHeaderChanged', enabled: false }),
   { type: 'tableStickyHeaderChanged', enabled: false }
 );
+assert.deepEqual(
+  decodeHostConfigurationEvent({ type: 'boldHeadingsChanged', enabled: false }),
+  { type: 'boldHeadingsChanged', enabled: false }
+);
+assert.equal(decodeHostConfigurationEvent({ type: 'boldHeadingsChanged', enabled: 'no' }), null);
 assert.deepEqual(
   decodeHostConfigurationEvent({ type: 'restoreReadingPositionOnOpenChanged', enabled: false }),
   { type: 'restoreReadingPositionOnOpenChanged', enabled: false }

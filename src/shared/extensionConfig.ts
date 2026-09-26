@@ -10,6 +10,7 @@ export const DIFF_BASELINE_MODE_SETTING_KEY = 'changes.baseline';
 export const GIT_DIFF_DETAILS_VISIBLE_SETTING_KEY = 'changes.showBeforeContent';
 export const CONTENT_MAX_WIDTH_SETTING_KEY = 'contentMaxWidth.visible';
 export const TABLE_STICKY_HEADER_SETTING_KEY = 'table.stickyHeader';
+export const BOLD_HEADINGS_SETTING_KEY = 'appearance.boldHeadings';
 export const RESTORE_READING_POSITION_SETTING_KEY = 'readingPosition.restoreOnOpen';
 export const LARGE_DOCUMENT_OPTIMIZATION_SETTING_KEY = 'performance.largeDocumentOptimization';
 export const GIT_CHANGES_GUTTER_LEGACY_VISIBLE_SETTING_KEY = 'gitChanges.visibility';
@@ -78,6 +79,12 @@ export function getTableStickyHeaderEnabled(): boolean {
   return vscode.workspace
     .getConfiguration(EXTENSION_CONFIG_SECTION)
     .get<boolean>(TABLE_STICKY_HEADER_SETTING_KEY, true);
+}
+
+export function getBoldHeadingsEnabled(): boolean {
+  return vscode.workspace
+    .getConfiguration(EXTENSION_CONFIG_SECTION)
+    .get<boolean>(BOLD_HEADINGS_SETTING_KEY, true);
 }
 
 export function getRestoreReadingPositionOnOpen(): boolean {

@@ -60,6 +60,7 @@ export type InitMessage = {
   readonly contentMaxWidthEnabled: boolean;
   readonly largeDocumentOptimizationEnabled: boolean;
   readonly tableStickyHeaderEnabled: boolean;
+  readonly boldHeadingsEnabled: boolean;
   readonly restoreReadingPositionOnOpen: boolean;
   readonly readingPositionRestore: ReadingPositionDto | null;
   readonly findOptions: { readonly wholeWord: boolean; readonly caseSensitive: boolean };
@@ -104,6 +105,11 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     ? true
     : isRecord(value) && typeof value.tableStickyHeaderEnabled === 'boolean'
       ? value.tableStickyHeaderEnabled
+      : null;
+  const boldHeadingsEnabled = isRecord(value) && value.boldHeadingsEnabled === undefined
+    ? true
+    : isRecord(value) && typeof value.boldHeadingsEnabled === 'boolean'
+      ? value.boldHeadingsEnabled
       : null;
   const largeDocumentOptimizationEnabled = isRecord(value) && value.largeDocumentOptimizationEnabled === undefined
     ? true
@@ -170,6 +176,7 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || typeof value.contentMaxWidthEnabled !== 'boolean'
     || largeDocumentOptimizationEnabled === null
     || tableStickyHeaderEnabled === null
+    || boldHeadingsEnabled === null
     || restoreReadingPositionOnOpen === null
     || (value.readingPositionRestore !== undefined
       && value.readingPositionRestore !== null
@@ -197,6 +204,7 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     editorFontSize,
     largeDocumentOptimizationEnabled,
     tableStickyHeaderEnabled,
+    boldHeadingsEnabled,
     restoreReadingPositionOnOpen,
     readingPositionRestore
   } as InitMessage;

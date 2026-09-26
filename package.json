@@ -227,6 +227,12 @@
           "order": 6,
           "description": "%config.appearance.strongColoring%"
         },
+        "meoEnhanced.appearance.boldHeadings": {
+          "type": "boolean",
+          "default": true,
+          "order": 7,
+          "description": "%config.appearance.boldHeadings%"
+        },
         "meoEnhanced.appearance.fontSizeMode": {
           "type": "string",
           "enum": [
@@ -238,7 +244,7 @@
             "%config.fontSize.custom%"
           ],
           "default": "auto",
-          "order": 7,
+          "order": 8,
           "description": "%config.fontSize.mode%"
         },
         "meoEnhanced.appearance.fontSize": {
@@ -246,7 +252,7 @@
           "default": 14,
           "minimum": 10,
           "maximum": 32,
-          "order": 8,
+          "order": 9,
           "description": "%config.fontSize.value%"
         },
         "meoEnhanced.useAsDefault": {

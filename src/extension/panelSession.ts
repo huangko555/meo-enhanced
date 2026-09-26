@@ -26,10 +26,12 @@ import {
   CONTENT_MAX_WIDTH_SETTING_KEY,
   LARGE_DOCUMENT_OPTIMIZATION_SETTING_KEY,
   TABLE_STICKY_HEADER_SETTING_KEY,
+  BOLD_HEADINGS_SETTING_KEY,
   RESTORE_READING_POSITION_SETTING_KEY,
   OUTLINE_WIDTH_KEY,
   getContentMaxWidthEnabled,
   getTableStickyHeaderEnabled,
+  getBoldHeadingsEnabled,
   getRestoreReadingPositionOnOpen,
   getGitChangesGutterEnabled,
   getGitDiffDetailsVisible,
@@ -432,6 +434,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       contentMaxWidthEnabled: getContentMaxWidthEnabled(context),
       largeDocumentOptimizationEnabled: getLargeDocumentOptimizationEnabled(),
       tableStickyHeaderEnabled: getTableStickyHeaderEnabled(),
+      boldHeadingsEnabled: getBoldHeadingsEnabled(),
       restoreReadingPositionOnOpen,
       readingPositionRestore,
       findOptions: getFindOptions(),
@@ -653,6 +656,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         await vscode.workspace
           .getConfiguration(EXTENSION_CONFIG_SECTION)
           .update(TABLE_STICKY_HEADER_SETTING_KEY, raw.enabled === true, vscode.ConfigurationTarget.Global);
+        return;
+      case 'setBoldHeadings':
+        await vscode.workspace
+          .getConfiguration(EXTENSION_CONFIG_SECTION)
+          .update(BOLD_HEADINGS_SETTING_KEY, raw.enabled === true, vscode.ConfigurationTarget.Global);
         return;
       case 'setRestoreReadingPositionOnOpen':
         await vscode.workspace
