@@ -2434,10 +2434,10 @@ async function main() {
       }
     });
     await waitForFrames(page, 2);
+    const sourceReadingAnchor = await captureSourceReadingAnchor(page, initialText);
     const previewRequestsBeforeCachedSwitch = await page.evaluate(() => (
       (window as typeof window & { __hostMessages?: Array<{ type?: string }> }).__hostMessages ?? []
     ).filter((message) => message.type === 'requestPreviewRender').length);
-    const sourceReadingAnchor = await captureSourceReadingAnchor(page, initialText);
     await page.click('[data-mode="preview"]');
     await waitForFrames(page, 2);
     const cachedSwitchState = await page.evaluate(() => {
