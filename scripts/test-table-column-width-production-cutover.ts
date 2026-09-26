@@ -208,6 +208,12 @@ async function dragWithCommittedSamples(
   readonly preview: Awaited<ReturnType<typeof tablePresentationWidths>>;
   readonly committed: readonly Awaited<ReturnType<typeof tablePresentationWidths>>[];
 }> {
+  await page.waitForFunction((handleSelector) => {
+    const handle = document.querySelector<HTMLElement>(handleSelector);
+    const table = handle?.closest('.meo-md-html-table-shell')
+      ?.querySelector<HTMLTableElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
+    return handle?.isConnected && table?.dataset.tableColumnWidthOwner === 'adapter';
+  }, { polling: 'raf', timeout: 10000 }, selector);
   const pointer = await page.$eval(selector, (handle: Element) => {
     const rect = handle.getBoundingClientRect();
     const pointerId = ((window as any).__columnWidthTransactionPointerId ?? 90) + 1;
@@ -241,6 +247,8 @@ async function dragWithCommittedSamples(
         chrome: bounds(chrome),
         chromeClass: chrome?.className ?? null,
         table: bounds(table),
+        tableOwner: table?.dataset.tableColumnWidthOwner ?? null,
+        handleConnected: handle?.isConnected ?? false,
         scrollTop: scroller?.scrollTop ?? null,
         hitClass: hit instanceof HTMLElement ? hit.className : null
       };
