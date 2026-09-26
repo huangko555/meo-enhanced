@@ -78,6 +78,7 @@ try {
   if (initialFont !== '15') throw new Error(`Expected to start at 15px, got ${initialFont}`);
   const failures: Array<Record<string, unknown>> = [];
   let samples = 0;
+  let bottomConstrainedSteps = 0;
   const requestedLines = process.argv.find((argument) => argument.startsWith('--lines='))?.slice('--lines='.length);
   const positions = requestedLines ? requestedLines.split(',').map(Number) : focused ? [1, 634, 788, 1005, 1020] : Array.from(new Set([
     1, 634, 788, 1005, 1020, lineCount,
@@ -155,7 +156,7 @@ try {
       return pointLine === sourceLine && visibleLine
         ? visibleLine.getBoundingClientRect().top - bounds.top : null;
     };
-    const record = () => ({ top: currentTop(), scroll: scroller.scrollTop,
+    const record = () => ({ top: currentTop(), scroll: scroller.scrollTop, maxScroll: scroller.scrollHeight - scroller.clientHeight,
       topVisibleLine: view ? view.state.doc.lineAt(view.posAtCoords({ x: bounds.left + 100, y: bounds.top + 2 }) ?? view.viewport.from).number : null,
       visible: Array.from(doc.querySelectorAll<HTMLElement>(sampleMode === 'preview' ? '[data-source-line]' : '.editor-host .cm-line'))
         .filter((item) => { const rect = item.getBoundingClientRect(); return rect.bottom > bounds.top && rect.top < bounds.bottom; }).length });
@@ -171,8 +172,18 @@ try {
     // The synchronous post-click layout is not painted. Observe after each
     // rendering opportunity so pre-paint ResizeObserver corrections do not
     // count as visible flashes.
-    const displacement = trace[0]!.top === null ? 0 : Math.max(...trace.slice(2).map((item) => item.top === null ? 9999 : Math.abs(item.top - trace[0]!.top!)));
-    return { sourceLine: sourceLine ?? previewLine?.dataset.sourceLine, codeMirrorLineTop, placeholderLine, renderedBlockLine, tableRow: rowIndex, displacement, trace };
+    const initialTop = trace[0]!.top;
+    const painted = trace.slice(2);
+    // When enlargement reaches the scroll limit, keeping the old top anchor
+    // would require scrolling past the document end. Check those frames against
+    // the bottom boundary instead of treating the unavoidable shift as a jump.
+    const isBottomConstrained = (item: (typeof trace)[number]) => delta > 0
+      && initialTop !== null && item.top !== null && item.top > initialTop
+      && item.scroll >= item.maxScroll - 1;
+    const bottomConstrained = painted.some(isBottomConstrained);
+    const displacement = initialTop === null ? 0 : Math.max(...painted.map((item) => item.top === null
+      ? 9999 : isBottomConstrained(item) ? 0 : Math.abs(item.top - initialTop)));
+    return { sourceLine: sourceLine ?? previewLine?.dataset.sourceLine, codeMirrorLineTop, placeholderLine, renderedBlockLine, tableRow: rowIndex, displacement, bottomConstrained, trace };
   }, { sampleMode: mode, delta: direction });
   for (const mode of modes) {
     if (mode !== 'live') {
@@ -271,6 +282,7 @@ try {
         for (let step = 0; step < 5; step++) {
           const up = await measureStep(mode, 1);
           samples += 1;
+          if (up.bottomConstrained) bottomConstrainedSteps += 1;
           if ('displacement' in up && up.displacement > 12) failures.push({ mode, line, blockMode, direction: `increase-${step}`, ...up });
         }
         for (let step = 0; step < 5; step++) {
@@ -286,6 +298,7 @@ try {
     console.log(`${mode}: ${positions.length} positions checked`);
   }
   console.log(`Font sweep: ${samples} changes, ${failures.length} anomalies`);
+  console.log(`Bottom-constrained steps: ${bottomConstrainedSteps}`);
   console.log(`Anomaly locations: ${JSON.stringify(Object.entries(failures.reduce<Record<string, number>>((counts, failure) => {
     const key = `${failure.mode}:${failure.line}`;
     counts[key] = (counts[key] ?? 0) + 1;

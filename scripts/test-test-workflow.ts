@@ -220,6 +220,8 @@ assert.equal(
 );
 assert.match(packageScripts.test ?? '', /bun run test:browser/);
 assert.match(packageScripts.test ?? '', /bun run test:browser-high-risk/);
+assert.match(packageScripts['test:unit'] ?? '', /bun run test:docx-export(?:\s|$)/);
+assert.match(packageScripts['test:browser'] ?? '', /bun run test:docx-export:browser(?:\s|$)/);
 
 function collectTransitiveTestScripts(
   root: string,

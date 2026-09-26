@@ -76,6 +76,10 @@ try {
     restoreReadingPositionOnOpen: false, vscodeTheme: null
   } })), text);
   await page.waitForSelector('.cm-content');
+  await page.waitForFunction(() => {
+    const button = document.querySelector<HTMLElement>('button[data-mode=source]');
+    return button?.offsetParent !== null && getComputedStyle(button).visibility === 'visible';
+  });
   await page.click('.line-jump-input');
   await page.keyboard.type(String(anchorLine));
   await page.keyboard.press('Enter');

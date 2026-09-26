@@ -63,6 +63,10 @@ try {
     } }));
   }, text);
   await page.waitForSelector('.cm-content');
+  await page.waitForFunction(() => {
+    const button = document.querySelector<HTMLElement>('.source-preview-button');
+    return button?.offsetParent !== null && getComputedStyle(button).visibility === 'visible';
+  });
   await page.click('.source-preview-button');
   await page.waitForFunction(() => {
     const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');

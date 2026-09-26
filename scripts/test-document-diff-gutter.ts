@@ -1166,6 +1166,9 @@ async function main() {
       editor.scrollToLine(601, 'center');
     });
     await waitForFrames(page, 8);
+    // Diff decorations and the Live viewport map settle on separate frames.
+    await page.waitForFunction(() => document.querySelectorAll('.meo-git-gutter-marker.is-modified').length === 1, { timeout: 2000 });
+    await page.waitForFunction(() => (window as any).__editor.getTopVisiblePosition().line > 500, { timeout: 2000 });
     const longLiveDocumentMarkers = await page.evaluate(() => ({
       added: document.querySelectorAll('.meo-git-gutter-marker.is-added').length,
       modified: document.querySelectorAll('.meo-git-gutter-marker.is-modified').length,

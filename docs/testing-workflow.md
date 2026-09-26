@@ -345,6 +345,15 @@ and write release notes from that inventory. Do not describe an unconfirmed repo
 as fixed. Record the candidate commit, clean working-tree state, runtime versions,
 commands, exit codes, log locations, and final VSIX size and SHA-256.
 
+When font-size or viewport behavior changes, supplement the release gate with
+`bun scripts/test-font-size-full-document.ts --document=<absolute-markdown-path>
+--confirm-long-run` on a representative rich document. The runner checks every
+sampled position in Live, Source, split Source/Preview, and Preview through five
+size increases and decreases. Record the fixture hash and anomaly count. Near
+the document end, an enlarged layout can reach the maximum scroll position;
+those frames are reported as bottom-constrained instead of being counted as
+top-anchor jumps. Any remaining displacement over 12 px is a failure.
+
 Run the complete release gate before endurance. Keep browser performance and
 native endurance runs serial to avoid resource contention. Diagnose failures with
 the smallest reproducer, inspect any skipped remainder, then run the required

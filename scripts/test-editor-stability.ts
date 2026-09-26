@@ -976,8 +976,8 @@ async function main() {
       !inlineStyleComposition.em ||
       !inlineStyleComposition.emCode ||
       !inlineStyleComposition.standaloneCode ||
-      Number(inlineStyleComposition.heading.fontWeight) !== 400 ||
-      Number(inlineStyleComposition.strong.fontWeight) <= Number(inlineStyleComposition.heading.fontWeight) ||
+      Number(inlineStyleComposition.heading.fontWeight) !== 700 ||
+      Number(inlineStyleComposition.strong.fontWeight) < Number(inlineStyleComposition.heading.fontWeight) ||
       inlineStyleComposition.strongEm.fontWeight !== inlineStyleComposition.strong.fontWeight ||
       inlineStyleComposition.strongEm.fontStyle !== 'italic' ||
       inlineStyleComposition.strongCode.fontWeight !== inlineStyleComposition.strong.fontWeight ||

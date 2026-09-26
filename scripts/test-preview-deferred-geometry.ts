@@ -60,6 +60,10 @@ try {
     await page.waitForSelector('.cm-content');
     await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')!.dataset.mode === 'source'
       && document.querySelector<HTMLElement>('.preview-host')!.hidden);
+    await page.waitForFunction(() => {
+      const button = document.querySelector<HTMLElement>('button[data-mode=preview]');
+      return button?.offsetParent !== null && getComputedStyle(button).visibility === 'visible';
+    });
     await page.click('button[data-mode="preview"]');
     await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')!.dataset.mode === 'preview'
       && !document.querySelector<HTMLElement>('.preview-host')!.hidden

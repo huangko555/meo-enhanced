@@ -433,6 +433,29 @@ async function sourceLineNumberPreference(browser: Browser): Promise<void> {
   }
 }
 
+async function headingWeightPreference(browser: Browser): Promise<void> {
+  const page = await open(browser, '# Heading\n\nBody', 'live');
+  try {
+    const selector = '.cm-line.meo-md-h1';
+    await page.waitForSelector(selector);
+    assert.equal(await page.$eval(selector, element => getComputedStyle(element).fontWeight), '700');
+    await page.click('[data-action="settings"]');
+    const option = '[data-action="boldHeadings"]';
+    assert.equal(await page.$eval(option, element => element.querySelector('.more-tools-option-label')?.textContent), 'Bold headings');
+    assert.equal(await page.$eval(option, element => element.getAttribute('aria-checked')), 'true');
+    await page.click(option);
+    await page.waitForFunction(() => getComputedStyle(document.querySelector<HTMLElement>('.cm-line.meo-md-h1')!).fontWeight === '400');
+    assert.equal(await page.$eval(option, element => element.getAttribute('aria-checked')), 'false');
+    await page.click(option);
+    await page.waitForFunction(() => getComputedStyle(document.querySelector<HTMLElement>('.cm-line.meo-md-h1')!).fontWeight === '700');
+    assert.deepEqual(await page.evaluate(() => (window as any).__hostMessages
+      .filter((message: any) => message.type === 'setBoldHeadings')
+      .map((message: any) => message.enabled)), [false, true]);
+  } finally {
+    await page.close();
+  }
+}
+
 async function largeDocumentStartupPreference(browser: Browser): Promise<void> {
   const page = await open(browser, 'settings fixture', 'live');
   try {
@@ -441,7 +464,7 @@ async function largeDocumentStartupPreference(browser: Browser): Promise<void> {
     assert.ok(option, 'Large-document startup option was not present');
     assert.equal(
       await option.evaluate((element) => element.querySelector('.more-tools-option-label')?.textContent),
-      'Large file startup'
+      'Open large documents faster'
     );
     await page.hover('[data-action="largeDocumentOptimization"] .more-tools-option-info');
     await page.waitForFunction(() => getComputedStyle(
@@ -510,5 +533,5 @@ async function startupModeVisibility(browser: Browser): Promise<void> {
   }
 }
 
-async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { await startupModeVisibility(browser); await blockquotePressLayout(browser); await alertPressLayout(browser); await blockquoteEnterFirstFrame(browser); await matrix(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); await largeDocumentStartupPreference(browser); } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
+async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { await startupModeVisibility(browser); await blockquotePressLayout(browser); await alertPressLayout(browser); await blockquoteEnterFirstFrame(browser); await matrix(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); await headingWeightPreference(browser); await largeDocumentStartupPreference(browser); } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
 main().finally(() => fs.rmSync(temp, { recursive: true, force: true })).catch((e) => { console.error(e instanceof Error ? e.stack : e); process.exitCode = 1; });
