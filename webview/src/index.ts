@@ -2111,6 +2111,7 @@ const scheduleEditorBundleWarmupAfterReady = () => {
 
 const READY_RETRY_DELAYS_MS = [120, 300, 700, 1300] as const;
 let readyHandshakeAcknowledged = false;
+let initReceived = false;
 const readyRetryTimers = new Set<number>();
 
 const clearReadyRetryTimers = () => {
@@ -3074,6 +3075,9 @@ window.addEventListener('message', (event) => {
   }
 
   if (message.type === 'init') {
+    // Host retries must not reset a mode change or an in-flight Preview render.
+    if (initReceived) return;
+    initReceived = true;
     acknowledgeReadyHandshake();
     withMessageErrorBoundary('init handler', () => {
       themeAdapter.start({

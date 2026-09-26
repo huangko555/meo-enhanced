@@ -48,6 +48,25 @@ still checking type safety, workflow policy, history, tables, rendered blocks,
 input-derived work, viewport behavior, and one production browser scenario in
 the quick gate.
 
+## Editor startup and loading
+
+The quick and release gates run `scripts/test-panel-session-ready-init.ts` and
+`scripts/test-editor-startup-load.ts`. The first checks that concurrent Webview
+`ready` messages share one `init`, a later `ready` can retry a lost delivery,
+and Markdown uses LF even when the file uses CRLF. The second opens the
+production Webview directly in Live, Source, and Preview, then waits for the
+document text on the active surface. In Preview, the test also requires the
+loading status to clear and the rendered document to exist. A selected mode
+button alone does not prove a successful load. Source's optional side-by-side
+preview is covered by
+`scripts/test-source-side-preview.ts` in the production browser matrix.
+
+For final installed-VSIX acceptance, use an isolated VS Code profile and open
+a Markdown file in each saved mode after both closing its tab and restarting
+VS Code. Confirm that the content is readable and interactive without changing
+modes. This native check complements the browser contract by exercising the
+actual extension Host/Webview startup handshake.
+
 The full-document endurance runner keeps the curated operation set for its
 original acceptance fixture. For other Markdown documents it discovers unique
 edit targets by structure, samples up to eight per category across the document,

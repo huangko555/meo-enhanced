@@ -4,6 +4,7 @@ This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
 ## 0.3.25
+- Fixed Preview startup for CRLF Markdown and Webview reloads so the rendered document appears without switching modes.
 - Let VS Code manage the default Markdown editor choice instead of rewriting user editor associations on extension startup.
 - Added Word (`.docx`) export with light document styling, a native table of contents, formatted Front Matter, code blocks, tables, images, diagrams, formulas, links, and footnotes.
 - Added optional bold-text coloring in Live mode, disabled by default, with body-derived colors tuned separately for light and dark appearances.

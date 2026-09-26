@@ -101,7 +101,10 @@ assert.deepEqual(uatCommands[1]?.args, [
 const release = createTestWorkflowPlan(parseTestWorkflowRequest(['release']));
 assert.equal(release.longRunning, true);
 assert.equal(release.stages[0]?.maxConcurrency, 3);
-assert.deepEqual(release.stages[1]?.commands, [{ args: ['run', 'test:browser-high-risk'] }]);
+assert.deepEqual(release.stages[1]?.commands, [
+  { args: ['scripts/test-editor-startup-load.ts'] },
+  { args: ['run', 'test:browser-high-risk'] }
+]);
 assert.deepEqual(release.stages[2]?.commands, [{ args: ['run', 'test:browser'] }]);
 assert.throws(
   () => validateTestWorkflowAuthorization(release, false, false),

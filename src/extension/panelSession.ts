@@ -224,6 +224,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   let latestDocumentApplyCompletion: Promise<void> = Promise.resolve();
   let webviewReady = false;
   let initDelivered = false;
+  let initDelivery: Promise<void> | null = null;
   let disposed = false;
   const workspaceRoot = vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath;
   const gitDocumentState = new GitDocumentState(documentUri.fsPath, workspaceRoot);
@@ -382,7 +383,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     const snapshot = savedRevisionTracker.getCurrentEditBaseline();
     if (snapshot === null) return null;
     return {
-      version: snapshot.text === document.getText() ? document.version : null,
+      version: snapshot.text === normalizeDocumentText(document.getText()) ? document.version : null,
       text: snapshot.text
     };
   };
@@ -391,7 +392,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     const savedRevision = await readInitialSavedRevision();
     const diffBaselineState = diffBaselineSelection.getState();
     const editorFontSizePreference = getEditorFontSizePreference();
-    const initialText = document.getText();
+    // Preview compares render responses with CodeMirror's LF-normalized text.
+    const initialText = normalizeDocumentText(document.getText());
     const initialMode = selectInitialEditorMode({
       text: initialText,
       persistedMode: persistedEditorMode,
@@ -509,18 +511,27 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     return { ok: true, value: { revision: expected } };
   };
 
-  const ensureInitDelivered = async (): Promise<void> => {
-    if (disposed || initDelivered || !webviewReady) {
-      return;
-    }
-    const posted = await sendInit();
-    if (posted) {
-      initDelivered = true;
-      if (externalFileStatus !== 'current') {
-        publishExternalFileStatus(externalFileStatus, true);
+  // A later ready may mean the previous post was lost during Webview startup.
+  const ensureInitDelivered = (retry = false): Promise<void> => {
+    if (disposed || !webviewReady) return Promise.resolve();
+    if (initDelivery) return initDelivery;
+    if (initDelivered && !retry) return Promise.resolve();
+    initDelivery = (async () => {
+      try {
+        const posted = await sendInit();
+        if (!posted || disposed) return;
+        if (!initDelivered) {
+          initDelivered = true;
+          if (externalFileStatus !== 'current') {
+            publishExternalFileStatus(externalFileStatus, true);
+          }
+          await viewNavigation.ready();
+        }
+      } finally {
+        initDelivery = null;
       }
-      await viewNavigation.ready();
-    }
+    })();
+    return initDelivery;
   };
 
   const requestExportSnapshot = async (): Promise<ReadingSnapshot> => {
@@ -584,7 +595,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     switch (raw.type) {
       case 'ready':
         webviewReady = true;
-        await ensureInitDelivered();
+        await ensureInitDelivered(true);
         refreshGitBaseline({ forcePost: true, delayMs: GIT_BASELINE_STARTUP_DELAY_MS });
         return;
       case 'setMode':

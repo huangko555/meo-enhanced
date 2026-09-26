@@ -222,6 +222,8 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           packageScript('test:reading-position'),
           script('scripts/test-test-workflow.ts'),
           script('scripts/test-document-auto-save-concurrency.ts'),
+          script('scripts/test-panel-session-ready-init.ts'),
+          script('scripts/test-editor-startup-load.ts'),
           script('scripts/test-editor-history-runtime.ts'),
           script('scripts/test-table-cell-editing.ts'),
           script('scripts/test-rendered-block-mode-shell.ts'),
@@ -273,10 +275,12 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
               packageScript('test:mermaid-presentation'),
               packageScript('test:reading-position'),
               packageScript('test:changes-review'),
-              packageScript('test:unit')
+              packageScript('test:unit'),
+              script('scripts/test-panel-session-ready-init.ts')
             ]
           },
           serialStage('High-risk browser regression preflight', [
+            script('scripts/test-editor-startup-load.ts'),
             packageScript('test:browser-high-risk')
           ]),
           serialStage('Production browser matrix', [packageScript('test:browser')]),
