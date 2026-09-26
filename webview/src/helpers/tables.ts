@@ -2528,6 +2528,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   pendingContextMenuRestore: boolean;
   contextPage: TableContextPage;
   tableCaretRevealGeneration: number;
+  destroyed: boolean;
 
   constructor(
     tableData: WidgetTableData,
@@ -2555,6 +2556,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     this.pendingContextMenuRestore = false;
     this.contextPage = 'structure';
     this.tableCaretRevealGeneration = 0;
+    this.destroyed = false;
     this.stickyHeaderAdapterFactory = stickyHeaderAdapterFactory;
     this.layoutTasks = new Set();
     this.layoutScheduler = {
@@ -2573,7 +2575,11 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         };
       }
     };
-    this.stickyHeaderAdapter = stickyHeaderAdapterFactory.create({
+    this.stickyHeaderAdapter = this.createStickyHeaderAdapter();
+  }
+
+  createStickyHeaderAdapter(): TableStickyHeaderAdapter {
+    return this.stickyHeaderAdapterFactory.create({
       scheduler: this.layoutScheduler,
       resolveElements: () => this.resolveStickyHeaderElements(),
       controlsHeight: () => 0,
@@ -5824,6 +5830,13 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   toDOM(view: EditorView) {
+    // CodeMirror can draw a widget instance again after destroying its previous DOM.
+    if (this.destroyed) {
+      this.cellSelection = new TableCellSelection();
+      this.cellInteraction = createTableCellInteraction();
+      this.stickyHeaderAdapter = this.createStickyHeaderAdapter();
+      this.destroyed = false;
+    }
     this.view = view;
     const existingSearchState = (view.dom as any).__meoSearchState;
     if (existingSearchState && typeof existingSearchState === 'object') {
@@ -6100,6 +6113,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     this.cellInteraction.accept({ type: 'dispose' });
     this.cancelPendingCellAutoCommit();
     this.pendingCellSwitchCommit = false;
+    this.destroyed = true;
   }
 }
 
