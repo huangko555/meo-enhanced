@@ -11,6 +11,11 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Stabilized ordinary blockquotes and all GitHub Alert variants during activation and Enter, preserving marker alignment, text inset, color, and first-frame styling.
 - Kept the floating table header's one-pixel bottom divider visible across display scales.
 - Shifted Preview body foreground blending to the requested 70/30 balance.
+- Added HTML comment visibility controls in Live and Preview, with visible comments carried into exported output.
+- Preserved nested lists, task items, blockquotes, quoted tables, and Unicode word underscores in Live editing.
+- Added color comparison while adjusting supported HEX colors, and refined table color controls and editor notices.
+- Unified toolbar and settings controls, added split Preview display options, and made editor heading weight configurable.
+- Kept viewports, line numbers, embedded source editors, and table controls stable through font-size changes, typing, and undo/redo.
 
 ## 0.3.24
 - Fixed Shift+Enter line breaks in Live table cells so rows expand downward and the viewport moves only when the caret would leave the visible area.
