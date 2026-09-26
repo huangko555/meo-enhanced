@@ -3631,10 +3631,10 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 .cm-editor .meo-rendered-block-document-line-number {
   box-sizing: border-box;
   display: flex;
-  align-items: center;
+  position: absolute;
+  align-items: flex-start;
   justify-content: flex-end;
   width: 100%;
-  min-height: calc(var(--meo-active-editor-line-height) * 1em);
   font: inherit;
   line-height: var(--meo-active-editor-line-height);
 }
@@ -4483,7 +4483,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
 
 .cm-editor .meo-mermaid-fallback code {
   font-family: var(--meo-font-source);
-  font-size: var(--meo-active-editor-font-size);
+  font-size: var(--meo-user-editor-font-size, var(--meo-active-editor-font-size));
   font-weight: var(--meo-font-source-weight);
 }
 
@@ -4537,7 +4537,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
 
 .cm-editor .meo-md-image-fallback-text {
   font-family: var(--meo-active-editor-font);
-  font-size: var(--meo-active-editor-font-size);
+  font-size: var(--meo-user-editor-font-size, var(--meo-active-editor-font-size));
   color: var(--meo-semantic-imageFallbackForeground);
 }
 
@@ -5690,7 +5690,6 @@ body.outline-resizing .preview-frame {
   background: var(--meo-code-background);
   font-family: var(--meo-font-source);
   font-weight: var(--meo-font-source-weight);
-  font-size: var(--meo-active-editor-font-size);
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0, "calt" 0;
   text-rendering: auto;

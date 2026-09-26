@@ -281,9 +281,12 @@ class RenderedBlockDocumentLineNumbersMarker extends GutterMarker {
     for (let index = 0; index < this.lineCount; index += 1) {
       const marker = document.createElement('span');
       marker.className = 'meo-rendered-block-document-line-number';
+      marker.style.visibility = 'hidden';
       marker.textContent = String(this.startLine + index);
       column.appendChild(marker);
     }
+    const lineMarkers = Array.from(column.children) as HTMLElement[];
+    let visibleMarkerIndices = new Set<number>();
 
     const rootSelector = this.kind === 'mermaid'
       ? `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${this.anchor}"]`
@@ -293,27 +296,67 @@ class RenderedBlockDocumentLineNumbersMarker extends GutterMarker {
       : '.meo-latex-math-source-editor';
     let timer = 0;
     let observer: ResizeObserver | null = null;
+    let mutationObserver: MutationObserver | null = null;
+    let observedGutter: HTMLElement | null = null;
     let observedElements: Element[] = [];
+    let alignmentFrame: number | null = null;
+    let alignmentFramesLeft = 0;
+    const scheduleAlignment = (): void => {
+      alignmentFramesLeft = 16;
+      if (alignmentFrame !== null) return;
+      const align = () => {
+        alignmentFrame = null;
+        if (!column.isConnected) return;
+        sync();
+        if (--alignmentFramesLeft > 0) alignmentFrame = requestAnimationFrame(align);
+      };
+      alignmentFrame = requestAnimationFrame(align);
+    };
 
     const sync = (): boolean => {
       const outerMarker = column.closest<HTMLElement>('.cm-gutterElement');
       const source = view.dom.querySelector<HTMLElement>(`${rootSelector} ${sourceSelector}`);
+      const innerGutter = source?.querySelector<HTMLElement>('.cm-lineNumbers');
       const innerMarkers = Array.from(
-        source?.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement') ?? []
+        innerGutter?.querySelectorAll<HTMLElement>(':scope > .cm-gutterElement') ?? []
       ).filter((element) => (
         getComputedStyle(element).visibility !== 'hidden'
         && element.getBoundingClientRect().height > 0
-        && Boolean(element.textContent?.trim())
+        && /^\d+$/.test(element.textContent?.trim() ?? '')
       ));
-      if (!outerMarker || innerMarkers.length < this.lineCount) return false;
+      if (!outerMarker || !innerGutter || innerMarkers.length === 0) {
+        for (const index of visibleMarkerIndices) lineMarkers[index].style.visibility = 'hidden';
+        visibleMarkerIndices.clear();
+        return false;
+      }
 
-      column.style.top = '';
       const columnRect = column.getBoundingClientRect();
-      const firstInnerRect = innerMarkers[0].getBoundingClientRect();
-      column.style.top = `${firstInnerRect.top - columnRect.top}px`;
-      const lineMarkers = Array.from(column.children) as HTMLElement[];
-      for (let index = 0; index < lineMarkers.length; index += 1) {
-        lineMarkers[index].style.height = `${innerMarkers[index].getBoundingClientRect().height}px`;
+      const nextVisibleIndices = new Set<number>();
+      for (const innerMarker of innerMarkers) {
+        const index = Number(innerMarker.textContent?.trim()) - 1;
+        const marker = lineMarkers[index];
+        if (!marker) continue;
+        const rect = innerMarker.getBoundingClientRect();
+        const top = `${rect.top - columnRect.top}px`;
+        const height = `${rect.height}px`;
+        if (marker.style.top !== top) marker.style.top = top;
+        if (marker.style.height !== height) marker.style.height = height;
+        if (!visibleMarkerIndices.has(index)) marker.style.visibility = 'visible';
+        nextVisibleIndices.add(index);
+      }
+      for (const index of visibleMarkerIndices) {
+        if (!nextVisibleIndices.has(index)) lineMarkers[index].style.visibility = 'hidden';
+      }
+      visibleMarkerIndices = nextVisibleIndices;
+
+      if (observedGutter !== innerGutter) {
+        mutationObserver?.disconnect();
+        mutationObserver = new MutationObserver(() => {
+          sync();
+          scheduleAlignment();
+        });
+        mutationObserver.observe(innerGutter, { childList: true, characterData: true, subtree: true });
+        observedGutter = innerGutter;
       }
 
       if (typeof ResizeObserver !== 'undefined') {
@@ -324,7 +367,10 @@ class RenderedBlockDocumentLineNumbersMarker extends GutterMarker {
           || nextObserved.some((element, index) => element !== observedElements[index])
         ) {
           observer?.disconnect();
-          observer = new ResizeObserver(() => sync());
+          observer = new ResizeObserver(() => {
+            sync();
+            scheduleAlignment();
+          });
           observedElements = nextObserved;
           for (const element of observedElements) observer.observe(element);
         }
@@ -335,11 +381,20 @@ class RenderedBlockDocumentLineNumbersMarker extends GutterMarker {
       if (sync() || attemptsLeft <= 1) return;
       timer = window.setTimeout(() => settle(attemptsLeft - 1));
     };
-    queueMicrotask(() => settle(4));
+    queueMicrotask(() => {
+      settle(4);
+      scheduleAlignment();
+    });
+    view.scrollDOM.addEventListener('scroll', sync, { passive: true });
     column.__meoRenderedBlockLineNumberCleanup = () => {
       window.clearTimeout(timer);
+      if (alignmentFrame !== null) cancelAnimationFrame(alignmentFrame);
+      view.scrollDOM.removeEventListener('scroll', sync);
       observer?.disconnect();
+      mutationObserver?.disconnect();
       observer = null;
+      mutationObserver = null;
+      observedGutter = null;
       observedElements = [];
     };
     return column;

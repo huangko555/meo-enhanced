@@ -129,6 +129,7 @@ function targetedCommands(
       return [
         packageScript('test:reading-position'),
         script('scripts/test-font-size-viewport.ts'),
+        script('scripts/test-embedded-source-font-size.ts'),
         script('scripts/test-viewport-controller.ts'),
         script('scripts/test-toolbar-input-viewport.ts'),
         script('scripts/test-line-number-typing-stability.ts'),
