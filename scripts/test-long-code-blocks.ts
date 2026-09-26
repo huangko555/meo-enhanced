@@ -419,6 +419,10 @@ async function main() {
       editor.setText(content, true);
       const target = editor.getText().indexOf('rafNew trailing prose 70');
       editor.revealSelection(target, target, { focusEditor: true, align: 'nearest' });
+      for (let attempt = 0; attempt < 100
+        && !document.querySelector('.meo-md-long-code-placeholder'); attempt += 1) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      }
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const beforeLateRaf = editor.getTopVisiblePosition();
       lateAnimationFrame.run();
