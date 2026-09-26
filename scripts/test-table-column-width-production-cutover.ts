@@ -208,26 +208,42 @@ async function dragWithCommittedSamples(
   readonly preview: Awaited<ReturnType<typeof tablePresentationWidths>>;
   readonly committed: readonly Awaited<ReturnType<typeof tablePresentationWidths>>[];
 }> {
-  await page.waitForFunction((handleSelector) => {
-    const handle = document.querySelector<HTMLElement>(handleSelector);
-    const table = handle?.closest('.meo-md-html-table-shell')
-      ?.querySelector<HTMLTableElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
-    return handle?.isConnected && table?.dataset.tableColumnWidthOwner === 'adapter';
-  }, { polling: 'raf', timeout: 10000 }, selector);
-  const pointer = await page.$eval(selector, (handle: Element) => {
-    const rect = handle.getBoundingClientRect();
+  // Sticky header clones can be replaced between page calls, so readiness and dispatch share one task.
+  const pointer = await page.evaluate(async (handleSelector) => {
+    let handle: HTMLElement;
+    let rect: DOMRect;
+    const deadline = performance.now() + 10000;
+    while (true) {
+      const candidate = document.querySelector<HTMLElement>(handleSelector);
+      const table = candidate?.closest('.meo-md-html-table-shell')
+        ?.querySelector<HTMLTableElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
+      const chrome = candidate?.closest('.meo-md-html-table-sticky-chrome');
+      const bounds = candidate?.getBoundingClientRect();
+      if (candidate?.isConnected && table?.dataset.tableColumnWidthOwner === 'adapter'
+        && (!chrome || (chrome.classList.contains('is-visible') && bounds!.width > 0 && bounds!.height > 0))) {
+        handle = candidate;
+        rect = bounds!;
+        break;
+      }
+      if (performance.now() >= deadline) throw new Error(`Table resize handle was not ready: ${handleSelector}`);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
     const pointerId = ((window as any).__columnWidthTransactionPointerId ?? 90) + 1;
     (window as any).__columnWidthTransactionPointerId = pointerId;
     const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, pointerId };
-    handle.dispatchEvent(new PointerEvent('pointerdown', {
+    const down = new PointerEvent('pointerdown', {
       bubbles: true, cancelable: true, button: 0, buttons: 1,
       pointerId, pointerType: 'mouse', clientX: point.x, clientY: point.y
-    }));
+    });
+    handle.dispatchEvent(down);
     return {
       ...point,
-      started: document.querySelector('.cm-editor')?.classList.contains('meo-table-column-resizing') ?? false
+      defaultPrevented: down.defaultPrevented,
+      resizeColumn: handle.dataset.tableResizeColumn,
+      started: handle.closest('.cm-editor')?.classList.contains('meo-table-column-resizing') ?? false,
+      handleConnected: handle.isConnected
     };
-  });
+  }, selector);
   if (!pointer.started) {
     const diagnostics = await page.evaluate(({ handleSelector, x, y }) => {
       const handle = document.querySelector<HTMLElement>(handleSelector);
@@ -253,7 +269,7 @@ async function dragWithCommittedSamples(
         hitClass: hit instanceof HTMLElement ? hit.className : null
       };
     }, { handleSelector: selector, x: pointer.x, y: pointer.y });
-    throw new Error(`Synthetic table width drag did not start: ${selector}; ${JSON.stringify(diagnostics)}`);
+    throw new Error(`Synthetic table width drag did not start: ${selector}; ${JSON.stringify({ pointer, diagnostics })}`);
   }
   await page.evaluate(({ x, y, pointerId, requestedDelta }) => {
     window.dispatchEvent(new PointerEvent('pointermove', {
