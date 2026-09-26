@@ -13,11 +13,20 @@ const actions = [['bold', `**${target}**`], ['italic', `*${target}*`], ['lineove
 
 const init = (text: string, mode: 'live' | 'source' | 'preview', sourceLineNumbers: SourceLineNumberMode = 'on') => ({ type: 'init', documentId: `file:///basic-${mode}.md`, text, version: 1, savedRevision: { version: 1, text }, diagnostics: [], mode, uiLanguage: 'en', sourceLineNumbers, previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'light', gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, largeDocumentOptimizationEnabled: true, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null });
 
-async function open(browser: Browser, text: string, mode: 'live' | 'source' | 'preview', sourceLineNumbers: SourceLineNumberMode = 'on', observeStartup = false): Promise<Page> {
+async function open(browser: Browser, text: string, mode: 'live' | 'source' | 'preview', sourceLineNumbers: SourceLineNumberMode = 'on', observeStartup = false, persistedMode?: 'live' | 'source' | 'preview', stallPreviewPaint = false): Promise<Page> {
   const page = await browser.newPage();
   await page.setViewport({ width: 1000, height: 700, deviceScaleFactor: 1 });
   await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>');
   await page.addStyleTag({ path: path.join(root, 'webview', 'src', 'styles.css') });
+  await page.evaluate((mode) => (window as any).__initialUiState = mode ? { mode, lastEditableMode: 'live' } : undefined, persistedMode ?? null);
+  if (stallPreviewPaint) await page.evaluate(() => {
+    (window as any).__stalledFrames = 0;
+    window.requestAnimationFrame = () => {
+      // Simulate a restored webview whose compositor has not resumed frame callbacks.
+      (window as any).__stalledFrames += 1;
+      return (window as any).__stalledFrames;
+    };
+  });
   await page.addScriptTag({ content: `
     window.__hostMessages=[];
     window.acquireVsCodeApi=()=>({
@@ -30,7 +39,7 @@ async function open(browser: Browser, text: string, mode: 'live' | 'source' | 'p
           result:{ok:true,value:{html,hasMermaid:false,styles:{light:'',dark:''}}}
         }})));
       },
-      getState(){return undefined},setState(){}
+      getState(){return window.__initialUiState},setState(state){window.__initialUiState=state}
     });
   ` });
   await page.addScriptTag({ path: path.join(temp, 'bundle.js') });
@@ -533,5 +542,36 @@ async function startupModeVisibility(browser: Browser): Promise<void> {
   }
 }
 
-async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { await startupModeVisibility(browser); await blockquotePressLayout(browser); await alertPressLayout(browser); await blockquoteEnterFirstFrame(browser); await matrix(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); await headingWeightPreference(browser); await largeDocumentStartupPreference(browser); } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
+async function reopenedPreviewMode(browser: Browser): Promise<void> {
+  const page = await open(browser, '# Reopened preview\n\nBody', 'preview', 'on', false, 'preview', true);
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const state = await page.evaluate(() => {
+      const surface = document.querySelector<HTMLElement>('.editor-surface')!;
+      const rect = surface.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return {
+        selected: document.querySelector('button[data-mode="preview"]')?.getAttribute('aria-selected'),
+        rootMode: document.querySelector<HTMLElement>('#app')?.dataset.mode,
+        editorHidden: document.querySelector<HTMLElement>('.editor-host')?.hidden,
+        editorInert: document.querySelector<HTMLElement>('.editor-host')?.inert,
+        editorCover: document.querySelector<HTMLElement>('.editor-host')?.hasAttribute('data-preview-cover'),
+        previewHidden: document.querySelector<HTMLElement>('.preview-host')?.hidden,
+        hitPreview: hit?.matches('.preview-frame') ?? false,
+        previewText: document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent?.includes('Reopened preview') ?? false,
+        stalledFrames: (window as any).__stalledFrames
+      };
+    });
+    const { stalledFrames, ...presentation } = state;
+    assert.ok(stalledFrames > 0, 'Preview paint frames were not stalled');
+    assert.deepEqual(presentation, {
+      selected: 'true', rootMode: 'preview', editorHidden: true,
+      editorInert: true, editorCover: false, previewHidden: false,
+      hitPreview: true, previewText: true
+    }, `Reopened Preview selected a noninteractive Live surface: ${JSON.stringify(state)}`);
+  } finally {
+    await page.close();
+  }
+}
+async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { await startupModeVisibility(browser); await reopenedPreviewMode(browser); await blockquotePressLayout(browser); await alertPressLayout(browser); await blockquoteEnterFirstFrame(browser); await matrix(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); await headingWeightPreference(browser); await largeDocumentStartupPreference(browser); } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
 main().finally(() => fs.rmSync(temp, { recursive: true, force: true })).catch((e) => { console.error(e instanceof Error ? e.stack : e); process.exitCode = 1; });

@@ -1618,7 +1618,13 @@ const waitForInitialPreviewPaint = (): Promise<void> => {
       resolve();
     };
     resolveInitialPreviewPaint = finish;
-    window.setTimeout(finish, 600);
+    window.setTimeout(() => {
+      if (!settled && getActiveEditorMode() === 'preview') {
+        // A throttled paint callback must not leave the inert Live surface covering Preview.
+        editorHost.removeAttribute('data-preview-cover');
+      }
+      finish();
+    }, 600);
   });
 };
 let previewViewportInteractionGeneration = 0;
