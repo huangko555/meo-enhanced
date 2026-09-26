@@ -1507,12 +1507,19 @@ export function createPreviewController({
         initializeFrame(viewportSlot);
       };
       if (preserveViewport) {
+        const wasAtDocumentTop = (reusableDocument.scrollingElement?.scrollTop ?? 0) <= 0.5;
         withViewportTransaction(
           (slot) => commit(slot),
           previousRenderedText === null
             ? undefined
             : { previousText: previousRenderedText, nextText: renderedText }
         );
+        // The first mapped source block can begin below the page padding.
+        // Projecting line 1 to that block would scroll away the document top.
+        if (wasAtDocumentTop && reusableDocument.scrollingElement) {
+          reusableDocument.scrollingElement.scrollTop = 0;
+          retainedViewportProjection = null;
+        }
       }
       else commit(null);
       return;
@@ -1524,7 +1531,7 @@ export function createPreviewController({
     frame.srcdoc = `<!DOCTYPE html><html lang="${uiLanguage}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewLatexMathViewportStyles}${previewSourcePositionMarkerStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${payload.html}</main></div></body></html>`;
   };
 
-  const applyAppearanceToFrame = () => {
+  const applyAppearanceToFrame = (preserveReadingPosition = false) => {
     if (disposed) return;
     const frameDocument = activeFrameDocument;
     const styleElement = frameDocument?.querySelector<HTMLStyleElement>('style[data-meo-preview-styles]');
@@ -1537,6 +1544,20 @@ export function createPreviewController({
     const preservedScrollTop = pendingPresentationScroll?.document === frameDocument
       ? pendingPresentationScroll.scrollTop
       : scrollElement?.scrollTop ?? 0;
+    const readingPosition = preserveReadingPosition ? getTopVisiblePosition() : null;
+    const wasAtDocumentTop = preserveReadingPosition && (scrollElement?.scrollTop ?? preservedScrollTop) <= 0.5;
+    const viewportHeight = frame.clientHeight;
+    const visualAnchor = preserveReadingPosition && !wasAtDocumentTop
+      ? Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]')).find((element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.bottom > 40 && rect.top < viewportHeight;
+      }) ?? null
+      : null;
+    const visualRect = visualAnchor?.getBoundingClientRect();
+    const visualProgress = visualRect && visualRect.height >= viewportHeight
+      ? Math.max(0, Math.min(1, (40 - visualRect.top) / visualRect.height)) : null;
+    const visualY = visualRect && visualProgress !== null
+      ? visualRect.top + visualRect.height * visualProgress : visualRect?.top;
     const interactionGeneration = viewportInteractionGeneration;
     const presentationGeneration = mermaidPresentationGeneration + 1;
     mermaidPresentationGeneration = presentationGeneration;
@@ -1546,21 +1567,87 @@ export function createPreviewController({
       activeFrameDocument === frameDocument &&
       frame.contentDocument === frameDocument
     );
+    let retainedScrollTop = scrollElement?.scrollTop ?? 0;
+    let hasRetainedPosition = false;
+    let retentionCancelled = false;
+    let layoutObserver: ResizeObserver | null = null;
     const keepPosition = () => {
       // Let the appearance render finish, but retire its old reading offset as
       // soon as the user interacts with the frame during asynchronous work.
-      if (isCurrent() && interactionGeneration === viewportInteractionGeneration && scrollElement) {
+      if (isCurrent() && !retentionCancelled && interactionGeneration === viewportInteractionGeneration && scrollElement) {
+        const scrollDelta = scrollElement.scrollTop - retainedScrollTop;
+        const visualDelta = visualAnchor?.isConnected && visualY !== undefined
+          ? visualAnchor.getBoundingClientRect().top - (visualRect?.top ?? visualY) : null;
+        if (hasRetainedPosition && Math.abs(scrollDelta) > 24 && (
+          wasAtDocumentTop || (visualDelta !== null && Math.abs(visualDelta + scrollDelta) < 8)
+        )) {
+          retentionCancelled = true;
+          layoutObserver?.disconnect();
+          retainedViewportProjection = null;
+          pendingPresentationScroll = null;
+          return;
+        }
+        const recordRetainedPosition = () => {
+          retainedScrollTop = scrollElement.scrollTop;
+          hasRetainedPosition = true;
+        };
+        if (wasAtDocumentTop) {
+          scrollElement.scrollTop = 0;
+          retainedViewportProjection = null;
+          recordRetainedPosition();
+          return;
+        }
+        if (visualAnchor?.isConnected && visualY !== undefined) {
+          const rect = visualAnchor.getBoundingClientRect();
+          const currentY = visualProgress === null ? rect.top : rect.top + rect.height * visualProgress;
+          scrollElement.scrollTop += currentY - visualY;
+          retainedViewportProjection = null;
+          recordRetainedPosition();
+          return;
+        }
+        if (readingPosition) {
+          sourceMapDirty = true;
+          restoreTopLine(
+            readingPosition.topLine,
+            readingPosition.topLineOffset,
+            readingPosition.viewportOffset,
+            readingPosition.sourceRange
+          );
+          recordRetainedPosition();
+          return;
+        }
         if (Math.abs(scrollElement.scrollTop - preservedScrollTop) > 0.1) {
           scrollElement.scrollTop = preservedScrollTop;
         }
+        recordRetainedPosition();
       }
     };
+    layoutObserver = preserveReadingPosition && typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(keepPosition) : null;
+    const previewContent = frameDocument.querySelector<HTMLElement>('.meo-export-doc');
+    if (previewContent) layoutObserver?.observe(previewContent);
+    if (visualAnchor && visualAnchor !== previewContent) layoutObserver?.observe(visualAnchor);
     // This is a presentation-only update of the same frame and document. A
     // cross-surface semantic projection would race this exact reading offset.
     styleElement.textContent = payload.styles[appearance];
     previewTableLayout?.refresh();
     syncPreviewCodeHighlight(frameDocument);
     keepPosition();
+    if (preserveReadingPosition) {
+      let remainingFrames = 20;
+      const settlePosition = () => {
+        if (!isCurrent() || retentionCancelled || interactionGeneration !== viewportInteractionGeneration) {
+          layoutObserver?.disconnect();
+          return;
+        }
+        keepPosition();
+        if (--remainingFrames > 0) requestAnimationFrame(settlePosition);
+        else layoutObserver?.disconnect();
+      };
+      requestAnimationFrame(settlePosition);
+    } else {
+      layoutObserver?.disconnect();
+    }
     onRendered?.({ skipLinkedViewportProjection: true });
     if (payload.hasMermaid) {
       void previewMermaidRenderer.render(
@@ -1569,6 +1656,7 @@ export function createPreviewController({
         () => {
           sourceMapDirty = true;
           scrollToTopController.sync();
+          keepPosition();
         },
         isCurrent,
         (mutate) => {
@@ -1676,7 +1764,7 @@ export function createPreviewController({
       latestAcceptedText = requestText;
       setStatus(null);
       if (preserveFrame && activeFrameDocument && frameRenderedText === requestText) {
-        applyAppearanceToFrame();
+        applyAppearanceToFrame(preserveViewport);
       } else {
         renderFrame(requestText, preserveViewport);
       }
@@ -1699,7 +1787,7 @@ export function createPreviewController({
     return performRequestRender(text, {
       background,
       force,
-      preserveViewport: preserveViewport && !preserveCurrentFrame,
+      preserveViewport,
       preserveFrame
     });
   };

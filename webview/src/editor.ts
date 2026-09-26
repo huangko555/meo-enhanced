@@ -3554,8 +3554,8 @@ export function createEditor({
       view.dispatch({ effects: refreshDecorationsEffect.of(null) });
       refreshTableLocalLinkIndicators(view.dom, view.state.facet(uiLanguageFacet));
     },
-    preserveViewport(mutate: () => void) {
-      viewportController.preserveDocumentAnchorWhileMutation(mutate);
+    preserveViewport(mutate: () => void, immediateLayout = false) {
+      viewportController.preserveDocumentAnchorWhileMutation(mutate, immediateLayout);
     },
     preserveViewportLayout(mutate: () => void) {
       const anchor = viewportController.captureDocumentAnchor();
@@ -3584,7 +3584,7 @@ export function createEditor({
           ]
         });
         gitDiffOverviewRuler?.refresh();
-      });
+      }, true);
     }
   };
 }

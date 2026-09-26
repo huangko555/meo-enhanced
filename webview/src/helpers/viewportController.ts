@@ -1,4 +1,4 @@
-import type { EditorView } from '@codemirror/view';
+import { EditorView } from '@codemirror/view';
 import { createLinkedViewportMap, type LinkedViewportMap, type LinkedViewportPoint } from './linkedViewportMap';
 
 export interface ViewportDocumentAnchor {
@@ -18,6 +18,7 @@ export interface ViewportDocumentAnchor {
 
 type RestoreDocumentAnchorOptions = {
   force?: boolean;
+  requiredStableFrames?: number;
 };
 
 export interface ViewportScrollDelta {
@@ -1059,7 +1060,7 @@ export class ViewportController {
   restoreDocumentAnchor(
     anchor: ViewportDocumentAnchor,
     onSettled?: () => void,
-    { force = false }: RestoreDocumentAnchorOptions = {}
+    { force = false, requiredStableFrames }: RestoreDocumentAnchorOptions = {}
   ): void {
     if (!force && this.isUserScrolling()) return;
     const position = Math.min(Math.max(0, anchor.position), this.view.state?.doc?.length ?? anchor.position);
@@ -1175,7 +1176,7 @@ export class ViewportController {
         }
       }
       return { top: Math.max(0, this.view.lineBlockAt(position).top + lineOffset) };
-    }, { onSettled });
+    }, { onSettled, requiredStableFrames });
   }
 
   restoreTopVisibleLine(
@@ -1192,10 +1193,215 @@ export class ViewportController {
     this.restoreDocumentAnchor({ position: line.from, lineOffset }, onSettled, options);
   }
 
-  preserveDocumentAnchorWhileMutation(mutate: () => void): void {
+  preserveDocumentAnchorWhileMutation(mutate: () => void, immediateLayout = false): void {
     const anchor = this.captureDocumentAnchor();
+    // A new font layout supersedes absolute scroll retention from a block-mode
+    // transition; that older target would otherwise pull this anchor away.
+    if (immediateLayout && !this.isUserScrolling()) this.beginNavigationReveal();
+    const scroller = this.view.scrollDOM;
+    const scrollerRect = immediateLayout ? scroller.getBoundingClientRect() : null;
+    const visibleTable = scrollerRect && Array.from(
+      this.view.contentDOM.querySelectorAll<HTMLElement>('.meo-md-html-table-shell')
+    ).find((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.top <= scrollerRect.top + 2 && rect.bottom > scrollerRect.top + 2;
+    });
+    const tableRows = visibleTable ? Array.from(visibleTable.querySelectorAll<HTMLElement>('tr')) : [];
+    const tableRowIndex = scrollerRect ? (() => {
+      const rowAtTop = tableRows.findIndex((element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.top <= scrollerRect.top + 2 && rect.bottom > scrollerRect.top + 2;
+      });
+      if (rowAtTop >= 0) return rowAtTop;
+      const bodyRow = tableRows.findIndex((element) => {
+        const rect = element.getBoundingClientRect();
+        return element.parentElement?.tagName === 'TBODY'
+          && rect.bottom > scrollerRect.top + 2 && rect.top < scrollerRect.bottom;
+      });
+      return bodyRow >= 0 ? bodyRow : tableRows.findIndex((element) => (
+        element.getBoundingClientRect().bottom > scrollerRect.top + 2
+      ));
+    })() : -1;
+    const tableRow = tableRows[tableRowIndex];
+    const resolveTableRow = () => tableRow?.isConnected ? tableRow : (
+      this.view.contentDOM.querySelector<HTMLElement>(
+        `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${visibleTable?.dataset.meoRenderedBlockStartLine}"]`
+      )?.querySelectorAll<HTMLElement>('tr')[tableRowIndex] ?? null
+    );
+    const visibleBlock = tableRow ?? (scrollerRect && Array.from(
+      this.view.contentDOM.querySelectorAll<HTMLElement>('.cm-line, [data-meo-rendered-block-start-line]')
+    ).find((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.bottom > scrollerRect.top + 2 && rect.top < scrollerRect.bottom;
+    }));
+    const blockTop = visibleBlock?.getBoundingClientRect().top;
+    const fontAnchorPosition = immediateLayout && scrollerRect
+      ? this.view.posAtCoords({ x: scrollerRect.left + 100, y: scrollerRect.top + 2 }) ?? anchor.position
+      : anchor.position;
+    const foldedCodeNearTop = immediateLayout && scrollerRect && Array.from(
+      this.view.contentDOM.querySelectorAll<HTMLElement>('.meo-md-long-code-placeholder')
+    ).find((element) => {
+      const rect = element.getBoundingClientRect();
+      const blockLine = Number(element.dataset.meoRenderedBlockStartLine);
+      const anchorLine = this.view.state.doc.lineAt(fontAnchorPosition).number;
+      const atTop = this.view.scrollDOM.ownerDocument.elementFromPoint(
+        scrollerRect.left + 100, scrollerRect.top + 2
+      )?.closest('.meo-md-long-code-placeholder') === element;
+      return rect.top <= scrollerRect.top + 2 && (
+        atTop || (
+          rect.bottom >= scrollerRect.top - 96 && Math.abs(blockLine - anchorLine) <= 15
+        )
+      );
+    });
+    const resolveAnchorLine = (): HTMLElement | null => {
+      try {
+        const node = this.view.domAtPos(fontAnchorPosition).node;
+        const element = node instanceof HTMLElement ? node : node.parentElement;
+        const line = element?.closest<HTMLElement>('.cm-line') ?? null;
+        return line?.closest('.cm-editor') === this.view.dom ? line : null;
+      } catch {
+        return null;
+      }
+    };
+    const anchorLine = !tableRow ? resolveAnchorLine() : null;
+    const resolveTrackedAnchorLine = () => resolveAnchorLine() ?? (anchorLine?.isConnected ? anchorLine : null);
+    const anchorLineRect = anchorLine?.getBoundingClientRect();
+    const anchorLineTop = anchorLineRect && scrollerRect
+      && anchorLineRect.bottom > scrollerRect.top && anchorLineRect.top < scrollerRect.bottom
+        ? anchorLineRect.top : null;
+    const topRenderedBlock = immediateLayout && scrollerRect
+      ? this.view.scrollDOM.ownerDocument.elementFromPoint(
+        scrollerRect.left + 100, scrollerRect.top + 2
+      )?.closest<HTMLElement>('.meo-rendered-block-preview, .meo-md-html-block') ?? null
+      : null;
+    const visualAnchor = !tableRow ? foldedCodeNearTop || topRenderedBlock : null;
+    const resolveVisualAnchor = () => visualAnchor?.isConnected ? visualAnchor : visualAnchor
+      ? this.view.contentDOM.querySelector<HTMLElement>(
+        `.${visualAnchor.classList.contains('meo-md-long-code-placeholder') ? 'meo-md-long-code-placeholder' : visualAnchor.classList.contains('meo-md-html-block') ? 'meo-md-html-block' : 'meo-rendered-block-preview'}[data-meo-rendered-block-start-line="${visualAnchor.dataset.meoRenderedBlockStartLine}"]`
+      ) : null;
+    const visualTop = visualAnchor?.getBoundingClientRect().top;
     mutate();
-    this.restoreDocumentAnchor(anchor);
+    if (immediateLayout && (this.getMode() === 'source' || foldedCodeNearTop
+      || topRenderedBlock?.querySelector('.meo-mermaid-toolbar'))) queueMicrotask(() => {
+      if (!this.destroyed) this.view.dispatch({
+        effects: EditorView.scrollIntoView(fontAnchorPosition, { y: 'nearest' })
+      });
+    });
+    const currentBlock = tableRow ? resolveTableRow() : visualAnchor
+      ? resolveVisualAnchor() : anchorLineTop !== null ? resolveTrackedAnchorLine() : visibleBlock;
+    const targetTop = visualTop ?? anchorLineTop ?? blockTop;
+    if (currentBlock?.isConnected && targetTop !== undefined && targetTop !== null && !this.isUserScrolling()) {
+      // Font changes reflow the DOM before CodeMirror updates its height map.
+      // Correct the first layout now, before later height-map measurements settle.
+      this.writeScrollPosition({
+        top: scroller.scrollTop + currentBlock.getBoundingClientRect().top - targetTop,
+        left: scroller.scrollLeft
+      });
+    }
+    if (tableRow && blockTop !== undefined && !this.isUserScrolling()) {
+      const correctTableRow = () => {
+        if (this.destroyed || this.isUserScrolling()) return;
+        const row = resolveTableRow();
+        if (row) this.writeScrollPosition({
+          top: scroller.scrollTop + row.getBoundingClientRect().top - blockTop,
+          left: scroller.scrollLeft
+        });
+      };
+      const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(correctTableRow);
+      observer?.observe(this.view.contentDOM);
+      const mutations = new MutationObserver(correctTableRow);
+      mutations.observe(this.view.contentDOM, { childList: true, attributes: true, subtree: true });
+      scroller.addEventListener('scroll', correctTableRow, { passive: true });
+      let remainingFrames = 15;
+      const release = () => {
+        if (--remainingFrames <= 0 || this.destroyed) {
+          observer?.disconnect();
+          mutations.disconnect();
+          scroller.removeEventListener('scroll', correctTableRow);
+        } else requestAnimationFrame(release);
+      };
+      requestAnimationFrame(release);
+      this.stabilize(() => {
+        const row = resolveTableRow();
+        return row ? { top: scroller.scrollTop + row.getBoundingClientRect().top - blockTop } : null;
+      }, { requiredStableFrames: 12 });
+      return;
+    }
+    if (!visualAnchor && anchorLineTop !== null && currentBlock?.isConnected && !this.isUserScrolling()) {
+      const trackedLineTarget = () => {
+        const line = resolveTrackedAnchorLine();
+        if (line) return scroller.scrollTop + line.getBoundingClientRect().top - anchorLineTop;
+        return this.getMode() === 'live'
+          ? this.view.lineBlockAt(fontAnchorPosition).top - (anchorLineTop - scrollerRect!.top)
+          : null;
+      };
+      const correctAnchorLine = () => {
+        if (this.destroyed || this.isUserScrolling()) return;
+        const top = trackedLineTarget();
+        if (top !== null) this.writeScrollPosition({ top, left: scroller.scrollLeft });
+      };
+      scroller.addEventListener('scroll', correctAnchorLine, { passive: true });
+      const mutations = new MutationObserver(correctAnchorLine);
+      mutations.observe(this.view.contentDOM, { childList: true, attributes: true, subtree: true });
+      if (typeof ResizeObserver !== 'undefined') {
+        const observer = new ResizeObserver(correctAnchorLine);
+        // CodeMirror can resize a preceding rendered block after its height
+        // map has settled. ResizeObserver runs before that frame is painted.
+        observer.observe(this.view.contentDOM);
+        let remainingFrames = 15;
+        const release = () => {
+          if (--remainingFrames <= 0 || this.destroyed) {
+            observer.disconnect();
+            mutations.disconnect();
+            scroller.removeEventListener('scroll', correctAnchorLine);
+          }
+          else requestAnimationFrame(release);
+        };
+        requestAnimationFrame(release);
+      } else {
+        requestAnimationFrame(() => {
+          mutations.disconnect();
+          scroller.removeEventListener('scroll', correctAnchorLine);
+        });
+      }
+      this.stabilize(() => {
+        const top = trackedLineTarget();
+        return top === null ? null : { top };
+      }, { requiredStableFrames: 12 });
+      return;
+    }
+    if (visualAnchor && visualTop !== undefined && currentBlock?.isConnected && !this.isUserScrolling()) {
+      const ownerGeneration = this.generation + 1;
+      const correctVisualAnchor = () => {
+        if (this.generation !== ownerGeneration) return;
+        const current = resolveVisualAnchor();
+        if (current && !this.destroyed && !this.isUserScrolling()) this.writeScrollPosition({
+          top: scroller.scrollTop + current.getBoundingClientRect().top - visualTop,
+          left: scroller.scrollLeft
+        });
+      };
+      const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
+        correctVisualAnchor();
+      });
+      observer?.observe(this.view.contentDOM);
+      const mutations = new MutationObserver(correctVisualAnchor);
+      mutations.observe(this.view.contentDOM, { childList: true, attributes: true, subtree: true });
+      scroller.addEventListener('scroll', correctVisualAnchor, { passive: true });
+      let remainingFrames = 8;
+      const release = () => {
+        if (--remainingFrames <= 0 || this.destroyed || this.generation !== ownerGeneration) {
+          observer?.disconnect();
+          mutations.disconnect();
+          scroller.removeEventListener('scroll', correctVisualAnchor);
+        } else requestAnimationFrame(release);
+      };
+      requestAnimationFrame(release);
+      this.stabilize(() => resolveVisualAnchor()
+        ? { top: scroller.scrollTop + resolveVisualAnchor()!.getBoundingClientRect().top - visualTop }
+        : null, { requiredStableFrames: 7 });
+      return;
+    }
+    this.restoreDocumentAnchor(anchor, undefined, immediateLayout ? { requiredStableFrames: 7 } : {});
   }
 
   preserveScrollPosition(mutate: () => void): void {
@@ -1452,6 +1658,7 @@ export class ViewportController {
   private stabilize(readTarget: () => ScrollTarget | null, options: StabilizeOptions = {}): void {
     if (this.destroyed || this.hasActiveScrollLock()) return;
     const generation = ++this.generation;
+    const maxAttempts = Math.max(MAX_SETTLE_FRAMES, (options.requiredStableFrames ?? REQUIRED_STABLE_FRAMES) + 8);
     this.activeScrollTarget = null;
     this.activeLayoutAnchor = null;
     this.anchorStabilizationGeneration = generation;
@@ -1469,7 +1676,7 @@ export class ViewportController {
     const measure = () => {
       if (
         this.destroyed || generation !== this.generation ||
-        attempts >= MAX_SETTLE_FRAMES
+        attempts >= maxAttempts
       ) {
         finish();
         return;
@@ -1511,7 +1718,7 @@ export class ViewportController {
             if (
               (stableFrames >= (options.requiredStableFrames ?? REQUIRED_STABLE_FRAMES)
                 && (options.canSettle?.() ?? true)) ||
-              attempts >= MAX_SETTLE_FRAMES
+              attempts >= maxAttempts
             ) {
               finish();
               return;

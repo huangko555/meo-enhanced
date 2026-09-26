@@ -1976,7 +1976,7 @@ const applyEditorFontSizePreference = (
       document.documentElement.style.removeProperty('--meo-user-editor-font-size');
     }
   };
-  if (editor?.preserveViewport) editor.preserveViewport(mutate);
+  if (editor?.preserveViewport) editor.preserveViewport(mutate, true);
   else mutate();
   syncEditorFontSizeControls();
   if (refreshPreview) {
@@ -2989,7 +2989,7 @@ const themeAdapter = createAppearanceWebviewAdapter({
   applyCodePalette: codePaletteAdapter.apply,
   refreshMermaidTheme: () => mermaidDiagramRenderPool.refreshTheme(),
   applyWithEditorViewportPreserved: (action) => {
-    if (editor) editor.preserveViewport(action);
+    if (editor) editor.preserveViewport(action, true);
     else action();
   },
   refreshEditorDecorations: () => editor?.refreshDecorations(),
