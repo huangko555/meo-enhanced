@@ -125,19 +125,6 @@ export async function migrateLegacyToggleSettings(context: vscode.ExtensionConte
   await migrateLegacyToggleSetting(context, CONTENT_MAX_WIDTH_SETTING_KEY, CONTENT_MAX_WIDTH_ENABLED_KEY);
 }
 
-export async function syncEditorAssociations(useAsDefault: boolean): Promise<void> {
-  const config = vscode.workspace.getConfiguration('workbench');
-  const inspected = config.inspect<Record<string, string>>('editorAssociations');
-  const markdownAssociation = useAsDefault ? 'meoEnhanced.editor' : 'default';
-
-  await syncEditorAssociationsForTarget(
-    config,
-    inspected?.globalValue,
-    vscode.ConfigurationTarget.Global,
-    markdownAssociation
-  );
-}
-
 function getToggleSettingValue(
   context: vscode.ExtensionContext,
   settingKey: string,
@@ -203,37 +190,4 @@ function hasExplicitConfigurationValue<T>(config: vscode.WorkspaceConfiguration,
     languageScoped.workspaceLanguageValue !== undefined ||
     languageScoped.workspaceFolderLanguageValue !== undefined
   );
-}
-
-async function syncEditorAssociationsForTarget(
-  config: vscode.WorkspaceConfiguration,
-  inspectedValue: Record<string, string> | undefined,
-  target: vscode.ConfigurationTarget,
-  markdownAssociation: string
-): Promise<void> {
-  const markdownAssociations = {
-    ...inspectedValue,
-    '*.md': markdownAssociation,
-    '*.markdown': markdownAssociation,
-    '*.mdx': markdownAssociation,
-    '*.mdc': markdownAssociation,
-    'git:/**/*.md': 'default',
-    'git:/**/*.markdown': 'default',
-    'git:/**/*.mdx': 'default',
-    'git:/**/*.mdc': 'default',
-    'git:**/*.md': 'default',
-    'git:**/*.markdown': 'default',
-    'git:**/*.mdx': 'default',
-    'git:**/*.mdc': 'default',
-    'chat-editing-text-model:/**/*.md': 'default',
-    'chat-editing-text-model:/**/*.markdown': 'default',
-    'chat-editing-text-model:/**/*.mdx': 'default',
-    'chat-editing-text-model:/**/*.mdc': 'default',
-    'chat-editing-text-model:**/*.md': 'default',
-    'chat-editing-text-model:**/*.markdown': 'default',
-    'chat-editing-text-model:**/*.mdx': 'default',
-    'chat-editing-text-model:**/*.mdc': 'default'
-  };
-
-  await config.update('editorAssociations', markdownAssociations, target);
 }

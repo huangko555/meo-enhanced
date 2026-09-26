@@ -109,7 +109,7 @@ Install **MEO Enhanced - Markdown Editor** from the [VS Code Marketplace](https:
 code --install-extension huangko555.meo-enhanced
 ```
 
-After installation, open any `.md`, `.markdown`, `.mdx`, or `.mdc` file directly. You can also right-click a file and select **Open With MEO Enhanced**, or run **MEO Enhanced: Set as Default** from the Command Palette.
+After installation, open any `.md`, `.markdown`, `.mdx`, or `.mdc` file directly. You can also right-click a file and select **Open With MEO Enhanced**. When another Markdown editor is installed, use VS Code's **Open With... → Configure Default Editor** command to choose your preference. An extension that rewrites editor associations on startup can still override that choice until it is disabled or fixed.
 
 For offline installation, download a `.vsix` package from [GitHub Releases](https://github.com/huangko555/meo-enhanced/releases), then run **Extensions: Install from VSIX...** in VS Code.
 

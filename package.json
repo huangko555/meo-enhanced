@@ -52,11 +52,6 @@
         "title": "MEO+"
       },
       {
-        "command": "meoEnhanced.setDefaultEditor",
-        "title": "%command.setDefaultEditor%",
-        "icon": "$(check)"
-      },
-      {
         "command": "meoEnhanced.toggleMode",
         "title": "%command.toggleMode%",
         "icon": "$(sync)"
@@ -130,10 +125,6 @@
     },
     "configurationDefaults": {
       "workbench.editorAssociations": {
-        "*.md": "meoEnhanced.editor",
-        "*.markdown": "meoEnhanced.editor",
-        "*.mdx": "meoEnhanced.editor",
-        "*.mdc": "meoEnhanced.editor",
         "git:/**/*.md": "default",
         "git:/**/*.markdown": "default",
         "git:/**/*.mdx": "default",
@@ -254,12 +245,6 @@
           "maximum": 32,
           "order": 9,
           "description": "%config.fontSize.value%"
-        },
-        "meoEnhanced.useAsDefault": {
-          "type": "boolean",
-          "default": true,
-          "order": 2,
-          "description": "%config.useAsDefault%"
         },
         "meoEnhanced.outline.position": {
           "type": "string",

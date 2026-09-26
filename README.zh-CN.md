@@ -109,7 +109,7 @@ Mermaid 图表和块级 LaTeX 公式提供 **Source、Split、Preview** 三种�
 code --install-extension huangko555.meo-enhanced
 ```
 
-安装完成后，可直接打开 `.md`、`.markdown`、`.mdx` 或 `.mdc` 文件。也可以右键文件并选择 **使用 MEO Enhanced 打开**，或在命令面板中执行 **MEO Enhanced：设为默认编辑器**。
+安装完成后，可直接打开 `.md`、`.markdown`、`.mdx` 或 `.mdc` 文件。也可以右键文件并选择 **使用 MEO Enhanced 打开**。同时安装其他 Markdown 编辑器时，请通过 VS Code 的 **打开方式... → 配置默认编辑器** 选择首选编辑器。如果另一个扩展在启动时改写编辑器关联，仍需禁用或修复它，才能保留这项选择。
 
 离线安装时，从 [GitHub Releases](https://github.com/huangko555/meo-enhanced/releases) 下载 `.vsix`，然后在 VS Code 中执行 **Extensions: Install from VSIX...**。
 

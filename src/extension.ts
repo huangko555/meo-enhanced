@@ -36,7 +36,6 @@ import {
   RESTORE_READING_POSITION_SETTING_KEY,
   OUTLINE_VISIBLE_KEY,
   getCurrentVscodeCodeTheme,
-  syncEditorAssociations,
   getGitChangesGutterEnabled,
   getOutlineVisible,
   getContentMaxWidthEnabled,
@@ -75,7 +74,6 @@ import {
   resolveLocalLinkTargetUri
 } from './shared/documentLinks';
 import {
-  showTimedInformationMessage,
   showTimedWarningMessage,
 } from './shared/timedUi';
 import type { ExportStyleEnvironment } from './export/runtime';
@@ -172,9 +170,6 @@ const createVscodeAppearanceSettingsStore = (context: vscode.ExtensionContext): 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const appearanceSettings = await createAppearanceSettingsOwner(createVscodeAppearanceSettingsStore(context));
   void vscode.commands.executeCommand('setContext', ACTIVE_EDITOR_CONTEXT_KEY, false);
-  const useAsDefault = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get<boolean>('useAsDefault', true);
-  void syncEditorAssociations(useAsDefault);
-
   const agentReviewHandoff = new AgentReviewHandoffController({
     viewType: VIEW_TYPE,
     getComparableResourceKey,
@@ -202,13 +197,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.useAsDefault`)) {
-        const shouldUseAsDefault = vscode.workspace
-          .getConfiguration(EXTENSION_CONFIG_SECTION)
-          .get<boolean>('useAsDefault', true);
-        void syncEditorAssociations(shouldUseAsDefault);
-      }
-
       if (event.affectsConfiguration('workbench.colorTheme')) {
         provider.notifyVscodeCodeThemeChanged();
       }
@@ -333,13 +321,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         ? 'default'
         : VIEW_TYPE;
       await vscode.commands.executeCommand('vscode.openWith', targetUri, targetViewType);
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('meoEnhanced.setDefaultEditor', async () => {
-      await syncEditorAssociations(true);
-      void showTimedInformationMessage('MEO Enhanced is now set as the default editor for Markdown files.');
     })
   );
 

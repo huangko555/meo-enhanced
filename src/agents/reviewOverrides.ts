@@ -32,7 +32,7 @@ export class AgentReviewOverrideController {
   async syncNow(): Promise<void> {
     const config = vscode.workspace.getConfiguration('workbench');
     const current = {
-      ...(config.get<Record<string, string>>('editorAssociations') || {})
+      ...(config.inspect<Record<string, string>>('editorAssociations')?.globalValue || {})
     };
     const previousKeys = new Set(this.context.workspaceState.get<string[]>(REVIEW_FILE_OVERRIDE_STATE_KEY, []));
     const nextKeys = this.collectOverrideKeys();
