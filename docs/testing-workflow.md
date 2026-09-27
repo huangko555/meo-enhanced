@@ -95,6 +95,34 @@ from settled interaction. Change one suspected source of work at a time. Keep
 the document hash, viewport, font, runtime version, and profiling mode with the
 results; CPU sampling changes timings and must not be mixed with unprofiled runs.
 
+For repeatable built-Webview loading measurements after a production build:
+
+```powershell
+bun scripts/benchmark-mode-loading.ts --confirm-long-run --rounds 5 --label candidate
+```
+
+This uses the emitted ESM chunks and real Mermaid runtime, with a fresh browser
+context and disabled HTTP cache for each Live, Source, and Preview startup.
+Ordinary, many-line, rich-block, and prose-only Mermaid mention fixtures have
+recorded hashes. Reports in
+`.local/probes/mode-loading-*` include build hashes, browser/version/viewport,
+navigation-to-ready-handshake, navigation-to-first-content-frame, and individual
+mode transitions tagged by whether the destination has been visited. Use
+`--fixture mention-only` to focus a follow-up sample. The Host render bridge
+uses the real preview renderer; it does not model Extension Host activation, VS Code IPC, OS file-cache coldness, saved
+reading-position restoration, or optional Source split preview. Rich-resource
+completion is not the first-content metric. The run additionally checks that
+Source does not request Mermaid code for documents without a diagram hint and
+that rich fixtures eventually produce a real SVG after switching to Live.
+
+Use `--preload-mermaid` only to reproduce the former broad word-match policy
+for comparison; it is recorded in the report and is not the current production
+policy. Compare matching fixtures, runtime, viewport, and sampling order without
+concurrent tests. Report medians and sample ranges; a few repetitions do not
+establish a reliable p95. Complement these Webview measurements with the native
+probes below. This is a repeated performance campaign and requires explicit
+long-run authorization.
+
 For a short, read-only native Windows startup/scroll probe after building:
 
 ```powershell

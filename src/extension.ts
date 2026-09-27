@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as vscode from 'vscode';
+import { shouldPreloadMermaid } from './extension/webviewResourceHints';
 import { createGitApiWatcher } from './git/gitApiWatch';
 import {
   AGENT_REVIEW_FILE_OVERRIDE_CLEANUP_DELAY_MS,
@@ -634,7 +635,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
 
     // A conservative hint preserves immediate diagram transitions without a
     // second Markdown parser. New diagrams can still load the runtime later.
-    panel.webview.html = this.getWebviewHtml(panel.webview, /mermaid/i.test(document.getText()));
+    panel.webview.html = this.getWebviewHtml(panel.webview, shouldPreloadMermaid(document.getText()));
     this.panelSessions.set(panel, controller.session);
     if (panel.active) {
       this.lastActivePanel = panel;

@@ -1,6 +1,8 @@
+import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { shouldPreloadMermaid } from '../src/extension/webviewResourceHints';
 import { launchTestBrowser } from './browser-test-helpers';
 import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { buildPreviewStyles } from '../src/export/exportStyles';
@@ -9,6 +11,16 @@ import {
   MermaidDiagramResourceUnavailableError,
   type MermaidDiagramRenderResources
 } from '../webview/src/application/mermaidDiagramRenderResources';
+
+for (const text of ['Mermaid diagrams are supported.', '[mermaid](https://mermaid.js.org)', '`mermaid`', '```typescript\nconst mermaid = true;\n```']) {
+  assert.equal(shouldPreloadMermaid(text), false, 'prose and ordinary code must not load Mermaid at startup');
+}
+for (const text of ['```mermaid\nflowchart LR; A-->B\n```', '~~~~mermaid\nA-->B', '> ``` mermaid', '- ```mermaid', '    ```MERMAID', '````mermaid', '```mermaid\r\n']) {
+  assert.equal(shouldPreloadMermaid(text), true, 'retain preloading for diagram fences, including nested and incomplete input');
+}
+
+assert.equal(shouldPreloadMermaid('`'.repeat(100_000)), false, 'long delimiter runs must remain cheap to scan');
+assert.equal(shouldPreloadMermaid('~'.repeat(100_000) + 'mermaid'), true);
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-preview-mermaid-runtime-'));
