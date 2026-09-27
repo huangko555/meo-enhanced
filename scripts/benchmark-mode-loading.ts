@@ -162,7 +162,7 @@ try {
     head: Bun.spawnSync(['git', 'rev-parse', 'HEAD']).stdout.toString().trim(),
     buildSha256: buildHash.digest('hex'), browser: await browser.version(), bun: Bun.version,
     platform: process.platform, arch: process.arch, cpu: os.cpus()[0]?.model, logicalCpuCount: os.cpus().length, viewport, cache: 'disabled; fresh browser context per startup',
-    scope: 'Built Webview only; ready/content times from navigation; transitions from DOM click to first ready frame. Excludes native Host activation and final rich-resource settlement.',
+    scope: 'Built Webview plus in-process real Preview renderer; ready/content times from navigation; transitions from DOM click to first ready frame. Excludes Extension Host activation, real VS Code IPC, OS cold file cache and final rich-resource settlement.',
     fixtures: selectedFixtures.map(f => ({ kind: f.kind, bytes: Buffer.byteLength(f.text), sha256: createHash('sha256').update(f.text).digest('hex') })), samples
   };
   const output = path.resolve('.local/probes', `mode-loading-${label}-${Date.now()}.json`);
