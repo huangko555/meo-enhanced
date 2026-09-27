@@ -123,6 +123,49 @@ establish a reliable p95. Complement these Webview measurements with the native
 probes below. This is a repeated performance campaign and requires explicit
 long-run authorization.
 
+For native saved-mode and process-restart coverage, build first and create a JSON
+case with an absolute `document` path, `savedMode` and `expectedMode` (`live`, `source`, or
+`preview`), plus boolean `optimization` and `restore` fields. For example:
+
+```json
+{"document":"C:/fixtures/ordinary.md","savedMode":"preview","expectedMode":"preview","optimization":false,"restore":true}
+```
+
+```powershell
+pwsh -File scripts/benchmark-vscode-modes.ps1 -CaseFile <case.json> -CodePath <Code.exe> -ConfirmLongRun
+```
+
+The probe seeds the saved mode and reading position through the real UI, quits,
+then restarts the same isolated profile. It checks initial mode, a same-process
+reopen, and all six directed mode transitions with Source split preview disabled
+and enabled. The large-document policy can override a saved mode with Source;
+encode that expectation explicitly rather than counting it as a Live/Preview
+startup. Split preview is intentionally session-only. When `restore` is false,
+the seed still saves a non-top position before the measuring process disables
+restoration. Empty/short documents cannot prove non-top restoration.
+
+This uses a small companion development extension, because VS Code's extension
+test runner uses in-memory storage and cannot prove cross-process persistence.
+Each phase is bounded to 180 seconds. Reports retain seed and measurement results,
+built entry/runtime hashes, document/driver hashes, runtime, viewport, font and
+focus state. Failure reports and isolated seed storage snapshots remain available
+for diagnosis. The seed waits five seconds outside measured intervals and Bun
+checks the copied SQLite state for a non-top position before measuring restore.
+Missing persisted state fails the setup instead of being counted as a restore
+test. Source documents are never edited.
+
+`launchToHarnessMs` and `launchToReadyMs` include VS Code and automation overhead;
+`openToReadyMs` starts at `openWith`. Extension activation may have begun earlier
+and its state at harness entry is recorded. OS file caches are not cleared. DOM
+polling is not exact first-paint measurement, and content readiness does not mean
+all diagrams/images have finished. `readingPositionReadyMs` only detects a move
+away from the top for a previously scrolled document; exact semantic fidelity is
+asserted separately by the production reading-position browser tests. Do not
+infer whole-application speedups, foreground latency, installed-VSIX acceptance,
+or reliable percentiles from one development-window sample. The launcher requests
+Hidden, but Electron may show its own window; use the recorded focus/visibility
+state rather than assuming it stayed hidden.
+
 For a short, read-only native Windows startup/scroll probe after building:
 
 ```powershell
