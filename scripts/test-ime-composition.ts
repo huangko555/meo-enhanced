@@ -1,7 +1,9 @@
+import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { launchTestBrowser } from './browser-test-helpers';
+import type { ApplyChangesMessage } from '../src/protocol/documentSync';
 import { darkBuiltInVisuals } from '../src/shared/builtInVisualBaseline';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
@@ -57,6 +59,24 @@ async function main() {
       '| --- |',
       '| ***粗斜体***、**粗体中的 `代码`**、~~删除线中的 *斜体*~~后续、12~~*斜体* 中的删除线~~、12**`代码`中的粗体**、12*`代码`中的斜体* |'
     ].join('\n');
+    let hostText = initialText;
+    let hostVersion = 1;
+    const acknowledgeChanges = async (message: ApplyChangesMessage): Promise<string> => {
+      assert.equal(message.baseVersion, hostVersion, 'IME change must use the acknowledged Host revision');
+      let nextText = hostText;
+      for (const change of [...message.changes].sort((left, right) => right.from - left.from)) {
+        assert.ok(change.from >= 0 && change.to >= change.from && change.to <= hostText.length);
+        nextText = nextText.slice(0, change.from) + change.insert + nextText.slice(change.to);
+      }
+      hostText = nextText;
+      hostVersion += 1;
+      await page.evaluate(({ text, version }) => {
+        window.dispatchEvent(new MessageEvent('message', { data: { type: 'applied', version } }));
+        window.dispatchEvent(new MessageEvent('message', { data: { type: 'docChanged', text, version } }));
+      }, { text: hostText, version: hostVersion });
+      return hostText;
+    };
+
     await page.evaluate(({ text, theme }) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', documentId: 'file:///ime.md', text, version: 1,
@@ -177,12 +197,8 @@ async function main() {
       }));
       throw new Error(`IME commit was not sent to the host: ${JSON.stringify(stalledState)}`);
     }
-    const committedText = committedApply.changes[0].insert as string;
-
-    await page.evaluate((text) => {
-      window.dispatchEvent(new MessageEvent('message', { data: { type: 'applied', version: 2 } }));
-      window.dispatchEvent(new MessageEvent('message', { data: { type: 'docChanged', text, version: 2 } }));
-    }, committedText);
+    const committedText = await acknowledgeChanges(committedApply);
+    assert.equal(committedText, initialText.replace('\n', '还\n'), 'Host acknowledgement must preserve the unedited document');
     await new Promise((resolve) => setTimeout(resolve, 180));
 
     const state = await page.evaluate(() => ({
@@ -332,7 +348,7 @@ async function main() {
     await assertPreeditAfterMarker('标题边界', '**');
     await assertPreeditAfterMarker('正文边界', '~~');
 
-    for (const [index, label] of ['正文组合', '标题组合'].entries()) {
+    for (const label of ['正文组合', '标题组合']) {
       const messageCountBefore = await page.evaluate(() => (window as any).__hostMessages.length);
       await clickLineEnd(label);
       const before = await page.evaluate((lineLabel) => (
@@ -358,17 +374,17 @@ async function main() {
         throw new Error(`Text insertion after nested markers was lost: ${JSON.stringify({ label, before, after, hasStrike: afterState.hasStrike, focus })}`);
       }
       await new Promise((resolve) => setTimeout(resolve, 300));
-      const appliedText = await page.evaluate((fromIndex) => (
+      const applyMessage = await page.evaluate((fromIndex) => (
         (window as any).__hostMessages.slice(fromIndex)
-          .find((message: any) => message.type === 'applyChanges')?.changes[0].insert ?? null
+          .find((message: any) => message.type === 'applyChanges') ?? null
       ), messageCountBefore);
-      if (typeof appliedText !== 'string') {
+      if (!applyMessage) {
         throw new Error(`Nested-marker insertion was not sent to the host: ${label}`);
       }
-      await page.evaluate(({ text, version }) => {
-        window.dispatchEvent(new MessageEvent('message', { data: { type: 'applied', version } }));
-        window.dispatchEvent(new MessageEvent('message', { data: { type: 'docChanged', text, version } }));
-      }, { text: appliedText, version: 3 + index });
+      const previousHostLength = hostText.length;
+      await acknowledgeChanges(applyMessage);
+      assert.equal(hostText.length, previousHostLength + 2, 'Host must retain the rest of the document after nested-marker input');
+      assert.ok(hostText.split('\n').find(line => line.includes(label))?.endsWith('12'));
     }
 
     const strikeActivation = await page.evaluate(() => {
