@@ -107,16 +107,7 @@ function preferredWidthSignature(table: HTMLTableElement, columnCount: number): 
   ].join('\u0002');
 }
 
-function measurePreferredWidths(table: HTMLTableElement, columnCount: number): number[] {
-  const signature = preferredWidthSignature(table, columnCount);
-  const cached = preferredWidthCache.get(table);
-  if (cached?.signature === signature && cached.widths.length === columnCount) return [...cached.widths];
-  const columns = ensureColumnGroup(table, columnCount);
-  for (const column of columns) column.style.width = '';
-  table.style.width = 'max-content';
-  table.style.minWidth = '0';
-  table.style.maxWidth = 'none';
-  table.style.tableLayout = 'auto';
+function readPreferredWidths(table: HTMLTableElement, columnCount: number, signature: string): number[] {
   const preferred = Array.from({ length: columnCount }, () => DEFAULT_MINIMUM_COLUMN_WIDTH);
   for (const row of Array.from(table.rows)) {
     let columnIndex = 0;
@@ -145,31 +136,19 @@ function applyTableWidthPlan(
   table: HTMLTableElement,
   columns: readonly HTMLTableColElement[],
   preferred: readonly number[],
-  availableWidth: number
+  availableWidth: number,
+  authoredPadding: number
 ): void {
   const plan = planPreviewTableWidths(preferred, availableWidth);
   table.style.width = `${plan.totalWidth}px`;
   plan.widths.forEach((width, index) => { columns[index].style.width = `${width}px`; });
   const compressed = availableWidth < DEFAULT_MINIMUM_COLUMN_WIDTH * columns.length;
-  // Read the authored padding without a previous compact pass feeding its own
-  // custom value back into the next ResizeObserver refresh.
+  // Clear the previous compact pass so it cannot feed its own
+  // custom padding back into the next ResizeObserver refresh.
   table.classList.remove('meo-preview-table-compressed');
   table.style.removeProperty('--meo-preview-table-cell-inline-padding');
   if (compressed) {
     const smallestColumn = Math.min(...plan.widths);
-    const firstCell = table.querySelector<HTMLTableCellElement>('th, td');
-    const cellStyle = firstCell
-      ? table.ownerDocument.defaultView?.getComputedStyle(firstCell) ?? getComputedStyle(firstCell)
-      : null;
-    const authoredPadding = cellStyle
-      ? Math.max(
-          1,
-          Math.min(
-            Number.parseFloat(cellStyle.paddingInlineStart) || 0,
-            Number.parseFloat(cellStyle.paddingInlineEnd) || 0
-          )
-        )
-      : 1;
     // Keep at least a few CSS pixels for a breakable glyph after borders and
     // padding. Without this, a legal narrow column can still have scrollWidth
     // larger than clientWidth and the wrapper merely clips its last pixels.
@@ -199,37 +178,64 @@ function visibleRightEdgeInset(table: HTMLTableElement): number {
   return Math.max(1 / devicePixelRatio, outerBorderWidth);
 }
 
-function layoutTable(table: HTMLTableElement): void {
-  const wrapper = table.closest<HTMLElement>('.meo-table-scroll, .meo-export-html-block') ?? table.parentElement;
-  const columnCount = tableColumnCount(table);
-  if (!wrapper || columnCount === 0) return;
-  const columns = ensureColumnGroup(table, columnCount);
-  // Preferred demand must be measured from the authored table, not from a
-  // compact presentation left by the previous viewport width.
-  table.classList.remove('meo-preview-table-compressed');
-  table.style.removeProperty('--meo-preview-table-cell-inline-padding');
-  const preferred = measurePreferredWidths(table, columnCount);
-  table.style.minWidth = '0';
-  table.style.maxWidth = '100%';
-  table.style.tableLayout = 'fixed';
-  const rightEdgeInset = visibleRightEdgeInset(table);
-  let availableWidth = Math.max(0, wrapper.clientWidth - rightEdgeInset);
-  const clippedRightEdge = () => (
-    wrapper.getBoundingClientRect().left + wrapper.clientLeft + wrapper.clientWidth - rightEdgeInset
-  );
-  // Chromium's collapsed-border box can differ fractionally from the declared
-  // width. Converge against the actual clip edge, not scrollWidth (which rounds
-  // and cannot tell whether the final painted border is still being clipped).
-  for (let pass = 0; pass < 3; pass += 1) {
-    applyTableWidthPlan(table, columns, preferred, availableWidth);
-    const renderedOverhang = table.getBoundingClientRect().right - clippedRightEdge();
-    if (renderedOverhang <= 0.01) break;
-    availableWidth = Math.max(0, availableWidth - renderedOverhang);
+function layoutTables(tables: readonly HTMLTableElement[]): void {
+  const entries = tables.flatMap(table => {
+    const wrapper = table.closest<HTMLElement>('.meo-table-scroll, .meo-export-html-block') ?? table.parentElement;
+    const columnCount = tableColumnCount(table);
+    if (!wrapper || columnCount === 0) return [];
+    const columns = ensureColumnGroup(table, columnCount);
+    table.classList.remove('meo-preview-table-compressed');
+    table.style.removeProperty('--meo-preview-table-cell-inline-padding');
+    return [{ table, wrapper, columns, columnCount }];
+  }).map(entry => {
+    const signature = preferredWidthSignature(entry.table, entry.columnCount);
+    const cached = preferredWidthCache.get(entry.table);
+    return { ...entry, signature, preferred: cached?.signature === signature && cached.widths.length === entry.columnCount
+      ? [...cached.widths] : null as number[] | null };
+  });
+  // Prepare every intrinsic measurement before reading any table geometry.
+  for (const entry of entries) if (!entry.preferred) {
+    for (const column of entry.columns) column.style.width = '';
+    entry.table.style.width = 'max-content';
+    entry.table.style.minWidth = '0';
+    entry.table.style.maxWidth = 'none';
+    entry.table.style.tableLayout = 'auto';
   }
-  wrapper.classList.toggle('meo-preview-table-only-html', isTableOnlyHtmlHost(wrapper));
-  wrapper.classList.remove('is-table-overflowing');
+  for (const entry of entries) if (!entry.preferred) {
+    entry.preferred = readPreferredWidths(entry.table, entry.columnCount, entry.signature);
+  }
+  for (const { table } of entries) {
+    table.style.minWidth = '0';
+    table.style.maxWidth = '100%';
+    table.style.tableLayout = 'fixed';
+  }
+  let pending = entries.map(entry => {
+    const rightEdgeInset = visibleRightEdgeInset(entry.table);
+    const firstCell = entry.table.querySelector<HTMLTableCellElement>('th, td');
+    const style = firstCell ? entry.table.ownerDocument.defaultView?.getComputedStyle(firstCell) ?? getComputedStyle(firstCell) : null;
+    const authoredPadding = style ? Math.max(1, Math.min(Number.parseFloat(style.paddingInlineStart) || 0, Number.parseFloat(style.paddingInlineEnd) || 0)) : 1;
+    return { ...entry, rightEdgeInset, authoredPadding, availableWidth: Math.max(0, entry.wrapper.clientWidth - rightEdgeInset) };
+  });
+  // Keep fitting synchronous, but batch each correction pass across the document.
+  // This preserves the existing three-pass border convergence without a forced
+  // layout between every pair of adjacent tables.
+  for (let pass = 0; pass < 3 && pending.length > 0; pass += 1) {
+    for (const entry of pending) {
+      applyTableWidthPlan(entry.table, entry.columns, entry.preferred!, entry.availableWidth, entry.authoredPadding);
+    }
+    pending = pending.filter(entry => {
+      const clippedRightEdge = entry.wrapper.getBoundingClientRect().left + entry.wrapper.clientLeft + entry.wrapper.clientWidth - entry.rightEdgeInset;
+      const overhang = entry.table.getBoundingClientRect().right - clippedRightEdge;
+      if (overhang <= 0.01) return false;
+      entry.availableWidth = Math.max(0, entry.availableWidth - overhang);
+      return true;
+    });
+  }
+  for (const { wrapper } of entries) {
+    wrapper.classList.toggle('meo-preview-table-only-html', isTableOnlyHtmlHost(wrapper));
+    wrapper.classList.remove('is-table-overflowing');
+  }
 }
-
 export function createPreviewTableLayoutController(frameDocument: Document): PreviewTableLayoutController {
   let disposed = false;
   let frame: number | null = null;
@@ -239,7 +245,11 @@ export function createPreviewTableLayoutController(frameDocument: Document): Pre
   ));
   const refresh = () => {
     if (disposed) return;
-    for (const table of tables()) layoutTable(table);
+    const currentTables = tables();
+    // Nested tables depend on their parent geometry; retain document order there.
+    if (currentTables.some(table => table.parentElement?.closest('table'))) {
+      for (const table of currentTables) layoutTables([table]);
+    } else layoutTables(currentTables);
   };
   const scheduleRefresh = () => {
     if (disposed || frame !== null) return;
