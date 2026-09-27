@@ -59,7 +59,8 @@ export function orderMermaidPreloads(
 }
 
 export async function preloadMermaidDocumentBatch(
-  consumer: Pick<MermaidDiagramPresentationConsumer, 'preload'>,
+  consumer: Pick<MermaidDiagramPresentationConsumer, 'preload'>
+    & Partial<Pick<MermaidDiagramPresentationConsumer, 'getCached'>>,
   requests: readonly MermaidDiagramRenderRequest[],
   isActive: () => boolean,
   onBatchAvailable: () => void
@@ -70,6 +71,7 @@ export async function preloadMermaidDocumentBatch(
     // document warm-up into one uninterrupted task.
     await new Promise<void>(resolve => setTimeout(resolve, 0));
     if (!isActive()) return;
+    if (consumer.getCached?.(request)) continue;
     await consumer.preload(request);
     if (!isActive()) return;
     completed = true;

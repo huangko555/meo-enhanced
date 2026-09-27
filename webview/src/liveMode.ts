@@ -94,6 +94,7 @@ import {
 } from './helpers/mermaidEditing';
 import { collectPunctuationClosingInlineStyles, type ParsedInlineStyleRange } from './helpers/inlineStyleFallback';
 import { collectHexColorRangesFromText } from '../../src/shared/hexColorSwatches';
+import { shikiRefreshEffect } from './helpers/shikiDecorations';
 import { addColorSwatchDecoration, hexColorAdjustmentExtension } from './helpers/colorSwatches';
 import { longCodeBlockSessionUiExtension } from './helpers/longCodeBlocks';
 import { attachLatexMathViewport, type LatexMathViewportController } from './helpers/latexMathViewport';
@@ -3522,10 +3523,11 @@ const liveDecorationField = StateField.define<DecorationSet>({
           )
         : inputDecorations;
     }
-    // Explicit effects also refresh resources and presentation state. Only reuse
-    // decorations when none of those inputs, including a published parse, changed.
+    // Shiki owns its own decorations. Its token refresh does not change Live
+    // structure, while other effects may refresh resources or presentation.
     // An explicit selection can end an editing/search reveal even at the same position.
-    if (!transaction.docChanged && !transaction.selection && !transaction.reconfigured && transaction.effects.length === 0
+    if (!transaction.docChanged && !transaction.selection && !transaction.reconfigured
+      && transaction.effects.every((effect) => effect.is(shikiRefreshEffect))
       && !syntaxTreeChanged(transaction)) {
       return decorations;
     }

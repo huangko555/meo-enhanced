@@ -3217,6 +3217,8 @@ export function createEditor({
           acquiredMermaidPresentationResources = mermaidDiagramPresentationConsumer.acquire();
         }
         try {
+          // Line-number extensions are shared by both modes. Keep their
+          // compartment so switching does not rebuild the gutter.
           view.dispatch({
             effects: [
               modeCompartment.reconfigure(
@@ -3224,8 +3226,7 @@ export function createEditor({
               ),
               gitGutterCompartment.reconfigure(
                 nextMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()
-              ),
-              lineNumberCompartment.reconfigure(lineNumberExtensions(nextMode, currentSourceLineNumbers))
+              )
             ]
           });
         } catch (error) {

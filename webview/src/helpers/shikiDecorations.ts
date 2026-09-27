@@ -27,7 +27,7 @@ import {
 } from '../editor/liveInputDerivedWork';
 import { getFencedCodeInfo, syntaxTreeChanged } from './markdownSyntax';
 
-const shikiRefreshEffect = StateEffect.define<null>();
+export const shikiRefreshEffect = StateEffect.define<null>();
 
 const FONT_STYLE_ITALIC = 1;
 const FONT_STYLE_BOLD = 2;

@@ -38,6 +38,32 @@ await preloadMermaidDocumentBatch(
 );
 assert.equal(refreshCount, 1, 'an empty warm-up batch must not request a refresh');
 
+let cachedPreloadCount = 0;
+await preloadMermaidDocumentBatch(
+  {
+    getCached: () => ({ ok: true, svg: '<svg/>' }),
+    async preload() { cachedPreloadCount += 1; }
+  },
+  requests.slice(0, 2),
+  () => true,
+  () => { refreshCount += 1; }
+);
+assert.equal(cachedPreloadCount, 0, 'cached diagrams should not be warmed again');
+assert.equal(refreshCount, 1, 'cached diagrams should not refresh the whole Live document');
+
+await preloadMermaidDocumentBatch(
+  {
+    getCached: (item) => item.rawSource === requests[0]!.rawSource
+      ? { ok: true, svg: '<svg/>' } : null,
+    async preload() { cachedPreloadCount += 1; }
+  },
+  requests.slice(0, 2),
+  () => true,
+  () => { refreshCount += 1; }
+);
+assert.equal(cachedPreloadCount, 1, 'only an uncached diagram should be warmed');
+assert.equal(refreshCount, 2, 'newly warmed diagrams still refresh mounted presentation');
+
 let active = true;
 let stoppedPreloadCount = 0;
 await preloadMermaidDocumentBatch(
@@ -52,7 +78,7 @@ await preloadMermaidDocumentBatch(
   () => { refreshCount += 1; }
 );
 assert.equal(stoppedPreloadCount, 1);
-assert.equal(refreshCount, 1, 'a disposed warm-up batch must not request a stale refresh');
+assert.equal(refreshCount, 2, 'a disposed warm-up batch must not request a stale refresh');
 
 let yielded = false;
 let countBeforeInput = 0;
