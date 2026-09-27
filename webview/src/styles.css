@@ -1742,11 +1742,15 @@ html[lang='zh-CN'] .mode-group .segmented-control-button-label {
   box-sizing: border-box;
   width: 28px;
   height: 16px;
-  border: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 38%, transparent);
+  border: 0;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent);
+  background: color-mix(in srgb, var(--vscode-editor-foreground) 12%, var(--vscode-editor-background));
   pointer-events: none;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
+  transition: background-color 0.15s ease;
+}
+
+html[data-editor-appearance='dark'] [aria-checked='false'] > .menu-switch {
+  background: color-mix(in srgb, var(--vscode-editor-foreground) 24%, var(--vscode-editor-background));
 }
 
 .menu-switch::after {
@@ -1754,30 +1758,23 @@ html[lang='zh-CN'] .mode-group .segmented-control-button-label {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  background: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
-  transition: transform 0.15s ease, background-color 0.15s ease;
+  background: #fff;
+  transition: transform 0.15s ease;
 }
 
 [aria-checked='true'] > .menu-switch {
-  border-color: color-mix(in srgb, var(--meo-semantic-linkForeground) 35%, var(--vscode-descriptionForeground));
-  background: color-mix(in srgb, var(--meo-semantic-linkForeground) 35%, var(--vscode-descriptionForeground));
-}
-
-html[data-editor-appearance='dark'] [aria-checked='true'] > .menu-switch {
-  border-color: color-mix(in srgb, var(--meo-semantic-linkForeground) 75%, var(--vscode-editor-background));
-  background: color-mix(in srgb, var(--meo-semantic-linkForeground) 75%, var(--vscode-editor-background));
+  background: #3185f5;
 }
 
 [aria-checked='true'] > .menu-switch::after {
   transform: translateX(12px);
-  background: var(--vscode-editor-background);
 }
 
 button:focus-visible > .menu-switch {
-  outline: 1px solid var(--meo-semantic-linkForeground);
+  outline: 1px solid var(--meo-semantic-linkForeground, #3185f5);
   outline-offset: 2px;
 }
 
