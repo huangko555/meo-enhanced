@@ -58,7 +58,8 @@ const render = async (sourceColoring: boolean, appearance: 'light' | 'dark' = 'l
   baseHref: 'file:///',
   title: 'Document title',
   includeTableOfContents: true,
-  shikiLanguageAssetsRoot: path.resolve(import.meta.dir, '..', 'webview', 'dist')
+  // Unit tests run before the Webview build; package:check covers the built assets.
+  shikiLanguageAssetsRoot: ''
 });
 
 const readArchiveXml = async (filePath: string, entryPath: string): Promise<string> => {
