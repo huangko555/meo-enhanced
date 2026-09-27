@@ -318,13 +318,26 @@ function createHexColorAdjustmentPanel(view: EditorView, active: ActiveHexColorA
     const tooltipSpace = hexColorTooltipSpace(view);
     const top = Math.max(scrollBounds.top, tooltipSpace.top);
     const bottom = Math.min(scrollBounds.bottom, tooltipSpace.bottom);
-    const left = Math.max(scrollBounds.left, tooltipSpace.left);
-    const right = Math.min(scrollBounds.right, tooltipSpace.right);
+    let left = Math.max(scrollBounds.left + scroller.clientLeft + 8, tooltipSpace.left);
+    let right = Math.min(scrollBounds.left + scroller.clientLeft + scroller.clientWidth - 8, tooltipSpace.right);
+    const outline = view.dom.closest('.editor-wrapper')?.querySelector<HTMLElement>('.outline-sidebar');
+    if (outline?.getClientRects().length) {
+      const outlineBounds = outline.getBoundingClientRect();
+      if (outlineBounds.bottom > top && outlineBounds.top < bottom) {
+        if (outline.closest<HTMLElement>('[data-outline-position]')?.dataset.outlinePosition === 'left') {
+          left = Math.max(left, outlineBounds.right + 8);
+        } else {
+          right = Math.min(right, outlineBounds.left - 8);
+        }
+      }
+    }
     const anchorBounds = anchor.getBoundingClientRect();
-    if (anchorBounds.bottom <= top || anchorBounds.top >= bottom ||
+    if (right - left < 160 || anchorBounds.bottom <= top || anchorBounds.top >= bottom ||
       anchorBounds.right <= left || anchorBounds.left >= right) return false;
 
-    dom.style.maxWidth = `${Math.max(0, right - left)}px`;
+    const availableWidth = right - left;
+    dom.style.maxWidth = `${availableWidth}px`;
+    dom.classList.toggle('is-compact', availableWidth < 260);
     dom.style.maxHeight = '';
     dom.style.overflowY = '';
     const preferredHeight = dom.getBoundingClientRect().height;

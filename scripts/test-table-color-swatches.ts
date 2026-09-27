@@ -356,6 +356,72 @@ async function main() {
       })}`);
     }
 
+    const horizontalPlacement = await page.evaluate(async () => {
+      const root = document.querySelector<HTMLElement>('.editor-root')!;
+      const wrapper = document.querySelector<HTMLElement>('.editor-wrapper')!;
+      const app = document.getElementById('app')!;
+      const results = [];
+      for (const { width, outline, inset } of [
+        { width: 420, outline: false, inset: 8 },
+        { width: 750, outline: true, inset: 300 },
+        { width: 220, outline: false, inset: 8 }
+      ]) {
+        app.replaceChildren();
+        root.style.width = `${width}px`;
+        root.classList.toggle('outline-visible', outline);
+        wrapper.dataset.outlineMode = outline ? 'floating' : 'fixed';
+        wrapper.dataset.outlinePosition = 'right';
+        wrapper.querySelector('.outline-sidebar')?.remove();
+        if (outline) {
+          const sidebar = document.createElement('div');
+          sidebar.className = 'outline-sidebar';
+          wrapper.appendChild(sidebar);
+        }
+        const editor = (window as any).TableStabilityHarness.createEditor({
+          parent: app,
+          initialMode: 'live',
+          text: 'Live colors\nHEX #60A5FA and #60A5FA80',
+          onApplyChanges() {}
+        });
+        const scroller = editor.view.scrollDOM as HTMLElement;
+        for (let index = 0; index < 3; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+        const swatch = app.querySelector<HTMLButtonElement>('.meo-md-color-swatch-interactive');
+        if (!swatch) throw new Error(`No inline HEX swatch in ${width}px fixture: ${app.textContent}`);
+        const line = swatch.closest<HTMLElement>('.cm-line')!;
+        line.style.textAlign = 'right';
+        line.style.paddingRight = `${inset}px`;
+        for (let index = 0; index < 3; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+        const before = scroller.scrollWidth;
+        swatch.click();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const dialog = app.querySelector<HTMLElement>('.meo-hex-color-adjustment')!;
+        const scrollerBounds = scroller.getBoundingClientRect();
+        const dialogBounds = dialog.getBoundingClientRect();
+        const sidebarBounds = wrapper.querySelector('.outline-sidebar')?.getBoundingClientRect();
+        results.push({ width, outline, before, after: scroller.scrollWidth,
+          left: dialogBounds.left, right: dialogBounds.right,
+          safeLeft: scrollerBounds.left + scroller.clientLeft + 8,
+          safeRight: Math.min(scrollerBounds.left + scroller.clientLeft + scroller.clientWidth - 8,
+            sidebarBounds ? sidebarBounds.left - 8 : Infinity),
+          internalOverflow: dialog.scrollWidth > dialog.clientWidth + 1 });
+        editor.destroy();
+      }
+      root.style.width = '';
+      root.classList.remove('outline-visible');
+      wrapper.querySelector('.outline-sidebar')?.remove();
+      wrapper.removeAttribute('data-outline-mode');
+      wrapper.removeAttribute('data-outline-position');
+      return results;
+    });
+    if (horizontalPlacement.some((result) => result.after > result.before + 1 ||
+      result.left < result.safeLeft - 1 || result.right > result.safeRight + 1 || result.internalOverflow)) {
+      throw new Error(`HEX dialog created horizontal overflow or escaped the visible editor: ${JSON.stringify(horizontalPlacement)}`);
+    }
+
     await page.evaluate(async () => {
       const app = document.getElementById('app')!;
       app.replaceChildren();

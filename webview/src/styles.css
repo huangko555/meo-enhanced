@@ -3300,6 +3300,21 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   min-height: 26px;
 }
 
+.meo-hex-color-adjustment.is-compact .meo-hex-color-adjustment-row {
+  grid-template-columns: minmax(0, 1fr) 48px;
+  gap: 4px 8px;
+}
+
+.meo-hex-color-adjustment.is-compact .meo-hex-color-adjustment-row input[type='range'] {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-width: 0;
+}
+
+.meo-hex-color-adjustment.is-compact .meo-hex-color-adjustment-actions {
+  flex-wrap: wrap;
+}
+
 .meo-hex-color-adjustment-row > span,
 .meo-hex-color-adjustment-row > output {
   overflow: hidden;
