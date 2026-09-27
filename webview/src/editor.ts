@@ -82,7 +82,8 @@ import {
   focusHistoryChange,
   focusTableHistoryChange,
   refreshMountedTablePositions,
-  refreshMountedTableUiLanguage
+  refreshMountedTableUiLanguage,
+  flushMountedTableLayouts
 } from './helpers/tables';
 import { parseFrontmatter, sourceFrontmatterField } from './helpers/frontmatter';
 import { collectLatexMathRanges } from './helpers/math';
@@ -2837,6 +2838,9 @@ export function createEditor({
       const deadline = performance.now() + Math.max(0, timeoutMs);
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
       if (editorDestroyed || currentMode !== presentationMode) return;
+      if (presentationMode === 'live' && flushMountedTableLayouts(view)) {
+        (view as EditorView & { measure(flush?: boolean): void }).measure(false);
+      }
       if (presentationMode === 'live') {
         let timeout: number | null = null;
         const waitAbortController = new AbortController();
@@ -2856,6 +2860,9 @@ export function createEditor({
         }
       }
       if (editorDestroyed || currentMode !== presentationMode) return;
+      if (presentationMode === 'live' && flushMountedTableLayouts(view)) {
+        (view as EditorView & { measure(flush?: boolean): void }).measure(false);
+      }
       await viewportController.whenPresentationSettled(Math.max(0, deadline - performance.now()));
     },
     getText() {
@@ -3240,6 +3247,9 @@ export function createEditor({
         // Reconfiguration invalidates CodeMirror's height map. Finish its queued
         // measurement before the browser can paint the unanchored intermediate frame.
         (view as EditorView & { measure(flush?: boolean): void }).measure(false);
+        if (nextMode === 'live' && flushMountedTableLayouts(view)) {
+          (view as EditorView & { measure(flush?: boolean): void }).measure(false);
+        }
         syncGitGutterVisibility();
 
         if (topPosition) {

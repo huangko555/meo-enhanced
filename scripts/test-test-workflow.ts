@@ -25,6 +25,16 @@ assert.ok(quickCommands.some((command) => (
 assert.ok(quickCommands.some((command) => (
   command.args.includes('scripts/test-fenced-block-enter-stability.ts')
 )));
+assert.ok(quickCommands.some((command) => (
+  command.args.includes('scripts/test-mode-roundtrip-reveal.ts')
+)));
+
+const viewportCommands = flattenTestWorkflowCommands(
+  createTestWorkflowPlan(parseTestWorkflowRequest(['targeted', 'viewport']))
+);
+assert.ok(viewportCommands.some((command) => (
+  command.args.includes('scripts/test-mode-transition-matrix.ts')
+)));
 
 const history = createTestWorkflowPlan(
   parseTestWorkflowRequest(['targeted', 'history'])
@@ -103,6 +113,7 @@ assert.equal(release.longRunning, true);
 assert.equal(release.stages[0]?.maxConcurrency, 3);
 assert.deepEqual(release.stages[1]?.commands, [
   { args: ['scripts/test-editor-startup-load.ts'] },
+  { args: ['scripts/test-mode-roundtrip-reveal.ts'] },
   { args: ['run', 'test:browser-high-risk'] }
 ]);
 assert.deepEqual(release.stages[2]?.commands, [{ args: ['run', 'test:browser'] }]);
@@ -225,6 +236,7 @@ assert.match(packageScripts.test ?? '', /bun run test:browser/);
 assert.match(packageScripts.test ?? '', /bun run test:browser-high-risk/);
 assert.match(packageScripts['test:unit'] ?? '', /bun run test:docx-export(?:\s|$)/);
 assert.match(packageScripts['test:browser'] ?? '', /bun run test:docx-export:browser(?:\s|$)/);
+assert.match(packageScripts['test:browser'] ?? '', /bun scripts\/test-mode-transition-matrix\.ts/);
 
 function collectTransitiveTestScripts(
   root: string,

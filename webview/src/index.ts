@@ -1947,7 +1947,7 @@ let pendingEditorSurfaceRecoveryRaf: number | null = null;
 let createEditorFactoryPromise: Promise<CreateEditorFactory> | null = null;
 let editorFontSizePreference: EditorFontSizePreference = { mode: 'auto', value: 14 };
 const INITIAL_EDITOR_MOUNT_FALLBACK_MS = 120;
-const LIVE_IMAGE_REVEAL_WAIT_MS = 120;
+const LIVE_PRESENTATION_REVEAL_WAIT_MS = 500;
 
 const failureNotice = createFailureNoticeManager(editorNotice);
 handleEditorNoticeDismiss = failureNotice.dismissCurrentNotice;
@@ -2747,7 +2747,7 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
       !previewController.host.hidden &&
       (mode === 'live' || (mode === 'source' && editorHost.inert))
     ) {
-      await editor.whenVisiblePresentationReady(LIVE_IMAGE_REVEAL_WAIT_MS);
+      await editor.whenVisiblePresentationReady(LIVE_PRESENTATION_REVEAL_WAIT_MS);
     }
     changesReviewMode = mode;
     syncGitDiffDetails();
@@ -3103,7 +3103,7 @@ window.addEventListener('message', (event) => {
           if (initializedMode === 'preview') {
             await waitForInitialPreviewPaint();
           } else {
-            await editor?.whenVisiblePresentationReady(LIVE_IMAGE_REVEAL_WAIT_MS);
+            await editor?.whenVisiblePresentationReady(LIVE_PRESENTATION_REVEAL_WAIT_MS);
           }
           toolbar.classList.remove('meo-preload-toolbar');
           toolbar.removeAttribute('aria-hidden');

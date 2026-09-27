@@ -60,6 +60,18 @@ loading status to clear and the rendered document to exist. A selected mode
 button alone does not prove a successful load. Source's optional side-by-side
 preview is covered by
 `scripts/test-source-side-preview.ts` in the production browser matrix.
+`scripts/test-mode-roundtrip-reveal.ts` checks Live → Source → Preview → Live
+with a viewport table whose row layout is deliberately delayed. The first
+visible Live frame must already contain content and the table's final height;
+this check runs in the quick, targeted table/viewport, and release gates.
+`scripts/test-mode-transition-matrix.ts` checks both six-step mode cycles with
+Source's split preview on and off. It covers paragraphs, tables, code blocks,
+successful and failed Mermaid renders, images, math, HTML/quotes, and nested
+lists in the viewport. Every painted frame must retain visible content, the
+first revealed editor frames must keep their geometry, and the 95th-percentile
+switch-to-ready time must stay
+below 300 ms in the production browser harness. Run it for mode-transition
+changes and as part of the targeted viewport and release browser suites.
 
 For final installed-VSIX acceptance, use an isolated VS Code profile and open
 a Markdown file in each saved mode after both closing its tab and restarting

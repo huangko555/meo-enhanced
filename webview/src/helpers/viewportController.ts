@@ -1587,28 +1587,48 @@ export class ViewportController {
                 Math.round(rect.width * 2) / 2
               ].join(':');
             });
-            return [
-              Math.round(this.view.scrollDOM.scrollTop * 2) / 2,
-              this.view.scrollDOM.scrollHeight,
-              Math.round(this.view.contentHeight * 2) / 2,
-              this.view.viewport.from,
-              this.view.viewport.to,
-              ...visibleBlocks
-            ].join('|');
+            const visibleLine = Array.from(
+              this.view.contentDOM.querySelectorAll<HTMLElement>('.cm-line')
+            ).some((line) => {
+              const rect = line.getBoundingClientRect();
+              return rect.height > 0 && rect.bottom >= scrollerRect.top && rect.top <= scrollerRect.bottom;
+            });
+            const hasPendingPresentation = Array.from(
+              this.view.contentDOM.querySelectorAll<HTMLElement>('[aria-busy="true"]')
+            ).some((element) => {
+              const rect = element.getBoundingClientRect();
+              return rect.height > 0 && rect.bottom >= scrollerRect.top && rect.top <= scrollerRect.bottom;
+            });
+            return {
+              hasVisibleContent: visibleLine || visibleBlocks.length > 0,
+              hasPendingPresentation,
+              signature: [
+                Math.round(this.view.scrollDOM.scrollTop * 2) / 2,
+                this.view.scrollDOM.scrollHeight,
+                Math.round(this.view.contentHeight * 2) / 2,
+                this.view.viewport.from,
+                this.view.viewport.to,
+                ...visibleBlocks
+              ].join('|')
+            };
           },
-          write: (signature) => {
-            if (this.destroyed || signature === null) {
+          write: (reading) => {
+            if (this.destroyed || reading === null) {
               resolve();
               return;
             }
             const anchorBusy = this.hasActiveDocumentAnchorStabilization()
               || this.activeLayoutAnchor !== null
               || this.isActiveScrollTargetValid(this.activeScrollTarget);
-            stableFrames = !anchorBusy && signature === previousSignature
+            // The anchor stabilizer already observes layout across frames. Count
+            // those same stable frames here, but never reveal until it has released
+            // the anchor; a later geometry change still resets the count.
+            stableFrames = reading.hasVisibleContent && reading.signature === previousSignature
               ? stableFrames + 1
               : 0;
-            previousSignature = signature;
-            if (stableFrames >= REQUIRED_STABLE_FRAMES || performance.now() >= deadline) {
+            previousSignature = reading.signature;
+            if ((stableFrames >= REQUIRED_STABLE_FRAMES && !anchorBusy && !reading.hasPendingPresentation)
+              || performance.now() >= deadline) {
               resolve();
               return;
             }

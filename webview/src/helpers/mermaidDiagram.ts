@@ -775,7 +775,8 @@ export class MermaidDiagramWidget extends WidgetType {
       },
       showError: (_source, error) => {
         finishPresentation();
-        container.style.removeProperty('min-height');
+        // Keep the height reserved while loading. A failed diagram must not
+        // contract just after a mode switch exposes the Live viewport.
         container.replaceChildren();
         this.renderError(container, error);
       },

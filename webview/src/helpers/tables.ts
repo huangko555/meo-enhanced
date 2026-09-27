@@ -2502,6 +2502,15 @@ export function refreshMountedTableUiLanguage(view: EditorView, language: UiLang
   for (const widget of widgets) widget.refreshUiLanguage(language);
 }
 
+/** Completes attached table geometry before a mode transition exposes the editor. */
+export function flushMountedTableLayouts(view: EditorView): boolean {
+  const widgets = mountedTableWidgets.get(view);
+  if (!widgets) return false;
+  let flushed = false;
+  for (const widget of widgets) flushed = widget.flushPendingLayout() || flushed;
+  return flushed;
+}
+
 class HtmlTableWidget extends UiLanguageSensitiveWidget {
   tableData: WidgetTableData;
   view: EditorView | null;
@@ -5152,25 +5161,28 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     if (textareas.length === 0 || contents.length === 0) return;
 
     let maxHeight = 0;
+    // A row shares one offscreen probe. Recreating and attaching a textarea for
+    // every cell forces a full layout on each mode switch, even when the table
+    // is only being prepared behind Preview.
+    const probe = textareas[0]!.cloneNode(false) as HTMLTextAreaElement;
+    probe.tabIndex = -1;
+    probe.setAttribute('aria-hidden', 'true');
+    probe.style.inset = 'auto';
+    probe.style.top = '0';
+    probe.style.left = '0';
+    probe.style.height = '0px';
+    probe.style.visibility = 'hidden';
+    probe.style.pointerEvents = 'none';
+    contents[0]!.appendChild(probe);
     for (let index = 0; index < textareas.length; index += 1) {
       const textarea = textareas[index];
       const content = contents[index];
       const preview = content?.querySelector<HTMLElement>('.meo-md-html-table-cell-preview');
-      const probe = textarea.cloneNode(false) as HTMLTextAreaElement;
       probe.value = textarea.value;
-      probe.tabIndex = -1;
-      probe.setAttribute('aria-hidden', 'true');
-      probe.style.inset = 'auto';
-      probe.style.top = '0';
-      probe.style.left = '0';
       probe.style.width = `${textarea.getBoundingClientRect().width}px`;
-      probe.style.height = '0px';
-      probe.style.visibility = 'hidden';
-      probe.style.pointerEvents = 'none';
-      content.appendChild(probe);
       maxHeight = Math.max(maxHeight, probe.scrollHeight, preview?.scrollHeight ?? 0);
-      probe.remove();
     }
+    probe.remove();
 
     for (const content of contents) {
       content.style.minHeight = `${maxHeight}px`;
@@ -5296,6 +5308,15 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       this.recalcLayout();
       this.pendingResizeRows = false;
     });
+  }
+
+  flushPendingLayout(): boolean {
+    if (!this.layoutFrame || !this.domRefs?.shell.isConnected) return false;
+    cancelAnimationFrame(this.layoutFrame);
+    this.layoutFrame = 0;
+    this.recalcLayout();
+    this.pendingResizeRows = false;
+    return true;
   }
 
   renderCellPreview(

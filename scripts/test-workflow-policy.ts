@@ -99,6 +99,7 @@ function targetedCommands(
         script('scripts/test-table-body-interaction-sticky-production.ts'),
         script('scripts/test-table-input-visual-stability.ts'),
         script('scripts/test-table-visible-history-viewport.ts'),
+        script('scripts/test-mode-roundtrip-reveal.ts'),
         script('scripts/test-table-body-history-shortcut.ts'),
         script('scripts/test-virtual-block-scroll-stability.ts')
       ];
@@ -136,6 +137,8 @@ function targetedCommands(
         script('scripts/test-line-number-no-wrap-stability.ts'),
         script('scripts/test-fenced-block-enter-stability.ts'),
         script('scripts/test-document-reload-mermaid-viewport.ts'),
+        script('scripts/test-mode-roundtrip-reveal.ts'),
+        script('scripts/test-mode-transition-matrix.ts'),
         script('scripts/test-uat-viewport-stability.ts'),
         script('scripts/test-live-embedded-input-viewport.ts'),
         script('scripts/test-table-position-after-embedded-edit.ts'),
@@ -224,6 +227,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-document-auto-save-concurrency.ts'),
           script('scripts/test-panel-session-ready-init.ts'),
           script('scripts/test-editor-startup-load.ts'),
+          script('scripts/test-mode-roundtrip-reveal.ts'),
           script('scripts/test-editor-history-runtime.ts'),
           script('scripts/test-table-cell-editing.ts'),
           script('scripts/test-rendered-block-mode-shell.ts'),
@@ -281,6 +285,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           },
           serialStage('High-risk browser regression preflight', [
             script('scripts/test-editor-startup-load.ts'),
+            script('scripts/test-mode-roundtrip-reveal.ts'),
             packageScript('test:browser-high-risk')
           ]),
           serialStage('Production browser matrix', [packageScript('test:browser')]),
