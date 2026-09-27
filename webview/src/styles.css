@@ -3186,7 +3186,9 @@ button:focus-visible > .menu-switch {
   outline-offset: 1px;
 }
 
-.cm-tooltip.meo-hex-color-adjustment {
+.cm-editor .cm-tooltip.meo-hex-color-adjustment {
+  position: absolute;
+  z-index: var(--meo-layer-document-popover);
   width: min(324px, calc(100vw - 16px));
   padding: 14px;
   border: 1px solid var(--meo-table-context-border);

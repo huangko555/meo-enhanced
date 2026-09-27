@@ -267,6 +267,7 @@ async function main() {
       const swatchTopBefore = swatch.getBoundingClientRect().top;
       const scrollTop = scroller.scrollTop;
       scroller.scrollTop += 24;
+      const beforeScrollEvent = offset();
       scroller.dispatchEvent(new Event('scroll'));
       const duringScroll = offset();
       const scrollTopDuring = scroller.scrollTop;
@@ -276,28 +277,30 @@ async function main() {
       for (let index = 0; index < 2; index += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
-      return { before, duringScroll, scrollTop, scrollTopDuring, swatchTopBefore, swatchTopDuring, restored: scroller.scrollTop === scrollTop };
+      return { before, beforeScrollEvent, duringScroll, scrollTop, scrollTopDuring, swatchTopBefore, swatchTopDuring, restored: scroller.scrollTop === scrollTop };
     });
     if (!scrollAlignment.restored || scrollAlignment.scrollTopDuring - scrollAlignment.scrollTop !== 24 ||
       Math.abs(scrollAlignment.swatchTopDuring - scrollAlignment.swatchTopBefore + 24) > 1 ||
+      Math.abs(scrollAlignment.beforeScrollEvent - scrollAlignment.before) > 1 ||
       Math.abs(scrollAlignment.duringScroll - scrollAlignment.before) > 1) {
-      throw new Error(`Table HEX dialog did not follow its swatch in the scroll event: ${JSON.stringify(scrollAlignment)}`);
+      throw new Error(`Table HEX dialog did not scroll with its swatch: ${JSON.stringify(scrollAlignment)}`);
     }
     const popoverWheelProgress = await page.evaluate(async () => {
       const scroller = (window as any).tableColorPopoverEditor.view.scrollDOM as HTMLElement;
       const samples = [scroller.scrollTop];
-      document.querySelector('.meo-hex-color-adjustment-hue')!.dispatchEvent(new WheelEvent('wheel', {
+      const wheel = new WheelEvent('wheel', {
         bubbles: true,
         cancelable: true,
         deltaY: 90,
         deltaMode: WheelEvent.DOM_DELTA_PIXEL
-      }));
+      });
+      document.querySelector('.meo-hex-color-adjustment-hue')!.dispatchEvent(wheel);
       samples.push(scroller.scrollTop);
       for (let index = 0; index < 18; index += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         samples.push(scroller.scrollTop);
       }
-      return samples;
+      return { samples, defaultPrevented: wheel.defaultPrevented };
     });
     const colorPopoverBounds = await page.$eval('.meo-hex-color-adjustment-hue', (element) => {
       const bounds = element.getBoundingClientRect();
@@ -343,10 +346,10 @@ async function main() {
       !popoverAfterWheel.reopenedAfterClick) {
       throw new Error(`Table HEX dialog did not end its session after the anchor left the viewport: ${JSON.stringify(popoverAfterWheel)}`);
     }
-    if (Math.abs(popoverWheelProgress[1]! - popoverWheelProgress[0]! - 90) > 1 ||
-      popoverWheelProgress.slice(2).some((position) => Math.abs(position - popoverWheelProgress[1]!) > 1) ||
-      popoverAfterWheel.afterWheel <= popoverWheelProgress.at(-1)!) {
-      throw new Error(`Wheel over the table HEX dialog did not scroll the document immediately: ${JSON.stringify({
+    if (popoverWheelProgress.defaultPrevented ||
+      popoverWheelProgress.samples.some((position) => Math.abs(position - popoverWheelProgress.samples[0]!) > 1) ||
+      popoverAfterWheel.afterWheel <= popoverWheelProgress.samples.at(-1)!) {
+      throw new Error(`Wheel over the table HEX dialog did not use native document scrolling: ${JSON.stringify({
         before: popoverBeforeWheel.scrollTop,
         progress: popoverWheelProgress,
         after: popoverAfterWheel.afterWheel

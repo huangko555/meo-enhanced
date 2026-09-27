@@ -2,12 +2,11 @@ import { isolateHistory } from '@codemirror/commands';
 import { StateEffect, StateField, type Extension } from '@codemirror/state';
 import {
   Decoration,
+  ViewPlugin,
   WidgetType,
-  showTooltip,
-  tooltips,
   type EditorView,
   type Rect,
-  type Tooltip
+  type ViewUpdate
 } from '@codemirror/view';
 import type { HexColorRange } from '../../../src/shared/hexColorSwatches';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
@@ -16,9 +15,9 @@ import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage
 type RgbColor = { red: number; green: number; blue: number };
 type HsvColor = { hue: number; saturation: number; brightness: number };
 type ActiveHexColorAdjustment = HexColorRange & { anchor?: HTMLButtonElement };
-type HexColorAdjustmentState = {
-  range: ActiveHexColorAdjustment;
-  tooltip: Tooltip;
+type HexColorAdjustmentPanel = {
+  position: () => boolean;
+  destroy: () => void;
 };
 
 const supportedHexColor = /^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i;
@@ -124,269 +123,274 @@ function closeHexColorAdjustment(view: EditorView): void {
   view.dispatch({ effects: setActiveHexColorAdjustment.of(null) });
 }
 
-function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tooltip {
+function createHexColorAdjustmentPanel(view: EditorView, active: ActiveHexColorAdjustment): HexColorAdjustmentPanel {
+  const strings = getUiStrings(view.state.facet(uiLanguageFacet));
+  const dom = document.createElement('div');
+  dom.className = 'cm-tooltip meo-hex-color-adjustment';
+  dom.setAttribute('role', 'dialog');
+  dom.setAttribute('aria-label', strings.colorControls(active.value));
+
+  const header = document.createElement('div');
+  header.className = 'meo-hex-color-adjustment-header';
+  const preview = document.createElement('span');
+  preview.className = 'meo-hex-color-adjustment-preview';
+  preview.setAttribute('role', 'img');
+  preview.setAttribute('aria-label', strings.colorControls(active.value));
+  const originalPreviewFill = document.createElement('span');
+  originalPreviewFill.className = 'meo-hex-color-adjustment-preview-fill is-original';
+  originalPreviewFill.style.backgroundColor = active.value;
+  const currentPreviewFill = document.createElement('span');
+  currentPreviewFill.className = 'meo-hex-color-adjustment-preview-fill is-current';
+  currentPreviewFill.style.backgroundColor = active.value;
+  preview.append(originalPreviewFill, currentPreviewFill);
+  const valueInput = document.createElement('input');
+  valueInput.className = 'meo-hex-color-adjustment-value';
+  valueInput.type = 'text';
+  valueInput.spellcheck = false;
+  valueInput.autocomplete = 'off';
+  valueInput.setAttribute('aria-label', strings.hexColorValue);
+  const closeButton = document.createElement('button');
+  closeButton.className = 'meo-hex-color-adjustment-close';
+  closeButton.type = 'button';
+  closeButton.textContent = '×';
+  closeButton.title = strings.closeColorControls;
+  closeButton.setAttribute('aria-label', strings.closeColorControls);
+  header.append(preview, valueInput, closeButton);
+
+  const controls = document.createElement('div');
+  controls.className = 'meo-hex-color-adjustment-controls';
+  const makeRange = (labelText: string, min: number, max: number) => {
+    const row = document.createElement('label');
+    row.className = 'meo-hex-color-adjustment-row';
+    const label = document.createElement('span');
+    label.textContent = labelText;
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = String(min);
+    input.max = String(max);
+    input.step = '1';
+    input.setAttribute('aria-label', labelText);
+    const output = document.createElement('output');
+    row.append(label, input, output);
+    controls.appendChild(row);
+    return { row, input, output };
+  };
+  const hue = makeRange(strings.hue, 0, 359);
+  hue.input.classList.add('meo-hex-color-adjustment-hue');
+  const saturation = makeRange(strings.saturation, 0, 100);
+  const brightness = makeRange(strings.brightness, 0, 100);
+  const opacity = makeRange(strings.opacity, 0, 255);
+  opacity.input.classList.add('meo-hex-color-adjustment-opacity');
+  const actions = document.createElement('div');
+  actions.className = 'meo-hex-color-adjustment-actions';
+  const cancelButton = document.createElement('button');
+  cancelButton.type = 'button';
+  cancelButton.textContent = strings.cancelColorAdjustment;
+  const applyButton = document.createElement('button');
+  applyButton.type = 'button';
+  applyButton.className = 'meo-hex-color-adjustment-apply';
+  applyButton.textContent = strings.applyColorAdjustment;
+  actions.append(cancelButton, applyButton);
+  dom.append(header, controls, actions);
+
+  const sourceSwatch = active.anchor?.isConnected ? active.anchor : view.dom.querySelector<HTMLButtonElement>(
+    `.meo-md-color-swatch-interactive[data-color-from="${active.from}"]`
+  );
+  const currentSourceSwatch = () => active.anchor?.isConnected
+    ? active.anchor
+    : view.dom.querySelector<HTMLButtonElement>(
+      `.meo-md-color-swatch-interactive[data-color-from="${active.from}"]`
+    );
+  let draftValue = active.value;
+  // Explicitly typed width remains the opaque format after later slider adjustments.
+  let includeAlphaWhenOpaque = active.value.length === 9;
+  const syncPreview = (next: string, syncSliders: boolean) => {
+    const parsed = parseHexColor(next);
+    if (!parsed) return;
+    draftValue = next;
+    valueInput.value = draftValue;
+    valueInput.removeAttribute('aria-invalid');
+    applyButton.disabled = false;
+    currentPreviewFill.style.backgroundColor = draftValue;
+    if (sourceSwatch) sourceSwatch.style.backgroundColor = draftValue;
+    if (syncSliders) {
+      const hsv = rgbToHsv(parsed.rgb);
+      hue.input.value = String(hsv.hue);
+      saturation.input.value = String(hsv.saturation);
+      brightness.input.value = String(hsv.brightness);
+      opacity.input.value = String(parsed.alpha);
+    }
+    const currentHue = Number(hue.input.value);
+    const currentSaturation = Number(saturation.input.value);
+    const currentBrightness = Number(brightness.input.value);
+    hue.output.textContent = `${currentHue}°`;
+    saturation.output.textContent = `${currentSaturation}%`;
+    brightness.output.textContent = `${brightness.input.value}%`;
+    opacity.output.textContent = `${Math.round((Number(opacity.input.value) / 255) * 100)}%`;
+    const fullSaturation = hsvToRgb({ hue: currentHue, saturation: 100, brightness: currentBrightness });
+    const fullBrightness = hsvToRgb({ hue: currentHue, saturation: currentSaturation, brightness: 100 });
+    const neutral = Math.round((currentBrightness / 100) * 255);
+    const currentColor = `rgb(${parsed.rgb.red} ${parsed.rgb.green} ${parsed.rgb.blue})`;
+    hue.input.style.setProperty('--meo-range-thumb-color', `rgb(${fullSaturation.red} ${fullSaturation.green} ${fullSaturation.blue})`);
+    saturation.input.style.setProperty('--meo-range-start', `rgb(${neutral} ${neutral} ${neutral})`);
+    saturation.input.style.setProperty('--meo-range-end', `rgb(${fullSaturation.red} ${fullSaturation.green} ${fullSaturation.blue})`);
+    saturation.input.style.setProperty('--meo-range-thumb-color', currentColor);
+    brightness.input.style.setProperty('--meo-range-end', `rgb(${fullBrightness.red} ${fullBrightness.green} ${fullBrightness.blue})`);
+    brightness.input.style.setProperty('--meo-range-thumb-color', currentColor);
+    opacity.input.style.setProperty('--meo-range-opaque', currentColor);
+    opacity.input.style.setProperty('--meo-range-thumb-color', draftValue);
+  };
+
+  const updateFromControls = () => {
+    const rgb = hsvToRgb({
+      hue: Number(hue.input.value),
+      saturation: Number(saturation.input.value),
+      brightness: Number(brightness.input.value)
+    });
+    syncPreview(formatHexColor(
+      rgb, Number(opacity.input.value), includeAlphaWhenOpaque || Number(opacity.input.value) < 255,
+      usesUppercaseHex(draftValue)
+    ), false);
+  };
+  const updateOpacity = () => {
+    const parsed = parseHexColor(draftValue);
+    if (!parsed) return;
+    const alpha = Number(opacity.input.value);
+    syncPreview(formatHexColor(
+      parsed.rgb, alpha, includeAlphaWhenOpaque || alpha < 255, usesUppercaseHex(draftValue)
+    ), false);
+  };
+  const apply = () => {
+    if (applyButton.disabled) return;
+    replaceActiveHexColor(view, active, draftValue);
+    view.focus();
+  };
+
+  hue.input.addEventListener('input', updateFromControls);
+  saturation.input.addEventListener('input', updateFromControls);
+  brightness.input.addEventListener('input', updateFromControls);
+  opacity.input.addEventListener('input', updateOpacity);
+  valueInput.addEventListener('input', () => {
+    const next = valueInput.value.trim();
+    const valid = supportedHexColor.test(next);
+    if (valid) valueInput.removeAttribute('aria-invalid');
+    else valueInput.setAttribute('aria-invalid', 'true');
+    applyButton.disabled = !valid;
+    if (valid) {
+      includeAlphaWhenOpaque = next.length === 9;
+      syncPreview(next, true);
+    }
+  });
+  valueInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      apply();
+    }
+  });
+  closeButton.addEventListener('click', () => {
+    closeHexColorAdjustment(view);
+    view.focus();
+  });
+  cancelButton.addEventListener('click', () => {
+    closeHexColorAdjustment(view);
+    view.focus();
+  });
+  applyButton.addEventListener('click', apply);
+
+  const onDocumentPointerDown = (event: PointerEvent) => {
+    const target = event.target;
+    if (target instanceof Node && (dom.contains(target) || (target instanceof Element && target.closest('.meo-md-color-swatch')))) return;
+    closeHexColorAdjustment(view);
+  };
+  const onDocumentKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeHexColorAdjustment(view);
+    view.focus();
+  };
+  let above: boolean | null = null;
+  const position = (): boolean => {
+    const anchor = currentSourceSwatch();
+    if (!anchor) return false;
+    const scroller = view.scrollDOM;
+    const scrollBounds = scroller.getBoundingClientRect();
+    const tooltipSpace = hexColorTooltipSpace(view);
+    const top = Math.max(scrollBounds.top, tooltipSpace.top);
+    const bottom = Math.min(scrollBounds.bottom, tooltipSpace.bottom);
+    const left = Math.max(scrollBounds.left, tooltipSpace.left);
+    const right = Math.min(scrollBounds.right, tooltipSpace.right);
+    const anchorBounds = anchor.getBoundingClientRect();
+    if (anchorBounds.bottom <= top || anchorBounds.top >= bottom ||
+      anchorBounds.right <= left || anchorBounds.left >= right) return false;
+
+    dom.style.maxWidth = `${Math.max(0, right - left)}px`;
+    dom.style.maxHeight = '';
+    dom.style.overflowY = '';
+    const preferredHeight = dom.getBoundingClientRect().height;
+    const spaceAbove = Math.max(0, anchorBounds.top - top);
+    const spaceBelow = Math.max(0, bottom - anchorBounds.bottom);
+    if (above === null || (spaceAbove < preferredHeight && spaceBelow < preferredHeight)) {
+      above = spaceAbove >= preferredHeight || (spaceBelow < preferredHeight && spaceAbove >= spaceBelow);
+    } else if (above && spaceAbove < preferredHeight && spaceBelow >= preferredHeight) {
+      above = false;
+    } else if (!above && spaceBelow < preferredHeight && spaceAbove >= preferredHeight) {
+      above = true;
+    }
+    const availableHeight = above ? spaceAbove : spaceBelow;
+    if (availableHeight < view.defaultLineHeight) return false;
+    if (preferredHeight > availableHeight) {
+      dom.style.maxHeight = `${availableHeight}px`;
+      dom.style.overflowY = 'auto';
+    }
+    const panelBounds = dom.getBoundingClientRect();
+    const viewportTop = above ? anchorBounds.top - panelBounds.height : anchorBounds.bottom;
+    const viewportLeft = clamp(anchorBounds.left, left, Math.max(left, right - panelBounds.width));
+    const contentBottom = view.contentDOM.getBoundingClientRect().bottom - scrollBounds.top + scroller.scrollTop;
+    const contentHeight = Math.max(scroller.clientHeight, contentBottom);
+    dom.style.top = `${clamp(viewportTop - scrollBounds.top + scroller.scrollTop,
+      0, Math.max(0, contentHeight - panelBounds.height))}px`;
+    dom.style.left = `${viewportLeft - scrollBounds.left + scroller.scrollLeft}px`;
+    dom.style.visibility = '';
+    dom.classList.toggle('cm-tooltip-above', above);
+    dom.classList.toggle('cm-tooltip-below', !above);
+    return true;
+  };
+  let visibilityFrame = 0;
+  const onEditorScroll = () => {
+    if (visibilityFrame) return;
+    visibilityFrame = requestAnimationFrame(() => {
+      visibilityFrame = 0;
+      if (!position()) closeHexColorAdjustment(view);
+    });
+  };
+
+  syncPreview(active.value, true);
+  dom.style.visibility = 'hidden';
+  view.scrollDOM.appendChild(dom);
+  if (!position()) onEditorScroll();
+  document.addEventListener('pointerdown', onDocumentPointerDown, true);
+  document.addEventListener('keydown', onDocumentKeyDown, true);
+  view.scrollDOM.addEventListener('scroll', onEditorScroll, { passive: true });
+  view.dom.ownerDocument.defaultView?.addEventListener('resize', onEditorScroll);
+  valueInput.focus();
   return {
-    pos: active.from,
-    end: active.to,
-    above: true,
-    create(view) {
-      const strings = getUiStrings(view.state.facet(uiLanguageFacet));
-      const dom = document.createElement('div');
-      dom.className = 'meo-hex-color-adjustment';
-      dom.setAttribute('role', 'dialog');
-      dom.setAttribute('aria-label', strings.colorControls(active.value));
-
-      const header = document.createElement('div');
-      header.className = 'meo-hex-color-adjustment-header';
-      const preview = document.createElement('span');
-      preview.className = 'meo-hex-color-adjustment-preview';
-      preview.setAttribute('role', 'img');
-      preview.setAttribute('aria-label', strings.colorControls(active.value));
-      const originalPreviewFill = document.createElement('span');
-      originalPreviewFill.className = 'meo-hex-color-adjustment-preview-fill is-original';
-      originalPreviewFill.style.backgroundColor = active.value;
-      const currentPreviewFill = document.createElement('span');
-      currentPreviewFill.className = 'meo-hex-color-adjustment-preview-fill is-current';
-      currentPreviewFill.style.backgroundColor = active.value;
-      preview.append(originalPreviewFill, currentPreviewFill);
-      const valueInput = document.createElement('input');
-      valueInput.className = 'meo-hex-color-adjustment-value';
-      valueInput.type = 'text';
-      valueInput.spellcheck = false;
-      valueInput.autocomplete = 'off';
-      valueInput.setAttribute('aria-label', strings.hexColorValue);
-      const closeButton = document.createElement('button');
-      closeButton.className = 'meo-hex-color-adjustment-close';
-      closeButton.type = 'button';
-      closeButton.textContent = '×';
-      closeButton.title = strings.closeColorControls;
-      closeButton.setAttribute('aria-label', strings.closeColorControls);
-      header.append(preview, valueInput, closeButton);
-
-      const controls = document.createElement('div');
-      controls.className = 'meo-hex-color-adjustment-controls';
-      const makeRange = (labelText: string, min: number, max: number) => {
-        const row = document.createElement('label');
-        row.className = 'meo-hex-color-adjustment-row';
-        const label = document.createElement('span');
-        label.textContent = labelText;
-        const input = document.createElement('input');
-        input.type = 'range';
-        input.min = String(min);
-        input.max = String(max);
-        input.step = '1';
-        input.setAttribute('aria-label', labelText);
-        const output = document.createElement('output');
-        row.append(label, input, output);
-        controls.appendChild(row);
-        return { row, input, output };
-      };
-      const hue = makeRange(strings.hue, 0, 359);
-      hue.input.classList.add('meo-hex-color-adjustment-hue');
-      const saturation = makeRange(strings.saturation, 0, 100);
-      const brightness = makeRange(strings.brightness, 0, 100);
-      const opacity = makeRange(strings.opacity, 0, 255);
-      opacity.input.classList.add('meo-hex-color-adjustment-opacity');
-      const actions = document.createElement('div');
-      actions.className = 'meo-hex-color-adjustment-actions';
-      const cancelButton = document.createElement('button');
-      cancelButton.type = 'button';
-      cancelButton.textContent = strings.cancelColorAdjustment;
-      const applyButton = document.createElement('button');
-      applyButton.type = 'button';
-      applyButton.className = 'meo-hex-color-adjustment-apply';
-      applyButton.textContent = strings.applyColorAdjustment;
-      actions.append(cancelButton, applyButton);
-      dom.append(header, controls, actions);
-
-      const sourceSwatch = active.anchor?.isConnected ? active.anchor : view.dom.querySelector<HTMLButtonElement>(
-        `.meo-md-color-swatch-interactive[data-color-from="${active.from}"]`
-      );
-      const currentSourceSwatch = () => active.anchor?.isConnected
-        ? active.anchor
-        : view.dom.querySelector<HTMLButtonElement>(
-          `.meo-md-color-swatch-interactive[data-color-from="${active.from}"]`
-        );
-      let draftValue = active.value;
-      // Explicitly typed width remains the opaque format after later slider adjustments.
-      let includeAlphaWhenOpaque = active.value.length === 9;
-      const syncPreview = (next: string, syncSliders: boolean) => {
-        const parsed = parseHexColor(next);
-        if (!parsed) return;
-        draftValue = next;
-        valueInput.value = draftValue;
-        valueInput.removeAttribute('aria-invalid');
-        applyButton.disabled = false;
-        currentPreviewFill.style.backgroundColor = draftValue;
-        if (sourceSwatch) sourceSwatch.style.backgroundColor = draftValue;
-        if (syncSliders) {
-          const hsv = rgbToHsv(parsed.rgb);
-          hue.input.value = String(hsv.hue);
-          saturation.input.value = String(hsv.saturation);
-          brightness.input.value = String(hsv.brightness);
-          opacity.input.value = String(parsed.alpha);
-        }
-        const currentHue = Number(hue.input.value);
-        const currentSaturation = Number(saturation.input.value);
-        const currentBrightness = Number(brightness.input.value);
-        hue.output.textContent = `${currentHue}°`;
-        saturation.output.textContent = `${currentSaturation}%`;
-        brightness.output.textContent = `${brightness.input.value}%`;
-        opacity.output.textContent = `${Math.round((Number(opacity.input.value) / 255) * 100)}%`;
-        const fullSaturation = hsvToRgb({ hue: currentHue, saturation: 100, brightness: currentBrightness });
-        const fullBrightness = hsvToRgb({ hue: currentHue, saturation: currentSaturation, brightness: 100 });
-        const neutral = Math.round((currentBrightness / 100) * 255);
-        const currentColor = `rgb(${parsed.rgb.red} ${parsed.rgb.green} ${parsed.rgb.blue})`;
-        hue.input.style.setProperty('--meo-range-thumb-color', `rgb(${fullSaturation.red} ${fullSaturation.green} ${fullSaturation.blue})`);
-        saturation.input.style.setProperty('--meo-range-start', `rgb(${neutral} ${neutral} ${neutral})`);
-        saturation.input.style.setProperty('--meo-range-end', `rgb(${fullSaturation.red} ${fullSaturation.green} ${fullSaturation.blue})`);
-        saturation.input.style.setProperty('--meo-range-thumb-color', currentColor);
-        brightness.input.style.setProperty('--meo-range-end', `rgb(${fullBrightness.red} ${fullBrightness.green} ${fullBrightness.blue})`);
-        brightness.input.style.setProperty('--meo-range-thumb-color', currentColor);
-        opacity.input.style.setProperty('--meo-range-opaque', currentColor);
-        opacity.input.style.setProperty('--meo-range-thumb-color', draftValue);
-      };
-
-      const updateFromControls = () => {
-        const rgb = hsvToRgb({
-          hue: Number(hue.input.value),
-          saturation: Number(saturation.input.value),
-          brightness: Number(brightness.input.value)
-        });
-        syncPreview(formatHexColor(
-          rgb, Number(opacity.input.value), includeAlphaWhenOpaque || Number(opacity.input.value) < 255,
-          usesUppercaseHex(draftValue)
-        ), false);
-      };
-      const updateOpacity = () => {
-        const parsed = parseHexColor(draftValue);
-        if (!parsed) return;
-        const alpha = Number(opacity.input.value);
-        syncPreview(formatHexColor(
-          parsed.rgb, alpha, includeAlphaWhenOpaque || alpha < 255, usesUppercaseHex(draftValue)
-        ), false);
-      };
-      const apply = () => {
-        if (applyButton.disabled) return;
-        replaceActiveHexColor(view, active, draftValue);
-        view.focus();
-      };
-
-      hue.input.addEventListener('input', updateFromControls);
-      saturation.input.addEventListener('input', updateFromControls);
-      brightness.input.addEventListener('input', updateFromControls);
-      opacity.input.addEventListener('input', updateOpacity);
-      valueInput.addEventListener('input', () => {
-        const next = valueInput.value.trim();
-        const valid = supportedHexColor.test(next);
-        if (valid) valueInput.removeAttribute('aria-invalid');
-        else valueInput.setAttribute('aria-invalid', 'true');
-        applyButton.disabled = !valid;
-        if (valid) {
-          includeAlphaWhenOpaque = next.length === 9;
-          syncPreview(next, true);
-        }
-      });
-      valueInput.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          apply();
-        }
-      });
-      closeButton.addEventListener('click', () => {
-        closeHexColorAdjustment(view);
-        view.focus();
-      });
-      cancelButton.addEventListener('click', () => {
-        closeHexColorAdjustment(view);
-        view.focus();
-      });
-      applyButton.addEventListener('click', apply);
-
-      const onDocumentPointerDown = (event: PointerEvent) => {
-        const target = event.target;
-        if (target instanceof Node && (dom.contains(target) || (target instanceof Element && target.closest('.meo-md-color-swatch')))) return;
-        closeHexColorAdjustment(view);
-      };
-      const onDocumentKeyDown = (event: KeyboardEvent) => {
-        if (event.key !== 'Escape') return;
-        event.preventDefault();
-        event.stopPropagation();
-        closeHexColorAdjustment(view);
-        view.focus();
-      };
-      const onWheel = (event: WheelEvent) => {
-        if (event.ctrlKey || event.deltaY === 0) return;
-        const multiplier = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-          ? view.defaultLineHeight
-          : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-            ? view.scrollDOM.clientHeight
-            : 1;
-        const before = view.scrollDOM.scrollTop;
-        const delta = event.deltaY * multiplier;
-        const target = clamp(before + delta, 0, view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight);
-        if (target === before) return;
-        view.scrollDOM.scrollTop = target;
-        event.preventDefault();
-        event.stopPropagation();
-      };
-      let positionedScrollTop = view.scrollDOM.scrollTop;
-      let visibilityFrame = 0;
-      const onEditorScroll = () => {
-        // Keep the fixed tooltip with its swatch until CodeMirror finishes repositioning it.
-        dom.style.transform = `translateY(${positionedScrollTop - view.scrollDOM.scrollTop}px)`;
-        if (visibilityFrame) return;
-        visibilityFrame = requestAnimationFrame(() => {
-          visibilityFrame = 0;
-          const anchor = currentSourceSwatch();
-          if (!anchor) {
-            closeHexColorAdjustment(view);
-            return;
-          }
-          const anchorBounds = anchor.getBoundingClientRect();
-          const scrollBounds = view.scrollDOM.getBoundingClientRect();
-          const tooltipSpace = hexColorTooltipSpace(view);
-          const visible = anchorBounds.bottom > Math.max(scrollBounds.top, tooltipSpace.top) &&
-            anchorBounds.top < Math.min(scrollBounds.bottom, tooltipSpace.bottom) &&
-            anchorBounds.right > Math.max(scrollBounds.left, tooltipSpace.left) &&
-            anchorBounds.left < Math.min(scrollBounds.right, tooltipSpace.right);
-          if (!visible) closeHexColorAdjustment(view);
-        });
-      };
-
-      syncPreview(active.value, true);
-      return {
-        dom,
-        getCoords: () => currentSourceSwatch()?.getBoundingClientRect()
-          ?? view.coordsAtPos(active.from)
-          ?? view.dom.getBoundingClientRect(),
-        positioned() {
-          positionedScrollTop = view.scrollDOM.scrollTop;
-          dom.style.transform = '';
-        },
-        mount() {
-          document.addEventListener('pointerdown', onDocumentPointerDown, true);
-          document.addEventListener('keydown', onDocumentKeyDown, true);
-          dom.addEventListener('wheel', onWheel, { passive: false });
-          view.scrollDOM.addEventListener('scroll', onEditorScroll, { passive: true });
-          valueInput.focus();
-        },
-        destroy() {
-          document.removeEventListener('pointerdown', onDocumentPointerDown, true);
-          document.removeEventListener('keydown', onDocumentKeyDown, true);
-          dom.removeEventListener('wheel', onWheel);
-          view.scrollDOM.removeEventListener('scroll', onEditorScroll);
-          if (visibilityFrame) cancelAnimationFrame(visibilityFrame);
-          if (sourceSwatch?.isConnected && view.state.doc.sliceString(active.from, active.to) === active.value) {
-            sourceSwatch.style.backgroundColor = active.value;
-          }
-        }
-      };
+    position,
+    destroy() {
+      document.removeEventListener('pointerdown', onDocumentPointerDown, true);
+      document.removeEventListener('keydown', onDocumentKeyDown, true);
+      view.scrollDOM.removeEventListener('scroll', onEditorScroll);
+      view.dom.ownerDocument.defaultView?.removeEventListener('resize', onEditorScroll);
+      if (visibilityFrame) cancelAnimationFrame(visibilityFrame);
+      dom.remove();
+      if (sourceSwatch?.isConnected && view.state.doc.sliceString(active.from, active.to) === active.value) {
+        sourceSwatch.style.backgroundColor = active.value;
+      }
     }
   };
 }
 
-const activeHexColorAdjustmentField = StateField.define<HexColorAdjustmentState | null>({
+const activeHexColorAdjustmentField = StateField.define<ActiveHexColorAdjustment | null>({
   create: () => null,
   update(value, transaction) {
     let next = transaction.docChanged || transaction.startState.facet(uiLanguageFacet) !== transaction.state.facet(uiLanguageFacet)
@@ -395,19 +399,39 @@ const activeHexColorAdjustmentField = StateField.define<HexColorAdjustmentState 
       if (effect.is(setActiveHexColorAdjustment)) {
         const range = effect.value;
         next = range && transaction.state.doc.sliceString(range.from, range.to) === range.value
-          ? { range, tooltip: createHexColorAdjustmentTooltip(range) } : null;
+          ? range : null;
       }
     }
     return next;
-  },
-  provide: (field) => showTooltip.from(field, (value) => value?.tooltip ?? null)
+  }
+});
+
+const hexColorAdjustmentViewPlugin = ViewPlugin.fromClass(class {
+  private active: ActiveHexColorAdjustment | null = null;
+  private panel: HexColorAdjustmentPanel | null = null;
+
+  constructor(private readonly view: EditorView) {}
+
+  update(update: ViewUpdate): void {
+    const active = update.state.field(activeHexColorAdjustmentField);
+    if (active !== this.active) {
+      this.panel?.destroy();
+      this.active = active;
+      this.panel = active ? createHexColorAdjustmentPanel(this.view, active) : null;
+    } else if (active && update.geometryChanged && this.panel && !this.panel.position()) {
+      queueMicrotask(() => {
+        if (this.view.state.field(activeHexColorAdjustmentField) === active) closeHexColorAdjustment(this.view);
+      });
+    }
+  }
+
+  destroy(): void {
+    this.panel?.destroy();
+  }
 });
 
 export function hexColorAdjustmentExtension(): Extension {
-  return [
-    tooltips({ tooltipSpace: hexColorTooltipSpace }),
-    activeHexColorAdjustmentField
-  ];
+  return [activeHexColorAdjustmentField, hexColorAdjustmentViewPlugin];
 }
 
 export function createColorSwatchElement(value: string, uiLanguage: UiLanguage = 'en'): HTMLSpanElement {
