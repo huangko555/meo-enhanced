@@ -131,6 +131,7 @@ async function main(): Promise<void> {
     await waitForFrames(page);
     await assertCountsMatchMarkers(page, 'Manual snapshot baseline');
 
+    await page.waitForFunction(() => !document.querySelector('.mode-toolbar')?.classList.contains('meo-preload-toolbar'));
     await page.click('.changes-review-trigger');
     const hoverHintCount = await page.evaluate(() => document.querySelectorAll(
       '.changes-review-option-info, .changes-review-option-tooltip, .changes-review-control [title]'
