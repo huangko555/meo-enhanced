@@ -9,7 +9,7 @@ const flushFrames = async (animationFrames: FrameRequestCallback[]): Promise<voi
   }
 };
 
-const runScenario = async ({ laterLayoutShift = 0 } = {}) => {
+const runScenario = async ({ laterLayoutShift = 0, initialScrollTop = 1000 } = {}) => {
   const animationFrames: FrameRequestCallback[] = [];
   const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
   globalThis.requestAnimationFrame = (callback: FrameRequestCallback) => {
@@ -17,9 +17,9 @@ const runScenario = async ({ laterLayoutShift = 0 } = {}) => {
     return animationFrames.length;
   };
 
-  let layoutTop = 1100;
+  let layoutTop = initialScrollTop + 100;
   const scrollDOM = {
-    scrollTop: 1000,
+    scrollTop: initialScrollTop,
     scrollLeft: 0,
     scrollHeight: 5000,
     scrollWidth: 900,
@@ -36,7 +36,7 @@ const runScenario = async ({ laterLayoutShift = 0 } = {}) => {
     scrollDOM,
     contentDOM: { querySelectorAll: () => [anchorElement] },
     posAtDOM: () => 42,
-    lineBlockAt: () => ({ top: layoutTop }),
+    lineBlockAt: (position: number) => ({ top: position === 0 ? 0 : layoutTop }),
     requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => {
       write(read());
     }
@@ -46,7 +46,7 @@ const runScenario = async ({ laterLayoutShift = 0 } = {}) => {
   controller.preserveLayoutChange({
     element: {
       isConnected: true,
-      getBoundingClientRect: () => ({ top: -100, bottom: 0 })
+      getBoundingClientRect: () => initialScrollTop <= 1 ? ({ top: 50, bottom: 80 }) : ({ top: -100, bottom: 0 })
     } as any,
     from: 1,
     to: 2
@@ -64,6 +64,19 @@ const runScenario = async ({ laterLayoutShift = 0 } = {}) => {
 const preservedScrollTop = await runScenario({ laterLayoutShift: 40 });
 if (preservedScrollTop !== 1280) {
   throw new Error(`Layout changes above the reading anchor moved the viewport: ${preservedScrollTop}`);
+}
+
+// A late block within the viewport must not hide the start of the document.
+// A middle-of-viewport anchor would otherwise turn block growth into a scroll.
+for (const initialScrollTop of [0, 0.5]) {
+  const top = await runScenario({ laterLayoutShift: 40, initialScrollTop });
+  if (top !== initialScrollTop) {
+    throw new Error(`Passive layout moved the document start: ${initialScrollTop} -> ${top}`);
+  }
+}
+const nearStart = await runScenario({ laterLayoutShift: 40, initialScrollTop: 10 });
+if (nearStart !== 290) {
+  throw new Error(`Reading below the top lost its layout compensation: ${nearStart}`);
 }
 
 const concurrentFrames: FrameRequestCallback[] = [];

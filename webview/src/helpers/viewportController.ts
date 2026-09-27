@@ -2785,6 +2785,14 @@ export class ViewportController {
     const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
     const regionRect = region.element.getBoundingClientRect();
     if (regionRect.top >= scrollerRect.bottom) return null;
+    // At the document boundary, preserving a later reading line would turn
+    // passive block growth into a scroll that hides the first content.
+    if (this.view.scrollDOM.scrollTop <= POSITION_EPSILON) {
+      return {
+        position: 0,
+        viewportOffset: this.view.lineBlockAt(0).top - this.view.scrollDOM.scrollTop
+      };
+    }
 
     const from = Math.min(region.from, region.to);
     const to = Math.max(region.from, region.to);
