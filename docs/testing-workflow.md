@@ -142,7 +142,9 @@ and enabled. The large-document policy can override a saved mode with Source;
 encode that expectation explicitly rather than counting it as a Live/Preview
 startup. Split preview is intentionally session-only. When `restore` is false,
 the seed still saves a non-top position before the measuring process disables
-restoration. Empty/short documents cannot prove non-top restoration.
+restoration. Non-scrollable documents are explicitly excluded from restoration
+coverage; scrollable documents must produce both a non-top DOM position and a
+non-top persisted position.
 
 This uses a small companion development extension, because VS Code's extension
 test runner uses in-memory storage and cannot prove cross-process persistence.
@@ -150,7 +152,10 @@ Each phase is bounded to 180 seconds. Reports retain seed and measurement result
 built entry/runtime hashes, document/driver hashes, runtime, viewport, font and
 focus state. Failure reports and isolated seed storage snapshots remain available
 for diagnosis. The seed waits five seconds outside measured intervals and Bun
-checks the copied SQLite state for a non-top position before measuring restore.
+checks scroll geometry and the copied SQLite state before measuring restore.
+Seeding uses trusted wheel input. Restored position must still be away from the
+top in the settled snapshot. Each Source transition also asserts the actual split
+state, and fresh Webviews must start with split disabled.
 Missing persisted state fails the setup instead of being counted as a restore
 test. Source documents are never edited.
 

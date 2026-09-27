@@ -92,20 +92,26 @@ exports.run = async () => {
       await opening;
       if (failure) throw failure;
       const initial = await snapshot(frame);
+      assert.equal(initial.split, false, 'A fresh Webview must start with Source split disabled');
       let readingPositionReadyMs = null;
+      let minimumRestoreScrollTop = null;
       if (phase === 'measure') {
-        const seed = JSON.parse(fs.readFileSync(path.join(output, 'seed.json'), 'utf8')).seedPosition;
-        if (config.restore && seed.scrollTop > 100) {
-          await frame.waitForFunction(() => {
+        const seed = JSON.parse(fs.readFileSync(path.join(output, 'seed.json'), 'utf8'));
+        if (config.restore && seed.restorationCoverage === 'non-top') {
+          minimumRestoreScrollTop = seed.minimumRestoreScrollTop;
+          await frame.waitForFunction(minimum => {
             const mode = document.getElementById('app').dataset.mode;
             const scroller = mode === 'preview' ? document.querySelector('.preview-frame').contentDocument.scrollingElement : document.querySelector('.cm-scroller');
-            return scroller.scrollTop > 100;
-          }, {timeout:10000});
+            return scroller.scrollTop > minimum;
+          }, {timeout:10000}, minimumRestoreScrollTop);
           readingPositionReadyMs = performance.now() - started;
         }
       }
       await wait(600);
       const settled = await snapshot(frame);
+      if (minimumRestoreScrollTop !== null) {
+        assert.ok(settled.scrollTop > minimumRestoreScrollTop, 'Restored position must survive the settled snapshot');
+      }
       // Preview may align the first block by removing page-top whitespace.
       // Require the first content to remain fully visible, not an exact margin.
       const atStart = settled.scrollTop <= 2
@@ -139,14 +145,24 @@ exports.run = async () => {
       await ready(frame, mode);
     };
     const scroll = async frame => {
-      await frame.evaluate(() => {
+      // Mode projection can finish after ready. Seed with trusted wheel input,
+      // which cancels pending viewport projection just like an actual reader.
+      await wait(600);
+      const amount = await frame.evaluate(() => {
         const mode = document.getElementById('app').dataset.mode;
         const scroller = mode === 'preview' ? document.querySelector('.preview-frame').contentDocument.scrollingElement : document.querySelector('.cm-scroller');
-        scroller.scrollTop = (scroller.scrollHeight - scroller.clientHeight) * .4;
+        return Math.max(0, scroller.scrollHeight - scroller.clientHeight) * .4;
       });
-      // Rich rendering can keep publishing layout changes after the scroll.
-      // Seed setup is outside the measured interval; allow the idle writer to
-      // settle, then verify its actual persisted state in the launcher.
+      const surface = await frame.evaluateHandle(() => document.querySelector(
+        document.getElementById('app').dataset.mode === 'preview' ? '.preview-frame' : '.cm-scroller'
+      ));
+      try {
+        assert.ok(surface.asElement(), 'Missing scroll surface');
+        await surface.asElement().hover();
+        await frame.page().mouse.wheel({ deltaY: amount });
+      } finally { await surface.dispose(); }
+      // Setup is outside the measured interval. The launcher verifies that the
+      // production idle writer actually persisted this position before restart.
       await wait(5000);
       return snapshot(frame);
     };
@@ -180,9 +196,13 @@ exports.run = async () => {
         // Euler tour covers all six directed edges exactly once per split state.
         for (const to of [others[0], others[1], startMode, others[1], others[0], startMode]) {
           await wait(200);
+          if (from === 'source') assert.equal((await snapshot(frame)).split, split, 'Source split before transition');
           const started = performance.now();
           await select(frame, to);
-          result.switches.push({ from, to, split, readyMs: performance.now() - started, state: await snapshot(frame) });
+          const readyMs = performance.now() - started;
+          const state = await snapshot(frame);
+          if (to === 'source') assert.equal(state.split, split, 'Source split after transition');
+          result.switches.push({ from, to, split, readyMs, state });
           from = to;
         }
       }

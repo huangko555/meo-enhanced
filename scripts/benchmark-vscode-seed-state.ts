@@ -26,8 +26,13 @@ for (const file of fs.readdirSync(output).filter(file => (
   }
 }
 seed.persistedPosition = position;
-seed.seedMemoryValid = seed.seedPosition.scrollTop <= 100
-  || !!position && (position.line > 1 || position.lineOffset > 0);
+const scrollRange = Math.max(0, seed.seedPosition.scrollHeight - seed.seedPosition.clientHeight);
+assert.ok(Number.isFinite(scrollRange), 'Missing seed scroll geometry');
+seed.restorationCoverage = scrollRange > 1 ? 'non-top' : 'not-scrollable';
+seed.minimumRestoreScrollTop = Math.min(100, scrollRange / 4);
+seed.seedMemoryValid = seed.restorationCoverage === 'not-scrollable'
+  || (seed.seedPosition.scrollTop > seed.minimumRestoreScrollTop
+    && !!position && (position.line > 1 || position.lineOffset > 0));
 fs.writeFileSync(seedPath, JSON.stringify(seed, null, 2));
 assert.ok(seed.seedMemoryValid,
   'Seed did not persist a non-top position; restart restoration was not tested');
