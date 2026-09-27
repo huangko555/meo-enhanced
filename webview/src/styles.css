@@ -1371,7 +1371,7 @@ html[data-editor-appearance='light'] .segmented-control-button:not(.is-active):i
 }
 
 .changes-review-toggle {
-  grid-template-columns: 16px minmax(0, 1fr) 32px;
+  grid-template-columns: 16px minmax(0, 1fr) 28px;
 }
 
 .changes-review-option-icon {
@@ -1673,7 +1673,7 @@ html[lang='zh-CN'] .mode-group .segmented-control-button-label {
 }
 
 .more-tools-toggle-option {
-  grid-template-columns: 16px minmax(0, 1fr) 32px;
+  grid-template-columns: 16px minmax(0, 1fr) 28px;
 }
 
 .more-tools-section-label {
@@ -1740,13 +1740,17 @@ html[lang='zh-CN'] .mode-group .segmented-control-button-label {
 .menu-switch {
   position: relative;
   box-sizing: border-box;
-  width: 32px;
+  width: 28px;
   height: 16px;
   border: 0;
   border-radius: 999px;
-  background: var(--meo-segmented-control-background);
+  background: color-mix(in srgb, var(--vscode-editor-foreground) 18%, var(--vscode-editor-background));
   pointer-events: none;
   transition: background-color 0.15s ease;
+}
+
+html[data-editor-appearance='dark'] .menu-switch {
+  background: color-mix(in srgb, var(--vscode-editor-foreground) 27%, var(--vscode-editor-background));
 }
 
 .menu-switch::after {
@@ -1770,7 +1774,7 @@ html[data-editor-appearance='dark'] [aria-checked='true'] > .menu-switch {
 }
 
 [aria-checked='true'] > .menu-switch::after {
-  transform: translateX(16px);
+  transform: translateX(12px);
 }
 
 button:focus-visible > .menu-switch {
