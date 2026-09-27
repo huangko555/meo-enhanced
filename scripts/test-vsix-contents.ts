@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const repoRoot = resolve(import.meta.dir, '..');
 const packageJson = JSON.parse(readFileSync(resolve(repoRoot, 'package.json'), 'utf8')) as {
@@ -40,10 +41,11 @@ for (const path of requiredFiles) {
   if (!included.has(path)) throw new Error(`VSIX listing is missing required file ${path}`);
 }
 
-const escapedRepoRoot = JSON.stringify(repoRoot).slice(1, -1);
+const checkoutPathVariants = [repoRoot, repoRoot.replaceAll('\\', '/'), pathToFileURL(repoRoot).href]
+  .flatMap((value) => [value, JSON.stringify(value).slice(1, -1)]);
 for (const path of ['dist/extension.js', 'dist/export-runtime.js', 'webview/dist/index.js']) {
   const contents = readFileSync(resolve(repoRoot, path), 'utf8');
-  if (contents.includes(repoRoot) || contents.includes(escapedRepoRoot)) {
+  if (checkoutPathVariants.some((value) => contents.includes(value))) {
     throw new Error(`Production bundle contains the build checkout path: ${path}`);
   }
 }

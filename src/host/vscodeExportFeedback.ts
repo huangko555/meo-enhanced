@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { UiLanguage } from '../foundation/uiLanguage';
+import { openWindowsFile } from './windowsFileOpen';
 
 export type VscodeExportFormat = 'html' | 'pdf' | 'docx';
 export type VscodeExportProgressStage =
@@ -222,8 +223,7 @@ async function openLocalResource(targetUri: vscode.Uri): Promise<boolean> {
     && targetUri.scheme === 'file'
     && /[^\u0000-\u007f]/u.test(targetUri.fsPath)
   ) {
-    const { default: openPath } = await import('open');
-    await openPath(targetUri.fsPath);
+    await openWindowsFile(targetUri.fsPath);
     return true;
   }
 

@@ -26,10 +26,9 @@ let informationMessageHandler: (() => Promise<string | undefined>) | undefined;
 
 Object.defineProperty(process, 'platform', { value: 'win32' });
 
-mock.module('open', () => ({
-  default: async (target: string) => {
+mock.module('../src/host/windowsFileOpen', () => ({
+  openWindowsFile: async (target: string) => {
     systemOpenedPaths.push(target);
-    return {};
   }
 }));
 
@@ -185,6 +184,16 @@ for (const [format, extension] of [['pdf', 'pdf'], ['docx', 'docx'], ['html', 'h
   assert.equal(systemOpenedPaths.at(-1), nonAsciiTarget.fsPath);
   assert.equal(openedUris.length, externalOpenCount, `${format} must bypass encoded URI opening on Windows`);
 }
+
+const quotedTarget = fileUri("D:/exports/李's report.pdf");
+saveDialogResult = quotedTarget;
+await runVscodeExportWithFeedback({
+  sourceDocumentUri,
+  format: 'pdf',
+  uiLanguage: 'zh-CN'
+}, async () => undefined);
+await new Promise<void>((resolve) => setTimeout(resolve, 0));
+assert.equal(systemOpenedPaths.at(-1), quotedTarget.fsPath);
 
 rejectReveal = true;
 selectedAction = '打开所在文件夹';
