@@ -2243,7 +2243,13 @@ readingPositionLifecycle = createReadingPositionLifecycle({
   restore: (position) => {
     if (getActiveEditorMode() === 'preview') {
       if (!previewController.getTopVisiblePosition()) return false;
-      previewController.restoreTopLine(position.line, position.lineOffset);
+      // Replace the mode transition's pending projection as well as its pixels;
+      // otherwise a late first render can repaint the old top-of-document anchor.
+      const interactionGeneration = previewViewportInteractionGeneration;
+      previewController.restoreTopVisiblePosition(position, () => (
+        getActiveEditorMode() === 'preview'
+        && previewViewportInteractionGeneration === interactionGeneration
+      ));
       return true;
     }
     if (!editor) return false;
