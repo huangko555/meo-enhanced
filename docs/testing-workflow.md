@@ -73,6 +73,13 @@ switch-to-ready time must stay
 below 300 ms in the production browser harness. Run it for mode-transition
 changes and as part of the targeted viewport and release browser suites.
 
+`scripts/test-viewport-anchor-production.ts` also runs in the full browser suite.
+It checks semantic reading-band position and proportional rendered-block progress
+across modes, every visible transition frame, and Preview selection/focus through
+late resources, external revisions, and disk reloads. Same-surface captures inside
+paragraph whitespace must preserve the gap; cross-mode checks do not require
+identical raw pixel offsets for differently sized rendered blocks.
+
 For final installed-VSIX acceptance, use an isolated VS Code profile and open
 a Markdown file in each saved mode after both closing its tab and restarting
 VS Code. Confirm that the content is readable and interactive without changing

@@ -48,6 +48,17 @@ const scrollLiveRenderedBlockToOffset = async (
   }, startLine);
 };
 
+// Mode changes preserve the reading band and proportional block progress.
+const captureLiveBlockReadingAnchor = (page: Page) => page.evaluate(() => {
+  const scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
+  const block = document.querySelector<HTMLElement>('.editor-host [data-meo-rendered-block-start-line="20"]')!;
+  const rect = block.getBoundingClientRect();
+  const viewportOffset = scroller.clientHeight / 3;
+  const progress = (scroller.getBoundingClientRect().top + viewportOffset - rect.top) / rect.height;
+  if (progress < 0 || progress > 1) throw new Error('Reading band must be inside the rendered fixture');
+  return { progress, viewportOffset };
+});
+
 const fixtureLines = Array.from({ length: 180 }, (_, index) => `semantic line ${index + 1}`);
 fixtureLines[19] = '| column A | column B |';
 fixtureLines[20] = '| --- | --- |';
@@ -182,6 +193,8 @@ async function main(): Promise<void> {
       }}));
     }, fixture);
     await page.waitForSelector('.editor-host > .cm-editor');
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source'
+      && !document.querySelector('.mode-toolbar')?.hasAttribute('aria-hidden'));
     if (process.argv.includes('--rendered-block-preview-only')) {
       await page.click('[data-mode="live"]');
       await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live');
@@ -194,6 +207,7 @@ async function main(): Promise<void> {
       const liveOffset = await scrollLiveRenderedBlockToOffset(page, 20, 90);
       assert.ok(Math.abs(liveOffset - 90) <= 2, `Live block offset was ${liveOffset}`);
 
+      const readingAnchor = await captureLiveBlockReadingAnchor(page);
       await page.click('[data-mode="preview"]');
       const requestId = await page.waitForFunction(() => (
         (window as typeof window & { __hostMessages?: Array<{ type?: string; requestId?: string }> })
@@ -223,11 +237,12 @@ async function main(): Promise<void> {
         if (!block) throw new Error('Missing Preview rendered block');
         return -block.getBoundingClientRect().top;
       });
-      assert.ok(
-        Math.abs(previewOffset - liveOffset) <= 2,
-        `Live to Preview lost rendered-block offset: ${liveOffset} -> ${previewOffset}`
-      );
-      console.log(`Live rendered block to Preview offset passed: ${liveOffset} -> ${previewOffset}`);
+      const previewHeight = await page.$eval<HTMLIFrameElement, number>('.preview-frame', frame =>
+        frame.contentDocument!.querySelector('[data-source-line="20"]')!.getBoundingClientRect().height);
+      const expectedOffset = previewHeight * readingAnchor.progress - readingAnchor.viewportOffset;
+      assert.ok(Math.abs(previewOffset - expectedOffset) <= 2,
+        `Live to Preview lost rendered-block reading progress: ${expectedOffset} -> ${previewOffset}`);
+      console.log(`Live rendered block reading progress passed: ${readingAnchor.progress} (offset ${previewOffset})`);
       return;
     }
     await page.evaluate(({ anchor, head }) => {
@@ -439,10 +454,17 @@ async function main(): Promise<void> {
       `Preview settle changed mode/selection/focus/text: ${JSON.stringify(traceResult)}`
     );
 
+    const previewExitAnchor = await page.$eval<HTMLIFrameElement, { documentPosition: number; viewportOffset: number }>('.preview-frame', frame => {
+      const document = frame.contentDocument!;
+      const viewportOffset = document.scrollingElement!.clientHeight / 3;
+      const paragraph = [...document.querySelectorAll<HTMLElement>('p[data-source-line]')]
+        .find(element => { const rect = element.getBoundingClientRect(); return rect.top <= viewportOffset && rect.bottom > viewportOffset; });
+      if (!paragraph) throw new Error('Reading band must intersect a fixture paragraph');
+      return { documentPosition: Number(paragraph.dataset.sourceLine), viewportOffset };
+    });
     await page.click('[data-mode="live"]');
     await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live');
     await waitForFrames(page, 4);
-    const previewExitAnchor = traceResult.before.anchor;
     const previewExitLine = previewExitAnchor.documentPosition;
     assert.ok(
       Number.isInteger(previewExitLine) && previewExitLine >= 1 && previewExitLine <= fixtureLines.length,
@@ -462,13 +484,15 @@ async function main(): Promise<void> {
       const anchors = Array.from(document.querySelectorAll<HTMLElement>('.editor-host .cm-line'))
         .filter((line) => line.textContent === anchorText);
       const anchor = anchors.length === 1 ? anchors[0] : null;
+      const textRange = anchor ? document.createRange() : null;
+      if (anchor) textRange!.selectNodeContents(anchor);
       return {
         mode: document.querySelector<HTMLElement>('#app')?.dataset.mode,
         selection: selection?.toString() ?? '',
         focusInEditor: Boolean(editorContent && document.activeElement && editorContent.contains(document.activeElement)),
         anchorLine,
         anchorMatches: anchors.length,
-        anchorViewportOffset: anchor ? anchor.getBoundingClientRect().top - scrollerTop : null
+        anchorViewportOffset: textRange ? textRange.getBoundingClientRect().top - scrollerTop : null
       };
     }, {
       anchorLine: previewExitLine,
@@ -504,6 +528,7 @@ async function main(): Promise<void> {
     const liveOffset = await scrollLiveRenderedBlockToOffset(page, 20, 90);
     assert.ok(Math.abs(liveOffset - 90) <= 2, `Live block offset was ${liveOffset}`);
 
+    const liveReadingAnchor = await captureLiveBlockReadingAnchor(page);
     const liveToPreviewTrace = await page.evaluate(async () => {
       const observation = (window as typeof window & {
         ProductFrameObservation: { observeContinuousFrames: Function };
@@ -519,6 +544,7 @@ async function main(): Promise<void> {
           metrics: {
             previewVisible: previewVisible ? 1 : 0,
             blockPresent: block ? 1 : 0,
+            height: block?.getBoundingClientRect().height ?? 0,
             offset: block ? -block.getBoundingClientRect().top : -1
           }
         };
@@ -538,12 +564,12 @@ async function main(): Promise<void> {
       `Preview became visible before its rendered block was available: ${JSON.stringify(liveToPreviewTrace)}`
     );
     assert.ok(
-      visiblePreviewSamples.every((sample) => Math.abs(sample.offset - liveOffset) <= 2),
+      visiblePreviewSamples.every((sample) => Math.abs(sample.offset - (sample.height * liveReadingAnchor.progress - liveReadingAnchor.viewportOffset)) <= 2),
       `Live to Preview exposed a stale position before settling: ${JSON.stringify({ liveOffset, liveToPreviewTrace })}`
     );
     const previewRenderedOffset = visiblePreviewSamples.at(-1)!.offset;
     assert.ok(
-      Math.abs(previewRenderedOffset - liveOffset) <= 2,
+      Math.abs(previewRenderedOffset - (visiblePreviewSamples.at(-1)!.height * liveReadingAnchor.progress - liveReadingAnchor.viewportOffset)) <= 2,
       `Live to Preview lost rendered-block offset: ${liveOffset} -> ${previewRenderedOffset}`
     );
 
@@ -565,6 +591,7 @@ async function main(): Promise<void> {
       Math.abs(delayedRenderLiveOffset - 90) <= 2,
       `Delayed-render Live block offset was ${delayedRenderLiveOffset}`
     );
+    const delayedReadingAnchor = await captureLiveBlockReadingAnchor(page);
     const delayedRenderTrace = await page.evaluate(async ({ html }) => {
       const observation = (window as typeof window & {
         ProductFrameObservation: { observeContinuousFrames: Function };
@@ -602,6 +629,7 @@ async function main(): Promise<void> {
         return { metrics: {
           previewVisible: document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview'
             && getComputedStyle(frame).visibility !== 'hidden' ? 1 : 0,
+          height: block?.getBoundingClientRect().height ?? 0,
           offset: block ? -block.getBoundingClientRect().top : -1
         } };
       }, { trigger, stableFrameCount: 12, maxFrameCount: 90, tolerance: 0.25 });
@@ -610,7 +638,7 @@ async function main(): Promise<void> {
     const delayedVisibleSamples = delayedRenderTrace.filter((sample) => sample.previewVisible === 1);
     assert.ok(
       delayedVisibleSamples.length > 0
-        && delayedVisibleSamples.every((sample) => Math.abs(sample.offset - delayedRenderLiveOffset) <= 2),
+        && delayedVisibleSamples.every((sample) => Math.abs(sample.offset - (sample.height * delayedReadingAnchor.progress - delayedReadingAnchor.viewportOffset)) <= 2),
       `Live to Preview exposed stale position while a fresh render was pending: ${JSON.stringify({
         delayedRenderLiveOffset, delayedRenderTrace
       })}`
@@ -619,17 +647,20 @@ async function main(): Promise<void> {
     await page.click('[data-mode="source"]');
     await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');
     await waitForFrames(page, 3);
-    const sourceRenderedOffset = await page.evaluate(() => {
+    const sourceReadingOffset = await page.evaluate(({ progress, viewportOffset }) => {
       const scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
-      const sourceLine = Array.from(document.querySelectorAll<HTMLElement>('.editor-host .cm-line'))
-        .find((line) => line.textContent === '| rendered row 2 | value 2 |');
-      if (!sourceLine) throw new Error('Missing Source line for rendered block');
-      return scroller.getBoundingClientRect().top - sourceLine.getBoundingClientRect().top;
-    });
-    assert.ok(
-      Math.abs(sourceRenderedOffset) <= 2,
-      `Preview to Source lost the worked semantic line 23 / offset 0: ${sourceRenderedOffset}`
-    );
+      const lines = (window as any).__viewportAnchorTransaction.editor.getText().split('\n');
+      const rangeOffset = 17 * progress;
+      const index = Math.min(16, Math.floor(rangeOffset));
+      const lineText = lines[19 + index];
+      const line = [...document.querySelectorAll<HTMLElement>('.editor-host .cm-line')]
+        .find(element => element.textContent === lineText);
+      if (!line) throw new Error('Missing Source reading-band line');
+      const rect = line.getBoundingClientRect();
+      return rect.top - scroller.getBoundingClientRect().top + rect.height * (rangeOffset - index) - viewportOffset;
+    }, delayedReadingAnchor);
+    assert.ok(Math.abs(sourceReadingOffset) <= 2,
+      `Preview to Source lost proportional reading-band position: ${sourceReadingOffset}`);
 
     const moveHiddenEditorAndPreview = async (
       documentText: string,
@@ -691,12 +722,12 @@ async function main(): Promise<void> {
       html: string,
       firstLine: string
     ): Promise<string> => {
-      const nextRequestId = await page.waitForFunction((previous) => (
-        (window as typeof window & { __hostMessages?: Array<{ type?: string; requestId?: string }> })
-          .__hostMessages?.findLast((message) => (
-            message.type === 'requestPreviewRender' && message.requestId !== previous
-          ))?.requestId ?? ''
-      ), {}, previousRequestId).then((handle) => handle.jsonValue() as Promise<string>);
+      const nextRequestId = await page.waitForFunction(({ previous, expected }) => (
+        (window as any).__hostMessages?.findLast((message: any) => (
+          message.type === 'requestPreviewRender' && message.requestId !== previous
+          && message.text?.split('\n')[0] === expected
+        ))?.requestId ?? ''
+      ), {}, { previous: previousRequestId, expected: firstLine }).then((handle) => handle.jsonValue() as Promise<string>);
       await page.evaluate(({ id, nextHtml }) => {
         window.dispatchEvent(new MessageEvent('message', { data: {
           type: 'previewRenderResult', requestId: id,

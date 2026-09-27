@@ -2458,6 +2458,16 @@ export function createPreviewController({
     const next = entries[Math.max(0, high) + 1];
     if (candidate.bottom < viewportAnchor && next) {
       if (next.top > viewportAnchor) {
+        // A same-surface capture in whitespace must retain the visible gap.
+        // Mode transitions sample a nonzero reading band and keep interpolation.
+        if (boundedViewportOffset === 0) {
+          return {
+            topLine: next.start,
+            topLineOffset: 0,
+            editorLineOffset: 0,
+            viewportOffset: next.top - viewportAnchor
+          };
+        }
         const gapHeight = Math.max(1, next.top - candidate.bottom);
         const ratio = Math.max(0, Math.min(1, (viewportAnchor - candidate.bottom) / gapHeight));
         return {
