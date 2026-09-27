@@ -1558,20 +1558,20 @@ export class ViewportController {
   }
 
   /** Waits for the post-reconfiguration height map, anchor projection, and visible block geometry. */
-  async whenPresentationSettled(timeoutMs: number): Promise<void> {
+  async whenPresentationSettled(timeoutMs: number, isCurrent: () => boolean = () => true): Promise<void> {
     if (this.destroyed || timeoutMs <= 0) return;
     const deadline = performance.now() + timeoutMs;
     let previousSignature: string | null = null;
     let stableFrames = 0;
     await new Promise<void>((resolve) => {
       const sample = () => {
-        if (this.destroyed || performance.now() >= deadline) {
+        if (this.destroyed || !isCurrent() || performance.now() >= deadline) {
           resolve();
           return;
         }
         this.view.requestMeasure({
           read: () => {
-            if (this.destroyed) return null;
+            if (this.destroyed || !isCurrent()) return null;
             const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
             const visibleBlocks = Array.from(
               this.view.contentDOM.querySelectorAll<HTMLElement>('[data-meo-rendered-block-start-line]')

@@ -5174,13 +5174,15 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     probe.style.visibility = 'hidden';
     probe.style.pointerEvents = 'none';
     contents[0]!.appendChild(probe);
+    const widths = textareas.map((textarea) => textarea.getBoundingClientRect().width);
+    const previewHeights = contents.map((content) =>
+      content.querySelector<HTMLElement>('.meo-md-html-table-cell-preview')?.scrollHeight ?? 0
+    );
     for (let index = 0; index < textareas.length; index += 1) {
       const textarea = textareas[index];
-      const content = contents[index];
-      const preview = content?.querySelector<HTMLElement>('.meo-md-html-table-cell-preview');
       probe.value = textarea.value;
-      probe.style.width = `${textarea.getBoundingClientRect().width}px`;
-      maxHeight = Math.max(maxHeight, probe.scrollHeight, preview?.scrollHeight ?? 0);
+      probe.style.width = `${widths[index]}px`;
+      maxHeight = Math.max(maxHeight, probe.scrollHeight, previewHeights[index] ?? 0);
     }
     probe.remove();
 

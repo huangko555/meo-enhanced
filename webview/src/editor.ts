@@ -2841,6 +2841,11 @@ export function createEditor({
       if (presentationMode === 'live' && flushMountedTableLayouts(view)) {
         (view as EditorView & { measure(flush?: boolean): void }).measure(false);
       }
+      let viewportSettled = false;
+      const viewportReady = viewportController.whenPresentationSettled(
+        Math.max(0, deadline - performance.now()),
+        () => !editorDestroyed && currentMode === presentationMode
+      ).then(() => { viewportSettled = true; });
       if (presentationMode === 'live') {
         let timeout: number | null = null;
         const waitAbortController = new AbortController();
@@ -2860,10 +2865,18 @@ export function createEditor({
         }
       }
       if (editorDestroyed || currentMode !== presentationMode) return;
-      if (presentationMode === 'live' && flushMountedTableLayouts(view)) {
+      const imageSettledAfterViewport = viewportSettled;
+      const tableLayoutChanged = presentationMode === 'live' && flushMountedTableLayouts(view);
+      if (tableLayoutChanged) {
         (view as EditorView & { measure(flush?: boolean): void }).measure(false);
       }
-      await viewportController.whenPresentationSettled(Math.max(0, deadline - performance.now()));
+      await viewportReady;
+      if (imageSettledAfterViewport) {
+        await viewportController.whenPresentationSettled(
+          Math.max(0, deadline - performance.now()),
+          () => !editorDestroyed && currentMode === presentationMode
+        );
+      }
     },
     getText() {
       commitActiveTableInput();

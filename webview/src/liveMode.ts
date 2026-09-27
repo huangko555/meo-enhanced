@@ -3482,6 +3482,12 @@ const liveDecorationField = StateField.define<DecorationSet>({
     return safeBuildDecorations(state, Decoration.none, 'create');
   },
   update(decorations: DecorationSet, transaction: Transaction): DecorationSet {
+    // A newly added field was created from the final transaction state. The
+    // reconfiguration then calls update for that same state; rebuilding here
+    // doubles the full-document work on every Source-to-Live switch.
+    if (transaction.reconfigured && !transaction.startState.field(liveDecorationField, false)) {
+      return decorations;
+    }
     // Search highlights are maintained independently. Preserving the existing
     // live decorations prevents a transient parse result from exposing source.
     if (
