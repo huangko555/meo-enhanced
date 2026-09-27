@@ -326,12 +326,15 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
         const delta = event.deltaY * multiplier;
         const target = clamp(before + delta, 0, view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight);
         if (target === before) return;
-        view.scrollDOM.scrollBy({ top: delta, behavior: 'smooth' });
+        view.scrollDOM.scrollTop = target;
         event.preventDefault();
         event.stopPropagation();
       };
+      let positionedScrollTop = view.scrollDOM.scrollTop;
       let visibilityFrame = 0;
       const onEditorScroll = () => {
+        // Keep the fixed tooltip with its swatch until CodeMirror finishes repositioning it.
+        dom.style.transform = `translateY(${positionedScrollTop - view.scrollDOM.scrollTop}px)`;
         if (visibilityFrame) return;
         visibilityFrame = requestAnimationFrame(() => {
           visibilityFrame = 0;
@@ -357,6 +360,10 @@ function createHexColorAdjustmentTooltip(active: ActiveHexColorAdjustment): Tool
         getCoords: () => currentSourceSwatch()?.getBoundingClientRect()
           ?? view.coordsAtPos(active.from)
           ?? view.dom.getBoundingClientRect(),
+        positioned() {
+          positionedScrollTop = view.scrollDOM.scrollTop;
+          dom.style.transform = '';
+        },
         mount() {
           document.addEventListener('pointerdown', onDocumentPointerDown, true);
           document.addEventListener('keydown', onDocumentKeyDown, true);

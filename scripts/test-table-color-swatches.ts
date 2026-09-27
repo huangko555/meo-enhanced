@@ -258,6 +258,31 @@ async function main() {
         swatchBottom: swatchBounds.bottom
       };
     });
+    const scrollAlignment = await page.evaluate(async () => {
+      const scroller = (window as any).tableColorPopoverEditor.view.scrollDOM as HTMLElement;
+      const swatch = document.querySelector<HTMLElement>('tbody button[data-color-value="#336699"]')!;
+      const dialog = document.querySelector<HTMLElement>('.meo-hex-color-adjustment')!;
+      const offset = () => dialog.getBoundingClientRect().top - swatch.getBoundingClientRect().top;
+      const before = offset();
+      const swatchTopBefore = swatch.getBoundingClientRect().top;
+      const scrollTop = scroller.scrollTop;
+      scroller.scrollTop += 24;
+      scroller.dispatchEvent(new Event('scroll'));
+      const duringScroll = offset();
+      const scrollTopDuring = scroller.scrollTop;
+      const swatchTopDuring = swatch.getBoundingClientRect().top;
+      scroller.scrollTop = scrollTop;
+      scroller.dispatchEvent(new Event('scroll'));
+      for (let index = 0; index < 2; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      return { before, duringScroll, scrollTop, scrollTopDuring, swatchTopBefore, swatchTopDuring, restored: scroller.scrollTop === scrollTop };
+    });
+    if (!scrollAlignment.restored || scrollAlignment.scrollTopDuring - scrollAlignment.scrollTop !== 24 ||
+      Math.abs(scrollAlignment.swatchTopDuring - scrollAlignment.swatchTopBefore + 24) > 1 ||
+      Math.abs(scrollAlignment.duringScroll - scrollAlignment.before) > 1) {
+      throw new Error(`Table HEX dialog did not follow its swatch in the scroll event: ${JSON.stringify(scrollAlignment)}`);
+    }
     const popoverWheelProgress = await page.evaluate(async () => {
       const scroller = (window as any).tableColorPopoverEditor.view.scrollDOM as HTMLElement;
       const samples = [scroller.scrollTop];
@@ -318,12 +343,10 @@ async function main() {
       !popoverAfterWheel.reopenedAfterClick) {
       throw new Error(`Table HEX dialog did not end its session after the anchor left the viewport: ${JSON.stringify(popoverAfterWheel)}`);
     }
-    const smoothIntermediatePositions = new Set(popoverWheelProgress.slice(1, -1));
-    if (popoverWheelProgress.at(-1)! <= popoverBeforeWheel.scrollTop ||
-      popoverWheelProgress[1] === popoverWheelProgress.at(-1) ||
-      smoothIntermediatePositions.size < 2 ||
+    if (Math.abs(popoverWheelProgress[1]! - popoverWheelProgress[0]! - 90) > 1 ||
+      popoverWheelProgress.slice(2).some((position) => Math.abs(position - popoverWheelProgress[1]!) > 1) ||
       popoverAfterWheel.afterWheel <= popoverWheelProgress.at(-1)!) {
-      throw new Error(`Wheel over the table HEX dialog did not scroll the document: ${JSON.stringify({
+      throw new Error(`Wheel over the table HEX dialog did not scroll the document immediately: ${JSON.stringify({
         before: popoverBeforeWheel.scrollTop,
         progress: popoverWheelProgress,
         after: popoverAfterWheel.afterWheel
