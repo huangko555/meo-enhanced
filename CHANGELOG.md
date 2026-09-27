@@ -3,6 +3,10 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.26
+- Removed a local build path from the extension package while retaining direct opening of exported files with Unicode names on Windows.
+- Fixed clean-checkout DOCX export tests and strengthened cross-platform package validation.
+
 ## 0.3.25
 - Fixed Preview startup for CRLF Markdown and Webview reloads so the rendered document appears without switching modes.
 - Let VS Code manage the default Markdown editor choice instead of rewriting user editor associations on extension startup.
