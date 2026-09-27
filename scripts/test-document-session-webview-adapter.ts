@@ -36,7 +36,7 @@ assert.deepEqual(posted.slice(0, 2), [
   {
     type: 'applyChanges',
     baseVersion: 1,
-    changes: [{ from: 0, to: 3, insert: 'one local' }]
+    changes: [{ from: 3, to: 3, insert: ' local' }]
   }
 ]);
 
