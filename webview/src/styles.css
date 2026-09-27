@@ -1371,7 +1371,7 @@ html[data-editor-appearance='light'] .segmented-control-button:not(.is-active):i
 }
 
 .changes-review-toggle {
-  grid-template-columns: 16px minmax(0, 1fr) 28px;
+  grid-template-columns: 16px minmax(0, 1fr) 32px;
 }
 
 .changes-review-option-icon {
@@ -1673,7 +1673,7 @@ html[lang='zh-CN'] .mode-group .segmented-control-button-label {
 }
 
 .more-tools-toggle-option {
-  grid-template-columns: 16px minmax(0, 1fr) 28px;
+  grid-template-columns: 16px minmax(0, 1fr) 32px;
 }
 
 .more-tools-section-label {
@@ -1740,17 +1740,13 @@ html[lang='zh-CN'] .mode-group .segmented-control-button-label {
 .menu-switch {
   position: relative;
   box-sizing: border-box;
-  width: 28px;
+  width: 32px;
   height: 16px;
   border: 0;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--vscode-editor-foreground) 12%, var(--vscode-editor-background));
+  background: var(--meo-segmented-control-background);
   pointer-events: none;
   transition: background-color 0.15s ease;
-}
-
-html[data-editor-appearance='dark'] [aria-checked='false'] > .menu-switch {
-  background: color-mix(in srgb, var(--vscode-editor-foreground) 24%, var(--vscode-editor-background));
 }
 
 .menu-switch::after {
@@ -1766,15 +1762,19 @@ html[data-editor-appearance='dark'] [aria-checked='false'] > .menu-switch {
 }
 
 [aria-checked='true'] > .menu-switch {
-  background: #3185f5;
+  background: #3483ff;
+}
+
+html[data-editor-appearance='dark'] [aria-checked='true'] > .menu-switch {
+  background: #247bf4;
 }
 
 [aria-checked='true'] > .menu-switch::after {
-  transform: translateX(12px);
+  transform: translateX(16px);
 }
 
 button:focus-visible > .menu-switch {
-  outline: 1px solid var(--meo-semantic-linkForeground, #3185f5);
+  outline: 1px solid var(--meo-semantic-linkForeground, #3483ff);
   outline-offset: 2px;
 }
 
