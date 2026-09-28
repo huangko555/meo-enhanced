@@ -2216,4 +2216,45 @@ for (const settledShift of [0, 40]) {
   }
 }
 
+// An offscreen line has no DOM coordinates until CodeMirror renders it. The
+// first projection must keep the reading band instead of relying on a later correction.
+for (const mode of ['source', 'live'] as const) {
+  for (const viewportOffset of [undefined, 0, 680 / 3]) {
+    const frames: FrameRequestCallback[] = [];
+    const previousRaf = globalThis.requestAnimationFrame;
+    globalThis.requestAnimationFrame = (callback) => (frames.push(callback), frames.length);
+    const scrollDOM = {
+      scrollTop: 3500, scrollLeft: 0, scrollHeight: 6000, scrollWidth: 900,
+      clientHeight: 680, clientWidth: 900,
+      getBoundingClientRect: () => ({ top: 0, bottom: 680, height: 680 })
+    };
+    let coordinatesAvailable = false;
+    const controller = new ViewportController({
+      dom: {}, scrollDOM, state: { doc: Text.of(['x'.repeat(6000)]) },
+      contentDOM: { querySelectorAll: () => [] },
+      coordsAtPos: () => coordinatesAvailable
+        ? { top: 1800 - scrollDOM.scrollTop, bottom: 1820 - scrollDOM.scrollTop }
+        : null,
+      lineBlockAt: () => ({ top: 1800, height: 20 }),
+      requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
+    } as any, { attachInteractions: false, getMode: () => mode });
+    try {
+      controller.restoreDocumentAnchor({ position: 900, lineOffset: 17, viewportOffset }, undefined, { force: true });
+      await Promise.resolve();
+      const expected = viewportOffset === undefined ? 1817 : 1800 - viewportOffset;
+      if (Math.abs(scrollDOM.scrollTop - expected) > 0.5) {
+        throw new Error(`Offscreen ${mode} first projection lost its reading band: ${scrollDOM.scrollTop}, expected ${expected}`);
+      }
+      coordinatesAvailable = true;
+      await flushFrames(frames);
+      if (Math.abs(scrollDOM.scrollTop - expected) > 0.5) {
+        throw new Error(`Mounted ${mode} coordinates moved a stable reading anchor: ${scrollDOM.scrollTop}, expected ${expected}`);
+      }
+    } finally {
+      controller.destroy();
+      globalThis.requestAnimationFrame = previousRaf;
+    }
+  }
+}
+
 console.log('viewport controller checks passed');

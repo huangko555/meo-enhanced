@@ -1175,7 +1175,13 @@ export class ViewportController {
           };
         }
       }
-      return { top: Math.max(0, this.view.lineBlockAt(position).top + lineOffset) };
+      // Offscreen lines do not have DOM coordinates yet. Preserve the same
+      // reading band using the height map until the line is rendered.
+      return {
+        top: Math.max(0, this.view.lineBlockAt(position).top + (
+          viewportOffset === null ? lineOffset : -viewportOffset
+        ))
+      };
     }, { onSettled, requiredStableFrames });
   }
 
