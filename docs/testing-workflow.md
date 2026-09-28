@@ -113,10 +113,14 @@ in the appearance pack, highlight suite, and full browser suite.
 `scripts/test-source-lightweight-shiki-lifecycle.ts` checks shared highlighter
 ownership and hidden-editor revisions through the production editor. Hidden
 editors keep previously presented fences warm across source, language, and theme
-changes without tokenizing every unseen fence. Reveal must color the latest
+changes and prepare at most one unseen block per document revision. Token refreshes
+must not restart this preparation budget. Reveal must color the latest
 visible content, and another visible editor must keep working independently.
 Performance comparisons must include the first return to Live/Source and a single
-large fence so reduced background work cannot conceal a new mode-switch delay.
+large fence, with Preview source coloring both enabled and disabled. Include a
+hidden editor measured after resizing, then external introduction of supported code,
+both into plain text and after an already cached block. Reduced background work
+must not conceal a new mode-switch delay.
 
 `scripts/test-export-fence-highlight-reuse.ts` runs the bundled renderer in Node
 and observes the real fallback highlighter. It checks reuse after prose changes,

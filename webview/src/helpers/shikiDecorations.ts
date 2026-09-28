@@ -152,7 +152,7 @@ function addTokenDecorations(
   contentFrom: number,
   contentTo: number,
   previous: DecorationSet = Decoration.none,
-  highlightUnseen = true
+  allowUnseen: () => boolean = () => true
 ): void {
   const tokens = getShikiTokens(lang, code);
   if (!tokens) {
@@ -171,8 +171,8 @@ function addTokenDecorations(
       }
     });
     // A hidden editor's mapped viewport may cover the whole replacement document.
-    // Maintain previously presented blocks without warming every unseen fence.
-    if (!highlightUnseen && !hadPresentation) return;
+    // Maintain known blocks and a bounded preparation of newly introduced code.
+    if (!hadPresentation && !allowUnseen()) return;
     requestShikiTokens(lang, code);
     // On first paint there is no completed Shiki presentation to preserve.
     // Cover the block with one neutral foreground until the requested token
@@ -266,7 +266,8 @@ function addBlockDecorations(
   node: { name: string; from: number; to: number },
   builder: RangeSetBuilder<Decoration>,
   markCache: Map<string, Decoration>,
-  previous: DecorationSet
+  previous: DecorationSet,
+  allowUnseen: () => boolean
 ): void {
   const { state } = view;
   const info = node.name === 'FencedCode' ? getFencedCodeInfo(state, node) : null;
@@ -298,10 +299,14 @@ function addBlockDecorations(
   }
 
   const code = state.doc.sliceString(contentFrom, contentTo);
-  addTokenDecorations(builder, markCache, lang, code, contentFrom, contentTo, previous, view.inView);
+  addTokenDecorations(builder, markCache, lang, code, contentFrom, contentTo, previous, allowUnseen);
 }
 
-function buildDecorations(view: EditorView, previous: DecorationSet = Decoration.none): DecorationSet {
+function buildDecorations(
+  view: EditorView,
+  previous: DecorationSet,
+  allowUnseen: () => boolean
+): DecorationSet {
   if (!isShikiThemeReady()) {
     return Decoration.none;
   }
@@ -313,7 +318,7 @@ function buildDecorations(view: EditorView, previous: DecorationSet = Decoration
       to: view.viewport.to,
       enter(node) {
         if (node.name === 'FencedCode' || node.name === 'CodeBlock') {
-          addBlockDecorations(view, node, builder, markCache, previous);
+          addBlockDecorations(view, node, builder, markCache, previous, allowUnseen);
           return false;
         }
         return undefined;
@@ -329,13 +334,21 @@ const shikiPlugin = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
     private inView: boolean;
+    private prepareUnseen = true;
+    private readonly allowUnseen: () => boolean;
     private readonly unsubscribe: () => void;
     private readonly releaseHighlighting: () => void;
 
     constructor(view: EditorView) {
       this.inView = view.inView;
+      this.allowUnseen = () => {
+        if (view.inView) return true;
+        const allowed = this.prepareUnseen;
+        this.prepareUnseen = false;
+        return allowed;
+      };
       this.releaseHighlighting = activateShikiCodeHighlighting();
-      this.decorations = buildDecorations(view);
+      this.decorations = buildDecorations(view, Decoration.none, this.allowUnseen);
       this.unsubscribe = subscribeShikiRefresh(() => {
         view.dispatch({ effects: shikiRefreshEffect.of(null) });
       });
@@ -344,6 +357,9 @@ const shikiPlugin = ViewPlugin.fromClass(
     update(update: ViewUpdate): void {
       const becameVisible = !this.inView && update.view.inView;
       this.inView = update.view.inView;
+      // One unseen block per document revision protects first-use preparation.
+      // Token refreshes must not restart that budget and eventually warm all fences.
+      if (update.docChanged) this.prepareUnseen = true;
       for (const transaction of update.transactions) {
         if (transaction.docChanged) {
           this.decorations = addPendingTokenDecorations(
@@ -360,7 +376,7 @@ const shikiPlugin = ViewPlugin.fromClass(
           || syntaxTreeChanged(transaction)
       );
       if (update.docChanged || update.viewportChanged || refreshed || becameVisible) {
-        this.decorations = buildDecorations(update.view, this.decorations);
+        this.decorations = buildDecorations(update.view, this.decorations, this.allowUnseen);
       }
     }
 

@@ -287,8 +287,8 @@ async function main(): Promise<void> {
     await page.evaluate((text) => (window as any).__shikiEditors.first.setText(text), hiddenText('latest'));
     await waitForFrames(page);
     const afterHidden = (await readMetrics(page)).tokenizeCalls;
-    assert.equal(afterHidden, beforeHidden + 2,
-      'Hidden revisions must only keep the previously presented block warm, not all 30 fences');
+    assert.equal(afterHidden, beforeHidden + 5,
+      'Hidden revisions must maintain known blocks and prepare at most one unseen block per revision');
 
     await page.evaluate(() => {
       const state = (window as any).__shikiEditors;
@@ -322,8 +322,9 @@ async function main(): Promise<void> {
       editor.setText(editor.view.state.doc.toString().replace('```typescript', '```javascript'));
     });
     await waitForFrames(page);
-    assert.equal((await readMetrics(page)).tokenizeCalls, beforeLanguageChange + 1,
-      'An already presented hidden block must stay warm when its language changes');
+    const languageChangeCalls = (await readMetrics(page)).tokenizeCalls - beforeLanguageChange;
+    assert.ok(languageChangeCalls >= 1 && languageChangeCalls <= 2,
+      'A language change must refresh the known block and prepare at most one unseen block');
 
     const beforeThemeChange = (await readMetrics(page)).tokenizeCalls;
     await page.evaluate(() => (window as any).SourceLightweightShikiHarness.applyTheme());
@@ -340,6 +341,43 @@ async function main(): Promise<void> {
     await page.waitForFunction(() => Array.from(document.querySelectorAll<HTMLElement>('#first span[style*="color:"]'))
       .some(node => node.textContent?.includes('hidden_latest_0')
         && getComputedStyle(node).color === 'rgb(34, 85, 170)'));
+    await page.evaluate(() => (window as any).__shikiEditors.second.setText('# No code yet'));
+    await waitForFrames(page);
+    await page.evaluate(() => {
+      document.getElementById('second')!.hidden = true;
+      (window as any).__shikiEditors.second.view.requestMeasure();
+    });
+    await page.waitForFunction(() => !(window as any).__shikiEditors.second.view.inView);
+    const beforeIntroducedCode = (await readMetrics(page)).tokenizeCalls;
+    // A hidden editor may receive its first supported block after initial layout.
+    // An unsupported fence before it must not consume the one-block preparation.
+    const introducedText = '```unsupported-test-language\nplain text\n```\n\n' + hiddenText('introduced');
+    await page.evaluate((text) => (window as any).__shikiEditors.second.setText(text), introducedText);
+    await waitForFrames(page);
+    assert.equal((await readMetrics(page)).tokenizeCalls, beforeIntroducedCode + 1,
+      'A hidden editor must prepare the first supported block without cascading into all unseen blocks');
+    await page.evaluate(() => {
+      document.getElementById('second')!.hidden = false;
+      (window as any).__shikiEditors.second.view.requestMeasure();
+    });
+    await page.waitForFunction(() => Array.from(document.querySelectorAll<HTMLElement>('#second span[style*="color:"]'))
+      .some(node => node.textContent?.includes('hidden_introduced_0')
+        && getComputedStyle(node).color === 'rgb(34, 85, 170)'));
+    await page.evaluate(() => (window as any).__shikiEditors.second.setText('```typescript\nconst existing_small = 1;\n```'));
+    await waitForFrames(page);
+    await page.evaluate(() => {
+      document.getElementById('second')!.hidden = true;
+      (window as any).__shikiEditors.second.view.requestMeasure();
+    });
+    await page.waitForFunction(() => !(window as any).__shikiEditors.second.view.inView);
+    const beforeAppendedCode = (await readMetrics(page)).tokenizeCalls;
+    await page.evaluate((text) => {
+      const editor = (window as any).__shikiEditors.second;
+      editor.setText(editor.view.state.doc.toString() + '\n\n' + text);
+    }, hiddenText('after_cached'));
+    await waitForFrames(page);
+    assert.equal((await readMetrics(page)).tokenizeCalls, beforeAppendedCode + 1,
+      'Cached or known blocks must not consume the one unseen-block preparation');
     const highlighterCount = (await readMetrics(page)).initCalls;
 
     await page.evaluate(() => {
