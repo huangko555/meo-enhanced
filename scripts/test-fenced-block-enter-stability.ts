@@ -142,7 +142,11 @@ try {
         });
         if (sampling) requestAnimationFrame(sample);
       };
-      requestAnimationFrame(sample);
+      // Arm before the trusted key event, but sample only its following frames.
+      // CDP may deliver the key after an unrelated animation frame has painted.
+      window.addEventListener('keydown', () => requestAnimationFrame(sample), {
+        capture: true, once: true
+      });
       (window as any).__fenceEnterProbe = {
         insertionPosition,
         beforeScrollTop: view.scrollDOM.scrollTop,
@@ -159,6 +163,8 @@ try {
       fence: enterCase.fence
     });
 
+    // Keep a scheduling gap so pre-input frames cannot masquerade as regressions.
+    await waitForFrames(page, 2);
     await page.keyboard.press('Enter');
     await waitForFrames(page, 12);
     const result = await page.evaluate(() => {
@@ -205,7 +211,8 @@ try {
       )));
 
     if (
-      result.text !== expectedText
+      result.samples.length < 12
+      || result.text !== expectedText
       || result.selectionHead !== setup.insertionPosition + 1
       || result.selectionLine !== setup.targetLine + 1
       || !String(result.activeElement).includes('cm-content')
