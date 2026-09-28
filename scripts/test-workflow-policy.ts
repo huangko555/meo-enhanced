@@ -117,7 +117,8 @@ function targetedCommands(
         script('scripts/test-appearance-webview-adapter.ts'),
         script('scripts/test-appearance-settings.ts'),
         script('scripts/test-vscode-theme-transition.ts'),
-        script('scripts/test-highlight.ts')
+        script('scripts/test-highlight.ts'),
+        script('scripts/test-preview-code-highlight-layout.ts')
       ];
     case 'search':
       return [

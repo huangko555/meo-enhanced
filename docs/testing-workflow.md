@@ -103,6 +103,13 @@ coverage; the subsequent production scroll-integrity pass traverses the document
 Duplicate text and unsupported shells are reported rather than counted as tested.
 Custom fixture-specific phases still require their matching curated document.
 
+`scripts/test-preview-code-highlight-layout.ts` exercises the production Preview
+renderer and Shiki projection in Chromium at three widths and both appearances.
+It checks source text, theme changes, viewport deferral, scrolling, resizing, and
+full-document projection. CDP layout counts enforce bounded layout work during
+projection without relying on machine-dependent elapsed-time thresholds. It runs
+in the appearance pack, highlight suite, and full browser suite.
+
 ## Performance investigation
 
 Start with a fixed revision and document, then measure cold startup separately

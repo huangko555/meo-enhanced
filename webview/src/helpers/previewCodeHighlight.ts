@@ -63,13 +63,14 @@ export function hasAppliedPreviewCodeHighlight(root: ParentNode): boolean {
 /** Projects the exact Shiki tokens used by Live mode onto an already-rendered Preview code block. */
 export function applyPreviewCodeHighlight(frameDocument: Document, nearViewportOnly = false): void {
   const themeVersion = String(getShikiThemeVersion('preview'));
-  for (const code of frameDocument.querySelectorAll<HTMLElement>('code.hljs')) {
-    if (nearViewportOnly) {
-      const height = frameDocument.documentElement.clientHeight;
-      const bounds = code.getBoundingClientRect();
-      // Inspect geometry before extracting source or allocating token DOM.
-      if (bounds.bottom < -height || bounds.top > height * 2) continue;
-    }
+  const codes = Array.from(frameDocument.querySelectorAll<HTMLElement>('code.hljs'));
+  const height = nearViewportOnly ? frameDocument.documentElement.clientHeight : 0;
+  // Read the whole candidate band before token DOM writes can invalidate layout.
+  const candidates = nearViewportOnly ? codes.filter(code => {
+    const bounds = code.getBoundingClientRect();
+    return bounds.bottom >= -height && bounds.top <= height * 2;
+  }) : codes;
+  for (const code of candidates) {
     const request = getHighlightRequest(code);
     if (!request) continue;
     const { language, source, sources } = request;
