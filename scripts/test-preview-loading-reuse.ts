@@ -10,7 +10,7 @@ if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
 let primaryError: unknown;
 try {
-  for (const scenario of ['reuse', 'replace', 'force', 'failed', 'dispose']) {
+  for (const scenario of ['reuse', 'replace', 'force', 'failed', 'force-failed', 'dispose']) {
     const page = await browser.newPage();
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(String(error)));
@@ -66,6 +66,12 @@ try {
       await respond(1, next);
       assert.equal(await respond(0, '# Initial document'), false, 'A retired response must not replace the latest frame');
       expected = scenario === 'replace' ? 'Replacement document' : expected;
+    } else if (scenario === 'force-failed') {
+      assert.equal(await request('# Initial document', true), 2);
+      await respond(1, '# Initial document', true);
+      assert.equal(await request('# Initial document'), 3,
+        'A failed forced refresh must not let the older loading frame suppress retry');
+      await respond(2, '# Initial document');
     } else if (scenario === 'dispose') {
       await page.evaluate(() => (window as any).__previewController.dispose());
       assert.equal(await request('# Initial document'), 1, 'Disposed surfaces must not request more work');

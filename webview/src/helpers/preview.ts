@@ -1738,6 +1738,9 @@ export function createPreviewController({
       setPendingStatus(background);
       return Promise.resolve();
     }
+    // A newer request supersedes the loading frame's reuse eligibility, even
+    // if a forced refresh subsequently fails and needs an ordinary retry.
+    loadingFrameText = null;
     const generation = requestGeneration + 1;
     cancelPaintReady();
     const requestText = text;
