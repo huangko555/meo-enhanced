@@ -151,15 +151,17 @@ function addTokenDecorations(
   code: string,
   contentFrom: number,
   contentTo: number,
-  previous: DecorationSet = Decoration.none
+  previous: DecorationSet = Decoration.none,
+  highlightUnseen = true
 ): void {
   const tokens = getShikiTokens(lang, code);
   if (!tokens) {
-    requestShikiTokens(lang, code);
     // Keep the mapped presentation until this revision's tokens are ready.
     // Only matching language/theme identities may enter the rebuilt result.
     let preservedPresentation = false;
+    let hadPresentation = false;
     previous.between(contentFrom, contentTo, (from, to, decoration) => {
+      if (decoration.spec.shikiLanguage) hadPresentation = true;
       if (decoration.spec.shikiLanguage !== lang || decoration.spec.shikiThemeVersion !== getShikiThemeVersion()) return;
       const start = Math.max(contentFrom, from);
       const end = Math.min(contentTo, to);
@@ -168,6 +170,10 @@ function addTokenDecorations(
         builder.add(start, end, decoration);
       }
     });
+    // A hidden editor's mapped viewport may cover the whole replacement document.
+    // Maintain previously presented blocks without warming every unseen fence.
+    if (!highlightUnseen && !hadPresentation) return;
+    requestShikiTokens(lang, code);
     // On first paint there is no completed Shiki presentation to preserve.
     // Cover the block with one neutral foreground until the requested token
     // set arrives, so CodeMirror's language parser cannot briefly expose a
@@ -292,7 +298,7 @@ function addBlockDecorations(
   }
 
   const code = state.doc.sliceString(contentFrom, contentTo);
-  addTokenDecorations(builder, markCache, lang, code, contentFrom, contentTo, previous);
+  addTokenDecorations(builder, markCache, lang, code, contentFrom, contentTo, previous, view.inView);
 }
 
 function buildDecorations(view: EditorView, previous: DecorationSet = Decoration.none): DecorationSet {
@@ -322,10 +328,12 @@ function buildDecorations(view: EditorView, previous: DecorationSet = Decoration
 const shikiPlugin = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
+    private inView: boolean;
     private readonly unsubscribe: () => void;
     private readonly releaseHighlighting: () => void;
 
     constructor(view: EditorView) {
+      this.inView = view.inView;
       this.releaseHighlighting = activateShikiCodeHighlighting();
       this.decorations = buildDecorations(view);
       this.unsubscribe = subscribeShikiRefresh(() => {
@@ -334,6 +342,8 @@ const shikiPlugin = ViewPlugin.fromClass(
     }
 
     update(update: ViewUpdate): void {
+      const becameVisible = !this.inView && update.view.inView;
+      this.inView = update.view.inView;
       for (const transaction of update.transactions) {
         if (transaction.docChanged) {
           this.decorations = addPendingTokenDecorations(
@@ -349,7 +359,7 @@ const shikiPlugin = ViewPlugin.fromClass(
           || isLiveInputDerivedWorkRefresh(transaction)
           || syntaxTreeChanged(transaction)
       );
-      if (update.docChanged || update.viewportChanged || refreshed) {
+      if (update.docChanged || update.viewportChanged || refreshed || becameVisible) {
         this.decorations = buildDecorations(update.view, this.decorations);
       }
     }

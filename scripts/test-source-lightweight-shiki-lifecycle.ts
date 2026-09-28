@@ -270,14 +270,86 @@ async function main(): Promise<void> {
       'stale completion must not restore old token DOM'
     );
 
+    // Preview keeps its editor alive but hidden. External revisions must not
+    // expand highlighting to that hidden editor's whole-document viewport.
+    await page.evaluate(() => {
+      document.getElementById('first')!.hidden = true;
+      (window as any).__shikiEditors.first.view.requestMeasure();
+    });
+    await page.waitForFunction(() => !(window as any).__shikiEditors.first.view.inView);
+    const beforeHidden = (await readMetrics(page)).tokenizeCalls;
+    const hiddenText = (revision: string) => '# Hidden revision\n\n' + Array.from(
+      { length: 30 },
+      (_, index) => '```typescript\nconst hidden_' + revision + '_' + index + ' = ' + index + ';\n```'
+    ).join('\n\n');
+    await page.evaluate((text) => (window as any).__shikiEditors.first.setText(text), hiddenText('old'));
+    await waitForFrames(page);
+    await page.evaluate((text) => (window as any).__shikiEditors.first.setText(text), hiddenText('latest'));
+    await waitForFrames(page);
+    const afterHidden = (await readMetrics(page)).tokenizeCalls;
+    assert.equal(afterHidden, beforeHidden + 2,
+      'Hidden revisions must only keep the previously presented block warm, not all 30 fences');
+
+    await page.evaluate(() => {
+      const state = (window as any).__shikiEditors;
+      state.second.setText('# Visible\n\n```typescript\nconst still_visible = 7;\n```');
+    });
+    await page.waitForFunction(() => Array.from(document.querySelectorAll<HTMLElement>('#second span[style*="color:"]'))
+      .some(node => node.textContent?.includes('still_visible')));
+    assert.equal((await readMetrics(page)).tokenizeCalls, afterHidden + 1,
+      'Hiding one editor must not pause another consumer');
+
+    await page.evaluate(() => {
+      document.getElementById('first')!.hidden = false;
+      (window as any).__shikiEditors.first.view.requestMeasure();
+    });
+    await page.waitForFunction(() => (window as any).__shikiEditors.first.view.inView
+      && Array.from(document.querySelectorAll<HTMLElement>('#first span[style*="color:"]'))
+        .some(node => node.textContent?.includes('hidden_latest_0')));
+    await waitForFrames(page);
+    assert.ok((await readMetrics(page)).tokenizeCalls < afterHidden + 31,
+      'Reveal must highlight the visible band rather than shift all hidden work to mode switching');
+    assert.equal(await page.evaluate(() => document.getElementById('first')!.textContent!.includes('hidden_old_')), false);
+
+    await page.evaluate(() => {
+      document.getElementById('first')!.hidden = true;
+      (window as any).__shikiEditors.first.view.requestMeasure();
+    });
+    await page.waitForFunction(() => !(window as any).__shikiEditors.first.view.inView);
+    const beforeLanguageChange = (await readMetrics(page)).tokenizeCalls;
+    await page.evaluate(() => {
+      const editor = (window as any).__shikiEditors.first;
+      editor.setText(editor.view.state.doc.toString().replace('```typescript', '```javascript'));
+    });
+    await waitForFrames(page);
+    assert.equal((await readMetrics(page)).tokenizeCalls, beforeLanguageChange + 1,
+      'An already presented hidden block must stay warm when its language changes');
+
+    const beforeThemeChange = (await readMetrics(page)).tokenizeCalls;
+    await page.evaluate(() => (window as any).SourceLightweightShikiHarness.applyTheme());
+    await waitForFrames(page);
+    metrics = await readMetrics(page);
+    assert.equal(metrics.initCalls, 2);
+    assert.ok(metrics.tokenizeCalls > beforeThemeChange
+      && metrics.tokenizeCalls < beforeThemeChange + 31,
+    'A theme change must refresh known presentations without requesting every hidden fence');
+    await page.evaluate(() => {
+      document.getElementById('first')!.hidden = false;
+      (window as any).__shikiEditors.first.view.requestMeasure();
+    });
+    await page.waitForFunction(() => Array.from(document.querySelectorAll<HTMLElement>('#first span[style*="color:"]'))
+      .some(node => node.textContent?.includes('hidden_latest_0')
+        && getComputedStyle(node).color === 'rgb(34, 85, 170)'));
+    const highlighterCount = (await readMetrics(page)).initCalls;
+
     await page.evaluate(() => {
       const state = (window as any).__shikiEditors;
       state.second.destroy();
       state.first.destroy();
     });
-    await page.waitForFunction(() => (window as any).__shikiLifecycleMetrics.disposeCalls === 1);
+    await page.waitForFunction((count) => (window as any).__shikiLifecycleMetrics.disposeCalls === count, {}, highlighterCount);
     metrics = await readMetrics(page);
-    assert.equal(metrics.disposeCalls, 1);
+    assert.equal(metrics.disposeCalls, highlighterCount);
     assert.equal(metrics.instances.every((instance) => instance.disposeCalls === 1), true);
   } finally {
     await browser.close();

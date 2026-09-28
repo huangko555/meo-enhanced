@@ -110,6 +110,14 @@ full-document projection. CDP layout counts enforce bounded layout work during
 projection without relying on machine-dependent elapsed-time thresholds. It runs
 in the appearance pack, highlight suite, and full browser suite.
 
+`scripts/test-source-lightweight-shiki-lifecycle.ts` checks shared highlighter
+ownership and hidden-editor revisions through the production editor. Hidden
+editors keep previously presented fences warm across source, language, and theme
+changes without tokenizing every unseen fence. Reveal must color the latest
+visible content, and another visible editor must keep working independently.
+Performance comparisons must include the first return to Live/Source and a single
+large fence so reduced background work cannot conceal a new mode-switch delay.
+
 `scripts/test-export-fence-highlight-reuse.ts` runs the bundled renderer in Node
 and observes the real fallback highlighter. It checks reuse after prose changes,
 code/language invalidation, custom-highlighter isolation, error retries, bounded
