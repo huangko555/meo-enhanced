@@ -150,6 +150,10 @@ assert.deepEqual(
   { active: false, mode: 'source', previousMode: 'preview' },
   'the atomic Preview exit must retain its presentation context through the async editor apply'
 );
+assert.ok(
+  events.includes('control:source') && events.indexOf('control:source') < events.indexOf('editor:true'),
+  'measure the mode control while the previous editor is hidden, before preparing the atomic reveal'
+);
 await runtime.dispatch({ type: 'requestMode', mode: 'preview', source: 'user' });
 
 events.length = 0;

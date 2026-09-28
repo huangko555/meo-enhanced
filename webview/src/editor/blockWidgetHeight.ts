@@ -60,7 +60,7 @@ function boundedHeight(value: number): number {
 function readLayoutMetrics(contentWidth?: number): BlockWidgetLayoutMetrics {
   const editor = typeof document === 'undefined'
     ? null
-    : document.querySelector<HTMLElement>('.editor-host > .cm-editor.meo-mode-live, .cm-editor.meo-mode-live');
+    : document.getElementsByClassName('cm-editor meo-mode-live').item(0) as HTMLElement | null;
   const content = editor?.querySelector<HTMLElement>('.cm-content');
   const style = (content ?? editor) && typeof getComputedStyle === 'function'
     ? getComputedStyle(content ?? editor!)

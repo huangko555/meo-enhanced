@@ -80,6 +80,8 @@ export function createEditorModeEffectAdapter(
     pendingAtomicReveal = null;
     if (presentation.closeFind) capabilities.closeFind();
     if (presentation.atomicEditorReveal) {
+      // Measure the control before unhiding the old editor to avoid laying it out before reconfiguration.
+      capabilities.presentModeControl(presentation.mode);
       capabilities.setEditorVisible(true, false);
       pendingAtomicReveal = {
         generation,
@@ -89,8 +91,8 @@ export function createEditorModeEffectAdapter(
     } else {
       capabilities.setPreviewActive(presentation.previewActive, presentation);
       capabilities.setEditorVisible(presentation.editorVisible, presentation.editorVisible);
+      capabilities.presentModeControl(presentation.mode);
     }
-    capabilities.presentModeControl(presentation.mode);
     capabilities.setSearchOwner(presentation.searchOwner);
     capabilities.setOutlineOwner(presentation.outlineOwner);
     capabilities.setReplaceEnabled(presentation.replaceEnabled);

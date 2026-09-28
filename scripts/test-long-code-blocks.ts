@@ -83,6 +83,42 @@ async function main() {
       });
     });
 
+    await page.evaluate(() => {
+      const host = document.createElement('div');
+      host.className = 'editor-host';
+      const first = document.createElement('div');
+      first.className = 'cm-editor meo-mode-source';
+      const second = document.createElement('div');
+      second.className = 'cm-editor meo-mode-live';
+      for (const [editor, fontSize] of [[first, 20], [second, 30]] as const) {
+        const content = document.createElement('div');
+        content.className = 'cm-content';
+        content.style.fontSize = `${fontSize}px`;
+        editor.append(content);
+        host.append(editor);
+      }
+      document.body.append(host);
+      const estimate = () => (window as any).LongCodeBlocksHarness.estimateBlockWidgetHeight({
+        kind: 'latex-display', html: ''
+      });
+      const check = (fontSize: number) => {
+        if (estimate() !== fontSize * 1.2) throw new Error('Height estimates must follow the first current Live editor');
+      };
+      try {
+        check(30);
+        first.classList.replace('meo-mode-source', 'meo-mode-live');
+        check(20);
+        first.firstElementChild!.setAttribute('style', 'font-size:25px');
+        check(25);
+        first.remove();
+        check(30);
+        second.classList.replace('meo-mode-live', 'meo-mode-source');
+        check(16);
+      } finally {
+        host.remove();
+      }
+    });
+
     const localizedLongCode = [
       '```js',
       ...Array.from({ length: 19 }, (_, index) => `const localized${index + 1} = ${index + 1};`),
