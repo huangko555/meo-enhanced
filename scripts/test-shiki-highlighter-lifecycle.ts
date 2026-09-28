@@ -90,6 +90,7 @@ mock.module('shiki/wasm', () => ({ default: {} }));
 mock.module('@shikijs/langs/typescript', () => ({
   default: { name: 'typescript' }
 }));
+mock.module('@shikijs/langs/sql', () => ({ default: { name: 'sql' } }));
 mock.module('shiki/core', () => ({
   createHighlighterCore(options: { readonly themes?: Array<{ readonly fg?: string }> }) {
     const plan = plannedHighlighters.shift() ?? {};
@@ -308,6 +309,245 @@ async function completedBatchRefreshesOnce(): Promise<void> {
   shiki.setShikiTheme(null);
 }
 
+async function matchingSurfacesReuseCompletedTokens(first: 'editor' | 'preview'): Promise<void> {
+  const code = 'const sharedAcrossSurfaces = 42;';
+  const matchingTheme = theme('same-palette', 'dark');
+  shiki.setShikiTheme(matchingTheme, 'editor');
+  shiki.setShikiTheme(structuredClone(matchingTheme), 'preview');
+  const releaseEditor = shiki.activateShikiCodeHighlighting('editor');
+  const releasePreview = shiki.activateShikiCodeHighlighting('preview');
+  const before = highlighters.reduce((sum, item) => sum + item.tokenizeCalls, 0);
+  try {
+    shiki.requestShikiTokens('typescript', code, first);
+    shiki.requestShikiTokens('typescript', code, first === 'editor' ? 'preview' : 'editor');
+    await waitFor(() => !!shiki.getShikiTokens('typescript', code, 'editor')
+      && !!shiki.getShikiTokens('typescript', code, 'preview'), 'both matching surfaces');
+    assert.deepEqual(shiki.getShikiTokens('typescript', code, 'editor'),
+      shiki.getShikiTokens('typescript', code, 'preview'));
+    assert.equal(highlighters.reduce((sum, item) => sum + item.tokenizeCalls, 0) - before, 1,
+      'matching active surfaces must tokenize identical source only once');
+  } finally {
+    releaseEditor();
+    releasePreview();
+    shiki.setShikiTheme(null, 'editor');
+    shiki.setShikiTheme(null, 'preview');
+    await drain();
+  }
+}
+
+const tokenizeCount = (): number => highlighters.reduce((sum, item) => sum + item.tokenizeCalls, 0);
+
+async function completedReuseKeepsIndependentLifetimes(): Promise<void> {
+  const palette = theme('lifetime', 'dark');
+  const code = 'const retained = 1;';
+  shiki.setShikiTheme(palette, 'editor');
+  shiki.setShikiTheme(structuredClone(palette), 'preview');
+  const releaseEditor = shiki.activateShikiCodeHighlighting('editor');
+  const releasePreview = shiki.activateShikiCodeHighlighting('preview');
+  shiki.requestShikiTokens('typescript', code, 'editor');
+  await waitFor(() => !!shiki.getShikiTokens('typescript', code, 'editor'), 'donor tokens');
+  const before = highlighters.length;
+  const calls = tokenizeCount();
+  let refreshes = 0;
+  const unsubscribe = shiki.subscribeShikiRefresh(() => { refreshes += 1; }, 'preview');
+  shiki.requestShikiTokens('typescript', code, 'preview');
+  await waitFor(() => refreshes === 1, 'borrower refresh');
+  assert.equal(highlighters.length, before + 1, 'reuse must preserve recipient grammar ownership');
+  assert.equal(highlighters[before].loadCalls, 1);
+  assert.equal(tokenizeCount(), calls);
+  const expected = structuredClone(shiki.getShikiTokens('typescript', code, 'preview'));
+  releaseEditor();
+  releaseEditor();
+  assert.equal(shiki.getShikiTokens('typescript', code, 'editor'), null);
+  assert.deepEqual(shiki.getShikiTokens('typescript', code, 'preview'), expected,
+    'donor release must not invalidate recipient output');
+  releasePreview();
+  releasePreview();
+  assert.equal(shiki.getShikiTokens('typescript', code, 'preview'), null);
+  shiki.requestShikiTokens('typescript', code, 'preview');
+  await drain();
+  assert.equal(tokenizeCount(), calls, 'inactive recipients must do no work');
+  const releaseReplacement = shiki.activateShikiCodeHighlighting('preview');
+  shiki.requestShikiTokens('typescript', code, 'preview');
+  await waitFor(() => tokenizeCount() === calls + 1, 'new lifetime tokens');
+  releaseReplacement();
+  unsubscribe();
+  shiki.setShikiTheme(null, 'editor');
+  shiki.setShikiTheme(null, 'preview');
+  await drain();
+}
+
+async function reuseRequiresEveryTokenInputToMatch(): Promise<void> {
+  const palette = theme('input-isolation', 'dark');
+  const code = 'const exact = 1;';
+  shiki.setShikiTheme(palette, 'editor');
+  const releaseEditor = shiki.activateShikiCodeHighlighting('editor');
+  const releasePreview = shiki.activateShikiCodeHighlighting('preview');
+  shiki.requestShikiTokens('typescript', code, 'editor');
+  await waitFor(() => !!shiki.getShikiTokens('typescript', code, 'editor'), 'input donor');
+  const mismatches = [
+    { ...palette, type: 'light' as const },
+    { ...palette, colors: { ...palette.colors, 'editor.foreground': '#123456' } },
+    { ...palette, colors: { ...palette.colors, 'editor.background': '#123456' } },
+    { ...palette, tokenColors: [{ scope: 'keyword', settings: { foreground: '#123456' } }] }
+  ];
+  for (const changed of mismatches) {
+    shiki.setShikiTheme(changed, 'preview');
+    const before = tokenizeCount();
+    shiki.requestShikiTokens('typescript', code, 'preview');
+    await waitFor(() => !!shiki.getShikiTokens('typescript', code, 'preview'), 'different theme');
+    assert.equal(tokenizeCount(), before + 1, 'different theme inputs must tokenize independently');
+  }
+  shiki.setShikiTheme(palette, 'preview');
+  for (const [language, source] of [['sql', code], ['typescript', code + '\n']]) {
+    const before = tokenizeCount();
+    shiki.requestShikiTokens(language, source, 'preview');
+    await waitFor(() => !!shiki.getShikiTokens(language, source, 'preview'), 'different source/language');
+    assert.equal(tokenizeCount(), before + 1);
+    assert.equal(shiki.getShikiTokens(language, source, 'preview')?.[0]?.[0]?.content, source);
+  }
+  shiki.setShikiTheme(null, 'preview');
+  const before = tokenizeCount();
+  shiki.requestShikiTokens('typescript', code, 'preview');
+  await drain();
+  assert.equal(shiki.getShikiTokens('typescript', code, 'preview'), null);
+  assert.equal(tokenizeCount(), before, 'missing theme cannot borrow another surface palette');
+  releaseEditor();
+  releasePreview();
+  shiki.setShikiTheme(null, 'editor');
+  await drain();
+}
+
+async function pendingSurfacesRetireIndependently(): Promise<void> {
+  const palette = theme('pending-surfaces', 'dark');
+  const code = 'const pendingSurface = 1;';
+  for (const retire of ['release', 'theme'] as const) {
+    const heldLoad = deferred<void>();
+    planHighlighter({ languageLoad: heldLoad });
+    shiki.setShikiTheme(palette, 'editor');
+    shiki.setShikiTheme(palette, 'preview');
+    const releaseEditor = shiki.activateShikiCodeHighlighting('editor');
+    const releasePreview = shiki.activateShikiCodeHighlighting('preview');
+    const first = highlighters.length;
+    shiki.requestShikiTokens('typescript', code, 'editor');
+    await waitFor(() => highlighters[first]?.loadCalls === 1, 'held surface grammar');
+    shiki.requestShikiTokens('typescript', code, 'preview');
+    await waitFor(() => !!shiki.getShikiTokens('typescript', code, 'preview'), 'independent completion');
+    if (retire === 'release') releaseEditor();
+    else shiki.setShikiTheme(theme('replacement', 'light'), 'editor');
+    let staleRefreshes = 0;
+    const unsubscribe = shiki.subscribeShikiRefresh(() => { staleRefreshes += 1; }, 'editor');
+    heldLoad.resolve();
+    await drain();
+    assert.equal(staleRefreshes, 0, 'retired pending work must not publish borrowed tokens');
+    assert.equal(shiki.getShikiTokens('typescript', code, 'editor'), null);
+    assert.equal(highlighters[first].tokenizeCalls, 0);
+    if (retire === 'theme') {
+      shiki.requestShikiTokens('typescript', code, 'editor');
+      await waitFor(() => !!shiki.getShikiTokens('typescript', code, 'editor'), 'replacement surface');
+      assert.equal(shiki.getShikiTokens('typescript', code, 'editor')?.[0]?.[0]?.color, '#101010');
+      assert.equal(shiki.getShikiTokens('typescript', code, 'preview')?.[0]?.[0]?.color, '#f0f0f0');
+    }
+    unsubscribe();
+    releaseEditor();
+    releasePreview();
+    shiki.setShikiTheme(null, 'editor');
+    shiki.setShikiTheme(null, 'preview');
+    await drain();
+  }
+}
+
+async function reusedEntriesRemainBounded(): Promise<void> {
+  const palette = theme('bounded-reuse', 'dark');
+  shiki.setShikiTheme(palette, 'editor');
+  shiki.setShikiTheme(palette, 'preview');
+  const releaseEditor = shiki.activateShikiCodeHighlighting('editor');
+  const releasePreview = shiki.activateShikiCodeHighlighting('preview');
+  const before = tokenizeCount();
+  for (let i = 0; i <= 300; i++) {
+    const code = `const bounded = ${i};`;
+    shiki.requestShikiTokens('typescript', code, 'editor');
+    await waitFor(() => !!shiki.getShikiTokens('typescript', code, 'editor'), 'bounded donor');
+    shiki.requestShikiTokens('typescript', code, 'preview');
+    await waitFor(() => !!shiki.getShikiTokens('typescript', code, 'preview'), 'bounded recipient');
+  }
+  assert.equal(tokenizeCount(), before + 301);
+  for (const surface of ['editor', 'preview'] as const) {
+    assert.equal(shiki.getShikiTokens('typescript', 'const bounded = 0;', surface), null,
+      'reuse must preserve the existing per-surface entry limit');
+    assert.ok(shiki.getShikiTokens('typescript', 'const bounded = 300;', surface));
+  }
+  releaseEditor();
+  releasePreview();
+  shiki.setShikiTheme(null, 'editor');
+  shiki.setShikiTheme(null, 'preview');
+  await drain();
+}
+
+async function mixedGrammarInstancesDoNotReuse(): Promise<void> {
+  const palette = theme('mixed-grammar', 'dark');
+  const code = 'const mixed = 1;';
+  for (const mixedSurface of ['editor', 'preview'] as const) {
+    shiki.setShikiTheme(palette, 'editor');
+    shiki.setShikiTheme(palette, 'preview');
+    const releaseEditor = shiki.activateShikiCodeHighlighting('editor');
+    const releasePreview = shiki.activateShikiCodeHighlighting('preview');
+    shiki.requestShikiTokens('sql', 'SELECT 1;', mixedSurface);
+    await waitFor(() => !!shiki.getShikiTokens('sql', 'SELECT 1;', mixedSurface), 'mixed grammar');
+    const before = tokenizeCount();
+    shiki.requestShikiTokens('typescript', code, 'editor');
+    await waitFor(() => !!shiki.getShikiTokens('typescript', code, 'editor'), 'mixed donor');
+    shiki.requestShikiTokens('typescript', code, 'preview');
+    await waitFor(() => !!shiki.getShikiTokens('typescript', code, 'preview'), 'mixed recipient');
+    assert.equal(tokenizeCount(), before + 2, 'mixed grammar histories must remain independent');
+    releaseEditor();
+    releasePreview();
+    shiki.setShikiTheme(null, 'editor');
+    shiki.setShikiTheme(null, 'preview');
+    await drain();
+  }
+}
+
+async function failedSurfaceCanRetryWithoutBlockingItsPeer(): Promise<void> {
+  const palette = theme('cross-surface-retry', 'dark');
+  const code = 'const retrySurface = 1;';
+  shiki.setShikiTheme(palette, 'editor');
+  shiki.setShikiTheme(palette, 'preview');
+  const releaseEditor = shiki.activateShikiCodeHighlighting('editor');
+  const releasePreview = shiki.activateShikiCodeHighlighting('preview');
+  planHighlighter({ loadFailures: 1 });
+  const before = tokenizeCount();
+  let failures = 0;
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    if (String(args[0]).includes('Shiki tokenization failed')) failures++;
+    else original(...args);
+  };
+  try {
+    shiki.requestShikiTokens('typescript', code, 'editor');
+    await waitFor(() => failures === 1, 'independent failure');
+    shiki.requestShikiTokens('typescript', code, 'preview');
+    await waitFor(() => !!shiki.getShikiTokens('typescript', code, 'preview'), 'unblocked peer');
+    shiki.requestShikiTokens('typescript', code, 'editor');
+    await waitFor(() => !!shiki.getShikiTokens('typescript', code, 'editor'), 'retry with completed peer');
+    assert.equal(tokenizeCount(), before + 1, 'a recovered grammar may reuse completed peer output');
+    assert.equal(failures, 1);
+  } finally {
+    console.error = original;
+    releaseEditor();
+    releasePreview();
+    shiki.setShikiTheme(null, 'editor');
+    shiki.setShikiTheme(null, 'preview');
+    await drain();
+  }
+}
+
+await failedSurfaceCanRetryWithoutBlockingItsPeer();await mixedGrammarInstancesDoNotReuse();await matchingSurfacesReuseCompletedTokens('editor');
+await matchingSurfacesReuseCompletedTokens('preview');
+await completedReuseKeepsIndependentLifetimes();
+await reuseRequiresEveryTokenInputToMatch();
+await pendingSurfacesRetireIndependently();
+await reusedEntriesRemainBounded();
 await completedBatchRefreshesOnce();
 await sourceWithoutConsumerDoesNoHeavyWork();
 await consumersShareOneInstanceUntilTheLastRelease();

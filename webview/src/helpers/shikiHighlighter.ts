@@ -39,13 +39,15 @@ export function resolveShikiLang(info: string | null | undefined): string | null
 }
 
 export type ShikiToken = {
-  offset: number;
-  content: string;
-  color?: string;
-  fontStyle?: number;
-  isStringComment?: boolean;
-  scopeNames?: readonly string[];
+  readonly offset: number;
+  readonly content: string;
+  readonly color?: string;
+  readonly fontStyle?: number;
+  readonly isStringComment?: boolean;
+  readonly scopeNames?: readonly string[];
 };
+
+type ShikiTokenLines = readonly (readonly ShikiToken[])[];
 
 export type ShikiThemeMeta = {
   bracketColors: string[];
@@ -77,14 +79,16 @@ type HighlighterRecord = {
   readonly generation: number;
   readonly promise: Promise<HighlighterCore>;
   readonly loadedLangs: Set<string>;
+  reuseLanguage: string | null;
 };
 
 type ShikiRuntimeState = {
   rawTheme: RawVscodeTheme | null;
+  tokenThemeKey: string | null;
   themeMeta: ShikiThemeMeta;
   themeVersion: number;
   highlighterRecord: HighlighterRecord | null;
-  tokenCache: Map<string, ShikiToken[][]>;
+  tokenCache: Map<string, ShikiTokenLines>;
   pending: Map<string, number>;
   refreshListeners: Set<() => void>;
   activeHighlightConsumers: number;
@@ -95,6 +99,7 @@ type ShikiRuntimeState = {
 function createRuntimeState(): ShikiRuntimeState {
   return {
     rawTheme: null,
+    tokenThemeKey: null,
     themeMeta: {
       bracketColors: DEFAULT_BRACKET_COLORS_DARK,
       unexpectedBracket: '#FF1212'
@@ -110,8 +115,8 @@ function createRuntimeState(): ShikiRuntimeState {
   };
 }
 
-// Editor and Preview share language loaders, but not theme generations or
-// token caches. Their appearance preferences can intentionally disagree.
+// Each surface owns its lifetime and theme generation. Completed, read-only
+// tokens may be reused only when the full Shiki theme input also matches.
 const runtimeStates: Record<ShikiSurface, ShikiRuntimeState> = {
   editor: createRuntimeState(),
   preview: createRuntimeState()
@@ -197,7 +202,7 @@ export function getShikiTokens(
   lang: string,
   code: string,
   surface: ShikiSurface = 'editor'
-): ShikiToken[][] | null {
+): ShikiTokenLines | null {
   const state = getRuntimeState(surface);
   return state.tokenCache.get(cacheKey(state, lang, code)) ?? null;
 }
@@ -258,7 +263,7 @@ function tokenIsStringComment(scopeNames: readonly string[]): boolean {
   return scopeNames.some((name) => name.startsWith('string') || name.startsWith('comment'));
 }
 
-function getHighlighter(state: ShikiRuntimeState): HighlighterRecord | null {
+function getHighlighter(state: ShikiRuntimeState, lang: string): HighlighterRecord | null {
   if (!state.rawTheme) {
     return null;
   }
@@ -266,7 +271,8 @@ function getHighlighter(state: ShikiRuntimeState): HighlighterRecord | null {
     state.highlighterRecord = {
       generation: state.workGeneration,
       promise: createHighlighter(state.rawTheme),
-      loadedLangs: new Set<string>()
+      loadedLangs: new Set<string>(),
+      reuseLanguage: lang
     };
   }
   return state.highlighterRecord;
@@ -277,6 +283,9 @@ async function ensureLang(
   highlighter: HighlighterCore,
   lang: string
 ): Promise<boolean> {
+  // Loading another bundle can change lazy embeddings and grammar injections.
+  // Once mixed, keep this instance ineligible even if a language load fails.
+  if (record.reuseLanguage !== lang) record.reuseLanguage = null;
   if (record.loadedLangs.has(lang)) {
     return true;
   }
@@ -288,6 +297,20 @@ async function ensureLang(
   await highlighter.loadLanguage(grammar as any);
   record.loadedLangs.add(lang);
   return true;
+}
+
+function getMatchingSurfaceTokens(
+  state: ShikiRuntimeState,
+  lang: string,
+  code: string
+): ShikiTokenLines | null {
+  const other = state === runtimeStates.editor ? runtimeStates.preview : runtimeStates.editor;
+  if (
+    state.tokenThemeKey === null || state.tokenThemeKey !== other.tokenThemeKey
+    || state.highlighterRecord?.reuseLanguage !== lang
+    || other.highlighterRecord?.reuseLanguage !== lang
+  ) return null;
+  return other.tokenCache.get(cacheKey(other, lang, code)) ?? null;
 }
 
 async function tokenizeAndCache(
@@ -306,7 +329,7 @@ async function tokenizeAndCache(
     if (state.pending.get(key) === generation) state.pending.delete(key);
   };
   try {
-    const record = getHighlighter(state);
+    const record = getHighlighter(state, lang);
     if (!record) {
       finish();
       return;
@@ -321,13 +344,16 @@ async function tokenizeAndCache(
       finish();
       return;
     }
-    if (!state.tokenCache.has(key)) {
+    // Preserve each instance's grammar loading, including lazy embeddings.
+    // Reuse only completed output; never wait on another surface's lifetime.
+    let mapped = getMatchingSurfaceTokens(state, lang, code);
+    if (!mapped) {
       const { tokens } = highlighter.codeToTokens(code, {
         lang,
         theme: THEME_NAME,
         includeExplanation: 'scopeName'
       });
-      const mapped: ShikiToken[][] = tokens.map((line) => line.map((syntaxToken) => {
+      mapped = tokens.map((line) => line.map((syntaxToken) => {
         const scopeNames = tokenScopeNames(syntaxToken as any);
         return {
           offset: syntaxToken.offset,
@@ -338,14 +364,12 @@ async function tokenizeAndCache(
           scopeNames
         };
       }));
-      if (state.tokenCache.size >= CACHE_LIMIT) {
-        const oldest = state.tokenCache.keys().next().value;
-        if (oldest !== undefined) {
-          state.tokenCache.delete(oldest);
-        }
-      }
-      state.tokenCache.set(key, mapped);
     }
+    if (state.tokenCache.size >= CACHE_LIMIT) {
+      const oldest = state.tokenCache.keys().next().value;
+      if (oldest !== undefined) state.tokenCache.delete(oldest);
+    }
+    state.tokenCache.set(key, mapped);
     finish();
     scheduleTokenRefresh(state);
   } catch (error) {
@@ -369,6 +393,7 @@ export function setShikiTheme(
       return;
     }
     state.rawTheme = null;
+    state.tokenThemeKey = null;
     state.themeVersion += 1;
     state.workGeneration += 1;
     discardHighlighter(state);
@@ -378,6 +403,7 @@ export function setShikiTheme(
     return;
   }
   state.rawTheme = theme;
+  state.tokenThemeKey = JSON.stringify(toShikiTheme(theme));
   state.themeMeta = computeThemeMeta(theme);
   state.themeVersion += 1;
   state.workGeneration += 1;

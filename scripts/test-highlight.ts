@@ -674,6 +674,93 @@ try {
     throw new Error(`Preview viewport highlighting failed: ${JSON.stringify(viewportHighlight)}`);
   }
 
+  const surfacePaletteIsolation = await page.evaluate(async () => {
+    const harness = (window as any).HighlightHarness;
+    const parent = document.getElementById('app')!;
+    parent.replaceChildren();
+    const code = 'const sharedPaletteProbe = 927463;';
+    const palette = (color: string) => ({ name: 'surface-palette', type: 'dark',
+      colors: { 'editor.foreground': '#eeeeee' },
+      tokenColors: [{ scope: 'constant.numeric', settings: { foreground: color } }] });
+    harness.setShikiTheme(palette('#55aa55'), 'editor');
+    harness.setShikiTheme(palette('#55aa55'), 'preview');
+    const editor = harness.createEditor({ parent,
+      text: ['```typescript', code, '```'].join('\n'), initialMode: 'live', onApplyChanges() {} });
+    const release = harness.activateShikiCodeHighlighting('preview');
+    const block = document.createElement('pre');
+    block.innerHTML = `<code class="hljs language-typescript"><span class="meo-export-code-line-source">${code}</span></code>`;
+    document.body.append(block);
+    const colorOf = (root: HTMLElement): string | null => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (node.textContent === '927463') return getComputedStyle(node.parentElement!).color;
+      }
+      return null;
+    };
+    const collect = async (editorColor: string, previewColor: string) => {
+      for (let attempt = 0; attempt < 200; attempt++) {
+        harness.applyPreviewCodeHighlight(document);
+        if (colorOf(editor.view.dom) === editorColor && colorOf(block) === previewColor) break;
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      return [colorOf(editor.view.dom), colorOf(block)];
+    };
+    try {
+      const matching = await collect('rgb(85, 170, 85)', 'rgb(85, 170, 85)');
+      harness.setShikiTheme(palette('#cc4444'), 'preview');
+      const different = await collect('rgb(85, 170, 85)', 'rgb(204, 68, 68)');
+      harness.setShikiTheme(palette('#cc4444'), 'editor');
+      const reunited = await collect('rgb(204, 68, 68)', 'rgb(204, 68, 68)');
+      return { matching, different, reunited };
+    } finally { editor.destroy(); release(); block.remove(); }
+  });
+  if (JSON.stringify(surfacePaletteIsolation) !== JSON.stringify({
+    matching: ['rgb(85, 170, 85)', 'rgb(85, 170, 85)'],
+    different: ['rgb(85, 170, 85)', 'rgb(204, 68, 68)'],
+    reunited: ['rgb(204, 68, 68)', 'rgb(204, 68, 68)']
+  })) throw new Error(`Editor/Preview palette isolation failed: ${JSON.stringify(surfacePaletteIsolation)}`);
+  const mixedGrammarPalette = await page.evaluate(async () => {
+    const harness = (window as any).HighlightHarness;
+    const parent = document.getElementById('app')!;
+    parent.replaceChildren();
+    const palette = { name: 'lazy-embedding', type: 'dark', colors: { 'editor.foreground': '#eeeeee' },
+      tokenColors: [{ scope: 'constant.numeric', settings: { foreground: '#55aa55' } }] };
+    harness.setShikiTheme(palette, 'editor');
+    harness.setShikiTheme(palette, 'preview');
+    const release = harness.activateShikiCodeHighlighting('preview');
+    const block = document.createElement('pre');
+    block.innerHTML = '<code class="hljs language-python"><span class="meo-export-code-line-source">print(927467)</span></code>';
+    document.body.append(block);
+    const waitForProjection = async () => {
+      for (let i = 0; i < 200 && !block.querySelector('[data-meo-shiki]'); i++) {
+        harness.applyPreviewCodeHighlight(document);
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      if (!block.querySelector('[data-meo-shiki]')) throw new Error('Missing grammar projection');
+    };
+    await waitForProjection();
+    const code = ['```python', 'print(927467)', '```'].join('\n');
+    block.innerHTML = `<code class="hljs language-markdown">${code.split('\n').map(line =>
+      `<span class="meo-export-code-line-source">${line}</span>`).join('')}</code>`;
+    const editor = harness.createStandaloneHighlightEditor(parent, code, 'markdown');
+    const colorOf = (root: HTMLElement) => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (node.textContent?.includes('927467')) return getComputedStyle(node.parentElement!).color;
+      }
+      return null;
+    };
+    try {
+      await waitForProjection();
+      for (let i = 0; i < 200 && colorOf(editor.view.dom) !== 'rgb(238, 238, 238)'; i++) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      return [colorOf(editor.view.dom), colorOf(block)];
+    } finally { editor.destroy(); release(); block.remove(); }
+  });
+  if (JSON.stringify(mixedGrammarPalette) !== JSON.stringify(['rgb(238, 238, 238)', 'rgb(85, 170, 85)'])) {
+    throw new Error(`Cross-surface reuse changed lazy embeddings: ${JSON.stringify(mixedGrammarPalette)}`);
+  }
   console.log('Highlight syntax test passed');
 } finally {
   await browser.close();

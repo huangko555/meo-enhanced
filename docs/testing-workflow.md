@@ -134,6 +134,18 @@ hidden editor measured after resizing, then external introduction of supported c
 both into plain text and after an already cached block. Reduced background work
 must not conceal a new mode-switch delay.
 
+`scripts/test-shiki-highlighter-lifecycle.ts` also checks completed token reuse
+between editor and Preview when language, exact source and all Shiki theme inputs
+match and each highlighter has requested only that one language bundle. Mixed
+language histories remain independent because lazy embeddings and injections can
+change token output. Reuse still loads the recipient grammar. The surfaces retain
+independent consumers, generations, cancellation and bounded caches. Tests cover both completion orders, differing inputs, pending
+retirement, last-consumer release and replacement. `scripts/test-highlight.ts`
+checks real token colors when the two surfaces match, diverge and match again,
+and when only one surface has preloaded an embedded language.
+Measure large-fence updates alongside first mode entry and retained heap; reuse
+must not shift the work into a later mode transition.
+
 `scripts/test-export-fence-highlight-reuse.ts` runs the bundled renderer in Node
 and observes the real fallback highlighter. It checks reuse after prose changes,
 code/language invalidation, custom-highlighter isolation, error retries, bounded
