@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import MarkdownIt from 'markdown-it';
-import hljs from 'highlight.js';
+import type { HLJSApi } from 'highlight.js';
 import sanitizeHtml from 'sanitize-html';
 import { parseDocument } from 'htmlparser2';
 import type { ChildNode } from 'domhandler';
@@ -30,8 +30,6 @@ const OPENING_KBD_TAG_RE = /^<kbd\b[^>]*>$/i;
 const CLOSING_KBD_TAG_RE = /^<\/kbd\s*>$/i;
 const DEFERRED_IMAGE_ATTRIBUTE = 'data-meo-deferred-image-src';
 const DEFERRED_IMAGE_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
-
-registerExportLanguages();
 
 export type RenderMarkdownTarget = 'html' | 'pdf' | 'docx';
 
@@ -1169,7 +1167,7 @@ function installAlertTransform(md: MarkdownIt, alertLabel: (type: string) => str
   };
 }
 
-function registerExportLanguages(): void {
+function registerExportLanguages(hljs: HLJSApi): void {
   if (hljs.getLanguage('powerquery')) {
     return;
   }
@@ -1211,7 +1209,12 @@ function registerExportLanguages(): void {
 }
 
 function highlightFence(code: string, language: string): string {
-  if (language && hljs.getLanguage(language)) {
+  if (!language) return escapeHtml(code);
+  // Keep Preview's synchronous first-paint fallback, but initialize its bundled
+  // language registry only when a fence actually needs it. Shiki exports skip it.
+  const hljs: HLJSApi = require('highlight.js');
+  registerExportLanguages(hljs);
+  if (hljs.getLanguage(language)) {
     try {
       return hljs.highlight(code, {
         language,

@@ -110,6 +110,13 @@ full-document projection. CDP layout counts enforce bounded layout work during
 projection without relying on machine-dependent elapsed-time thresholds. It runs
 in the appearance pack, highlight suite, and full browser suite.
 
+`scripts/test-export-highlight-loading.ts` builds the production Markdown renderer
+and exercises it in Node outside the checkout. It observes the real bundled
+highlight.js initialization: plain text, unlabelled fences, and injected export
+highlighting must skip that registry; the first fallback fence initializes it
+once, and subsequent renders reuse it. The unit and release gates include this
+check alongside the existing rendering and installed-export tests.
+
 ## Performance investigation
 
 Start with a fixed revision and document, then measure cold startup separately
