@@ -2156,6 +2156,9 @@ const persistUiState = (
   mode = getActiveEditorMode(),
   lastEditableMode = editorModeApplication.getState().lastEditableMode
 ) => {
+  // Initial settings can notify before Editor Mode accepts Host/local init.
+  // Do not turn that temporary default into a preference for the next reload.
+  if (editorModeApplication.getState().lifecycle !== 'ready') return;
   const state: WebviewUiState = {
     mode,
     lastEditableMode,

@@ -69,7 +69,11 @@ and Markdown uses LF even when the file uses CRLF. The second opens the
 production Webview directly in Live, Source, and Preview, then waits for the
 document text on the active surface. In Preview, the test also requires the
 loading status to clear and the rendered document to exist. A selected mode
-button alone does not prove a successful load. Source's optional side-by-side
+button alone does not prove a successful load. The startup check also reopens
+all three modes with the actual Webview state written during initialization,
+then with a manual mode choice that must override Host initialization. It covers
+default/custom layout settings and verifies that initial settings do not save a
+temporary default mode as a user preference. Source's optional side-by-side
 preview is covered by
 `scripts/test-source-side-preview.ts` in the production browser matrix.
 `scripts/test-mode-roundtrip-reveal.ts` checks Live → Source → Preview → Live
