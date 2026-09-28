@@ -110,6 +110,15 @@ full-document projection. CDP layout counts enforce bounded layout work during
 projection without relying on machine-dependent elapsed-time thresholds. It runs
 in the appearance pack, highlight suite, and full browser suite.
 
+`scripts/test-export-fence-highlight-reuse.ts` runs the bundled renderer in Node
+and observes the real fallback highlighter. It checks reuse after prose changes,
+code/language invalidation, custom-highlighter isolation, error retries, bounded
+entry count and text payload, oversized-entry bypass, parent-document release,
+and repeated sanitization.
+It runs in the unit suite. Performance comparisons must separate first rendering
+from later revisions and include both many small fences and a single oversized
+fence; cache reuse does not promise faster cold starts or oversized highlights.
+
 ## Performance investigation
 
 Start with a fixed revision and document, then measure cold startup separately

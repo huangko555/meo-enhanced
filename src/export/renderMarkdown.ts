@@ -31,6 +31,14 @@ const CLOSING_KBD_TAG_RE = /^<\/kbd\s*>$/i;
 const DEFERRED_IMAGE_ATTRIBUTE = 'data-meo-deferred-image-src';
 const DEFERRED_IMAGE_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
 
+// Only context-free fallback token HTML is retained. Source positions, wrappers,
+// appearance, and document sanitization are recomputed on every render.
+const FENCE_HIGHLIGHT_CACHE_ENTRIES = 256;
+const FENCE_HIGHLIGHT_CACHE_BYTES = 8 * 1024 * 1024;
+const FENCE_HIGHLIGHT_ENTRY_BYTES = 256 * 1024;
+const fenceHighlightCache = new Map<string, string>();
+let fenceHighlightCacheBytes = 0;
+
 registerExportLanguages();
 
 export type RenderMarkdownTarget = 'html' | 'pdf' | 'docx';
@@ -1212,16 +1220,43 @@ function registerExportLanguages(): void {
 
 function highlightFence(code: string, language: string): string {
   if (language && hljs.getLanguage(language)) {
+    // JSON owns an unambiguous key without retaining a slice of a larger document.
+    const key = code.length * 2 <= FENCE_HIGHLIGHT_ENTRY_BYTES
+      ? JSON.stringify([language, code])
+      : null;
+    const cached = key === null ? undefined : fenceHighlightCache.get(key);
+    if (cached !== undefined && key !== null) {
+      fenceHighlightCache.delete(key);
+      fenceHighlightCache.set(key, cached);
+      return cached;
+    }
     try {
-      return hljs.highlight(code, {
-        language,
-        ignoreIllegals: true
-      }).value;
+      const result = hljs.highlight(code, { language, ignoreIllegals: true });
+      // A transient failure must be retried, including highlight.js safe-mode errors.
+      if (key !== null && !result.errorRaised && !result.illegal) cacheFenceHighlight(key, result.value);
+      return result.value;
     } catch {
       // Fallback to escaped plain text.
     }
   }
   return escapeHtml(code);
+}
+
+function cacheFenceHighlight(key: string, html: string): void {
+  const bytes = (key.length + html.length) * 2;
+  if (bytes > FENCE_HIGHLIGHT_ENTRY_BYTES) return;
+  // Bound UTF-16 text payload as well as entry count; a few large fences must not
+  // pin arbitrarily large documents for the lifetime of the extension Host.
+  while (fenceHighlightCache.size >= FENCE_HIGHLIGHT_CACHE_ENTRIES
+    || fenceHighlightCacheBytes + bytes > FENCE_HIGHLIGHT_CACHE_BYTES) {
+    const oldest = fenceHighlightCache.keys().next().value!;
+    fenceHighlightCacheBytes -= (oldest.length + fenceHighlightCache.get(oldest)!.length) * 2;
+    fenceHighlightCache.delete(oldest);
+  }
+  // Plain token HTML can still be a slice of MarkdownIt's complete source.
+  // Detach it before retention so the payload limit also releases parent documents.
+  fenceHighlightCache.set(key, JSON.parse(JSON.stringify(html)) as string);
+  fenceHighlightCacheBytes += bytes;
 }
 
 function escapeHtml(value: string): string {
