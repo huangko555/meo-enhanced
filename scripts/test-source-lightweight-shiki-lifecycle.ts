@@ -60,6 +60,7 @@ const fakeCore = `
       codeToTokens(code, options) {
         instance.tokenizeCalls += 1;
         metrics.tokenizeCalls += 1;
+        globalThis.__onShikiTokenize?.(code);
         if (!loaded.has(options.lang)) {
           throw new Error('tokenization attempted without an instance-owned grammar');
         }
@@ -378,6 +379,31 @@ async function main(): Promise<void> {
     await waitForFrames(page);
     assert.equal((await readMetrics(page)).tokenizeCalls, beforeAppendedCode + 1,
       'Cached or known blocks must not consume the one unseen-block preparation');
+    for (const mode of ['source', 'live']) {
+      await page.evaluate((mode) => {
+        const state = (window as any).__shikiEditors;
+        const editor = state.first;
+        document.getElementById('first')!.hidden = false;
+        editor.setMode(mode);
+        editor.view.requestMeasure();
+        (window as any).__cancelledBatchCalls = 0;
+        (window as any).__onShikiTokenize = (code: string) => {
+          if (!code.includes('pending_batch_')) return;
+          (window as any).__cancelledBatchCalls++;
+          if ((window as any).__cancelledBatchCalls === 1) queueMicrotask(() => {
+            editor.setText('# Replacement\n\n\u0060\u0060\u0060typescript\nconst current_batch_' + mode + ' = 1;\n\u0060\u0060\u0060');
+          });
+        };
+        editor.setText('\u0060\u0060\u0060typescript\n' + Array.from({length: 410}, (_, index) =>
+          'const pending_batch_' + mode + '_' + index + ' = 1;').join('\n') + '\n\u0060\u0060\u0060');
+      }, mode);
+      await page.waitForFunction((mode) => Array.from(document.querySelectorAll('#first span[style*="color:"]'))
+        .some(node => node.textContent?.includes('current_batch_' + mode)), {}, mode);
+      await waitForFrames(page);
+      assert.equal(await page.evaluate(() => (window as any).__cancelledBatchCalls), 1,
+        mode + ' must stop obsolete document tokenization while another editor remains active');
+      await page.evaluate(() => { delete (window as any).__onShikiTokenize; });
+    }
     const highlighterCount = (await readMetrics(page)).initCalls;
 
     await page.evaluate(() => {

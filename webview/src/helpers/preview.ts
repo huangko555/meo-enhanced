@@ -226,7 +226,8 @@ function morphPreviewMain(
   currentMain: HTMLElement,
   html: string,
   deferUnreadyCodeBlock: boolean,
-  pendingCodeBlocks?: readonly PreviewCodeBlockUpdate[]
+  pendingCodeBlocks: readonly PreviewCodeBlockUpdate[] | undefined,
+  isCurrent: () => boolean
 ): PreviewCodeBlockUpdate[] {
   const updates: PreviewCodeBlockUpdate[] = pendingCodeBlocks ? [...pendingCodeBlocks] : [];
   let clearPresentationMorphKeys = () => {};
@@ -304,7 +305,7 @@ function morphPreviewMain(
             && toElement.classList.contains('meo-export-code-block-wrap')
             && fromElement.textContent !== toElement.textContent
             && hasAppliedPreviewCodeHighlight(fromElement)
-            && !isPreviewCodeHighlightReady(toElement)
+            && !isPreviewCodeHighlightReady(toElement, isCurrent)
           ) {
             // Keep the last fully themed block until the replacement tokens exist.
             // The Shiki refresh callback revisits only this block and commits the
@@ -927,6 +928,11 @@ export function createPreviewController({
   let paintFrame: number | null = null;
   let highlightFrame: number | null = null;
   let commitPendingCodeHighlight: (() => void) | null = null;
+  const currentCodeHighlight = (frameDocument: Document): (() => boolean) => {
+    const generation = frameGeneration;
+    return () => !disposed && sourceColoring && generation === frameGeneration
+      && activeFrameDocument === frameDocument;
+  };
   const cancelHighlightFrame = () => {
     if (highlightFrame !== null) window.cancelAnimationFrame(highlightFrame);
     highlightFrame = null;
@@ -936,7 +942,7 @@ export function createPreviewController({
     highlightFrame = window.requestAnimationFrame(() => {
       highlightFrame = null;
       if (!disposed && sourceColoring && activeFrameDocument === frameDocument) {
-        applyPreviewCodeHighlight(frameDocument, true);
+        applyPreviewCodeHighlight(frameDocument, true, currentCodeHighlight(frameDocument));
       }
     });
   };
@@ -990,7 +996,7 @@ export function createPreviewController({
       return;
     }
     if (!disposed && sourceColoring && activeFrameDocument) {
-      applyPreviewCodeHighlight(activeFrameDocument, true);
+      applyPreviewCodeHighlight(activeFrameDocument, true, currentCodeHighlight(activeFrameDocument));
     }
   }, 'preview');
 
@@ -1272,7 +1278,7 @@ export function createPreviewController({
 
   const syncPreviewCodeHighlight = (frameDocument: Document): void => {
     frameDocument.documentElement.dataset.meoPreviewSourceColoring = String(sourceColoring);
-    if (sourceColoring) applyPreviewCodeHighlight(frameDocument, true);
+    if (sourceColoring) applyPreviewCodeHighlight(frameDocument, true, currentCodeHighlight(frameDocument));
   };
 
   const syncSourceActiveLineBackground = (frameDocument: Document): void => {
@@ -1515,7 +1521,8 @@ export function createPreviewController({
           reusableMain,
           payload.html,
           sourceColoring,
-          pendingCodeBlocks
+          pendingCodeBlocks,
+          () => !disposed && sourceColoring && loadGeneration === frameGeneration
         );
         if (deferredCodeBlocks.length > 0) {
           commitPendingCodeHighlight = () => {

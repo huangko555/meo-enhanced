@@ -39,12 +39,12 @@ function getHighlightRequest(code: HTMLElement): {
 }
 
 /** Returns false only after scheduling tokens needed for an atomic visible update. */
-export function isPreviewCodeHighlightReady(root: ParentNode): boolean {
+export function isPreviewCodeHighlightReady(root: ParentNode, isCurrent: () => boolean = () => true): boolean {
   let ready = true;
   for (const code of root.querySelectorAll<HTMLElement>('code.hljs')) {
     const request = getHighlightRequest(code);
     if (!request || getShikiTokens(request.language, request.source, 'preview')) continue;
-    requestShikiTokens(request.language, request.source, 'preview');
+    requestShikiTokens(request.language, request.source, 'preview', isCurrent);
     ready = false;
   }
   return ready;
@@ -61,7 +61,7 @@ export function hasAppliedPreviewCodeHighlight(root: ParentNode): boolean {
 }
 
 /** Projects the exact Shiki tokens used by Live mode onto an already-rendered Preview code block. */
-export function applyPreviewCodeHighlight(frameDocument: Document, nearViewportOnly = false): void {
+export function applyPreviewCodeHighlight(frameDocument: Document, nearViewportOnly = false, isCurrent: () => boolean = () => true): void {
   const themeVersion = String(getShikiThemeVersion('preview'));
   const codes = Array.from(frameDocument.querySelectorAll<HTMLElement>('code.hljs'));
   const height = nearViewportOnly ? frameDocument.documentElement.clientHeight : 0;
@@ -77,7 +77,7 @@ export function applyPreviewCodeHighlight(frameDocument: Document, nearViewportO
     if (sources.every((sourceElement) => sourceElement.dataset.meoShiki === themeVersion)) continue;
     const lines = getShikiTokens(language, source, 'preview');
     if (!lines) {
-      requestShikiTokens(language, source, 'preview');
+      requestShikiTokens(language, source, 'preview', isCurrent);
       continue;
     }
 

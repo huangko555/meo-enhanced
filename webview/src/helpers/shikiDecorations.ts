@@ -152,7 +152,8 @@ function addTokenDecorations(
   contentFrom: number,
   contentTo: number,
   previous: DecorationSet = Decoration.none,
-  allowUnseen: () => boolean = () => true
+  allowUnseen: () => boolean = () => true,
+  isNeeded: () => boolean = () => true
 ): void {
   const tokens = getShikiTokens(lang, code);
   if (!tokens) {
@@ -173,7 +174,7 @@ function addTokenDecorations(
     // A hidden editor's mapped viewport may cover the whole replacement document.
     // Maintain known blocks and a bounded preparation of newly introduced code.
     if (!hadPresentation && !allowUnseen()) return;
-    requestShikiTokens(lang, code);
+    requestShikiTokens(lang, code, 'editor', isNeeded);
     // On first paint there is no completed Shiki presentation to preserve.
     // Cover the block with one neutral foreground until the requested token
     // set arrives, so CodeMirror's language parser cannot briefly expose a
@@ -267,7 +268,8 @@ function addBlockDecorations(
   builder: RangeSetBuilder<Decoration>,
   markCache: Map<string, Decoration>,
   previous: DecorationSet,
-  allowUnseen: () => boolean
+  allowUnseen: () => boolean,
+  isNeeded: () => boolean
 ): void {
   const { state } = view;
   const info = node.name === 'FencedCode' ? getFencedCodeInfo(state, node) : null;
@@ -299,26 +301,29 @@ function addBlockDecorations(
   }
 
   const code = state.doc.sliceString(contentFrom, contentTo);
-  addTokenDecorations(builder, markCache, lang, code, contentFrom, contentTo, previous, allowUnseen);
+  addTokenDecorations(builder, markCache, lang, code, contentFrom, contentTo, previous, allowUnseen, isNeeded);
 }
 
 function buildDecorations(
   view: EditorView,
   previous: DecorationSet,
-  allowUnseen: () => boolean
+  allowUnseen: () => boolean,
+  isAlive: () => boolean
 ): DecorationSet {
   if (!isShikiThemeReady()) {
     return Decoration.none;
   }
   const builder = new RangeSetBuilder<Decoration>();
   const markCache = new Map<string, Decoration>();
+  const doc = view.state.doc;
+  const isNeeded = () => isAlive() && view.state.doc === doc;
   try {
     syntaxTree(view.state).iterate({
       from: view.viewport.from,
       to: view.viewport.to,
       enter(node) {
         if (node.name === 'FencedCode' || node.name === 'CodeBlock') {
-          addBlockDecorations(view, node, builder, markCache, previous, allowUnseen);
+          addBlockDecorations(view, node, builder, markCache, previous, allowUnseen, isNeeded);
           return false;
         }
         return undefined;
@@ -334,6 +339,8 @@ const shikiPlugin = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
     private inView: boolean;
+    private destroyed = false;
+    private readonly isAlive = () => !this.destroyed;
     private prepareUnseen = true;
     private readonly allowUnseen: () => boolean;
     private readonly unsubscribe: () => void;
@@ -348,7 +355,7 @@ const shikiPlugin = ViewPlugin.fromClass(
         return allowed;
       };
       this.releaseHighlighting = activateShikiCodeHighlighting();
-      this.decorations = buildDecorations(view, Decoration.none, this.allowUnseen);
+      this.decorations = buildDecorations(view, Decoration.none, this.allowUnseen, this.isAlive);
       this.unsubscribe = subscribeShikiRefresh(() => {
         view.dispatch({ effects: shikiRefreshEffect.of(null) });
       });
@@ -376,11 +383,12 @@ const shikiPlugin = ViewPlugin.fromClass(
           || syntaxTreeChanged(transaction)
       );
       if (update.docChanged || update.viewportChanged || refreshed || becameVisible) {
-        this.decorations = buildDecorations(update.view, this.decorations, this.allowUnseen);
+        this.decorations = buildDecorations(update.view, this.decorations, this.allowUnseen, this.isAlive);
       }
     }
 
     destroy(): void {
+      this.destroyed = true;
       this.unsubscribe();
       this.releaseHighlighting();
     }
@@ -401,6 +409,7 @@ export function shikiDocumentHighlight(language: string): Extension {
     class {
       decorations: DecorationSet;
       private readonly unsubscribe: () => void;
+      private destroyed = false;
       private readonly releaseHighlighting: () => void;
 
       constructor(view: EditorView) {
@@ -430,6 +439,7 @@ export function shikiDocumentHighlight(language: string): Extension {
       }
 
       destroy(): void {
+        this.destroyed = true;
         this.unsubscribe();
         this.releaseHighlighting();
       }
@@ -439,6 +449,7 @@ export function shikiDocumentHighlight(language: string): Extension {
           return Decoration.none;
         }
         const builder = new RangeSetBuilder<Decoration>();
+        const doc = view.state.doc;
         addTokenDecorations(
           builder,
           new Map<string, Decoration>(),
@@ -446,7 +457,9 @@ export function shikiDocumentHighlight(language: string): Extension {
           view.state.doc.toString(),
           0,
           view.state.doc.length,
-          previous
+          previous,
+          () => true,
+          () => !this.destroyed && view.state.doc === doc
         );
         return builder.finish();
       }

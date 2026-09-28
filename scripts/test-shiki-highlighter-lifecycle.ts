@@ -16,6 +16,9 @@ type FakePlan = {
   readonly init?: Deferred<void>;
   readonly languageLoad?: Deferred<void>;
   loadFailures?: number;
+  tokenFailures?: number;
+  colorByGrammar?: boolean;
+  onTokenize?(highlighter: FakeHighlighter): void;
 };
 
 type FakeHighlighter = {
@@ -65,16 +68,23 @@ const createFakeHighlighter = (color: string, plan: FakePlan): FakeHighlighter =
     },
     codeToTokens(code, options) {
       this.tokenizeCalls += 1;
+      if (this.disposeCalls) throw new Error('Tokenized a disposed highlighter');
+      plan.onTokenize?.(this);
+      if ((plan.tokenFailures ?? 0) > 0) {
+        plan.tokenFailures = (plan.tokenFailures ?? 0) - 1;
+        throw new Error('Planned token failure');
+      }
       if (!loadedLanguages.has(options.lang)) {
         throw new Error(`H${id} tokenized ${options.lang} without its grammar`);
       }
+      let offset = 0;
       return {
-        tokens: [[{
-          offset: 0,
-          content: code,
-          color,
-          fontStyle: 0
-        }]]
+        tokens: code.split(/(\r?\n)/).flatMap((part, index) => {
+          const start = offset;
+          offset += part.length;
+          return index % 2 ? [] : [[{ offset: start, content: part, color,
+            fontStyle: plan.colorByGrammar ? loadedLanguages.size : 0 }]];
+        })
       };
     },
     dispose() {
@@ -404,7 +414,7 @@ async function reuseRequiresEveryTokenInputToMatch(): Promise<void> {
     shiki.requestShikiTokens(language, source, 'preview');
     await waitFor(() => !!shiki.getShikiTokens(language, source, 'preview'), 'different source/language');
     assert.equal(tokenizeCount(), before + 1);
-    assert.equal(shiki.getShikiTokens(language, source, 'preview')?.[0]?.[0]?.content, source);
+    assert.equal(shiki.getShikiTokens(language, source, 'preview')?.map(line => line.map(syntaxToken => syntaxToken.content).join('')).join('\n'), source);
   }
   shiki.setShikiTheme(null, 'preview');
   const before = tokenizeCount();
@@ -541,6 +551,239 @@ async function failedSurfaceCanRetryWithoutBlockingItsPeer(): Promise<void> {
     await drain();
   }
 }
+
+
+const longCode = Array.from({ length: 410 }, (_, index) => 'const item' + index + ' = true;').join('\r\n');
+
+async function batchesPublishAtomicallyAndYield(): Promise<void> {
+  for (const surface of ['editor', 'preview'] as const) {
+    let observedPending = false;
+    planHighlighter({ onTokenize(instance) {
+      if (instance.tokenizeCalls === 1) queueMicrotask(() => {
+        observedPending = shiki.getShikiTokens('typescript', longCode, surface) === null;
+      });
+    } });
+    shiki.setShikiTheme(theme('atomic-batches', 'dark'), surface);
+    const release = shiki.activateShikiCodeHighlighting(surface);
+    shiki.requestShikiTokens('typescript', longCode, surface);
+    await waitFor(() => !!shiki.getShikiTokens('typescript', longCode, surface), 'atomic long block');
+    assert.ok(observedPending, 'other queued work must run before the complete block is published');
+    const lines = shiki.getShikiTokens('typescript', longCode, surface)!;
+    assert.equal(lines.length, 410);
+    for (const line of lines) {
+      for (const syntaxToken of line) assert.equal(longCode.slice(syntaxToken.offset, syntaxToken.offset + syntaxToken.content.length), syntaxToken.content);
+    }
+    release();
+    shiki.setShikiTheme(null, surface);
+    await drain();
+  }
+}
+
+async function suspendedBatchesCannotOutliveTheirGeneration(): Promise<void> {
+  for (const surface of ['editor', 'preview'] as const) {
+    for (const replacement of ['theme', 'release'] as const) {
+      let old!: FakeHighlighter;
+      let release!: () => void;
+      planHighlighter({ onTokenize(instance) {
+        old = instance;
+        if (instance.tokenizeCalls === 1) queueMicrotask(() => {
+          planHighlighter();
+          if (replacement === 'theme') shiki.setShikiTheme(theme('new', 'light'), surface);
+          else { release(); release(); release = shiki.activateShikiCodeHighlighting(surface); }
+          shiki.requestShikiTokens('typescript', longCode, surface);
+        });
+      } });
+      shiki.setShikiTheme(theme('old', 'dark'), surface);
+      release = shiki.activateShikiCodeHighlighting(surface);
+      shiki.requestShikiTokens('typescript', longCode, surface);
+      await waitFor(() => !!shiki.getShikiTokens('typescript', longCode, surface), 'replacement long block');
+      assert.equal(old.tokenizeCalls, 1, 'retired grammar must never resume a suspended batch');
+      assert.equal(old.disposeCalls, 1);
+      const expected = replacement === 'theme' ? '#101010' : '#f0f0f0';
+      assert.ok(shiki.getShikiTokens('typescript', longCode, surface)!.every(line => line.every(t => t.color === expected)));
+      release();
+      shiki.setShikiTheme(null, surface);
+      await drain();
+    }
+  }
+}
+
+async function suspendedBatchesRestartAfterGrammarChanges(): Promise<void> {
+  let firstPasses = 0;
+  let loaded = false;
+  planHighlighter({ colorByGrammar: true, onTokenize(instance) {
+    if (instance.tokenizeCalls === 1) queueMicrotask(() => {
+      shiki.requestShikiTokens('sql', 'SELECT 1;');
+      loaded = true;
+    });
+    if (instance.loadedLanguages.size === 1) firstPasses++;
+  } });
+  shiki.setShikiTheme(theme('mixed-batches', 'dark'));
+  const release = shiki.activateShikiCodeHighlighting();
+  shiki.requestShikiTokens('typescript', longCode);
+  await waitFor(() => !!shiki.getShikiTokens('typescript', longCode), 'mixed grammar completed block');
+  assert.ok(loaded && firstPasses > 0);
+  assert.ok(shiki.getShikiTokens('typescript', longCode)!.every(line => line.every(t => t.fontStyle === 2)),
+    'one completed block must not mix the grammar histories before and after a language load');
+  release();
+  shiki.setShikiTheme(null);
+  await drain();
+}
+
+async function failedBatchCanRetry(): Promise<void> {
+  const plan: FakePlan = { onTokenize(instance) {
+    if (instance.tokenizeCalls === 1) queueMicrotask(() => { plan.tokenFailures = 1; });
+  } };
+  planHighlighter(plan);
+  shiki.setShikiTheme(theme('batch-retry', 'dark'));
+  const release = shiki.activateShikiCodeHighlighting();
+  const original = console.error;
+  let failures = 0;
+  console.error = () => { failures++; };
+  try {
+    shiki.requestShikiTokens('typescript', longCode);
+    await waitFor(() => failures === 1, 'failed later batch');
+    assert.equal(shiki.getShikiTokens('typescript', longCode), null);
+    shiki.requestShikiTokens('typescript', longCode);
+    await waitFor(() => !!shiki.getShikiTokens('typescript', longCode), 'retry completed block');
+    assert.equal(failures, 1);
+  } finally {
+    console.error = original;
+    release();
+    shiki.setShikiTheme(null);
+    await drain();
+  }
+}
+
+
+async function documentDemandControlsSuspendedWork(): Promise<void> {
+  for (const surface of ['editor', 'preview'] as const) {
+    for (const keepPeer of [false, true]) {
+      let firstCurrent = true;
+      let observedCancellation = false;
+      let secondCurrent = keepPeer;
+      let instance!: FakeHighlighter;
+      planHighlighter({ onTokenize(current) {
+        instance = current;
+        if (current.tokenizeCalls === 1) queueMicrotask(() => { firstCurrent = false; });
+      } });
+      shiki.setShikiTheme(theme('request-demand', 'dark'), surface);
+      const release = shiki.activateShikiCodeHighlighting(surface);
+      shiki.requestShikiTokens('typescript', longCode, surface, () => { if (!firstCurrent) observedCancellation = true; return firstCurrent; });
+      shiki.requestShikiTokens('typescript', longCode, surface, () => secondCurrent);
+      await waitFor(() => !!instance, 'first requested batch');
+      if (keepPeer) {
+        await waitFor(() => !!shiki.getShikiTokens('typescript', longCode, surface), 'remaining current owner');
+        assert.ok(instance.tokenizeCalls > 1, 'one retired owner must not cancel another owner of identical code');
+      } else {
+        await waitFor(() => observedCancellation, 'retired document demand');
+        assert.equal(instance.tokenizeCalls, 1, 'an old document must stop before the next batch');
+        assert.equal(shiki.getShikiTokens('typescript', longCode, surface), null);
+        secondCurrent = true;
+        shiki.requestShikiTokens('typescript', longCode, surface, () => secondCurrent);
+        await waitFor(() => !!shiki.getShikiTokens('typescript', longCode, surface), 'same-key request after cancellation');
+      }
+      release();
+      shiki.setShikiTheme(null, surface);
+      await drain();
+    }
+  }
+}
+
+
+async function abortedCompletionCannotRemoveANewRequest(): Promise<void> {
+  let current = true;
+  let replacementQueued = false;
+  planHighlighter({ onTokenize(instance) {
+    if (instance.tokenizeCalls === 1) queueMicrotask(() => { current = false; });
+  } });
+  shiki.setShikiTheme(theme('same-key-handoff', 'dark'));
+  const release = shiki.activateShikiCodeHighlighting();
+  shiki.requestShikiTokens('typescript', longCode, 'editor', () => {
+    if (!current && !replacementQueued) {
+      replacementQueued = true;
+      queueMicrotask(() => shiki.requestShikiTokens('typescript', longCode));
+    }
+    return current;
+  });
+  await waitFor(() => !!shiki.getShikiTokens('typescript', longCode), 'new same-key request before abort settlement');
+  assert.ok(replacementQueued);
+  release();
+  shiki.setShikiTheme(null);
+  await drain();
+}
+
+
+async function matchingLongSurfacesComputeOnce(): Promise<void> {
+  for (const first of ['editor', 'preview'] as const) {
+    const palette = theme('matching-long', 'dark');
+    shiki.setShikiTheme(palette, 'editor');
+    shiki.setShikiTheme(palette, 'preview');
+    const releases = [shiki.activateShikiCodeHighlighting('editor'), shiki.activateShikiCodeHighlighting('preview')];
+    const before = highlighters.length;
+    shiki.requestShikiTokens('typescript', longCode, first);
+    shiki.requestShikiTokens('typescript', longCode, first === 'editor' ? 'preview' : 'editor');
+    await waitFor(() => !!shiki.getShikiTokens('typescript', longCode, 'editor')
+      && !!shiki.getShikiTokens('typescript', longCode, 'preview'), 'matching long surfaces');
+    assert.equal(highlighters.slice(before).filter(instance => instance.tokenizeCalls > 0).length, 1,
+      'yielding must not duplicate a block previously shared by matching surfaces');
+    assert.deepEqual(shiki.getShikiTokens('typescript', longCode, 'editor'), shiki.getShikiTokens('typescript', longCode, 'preview'));
+    releases.forEach(release => release());
+    shiki.setShikiTheme(null, 'editor');
+    shiki.setShikiTheme(null, 'preview');
+    await drain();
+  }
+}
+
+
+async function readyQueueSurvivesDonorRetirementAndFailure(): Promise<void> {
+  for (const first of ['editor', 'preview'] as const) {
+    for (const outcome of ['release', 'theme', 'error'] as const) {
+      const second = first === 'editor' ? 'preview' : 'editor';
+      const palette = theme('queued-surfaces', 'dark');
+      shiki.setShikiTheme(palette, first);
+      shiki.setShikiTheme(palette, second);
+      const releaseFirst = shiki.activateShikiCodeHighlighting(first);
+      const releaseSecond = shiki.activateShikiCodeHighlighting(second);
+      const plan: FakePlan = { onTokenize(instance) {
+        if (instance.tokenizeCalls !== 1) return;
+        queueMicrotask(() => {
+          if (outcome === 'release') releaseFirst();
+          else if (outcome === 'theme') shiki.setShikiTheme(theme('replacement', 'light'), first);
+          else plan.tokenFailures = 1;
+        });
+      } };
+      planHighlighter(plan);
+      planHighlighter();
+      const original = console.error;
+      let errors = 0;
+      console.error = () => { errors++; };
+      try {
+        shiki.requestShikiTokens('typescript', longCode, first);
+        shiki.requestShikiTokens('typescript', longCode, second);
+        await waitFor(() => !!shiki.getShikiTokens('typescript', longCode, second), 'queued independent recipient');
+        assert.equal(shiki.getShikiTokens('typescript', longCode, first), null);
+        assert.equal(errors, outcome === 'error' ? 1 : 0);
+      } finally {
+        console.error = original;
+        releaseFirst();
+        releaseSecond();
+        shiki.setShikiTheme(null, first);
+        shiki.setShikiTheme(null, second);
+        await drain();
+      }
+    }
+  }
+}
+
+await readyQueueSurvivesDonorRetirementAndFailure();
+await matchingLongSurfacesComputeOnce();
+await abortedCompletionCannotRemoveANewRequest();
+await documentDemandControlsSuspendedWork();
+await batchesPublishAtomicallyAndYield();
+await suspendedBatchesCannotOutliveTheirGeneration();
+await suspendedBatchesRestartAfterGrammarChanges();
+await failedBatchCanRetry();
 
 await failedSurfaceCanRetryWithoutBlockingItsPeer();await mixedGrammarInstancesDoNotReuse();await matchingSurfacesReuseCompletedTokens('editor');
 await matchingSurfacesReuseCompletedTokens('preview');

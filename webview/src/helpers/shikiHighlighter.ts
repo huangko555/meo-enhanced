@@ -80,7 +80,15 @@ type HighlighterRecord = {
   readonly promise: Promise<HighlighterCore>;
   readonly loadedLangs: Set<string>;
   reuseLanguage: string | null;
+  grammarVersion: number;
 };
+
+type PendingHighlight = {
+  readonly generation: number;
+  readonly consumers: Set<() => boolean>;
+};
+
+const alwaysNeeded = () => true;
 
 type ShikiRuntimeState = {
   rawTheme: RawVscodeTheme | null;
@@ -89,7 +97,7 @@ type ShikiRuntimeState = {
   themeVersion: number;
   highlighterRecord: HighlighterRecord | null;
   tokenCache: Map<string, ShikiTokenLines>;
-  pending: Map<string, number>;
+  pending: Map<string, PendingHighlight>;
   refreshListeners: Set<() => void>;
   activeHighlightConsumers: number;
   workGeneration: number;
@@ -121,6 +129,10 @@ const runtimeStates: Record<ShikiSurface, ShikiRuntimeState> = {
   editor: createRuntimeState(),
   preview: createRuntimeState()
 };
+
+// Only ready token calculations share execution order. Initialization, grammar
+// ownership and cancellation remain local to each surface and caller.
+let activeTokenBatch: Promise<void> | null = null;
 
 function getRuntimeState(surface: ShikiSurface): ShikiRuntimeState {
   return runtimeStates[surface];
@@ -207,22 +219,33 @@ export function getShikiTokens(
   return state.tokenCache.get(cacheKey(state, lang, code)) ?? null;
 }
 
+/**
+ * isNeeded is a cheap synchronous check of the caller's current document/lifetime.
+ * Identical requests share work while at least one caller still needs the result.
+ */
 export function requestShikiTokens(
   lang: string,
   code: string,
-  surface: ShikiSurface = 'editor'
+  surface: ShikiSurface = 'editor',
+  isNeeded: () => boolean = alwaysNeeded
 ): void {
   const state = getRuntimeState(surface);
   if (!state.rawTheme || state.activeHighlightConsumers === 0) {
     return;
   }
   const key = cacheKey(state, lang, code);
-  if (state.tokenCache.has(key) || state.pending.has(key)) {
+  if (state.tokenCache.has(key)) return;
+  const pending = state.pending.get(key);
+  if (pending) {
+    pending.consumers.add(isNeeded);
     return;
   }
-  const generation = state.workGeneration;
-  state.pending.set(key, generation);
-  void tokenizeAndCache(state, key, lang, code, generation);
+  const request: PendingHighlight = {
+    generation: state.workGeneration,
+    consumers: new Set([isNeeded])
+  };
+  state.pending.set(key, request);
+  void tokenizeAndCache(state, key, lang, code, request);
 }
 
 function toShikiTheme(theme: RawVscodeTheme) {
@@ -272,7 +295,8 @@ function getHighlighter(state: ShikiRuntimeState, lang: string): HighlighterReco
       generation: state.workGeneration,
       promise: createHighlighter(state.rawTheme),
       loadedLangs: new Set<string>(),
-      reuseLanguage: lang
+      reuseLanguage: lang,
+      grammarVersion: 0
     };
   }
   return state.highlighterRecord;
@@ -294,6 +318,7 @@ async function ensureLang(
     return false;
   }
   const grammar = (await loader()).default;
+  record.grammarVersion += 1;
   await highlighter.loadLanguage(grammar as any);
   record.loadedLangs.add(lang);
   return true;
@@ -313,20 +338,99 @@ function getMatchingSurfaceTokens(
   return other.tokenCache.get(cacheKey(other, lang, code)) ?? null;
 }
 
+function tokenizeInBatches(
+  record: HighlighterRecord,
+  highlighter: HighlighterCore,
+  lang: string,
+  code: string,
+  isCurrent: () => boolean
+): ShikiTokenLines | null | Promise<ShikiTokenLines | null> {
+  const lines = /\r?\n/g;
+  let start = 0;
+  let grammarVersion = record.grammarVersion;
+  let grammarState: ReturnType<HighlighterCore['codeToTokens']>['grammarState'];
+  let mapped: ShikiToken[][] = [];
+  const runBatch = (): ShikiTokenLines | null | Promise<ShikiTokenLines | null> => {
+    if (!isCurrent()) return null;
+    if (grammarVersion !== record.grammarVersion) {
+      // A language loaded while we yielded may alter injections or embeddings.
+      // Restart against that grammar registry instead of combining two histories.
+      grammarVersion = record.grammarVersion;
+      grammarState = undefined;
+      mapped = [];
+      start = lines.lastIndex = 0;
+    }
+    let boundary: RegExpExecArray | null = null;
+    for (let line = 0; line < 128; line += 1) {
+      boundary = lines.exec(code);
+      if (!boundary) break;
+    }
+    const end = boundary ? boundary.index : code.length;
+    const next = lines.lastIndex;
+    const result = highlighter.codeToTokens(code.slice(start, end), {
+      lang,
+      theme: THEME_NAME,
+      includeExplanation: 'scopeName',
+      grammarState
+    });
+    grammarState = result.grammarState;
+    for (const line of result.tokens) {
+      mapped.push(line.map((syntaxToken) => {
+        const scopeNames = tokenScopeNames(syntaxToken as any);
+        return {
+          offset: start + syntaxToken.offset,
+          content: syntaxToken.content,
+          color: syntaxToken.color,
+          fontStyle: syntaxToken.fontStyle,
+          isStringComment: tokenIsStringComment(scopeNames),
+          scopeNames
+        };
+      }));
+    }
+    if (!boundary) return mapped;
+    start = next;
+    // Keep publication atomic while letting input run between full-line batches.
+    // Microtasks alone would still block the browser for the entire code block.
+    return new Promise<void>((resolve) => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => {
+        channel.port1.close();
+        channel.port2.close();
+        resolve();
+      };
+      channel.port2.postMessage(null);
+    }).then(runBatch);
+  };
+  return runBatch();
+}
+
 async function tokenizeAndCache(
   state: ShikiRuntimeState,
   key: string,
   lang: string,
   code: string,
-  generation: number
+  request: PendingHighlight
 ): Promise<void> {
-  const isCurrent = (): boolean => (
-    generation === state.workGeneration &&
-    state.activeHighlightConsumers > 0 &&
-    cacheKey(state, lang, code) === key
-  );
+  const { generation } = request;
   const finish = (): void => {
-    if (state.pending.get(key) === generation) state.pending.delete(key);
+    if (state.pending.get(key) === request) state.pending.delete(key);
+  };
+  const isCurrent = (): boolean => {
+    if (generation !== state.workGeneration || state.activeHighlightConsumers === 0
+      || state.pending.get(key) !== request) return false;
+    let needed = false;
+    for (const consumer of request.consumers) {
+      if (consumer()) needed = true;
+      else request.consumers.delete(consumer);
+    }
+    return needed;
+  };
+  const continueBatch = (): boolean => {
+    if (isCurrent()) return true;
+    // Retire synchronously: a new request for this key can arrive before the
+    // aborted promise settles and must not join work that already stopped.
+    finish();
+    return false;
   };
   try {
     const record = getHighlighter(state, lang);
@@ -344,26 +448,34 @@ async function tokenizeAndCache(
       finish();
       return;
     }
-    // Preserve each instance's grammar loading, including lazy embeddings.
-    // Reuse only completed output; never wait on another surface's lifetime.
+    // Yielded work must finish (or retire) before another ready block starts.
+    // Otherwise matching surfaces duplicate the calculation before either can
+    // publish the complete tokens that the other surface is allowed to reuse.
+    while (activeTokenBatch) {
+      await activeTokenBatch;
+      if (!isCurrent()) {
+        finish();
+        return;
+      }
+    }
     let mapped = getMatchingSurfaceTokens(state, lang, code);
     if (!mapped) {
-      const { tokens } = highlighter.codeToTokens(code, {
-        lang,
-        theme: THEME_NAME,
-        includeExplanation: 'scopeName'
-      });
-      mapped = tokens.map((line) => line.map((syntaxToken) => {
-        const scopeNames = tokenScopeNames(syntaxToken as any);
-        return {
-          offset: syntaxToken.offset,
-          content: syntaxToken.content,
-          color: syntaxToken.color,
-          fontStyle: syntaxToken.fontStyle,
-          isStringComment: tokenIsStringComment(scopeNames),
-          scopeNames
-        };
-      }));
+      const tokenization = tokenizeInBatches(record, highlighter, lang, code, continueBatch);
+      if (tokenization instanceof Promise) {
+        const completion = tokenization.then(() => undefined, () => undefined);
+        activeTokenBatch = completion;
+        try {
+          mapped = await tokenization;
+        } finally {
+          if (activeTokenBatch === completion) activeTokenBatch = null;
+        }
+      } else {
+        mapped = tokenization;
+      }
+    }
+    if (!mapped || !isCurrent()) {
+      finish();
+      return;
     }
     if (state.tokenCache.size >= CACHE_LIMIT) {
       const oldest = state.tokenCache.keys().next().value;
@@ -373,8 +485,9 @@ async function tokenizeAndCache(
     finish();
     scheduleTokenRefresh(state);
   } catch (error) {
+    const current = isCurrent();
     finish();
-    if (isCurrent()) console.error('[MEO webview] Shiki tokenization failed', error);
+    if (current) console.error('[MEO webview] Shiki tokenization failed', error);
   }
 }
 

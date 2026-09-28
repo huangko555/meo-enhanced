@@ -204,6 +204,7 @@ async function main(): Promise<void> {
       editor.destroy();
     });
     assert.equal(await page.evaluate(() => document.querySelectorAll('.cm-editor').length), 0);
+    assert.equal(await page.evaluate(() => (window as any).SourceLightweightShikiHarness.verifyBatchedTokens()), 64);
   } finally {
     await browser.close();
   }
