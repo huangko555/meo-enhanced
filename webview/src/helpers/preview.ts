@@ -216,104 +216,120 @@ function preserveLoadedPreviewImage(fromImage: HTMLImageElement, toImage: HTMLIm
   return true;
 }
 
+type PreviewCodeBlockUpdate = {
+  readonly current: HTMLElement;
+  readonly next: HTMLElement;
+};
+
 function morphPreviewMain(
   frameDocument: Document,
   currentMain: HTMLElement,
   html: string,
-  deferUnreadyCodeBlock: boolean
-): boolean {
-  const nextMain = frameDocument.createElement('main');
-  nextMain.className = 'meo-export-doc';
-  nextMain.innerHTML = html;
-  const currentTables = Array.from(currentMain.querySelectorAll<HTMLTableElement>('table'));
-  Array.from(nextMain.querySelectorAll<HTMLTableElement>('table')).forEach((table, index) => {
-    const columns = currentTables[index]
-      ?.querySelector<HTMLTableColElement>(':scope > colgroup[data-meo-preview-columns]');
-    if (columns) table.prepend(columns.cloneNode(true));
-  });
-  const clearPresentationMorphKeys = preparePreviewPresentationMorphKeys(currentMain, nextMain);
-  let deferredCodeBlock = false;
+  deferUnreadyCodeBlock: boolean,
+  pendingCodeBlocks?: readonly PreviewCodeBlockUpdate[]
+): PreviewCodeBlockUpdate[] {
+  const updates: PreviewCodeBlockUpdate[] = pendingCodeBlocks ? [...pendingCodeBlocks] : [];
+  let clearPresentationMorphKeys = () => {};
+  if (!pendingCodeBlocks) {
+    const nextMain = frameDocument.createElement('main');
+    nextMain.className = 'meo-export-doc';
+    nextMain.innerHTML = html;
+    const currentTables = Array.from(currentMain.querySelectorAll<HTMLTableElement>('table'));
+    Array.from(nextMain.querySelectorAll<HTMLTableElement>('table')).forEach((table, index) => {
+      const columns = currentTables[index]
+        ?.querySelector<HTMLTableColElement>(':scope > colgroup[data-meo-preview-columns]');
+      if (columns) table.prepend(columns.cloneNode(true));
+    });
+    clearPresentationMorphKeys = preparePreviewPresentationMorphKeys(currentMain, nextMain);
+    updates.push({ current: currentMain, next: nextMain });
+  }
+  const deferredCodeBlocks: PreviewCodeBlockUpdate[] = [];
   try {
-    morphdom(currentMain, nextMain, {
-      childrenOnly: true,
-      getNodeKey(node) {
-        if (node.nodeType !== 1) return undefined;
-        const element = node as Element;
-        return element.getAttribute(previewPresentationMorphKeyAttribute) ?? (element.id || undefined);
-      },
-      onBeforeElUpdated(fromElement, toElement) {
-        if (
-          fromElement.tagName === 'IMG'
-          && toElement.tagName === 'IMG'
-          && preserveLoadedPreviewImage(
-            fromElement as HTMLImageElement,
-            toElement as HTMLImageElement
-          )
-        ) {
-          return false;
-        }
-        const mermaidSource = fromElement.dataset.sourceB64;
-        if (
-          mermaidSource
-          && fromElement.classList.contains('meo-export-mermaid')
-          && toElement.classList.contains('meo-export-mermaid')
-        ) {
-          const nextSource = toElement.dataset.sourceB64;
+    for (const { current, next } of updates) {
+      if (!currentMain.contains(current)) continue;
+      morphdom(current, next, {
+        childrenOnly: !pendingCodeBlocks,
+        getNodeKey(node) {
+          if (node.nodeType !== 1) return undefined;
+          const element = node as Element;
+          return element.getAttribute(previewPresentationMorphKeyAttribute) ?? (element.id || undefined);
+        },
+        onBeforeElUpdated(fromElement, toElement) {
           if (
-            nextSource
-            && nextSource !== mermaidSource
-            && fromElement.classList.contains('is-rendered')
-            && fromElement.querySelector('svg')
+            fromElement.tagName === 'IMG'
+            && toElement.tagName === 'IMG'
+            && preserveLoadedPreviewImage(
+              fromElement as HTMLImageElement,
+              toElement as HTMLImageElement
+            )
           ) {
-            // Keep the last successful diagram on screen while the replacement is
-            // rendered off-layout. The renderer commits the new SVG atomically.
-            fromElement.dataset.sourceB64 = nextSource;
-            fromElement.dataset.meoPreviewMermaidPending = 'true';
-            delete fromElement.dataset.meoPreviewMermaidAppearance;
+            return false;
+          }
+          const mermaidSource = fromElement.dataset.sourceB64;
+          if (
+            mermaidSource
+            && fromElement.classList.contains('meo-export-mermaid')
+            && toElement.classList.contains('meo-export-mermaid')
+          ) {
+            const nextSource = toElement.dataset.sourceB64;
+            if (
+              nextSource
+              && nextSource !== mermaidSource
+              && fromElement.classList.contains('is-rendered')
+              && fromElement.querySelector('svg')
+            ) {
+              // Keep the last successful diagram on screen while the replacement is
+              // rendered off-layout. The renderer commits the new SVG atomically.
+              fromElement.dataset.sourceB64 = nextSource;
+              fromElement.dataset.meoPreviewMermaidPending = 'true';
+              delete fromElement.dataset.meoPreviewMermaidAppearance;
+              syncSourceMappingAttributes(fromElement, toElement);
+              return false;
+            }
+            if (mermaidSource !== nextSource) return true;
             syncSourceMappingAttributes(fromElement, toElement);
             return false;
           }
-          if (mermaidSource !== nextSource) return true;
-          syncSourceMappingAttributes(fromElement, toElement);
-          return false;
+          const fromPresentation = getPreviewPresentationSignature(fromElement);
+          if (
+            fromPresentation?.startsWith('math:')
+            && fromPresentation === getPreviewPresentationSignature(toElement)
+          ) {
+            syncSourceMappingAttributes(fromElement, toElement);
+            return false;
+          }
+          if (
+            deferUnreadyCodeBlock
+            && fromElement.classList.contains('meo-export-code-block-wrap')
+            && toElement.classList.contains('meo-export-code-block-wrap')
+            && fromElement.textContent !== toElement.textContent
+            && hasAppliedPreviewCodeHighlight(fromElement)
+            && !isPreviewCodeHighlightReady(toElement)
+          ) {
+            // Keep the last fully themed block until the replacement tokens exist.
+            // The Shiki refresh callback revisits only this block and commits the
+            // new source and token DOM together before the next visible frame.
+            syncSourceMappingAttributes(fromElement, toElement);
+            deferredCodeBlocks.push({ current: fromElement, next: toElement });
+            return false;
+          }
+          if (fromElement.tagName === 'DETAILS') {
+            toElement.toggleAttribute('open', (fromElement as HTMLDetailsElement).open);
+          }
+          if (areEquivalentPreviewElements(fromElement, toElement)) {
+            syncDescendantSourceMappings(fromElement, toElement);
+            return false;
+          }
+          return true;
         }
-        const fromPresentation = getPreviewPresentationSignature(fromElement);
-        if (
-          fromPresentation?.startsWith('math:')
-          && fromPresentation === getPreviewPresentationSignature(toElement)
-        ) {
-          syncSourceMappingAttributes(fromElement, toElement);
-          return false;
-        }
-        if (
-          deferUnreadyCodeBlock
-          && fromElement.classList.contains('meo-export-code-block-wrap')
-          && toElement.classList.contains('meo-export-code-block-wrap')
-          && fromElement.textContent !== toElement.textContent
-          && hasAppliedPreviewCodeHighlight(fromElement)
-          && !isPreviewCodeHighlightReady(toElement)
-        ) {
-          // Keep the last fully themed block until the replacement tokens exist.
-          // The Shiki refresh callback reruns this morph, which then commits the
-          // new source and token DOM together before the next visible frame.
-          syncSourceMappingAttributes(fromElement, toElement);
-          deferredCodeBlock = true;
-          return false;
-        }
-        if (fromElement.tagName === 'DETAILS') {
-          toElement.toggleAttribute('open', (fromElement as HTMLDetailsElement).open);
-        }
-        if (areEquivalentPreviewElements(fromElement, toElement)) {
-          syncDescendantSourceMappings(fromElement, toElement);
-          return false;
-        }
-        return true;
-      }
-    });
+      });
+    }
   } finally {
     clearPresentationMorphKeys();
   }
-  return deferredCodeBlock;
+  // A pending block must not retain the rest of the detached document tree.
+  for (const { next } of deferredCodeBlocks) next.remove();
+  return deferredCodeBlocks;
 }
 
 const previewScrollbarStyles = `
@@ -1308,7 +1324,11 @@ export function createPreviewController({
     setStatus(!background && !hasReadablePresentation ? uiStrings.previewGenerating : null);
   };
 
-  const renderFrame = (renderedText: string, preserveViewport = false) => {
+  const renderFrame = (
+    renderedText: string,
+    preserveViewport = false,
+    pendingCodeBlocks?: readonly PreviewCodeBlockUpdate[]
+  ) => {
     if (disposed || !latestPayload) {
       return;
     }
@@ -1490,18 +1510,19 @@ export function createPreviewController({
       const commit = (viewportSlot: PreviewViewportProjectionSlot | null) => {
         clearSearchMatches();
         reusableDocument.documentElement.lang = uiLanguage;
-        const deferredCodeBlock = morphPreviewMain(
+        const deferredCodeBlocks = morphPreviewMain(
           reusableDocument,
           reusableMain,
           payload.html,
-          sourceColoring
+          sourceColoring,
+          pendingCodeBlocks
         );
-        if (deferredCodeBlock) {
+        if (deferredCodeBlocks.length > 0) {
           commitPendingCodeHighlight = () => {
             if (
               !disposed && activeFrameDocument === reusableDocument
               && latestPayload === payload && frameRenderedText === renderedText
-            ) renderFrame(renderedText, true);
+            ) renderFrame(renderedText, true, deferredCodeBlocks);
           };
         }
         if (!preserveViewport && reusableDocument.scrollingElement) {
@@ -1774,7 +1795,11 @@ export function createPreviewController({
       latestPayload = result.value;
       latestAcceptedText = requestText;
       setStatus(null);
-      if (preserveFrame && activeFrameDocument && frameRenderedText === requestText) {
+      // An appearance-only refresh must not strand source still waiting on tokens.
+      if (
+        preserveFrame && activeFrameDocument && frameRenderedText === requestText
+        && !commitPendingCodeHighlight
+      ) {
         applyAppearanceToFrame(preserveViewport);
       } else {
         renderFrame(requestText, preserveViewport);

@@ -48,6 +48,18 @@ still checking type safety, workflow policy, history, tables, rendered blocks,
 input-derived work, viewport behavior, and one production browser scenario in
 the quick gate.
 
+## Preview pending code updates
+
+`scripts/test-preview-code-update.ts` runs the production Preview controller with
+only the external Shiki grammar loader held at deterministic boundaries. It
+checks atomic source/color commits when two blocks finish separately, newer
+revisions, removed blocks, hidden Preview, appearance and source-coloring
+changes, and disposal. Token completions must not parse the whole document
+again. A garbage-collection check ensures pending blocks do not retain the
+parsed full-document tree. The existing production reading-surface, viewport
+anchor and mode-transition tests cover the real Shiki/browser integration.
+The pending-code test runs in the full browser suite.
+
 ## Editor startup and loading
 
 The quick and release gates run `scripts/test-panel-session-ready-init.ts` and
