@@ -3092,6 +3092,9 @@ window.addEventListener('message', (event) => {
       });
       failureNotice.clearFailureNotice();
       documentSessionAdapter.start(message);
+      // Preview preload captures language and font settings synchronously.
+      // Initialize them before its single accepted presentation is reusable.
+      handleInit(message);
       previewAdapter.start({
         text: message.text,
         appearance: message.previewAppearance,
@@ -3101,7 +3104,6 @@ window.addEventListener('message', (event) => {
         active: false
       });
 
-      handleInit(message);
       void editorModeRuntime.dispatch({ type: 'initialize', hostMode: message.mode })
         .then(async () => {
           const initializedMode = editorModeApplication.getState().mode;

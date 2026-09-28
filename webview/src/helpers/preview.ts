@@ -842,6 +842,7 @@ export function createPreviewController({
   let showComments = false;
   let fontFamilyPreference = '';
   let requestGeneration = 0;
+  let latestAcceptedRequestGeneration = -1;
   let frameGeneration = 0;
   let mermaidPresentationGeneration = 0;
   let activeFrameDocument: Document | null = null;
@@ -1719,14 +1720,14 @@ export function createPreviewController({
     } = {}
   ): Promise<void> => {
     if (disposed) return Promise.resolve();
-    // The Host response can settle before srcdoc's load event. Activation must
-    // let that presentation finish instead of rendering the same document twice.
-    if (!force && latestPayload && text === latestAcceptedText && text === loadingFrameText) {
-      return Promise.resolve();
-    }
-    if (!force
-      && latestPayload
-      && text === latestAcceptedText
+    // DOM readiness is not cache validity: an older iframe may finish loading
+    // after a newer environment request fails. Only its accepted generation can
+    // authorize reuse, both while srcdoc loads and after it becomes readable.
+    const canReuseAcceptedPayload = !force && latestPayload !== null
+      && latestAcceptedRequestGeneration === requestGeneration
+      && text === latestAcceptedText;
+    if (canReuseAcceptedPayload && text === loadingFrameText) return Promise.resolve();
+    if (canReuseAcceptedPayload
       && text === frameRenderedText
       && frame.contentDocument?.querySelector('.meo-export-doc')) {
       setStatus(null);
@@ -1738,9 +1739,7 @@ export function createPreviewController({
       setPendingStatus(background);
       return Promise.resolve();
     }
-    // A newer request supersedes the loading frame's reuse eligibility, even
-    // if a forced refresh subsequently fails and needs an ordinary retry.
-    loadingFrameText = null;
+
     const generation = requestGeneration + 1;
     cancelPaintReady();
     const requestText = text;
@@ -1771,6 +1770,7 @@ export function createPreviewController({
         schedulePaintReady();
         return;
       }
+      latestAcceptedRequestGeneration = generation;
       latestPayload = result.value;
       latestAcceptedText = requestText;
       setStatus(null);

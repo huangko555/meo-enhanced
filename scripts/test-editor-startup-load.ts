@@ -11,16 +11,18 @@ const bundle = await build.outputs[0]!.text();
 const browser = await launchTestBrowser();
 let primaryError: unknown;
 try {
-  for (const mode of ['live', 'source', 'preview'] as const) {
-    console.log(`Checking ${mode} startup`);
+  for (const custom of [false, true]) for (const mode of ['live', 'source', 'preview'] as const) {
+    console.log(`Checking ${mode} startup (${custom ? 'custom' : 'default'} settings)`);
     const page = await browser.newPage();
     await page.setViewport({ width: 1000, height: 700 });
     await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
     await page.addStyleTag({ path: 'webview/src/styles.css' });
     let renderRequests = 0;
+    const renderSettings: Array<{ language: string; fontSize: number }> = [];
     await page.exposeFunction('__renderStartupPreview', async (message: any) => {
       if (message.type !== 'requestPreviewRender') return null;
       renderRequests += 1;
+      renderSettings.push({ language: message.uiLanguage, fontSize: message.environment.editorFontSizePx });
       return {
         type: 'previewRenderResult', requestId: message.requestId,
         result: { ok: true, value: exportRuntime.renderPreviewDocument({
@@ -35,12 +37,12 @@ try {
     await page.addScriptTag({ content: bundle });
     const marker = `Startup content ${mode}`;
     const markdown = `# ${marker}\n\nThe document body must load after opening.`;
-    await page.evaluate(({ mode, markdown }) => {
+    await page.evaluate(({ mode, markdown, custom }) => {
       const initMessage = {
         type: 'init', documentId: `file:///startup-${mode}.md`, text: markdown, version: 1,
-        savedRevision: { version: 1, text: markdown }, diagnostics: [], mode, uiLanguage: 'en',
+        savedRevision: { version: 1, text: markdown }, diagnostics: [], mode, uiLanguage: custom ? 'zh-CN' : 'en',
         sourceLineNumbers: 'on', previewAppearance: 'dark', previewFontFamily: '', previewSourceColoring: true,
-        editorAppearance: 'dark', editorFontSizeMode: 'auto', editorFontSize: 14,
+        editorAppearance: 'dark', editorFontSizeMode: custom ? 'custom' : 'auto', editorFontSize: custom ? 32 : 14,
         gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         contentMaxWidthEnabled: false, findOptions: { wholeWord: false, caseSensitive: false },
@@ -49,7 +51,7 @@ try {
       };
       (window as typeof window & { __startupInit?: typeof initMessage }).__startupInit = initMessage;
       window.dispatchEvent(new MessageEvent('message', { data: initMessage }));
-    }, { mode, markdown });
+    }, { mode, markdown, custom });
     await page.waitForFunction(({ mode, marker }) => {
       const root = document.querySelector<HTMLElement>('.editor-root');
       const selected = document.querySelector<HTMLButtonElement>(`button[data-mode="${mode}"]`);
@@ -73,6 +75,11 @@ try {
       }));
       throw new Error(`${mode} startup did not load content: ${JSON.stringify(state)}`, { cause: error });
     });
+    assert.ok(renderSettings.length > 0, 'Startup must exercise the real Preview bridge');
+    assert.equal(renderSettings[0]!.language, custom ? 'zh-CN' : 'en',
+      'Initial Preview request must capture the configured UI language');
+    if (custom) assert.equal(renderSettings[0]!.fontSize, 32,
+      'Initial Preview request must capture the configured editor font size');
     if (mode === 'preview') {
       await new Promise(resolve => setTimeout(resolve, 150));
       assert.equal(renderRequests, 1, 'Opening Preview must reuse its in-flight initial presentation');

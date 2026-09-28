@@ -10,7 +10,7 @@ if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
 let primaryError: unknown;
 try {
-  for (const scenario of ['reuse', 'replace', 'force', 'failed', 'force-failed', 'dispose']) {
+  for (const scenario of ['reuse', 'replace', 'force', 'failed', 'force-failed', 'force-failed-after-load', 'force-failed-ready', 'dispose']) {
     const page = await browser.newPage();
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(String(error)));
@@ -26,6 +26,11 @@ try {
       if (holdStyles) releases.push(release);
       else void release();
     });
+    const releaseStyles = async () => {
+      holdStyles = false;
+      await Promise.all(releases.splice(0).map(release => release()));
+    };
+    const waitForReady = () => page.waitForFunction(() => Boolean((window as any).__previewRenderedAt));
     await page.setContent('<!doctype html><body></body>');
     await page.addScriptTag({ content: await build.outputs[0]!.text() });
     const request = async (text: string, force = false) => page.evaluate(({ text, force }) => {
@@ -37,6 +42,7 @@ try {
       const value = exportRuntime.renderPreviewDocument({ markdownText: text,
         sourceDocumentPath: 'C:/tmp/preview-load.md', uiLanguage: 'en' });
       // Hold srcdoc's load event after the actual Host response has completed.
+      value.html += '<span data-render-sequence="' + index + '"></span>';
       value.html += '<link rel="stylesheet" href="https://preview-load.test/held.css">';
       return page.evaluate(({ index, value, failure }) => {
         const scope = window as any;
@@ -60,18 +66,23 @@ try {
     assert.equal(await page.evaluate(() => (window as any).__previewRenderedAt ?? null), null,
       'The stylesheet gate must hold frame initialization, not just delay the Host');
     let expected = 'Initial document';
+    let expectedSequence = scenario === 'failed' ? 1 : 0;
     if (scenario === 'replace' || scenario === 'force') {
       const next = scenario === 'replace' ? '# Replacement document' : '# Initial document';
       assert.equal(await request(next, scenario === 'force'), 2, 'Changed text and forced refresh must render');
       await respond(1, next);
+      expectedSequence = 1;
       assert.equal(await respond(0, '# Initial document'), false, 'A retired response must not replace the latest frame');
       expected = scenario === 'replace' ? 'Replacement document' : expected;
-    } else if (scenario === 'force-failed') {
+    } else if (scenario.startsWith('force-failed')) {
+      if (scenario === 'force-failed-ready') { await releaseStyles(); await waitForReady(); }
       assert.equal(await request('# Initial document', true), 2);
+      if (scenario === 'force-failed-after-load') { await releaseStyles(); await waitForReady(); }
       await respond(1, '# Initial document', true);
       assert.equal(await request('# Initial document'), 3,
-        'A failed forced refresh must not let the older loading frame suppress retry');
+        'A failed forced refresh must not let the retained frame suppress retry');
       await respond(2, '# Initial document');
+      expectedSequence = 2;
     } else if (scenario === 'dispose') {
       await page.evaluate(() => (window as any).__previewController.dispose());
       assert.equal(await request('# Initial document'), 1, 'Disposed surfaces must not request more work');
@@ -79,8 +90,7 @@ try {
       assert.equal(await request('# Initial document'), scenario === 'failed' ? 2 : 1,
         'Activation during iframe loading must reuse the accepted presentation');
     }
-    holdStyles = false;
-    await Promise.all(releases.map(release => release()));
+    await releaseStyles();
     if (scenario === 'dispose') {
       await new Promise(resolve => setTimeout(resolve, 100));
       assert.equal(await page.evaluate(() => (window as any).__previewRenderedAt ?? null), null);
@@ -88,6 +98,10 @@ try {
       await page.waitForFunction(expected => Boolean((window as any).__previewRenderedAt)
         && (window as any).__previewController.host.querySelector('iframe').contentDocument
           ?.querySelector('main.meo-export-doc')?.textContent?.includes(expected), {}, expected);
+      await page.waitForFunction(sequence => (window as any).__previewController.host.querySelector('iframe').contentDocument
+        ?.querySelector('[data-render-sequence]')?.getAttribute('data-render-sequence') === String(sequence), {}, expectedSequence);
+      assert.equal(await page.evaluate(() => (window as any).__previewController.host.querySelector('.preview-status').hidden), true,
+        'Successful retry must clear the previous failure status');
       const before = await page.evaluate(() => (window as any).__previewMessages.length);
       await request(`# ${expected}`);
       assert.equal(await page.evaluate(() => (window as any).__previewMessages.length), before,

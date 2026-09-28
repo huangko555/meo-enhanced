@@ -84,7 +84,9 @@ identical raw pixel offsets for differently sized rendered blocks.
 its Host response. It verifies that activation reuses that presentation while
 changed text, forced refresh, failed-response retry, and disposal retain their
 behavior. It runs in the full browser suite; the quick startup test also requires
-one Host render when opening directly in Preview.
+one Host render when opening directly in Preview, with the configured language
+and font size already applied to the initial request. Force-failure retry is
+checked both before and after the retained iframe becomes ready.
 
 For final installed-VSIX acceptance, use an isolated VS Code profile and open
 a Markdown file in each saved mode after both closing its tab and restarting
