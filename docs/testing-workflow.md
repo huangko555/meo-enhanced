@@ -58,6 +58,9 @@ changes, and disposal. Token completions must not parse the whole document
 again. A garbage-collection check ensures pending blocks do not retain the
 parsed full-document tree. The existing production reading-surface, viewport
 anchor and mode-transition tests cover the real Shiki/browser integration.
+The pending-code test also checks that prose revisions retain the themed DOM
+and selection of unchanged, structurally matched code while updating source
+mappings. Same-text language changes and theme replacement must still recolor.
 The pending-code test runs in the full browser suite.
 
 ## Editor startup and loading

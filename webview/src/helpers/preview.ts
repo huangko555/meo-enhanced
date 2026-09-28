@@ -157,41 +157,52 @@ function syncDescendantSourceMappings(fromElement: Element, toElement: Element):
   }
 }
 
-function haveEquivalentPreviewAttributes(left: Element, right: Element): boolean {
+function haveEquivalentPreviewAttributes(left: Element, right: Element, preserveCodeLine = false): boolean {
   let leftCount = 0;
   let rightCount = 0;
   for (const attribute of Array.from(left.attributes)) {
-    if (previewMutableStateAttributes.has(attribute.name)) continue;
+    if (previewMutableStateAttributes.has(attribute.name)
+      || (preserveCodeLine && attribute.name === 'data-meo-shiki')) continue;
     leftCount += 1;
     if (right.getAttribute(attribute.name) !== attribute.value) return false;
   }
   for (const attribute of Array.from(right.attributes)) {
-    if (!previewMutableStateAttributes.has(attribute.name)) rightCount += 1;
+    if (!previewMutableStateAttributes.has(attribute.name)
+      && !(preserveCodeLine && attribute.name === 'data-meo-shiki')) rightCount += 1;
   }
   return leftCount === rightCount;
 }
 
-function areEquivalentPreviewNodes(left: Node, right: Node): boolean {
+function areEquivalentPreviewNodes(left: Node, right: Node, preserveCodeHighlight = false): boolean {
   if (left.nodeType !== right.nodeType) return false;
   if (left.nodeType !== 1) return left.isEqualNode(right);
   const leftElement = left as Element;
   const rightElement = right as Element;
+  const preserveCodeLine = preserveCodeHighlight
+    && leftElement.classList.contains('meo-export-code-line-source')
+    && rightElement.classList.contains('meo-export-code-line-source')
+    && leftElement.hasAttribute('data-meo-shiki');
   if (
     leftElement.tagName !== rightElement.tagName
-    || !haveEquivalentPreviewAttributes(leftElement, rightElement)
-    || leftElement.childNodes.length !== rightElement.childNodes.length
+    || !haveEquivalentPreviewAttributes(leftElement, rightElement, preserveCodeLine)
   ) return false;
+  if (preserveCodeLine) return leftElement.textContent === rightElement.textContent;
+  if (leftElement.childNodes.length !== rightElement.childNodes.length) return false;
   for (let index = 0; index < leftElement.childNodes.length; index += 1) {
     if (!areEquivalentPreviewNodes(
       leftElement.childNodes[index],
-      rightElement.childNodes[index]
+      rightElement.childNodes[index],
+      preserveCodeHighlight
     )) return false;
   }
   return true;
 }
 
 function areEquivalentPreviewElements(left: HTMLElement, right: HTMLElement): boolean {
-  return areEquivalentPreviewNodes(left, right);
+  if (left.isEqualNode(right)) return true;
+  // Host fallback spans differ from the themed token DOM. Retain that projection
+  // only beneath an equivalent code root, so language/structure changes still morph.
+  return areEquivalentPreviewNodes(left, right, left.matches('code.hljs') && right.matches('code.hljs'));
 }
 
 function preserveLoadedPreviewImage(fromImage: HTMLImageElement, toImage: HTMLImageElement): boolean {

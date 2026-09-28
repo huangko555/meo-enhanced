@@ -11,6 +11,7 @@ type Harness = Window & {
   __waitingLanguages: Set<string>;
   __fullParses: number;
   __parsedMain?: WeakRef<Element>;
+  __retainedCodeRuns: Element[];
 };
 
 // Hold only the external grammar loader. Production token scheduling, Preview
@@ -35,10 +36,10 @@ const fakeCore = `
           releases.set(grammar.name, pending);
         });
       },
-      codeToTokens(code) {
+      codeToTokens(code, options) {
         let offset = 0;
         return { tokens: code.split('\\n').map(content => {
-          const syntaxToken = { content, offset, color: content.includes('old') ? '#2244aa' : '#aa4422', fontStyle: 0 };
+          const syntaxToken = { content, offset, color: options.lang === 'javascript' ? '#11aa55' : content.includes('old') ? '#2244aa' : '#aa4422', fontStyle: 0 };
           offset += content.length + 1;
           return [syntaxToken];
         }) };
@@ -106,6 +107,7 @@ try {
         scope.__previewController.acceptRenderResponse({ type: 'previewRenderResult',
           requestId: message.requestId, result: { ok: true, value } });
       }, { text, value });
+      return value;
     };
     const text = (revision: string, first = 'typescript', second = 'typescript') => [
       '# Stable heading', `${revision} revision`, 'Stable selected paragraph',
@@ -120,6 +122,62 @@ try {
       const doc = scope.__previewController.host.querySelector('iframe')?.contentDocument;
       return scope.__previewRenderedAt && doc?.querySelectorAll('[data-meo-shiki]').length === 2;
     });
+    if (scenario === 'staggered') {
+      await page.evaluate(() => {
+        const scope = window as Harness;
+        const doc = scope.__previewController.host.querySelector('iframe')!.contentDocument!;
+        scope.__retainedCodeRuns = Array.from(doc.querySelectorAll('.meo-export-code-line-source > span'));
+        const range = doc.createRange();
+        range.selectNodeContents(scope.__retainedCodeRuns[0]);
+        doc.defaultView!.getSelection()!.addRange(range);
+      });
+      const proseOnly = text('old').replace('old revision', 'prose-only revision\nsecond line');
+      const prosePayload = await render(proseOnly);
+      await waitFor(() => (window as Harness).__previewController.host.querySelector('iframe')!
+        .contentDocument!.querySelector('p')?.textContent?.includes('prose-only revision'));
+      assert.equal(await page.evaluate(() => {
+        const scope = window as Harness;
+        const doc = scope.__previewController.host.querySelector('iframe')!.contentDocument!;
+        const runs = Array.from(doc.querySelectorAll('.meo-export-code-line-source > span'));
+        return runs.length === scope.__retainedCodeRuns.length
+          && runs.every((run, index) => run === scope.__retainedCodeRuns[index]);
+      }), true, 'Prose-only revisions must retain unchanged themed code DOM');
+      const mappings = await page.evaluate(html => {
+        const doc = (window as Harness).__previewController.host.querySelector('iframe')!.contentDocument!;
+        const expected = doc.createElement('main');
+        expected.innerHTML = html;
+        const read = (root: ParentNode) => Array.from(root.querySelectorAll('[data-source-line], [data-source-end-line]'))
+          .map(node => [node.getAttribute('data-source-line'), node.getAttribute('data-source-end-line')]);
+        return { actual: read(doc.querySelector('main.meo-export-doc')!), expected: read(expected),
+          selected: doc.defaultView!.getSelection()!.toString() };
+      }, prosePayload.html);
+      assert.deepEqual(mappings.actual, mappings.expected, 'Retained code must receive current source mappings');
+      assert.equal(mappings.selected, 'old_first = 1', 'A prose update must preserve selection inside unchanged code');
+      await render(text('old', 'javascript'));
+      await waitFor(() => (window as Harness).__previewController.host.querySelector('iframe')!
+        .contentDocument!.querySelector<HTMLElement>('code.language-javascript .meo-export-code-line-source > span')
+        ?.style.color === 'rgb(17, 170, 85)');
+      await render(text('old'));
+      await waitFor(() => (window as Harness).__previewController.host.querySelector('iframe')!
+        .contentDocument!.querySelector<HTMLElement>('code.language-typescript .meo-export-code-line-source > span')
+        ?.style.color === 'rgb(34, 68, 170)');
+      const themeVersion = await page.evaluate(() => (window as Harness).__previewController.host.querySelector('iframe')!
+        .contentDocument!.querySelector<HTMLElement>('[data-meo-shiki]')!.dataset.meoShiki);
+      await page.evaluate(() => (window as Harness).__previewController.setAppearance('light'));
+      await page.waitForFunction(previous => {
+        const doc = (window as Harness).__previewController.host.querySelector('iframe')!.contentDocument!;
+        const lines = Array.from(doc.querySelectorAll<HTMLElement>('[data-meo-shiki]'));
+        return lines.length === 2 && lines.every(line => line.dataset.meoShiki !== previous);
+      }, {}, themeVersion);
+      const lightVersion = await page.evaluate(() => (window as Harness).__previewController.host.querySelector('iframe')!
+        .contentDocument!.querySelector<HTMLElement>('[data-meo-shiki]')!.dataset.meoShiki);
+      await page.evaluate(() => (window as Harness).__previewController.setAppearance('dark'));
+      await page.waitForFunction(previous => {
+        const doc = (window as Harness).__previewController.host.querySelector('iframe')!.contentDocument!;
+        const lines = Array.from(doc.querySelectorAll<HTMLElement>('[data-meo-shiki]'));
+        return lines.length === 2 && lines.every(line => line.dataset.meoShiki !== previous);
+      }, {}, lightVersion);
+    }
     await page.evaluate(() => {
       const scope = window as Harness;
       const frame = scope.__previewController.host.querySelector('iframe')!;
@@ -133,6 +191,7 @@ try {
       const paragraph = frame.contentDocument!.querySelectorAll('p')[1]!;
       const range = frame.contentDocument!.createRange();
       range.selectNodeContents(paragraph);
+      frame.contentWindow!.getSelection()!.removeAllRanges();
       frame.contentWindow!.getSelection()!.addRange(range);
     });
     await render(text('new', 'python', 'sql'));
