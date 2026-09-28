@@ -80,6 +80,12 @@ late resources, external revisions, and disk reloads. Same-surface captures insi
 paragraph whitespace must preserve the gap; cross-mode checks do not require
 identical raw pixel offsets for differently sized rendered blocks.
 
+`scripts/test-preview-loading-reuse.ts` holds the initial Preview iframe load after
+its Host response. It verifies that activation reuses that presentation while
+changed text, forced refresh, failed-response retry, and disposal retain their
+behavior. It runs in the full browser suite; the quick startup test also requires
+one Host render when opening directly in Preview.
+
 For final installed-VSIX acceptance, use an isolated VS Code profile and open
 a Markdown file in each saved mode after both closing its tab and restarting
 VS Code. Confirm that the content is readable and interactive without changing

@@ -859,6 +859,7 @@ export function createPreviewController({
   let pendingText = '';
   let latestAcceptedText: string | null = null;
   let frameRenderedText: string | null = null;
+  let loadingFrameText: string | null = null;
   type PreviewSourceMapEntry = {
     element: HTMLElement;
     start: number;
@@ -1355,6 +1356,7 @@ export function createPreviewController({
       frameEvents = new AbortController();
       const signal = frameEvents.signal;
       frameRenderedText = renderedText;
+      loadingFrameText = null;
       sourceMapResizeObserver?.disconnect();
       const FrameResizeObserver = frame.contentWindow
         ? (frame.contentWindow as unknown as Pick<typeof globalThis, 'ResizeObserver'>).ResizeObserver
@@ -1527,6 +1529,7 @@ export function createPreviewController({
     disposePreviewMathViewports();
     previewTableLayout?.dispose();
     previewTableLayout = null;
+    loadingFrameText = renderedText;
     frame.onload = () => initializeFrame();
     frame.srcdoc = `<!DOCTYPE html><html lang="${uiLanguage}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewLatexMathViewportStyles}${previewSourcePositionMarkerStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${payload.html}</main></div></body></html>`;
   };
@@ -1716,6 +1719,11 @@ export function createPreviewController({
     } = {}
   ): Promise<void> => {
     if (disposed) return Promise.resolve();
+    // The Host response can settle before srcdoc's load event. Activation must
+    // let that presentation finish instead of rendering the same document twice.
+    if (!force && latestPayload && text === latestAcceptedText && text === loadingFrameText) {
+      return Promise.resolve();
+    }
     if (!force
       && latestPayload
       && text === latestAcceptedText
@@ -2727,6 +2735,7 @@ export function createPreviewController({
       sourceNavigation = null;
       sourceNavigationDocument = null;
       frameRenderedText = null;
+      loadingFrameText = null;
       frame.style.removeProperty('visibility');
       hasPendingRequest = false;
       previewRenderTransport.cancelAll('Preview closed');

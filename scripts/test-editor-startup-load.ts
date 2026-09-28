@@ -17,8 +17,10 @@ try {
     await page.setViewport({ width: 1000, height: 700 });
     await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
     await page.addStyleTag({ path: 'webview/src/styles.css' });
+    let renderRequests = 0;
     await page.exposeFunction('__renderStartupPreview', async (message: any) => {
       if (message.type !== 'requestPreviewRender') return null;
+      renderRequests += 1;
       return {
         type: 'previewRenderResult', requestId: message.requestId,
         result: { ok: true, value: exportRuntime.renderPreviewDocument({
@@ -72,6 +74,8 @@ try {
       throw new Error(`${mode} startup did not load content: ${JSON.stringify(state)}`, { cause: error });
     });
     if (mode === 'preview') {
+      await new Promise(resolve => setTimeout(resolve, 150));
+      assert.equal(renderRequests, 1, 'Opening Preview must reuse its in-flight initial presentation');
       await page.click('button[data-mode="source"]');
       await page.waitForFunction(() => document.querySelector<HTMLElement>('.editor-root')?.dataset.mode === 'source');
       await page.evaluate(() => {
