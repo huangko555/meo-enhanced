@@ -375,7 +375,7 @@ body {
   color: var(--editor-notice-foreground);
   background: var(--editor-notice-surface);
   box-shadow: 0 4px 10px rgb(0 0 0 / 18%);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.4;
   z-index: var(--meo-layer-document-status);
 }
@@ -858,7 +858,8 @@ html[data-editor-appearance='light'] .segmented-control-button:not(.is-active):i
 }
 
 .preview-font-family-dropdown {
-  width: clamp(112px, 13vw, 156px);
+  width: max-content;
+  max-width: 156px;
 }
 
 .preview-toolbar-dropdown:hover,
@@ -6014,7 +6015,7 @@ body.outline-resizing .preview-frame {
   border-radius: 50%;
   color: var(--meo-foreground);
   background: var(--meo-background);
-  box-shadow: 0 2px 6px rgb(0 0 0 / 16%);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 10%);
   cursor: pointer;
 }
 
@@ -6060,7 +6061,7 @@ body.outline-resizing .preview-frame {
 }
 
 .source-preview-more-panel .preview-font-family-dropdown {
-  width: 132px;
+  max-width: 132px;
 }
 
 .preview-frame {

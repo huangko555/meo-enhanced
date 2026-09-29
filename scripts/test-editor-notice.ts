@@ -252,7 +252,7 @@ async function main() {
       result.firstState.retryText !== '重试') {
       throw new Error(`notice close control was incorrect: ${JSON.stringify(result.firstState)}`);
     }
-    if (result.firstState.fontSize !== '14px' || result.firstState.opacity !== '1' ||
+    if (result.firstState.fontSize !== '13px' || result.firstState.opacity !== '1' ||
       result.firstState.contentHeight > 21 ||
       Math.abs(result.firstState.titleTop - result.firstState.messageTop) > 2 ||
       result.firstState.background === result.firstState.editorBackground ||
