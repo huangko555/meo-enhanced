@@ -3826,6 +3826,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         return;
       }
       const isOutsideTable = !container.contains(event.target);
+      // Focus-preserving toolbar presses do not end editing in the active cell.
+      if (isOutsideTable && event.defaultPrevented) return;
       const targetTableShell = event.target instanceof Element
         ? event.target.closest('.meo-md-html-table-shell')
         : null;

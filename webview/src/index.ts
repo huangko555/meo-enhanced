@@ -834,17 +834,17 @@ discardBtn.title = activeUiStrings.reloadDiskVersion;
 discardBtn.setAttribute('aria-label', activeUiStrings.reloadDiskVersion);
 discardBtn.appendChild(createElement(HardDriveUpload, { width: 18, height: 18 }));
 
-toolbar.addEventListener('pointerdown', (event) => {
+document.addEventListener('pointerdown', (event) => {
   const target = event.target;
   if (
     event.button === 0 &&
     target instanceof Element &&
-    target.closest('button') &&
+    toolbar.contains(target) &&
+    !target.closest('input, textarea, select, [contenteditable], [role="textbox"]') &&
     editor?.hasFocus()
   ) {
-    // Toolbar commands operate on the current editor context. Retaining focus
-    // prevents native blur from committing embedded editors and changing layout
-    // before the command establishes its own viewport/document transaction.
+    // Pointer-operated chrome, including switches and empty space, keeps the
+    // current insertion caret. Controls that accept input still own focus.
     event.preventDefault();
   }
 }, true);
@@ -2330,18 +2330,32 @@ const applyRevealDocumentFragmentFromHost = (href: unknown): void => {
   pendingRevealDocumentFragment = null;
 };
 
+let restoreEditorFocusOnWindowReturn = false;
+let editorWasLastFocused = false;
+let documentPointerGeneration = 0;
+let pendingEditorFocusReturnRaf: number | null = null;
+const scheduleEditorFocusReturn = (): void => {
+  if (pendingEditorFocusReturnRaf !== null) window.cancelAnimationFrame(pendingEditorFocusReturnRaf);
+  const pointerGeneration = documentPointerGeneration;
+  pendingEditorFocusReturnRaf = window.requestAnimationFrame(() => {
+    pendingEditorFocusReturnRaf = null;
+    if (!editor || getActiveEditorMode() === 'preview') return;
+    if (documentPointerGeneration !== pointerGeneration) return;
+    const active = document.activeElement;
+    if (active !== document.body && active !== document.documentElement && !editor.hasFocus()) return;
+    editor.focus();
+  });
+};
+
 const focusEditorFromHost = () => {
   if (!editor) {
     pendingEditorFocus = true;
     return;
   }
-
   const active = document.activeElement;
-  if (active !== document.body && active !== document.documentElement && !editor.hasFocus()) {
-    return;
-  }
+  if (active !== document.body && active !== document.documentElement && !editor.hasFocus()) return;
   scheduleEditorSurfaceRecovery();
-  editor.focus();
+  scheduleEditorFocusReturn();
   pendingEditorFocus = false;
 };
 
@@ -3333,9 +3347,6 @@ window.addEventListener('paste', async (event) => {
   });
 });
 
-let restoreEditorFocusOnWindowReturn = false;
-let editorWasLastFocused = false;
-let documentPointerGeneration = 0;
 document.addEventListener('focusin', (event) => {
   editorWasLastFocused = event.target instanceof Node && editor?.view.dom.contains(event.target) === true;
 }, true);
@@ -3365,14 +3376,7 @@ window.addEventListener('focus', () => {
   scheduleEditorSurfaceRecovery();
   if (!restoreEditorFocusOnWindowReturn) return;
   restoreEditorFocusOnWindowReturn = false;
-  const pointerGeneration = documentPointerGeneration;
-  window.requestAnimationFrame(() => {
-    if (!editor || getActiveEditorMode() === 'preview') return;
-    if (documentPointerGeneration !== pointerGeneration) return;
-    const active = document.activeElement;
-    if (active !== document.body && active !== document.documentElement && !editor.hasFocus()) return;
-    editor.focus();
-  });
+  scheduleEditorFocusReturn();
 });
 
 window.addEventListener('beforeunload', () => {

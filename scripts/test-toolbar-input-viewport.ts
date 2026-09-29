@@ -9,12 +9,12 @@ const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-toolbar-input-viewport-'));
 const text = Array.from({ length: 40 }, (_, index) => `line ${index + 1} ordinary content`).join('\n');
 
-const init = (mode: 'live' | 'source') => ({
+const init = (mode: 'live' | 'source', documentText = text) => ({
   type: 'init',
   documentId: `file:///toolbar-input-${mode}.md`,
-  text,
+  text: documentText,
   version: 1,
-  savedRevision: { version: 1, text },
+  savedRevision: { version: 1, text: documentText },
   diagnostics: [],
   mode,
   uiLanguage: 'en',
@@ -38,7 +38,7 @@ const init = (mode: 'live' | 'source') => ({
   vscodeTheme: null
 });
 
-async function open(browser: Browser, mode: 'live' | 'source'): Promise<Page> {
+async function open(browser: Browser, mode: 'live' | 'source', documentText = text): Promise<Page> {
   const page = await browser.newPage();
   await page.setViewport({ width: 1000, height: 700, deviceScaleFactor: 1 });
   await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><button id="outside">outside</button><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>');
@@ -54,7 +54,7 @@ async function open(browser: Browser, mode: 'live' | 'source'): Promise<Page> {
   await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
   await page.evaluate((message) => {
     window.dispatchEvent(new MessageEvent('message', { data: message }));
-  }, init(mode));
+  }, init(mode, documentText));
   await page.waitForSelector('.editor-wrapper:not(.meo-preload-editor-shell) .cm-content');
   return page;
 }
@@ -192,6 +192,96 @@ async function runFocusReturn(browser: Browser, mode: 'live' | 'source'): Promis
   }
 }
 
+async function runPassiveControls(browser: Browser, mode: 'live' | 'source'): Promise<void> {
+  const page = await open(browser, mode);
+  try {
+    await page.click('.cm-line:nth-child(3)');
+    const blank = await page.evaluate(() => {
+      const rect = document.querySelector<HTMLElement>('.mode-toolbar')!.getBoundingClientRect();
+      return { x: rect.left + 2, y: rect.top + rect.height / 2 };
+    });
+    await page.mouse.click(blank.x, blank.y);
+    const afterBlank = await page.evaluate(() => ({
+      focused: document.activeElement === document.querySelector('.cm-content'),
+      line: document.getSelection()?.anchorNode?.parentElement?.closest('.cm-line')?.textContent
+    }));
+    assert.equal(afterBlank.focused, true, `${mode} toolbar background hid the insertion caret`);
+    assert.match(afterBlank.line ?? '', /line 3 ordinary content/);
+
+    await page.click('[data-action="settings"]');
+    await page.click('[data-action="tableStickyHeader"]');
+    const afterSwitch = await page.evaluate(() => ({
+      focused: document.activeElement === document.querySelector('.cm-content'),
+      switched: document.querySelector('[data-action="tableStickyHeader"]')?.getAttribute('aria-checked'),
+      menuOpen: !document.querySelector<HTMLElement>('.more-tools-panel')?.hidden
+    }));
+    assert.deepEqual(afterSwitch, { focused: true, switched: 'false', menuOpen: true },
+      `${mode} settings switch lost the editing caret`);
+    await page.click('.line-jump-input');
+    assert.equal(await page.evaluate(() => document.activeElement === document.querySelector('.line-jump-input')), true,
+      `${mode} line-jump input could not take focus`);
+  } finally {
+    await page.close();
+  }
+}
+
+async function runTableControlFocus(browser: Browser): Promise<void> {
+  const page = await open(browser, 'live', '| A | B |\n| --- | --- |\n| alpha | beta |');
+  try {
+    await page.waitForSelector('tbody textarea[data-table-row="1"][data-table-col="0"]');
+    await page.evaluate(() => {
+      const input = document.querySelector<HTMLTextAreaElement>('tbody textarea[data-table-row="1"][data-table-col="0"]')!;
+      input.focus();
+      input.setSelectionRange(2, 2);
+    });
+    await page.click('[data-action="settings"]');
+    const focusedAfterOpen = await page.evaluate(() => document.activeElement
+      === document.querySelector('tbody textarea[data-table-row="1"][data-table-col="0"]'));
+    assert.equal(focusedAfterOpen, true, 'Opening settings lost the Live table cell caret');
+    await page.click('[data-action="tableStickyHeader"]');
+    const result = await page.evaluate(() => {
+      const input = document.querySelector<HTMLTextAreaElement>('tbody textarea[data-table-row="1"][data-table-col="0"]');
+      return {
+        focused: document.activeElement === input,
+        selection: input?.selectionStart,
+        switched: document.querySelector('[data-action="tableStickyHeader"]')?.getAttribute('aria-checked')
+      };
+    });
+    assert.deepEqual(result, { focused: true, selection: 2, switched: 'false' },
+      `Live table cell caret was lost while toggling a settings switch: ${JSON.stringify(result)}`);
+  } finally {
+    await page.close();
+  }
+}
+
+async function runActivationClickPriority(browser: Browser, mode: 'live' | 'source'): Promise<void> {
+  const page = await open(browser, mode);
+  try {
+    await page.click('.cm-line:nth-child(3)');
+    const result = await page.evaluate(async () => {
+      const content = document.querySelector<HTMLElement>('.cm-content')!;
+      const originalFocus = content.focus.bind(content);
+      let oldCaretRestores = 0;
+      content.focus = (options?: FocusOptions) => { oldCaretRestores += 1; originalFocus(options); };
+      window.dispatchEvent(new Event('blur'));
+      content.blur();
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
+      const beforeClick = oldCaretRestores;
+      document.querySelector<HTMLElement>('.cm-line:nth-child(5)')!.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true, button: 0
+      }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      content.focus = originalFocus;
+      return { beforeClick, afterFrame: oldCaretRestores };
+    });
+    assert.deepEqual(result, { beforeClick: 0, afterFrame: 0 },
+      `${mode} activation showed the old caret before a document click: ${JSON.stringify(result)}`);
+  } finally {
+    await page.close();
+  }
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-basic-capability-index-entry.ts')],
@@ -209,6 +299,11 @@ async function main(): Promise<void> {
     await runMode(browser, 'source');
     await runFocusReturn(browser, 'live');
     await runFocusReturn(browser, 'source');
+    await runActivationClickPriority(browser, 'live');
+    await runActivationClickPriority(browser, 'source');
+    await runPassiveControls(browser, 'live');
+    await runPassiveControls(browser, 'source');
+    await runTableControlFocus(browser);
     console.log('Toolbar input viewport regression passed');
   } catch (error) {
     primaryError = error;
