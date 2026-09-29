@@ -220,6 +220,36 @@ async function runPassiveControls(browser: Browser, mode: 'live' | 'source'): Pr
     await page.click('.line-jump-input');
     assert.equal(await page.evaluate(() => document.activeElement === document.querySelector('.line-jump-input')), true,
       `${mode} line-jump input could not take focus`);
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.activeElement === document.querySelector('.cm-content'));
+    await page.click('.line-jump-input');
+    await page.keyboard.type('40');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => document.activeElement === document.querySelector('.cm-content'));
+    assert.ok(await page.$eval('.cm-scroller', element => element.scrollTop) > 0,
+      `${mode} line-jump focus recovery undid navigation`);
+
+    await page.click('[data-action="outline-right"]');
+    await page.click('.outline-header-button[data-action="expand-all"]');
+    assert.equal(await page.evaluate(() => document.activeElement === document.querySelector('.cm-content')), true,
+      `${mode} outline action hid the insertion caret`);
+
+    await page.evaluate(() => {
+      const button = document.createElement('button');
+      button.id = 'future-passive-control';
+      button.textContent = 'Future action';
+      button.style.cssText = 'position:fixed;right:8px;top:110px;z-index:100';
+      const input = document.createElement('input');
+      input.id = 'future-transient-control';
+      input.style.cssText = 'position:fixed;right:8px;top:145px;z-index:100';
+      document.getElementById('app')!.append(button, input);
+    });
+    await page.click('#future-passive-control');
+    assert.equal(await page.evaluate(() => document.activeElement === document.querySelector('.cm-content')), true,
+      `${mode} unregistered passive control hid the insertion caret`);
+    await page.click('#future-transient-control');
+    await page.evaluate(() => document.querySelector<HTMLInputElement>('#future-transient-control')!.blur());
+    await page.waitForFunction(() => document.activeElement === document.querySelector('.cm-content'));
   } finally {
     await page.close();
   }

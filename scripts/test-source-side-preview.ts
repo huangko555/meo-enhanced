@@ -1881,6 +1881,12 @@ try {
     return { left: rect.left, right: rect.right, viewportWidth: window.innerWidth };
   });
   assert.ok(narrowMenuBounds.left >= 8 && narrowMenuBounds.right <= narrowMenuBounds.viewportWidth - 8, JSON.stringify(narrowMenuBounds));
+  await page.click('.cm-content');
+  await page.click('.source-preview-more-button');
+  await page.click('.source-preview-more-panel .preview-font-family-dropdown');
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('role')), 'combobox');
+  await page.click('.preview-font-family-dropdown-panel [role="option"]:nth-child(2)');
+  await page.waitForFunction(() => document.activeElement === document.querySelector('.cm-content'));
 } catch (error) {
   primaryError = error;
 } finally {
