@@ -1462,6 +1462,31 @@ export function createEditor({
     });
   };
 
+  const revealLiveTableSearchMatch = (from: number, to: number, isCurrent: () => boolean, remainingFrames = 8) => {
+    if (remainingFrames <= 0) return;
+    // CodeMirror measures a rendered table as one widget, so its position cannot
+    // reveal a match in a distant row. Wait for the table's derived search mark.
+    const matchSelector = '.meo-md-html-table:not(.meo-md-html-table-sticky-table) .meo-search-match-active';
+    requestAnimationFrame(() => {
+      if (editorDestroyed || currentMode !== 'live' || !isCurrent()) return;
+      const searchState = (view.dom as HTMLElement & {
+        __meoSearchState?: { selectionFrom: number; selectionTo: number };
+      }).__meoSearchState;
+      if (searchState?.selectionFrom === from && searchState.selectionTo === to) {
+        const match = view.dom.querySelector<HTMLElement>(matchSelector);
+        if (match) {
+          viewportController.revealVerticalBounds(() => {
+            const currentMatch = view.dom.querySelector<HTMLElement>(matchSelector);
+            const rect = currentMatch?.getBoundingClientRect();
+            return rect ? { top: rect.top, bottom: rect.bottom } : null;
+          }, isCurrent, { yMargin: 12 });
+          return;
+        }
+      }
+      revealLiveTableSearchMatch(from, to, isCurrent, remainingFrames - 1);
+    });
+  };
+
   const selectSearchMatch = (from: number, to: number, { focusEditor = true }: { focusEditor?: boolean } = {}) => {
     const htmlBlock = currentMode === 'live'
       ? collectRenderableHtmlBlocks(view.state).find((block) => from < block.to && to > block.from)
@@ -1479,6 +1504,9 @@ export function createEditor({
     scheduleLiveSearchDecorationRefresh(to);
     const isRevealCurrent = viewportController.beginNavigationReveal();
     viewportController.revealPosition(from, { y: 'center-if-outside', schedule: 'next-frame' }, isRevealCurrent);
+    if (currentMode === 'live') {
+      requestAnimationFrame(() => revealLiveTableSearchMatch(from, to, isRevealCurrent));
+    }
     if (focusEditor) {
       view.focus();
     }

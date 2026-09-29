@@ -35,8 +35,9 @@ async function main() {
         }
       };
       const before = Array.from({ length: 18 }, (_, index) => `before ${index + 1}`);
-      const rows = Array.from({ length: 10 }, (_, index) => (
-        `| ${index + 1} | ${index === 7 ? 'overview-needle' : `row ${index + 1}`} |`
+      const wrappedCell = '这是一段需要换行的长内容，包含中文、 English words and numbers 12345。'.repeat(8);
+      const rows = Array.from({ length: 24 }, (_, index) => (
+        `| ${index + 1} | ${index === 18 ? 'overview-needle ' : ''}${wrappedCell} |`
       ));
       const after = Array.from({ length: 36 }, (_, index) => `after ${index + 1}`);
       const selectionStates: Array<{ visible?: boolean }> = [];
@@ -62,12 +63,14 @@ async function main() {
       editor.findNext('overview-needle', { focusEditor: false });
       await waitFrames();
 
-      const matchedRow = tableRows[7];
+      const matchedRow = tableRows[18];
       const scroller = editor.view.scrollDOM as HTMLElement;
       const ruler = document.querySelector<HTMLElement>('.meo-search-overview-ruler')!;
       const marker = ruler.querySelector<HTMLElement>('.meo-search-overview-ruler-marker')!;
+      const activeMatch = document.querySelector<HTMLElement>('.meo-md-html-table .meo-search-match-active');
       const scrollRect = scroller.getBoundingClientRect();
       const rowRect = matchedRow.getBoundingClientRect();
+      const activeRect = activeMatch?.getBoundingClientRect();
       const rowTop = scroller.scrollTop + rowRect.top - scrollRect.top;
       const expectedTop = Math.round((rowTop / scroller.scrollHeight) * ruler.clientHeight);
       const actualTop = Number.parseFloat(marker.style.top);
@@ -77,15 +80,30 @@ async function main() {
         delta: Math.abs(expectedTop - actualTop),
         scrollHeight: scroller.scrollHeight,
         trackHeight: ruler.clientHeight,
+        activeMatchVisible: Boolean(activeRect && activeRect.top >= scrollRect.top && activeRect.bottom <= scrollRect.bottom),
+        focusedMatchVisible: false,
         hasSearchSelection: editor.view.dom.classList.contains('has-search-selection'),
         selectionMenuVisible: selectionStates.at(-1)?.visible ?? null
       };
+      editor.findNext('overview-needle');
+      await waitFrames();
+      const focusedMatchRect = document.querySelector<HTMLElement>(
+        '.meo-md-html-table .meo-search-match-active'
+      )?.getBoundingClientRect();
+      state.focusedMatchVisible = Boolean(focusedMatchRect
+        && focusedMatchRect.top >= scrollRect.top && focusedMatchRect.bottom <= scrollRect.bottom);
       editor.destroy();
       return state;
     });
 
     if (result.delta > 2) {
       throw new Error(`Search overview marker did not follow rendered row geometry: ${JSON.stringify(result)}`);
+    }
+    if (!result.activeMatchVisible) {
+      throw new Error(`Active search match remained outside the editor viewport: ${JSON.stringify(result)}`);
+    }
+    if (!result.focusedMatchVisible) {
+      throw new Error(`Focused search match remained outside the editor viewport: ${JSON.stringify(result)}`);
     }
     if (!result.hasSearchSelection || result.selectionMenuVisible !== false) {
       throw new Error(`Active search selection was not classified without opening the selection menu: ${JSON.stringify(result)}`);
