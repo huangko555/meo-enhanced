@@ -21,7 +21,7 @@ const rendered = await exportRuntime.renderExportHtmlDocument({
   target: 'html',
   mermaidRuntimeSrc: 'mermaid.min.js',
   baseHref: 'file:///C:/tmp/',
-  title: 'Dark export colors'
+  title: 'Light export colors'
 });
 
 const browser = await launchTestBrowser();
@@ -56,23 +56,23 @@ try {
   });
   const pdfColors = await readColors();
   const expectedColors = {
-    heading: 'rgb(216, 222, 233)',
-    strong: 'rgb(197, 205, 216)',
-    emphasis: 'rgb(197, 205, 216)',
-    deleted: 'rgb(197, 205, 216)',
-    code: 'rgb(197, 205, 216)',
-    link: 'rgb(88, 166, 255)',
-    linkedCode: 'rgb(88, 166, 255)'
+    heading: 'rgb(31, 35, 40)',
+    strong: 'rgb(48, 54, 61)',
+    emphasis: 'rgb(48, 54, 61)',
+    deleted: 'rgb(48, 54, 61)',
+    code: 'rgb(48, 54, 61)',
+    link: 'rgb(9, 105, 218)',
+    linkedCode: 'rgb(9, 105, 218)'
   };
   for (const [target, colors] of Object.entries({ html: htmlColors, pdf: pdfColors })) {
     for (const [kind, color] of Object.entries(colors) as Array<[keyof typeof expectedColors, string]>) {
       const expectedColor = expectedColors[kind];
       if (color !== expectedColor) {
-        throw new Error(`Dark ${target} export ${kind} did not inherit the Preview palette: ${color}`);
+        throw new Error(`${target} export ${kind} did not use the light palette: ${color}`);
       }
     }
   }
-  console.log('Dark export color test passed');
+  console.log('Light export color test passed');
 } finally {
   await browser.close();
 }

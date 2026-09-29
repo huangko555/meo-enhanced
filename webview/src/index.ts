@@ -3022,7 +3022,7 @@ const exportAdapter = createExportWebviewAdapter({
   getPreviewAppearance: () => previewAdapter.getAppearance(),
   getUiLanguage: () => activeUiLanguage,
   getStyleEnvironment: () => previewController.getStyleEnvironment(),
-  getCodeTheme: () => themeAdapter.getCodePalette(previewAdapter.getAppearance()).sourceTheme
+  getCodeTheme: () => themeAdapter.getCodePalette('light').sourceTheme
 });
 
 const themeAdapter = createAppearanceWebviewAdapter({

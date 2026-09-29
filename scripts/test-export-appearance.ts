@@ -28,15 +28,24 @@ const dark = await exportRuntime.renderExportHtmlDocument({
   ...baseOptions,
   readingSnapshot: { ...baseOptions.readingSnapshot, snapshotId: 'appearance-dark', appearance: 'dark' }
 });
+const darkPdf = await exportRuntime.renderExportHtmlDocument({
+  ...baseOptions,
+  target: 'pdf',
+  outputFilePath: 'C:/tmp/export.pdf',
+  readingSnapshot: { ...baseOptions.readingSnapshot, snapshotId: 'appearance-dark-pdf', appearance: 'dark' }
+});
 
 if (!light.htmlDocument.includes('--meo-bg: #ffffff')) {
   throw new Error('Light export did not build a white reading document');
 }
-if (!dark.htmlDocument.includes('--meo-bg: #20252b')) {
-  throw new Error('Dark export did not build a dark reading document');
+if (!dark.htmlDocument.includes('--meo-bg: #ffffff')) {
+  throw new Error('Dark Preview did not export a white reading document');
 }
-if (!light.hasMermaid || !dark.hasMermaid || light.htmlDocument === dark.htmlDocument) {
-  throw new Error('Export rendering did not preserve Mermaid content across appearance variants');
+if (!darkPdf.htmlDocument.includes('--meo-bg: #ffffff')) {
+  throw new Error('Dark Preview did not export a white PDF document');
+}
+if (!light.hasMermaid || !dark.hasMermaid || light.htmlDocument !== dark.htmlDocument) {
+  throw new Error('Export rendering changed with the Preview appearance');
 }
 
 console.log('export appearance checks passed');

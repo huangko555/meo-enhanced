@@ -42,7 +42,7 @@ const createHarness = (initialText: string, initialAppearance: 'light' | 'dark',
     getPreviewAppearance: () => appearance,
     getUiLanguage: () => 'zh-CN',
     getStyleEnvironment: () => environment,
-    getCodeTheme: () => ({ name: `${appearance} test`, type: appearance, colors: {}, tokenColors: [] })
+    getCodeTheme: () => ({ name: 'light test', type: 'light', colors: {}, tokenColors: [] })
   });
   return {
     request: () => hostTransport.request(),
@@ -87,7 +87,7 @@ assert.deepEqual(firstSnapshot, {
   appearance: 'dark',
   uiLanguage: 'zh-CN',
   environment: { editorBackgroundColor: '#101010', previewFontFamily: 'MEO Synthetic Sans' },
-  codeTheme: { name: 'dark test', type: 'dark', colors: {}, tokenColors: [] }
+  codeTheme: { name: 'light test', type: 'light', colors: {}, tokenColors: [] }
 });
 assert.equal(secondResult.value.text, '# editor two', 'two Editor/panel transports must remain isolated');
 assert.equal(secondResult.value.environment.previewFontFamily, 'MEO Synthetic Serif');
@@ -113,7 +113,8 @@ for (const target of ['html', 'pdf'] as const) {
   });
   assert.match(rendered.htmlDocument, /editor one current/);
   assert.doesNotMatch(rendered.htmlDocument, /later edit/);
-  assert.match(rendered.htmlDocument, /#101010/);
+  assert.match(rendered.htmlDocument, /--meo-bg:\s*#ffffff/);
+  assert.doesNotMatch(rendered.htmlDocument, /#101010/);
   assert.match(rendered.htmlDocument, /MEO Synthetic Sans/);
   assert.doesNotMatch(rendered.htmlDocument, /MEO Synthetic Serif/);
 }

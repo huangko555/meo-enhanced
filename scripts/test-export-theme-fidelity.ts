@@ -1,4 +1,4 @@
-import darkPlus from '@shikijs/themes/dark-plus';
+import lightPlus from '@shikijs/themes/light-plus';
 import { codeToTokens } from 'shiki';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -18,16 +18,21 @@ const code = [
   '  return `Hello, ${user.id}`;',
   '}'
 ].join('\n');
-const codeTheme = darkPlus as CodeThemeDto;
+const codeTheme = lightPlus as CodeThemeDto;
 const palette = resolveFinalCodePalette(
   codeTheme as RawCodeTheme,
   codeTheme as RawCodeTheme,
-  'dark'
+  'light'
 ).preview;
-const frontmatterColors = {
+const capturedFrontmatterColors = {
   key: '#e5c07b',
   value: '#d4d4d4',
   pillBackground: '#474b50'
+};
+const frontmatterColors = {
+  key: '#9a6700',
+  value: '#24292f',
+  pillBackground: '#d0d7de'
 };
 const rendered = await exportRuntime.renderExportHtmlDocument({
   readingSnapshot: {
@@ -54,9 +59,9 @@ const rendered = await exportRuntime.renderExportHtmlDocument({
       panelBorderColor: '#454545',
       previewSourceColoring: true,
       previewCodePalettes: { light: palette, dark: palette },
-      frontmatterKeyColor: frontmatterColors.key,
-      frontmatterValueColor: frontmatterColors.value,
-      frontmatterPillBackgroundColor: frontmatterColors.pillBackground
+      frontmatterKeyColor: capturedFrontmatterColors.key,
+      frontmatterValueColor: capturedFrontmatterColors.value,
+      frontmatterPillBackgroundColor: capturedFrontmatterColors.pillBackground
     }
   },
   sourceDocumentPath: 'C:/tmp/source.md',
@@ -91,9 +96,9 @@ const lightRenderedSnapshot = {
     meoThemeColors: getBuiltInVisuals('dark').colors,
     previewSourceColoring: true,
     previewCodePalettes: { light: palette, dark: palette },
-    frontmatterKeyColor: frontmatterColors.key,
-    frontmatterValueColor: frontmatterColors.value,
-    frontmatterPillBackgroundColor: frontmatterColors.pillBackground
+    frontmatterKeyColor: capturedFrontmatterColors.key,
+    frontmatterValueColor: capturedFrontmatterColors.value,
+    frontmatterPillBackgroundColor: capturedFrontmatterColors.pillBackground
   }
 };
 const lightRendered = await exportRuntime.renderExportHtmlDocument({
@@ -108,12 +113,12 @@ const lightRendered = await exportRuntime.renderExportHtmlDocument({
 
 const toRgb = (value: string | undefined): string => {
   if (!value) return '';
-  const match = /^#([0-9a-f]{6})$/i.exec(value);
+  const match = /^#([0-9a-f]{6})(?:ff)?$/i.exec(value);
   if (!match) return value.toLowerCase();
   const hex = match[1]!;
   return `rgb(${Number.parseInt(hex.slice(0, 2), 16)}, ${Number.parseInt(hex.slice(2, 4), 16)}, ${Number.parseInt(hex.slice(4, 6), 16)})`;
 };
-const expectedTokens = await codeToTokens(code, { lang: 'ts', theme: darkPlus });
+const expectedTokens = await codeToTokens(code, { lang: 'ts', theme: lightPlus });
 const expectedLines = expectedTokens.tokens.map((line) => line.flatMap((token) => (
   [...token.content].map((char) => ({ char, color: toRgb(token.color) }))
 )));
@@ -193,7 +198,7 @@ try {
     keyColumnWidth: 124
   };
   if (mismatches.length > 0 || JSON.stringify(actual.frontmatter) !== JSON.stringify(expectedFrontmatter)) {
-    throw new Error(`Export theme differs from Live/Preview: ${JSON.stringify({
+    throw new Error(`Light export theme differs from its code and reading palette: ${JSON.stringify({
       mismatchCount: mismatches.length,
       firstMismatches: mismatches.slice(0, 12),
       expectedFrontmatter,

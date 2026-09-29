@@ -36,7 +36,7 @@ const adapter = createExportWebviewAdapter({
   getPreviewAppearance: () => currentAppearance,
   getUiLanguage: () => 'en',
   getStyleEnvironment: () => currentEnvironment,
-  getCodeTheme: () => ({ name: `${currentAppearance} test`, type: currentAppearance, colors: {}, tokenColors: [] })
+  getCodeTheme: () => ({ name: 'light test', type: 'light', colors: {}, tokenColors: [] })
 });
 
 adapter.requestExport('html', { includeTableOfContents: false });
@@ -85,7 +85,7 @@ assert.deepEqual(posted.splice(0), [
         appearance: 'dark',
         uiLanguage: 'en',
         environment: { previewFontFamily: '', editorBackgroundColor: '#111' },
-        codeTheme: { name: 'dark test', type: 'dark', colors: {}, tokenColors: [] }
+        codeTheme: { name: 'light test', type: 'light', colors: {}, tokenColors: [] }
       }
     }
   },
@@ -100,7 +100,7 @@ assert.deepEqual(posted.splice(0), [
         appearance: 'dark',
         uiLanguage: 'en',
         environment: { previewFontFamily: '', editorBackgroundColor: '#111' },
-        codeTheme: { name: 'dark test', type: 'dark', colors: {}, tokenColors: [] }
+        codeTheme: { name: 'light test', type: 'light', colors: {}, tokenColors: [] }
       }
     }
   }

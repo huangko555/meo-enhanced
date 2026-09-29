@@ -26,12 +26,10 @@ async function renderExportHtmlDocument(
   options: ExportRuntimeBuildHtmlOptions
 ): Promise<{ htmlDocument: string; hasMermaid: boolean; hasMath: boolean }> {
   const snapshot = options.readingSnapshot;
-  const exportAppearance = options.target === 'docx' ? 'light' : snapshot.appearance;
-  const fallbackTheme = options.target === 'docx'
+  const exportAppearance = 'light';
+  const fallbackTheme = options.target === 'docx' || !snapshot.codeTheme
     ? (await import('@shikijs/themes/light-plus')).default as CodeThemeDto
-    : snapshot.codeTheme ?? (exportAppearance === 'light'
-      ? (await import('@shikijs/themes/light-plus')).default as CodeThemeDto
-      : (await import('@shikijs/themes/dark-plus')).default as CodeThemeDto);
+    : snapshot.codeTheme;
   const highlighter = snapshot.environment.previewSourceColoring === false
     ? null
     : await createExportCodeHighlighter(snapshot.text, fallbackTheme, options.shikiLanguageAssetsRoot);
