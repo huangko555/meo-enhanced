@@ -98,6 +98,19 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     breaks: true,
     langPrefix: 'language-'
   });
+  // Markdown-it leaves punctuation-ending strong text literal when prose follows the closing marker.
+  // Limit this Live-compatible case to plain labels; nested Markdown keeps the normal parser.
+  md.inline.ruler.before('emphasis', 'punctuation_closing_strong', (state, silent) => {
+    const match = /^\*\*([^*\n]+[\p{P}\p{S}])\*\*(?=\S)/u.exec(state.src.slice(state.pos, state.posMax));
+    if (!match || /^\s/u.test(match[1]) || /[*_`~\[\]<>\\&]/u.test(match[1])) return false;
+    if (!silent) {
+      state.push('strong_open', 'strong', 1);
+      state.push('text', '', 0).content = match[1];
+      state.push('strong_close', 'strong', -1);
+    }
+    state.pos += match[0].length;
+    return true;
+  });
   installHighlightTransform(md);
   installSourcePositionAndHeadingAnchorTransform(md, (startIndex, endIndex) => ({
     start: bodySourceLines?.[startIndex] ?? 0,

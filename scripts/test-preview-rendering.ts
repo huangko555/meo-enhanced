@@ -15,6 +15,25 @@ const blockBoundaryPreviews = markdownBlockBoundaryCases.map((markdownText, inde
   uiLanguage: 'en',
   styleEnvironment: { previewFontFamily: '' }
 }));
+const punctuationBoldPreview = exportRuntime.renderPreviewDocument({
+  markdownText: '**标题：**\n\n**标题：**内容',
+  sourceDocumentPath: 'C:/tmp/preview-punctuation-bold.md',
+  uiLanguage: 'zh-CN',
+  styleEnvironment: { previewFontFamily: '' }
+});
+if (!punctuationBoldPreview.html.includes('<strong>标题：</strong>')
+  || !punctuationBoldPreview.html.includes('<strong>标题：</strong>内容')) {
+  throw new Error(`Preview should render bold text ending in Chinese punctuation before adjacent text: ${punctuationBoldPreview.html}`);
+}
+const punctuationBoldCode = exportRuntime.renderPreviewDocument({
+  markdownText: '`**标题：**内容`',
+  sourceDocumentPath: 'C:/tmp/preview-punctuation-code.md',
+  uiLanguage: 'zh-CN',
+  styleEnvironment: { previewFontFamily: '' }
+});
+if (!punctuationBoldCode.html.includes('<code>**标题：**内容</code>')) {
+  throw new Error(`Inline code should preserve literal punctuation and markers: ${punctuationBoldCode.html}`);
+}
 
 const previewColors = exportRuntime.renderPreviewDocument({
   markdownText: [
