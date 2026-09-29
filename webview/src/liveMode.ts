@@ -3776,7 +3776,7 @@ export const editorMarkdownLanguage = markdown({
   addKeymap: false,
   codeLanguages: resolveCodeLanguage,
   extensions: [footnoteMarkdownExtension, highlightMarkdownExtension,
-    { props: [sourceMarkdownHighlightProps] }, { remove: ['SetextHeading'] }]
+    { props: [sourceMarkdownHighlightProps] }, { remove: ['SetextHeading', 'Emoji'] }]
 });
 
 export function liveModeExtensions(options: { readonly largeDocument?: boolean } = {}): Extension[] {

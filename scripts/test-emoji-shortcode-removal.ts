@@ -7,7 +7,7 @@ import { launchTestBrowser } from './browser-test-helpers';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-emoji-shortcode-removal-'));
-const ordinaryText = ':smile: :not_real: 😄';
+const ordinaryText = ':smile: :not_real: 😄 14:18:33';
 
 async function main(): Promise<void> {
   const rendered = renderMarkdownToHtml({
@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   });
   assert.match(
     rendered.html,
-    />:smile: :not_real: 😄<\/p>/,
+    />:smile: :not_real: 😄 14:18:33<\/p>/,
     'Preview/export must preserve known and unknown shortcodes plus Unicode emoji as ordinary text'
   );
 
@@ -60,7 +60,15 @@ async function main(): Promise<void> {
       const liveEditor = await create(`lead\n${text}`, 'live');
       const live = {
         text: document.querySelector<HTMLElement>('.cm-content')?.textContent ?? '',
-        emojiWidgets: document.querySelectorAll('.meo-md-emoji').length
+        emojiWidgets: document.querySelectorAll('.meo-md-emoji').length,
+        timeColorMatchesText: (() => {
+          const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+            .find(candidate => candidate.textContent?.includes('14:18:33'));
+          if (!line) return false;
+          const timeHighlight = Array.from(line.querySelectorAll<HTMLElement>('span'))
+            .find(span => span.textContent?.includes(':18:'));
+          return !timeHighlight || getComputedStyle(timeHighlight).color === getComputedStyle(line).color;
+        })()
       };
       liveEditor.setMode('source');
       await waitFrames();
@@ -83,6 +91,7 @@ async function main(): Promise<void> {
 
     assert.equal(snapshot.live.text.includes(ordinaryText), true, 'Live must display shortcode source text');
     assert.equal(snapshot.live.emojiWidgets, 0, 'Live must not create Emoji-specific widgets');
+    assert.equal(snapshot.live.timeColorMatchesText, true, 'Live time separators must keep ordinary text color');
     assert.equal(snapshot.source.text.includes(ordinaryText), true, 'Source must preserve shortcode and Unicode text');
     assert.equal(snapshot.source.emojiWidgets, 0, 'Source must not create Emoji-specific widgets');
     assert.equal(snapshot.table.text, ordinaryText, 'Table inline preview must preserve shortcode and Unicode text');
