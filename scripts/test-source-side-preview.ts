@@ -248,7 +248,8 @@ try {
       size: { width: more.getBoundingClientRect().width, height: more.getBoundingClientRect().height },
       borderRadius: getComputedStyle(more).borderRadius,
       boxShadow: getComputedStyle(more).boxShadow,
-      controlsVisible: Array.from(panel.children, child => (child as HTMLElement).offsetParent !== null)
+      controlsVisible: Array.from(panel.children, child => (child as HTMLElement).offsetParent !== null),
+      editorFocused: document.activeElement === document.querySelector('.cm-content')
     };
   });
   assert.deepEqual(sideTools, {
@@ -256,7 +257,7 @@ try {
     rows: ['Font', 'Preview theme', 'Code color', 'Show comments'],
     hasExport: false, belowSync: true, icon: 'ellipsis', text: '',
     size: { width: 20, height: 20 }, borderRadius: '50%', boxShadow: 'none',
-    controlsVisible: [true, true, true, true]
+    controlsVisible: [true, true, true, true], editorFocused: true
   });
   await page.click('.source-preview-more-button');
   assert.equal(await page.$eval('.source-preview-more-panel', panel => (panel as HTMLElement).hidden), true);

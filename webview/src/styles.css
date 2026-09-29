@@ -2387,6 +2387,16 @@ button:focus-visible > .menu-switch {
   box-sizing: border-box;
 }
 
+.editor-root.meo-window-focus-return-pending .cm-editor .cm-content,
+.editor-root.meo-window-focus-return-pending .cm-editor textarea,
+.editor-root.meo-window-focus-return-pending .cm-editor input {
+  caret-color: transparent !important;
+}
+
+.editor-root.meo-window-focus-return-pending .cm-editor .cm-cursorLayer {
+  visibility: hidden !important;
+}
+
 .cm-editor,
 .cm-editor .cm-scroller,
 .cm-editor .cm-content,

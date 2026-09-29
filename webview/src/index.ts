@@ -1376,6 +1376,16 @@ sourcePreviewMorePanel.setAttribute('aria-label', activeUiStrings.previewTools);
 sourcePreviewMorePanel.hidden = true;
 sourcePreviewMoreButton.setAttribute('aria-controls', sourcePreviewMorePanel.id);
 sourcePreviewTools.append(sourcePreviewScrollSyncButton, sourcePreviewMoreButton, sourcePreviewMorePanel);
+document.addEventListener('pointerdown', (event) => {
+  const target = event.target;
+  if (
+    event.button === 0 &&
+    target instanceof Element &&
+    sourcePreviewTools.contains(target) &&
+    target.closest('.source-preview-tool-button, .preview-setting-segmented button') &&
+    editor?.hasFocus()
+  ) event.preventDefault();
+}, true);
 const setSourcePreviewMoreOpen = (open: boolean): void => {
   sourcePreviewMorePanel.hidden = !open;
   sourcePreviewMoreButton.setAttribute('aria-expanded', String(open));
@@ -2334,7 +2344,27 @@ let restoreEditorFocusOnWindowReturn = false;
 let editorWasLastFocused = false;
 let documentPointerGeneration = 0;
 let pendingEditorFocusReturnRaf: number | null = null;
+let windowFocusReturnPending = false;
+let windowFocusReturnTimer: number | null = null;
+let windowFocusReturnPointerGeneration = 0;
+let windowFocusReturnGeneration = 0;
+let lastWindowReturnPointerAt = -Infinity;
+// Window activation can repaint the old caret before its activating click reaches the webview.
+const windowFocusReturnDelayMs = 160;
 const scheduleEditorFocusReturn = (): void => {
+  if (windowFocusReturnPending) {
+    if (documentPointerGeneration !== windowFocusReturnPointerGeneration || windowFocusReturnTimer !== null) return;
+    const generation = windowFocusReturnGeneration;
+    windowFocusReturnTimer = window.setTimeout(() => {
+      if (generation !== windowFocusReturnGeneration) return;
+      windowFocusReturnTimer = null;
+      windowFocusReturnPending = false;
+      root.classList.remove('meo-window-focus-return-pending');
+      if (documentPointerGeneration === windowFocusReturnPointerGeneration) scheduleEditorFocusReturn();
+    }, windowFocusReturnDelayMs);
+    return;
+  }
+  if (performance.now() - lastWindowReturnPointerAt < windowFocusReturnDelayMs) return;
   if (pendingEditorFocusReturnRaf !== null) window.cancelAnimationFrame(pendingEditorFocusReturnRaf);
   const pointerGeneration = documentPointerGeneration;
   pendingEditorFocusReturnRaf = window.requestAnimationFrame(() => {
@@ -3353,10 +3383,29 @@ document.addEventListener('focusin', (event) => {
 document.addEventListener('pointerdown', (event) => {
   if (event.target instanceof Node && editor?.view.dom.contains(event.target)) {
     documentPointerGeneration += 1;
+    if (windowFocusReturnPending) {
+      windowFocusReturnPending = false;
+      if (windowFocusReturnTimer !== null) window.clearTimeout(windowFocusReturnTimer);
+      windowFocusReturnTimer = null;
+      lastWindowReturnPointerAt = performance.now();
+      const generation = windowFocusReturnGeneration;
+      window.requestAnimationFrame(() => {
+        if (generation === windowFocusReturnGeneration) root.classList.remove('meo-window-focus-return-pending');
+      });
+    }
   }
 }, true);
 window.addEventListener('blur', () => {
   restoreEditorFocusOnWindowReturn = editor?.hasFocus() === true || editorWasLastFocused;
+  windowFocusReturnGeneration += 1;
+  if (windowFocusReturnTimer !== null) window.clearTimeout(windowFocusReturnTimer);
+  windowFocusReturnTimer = null;
+  if (pendingEditorFocusReturnRaf !== null) window.cancelAnimationFrame(pendingEditorFocusReturnRaf);
+  pendingEditorFocusReturnRaf = null;
+  windowFocusReturnPending = restoreEditorFocusOnWindowReturn;
+  windowFocusReturnPointerGeneration = documentPointerGeneration;
+  lastWindowReturnPointerAt = -Infinity;
+  root.classList.toggle('meo-window-focus-return-pending', windowFocusReturnPending);
   commitEditorTransientEdits();
 });
 
