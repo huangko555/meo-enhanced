@@ -3334,8 +3334,18 @@ window.addEventListener('paste', async (event) => {
 });
 
 let restoreEditorFocusOnWindowReturn = false;
+let editorWasLastFocused = false;
+let documentPointerGeneration = 0;
+document.addEventListener('focusin', (event) => {
+  editorWasLastFocused = event.target instanceof Node && editor?.view.dom.contains(event.target) === true;
+}, true);
+document.addEventListener('pointerdown', (event) => {
+  if (event.target instanceof Node && editor?.view.dom.contains(event.target)) {
+    documentPointerGeneration += 1;
+  }
+}, true);
 window.addEventListener('blur', () => {
-  restoreEditorFocusOnWindowReturn = editor?.hasFocus() === true;
+  restoreEditorFocusOnWindowReturn = editor?.hasFocus() === true || editorWasLastFocused;
   commitEditorTransientEdits();
 });
 
@@ -3355,8 +3365,10 @@ window.addEventListener('focus', () => {
   scheduleEditorSurfaceRecovery();
   if (!restoreEditorFocusOnWindowReturn) return;
   restoreEditorFocusOnWindowReturn = false;
+  const pointerGeneration = documentPointerGeneration;
   window.requestAnimationFrame(() => {
     if (!editor || getActiveEditorMode() === 'preview') return;
+    if (documentPointerGeneration !== pointerGeneration) return;
     const active = document.activeElement;
     if (active !== document.body && active !== document.documentElement && !editor.hasFocus()) return;
     editor.focus();

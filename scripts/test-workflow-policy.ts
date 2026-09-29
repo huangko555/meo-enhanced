@@ -228,6 +228,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-test-workflow.ts'),
           script('scripts/test-document-auto-save-concurrency.ts'),
           script('scripts/test-panel-session-ready-init.ts'),
+          script('scripts/test-panel-session-window-focus.ts'),
           script('scripts/test-editor-startup-load.ts'),
           script('scripts/test-mode-roundtrip-reveal.ts'),
           script('scripts/test-editor-history-runtime.ts'),

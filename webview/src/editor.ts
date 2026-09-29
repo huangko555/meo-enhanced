@@ -3128,7 +3128,7 @@ export function createEditor({
     focus() {
       const target = lastFocusedEditorTarget;
       if (target?.isConnected && view.contentDOM.contains(target)) {
-        if (document.activeElement === target) return;
+        if (document.activeElement === target && document.hasFocus()) return;
         const selection = lastTextareaSelection?.target === target ? lastTextareaSelection : null;
         target.focus({ preventScroll: true });
         if (target instanceof HTMLTextAreaElement && selection) {

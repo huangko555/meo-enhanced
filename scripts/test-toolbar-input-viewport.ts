@@ -140,6 +140,35 @@ async function runFocusReturn(browser: Browser, mode: 'live' | 'source'): Promis
     assert.match(restored.split('\n')[2], /RETURN_MARK/, `${mode} return focus did not restore the caret`);
 
     await page.evaluate(() => {
+      (document.activeElement as HTMLElement)?.blur();
+      window.dispatchEvent(new Event('blur'));
+      window.dispatchEvent(new Event('focus'));
+    });
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    await page.keyboard.type('LATE_BLUR_MARK');
+    const lateBlurRestored = await page.evaluate(() => (window as any).__hostMessages
+      .filter((message: any) => message.type === 'draftChanged').at(-1)?.text as string);
+    assert.match(lateBlurRestored.split('\n')[2], /LATE_BLUR_MARK/,
+      `${mode} return focus missed editor focusout before window blur`);
+
+    const clickPriority = await page.evaluate(async () => {
+      const content = document.querySelector<HTMLElement>('.cm-content')!;
+      const originalFocus = content.focus.bind(content);
+      let restoreCalls = 0;
+      content.focus = (options?: FocusOptions) => { restoreCalls += 1; originalFocus(options); };
+      window.dispatchEvent(new Event('blur'));
+      content.blur();
+      window.dispatchEvent(new Event('focus'));
+      document.querySelector<HTMLElement>('.cm-line:nth-child(5)')!.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true, button: 0
+      }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      content.focus = originalFocus;
+      return restoreCalls;
+    });
+    assert.equal(clickPriority, 0, `${mode} delayed focus restoration overrode a new document pointerdown`);
+
+    await page.evaluate(() => {
       window.dispatchEvent(new Event('blur'));
       (document.activeElement as HTMLElement)?.blur();
       document.getElementById('outside')!.focus();

@@ -1017,6 +1017,12 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     onPanelViewStateChanged();
   });
 
+  const windowStateSubscription = vscode.window.onDidChangeWindowState(({ focused }) => {
+    if (focused && panel.active) {
+      runBackground(postFocusEditor(), 'postFocusEditor.windowState');
+    }
+  });
+
   const disposeSubscription = panel.onDidDispose(() => {
     dispose();
   });
@@ -1058,6 +1064,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     activeTextEditorSubscription.dispose();
     visibleTextEditorsSubscription.dispose();
     viewStateSubscription.dispose();
+    windowStateSubscription.dispose();
     disposeSubscription.dispose();
     onPanelDisposed(panel);
   };
