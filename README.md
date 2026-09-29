@@ -115,7 +115,7 @@ For offline installation, download a `.vsix` package from [GitHub Releases](http
 
 ## Compatibility
 
-- Requires VS Code `1.97.0` or newer.
+- Requires VS Code `1.94.0` or newer.
 - Supports `.md`, `.markdown`, `.mdx`, and `.mdc` files.
 - Can be installed alongside the original MEO extension; each extension uses independent editors, commands, and settings.
 

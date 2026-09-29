@@ -8,7 +8,7 @@
   "license": "SEE LICENSE IN LICENSE",
   "icon": "logo.png",
   "engines": {
-    "vscode": "^1.97.0"
+    "vscode": "^1.94.0"
   },
   "categories": [
     "Programming Languages",
@@ -414,7 +414,7 @@
     "@lezer/highlight": "^1.2.3",
     "@lezer/markdown": "1.6.3",
     "@shyang1012/docx-convert": "2.1.2",
-    "@types/vscode": "^1.109.0",
+    "@types/vscode": "1.94.0",
     "highlight.js": "^11.11.1",
     "htmlparser2": "10.0.0",
     "js-yaml": "4.1.1",

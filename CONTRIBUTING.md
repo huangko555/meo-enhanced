@@ -9,7 +9,7 @@ that changed.
 - Install [Bun](https://bun.sh/). The repository uses Bun for dependency
   installation, scripts, tests, and builds, but does not currently pin a Bun
   version in `package.json`.
-- Use VS Code `^1.97.0`, the compatibility range declared by the extension.
+- Use VS Code `^1.94.0`, the compatibility range declared by the extension.
 - The repository does not declare a separate Node.js engine range. Do not infer
   a project-specific Node.js minimum from a local environment.
 

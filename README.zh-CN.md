@@ -115,7 +115,7 @@ code --install-extension huangko555.meo-enhanced
 
 ## 兼容性
 
-- 需要 VS Code `1.97.0` 或更高版本。
+- 需要 VS Code `1.94.0` 或更高版本。
 - 支持 `.md`、`.markdown`、`.mdx` 和 `.mdc` 文件。
 - 可以与原版 MEO 同时安装，两者使用独立的编辑器、命令和设置。
 
