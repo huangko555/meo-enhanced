@@ -1527,10 +1527,12 @@ export class ViewportController {
     isCurrent: () => boolean = () => true,
     {
       yMargin = 0,
+      y = 'nearest',
       readViewportBounds,
       originScrollTop
     }: {
       yMargin?: number;
+      y?: 'nearest' | 'center-if-outside';
       readViewportBounds?: () => { top: number; bottom: number };
       originScrollTop?: number;
     } = {}
@@ -1555,6 +1557,14 @@ export class ViewportController {
         return Math.abs(current.top - evaluationTop) <= POSITION_EPSILON
           ? { kind: 'stable' }
           : { kind: 'target', target: { top: evaluationTop } };
+      }
+      if (y === 'center-if-outside') {
+        return {
+          kind: 'target',
+          target: {
+            top: evaluationTop + (projectedTop + projectedBottom - scrollerRect.top - scrollerRect.bottom) / 2
+          }
+        };
       }
       const delta = topDelta < 0 && bottomDelta > 0
         ? (Math.abs(topDelta) <= bottomDelta ? topDelta : bottomDelta)

@@ -123,6 +123,7 @@ function targetedCommands(
     case 'search':
       return [
         script('scripts/test-search-replace-production.ts'),
+        script('scripts/test-search-overview-ruler.ts'),
         script('scripts/test-webview-search-controls.ts'),
         script('scripts/test-viewport-controller.ts'),
         script('scripts/test-table-column-width-lifecycle.ts')

@@ -83,7 +83,8 @@ import {
   focusTableHistoryChange,
   refreshMountedTablePositions,
   refreshMountedTableUiLanguage,
-  flushMountedTableLayouts
+  flushMountedTableLayouts,
+  tableUsableViewportBounds
 } from './helpers/tables';
 import { parseFrontmatter, sourceFrontmatterField } from './helpers/frontmatter';
 import { collectLatexMathRanges } from './helpers/math';
@@ -1467,7 +1468,13 @@ export function createEditor({
     });
   };
 
-  const revealLiveTableSearchMatch = (from: number, to: number, isCurrent: () => boolean, remainingFrames = 8) => {
+  const revealLiveTableSearchMatch = (
+    from: number,
+    to: number,
+    isCurrent: () => boolean,
+    remainingFrames = 8,
+    mounting = false
+  ) => {
     if (remainingFrames <= 0) return;
     // CodeMirror measures a rendered table as one widget, so its position cannot
     // reveal a match in a distant row. Wait for the table's derived search mark.
@@ -1484,11 +1491,27 @@ export function createEditor({
             const currentMatch = view.dom.querySelector<HTMLElement>(matchSelector);
             const rect = currentMatch?.getBoundingClientRect();
             return rect ? { top: rect.top, bottom: rect.bottom } : null;
-          }, isCurrent, { yMargin: 12 });
+          }, isCurrent, {
+            y: 'center-if-outside',
+            yMargin: 12,
+            readViewportBounds: () => {
+              const currentMatch = view.dom.querySelector<HTMLElement>(matchSelector);
+              return currentMatch
+                ? tableUsableViewportBounds(view, currentMatch)
+                : view.scrollDOM.getBoundingClientRect();
+            }
+          });
           return;
         }
       }
-      revealLiveTableSearchMatch(from, to, isCurrent, remainingFrames - 1);
+      if (remainingFrames === 1 && !mounting) {
+        // An offscreen widget needs one source-position reveal to mount its DOM.
+        // Only after that one-shot mount step can the measured table match own positioning.
+        viewportController.revealPosition(from, { y: 'center-if-outside' }, isCurrent);
+        revealLiveTableSearchMatch(from, to, isCurrent, 8, true);
+      } else {
+        revealLiveTableSearchMatch(from, to, isCurrent, remainingFrames - 1, mounting);
+      }
     });
   };
 
@@ -1508,9 +1531,14 @@ export function createEditor({
     });
     scheduleLiveSearchDecorationRefresh(to);
     const isRevealCurrent = viewportController.beginNavigationReveal();
-    viewportController.revealPosition(from, { y: 'center-if-outside', schedule: 'next-frame' }, isRevealCurrent);
-    if (currentMode === 'live') {
+    let tableNode: SyntaxNode | null = currentMode === 'live'
+      ? syntaxTree(view.state).resolveInner(from, 1)
+      : null;
+    while (tableNode && tableNode.name !== 'Table') tableNode = tableNode.parent;
+    if (tableNode) {
       requestAnimationFrame(() => revealLiveTableSearchMatch(from, to, isRevealCurrent));
+    } else {
+      viewportController.revealPosition(from, { y: 'center-if-outside', schedule: 'next-frame' }, isRevealCurrent);
     }
     if (focusEditor) {
       view.focus();

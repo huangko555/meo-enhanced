@@ -50,6 +50,7 @@ async function main() {
           selectionStates.push(state);
         }
       });
+      editor.setTableStickyHeaderEnabled(true);
       await waitFrames();
 
       const tableRows = Array.from(document.querySelectorAll<HTMLTableRowElement>(
@@ -71,6 +72,10 @@ async function main() {
       const scrollRect = scroller.getBoundingClientRect();
       const rowRect = matchedRow.getBoundingClientRect();
       const activeRect = activeMatch?.getBoundingClientRect();
+      const stickyChrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome.is-visible');
+      const stickyRect = stickyChrome?.getBoundingClientRect();
+      const safeTop = Math.max(scrollRect.top, stickyRect?.bottom ?? scrollRect.top);
+      const safeCenter = (safeTop + scrollRect.bottom) / 2;
       const rowTop = scroller.scrollTop + rowRect.top - scrollRect.top;
       const expectedTop = Math.round((rowTop / scroller.scrollHeight) * ruler.clientHeight);
       const actualTop = Number.parseFloat(marker.style.top);
@@ -81,6 +86,12 @@ async function main() {
         scrollHeight: scroller.scrollHeight,
         trackHeight: ruler.clientHeight,
         activeMatchVisible: Boolean(activeRect && activeRect.top >= scrollRect.top && activeRect.bottom <= scrollRect.bottom),
+        activeMatchClearsHeader: Boolean(activeRect && activeRect.top >= safeTop),
+        activeMatchCenterDelta: activeRect ? Math.abs((activeRect.top + activeRect.bottom) / 2 - safeCenter) : null,
+        stickyHeaderVisible: Boolean(stickyRect),
+        coveredMatchWasRevealed: false,
+        distantTableMatchCentered: false,
+        distantTableInitiallyUnmounted: false,
         focusedMatchVisible: false,
         hasSearchSelection: editor.view.dom.classList.contains('has-search-selection'),
         selectionMenuVisible: selectionStates.at(-1)?.visible ?? null
@@ -92,7 +103,59 @@ async function main() {
       )?.getBoundingClientRect();
       state.focusedMatchVisible = Boolean(focusedMatchRect
         && focusedMatchRect.top >= scrollRect.top && focusedMatchRect.bottom <= scrollRect.bottom);
+      if (focusedMatchRect && stickyRect) {
+        scroller.scrollTop += focusedMatchRect.top - (safeTop - 4);
+        await waitFrames();
+        const coveredRect = document.querySelector<HTMLElement>(
+          '.meo-md-html-table .meo-search-match-active'
+        )?.getBoundingClientRect();
+        const currentHeader = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome.is-visible')
+          ?.getBoundingClientRect();
+        if (coveredRect && currentHeader && coveredRect.top < currentHeader.bottom) {
+          editor.findNext('overview-needle', { focusEditor: false });
+          await waitFrames();
+          const revealedRect = document.querySelector<HTMLElement>(
+            '.meo-md-html-table .meo-search-match-active'
+          )?.getBoundingClientRect();
+          const revealedHeader = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome.is-visible')
+            ?.getBoundingClientRect();
+          state.coveredMatchWasRevealed = Boolean(revealedRect && revealedHeader
+            && revealedRect.top >= revealedHeader.bottom
+            && Math.abs((revealedRect.top + revealedRect.bottom - revealedHeader.bottom - scrollRect.bottom) / 2) <= 24);
+        }
+      }
       editor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      const distantEditor = (window as any).TableStabilityHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: [
+          ...Array.from({ length: 120 }, (_, index) => `distant before ${index + 1}`),
+          '', '| A | B |', '| --- | --- |', ...rows,
+          ...Array.from({ length: 40 }, (_, index) => `distant after ${index + 1}`)
+        ].join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      distantEditor.setTableStickyHeaderEnabled(true);
+      await waitFrames();
+      state.distantTableInitiallyUnmounted = !distantEditor.view.dom.querySelector('.meo-md-html-table');
+      distantEditor.setSearchQuery('overview-needle');
+      distantEditor.findNext('overview-needle', { focusEditor: false });
+      await waitFrames(30);
+      const distantScroller = distantEditor.view.scrollDOM as HTMLElement;
+      const distantMatch = distantEditor.view.dom.querySelector<HTMLElement>(
+        '.meo-md-html-table:not(.meo-md-html-table-sticky-table) .meo-search-match-active'
+      )?.getBoundingClientRect();
+      const distantViewport = distantScroller.getBoundingClientRect();
+      const distantHeader = distantEditor.view.dom.querySelector<HTMLElement>(
+        '.meo-md-html-table-sticky-chrome.is-visible'
+      )?.getBoundingClientRect();
+      state.distantTableMatchCentered = Boolean(distantMatch
+        && distantScroller.scrollTop > 0
+        && Math.abs((distantMatch.top + distantMatch.bottom
+          - Math.max(distantViewport.top, distantHeader?.bottom ?? distantViewport.top)
+          - distantViewport.bottom) / 2) <= 24);
+      distantEditor.destroy();
       return state;
     });
 
@@ -102,8 +165,17 @@ async function main() {
     if (!result.activeMatchVisible) {
       throw new Error(`Active search match remained outside the editor viewport: ${JSON.stringify(result)}`);
     }
+    if (!result.stickyHeaderVisible || !result.activeMatchClearsHeader || result.activeMatchCenterDelta === null || result.activeMatchCenterDelta > 24) {
+      throw new Error(`Active table search match was not centered in the unobscured viewport: ${JSON.stringify(result)}`);
+    }
     if (!result.focusedMatchVisible) {
       throw new Error(`Focused search match remained outside the editor viewport: ${JSON.stringify(result)}`);
+    }
+    if (!result.coveredMatchWasRevealed) {
+      throw new Error(`A table match hidden under the sticky header was not centered: ${JSON.stringify(result)}`);
+    }
+    if (!result.distantTableInitiallyUnmounted || !result.distantTableMatchCentered) {
+      throw new Error(`A search match inside an initially unmounted table was not centered: ${JSON.stringify(result)}`);
     }
     if (!result.hasSearchSelection || result.selectionMenuVisible !== false) {
       throw new Error(`Active search selection was not classified without opening the selection menu: ${JSON.stringify(result)}`);

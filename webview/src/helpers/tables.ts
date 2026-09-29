@@ -375,7 +375,7 @@ function stabilizeHistoryScrollTop(
   }
 }
 
-function tableUsableViewportBounds(view: EditorView, element: Element) {
+export function tableUsableViewportBounds(view: EditorView, element: Element) {
   const viewport = view.scrollDOM.getBoundingClientRect();
   const shell = element.closest('.meo-md-html-table-shell');
   const stickyChrome = shell?.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome.is-visible')
