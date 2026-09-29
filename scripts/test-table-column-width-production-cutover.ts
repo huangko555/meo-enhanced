@@ -852,6 +852,11 @@ async function widths(page: any, selector: string): Promise<number[]> {
 }
 
 async function main(): Promise<void> {
+  const waitForFrames = (page: any, count: number) => page.evaluate(async (frames: number) => {
+    for (let index = 0; index < frames; index += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  }, count);
   const entryPath = path.join(repoRoot, 'scripts', 'test-table-stability-entry.ts');
   const build = await Bun.build({
     entrypoints: [entryPath],
@@ -896,6 +901,20 @@ async function main(): Promise<void> {
     const firstHandle = `${tableSelector}:first-of-type th:first-child .meo-md-html-table-column-resize-handle`;
     const firstStickyHandle = '.meo-md-html-table-sticky-table th:first-child .meo-md-html-table-column-resize-handle';
     await waitForTableLayout(page, tableSelector, 1, 3);
+    const readFirstTableWidths = () => page.$$eval(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table):first-of-type thead th',
+      (cells) => cells.map((cell) => cell.getBoundingClientRect().width)
+    );
+    const preferredWidthsBeforeResize = await readFirstTableWidths();
+    await page.setViewport({ width: 1200, height: 440 });
+    await waitForFrames(page, 8);
+    await page.setViewport({ width: 900, height: 440 });
+    await waitForFrames(page, 8);
+    const preferredWidthsAfterResize = await readFirstTableWidths();
+    assert.ok(
+      preferredWidthsAfterResize.every((width, index) => width >= preferredWidthsBeforeResize[index] - 1),
+      `automatic column widths must survive maximize and restore: ${JSON.stringify({ preferredWidthsBeforeResize, preferredWidthsAfterResize })}`
+    );
     await page.evaluate(async () => {
       (window as any).__columnWidthProduction.scrollToLine(26, 'top');
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));

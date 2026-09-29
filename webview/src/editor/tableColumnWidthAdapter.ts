@@ -397,7 +397,8 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         }
       : { elastic: false, tracksAvailableWidth: false };
     const preserveWidthIntent = sameLayoutFacts(intent.snapshot, currentFacts);
-    const projectionWidths = currentPolicyState.tracksAvailableWidth && !preserveWidthIntent
+    const projectionWidths = (intent.source === 'automatic' || currentPolicyState.tracksAvailableWidth)
+      && !preserveWidthIntent
       ? intent.snapshot.intentWidths
       : currentFacts.widths;
     const result = policy.project({
