@@ -6015,7 +6015,6 @@ body.outline-resizing .preview-frame {
   border-radius: 50%;
   color: var(--meo-foreground);
   background: var(--meo-background);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 10%);
   cursor: pointer;
 }
 

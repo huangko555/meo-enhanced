@@ -226,7 +226,7 @@ try {
   assert.equal(layout.syncIconSize, 14);
   assert.equal(layout.syncBorderRadius, '50%');
   assert.equal(layout.syncBorderWidth, '1px');
-  assert.notEqual(layout.syncBoxShadow, 'none');
+  assert.equal(layout.syncBoxShadow, 'none');
   assert.deepEqual(layout.syncSize, { width: 20, height: 20 });
   assert.ok(layout.syncOffset.left >= 2 && layout.syncOffset.left <= 4, JSON.stringify(layout));
   assert.ok(Math.abs(layout.syncOffset.top - 2) <= 0.5, JSON.stringify(layout));
@@ -247,6 +247,7 @@ try {
       text: more.textContent,
       size: { width: more.getBoundingClientRect().width, height: more.getBoundingClientRect().height },
       borderRadius: getComputedStyle(more).borderRadius,
+      boxShadow: getComputedStyle(more).boxShadow,
       controlsVisible: Array.from(panel.children, child => (child as HTMLElement).offsetParent !== null)
     };
   });
@@ -254,7 +255,7 @@ try {
     expanded: 'true', open: true,
     rows: ['Font', 'Preview theme', 'Code color', 'Show comments'],
     hasExport: false, belowSync: true, icon: 'ellipsis', text: '',
-    size: { width: 20, height: 20 }, borderRadius: '50%',
+    size: { width: 20, height: 20 }, borderRadius: '50%', boxShadow: 'none',
     controlsVisible: [true, true, true, true]
   });
   await page.click('.source-preview-more-button');
