@@ -2336,6 +2336,10 @@ const focusEditorFromHost = () => {
     return;
   }
 
+  const active = document.activeElement;
+  if (active !== document.body && active !== document.documentElement && !editor.hasFocus()) {
+    return;
+  }
   scheduleEditorSurfaceRecovery();
   editor.focus();
   pendingEditorFocus = false;
@@ -3329,7 +3333,11 @@ window.addEventListener('paste', async (event) => {
   });
 });
 
-window.addEventListener('blur', commitEditorTransientEdits);
+let restoreEditorFocusOnWindowReturn = false;
+window.addEventListener('blur', () => {
+  restoreEditorFocusOnWindowReturn = editor?.hasFocus() === true;
+  commitEditorTransientEdits();
+});
 
 window.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
@@ -3345,6 +3353,14 @@ window.addEventListener('visibilitychange', () => {
 
 window.addEventListener('focus', () => {
   scheduleEditorSurfaceRecovery();
+  if (!restoreEditorFocusOnWindowReturn) return;
+  restoreEditorFocusOnWindowReturn = false;
+  window.requestAnimationFrame(() => {
+    if (!editor || getActiveEditorMode() === 'preview') return;
+    const active = document.activeElement;
+    if (active !== document.body && active !== document.documentElement && !editor.hasFocus()) return;
+    editor.focus();
+  });
 });
 
 window.addEventListener('beforeunload', () => {

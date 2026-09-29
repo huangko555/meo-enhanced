@@ -386,6 +386,11 @@ export function createEditor({
   let checkboxClick: PointerClickState | null = null;
   let frontmatterBoundaryClick: FrontmatterBoundaryClickState | null = null;
   let view: EditorView;
+  let lastFocusedEditorTarget: HTMLElement | null = null;
+  let lastTextareaSelection: { target: HTMLTextAreaElement; start: number; end: number; direction: 'forward' | 'backward' | 'none' } | null = null;
+  let onEditorFocusIn: ((event: FocusEvent) => void) | null = null;
+  let onEditorFocusOut: ((event: FocusEvent) => void) | null = null;
+  let onEditorPointerDown: ((event: PointerEvent) => void) | null = null;
   let mermaidDocumentPreloader: MermaidDocumentPreloader | null = null;
   let currentMode: EditableEditorMode = startMode;
   let lastSearchStateSignature = '';
@@ -2360,6 +2365,39 @@ export function createEditor({
     state,
     parent
   });
+  const editableTarget = (target: EventTarget | null): HTMLElement | null => {
+    if (!(target instanceof Element) || !view.contentDOM.contains(target)) return null;
+    const editable = target.closest<HTMLElement>('textarea, input, [contenteditable="true"]');
+    return editable && view.contentDOM.contains(editable) ? editable : view.contentDOM;
+  };
+  onEditorFocusIn = (event) => {
+    const target = editableTarget(event.target);
+    if (target) lastFocusedEditorTarget = target;
+  };
+  onEditorFocusOut = (event) => {
+    const target = event.target;
+    if (target instanceof HTMLTextAreaElement && target === lastFocusedEditorTarget) {
+      lastTextareaSelection = {
+        target,
+        start: target.selectionStart,
+        end: target.selectionEnd,
+        direction: target.selectionDirection
+      };
+    }
+  };
+  onEditorPointerDown = (event) => {
+    if (event.button === 0) {
+      const target = editableTarget(event.target);
+      if (target) {
+        // A new document click takes precedence over the focus target saved before blur.
+        lastFocusedEditorTarget = target;
+        lastTextareaSelection = null;
+      }
+    }
+  };
+  view.dom.addEventListener('focusin', onEditorFocusIn, true);
+  view.dom.addEventListener('focusout', onEditorFocusOut, true);
+  view.dom.addEventListener('pointerdown', onEditorPointerDown, true);
   emitGitDiffSummary(view.state);
   if (startMode === 'live') tableColumnWidthAdapter.adapter.acquire();
   // CodeMirror deliberately suppresses editor handlers for some block widgets.
@@ -3060,15 +3098,28 @@ export function createEditor({
       viewportController.setLinkedPreviewEnabled(enabled, activationOwner);
     },
     focus() {
-      const activeTableInput = getActiveTableInput();
-      if (activeTableInput) {
-        activeTableInput.focus({ preventScroll: true });
+      const target = lastFocusedEditorTarget;
+      if (target?.isConnected && view.contentDOM.contains(target)) {
+        if (document.activeElement === target) return;
+        const selection = lastTextareaSelection?.target === target ? lastTextareaSelection : null;
+        target.focus({ preventScroll: true });
+        if (target instanceof HTMLTextAreaElement && selection) {
+          target.setSelectionRange(
+            selection.start,
+            selection.end,
+            selection.direction
+          );
+        }
+        lastTextareaSelection = null;
         return;
       }
       view.focus();
     },
     destroy() {
       editorDestroyed = true;
+      if (onEditorFocusIn) view.dom.removeEventListener('focusin', onEditorFocusIn, true);
+      if (onEditorFocusOut) view.dom.removeEventListener('focusout', onEditorFocusOut, true);
+      if (onEditorPointerDown) view.dom.removeEventListener('pointerdown', onEditorPointerDown, true);
       for (const event of nestedCompositionEvents) view.dom.removeEventListener(event, onNestedComposition, true);
       view.dom.classList.remove('meo-pointer-selecting');
       gitDiffOverviewRuler?.destroy();

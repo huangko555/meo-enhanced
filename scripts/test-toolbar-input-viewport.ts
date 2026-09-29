@@ -41,7 +41,7 @@ const init = (mode: 'live' | 'source') => ({
 async function open(browser: Browser, mode: 'live' | 'source'): Promise<Page> {
   const page = await browser.newPage();
   await page.setViewport({ width: 1000, height: 700, deviceScaleFactor: 1 });
-  await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>');
+  await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><button id="outside">outside</button><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>');
   await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
   await page.addScriptTag({ content: `
     window.__hostMessages=[];
@@ -124,6 +124,45 @@ async function runMode(browser: Browser, mode: 'live' | 'source'): Promise<void>
   }
 }
 
+async function runFocusReturn(browser: Browser, mode: 'live' | 'source'): Promise<void> {
+  const page = await open(browser, mode);
+  try {
+    await page.click('.cm-line:nth-child(3)');
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event('blur'));
+      (document.activeElement as HTMLElement)?.blur();
+      window.dispatchEvent(new Event('focus'));
+    });
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    await page.keyboard.type('RETURN_MARK');
+    const restored = await page.evaluate(() => (window as any).__hostMessages
+      .filter((message: any) => message.type === 'draftChanged').at(-1)?.text as string);
+    assert.match(restored.split('\n')[2], /RETURN_MARK/, `${mode} return focus did not restore the caret`);
+
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event('blur'));
+      (document.activeElement as HTMLElement)?.blur();
+      document.getElementById('outside')!.focus();
+      window.dispatchEvent(new Event('focus'));
+    });
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'focusEditor' }
+    })));
+    assert.equal(await page.evaluate(() => document.activeElement?.id), 'outside', `${mode} window return stole an outside click`);
+    await page.click('.cm-line:nth-child(5)');
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'focusEditor' }
+    })));
+    await page.keyboard.type('CLICK_MARK');
+    const clicked = await page.evaluate(() => (window as any).__hostMessages
+      .filter((message: any) => message.type === 'draftChanged').at(-1)?.text as string);
+    assert.match(clicked.split('\n')[4], /CLICK_MARK/, `${mode} return click did not place the caret`);
+  } finally {
+    await page.close();
+  }
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-basic-capability-index-entry.ts')],
@@ -139,6 +178,8 @@ async function main(): Promise<void> {
   try {
     await runMode(browser, 'live');
     await runMode(browser, 'source');
+    await runFocusReturn(browser, 'live');
+    await runFocusReturn(browser, 'source');
     console.log('Toolbar input viewport regression passed');
   } catch (error) {
     primaryError = error;

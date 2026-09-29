@@ -35,7 +35,7 @@ async function main() {
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 900, height: 420, deviceScaleFactor: 1 });
-    await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
+    await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><button id="outside">outside</button><div id="app"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
     await page.evaluate(() => {
@@ -103,6 +103,40 @@ async function main() {
       (window as any).__mixedHistoryEditor.commitTransientEdits();
     });
     await waitForFrames(page);
+
+    await page.evaluate(() => (window as any).__mixedHistoryEditor.scrollToLine(21, 'center'));
+    await waitForFrames(page);
+    const tableFocusReturn = await page.evaluate(() => {
+      const editor = (window as any).__mixedHistoryEditor;
+      const input = Array.from(document.querySelectorAll<HTMLTextAreaElement>('tbody textarea'))
+        .find((candidate) => candidate.value === 'TABLE_EDIT')!;
+      input.focus();
+      input.setSelectionRange(3, 3);
+      document.getElementById('outside')!.focus();
+      editor.focus();
+      return { focused: document.activeElement === input, offset: input.selectionStart };
+    });
+    if (!tableFocusReturn.focused || tableFocusReturn.offset !== 3) {
+      throw new Error(`Table input focus was not restored: ${JSON.stringify(tableFocusReturn)}`);
+    }
+    const activeTableOffset = await page.evaluate(() => {
+      const input = document.activeElement as HTMLTextAreaElement;
+      input.setSelectionRange(7, 7);
+      (window as any).__mixedHistoryEditor.focus();
+      return input.selectionStart;
+    });
+    if (activeTableOffset !== 7) {
+      throw new Error(`Refocusing an active table cell moved its caret: ${activeTableOffset}`);
+    }
+    await page.evaluate(() => document.getElementById('outside')!.focus());
+    await page.click('tbody tr:first-child textarea:first-of-type');
+    const tableClickFocus = await page.evaluate(() => {
+      (window as any).__mixedHistoryEditor.focus();
+      return (document.activeElement as HTMLTextAreaElement | null)?.value;
+    });
+    if (tableClickFocus !== 'row') {
+      throw new Error(`Returning through a table click ignored the clicked cell: ${tableClickFocus}`);
+    }
     const committedTableLines = await page.evaluate(() => (
       (window as any).__mixedHistoryEditor.getText().split('\n').filter((line: string) => line.includes('|'))
     ));
@@ -138,6 +172,19 @@ async function main() {
     await waitForFrames(page);
     await page.click('.meo-mermaid-mode-btn');
     await waitForFrames(page);
+    const mermaidFocusReturn = await page.evaluate(() => {
+      const editor = (window as any).__mixedHistoryEditor;
+      const innerView = (document.querySelector<HTMLElement>('.meo-mermaid-editing-block') as any)
+        .__meoMermaidEditingController.innerView;
+      innerView.dispatch({ selection: { anchor: 4 } });
+      innerView.focus();
+      document.getElementById('outside')!.focus();
+      editor.focus();
+      return { focused: innerView.hasFocus, offset: innerView.state.selection.main.head };
+    });
+    if (!mermaidFocusReturn.focused || mermaidFocusReturn.offset !== 4) {
+      throw new Error(`Mermaid editing focus was not restored: ${JSON.stringify(mermaidFocusReturn)}`);
+    }
     await page.evaluate(() => {
       const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')! as any;
       const innerView = block.__meoMermaidEditingController.innerView;
@@ -162,6 +209,19 @@ async function main() {
     await waitForFrames(page);
     await page.click('.meo-latex-math-mode-btn');
     await waitForFrames(page);
+    const mathFocusReturn = await page.evaluate(() => {
+      const editor = (window as any).__mixedHistoryEditor;
+      const innerView = (document.querySelector<HTMLElement>('.meo-latex-math-editing-block') as any)
+        .__meoLatexMathEditingController.innerView;
+      innerView.dispatch({ selection: { anchor: 3 } });
+      innerView.focus();
+      document.getElementById('outside')!.focus();
+      editor.focus();
+      return { focused: innerView.hasFocus, offset: innerView.state.selection.main.head };
+    });
+    if (!mathFocusReturn.focused || mathFocusReturn.offset !== 3) {
+      throw new Error(`Formula editing focus was not restored: ${JSON.stringify(mathFocusReturn)}`);
+    }
     await page.evaluate(() => {
       const block = document.querySelector<HTMLElement>('.meo-latex-math-editing-block')! as any;
       const innerView = block.__meoLatexMathEditingController.innerView;
@@ -353,6 +413,28 @@ async function main() {
     const afterTailRedo = await readOuterLineFocus('TAIL_TARGET');
     if (!afterTailRedo.text.includes('TAIL_EDIT') || !afterTailRedo.focused || !afterTailRedo.targetSelected || !afterTailRedo.targetVisible) {
       throw new Error(`Mixed redo did not focus the tail change: ${JSON.stringify(afterTailRedo)}`);
+    }
+
+    await page.evaluate(() => (window as any).__mixedHistoryEditor.scrollToLine(21, 'center'));
+    await waitForFrames(page);
+    await page.evaluate(() => {
+      const input = Array.from(document.querySelectorAll<HTMLTextAreaElement>('tbody textarea'))
+        .find((candidate) => candidate.value === 'TABLE_EDIT')!;
+      input.focus();
+      input.value = 'TABLE_EDIT_MORE';
+      input.setSelectionRange(5, 5);
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: '_MORE' }));
+      document.getElementById('outside')!.focus();
+      (window as any).__mixedHistoryEditor.commitTransientEdits();
+    });
+    await waitForFrames(page);
+    const committedFocusReturn = await page.evaluate(() => {
+      (window as any).__mixedHistoryEditor.focus();
+      const input = document.activeElement instanceof HTMLTextAreaElement ? document.activeElement : null;
+      return { value: input?.value ?? null, offset: input?.selectionStart ?? null };
+    });
+    if (committedFocusReturn.value !== 'TABLE_EDIT_MORE' || committedFocusReturn.offset !== 5) {
+      throw new Error(`Committed table input focus was not restored: ${JSON.stringify(committedFocusReturn)}`);
     }
 
     console.log('mixed history focus checks passed');
