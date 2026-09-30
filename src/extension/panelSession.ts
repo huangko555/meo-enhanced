@@ -79,6 +79,7 @@ import { createExportSnapshotTransport } from '../host/exportSnapshotTransport';
 import { respondToDocumentSessionRequest } from '../host/documentSessionRequestHandler';
 import { createVscodeDocumentReloadAdapter } from '../host/vscodeDocumentReloadAdapter';
 import { createVscodeDocumentCopyAdapter } from '../host/vscodeDocumentCopyAdapter';
+import { showSavedDocumentCopyFeedback } from '../host/vscodeDocumentCopyFeedback';
 import { createVscodeDocumentSaveLifecycleAdapter } from '../host/vscodeDocumentSaveLifecycleAdapter';
 import { saveClipboardImageFile } from '../host/clipboardImageSave';
 import type { DocumentRevisionDto, DocumentRevisionResolution } from '../protocol/documentSession';
@@ -318,12 +319,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
 
   const documentCopyAdapter = createVscodeDocumentCopyAdapter(documentUri, {
     getUiLanguage,
-    onSaved: (uri) => {
-      const location = uri.fsPath || uri.toString();
-      void vscode.window.showInformationMessage(
-        getUiLanguage() === 'zh-CN' ? '副本已保存：' + location : 'Copy saved: ' + location
-      );
-    },
+    onSaved: (uri) => { void showSavedDocumentCopyFeedback(uri, getUiLanguage()); },
     onFailure: (message) => {
       void vscode.window.showErrorMessage(
         getUiLanguage() === 'zh-CN' ? '另存副本失败：' + message : 'Could not save copy: ' + message
