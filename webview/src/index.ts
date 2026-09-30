@@ -1951,31 +1951,40 @@ const editorNoticeIssue = Object.freeze({
   externalFileDeleted: 'external-file-deleted',
   externalFileUnreadable: 'external-file-unreadable',
   externalFileModified: 'external-file-modified',
-  liveModeUnavailable: 'live-mode-unavailable'
+  liveModeUnavailable: 'live-mode-unavailable',
+  imagePaste: 'image-paste'
 });
 
-const requestModeFromNotice = async (mode: 'live' | 'source'): Promise<void> => {
+const requestModeFromNotice = async (mode: 'live' | 'source', retry = false): Promise<void> => {
   failureNotice.clearFailureNotice();
-  await editorModeRuntime.dispatch({ type: 'requestMode', mode, source: 'user' });
+  await editorModeRuntime.dispatch({ type: 'requestMode', mode, source: 'user', retry });
 };
 
 const retryLiveModeAction = (): EditorNoticeAction => ({
   id: 'retry-live-mode',
   label: activeUiStrings.retryLiveMode,
   emphasis: 'primary',
-  run: () => requestModeFromNotice('live')
+  run: () => requestModeFromNotice('live', true)
 });
 
 const restartEditorAction = (): EditorNoticeAction => ({
   id: 'restart-editor',
   label: activeUiStrings.restartEditor,
   emphasis: 'primary',
-  run: () => requestModeFromNotice(getActiveEditableMode())
+  run: () => requestModeFromNotice(getActiveEditableMode(), true)
 });
 
-const switchToSourceAction = (): EditorNoticeAction => ({
+const retryEditorModeAction = (): EditorNoticeAction => ({
+  id: 'retry-editor-mode',
+  label: activeUiStrings.retryLiveMode,
+  emphasis: 'primary',
+  run: () => requestModeFromNotice(getActiveEditableMode(), true)
+});
+
+const switchToSourceAction = (emphasis: 'primary' | 'secondary' = 'secondary'): EditorNoticeAction => ({
   id: 'switch-to-source',
   label: activeUiStrings.switchToSourceMode,
+  emphasis,
   run: () => requestModeFromNotice('source')
 });
 
@@ -2401,6 +2410,22 @@ discardBtn.addEventListener('click', () => {
   discardConfirmationTimer = window.setTimeout(clearDiscardConfirmation, discardConfirmationWindowMs);
 });
 
+const retryDocumentUpdateAction = (
+  text: string,
+  context: string,
+  resetHistory: boolean
+): EditorNoticeAction => ({
+  id: 'retry-document-update',
+  label: activeUiStrings.retryDocumentUpdate,
+  emphasis: 'primary',
+  run: async () => {
+    const succeeded = context === 'init'
+      ? await setEditorTextSafely(text, context, resetHistory)
+      : await documentSessionAdapter.retryPresentation();
+    if (!succeeded) throw new Error(activeUiStrings.retryDocumentUpdateFailed);
+  }
+});
+
 const setEditorTextSafely = async (
   text: string,
   context: string,
@@ -2433,7 +2458,7 @@ const setEditorTextSafely = async (
           failureNotice.setFailureNotice(() => ({
             title: activeUiStrings.noticeLiveRenderIssueTitle,
             message: activeUiStrings.transientUpdateFailure,
-            actions: [switchToSourceAction()]
+            actions: [switchToSourceAction('primary')]
           }), 'warning', editorNoticeIssue.documentPresentation);
           return false;
         }
@@ -2447,7 +2472,16 @@ const setEditorTextSafely = async (
       await editorModeRuntime.dispatch({
         type: 'requestMode', mode: 'source', source: 'render-failure', basisManualIntentId
       });
-      if (!editor || getActiveEditorMode() !== 'source') return false;
+      if (!editor || getActiveEditorMode() !== 'source') {
+        failureNotice.setFailureNotice(() => ({
+          title: activeUiStrings.noticeEditorUpdateFailedTitle,
+          message: activeUiStrings.editorUpdateFailure,
+          actions: [context === 'documentSession.disk-reload'
+            ? saveCopyAction()
+            : retryDocumentUpdateAction(text, context, resetHistory)]
+        }), 'error', editorNoticeIssue.documentPresentation);
+        return false;
+      }
       try {
         editor.setText(text, resetHistory);
         failureNotice.clearFailureNotice(editorNoticeIssue.documentPresentation);
@@ -2456,15 +2490,28 @@ const setEditorTextSafely = async (
         logWebviewRenderError('setText.retryInSource', retryError, { context });
         failureNotice.setFailureNotice(() => ({
           title: activeUiStrings.noticeEditorUpdateFailedTitle,
-          message: activeUiStrings.editorUpdateFailure
+          message: activeUiStrings.editorUpdateFailure,
+          actions: [context === 'documentSession.disk-reload'
+            ? saveCopyAction()
+            : retryDocumentUpdateAction(text, context, resetHistory)]
         }), 'error', editorNoticeIssue.documentPresentation);
         return false;
       }
     }
 
+    try {
+      editor.setText(text, resetHistory);
+      failureNotice.clearFailureNotice(editorNoticeIssue.documentPresentation);
+      return true;
+    } catch (retryError) {
+      logWebviewRenderError('setText.retryInSource', retryError, { context });
+    }
     failureNotice.setFailureNotice(() => ({
       title: activeUiStrings.noticeEditorUpdateFailedTitle,
-      message: activeUiStrings.editorUpdateFailure
+      message: activeUiStrings.editorUpdateFailure,
+      actions: [context === 'documentSession.disk-reload'
+        ? saveCopyAction()
+        : retryDocumentUpdateAction(text, context, resetHistory)]
     }), 'error', editorNoticeIssue.documentPresentation);
     return false;
   }
@@ -2550,10 +2597,10 @@ const documentCopyTransport = createDocumentCopyTransport({
   whenDocumentIdle: () => documentSessionAdapter.whenIdle()
 });
 
-const saveCopyAction = (): EditorNoticeAction => ({
+const saveCopyAction = (emphasis: 'primary' | 'secondary' = 'primary'): EditorNoticeAction => ({
   id: 'save-copy',
   label: activeUiStrings.saveCopy,
-  emphasis: 'primary',
+  emphasis,
   run: async () => {
     const result = await documentCopyTransport.save();
     if (!result.ok) throw new Error(result.error.message);
@@ -2930,7 +2977,9 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
           ? getActiveEditorMode() === 'source'
             ? [restartEditorAction()]
             : [restartEditorAction(), switchToSourceAction()]
-          : getActiveEditorMode() === 'live' ? [switchToSourceAction()] : []
+          : getActiveEditorMode() === 'live'
+            ? [retryLiveModeAction(), switchToSourceAction()]
+            : [retryEditorModeAction()]
       }), 'error', editorModeApplication.getState().editorMount === 'unmounted'
         ? editorNoticeIssue.editorMount
         : editorNoticeIssue.editorModeTransition);
@@ -3336,6 +3385,8 @@ window.addEventListener('paste', async (event) => {
     return;
   }
 
+  failureNotice.clearFailureNotice(editorNoticeIssue.imagePaste);
+
   const stateAtPaste = editor.view.state;
   const selectionAtPaste = stateAtPaste.selection.main;
   const lineAtPaste = stateAtPaste.doc.lineAt(selectionAtPaste.head);
@@ -3345,12 +3396,21 @@ window.addEventListener('paste', async (event) => {
   await handleImagePaste(event, editor, {
     lineNumber: lineNumberAtPaste,
     lineOffset: lineOffsetAtPaste,
-    onError: (message) => failureNotice.setFailureNotice(
+    onError: (message, retry) => failureNotice.setFailureNotice(
       () => ({
         title: activeUiStrings.noticePasteImageFailedTitle,
-        message: activeUiStrings.pasteImageFailure(message)
+        message: activeUiStrings.pasteImageFailure(message),
+        actions: [{
+          id: 'retry-image-paste',
+          label: activeUiStrings.retryImagePaste,
+          emphasis: 'primary',
+          run: async () => {
+            if (!await retry()) throw new Error(activeUiStrings.retryImagePasteFailed);
+            failureNotice.clearFailureNotice(editorNoticeIssue.imagePaste);
+          }
+        }]
       }),
-      'warning'
+      'warning', editorNoticeIssue.imagePaste
     )
   });
 });

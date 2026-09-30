@@ -975,17 +975,19 @@ async function main() {
       orderedIndentEditor.destroy();
 
       const pastedImageMessages: any[] = [];
+      let failNextImageSave = false;
       harness.initializeImageHandling({
         postMessage(message: any) {
           pastedImageMessages.push(message);
           if (message.type === 'saveImageFromClipboard') {
+            const fail = failNextImageSave;
+            failNextImageSave = false;
             queueMicrotask(() => harness.handleSavedImagePath({
               type: 'savedImagePath',
               requestId: message.requestId,
-              result: {
-                ok: true,
-                value: { path: 'images/pasted.png' }
-              }
+              result: fail
+                ? { ok: false, error: { code: 'operation-failed', message: 'temporary write failure' } }
+                : { ok: true, value: { path: 'images/pasted.png' } }
             }));
           }
         }
@@ -1030,6 +1032,19 @@ async function main() {
       await waitFrames();
       const bodyPasteSource = bodyPasteEditor.view.state.doc.toString();
       bodyPasteEditor.destroy();
+
+      const retryPasteEditor = await create('retry here');
+      let retryPaste: (() => Promise<boolean>) | null = null;
+      failNextImageSave = true;
+      await harness.handleImagePaste(fileOnlyPasteEvent, retryPasteEditor, {
+        lineNumber: 1,
+        lineOffset: 6,
+        onError: (_message: string, retry: () => Promise<boolean>) => { retryPaste = retry; }
+      });
+      const failedPasteSource = retryPasteEditor.view.state.doc.toString();
+      if (retryPaste) await retryPaste();
+      const retriedPasteSource = retryPasteEditor.view.state.doc.toString();
+      retryPasteEditor.destroy();
 
       const bodyListEditor = await create('- one\n- two');
       bodyListEditor.view.dispatch({ selection: { anchor: 3 } });
@@ -1166,6 +1181,8 @@ async function main() {
         tablePasteSource,
         bodyPasteHandled,
         bodyPasteSource,
+        failedPasteSource,
+        retriedPasteSource,
         indentedBodyValue,
         outdentedBodyValue,
         bodyNestedMarkerState,
@@ -1444,7 +1461,7 @@ async function main() {
     ) {
       failures.push(`ordered table indentation changed ${JSON.stringify(result.indentedOrderedValue)} -> ${JSON.stringify(result.outdentedOrderedValue)}`);
     }
-    if (result.pastedImageMessageCount !== 2) {
+    if (result.pastedImageMessageCount !== 4) {
       failures.push(`table image paste sent ${result.pastedImageMessageCount} save requests`);
     }
     if (!/^ri!\[\d+\.png\]\(images\/pasted\.png\)ght$/.test(result.tablePasteValue)) {
@@ -1452,6 +1469,12 @@ async function main() {
     }
     if (!result.bodyPasteHandled || !/^before !\[\d+\.png\]\(images\/pasted\.png\)after$/.test(result.bodyPasteSource)) {
       failures.push(`file-only body image paste was ignored: ${JSON.stringify({ handled: result.bodyPasteHandled, source: result.bodyPasteSource })}`);
+    }
+    if (result.failedPasteSource !== 'retry here' ||
+      !/^retry !\[\d+\.png\]\(images\/pasted\.png\)here$/.test(result.retriedPasteSource)) {
+      failures.push(`failed image paste did not retry from its captured data: ${JSON.stringify({
+        failed: result.failedPasteSource, retried: result.retriedPasteSource
+      })}`);
     }
     if (!result.bodyNestedMarkerState.hollow || result.bodyNestedMarkerState.fill !== 'none' || result.bodyNestedMarkerState.stroke !== 'rgb(121, 184, 255)') {
       failures.push(`nested body bullet was not hollow: ${JSON.stringify(result.bodyNestedMarkerState)}`);

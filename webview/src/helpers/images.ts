@@ -173,7 +173,7 @@ export const handleSavedImagePath = (message: SavedImagePathResponse): void => {
 export interface ImagePasteContext {
   lineNumber: number;
   lineOffset: number;
-  onError?: (message: string) => void;
+  onError?: (message: string, retry: () => Promise<boolean>) => void;
 }
 
 export const handleImagePaste = async (
@@ -197,6 +197,7 @@ export const handleImagePaste = async (
       if (file.type.startsWith('image/')) imageCandidates.push({ blob: file, mimeType: file.type });
     }
   }
+  if (imageCandidates.length === 0) return false;
 
   const tableInput = document.activeElement instanceof HTMLTextAreaElement &&
     document.activeElement.closest('.meo-md-html-table')
@@ -208,69 +209,69 @@ export const handleImagePaste = async (
         end: tableInput.selectionEnd ?? tableInput.selectionStart ?? 0
       }
     : null;
+  const tableTextAtPaste = tableInput?.value ?? null;
+  const documentAtPaste = editor.view.state.doc;
 
   for (const { blob, mimeType } of imageCandidates) {
-
     event.preventDefault();
     event.stopPropagation();
-
     let imageData = '';
-    try {
-      imageData = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result ?? ''));
-        reader.onerror = () => reject(reader.error ?? new Error('Failed to read pasted image'));
-        reader.readAsDataURL(blob);
-      });
-    } catch (error) {
-      context.onError?.(error instanceof Error ? error.message : 'Failed to read pasted image');
-      return true;
-    }
-
-    if (!imageData) {
-      return true;
-    }
-
-    const timestamp = Date.now();
-    const dataUrlMimeType = parseDataUrlMimeType(imageData);
-    const extension = (
-      imageExtensionFromMimeType(dataUrlMimeType) ||
-      imageExtensionFromMimeType(mimeType) ||
-      'png'
-    );
-    const fileName = `${timestamp}.${extension}`;
-
-    const result = await clipboardImageSaveTransport.save({
-      imageData,
-      fileName
-    });
-
-    try {
-      if (result.ok === true) {
-        const imageMarkdown = `![${fileName}](${result.value.path})`;
+    let savedImage: { readonly fileName: string; readonly path: string } | null = null;
+    let completed = false;
+    const pasteImage = async (): Promise<boolean> => {
+      if (completed) return true;
+      try {
+        if (!imageData) {
+          imageData = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result ?? ''));
+            reader.onerror = () => reject(reader.error ?? new Error('Failed to read pasted image'));
+            reader.readAsDataURL(blob);
+          });
+          if (!imageData) throw new Error('Failed to read pasted image');
+        }
+        if (!savedImage) {
+          const extension = imageExtensionFromMimeType(parseDataUrlMimeType(imageData)) ||
+            imageExtensionFromMimeType(mimeType) || 'png';
+          const fileName = `${Date.now()}.${extension}`;
+          const result = await clipboardImageSaveTransport.save({ imageData, fileName });
+          if (result.ok === false) throw new Error(result.error.message);
+          savedImage = { fileName, path: result.value.path };
+        }
+        const imageMarkdown = `![${savedImage.fileName}](${savedImage.path})`;
         if (tableInput && tableSelection && tableInput.isConnected) {
-          tableInput.setRangeText(imageMarkdown, tableSelection.start, tableSelection.end, 'end');
+          const start = tableInput.value === tableTextAtPaste
+            ? tableSelection.start : tableInput.selectionStart;
+          const end = tableInput.value === tableTextAtPaste
+            ? tableSelection.end : tableInput.selectionEnd;
+          tableInput.setRangeText(imageMarkdown, start, end, 'end');
+          completed = true;
           tableInput.dispatchEvent(new Event('input', { bubbles: true }));
           tableInput.focus({ preventScroll: true });
           return true;
         }
         const currentState = editor.view.state;
-        const targetLineNumber = Math.min(context.lineNumber, currentState.doc.lines);
-        const targetLine = currentState.doc.line(targetLineNumber);
-        const insertAt = Math.min(targetLine.to, targetLine.from + context.lineOffset);
+        let insertAt = currentState.selection.main.head;
+        if (currentState.doc === documentAtPaste) {
+          const targetLineNumber = Math.min(context.lineNumber, currentState.doc.lines);
+          const targetLine = currentState.doc.line(targetLineNumber);
+          insertAt = Math.min(targetLine.to, targetLine.from + context.lineOffset);
+        }
         editor.view.dispatch({
           changes: { from: insertAt, to: insertAt, insert: imageMarkdown },
           selection: { anchor: insertAt + imageMarkdown.length }
         });
+        completed = true;
         editor.focus();
-      } else {
-        context.onError?.(result.error.message);
+        return true;
+      } catch (error) {
+        if (completed) return true;
+        console.error('[MEO image paste]', error);
+        context.onError?.(error instanceof Error ? error.message : 'Failed to paste image', pasteImage);
+        return false;
       }
-    } catch (error) {
-      console.error('[MEO image paste]', error);
-      context.onError?.(error instanceof Error ? error.message : 'Failed to paste image');
-    }
-
+    };
+    await pasteImage();
     return true;
   }
 

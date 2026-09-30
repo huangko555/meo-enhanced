@@ -97,7 +97,7 @@ async function main(): Promise<void> {
         status: 'unreadable-while-dirty'
       }}));
     });
-    await page.waitForFunction(() => document.querySelector('.editor-notice-title')?.textContent === 'Disk file unavailable');
+    await page.waitForFunction(() => document.querySelector('.editor-notice-title')?.textContent === 'Could not verify disk version');
     if (!await page.$('.editor-notice-action[data-action="save-copy"]')) {
       throw new Error('Unreadable disk warning did not provide Save Copy');
     }
@@ -130,6 +130,8 @@ async function main(): Promise<void> {
       const EditorView = (window as any).__EditorView;
       const editorElement = document.querySelector('.cm-editor');
       const view = EditorView.findFromDOM(editorElement);
+      const originalDispatch = view.dispatch.bind(view);
+      (window as any).__restoreDispatch = () => { view.dispatch = originalDispatch; };
       view.dispatch = function (...args: any[]) {
         void args;
         throw new Error('forced ordered-list render failure');
@@ -145,6 +147,18 @@ async function main(): Promise<void> {
     await page.waitForFunction((expected) => (window as any).__hostMessages.some(
       (message: any) => message.type === 'draftChanged' && message.text === expected
     ), { timeout: 2_000 }, expectedDraft);
+
+    await page.waitForSelector('.editor-notice-action[data-action="retry-document-update"]');
+    await page.evaluate(() => (window as any).__restoreDispatch());
+    await page.click('.editor-notice-action[data-action="retry-document-update"]');
+    await page.waitForFunction((expected) => {
+      const editorElement = document.querySelector('.cm-editor');
+      const view = (window as any).__EditorView.findFromDOM(editorElement);
+      return view.state.doc.toString() === expected;
+    }, { timeout: 2_000 }, expectedDraft);
+    if (!await page.$eval('.editor-notice', banner => (banner as HTMLElement).hidden)) {
+      throw new Error('successful document update retry did not clear the failure notice');
+    }
 
     console.log('document sync recovery checks passed');
   } finally {

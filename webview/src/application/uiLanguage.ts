@@ -288,6 +288,10 @@ export type UiStrings = Readonly<{
   noticeExternalFileUnreadableTitle: string;
   noticePasteImageFailedTitle: string;
   retryLiveMode: string;
+  retryDocumentUpdate: string;
+  retryDocumentUpdateFailed: string;
+  retryImagePaste: string;
+  retryImagePasteFailed: string;
   restartEditor: string;
   saveCopy: string;
   noticeActionFailed: string;
@@ -469,15 +473,19 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     noticeReloadDiskFailedTitle: 'Disk reload failed',
     noticeExternalFileModifiedTitle: 'File changed on disk',
     noticeExternalFileDeletedTitle: 'File deleted on disk',
-    noticeExternalFileUnreadableTitle: 'Disk file unavailable',
+    noticeExternalFileUnreadableTitle: 'Could not verify disk version',
     noticePasteImageFailedTitle: 'Image paste failed',
     retryLiveMode: 'Retry',
+    retryDocumentUpdate: 'Retry Update',
+    retryDocumentUpdateFailed: 'The update still could not be shown.',
+    retryImagePaste: 'Retry Paste',
+    retryImagePasteFailed: 'The image still could not be inserted.',
     restartEditor: 'Restart Editor',
     saveCopy: 'Save Copy',
     noticeActionFailed: 'Action failed:',
     switchToSourceMode: 'Switch to Source',
     liveModeFailure: 'Live mode failed to render this document. Switched to Source mode.',
-    editorUpdateFailure: 'Editor failed to update this document. Try reopening the file.',
+    editorUpdateFailure: 'The editor could not show the latest document content. Retry the update.',
     transientUpdateFailure: 'Live mode hit a transient render error while updating. Try again.',
     transientModeFailure: 'Live mode hit a transient render error. Staying in current mode; try again.',
     transientLoadFailure: 'Live mode hit a transient render error while loading. Try reopening or switching modes.',
@@ -649,15 +657,19 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     noticeReloadDiskFailedTitle: '磁盘重新加载失败',
     noticeExternalFileModifiedTitle: '磁盘文件已修改',
     noticeExternalFileDeletedTitle: '磁盘文件已删除',
-    noticeExternalFileUnreadableTitle: '无法读取磁盘文件',
+    noticeExternalFileUnreadableTitle: '无法核验磁盘版本',
     noticePasteImageFailedTitle: '图片粘贴失败',
     retryLiveMode: '重试',
+    retryDocumentUpdate: '重试更新',
+    retryDocumentUpdateFailed: '重试后仍无法显示最新内容。',
+    retryImagePaste: '重试粘贴',
+    retryImagePasteFailed: '仍无法插入图片。',
     restartEditor: '重启编辑器',
     saveCopy: '另存副本',
     noticeActionFailed: '操作失败：',
     switchToSourceMode: '切换到源码',
     liveModeFailure: '实时模式无法渲染此文档，已切换到源码模式。',
-    editorUpdateFailure: '编辑器无法更新此文档，请重新打开文件。',
+    editorUpdateFailure: '编辑器无法显示最新文档内容，请重试更新。',
     transientUpdateFailure: '实时模式更新时遇到临时渲染错误，请重试。',
     transientModeFailure: '实时模式遇到临时渲染错误，将保持当前模式；请重试。',
     transientLoadFailure: '实时模式加载时遇到临时渲染错误，请重新打开文件或切换模式。',

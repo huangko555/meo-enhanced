@@ -33,6 +33,7 @@ export type EditorModeInput =
       readonly source: 'user' | 'host-command';
       readonly viewport?: EditorModeViewportToken | null;
       readonly restoreEditorFocus?: boolean;
+      readonly retry?: boolean;
     }
   | {
       readonly type: 'requestMode';
@@ -397,7 +398,7 @@ export function createEditorModeApplication(): EditorModeApplication {
           input.restoreEditorFocus === true,
           input.source === 'render-failure'
             ? { basisManualIntentId: input.basisManualIntentId }
-            : undefined
+            : { force: input.retry === true }
         );
 
       case 'toggleMode': {

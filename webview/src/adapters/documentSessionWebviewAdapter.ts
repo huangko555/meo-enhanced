@@ -17,6 +17,7 @@ export type DocumentSessionWebviewAdapter = {
   localDraftChanged(text: string): void;
   requestSave(): void;
   requestReloadFromDisk(position: DocumentSessionViewPosition): void;
+  retryPresentation(): Promise<boolean>;
   whenIdle(): Promise<void>;
   dispose(): void;
 };
@@ -149,6 +150,14 @@ export function createDocumentSessionWebviewAdapter(
           topLineOffset: position.topLineOffset
         });
       });
+    },
+    async retryPresentation() {
+      let succeeded = false;
+      enqueueSession('presentation retry', async () => {
+        succeeded = await runtime.retryPresentation();
+      });
+      await operation;
+      return succeeded;
     },
     async whenIdle() {
       let pending: Promise<void>;

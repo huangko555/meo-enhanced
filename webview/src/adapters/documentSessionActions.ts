@@ -23,6 +23,7 @@ export type DocumentSessionActionAdapter = {
   execute(actions: readonly DocumentSessionAction[]): Promise<
     readonly DocumentPresentationCompletion[]
   >;
+  retryPresentation(): Promise<boolean>;
 };
 
 export type DocumentSessionActionAdapterDependencies = {
@@ -45,7 +46,19 @@ const MAX_REVISION_REQUEST_ATTEMPTS = 2;
 export function createDocumentSessionActionAdapter(
   dependencies: DocumentSessionActionAdapterDependencies
 ): DocumentSessionActionAdapter {
+  let failedPresentation: Extract<DocumentSessionAction, { readonly type: 'presentText' }> | null = null;
+  const present = async (
+    action: Extract<DocumentSessionAction, { readonly type: 'presentText' }>
+  ): Promise<boolean> => {
+    const succeeded = await dependencies.presentText(action.text, action.source) !== false;
+    // A disk reload also requires a Host receipt; retry that complete operation instead.
+    failedPresentation = succeeded || action.source === 'disk-reload' ? null : action;
+    return succeeded;
+  };
   return {
+    async retryPresentation() {
+      return failedPresentation ? present(failedPresentation) : false;
+    },
     async execute(actions) {
       const queue = Array.from(actions);
       let revisionRequestAttempts = 0;
@@ -56,6 +69,7 @@ export function createDocumentSessionActionAdapter(
         if (!action) continue;
 
         if (action.type === 'rememberDraft') {
+          failedPresentation = null;
           dependencies.postMessage({
             type: 'draftChanged',
             text: action.text,
@@ -72,8 +86,7 @@ export function createDocumentSessionActionAdapter(
           continue;
         }
         if (action.type === 'presentText') {
-          if (await dependencies.presentText(action.text, action.source) !== false
-            && action.onPresented) {
+          if (await present(action) && action.onPresented) {
             completions.push(action.onPresented);
           }
           continue;

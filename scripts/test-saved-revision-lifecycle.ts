@@ -75,6 +75,23 @@ scheduled.at(-1)?.run();
 for (let index = 0; index < 8; index += 1) await Promise.resolve();
 assert.deepEqual(observations.at(-1), { ok: false, reason: 'binary' });
 
+let transientReadCount = 0;
+const transientObservations: SavedRevisionFileReadResult[] = [];
+const transient = createSavedRevisionLifecycle({
+  file: { read: async () => ++transientReadCount === 1
+    ? { ok: false, reason: 'error' }
+    : { ok: true, text: 'disk' } },
+  timer,
+  readDocumentRevision: () => ({ version: 1, text: 'disk' }),
+  saveDocument: async () => true,
+  onRefresh: async ({ result }) => { transientObservations.push(result); }
+});
+await transient.refreshNow();
+assert.equal(transientReadCount, 2);
+assert.deepEqual(transientObservations, [{ ok: true, text: 'disk' }],
+  'a one-off disk read error must recover before raising a file warning');
+transient.dispose();
+
 const saveTrace: string[] = [];
 const explicitFile: SavedRevisionFileAdapter = {
   read: async () => { saveTrace.push('read'); return { ok: true, text: 'saved text' }; }

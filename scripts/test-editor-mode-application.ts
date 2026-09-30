@@ -50,6 +50,11 @@ assert.deepEqual(
   'stable same-mode manual requests must be idempotent'
 );
 assert.equal(hostInit.getState().manualIntent?.id, adoptedHostInitManualId);
+assert.deepEqual(
+  effectTypes(hostInit.dispatch({ type: 'requestMode', mode: 'source', source: 'user', retry: true })),
+  ['commitTransientEdits', 'presentMode', 'applyEditorMode'],
+  'a notice retry must reapply the current mode instead of being ignored as a duplicate'
+);
 
 const localInit = createEditorModeApplication();
 localInit.dispatch({ type: 'restoreLocal', mode: 'preview', lastEditableMode: 'source' });

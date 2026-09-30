@@ -182,4 +182,37 @@ const testAsyncReloadPresentation = async (
 await testAsyncReloadPresentation(false, 11, [], 3);
 await testAsyncReloadPresentation(true, 13, [13], 4);
 
+const retryPresentations: string[] = [];
+let failPresentation = true;
+const retryAdapter = createDocumentSessionWebviewAdapter({
+  postMessage: () => undefined,
+  presentText: (text) => {
+    retryPresentations.push(text);
+    return !failPresentation;
+  },
+  restoreReloadedView: () => undefined,
+  showNotice: () => undefined,
+  reportUnexpectedError: (context, error) => { throw new Error(`${context}: ${String(error)}`); }
+});
+retryAdapter.start(init);
+await retryAdapter.whenIdle();
+retryAdapter.accept({ type: 'docChanged', version: 2, text: 'new revision' });
+await retryAdapter.whenIdle();
+assert.deepEqual(retryPresentations, ['new revision']);
+failPresentation = false;
+assert.equal(await retryAdapter.retryPresentation(), true);
+assert.deepEqual(retryPresentations, ['new revision', 'new revision'],
+  'manual retry must present the failed Revision through the ordered session');
+assert.equal(await retryAdapter.retryPresentation(), false,
+  'successful presentation must clear the retry candidate');
+failPresentation = true;
+retryAdapter.accept({ type: 'docChanged', version: 3, text: 'newer revision' });
+await retryAdapter.whenIdle();
+retryAdapter.localDraftChanged('user typed after the failure');
+await retryAdapter.whenIdle();
+failPresentation = false;
+assert.equal(await retryAdapter.retryPresentation(), false,
+  'a later local edit must invalidate the stale failed presentation');
+retryAdapter.dispose();
+
 console.log('Document Session Webview Adapter checks passed');

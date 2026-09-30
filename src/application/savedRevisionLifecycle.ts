@@ -64,6 +64,11 @@ export function createSavedRevisionLifecycle(
     return recoveredFromUnavailable;
   };
 
+  const readWithRecovery = async (): Promise<SavedRevisionFileReadResult> => {
+    const result = await dependencies.file.read();
+    return result.ok || result.reason !== 'error' ? result : dependencies.file.read();
+  };
+
   const runRefreshes = (): Promise<void> => {
     if (disposed) return Promise.resolve();
     if (refreshRunning) return refreshRunning;
@@ -71,7 +76,7 @@ export function createSavedRevisionLifecycle(
       while (refreshPending && !disposed) {
         refreshPending = false;
         const readGeneration = generation;
-        const result = await dependencies.file.read();
+        const result = await readWithRecovery();
         if (disposed) return;
         if (readGeneration !== generation) continue;
         const recoveredFromUnavailable = noteResult(result);
@@ -94,7 +99,7 @@ export function createSavedRevisionLifecycle(
 
   return {
     async readInitial() {
-      const result = await dependencies.file.read();
+      const result = await readWithRecovery();
       if (disposed) return null;
       noteResult(result);
       if (!result.ok) return null;
@@ -119,7 +124,7 @@ export function createSavedRevisionLifecycle(
         return { ok: false, reason: 'save-rejected' };
       }
       generation += 1;
-      const result = await dependencies.file.read();
+      const result = await readWithRecovery();
       if (disposed) return { ok: false, reason: 'read-failed' };
       noteResult(result);
       if (!result.ok) return { ok: false, reason: 'read-failed' };
