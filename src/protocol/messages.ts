@@ -1,3 +1,4 @@
+import { decodeSaveDocumentCopyRequest, decodeDocumentCopyResponse, type SaveDocumentCopyRequest, type DocumentCopyResponse } from './documentCopy';
 import { decodeSaveImageFromClipboardRequest, decodeSavedImagePathResponse, type SaveImageFromClipboardRequest, type SavedImagePathResponse } from './clipboardImageSave';
 import { decodeDiagnosticsChangedEvent, type DiagnosticsChangedEvent } from './diagnostics';
 import { decodeDocumentSyncCommand, decodeDocumentSyncMessage, type DocumentSyncCommand, type DocumentSyncMessage } from './documentSync';
@@ -27,6 +28,7 @@ export type WebviewToHostMessage =
   | ResolveWikiLinksRequest
   | ResolveLocalLinksRequest
   | SaveImageFromClipboardRequest
+  | SaveDocumentCopyRequest
   | PreviewRenderRequest
   | ExportSnapshotResponse;
 
@@ -43,6 +45,7 @@ export type HostToWebviewMessage =
   | ResolvedWikiLinksResponse
   | ResolvedLocalLinksResponse
   | SavedImagePathResponse
+  | DocumentCopyResponse
   | PreviewRenderResponse
   | ExportSnapshotRequest
   | GitBaselineChangedEvent;
@@ -59,6 +62,7 @@ export function decodeWebviewToHostMessage(value: unknown): WebviewToHostMessage
     ?? decodeResolveWikiLinksRequest(value)
     ?? decodeResolveLocalLinksRequest(value)
     ?? decodeSaveImageFromClipboardRequest(value)
+    ?? decodeSaveDocumentCopyRequest(value)
     ?? decodePreviewRenderRequest(value)
     ?? decodeExportSnapshotResponse(value);
 }
@@ -76,6 +80,7 @@ export function decodeHostToWebviewMessage(value: unknown): HostToWebviewMessage
     ?? decodeResolvedWikiLinksResponse(value)
     ?? decodeResolvedLocalLinksResponse(value)
     ?? decodeSavedImagePathResponse(value)
+    ?? decodeDocumentCopyResponse(value)
     ?? decodePreviewRenderResponse(value)
     ?? decodeExportSnapshotRequest(value)
     ?? decodeGitBaselineChangedEvent(value);

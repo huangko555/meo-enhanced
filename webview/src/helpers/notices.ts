@@ -80,9 +80,15 @@ export function createEditorNoticeController(
       actionButtons.forEach((candidate) => { candidate.disabled = true; });
       banner.setAttribute('aria-busy', 'true');
       try {
+        if (version === renderVersion && activeNotice) message.textContent = activeNotice.message;
         await action.run();
       } catch (error) {
         console.error('[MEO webview] notice action failed', { action: action.id, error });
+        if (version === renderVersion && activeNotice && !banner.hidden) {
+          const detail = error instanceof Error ? error.message : String(error);
+          message.textContent = activeNotice.message + ' ' +
+            getUiStrings(activeLanguage).noticeActionFailed + ' ' + detail;
+        }
       } finally {
         if (version === renderVersion && !banner.hidden) {
           actionButtons.forEach((candidate) => { candidate.disabled = false; });

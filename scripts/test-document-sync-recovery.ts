@@ -60,6 +60,55 @@ async function main(): Promise<void> {
 
     await page.evaluate(() => {
       window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'externalFileStatusChanged',
+        status: 'modified-while-dirty'
+      }}));
+    });
+    await page.waitForSelector('.editor-notice-action[data-action="save-copy"]');
+    await page.click('.editor-notice-action[data-action="save-copy"]');
+    await page.waitForFunction(() => (window as any).__hostMessages.some(
+      (message: any) => message.type === 'saveDocumentCopy'
+    ));
+    const copyRequest = await page.evaluate(() => (window as any).__hostMessages.find(
+      (message: any) => message.type === 'saveDocumentCopy'
+    ));
+    if (copyRequest.text !== '1. alpha\n2. beta') {
+      throw new Error('Save Copy did not capture the unsaved editor draft');
+    }
+    await page.evaluate((requestId) => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'documentCopyResult', requestId,
+        result: { ok: true, value: { status: 'saved' } }
+      }}));
+    }, copyRequest.requestId);
+    await page.waitForFunction(() => document.querySelector('.editor-notice')?.getAttribute('aria-busy') !== 'true');
+    if (await page.$eval('.editor-notice', banner => (banner as HTMLElement).hidden)) {
+      throw new Error('Saving a copy must not dismiss the unresolved external change');
+    }
+    await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'externalFileStatusChanged',
+        status: 'current'
+      }}));
+    });
+    await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'externalFileStatusChanged',
+        status: 'unreadable-while-dirty'
+      }}));
+    });
+    await page.waitForFunction(() => document.querySelector('.editor-notice-title')?.textContent === 'Disk file unavailable');
+    if (!await page.$('.editor-notice-action[data-action="save-copy"]')) {
+      throw new Error('Unreadable disk warning did not provide Save Copy');
+    }
+    await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'externalFileStatusChanged',
+        status: 'current'
+      }}));
+    });
+    await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'docChanged',
         text: '1. alpha',
         version: 1

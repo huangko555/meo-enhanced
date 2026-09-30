@@ -23,6 +23,7 @@ import { createMermaidDiagramPresentationEffectAdapter } from './editor/mermaidD
 import { createMermaidDiagramPresentationFactory } from './editor/mermaidDiagramPresentation';
 import { isAcceptedLineJumpInput, parseLineJumpTarget } from './helpers/lineJump';
 import { createEditorNoticeController } from './helpers/notices';
+import { createDocumentCopyTransport } from './adapters/documentCopyTransport';
 import { createPreviewController } from './helpers/preview';
 import type { ViewportAnchorToken } from './helpers/viewportController';
 import { createDocumentScrollToTopController } from './helpers/scrollToTop';
@@ -1948,6 +1949,7 @@ const editorNoticeIssue = Object.freeze({
   editorModeTransition: 'editor-mode-transition',
   editorMount: 'editor-mount',
   externalFileDeleted: 'external-file-deleted',
+  externalFileUnreadable: 'external-file-unreadable',
   externalFileModified: 'external-file-modified',
   liveModeUnavailable: 'live-mode-unavailable'
 });
@@ -2540,6 +2542,23 @@ const presentDocumentText = async (
   return true;
 };
 
+const documentCopyTransport = createDocumentCopyTransport({
+  getUiLanguage: () => activeUiLanguage,
+  postMessage: (message) => vscode.postMessage(message),
+  commitTransientEdits: commitEditorTransientEdits,
+  getCurrentText: () => editor?.getTextForSave() ?? pendingInitialText,
+  whenDocumentIdle: () => documentSessionAdapter.whenIdle()
+});
+
+const saveCopyAction = (): EditorNoticeAction => ({
+  id: 'save-copy',
+  label: activeUiStrings.saveCopy,
+  emphasis: 'primary',
+  run: async () => {
+    const result = await documentCopyTransport.save();
+    if (!result.ok) throw new Error(result.error.message);
+  }
+});
 const documentSessionAdapter = createDocumentSessionWebviewAdapter({
   postMessage: (message) => vscode.postMessage(message),
   presentText: presentDocumentText,
@@ -2553,18 +2572,21 @@ const documentSessionAdapter = createDocumentSessionWebviewAdapter({
       if (notice === 'external-conflict') {
         return {
           title: activeUiStrings.noticeExternalConflictTitle,
-          message: activeUiStrings.externalConflictNotice
+          message: activeUiStrings.externalConflictNotice,
+          actions: [saveCopyAction()]
         };
       }
       if (notice === 'resync-failed') {
         return {
           title: activeUiStrings.noticeDocumentSyncFailedTitle,
-          message: activeUiStrings.resyncFailureNotice
+          message: activeUiStrings.resyncFailureNotice,
+          actions: [saveCopyAction()]
         };
       }
       return {
         title: activeUiStrings.noticeReloadDiskFailedTitle,
-        message: activeUiStrings.reloadDiskFailureNotice
+        message: activeUiStrings.reloadDiskFailureNotice,
+        actions: [saveCopyAction()]
       };
     };
     failureNotice.setFailureNotice(resolveMessage, 'warning');
@@ -3123,6 +3145,10 @@ window.addEventListener('message', (event) => {
     return;
   }
 
+  if (message.type === 'documentCopyResult') {
+    documentCopyTransport.accept(message);
+    return;
+  }
   if (themeAdapter.accept(message)) {
     return;
   }
@@ -3151,16 +3177,26 @@ window.addEventListener('message', (event) => {
         () => message.status === 'deleted-while-dirty'
           ? {
               title: activeUiStrings.noticeExternalFileDeletedTitle,
-              message: activeUiStrings.externalFileDeletedNotice
+              message: activeUiStrings.externalFileDeletedNotice,
+              actions: [saveCopyAction()]
             }
-          : {
-              title: activeUiStrings.noticeExternalFileModifiedTitle,
-              message: activeUiStrings.externalFileModifiedNotice
-            },
+          : message.status === 'unreadable-while-dirty'
+            ? {
+                title: activeUiStrings.noticeExternalFileUnreadableTitle,
+                message: activeUiStrings.externalFileUnreadableNotice,
+                actions: [saveCopyAction()]
+              }
+            : {
+                title: activeUiStrings.noticeExternalFileModifiedTitle,
+                message: activeUiStrings.externalFileModifiedNotice,
+                actions: [saveCopyAction()]
+              },
         'warning',
         message.status === 'deleted-while-dirty'
           ? editorNoticeIssue.externalFileDeleted
-          : editorNoticeIssue.externalFileModified
+          : message.status === 'unreadable-while-dirty'
+            ? editorNoticeIssue.externalFileUnreadable
+            : editorNoticeIssue.externalFileModified
       );
     }
     return;
@@ -3345,6 +3381,7 @@ window.addEventListener('beforeunload', () => {
   cancelPendingLocalLinkStatusRefresh();
   documentSessionAdapter.dispose();
   documentSaveFlushAdapter.dispose();
+  documentCopyTransport.dispose();
   previewAdapter.dispose();
   exportAdapter.dispose();
   editorFocusController.dispose();

@@ -12,6 +12,7 @@ import {
 const documentUri = createPanelSessionTestUri('C:/external-file-notice.md');
 const document = createPanelSessionTestDocument(documentUri, 'base', 1, false);
 let diskText = 'base';
+let readFailure = false;
 let fileChanged = (): void => undefined;
 let fileCreated = (): void => undefined;
 let fileDeleted = (): void => undefined;
@@ -75,6 +76,9 @@ const controller = createPanelSessionController(createPanelSessionControllerPara
   readDiskText: () => diskText,
   overrides: {
     savedRevisionRefreshTimer: immediateTimer,
+    savedRevisionFile: { read: async () => readFailure
+      ? { ok: false as const, reason: 'error' as const }
+      : { ok: true as const, text: diskText } },
     gitBaselineRefreshTimer: { schedule: () => panelSessionCancelable() }
   }
 }) as never);
@@ -141,5 +145,17 @@ documentSaved();
 await flushMicrotasks();
 assert.equal(statuses().at(-1), 'current', 'a successful save must clear the external-file warning');
 
+document.text = 'unpublished local edit';
+document.isDirty = true;
+readFailure = true;
+fileChanged();
+await flushMicrotasks();
+assert.equal(statuses().at(-1), 'unreadable-while-dirty',
+  'a failed disk read with unsaved content must expose a recovery action');
+readFailure = false;
+diskText = document.text;
+fileChanged();
+await flushMicrotasks();
+assert.equal(statuses().at(-1), 'current', 'a successful disk read must clear the unavailable state');
 controller.dispose();
 console.log('Panel Session external file notice checks passed');

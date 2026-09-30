@@ -285,9 +285,12 @@ export type UiStrings = Readonly<{
   noticeReloadDiskFailedTitle: string;
   noticeExternalFileModifiedTitle: string;
   noticeExternalFileDeletedTitle: string;
+  noticeExternalFileUnreadableTitle: string;
   noticePasteImageFailedTitle: string;
   retryLiveMode: string;
   restartEditor: string;
+  saveCopy: string;
+  noticeActionFailed: string;
   switchToSourceMode: string;
   liveModeFailure: string;
   editorUpdateFailure: string;
@@ -301,6 +304,7 @@ export type UiStrings = Readonly<{
   reloadDiskFailureNotice: string;
   externalFileModifiedNotice: string;
   externalFileDeletedNotice: string;
+  externalFileUnreadableNotice: string;
 }>;
 
 const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
@@ -465,9 +469,12 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     noticeReloadDiskFailedTitle: 'Disk reload failed',
     noticeExternalFileModifiedTitle: 'File changed on disk',
     noticeExternalFileDeletedTitle: 'File deleted on disk',
+    noticeExternalFileUnreadableTitle: 'Disk file unavailable',
     noticePasteImageFailedTitle: 'Image paste failed',
     retryLiveMode: 'Retry',
     restartEditor: 'Restart Editor',
+    saveCopy: 'Save Copy',
+    noticeActionFailed: 'Action failed:',
     switchToSourceMode: 'Switch to Source',
     liveModeFailure: 'Live mode failed to render this document. Switched to Source mode.',
     editorUpdateFailure: 'Editor failed to update this document. Try reopening the file.',
@@ -476,11 +483,12 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     transientLoadFailure: 'Live mode hit a transient render error while loading. Try reopening or switching modes.',
     pasteImageFailure: (message: string) => `Could not paste image: ${message}`,
     properties: 'Properties',
-    resyncFailureNotice: 'Could not resynchronize the document. Local edits were kept.',
-    externalConflictNotice: 'The document changed while a local edit was still being applied. The local edit was kept.',
-    reloadDiskFailureNotice: 'Could not reload the latest version from disk. Unsaved edits were kept.',
-    externalFileModifiedNotice: 'The file was modified externally on disk. Unsaved edits were kept; review the changes before saving.',
-    externalFileDeletedNotice: 'The file was deleted externally from disk. Unsaved edits were kept; review the situation before saving.'
+    resyncFailureNotice: 'Could not resynchronize the document. Local edits were kept; save a copy to protect them.',
+    externalConflictNotice: 'The document changed while a local edit was still being applied. Local edits were kept; save a copy before resolving the conflict.',
+    reloadDiskFailureNotice: 'Could not reload the latest version from disk. Unsaved edits were kept; save a copy to protect them.',
+    externalFileModifiedNotice: 'The file changed on disk. Unsaved edits were kept; save a copy before deciding how to proceed.',
+    externalFileDeletedNotice: 'The file was deleted from disk. Unsaved edits were kept; save a copy to protect them.',
+    externalFileUnreadableNotice: 'Could not read the disk version. Unsaved edits remain in the editor; save a copy to protect them.'
   }),
   'zh-CN': Object.freeze({
     auto: '自动', light: '浅色', dark: '深色', previewTitle: 'Markdown 预览',
@@ -641,9 +649,12 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     noticeReloadDiskFailedTitle: '磁盘重新加载失败',
     noticeExternalFileModifiedTitle: '磁盘文件已修改',
     noticeExternalFileDeletedTitle: '磁盘文件已删除',
+    noticeExternalFileUnreadableTitle: '无法读取磁盘文件',
     noticePasteImageFailedTitle: '图片粘贴失败',
     retryLiveMode: '重试',
     restartEditor: '重启编辑器',
+    saveCopy: '另存副本',
+    noticeActionFailed: '操作失败：',
     switchToSourceMode: '切换到源码',
     liveModeFailure: '实时模式无法渲染此文档，已切换到源码模式。',
     editorUpdateFailure: '编辑器无法更新此文档，请重新打开文件。',
@@ -652,11 +663,12 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     transientLoadFailure: '实时模式加载时遇到临时渲染错误，请重新打开文件或切换模式。',
     pasteImageFailure: (message: string) => `无法粘贴图片：${message}`,
     properties: 'Properties',
-    resyncFailureNotice: '无法重新同步文档，已保留本地编辑。',
-    externalConflictNotice: '文档发生外部变化时，本地编辑尚未应用完成。当前编辑已保留。',
-    reloadDiskFailureNotice: '无法从磁盘重新加载最新版本，已保留本地编辑。',
-    externalFileModifiedNotice: '磁盘文件已被外部修改。未保存的编辑已保留，请在保存前查看变更。',
-    externalFileDeletedNotice: '磁盘文件已被外部删除。未保存的编辑已保留，请在保存前确认如何处理。'
+    resyncFailureNotice: '无法重新同步文档，已保留本地编辑，可另存副本保全内容。',
+    externalConflictNotice: '文档发生外部变化时，本地编辑尚未应用完成。当前编辑已保留，可先另存副本。',
+    reloadDiskFailureNotice: '无法从磁盘重新加载最新版本，已保留本地编辑，可另存副本保全内容。',
+    externalFileModifiedNotice: '磁盘文件已被外部修改。未保存的编辑已保留，可先另存副本再决定如何处理。',
+    externalFileDeletedNotice: '磁盘文件已被外部删除。未保存的编辑已保留，可另存副本保全内容。',
+    externalFileUnreadableNotice: '无法读取磁盘版本。未保存的编辑仍在编辑器中，可另存副本以保全内容。'
   })
 });
 

@@ -4,7 +4,7 @@ export type HostEditorEvent =
   | { readonly type: 'focusEditor' }
   | {
       readonly type: 'externalFileStatusChanged';
-      readonly status: 'current' | 'modified-while-dirty' | 'deleted-while-dirty';
+      readonly status: 'current' | 'modified-while-dirty' | 'deleted-while-dirty' | 'unreadable-while-dirty';
     }
   | { readonly type: 'revealSelection'; readonly anchor: number; readonly head: number; readonly focus?: boolean; readonly preserveViewport?: boolean }
   | { readonly type: 'revealDocumentFragment'; readonly href: string }
@@ -34,6 +34,7 @@ export function decodeHostEditorEvent(value: unknown): HostEditorEvent | null {
       return value.status === 'current'
         || value.status === 'modified-while-dirty'
         || value.status === 'deleted-while-dirty'
+        || value.status === 'unreadable-while-dirty'
         ? value as HostEditorEvent : null;
     case 'revealSelection':
       return isOffset(value.anchor) && isOffset(value.head)

@@ -78,6 +78,7 @@ import type { ReadingSnapshot } from '../protocol/exportSnapshot';
 import { createExportSnapshotTransport } from '../host/exportSnapshotTransport';
 import { respondToDocumentSessionRequest } from '../host/documentSessionRequestHandler';
 import { createVscodeDocumentReloadAdapter } from '../host/vscodeDocumentReloadAdapter';
+import { createVscodeDocumentCopyAdapter } from '../host/vscodeDocumentCopyAdapter';
 import { createVscodeDocumentSaveLifecycleAdapter } from '../host/vscodeDocumentSaveLifecycleAdapter';
 import { saveClipboardImageFile } from '../host/clipboardImageSave';
 import type { DocumentRevisionDto, DocumentRevisionResolution } from '../protocol/documentSession';
@@ -286,6 +287,12 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     saveDocument,
     onRefresh: async ({ result, recoveredFromUnavailable }) => {
       if (!result.ok) {
+        if (result.reason === 'error' && document.isDirty
+          && externalFileStatus !== 'deleted-while-dirty') {
+          publishExternalFileStatus('unreadable-while-dirty');
+        } else if (!document.isDirty && externalFileStatus === 'unreadable-while-dirty') {
+          publishExternalFileStatus('current');
+        }
         notifySavedRevisionChanged();
         return;
       }
@@ -309,6 +316,20 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     savedRevisionLifecycle.scheduleRefresh(delayMs);
   };
 
+  const documentCopyAdapter = createVscodeDocumentCopyAdapter(documentUri, {
+    getUiLanguage,
+    onSaved: (uri) => {
+      const location = uri.fsPath || uri.toString();
+      void vscode.window.showInformationMessage(
+        getUiLanguage() === 'zh-CN' ? '副本已保存：' + location : 'Copy saved: ' + location
+      );
+    },
+    onFailure: (message) => {
+      void vscode.window.showErrorMessage(
+        getUiLanguage() === 'zh-CN' ? '另存副本失败：' + message : 'Could not save copy: ' + message
+      );
+    }
+  });
   const documentSaveLifecycle = createVscodeDocumentSaveLifecycleAdapter({
     document,
     postMessage: postToWebview,
@@ -915,6 +936,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
           }
         });
         return;
+      case 'saveDocumentCopy': {
+        const response = await documentCopyAdapter.handle(raw);
+        await postToWebview(response);
+        return;
+      }
       case 'saveImageFromClipboard': {
         const response = await handleSaveImageFromClipboard(raw, documentUri);
         await postToWebview(response);
@@ -1041,6 +1067,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     gitBaselineRefresh.dispose();
     savedRevisionLifecycle.dispose();
     documentSaveLifecycle.dispose();
+    documentCopyAdapter.dispose();
 
     runBackground(enqueue(async () => {
       try {

@@ -178,6 +178,7 @@ assert.deepEqual(
     chinese.noticeReloadDiskFailedTitle,
     chinese.noticeExternalFileModifiedTitle,
     chinese.noticeExternalFileDeletedTitle,
+    chinese.noticeExternalFileUnreadableTitle,
     chinese.noticePasteImageFailedTitle
   ],
   [
@@ -190,6 +191,7 @@ assert.deepEqual(
     '磁盘重新加载失败',
     '磁盘文件已修改',
     '磁盘文件已删除',
+    '无法读取磁盘文件',
     '图片粘贴失败'
   ]
 );
@@ -199,14 +201,18 @@ assert.deepEqual(
     chinese.externalFileDeletedNotice,
     chinese.reloadDiskFailureNotice,
     chinese.externalConflictNotice,
-    chinese.resyncFailureNotice
+    chinese.resyncFailureNotice,
+    chinese.externalFileUnreadableNotice,
+    chinese.saveCopy
   ],
   [
-    '磁盘文件已被外部修改。未保存的编辑已保留，请在保存前查看变更。',
-    '磁盘文件已被外部删除。未保存的编辑已保留，请在保存前确认如何处理。',
-    '无法从磁盘重新加载最新版本，已保留本地编辑。',
-    '文档发生外部变化时，本地编辑尚未应用完成。当前编辑已保留。',
-    '无法重新同步文档，已保留本地编辑。'
+    '磁盘文件已被外部修改。未保存的编辑已保留，可先另存副本再决定如何处理。',
+    '磁盘文件已被外部删除。未保存的编辑已保留，可另存副本保全内容。',
+    '无法从磁盘重新加载最新版本，已保留本地编辑，可另存副本保全内容。',
+    '文档发生外部变化时，本地编辑尚未应用完成。当前编辑已保留，可先另存副本。',
+    '无法重新同步文档，已保留本地编辑，可另存副本保全内容。',
+    '无法读取磁盘版本。未保存的编辑仍在编辑器中，可另存副本以保全内容。',
+    '另存副本'
   ]
 );
 assert.equal(Object.isFrozen(english), true);

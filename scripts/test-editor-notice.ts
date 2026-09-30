@@ -189,6 +189,22 @@ async function main() {
         background: getComputedStyle(banner).backgroundColor,
         iconColor: getComputedStyle(banner.querySelector('.editor-notice-icon') as HTMLElement).color
       };
+      controller.setEditorNotice({
+        message: '风险仍在',
+        actions: [{
+          id: 'save-copy',
+          label: '另存副本',
+          emphasis: 'primary',
+          run: async () => { throw new Error('无法核验副本'); }
+        }]
+      }, 'warning');
+      const copyButton = banner.querySelector<HTMLButtonElement>('[data-action="save-copy"]');
+      copyButton?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+      const failedActionVisible = !banner.hidden && copyButton?.disabled === false &&
+        banner.querySelector('.editor-notice-message')?.textContent ===
+          '风险仍在 操作失败： 无法核验副本';
       controller.clearEditorNotice();
 
       let localizedMessage = '磁盘文件已修改';
@@ -236,7 +252,7 @@ async function main() {
       keyedManager.setPersistentNotice('deleted on disk', 'warning', 'external-file-deleted');
       const differentPersistentOccurrenceShown = keyedRenders === 5;
       return {
-        firstState, layerState, lightState, dismissed, dismissCount, actionCount, secondState,
+        firstState, layerState, lightState, dismissed, dismissCount, actionCount, secondState, failedActionVisible,
         localizedChrome,
         persistentText, failureText, restoredPersistentText, relocalizedText, persistentDismissed,
         duplicateCoalesced, dismissedOccurrenceSuppressed,
@@ -287,6 +303,7 @@ async function main() {
         light: result.lightState
       })}`);
     }
+    if (!result.failedActionVisible) throw new Error('failed notice action hid the original risk or could not be retried');
     if (!result.dismissed || result.dismissCount !== 1 || result.actionCount !== 1) {
       throw new Error('notice actions could not be invoked or dismissed');
     }
