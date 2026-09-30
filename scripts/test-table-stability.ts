@@ -60,6 +60,86 @@ async function main() {
       const editingInputSpellcheck = editingInput.spellcheck;
       editingEditor.destroy();
 
+      const modeCaretEditor = await create('| A | B |\n| --- | --- |\n| alpha beta | gamma |');
+      const modeInput = document.querySelector<HTMLTextAreaElement>('tbody textarea[data-table-col="0"]')!;
+      modeInput.focus();
+      modeInput.setSelectionRange(5, 5);
+      const sourceModeViewport = modeCaretEditor.captureModeTransitionAnchorToken('editor');
+      modeCaretEditor.commitTransientEdits();
+      modeCaretEditor.setMode('source', sourceModeViewport);
+      const sourceCaret = {
+        head: modeCaretEditor.view.state.selection.main.head,
+        expected: modeCaretEditor.view.state.doc.toString().indexOf('alpha') + 5,
+        focused: document.activeElement === modeCaretEditor.view.contentDOM
+      };
+      modeCaretEditor.setMode('live', modeCaretEditor.captureModeTransitionAnchorToken('editor'));
+      await waitFrames();
+      const returnedInput = document.querySelector<HTMLTextAreaElement>('tbody textarea[data-table-col="0"]');
+      const liveCaret = {
+        focused: document.activeElement === returnedInput,
+        offset: returnedInput?.selectionStart ?? -1
+      };
+      returnedInput?.focus();
+      if (returnedInput) {
+        returnedInput.value = 'alpha longer beta';
+        returnedInput.setSelectionRange(8, 8);
+        returnedInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      modeCaretEditor.commitTransientEdits();
+      modeCaretEditor.setMode('source');
+      const editedSourceCaret = {
+        head: modeCaretEditor.view.state.selection.main.head,
+        expected: modeCaretEditor.view.state.doc.toString().indexOf('alpha longer beta') + 8,
+        focused: document.activeElement === modeCaretEditor.view.contentDOM
+      };
+      modeCaretEditor.setMode('live');
+      await waitFrames();
+      const blurredInput = document.querySelector<HTMLTextAreaElement>('tbody textarea[data-table-col="0"]')!;
+      blurredInput.focus();
+      blurredInput.setSelectionRange(2, 2);
+      (document.getElementById('outside') as HTMLButtonElement).focus();
+      modeCaretEditor.setMode('source');
+      modeCaretEditor.focus();
+      const blurredSourceCaret = {
+        head: modeCaretEditor.view.state.selection.main.head,
+        expected: modeCaretEditor.view.state.doc.toString().indexOf('alpha longer beta') + 2,
+        focused: document.activeElement === modeCaretEditor.view.contentDOM
+      };
+      modeCaretEditor.view.dispatch({ selection: { anchor: 0 } });
+      modeCaretEditor.setMode('live');
+      await waitFrames();
+      const movedSourceCaret = {
+        head: modeCaretEditor.view.state.selection.main.head,
+        focused: document.activeElement === modeCaretEditor.view.contentDOM
+      };
+      modeCaretEditor.destroy();
+
+      const modeRangeEditor = await create('| A | B |\n| --- | --- |\n| first<br>second \\| pipe | other |');
+      const modeRangeInput = document.querySelector<HTMLTextAreaElement>('tbody textarea[data-table-col="0"]')!;
+      const rangeStart = modeRangeInput.value.indexOf('second') + 1;
+      const rangeEnd = rangeStart + 3;
+      modeRangeInput.focus();
+      modeRangeInput.setSelectionRange(rangeStart, rangeEnd, 'backward');
+      modeRangeEditor.setMode('source');
+      const expectedRangeHead = modeRangeEditor.view.state.doc.toString().indexOf('second') + 1;
+      const sourceRange = {
+        anchor: modeRangeEditor.view.state.selection.main.anchor,
+        head: modeRangeEditor.view.state.selection.main.head,
+        expectedHead: expectedRangeHead
+      };
+      modeRangeEditor.setMode('live');
+      await waitFrames();
+      const rangeReturnInput = document.querySelector<HTMLTextAreaElement>('tbody textarea[data-table-col="0"]')!;
+      const liveRange = {
+        focused: document.activeElement === rangeReturnInput,
+        start: rangeReturnInput.selectionStart,
+        end: rangeReturnInput.selectionEnd,
+        direction: rangeReturnInput.selectionDirection,
+        expectedStart: rangeStart,
+        expectedEnd: rangeEnd
+      };
+      modeRangeEditor.destroy();
+
       const inlineEditingEditor = await create('| A | B |\n| --- | --- |\n| before `literal` #tag [external](https://example.com) [internal](#target) **bold** | editing |');
       const inlineEditingInputs = document.querySelectorAll<HTMLTextAreaElement>('tbody textarea');
       const inlineEditingInput = inlineEditingInputs[0]!;
@@ -1113,6 +1193,13 @@ async function main() {
 
       return {
         editingPreviewText,
+        sourceCaret,
+        liveCaret,
+        editedSourceCaret,
+        blurredSourceCaret,
+        movedSourceCaret,
+        sourceRange,
+        liveRange,
         editingInputSpellcheck,
         inlineDecorationCount,
         inlineLinkButtons,
@@ -1213,6 +1300,27 @@ async function main() {
 
     const failures: string[] = [];
     if (result.editingPreviewText !== 'asdx') failures.push(`editing preview remained ${JSON.stringify(result.editingPreviewText)}`);
+    if (result.sourceCaret.head !== result.sourceCaret.expected || !result.sourceCaret.focused ||
+      !result.liveCaret.focused || result.liveCaret.offset !== 5 ||
+      result.editedSourceCaret.head !== result.editedSourceCaret.expected || !result.editedSourceCaret.focused) {
+      failures.push(`table mode round-trip lost cell caret: ${JSON.stringify({
+        source: result.sourceCaret, live: result.liveCaret, editedSource: result.editedSourceCaret
+      })}`);
+    }
+    if (result.blurredSourceCaret.head !== result.blurredSourceCaret.expected || !result.blurredSourceCaret.focused ||
+      result.movedSourceCaret.head !== 0 || !result.movedSourceCaret.focused) {
+      failures.push(`table mode switch did not respect focus handoff or source navigation: ${JSON.stringify({
+        blurred: result.blurredSourceCaret, moved: result.movedSourceCaret
+      })}`);
+    }
+    if (result.sourceRange.anchor !== result.sourceRange.expectedHead + 3 ||
+      result.sourceRange.head !== result.sourceRange.expectedHead || !result.liveRange.focused ||
+      result.liveRange.start !== result.liveRange.expectedStart || result.liveRange.end !== result.liveRange.expectedEnd ||
+      result.liveRange.direction !== 'backward') {
+      failures.push(`table mode switch lost a multiline backward selection: ${JSON.stringify({
+        source: result.sourceRange, live: result.liveRange
+      })}`);
+    }
     if (result.editingInputSpellcheck !== true) failures.push(`table input native spellcheck was ${JSON.stringify(result.editingInputSpellcheck)}`);
     if (
       result.inlineDecorationCount !== 5 ||

@@ -946,6 +946,19 @@ export function tableCellSourceOffsetToEditorOffset(value: string, offset: numbe
   return tableCellSourceToEditorValue(source.slice(0, Math.max(0, offset))).length;
 }
 
+/** Resolve against the committed row; a textarea's dataset can lag a pending cell edit. */
+export function tableCellSourceRangeForInput(
+  view: EditorView,
+  input: HTMLTextAreaElement
+): { from: number; to: number } | null {
+  const lineNumber = Number.parseInt(input.closest('tr')?.dataset.sourceLineNumber ?? '', 10);
+  const column = Number.parseInt(input.dataset.tableCol ?? '', 10);
+  if (!Number.isInteger(lineNumber) || lineNumber < 1 || lineNumber > view.state.doc.lines ||
+    !Number.isInteger(column) || column < 0) return null;
+  const line = view.state.doc.line(lineNumber);
+  return parseTableRowCells(line.text, line.from).segments[column] ?? null;
+}
+
 function withTableCellVisualLineProbe<T>(
   input: HTMLTextAreaElement,
   run: (probe: {

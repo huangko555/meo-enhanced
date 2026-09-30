@@ -77,6 +77,9 @@ import {
   sourceTableHeaderLineField,
   refreshTableLocalLinkIndicators,
   tableCellEditorOffsetToSourceOffset,
+  tableCellEditorValueToSource,
+  tableCellSourceOffsetToEditorOffset,
+  tableCellSourceRangeForInput,
   tableHeaderAlignmentOverrideField,
   commitPendingTableEdits,
   focusHistoryChange,
@@ -1027,6 +1030,33 @@ export function createEditor({
       return false;
     }
     return commitPendingTableEdits(view);
+  };
+
+  const restoreTableModeSelection = (
+    selection: { anchor: number; head: number },
+    restoreFocus: boolean
+  ): boolean => {
+    if (view.state.selection.ranges.length !== 1) return false;
+    const from = Math.min(selection.anchor, selection.head);
+    const to = Math.max(selection.anchor, selection.head);
+    const lineNumber = view.state.doc.lineAt(from).number;
+    if (view.state.doc.lineAt(to).number !== lineNumber) return false;
+    for (const input of view.dom.querySelectorAll<HTMLTextAreaElement>(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) ' +
+      `tr[data-source-line-number="${lineNumber}"] textarea[data-table-col]`
+    )) {
+      const range = getTableInputSourceRange(input);
+      if (!range || from < range.from || to > range.to) continue;
+      const start = tableCellSourceOffsetToEditorOffset(input.value, from - range.from);
+      const end = tableCellSourceOffsetToEditorOffset(input.value, to - range.from);
+      const direction = selection.anchor > selection.head ? 'backward' : 'forward';
+      if (restoreFocus) input.focus({ preventScroll: true });
+      input.setSelectionRange(start, end, direction);
+      lastFocusedEditorTarget = input;
+      lastTextareaSelection = { target: input, start, end, direction };
+      return true;
+    }
+    return false;
   };
 
   const requestEditorHistoryReplay = async (direction: EditorHistoryDirection): Promise<boolean> => {
@@ -3301,10 +3331,45 @@ export function createEditor({
     ) {
       const applyMode = (isTransactionCurrent: () => boolean): void => {
         interactionContinuity?.cancel();
+        const tableInput = currentMode === 'live' ? getActiveTableInput() ?? (
+          lastFocusedEditorTarget instanceof HTMLTextAreaElement &&
+          lastFocusedEditorTarget.isConnected && view.contentDOM.contains(lastFocusedEditorTarget) &&
+          lastFocusedEditorTarget.closest('.meo-md-html-table-wrap')
+            ? lastFocusedEditorTarget : null
+        ) : null;
+        const rememberedSelection = tableInput && document.activeElement !== tableInput &&
+          lastTextareaSelection?.target === tableInput
+          ? lastTextareaSelection : null;
+        const tableSelection = tableInput ? {
+          value: tableInput.value,
+          start: rememberedSelection?.start ?? tableInput.selectionStart,
+          end: rememberedSelection?.end ?? tableInput.selectionEnd,
+          direction: rememberedSelection?.direction ?? tableInput.selectionDirection
+        } : null;
+        const restoreFocus = view.hasFocus || view.dom.contains(view.dom.ownerDocument.activeElement);
         commitActiveTableInput();
         const nextMode = mode === 'live' ? 'live' : 'source';
         if (nextMode === currentMode) {
           return;
+        }
+
+        let modeSelection = {
+          anchor: view.state.selection.main.anchor,
+          head: view.state.selection.main.head
+        };
+        if (tableInput && tableSelection) {
+          const range = tableCellSourceRangeForInput(view, tableInput);
+          if (range) {
+            const source = tableCellEditorValueToSource(tableSelection.value);
+            const leadingPadding = source.length - source.trimStart().length;
+            const position = (offset: number) => range.from + Math.min(range.to - range.from,
+              Math.max(0, tableCellEditorOffsetToSourceOffset(tableSelection.value, offset) - leadingPadding));
+            const start = position(tableSelection.start);
+            const end = position(tableSelection.end);
+            modeSelection = tableSelection.direction === 'backward'
+              ? { anchor: end, head: start }
+              : { anchor: start, head: end };
+          }
         }
 
         void editorHistoryRuntime?.dispatch({ type: 'presentationChanged' });
@@ -3327,6 +3392,7 @@ export function createEditor({
           // Line-number extensions are shared by both modes. Keep their
           // compartment so switching does not rebuild the gutter.
           view.dispatch({
+            ...(tableSelection ? { selection: modeSelection } : {}),
             effects: [
               modeCompartment.reconfigure(
                 nextMode === 'live' ? liveModeExtensions({ largeDocument }) : sourceMode()
@@ -3370,6 +3436,15 @@ export function createEditor({
         (view as EditorView & { measure(flush?: boolean): void }).measure(false);
         if (nextMode === 'live' && flushMountedTableLayouts(view)) {
           (view as EditorView & { measure(flush?: boolean): void }).measure(false);
+        }
+        // The old table textarea is removed by reconfiguration. Hand its selection
+        // through source coordinates and focus the newly rendered owner without scrolling.
+        if (nextMode === 'live') {
+          restoreTableModeSelection(modeSelection, restoreFocus);
+        } else if (tableSelection) {
+          lastFocusedEditorTarget = view.contentDOM;
+          lastTextareaSelection = null;
+          if (restoreFocus) view.contentDOM.focus({ preventScroll: true });
         }
         syncGitGutterVisibility();
 
