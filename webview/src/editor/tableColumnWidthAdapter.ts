@@ -318,6 +318,14 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
 
   const project = (table: HTMLTableElement, epoch: LifecycleEpoch): void => {
     if (!isCurrentEpoch(epoch)) return;
+    // Source ranges can move before a retained widget refreshes its metadata.
+    // Preserve its previous projection until the DOM catches up, so an automatic
+    // reset cannot overwrite the still-valid manual width intent.
+    const from = numberFromDataset(table, 'tableFrom');
+    const to = numberFromDataset(table, 'tableTo');
+    if (intents.some(intent => intent.table === table && (intent.from !== from || intent.to !== to))) {
+      return;
+    }
     const intent = findIntent(table, true);
     if (!intent) {
       reset(table);

@@ -402,9 +402,22 @@ async function main(): Promise<void> {
     await page.waitForSelector('#first table[data-table-column-width][data-table-column-width-owner="adapter"]');
     await page.waitForSelector('#second table[data-table-column-width][data-table-column-width-owner="adapter"]');
     await waitForFrames(page);
+    const externalWidth = await firstColumnWidth(page, '#first');
     assert.ok(
-      Math.abs(await firstColumnWidth(page, '#first') - resizedWidth) < 2,
-      'WidthIntent must survive a production external presentation'
+      Math.abs(externalWidth - resizedWidth) < 2,
+      `WidthIntent must survive a production external presentation: ${JSON.stringify({
+        expected: resizedWidth,
+        actual: externalWidth,
+        metrics: await readMetrics(page, 'first'),
+        projection: await page.$eval(`#first ${tableSelector}`, (table: HTMLTableElement) => ({
+          from: table.dataset.tableFrom,
+          to: table.dataset.tableTo,
+          signature: table.dataset.tableSignature,
+          width: table.style.width,
+          columns: Array.from(table.querySelectorAll<HTMLTableColElement>('colgroup > col'))
+            .map(column => column.style.width)
+        }))
+      })}`
     );
     assert.equal((await readMetrics(page, 'first')).constructs, 4);
     const initialLiveSecond = await readMetrics(page, 'second');
