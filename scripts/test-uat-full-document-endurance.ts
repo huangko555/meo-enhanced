@@ -497,16 +497,6 @@ async function prepareHtmlSource(page: import('puppeteer-core').Page, operation:
 }
 
 async function editHtml(page: import('puppeteer-core').Page, operation: Operation, lineNumber: number): Promise<void> {
-  await page.evaluate((needle) => {
-    const editor = (window as any).__fullUatEditor;
-    const text = editor.getText();
-    const index = text.indexOf(needle);
-    if (index < 0) throw new Error(`Missing revealed HTML edit needle: ${needle}`);
-    const position = index + needle.length;
-    editor.revealSelection(position, position, { focusEditor: true, align: 'center' });
-    editor.view.contentDOM.focus({ preventScroll: true });
-  }, operation.needle);
-  await waitForFrames(page, 5);
   await page.keyboard.type(operation.marker);
   await page.waitForFunction(({ needle, marker }) => (
     (window as any).__fullUatEditor.getText().includes(`${needle}${marker}`)
@@ -763,7 +753,9 @@ async function applyOperation(page: import('puppeteer-core').Page, operation: Op
   if (operation.kind === 'table') {
     await prepareTableInput(page, operation, location.lineNumber);
   }
-  if (operation.kind === 'outer') {
+  // Explicit caret navigation belongs to preparation, before the input
+  // monitor starts. HTML edits use the same boundary as ordinary source text.
+  if (operation.kind === 'outer' || operation.kind === 'html') {
     await prepareOuterSelection(page, operation);
   }
   const excludeFrom = operation.kind === 'mermaid' || operation.kind === 'math'
