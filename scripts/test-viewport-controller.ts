@@ -851,7 +851,9 @@ const readingView = {
 const readingController = new ViewportController(readingView as any);
 const nativeReadingWheel = (deltaY: number) => {
   readingScroller.dispatch('wheel', { deltaX: 0, deltaY, ctrlKey: false });
-  readingScroller.scrollTop += deltaY;
+  readingScroller.scrollTop = Math.max(0, Math.min(
+    readingScroller.scrollHeight - readingScroller.clientHeight, readingScroller.scrollTop + deltaY
+  ));
   readingScroller.dispatch('scroll', {});
 };
 const readingFrame = async () => {
@@ -893,6 +895,15 @@ try {
   await readingFrame();
   if (readingScroller.scrollTop !== idleScrollTop) {
     throw new Error('An idle wheel gesture retained a reading anchor');
+  }
+  readingLineTop = 120;
+  nativeReadingWheel(-10_000);
+  await readingFrame();
+  readingLineTop += 40;
+  readingController.reconcileAfterEditorUpdate();
+  await readingFrame();
+  if (readingScroller.scrollTop !== 0) {
+    throw new Error(`Late reading layout hid the document start: ${readingScroller.scrollTop}`);
   }
 } finally {
   readingController.destroy();

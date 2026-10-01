@@ -390,6 +390,7 @@ export class ViewportController {
     // Adopt the reading line after native scrolling, using the same layout
     // stabilizer as block updates. A newer interaction invalidates this anchor.
     if (this.getMode() === 'live' && this.isUserScrolling() &&
+      this.view.scrollDOM.scrollTop > POSITION_EPSILON &&
       !this.scrollbarDragActive && !this.activeLayoutAnchor) {
       this.startInteractionLayoutStabilization({ from: -1, to: -1 });
     }
