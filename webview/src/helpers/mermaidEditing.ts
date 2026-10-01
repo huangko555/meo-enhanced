@@ -90,9 +90,10 @@ const innerMermaidSearchField = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field)
 });
 
-// Raw lines include the enclosing list indentation; the parser already decides
-// which fences render as Mermaid, so anchor validation must retain that prefix.
-const mermaidOpeningLineRegex = /^[ \t]*(?:`{3,}|~{3,})\s*mermaid\b/i;
+const mermaidOpeningLineRegex = /^[ \t]{0,3}(?:`{3,}|~{3,})\s*mermaid\b/i;
+// Registered anchors come from parsed fences and retain enclosing list indentation.
+// Keep that validation separate from classifying a standalone opening candidate.
+const mermaidAnchorLineRegex = /^[ \t]*(?:`{3,}|~{3,})\s*mermaid\b/i;
 
 export function isMermaidOpeningLine(lineText: string): boolean {
   return mermaidOpeningLineRegex.test(lineText);
@@ -103,7 +104,7 @@ function isMermaidAnchor(state: EditorState, anchor: number): boolean {
     return false;
   }
   const line = state.doc.lineAt(anchor);
-  return line.from === anchor && isMermaidOpeningLine(line.text);
+  return line.from === anchor && mermaidAnchorLineRegex.test(line.text);
 }
 
 function resolveMermaidAnchorAtLine(state: EditorState, lineNumber: number): number | null {
