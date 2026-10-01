@@ -222,6 +222,41 @@ async function main(): Promise<void> {
       })}`);
     }
 
+    const richText = Array.from({ length: 80 }, (_, index) => [
+      `# Section ${index}`, '', `paragraph bulk ${index}`, '',
+      '| A | B |', '| --- | --- |', '| bulk | value |', '',
+      '```mermaid', `flowchart LR; A[bulk ${index}] --> B[Finish]`, '```', '',
+      '$$', `x_{${index}} = ${index}^2 + 1`, '$$', ''
+    ].join('\n')).join('\n');
+    for (const { mode, replacement } of ['source', 'live'].flatMap(mode => (
+      ['done', 'a much longer label'].map(replacement => ({ mode, replacement }))
+    ))) {
+      await page.evaluate(({ text, mode }) => {
+        (window as any).__replaceAllEditor.destroy();
+        document.getElementById('search')!.replaceChildren();
+        (window as any).__replaceAllEditor = (window as any).__createInputCursorEditor({
+          parent: document.getElementById('search')!, text, initialMode: mode, onApplyChanges() {}
+        });
+      }, { text: richText, mode });
+      await waitForFrames(page, 10);
+      const result = await page.evaluate(async (replacement) => {
+        const editor = (window as any).__replaceAllEditor;
+        const position = editor.view.state.doc.line(643).from;
+        editor.revealSelection(position, position, { focusEditor: false, align: 'center' });
+        await editor.whenVisiblePresentationReady(1_200);
+        const before = editor.getTopVisiblePosition().line;
+        const replaced = editor.replaceAll('bulk', replacement);
+        await editor.whenVisiblePresentationReady(1_200);
+        const after = editor.getTopVisiblePosition().line;
+        const selectionLine = editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number;
+        return { before, after, replaced, selectionLine };
+      }, replacement);
+      if (result.replaced.replaced !== 240 || result.selectionLine !== 643 ||
+        Math.abs(result.after - result.before) > 1) {
+        throw new Error(`Rich-document replace-all lost reading position (${mode}): ${JSON.stringify(result)}`);
+      }
+    }
+
     console.log('search and replace production contracts passed');
   } finally {
     await browser.close();

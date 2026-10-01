@@ -80,6 +80,7 @@ export function createEditorInteractionContinuity(input: {
   let inputSessionScrollTop: number | null = null;
   let inputSessionCaretTop: number | null = null;
   let inputSessionCaretVisible: boolean | null = null;
+  let inputSessionRetainingCaretTop = false;
   let inputSessionPosition: number | null = null;
   let disposed = false;
 
@@ -101,6 +102,7 @@ export function createEditorInteractionContinuity(input: {
     inputSessionScrollTop = null;
     inputSessionCaretTop = null;
     inputSessionCaretVisible = null;
+    inputSessionRetainingCaretTop = false;
     inputSessionPosition = null;
   };
 
@@ -154,6 +156,7 @@ export function createEditorInteractionContinuity(input: {
             inputSessionCaretTop = measurement.caretTop;
             inputSessionCaretVisible = true;
             candidate.retainingCaretTop = false;
+            inputSessionRetainingCaretTop = false;
             candidate.inputLineHeightBefore = measurement.inputLineHeight;
             candidate.inputLineNumberBefore = measurement.inputLineNumber;
           }
@@ -161,11 +164,10 @@ export function createEditorInteractionContinuity(input: {
             candidate.caretTopBeforeInput !== null && measurement.caretTop !== null &&
             Math.abs(measurement.caretTop - candidate.caretTopBeforeInput) > view.defaultLineHeight * 1.5
           );
-          if (candidate.awaitingDerivedPresentation && largeLayoutShift) {
-            // A structural Live edit can temporarily project the new caret
-            // through the old decorations. Wait for the derived presentation
-            // instead of revealing an offscreen coordinate that cannot be
-            // visible in the final layout.
+          if (candidate.awaitingDerivedPresentation && largeLayoutShift && inputLineReflowed) {
+            // Structural edits can project the caret through old decorations.
+            // Wait only when the edited line changed its layout; upstream virtual
+            // height corrections must retain its visible Y during the quiet window.
             candidate.stableFrames = 0;
             schedule(candidate);
             return;
@@ -174,6 +176,9 @@ export function createEditorInteractionContinuity(input: {
           // An offscreen edit must reveal its caret instead of preserving the
           // very position that made the edit invisible.
           candidate.retainingCaretTop ||= largeLayoutShift && candidate.caretVisibleBeforeInput;
+          // Later keys must inherit an adopted physical anchor. Returning to the
+          // burst's old absolute offset would alternate between two positions.
+          inputSessionRetainingCaretTop = candidate.retainingCaretTop;
           if (candidate.retainingCaretTop && candidate.caretTopBeforeInput !== null) {
             if (
               measurement.caretTop !== null &&
@@ -256,7 +261,7 @@ export function createEditorInteractionContinuity(input: {
       caretVisibleBeforeInput,
       inputLineHeightBefore,
       inputLineNumberBefore,
-      retainingCaretTop: false,
+      retainingCaretTop: inputSessionRetainingCaretTop,
       scrollTopBeforeInput,
       viewportMoved: false,
       awaitingDerivedPresentation: getMode() === 'live',
@@ -478,8 +483,27 @@ export function createNestedEditorInteractionContinuity(input: {
       ? viewport.readScrollTop()
       : null;
   };
+  const resumeOnOuterLayout = (): void => {
+    if (inputSessionPosition === null || !isActive() || !view.hasFocus) return;
+    const position = inputSessionPosition;
+    const coords = view.coordsAtPos(position);
+    const bounds = viewport.readBounds();
+    if (!coords || (coords.top >= bounds.top && coords.bottom <= bounds.bottom)) return;
+    // Queue directly in the outer owner's current measurement batch. An extra
+    // inner animation frame would let the displaced caret paint once first.
+    viewport.revealCaret(position, () => (
+      !disposed && inputSessionPosition === position && isActive() && view.hasFocus
+    ), viewport.readScrollTop());
+  };
+  const resumeOnOuterScroll = (): void => {
+    // Parent height-map corrections do not necessarily emit an inner ViewUpdate.
+    // Resume the existing input session; wheel, pointer and blur cancel it first.
+    if (inputSessionPosition !== null && isActive() && view.hasFocus) beginInputSettlement();
+  };
   const cancelOnInteraction = () => cancel();
   view.dom.addEventListener('beforeinput', captureScrollTopBeforeInput, true);
+  interactionTarget?.addEventListener('meo-viewport-layout-change', resumeOnOuterLayout);
+  interactionTarget?.addEventListener('scroll', resumeOnOuterScroll, { passive: true });
   interactionTarget?.addEventListener('wheel', cancelOnInteraction, { capture: true, passive: true });
   interactionTarget?.addEventListener('touchstart', cancelOnInteraction, { capture: true, passive: true });
   view.dom.addEventListener('pointerdown', cancelOnInteraction, true);
@@ -499,6 +523,14 @@ export function createNestedEditorInteractionContinuity(input: {
           inputSessionPosition === null || !selection.empty ||
           selection.head !== inputSessionPosition
         ) cancel();
+      } else if (
+        inputSessionPosition !== null && isActive() && view.hasFocus &&
+        (update.geometryChanged || update.viewportChanged ||
+          update.transactions.some((transaction) => transaction.effects.length > 0))
+      ) {
+        // Outer widgets can settle after the input's first stable frames.
+        // Recheck this still-focused session through the same viewport owner.
+        beginInputSettlement();
       }
     },
     cancel,
@@ -507,6 +539,8 @@ export function createNestedEditorInteractionContinuity(input: {
       disposed = true;
       cancel();
       view.dom.removeEventListener('beforeinput', captureScrollTopBeforeInput, true);
+      interactionTarget?.removeEventListener('meo-viewport-layout-change', resumeOnOuterLayout);
+      interactionTarget?.removeEventListener('scroll', resumeOnOuterScroll);
       interactionTarget?.removeEventListener('wheel', cancelOnInteraction, true);
       interactionTarget?.removeEventListener('touchstart', cancelOnInteraction, true);
       view.dom.removeEventListener('pointerdown', cancelOnInteraction, true);

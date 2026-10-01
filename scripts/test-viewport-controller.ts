@@ -1140,10 +1140,10 @@ if (revealScrollDOM.scrollTop !== 420) {
   throw new Error(`A stale reveal moved the viewport to ${revealScrollDOM.scrollTop}`);
 }
 
-type GeometryShiftInterruption = 'none' | 'stale-frame' | 'destroy' | 'late-measure' | 'editor-update-overwrite';
+type GeometryShiftInterruption = 'none' | 'stale-frame' | 'destroy' | 'late-measure' | 'editor-update-overwrite' | 'read-write-layout';
 
 const runGeometryShiftReveal = async (
-  kind: 'ordinary' | 'settled',
+  kind: 'ordinary' | 'settled' | 'bounds',
   interruption: GeometryShiftInterruption = 'none'
 ) => {
   const frames: FrameRequestCallback[] = [];
@@ -1201,12 +1201,22 @@ const runGeometryShiftReveal = async (
   try {
     const isCurrent = controller.beginNavigationReveal();
     if (kind === 'ordinary') controller.revealPosition(1600, { y: 'center' }, isCurrent);
+    else if (kind === 'bounds') controller.revealVerticalBounds(
+      () => ({ top: targetTop - scrollTop, bottom: targetTop + 20 - scrollTop }),
+      isCurrent
+    );
     else controller.revealPositionUntilStable(1600, { y: 'center' }, isCurrent);
 
-    if (interruption === 'late-measure') {
+    if (interruption === 'read-write-layout') {
+      // CodeMirror redraws and changes the height map between requestMeasure's
+      // read and write phases. No stale absolute target may reach the scroller.
+      flushMeasure(() => { targetTop += 600; scrollTop += 600; });
+      await flushAll();
+    } else if (interruption === 'late-measure') {
       flushMeasure(() => { controller.beginNavigationReveal(); });
     } else {
       flushMeasure();
+      await Promise.resolve();
       if (interruption === 'editor-update-overwrite') {
         scrollTop = 1000;
         controller.reconcileAfterEditorUpdate();
@@ -1227,6 +1237,14 @@ const runGeometryShiftReveal = async (
     globalThis.requestAnimationFrame = previousRequestAnimationFrame;
   }
 };
+
+for (const kind of ['settled', 'bounds'] as const) {
+  const result = await runGeometryShiftReveal(kind, 'read-write-layout');
+  const expected = kind === 'bounds' ? '[1720]' : '[1960]';
+  if (!result.targetVisible || JSON.stringify(result.writes) !== expected) {
+    throw new Error(`Reveal wrote geometry captured before redraw (${kind}): ${JSON.stringify(result)}`);
+  }
+}
 
 const ordinaryGeometryReveal = await runGeometryShiftReveal('ordinary');
 if (
@@ -1281,12 +1299,14 @@ const tallController = new ViewportController({
 } as any, { attachInteractions: false });
 const tallNearestReveal = tallController.beginNavigationReveal();
 tallController.revealPosition(900, { y: 'nearest' }, tallNearestReveal);
+await flushFrames(wheelFrames);
 if (tallScrollDOM.scrollTop !== 1040) {
   throw new Error(`Tall wrapped nearest reveal moved to ${tallScrollDOM.scrollTop} instead of 1040`);
 }
 tallScrollDOM.scrollTop = 1000;
 const tallCenterReveal = tallController.beginNavigationReveal();
 tallController.revealPosition(900, { y: 'center' }, tallCenterReveal);
+await flushFrames(wheelFrames);
 if (tallScrollDOM.scrollTop !== 1280) {
   throw new Error(`Tall wrapped center reveal moved to ${tallScrollDOM.scrollTop} instead of 1280`);
 }

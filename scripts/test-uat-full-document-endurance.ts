@@ -280,7 +280,16 @@ async function startMonitor(
         return lastTarget;
       }
       const line = editor.view.state.doc.line(Math.min(Math.max(targetLine, 1), editor.view.state.doc.lines));
-      return { key: 'document-line', top: editor.view.coordsAtPos(line.from)?.top ?? null };
+      const anchorDom = editor.view.domAtPos(line.from).node;
+      const anchorElement = anchorDom instanceof Element ? anchorDom : anchorDom.parentElement;
+      const lineElement = anchorElement?.closest<HTMLElement>('.cm-line');
+      const head = editor.view.state.selection.main.head;
+      // Appending text to an image-only line changes the inline image baseline.
+      // Its boundary coordinate is not the typing caret; monitor the actual
+      // focused caret while keeping the same displacement threshold.
+      const position = lineElement?.querySelector('.meo-md-image') && editor.view.hasFocus &&
+        head >= line.from && head <= line.to ? head : line.from;
+      return { key: 'document-line', top: editor.view.coordsAtPos(position)?.top ?? null };
     };
     const monitor = {
       running: true,
@@ -722,13 +731,22 @@ async function editRendered(
     });
   }
   await waitForFrames(page, 10);
+  // Large-document input deliberately defers derived widgets beyond a fixed
+  // frame count. Check final controls after the editor's readiness boundary;
+  // the running monitor still observes transient focus and viewport failures.
+  await page.evaluate(async () => {
+    await (window as any).__fullUatEditor.whenVisiblePresentationReady(1_200);
+  });
+  const currentLocation = await locateOperation(page, operation);
+  const currentRegionLabel = `${blockName} editor at line ${currentLocation.openingLine}`;
+  const currentControlsLabel = `${blockName} block controls at line ${currentLocation.openingLine}`;
   const focus = await page.evaluate(({ label, controls }) => {
     const region = document.querySelector<HTMLElement>(`[role="region"][aria-label="${label}"]`);
     return {
       focused: Boolean(region?.contains(document.activeElement)),
       controlsPresent: Boolean(document.querySelector(`[role="group"][aria-label="${controls}"]`))
     };
-  }, { label: regionLabel, controls: controlsLabel });
+  }, { label: currentRegionLabel, controls: currentControlsLabel });
   if (!focus.focused || !focus.controlsPresent) {
     throw new Error(`Rendered edit focus drift: ${JSON.stringify({ operation, openingLine, focus })}`);
   }

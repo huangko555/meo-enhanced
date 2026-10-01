@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
+import { createEditorInteractionContinuity, createNestedEditorInteractionContinuity } from '../webview/src/editor/interactionContinuity';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-live-caret-continuity-'));
@@ -16,6 +17,129 @@ type CaretGeometry = {
   readonly scrollTop: number;
   readonly visible: boolean;
 };
+
+function checkPendingInputLayoutOwnership(): void {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameId = 0;
+  globalThis.requestAnimationFrame = (callback) => {
+    frames.set(++frameId, callback);
+    return frameId;
+  };
+  globalThis.cancelAnimationFrame = (handle) => { frames.delete(handle); };
+  try {
+    for (const reflowed of [false, true]) {
+      let caretTop = 350;
+      let lineHeight = 24;
+      const dom = Object.assign(new EventTarget(), { ownerDocument: new EventTarget() });
+      const scroller = Object.assign(new EventTarget(), {
+        scrollTop: 1_000,
+        getBoundingClientRect: () => ({ top: 0, bottom: 500 })
+      });
+      const view = {
+        dom, scrollDOM: scroller, hasFocus: true, defaultLineHeight: 24,
+        state: { selection: { main: { head: 100, empty: true } },
+          doc: { length: 1_000, lineAt: () => ({ number: 10 }) } },
+        coordsAtPos: () => ({ top: caretTop, bottom: caretTop + 24 }),
+        lineBlockAt: () => ({ height: lineHeight }),
+        requestMeasure: ({ read, write }: any) => write(read())
+      };
+      let retains = 0;
+      let reveals = 0;
+      const continuity = createEditorInteractionContinuity({
+        view: view as any, getMode: () => 'live',
+        viewport: {
+          retainCaretTop(_position, top, isCurrent) {
+            if (!isCurrent()) throw new Error('Stale input correction');
+            retains += 1;
+            caretTop = top;
+          },
+          revealCaret() { reveals += 1; }
+        }
+      });
+      dom.dispatchEvent(new Event('beforeinput'));
+      // Upstream virtual heights change while the accepted line stays intact.
+      // A structural edit instead changes that line and must await presentation.
+      caretTop = reflowed ? 700 : 30;
+      scroller.scrollTop = 600;
+      if (reflowed) lineHeight = 48;
+      view.state.selection.main.head += 1;
+      continuity.observe({
+        transactions: [{ docChanged: true, isUserEvent: () => true }],
+        selectionSet: true
+      } as any);
+      if (!reflowed) {
+        // A following key must inherit the physical caret anchor, even though
+        // virtual heights changed the burst's original absolute scroll offset.
+        dom.dispatchEvent(new Event('beforeinput'));
+        view.state.selection.main.head += 1;
+        continuity.observe({
+          transactions: [{ docChanged: true, isUserEvent: () => true }], selectionSet: true
+        } as any);
+      }
+      continuity.dispose();
+      if (reflowed ? retains !== 0 || reveals !== 0 : retains !== 1 || reveals !== 0 || caretTop !== 350) {
+        throw new Error(`Pending input layout ownership failed: ${JSON.stringify({ reflowed, retains, reveals, caretTop })}`);
+      }
+    }
+    let nestedTop = 100;
+    const nestedDom = new EventTarget();
+    const outerScroller = new EventTarget();
+    const nestedView = {
+      dom: nestedDom, hasFocus: true,
+      state: { selection: { main: { head: 1, empty: true } }, doc: { length: 20 } },
+      coordsAtPos: () => ({ top: nestedTop, bottom: nestedTop + 24 }),
+      requestMeasure: ({ read, write }: any) => write(read())
+    };
+    let lateReveals = 0;
+    const nested = createNestedEditorInteractionContinuity({
+      view: nestedView as any, isActive: () => true, interactionTarget: outerScroller as any,
+      viewport: {
+        readBounds: () => ({ top: 0, bottom: 500 }), readScrollTop: () => 1_000,
+        revealCaret(_position, isCurrent) {
+          if (!isCurrent()) throw new Error('Stale nested correction');
+          lateReveals += 1;
+          nestedTop = 100;
+        }
+      }
+    });
+    const flush = () => {
+      for (let step = 0; frames.size && step < 20; step += 1) {
+        const callbacks = [...frames.values()];
+        frames.clear();
+        for (const callback of callbacks) callback(0);
+      }
+    };
+    nestedDom.dispatchEvent(new Event('beforeinput'));
+    nested.observe({ transactions: [{ docChanged: true, isUserEvent: () => true }], selectionSet: true } as any);
+    flush();
+    nestedTop = 700;
+    nested.observe({ transactions: [], selectionSet: false, geometryChanged: true } as any);
+    flush();
+    nestedTop = 700;
+    // A parent height-map correction can move the embedded editor without any
+    // inner ViewUpdate. Its owning scroller must also resume the input check.
+    outerScroller.dispatchEvent(new Event('scroll'));
+    flush();
+    nestedTop = 700;
+    outerScroller.dispatchEvent(new Event('meo-viewport-layout-change'));
+    flush();
+    outerScroller.dispatchEvent(new Event('wheel'));
+    nestedTop = 700;
+    outerScroller.dispatchEvent(new Event('scroll'));
+    flush();
+    nested.dispose();
+    if (lateReveals !== 3 || nestedTop !== 700) {
+      throw new Error(`Late nested geometry lost input visibility: ${JSON.stringify({ lateReveals, nestedTop })}`);
+    }
+  } finally {
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+}
+
+checkPendingInputLayoutOwnership();
 
 async function main(): Promise<void> {
   const build = await Bun.build({

@@ -4,9 +4,9 @@ This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
 ## 0.3.27
-- Improved caret continuity across window activation, toolbar and menu interactions, and Live/Source mode switches, including table cells, Mermaid, and math editors.
+- Improved caret continuity across window activation, toolbar and menu interactions, and Live/Source mode switches, including table cells, Mermaid, and math editors. Fixed reversed formula input when nearby tables were re-rendered. Kept typing carets visible through late layout changes without competing scroll corrections.
 - Preserved Mermaid and math source/split choices across mode switches and kept new Source selections authoritative; restored HTML source positions when editing rendered content again.
-- Centered offscreen Live table search matches in the usable viewport, accounting for floating table headers.
+- Centered offscreen Live table search matches in the usable viewport, accounting for floating table headers. Preserved the reading position during bulk replacement.
 - Preserved automatic table column minimum widths after window resizing and manual widths through external document updates; kept HEX color controls aligned with editor scrolling.
 - Added document recovery actions and safe copy saving, with native notifications for opening a saved copy or its containing folder.
 - Made HTML, PDF, and DOCX exports use light document appearance independently of Preview's theme.

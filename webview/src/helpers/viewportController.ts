@@ -1856,68 +1856,92 @@ export class ViewportController {
             return { kind: 'unavailable' } as const;
           }
         },
-        write: (measurement) => {
-          if (!isRevealCurrent()) {
+        write: (initialMeasurement) => {
+          if (!isRevealCurrent() || initialMeasurement.kind === 'unavailable') {
             finish();
             return;
           }
-          if (measurement.kind === 'unavailable') {
-            finish();
-            return;
-          }
-          if (measurement.kind === 'stable') {
+          if (initialMeasurement.kind === 'stable') {
             if (state.phase === 'measured') finish();
             else completeFrame(measure, false);
             return;
           }
-
-          const current = this.readScrollPosition();
-          const target = this.resolveScrollTarget(measurement.target, current);
-          const differs = (
-            Math.abs(target.top - current.top) > POSITION_EPSILON ||
-            Math.abs(target.left - current.left) > POSITION_EPSILON
-          );
-          if (!differs) {
-            if (state.phase === 'measured') finish();
-            else completeFrame(measure, false);
-            return;
-          }
-
-          if (state.phase === 'measured') {
+          // CodeMirror can redraw and re-anchor after the read phase. Adopt only
+          // geometry measured after that batch, before the browser paints.
+          queueMicrotask(() => {
             if (!isRevealCurrent()) {
               finish();
               return;
             }
-            this.markNavigationScrollStart();
-            state.ownerGeneration = ++this.generation;
-            this.activeScrollTarget = {
-              changedSinceFrame: false,
-              frameScheduled: false,
-              generation: state.ownerGeneration,
-              isCurrent: state.isCurrent,
-              position: target,
-              remainingFrames: MAX_SETTLE_FRAMES,
-              stableFrames: 0
-            };
-            this.activeLayoutAnchor = null;
-            this.anchorStabilizationGeneration = null;
-            state.phase = 'adopted';
-          }
-          if (!isRevealCurrent()) {
-            finish();
-            return;
-          }
-          const activeTarget = this.activeScrollTarget;
-          if (this.isActiveScrollTargetValid(activeTarget)) {
-            activeTarget.position = target;
-          }
-          const changed = this.writeScrollPosition(target);
-          if (this.isActiveScrollTargetValid(activeTarget)) {
-            activeTarget.changedSinceFrame ||= changed;
-            this.scheduleActiveScrollFrame();
-          }
-          state.phase = 'settling';
-          completeFrame(measure, changed);
+            let measurement: NavigationRevealMeasurement;
+            try {
+              measurement = readMeasurement();
+            } catch {
+              finish();
+              return;
+            }
+            if (!isRevealCurrent()) {
+              finish();
+              return;
+            }
+            if (measurement.kind === 'unavailable') {
+              finish();
+              return;
+            }
+            if (measurement.kind === 'stable') {
+              if (state.phase === 'measured') finish();
+              else completeFrame(measure, false);
+              return;
+            }
+
+            const current = this.readScrollPosition();
+            const target = this.resolveScrollTarget(measurement.target, current);
+            const differs = (
+              Math.abs(target.top - current.top) > POSITION_EPSILON ||
+              Math.abs(target.left - current.left) > POSITION_EPSILON
+            );
+            if (!differs) {
+              if (state.phase === 'measured') finish();
+              else completeFrame(measure, false);
+              return;
+            }
+
+            if (state.phase === 'measured') {
+              if (!isRevealCurrent()) {
+                finish();
+                return;
+              }
+              this.markNavigationScrollStart();
+              state.ownerGeneration = ++this.generation;
+              this.activeScrollTarget = {
+                changedSinceFrame: false,
+                frameScheduled: false,
+                generation: state.ownerGeneration,
+                isCurrent: state.isCurrent,
+                position: target,
+                remainingFrames: MAX_SETTLE_FRAMES,
+                stableFrames: 0
+              };
+              this.activeLayoutAnchor = null;
+              this.anchorStabilizationGeneration = null;
+              state.phase = 'adopted';
+            }
+            if (!isRevealCurrent()) {
+              finish();
+              return;
+            }
+            const activeTarget = this.activeScrollTarget;
+            if (this.isActiveScrollTargetValid(activeTarget)) {
+              activeTarget.position = target;
+            }
+            const changed = this.writeScrollPosition(target);
+            if (this.isActiveScrollTargetValid(activeTarget)) {
+              activeTarget.changedSinceFrame ||= changed;
+              this.scheduleActiveScrollFrame();
+            }
+            state.phase = 'settling';
+            completeFrame(measure, changed);
+          });
         }
       });
     };

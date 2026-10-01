@@ -2376,6 +2376,10 @@ export function createEditor({
           update.docChanged ? (position) => update.changes.mapPos(position, 1) : undefined
         );
         interactionContinuity?.observe(update);
+        if (update.geometryChanged || update.docChanged || update.viewportChanged) {
+          // Embedded views may not receive an update when only parent geometry changes.
+          update.view.scrollDOM.dispatchEvent(new Event('meo-viewport-layout-change'));
+        }
 
         syncModeClasses();
         if (!liveDerivedRefresh && presentationMayHaveChanged) {
@@ -3064,12 +3068,16 @@ export function createEditor({
         return { replaced: 0, total: 0 };
       }
 
-      view.dispatch({
-        changes: matches.map((match) => ({
-          from: match.start,
-          to: match.end,
-          insert: replacement
-        }))
+      // A bulk edit rebuilds distant Live widgets and their estimated heights.
+      // Preserve the reading anchor through the same owner as layout changes.
+      viewportController.runDocumentChange(() => {
+        view.dispatch({
+          changes: matches.map((match) => ({
+            from: match.start,
+            to: match.end,
+            insert: replacement
+          }))
+        });
       });
       return { replaced, total: getSearchMatches(query, options).length };
     },
