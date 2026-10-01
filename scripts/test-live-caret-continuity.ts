@@ -125,6 +125,20 @@ function checkPendingInputLayoutOwnership(): void {
     nestedTop = 700;
     outerScroller.dispatchEvent(new Event('meo-viewport-layout-change'));
     flush();
+    // History and external source synchronization can replace the document
+    // without changing the mapped head. That must retire the old input anchor.
+    nested.observe({
+      docChanged: true,
+      transactions: [{ docChanged: true, isUserEvent: () => false, effects: [] }],
+      selectionSet: false
+    } as any);
+    nestedTop = 700;
+    outerScroller.dispatchEvent(new Event('meo-viewport-layout-change'));
+    outerScroller.dispatchEvent(new Event('scroll'));
+    flush();
+    nested.observe({ transactions: [{ docChanged: true, isUserEvent: () => true }], selectionSet: true } as any);
+    nestedTop = 100;
+    flush();
     outerScroller.dispatchEvent(new Event('wheel'));
     nestedTop = 700;
     outerScroller.dispatchEvent(new Event('scroll'));

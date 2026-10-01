@@ -2338,6 +2338,58 @@ for (const settledShift of [0, 40]) {
   }
 }
 
+// A geometry-refresh timer can beat the native scroll event. A driver that
+// already moved must not be pinned to the follower's still-old position.
+for (const owner of ['editor', 'preview'] as const) {
+  const doc = Text.of(Array.from({ length: 80 }, () => 'line'));
+  const scrollDOM = {
+    scrollTop: 200, scrollLeft: 0, scrollHeight: 2000, scrollWidth: 800,
+    clientHeight: 400, clientWidth: 800
+  };
+  let previewTop = 0;
+  let previewOffset = 0;
+  const controller = new ViewportController({
+    dom: {}, scrollDOM, state: { doc },
+    lineBlockAt: (position: number) => {
+      const number = doc.lineAt(position).number;
+      return { top: (number - 1) * 20, bottom: number * 20 };
+    }
+  } as any, {
+    attachInteractions: false, getMode: () => 'source',
+    previewSurface: {
+      captureTopVisiblePosition: () => null,
+      restoreTopVisiblePosition() {},
+      readScrollTop: () => previewTop,
+      writeScrollTop: top => { previewTop = top; },
+      captureLinkedGeometry: () => ({
+        maximumScrollTop: 3200,
+        regions: Array.from({ length: 80 }, (_, index) => ({
+          startLine: index + 1, endLine: index + 1,
+          top: index * 40 + previewOffset, bottom: (index + 1) * 40 + previewOffset
+        }))
+      })
+    }
+  });
+  try {
+    controller.setLinkedPreviewEnabled(true);
+    if (owner === 'preview') controller.markPreviewInteraction();
+    if (owner === 'editor') scrollDOM.scrollTop = 600;
+    else previewTop = 1200;
+    controller.linkedPreviewReady();
+    await new Promise(resolve => setTimeout(resolve, 400));
+    if (scrollDOM.scrollTop !== 600 || Math.abs(previewTop - 1200) > 0.5) {
+      throw new Error(`Geometry refresh pinned a pending ${owner} scroll to its stale follower: ${JSON.stringify({source:scrollDOM.scrollTop,preview:previewTop})}`);
+    }
+    // A presentation-only change still pins an already synchronized pair.
+    previewOffset = 100;
+    controller.linkedPreviewReady();
+    await new Promise(resolve => setTimeout(resolve, 400));
+    if (scrollDOM.scrollTop !== 600 || Math.abs(previewTop - 1200) > 0.5) {
+      throw new Error(`Idle linked geometry moved its synchronized reading point: ${JSON.stringify({source:scrollDOM.scrollTop,preview:previewTop})}`);
+    }
+  } finally { controller.destroy(); }
+}
+
 // An offscreen line has no DOM coordinates until CodeMirror renders it. The
 // first projection must keep the reading band instead of relying on a later correction.
 for (const mode of ['source', 'live'] as const) {

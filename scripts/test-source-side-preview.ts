@@ -168,7 +168,13 @@ try {
     } }));
   }, text);
   await page.waitForSelector('.cm-content');
-  await page.waitForFunction(() => document.querySelector<HTMLElement>('.source-preview-button')?.offsetParent !== null);
+  await page.waitForFunction(() => {
+    const button = document.querySelector<HTMLButtonElement>('.source-preview-button');
+    if (!button || button.closest('.meo-preload-toolbar') || button.disabled) return false;
+    const rect = button.getBoundingClientRect();
+    return button.offsetParent !== null && getComputedStyle(button).visibility !== 'hidden'
+      && rect.width > 0 && rect.height > 0;
+  });
   const preloadCount = previewRenderCount;
 
   await page.click('.source-preview-button');

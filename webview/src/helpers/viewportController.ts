@@ -373,6 +373,7 @@ export class ViewportController {
   private lastViewportInteractionOwner: ViewportAnchorOwner = 'editor';
   private linkedProjectionGeneration = 0;
   private linkedViewportMap: LinkedViewportMap | null = null;
+  private linkedViewportPosition: { source: number; preview: number } | null = null;
   private linkedViewportMapDirty = true;
   private linkedViewportMapRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   private linkedInteractionUntil = Number.NEGATIVE_INFINITY;
@@ -897,6 +898,10 @@ export class ViewportController {
           left: this.view.scrollDOM.scrollLeft
         });
       }
+      this.linkedViewportPosition = {
+        source: this.view.scrollDOM.scrollTop,
+        preview: this.previewSurface.readScrollTop()
+      };
       return;
     }
     if (owner === 'editor') {
@@ -981,11 +986,19 @@ export class ViewportController {
         { source: endBlock.bottom, preview: region.bottom }
       );
     }
-    const pinnedPoint = project && this.linkedViewportMap && this.previewSurface?.readScrollTop
-      ? {
-          source: this.view.scrollDOM.scrollTop,
-          preview: this.previewSurface.readScrollTop()
-        }
+    const currentPosition = this.previewSurface?.readScrollTop ? {
+      source: this.view.scrollDOM.scrollTop,
+      preview: this.previewSurface.readScrollTop()
+    } : null;
+    const driverPositionUnchanged = currentPosition && this.linkedViewportPosition && Math.abs(
+      this.linkedViewportDriver === 'editor'
+        ? currentPosition.source - this.linkedViewportPosition.source
+        : currentPosition.preview - this.linkedViewportPosition.preview
+    ) <= POSITION_EPSILON;
+    // A timer may run before the driver's native scroll event. Pinning that
+    // new position to its old follower would freeze a real scroll into the map.
+    const pinnedPoint = project && this.linkedViewportMap && driverPositionUnchanged
+      ? currentPosition ?? undefined
       : undefined;
     this.linkedViewportMap = createLinkedViewportMap(points, {
       sourceMaximum,

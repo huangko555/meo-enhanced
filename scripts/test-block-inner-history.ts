@@ -693,14 +693,14 @@ async function main() {
     await page.evaluate(() => {
       (window as any).__multiMermaidFirst.destroy();
     });
-    await page.keyboard.type('_AFTER_FIRST_DESTROY');
+    await waitForFrames(page);
     const multiAfterDestroy = await page.evaluate((secondTop) => {
       const second = (window as any).__multiMermaidSecond;
       const secondHost = document.getElementById('multi-mermaid-second')!;
       const secondScroller = secondHost.querySelector<HTMLElement>(':scope > .cm-editor .cm-scroller')!;
       const secondSource = secondHost.querySelector<HTMLElement>('.meo-mermaid-source-editor');
       return {
-        marker: second.getText().includes('MULTI_SECOND_AFTER_FIRST_DESTROY'),
+        marker: second.getText().includes('MULTI_SECOND'),
         connected: Boolean(secondHost.querySelector('.meo-mermaid-editing-block')?.isConnected),
         focused: Boolean(secondSource?.contains(document.activeElement)),
         scrollStable: Math.abs(secondScroller.scrollTop - secondTop) <= 1,
@@ -710,6 +710,27 @@ async function main() {
     }, secondMultiScrollTop);
     if (!multiAfterDestroy.marker || !multiAfterDestroy.connected || !multiAfterDestroy.focused || !multiAfterDestroy.scrollStable) {
       throw new Error(`Destroying one Mermaid editor affected the other: ${JSON.stringify(multiAfterDestroy)}`);
+    }
+    // Destruction must retain the other viewport. Further input can wrap at
+    // the bottom edge, so its separate contract is a visible, focused caret.
+    await page.keyboard.type('_AFTER_FIRST_DESTROY');
+    await waitForFrames(page);
+    const multiAfterInput = await page.evaluate(() => {
+      const host = document.getElementById('multi-mermaid-second')!;
+      const source = host.querySelector<HTMLElement>('.meo-mermaid-source-editor');
+      const block = host.querySelector('.meo-mermaid-editing-block') as any;
+      const inner = block?.__meoMermaidEditingController?.innerView;
+      const caret = inner?.coordsAtPos(inner.state.selection.main.head);
+      const bounds = host.querySelector<HTMLElement>(':scope > .cm-editor .cm-scroller')!.getBoundingClientRect();
+      return {
+        marker: (window as any).__multiMermaidSecond.getText().includes('MULTI_SECOND_AFTER_FIRST_DESTROY'),
+        connected: Boolean(block?.isConnected),
+        focused: Boolean(source?.contains(document.activeElement)),
+        caretVisible: Boolean(caret && caret.top >= bounds.top && caret.bottom <= bounds.bottom)
+      };
+    });
+    if (!multiAfterInput.marker || !multiAfterInput.connected || !multiAfterInput.focused || !multiAfterInput.caretVisible) {
+      throw new Error(`Remaining Mermaid input lost its visible caret: ${JSON.stringify(multiAfterInput)}`);
     }
     await page.evaluate(() => {
       (window as any).__multiMermaidSecond.destroy();

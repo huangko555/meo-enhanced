@@ -517,6 +517,10 @@ export function createNestedEditorInteractionContinuity(input: {
       ));
       if (directInput && isActive() && view.hasFocus && view.state.selection.main.empty) {
         beginInputSettlement();
+      } else if (update.docChanged && !directInput) {
+        // History or external synchronization owns the replacement document,
+        // even when its mapped selection happens to keep the same head.
+        cancel();
       } else if (update.selectionSet && !directInput) {
         const selection = view.state.selection.main;
         if (
