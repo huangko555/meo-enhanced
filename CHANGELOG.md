@@ -3,6 +3,17 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.27
+- Improved caret continuity across window activation, toolbar and menu interactions, and Live/Source mode switches, including table cells, Mermaid, and math editors.
+- Preserved Mermaid and math source/split choices across mode switches and kept new Source selections authoritative; restored HTML source positions when editing rendered content again.
+- Centered offscreen Live table search matches in the usable viewport, accounting for floating table headers.
+- Preserved automatic table column minimum widths after window resizing and kept HEX color controls aligned with editor scrolling.
+- Added document recovery actions and safe copy saving, with native notifications for opening a saved copy or its containing folder.
+- Made HTML, PDF, and DOCX exports use light document appearance independently of Preview's theme.
+- Aligned Preview bold labels ending in punctuation with Live rendering and prevented time literals from being treated as emoji syntax.
+- Reduced redundant highlighting, Preview DOM updates, and table-layout work; stabilized startup reading positions and retryable Preview refreshes.
+- Refined editor notices, split Preview controls, and content-sized Preview font controls; lowered the minimum VS Code version to 1.94.
+
 ## 0.3.26
 - Removed a local build path from the extension package while retaining direct opening of exported files with Unicode names on Windows.
 - Fixed clean-checkout DOCX export tests and strengthened cross-platform package validation.
