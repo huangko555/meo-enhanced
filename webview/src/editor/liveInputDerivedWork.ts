@@ -232,7 +232,8 @@ export function shouldDeferLiveInputDerivedWork(transaction: Transaction): boole
     || phase === 'composing-without-pending';
 }
 
-function isLiveInputDerivedWorkPending(state: EditorState): boolean {
+/** Read-only input ownership check; observers must not schedule desired work. */
+export function isLiveInputDerivedWorkPending(state: EditorState): boolean {
   const phase = state.field(liveInputDerivedWorkPhaseField, false)?.phase;
   return phase === 'pending-input'
     || phase === 'composing-with-pending'

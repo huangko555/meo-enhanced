@@ -413,6 +413,75 @@ async function main(): Promise<void> {
       throw new Error(`Reentrant consumer generation was not drained exactly once: ${JSON.stringify(reentrantConsumerFacts)}`);
     }
 
+    const presentationReadyFacts = await page.evaluate(async () => {
+      const nativeRequestIdleCallback = window.requestIdleCallback;
+      const nativeCancelIdleCallback = window.cancelIdleCallback;
+      const timers = new Set<number>();
+      // A busy browser may defer an idle callback while unchanged geometry
+      // already looks stable. Presentation readiness must include that input.
+      window.requestIdleCallback = ((callback: IdleRequestCallback) => {
+        const id = window.setTimeout(() => {
+          timers.delete(id);
+          callback({ didTimeout: false, timeRemaining: () => 10 });
+        }, 350);
+        timers.add(id);
+        return id;
+      }) as typeof window.requestIdleCallback;
+      window.cancelIdleCallback = ((id: number) => {
+        timers.delete(id);
+        window.clearTimeout(id);
+      }) as typeof window.cancelIdleCallback;
+      const host = document.createElement('div');
+      host.style.cssText = 'position:absolute;inset:0';
+      document.body.append(host);
+      const editor = (window as any).__createInputCursorEditor({
+        parent: host,
+        text: Array.from({ length: 8_001 }, (_, index) => `ready-line-${index}`).join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      try {
+        await editor.whenVisiblePresentationReady(1_200);
+        editor.setSearchQuery('ready-needle');
+        (window as any).__dispatchProductionInput(editor, 0, 'ready-needle ');
+        await editor.whenVisiblePresentationReady(1_200);
+        const visibleMatch = host.querySelector('.meo-search-match')?.textContent ?? '';
+        const refreshProbe = (window as any).__observeLiveSearchRefresh(editor);
+        editor.view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+        let timeout: number | null = null;
+        let timeoutCompleted: boolean;
+        try {
+          timeoutCompleted = await Promise.race([
+            editor.whenVisiblePresentationReady(60).then(() => true),
+            new Promise<boolean>((resolve) => {
+              timeout = window.setTimeout(() => resolve(false), 1_000);
+            })
+          ]);
+        } finally {
+          if (timeout !== null) window.clearTimeout(timeout);
+        }
+        editor.view.contentDOM.dispatchEvent(new CompositionEvent('compositionend', { data: '', bubbles: true }));
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 700));
+        const observationRefreshes = refreshProbe.count();
+        refreshProbe.destroy();
+        return {
+          textCommitted: editor.getText().startsWith('ready-needle '),
+          visibleMatch,
+          timeoutCompleted,
+          observationRefreshes
+        };
+      } finally {
+        editor.destroy();
+        host.remove();
+        for (const id of timers) window.clearTimeout(id);
+        window.requestIdleCallback = nativeRequestIdleCallback;
+        window.cancelIdleCallback = nativeCancelIdleCallback;
+      }
+    });
+    if (!presentationReadyFacts.textCommitted || presentationReadyFacts.visibleMatch !== 'ready-needle' || !presentationReadyFacts.timeoutCompleted || presentationReadyFacts.observationRefreshes !== 0) {
+      throw new Error(`Presentation readiness skipped accepted input work: ${JSON.stringify(presentationReadyFacts)}`);
+    }
+
     const observerQuiescenceFacts = await page.evaluate(async () => {
       const host = document.createElement('div');
       const target = document.createElement('div');

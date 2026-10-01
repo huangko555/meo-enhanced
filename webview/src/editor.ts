@@ -137,6 +137,7 @@ import {
 import {
   beginLiveInputComposition,
   completeLiveInputComposition,
+  isLiveInputDerivedWorkPending,
   isLiveInputDerivedWorkRefresh,
   mapLiveInputDerivedDecorations,
   requestLiveInputDerivedWork,
@@ -2973,6 +2974,13 @@ export function createEditor({
       const presentationMode = currentMode;
       const deadline = performance.now() + Math.max(0, timeoutMs);
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      // Stable geometry can precede the input generation's idle refresh.
+      // Observe its owner without registering new desired work or forcing IME.
+      while (!editorDestroyed && currentMode === presentationMode
+        && presentationMode === 'live' && isLiveInputDerivedWorkPending(view.state)
+        && performance.now() < deadline) {
+        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      }
       if (editorDestroyed || currentMode !== presentationMode) return;
       if (presentationMode === 'live' && flushMountedTableLayouts(view)) {
         (view as EditorView & { measure(flush?: boolean): void }).measure(false);
