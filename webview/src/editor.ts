@@ -94,8 +94,16 @@ import { collectLatexMathRanges } from './helpers/math';
 import { diagnosticDataField, diagnosticField, setDiagnosticsEffect, type EditorDiagnostic } from './helpers/diagnostics';
 import type { GitBaselinePayload } from '../../src/protocol/git';
 import type { SelectionMenuState } from './helpers/selectionMenu';
-import { focusMermaidEditingOffset, getMermaidBlockMode, setMermaidBlockModeEffect, setMermaidSearchRevealEffect } from './helpers/mermaidEditing';
-import { focusLatexMathEditingOffset, getLatexMathBlockMode, setLatexMathBlockModeEffect, setLatexMathSearchRevealEffect } from './helpers/latexMathEditing';
+import {
+  focusMermaidEditingOffset, getMermaidBlockMode, mermaidEditingStateField,
+  restoreMermaidModeSelection, setMermaidBlockModeEffect, setMermaidSearchRevealEffect,
+  takeMermaidModeSelection
+} from './helpers/mermaidEditing';
+import {
+  focusLatexMathEditingOffset, getLatexMathBlockMode, latexMathEditingStateField,
+  restoreLatexMathModeSelection, setLatexMathBlockModeEffect, setLatexMathSearchRevealEffect,
+  takeLatexMathModeSelection
+} from './helpers/latexMathEditing';
 import { getLiveRenderedBlocks } from './helpers/liveRenderedBlocks';
 import {
   ViewportController,
@@ -3353,7 +3361,13 @@ export function createEditor({
           return;
         }
 
-        let modeSelection = {
+        const activeElement = view.dom.ownerDocument.activeElement;
+        const editingTarget = activeElement instanceof HTMLElement && view.contentDOM.contains(activeElement)
+          ? activeElement : lastFocusedEditorTarget;
+        const mermaidSelection = takeMermaidModeSelection(view, editingTarget);
+        const latexMathSelection = takeLatexMathModeSelection(view, editingTarget);
+        const nestedSelection = mermaidSelection ?? latexMathSelection;
+        let modeSelection = nestedSelection ?? {
           anchor: view.state.selection.main.anchor,
           head: view.state.selection.main.head
         };
@@ -3392,8 +3406,10 @@ export function createEditor({
           // Line-number extensions are shared by both modes. Keep their
           // compartment so switching does not rebuild the gutter.
           view.dispatch({
-            ...(tableSelection ? { selection: modeSelection } : {}),
+            ...(tableSelection || nestedSelection ? { selection: modeSelection } : {}),
             effects: [
+              setMermaidSearchRevealEffect.of(null),
+              setLatexMathSearchRevealEffect.of(null),
               modeCompartment.reconfigure(
                 nextMode === 'live' ? liveModeExtensions({ largeDocument }) : sourceMode()
               ),
@@ -3437,11 +3453,18 @@ export function createEditor({
         if (nextMode === 'live' && flushMountedTableLayouts(view)) {
           (view as EditorView & { measure(flush?: boolean): void }).measure(false);
         }
-        // The old table textarea is removed by reconfiguration. Hand its selection
-        // through source coordinates and focus the newly rendered owner without scrolling.
+        // Restore the current source selection in its new editable owner. Source
+        // navigation wins over the discarded widget, and viewport ownership stays here.
         if (nextMode === 'live') {
-          restoreTableModeSelection(modeSelection, restoreFocus);
-        } else if (tableSelection) {
+          if (!restoreTableModeSelection(modeSelection, restoreFocus) && view.state.selection.ranges.length === 1) {
+            const target = restoreMermaidModeSelection(view, modeSelection, restoreFocus)
+              ?? restoreLatexMathModeSelection(view, modeSelection, restoreFocus);
+            if (target) {
+              lastFocusedEditorTarget = target;
+              lastTextareaSelection = null;
+            }
+          }
+        } else if (tableSelection || nestedSelection) {
           lastFocusedEditorTarget = view.contentDOM;
           lastTextareaSelection = null;
           if (restoreFocus) view.contentDOM.focus({ preventScroll: true });
@@ -4401,6 +4424,9 @@ function insertWikiLink(
 
 function sourceMode(): Extension[] {
   return [
+    // Block display choices belong to the editing session, including Source.
+    mermaidEditingStateField,
+    latexMathEditingStateField,
     editorMarkdownLanguage,
     syntaxHighlighting(sourceHighlightStyle),
     sourceCodeBlockField,

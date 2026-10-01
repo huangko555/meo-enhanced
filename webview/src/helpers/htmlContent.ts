@@ -1,4 +1,4 @@
-import { StateEffect, StateField, type ChangeDesc, type EditorState } from '@codemirror/state';
+import { Prec, StateEffect, StateField, type ChangeDesc, type EditorState } from '@codemirror/state';
 import {
   Decoration,
   EditorView,
@@ -358,10 +358,14 @@ function preserveHtmlPosition(view: EditorView, mutate: () => void): void {
   else mutate();
 }
 
-export function enterHtmlSource(view: EditorView, block: HtmlEditingRange, anchor = block.from): void {
+export function enterHtmlSource(view: EditorView, block: HtmlEditingRange, anchor?: number): void {
+  const currentSelection = view.state.selection;
+  const selection = anchor === undefined && currentSelection.ranges.every((range) => (
+    range.from >= block.from && range.to <= block.to
+  )) ? currentSelection : { anchor: anchor ?? block.from };
   preserveHtmlPosition(view, () => {
     view.dispatch({
-      selection: { anchor },
+      selection,
       effects: setHtmlEditingRangeEffect.of({ from: block.from, to: block.to }),
       scrollIntoView: false
     });
@@ -784,6 +788,45 @@ const htmlEscapeKeymap = keymap.of([{
   }
 }]);
 
+function revealHtmlSourceForInput(view: EditorView, target: EventTarget | null): void {
+  if (target !== view.contentDOM || getHtmlEditingRange(view.state)) return;
+  const selection = view.state.selection.main;
+  const block = collectRenderableHtmlBlocks(view.state).find((block) => (
+    selection.from >= block.from && selection.to <= block.to
+  ));
+  if (block) enterHtmlSource(view, block);
+}
+
+// Reveal before both native input and CodeMirror editing commands. A rendered
+// replacement cannot express the saved DOM caret and would redirect native typing.
+const htmlSourceInputHandlers = Prec.highest(EditorView.domEventHandlers({
+  keydown(event, view) {
+    const shortcut = (event.ctrlKey || event.metaKey) && !event.altKey && /^[vx]$/i.test(event.key);
+    const editingKey = ['Enter', 'Backspace', 'Delete'].includes(event.key) || (
+      !event.ctrlKey && !event.metaKey && !event.altKey &&
+      (event.key.length === 1 || event.key === 'Process')
+    );
+    if (shortcut || editingKey) revealHtmlSourceForInput(view, event.target);
+    return false;
+  },
+  beforeinput(event, view) {
+    if (/^(insert|delete)/.test(event.inputType)) revealHtmlSourceForInput(view, event.target);
+    return false;
+  },
+  compositionstart(event, view) {
+    revealHtmlSourceForInput(view, event.target);
+    return false;
+  },
+  paste(event, view) {
+    revealHtmlSourceForInput(view, event.target);
+    return false;
+  },
+  cut(event, view) {
+    revealHtmlSourceForInput(view, event.target);
+    return false;
+  }
+}));
+
 export function htmlContentExtensions() {
-  return [htmlEditingRangeField, htmlEscapeKeymap, htmlBlockLineNumberMarker];
+  return [htmlEditingRangeField, htmlEscapeKeymap, htmlBlockLineNumberMarker, htmlSourceInputHandlers];
 }

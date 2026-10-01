@@ -90,7 +90,9 @@ const innerMermaidSearchField = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field)
 });
 
-const mermaidOpeningLineRegex = /^[ \t]{0,3}(?:`{3,}|~{3,})\s*mermaid\b/i;
+// Raw lines include the enclosing list indentation; the parser already decides
+// which fences render as Mermaid, so anchor validation must retain that prefix.
+const mermaidOpeningLineRegex = /^[ \t]*(?:`{3,}|~{3,})\s*mermaid\b/i;
 
 export function isMermaidOpeningLine(lineText: string): boolean {
   return mermaidOpeningLineRegex.test(lineText);
@@ -481,6 +483,34 @@ export function focusMermaidEditingOffset(
 function applyMermaidSourceLinePrefix(sourceText: string, prefix: string): string {
   if (!prefix) return sourceText;
   return sourceText.split('\n').map((line) => `${prefix}${line}`).join('\n');
+}
+
+// Mode changes replace the inner editor. Transfer its selection once and retire
+// projection locks before their deferred blur restoration can overwrite it.
+export function takeMermaidModeSelection(
+  view: EditorView,
+  target: HTMLElement | null
+): { anchor: number; head: number } | null {
+  const block = target && view.contentDOM.contains(target)
+    ? target.closest<MermaidEditingBlockElement>('.meo-mermaid-editing-block') : null;
+  const selection = block?.__meoMermaidEditingController?.getModeSelection() ?? null;
+  for (const [anchor, lock] of mermaidSourceProjectionLocks.get(view) ?? []) {
+    lock.pinnedSelection = null;
+    releaseMermaidSourceProjectionLock(view, anchor, lock);
+  }
+  return selection;
+}
+
+export function restoreMermaidModeSelection(
+  view: EditorView,
+  selection: { anchor: number; head: number },
+  restoreFocus: boolean
+): HTMLElement | null {
+  for (const block of view.dom.querySelectorAll<MermaidEditingBlockElement>('.meo-mermaid-editing-block')) {
+    const target = block.__meoMermaidEditingController?.restoreModeSelection(selection, restoreFocus);
+    if (target) return target;
+  }
+  return null;
 }
 
 function resolveMermaidSourceProjection(
@@ -954,6 +984,32 @@ class MermaidEditingController {
       });
     });
     return true;
+  }
+
+  getModeSelection(): { anchor: number; head: number } {
+    const selection = this.innerView.state.selection.main;
+    const position = (offset: number) => this.block.contentFrom + mermaidEditorOffsetToOuterOffset(
+      this.block.diagramText, this.block.sourceLinePrefix, offset
+    );
+    return { anchor: position(selection.anchor), head: position(selection.head) };
+  }
+
+  restoreModeSelection(
+    selection: { anchor: number; head: number },
+    restoreFocus: boolean
+  ): HTMLElement | null {
+    if (
+      Math.min(selection.anchor, selection.head) < this.block.contentFrom ||
+      Math.max(selection.anchor, selection.head) > this.block.contentTo
+    ) return null;
+    const position = (offset: number) => mermaidOuterOffsetToEditorOffset(
+      this.block.diagramText, this.block.sourceLinePrefix, offset - this.block.contentFrom
+    );
+    this.innerView.dispatch({
+      selection: { anchor: position(selection.anchor), head: position(selection.head) }
+    });
+    if (restoreFocus) this.innerView.contentDOM.focus({ preventScroll: true });
+    return this.innerView.contentDOM;
   }
 
   focusOuterOffset(offset: number, isCurrent: () => boolean = () => true): boolean {

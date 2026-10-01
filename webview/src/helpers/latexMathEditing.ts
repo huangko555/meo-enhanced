@@ -475,6 +475,31 @@ export function focusLatexMathEditingOffset(
   return editingBlock.__meoLatexMathEditingController.focusOffset(offset, isCurrent);
 }
 
+export function takeLatexMathModeSelection(
+  view: EditorView,
+  target: HTMLElement | null
+): { anchor: number; head: number } | null {
+  const activeBlock = target && view.contentDOM.contains(target)
+    ? target.closest<LatexMathEditingBlockElement>('.meo-latex-math-editing-block') : null;
+  const selection = activeBlock?.__meoLatexMathEditingController?.getModeSelection() ?? null;
+  for (const block of view.dom.querySelectorAll<LatexMathEditingBlockElement>('.meo-latex-math-editing-block')) {
+    block.__meoLatexMathEditingController?.cancelModeSelectionRestore();
+  }
+  return selection;
+}
+
+export function restoreLatexMathModeSelection(
+  view: EditorView,
+  selection: { anchor: number; head: number },
+  restoreFocus: boolean
+): HTMLElement | null {
+  for (const block of view.dom.querySelectorAll<LatexMathEditingBlockElement>('.meo-latex-math-editing-block')) {
+    const target = block.__meoLatexMathEditingController?.restoreModeSelection(selection, restoreFocus);
+    if (target) return target;
+  }
+  return null;
+}
+
 class LatexMathEditingController {
   private outerView: EditorView;
   private block: LatexMathEditingBlock;
@@ -656,6 +681,41 @@ class LatexMathEditingController {
     this.innerView.focus();
   }
 
+  getModeSelection(): { anchor: number; head: number } {
+    const selection = this.innerView.state.selection.main;
+    return {
+      anchor: this.block.contentFrom + selection.anchor,
+      head: this.block.contentFrom + selection.head
+    };
+  }
+
+  cancelModeSelectionRestore(): void {
+    if (this.projectionRestoreFrame !== null) {
+      window.cancelAnimationFrame(this.projectionRestoreFrame);
+      this.projectionRestoreFrame = null;
+    }
+    this.projectionPreviousSelection = null;
+    this.projectionPinnedSelection = null;
+  }
+
+  restoreModeSelection(
+    selection: { anchor: number; head: number },
+    restoreFocus: boolean
+  ): HTMLElement | null {
+    if (
+      Math.min(selection.anchor, selection.head) < this.block.contentFrom ||
+      Math.max(selection.anchor, selection.head) > this.block.contentTo
+    ) return null;
+    this.innerView.dispatch({
+      selection: {
+        anchor: selection.anchor - this.block.contentFrom,
+        head: selection.head - this.block.contentFrom
+      }
+    });
+    if (restoreFocus) this.innerView.contentDOM.focus({ preventScroll: true });
+    return this.innerView.contentDOM;
+  }
+
   focusOffset(offset: number, isCurrent: () => boolean = () => true): boolean {
     if (!isCurrent()) return false;
     const position = Math.max(0, Math.min(offset, this.innerView.state.doc.length));
@@ -774,6 +834,7 @@ class LatexMathEditingController {
   }
 
   private scheduleProjectionSelectionRestore(): void {
+    if (!this.projectionPreviousSelection || !this.projectionPinnedSelection) return;
     if (this.projectionRestoreFrame !== null) {
       window.cancelAnimationFrame(this.projectionRestoreFrame);
     }

@@ -105,6 +105,8 @@ function targetedCommands(
       ];
     case 'rendered':
       return [
+        script('scripts/test-mode-selection-continuity.ts'),
+        script('scripts/test-html-content.ts'),
         script('scripts/test-rendered-block-mode-shell.ts'),
         script('scripts/test-history-rendered-block-interaction.ts'),
         script('scripts/test-mermaid-diagram-presentation-runtime.ts'),
