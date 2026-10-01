@@ -375,7 +375,39 @@ async function runOwnedBrowserLifecycleChecks(): Promise<void> {
   }
 }
 
+async function runTransientProfileCleanupChecks(): Promise<void> {
+  for (const scenario of ['transient', 'transient-primary', 'permanent-primary'] as const) {
+    const fake = createFakeBrowser();
+    const dependencies = createFakeDependencies(fake, `profile-${scenario}`);
+    const cleanup = dependencies.cleanupUserDataDir;
+    const busy = Object.assign(new Error('profile handle is still closing'), { code: 'EBUSY' });
+    const primary = scenario === 'transient' ? undefined : new Error('original browser assertion');
+    let attempts = 0;
+    dependencies.cleanupUserDataDir = async directory => {
+      attempts += 1;
+      if (scenario === 'permanent-primary' || attempts <= 2) throw busy;
+      await cleanup(directory);
+    };
+    fake.setCloseAction(() => { fake.emitDisconnected(); fake.emitExit(); });
+    const browser = await launchOwnedTestBrowser(dependencies);
+    if (primary) {
+      const observed = await captureFailure(() => closeTestBrowser(browser, primary));
+      if (scenario === 'permanent-primary') {
+        assert.ok(observed instanceof AggregateError);
+        assert.deepEqual((observed as AggregateError).errors, [primary, busy]);
+        assert.equal((observed as AggregateError).cause, primary);
+        assert.equal(attempts, 4, 'Permanent locks must stop after bounded cleanup attempts');
+      } else assert.strictEqual(observed, primary, 'Cleanup recovery must not hide an assertion');
+    } else await browser.close();
+    if (scenario !== 'permanent-primary') {
+      assert.equal(attempts, 3);
+      assert.deepEqual([...dependencies.profileRegistry.profiles], []);
+    }
+  }
+}
+
 await runOwnedBrowserLifecycleChecks();
+await runTransientProfileCleanupChecks();
 
 const browser = await launchTestBrowser();
 try {

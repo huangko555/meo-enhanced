@@ -100,7 +100,7 @@ export async function launchOwnedTestBrowser(
         if (!closeOutcome.processTerminal) appendFlat(cleanupErrors, processTerminalUnavailableError());
         if (userDataDir !== undefined && closeOutcome.processTerminal) {
           try {
-            await dependencies.cleanupUserDataDir(userDataDir);
+            await cleanupOwnedUserDataDir(dependencies, userDataDir);
           } catch (cleanupError) {
             appendFlat(cleanupErrors, cleanupError);
           }
@@ -110,7 +110,7 @@ export async function launchOwnedTestBrowser(
       }
     } else if (userDataDir !== undefined) {
       try {
-        await dependencies.cleanupUserDataDir(userDataDir);
+        await cleanupOwnedUserDataDir(dependencies, userDataDir);
       } catch (cleanupError) {
         appendFlat(cleanupErrors, cleanupError);
       }
@@ -141,13 +141,31 @@ function installOwnedBrowserState(browser: Browser, state: OwnedBrowserState): v
   ownedBrowserStates.set(browser, state);
 }
 
+async function cleanupOwnedUserDataDir(
+  owner: Pick<TestBrowserLaunchDependencies, 'cleanupUserDataDir'>,
+  userDataDir: string
+): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await owner.cleanupUserDataDir(userDataDir);
+      return;
+    } catch (error) {
+      // Windows can retain a closing profile handle after the browser exits.
+      // Retry only that transient condition; keep permanent and primary errors.
+      if (attempt >= 3 || !error || typeof error !== 'object' ||
+        !('code' in error) || error.code !== 'EBUSY') throw error;
+      await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 100));
+    }
+  }
+}
+
 async function disposeOwnedBrowser(browser: Browser, state: OwnedBrowserState): Promise<void> {
   const closeOutcome = await closeBrowserAndWait(browser, state.process, state.originalClose);
   const cleanupErrors = [...closeOutcome.cleanupErrors];
 
   if (closeOutcome.processTerminal) {
     try {
-      await state.cleanupUserDataDir(state.userDataDir);
+      await cleanupOwnedUserDataDir(state, state.userDataDir);
     } catch (error) {
       appendFlat(cleanupErrors, error);
     }
