@@ -70,6 +70,14 @@ try {
   await page.waitForSelector('.editor-host > .cm-editor .cm-scroller');
   await page.waitForFunction((expectedLines) => (window as any).__fontTestView()?.state.doc.lines === expectedLines,
     { timeout: 10000 }, lineCount);
+  // Document state is installed before the startup cover releases the toolbar.
+  // Only begin physical menu interaction once that presentation is visible.
+  await page.waitForFunction(() => {
+    const button = document.querySelector<HTMLElement>('.more-tools-wrapper > button');
+    return Boolean(button && !button.closest('.meo-preload-toolbar')
+      && getComputedStyle(button).visibility === 'visible'
+      && button.getBoundingClientRect().width > 0);
+  }, { timeout: 10000 });
   await page.click('.more-tools-wrapper > button');
   await page.click('[data-editor-font-size-mode="custom"]');
   await page.evaluate(() => document.querySelector<HTMLButtonElement>('.editor-font-size-stepper-button:last-child')!.click());
