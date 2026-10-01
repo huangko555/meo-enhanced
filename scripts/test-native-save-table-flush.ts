@@ -167,7 +167,8 @@ async function main(): Promise<void> {
     }
     for (const block of [
       { text: '```mermaid\ngraph TD\nA --> B\n```', kind: 'mermaid', marker: 'C' },
-      { text: '$$\nx = 1\n$$', kind: 'latex-math', marker: '+2' }
+      { text: '$$\nx = 1\n$$', kind: 'latex-math', marker: '+2' },
+      { text: '$$\nx = 1\n$$\n\n| A | B |\n| --- | --- |\n| one | two |', kind: 'latex-math', marker: '+2+3+4+5' }
     ]) {
       await page.goto('about:blank');
       await page.setContent('<!doctype html><body><div id="editor"></div></body>');
@@ -184,7 +185,9 @@ async function main(): Promise<void> {
       await page.keyboard.type(block.marker);
       const saved = await page.evaluate(() => (window as any).__nativeSaveTableFlush.nativeSave());
       const snapshot = await page.evaluate(() => (window as any).__nativeSaveTableFlush.snapshot());
-      const expected = block.text.replace(/\n([^\n]+)$/, `${block.marker}\n$1`);
+      const expected = block.kind === 'latex-math'
+        ? block.text.replace('x = 1', `x = 1${block.marker}`)
+        : block.text.replace(/\n([^\n]+)$/, `${block.marker}\n$1`);
       assert.deepEqual(saved.result, { ok: true, value: { text: expected } });
       assert.equal(snapshot.diskText, expected, `${block.kind}: embedded input must reach disk`);
       assert.equal(await page.$eval(selector, node => node === document.activeElement), true,
@@ -201,7 +204,10 @@ async function main(): Promise<void> {
       await new Promise(resolve => setTimeout(resolve, 180));
       await page.evaluate(() => (window as any).__nativeSaveTableFlush.nativeSave());
       const committed = await page.evaluate(() => (window as any).__nativeSaveTableFlush.snapshot());
-      assert.equal(committed.diskText, expected.replace(/\n([^\n]+)$/, '中文\n$1'));
+      const committedExpected = block.kind === 'latex-math'
+        ? expected.replace(`x = 1${block.marker}`, `x = 1${block.marker}中文`)
+        : expected.replace(/\n([^\n]+)$/, '中文\n$1');
+      assert.equal(committed.diskText, committedExpected);
       await cdp.detach();
       await page.evaluate(() => (window as any).__nativeSaveTableFlush.destroy());
     }

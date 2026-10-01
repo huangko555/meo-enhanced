@@ -3264,9 +3264,13 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         cleanupErrors.push(error);
       }
     };
-    const clearNativeTextSelection = () => {
+    const clearNativeTextSelection = (onlyOwned = false) => {
       this.selectionDomAnchor = null;
-      document.getSelection()?.removeAllRanges();
+      const selection = document.getSelection();
+      // Virtual widget disposal must not clear a caret owned by another editor.
+      if (onlyOwned && !wrap?.contains(selection?.anchorNode ?? null) &&
+        !wrap?.contains(selection?.focusNode ?? null)) return;
+      selection?.removeAllRanges();
     };
     const projectNativeTextSelection = (domHead: { node: Node; offset: number } | null | undefined) => {
       if (!this.selectionDomAnchor || !domHead) return;
@@ -3312,7 +3316,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         continue;
       }
       if (effect.kind === 'clear') {
-        runPrimary(clearNativeTextSelection);
+        runPrimary(() => clearNativeTextSelection(effect.reason === 'dispose'));
         runPrimary(() => this.applySelection(null));
         if (wrap && effect.reason === 'cross-table') {
           runPrimary(() => {

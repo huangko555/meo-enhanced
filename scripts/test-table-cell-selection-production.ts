@@ -630,6 +630,8 @@ async function main() {
       let laterImageOwnerRuns = 0;
       laterImageOwner.addEventListener('meo-dispose-image-presentation', () => { laterImageOwnerRuns += 1; });
       table.append(laterImageOwner);
+      const ownedText = table.querySelector('.meo-md-html-table-cell-preview')!.firstChild!;
+      document.getSelection()!.setBaseAndExtent(ownedText, 0, ownedText, 1);
       const nativeRemoveAllRanges = Selection.prototype.removeAllRanges;
       const nativeRelease = table.releasePointerCapture.bind(table);
       let removeAllRangesCalls = 0;
@@ -1095,6 +1097,36 @@ async function main() {
       } finally {
         await mapperPage.close();
       }
+    }
+    const disposalPage = await browser.newPage();
+    try {
+      await disposalPage.setContent('<div id="other" contenteditable="true">other editor</div><div id="app"></div>');
+      await disposalPage.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+      await disposalPage.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+      for (const collapsed of [true, false]) {
+        await disposalPage.evaluate(() => {
+          (window as any).__disposalEditor = (window as any).TableStabilityHarness.createEditor({
+            parent: document.getElementById('app')!,
+            text: '| A | B |\n| --- | --- |\n| one | two |',
+            initialMode: 'live', onApplyChanges() {}
+          });
+        });
+        await disposalPage.waitForSelector('.meo-md-html-table-shell');
+        const preserved = await disposalPage.evaluate((isCollapsed) => {
+          const other = document.getElementById('other')!;
+          const node = other.firstChild!;
+          other.focus();
+          const selection = document.getSelection()!;
+          selection.setBaseAndExtent(node, 2, node, isCollapsed ? 2 : 7);
+          (window as any).__disposalEditor.destroy();
+          return selection.rangeCount === 1 && selection.anchorNode === node &&
+            selection.focusNode === node && selection.anchorOffset === 2 &&
+            selection.focusOffset === (isCollapsed ? 2 : 7) && document.activeElement === other;
+        }, collapsed);
+        if (!preserved) throw new Error(`Table disposal cleared another editor's ${collapsed ? 'caret' : 'selection'}`);
+      }
+    } finally {
+      await disposalPage.close();
     }
     console.log('table cell selection production checks passed');
   } finally {
