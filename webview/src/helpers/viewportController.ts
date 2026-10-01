@@ -119,6 +119,7 @@ export interface ViewportHistorySnapshot {
 interface LayoutAnchor {
   position: number;
   viewportOffset: number;
+  readingOffset?: number;
 }
 
 interface ActiveLayoutAnchor extends LayoutAnchor {
@@ -386,6 +387,12 @@ export class ViewportController {
   private pendingAsyncAnchorTransactions = 0;
   private readonly onWheel = (event: WheelEvent) => this.handleWheel(event);
   private readonly onScroll = () => {
+    // Adopt the reading line after native scrolling, using the same layout
+    // stabilizer as block updates. A newer interaction invalidates this anchor.
+    if (this.getMode() === 'live' && this.isUserScrolling() &&
+      !this.scrollbarDragActive && !this.activeLayoutAnchor) {
+      this.startInteractionLayoutStabilization({ from: -1, to: -1 });
+    }
     this.scheduleActiveScrollFrame();
     this.projectLinkedViewport('editor');
   };
@@ -394,6 +401,11 @@ export class ViewportController {
   private readonly onKeyDown = (event: KeyboardEvent) => this.handleKeyDown(event);
   private readonly onKeyUp = (event: KeyboardEvent) => this.handleKeyUp(event);
   private readonly onBeforeInput = () => {
+    // Composition input need not have a preceding keydown. It must still retire
+    // a wheel reading anchor before the edit can change the visible layout.
+    if (this.activeLayoutAnchor?.readingOffset !== undefined) this.activeLayoutAnchor = null;
+    this.lastWheelAt = Number.NEGATIVE_INFINITY;
+    this.lastTouchMoveAt = Number.NEGATIVE_INFINITY;
     this.claimLinkedViewport('editor');
     this.navigationGeneration += 1;
   };
@@ -516,7 +528,11 @@ export class ViewportController {
         const activeAnchor = this.activeLayoutAnchor;
         return {
           anchor: activeAnchor && (activeAnchor.position < from || activeAnchor.position > to)
-            ? { position: activeAnchor.position, viewportOffset: activeAnchor.viewportOffset }
+            ? {
+                position: activeAnchor.position,
+                viewportOffset: activeAnchor.viewportOffset,
+                readingOffset: activeAnchor.readingOffset
+              }
             : this.captureLayoutAnchor(region),
           from,
           interactionGeneration: this.interactionGeneration,
@@ -2845,7 +2861,7 @@ export class ViewportController {
 
   private captureInteractionLayoutAnchor(changedRange: { from: number; to: number }): LayoutAnchor | null {
     const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
-    const candidates = Array.from(this.view.contentDOM.querySelectorAll<HTMLElement>('.cm-line'))
+    const candidates = Array.from(this.view.contentDOM.querySelectorAll<HTMLElement>(':scope > .cm-line'))
       .map((line) => ({
         position: this.view.posAtDOM(line),
         top: line.getBoundingClientRect().top
@@ -2862,7 +2878,10 @@ export class ViewportController {
     ));
     return {
       position: anchor.position,
-      viewportOffset: this.view.lineBlockAt(anchor.position).top - this.view.scrollDOM.scrollTop
+      viewportOffset: this.view.lineBlockAt(anchor.position).top - this.view.scrollDOM.scrollTop,
+      readingOffset: this.isUserScrolling()
+        ? (this.view.coordsAtPos(anchor.position)?.top ?? anchor.top) - scrollerRect.top
+        : undefined
     };
   }
 
@@ -2896,13 +2915,17 @@ export class ViewportController {
           const target = measurement.revision === activeAnchor.revision
             ? measurement.target
             : this.resolveLayoutAnchorTarget(activeAnchor);
-          activeAnchor.remainingFrames -= 1;
+          // Virtual height corrections may arrive after two stable frames while
+          // the wheel gesture is still active. Settle within the existing frame
+          // budget once it goes idle; never retain an anchor across new input.
+          const userScrolling = this.isUserScrolling();
+          if (!userScrolling) activeAnchor.remainingFrames -= 1;
           const changed = this.writeScrollPosition(target);
           activeAnchor.stableFrames = changed ? 0 : activeAnchor.stableFrames + 1;
-          if (
+          if (!userScrolling && (
             activeAnchor.stableFrames >= REQUIRED_STABLE_FRAMES ||
             activeAnchor.remainingFrames <= 0
-          ) {
+          )) {
             this.activeLayoutAnchor = null;
             return;
           }
@@ -2914,6 +2937,13 @@ export class ViewportController {
 
   private resolveLayoutAnchorTarget(anchor: ActiveLayoutAnchor): ScrollPosition {
     const current = this.readScrollPosition();
+    if (anchor.readingOffset !== undefined) {
+      const coords = this.view.coordsAtPos(anchor.position);
+      if (!coords) return current;
+      return this.resolveScrollTarget({
+        top: current.top + coords.top - this.view.scrollDOM.getBoundingClientRect().top - anchor.readingOffset
+      }, current);
+    }
     return this.resolveScrollTarget({
       top: this.view.lineBlockAt(anchor.position).top - anchor.viewportOffset
     }, current);

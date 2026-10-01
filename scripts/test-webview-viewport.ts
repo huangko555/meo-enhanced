@@ -2799,7 +2799,11 @@ async function main() {
                 top: anchorTop,
                 blockTop: pendingRect.top,
                 blockHeight: pendingRect.height,
-                scrollTop: scroller.scrollTop
+                scrollTop: scroller.scrollTop,
+                viewportTop: scroller.getBoundingClientRect().top,
+                scrollHeight: scroller.scrollHeight,
+                windowScrollY: window.scrollY,
+                gaps: Array.from(scroller.querySelectorAll<HTMLElement>('.cm-gap')).map(gap => gap.getBoundingClientRect().height)
               };
             }
           }
@@ -2866,6 +2870,10 @@ async function main() {
         top: anchor?.getBoundingClientRect().top ?? null,
         rendered: Boolean(document.querySelector('.meo-mermaid-block svg[height="3000"]')),
         scrollTop: scroller.scrollTop,
+        viewportTop: scroller.getBoundingClientRect().top,
+        scrollHeight: scroller.scrollHeight,
+        windowScrollY: window.scrollY,
+        gaps: Array.from(scroller.querySelectorAll<HTMLElement>('.cm-gap')).map(gap => gap.getBoundingClientRect().height),
         blockTop: block?.getBoundingClientRect().top ?? null,
         blockHeight: block?.getBoundingClientRect().height ?? null,
         visibleLines: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))

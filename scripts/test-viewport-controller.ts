@@ -812,6 +812,97 @@ if (liveWheelScrollTop !== 1120 || liveWheelWrites.length > 0) {
 }
 liveWheelController.destroy();
 
+// A height-map correction can arrive after the native wheel scroll has already
+// settled for several frames. Preserve the newly visible line, without replaying
+// the wheel distance or keeping an obsolete anchor after another interaction.
+const readingFrames: FrameRequestCallback[] = [];
+const originalReadingNow = performance.now;
+let readingNow = 0;
+performance.now = () => readingNow;
+globalThis.requestAnimationFrame = (callback: FrameRequestCallback) => {
+  readingFrames.push(callback);
+  return readingFrames.length;
+};
+const readingDom = new FakeEventTarget();
+const readingScroller = Object.assign(new FakeEventTarget(), {
+  ownerDocument: new FakeEventTarget(),
+  scrollTop: 1000,
+  scrollLeft: 0,
+  scrollHeight: 5000,
+  scrollWidth: 900,
+  clientHeight: 500,
+  clientWidth: 900,
+  getBoundingClientRect: () => ({ top: 40, bottom: 540, height: 500 })
+});
+let readingLineTop = 1200;
+const readingLine = {
+  getBoundingClientRect: () => ({ top: 40 + readingLineTop - readingScroller.scrollTop })
+};
+const readingView = {
+  dom: readingDom,
+  scrollDOM: readingScroller,
+  contentDOM: { querySelectorAll: () => [readingLine] },
+  coordsAtPos: () => readingLine.getBoundingClientRect(),
+  posAtDOM: () => 42,
+  // A rendered widget may share an aggregate height-map block with this line.
+  lineBlockAt: () => ({ top: readingLineTop - 2600 }),
+  requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
+};
+const readingController = new ViewportController(readingView as any);
+const nativeReadingWheel = (deltaY: number) => {
+  readingScroller.dispatch('wheel', { deltaX: 0, deltaY, ctrlKey: false });
+  readingScroller.scrollTop += deltaY;
+  readingScroller.dispatch('scroll', {});
+};
+const readingFrame = async () => {
+  readingNow += 16;
+  for (const callback of readingFrames.splice(0)) callback(readingNow);
+  await Promise.resolve();
+};
+try {
+  nativeReadingWheel(-120);
+  for (let frame = 0; frame < 6; frame += 1) await readingFrame();
+  const nativeTop = readingLine.getBoundingClientRect().top;
+  readingLineTop += 19.5;
+  readingScroller.scrollHeight += 19.5;
+  readingController.reconcileAfterEditorUpdate();
+  await readingFrame();
+  if (Math.abs(readingLine.getBoundingClientRect().top - nativeTop) > 1) {
+    throw new Error(`Late virtual height moved the native reading anchor: ${JSON.stringify({
+      nativeTop, actualTop: readingLine.getBoundingClientRect().top, scrollTop: readingScroller.scrollTop
+    })}`);
+  }
+  nativeReadingWheel(20);
+  await readingFrame();
+  if (Math.abs(readingLine.getBoundingClientRect().top - (nativeTop - 20)) > 1) {
+    throw new Error('A new wheel delta reused the previous reading anchor');
+  }
+  readingDom.dispatch('beforeinput', { inputType: 'insertCompositionText' });
+  readingScroller.scrollTop = 600;
+  readingLineTop += 40;
+  readingController.reconcileAfterEditorUpdate();
+  for (let frame = 0; frame < 20; frame += 1) await readingFrame();
+  if (readingScroller.scrollTop !== 600) {
+    throw new Error('An obsolete reading anchor overrode the next interaction');
+  }
+  nativeReadingWheel(-20);
+  for (let frame = 0; frame < 20; frame += 1) await readingFrame();
+  const idleScrollTop = readingScroller.scrollTop;
+  readingLineTop += 40;
+  readingController.reconcileAfterEditorUpdate();
+  await readingFrame();
+  if (readingScroller.scrollTop !== idleScrollTop) {
+    throw new Error('An idle wheel gesture retained a reading anchor');
+  }
+} finally {
+  readingController.destroy();
+  performance.now = originalReadingNow;
+  globalThis.requestAnimationFrame = (callback: FrameRequestCallback) => {
+    wheelFrames.push(callback);
+    return wheelFrames.length;
+  };
+}
+
 wheelScrollDOM.scrollTop = 1000;
 let elementScrollIntoViewCalls = 0;
 let navigationElementTop = 1800;
