@@ -1818,30 +1818,71 @@ async function main(): Promise<void> {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
     });
-    await page.waitForFunction((selector) => {
-      const table = document.querySelector<HTMLTableElement>(selector);
-      const wrap = table?.closest<HTMLElement>('.meo-md-html-table-wrap');
-      const sticky = table?.closest('.meo-md-html-table-shell')
-        ?.querySelector<HTMLTableElement>('.meo-md-html-table-sticky-table');
-      const mainCells = Array.from(table?.querySelectorAll<HTMLElement>('thead th') ?? []);
-      const stickyCells = Array.from(sticky?.querySelectorAll<HTMLElement>('thead th') ?? []);
-      const mainColumns = Array.from(table?.querySelectorAll<HTMLTableColElement>('colgroup > col') ?? [])
-        .map((column) => Number.parseFloat(column.style.width));
-      const stickyColumns = Array.from(sticky?.querySelectorAll<HTMLTableColElement>('colgroup > col') ?? [])
-        .map((column) => Number.parseFloat(column.style.width));
-      return Boolean(table && wrap && mainCells.length === 3 && stickyCells.length === 3
-        && wrap.scrollWidth <= wrap.clientWidth + 1
-        && mainColumns.length === 3 && stickyColumns.length === 3
-        && mainColumns.every((width, index) => (
-          Number.isFinite(width)
-          && Math.abs(width - stickyColumns[index]) < 1
-          && Math.abs(width - mainCells[index].getBoundingClientRect().width) < 1
-        ))
-        && mainCells.every((cell, index) => (
-          Math.abs(cell.getBoundingClientRect().left - stickyCells[index].getBoundingClientRect().left) < 1
-          && Math.abs(cell.getBoundingClientRect().right - stickyCells[index].getBoundingClientRect().right) < 1
-        )));
-    }, { timeout: 5000 }, `${tableSelector}:first-of-type`);
+    // Use editor navigation so a pending mode restoration cannot undo the
+    // fixture's scroll before Sticky column boundaries are measured.
+    await page.evaluate(async (selector) => {
+      const editor = (window as any).__columnWidthProduction;
+      const table = document.querySelector<HTMLTableElement>(selector)!;
+      const line = editor.getText().slice(0, Number(table.dataset.tableFrom)).split('\n').length;
+      editor.scrollToLine(line, 'top');
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      const currentTable = document.querySelector<HTMLTableElement>(selector)!;
+      const scroller = currentTable.closest<HTMLElement>('.cm-scroller')!;
+      const headerHeight = currentTable.tHead?.getBoundingClientRect().height ?? 0;
+      scroller.scrollTop += Math.max(24, headerHeight + 8);
+      scroller.dispatchEvent(new Event('scroll'));
+    }, `${tableSelector}:first-of-type`);
+    try {
+      await page.waitForFunction((selector) => {
+        const table = document.querySelector<HTMLTableElement>(selector);
+        const wrap = table?.closest<HTMLElement>('.meo-md-html-table-wrap');
+        const sticky = table?.closest('.meo-md-html-table-shell')
+          ?.querySelector<HTMLTableElement>('.meo-md-html-table-sticky-table');
+        const mainCells = Array.from(table?.querySelectorAll<HTMLElement>('thead th') ?? []);
+        const stickyCells = Array.from(sticky?.querySelectorAll<HTMLElement>('thead th') ?? []);
+        const mainColumns = Array.from(table?.querySelectorAll<HTMLTableColElement>('colgroup > col') ?? [])
+          .map((column) => Number.parseFloat(column.style.width));
+        const stickyColumns = Array.from(sticky?.querySelectorAll<HTMLTableColElement>('colgroup > col') ?? [])
+          .map((column) => Number.parseFloat(column.style.width));
+        return Boolean(table && wrap && mainCells.length === 3 && stickyCells.length === 3
+          && wrap.scrollWidth <= wrap.clientWidth + 1
+          && mainColumns.length === 3 && stickyColumns.length === 3
+          && mainColumns.every((width, index) => (
+            Number.isFinite(width)
+            && Math.abs(width - stickyColumns[index]) < 1
+            && Math.abs(width - mainCells[index].getBoundingClientRect().width) < 1
+          ))
+          && mainCells.every((cell, index) => (
+            Math.abs(cell.getBoundingClientRect().left - stickyCells[index].getBoundingClientRect().left) < 1
+            && Math.abs(cell.getBoundingClientRect().right - stickyCells[index].getBoundingClientRect().right) < 1
+          )));
+      }, { timeout: 5000 }, `${tableSelector}:first-of-type`);
+    } catch (error) {
+      const facts = await page.$eval(`${tableSelector}:first-of-type`, (table: HTMLTableElement) => {
+        const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap');
+        const sticky = table.closest('.meo-md-html-table-shell')
+          ?.querySelector<HTMLTableElement>('.meo-md-html-table-sticky-table');
+        const scroller = table.closest<HTMLElement>('.cm-scroller');
+        const describe = (target: HTMLTableElement | null | undefined) => ({
+          columns: Array.from(target?.querySelectorAll<HTMLTableColElement>('colgroup > col') ?? [])
+            .map((column) => column.style.width),
+          cells: Array.from(target?.querySelectorAll<HTMLElement>('thead th') ?? []).map((cell) => ({
+            width: cell.getBoundingClientRect().width,
+            left: cell.getBoundingClientRect().left,
+            right: cell.getBoundingClientRect().right
+          }))
+        });
+        return {
+          wrap: { clientWidth: wrap?.clientWidth, scrollWidth: wrap?.scrollWidth, scrollLeft: wrap?.scrollLeft },
+          viewport: { scrollTop: scroller?.scrollTop, scrollHeight: scroller?.scrollHeight, clientHeight: scroller?.clientHeight },
+          table: { top: table.getBoundingClientRect().top, bottom: table.getBoundingClientRect().bottom },
+          stickyVisible: sticky?.closest('.meo-md-html-table-sticky-chrome')?.classList.contains('is-visible'),
+          main: describe(table),
+          sticky: describe(sticky)
+        };
+      });
+      throw new Error(`Font/viewport round-trip projection did not settle: ${JSON.stringify(facts)}`, { cause: error });
+    }
     const afterAccessibleRoundTrip = await tablePresentationWidths(page, `${tableSelector}:first-of-type`);
     assert.deepEqual(
       afterAccessibleRoundTrip.stickyWidths.map(Math.round),

@@ -531,6 +531,7 @@ try {
     line: number;
     previewOffset: number | null;
     previewRange: [number, number] | null;
+    sourceOffset: number | null;
   }>;
   for (const target of structuredTargets) {
     await page.click('.line-jump-input');
@@ -541,14 +542,24 @@ try {
     await page.keyboard.press('Enter');
     await page.waitForFunction(marker => Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
       .some(line => line.textContent?.includes(marker)), {}, target.marker);
-    await page.evaluate(marker => {
+    await page.evaluate(async marker => {
       const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
       const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
         .find(candidate => candidate.textContent?.includes(marker))!;
       const viewport = scroller.getBoundingClientRect();
-      scroller.scrollTop += line.getBoundingClientRect().top - viewport.top - viewport.height / 3;
+      // Linked projection is driven by the native scroll event. A wall-clock
+      // sleep can expire before Chromium delivers it, especially after layout.
+      await new Promise<void>(resolve => {
+        const afterScroll = () => requestAnimationFrame(() => resolve());
+        scroller.addEventListener('scroll', afterScroll, { once: true });
+        const previousTop = scroller.scrollTop;
+        scroller.scrollTop += line.getBoundingClientRect().top - viewport.top - viewport.height / 3;
+        if (scroller.scrollTop === previousTop) {
+          scroller.removeEventListener('scroll', afterScroll);
+          afterScroll();
+        }
+      });
     }, target.marker);
-    await new Promise(resolve => setTimeout(resolve, 40));
     structuredAlignment.push(await page.evaluate(({ marker, line }) => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
       const frameDocument = frame.contentDocument!;
@@ -572,7 +583,14 @@ try {
         marker,
         line,
         previewOffset: candidates[0]?.offset ?? null,
-        previewRange: candidates[0]?.range ?? null
+        previewRange: candidates[0]?.range ?? null,
+        sourceOffset: (() => {
+          const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+          const sourceLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+            .find(element => element.textContent?.includes(marker));
+          const bounds = scroller.getBoundingClientRect();
+          return sourceLine ? sourceLine.getBoundingClientRect().top - bounds.top - bounds.height / 3 : null;
+        })()
       };
     }, target));
   }
