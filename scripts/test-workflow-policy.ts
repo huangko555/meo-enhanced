@@ -132,6 +132,7 @@ function targetedCommands(
       ];
     case 'viewport':
       return [
+        script('scripts/test-native-scroll-progress-production.ts'),
         packageScript('test:reading-position'),
         script('scripts/test-font-size-viewport.ts'),
         script('scripts/test-embedded-source-font-size.ts'),
@@ -221,7 +222,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
       return {
         tier: 'quick',
         title: 'Quick regression gate',
-        expectedDuration: 'about 30-60 seconds',
+        expectedDuration: 'about 2-4 minutes',
         longRunning: false,
         stages: [serialStage('Quick regression contracts', [
           packageScript('typecheck'),
@@ -238,6 +239,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-rendered-block-mode-shell.ts'),
           script('scripts/test-live-input-derived-work.ts'),
           script('scripts/test-viewport-controller.ts'),
+          script('scripts/test-native-scroll-progress-production.ts'),
           script('scripts/test-toolbar-input-viewport.ts'),
           script('scripts/test-line-number-typing-stability.ts'),
           script('scripts/test-line-number-no-wrap-stability.ts'),

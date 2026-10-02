@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -168,6 +169,45 @@ async function main() {
       failures.push(`history did not use a visible source boundary beside an atomic image: ${JSON.stringify(imageHistory)}`);
     }
     if (failures.length) throw new Error(failures.join('\n'));
+
+    const beforeViewer = await page.evaluate(() => {
+      const editor = (window as any).__imageLayoutEditor;
+      editor.view.dispatch({ selection: { anchor: 0 } });
+      return editor.view.state.doc.toString();
+    });
+    const openViewer = '.meo-md-image button[title="Fullscreen image"]';
+    await page.waitForSelector(openViewer);
+    const expectedSrc = await page.$eval(openViewer, button =>
+      button.closest('.meo-md-image')!.querySelector<HTMLImageElement>('img')!.src);
+    await page.click(openViewer);
+    await page.waitForSelector('.meo-md-image-fullscreen-img');
+    assert.equal(await page.$eval('.meo-md-image-fullscreen-img', image => (image as HTMLImageElement).src), expectedSrc);
+    const transform = () => page.$eval('.meo-md-image-fullscreen-img', image => {
+      const matrix = new DOMMatrix(getComputedStyle(image).transform);
+      return { zoom: matrix.a, x: matrix.e, y: matrix.f };
+    });
+    await page.click('.meo-md-image-fullscreen button[title="Zoom in"]');
+    assert.equal((await transform()).zoom, 1.5);
+    const viewerPoint = await page.$eval('.meo-md-image-fullscreen-img', image => {
+      const rect = image.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    });
+    await page.mouse.move(viewerPoint.x, viewerPoint.y);
+    await page.mouse.down();
+    await page.mouse.move(viewerPoint.x + 40, viewerPoint.y + 25, { steps: 4 });
+    await page.mouse.up();
+    assert.deepEqual(await transform(), { zoom: 1.5, x: 40, y: 25 });
+    await page.mouse.wheel({ deltaY: 120 });
+    await page.waitForFunction(() =>
+      new DOMMatrix(getComputedStyle(document.querySelector('.meo-md-image-fullscreen-img')!).transform).a === 1.25);
+    await page.click('.meo-md-image-fullscreen button[title="Reset zoom"]');
+    assert.deepEqual(await transform(), { zoom: 1, x: 0, y: 0 });
+    await page.keyboard.press('Escape');
+    assert.equal(await page.$('.meo-md-image-fullscreen-scrim'), null);
+    await page.click(openViewer);
+    await page.click('.meo-md-image-fullscreen button[title="Exit fullscreen"]');
+    assert.equal(await page.$('.meo-md-image-fullscreen-scrim'), null);
+    assert.equal(await page.evaluate(() => (window as any).__imageLayoutEditor.view.state.doc.toString()), beforeViewer);
     console.log('image layout checks passed');
   } finally {
     await browser.close();

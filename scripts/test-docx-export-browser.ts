@@ -5,6 +5,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import JSZip from 'jszip';
 import exportRuntime from '../src/export/runtime';
+import { renderPdfFromHtmlExport } from '../src/export/pdfRenderer';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-docx-browser-'));
@@ -53,6 +54,34 @@ try {
   );
 
   console.log('DOCX rich-media browser checks passed.');
+
+  const outputPdfPath = path.join(fixtureRoot, 'rich-media.pdf');
+  const pdf = await exportRuntime.renderExportHtmlDocument({
+    readingSnapshot: {
+      snapshotId: 'pdf-rich-media',
+      text: '# PDF fixture\n\n```mermaid\ngraph LR\n  A --> B\n```\n\n$$x^2 + y^2 = z^2$$',
+      appearance: 'dark', uiLanguage: 'en',
+      environment: { previewFontFamily: '', previewSourceColoring: true }
+    },
+    sourceDocumentPath: path.join(fixtureRoot, 'rich-media.md'),
+    outputFilePath: outputPdfPath, target: 'pdf',
+    mermaidRuntimeSrc: pathToFileURL(path.join(repoRoot, 'webview/dist/mermaid.min.js')).toString(),
+    katexStylesHref: pathToFileURL(path.join(repoRoot, 'webview/dist/katex/katex.min.css')).toString(),
+    baseHref: pathToFileURL(`${fixtureRoot}${path.sep}`).toString(),
+    title: 'Rich media PDF', includeTableOfContents: true,
+    shikiLanguageAssetsRoot: path.join(repoRoot, 'webview/dist')
+  });
+  await renderPdfFromHtmlExport({
+    htmlDocument: pdf.htmlDocument, outputPdfPath,
+    puppeteerRuntimeModulePath: path.join(repoRoot, 'dist/puppeteer-runtime.js'),
+    timeoutMs: 60000
+  });
+  const pdfBytes = fs.readFileSync(outputPdfPath);
+  assert.equal(pdfBytes.subarray(0, 5).toString(), '%PDF-');
+  assert.match(pdfBytes.toString('latin1'), /\/Type\s*\/Page\b/);
+  assert.match(pdfBytes.subarray(-32).toString(), /%%EOF/);
+  assert.ok(pdfBytes.length > 1000, 'Rich-media PDF must contain a complete document');
+  console.log('PDF rich-media file generation passed.');
 } finally {
   fs.rmSync(fixtureRoot, { recursive: true, force: true });
 }

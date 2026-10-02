@@ -85,6 +85,35 @@ async function select(page: Page, text = target): Promise<void> {
 
 const drafts = (page: Page) => page.evaluate(() => (window as any).__hostMessages.filter((m: any) => m.type === 'draftChanged').map((m: any) => m.text));
 
+async function resolveMergeConflicts(browser: Browser): Promise<void> {
+  for (const mode of ['source', 'live'] as const) for (const withBase of [false, true]) {
+    const original = ['before', '<<<<<<< current', 'current value',
+      ...(withBase ? ['||||||| base', 'base value'] : []),
+      '=======', 'incoming value', '>>>>>>> incoming', 'after'].join('\n');
+    for (const [action, replacement] of [
+      ['current', 'current value'], ['incoming', 'incoming value'],
+      ['both', 'current value\nincoming value']
+    ]) {
+      const page = await open(browser, original, mode);
+      try {
+        await page.waitForSelector('.meo-merge-actions');
+        await page.click(`.meo-merge-action-btn[data-action="${action}"]`);
+        const expected = `before\n${replacement}\nafter`;
+        await page.waitForFunction(text => (window as any).__hostMessages
+          .filter((message: any) => message.type === 'draftChanged').at(-1)?.text === text, {}, expected);
+        assert.equal(await page.$('.meo-merge-actions'), null, 'Resolved conflict retained its controls');
+        await page.keyboard.down('Control'); await page.keyboard.press('z'); await page.keyboard.up('Control');
+        await page.waitForFunction(text => (window as any).__hostMessages
+          .filter((message: any) => message.type === 'draftChanged').at(-1)?.text === text, {}, original);
+        await page.waitForSelector('.meo-merge-actions');
+        await page.keyboard.down('Control'); await page.keyboard.press('y'); await page.keyboard.up('Control');
+        await page.waitForFunction(text => (window as any).__hostMessages
+          .filter((message: any) => message.type === 'draftChanged').at(-1)?.text === text, {}, expected);
+      } finally { await page.close(); }
+    }
+  }
+}
+
 async function matrix(browser: Browser): Promise<void> {
   for (const mode of ['source', 'live'] as const) for (const [action, expected] of actions) {
     const page = await open(browser, target, mode); try {
@@ -573,5 +602,5 @@ async function reopenedPreviewMode(browser: Browser): Promise<void> {
     await page.close();
   }
 }
-async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { await startupModeVisibility(browser); await reopenedPreviewMode(browser); await blockquotePressLayout(browser); await alertPressLayout(browser); await blockquoteEnterFirstFrame(browser); await matrix(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); await headingWeightPreference(browser); await largeDocumentStartupPreference(browser); } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
+async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { await startupModeVisibility(browser); await reopenedPreviewMode(browser); await blockquotePressLayout(browser); await alertPressLayout(browser); await blockquoteEnterFirstFrame(browser); await matrix(browser); await resolveMergeConflicts(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); await headingWeightPreference(browser); await largeDocumentStartupPreference(browser); } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
 main().finally(() => fs.rmSync(temp, { recursive: true, force: true })).catch((e) => { console.error(e instanceof Error ? e.stack : e); process.exitCode = 1; });

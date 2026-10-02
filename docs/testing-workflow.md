@@ -3,9 +3,24 @@
 This repository separates fast feedback from release confidence. The normal
 repair loop stays narrow; broad and endurance runs are intentional events.
 
+The user-facing inventory is in [testing-feature-coverage.md](testing-feature-coverage.md).
+Review its operation outcomes against the README, commands, settings and changes
+since the last release before selecting acceptance evidence. Gate membership is
+necessary, but a visible control or emitted message alone is not a successful
+operation. Report browser, Host-contract and final installed-VSIX evidence separately.
+
+`scripts/test-native-scroll-progress-production.ts` checks trusted wheel input in
+both directions, instantaneous scrolling and the browser's multi-frame native
+scroll animation, with independent visible-content witnesses. The headless wheel
+default does not animate, so this test switches only its platform scroll behavior
+to native `smooth` scrolling while retaining the trusted wheel event. It belongs
+to the quick, targeted viewport and release gates. Late-layout compensation remains
+covered by the viewport and virtual-block contracts. Full-document scroll traversal
+must reach both boundaries; a capped or stalled loop cannot report full traversal.
+
 | Tier | Use it when | Expected time | Command |
 | --- | --- | --- | --- |
-| Quick | A coherent implementation change is ready for a general regression check | About 30–60 seconds | `bun run test:quick` |
+| Quick | A coherent implementation change is ready for a general regression check | About 2–4 minutes | `bun run test:quick` |
 | Targeted | A change affects one high-risk area, or a quick check identifies that area | About 1–5 minutes | `bun run test:targeted -- <area>` |
 | Release | A milestone or release candidate needs the complete gate | About 12–25 minutes | `bun run test:release -- --confirm-long-run` |
 | Large document | A shorter production-like document stress pass is specifically needed | About 1–3 minutes | `bun run test:large-document -- <document> --confirm-long-run` |

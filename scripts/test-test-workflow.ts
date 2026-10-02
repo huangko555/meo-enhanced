@@ -263,7 +263,28 @@ function collectTransitiveTestScripts(
 }
 
 const fullDirectScripts = collectTransitiveTestScripts('test', packageScripts);
+const releaseDirectScripts = new Set<string>();
+for (const command of flattenTestWorkflowCommands(release)) {
+  if (command.args[0] === 'run') {
+    for (const script of collectTransitiveTestScripts(command.args[1]!, packageScripts)) {
+      releaseDirectScripts.add(script);
+    }
+  } else if (command.args[0]?.startsWith('scripts/')) {
+    releaseDirectScripts.add(command.args[0]);
+  }
+}
+for (const command of flattenTestWorkflowCommands(quick)) {
+  if (!command.args[0]?.startsWith('scripts/')) continue;
+  assert.ok(releaseDirectScripts.has(command.args[0]),
+    `release gate must include quick contract ${command.args[0]}`);
+}
 for (const contract of [
+  'scripts/test-native-scroll-progress-production.ts',
+  'scripts/test-table-clipboard.ts',
+  'scripts/test-table-clipboard-production.ts',
+  'scripts/test-export-table-of-contents.ts',
+  'scripts/test-linked-viewport-map.ts',
+  'scripts/test-html-enter-gutter-stability.ts',
   'scripts/test-vscode-document-copy-adapter.ts',
   'scripts/test-vscode-document-copy-feedback.ts',
   'scripts/test-document-copy-transport.ts',
@@ -305,6 +326,17 @@ const workflowGuide = readFileSync(
   resolve(repoRoot, 'docs/testing-workflow.md'),
   'utf8'
 );
+const featureCoverageGuide = readFileSync(resolve(repoRoot, 'docs/testing-feature-coverage.md'), 'utf8');
+const manifest = JSON.parse(readFileSync(resolve(repoRoot, 'package.json'), 'utf8'));
+for (const setting of Object.keys(manifest.contributes.configuration.properties)) {
+  assert.ok(featureCoverageGuide.includes(`\`${setting}\``), `Missing setting acceptance: ${setting}`);
+}
+for (const { command } of manifest.contributes.commands) {
+  assert.ok(featureCoverageGuide.includes(`\`${command}\``), `Missing command acceptance: ${command}`);
+}
+for (const link of featureCoverageGuide.matchAll(/\]\(\.\.\/(scripts\/test-[^)]+\.(?:ts|mjs))\)/g)) {
+  assert.ok(releaseDirectScripts.has(link[1]!), `Documented feature contract is absent from the release gate: ${link[1]}`);
+}
 for (const command of [
   'bun run test:quick',
   'bun run test:targeted',
