@@ -26,6 +26,7 @@ export type AppearanceWebviewAdapter = {
   }): void;
   setAppearance(appearance: EditorAppearance, options?: { readonly post?: boolean }): void;
   getAppearance(): 'light' | 'dark';
+  getPreference(): EditorAppearance;
   getCodePalette(appearance?: 'light' | 'dark'): FinalCodePalette;
   accept(message: HostToWebviewMessage): boolean;
 };
@@ -76,6 +77,7 @@ export function createAppearanceWebviewAdapter(
 
       if (post) dependencies.postEditorAppearance(appearancePreference);
     },
+    getPreference() { return appearancePreference; },
     getAppearance() {
       return appearance;
     },

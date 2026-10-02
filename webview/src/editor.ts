@@ -1,4 +1,13 @@
-import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type Annotation, type ChangeSpec, type EditorSelection, type Extension, type SelectionRange, type Text } from '@codemirror/state';
+import { currentHeadingSuggestions } from './editor/headingSuggestions';
+import { createInputSuggestions } from './editor/inputSuggestions';
+import type { LinkCandidate } from '../../src/protocol/editorServices';
+import { sourceTableAt, createSourceTableCommandTarget, tableShortcutCommands } from './editor/sourceTableCommands';
+import { parseMarkdownTable, serializeDelimitedTable } from './application/delimitedTable';
+import { executeMountedTableShortcut, mountedTableClipboardText } from './helpers/tables';
+import { formatMultipleSelections, runEditorCommand, secondarySelections } from './editor/commands';
+import type { EditorCommandId } from '../../src/foundation/editingPreferences';
+import { pasteAssistance, insertPlainClipboardText } from './editor/pasteAssistance';
+import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type Annotation, type ChangeSpec, EditorSelection, type Extension, type SelectionRange, type Text } from '@codemirror/state';
 import { EditorView, keymap, highlightActiveLine, lineNumbers, highlightActiveLineGutter, Decoration, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
@@ -14,6 +23,7 @@ import { assessLargeDocument } from '../../src/foundation/largeDocument';
 import { uiLanguageFacet } from './editor/uiLanguage';
 import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
 import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
+import { insertMountedTableCellBreak } from './helpers/tables';
 import { insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
 import { sourceStrikeMarkerField } from './helpers/strikeMarkers';
 import { sourceHighlightField } from './helpers/highlightSyntax';
@@ -150,6 +160,9 @@ import {
   type EditorInteractionContinuity
 } from './editor/interactionContinuity';
 import { markExternalDocumentPresentation } from './editor/externalDocumentPresentation';
+import { inputAssistanceFacet, typingAssistance } from './editor/typingAssistance';
+import { defaultInputAssistance, type InputAssistance } from '../../src/foundation/editingPreferences';
+import { inlineCodeMarkers } from './application/symbolInput';
 
 declare module '@codemirror/view' {
   interface EditorView {
@@ -213,6 +226,8 @@ type CreateEditorOptions = {
   initialGitGutter?: boolean;
   initialLongCodeBlockFolding?: boolean;
   initialTableStickyHeaderEnabled?: boolean;
+  initialInputAssistance?: InputAssistance;
+  requestLinkCandidates?: (input: { kind: 'documents' | 'paths' | 'headings'; query: string; target: string }) => Promise<readonly LinkCandidate[]>;
   initialDiagnostics?: readonly EditorDiagnostic[];
   mermaidDiagramPresentationFactory: MermaidDiagramPresentationFactory;
   previewViewportSurface?: PreviewViewportSurface;
@@ -360,6 +375,8 @@ export function createEditor({
   initialGitGutter = true,
   initialLongCodeBlockFolding = true,
   initialTableStickyHeaderEnabled = true,
+  initialInputAssistance = defaultInputAssistance,
+  requestLinkCandidates,
   initialDiagnostics = [],
   mermaidDiagramPresentationFactory,
   previewViewportSurface,
@@ -1189,6 +1206,11 @@ export function createEditor({
 
       const trimmedEnd = trimTrailingNewlines(value, start, end);
       if (toggle) {
+        const selectedText = value.slice(start, trimmedEnd);
+        if (selectedText.startsWith(openMarker) && selectedText.endsWith(closeMarker) && selectedText.length >= openMarker.length + closeMarker.length) {
+          const insert = selectedText.slice(openMarker.length, -closeMarker.length);
+          return updateActiveTableInput(input, value.slice(0, start) + insert + value.slice(trimmedEnd), start, start + insert.length);
+        }
         const hasOpenMarker =
           start >= openMarker.length && value.slice(start - openMarker.length, start) === openMarker;
         const hasCloseMarker = value.slice(trimmedEnd, trimmedEnd + closeMarker.length) === closeMarker;
@@ -1222,8 +1244,17 @@ export function createEditor({
 
   const insertFormatInActiveTableInput = (input: HTMLTextAreaElement, action: EditorFormatAction) => {
     switch (action) {
-      case 'inlineCode':
-        return wrapActiveTableInputSelection(input, '`', '`', { toggle: false, selectWrapped: false });
+      case 'inlineCode': {
+        const start = input.selectionStart, end = input.selectionEnd;
+        const selected = input.value.slice(start, end);
+        const full = /^(`+)([\s\S]*?)\1$/.exec(selected);
+        if (full && !full[2].startsWith('`') && !full[2].endsWith('`')) {
+          const content = full[2].startsWith(' ') && full[2].endsWith(' ') && /\S/.test(full[2]) ? full[2].slice(1, -1) : full[2];
+          return updateActiveTableInput(input, input.value.slice(0, start) + content + input.value.slice(end), start, start + content.length);
+        }
+        const markers = inlineCodeMarkers(selected);
+        return wrapActiveTableInputSelection(input, markers.open, markers.close);
+      }
       case 'kbd':
         return wrapActiveTableInputSelection(input, '<kbd>', '</kbd>');
       case 'underline':
@@ -2068,12 +2099,19 @@ export function createEditor({
     ? mermaidDiagramPresentationConsumer.acquire()
     : null;
   const historyCompartment = new Compartment();
+  const inputAssistanceCompartment = new Compartment();
   const state = EditorState.create({
     doc: text,
     selection: { anchor: initialCursorPos },
     extensions: [
       EditorState.tabSize.of(4),
       indentUnit.of('  '),
+      inputAssistanceCompartment.of(inputAssistanceFacet.of(initialInputAssistance)),
+      Prec.highest(typingAssistance),
+      Prec.highest(pasteAssistance),
+      Prec.highest(createInputSuggestions({ requestLinks: requestLinkCandidates, currentHeadings: () => currentHeadingSuggestions(view.state.doc.toString()) })),
+      EditorState.allowMultipleSelections.of(true),
+      secondarySelections,
       orderedListRenumberTransactionFilter(() => !applyingExternal && !editorDestroyed),
       keymap.of([
         { key: 'Tab', run: (view) => indentListByTwoSpaces(view) || indentMore(view) },
@@ -2087,16 +2125,18 @@ export function createEditor({
           key: 'Enter',
           run: (view) =>
             handleEnterContinueQuotedCodeBlock(view) ||
-            handleEnterOnEmptyListItem(view) ||
-            handleEnterAtListContentStart(view) ||
-            handleEnterContinueList(view) ||
-            handleEnterBeforeNestedList(view)
+            (view.state.facet(inputAssistanceFacet).lists && (
+              handleEnterOnEmptyListItem(view) ||
+              handleEnterAtListContentStart(view) ||
+              handleEnterContinueList(view) ||
+              handleEnterBeforeNestedList(view)))
         },
         { key: 'Shift-Enter', run: insertTableCellLineBreak },
         { key: 'Ctrl-Enter', run: insertTableCellLineBreak },
         { key: 'ArrowUp', run: (view) => tryEnterAdjacentTable(view, 'up') },
         { key: 'ArrowDown', run: (view) => tryEnterAdjacentTable(view, 'down') },
-        ...markdownKeymap,
+        ...markdownKeymap.map(binding => ({ ...binding, run: (view: EditorView) =>
+          binding.key === 'Enter' && !view.state.facet(inputAssistanceFacet).lists ? false : binding.run?.(view) ?? false })),
         ...defaultKeymap,
         ...editorHistoryKeymap
       ]),
@@ -2784,7 +2824,12 @@ export function createEditor({
     const owner = detail && typeof detail === 'object' && 'owner' in detail && detail.owner instanceof HTMLElement
       ? detail.owner
       : null;
-    setTableInteractionActive(active, owner);
+    if (active) setTableInteractionActive(true, owner);
+    else {
+      // Removing a table widget can emit this during CodeMirror's DOM update.
+      // Release its interaction after that update; an intervening new owner wins.
+      queueMicrotask(() => { if (!editorDestroyed) setTableInteractionActive(false, owner); });
+    }
   };
   view.dom.addEventListener('meo-table-interaction', onTableInteraction);
   onWidgetOpenLink = (event) => {
@@ -3528,6 +3573,44 @@ export function createEditor({
     setTableStickyHeaderEnabled(enabled: boolean) {
       tableStickyHeaderAdapterFactory.setEnabled(enabled);
     },
+    isTableFocused() { return !!getActiveTableInput() || isInsideTableCell(view.state, view.state.selection.main.head); },
+    getTableClipboardText(format: 'markdown' | 'csv'): string | null {
+      const mounted = mountedTableClipboardText(view, format); if (mounted !== null) return mounted;
+      let node: SyntaxNode | null = syntaxTree(view.state).resolveInner(view.state.selection.main.head, -1);
+      while (node && node.name !== 'Table') node = node.parent;
+      if (!node) return null;
+      const raw = view.state.sliceDoc(node.from, node.to);
+      const matrix = parseMarkdownTable(raw);
+      return !matrix ? null : format === 'csv' ? serializeDelimitedTable(matrix.cells, ',') : raw;
+    },
+    executeCommand(command: EditorCommandId): boolean {
+      if (executeMountedTableShortcut(view, command)) return true;
+      const sourceTable = sourceTableAt(view.state);
+      const tableCommand = tableShortcutCommands[command];
+      if (sourceTable && tableCommand) {
+        const registration = tableCommandTargetRegistry.register(createSourceTableCommandTarget(view, sourceTable, run => viewportController.preserveDocumentAnchorWhileMutation(run, true)));
+        void tableCommandRuntime.dispatch({ type: 'request', command: tableCommand, target: { tableId: registration.id, row: sourceTable.row, column: sourceTable.column, selection: null }, enabled: true }).finally(() => registration.dispose());
+        return true;
+      }
+      const formats: Partial<Record<EditorCommandId, EditorFormatAction>> = {
+        bold: 'bold', italic: 'italic', inlineCode: 'inlineCode', strike: 'strike', highlight: 'highlight',
+        underline: 'underline', kbd: 'kbd', link: 'link', wikiLink: 'wikiLink', image: 'image',
+        codeBlock: 'codeBlock', rule: 'hr', insertTable: 'table'
+      };
+      if (formats[command]) { this.insertFormat(formats[command]!); return true; }
+      const nativeInput = getActiveTableInput();
+      if (nativeInput) {
+        if (command === 'inlineMath') return wrapActiveTableInputSelection(nativeInput, '$');
+        // Other document commands cannot mutate the hidden primary selection while a cell owns focus.
+        if (command !== 'cellBreak') return false;
+      }
+      if (command === 'cellBreak') { if (getActiveTableInput()) return insertMountedTableCellBreak(view); return insertTableCellLineBreak(view); }
+      return runEditorCommand(view, command);
+    },
+    pastePlainText(text: string) { return insertPlainClipboardText(view, text); },
+    setInputAssistance(preferences: InputAssistance) {
+      view.dispatch({ effects: inputAssistanceCompartment.reconfigure(inputAssistanceFacet.of(preferences)) });
+    },
     setUiLanguage(language: UiLanguage) {
       view.dispatch({
         effects: uiLanguageCompartment.reconfigure(uiLanguageFacet.of(language))
@@ -3540,6 +3623,9 @@ export function createEditor({
         return insertFormatInActiveTableInput(activeTableInput, action);
       }
 
+      if (view.state.selection.ranges.length > 1 && formatMultipleSelections(view, action)) return;
+      const blockCommands: Partial<Record<EditorFormatAction, EditorCommandId>> = { bulletList: 'bullet', numberedList: 'ordered', task: 'taskList', quote: 'quote' };
+      if (action === 'heading' || blockCommands[action]) return runEditorCommand(view, action === 'heading' ? `heading${typeof level === 'number' ? level : 1}` as EditorCommandId : blockCommands[action]!);
       const userEvent = Transaction.userEvent.of('input.toolbar');
       const { state } = view;
       const selection = state.selection.main;
@@ -3556,9 +3642,6 @@ export function createEditor({
 
       let insert = '';
       switch (action) {
-        case 'heading':
-          insert = `${'#'.repeat(typeof level === 'number' ? level : 1)} `;
-          break;
         case 'bulletList':
           insert = '- ';
           break;
@@ -4169,15 +4252,26 @@ function insertInlineCode(
       to -= 1;
     }
     const selectedText = state.doc.sliceString(from, to);
-    const insert = `\`${selectedText}\``;
-    view.dispatch({
-      changes: { from, to, insert },
-      selection: { anchor: from + insert.length },
-      annotations: userEvent
-    });
-    return;
+    const fullSpan = /^(`+)([\s\S]*?)\1$/.exec(selectedText);
+    if (fullSpan && !fullSpan[2].startsWith('`') && !fullSpan[2].endsWith('`')) {
+      view.dispatch({ changes: { from, to, insert: fullSpan[2] },
+        selection: { anchor: from, head: from + fullSpan[2].length }, annotations: userEvent });
+      return;
+    }
+    const markers = inlineCodeMarkers(selectedText);
+    return toggleInlineWrapper(view, { from, to, anchor: selection.anchor, head: selection.head, empty: false }, markers.open, markers.close, userEvent);
   }
 
+  let node: SyntaxNode | null = syntaxTree(state).resolveInner(selection.from, -1);
+  while (node && node.name !== 'InlineCode') node = node.parent;
+  if (node && selection.from > node.from && selection.from < node.to) {
+    const source = state.doc.sliceString(node.from, node.to);
+    const marker = /^`+/.exec(source)![0];
+    const content = source.slice(marker.length, -marker.length);
+    view.dispatch({ changes: { from: node.from, to: node.to, insert: content },
+      selection: { anchor: Math.min(node.from + content.length, Math.max(node.from, selection.from - marker.length)) }, annotations: userEvent });
+    return;
+  }
   const insert = '``';
   view.dispatch({
     changes: { from: selection.from, insert },
@@ -4209,6 +4303,13 @@ function toggleInlineWrapper(
   let to = Math.max(selection.from, selection.to);
   while (to > from && state.doc.sliceString(to - 1, to) === '\n') {
     to -= 1;
+  }
+
+  const selectedText = state.sliceDoc(from, to);
+  if (selectedText.startsWith(openMarker) && selectedText.endsWith(closeMarker) && selectedText.length >= openMarker.length + closeMarker.length) {
+    const insert = selectedText.slice(openMarker.length, -closeMarker.length);
+    view.dispatch({ changes: { from, to, insert }, selection: { anchor: from, head: from + insert.length }, annotations: userEvent });
+    return;
   }
 
   const hasOpenMarker =

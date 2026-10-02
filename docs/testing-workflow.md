@@ -615,3 +615,16 @@ typing and undo/redo, cursor visibility and scroll stability. Add Mermaid/math,
 tables, themes, or export only when the change can affect them. Reserve the
 complete top-to-bottom document walkthrough for an explicitly scheduled
 release acceptance session.
+
+## Settings, typing assistance and shortcuts
+
+The quick and release gates include `test-editing-preferences.ts`,
+`test-editor-services.ts`, `test-input-assistance-production.ts`,
+`test-editing-features-production.ts` and `test-settings-window-production.ts`.
+The table/history packs exercise the new editing paths; the appearance pack
+includes the actual settings and toolbar menus. Browser tests use the production
+editor and full Webview bootstrap. They assert resulting documents, undo results,
+actual remapped gestures, persisted projections, focus and DOM disposal.
+CDP composition validates preedit/commit boundaries without proving a specific
+Windows IME. Clipboard events and the mocked VS Code clipboard validate payloads
+and ownership, without proving native Excel/OS permission or installed-VSIX behavior.

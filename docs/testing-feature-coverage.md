@@ -34,10 +34,22 @@
 | HTML / PDF / Word 导出与目录 | 导出内容、浅色外观、资源、高亮、公式、分页与目录正确；失败可重试 | [导出外观](../scripts/test-export-appearance.ts)、[含目录导出](../scripts/test-export-table-of-contents.ts)、[PDF 布局](../scripts/test-pdf-mermaid-layout.ts)、[Word 生成](../scripts/test-docx-export-runtime.ts)、[实际 PDF / Word 文件生成](../scripts/test-docx-export-browser.ts)；PDF 文件检查验证格式完整性，逐页视觉检查和原生保存对话框另验 |
 | 长文档 | 固定文档、明确采样类别与未覆盖目标；编辑和历史不跳；完整阅读确实到达两端 | 发布范围选用受保护的 endurance / large-document 入口，不能把采样编辑称为每个位置都已测试 |
 
+## 设置、输入辅助与快捷键
+
+| 功能 | 必须检查的结果 | 门禁证据与边界 |
+| --- | --- | --- |
+| 小菜单与完整设置 | 小菜单保持 288px 和原有主题/语言/字号控件；三个 Tab、连续章节、搜索、焦点返回、恢复默认范围正确；中英文和亮暗/窄屏可用 | [正式窗口](../scripts/test-settings-window-production.ts)、[工具栏菜单](../scripts/test-toolbar-menus-browser.ts) |
+| 包裹、补对、跳过、退格与列表续写 | 中英文符号、单/双反引号、正反选区、多选区、智能/始终/关闭；自动符号来源随撤销恢复、外部文档更新清除；正文与单元格一致；预编辑不改写、IME 自带整对不重复 | [输入辅助](../scripts/test-input-assistance-production.ts)、[编辑场景](../scripts/test-editing-features-production.ts)；CDP 输入法事件覆盖浏览器流程，原生中文输入法另验 |
+| 表格、URL、HTML 与纯文本粘贴 | 正文转换、代码原样、已有表格覆盖/扩展、Markdown 源码保留；CSV/TSV 引号/换行/管道、HTML 合并与换行；转换开关及撤销结果正确 | [编辑场景](../scripts/test-editing-features-production.ts)、[生产表格剪贴板](../scripts/test-table-clipboard-production.ts)、[服务合同](../scripts/test-editor-services.ts)；真实 Excel/系统剪贴板往返另验 |
+| 格式、结构、行/块、表格与多光标命令 | 命令实际改变正确选区；格式可取消；Source/Live 表格行列与对齐逐项验证及一次撤销；多选区、下一处匹配和光标添加有效 | [编辑场景](../scripts/test-editing-features-production.ts)、[基础功能矩阵](../scripts/test-basic-capability-production-matrix.ts)、[历史矩阵](../scripts/test-history-matrix.ts) |
+| 快捷键修改、清除与恢复默认 | 修改后新键执行操作、旧键不再响应；冲突必须明确替换；保留其他绑定；原生规则不可改；输入法和不同上下文不误执行；恢复仅影响快捷键 | [偏好合同](../scripts/test-editing-preferences.ts)、[快捷键路由](../scripts/test-editor-shortcuts.ts)、[正式窗口](../scripts/test-settings-window-production.ts)；操作系统/VS Code 优先处理的键需原生另验 |
+| 链接、斜杠和表情候选 | 只在合适上下文出现；Enter/Tab 明确插入，未选表情保持原文；失焦、选区变化、旧请求和销毁不插入；文档查找有界、同名歧义不指向错误文档 | [编辑场景](../scripts/test-editing-features-production.ts)、[服务合同](../scripts/test-editor-services.ts) |
+
 ## 公开设置
 
 | 设置 | 结果与证据 |
 | --- | --- |
+| `meoEnhanced.editing.preferences` | 输入偏好与快捷键跨面板合并、重载保持、保存失败不伪报成功、旧版本消息不覆盖新值；[偏好合同](../scripts/test-editing-preferences.ts)、[正式窗口](../scripts/test-settings-window-production.ts) |
 | `meoEnhanced.language` | 中英文与自动跟随改变实际标签，[语言切换](../scripts/test-live-ui-language-switch.ts) |
 | `meoEnhanced.appearance.editor`、`meoEnhanced.appearance.preview` | 独立亮暗外观和主题更新有效，[主题过渡](../scripts/test-vscode-theme-transition.ts) |
 | `meoEnhanced.preview.fontFamily`、`meoEnhanced.preview.sourceColoring`、`meoEnhanced.preview.showComments` | 字体生效、代码着色切换、注释显隐；[菜单](../scripts/test-toolbar-menus-browser.ts)、[预览着色](../scripts/test-preview-code-highlight-layout.ts)、[注释开关](../scripts/test-preview-comment-toggle-browser.ts) |

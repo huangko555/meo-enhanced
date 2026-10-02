@@ -119,14 +119,15 @@ async function main(): Promise<void> {
     }
 
     await page.click('[data-action="settings"]');
+    await page.click('.more-tools-settings-button');
     const chineseLabel = await page.$eval(
-      '[data-action="restoreReadingPosition"] .more-tools-option-label',
+      '[data-setting="restorePosition"] .settings-item-title',
       (element) => element.textContent
     );
     if (chineseLabel !== '恢复阅读位置') {
       throw new Error(`Unexpected Chinese reading-position label: ${chineseLabel}`);
     }
-    await page.click('[data-action="restoreReadingPosition"]');
+    await page.click('[data-setting="restorePosition"] [role="switch"]');
     const settingMessage = await page.evaluate(() => (
       (window as typeof window & { __hostMessages: Array<any> }).__hostMessages
         .filter((message) => message.type === 'setRestoreReadingPositionOnOpen')
@@ -137,9 +138,9 @@ async function main(): Promise<void> {
       enabled: false
     })) throw new Error(`Setting toggle posted the wrong message: ${JSON.stringify(settingMessage)}`);
 
-    await page.click('[data-ui-language="en"]');
+    await page.click('[data-setting="language"] [data-value="en"]');
     const englishLabel = await page.$eval(
-      '[data-action="restoreReadingPosition"] .more-tools-option-label',
+      '[data-setting="restorePosition"] .settings-item-title',
       (element) => element.textContent
     );
     if (englishLabel !== 'Resume from last position') {
@@ -149,10 +150,10 @@ async function main(): Promise<void> {
       type: 'restoreReadingPositionOnOpenChanged', enabled: true
     }})));
     const restoredSetting = await page.$eval(
-      '[data-action="restoreReadingPosition"]',
-      (button) => [button.classList.contains('is-active'), button.getAttribute('aria-checked')]
+      '[data-setting="restorePosition"] [role="switch"]',
+      (button) => [button.getAttribute('aria-checked')]
     );
-    if (JSON.stringify(restoredSetting) !== JSON.stringify([true, 'true'])) {
+    if (JSON.stringify(restoredSetting) !== JSON.stringify(['true'])) {
       throw new Error(`Host setting update was not reflected: ${JSON.stringify(restoredSetting)}`);
     }
   } finally {

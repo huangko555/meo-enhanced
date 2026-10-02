@@ -1,3 +1,4 @@
+import { decodeEditorServiceRequest, decodeEditorServiceResponse, type EditorServiceRequest, type EditorServiceResponse } from './editorServices';
 import { decodeSaveDocumentCopyRequest, decodeDocumentCopyResponse, type SaveDocumentCopyRequest, type DocumentCopyResponse } from './documentCopy';
 import { decodeSaveImageFromClipboardRequest, decodeSavedImagePathResponse, type SaveImageFromClipboardRequest, type SavedImagePathResponse } from './clipboardImageSave';
 import { decodeDiagnosticsChangedEvent, type DiagnosticsChangedEvent } from './diagnostics';
@@ -5,6 +6,7 @@ import { decodeDocumentSyncCommand, decodeDocumentSyncMessage, type DocumentSync
 import { decodeDocumentRevisionRequest, decodeDocumentRevisionResponse, decodeSaveDocumentRevisionRequest, decodeSaveDocumentRevisionResponse, type DocumentRevisionRequest, type DocumentRevisionResponse, type SaveDocumentRevisionRequest, type SaveDocumentRevisionResponse } from './documentSession';
 import { decodeFlushDocumentEditsRequest, decodeFlushDocumentEditsResponse, type FlushDocumentEditsRequest, type FlushDocumentEditsResponse } from './documentSaveFlush';
 import { decodeEditorCommand, type EditorCommand } from './editorCommands';
+import { decodeUpdateEditingPreferencesRequest, decodeUpdatedEditingPreferencesResponse, decodeEditingPreferencesChangedEvent, type UpdateEditingPreferencesRequest, type UpdatedEditingPreferencesResponse, type EditingPreferencesChangedEvent } from './editingPreferences';
 import { decodeExportSnapshotRequest, decodeExportSnapshotResponse, type ExportSnapshotRequest, type ExportSnapshotResponse } from './exportSnapshot';
 import { decodeGitBaselineChangedEvent, type GitBaselineChangedEvent } from './git';
 import { decodeHostConfigurationEvent, type HostConfigurationEvent } from './hostConfigurationEvents';
@@ -17,12 +19,14 @@ import { decodeResolveWikiLinksRequest, decodeResolvedWikiLinksResponse, type Re
 import { decodeReadingPositionChangedMessage, type ReadingPositionChangedMessage } from './readingPosition';
 
 export type WebviewToHostMessage =
+  | EditorServiceRequest
   | ReadyMessage
   | DocumentSyncCommand
   | SaveDocumentRevisionRequest
   | DocumentRevisionRequest
   | FlushDocumentEditsResponse
   | EditorCommand
+  | UpdateEditingPreferencesRequest
   | ReadingPositionChangedMessage
   | ResolveImageSrcRequest
   | ResolveWikiLinksRequest
@@ -33,6 +37,7 @@ export type WebviewToHostMessage =
   | ExportSnapshotResponse;
 
 export type HostToWebviewMessage =
+  | EditorServiceResponse
   | InitMessage
   | DocumentSyncMessage
   | SaveDocumentRevisionResponse
@@ -40,6 +45,8 @@ export type HostToWebviewMessage =
   | FlushDocumentEditsRequest
   | HostEditorEvent
   | HostConfigurationEvent
+  | UpdatedEditingPreferencesResponse
+  | EditingPreferencesChangedEvent
   | DiagnosticsChangedEvent
   | ResolvedImageSrcResponse
   | ResolvedWikiLinksResponse
@@ -51,12 +58,14 @@ export type HostToWebviewMessage =
   | GitBaselineChangedEvent;
 
 export function decodeWebviewToHostMessage(value: unknown): WebviewToHostMessage | null {
-  return decodeReadyMessage(value)
+  return decodeEditorServiceRequest(value)
+    ?? decodeReadyMessage(value)
     ?? decodeDocumentSyncCommand(value)
     ?? decodeSaveDocumentRevisionRequest(value)
     ?? decodeDocumentRevisionRequest(value)
     ?? decodeFlushDocumentEditsResponse(value)
     ?? decodeEditorCommand(value)
+    ?? decodeUpdateEditingPreferencesRequest(value)
     ?? decodeReadingPositionChangedMessage(value)
     ?? decodeResolveImageSrcRequest(value)
     ?? decodeResolveWikiLinksRequest(value)
@@ -68,13 +77,16 @@ export function decodeWebviewToHostMessage(value: unknown): WebviewToHostMessage
 }
 
 export function decodeHostToWebviewMessage(value: unknown): HostToWebviewMessage | null {
-  return decodeInitMessage(value)
+  return decodeEditorServiceResponse(value)
+    ?? decodeInitMessage(value)
     ?? decodeDocumentSyncMessage(value)
     ?? decodeSaveDocumentRevisionResponse(value)
     ?? decodeDocumentRevisionResponse(value)
     ?? decodeFlushDocumentEditsRequest(value)
     ?? decodeHostEditorEvent(value)
     ?? decodeHostConfigurationEvent(value)
+    ?? decodeUpdatedEditingPreferencesResponse(value)
+    ?? decodeEditingPreferencesChangedEvent(value)
     ?? decodeDiagnosticsChangedEvent(value)
     ?? decodeResolvedImageSrcResponse(value)
     ?? decodeResolvedWikiLinksResponse(value)

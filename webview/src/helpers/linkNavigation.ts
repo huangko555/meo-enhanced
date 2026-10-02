@@ -1,3 +1,4 @@
+import { currentMarkdownHeadings } from '../editor/headingSuggestions';
 import type { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import type { SyntaxNode, SyntaxNodeRef } from '@lezer/common';
@@ -67,6 +68,9 @@ export function findDocumentFragmentPosition(state: EditorState, rawHref: string
   });
   if (htmlTargetPosition !== null) return htmlTargetPosition;
 
+  // Canonical Preview anchors take precedence; older Live aliases remain a fallback.
+  const canonical = currentMarkdownHeadings(state.doc.toString()).find(heading => heading.anchor === decodedFragment.toLowerCase());
+  if (canonical) return state.doc.line(canonical.line).from;
   const decodedTarget = decodedFragment.toLowerCase();
   const normalizedTarget = headingSlug(decodedTarget);
   const occupiedSlugs = new Set<string>();

@@ -16,6 +16,7 @@ import {
   type EditorFontSizeMode
 } from '../foundation/editorFontSize';
 import { decodeReadingPosition, type ReadingPositionDto } from './readingPosition';
+import { defaultInputAssistance, isEditingPreferences, type EditingPreferences } from '../foundation/editingPreferences';
 
 export type EditorMode = 'live' | 'source' | 'preview';
 export type PreviewAppearance = 'auto' | 'dark' | 'light';
@@ -42,6 +43,8 @@ export type InitMessage = {
   readonly uiLanguagePreference: UiLanguagePreference;
   readonly automaticUiLanguage: UiLanguage;
   readonly sourceLineNumbers: SourceLineNumberMode;
+  readonly editingPreferences: EditingPreferences;
+  readonly editingPreferencesRevision?: number;
   readonly previewAppearance: PreviewAppearance;
   readonly previewFontFamily: string;
   readonly previewSourceColoring: boolean;
@@ -174,6 +177,8 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
       && value.fixedBaselineUpdatedAt !== null
       && (typeof value.fixedBaselineUpdatedAt !== 'number' || !Number.isFinite(value.fixedBaselineUpdatedAt)))
     || typeof value.contentMaxWidthEnabled !== 'boolean'
+    || (value.editingPreferencesRevision !== undefined && (!Number.isSafeInteger(value.editingPreferencesRevision) || Number(value.editingPreferencesRevision) < 0))
+    || (value.editingPreferences !== undefined && !isEditingPreferences(value.editingPreferences))
     || largeDocumentOptimizationEnabled === null
     || tableStickyHeaderEnabled === null
     || boldHeadingsEnabled === null
@@ -196,6 +201,8 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
   return {
     ...value,
     uiLanguagePreference: value.uiLanguagePreference ?? 'auto',
+    editingPreferencesRevision: value.editingPreferencesRevision === undefined ? 0 : Number(value.editingPreferencesRevision),
+    editingPreferences: value.editingPreferences ?? { input: { ...defaultInputAssistance }, shortcuts: {} },
     automaticUiLanguage: value.automaticUiLanguage ?? value.uiLanguage,
     previewFontFamily,
     previewShowComments: value.previewShowComments ?? false,

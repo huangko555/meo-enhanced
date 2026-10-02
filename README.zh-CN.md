@@ -101,6 +101,10 @@ Mermaid 图表和块级 LaTeX 公式提供 **Source、Split、Preview** 三种�
 - `==高亮==`、键盘按键、颜色值预览和行内样式。
 - 合并冲突块的可视化操作。
 
+### 设置与输入辅助
+
+从设置菜单打开 **更多设置**，调整输入辅助和快捷键。符号输入、表格粘贴及快捷键冲突规则见 [设置与剪贴板说明](docs/editing-preferences.md)。
+
 ## 安装
 
 从 [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=huangko555.meo-enhanced) 安装 **MEO Enhanced - Markdown 编辑器**，或在终端中执行：

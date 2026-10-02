@@ -81,6 +81,8 @@ function targetedCommands(
   switch (area) {
     case 'history':
       return [
+        script('scripts/test-input-assistance-production.ts'),
+        script('scripts/test-editing-features-production.ts'),
         script('scripts/test-editor-shortcuts.ts'),
         script('scripts/test-editor-history-runtime.ts'),
         script('scripts/test-editor-history-production-cutover.ts'),
@@ -92,6 +94,9 @@ function targetedCommands(
       ];
     case 'table':
       return [
+        script('scripts/test-editing-features-production.ts'),
+        script('scripts/test-table-clipboard.ts'),
+        script('scripts/test-table-clipboard-production.ts'),
         script('scripts/test-table-cell-editing.ts'),
         script('scripts/test-table-column-width-policy.ts'),
         script('scripts/test-table-column-width-lifecycle.ts'),
@@ -116,6 +121,8 @@ function targetedCommands(
       ];
     case 'appearance':
       return [
+        script('scripts/test-settings-window-production.ts'),
+        script('scripts/test-toolbar-menus-browser.ts'),
         script('scripts/test-appearance-webview-adapter.ts'),
         script('scripts/test-appearance-settings.ts'),
         script('scripts/test-vscode-theme-transition.ts'),
@@ -227,6 +234,11 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
         stages: [serialStage('Quick regression contracts', [
           packageScript('typecheck'),
           script('scripts/test-editor-shortcuts.ts'),
+          script('scripts/test-editing-preferences.ts'),
+          script('scripts/test-editor-services.ts'),
+          script('scripts/test-input-assistance-production.ts'),
+          script('scripts/test-editing-features-production.ts'),
+          script('scripts/test-settings-window-production.ts'),
           packageScript('test:reading-position'),
           script('scripts/test-test-workflow.ts'),
           script('scripts/test-document-auto-save-concurrency.ts'),

@@ -20,7 +20,7 @@ import {
 } from './previewCodeHighlight';
 import { activateShikiCodeHighlighting, subscribeShikiRefresh } from './shikiHighlighter';
 import { createToolbarDropdown } from './toolbarDropdown';
-import { createSegmentedControl } from './segmentedControl';
+import { createSegmentedControl } from '../adapters/segmentedControl';
 import { resolveEmbeddedImageSrc } from './images';
 import {
   createPreviewTableLayoutController,

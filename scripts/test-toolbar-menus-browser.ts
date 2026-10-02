@@ -133,7 +133,7 @@ try {
   assert.deepEqual(modeWidthsByLanguage, [170, 170, 170]);
   for (const action of [
     'sourceLineNumbers', 'longCodeBlockFolding', 'contentMaxWidth', 'liveStrongColoring',
-    'tableStickyHeader', 'restoreReadingPosition', 'largeDocumentOptimization'
+    'boldHeadings', 'tableStickyHeader'
   ]) {
     const selector = `.more-tools-panel [data-action="${action}"]`;
     if (await page.$eval(selector, button => (button as HTMLButtonElement).disabled)) continue;

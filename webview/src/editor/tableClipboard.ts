@@ -1,3 +1,5 @@
+import { clipboardHtmlToMarkdown } from './htmlPaste';
+import { parseDelimitedTable } from '../application/delimitedTable';
 export const meoTableClipboardMime = 'application/x-meo-table-cells+json';
 
 export interface TableClipboardMatrix {
@@ -28,7 +30,7 @@ function normalizeMatrix(value: unknown): string[][] | null {
     width = Math.max(width, row.length);
     rows.push(row);
   }
-  if (width === 0) return null;
+  if (width === 0 || rows.length * width > maxClipboardCells) return null;
   return rows.map((row) => [...row, ...new Array(width - row.length).fill('')]);
 }
 
@@ -53,52 +55,50 @@ export function parseMeoTableClipboard(value: string): TableClipboardMatrix | nu
 /** Parses the tab-delimited clipboard shape produced by spreadsheet applications. */
 export function parseTsvTableClipboard(value: string): TableClipboardMatrix | null {
   if (!value.includes('\t') || value.length > maxClipboardCharacters) return null;
-  const rows: string[][] = [[]];
-  let cell = '';
-  let quoted = false;
-  for (let index = 0; index < value.length; index += 1) {
-    const character = value[index];
-    if (quoted) {
-      if (character === '"' && value[index + 1] === '"') {
-        cell += '"';
-        index += 1;
-      } else if (character === '"') {
-        quoted = false;
-      } else {
-        cell += character;
-      }
-      continue;
-    }
-    if (character === '"' && cell.length === 0) {
-      quoted = true;
-    } else if (character === '\t') {
-      rows[rows.length - 1].push(cell);
-      cell = '';
-    } else if (character === '\n' || character === '\r') {
-      if (character === '\r' && value[index + 1] === '\n') index += 1;
-      rows[rows.length - 1].push(cell);
-      rows.push([]);
-      cell = '';
-    } else {
-      cell += character;
-    }
-  }
-  rows[rows.length - 1].push(cell);
-  if (rows.length > 1 && rows[rows.length - 1].length === 1 && rows[rows.length - 1][0] === '') rows.pop();
-  const cells = normalizeMatrix(rows);
+  const cells = parseDelimitedTable(value, '\t');
   return cells ? { cells, source: 'external' } : null;
 }
 
-export function parseHtmlTableClipboard(value: string): TableClipboardMatrix | null {
+export function parseHtmlTableClipboard(value: string, preserveFormatting = false): TableClipboardMatrix | null {
   if (!value || value.length > maxClipboardCharacters || typeof DOMParser === 'undefined') return null;
   const document = new DOMParser().parseFromString(value, 'text/html');
   const table = document.querySelector('table');
   if (!table) return null;
-  const rows = Array.from(table.querySelectorAll('tr'), (row) => (
-    Array.from(row.children)
-      .filter((cell) => cell.tagName === 'TD' || cell.tagName === 'TH')
-      .map((cell) => cell.textContent ?? '')
-  )).filter((row) => row.length > 0);
-  const cells = normalizeMatrix(rows);
-  return cells ? { cells, source: 'external' } : null;
+  const sourceRows = Array.from(table.querySelectorAll('tr')).filter(row => row.closest('table') === table);
+  if (sourceRows.length > maxClipboardCells) return null;
+  const rows: string[][] = [];
+  const occupied = new Set<string>();
+  const text = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
+    if (!(node instanceof Element)) return '';
+    if (['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(node.tagName)) return '';
+    if (node.tagName === 'BR') return '\n';
+    const content = Array.from(node.childNodes, text).join('');
+    return ['P', 'DIV'].includes(node.tagName) ? content + '\n' : content;
+  };
+  for (let rowIndex = 0; rowIndex < sourceRows.length; rowIndex++) {
+    const row = rows[rowIndex] ??= [];
+    let column = 0;
+    for (const cell of Array.from(sourceRows[rowIndex].children).filter(cell => cell.tagName === 'TD' || cell.tagName === 'TH')) {
+      while (occupied.has(rowIndex + ':' + column)) column++;
+      const colspan = Math.max(1, Number(cell.getAttribute('colspan') ?? 1));
+      const rawRowspan = Number(cell.getAttribute('rowspan') ?? 1);
+      const rowspan = rawRowspan === 0 ? sourceRows.length - rowIndex : Math.max(1, rawRowspan);
+      if (!Number.isInteger(colspan) || !Number.isInteger(rowspan) || colspan * rowspan > maxClipboardCells || column + colspan > maxClipboardCells || rowIndex + rowspan > maxClipboardCells) return null;
+      for (let r = rowIndex; r < rowIndex + rowspan; r++) {
+        const target = rows[r] ??= [];
+        for (let c = column; c < column + colspan; c++) {
+          const key = r + ':' + c;
+          if (occupied.has(key)) return null;
+          occupied.add(key); if (occupied.size > maxClipboardCells) return null;
+          target[c] = r === rowIndex && c === column ? preserveFormatting
+            ? (clipboardHtmlToMarkdown(cell.innerHTML) ?? '').replace(/<br>\n/g, '<br>')
+            : Array.from(cell.childNodes, text).join('').replace(/\n$/, '') : '';
+        }
+      }
+      column += colspan;
+    }
+  }
+  const cells = normalizeMatrix(rows.map(row => Array.from({ length: row.length }, (_, index) => row[index] ?? '')));
+  return cells ? { cells, source: preserveFormatting ? 'meo' : 'external' } : null;
 }

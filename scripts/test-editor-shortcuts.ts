@@ -138,6 +138,8 @@ for (const testCase of cases) {
     },
     editableMode: testCase.editableMode ?? 'source',
     editorSurfaceActive: testCase.editorSurfaceActive ?? true,
+    shortcuts: {},
+    platform: 'other' as const,
     requestSave: () => effects.push('save'),
     openFindPanel: (target: 'find' | 'replace') => effects.push(`find:${target}`),
     requestMode: (mode: 'live' | 'source') => effects.push(`mode:${mode}`)

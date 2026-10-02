@@ -354,3 +354,7 @@ assert.ok(contributingGuide.includes('docs/testing-workflow.md'));
 assert.ok(contributingGuide.includes('bun run test:release -- --confirm-long-run'));
 
 console.log('Test workflow policy contract passed');
+
+for (const contract of ['test-editing-preferences.ts', 'test-editor-services.ts', 'test-input-assistance-production.ts', 'test-editing-features-production.ts', 'test-settings-window-production.ts']) {
+  assert.ok(quickCommands.some(command => command.args.includes('scripts/' + contract)), contract + ' is a quick contract');
+}

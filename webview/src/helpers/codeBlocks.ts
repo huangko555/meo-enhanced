@@ -523,29 +523,27 @@ export function insertCodeBlock(
   userEvent?: Annotation<string>
 ): void {
   const { state } = view;
-  const line = state.doc.lineAt(selection.from);
-  const lineText = state.doc.sliceString(line.from, line.to);
-  const leadingWhitespace = /^(\s*)/.exec(lineText)![1];
-
-  if (!selection.empty) {
-    const selectedText = state.doc.sliceString(selection.from, selection.to);
-    const insert = `\n${leadingWhitespace}\`\`\`\n${selectedText}\n${leadingWhitespace}\`\`\`\n`;
-    view.dispatch({
-      changes: { from: selection.from, to: selection.to, insert },
-      selection: { anchor: selection.from + leadingWhitespace.length + 4 },
-      annotations: userEvent
-    });
-    return;
+  let node = currentSyntaxTree(state).resolveInner(selection.from, 1);
+  while (node.parent && node.name !== 'FencedCode') node = node.parent;
+  if (node.name === 'FencedCode' && node.from <= selection.from && node.to >= selection.to) {
+    const first = state.doc.lineAt(node.from), last = state.doc.lineAt(node.to);
+    if (/^[ \t]*(?:> ?)*(`{3,}|~{3,})/.test(first.text) && /^[ \t]*(?:> ?)*(`{3,}|~{3,})[ \t]*$/.test(last.text) && last.number > first.number) {
+      const content = state.sliceDoc(first.to + 1, Math.max(first.to + 1, last.from - 1));
+      view.dispatch({ changes: { from: first.from, to: last.to, insert: content }, selection: { anchor: first.from, head: first.from + content.length }, annotations: userEvent });
+      return;
+    }
   }
-
-  const contentWithoutLeadingWhitespace = lineText.slice(leadingWhitespace.length);
-  const insert = `${leadingWhitespace}\`\`\`\n${contentWithoutLeadingWhitespace}\n${leadingWhitespace}\`\`\`\n`;
-  const cursorPos = line.from + leadingWhitespace.length + 4;
-  view.dispatch({
-    changes: { from: line.from, to: line.to, insert },
-    selection: { anchor: cursorPos },
-    annotations: userEvent
-  });
+  const line = state.doc.lineAt(selection.from);
+  const prefix = /^[ \t]*/.exec(line.text)![0];
+  const from = selection.empty ? line.from : selection.from;
+  const to = selection.empty ? line.to : selection.to;
+  const content = selection.empty ? line.text.slice(prefix.length) : state.sliceDoc(from, to);
+  let fenceLength = 3; for (const match of content.matchAll(/`+/g)) fenceLength = Math.max(fenceLength, match[0].length + 1);
+  const fence = '`'.repeat(fenceLength);
+  const before = from > line.from ? '\n' : '';
+  const after = to < state.doc.lineAt(to).to ? '\n' : '';
+  const insert = `${before}${prefix}${fence}\n${content}\n${prefix}${fence}${after}`;
+  view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + before.length + prefix.length + fence.length + 1 }, annotations: userEvent });
 }
 
 const sourceCodeBlockLine = Decoration.line({ class: 'meo-src-code-block' });

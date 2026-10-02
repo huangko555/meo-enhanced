@@ -1,3 +1,7 @@
+import { wireNativeSymbolInput, nativeSymbolInput } from '../editor/nativeTypingAssistance';
+import { automaticSymbolPairs, symbolOriginEpoch, replaceAutomaticSymbolPairArea, inputAssistanceFacet, type AutomaticSymbolPair } from '../editor/typingAssistance';
+import { markdownTableFromCells, serializeDelimitedTable, parseMarkdownTable, externalTableCellToMarkdown } from '../application/delimitedTable';
+import { defaultInputAssistance, type EditorCommandId } from '../../../src/foundation/editingPreferences';
 import { EditorState, RangeSet, RangeValue, StateEffect, StateField, type Annotation, type Range, type SelectionRange as CodeMirrorSelectionRange, type Transaction } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
@@ -719,13 +723,6 @@ function isTableControlTarget(target: EventTarget | null): boolean {
   return Boolean(target instanceof Element && target.closest(tableControlSelector));
 }
 
-function externalClipboardCellToSource(value: string): string {
-  return value
-    .replaceAll('\r\n', '\n')
-    .replaceAll('\r', '\n')
-    .replaceAll('|', '\\|')
-    .replaceAll('\n', '<br>');
-}
 
 function isSelectionMenuTarget(target: EventTarget | null): boolean {
   return Boolean(target instanceof Element && target.closest('.selection-inline-menu'));
@@ -2534,6 +2531,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   cellSelection: TableCellSelection;
   cellInteraction: TableCellInteraction;
   pendingCellAutoCommitTimer: number | null;
+  readonly cellSymbolSnapshots = new Map<number, readonly AutomaticSymbolPair[]>();
   composingInput: HTMLTextAreaElement | null = null;
   pendingCellSwitchCommit: boolean;
   activeTarget: TableActionTarget;
@@ -3458,8 +3456,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const clipboard = event.clipboardData;
     if (!clipboard) return null;
     return parseMeoTableClipboard(clipboard.getData(meoTableClipboardMime))
-      ?? parseHtmlTableClipboard(clipboard.getData('text/html'))
-      ?? parseTsvTableClipboard(clipboard.getData('text/plain'));
+      ?? parseHtmlTableClipboard(clipboard.getData('text/html'), this.view?.state.facet(inputAssistanceFacet).pasteHtml ?? true)
+      ?? parseTsvTableClipboard(clipboard.getData('text/plain')) ?? (() => { const table = parseMarkdownTable(clipboard.getData('text/plain')); return table ? { cells: table.cells, source: 'meo' as const } : null; })();
   }
 
   buildPasteCellsTransaction(
@@ -3483,7 +3481,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     }
     const sourceValue = (value: string) => payload.source === 'meo'
       ? value
-      : externalClipboardCellToSource(value);
+      : externalTableCellToMarkdown(value);
     for (let rowOffset = 0; rowOffset < payload.cells.length; rowOffset += 1) {
       const destinationRow = target.row + rowOffset;
       const destination = destinationRow === 0
@@ -3773,6 +3771,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       if (!target) return;
       event.preventDefault();
       event.stopPropagation();
+      const height = Math.max(this.tableData.rows.length + 1, target.row + payload.cells.length);
+      const width = Math.max(this.tableData.colCount, target.col + payload.cells[0].length);
+      if (height * width > 10_000) return;
       this.applyTablePaste(payload, target);
     };
 
@@ -4000,9 +4001,19 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
             const tableStartLine = this.resolveCurrentTableStartLine(view, edit.row, currentRange);
             if (tableStartLine === null) return null;
             const change = this.pendingCellSourceChange(state, edit, tableStartLine);
-            return change
-              ? state.update({ changes: change, annotations: isolateHistory.of('full') })
-              : null;
+            if (!change) return null;
+            const next = state.update({ changes: change }).state;
+            const line = next.doc.line(tableStartLine + (edit.row === 0 ? 0 : edit.row + 1));
+            const segment = parseTableRowCells(line.text, line.from).segments[edit.col];
+            const origins = this.cellSymbolSnapshots.get(edit.sequence) ?? [];
+            this.cellSymbolSnapshots.delete(edit.sequence);
+            const source = tableCellEditorValueToSource(edit.value);
+            const sourcePadding = source.length - source.trimStart().length;
+            const content = segment ? next.doc.sliceString(segment.from, segment.to) : '';
+            const start = segment ? segment.from + content.length - content.trimStart().length : 0;
+            const pairs = origins.map(pair => ({ ...pair, from: start + tableCellEditorOffsetToSourceOffset(edit.value, pair.from) - sourcePadding, to: start + tableCellEditorOffsetToSourceOffset(edit.value, pair.to) - sourcePadding }))
+              .filter(pair => !!segment && pair.from >= segment.from && pair.to <= segment.to);
+            return state.update({ changes: change, effects: segment ? replaceAutomaticSymbolPairArea(segment.from, segment.to, pairs) : [], annotations: isolateHistory.of('full') });
           }
         }))
       };
@@ -4150,12 +4161,11 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   recordPendingCellEdit(row: number, col: number, value: string) {
-    return this.cellInteraction.accept({
-      type: 'input',
-      target: { row, col },
-      value,
-      sequence: ++nextTableCellEditSequence
-    }).scheduleAutoCommit?.generation ?? null;
+    const sequence = ++nextTableCellEditSequence;
+    const input = this.domRefs?.allRowInputs?.[row]?.[col];
+    if (input) this.cellSymbolSnapshots.set(sequence, nativeSymbolInput(input)?.snapshot() ?? []);
+    if (this.cellSymbolSnapshots.size > 512) this.cellSymbolSnapshots.delete(this.cellSymbolSnapshots.keys().next().value!);
+    return this.cellInteraction.accept({ type: 'input', target: { row, col }, value, sequence }).scheduleAutoCommit?.generation ?? null;
   }
 
   cancelPendingCellAutoCommit() {
@@ -4923,10 +4933,22 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   wireInput(input: HTMLTextAreaElement, rowEl: HTMLTableRowElement, rowInputs: HTMLTextAreaElement[], container: HTMLElement, rowIndex: number, colIndex: number, preview: HTMLElement) {
+    wireNativeSymbolInput(input, {
+      originEpoch: () => this.view ? symbolOriginEpoch(this.view.state) : -1,
+      preferences: () => this.view?.state.facet(inputAssistanceFacet) ?? defaultInputAssistance,
+      readOrigins: () => {
+        const view = this.view, range = this.cellSourceRange(rowIndex, colIndex);
+        if (!view || !range) return [];
+        return automaticSymbolPairs(view.state, range.from, range.to).map(pair => ({ ...pair,
+          from: tableCellSourceOffsetToEditorOffset(input.value, pair.from - range.from),
+          to: tableCellSourceOffsetToEditorOffset(input.value, pair.to - range.from) }));
+      }
+    });
     let compositionEndedAt = Number.NEGATIVE_INFINITY;
     let scrollTopBeforeInput: number | null = null;
     let revealCaretAfterInput = false;
     const refreshPreview = () => {
+      if (this.destroyed || !this.view) return;
       this.renderCellPreview(
         preview,
         tableCellEditorValueToSource(input.value),
@@ -5057,7 +5079,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         // synthetic input event, so the browser does not provide beforeinput.
         // Capture the same viewport intent as native typing before row growth.
         captureInputViewportIntent();
-        if (!continueTableCellList(input)) replaceTableCellEditorSelection(input, '<br>\n');
+        if (!this.view?.state.facet(inputAssistanceFacet).lists || !continueTableCellList(input)) replaceTableCellEditorSelection(input, '<br>\n');
         return;
       }
       if (keyboard?.type === 'commit-and-exit') {
@@ -5148,6 +5170,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       notifySelectionChange();
     });
     input.addEventListener('blur', (event) => {
+      if (this.destroyed || !this.view) return;
       refreshPreview();
       this.setCellEditingState(input, false);
       notifySelectionChange();
@@ -6135,6 +6158,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       return;
     }
     tableDomOwners.delete(dom);
+    this.destroyed = true;
     const selectionDisposal = this.cellSelection.accept({ type: 'dispose' });
     this.applyCellSelectionTransition(selectionDisposal);
     disposeImagePresentations(dom);
@@ -6477,4 +6501,41 @@ export function insertTable(
     selection: { anchor: line.from + leadingWhitespace.length + 2 },
     annotations: userEvent
   });
+}
+
+/** Reuses the mounted table's command target, pending-cell commit and selection owner. */
+export function executeMountedTableShortcut(view: EditorView, command: EditorCommandId): boolean {
+  const active = view.dom.ownerDocument.activeElement;
+  const shell = active instanceof Element ? active.closest<HTMLElement>('.meo-md-html-table-shell') : null;
+  const owner = shell ? tableDomOwners.get(shell) : null;
+  if (!owner || !shell) return false;
+  const commands: Partial<Record<EditorCommandId, TableCommand>> = {
+    rowAbove: 'insert-row-above', rowBelow: 'insert-row-below', rowDelete: 'delete-row',
+    columnBefore: 'insert-column-left', columnAfter: 'insert-column-right', columnDelete: 'delete-column',
+    moveRowUp: 'move-row-up', moveRowDown: 'move-row-down', moveColumnLeft: 'move-column-left', moveColumnRight: 'move-column-right',
+    alignLeft: 'align-left', alignCenter: 'align-center', alignRight: 'align-right'
+  };
+  const mapped = commands[command]; if (!mapped) return false;
+  owner.updateContextMenuState();
+  const control = shell.querySelector<HTMLButtonElement>(`[data-command='${mapped}']`);
+  void owner.requestTableCommand(mapped, !!control && !control.disabled);
+  return true;
+}
+export function mountedTableClipboardText(view: EditorView, format: 'markdown' | 'csv'): string | null {
+  const active = view.dom.ownerDocument.activeElement;
+  const shell = active instanceof Element ? active.closest<HTMLElement>('.meo-md-html-table-shell') : null;
+  const owner = shell ? tableDomOwners.get(shell) : null;
+  if (!owner?.domRefs) return null;
+  const selection = owner.cellSelection.snapshot().range;
+  const cells = owner.domRefs.allRowInputs.map((row, rowIndex) => row.map((_input, columnIndex) => owner.tableCellCopyValue(rowIndex, columnIndex).plain));
+  const selected = selection ? cells.slice(selection.fromRow, selection.toRow + 1).map(row => row.slice(selection.fromCol, selection.toCol + 1)) : cells;
+  return format === 'csv' ? serializeDelimitedTable(selected, ',') : markdownTableFromCells(selected, true);
+}
+
+/** Explicit/rebound cell-break commands share the native cell input and commit path. */
+export function insertMountedTableCellBreak(view: EditorView): boolean {
+  const input = document.activeElement;
+  if (!(input instanceof HTMLTextAreaElement) || !view.dom.contains(input)) return false;
+  if (!view.state.facet(inputAssistanceFacet).lists || !continueTableCellList(input)) replaceTableCellEditorSelection(input, '<br>\n');
+  return true;
 }

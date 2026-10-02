@@ -1,3 +1,4 @@
+import { runEditorService } from '../host/editorServices';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { AgentReviewHandoffController } from '../agents/reviewHandoff';
@@ -87,6 +88,8 @@ import type { HostEditorEvent } from '../protocol/hostEditorEvents';
 import type { DiagnosticsChangedEvent, SerializedDiagnostic } from '../protocol/diagnostics';
 import { decodeWebviewToHostMessage, type WebviewToHostMessage } from '../protocol/messages';
 import { normalizeUiLanguagePreference, resolveUiLanguage } from '../foundation/uiLanguage';
+import { defaultInputAssistance } from '../foundation/editingPreferences';
+import type { createEditingPreferencesHost } from '../host/editingPreferences';
 export type EditorMode = 'live' | 'source' | 'preview';
 export type ExportFormat = 'html' | 'pdf' | 'docx';
 export type ExportOptions = Readonly<{
@@ -117,6 +120,7 @@ type PanelSessionControllerParams = {
   document: vscode.TextDocument;
   documentUri: vscode.Uri;
   context: vscode.ExtensionContext;
+  editingPreferences?: ReturnType<typeof createEditingPreferencesHost>;
   diagnostics: PanelDiagnostics;
   agentReviewHandoff: AgentReviewHandoffController;
   pendingDraftRecovery: PendingDraftRecovery;
@@ -435,6 +439,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       ),
       automaticUiLanguage: resolveUiLanguage('auto', vscode.env.language),
       sourceLineNumbers: getSourceLineNumbers(),
+      editingPreferencesRevision: params.editingPreferences?.snapshot().revision ?? 0,
+      editingPreferences: params.editingPreferences?.read() ?? { input: { ...defaultInputAssistance }, shortcuts: {} },
       previewAppearance: getPreviewAppearance(),
       previewFontFamily: getPreviewFontFamily(),
       previewSourceColoring: getPreviewSourceColoring(),
@@ -610,6 +616,17 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       return;
     }
     switch (raw.type) {
+      case 'editorService':
+        await postToWebview(await runEditorService(raw, params.documentUri));
+        return;
+      case 'updateEditingPreferences': {
+        const response = params.editingPreferences ? await params.editingPreferences.update(raw) : {
+          type: 'updatedEditingPreferences' as const, requestId: raw.requestId, revision: 0,
+          result: { ok: false as const, error: { code: 'operation-failed' as const, message: 'Editing preferences owner is unavailable' } }
+        };
+        await postToWebview(response);
+        return;
+      }
       case 'ready':
         webviewReady = true;
         await ensureInitDelivered(true);

@@ -101,6 +101,10 @@ Code blocks support syntax highlighting, select all, copy, and folding for long 
 - `==highlights==`, keyboard keys, color previews, and inline styles.
 - Visual actions for merge conflict blocks.
 
+### Settings and typing assistance
+
+Open **More settings** from the settings menu to adjust typing assistance and shortcuts. See the [settings and clipboard guide](docs/editing-preferences.md) for input rules, table paste behavior and shortcut conflicts.
+
 ## Install
 
 Install **MEO Enhanced - Markdown Editor** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=huangko555.meo-enhanced), or run:

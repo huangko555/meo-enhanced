@@ -81,6 +81,9 @@ import type { ExportStyleEnvironment } from './export/runtime';
 import type { ReadingSnapshot } from './protocol/exportSnapshot';
 import type { HostConfigurationEvent } from './protocol/hostConfigurationEvents';
 import { resolveUiLanguage } from './foundation/uiLanguage';
+import { createVscodeEditingPreferences } from './host/vscodeEditingPreferences';
+import { EDITING_PREFERENCES_SETTING } from './host/editingPreferences';
+import type { EditingPreferencesChangedEvent } from './protocol/editingPreferences';
 
 const VIEW_TYPE = 'meoEnhanced.editor';
 const ACTIVE_EDITOR_CONTEXT_KEY = 'meoEnhanced.activeEditor';
@@ -185,7 +188,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   void agentReviewOverrides.syncNow();
 
-  const provider = new MarkdownWebviewProvider(context, agentReviewHandoff, appearanceSettings);
+  const provider = new MarkdownWebviewProvider(context, agentReviewHandoff, appearanceSettings, createVscodeEditingPreferences());
   void provider.initializeGitWatcher();
   provider.initializeDevelopmentStyleWatcher();
 
@@ -358,7 +361,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly agentReviewHandoff: AgentReviewHandoffController,
-    private readonly appearanceSettings: AppearanceSettingsOwner
+    private readonly appearanceSettings: AppearanceSettingsOwner,
+    private readonly editingPreferences: ReturnType<typeof createVscodeEditingPreferences>
   ) {}
 
   async initializeGitWatcher(): Promise<void> {
@@ -449,6 +453,9 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
   }
 
   async handleConfigurationChanged(event: vscode.ConfigurationChangeEvent): Promise<void> {
+    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${EDITING_PREFERENCES_SETTING}`)) {
+      this.broadcast({ type: 'editingPreferencesChanged', ...this.editingPreferences.snapshot() });
+    }
     if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${LARGE_DOCUMENT_OPTIMIZATION_SETTING_KEY}`)) {
       this.broadcast({
         type: 'largeDocumentOptimizationChanged',
@@ -550,6 +557,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       document,
       documentUri,
       context: this.context,
+      editingPreferences: this.editingPreferences,
       diagnostics: createVscodeDiagnosticsAdapter(document),
       agentReviewHandoff: this.agentReviewHandoff,
       pendingDraftRecovery: createVscodePendingDraftRecoveryAdapter({
@@ -643,7 +651,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     this.updateActiveEditorContext();
   }
 
-  private broadcast(message: HostConfigurationEvent): void {
+  private broadcast(message: HostConfigurationEvent | EditingPreferencesChangedEvent): void {
     for (const panel of this.activePanels) {
       void panel.webview.postMessage(message);
     }

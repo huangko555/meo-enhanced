@@ -1,3 +1,10 @@
+import { effectiveShortcuts } from '../../src/application/editingPreferences';
+import { commandTitle } from './application/settingsCatalog';
+import type { EditorCommandId } from '../../src/foundation/editingPreferences';
+import { createSettingsWindow, type GeneralSetting } from './adapters/settingsWindow';
+import { createEditingPreferencesTransport } from './adapters/editingPreferencesTransport';
+import { createEditorServicesTransport } from './adapters/editorServicesTransport';
+import { defaultInputAssistance, type EditingPreferences } from '../../src/foundation/editingPreferences';
 import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Unlink, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, Save, HardDriveUpload, PanelLeftRightDashed, SquareSplitHorizontal, Settings, Check, Ellipsis, Sun, Moon, SunMoon, Languages, Type, ExternalLink, History, Info } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
@@ -27,7 +34,7 @@ import { createDocumentCopyTransport } from './adapters/documentCopyTransport';
 import { createPreviewController } from './helpers/preview';
 import type { ViewportAnchorToken } from './helpers/viewportController';
 import { createDocumentScrollToTopController } from './helpers/scrollToTop';
-import { createSegmentedControl } from './helpers/segmentedControl';
+import { createSegmentedControl } from './adapters/segmentedControl';
 import { createExportButtonIcon, createExportFormatIcon } from './helpers/exportIcons';
 import { createMenuSwitch } from './adapters/menuSwitch';
 import { createCodePaletteWebviewAdapter } from './adapters/codePaletteWebviewAdapter';
@@ -62,6 +69,10 @@ import type { ChangesReviewDiffSummary } from './application/changesReview';
 import { setGitDiffDetailsVisible } from './helpers/gitDiffDetails';
 import { createReadingPositionLifecycle, type ReadingPositionLifecycle } from './application/readingPositionLifecycle';
 import { createEditorFocusController } from './adapters/editorFocusController';
+
+let settingsWindow: ReturnType<typeof createSettingsWindow> | null = null;
+let editingPreferences: EditingPreferences = { input: { ...defaultInputAssistance }, shortcuts: {} };
+let editingPreferencesRevision = -1;
 
 type CreateEditorFactory = (typeof import('./editor'))['createEditor'];
 
@@ -1009,6 +1020,12 @@ toolbarOverflowSection.hidden = true;
 const displaySettingsHeading = document.createElement('div');
 displaySettingsHeading.className = 'more-tools-section-label';
 displaySettingsHeading.textContent = activeUiStrings.documentDisplaySettings;
+const preferencesHeading = document.createElement('div');
+preferencesHeading.className = 'more-tools-section-label';
+const preferencesRow = document.createElement('div'); preferencesRow.className = 'more-tools-preferences';
+const preferencesLabel = document.createElement('span'); preferencesLabel.className = 'more-tools-preferences-label';
+const moreSettingsButton = document.createElement('button'); moreSettingsButton.type = 'button'; moreSettingsButton.className = 'settings-button more-tools-settings-button';
+preferencesRow.append(preferencesLabel, moreSettingsButton);
 const openingDocumentsHeading = document.createElement('div');
 openingDocumentsHeading.className = 'more-tools-section-label';
 openingDocumentsHeading.textContent = activeUiStrings.openingDocumentsSettings;
@@ -1082,6 +1099,10 @@ editorFontSizeStepper.append(decreaseEditorFontSizeBtn, editorFontSizeValue, inc
 
 const applyUiLanguage = (language: UiLanguage): void => {
   const strings = getUiStrings(language);
+  preferencesHeading.textContent = language === 'zh-CN' ? '偏好设置' : 'Preferences';
+  preferencesLabel.textContent = language === 'zh-CN' ? '输入辅助 · 快捷键等' : 'Typing · Shortcuts, etc.';
+  moreSettingsButton.textContent = language === 'zh-CN' ? '更多设置 →' : 'More settings →';
+  settingsWindow?.setLanguage(language);
   activeUiLanguage = language;
   activeUiStrings = strings;
   editor?.setUiLanguage?.(language);
@@ -1136,6 +1157,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   modeControl.setLabels({ live: strings.live, source: strings.source, preview: strings.preview });
   presentSourcePreviewControls();
   selectionMenuElements.setUiLanguage(language);
+  refreshShortcutHints();
   editorScrollToTopController.setUiLanguage(language);
   findToggleBtn.title = strings.findAndReplace;
   exportButton.title = strings.exportDocument;
@@ -1228,13 +1250,12 @@ moreToolsPanel.append(
   liveStrongColoringBtn,
   boldHeadingsBtn,
   tableStickyHeaderBtn,
-  openingDocumentsHeading,
-  restoreReadingPositionBtn,
-  largeDocumentOptimizationBtn,
   interfaceSettingsHeading,
   editorAppearanceRow,
   uiLanguageRow,
   editorFontSizeRow,
+  preferencesHeading,
+  preferencesRow,
   feedbackSeparator,
   feedbackRow
 );
@@ -2662,6 +2683,10 @@ saveBtn.addEventListener('click', () => {
 const shortcutHandlerContext: ShortcutHandlerContext = {
   get editor() { return editor; },
   get editableMode() { return getActiveEditableMode(); },
+  get shortcuts() { return editingPreferences.shortcuts; },
+  requestPreview: () => { void editorModeRuntime.dispatch({ type: 'requestMode', mode: getActiveEditorMode() === 'preview' ? getActiveEditableMode() : 'preview', source: 'user' }); },
+  requestPlainPaste: () => { void pastePlainFromHost(); },
+  requestTableCopy: format => { void copyTableToHost(format); },
   get editorSurfaceActive() { return getActiveEditorMode() !== 'preview'; },
   requestSave,
   openFindPanel: (target) => findPanelController.open(target),
@@ -2687,6 +2712,8 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     parent: editorHost,
     text: initialText,
     initialMode: mode,
+    initialInputAssistance: editingPreferences.input,
+    requestLinkCandidates: async input => { const result = await editorServicesTransport.request({ action: 'links', ...input }); return result && 'candidates' in result ? result.candidates : []; },
     initialGitGutter: gitChangesGutterVisible,
     initialLongCodeBlockFolding: longCodeBlockFoldingEnabled,
     initialTableStickyHeaderEnabled: tableStickyHeaderEnabled,
@@ -3006,6 +3033,7 @@ editorModeRuntime = createEditorModeRuntime(
 );
 
 const handleInit = (message: InitMessage) => {
+  acceptEditingPreferences(message.editingPreferences, message.editingPreferencesRevision ?? 0);
   activeUiLanguagePreference = message.uiLanguagePreference;
   automaticUiLanguage = message.automaticUiLanguage;
   uiLanguageControl.setActive(activeUiLanguagePreference);
@@ -3113,6 +3141,57 @@ applyCodeThemeForPreview = (appearance) => {
   setShikiTheme(themeAdapter.getCodePalette(appearance).sourceTheme, 'preview');
 };
 
+
+const acceptEditingPreferences = (preferences: EditingPreferences, revision: number) => {
+  if (revision < editingPreferencesRevision) return;
+  editingPreferencesRevision = revision; editingPreferences = preferences;
+  editor?.setInputAssistance(preferences.input); settingsWindow?.present(); refreshShortcutHints();
+};
+const editingPreferencesTransport = createEditingPreferencesTransport({ post: request => vscode.postMessage(request), onSnapshot: acceptEditingPreferences });
+const editorServicesTransport = createEditorServicesTransport(request => vscode.postMessage(request));
+const reportClipboardFailure = () => failureNotice.setFailureNotice(() => ({ title: activeUiLanguage === 'zh-CN' ? '剪贴板操作失败' : 'Clipboard operation failed', message: activeUiLanguage === 'zh-CN' ? '请重试。' : 'Please retry.' }), 'warning');
+const pastePlainFromHost = async () => {
+  const activeEditor = editor;
+  if (!activeEditor || getActiveEditorMode() === 'preview') return;
+  const state = activeEditor.view.state; const focus = document.activeElement;
+  const native = focus instanceof HTMLTextAreaElement ? { value: focus.value, from: focus.selectionStart, to: focus.selectionEnd, direction: focus.selectionDirection } : null;
+  const value = await editorServicesTransport.request({ action: 'readClipboard' });
+  if (!value || !('text' in value)) { reportClipboardFailure(); return; }
+  if (editor !== activeEditor || getActiveEditorMode() === 'preview' || !state.doc.eq(activeEditor.view.state.doc) || !state.selection.eq(activeEditor.view.state.selection) || focus !== document.activeElement) return;
+  if (native && focus instanceof HTMLTextAreaElement && (focus.value !== native.value || focus.selectionStart !== native.from || focus.selectionEnd !== native.to || focus.selectionDirection !== native.direction)) return;
+  activeEditor.pastePlainText(value.text);
+};
+const copyTableToHost = async (format: 'markdown' | 'csv') => {
+  const text = editor?.getTableClipboardText?.(format);
+  if (typeof text !== 'string') return;
+  if (!await editorServicesTransport.request({ action: 'writeClipboard', text })) reportClipboardFailure();
+};
+settingsWindow = createSettingsWindow({
+  initialLanguage: activeUiLanguage, platform: /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? 'mac' : 'other',
+  getPreferences: () => editingPreferences, update: change => editingPreferencesTransport.update(change), returnFocus: () => moreToolsButton,
+  getGeneral: language => {
+    const strings = getUiStrings(language);
+    const switchItem = (id: string, section: 'display' | 'opening', title: string, get: () => boolean, set: (value: boolean) => void, description?: string): GeneralSetting => ({ id, section, title, description, control: { kind: 'switch', get, set } });
+    return [
+      switchItem('lineNumbers', 'display', strings.showLineNumbers, () => pendingSourceLineNumbers !== 'off', () => sourceLineNumbersBtn.click()),
+      switchItem('foldCode', 'display', strings.foldLongCodeBlocks, () => longCodeBlockFoldingEnabled, () => longCodeBlockFoldingBtn.click()),
+      switchItem('width', 'display', strings.constrainWidth, () => contentMaxWidthEnabled, setContentMaxWidthEnabled),
+      switchItem('strongColor', 'display', strings.strongColoring, () => liveStrongColoring, setLiveStrongColoring),
+      switchItem('boldHeadings', 'display', strings.boldHeadings, () => boldHeadingsEnabled, setBoldHeadingsEnabled),
+      switchItem('stickyHeader', 'display', strings.stickyTableHeader, () => tableStickyHeaderEnabled, setTableStickyHeaderEnabled),
+      switchItem('restorePosition', 'opening', strings.resumeReadingPositionLabel, () => restoreReadingPositionOnOpen, setRestoreReadingPositionOnOpen),
+      switchItem('largeDocument', 'opening', strings.largeDocumentStartup, () => largeDocumentOptimizationEnabled, setLargeDocumentOptimizationEnabled, strings.largeDocumentStartupDescription),
+      { id: 'theme', section: 'interface', title: strings.editorAppearance, control: { kind: 'choice', get: () => themeAdapter.getPreference(), set: value => themeAdapter.setAppearance(value as EditorAppearance, { post: true }), options: [{ value: 'auto', label: strings.auto }, { value: 'light', label: strings.light }, { value: 'dark', label: strings.dark }] } },
+      { id: 'language', section: 'interface', title: strings.interfaceLanguage, control: { kind: 'choice', get: () => activeUiLanguagePreference, set: value => { activeUiLanguagePreference = value as UiLanguagePreference; uiLanguageControl.setActive(activeUiLanguagePreference); applyUiLanguage(value === 'auto' ? automaticUiLanguage : value as UiLanguage); vscode.postMessage({ type: 'setUiLanguagePreference', language: activeUiLanguagePreference }); }, options: [{ value: 'auto', label: strings.auto }, { value: 'zh-CN', label: '简体中文' }, { value: 'en', label: 'English' }] } },
+      { id: 'fontSize', section: 'interface', title: strings.editorFontSize, control: { kind: 'font', get: () => editorFontSizePreference, set: value => applyEditorFontSizePreference(value, { post: true }) } }
+    ];
+  }
+});
+moreSettingsButton.addEventListener('click', () => { setMoreToolsVisible(false); settingsWindow?.open(); });
+preferencesHeading.textContent = 'Preferences';
+preferencesLabel.textContent = 'Typing · Shortcuts, etc.';
+moreSettingsButton.textContent = 'More settings →';
+
 const withMessageErrorBoundary = (context: string, action: () => void): void => {
   try {
     action();
@@ -3133,6 +3212,10 @@ window.addEventListener('message', (event) => {
     return;
   }
 
+  queueMicrotask(() => { if (settingsWindow?.isOpen()) settingsWindow.present(); });
+  if (message.type === 'updatedEditingPreferences') { editingPreferencesTransport.accept(message); return; }
+  if (message.type === 'editingPreferencesChanged') { acceptEditingPreferences(message.preferences, message.revision); return; }
+  if (message.type === 'editorServiceResult') { editorServicesTransport.accept(message); return; }
   if (message.type === 'developmentStylesChanged') {
     let style = document.getElementById('meo-development-styles');
     if (!(style instanceof HTMLStyleElement)) {
@@ -3381,7 +3464,7 @@ window.addEventListener('keydown', (event) => {
 }, { capture: true });
 
 window.addEventListener('paste', async (event) => {
-  if (!editor) {
+  if (!editor || getActiveEditorMode() === 'preview' || !(event.target instanceof Node) || !editor.view.dom.contains(event.target)) {
     return;
   }
 
@@ -3436,6 +3519,9 @@ window.addEventListener('focus', () => {
 });
 
 window.addEventListener('beforeunload', () => {
+  settingsWindow?.dispose();
+  editingPreferencesTransport.dispose();
+  editorServicesTransport.dispose();
   clearReadyRetryTimers();
   cancelPendingWikiStatusRefresh();
   cancelPendingLocalLinkStatusRefresh();
@@ -3551,7 +3637,7 @@ previewButton.addEventListener('click', () => {
 });
 
 const handleFormatAction = (action: string) => {
-  if (!editor) return;
+  if (!editor || getActiveEditorMode() === 'preview') return;
   editor.insertFormat(action);
   editor.focus();
 };
@@ -3733,3 +3819,16 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', () => readingPositionLifecycle?.flush());
 scheduleReadyHandshake();
 scheduleEditorBundleWarmupAfterReady();
+
+function refreshShortcutHints(): void {
+  const keys = effectiveShortcuts(editingPreferences.shortcuts, /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? 'mac' : 'other');
+  const controls: [HTMLElement, EditorCommandId][] = [[saveBtn, 'save'], [findToggleBtn, 'find'], [bulletListBtn, 'bullet'], [numberedListBtn, 'ordered'], [taskBtn, 'taskList'], [codeBlockBtn, 'codeBlock'], [quoteBtn, 'quote'], [hrBtn, 'rule'], [linkBtn, 'link'], [wikiLinkBtn, 'wikiLink'], [imageBtn, 'image'], [tableBtn, 'insertTable']];
+  for (const control of selectionMenuElements.menu.querySelectorAll<HTMLElement>('[data-action]')) {
+    const action = control.dataset.action === 'lineover' ? 'strike' : control.dataset.action;
+    if (action && Object.hasOwn(keys, action)) controls.push([control, action as EditorCommandId]);
+  }
+  for (const [control, command] of controls) {
+    const label = commandTitle(command, activeUiLanguage);
+    control.title = label + (keys[command].length ? ' · ' + keys[command].join(' / ') : '');
+  }
+}

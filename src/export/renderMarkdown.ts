@@ -1,3 +1,4 @@
+import { markdownHeadingAnchor } from '../foundation/markdownHeadingAnchor';
 import * as path from 'node:path';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
@@ -545,7 +546,7 @@ function installSourcePositionAndHeadingAnchorTransform(
       }
 
       const inlineContent = tokens[index + 1];
-      const baseSlug = slugifyHeading(inlineContent?.content ?? '') || 'section';
+      const baseSlug = markdownHeadingAnchor(inlineContent?.content ?? '');
       const occurrence = (slugCounts.get(baseSlug) ?? 0) + 1;
       slugCounts.set(baseSlug, occurrence);
       const id = occurrence === 1 ? baseSlug : `${baseSlug}-${occurrence}`;
@@ -650,15 +651,6 @@ function renderBreakSeparatedCellList(content: string, md: MarkdownIt): string |
   return html;
 }
 
-function slugifyHeading(value: string): string {
-  return String(value ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/<[^>]*>/g, '')
-    .replace(/[^\p{Letter}\p{Number}\s-]/gu, '')
-    .replace(/[\s_-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
 
 function extractHeadingText(inlineToken: any): string {
   const collect = (tokens: any[]): string => tokens.map((token) => {

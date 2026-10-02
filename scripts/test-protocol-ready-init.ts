@@ -1,3 +1,4 @@
+import { defaultInputAssistance } from '../src/foundation/editingPreferences';
 import assert from 'node:assert/strict';
 import { decodeInitMessage, decodeReadyMessage } from '../src/protocol/readyInit';
 import { decodeDocumentSyncCommand, decodeDocumentSyncMessage } from '../src/protocol/documentSync';
@@ -61,13 +62,18 @@ const completeInit = {
   outlinePosition: 'right' as const,
   outlineVisible: true,
   outlineWidth: 260,
-  vscodeTheme: codeTheme
+  vscodeTheme: codeTheme,
+  editingPreferences: { input: { ...defaultInputAssistance }, shortcuts: {} },
+  editingPreferencesRevision: 0
 };
 
 assert.deepEqual(decodeReadyMessage({ type: 'ready', extra: true }), { type: 'ready' });
 assert.equal(decodeReadyMessage(null), null);
 assert.deepEqual(decodeReadyMessage({ type: 'ready', version: 1 }), { type: 'ready' });
 
+assert.deepEqual(decodeInitMessage({ ...completeInit, editingPreferences: undefined, editingPreferencesRevision: undefined }), completeInit, 'older init messages receive the default preferences and revision');
+assert.equal(decodeInitMessage({ ...completeInit, editingPreferencesRevision: -1 }), null);
+assert.equal(decodeInitMessage({ ...completeInit, editingPreferences: { input: {}, shortcuts: {} } }), null);
 const init = decodeInitMessage(completeInit);
 assert.equal(init?.version, 3);
 if (init === null) throw new Error('Expected decoded init');
