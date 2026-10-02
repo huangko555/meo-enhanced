@@ -38,7 +38,7 @@ const init = (mode: 'live' | 'source', documentText = text) => ({
   vscodeTheme: null
 });
 
-async function open(browser: Browser, mode: 'live' | 'source', documentText = text): Promise<Page> {
+async function open(browser: Browser, mode: 'live' | 'source', documentText = text, stubMermaid = false): Promise<Page> {
   const page = await browser.newPage();
   await page.setViewport({ width: 1000, height: 700, deviceScaleFactor: 1 });
   await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><button id="outside">outside</button><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>');
@@ -51,6 +51,11 @@ async function open(browser: Browser, mode: 'live' | 'source', documentText = te
       setState(){}
     });
   ` });
+  if (stubMermaid) await page.evaluate(() => {
+    (window as any).mermaid = { initialize() {}, async render() {
+      return { svg: '<svg viewBox="0 0 120 60"><text x="4" y="20">diagram</text></svg>' };
+    } };
+  });
   await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
   await page.evaluate((message) => {
     window.dispatchEvent(new MessageEvent('message', { data: message }));
@@ -154,8 +159,11 @@ async function runFocusReturn(browser: Browser, mode: 'live' | 'source'): Promis
     const clickPriority = await page.evaluate(async () => {
       const content = document.querySelector<HTMLElement>('.cm-content')!;
       const originalFocus = content.focus.bind(content);
-      let restoreCalls = 0;
-      content.focus = (options?: FocusOptions) => { restoreCalls += 1; originalFocus(options); };
+      let visibleOldRestores = 0;
+      content.focus = (options?: FocusOptions) => {
+        if (getComputedStyle(content).caretColor !== 'rgba(0, 0, 0, 0)') visibleOldRestores += 1;
+        originalFocus(options);
+      };
       window.dispatchEvent(new Event('blur'));
       content.blur();
       window.dispatchEvent(new Event('focus'));
@@ -163,10 +171,11 @@ async function runFocusReturn(browser: Browser, mode: 'live' | 'source'): Promis
         bubbles: true, button: 0
       }));
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
       content.focus = originalFocus;
-      return restoreCalls;
+      return visibleOldRestores;
     });
-    assert.equal(clickPriority, 0, `${mode} delayed focus restoration overrode a new document pointerdown`);
+    assert.equal(clickPriority, 0, `${mode} activation exposed the old caret or reapplied it after pointerdown`);
 
     await page.evaluate(() => {
       window.dispatchEvent(new Event('blur'));
@@ -187,8 +196,194 @@ async function runFocusReturn(browser: Browser, mode: 'live' | 'source'): Promis
     const clicked = await page.evaluate(() => (window as any).__hostMessages
       .filter((message: any) => message.type === 'draftChanged').at(-1)?.text as string);
     assert.match(clicked.split('\n')[4], /CLICK_MARK/, `${mode} return click did not place the caret`);
+    await page.evaluate(() => {
+      const blank = document.createElement('div');
+      blank.id = 'outside-blank';
+      blank.style.cssText = 'position:fixed;left:0;top:95px;width:16px;height:24px;z-index:1000';
+      document.body.append(blank);
+    });
+    await page.click('#outside-blank');
+    assert.equal(await page.evaluate(() => document.activeElement === document.body), true);
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } })));
+    assert.equal(await page.evaluate(() => document.activeElement === document.body), true,
+      `${mode} late Host return stole focus from a non-focusable outside click`);
+
   } finally {
     await page.close();
+  }
+}
+
+async function runImmediateFocusReturn(browser: Browser, mode: 'live' | 'source'): Promise<void> {
+  const page = await open(browser, mode);
+  try {
+    await page.click('.cm-line:nth-child(3)');
+    const immediate = await page.evaluate(() => {
+      const content = document.querySelector<HTMLElement>('.cm-content')!;
+      window.dispatchEvent(new Event('blur'));
+      content.blur();
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
+      return document.activeElement === content;
+    });
+    assert.equal(immediate, true, `${mode} window return left an input gap before the first key`);
+    await page.keyboard.type('FAST_RETURN', { delay: 2 });
+    const firstInput = await page.evaluate(() => ({
+      changed: (window as any).__hostMessages.filter((message: any) => message.type === 'draftChanged').at(-1)?.text,
+      caretVisible: getComputedStyle(document.querySelector<HTMLElement>('.cm-content')!).caretColor !== 'rgba(0, 0, 0, 0)'
+    }));
+    assert.match(firstInput.changed.split('\n')[2], /FAST_RETURN/, `${mode} window return lost the first input`);
+    assert.equal(firstInput.caretVisible, true, `${mode} fast return input kept the caret hidden`);
+
+    const idleReturn = await page.evaluate(async () => {
+      const content = document.querySelector<HTMLElement>('.cm-content')!;
+      window.dispatchEvent(new Event('blur'));
+      content.blur();
+      window.dispatchEvent(new Event('focus'));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      return { focused: document.activeElement === content,
+        caretVisible: getComputedStyle(content).caretColor !== 'rgba(0, 0, 0, 0)' };
+    });
+    assert.deepEqual(idleReturn, { focused: true, caretVisible: true },
+      `${mode} idle return did not reveal the caret for the first paint`);
+
+    const nativeReturn = await page.evaluate(async () => {
+      const content = document.querySelector<HTMLElement>('.cm-content')!;
+      window.dispatchEvent(new Event('blur'));
+      content.blur();
+      // A native focusin must settle the visual guard even if window/Host
+      // activation notifications have not arrived yet.
+      content.focus({ preventScroll: true });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      return { focused: document.activeElement === content,
+        caretVisible: getComputedStyle(content).caretColor !== 'rgba(0, 0, 0, 0)' };
+    });
+    assert.deepEqual(nativeReturn, { focused: true, caretVisible: true },
+      `${mode} native focusin left the return caret hidden`);
+
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event('blur'));
+      (document.activeElement as HTMLElement)?.blur();
+    });
+    await page.keyboard.type('EARLY_SIGNAL', { delay: 2 });
+    const beforeSignal = await page.evaluate(() => ({
+      changed: (window as any).__hostMessages.filter((message: any) => message.type === 'draftChanged').at(-1)?.text,
+      caretVisible: getComputedStyle(document.querySelector<HTMLElement>('.cm-content')!).caretColor !== 'rgba(0, 0, 0, 0)'
+    }));
+    assert.match(beforeSignal.changed.split('\n')[2], /EARLY_SIGNAL/,
+      `${mode} input before return notifications lost characters`);
+    assert.equal(beforeSignal.caretVisible, true, `${mode} early input left the caret hidden`);
+    const rapidBlur = await page.evaluate(async () => {
+      const content = document.querySelector<HTMLElement>('.cm-content')!;
+      window.dispatchEvent(new Event('blur'));
+      content.blur();
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new Event('blur'));
+      content.blur();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      return { focused: document.activeElement === content,
+        hidden: getComputedStyle(content).caretColor === 'rgba(0, 0, 0, 0)' };
+    });
+    assert.deepEqual(rapidBlur, { focused: false, hidden: true },
+      `${mode} an old activation frame completed after another blur`);
+
+    const compositionStart = await page.evaluate(() => {
+      const content = document.querySelector<HTMLElement>('.cm-content')!;
+      window.dispatchEvent(new Event('focus'));
+      content.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      const visible = getComputedStyle(content).caretColor !== 'rgba(0, 0, 0, 0)';
+      content.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+      return visible;
+    });
+    assert.equal(compositionStart, true, `${mode} composition began with an invisible caret`);
+    const input = await page.createCDPSession();
+    try {
+      await input.send('Input.imeSetComposition', { text: '中', selectionStart: 1, selectionEnd: 1 });
+      await input.send('Input.insertText', { text: '中' });
+      await page.waitForFunction(() => (window as any).__hostMessages
+        .filter((message: any) => message.type === 'draftChanged').at(-1)?.text?.includes('中'), { timeout: 3000 });
+      assert.equal(await page.$eval('.cm-content', (content) => getComputedStyle(content).caretColor !== 'rgba(0, 0, 0, 0)'), true,
+        `${mode} committed composition left the caret hidden`);
+    } finally {
+      await input.detach();
+    }
+
+  } finally {
+    await page.close();
+  }
+}
+
+async function runComponentFocusReturn(browser: Browser): Promise<void> {
+  const fixtures = [
+    { kind: 'table', text: '| A | B |\n| --- | --- |\n| alpha | beta |',
+      selector: 'tbody textarea[data-table-row="1"][data-table-col="0"]', from: 'alpha', to: 'alRa' },
+    { kind: 'code', text: 'intro\n\n```js\nconst value = 1;\n```\n\ntail',
+      selector: '.cm-content', line: 'const value = 1;', from: 'const value = 1;', to: 'const value = 1;R' },
+    { kind: 'html', text: 'intro\n\n<div>\n<p>alpha beta</p>\n</div>\n\ntail',
+      selector: '.cm-content', button: '.meo-md-html-source-toggle', clicks: 1,
+      line: '<p>alpha beta</p>', from: '<p>alpha beta</p>', to: '<p>alpha beta</p>R' },
+    ...[1, 2].map((clicks) => ({ kind: `mermaid-${clicks === 1 ? 'split' : 'source'}`,
+      text: 'intro\n\n```mermaid\ngraph TD\nA --> B\n```\n\ntail',
+      selector: '.meo-mermaid-source-editor .cm-content', button: '.meo-mermaid-mode-btn', clicks,
+      from: 'A --> B', to: 'A --> BR' })),
+    ...[1, 2].map((clicks) => ({ kind: `math-${clicks === 1 ? 'split' : 'source'}`,
+      text: 'intro\n\n$$\nx^2 + y^2 = 1\n$$\n\ntail',
+      selector: '.meo-latex-math-source-editor .cm-content', button: '.meo-latex-math-mode-btn', clicks,
+      from: 'x^2 + y^2 = 1', to: 'x^2 + y^2 = 1R' }))
+  ];
+  for (const fixture of fixtures) {
+    const page = await open(browser, 'live', fixture.text, fixture.kind.startsWith('mermaid'));
+    try {
+      if ('button' in fixture) {
+        for (let step = 0; step < fixture.clicks; step += 1) {
+          await page.evaluate((selector) => document.querySelector<HTMLButtonElement>(selector)!.click(), fixture.button);
+          await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+        }
+      }
+      await page.waitForSelector(fixture.selector);
+      if ('line' in fixture) {
+        const point = await page.evaluate((lineText) => {
+          const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+            .find((element) => element.textContent === lineText)!;
+          const rect = line.getBoundingClientRect();
+          return { x: rect.left + 12, y: rect.top + rect.height / 2 };
+        }, fixture.line);
+        await page.mouse.click(point.x, point.y);
+        await page.keyboard.press('End');
+      } else {
+        await page.focus(fixture.selector);
+        if (fixture.kind === 'table') {
+          await page.evaluate((selector) => document.querySelector<HTMLTextAreaElement>(selector)!.setSelectionRange(2, 4), fixture.selector);
+        } else {
+          await page.keyboard.down('Control');
+          await page.keyboard.press('End');
+          await page.keyboard.up('Control');
+        }
+      }
+      const restored = await page.evaluate((selector) => {
+        const target = document.querySelector<HTMLElement>(selector)!;
+        window.dispatchEvent(new Event('blur'));
+        target.blur();
+        window.dispatchEvent(new Event('focus'));
+        window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
+        return { focused: document.activeElement === document.querySelector(selector),
+          range: target instanceof HTMLTextAreaElement ? [target.selectionStart, target.selectionEnd] : null };
+      }, fixture.selector);
+      assert.equal(restored.focused, true, `${fixture.kind} return did not synchronously focus its editor`);
+      if (fixture.kind === 'table') assert.deepEqual(restored.range, [2, 4], 'Table return lost its selected range');
+      await page.keyboard.type('R');
+      const expected = fixture.text.replace(fixture.from, fixture.to);
+      await page.waitForFunction((expected) => (window as any).__hostMessages
+        .filter((message: any) => message.type === 'draftChanged').at(-1)?.text === expected,
+        { timeout: 3000 }, expected);
+      const afterInput = await page.evaluate((selector) => {
+        const target = document.querySelector<HTMLElement>(selector)!;
+        return { focused: document.activeElement === target,
+          caretVisible: getComputedStyle(target).caretColor !== 'rgba(0, 0, 0, 0)' };
+      }, fixture.selector);
+      assert.deepEqual(afterInput, { focused: true, caretVisible: true }, `${fixture.kind} accepted hidden or unfocused input`);
+    } finally {
+      await page.close();
+    }
   }
 }
 
@@ -288,62 +483,88 @@ async function runActivationClickPriority(browser: Browser, mode: 'live' | 'sour
   const page = await open(browser, mode);
   try {
     await page.click('.cm-line:nth-child(3)');
-    const result = await page.evaluate(async () => {
+    await page.evaluate(() => {
       const content = document.querySelector<HTMLElement>('.cm-content')!;
       const originalFocus = content.focus.bind(content);
-      let oldCaretRestores = 0;
-      content.focus = (options?: FocusOptions) => { oldCaretRestores += 1; originalFocus(options); };
+      (window as any).__activationPaints = [];
+      (window as any).__visibleOldRestores = 0;
+      content.focus = (options?: FocusOptions) => {
+        if (getComputedStyle(content).caretColor !== 'rgba(0, 0, 0, 0)') {
+          const line = document.getSelection()?.anchorNode?.parentElement?.closest('.cm-line')?.textContent;
+          if (line?.includes('line 3 ordinary content')) (window as any).__visibleOldRestores += 1;
+        }
+        originalFocus(options);
+      };
       window.dispatchEvent(new Event('blur'));
       content.blur();
-      window.dispatchEvent(new Event('focus'));
-      window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
-      const beforeClick = oldCaretRestores;
-      document.querySelector<HTMLElement>('.cm-line:nth-child(5)')!.dispatchEvent(new PointerEvent('pointerdown', {
-        bubbles: true, button: 0
-      }));
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      content.focus = originalFocus;
-      return { beforeClick, afterFrame: oldCaretRestores };
+      // Deliver activation before the trusted click reaches the document.
+      // The first painted frame must contain the click's new selection.
+      window.addEventListener('pointerdown', () => {
+        window.dispatchEvent(new Event('focus'));
+        window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
+      }, { capture: true, once: true });
+      document.addEventListener('pointerdown', () => {
+        requestAnimationFrame(() => {
+          (window as any).__activationPaints.push({
+            line: document.getSelection()?.anchorNode?.parentElement?.closest('.cm-line')?.textContent,
+            focused: document.activeElement === content,
+            visible: getComputedStyle(content).caretColor !== 'rgba(0, 0, 0, 0)'
+          });
+        });
+      }, { once: true });
+      (window as any).__restoreOriginalFocus = () => { content.focus = originalFocus; };
     });
-    assert.deepEqual(result, { beforeClick: 0, afterFrame: 0 },
-      `${mode} activation showed the old caret before a document click: ${JSON.stringify(result)}`);
+    await page.click('.cm-line:nth-child(5)');
+    await page.evaluate(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    const result = await page.evaluate(() => ({
+      paints: (window as any).__activationPaints,
+      visibleOldRestores: (window as any).__visibleOldRestores,
+      line: document.getSelection()?.anchorNode?.parentElement?.closest('.cm-line')?.textContent
+    }));
+    assert.equal(result.visibleOldRestores, 0, `${mode} activation flashed the old insertion point`);
+    assert.equal(result.paints.length, 1);
+    assert.match(result.paints[0].line ?? '', /line 5 ordinary content/,
+      `${mode} first activation paint still contained the old selection`);
+    assert.equal(result.paints[0].focused, true);
+    assert.equal(result.paints[0].visible, true);
+    assert.match(result.line ?? '', /line 5 ordinary content/, `${mode} late Host focus rewound the click`);
+    await page.evaluate(() => (window as any).__restoreOriginalFocus());
+    await page.keyboard.type('ACTIVATION_CLICK');
+    const changed = await page.evaluate(() => (window as any).__hostMessages
+      .filter((message: any) => message.type === 'draftChanged').at(-1)?.text as string);
+    assert.match(changed.split('\n')[4], /ACTIVATION_CLICK/, `${mode} first activation click did not accept input`);
   } finally {
     await page.close();
   }
 }
 
-async function runDelayedActivationClick(browser: Browser, mode: 'live' | 'source'): Promise<void> {
+async function runClickAfterSettledReturn(browser: Browser, mode: 'live' | 'source'): Promise<void> {
   const page = await open(browser, mode);
   try {
     await page.click('.cm-line:nth-child(3)');
-    const result = await page.evaluate(async () => {
+    const beforeClick = await page.evaluate(async () => {
       const content = document.querySelector<HTMLElement>('.cm-content')!;
-      const originalFocus = content.focus.bind(content);
-      let oldCaretRestores = 0;
-      content.focus = (options?: FocusOptions) => { oldCaretRestores += 1; originalFocus(options); };
       window.dispatchEvent(new Event('blur'));
       content.blur();
       window.dispatchEvent(new Event('focus'));
       window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-      const beforeClick = {
-        restores: oldCaretRestores,
-        caretHidden: getComputedStyle(content).caretColor === 'rgba(0, 0, 0, 0)'
-      };
-      document.querySelector<HTMLElement>('.cm-line:nth-child(5)')!.dispatchEvent(new PointerEvent('pointerdown', {
-        bubbles: true, button: 0
-      }));
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      const afterClick = { restores: oldCaretRestores, caretVisible: getComputedStyle(content).caretColor !== 'rgba(0, 0, 0, 0)' };
-      content.focus = originalFocus;
-      return { beforeClick, afterClick };
+      return { focused: document.activeElement === content,
+        caretVisible: getComputedStyle(content).caretColor !== 'rgba(0, 0, 0, 0)' };
     });
-    assert.deepEqual(result, {
-      beforeClick: { restores: 0, caretHidden: true },
-      afterClick: { restores: 0, caretVisible: true }
-    }, `${mode} delayed activation flashed the old caret: ${JSON.stringify(result)}`);
+    assert.deepEqual(beforeClick, { focused: true, caretVisible: true },
+      `${mode} settled return left the old input point unavailable`);
+    await page.click('.cm-line:nth-child(5)');
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } })));
+    await page.keyboard.type('NEW_CLICK');
+    const changed = await page.evaluate(() => (window as any).__hostMessages
+      .filter((message: any) => message.type === 'draftChanged').at(-1)?.text as string);
+    assert.match(changed.split('\n')[4], /NEW_CLICK/, `${mode} delayed notification overrode the new click`);
+    assert.doesNotMatch(changed.split('\n')[2], /NEW_CLICK/);
   } finally {
     await page.close();
   }
@@ -362,14 +583,17 @@ async function main(): Promise<void> {
   const browser = await launchTestBrowser();
   let primaryError: unknown;
   try {
+    await runComponentFocusReturn(browser);
+    await runImmediateFocusReturn(browser, 'live');
+    await runImmediateFocusReturn(browser, 'source');
     await runMode(browser, 'live');
     await runMode(browser, 'source');
     await runFocusReturn(browser, 'live');
     await runFocusReturn(browser, 'source');
     await runActivationClickPriority(browser, 'live');
     await runActivationClickPriority(browser, 'source');
-    await runDelayedActivationClick(browser, 'live');
-    await runDelayedActivationClick(browser, 'source');
+    await runClickAfterSettledReturn(browser, 'live');
+    await runClickAfterSettledReturn(browser, 'source');
     await runPassiveControls(browser, 'live');
     await runPassiveControls(browser, 'source');
     await runTableControlFocus(browser);

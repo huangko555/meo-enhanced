@@ -11,7 +11,6 @@ export type EditorFocusController = {
 
 const focusTakingSelector = 'input, textarea, select, [role="textbox"], [role="combobox"], [role="listbox"], [role="option"], [contenteditable]:not([contenteditable="false"])';
 const focusTransferSelector = 'iframe, dialog[open], [aria-modal="true"], [draggable="true"]';
-const windowReturnDelayMs = 160;
 
 /** Owns focus handoffs between an editable document, window activation, and Webview chrome. */
 export function createEditorFocusController({
@@ -27,13 +26,11 @@ export function createEditorFocusController({
   let documentPointerGeneration = 0;
   let transientOrigin = false;
   let transientReturnFrame: number | null = null;
-  let hostReturnFrame: number | null = null;
-  let windowReturnTimer: number | null = null;
+  let windowReturnFrame: number | null = null;
   let restoreOnWindowReturn = false;
   let windowReturnPending = false;
-  let windowReturnPointerGeneration = 0;
+  let windowReturnPointerGeneration: number | null = 0;
   let windowReturnGeneration = 0;
-  let lastWindowReturnPointerAt = -Infinity;
 
   const editorDom = (): HTMLElement | null => getEditor()?.view.dom ?? null;
   const inEditor = (target: EventTarget | null): boolean => (
@@ -70,31 +67,46 @@ export function createEditorFocusController({
     });
   };
 
-  const scheduleHostReturn = (): void => {
-    if (windowReturnPending) {
-      if (documentPointerGeneration !== windowReturnPointerGeneration || windowReturnTimer !== null) return;
-      const generation = windowReturnGeneration;
-      windowReturnTimer = window.setTimeout(() => {
-        if (generation !== windowReturnGeneration) return;
-        windowReturnTimer = null;
-        windowReturnPending = false;
-        root.classList.remove('meo-window-focus-return-pending');
-        if (documentPointerGeneration === windowReturnPointerGeneration) scheduleHostReturn();
-      }, windowReturnDelayMs);
-      return;
-    }
-    if (performance.now() - lastWindowReturnPointerAt < windowReturnDelayMs) return;
-    if (hostReturnFrame !== null) window.cancelAnimationFrame(hostReturnFrame);
-    const pointerGeneration = documentPointerGeneration;
-    hostReturnFrame = window.requestAnimationFrame(() => {
-      hostReturnFrame = null;
-      if (!isEditableMode() || documentPointerGeneration !== pointerGeneration) return;
-      const editor = getEditor();
-      if (!editor) return;
-      const active = document.activeElement;
-      if (active !== document.body && active !== document.documentElement && !editor.hasFocus()) return;
-      editor.focus();
+  const clearWindowReturnFrame = (): void => {
+    if (windowReturnFrame !== null) window.cancelAnimationFrame(windowReturnFrame);
+    windowReturnFrame = null;
+  };
+  const finishWindowReturn = (): void => {
+    clearWindowReturnFrame();
+    windowReturnPending = false;
+    restoreOnWindowReturn = false;
+    root.classList.remove('meo-window-focus-return-pending');
+  };
+  const settleWindowReturnBeforePaint = (): void => {
+    if (!windowReturnPending || windowReturnFrame !== null) return;
+    const generation = windowReturnGeneration;
+    windowReturnFrame = window.requestAnimationFrame(() => {
+      if (generation !== windowReturnGeneration) return;
+      windowReturnFrame = null;
+      finishWindowReturn();
     });
+  };
+  const restoreWindowReturn = (): boolean => {
+    if (!isEditableMode()) {
+      finishWindowReturn();
+      return false;
+    }
+    const editor = getEditor();
+    if (!editor) return false;
+    const active = document.activeElement;
+    if (inEditor(active)) {
+      // Native activation or a new click already owns this selection. A late
+      // Host notification must not reapply the target saved before blur.
+      settleWindowReturnBeforePaint();
+      return true;
+    }
+    if (active !== document.body && active !== document.documentElement) return false;
+    if (documentPointerGeneration !== windowReturnPointerGeneration) return false;
+    // Input must be connected synchronously. Only painting waits for the
+    // activation click's native selection to finish, never the first key.
+    editor.focus();
+    settleWindowReturnBeforePaint();
+    return true;
   };
 
   const onPointerDown = (event: PointerEvent): void => {
@@ -104,18 +116,16 @@ export function createEditorFocusController({
       documentPointerGeneration += 1;
       transientOrigin = false;
       clearTransientFrame();
+      restoreOnWindowReturn = false;
       if (windowReturnPending) {
-        windowReturnPending = false;
-        if (windowReturnTimer !== null) window.clearTimeout(windowReturnTimer);
-        windowReturnTimer = null;
-        lastWindowReturnPointerAt = performance.now();
-        const generation = windowReturnGeneration;
-        window.requestAnimationFrame(() => {
-          if (generation === windowReturnGeneration) root.classList.remove('meo-window-focus-return-pending');
-        });
+        windowReturnGeneration += 1;
+        clearWindowReturnFrame();
+        settleWindowReturnBeforePaint();
       }
       return;
     }
+    windowReturnPointerGeneration = null;
+    finishWindowReturn();
     if (isFocusTransfer(target)) {
       transientOrigin = false;
       clearTransientFrame();
@@ -137,8 +147,12 @@ export function createEditorFocusController({
       editorWasLastFocused = true;
       transientOrigin = false;
       clearTransientFrame();
+      restoreOnWindowReturn = false;
+      settleWindowReturnBeforePaint();
       return;
     }
+    windowReturnPointerGeneration = null;
+    finishWindowReturn();
     const target = event.target;
     if (target instanceof Element && root.contains(target) && isFocusTaking(target)) {
       if (inEditor(event.relatedTarget)) transientOrigin = true;
@@ -154,10 +168,22 @@ export function createEditorFocusController({
     const active = document.activeElement;
     if (active instanceof Element && active.matches('[role="combobox"][aria-expanded="false"]')) restoreAfterTransient();
   };
+  const onInputCapture = (event: Event): void => {
+    if (!windowReturnPending) return;
+    if (inEditor(event.target)) {
+      finishWindowReturn();
+    } else if (restoreWindowReturn()) {
+      finishWindowReturn();
+    }
+  };
   const onKeyDownCapture = (event: KeyboardEvent): void => {
-    if (event.key !== 'Tab') return;
-    transientOrigin = false;
-    clearTransientFrame();
+    if (event.key === 'Tab') {
+      transientOrigin = false;
+      clearTransientFrame();
+      finishWindowReturn();
+      return;
+    }
+    if (!['Alt', 'Control', 'Meta', 'Shift'].includes(event.key)) onInputCapture(event);
   };
   const onKeyDownBubble = (event: KeyboardEvent): void => {
     if (event.key === 'Escape') onClick();
@@ -165,19 +191,16 @@ export function createEditorFocusController({
   const onWindowBlur = (): void => {
     restoreOnWindowReturn = getEditor()?.hasFocus() === true || editorWasLastFocused;
     windowReturnGeneration += 1;
-    if (windowReturnTimer !== null) window.clearTimeout(windowReturnTimer);
-    windowReturnTimer = null;
-    if (hostReturnFrame !== null) window.cancelAnimationFrame(hostReturnFrame);
-    hostReturnFrame = null;
+    clearWindowReturnFrame();
+    clearTransientFrame();
     windowReturnPending = restoreOnWindowReturn;
-    windowReturnPointerGeneration = documentPointerGeneration;
-    lastWindowReturnPointerAt = -Infinity;
+    windowReturnPointerGeneration = restoreOnWindowReturn ? documentPointerGeneration : null;
     root.classList.toggle('meo-window-focus-return-pending', windowReturnPending);
   };
   const onWindowFocus = (): void => {
     if (!restoreOnWindowReturn) return;
     restoreOnWindowReturn = false;
-    scheduleHostReturn();
+    restoreWindowReturn();
   };
 
   document.addEventListener('pointerdown', onPointerDown, true);
@@ -185,18 +208,15 @@ export function createEditorFocusController({
   document.addEventListener('focusout', onFocusOut, true);
   document.addEventListener('click', onClick);
   document.addEventListener('keydown', onKeyDownCapture, true);
+  document.addEventListener('beforeinput', onInputCapture, true);
+  document.addEventListener('compositionstart', onInputCapture, true);
   document.addEventListener('keydown', onKeyDownBubble);
   window.addEventListener('blur', onWindowBlur);
   window.addEventListener('focus', onWindowFocus);
 
   return {
     restoreFromHost(): boolean {
-      const editor = getEditor();
-      if (!editor) return false;
-      const active = document.activeElement;
-      if (active !== document.body && active !== document.documentElement && !editor.hasFocus()) return false;
-      scheduleHostReturn();
-      return true;
+      return restoreWindowReturn();
     },
     dispose(): void {
       document.removeEventListener('pointerdown', onPointerDown, true);
@@ -204,13 +224,13 @@ export function createEditorFocusController({
       document.removeEventListener('focusout', onFocusOut, true);
       document.removeEventListener('click', onClick);
       document.removeEventListener('keydown', onKeyDownCapture, true);
+      document.removeEventListener('beforeinput', onInputCapture, true);
+      document.removeEventListener('compositionstart', onInputCapture, true);
       document.removeEventListener('keydown', onKeyDownBubble);
       window.removeEventListener('blur', onWindowBlur);
       window.removeEventListener('focus', onWindowFocus);
       clearTransientFrame();
-      if (hostReturnFrame !== null) window.cancelAnimationFrame(hostReturnFrame);
-      if (windowReturnTimer !== null) window.clearTimeout(windowReturnTimer);
-      root.classList.remove('meo-window-focus-return-pending');
+      finishWindowReturn();
     }
   };
 }
