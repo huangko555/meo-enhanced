@@ -112,6 +112,14 @@ a Markdown file in each saved mode after both closing its tab and restarting
 VS Code. Confirm that the content is readable and interactive without changing
 modes. This native check complements the browser contract by exercising the
 actual extension Host/Webview startup handshake.
+Install the artifact with the official `code` CLI into the isolated extensions
+folder. Loading extracted VSIX files through `--extensionDevelopmentPath` can
+select development-only source styles that do not belong in the package. Run
+cross-process persistence checks in a normal host: `--extensionTestsPath` uses
+in-memory storage. The extension test host remains suitable for in-session
+automatic-save, document synchronization, and cursor assertions.
+Seed a saved mode with an actual mode change before quitting; selecting the
+already active Live default does not create an explicit stored preference.
 
 The full-document endurance runner keeps the curated operation set for its
 original acceptance fixture. For other Markdown documents it discovers unique
