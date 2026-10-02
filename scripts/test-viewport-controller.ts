@@ -838,6 +838,7 @@ let readingLineTop = 1200;
 const readingLine = {
   getBoundingClientRect: () => ({ top: 40 + readingLineTop - readingScroller.scrollTop })
 };
+let afterReadingMeasure: (() => void) | null = null;
 const readingView = {
   dom: readingDom,
   scrollDOM: readingScroller,
@@ -846,7 +847,10 @@ const readingView = {
   posAtDOM: () => 42,
   // A rendered widget may share an aggregate height-map block with this line.
   lineBlockAt: () => ({ top: readingLineTop - 2600 }),
-  requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
+  requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => {
+    write(read());
+    afterReadingMeasure?.();
+  }
 };
 const readingController = new ViewportController(readingView as any);
 const nativeReadingWheel = (deltaY: number) => {
@@ -862,9 +866,75 @@ const readingFrame = async () => {
   await Promise.resolve();
 };
 try {
+  // One native gesture can continue scrolling across frames without another
+  // wheel event. Layout retention must not pin it to its first scroll frame.
+  for (const direction of [1, -1]) {
+    readingScroller.scrollTop = 1000;
+    readingScroller.dispatch('wheel', { deltaX: 0, deltaY: direction * 120, ctrlKey: false });
+    for (const progress of [3, 17, 43, 77, 120]) {
+      const expected = 1000 + direction * progress;
+      readingScroller.scrollTop = expected;
+      readingScroller.dispatch('scroll', {});
+      await readingFrame();
+      if (Math.abs(readingScroller.scrollTop - expected) > 1) {
+        throw new Error(`Reading retention blocked native gesture progress: ${JSON.stringify({
+          direction, progress, expected, actual: readingScroller.scrollTop
+        })}`);
+      }
+    }
+  }
+  const beforeMeasureGap = readingScroller.scrollTop;
+  afterReadingMeasure = () => {
+    afterReadingMeasure = null;
+    readingScroller.scrollTop += 14;
+  };
+  await readingFrame();
+  if (Math.abs(readingScroller.scrollTop - beforeMeasureGap - 14) > 1) {
+    throw new Error('A queued reading measurement overwrote newer native scroll progress');
+  }
+  readingScroller.scrollTop = 1000;
+  readingScroller.dispatch('wheel', { deltaX: 0, deltaY: 120, ctrlKey: false });
+  readingScroller.scrollTop = 1003;
+  readingScroller.dispatch('scroll', {});
+  await readingFrame();
+  readingScroller.scrollTop += 14;
+  readingScroller.dispatch('scroll', {});
+  readingLineTop += 19.5;
+  readingScroller.scrollHeight += 19.5;
+  readingController.reconcileAfterEditorUpdate();
+  await readingFrame();
+  if (Math.abs(readingScroller.scrollTop - 1036.5) > 1) {
+    throw new Error('Late layout compensation discarded concurrent native scroll progress');
+  }
+  readingScroller.scrollTop += 26;
+  readingScroller.dispatch('scroll', {});
+  await readingFrame();
+  if (Math.abs(readingScroller.scrollTop - 1062.5) > 1) {
+    throw new Error('Layout compensation was replayed during the next native frame');
+  }
+  readingLineTop = 1200;
+  readingScroller.scrollTop = 1000;
   nativeReadingWheel(-120);
   for (let frame = 0; frame < 6; frame += 1) await readingFrame();
   const nativeTop = readingLine.getBoundingClientRect().top;
+  // CodeMirror may already anchor the native offset when its height map grows.
+  // The controller must compensate only the drift left after that anchoring.
+  readingLineTop += 19.5;
+  readingScroller.scrollHeight += 19.5;
+  readingScroller.scrollTop += 19.5;
+  readingController.reconcileAfterEditorUpdate();
+  await readingFrame();
+  if (Math.abs(readingLine.getBoundingClientRect().top - nativeTop) > 1) {
+    throw new Error('Reading retention compensated a height-map shift twice');
+  }
+  readingLineTop += 19.5;
+  readingScroller.scrollHeight += 19.5;
+  readingScroller.scrollTop += 6;
+  readingController.reconcileAfterEditorUpdate();
+  await readingFrame();
+  if (Math.abs(readingLine.getBoundingClientRect().top - nativeTop) > 1) {
+    throw new Error('Reading retention failed to compensate the remainder of a height-map shift');
+  }
   readingLineTop += 19.5;
   readingScroller.scrollHeight += 19.5;
   readingController.reconcileAfterEditorUpdate();

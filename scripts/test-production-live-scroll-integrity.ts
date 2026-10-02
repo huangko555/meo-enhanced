@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import type { Page } from 'puppeteer-core';
@@ -198,14 +199,20 @@ async function main(): Promise<void> {
       console.log('production Live outline jump integrity test passed');
       return;
     }
-    for (let step = 0; step < 180; step += 1) {
+    const stepBudget = await page.$eval('.editor-host > .cm-editor .cm-scroller', element => (
+      Math.ceil((element.scrollHeight - element.clientHeight) / 100) * 3 + 100
+    ));
+    for (let step = 0; step < stepBudget; step += 1) {
       const top = await page.$eval('.editor-host > .cm-editor .cm-scroller', (element) => element.scrollTop);
       if (top <= 1) break;
       await page.mouse.wheel({ deltaY: -100 });
       await waitForFrames(page, 1);
       await assertVisibleIntegrity(page, `initial-reverse-${step}`);
     }
-    for (let step = 0; step < 180; step += 1) {
+    assert.ok(await page.$eval('.editor-host > .cm-editor .cm-scroller', element => element.scrollTop <= 1),
+      'Reverse full-document traversal stopped before reaching the start');
+    let stalledSteps = 0;
+    for (let step = 0; step < stepBudget; step += 1) {
       const before = await page.$eval('.editor-host > .cm-editor .cm-scroller', (element) => ({
         top: element.scrollTop,
         max: element.scrollHeight - element.clientHeight
@@ -214,7 +221,16 @@ async function main(): Promise<void> {
       await page.mouse.wheel({ deltaY: 100 });
       await waitForFrames(page, 1);
       await assertVisibleIntegrity(page, `forward-${step}`);
+      const after = await page.$eval('.editor-host > .cm-editor .cm-scroller', element => ({
+        top: element.scrollTop, max: element.scrollHeight - element.clientHeight
+      }));
+      stalledSteps = Math.abs(after.top - before.top) <= 1 && after.top < after.max - 1
+        ? stalledSteps + 1 : 0;
+      assert.ok(stalledSteps < 3, `Live wheel stalled inside the document at forward-${step}`);
     }
+    assert.ok(await page.$eval('.editor-host > .cm-editor .cm-scroller', element => (
+      element.scrollTop >= element.scrollHeight - element.clientHeight - 1
+    )), 'Forward full-document traversal stopped before reaching the end');
     console.log('production Live full-document scroll integrity test passed');
   } catch (error) {
     primaryError = error;

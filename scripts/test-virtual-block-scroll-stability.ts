@@ -576,7 +576,13 @@ async function main(): Promise<void> {
         );
       }
       const scrollDelta = after.scrollTop - before.scrollTop;
-      if (Math.abs(scrollDelta) < 1) break;
+      if (Math.abs(scrollDelta) < 1) {
+        const atBoundary = wheelDelta < 0
+          ? after.scrollTop <= 1
+          : after.scrollTop >= after.scrollHeight - after.clientHeight - 1;
+        if (!atBoundary) throw new Error(`Wheel stalled before the document boundary at step ${step}`);
+        break;
+      }
       if (after.visibleLoadingBlocks.length > 0) {
         loadingObservations.push({ step, lines: after.visibleLoadingBlocks });
       }

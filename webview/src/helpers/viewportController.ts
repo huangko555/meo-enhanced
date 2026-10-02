@@ -119,7 +119,8 @@ export interface ViewportHistorySnapshot {
 interface LayoutAnchor {
   position: number;
   viewportOffset: number;
-  readingOffset?: number;
+  readingDocumentTop?: number;
+  readingScrollTop?: number;
 }
 
 interface ActiveLayoutAnchor extends LayoutAnchor {
@@ -395,6 +396,18 @@ export class ViewportController {
       !this.scrollbarDragActive && !this.activeLayoutAnchor) {
       this.startInteractionLayoutStabilization({ from: -1, to: -1 });
     }
+    const anchor = this.activeLayoutAnchor;
+    if (anchor?.readingDocumentTop !== undefined) {
+      const coords = this.view.coordsAtPos(anchor.position);
+      const scrollTop = this.view.scrollDOM.scrollTop;
+      const documentTop = coords && coords.top + scrollTop - this.view.scrollDOM.getBoundingClientRect().top;
+      // Scroll events advance the reading offset only while geometry is unchanged.
+      // Height-map anchoring is reconciled by the editor update before its scroll event.
+      if (documentTop !== null && Math.abs(documentTop - anchor.readingDocumentTop) <= POSITION_EPSILON) {
+        anchor.readingScrollTop = scrollTop;
+        anchor.revision += 1;
+      }
+    }
     this.scheduleActiveScrollFrame();
     this.projectLinkedViewport('editor');
   };
@@ -405,7 +418,7 @@ export class ViewportController {
   private readonly onBeforeInput = () => {
     // Composition input need not have a preceding keydown. It must still retire
     // a wheel reading anchor before the edit can change the visible layout.
-    if (this.activeLayoutAnchor?.readingOffset !== undefined) this.activeLayoutAnchor = null;
+    if (this.activeLayoutAnchor?.readingDocumentTop !== undefined) this.activeLayoutAnchor = null;
     this.lastWheelAt = Number.NEGATIVE_INFINITY;
     this.lastTouchMoveAt = Number.NEGATIVE_INFINITY;
     this.claimLinkedViewport('editor');
@@ -533,7 +546,8 @@ export class ViewportController {
             ? {
                 position: activeAnchor.position,
                 viewportOffset: activeAnchor.viewportOffset,
-                readingOffset: activeAnchor.readingOffset
+                readingDocumentTop: activeAnchor.readingDocumentTop,
+                readingScrollTop: activeAnchor.readingScrollTop
               }
             : this.captureLayoutAnchor(region),
           from,
@@ -579,6 +593,14 @@ export class ViewportController {
     const activeAnchor = this.activeLayoutAnchor;
     if (activeAnchor) {
       if (mapPosition) activeAnchor.position = mapPosition(activeAnchor.position);
+      if (activeAnchor.readingDocumentTop !== undefined) {
+        const resolved = this.resolveLayoutAnchorTarget(activeAnchor);
+        this.writeScrollPosition(resolved.target);
+        if (resolved.readingDocumentTop !== undefined) {
+          activeAnchor.readingDocumentTop = resolved.readingDocumentTop;
+          activeAnchor.readingScrollTop = this.view.scrollDOM.scrollTop;
+        }
+      }
       this.restartLayoutStabilization();
     }
     const activeTarget = this.activeScrollTarget;
@@ -2917,9 +2939,11 @@ export class ViewportController {
     return {
       position: anchor.position,
       viewportOffset: this.view.lineBlockAt(anchor.position).top - this.view.scrollDOM.scrollTop,
-      readingOffset: this.isUserScrolling()
-        ? (this.view.coordsAtPos(anchor.position)?.top ?? anchor.top) - scrollerRect.top
-        : undefined
+      readingDocumentTop: this.isUserScrolling()
+        ? (this.view.coordsAtPos(anchor.position)?.top ?? anchor.top)
+          + this.view.scrollDOM.scrollTop - scrollerRect.top
+        : undefined,
+      readingScrollTop: this.isUserScrolling() ? this.view.scrollDOM.scrollTop : undefined
     };
   }
 
@@ -2942,7 +2966,7 @@ export class ViewportController {
         if (!current || current !== activeAnchor) return null;
         return {
           revision: current.revision,
-          target: this.resolveLayoutAnchorTarget(current)
+          ...this.resolveLayoutAnchorTarget(current)
         };
       },
       write: (measurement) => {
@@ -2950,15 +2974,19 @@ export class ViewportController {
         if (!measurement || this.activeLayoutAnchor !== activeAnchor) return;
         queueMicrotask(() => {
           if (this.activeLayoutAnchor !== activeAnchor) return;
-          const target = measurement.revision === activeAnchor.revision
-            ? measurement.target
+          const resolved = activeAnchor.readingDocumentTop === undefined && measurement.revision === activeAnchor.revision
+            ? measurement
             : this.resolveLayoutAnchorTarget(activeAnchor);
           // Virtual height corrections may arrive after two stable frames while
           // the wheel gesture is still active. Settle within the existing frame
           // budget once it goes idle; never retain an anchor across new input.
           const userScrolling = this.isUserScrolling();
           if (!userScrolling) activeAnchor.remainingFrames -= 1;
-          const changed = this.writeScrollPosition(target);
+          const changed = this.writeScrollPosition(resolved.target);
+          if (resolved.readingDocumentTop !== undefined) {
+            activeAnchor.readingDocumentTop = resolved.readingDocumentTop;
+            activeAnchor.readingScrollTop = this.view.scrollDOM.scrollTop;
+          }
           activeAnchor.stableFrames = changed ? 0 : activeAnchor.stableFrames + 1;
           if (!userScrolling && (
             activeAnchor.stableFrames >= REQUIRED_STABLE_FRAMES ||
@@ -2973,18 +3001,31 @@ export class ViewportController {
     });
   }
 
-  private resolveLayoutAnchorTarget(anchor: ActiveLayoutAnchor): ScrollPosition {
+  private resolveLayoutAnchorTarget(anchor: ActiveLayoutAnchor): {
+    target: ScrollPosition;
+    readingDocumentTop?: number;
+  } {
     const current = this.readScrollPosition();
-    if (anchor.readingOffset !== undefined) {
+    if (anchor.readingDocumentTop !== undefined) {
       const coords = this.view.coordsAtPos(anchor.position);
-      if (!coords) return current;
-      return this.resolveScrollTarget({
-        top: current.top + coords.top - this.view.scrollDOM.getBoundingClientRect().top - anchor.readingOffset
-      }, current);
+      if (!coords) return { target: current };
+      // Native progress changes viewport Y without changing document geometry.
+      // If geometry changed, compare against the last native offset instead of
+      // adding the delta to an offset CodeMirror may already have compensated.
+      const readingDocumentTop = coords.top + current.top - this.view.scrollDOM.getBoundingClientRect().top;
+      const geometryDelta = readingDocumentTop - anchor.readingDocumentTop;
+      return {
+        target: this.resolveScrollTarget({
+          top: Math.abs(geometryDelta) <= POSITION_EPSILON
+            ? current.top
+            : (anchor.readingScrollTop ?? current.top) + geometryDelta
+        }, current),
+        readingDocumentTop
+      };
     }
-    return this.resolveScrollTarget({
+    return { target: this.resolveScrollTarget({
       top: this.view.lineBlockAt(anchor.position).top - anchor.viewportOffset
-    }, current);
+    }, current) };
   }
 
   private resolveScrollTarget(target: ScrollTarget, fallback: ScrollPosition): ScrollPosition {
