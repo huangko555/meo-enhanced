@@ -48,6 +48,23 @@ still checking type safety, workflow policy, history, tables, rendered blocks,
 input-derived work, viewport behavior, and one production browser scenario in
 the quick gate.
 
+## Window return focus and caret
+
+`scripts/test-toolbar-input-viewport.ts` runs in the quick and release gates.
+It checks input immediately after activation without waiting for focus, a trusted
+click delivered in a later frame, late Host notifications, Alt release, composition,
+passive controls, and nested table/rendered-block editors. Unknown activation may
+briefly guard caret painting; input must remain ready and a click or input must
+end that guard early. Duplicate return notifications must not extend it.
+
+The Live and Source painting cases capture the browser's actual caret pixels,
+using a distinct caret color and a visible-caret positive control. Browser virtual
+time keeps screenshot transport from consuming the activation interval. Before
+the delayed click, screenshots must contain no old-position caret; afterward they
+must contain the new-position caret. Frame observations also cover the unfrozen
+browser event path. These checks do not simulate Windows Alt+Tab or prove native
+activation event delivery; foreground acceptance remains a separate check.
+
 ## Preview pending code updates
 
 `scripts/test-preview-code-update.ts` runs the production Preview controller with

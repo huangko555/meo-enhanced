@@ -239,12 +239,27 @@ async function runImmediateFocusReturn(browser: Browser, mode: 'live' | 'source'
       window.dispatchEvent(new Event('blur'));
       content.blur();
       window.dispatchEvent(new Event('focus'));
+      setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } })), 35);
+      await new Promise<void>((resolve) => setTimeout(() => resolve(), 70));
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       return { focused: document.activeElement === content,
         caretVisible: getComputedStyle(content).caretColor !== 'rgba(0, 0, 0, 0)' };
     });
     assert.deepEqual(idleReturn, { focused: true, caretVisible: true },
-      `${mode} idle return did not reveal the caret for the first paint`);
+      `${mode} idle return exceeded the short caret display bound`);
+
+    const keyboardReturn = await page.evaluate(async () => {
+      const content = document.querySelector<HTMLElement>('.cm-content')!;
+      window.dispatchEvent(new Event('blur'));
+      content.blur();
+      window.dispatchEvent(new Event('focus'));
+      document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt', bubbles: true }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      return { focused: document.activeElement === content,
+        caretVisible: getComputedStyle(content).caretColor !== 'rgba(0, 0, 0, 0)' };
+    });
+    assert.deepEqual(keyboardReturn, { focused: true, caretVisible: true },
+      `${mode} confirmed keyboard return waited for the caret display bound`);
 
     const nativeReturn = await page.evaluate(async () => {
       const content = document.querySelector<HTMLElement>('.cm-content')!;
@@ -253,6 +268,7 @@ async function runImmediateFocusReturn(browser: Browser, mode: 'live' | 'source'
       // A native focusin must settle the visual guard even if window/Host
       // activation notifications have not arrived yet.
       content.focus({ preventScroll: true });
+      await new Promise<void>((resolve) => setTimeout(() => resolve(), 70));
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       return { focused: document.activeElement === content,
         caretVisible: getComputedStyle(content).caretColor !== 'rgba(0, 0, 0, 0)' };
@@ -552,6 +568,7 @@ async function runClickAfterSettledReturn(browser: Browser, mode: 'live' | 'sour
       content.blur();
       window.dispatchEvent(new Event('focus'));
       window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
+      await new Promise<void>((resolve) => setTimeout(() => resolve(), 70));
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       return { focused: document.activeElement === content,
         caretVisible: getComputedStyle(content).caretColor !== 'rgba(0, 0, 0, 0)' };
@@ -570,6 +587,134 @@ async function runClickAfterSettledReturn(browser: Browser, mode: 'live' | 'sour
   }
 }
 
+async function runSeparatedActivationClick(browser: Browser, mode: 'live' | 'source'): Promise<void> {
+  const page = await open(browser, mode);
+  try {
+    await page.click('.cm-line:nth-child(3)');
+    const point = await page.$eval('.cm-line:nth-child(5)', (line) => {
+      const rect = line.getBoundingClientRect();
+      return { x: rect.left + 12, y: rect.top + rect.height / 2 };
+    });
+    await page.exposeFunction('__deliverReturnClick', () => page.mouse.click(point.x, point.y));
+    const result = await page.evaluate(async () => {
+      const content = document.querySelector<HTMLElement>('.cm-content')!;
+      const frames: Array<{ line: string | null | undefined; visible: boolean; focused: boolean }> = [];
+      let clicking = false;
+      const sample = () => ({
+        line: document.getSelection()?.anchorNode?.parentElement?.closest('.cm-line')?.textContent,
+        visible: getComputedStyle(content).caretColor !== 'rgba(0, 0, 0, 0)',
+        focused: document.activeElement === content
+      });
+      const observe = () => {
+        if (clicking) return;
+        frames.push(sample());
+        requestAnimationFrame(observe);
+      };
+      window.dispatchEvent(new Event('blur'));
+      content.blur();
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
+      const inputReady = document.activeElement === content;
+      requestAnimationFrame(observe);
+      // Unlike the same-event activation fixture, let an activation frame
+      // actually render before delivering a trusted browser click.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await (window as any).__deliverReturnClick();
+      clicking = true;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const afterClick = sample();
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      return { inputReady, frames, afterClick, afterHost: sample() };
+    });
+    assert.equal(result.inputReady, true, `${mode} caret protection delayed input readiness`);
+    assert.ok(result.frames.length > 0, `${mode} fixture never rendered before clicking`);
+    assert.equal(result.frames.some((frame) => frame.focused && frame.visible && frame.line?.includes('line 3 ordinary content')), false,
+      `${mode} old caret flashed between activation and click: ${JSON.stringify(result.frames)}`);
+    assert.match(result.afterClick.line ?? '', /line 5 ordinary content/);
+    assert.equal(result.afterClick.visible, true, `${mode} click did not reveal its caret on the next paint`);
+    assert.deepEqual(result.afterHost, result.afterClick, `${mode} late Host notification changed the clicked caret`);
+    await page.keyboard.type('SEPARATED_CLICK');
+    const changed = await page.evaluate(() => (window as any).__hostMessages
+      .filter((message: any) => message.type === 'draftChanged').at(-1)?.text as string);
+    assert.match(changed.split('\n')[4], /SEPARATED_CLICK/, `${mode} separate activation click lost input`);
+  } finally {
+    await page.close();
+  }
+}
+
+async function runPaintedActivationClick(browser: Browser, mode: 'live' | 'source'): Promise<void> {
+  const page = await open(browser, mode);
+  const input = await page.createCDPSession();
+  try {
+    await page.$eval('.editor-root', (root) => (root as HTMLElement).style.setProperty('--meo-caret-color', '#ff00ff'));
+    await page.click('.cm-line:nth-child(3)');
+    const geometry = await page.evaluate(() => {
+      const old = document.getSelection()!.getRangeAt(0).getBoundingClientRect();
+      const line = document.querySelector('.cm-line:nth-child(5)')!.getBoundingClientRect();
+      return { old: { left: old.left - 4, top: old.top - 2, right: old.right + 4, bottom: old.bottom + 2 },
+        next: { left: line.left, top: line.top - 2, right: line.right, bottom: line.bottom + 2 },
+        click: { x: line.left + 12, y: line.top + line.height / 2 } };
+    });
+    const positiveControl = await page.screenshot();
+    const advance = async (budget: number) => {
+      const expired = new Promise<void>((resolve) => input.once('Emulation.virtualTimeBudgetExpired', () => resolve()));
+      await input.send('Emulation.setVirtualTimePolicy', { policy: 'advance', budget });
+      await expired;
+    };
+    // Freeze browser time between actual screenshots, so image transport and
+    // decoding cannot consume the short display guard. No fake caret is drawn.
+    await input.send('Emulation.setVirtualTimePolicy', { policy: 'pause' });
+    const ready = await page.evaluate(() => {
+      const content = document.querySelector<HTMLElement>('.cm-content')!;
+      window.dispatchEvent(new Event('blur'));
+      content.blur();
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
+      return document.activeElement === content;
+    });
+    assert.equal(ready, true, `${mode} painted caret guard delayed input focus`);
+    await advance(34);
+    const beforeClick = await page.screenshot();
+    await input.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...geometry.click });
+    await input.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...geometry.click });
+    await advance(34);
+    const afterClick = await page.screenshot();
+    const pixels = await page.evaluate(async ({ images, geometry }) => {
+      const counts: Array<{ old: number; next: number }> = [];
+      for (const encoded of images) {
+        const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
+        const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const context = canvas.getContext('2d')!;
+        context.drawImage(bitmap, 0, 0);
+        const { data, width, height } = context.getImageData(0, 0, bitmap.width, bitmap.height);
+        const count = (rect: { left: number; top: number; right: number; bottom: number }) => {
+          let result = 0;
+          for (let y = Math.max(0, Math.floor(rect.top)); y < Math.min(height, Math.ceil(rect.bottom)); y += 1) {
+            for (let x = Math.max(0, Math.floor(rect.left)); x < Math.min(width, Math.ceil(rect.right)); x += 1) {
+              const offset = (y * width + x) * 4;
+              if (data[offset] > 200 && data[offset + 1] < 70 && data[offset + 2] > 200) result += 1;
+            }
+          }
+          return result;
+        };
+        counts.push({ old: count(geometry.old), next: count(geometry.next) });
+        bitmap.close();
+      }
+      return counts;
+    }, { images: [positiveControl, beforeClick, afterClick].map((buffer) => Buffer.from(buffer).toString('base64')), geometry });
+    assert.ok(pixels[0].old > 0, `${mode} fixture could not capture a real native caret`);
+    assert.equal(pixels[1].old, 0, `${mode} screenshot captured the old caret before clicking: ${JSON.stringify(pixels)}`);
+    assert.equal(pixels[2].old, 0, `${mode} screenshot retained the old caret after clicking`);
+    assert.ok(pixels[2].next > 0, `${mode} screenshot did not contain the new clicked caret`);
+    console.log(`${mode} activation caret pixels: ${JSON.stringify(pixels)}`);
+  } finally {
+    await input.detach();
+    await page.close();
+  }
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-basic-capability-index-entry.ts')],
@@ -583,6 +728,10 @@ async function main(): Promise<void> {
   const browser = await launchTestBrowser();
   let primaryError: unknown;
   try {
+    await runPaintedActivationClick(browser, 'live');
+    await runPaintedActivationClick(browser, 'source');
+    await runSeparatedActivationClick(browser, 'live');
+    await runSeparatedActivationClick(browser, 'source');
     await runComponentFocusReturn(browser);
     await runImmediateFocusReturn(browser, 'live');
     await runImmediateFocusReturn(browser, 'source');

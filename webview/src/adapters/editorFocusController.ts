@@ -11,6 +11,7 @@ export type EditorFocusController = {
 
 const focusTakingSelector = 'input, textarea, select, [role="textbox"], [role="combobox"], [role="listbox"], [role="option"], [contenteditable]:not([contenteditable="false"])';
 const focusTransferSelector = 'iframe, dialog[open], [aria-modal="true"], [draggable="true"]';
+const windowReturnPaintGraceMs = 50;
 
 /** Owns focus handoffs between an editable document, window activation, and Webview chrome. */
 export function createEditorFocusController({
@@ -27,6 +28,7 @@ export function createEditorFocusController({
   let transientOrigin = false;
   let transientReturnFrame: number | null = null;
   let windowReturnFrame: number | null = null;
+  let windowReturnPaintTimer: number | null = null;
   let restoreOnWindowReturn = false;
   let windowReturnPending = false;
   let windowReturnPointerGeneration: number | null = 0;
@@ -67,24 +69,35 @@ export function createEditorFocusController({
     });
   };
 
-  const clearWindowReturnFrame = (): void => {
+  const clearWindowReturnPaint = (): void => {
     if (windowReturnFrame !== null) window.cancelAnimationFrame(windowReturnFrame);
     windowReturnFrame = null;
+    if (windowReturnPaintTimer !== null) window.clearTimeout(windowReturnPaintTimer);
+    windowReturnPaintTimer = null;
   };
   const finishWindowReturn = (): void => {
-    clearWindowReturnFrame();
+    clearWindowReturnPaint();
     windowReturnPending = false;
     restoreOnWindowReturn = false;
     root.classList.remove('meo-window-focus-return-pending');
   };
-  const settleWindowReturnBeforePaint = (): void => {
-    if (!windowReturnPending || windowReturnFrame !== null) return;
+  const settleWindowReturnBeforePaint = (activationClick = false): void => {
+    if (!windowReturnPending || windowReturnFrame !== null || windowReturnPaintTimer !== null) return;
     const generation = windowReturnGeneration;
-    windowReturnFrame = window.requestAnimationFrame(() => {
+    const beforePaint = () => {
       if (generation !== windowReturnGeneration) return;
-      windowReturnFrame = null;
-      finishWindowReturn();
-    });
+      windowReturnPaintTimer = null;
+      windowReturnFrame = window.requestAnimationFrame(() => {
+        if (generation !== windowReturnGeneration) return;
+        windowReturnFrame = null;
+        finishWindowReturn();
+      });
+    };
+    // Window activation can arrive before the click in a later frame.
+    // This bound guards only paint: input stays focused, and a click or key
+    // ends the guard early. Duplicate Host/focus signals never extend it.
+    if (activationClick) beforePaint();
+    else windowReturnPaintTimer = window.setTimeout(beforePaint, windowReturnPaintGraceMs);
   };
   const restoreWindowReturn = (): boolean => {
     if (!isEditableMode()) {
@@ -119,8 +132,8 @@ export function createEditorFocusController({
       restoreOnWindowReturn = false;
       if (windowReturnPending) {
         windowReturnGeneration += 1;
-        clearWindowReturnFrame();
-        settleWindowReturnBeforePaint();
+        clearWindowReturnPaint();
+        settleWindowReturnBeforePaint(true);
       }
       return;
     }
@@ -188,10 +201,15 @@ export function createEditorFocusController({
   const onKeyDownBubble = (event: KeyboardEvent): void => {
     if (event.key === 'Escape') onClick();
   };
+  const onKeyUpCapture = (event: KeyboardEvent): void => {
+    // Alt release, when delivered to the Webview, confirms a keyboard return
+    // without waiting for the unknown-activation paint bound.
+    if (event.key === 'Alt') onInputCapture(event);
+  };
   const onWindowBlur = (): void => {
     restoreOnWindowReturn = getEditor()?.hasFocus() === true || editorWasLastFocused;
     windowReturnGeneration += 1;
-    clearWindowReturnFrame();
+    clearWindowReturnPaint();
     clearTransientFrame();
     windowReturnPending = restoreOnWindowReturn;
     windowReturnPointerGeneration = restoreOnWindowReturn ? documentPointerGeneration : null;
@@ -208,6 +226,7 @@ export function createEditorFocusController({
   document.addEventListener('focusout', onFocusOut, true);
   document.addEventListener('click', onClick);
   document.addEventListener('keydown', onKeyDownCapture, true);
+  document.addEventListener('keyup', onKeyUpCapture, true);
   document.addEventListener('beforeinput', onInputCapture, true);
   document.addEventListener('compositionstart', onInputCapture, true);
   document.addEventListener('keydown', onKeyDownBubble);
@@ -224,6 +243,7 @@ export function createEditorFocusController({
       document.removeEventListener('focusout', onFocusOut, true);
       document.removeEventListener('click', onClick);
       document.removeEventListener('keydown', onKeyDownCapture, true);
+      document.removeEventListener('keyup', onKeyUpCapture, true);
       document.removeEventListener('beforeinput', onInputCapture, true);
       document.removeEventListener('compositionstart', onInputCapture, true);
       document.removeEventListener('keydown', onKeyDownBubble);
