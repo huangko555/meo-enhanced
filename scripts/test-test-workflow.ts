@@ -263,6 +263,15 @@ function collectTransitiveTestScripts(
 }
 
 const fullDirectScripts = collectTransitiveTestScripts('test', packageScripts);
+for (const contract of [
+  'scripts/test-vscode-document-copy-adapter.ts',
+  'scripts/test-vscode-document-copy-feedback.ts',
+  'scripts/test-document-copy-transport.ts',
+  'scripts/test-panel-session-external-file-notice.ts',
+  'scripts/test-panel-session-window-focus.ts'
+]) {
+  assert.ok(fullDirectScripts.has(contract), `full test workflow must include recovery and focus contract ${contract}`);
+}
 for (const area of ['history', 'table', 'rendered', 'appearance', 'search', 'viewport', 'changes'] as const) {
   const targetedPlan = createTestWorkflowPlan(parseTestWorkflowRequest(['targeted', area]));
   for (const command of flattenTestWorkflowCommands(targetedPlan)) {
