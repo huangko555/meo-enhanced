@@ -43,6 +43,29 @@ exports.run = async function () {
       }
       return false;
     }, 'production editor');
+    // A selected mode button can precede the final interactive surface. Input
+    // must reach that surface before automatic-save assertions have meaning.
+    const waitModeReady = async mode => frame.waitForFunction(mode => {
+      if (document.querySelector('.meo-preload-toolbar')) return false;
+      if (document.querySelector('.editor-root')?.dataset.mode !== mode) return false;
+      const selected = document.querySelector(`button[data-mode="${mode}"]`);
+      if (selected?.getAttribute('aria-selected') !== 'true') return false;
+      if (mode === 'preview') {
+        const preview = document.querySelector('.preview-host');
+        const previewFrame = document.querySelector('.preview-frame');
+        return preview?.hidden === false && document.querySelector('.preview-status')?.hidden === true
+          && !!previewFrame?.contentDocument?.querySelector('main.meo-export-doc')?.textContent;
+      }
+      const host = document.querySelector('.editor-host');
+      const content = host?.querySelector(`.meo-mode-${mode} .cm-content`);
+      return host?.hidden === false && host.inert === false && !!content && !content.closest('[inert]')
+        && getComputedStyle(content).visibility === 'visible' && content.getBoundingClientRect().height > 0;
+    }, {timeout:8000}, mode);
+    await waitModeReady(await frame.evaluate(()=>document.querySelector('.editor-root').dataset.mode));
+    const selectMode = async mode => {
+      await frame.click(`button[data-mode="${mode}"]`);
+      await waitModeReady(mode);
+    };
     const doc = await vscode.workspace.openTextDocument(uri);
     const saved = async expected => {
       await waitFor(() => !doc.isDirty && fs.readFileSync(file, 'utf8') === expected, 'automatic disk save');
@@ -53,7 +76,7 @@ exports.run = async function () {
     for (let round = 0; round < rounds; round++) {
       const before = expected;
       const mode = round % 3 === 1 ? 'live' : 'source';
-      await frame.click(`button[data-mode="${mode}"]`);
+      await selectMode(mode);
       const savesBefore = report.saves;
       if (mode === 'live') {
         const selector = '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tbody textarea[data-table-col="1"]';
@@ -73,6 +96,16 @@ exports.run = async function () {
         await page.keyboard.down('Control');
         await page.keyboard.press('End');
         await page.keyboard.up('Control');
+        assert.equal(await frame.evaluate(() => {
+          const content = document.querySelector('.editor-host .cm-content');
+          const selection = window.getSelection();
+          if (document.activeElement !== content || !selection?.isCollapsed
+            || !selection.focusNode || !content.contains(selection.focusNode)) return false;
+          const remaining = document.createRange();
+          remaining.selectNodeContents(content);
+          remaining.setStart(selection.focusNode, selection.focusOffset);
+          return remaining.toString() === '';
+        }), true, 'Source input must target the document end');
         const marker = ` round-${round}`;
         await page.keyboard.type(marker, { delay: 30 });
         expected = before + marker;
@@ -87,8 +120,8 @@ exports.run = async function () {
         await saved(expected);
       }
       assert.ok(report.saves > savesBefore, 'The platform must emit a native save event');
-      await frame.click('button[data-mode="preview"]');
-      await frame.click('button[data-mode="source"]');
+      await selectMode('preview');
+      await selectMode('source');
       report.completed++;
       console.log(`Native auto-save endurance ${report.completed}/${rounds}`);
     }
