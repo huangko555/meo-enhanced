@@ -224,23 +224,31 @@ export function createInputSuggestions(options: {
         row.addEventListener('click', () => this.choose(index));
         if (item.slash) row.addEventListener('pointermove', () => {
           if (this.index === index) return;
-          this.index = index; this.selectedCommand = item.slash!.id;
-          list.querySelectorAll('[role="option"]').forEach((option, selected) => option.setAttribute('aria-selected', String(selected === index)));
-          this.ariaInput?.setAttribute('aria-activedescendant', row.id); this.position();
+          this.select(index, false);
         });
         list.append(row);
       });
       this.popup.hidden = false; this.ariaInput = this.cellInput ?? this.view.contentDOM;
       this.ariaInput.setAttribute('aria-controls', this.popup.id); this.ariaInput.setAttribute('aria-activedescendant', this.popup.id + '-' + this.index);
       this.position();
+      if (!this.popup.hidden) { this.scrollSelection(); if (slash) this.position(); }
+    }
+    select(index: number, scroll: boolean) {
+      this.index = index;
+      if (this.items[index]?.slash) this.selectedCommand = this.items[index].slash!.id;
+      this.popup.querySelectorAll('[role="option"]').forEach((row, selected) => row.setAttribute('aria-selected', String(selected === index)));
+      this.ariaInput?.setAttribute('aria-activedescendant', this.popup.id + '-' + index);
+      if (scroll) this.scrollSelection();
+      this.position();
+    }
+    scrollSelection() {
+      const list = this.popup.querySelector<HTMLElement>('.meo-slash-list') ?? this.popup;
       const selected = list.querySelector<HTMLElement>('[aria-selected="true"]');
-      if (selected && !this.popup.hidden) {
-        // Scroll only the candidate list, never the document containing its anchor.
-        const row = selected.getBoundingClientRect(), bounds = list.getBoundingClientRect();
-        if (row.top < bounds.top) list.scrollTop -= bounds.top - row.top;
-        else if (row.bottom > bounds.bottom) list.scrollTop += row.bottom - bounds.bottom;
-        if (slash) this.position();
-      }
+      if (!selected) return;
+      // Scroll only enough to reveal a candidate; keep both the list and document stable otherwise.
+      const row = selected.getBoundingClientRect(), bounds = list.getBoundingClientRect();
+      if (row.top < bounds.top) list.scrollTop -= bounds.top - row.top;
+      else if (row.bottom > bounds.bottom) list.scrollTop += row.bottom - bounds.bottom;
     }
     position() {
       const slash = this.context?.type === 'slash', document = this.view.dom.ownerDocument;
@@ -289,25 +297,32 @@ export function createInputSuggestions(options: {
         if (coords.bottom <= visibleTop || coords.top >= visibleBottom || coords.left >= visibleRight ||
             Math.max(coords.right, coords.left + this.view.defaultCharacterWidth) <= visibleLeft || right <= left) { close(); return; }
         this.popup.style.maxWidth = (right - left) + 'px';
-        this.popup.style.removeProperty('--meo-suggestion-max-height');
-        const preferred = this.popup.getBoundingClientRect().height;
+        const list = this.popup.querySelector<HTMLElement>('.meo-slash-list')!, previous = list.getBoundingClientRect();
+        const selected = list.querySelector<HTMLElement>('[aria-selected="true"]'), selectedBefore = selected?.getBoundingClientRect();
+        const selectedVisible = selectedBefore && selectedBefore.top >= previous.top - 1 && selectedBefore.bottom <= previous.bottom + 1;
+        const first = list.firstElementChild!.getBoundingClientRect(), last = list.lastElementChild!.getBoundingClientRect();
+        const chrome = this.popup.getBoundingClientRect().height - previous.height;
+        // Measure content without enlarging the list: a temporary resize clamps its scroll position.
+        const preferred = Math.min(parseFloat(getComputedStyle(this.popup).getPropertyValue('--meo-suggestion-preferred-height')), last.bottom - first.top + chrome);
         const below = Math.max(0, bottom - coords.bottom - 4), above = Math.max(0, coords.top - top - 4);
         if (this.above === null) this.above = below < preferred && above > below;
         else if ((this.above ? above : below) < preferred && (this.above ? below : above) >= preferred) this.above = !this.above;
         else if (above < preferred && below < preferred) this.above = above > below;
         const available = this.above ? above : below;
-        const rowHeight = this.popup.querySelector<HTMLElement>('[role="option"]')!.offsetHeight;
-        if (available < rowHeight + 2) { close(); return; }
-        this.popup.style.setProperty('--meo-suggestion-max-height', Math.min(preferred, available) + 'px');
+        const rows = Math.floor((Math.min(preferred, available) - chrome + 0.001) / first.height);
+        if (rows < 1) { close(); return; }
+        // Keep the edge between rows, including fractional heights from editor fonts and zoom.
+        this.popup.style.setProperty('--meo-suggestion-max-height', rows * first.height + chrome + 'px');
         const bounds = this.popup.getBoundingClientRect();
         this.popup.style.left = Math.max(left, Math.min(coords.left, right - bounds.width)) + 'px';
         this.popup.style.top = (this.above ? coords.top - bounds.height - 4 : coords.bottom + 4) + 'px';
-        const selected = this.popup.querySelector<HTMLElement>('[aria-selected="true"]');
+        // Shrinking the viewport must not hide a command that was already visible.
+        if (selectedVisible && list.getBoundingClientRect().height < previous.height) this.scrollSelection();
         if (selected) {
           // Paint a single selection background across the list and its reserved scrollbar gutter.
-          const offset = selected.getBoundingClientRect().top - this.popup.getBoundingClientRect().top - this.popup.clientTop;
+          const row = selected.getBoundingClientRect(), offset = row.top - bounds.top - this.popup.clientTop;
           this.popup.style.setProperty('--meo-suggestion-selected-top', offset + 'px');
-          this.popup.style.setProperty('--meo-suggestion-selected-bottom', offset + selected.offsetHeight + 'px');
+          this.popup.style.setProperty('--meo-suggestion-selected-bottom', offset + row.height + 'px');
         }
       } else {
         const bounds = this.popup.getBoundingClientRect();
@@ -382,7 +397,7 @@ export function createInputSuggestions(options: {
       if (event.key === 'Escape' && (this.slashFrom !== null || this.cellFrom !== null || !this.popup.hidden || this.fields.length)) { event.preventDefault(); this.slashFrom = null; this.cellFrom = null; this.cellInput = null; this.fields = []; this.clear(); return true; }
       if (this.popup.hidden) return false;
       if (event.key === 'Escape') { event.preventDefault(); this.slashFrom = null; this.cellFrom = null; this.cellInput = null; this.fields = []; this.clear(); return true; }
-      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); this.index = (this.index + (event.key === 'ArrowDown' ? 1 : this.items.length - 1)) % this.items.length; this.render(); return true; }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); this.select((this.index + (event.key === 'ArrowDown' ? 1 : this.items.length - 1)) % this.items.length, true); return true; }
       if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey) {
         if (this.items[this.index]?.slash?.disabled) return false;
         event.preventDefault(); this.choose(this.index); return true;

@@ -23,7 +23,7 @@ page.on('pageerror', error => errors.push(String(error)));
 page.on('console', message => { if (message.type() === 'error' && message.text().includes('plugin crashed')) errors.push(message.text()) });
 try {
   await page.setViewport({ width: 1000, height: 720 });
-  await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
+  await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}:root{--vscode-panel-border:#666}</style><div id="app"></div>');
   await page.addStyleTag({ path: 'webview/src/styles.css' });
   await page.addScriptTag({ content: await build.outputs[0].text() });
   const prepare = async (mode: string, text = '', pos = text.length, input = {}) => {
@@ -62,8 +62,22 @@ try {
     const g = window as any, view = g.editor.view, anchor = view.coordsAtPos(g.slashAnchor), popup = document.querySelector<HTMLElement>('.meo-input-suggestions')!, menu = popup.getBoundingClientRect(), scroller = view.scrollDOM.getBoundingClientRect();
     return { anchor: { top: anchor.top, bottom: anchor.bottom, left: anchor.left }, menu: { top: menu.top, bottom: menu.bottom, left: menu.left, right: menu.right, height: menu.height }, viewport: { top: scroller.top, bottom: scroller.bottom }, scrollTop: view.scrollDOM.scrollTop };
   });
+  const completeRows = async (label: string) => {
+    await settlePosition();
+    // Native scroll limits round clientHeight/scrollTop; allow one CSS pixel at fractional edges.
+    const layout = await page.evaluate(() => {
+      const list = document.querySelector<HTMLElement>('.meo-slash-list')!, bounds = list.getBoundingClientRect();
+      const rows = Array.from(list.children).map(row => {
+        const box = row.getBoundingClientRect();
+        return { command: (row as HTMLElement).dataset.command, selected: row.getAttribute('aria-selected') === 'true', top: box.top, bottom: box.bottom };
+      });
+      return { top: bounds.top, bottom: bounds.bottom, visible: rows.filter(row => row.bottom > bounds.top + 1 && row.top < bounds.bottom - 1), selected: rows.find(row => row.selected) };
+    });
+    assert.ok(layout.visible.length > 0 && layout.visible.every(row => row.top >= layout.top - 1 && row.bottom <= layout.bottom + 1), label + ': every visible command row fits completely: ' + JSON.stringify(layout));
+    assert.ok(layout.selected && layout.selected.top >= layout.top - 1 && layout.selected.bottom <= layout.bottom + 1, label + ': the selected command remains fully visible: ' + JSON.stringify(layout));
+  };
   for (const mode of ['source', 'live']) {
-    await prepare(mode); await page.keyboard.type('/'); await open(); await watchPopup();
+    await prepare(mode); await page.keyboard.type('/'); await open(); await completeRows(mode + ': preferred menu height'); await watchPopup();
     await page.keyboard.type('bold', { delay: 60 }); await open();
     assert.deepEqual(await popupContinuity(), { hiddenFrames: 0, replaced: false }, mode + ': filtering retains the visible popup without blank frames');
     await page.click('[data-command="bold"] .meo-suggestion-command'); await waitText('****');
@@ -101,11 +115,38 @@ try {
     await page.evaluate(scrollTop => { (window as any).editor.view.scrollDOM.scrollTop = scrollTop; }, below.scrollTop); await settlePosition(); await closed();
     await page.keyboard.type('i'); await closed();
     assert.equal(await text(), longDocument.slice(0, anchor) + '/boldi' + longDocument.slice(anchor), mode + ': automatic dismissal preserves text and does not reopen on scrolling back or typing');
+    await prepare(mode, longDocument, anchor); await page.evaluate(anchor => { (window as any).slashAnchor = anchor; }, anchor);
+    await placeAnchor(150); await page.keyboard.type('/'); await open();
+    const pageRows = await page.$eval('.meo-slash-list', list => Math.floor(list.clientHeight / list.firstElementChild!.getBoundingClientRect().height));
+    const navigationRowHeight = await page.$eval('.meo-slash-suggestion', row => row.getBoundingClientRect().height);
+    for (let index = 0; index < pageRows; index++) await page.keyboard.press('ArrowDown');
+    await completeRows(mode + ': crosses the first page boundary');
+    const firstScrolled = await page.$eval('.meo-slash-list', list => list.scrollTop);
+    assert.ok(Math.abs(firstScrolled - navigationRowHeight) <= 1, mode + ': crossing the lower edge scrolls only one row');
+    await page.keyboard.press('ArrowUp'); await completeRows(mode + ': moves up within the second page');
+    assert.equal(await page.$eval('.meo-slash-list', list => list.scrollTop), firstScrolled, mode + ': moving up inside the viewport keeps the scroll');
+    await page.keyboard.press('ArrowDown'); await completeRows(mode + ': moves back down within the second page');
+    assert.equal(await page.$eval('.meo-slash-list', list => list.scrollTop), firstScrolled, mode + ': moving down inside the viewport keeps the scroll');
+    for (let index = 0; index < pageRows; index++) await page.keyboard.press('ArrowUp');
+    await completeRows(mode + ': crosses the upper edge');
+    assert.equal(await page.$eval('.meo-slash-list', list => list.scrollTop), 0, mode + ': crossing the upper edge reveals the first row');
+    await page.evaluate(() => { (window as any).slashSelectionList = document.querySelector('.meo-slash-list'); });
+    await page.keyboard.press('ArrowUp'); await completeRows(mode + ': last command before shrinking');
+    const tailScroll = await page.$eval('.meo-slash-list', list => list.scrollTop);
+    await page.keyboard.press('ArrowUp'); await completeRows(mode + ': moves up within the visible tail');
+    assert.equal(await page.$eval('.meo-slash-list', list => list.scrollTop), tailScroll, mode + ': moving within the visible list does not scroll');
+    assert.equal(await page.evaluate(() => document.querySelector('.meo-slash-list') === (window as any).slashSelectionList), true, mode + ': keyboard selection retains the list DOM');
+    await page.keyboard.press('ArrowDown'); await completeRows(mode + ': returns to the last visible command');
+    assert.equal(await page.$eval('.meo-slash-list', list => list.scrollTop), tailScroll, mode + ': moving back within the visible list keeps its scroll');
     await page.setViewport({ width: 1000, height: 320 });
+    await completeRows(mode + ': selected command after shrinking the viewport');
     await prepare(mode, longDocument, anchor); await page.evaluate(anchor => { (window as any).slashAnchor = anchor; }, anchor); await placeAnchor(150);
     await page.keyboard.type('/'); await open();
     const compact = await geometry();
     assert.ok(compact.menu.height < 170 && compact.menu.top >= compact.viewport.top && compact.menu.bottom <= compact.viewport.bottom, mode + ': shrinks within the visible editor when neither side fits');
+    await completeRows(mode + ': constrained menu');
+    await page.keyboard.press('ArrowUp'); await completeRows(mode + ': wraps to the last command');
+    await page.keyboard.press('ArrowDown'); await completeRows(mode + ': wraps to the first command');
     const beforeListScroll = compact.menu.top;
     await page.evaluate(() => { document.querySelector('.meo-slash-list')!.scrollTop = 100; }); await settlePosition();
     assert.ok(Math.abs((await geometry()).menu.top - beforeListScroll) < 2, mode + ': scrolling the candidate list does not move the document anchor');
@@ -113,6 +154,35 @@ try {
     const resized = await geometry();
     assert.ok(resized.menu.top >= resized.viewport.top && resized.menu.bottom <= resized.viewport.bottom && resized.menu.right <= 800, mode + ': remains inside the editor after a window resize');
     await page.keyboard.press('End'); await closed();
+    await page.setViewport({ width: 1000, height: 320 });
+    for (const fontSize of [23, 29]) for (const offset of [40, 260]) {
+      await prepare(mode, longDocument, anchor);
+      await page.evaluate(({ anchor, fontSize }) => {
+        const g = window as any; g.slashAnchor = anchor;
+        g.editor.view.contentDOM.style.fontSize = fontSize + 'px'; g.editor.view.requestMeasure();
+      }, { anchor, fontSize });
+      await settlePosition(); await placeAnchor(offset); await page.keyboard.type('/'); await open();
+      const label = mode + ': ' + fontSize + 'px at ' + (offset === 40 ? 'top' : 'bottom');
+      await completeRows(label);
+      const rowHeight = await page.$eval('.meo-slash-suggestion', row => row.getBoundingClientRect().height);
+      assert.ok(Math.abs(rowHeight - Math.round(rowHeight)) > 0.01, label + ': exercises fractional row heights');
+      const placement = await geometry();
+      assert.ok(offset === 40 ? placement.menu.top >= placement.anchor.bottom + 3 : placement.menu.bottom <= placement.anchor.top - 3, label + ': opens on the side with space');
+      await page.keyboard.press('ArrowUp'); await completeRows(label + ': last command');
+      const fontTailScroll = await page.$eval('.meo-slash-list', list => list.scrollTop);
+      await page.keyboard.press('ArrowUp'); await completeRows(label + ': previous command');
+      assert.equal(await page.$eval('.meo-slash-list', list => list.scrollTop), fontTailScroll, label + ': visible upward selection keeps its scroll');
+      await page.keyboard.press('ArrowDown'); await completeRows(label + ': last command again');
+      assert.equal(await page.$eval('.meo-slash-list', list => list.scrollTop), fontTailScroll, label + ': visible downward selection keeps its scroll');
+      const listScroll = await page.$eval('.meo-slash-list', list => list.scrollTop);
+      const documentScroll = placement.scrollTop;
+      await page.evaluate(() => { window.dispatchEvent(new Event('resize')); }); await settlePosition();
+      assert.equal(await page.$eval('.meo-slash-list', list => list.scrollTop), listScroll, label + ': repositioning preserves internal scroll');
+      assert.equal((await geometry()).scrollTop, documentScroll, label + ': keyboard navigation does not scroll the document');
+      await completeRows(label + ': after repositioning');
+      await page.keyboard.press('ArrowDown'); await completeRows(label + ': first command again');
+      await page.keyboard.press('Escape'); await closed();
+    }
     await page.setViewport({ width: 1000, height: 720 });
     await page.evaluate(() => { delete (window as any).slashAnchor; });
     await prepare(mode); await page.keyboard.type('/'); await open();
@@ -401,13 +471,28 @@ try {
   await page.waitForSelector('tbody textarea');
   await page.evaluate(() => { const input = document.querySelector<HTMLTextAreaElement>('tbody textarea')!; input.focus(); input.scrollIntoView({ block: 'center' }); input.setSelectionRange(0, 0); });
   await settlePosition(); await page.keyboard.type('/bold'); await open();
+  // Take the scroll baseline after the native commit's viewport restoration has settled.
+  await page.waitForFunction(() => (window as any).editor.view.state.doc.toString().includes('| /bold | x |'));
+  await settlePosition();
   const cellTop = () => page.$eval('.meo-input-suggestions', element => element.getBoundingClientRect().top);
   const originalCellTop = await cellTop();
+  const cellBeforeScroll = await page.evaluate(() => ({ input: document.activeElement!.getBoundingClientRect().top, scroll: (window as any).editor.view.scrollDOM.scrollTop }));
   await page.evaluate(() => { (window as any).editor.view.scrollDOM.scrollTop -= 40; }); await settlePosition();
-  assert.ok(Math.abs(await cellTop() - originalCellTop - 40) < 2, 'native cell popup follows document scrolling');
+  const cellAfterScroll = await page.evaluate(() => ({ input: document.activeElement!.getBoundingClientRect().top, scroll: (window as any).editor.view.scrollDOM.scrollTop, popup: document.querySelector('.meo-input-suggestions')!.getBoundingClientRect().top }));
+  assert.ok(Math.abs(cellAfterScroll.input - cellBeforeScroll.input - 40) < 2, 'the native cell actually moves with the document scroll');
+  assert.ok(Math.abs(cellAfterScroll.popup - originalCellTop - 40) < 2, 'native cell popup follows document scrolling: ' + JSON.stringify({ before: cellBeforeScroll, after: cellAfterScroll, originalCellTop }));
   await page.evaluate(() => { const input = document.activeElement as HTMLTextAreaElement, view = (window as any).editor.view; view.scrollDOM.scrollTop += input.getBoundingClientRect().bottom - view.scrollDOM.getBoundingClientRect().top + 40; });
   await closed();
   await page.evaluate(() => { (document.activeElement as HTMLTextAreaElement).scrollIntoView({ block: 'center' }); }); await settlePosition(); await closed();
+  await page.setViewport({ width: 1000, height: 320 });
+  await prepareCell(); await page.keyboard.type('/'); await open(); await completeRows('native cell: constrained menu');
+  await page.keyboard.press('ArrowUp'); await completeRows('native cell: last command');
+  const nativeTailScroll = await page.$eval('.meo-slash-list', list => list.scrollTop);
+  await page.keyboard.press('ArrowUp'); await completeRows('native cell: previous visible command');
+  assert.equal(await page.$eval('.meo-slash-list', list => list.scrollTop), nativeTailScroll, 'native cell: visible selection keeps internal scroll');
+  await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown'); await completeRows('native cell: first command');
+  await page.keyboard.press('Escape'); await closed();
+  await page.setViewport({ width: 1000, height: 720 });
   const wideTable = ['A', '---', 'x'].map(value => '| ' + Array(10).fill(value).join(' | ') + ' |').join('\n');
   await prepare('live', wideTable, 0); await page.waitForSelector('tbody textarea');
   await page.evaluate(() => {

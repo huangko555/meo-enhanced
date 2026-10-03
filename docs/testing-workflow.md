@@ -647,7 +647,10 @@ invalid parameters, preserved selections, paragraph boundaries and list/quote ne
 The full Webview checks verify actual shortcut priority and Chinese/English,
 light/dark popup surfaces, localized descriptions and inherited editor fonts.
 Slash positioning checks cover document scrolling, stable slash anchors, above/below
-flips, limited viewport height, list-only scrolling, dismissal without reopening,
+flips, whole-row viewport limits (including fractional font heights), first/last
+command visibility through viewport shrinking, stable keyboard-selection DOM and
+minimal list scrolling, preserved internal scroll during repositioning, list-only
+scrolling, dismissal without reopening,
 native table clipping and textarea scrolling. Pinyin separators are exercised in
 Source, Live and native-cell preedit, including complete raw-query replacement.
 CDP composition validates preedit/commit boundaries without proving a specific

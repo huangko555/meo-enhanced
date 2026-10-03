@@ -7147,7 +7147,10 @@ html[data-editor-appearance='dark'] :is(.settings-warning, .settings-shortcut-co
   --meo-suggestion-selected-background: color-mix(in srgb, var(--vscode-sideBar-background) 90%, var(--meo-foreground) 10%);
   --meo-suggestion-match-color: var(--meo-notice-info, #3483ff);
   --meo-suggestion-shadow-color: rgb(31 35 40 / 18%);
-  --meo-suggestion-max-height: min(342px, calc(100vh - 16px));
+  --meo-suggestion-preferred-height: 342px;
+  --meo-suggestion-max-height: min(var(--meo-suggestion-preferred-height), calc(100vh - 16px));
+  display: flex;
+  flex-direction: column;
   width: min(360px, calc(100vw - 16px));
   max-height: var(--meo-suggestion-max-height);
   padding: 0;
@@ -7167,7 +7170,7 @@ html[data-editor-appearance='dark'] .meo-slash-suggestions {
   --meo-suggestion-shadow-color: rgb(0 0 0 / 36%);
 }
 .meo-slash-list {
-  max-height: calc(var(--meo-suggestion-max-height) - 2px);
+  min-height: 0;
   clip-path: inset(0 round 9px);
   overflow-x: hidden;
   overflow-y: scroll;
