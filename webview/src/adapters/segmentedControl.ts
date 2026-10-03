@@ -84,10 +84,10 @@ export const createSegmentedControl = <Value extends string>(options: SegmentedC
       if (!previousBounds || !nextIndicator || !element.isConnected || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
       const nextBounds = nextIndicator.getBoundingClientRect();
       if (previousBounds.width === 0 || nextBounds.width === 0 || typeof nextIndicator.animate !== 'function') return;
-      // The buttons can have different widths, so move and resize the pill from its previous position.
+      // Keep the pill's dimensions and corner radius unchanged throughout the slide.
       nextIndicator.animate([
-        { transform: `translateX(${previousBounds.left - nextBounds.left}px) scaleX(${previousBounds.width / nextBounds.width})` },
-        { transform: 'translateX(0) scaleX(1)' }
+        { transform: `translateX(${previousBounds.left - nextBounds.left}px)` },
+        { transform: 'translateX(0)' }
       ], { duration: 150, easing: 'ease-out' });
     },
     setLabels(labels: Readonly<Partial<Record<Value, string>>>) {

@@ -3849,7 +3849,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       if (!(event.target instanceof Node)) return;
       const wrap = getWrap();
       const container = getContainer();
-      if (isEditingMenuTarget(event.target)) {
+      // A modal owns its pointer interactions. Scheduling an outside-table exit
+      // here could blur the cell after the modal restores its original focus.
+      if (isEditingMenuTarget(event.target) || (event.target instanceof Element && event.target.closest('dialog[open]'))) {
         return;
       }
       const isOutsideTable = !container.contains(event.target);

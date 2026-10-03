@@ -10,7 +10,7 @@ let page = await browser.newPage();
 const errors: string[] = []; page.on('pageerror', error => errors.push(String(error)));
 try {
   const chord = async (key: string) => { await page.keyboard.down('Control'); await page.keyboard.press(key); await page.keyboard.up('Control'); };
-  const openFixture = async () => {
+  const openFixture = async (text = 'hello\n\n# Heading\n\ntext', mode: 'source' | 'live' = 'source', stubMermaid = false) => {
     await page.setViewport({ width: 1100, height: 780 });
     await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
     await page.addStyleTag({ path: 'webview/src/styles.css' });
@@ -41,17 +41,56 @@ try {
         }
       }});
     ` });
+    if (stubMermaid) await page.evaluate(() => { (window as any).mermaid = { initialize() {}, async render() { return { svg: '<svg viewBox="0 0 120 60"><text x="4" y="20">diagram</text></svg>' }; } }; });
     await page.addScriptTag({ content: await build.outputs[0].text() });
-    await page.evaluate(() => {
+    await page.evaluate(({ text, mode }) => {
       const global = window as any; global.__preferences = { input: { ...global.EditingSettingsHarness.defaultInputAssistance }, shortcuts: {} };
-      const text = 'hello\n\n# Heading\n\ntext';
-      global.__initMessage = { type: 'init', documentId: 'file:///settings.md', text, version: 1, savedRevision: { version: 1, text }, diagnostics: [], mode: 'source', uiLanguage: 'zh-CN', uiLanguagePreference: 'zh-CN', automaticUiLanguage: 'zh-CN', sourceLineNumbers: 'on', previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, previewShowComments: false, editorAppearance: 'dark', gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null, editingPreferences: global.__preferences, editingPreferencesRevision: 0 };
+      global.__initMessage = { type: 'init', documentId: 'file:///settings.md', text, version: 1, savedRevision: { version: 1, text }, diagnostics: [], mode, uiLanguage: 'zh-CN', uiLanguagePreference: 'zh-CN', automaticUiLanguage: 'zh-CN', sourceLineNumbers: 'on', previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, previewShowComments: false, editorAppearance: 'dark', gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null, editingPreferences: global.__preferences, editingPreferencesRevision: 0 };
       window.dispatchEvent(new MessageEvent('message', { data: global.__initMessage }));
-    });
+    }, { text, mode });
   };
   await openFixture();
   await page.waitForSelector('.cm-editor');
   await page.waitForFunction(() => !document.querySelector('.mode-toolbar')?.classList.contains('meo-preload-toolbar'));
+  const closeSettings = async (method: 'button' | 'backdrop' | 'escape') => {
+    if (method === 'button') await page.click('.settings-close');
+    else if (method === 'escape') await page.keyboard.press('Escape');
+    else {
+      const point = await page.$eval('.settings-window', element => { const bounds = element.getBoundingClientRect(); return { x: Math.max(1, bounds.left - 4), y: bounds.top + 30 }; });
+      await page.mouse.click(point.x, point.y);
+    }
+    await page.waitForFunction(() => !document.querySelector<HTMLDialogElement>('.settings-window')!.open);
+  };
+  for (const mode of ['source', 'live']) {
+    await page.click(`button[data-mode="${mode}"]`);
+    await page.waitForSelector(`.cm-editor.meo-mode-${mode}`);
+    for (const method of ['button', 'backdrop', 'escape'] as const) {
+      for (const [anchor, head] of [[2, 2], [1, 4], [4, 1]]) {
+        const before = await page.evaluate(({ anchor, head }) => {
+          const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor'));
+          view.dispatch({ selection: { anchor, head } }); view.focus();
+          return { text: view.state.doc.toString(), scroll: view.scrollDOM.scrollTop };
+        }, { anchor, head });
+        await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button');
+        await closeSettings(method);
+        const restored = await page.evaluate(() => {
+          const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor'));
+          return { focus: view.hasFocus, anchor: view.state.selection.main.anchor, head: view.state.selection.main.head, scroll: view.scrollDOM.scrollTop };
+        });
+        assert.equal(restored.focus, true, `${mode}/${method}: closing settings restores editor focus immediately`);
+        assert.deepEqual([restored.anchor, restored.head], [anchor, head], `${mode}/${method}: closing settings preserves the caret and selection direction`);
+        assert.ok(Math.abs(restored.scroll - before.scroll) <= 1, `${mode}/${method}: closing settings preserves the document viewport`);
+        await page.keyboard.type('Z');
+        const expected = before.text.slice(0, Math.min(anchor, head)) + 'Z' + before.text.slice(Math.max(anchor, head));
+        await page.waitForFunction(text => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')).state.doc.toString() === text, { timeout: 2000 }, expected);
+        assert.equal(await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')).state.doc.toString()), expected, `${mode}/${method}: typing resumes at the original selection without another click`);
+        await chord('z');
+        await page.waitForFunction(text => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')).state.doc.toString() === text, {}, before.text);
+      }
+    }
+  }
+  await page.click('button[data-mode="source"]');
+  await page.waitForSelector('.cm-editor.meo-mode-source');
   await page.click('.more-tools-wrapper > .format-button');
   assert.equal(await page.$eval('.more-tools-panel', element => element.getBoundingClientRect().width), 288);
   assert.equal(await page.$$eval('.more-tools-panel .more-tools-option', elements => elements.length), 6);
@@ -61,6 +100,23 @@ try {
   assert.equal(await page.$$eval('.settings-item', elements => elements.length), 11);
   assert.equal(await page.$eval('.settings-footer', element => (element as HTMLElement).hidden), true);
   const height = await page.$eval('.settings-window', element => element.getBoundingClientRect().height);
+  await page.click('.settings-jump[data-section="interface"]');
+  const fontStepper = '.settings-item[data-setting="fontSize"] .editor-font-size-stepper';
+  await page.click('[data-setting="fontSize"] [data-value="auto"]');
+  assert.equal(await page.$eval(fontStepper, element => element.getAttribute('aria-disabled')), 'true');
+  assert.equal(await page.$$eval(fontStepper + ' button', elements => elements.every(element => (element as HTMLButtonElement).disabled)), true);
+  assert.ok(await page.$eval(fontStepper, element => Number(getComputedStyle(element).opacity) < 1), 'automatic font size visibly disables the whole stepper');
+  assert.ok(await page.$$eval(fontStepper + ' button', elements => elements.every(element => {
+    const button = element.getBoundingClientRect(), icon = element.querySelector('svg')!.getBoundingClientRect();
+    return Math.abs(icon.top + icon.height / 2 - button.top - button.height / 2) <= .5;
+  })), 'font adjustment icons are vertically centered');
+  await page.click('[data-setting="fontSize"] [data-value="custom"]');
+  assert.equal(await page.$eval(fontStepper, element => element.getAttribute('aria-disabled')), 'false');
+  const fontValue = await page.$eval(fontStepper + ' output', element => Number(element.textContent));
+  await page.click(fontStepper + ' button:last-child');
+  assert.equal(await page.$eval(fontStepper + ' output', element => Number(element.textContent)), fontValue + 1);
+  await page.click('[data-setting="fontSize"] [data-value="auto"]');
+  assert.equal(await page.$eval(fontStepper + ' output', element => Number(element.textContent)), fontValue + 1, 'automatic mode preserves the last custom size');
   await page.click('.settings-tab[data-tab="typing"]');
   assert.equal(await page.$$eval('.settings-item', elements => elements.length), 12);
   assert.deepEqual(await page.$$eval('.settings-paste-contexts dt', elements => elements.map(e => e.textContent)), ['正文', '已有表格', '代码']);
@@ -230,9 +286,18 @@ try {
   const animation = await page.$eval('[data-setting="theme"] [data-value="light"]', e => {
     (e as HTMLButtonElement).click();
     const pill = e.querySelector<HTMLElement>('.segmented-control-button-indicator')!;
-    return pill.getAnimations().map(animation => ({ duration: animation.effect?.getTiming().duration, keyframes: (animation.effect as KeyframeEffect).getKeyframes().map(frame => frame.transform) }));
+    return pill.getAnimations().map(animation => {
+      animation.pause();
+      const samples = [0, 75, 150].map(time => { animation.currentTime = time; const bounds = pill.getBoundingClientRect(); return { width: bounds.width, height: bounds.height, radius: getComputedStyle(pill).borderRadius }; });
+      const result = { duration: animation.effect?.getTiming().duration, keyframes: (animation.effect as KeyframeEffect).getKeyframes().map(frame => frame.transform), samples };
+      animation.finish(); return result;
+    });
   });
-  assert.ok(animation.some(value => value.duration === 150 && value.keyframes[0] !== value.keyframes[1]), 'the production segmented pill moves and resizes');
+  assert.ok(animation.some(value => value.duration === 150 && value.keyframes[0] !== value.keyframes[1]), 'the production segmented pill slides');
+  assert.ok(animation.every(value => value.keyframes.every(transform => /^translateX\(/.test(String(transform)))), 'the selected pill only translates without scaling');
+  for (const value of animation) for (const sample of value.samples) {
+    assert.ok(Math.abs(sample.width - value.samples[0].width) <= .1 && Math.abs(sample.height - value.samples[0].height) <= .1 && sample.radius === value.samples[0].radius, 'the selected pill keeps its dimensions and corner radius throughout the slide');
+  }
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
   assert.equal(await page.$eval('[data-setting="theme"] [data-value="dark"]', e => { (e as HTMLButtonElement).click(); return e.querySelector<HTMLElement>('.segmented-control-button-indicator')!.getAnimations().length; }), 0);
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
@@ -277,6 +342,23 @@ try {
   const tableText = '| A | B |\n| --- | --- |\n| x | y |';
   await page.evaluate(table => { const g = window as any; const view = g.EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')); view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: table }, selection: { anchor: table.indexOf('x') } }); }, tableText);
   await page.click('button[data-mode="live"]'); await page.waitForSelector('tbody textarea');
+  for (const method of ['button', 'backdrop', 'escape'] as const) {
+    for (const [start, end, direction] of [[0, 0, 'none'], [1, 1, 'none'], [0, 1, 'forward'], [0, 1, 'backward']] as const) {
+      await page.evaluate(({ start, end, direction }) => {
+        const input = document.querySelector<HTMLTextAreaElement>('tbody textarea')!; input.focus(); input.setSelectionRange(start, end, direction);
+      }, { start, end, direction });
+      await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button');
+      await closeSettings(method);
+      assert.deepEqual(await page.evaluate(() => {
+        const input = document.querySelector<HTMLTextAreaElement>('tbody textarea')!;
+        return { focus: document.activeElement === input, start: input.selectionStart, end: input.selectionEnd, direction: input.selectionDirection };
+      }), { focus: true, start, end, direction: direction === 'none' ? 'forward' : direction }, `native cell/${method}: caret and selection direction return to the original input`);
+      await page.keyboard.type('Z');
+      assert.equal(await page.$eval('tbody textarea', element => (element as HTMLTextAreaElement).value), 'x'.slice(0, start) + 'Z' + 'x'.slice(end), `native cell/${method}: typing resumes without another click`);
+      await chord('z');
+      await page.waitForFunction(() => document.querySelector<HTMLTextAreaElement>('tbody textarea')?.value === 'x');
+    }
+  }
   await page.evaluate(() => { const input = document.querySelector<HTMLTextAreaElement>('tbody textarea')!; input.focus(); input.setSelectionRange(0, input.value.length); });
   await settleSelection();
   await page.waitForFunction(() => document.querySelector('.selection-inline-menu')?.classList.contains('is-visible'));
@@ -305,6 +387,11 @@ try {
   assert.equal(await toolbarVisible(), false, 'enabling in Preview does not expose the hidden editor toolbar');
   await chord('b');
   assert.equal(await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')).state.doc.toString()), beforePreview, 'Preview does not mutate the hidden editor');
+  for (const method of ['button', 'backdrop', 'escape'] as const) {
+    await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button'); await closeSettings(method);
+    assert.equal(await page.evaluate(() => document.activeElement === document.querySelector('.more-tools-wrapper > .format-button')), true, `Preview/${method}: closing settings returns to the visible settings entry`);
+    assert.equal(await page.$eval('.editor-root', element => element.getAttribute('data-mode')), 'preview');
+  }
   await page.setViewport({ width: 1100, height: 780 });
   // Keep the appearance/IME matrix independent of deliberately incomplete clipboard/mode host scenarios.
   await page.close(); page = await browser.newPage(); page.on('pageerror', error => errors.push(String(error)));
@@ -347,6 +434,57 @@ try {
     await page.keyboard.press('Enter');
     assert.equal(await documentText(), '正文[text](url "title")', 'the full shell does not steal the command confirmation');
   }
+  const scrollingText = Array.from({ length: 120 }, (_, index) => `content line ${index + 1}`).join('\n');
+  for (const mode of ['source', 'live'] as const) {
+    await page.close(); page = await browser.newPage(); page.on('pageerror', error => errors.push(String(error)));
+    await openFixture(scrollingText, mode); await page.waitForSelector(`.cm-editor.meo-mode-${mode}`);
+    await page.waitForFunction(() => !document.querySelector('.mode-toolbar')?.classList.contains('meo-preload-toolbar'));
+    const selection = await page.evaluate(() => {
+      const g = window as any, view = g.EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor'));
+      const head = view.state.doc.line(70).from + 3, anchor = head + 4;
+      view.dispatch({ selection: { anchor, head }, effects: g.EditingSettingsHarness.EditorView.scrollIntoView(head, { y: 'center' }) }); view.focus(); return { anchor, head };
+    });
+    await settleSelection();
+    const scroll = await page.$eval('.cm-scroller', element => element.scrollTop);
+    assert.ok(scroll > 0, `${mode}: the settings-return fixture is genuinely scrolled`);
+    for (const method of ['button', 'backdrop', 'escape'] as const) {
+      await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button'); await closeSettings(method);
+      assert.ok(Math.abs(await page.$eval('.cm-scroller', element => element.scrollTop) - scroll) <= 1, `${mode}/${method}: returning from settings keeps the scrolled viewport`);
+      assert.deepEqual(await page.evaluate(() => {
+        const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor'));
+        return { anchor: view.state.selection.main.anchor, head: view.state.selection.main.head };
+      }), selection);
+    }
+  }
+  for (const fixture of [
+    { kind: 'mermaid', text: 'intro\n\n```mermaid\ngraph TD\nA --> B\n```\n\ntail', selector: '.meo-mermaid-source-editor .cm-content', button: '.meo-mermaid-mode-btn' },
+    { kind: 'math', text: 'intro\n\n$$\nx^2 + y^2 = 1\n$$\n\ntail', selector: '.meo-latex-math-source-editor .cm-content', button: '.meo-latex-math-mode-btn' }
+  ]) for (const clicks of [1, 2]) {
+    await page.close(); page = await browser.newPage(); page.on('pageerror', error => errors.push(String(error)));
+    await openFixture(fixture.text, 'live', fixture.kind === 'mermaid');
+    await page.waitForFunction(() => !document.querySelector('.mode-toolbar')?.classList.contains('meo-preload-toolbar'));
+    for (let count = 0; count < clicks; count++) {
+      await page.$eval(fixture.button, element => (element as HTMLButtonElement).click());
+      await settleSelection();
+    }
+    await page.waitForSelector(fixture.selector);
+    for (const method of ['button', 'backdrop', 'escape'] as const) {
+      const original = await page.evaluate(selector => {
+        const g = window as any, inner = g.EditingSettingsHarness.EditorView.findFromDOM(document.querySelector(selector));
+        inner.dispatch({ selection: { anchor: 4, head: 2 } }); inner.focus(); return inner.state.doc.toString();
+      }, fixture.selector);
+      await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button'); await closeSettings(method);
+      assert.deepEqual(await page.evaluate(selector => {
+        const inner = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector(selector));
+        return { focus: inner.hasFocus, anchor: inner.state.selection.main.anchor, head: inner.state.selection.main.head };
+      }, fixture.selector), { focus: true, anchor: 4, head: 2 }, `${fixture.kind}/${clicks}/${method}: internal editor regains its reversed selection`);
+      await page.keyboard.type('R');
+      const expected = fixture.text.replace(original, original.slice(0, 2) + 'R' + original.slice(4));
+      await page.waitForFunction(text => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor')).state.doc.toString() === text, { timeout: 2000 }, expected);
+      await chord('z');
+      await page.waitForFunction(text => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor')).state.doc.toString() === text, {}, fixture.text);
+    }
+  }
   assert.ok(height > 500);
   assert.deepEqual(errors, []);
   if (process.env.MEO_SETTINGS_SCREENSHOTS) {
@@ -364,7 +502,7 @@ try {
     await page.click('.settings-close'); await page.click('.more-tools-wrapper > .format-button');
     await page.screenshot({ path: path.join(directory, 'settings-menu-en-light.png') });
   }
-  console.log('Production settings: flat sections, narrow/desktop, real controls, live search, recording/conflict, actual reassigned format operation, reset scope and focus; animation/reduced motion, failure/retry, late clipboard and native key rebinding; selection toolbar toggle, drag direction, reload and native cells passed');
+  console.log('Production settings: flat sections, narrow/desktop, real controls, live search, recording/conflict, actual reassigned format operation, reset scope, modal return focus/caret/selection in prose, native cells and embedded editors; scrolled viewport, first-character input, animation/reduced motion, failure/retry, late clipboard and native key rebinding; selection toolbar toggle, drag direction, reload and native cells passed');
 } catch (error) {
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'meo-settings-failure-'));
   await page.screenshot({ path: path.join(folder, 'settings.png') }); await fs.writeFile(path.join(folder, 'page.html'), await page.content());

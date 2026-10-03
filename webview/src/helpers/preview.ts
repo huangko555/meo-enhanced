@@ -805,8 +805,8 @@ export function createPreviewController({
     role: 'group',
     buttonTitles: false,
     options: [
-      { value: 'true', label: uiStrings.previewCodeColorsOn },
-      { value: 'false', label: uiStrings.previewCodeColorsOff }
+      { value: 'true', label: uiStrings.previewCommentsShow },
+      { value: 'false', label: uiStrings.previewCommentsHide }
     ]
   });
   showCommentsControl.append(showCommentsLabel, showCommentsSegments.element);
@@ -850,7 +850,7 @@ export function createPreviewController({
     sourceColoringSegments.setLabels({ true: uiStrings.previewCodeColorsOn, false: uiStrings.previewCodeColorsOff });
     showCommentsLabel.textContent = uiStrings.showComments;
     showCommentsSegments.element.setAttribute('aria-label', uiStrings.showComments);
-    showCommentsSegments.setLabels({ true: uiStrings.previewCodeColorsOn, false: uiStrings.previewCodeColorsOff });
+    showCommentsSegments.setLabels({ true: uiStrings.previewCommentsShow, false: uiStrings.previewCommentsHide });
     fontFamilySelectControl.setLabel(uiStrings.previewFontFamily);
     defaultFontOption.textContent = uiStrings.previewFontPlaceholder;
     fontFamilySelectControl.refreshOptions();

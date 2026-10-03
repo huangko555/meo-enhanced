@@ -101,6 +101,11 @@ try {
     '.editor-font-size-mode-button[data-editor-font-size-mode="auto"]'
   ];
   const modeWidthsByLanguage: number[] = [];
+  for (const [language, label, choices] of [['zh-CN', 'HTML 注释', ['显示', '隐藏']], ['en', 'HTML comments', ['Show', 'Hide']]] as const) {
+    await page.click(`.ui-language-button[data-ui-language="${language}"]`);
+    assert.equal(await page.$eval('.preview-show-comments .preview-select-label', element => element.textContent), label);
+    assert.deepEqual(await page.$$eval('.preview-show-comments .segmented-control-button-label', elements => elements.map(element => element.textContent)), [...choices]);
+  }
   for (const selector of settingsChoices) {
     await page.click(selector);
     const menuState = await page.evaluate(() => ({
@@ -191,7 +196,7 @@ try {
       outerRight: outer.right - indicators[1].right
     };
   });
-  assert.deepEqual(segmentGaps, { outerLeft: 2, between: 0, outerRight: 2 });
+  assert.deepEqual(segmentGaps, { outerLeft: 2, between: 4, outerRight: 2 }, 'each selected pill keeps the same inset on every side');
   await page.mouse.click(4, 10);
   assert.equal(await page.$eval('.more-tools-panel', panel => (panel as HTMLElement).hidden), true);
   await page.close();

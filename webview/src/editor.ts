@@ -3274,9 +3274,17 @@ export function createEditor({
     },
     focus() {
       const target = lastFocusedEditorTarget;
+      // A modal can move the browser selection away from the document. CodeMirror
+      // restores that selection as well as focus; DOM focus alone cannot do so.
+      const focusedView = target?.isConnected && view.contentDOM.contains(target) ? EditorView.findFromDOM(target) : null;
+      if (focusedView && target === focusedView.contentDOM) {
+        focusedView.focus();
+        return;
+      }
       if (target?.isConnected && view.contentDOM.contains(target)) {
-        if (document.activeElement === target && document.hasFocus()) return;
         const selection = lastTextareaSelection?.target === target ? lastTextareaSelection : null;
+        // Dialog close may already have refocused the textarea without its saved range.
+        if (document.activeElement === target && document.hasFocus() && !selection) return;
         target.focus({ preventScroll: true });
         if (target instanceof HTMLTextAreaElement && selection) {
           target.setSelectionRange(

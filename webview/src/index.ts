@@ -5,7 +5,7 @@ import { createSettingsWindow, type GeneralSetting } from './adapters/settingsWi
 import { createEditingPreferencesTransport } from './adapters/editingPreferencesTransport';
 import { createEditorServicesTransport } from './adapters/editorServicesTransport';
 import { defaultInputAssistance, type EditingPreferences } from '../../src/foundation/editingPreferences';
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Unlink, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, Save, HardDriveUpload, PanelLeftRightDashed, SquareSplitHorizontal, Settings, Check, Ellipsis, Sun, Moon, SunMoon, Languages, Type, ExternalLink, History, Info } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Unlink, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, Save, HardDriveUpload, PanelLeftRightDashed, SquareSplitHorizontal, Settings, Check, Ellipsis, Sun, Moon, SunMoon, Languages, Type, Keyboard, ArrowRight, ExternalLink, History, Info } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -1025,7 +1025,9 @@ preferencesHeading.className = 'more-tools-section-label';
 const preferencesRow = document.createElement('div'); preferencesRow.className = 'more-tools-preferences';
 const preferencesLabel = document.createElement('span'); preferencesLabel.className = 'more-tools-preferences-label';
 const moreSettingsButton = document.createElement('button'); moreSettingsButton.type = 'button'; moreSettingsButton.className = 'settings-button more-tools-settings-button';
-preferencesRow.append(preferencesLabel, moreSettingsButton);
+const moreSettingsButtonLabel = document.createElement('span');
+moreSettingsButton.append(moreSettingsButtonLabel, createElement(ArrowRight, { width: 14, height: 14, 'aria-hidden': 'true' }));
+preferencesRow.append(createMoreToolsControlHeading(Keyboard, preferencesLabel), moreSettingsButton);
 const openingDocumentsHeading = document.createElement('div');
 openingDocumentsHeading.className = 'more-tools-section-label';
 openingDocumentsHeading.textContent = activeUiStrings.openingDocumentsSettings;
@@ -1101,7 +1103,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   const strings = getUiStrings(language);
   preferencesHeading.textContent = language === 'zh-CN' ? '偏好设置' : 'Preferences';
   preferencesLabel.textContent = language === 'zh-CN' ? '输入辅助 · 快捷键等' : 'Typing · Shortcuts, etc.';
-  moreSettingsButton.textContent = language === 'zh-CN' ? '更多设置 →' : 'More settings →';
+  moreSettingsButtonLabel.textContent = language === 'zh-CN' ? '更多设置' : 'More settings';
   settingsWindow?.setLanguage(language);
   activeUiLanguage = language;
   activeUiStrings = strings;
@@ -3172,7 +3174,7 @@ const copyTableToHost = async (format: 'markdown' | 'csv') => {
 };
 settingsWindow = createSettingsWindow({
   initialLanguage: activeUiLanguage, platform: /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? 'mac' : 'other',
-  getPreferences: () => editingPreferences, update: change => editingPreferencesTransport.update(change), returnFocus: () => moreToolsButton,
+  getPreferences: () => editingPreferences, update: change => editingPreferencesTransport.update(change), returnFocus: () => getActiveEditorMode() === 'preview' ? moreToolsButton : editor ?? moreToolsButton,
   getGeneral: language => {
     const strings = getUiStrings(language);
     const switchItem = (id: string, section: 'display' | 'opening', title: string, get: () => boolean, set: (value: boolean) => void, description?: string): GeneralSetting => ({ id, section, title, description, control: { kind: 'switch', get, set } });
@@ -3194,7 +3196,7 @@ settingsWindow = createSettingsWindow({
 moreSettingsButton.addEventListener('click', () => { setMoreToolsVisible(false); settingsWindow?.open(); });
 preferencesHeading.textContent = 'Preferences';
 preferencesLabel.textContent = 'Typing · Shortcuts, etc.';
-moreSettingsButton.textContent = 'More settings →';
+moreSettingsButtonLabel.textContent = 'More settings';
 
 const withMessageErrorBoundary = (context: string, action: () => void): void => {
   try {

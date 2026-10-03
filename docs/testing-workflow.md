@@ -626,6 +626,13 @@ The table/history packs exercise the new editing paths; the appearance pack
 includes the actual settings and toolbar menus. Browser tests use the production
 editor and full Webview bootstrap. They assert resulting documents, undo results,
 actual remapped gestures, persisted projections, focus and DOM disposal.
+Settings-return checks cover the close button, backdrop and Escape in Live/Source,
+scrolled documents, native table cells, and Mermaid/math Source/Split editors.
+They require preserved caret/selection direction and the first typed character
+to reach the original document without another click. Segmented controls keep
+constant pill dimensions and radius during motion, respect reduced motion, and
+automatic font sizing disables the whole stepper. Toolbar checks cover localized
+HTML-comment labels and consistent indicator insets.
 The selection-toolbar switch is checked through real Source/Live drag selections,
 native cell selections, immediate updates, failed writes, stale snapshots and
 reopened documents, while formatting shortcuts remain usable.
