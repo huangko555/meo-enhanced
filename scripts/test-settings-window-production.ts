@@ -44,7 +44,8 @@ try {
   await page.evaluate(() => {
     const global = window as any; global.__preferences = { input: { ...global.EditingSettingsHarness.defaultInputAssistance }, shortcuts: {} };
     const text = 'hello\n\n# Heading\n\ntext';
-    window.dispatchEvent(new MessageEvent('message', { data: { type: 'init', documentId: 'file:///settings.md', text, version: 1, savedRevision: { version: 1, text }, diagnostics: [], mode: 'source', uiLanguage: 'zh-CN', uiLanguagePreference: 'zh-CN', automaticUiLanguage: 'zh-CN', sourceLineNumbers: 'on', previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, previewShowComments: false, editorAppearance: 'dark', gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null, editingPreferences: global.__preferences, editingPreferencesRevision: 0 } }));
+    global.__initMessage = { type: 'init', documentId: 'file:///settings.md', text, version: 1, savedRevision: { version: 1, text }, diagnostics: [], mode: 'source', uiLanguage: 'zh-CN', uiLanguagePreference: 'zh-CN', automaticUiLanguage: 'zh-CN', sourceLineNumbers: 'on', previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, previewShowComments: false, editorAppearance: 'dark', gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null, editingPreferences: global.__preferences, editingPreferencesRevision: 0 };
+    window.dispatchEvent(new MessageEvent('message', { data: global.__initMessage }));
   });
   await page.waitForSelector('.cm-editor');
   await page.waitForFunction(() => !document.querySelector('.mode-toolbar')?.classList.contains('meo-preload-toolbar'));
@@ -58,7 +59,7 @@ try {
   assert.equal(await page.$eval('.settings-footer', element => (element as HTMLElement).hidden), true);
   const height = await page.$eval('.settings-window', element => element.getBoundingClientRect().height);
   await page.click('.settings-tab[data-tab="typing"]');
-  assert.equal(await page.$$eval('.settings-item', elements => elements.length), 11);
+  assert.equal(await page.$$eval('.settings-item', elements => elements.length), 12);
   assert.deepEqual(await page.$$eval('.settings-paste-contexts dt', elements => elements.map(e => e.textContent)), ['正文', '已有表格', '代码']);
   assert.ok(await page.$eval('.settings-paste-contexts dd:nth-of-type(2)', e => e.textContent?.includes('不受这个开关影响')));
   const wrap = '.settings-item[data-setting="wrapSelection"]';
@@ -83,6 +84,86 @@ try {
   assert.equal(await page.$eval('.settings-status', e => (e as HTMLElement).hidden), true);
   await page.click(wrap + ' [role="switch"]');
   await page.waitForFunction(() => document.querySelector('[data-setting="wrapSelection"] [role="switch"]')?.getAttribute('aria-checked') === 'false');
+
+  const toolbarSwitch = '[data-setting="selectionToolbar"] [role="switch"]';
+  assert.equal(await page.$eval(toolbarSwitch, e => e.getAttribute('aria-checked')), 'true');
+  await page.evaluate(() => { (window as any).__failNextUpdate = true; });
+  await page.click(toolbarSwitch);
+  await page.waitForFunction(() => !document.querySelector<HTMLElement>('.settings-status')?.hidden);
+  assert.equal(await page.$eval(toolbarSwitch, e => e.getAttribute('aria-checked')), 'true', 'a failed toolbar write preserves the enabled value');
+  await page.click(toolbarSwitch);
+  await page.waitForFunction(() => (window as any).__preferences.input.selectionToolbar === false);
+  await page.click('.settings-close');
+  const toolbarVisible = () => page.$eval('.selection-inline-menu', e => e.classList.contains('is-visible'));
+  const setToolbar = async (enabled: boolean) => page.evaluate(enabled => {
+    const g = window as any;
+    g.__preferences = { ...g.__preferences, input: { ...g.__preferences.input, selectionToolbar: enabled } };
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'editingPreferencesChanged', preferences: g.__preferences, revision: ++g.__revision } }));
+  }, enabled);
+  const settleSelection = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  for (const mode of ['source', 'live']) {
+    await page.click(`button[data-mode="${mode}"]`);
+    await page.waitForSelector(`.cm-editor.meo-mode-${mode}`);
+    for (const backward of [false, true]) {
+      const points = await page.evaluate(backward => {
+        const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor'));
+        view.dispatch({ selection: { anchor: 0 } }); view.focus();
+        const from = view.coordsAtPos(0), to = view.coordsAtPos(5);
+        const start = { x: from.left + 1, y: (from.top + from.bottom) / 2 };
+        const end = { x: to.left - 1, y: (to.top + to.bottom) / 2 };
+        return backward ? [end, start] : [start, end];
+      }, backward);
+      await page.mouse.move(points[0].x, points[0].y); await page.mouse.down();
+      await page.mouse.move(points[1].x, points[1].y, { steps: 4 }); await page.mouse.up();
+      await settleSelection();
+      assert.equal(await page.evaluate(() => { const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')); return view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to); }), 'hello');
+      assert.equal(await toolbarVisible(), false, `${mode}: disabled toolbar stays hidden after dragging`);
+      assert.equal(await page.$eval('.selection-inline-menu', e => getComputedStyle(e).pointerEvents), 'none');
+      await setToolbar(true);
+      await page.waitForFunction(() => document.querySelector('.selection-inline-menu')?.classList.contains('is-visible'));
+      await setToolbar(false);
+      assert.equal(await toolbarVisible(), false, `${mode}: disabling hides an already visible toolbar immediately`);
+      // An older configuration snapshot cannot restore a disabled toolbar.
+      await page.evaluate(() => {
+        const g = window as any;
+        window.dispatchEvent(new MessageEvent('message', { data: { type: 'editingPreferencesChanged', preferences: { ...g.__preferences, input: { ...g.__preferences.input, selectionToolbar: true } }, revision: g.__revision - 1 } }));
+      });
+      await settleSelection(); assert.equal(await toolbarVisible(), false);
+    }
+    await page.evaluate(() => document.querySelector<HTMLButtonElement>('.selection-inline-button[data-action="bold"]')!.click());
+    assert.equal(await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')).state.doc.line(1).text), 'hello', 'a stale toolbar action is ignored after disabling');
+    await chord('b');
+    assert.equal(await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')).state.doc.line(1).text), '**hello**', 'format shortcuts still work with the selection toolbar disabled');
+    await chord('z');
+    assert.equal(await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')).state.doc.line(1).text), 'hello');
+  }
+  for (const mode of ['source', 'live']) {
+    const initial = await page.evaluate(mode => { const g = window as any; return { ...g.__initMessage, mode, editingPreferences: g.__preferences, editingPreferencesRevision: g.__revision }; }, mode);
+    const reopened = await browser.newPage();
+    try {
+      await reopened.setViewport({ width: 1100, height: 780 });
+      await reopened.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
+      await reopened.addStyleTag({ path: 'webview/src/styles.css' });
+      await reopened.addScriptTag({ content: 'window.acquireVsCodeApi=()=>({getState(){},setState(){},postMessage(){}});' });
+      await reopened.addScriptTag({ content: await build.outputs[0].text() });
+      await reopened.evaluate(initial => window.dispatchEvent(new MessageEvent('message', { data: initial })), initial);
+      await reopened.waitForSelector(`.cm-editor.meo-mode-${mode}`);
+      await reopened.evaluate(async () => {
+        const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor'));
+        view.dispatch({ selection: { anchor: 0, head: 5 } }); view.focus();
+        await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      });
+      assert.equal(await reopened.$eval('.selection-inline-menu', e => e.classList.contains('is-visible')), false, `${mode}: a reopened document honors the saved disabled preference`);
+    } finally { await reopened.close(); }
+  }
+  await setToolbar(true);
+  await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button');
+  await page.click('.settings-tab[data-tab="typing"]');
+  assert.equal(await page.$eval(toolbarSwitch, e => e.getAttribute('aria-checked')), 'true');
+  await page.click('.settings-search'); await page.keyboard.type('选区工具栏');
+  assert.equal(await page.$$eval('.settings-item', elements => elements.length), 1);
+  assert.equal(await page.$eval(toolbarSwitch, e => e.getAttribute('aria-checked')), 'true');
+  await page.click('.settings-search-clear');
 
   const cursors = await page.$$eval('.settings-radio-input', elements => elements.map(element => [getComputedStyle(element).cursor, getComputedStyle(element.parentElement!).cursor]));
   assert.ok(cursors.every(([input, label]) => input === 'pointer' && label === 'pointer'));
@@ -159,6 +240,7 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.lang), language);
     assert.equal(await page.evaluate(() => document.documentElement.dataset.editorAppearance), appearance);
     await page.click('.settings-tab[data-tab="typing"]');
+    assert.equal(await page.$eval('[data-setting="selectionToolbar"] .settings-item-title', e => e.textContent), language === 'en' ? 'Selection toolbar' : '选区工具栏');
     const wrappingDescription = await page.$eval(wrap + ' .settings-description', element => element.textContent ?? '');
     for (const pair of ['<>', '*', '_', '~', '$', '``']) assert.ok(wrappingDescription.includes(pair), language + ': wrapping description includes ' + pair);
     const selectedColor = await page.$eval('.settings-tab[aria-selected="true"]', e => getComputedStyle(e).color.match(/\d+/g)!.map(Number));
@@ -193,6 +275,14 @@ try {
   await page.evaluate(table => { const g = window as any; const view = g.EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')); view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: table }, selection: { anchor: table.indexOf('x') } }); }, tableText);
   await page.click('button[data-mode="live"]'); await page.waitForSelector('tbody textarea');
   await page.evaluate(() => { const input = document.querySelector<HTMLTextAreaElement>('tbody textarea')!; input.focus(); input.setSelectionRange(0, input.value.length); });
+  await settleSelection();
+  await page.waitForFunction(() => document.querySelector('.selection-inline-menu')?.classList.contains('is-visible'));
+  await setToolbar(false);
+  assert.equal(await toolbarVisible(), false, 'disabling also hides the native cell selection toolbar');
+  await page.evaluate(() => { const input = document.querySelector<HTMLTextAreaElement>('tbody textarea')!; input.focus(); input.setSelectionRange(0, 0); input.setSelectionRange(0, input.value.length); });
+  await settleSelection(); assert.equal(await toolbarVisible(), false, 'a new native cell selection does not reopen a disabled toolbar');
+  await setToolbar(true);
+  await page.waitForFunction(() => document.querySelector('.selection-inline-menu')?.classList.contains('is-visible'));
   await chord('b');
   assert.equal(await page.evaluate(() => (document.activeElement as HTMLTextAreaElement).value), '**x**', 'format shortcuts edit the focused native cell');
   await setPreferences({ cellBreak: [] });
@@ -208,6 +298,8 @@ try {
   const beforePreview = await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')).state.doc.toString());
   await page.click('button[data-mode="preview"]');
   await page.waitForFunction(() => document.querySelector<HTMLElement>('.editor-host')?.hidden || document.querySelector('button[data-mode="preview"]')?.classList.contains('active'));
+  await setToolbar(false); await setToolbar(true);
+  assert.equal(await toolbarVisible(), false, 'enabling in Preview does not expose the hidden editor toolbar');
   await chord('b');
   assert.equal(await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')).state.doc.toString()), beforePreview, 'Preview does not mutate the hidden editor');
   assert.ok(height > 500);
@@ -227,7 +319,7 @@ try {
     await page.click('.settings-close'); await page.click('.more-tools-wrapper > .format-button');
     await page.screenshot({ path: path.join(directory, 'settings-menu-en-light.png') });
   }
-  console.log('Production settings: flat sections, narrow/desktop, real controls, live search, recording/conflict, actual reassigned format operation, reset scope and focus; animation/reduced motion, failure/retry, late clipboard and native key rebinding passed');
+  console.log('Production settings: flat sections, narrow/desktop, real controls, live search, recording/conflict, actual reassigned format operation, reset scope and focus; animation/reduced motion, failure/retry, late clipboard and native key rebinding; selection toolbar toggle, drag direction, reload and native cells passed');
 } catch (error) {
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'meo-settings-failure-'));
   await page.screenshot({ path: path.join(folder, 'settings.png') }); await fs.writeFile(path.join(folder, 'page.html'), await page.content());

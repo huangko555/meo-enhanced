@@ -625,6 +625,9 @@ The table/history packs exercise the new editing paths; the appearance pack
 includes the actual settings and toolbar menus. Browser tests use the production
 editor and full Webview bootstrap. They assert resulting documents, undo results,
 actual remapped gestures, persisted projections, focus and DOM disposal.
+The selection-toolbar switch is checked through real Source/Live drag selections,
+native cell selections, immediate updates, failed writes, stale snapshots and
+reopened documents, while formatting shortcuts remain usable.
 Symbol surrounding uses an explicit native Markdown fixture, independent of
 the production pair map. It covers all 11 native pairs plus Chinese extensions,
 repeated markers, forward/reverse/multiline/code-context selections, all-or-none

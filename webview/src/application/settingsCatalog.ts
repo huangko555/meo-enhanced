@@ -11,6 +11,7 @@ export const sectionTitles = {
   table: ['表格', 'Tables'], selection: ['选择与光标', 'Selections and cursors'], lines: ['行操作', 'Line operations'], navigation: ['模式与导航', 'Modes and navigation']
 } as const;
 export const typingCatalog: readonly { key: keyof InputAssistance; section: TypingSection; title: readonly [string, string]; description: readonly [string, string] }[] = [
+  { key: 'selectionToolbar', section: 'symbols', title: ['选区工具栏', 'Selection toolbar'], description: ['选中文字后显示常用格式工具栏。', 'Show common formatting actions when text is selected.'] },
   { key: 'wrapSelection', section: 'symbols', title: ['选中文字后包裹符号', 'Wrap selected text'], description: ['支持 () [] {} <>、引号、* _ ~ $ ^ =、` 和 ``，以及（）【】“”‘’《》「」『』。= 输入两次形成高亮。反引号长度会避开选中内容中的反引号。', 'Supports () [] {} <>, quotes, * _ ~ $ ^ =, ` and ``, plus Chinese brackets and quotes. Press = twice for highlight. Backtick length adapts to the selected text.'] },
   { key: 'pairMode', section: 'symbols', title: ['自动补全符号', 'Complete symbol pairs'], description: ['输入左符号时补出右符号，光标留在中间。', 'Insert the closing symbol and leave the cursor between the pair.'] },
   { key: 'skipMode', section: 'symbols', title: ['跳过已有右符号', 'Skip an existing closing symbol'], description: ['右侧已有匹配符号时，决定移动光标还是插入新符号。', 'Choose whether typing a matching closing symbol moves the cursor or inserts another symbol.'] },

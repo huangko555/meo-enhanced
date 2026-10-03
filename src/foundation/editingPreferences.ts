@@ -13,6 +13,7 @@ export const editorCommandIds = [
 export type EditorCommandId = typeof editorCommandIds[number];
 export type PairMode = 'smart' | 'always' | 'off';
 export type InputAssistance = {
+  readonly selectionToolbar: boolean;
   readonly wrapSelection: boolean;
   readonly pairMode: PairMode;
   readonly skipMode: PairMode;
@@ -37,7 +38,7 @@ export type EditingPreferencesChange =
   | { readonly type: 'resetShortcuts' };
 
 export const defaultInputAssistance: InputAssistance = {
-  wrapSelection: true, pairMode: 'smart', skipMode: 'smart', deleteMode: 'smart', lists: true,
+  selectionToolbar: true, wrapSelection: true, pairMode: 'smart', skipMode: 'smart', deleteMode: 'smart', lists: true,
   convertTables: true, pasteUrl: true, pasteHtml: true, documentSuggestions: true, slash: true, emoji: false
 };
 

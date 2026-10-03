@@ -13,6 +13,18 @@ import type { EditingPreferences } from '../src/foundation/editingPreferences';
 import type { UpdateEditingPreferencesRequest } from '../src/protocol/editingPreferences';
 
 const defaults = { input: { ...defaultInputAssistance }, shortcuts: {} };
+assert.equal(defaults.input.selectionToolbar, true, 'existing users keep the selection toolbar by default');
+const { selectionToolbar: _toolbar, ...previousInput } = defaultInputAssistance;
+assert.deepEqual(normalizeEditingPreferences({ input: { ...previousInput, emoji: true }, shortcuts: { bold: [] } }), {
+  input: { ...defaultInputAssistance, emoji: true }, shortcuts: { bold: [] }
+}, 'older saved preferences gain the default without losing other choices');
+for (const value of [true, false]) {
+  const change = { type: 'input' as const, key: 'selectionToolbar' as const, value };
+  assert.ok(decodeWebviewToHostMessage({ type: 'updateEditingPreferences', requestId: 'toolbar', change }));
+  assert.equal(changeEditingPreferences(defaults, change, 'other').input.selectionToolbar, value);
+}
+assert.equal(isEditingPreferencesChange({ type: 'input', key: 'selectionToolbar', value: 'off' }), false);
+assert.equal(normalizeEditingPreferences({ input: { selectionToolbar: 'off' } }).input.selectionToolbar, true);
 for (const platform of ['mac', 'other'] as const) {
   const bindings = defaultShortcuts(platform);
   assert.deepEqual(Object.keys(bindings), editorCommandIds);
@@ -77,6 +89,10 @@ const reloaded = createEditingPreferencesHost({ platform: 'other', read: () => p
 assert.deepEqual(reloaded.read(), persisted);
 assert.equal(persisted.input.emoji, true);
 assert.equal(persisted.input.pasteUrl, false);
+const toolbarResponse = await host.update({ type: 'updateEditingPreferences', requestId: 'toolbar', change: { type: 'input', key: 'selectionToolbar', value: false } });
+assert.equal(toolbarResponse.result.ok, true);
+assert.equal(reloaded.read().input.selectionToolbar, false, 'the disabled toolbar survives a new Host instance');
+assert.equal(changeEditingPreferences(persisted, { type: 'resetShortcuts' }, 'other').input.selectionToolbar, false);
 const failing = createEditingPreferencesHost({ platform: 'other', read: () => persisted, write: async () => { throw new Error('disk failure'); } });
 const failure = await failing.update({ ...request, requestId: 'failed' });
 assert.equal(failure.result.ok, false);

@@ -84,7 +84,8 @@ export const createSelectionMenu = (): SelectionMenuElements => {
 
 export const createSelectionMenuController = (
   elements: SelectionMenuElements,
-  getEditor: () => any
+  getEditor: () => any,
+  isEnabled: () => boolean = () => true
 ) => {
   const hide = (): void => {
     elements.menu.classList.remove('is-visible');
@@ -101,7 +102,7 @@ export const createSelectionMenuController = (
   };
 
   const update = (selectionState: SelectionMenuState | null): void => {
-    if (!selectionState?.visible) {
+    if (!isEnabled() || !selectionState?.visible) {
       hide();
       return;
     }
@@ -126,6 +127,7 @@ export const createSelectionMenuController = (
   };
 
   const handleAction = (action: string): void => {
+    if (!isEnabled()) return;
     const editor = getEditor();
     if (!editor) return;
     editor.insertFormat(action);

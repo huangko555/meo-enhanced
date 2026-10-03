@@ -1470,7 +1470,7 @@ const findPanelController = createFindPanelController(
 );
 
 const selectionMenuElements = createSelectionMenu();
-const selectionMenuController = createSelectionMenuController(selectionMenuElements, () => editor);
+const selectionMenuController = createSelectionMenuController(selectionMenuElements, () => editor, () => editingPreferences.input.selectionToolbar);
 
 const editorNoticeBanner = document.createElement('div');
 editorNoticeBanner.className = 'editor-notice';
@@ -3145,7 +3145,10 @@ applyCodeThemeForPreview = (appearance) => {
 const acceptEditingPreferences = (preferences: EditingPreferences, revision: number) => {
   if (revision < editingPreferencesRevision) return;
   editingPreferencesRevision = revision; editingPreferences = preferences;
-  editor?.setInputAssistance(preferences.input); settingsWindow?.present(); refreshShortcutHints();
+  editor?.setInputAssistance(preferences.input);
+  if (!preferences.input.selectionToolbar) selectionMenuController.hide();
+  else if (getActiveEditorMode() !== 'preview') editor?.refreshSelectionOverlay();
+  settingsWindow?.present(); refreshShortcutHints();
 };
 const editingPreferencesTransport = createEditingPreferencesTransport({ post: request => vscode.postMessage(request), onSnapshot: acceptEditingPreferences });
 const editorServicesTransport = createEditorServicesTransport(request => vscode.postMessage(request));

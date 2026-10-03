@@ -144,6 +144,7 @@
           "scope": "window",
           "default": {
             "input": {
+              "selectionToolbar": true,
               "wrapSelection": true,
               "pairMode": "smart",
               "skipMode": "smart",
@@ -164,6 +165,10 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
+                "selectionToolbar": {
+                  "type": "boolean",
+                  "default": true
+                },
                 "wrapSelection": {
                   "type": "boolean",
                   "default": true
