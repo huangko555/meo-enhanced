@@ -26,6 +26,19 @@ try {
   const closed = async () => { await new Promise(resolve => setTimeout(resolve, 100)); await page.waitForFunction(() => !document.querySelector('.meo-input-suggestions:not([hidden])'), { timeout: 1000 }); };
   const waitText = (expected: string) => page.waitForFunction(expected => (window as any).editor.getText() === expected, { timeout: 4000 }, expected);
   const settlePosition = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))));
+  const watchPopup = () => page.evaluate(() => {
+    const g = window as any, popup = document.querySelector<HTMLElement>('.meo-input-suggestions')!;
+    const sample = { hiddenFrames: 0, replaced: false, frame: 0 }; g.slashVisibility = sample;
+    const tick = () => {
+      if (popup.hidden) sample.hiddenFrames++;
+      if (!popup.isConnected || document.querySelector('.meo-input-suggestions') !== popup) sample.replaced = true;
+      sample.frame = requestAnimationFrame(tick);
+    }; sample.frame = requestAnimationFrame(tick);
+  });
+  const popupContinuity = () => page.evaluate(() => {
+    const sample = (window as any).slashVisibility; cancelAnimationFrame(sample.frame);
+    return { hiddenFrames: sample.hiddenFrames, replaced: sample.replaced };
+  });
   const placeAnchor = async (offset: number) => {
     await page.evaluate(() => (window as any).editor.view.dispatch({ scrollIntoView: true })); await settlePosition();
     await page.evaluate(offset => {
@@ -38,6 +51,11 @@ try {
     return { anchor: { top: anchor.top, bottom: anchor.bottom, left: anchor.left }, menu: { top: menu.top, bottom: menu.bottom, left: menu.left, right: menu.right, height: menu.height }, viewport: { top: scroller.top, bottom: scroller.bottom }, scrollTop: view.scrollDOM.scrollTop };
   });
   for (const mode of ['source', 'live']) {
+    await prepare(mode); await page.keyboard.type('/'); await open(); await watchPopup();
+    await page.keyboard.type('bold', { delay: 60 }); await open();
+    assert.deepEqual(await popupContinuity(), { hiddenFrames: 0, replaced: false }, mode + ': filtering retains the visible popup without blank frames');
+    await page.click('[data-command="bold"] .meo-suggestion-command'); await waitText('****');
+    await page.keyboard.type('word'); await waitText('**word**');
     await prepare(mode); await page.keyboard.type('/table'); await open();
     for (const [character, display, disabled] of [['6', '/table6xN', 'true'], ['x', '/table6xN', 'true'], ['6', '/table6x6', 'false']]) {
       await page.keyboard.type(character); await open();
@@ -306,6 +324,37 @@ try {
     await page.waitForSelector('tbody textarea'); await page.click('tbody textarea');
     await page.evaluate(pos => (document.activeElement as HTMLTextAreaElement).setSelectionRange(pos, pos), pos);
   };
+  await prepareCell(); await page.keyboard.type('/'); await open(); await watchPopup();
+  await page.keyboard.type('bold', { delay: 60 }); await open();
+  await page.waitForFunction(() => (window as any).editor.getText().includes('/bold'));
+  await settlePosition();
+  assert.deepEqual(await popupContinuity(), { hiddenFrames: 0, replaced: false }, 'native filtering and automatic cell commits keep the popup visible');
+  await prepareCell(); await page.keyboard.type('/b'); await open();
+  const pressedBounds = await page.$eval('[data-command="bold"]', element => {
+    (window as any).pressedSlashCandidate = element;
+    const rect = element.getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.move(pressedBounds.x, pressedBounds.y); await page.mouse.down();
+  await page.waitForFunction(() => (window as any).editor.getText().includes('/b')); await settlePosition();
+  assert.equal(await page.evaluate(() => (window as any).pressedSlashCandidate === document.querySelector('[data-command="bold"]')), true, 'automatic commits retain the candidate between pointerdown and click');
+  await page.mouse.up(); await page.keyboard.type('held');
+  assert.equal(await page.evaluate(() => (document.activeElement as HTMLTextAreaElement).value), '**held**', 'a click held across the cell commit executes and retains the caret');
+  for (const [command, expected] of [
+    ['bold', '**word**'], ['italic', '*word*'], ['boldItalic', '***word***'], ['strike', '~~word~~'],
+    ['highlight', '==word=='], ['subscript', '~word~'], ['superscript', '^word^'], ['inlineCode', '`word`'], ['inlineMath', '$word$'], ['lineBreak', '<br>\nword'],
+    ['link', '[word](url)'], ['linkTitle', '[word](url "title")'], ['autoLink', '<word>'], ['image', '![word](url)'], ['imageTitle', '![word](url "title")']
+  ]) {
+    await prepareCell(); await page.keyboard.type('/' + (command === 'bold' ? '' : command.toLowerCase())); await open();
+    await page.click(`[data-command="${command}"] .meo-suggestion-command`);
+    assert.equal(await page.evaluate(() => document.activeElement instanceof HTMLTextAreaElement && document.activeElement.isConnected), true, command + ': mouse selection retains the editable cell');
+    await page.keyboard.type('word');
+    assert.equal(await page.evaluate(() => (document.activeElement as HTMLTextAreaElement).value), expected, command + ': subsequent typing reaches the command caret/field');
+    await page.evaluate(() => (window as any).editor.getTextForSave());
+    assert.equal(await page.evaluate(() => document.activeElement instanceof HTMLTextAreaElement), true, command + ': committing after the mouse action retains focus');
+  }
+  await prepareCell(); await page.keyboard.type('/linktitle'); await open(); await page.click('[data-command="linkTitle"]');
+  for (const value of ['Label', 'target', 'Hint']) { await page.keyboard.type(value); await page.keyboard.press('Tab'); }
+  assert.equal(await page.evaluate(() => (document.activeElement as HTMLTextAreaElement).value), '[Label](target "Hint")', 'mouse-selected templates retain Tab navigation');
   await prepareCell(); await page.keyboard.type('/b'); await open();
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-controls')), await page.$eval('.meo-input-suggestions', e => e.id), 'the native input owns its candidate accessibility relationship');
   await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter');

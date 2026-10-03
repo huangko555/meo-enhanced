@@ -137,7 +137,15 @@ export function createInputSuggestions(options: {
     }
     schedule() {
       if (this.items[this.index]?.slash) this.selectedCommand = this.items[this.index].slash!.id;
-      this.clear(); const context = this.getContext(); if (!context) return;
+      const context = this.getContext();
+      if (context?.type === 'slash' && this.context?.type === 'slash' && !this.popup.hidden) {
+        if (this.timer !== null) clearTimeout(this.timer); this.timer = null;
+        const generation = ++this.generation;
+        // Keep the surface visible while filtering; layout reads wait until the editor update ends.
+        queueMicrotask(() => { if (!this.disposed && generation === this.generation) void this.resolve(context, generation); });
+        return;
+      }
+      this.clear(); if (!context) return;
       const generation = this.generation;
       this.timer = setTimeout(() => { this.timer = null; void this.resolve(context, generation); }, context.type === 'documents' || context.type === 'paths' || context.type === 'headings' ? 160 : 40);
     }
@@ -160,12 +168,19 @@ export function createInputSuggestions(options: {
         try { items = await options.requestLinks?.({ kind: context.type, query: context.query, target: context.target }) ?? []; }
         catch { items = []; }
       }
-      if (this.disposed || generation !== this.generation || JSON.stringify(context) !== JSON.stringify(this.getContext()) || !items.length) return;
+      if (this.disposed || generation !== this.generation || JSON.stringify(context) !== JSON.stringify(this.getContext())) return;
+      if (!items.length) { this.clear(); return; }
+      const unchanged = context.type === 'slash' && !this.popup.hidden && this.ariaInput === (this.cellInput ?? this.view.contentDOM) &&
+        JSON.stringify(context) === JSON.stringify(this.context) && JSON.stringify(items) === JSON.stringify(this.items);
       this.context = context; this.items = items; const exact = context.type === 'slash' ? items.findIndex(item => [item.slash!.id.toLowerCase(), ...item.slash!.aliases].includes(context.query.toLowerCase())) : -1;
       this.index = context.query !== this.resolvedQuery && exact >= 0 ? exact : Math.max(0, items.findIndex(item => item.slash?.id === this.selectedCommand));
       this.resolvedQuery = context.query;
       this.head = this.cellInput && this.cellFrom !== null ? this.cellInput.selectionStart : this.view.state.selection.main.head;
-      this.render();
+      if (unchanged) {
+        // Automatic cell commits must not replace a candidate pressed by the pointer.
+        this.popup.querySelectorAll('[role="option"]').forEach((row, index) => row.setAttribute('aria-disabled', String(!!this.items[index]?.slash?.disabled || this.composing || this.view.compositionStarted)));
+        this.reposition();
+      } else this.render();
     }
     render() {
       this.popup.replaceChildren();

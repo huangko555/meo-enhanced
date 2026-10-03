@@ -638,9 +638,12 @@ empty-cursor auto-close, overtype and paired Backspace.
 Slash commands cover Source, Live and native cells: direct/no-space triggers,
 English aliases, context exclusions, every command template, field traversal,
 IME filtering without consuming candidate keys, cancellation and committed Chinese,
-settings updates, disposal and undo/redo. The table checks cover all 1–10 row/column
-combinations, default dimensions (data rows plus an additional header), invalid
-parameters, preserved selections, paragraph boundaries and list/quote nesting.
+settings updates, disposal and undo/redo. Visible-frame checks keep the popup open
+through filtering and native-cell automatic commits; pointer-held candidates retain
+their identity, and mouse-selected formats and template fields remain editable.
+The table checks cover all 1–10 row/column combinations, default dimensions
+(data rows plus an additional header), invalid parameters, preserved selections,
+paragraph boundaries and list/quote nesting.
 The full Webview checks verify actual shortcut priority and Chinese/English,
 light/dark popup surfaces, localized descriptions and inherited editor fonts.
 Slash positioning checks cover document scrolling, stable slash anchors, above/below

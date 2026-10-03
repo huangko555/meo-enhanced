@@ -726,8 +726,8 @@ function isTableControlTarget(target: EventTarget | null): boolean {
 }
 
 
-function isSelectionMenuTarget(target: EventTarget | null): boolean {
-  return Boolean(target instanceof Element && target.closest('.selection-inline-menu'));
+function isEditingMenuTarget(target: EventTarget | null): boolean {
+  return Boolean(target instanceof Element && target.closest('.selection-inline-menu, .meo-input-suggestions'));
 }
 
 function targetElementFrom(target: EventTarget | null): Element | null {
@@ -3849,7 +3849,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       if (!(event.target instanceof Node)) return;
       const wrap = getWrap();
       const container = getContainer();
-      if (isSelectionMenuTarget(event.target)) {
+      if (isEditingMenuTarget(event.target)) {
         return;
       }
       const isOutsideTable = !container.contains(event.target);
