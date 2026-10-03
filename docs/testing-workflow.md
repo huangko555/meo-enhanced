@@ -72,6 +72,13 @@ passive controls, and nested table/rendered-block editors. Unknown activation ma
 briefly guard caret painting; input must remain ready and a click or input must
 end that guard early. Duplicate return notifications must not extend it.
 
+The Workbench-menu cases use nested Webview frames: a late Host notification
+must leave the outside menu focused, and an actual return into the content frame
+must retain the insertion position and first input. Activity-only WindowState
+changes are covered by `scripts/test-panel-session-window-focus.ts`; they must
+not be treated as window activation. A shell-only return is not a content-focus
+signal. Native menu dismissal still requires separate Windows verification.
+
 The Live and Source painting cases capture the browser's actual caret pixels,
 using a distinct caret color and a visible-caret positive control. Browser virtual
 time keeps screenshot transport from consuming the activation interval. Before
@@ -79,6 +86,14 @@ the delayed click, screenshots must contain no old-position caret; afterward the
 must contain the new-position caret. Frame observations also cover the unfrozen
 browser event path. These checks do not simulate Windows Alt+Tab or prove native
 activation event delivery; foreground acceptance remains a separate check.
+
+The same test observes the content-window keyboard forwarding boundary for the
+Windows bare-left-Alt policy. Live/Source prose, table cell selections and code,
+HTML, Mermaid and math inputs must keep focus and selection and accept immediate
+input. Repeated Alt, window handoff, lost keyup, Alt+Shift+M, Host combinations,
+AltGr/composition and read-only/outside controls are checked. These are browser
+contracts with an explicit Windows platform fixture; real Windows menu, Alt+Tab
+and input-method switching remain separate native acceptance checks.
 
 ## Preview pending code updates
 

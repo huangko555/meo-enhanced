@@ -24,6 +24,7 @@ export function createEditorFocusController({
   isEditableMode: () => boolean;
 }): EditorFocusController {
   let editorWasLastFocused = false;
+  let leftAltGesture: { usedInCombination: boolean } | null = null;
   let documentPointerGeneration = 0;
   let transientOrigin = false;
   let transientReturnFrame: number | null = null;
@@ -37,6 +38,14 @@ export function createEditorFocusController({
   const editorDom = (): HTMLElement | null => getEditor()?.view.dom ?? null;
   const inEditor = (target: EventTarget | null): boolean => (
     target instanceof Node && editorDom()?.contains(target) === true
+  );
+  const isEditableInput = (target: EventTarget | null): boolean => (
+    isEditableMode() && inEditor(target) && target instanceof HTMLElement && (
+      target.isContentEditable
+      || ((target instanceof HTMLTextAreaElement
+        || (target instanceof HTMLInputElement && ['text', 'search', 'url', 'tel', 'email', 'password', 'number'].includes(target.type)))
+        && !target.readOnly && !target.disabled)
+    )
   );
   const isFocusTaking = (target: Element): boolean => Boolean(target.closest(focusTakingSelector));
   const isFocusTransfer = (target: Element): boolean => Boolean(target.closest(focusTransferSelector));
@@ -182,6 +191,7 @@ export function createEditorFocusController({
     if (active instanceof Element && active.matches('[role="combobox"][aria-expanded="false"]')) restoreAfterTransient();
   };
   const onInputCapture = (event: Event): void => {
+    if (event.type === 'compositionstart' && leftAltGesture) leftAltGesture.usedInCombination = true;
     if (!windowReturnPending) return;
     if (inEditor(event.target)) {
       finishWindowReturn();
@@ -190,6 +200,19 @@ export function createEditorFocusController({
     }
   };
   const onKeyDownCapture = (event: KeyboardEvent): void => {
+    const leftAlt = event.key === 'Alt' && event.code === 'AltLeft';
+    if (leftAltGesture && !leftAlt) leftAltGesture.usedInCombination = true;
+    if (leftAlt && navigator.platform.startsWith('Win') && isEditableInput(event.target)
+      && !event.ctrlKey && !event.metaKey && !event.shiftKey
+      && !event.isComposing && !event.getModifierState('AltGraph')) {
+      if (!event.repeat) leftAltGesture = { usedInCombination: false };
+      if (leftAltGesture && !leftAltGesture.usedInCombination) {
+        // VS Code forwards Webview window events even when defaultPrevented.
+        // Keep bare Alt inside the editing surface before it enters the menu.
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }
     if (event.key === 'Tab') {
       transientOrigin = false;
       clearTransientFrame();
@@ -205,6 +228,17 @@ export function createEditorFocusController({
     // Alt release, when delivered to the Webview, confirms a keyboard return
     // without waiting for the unknown-activation paint bound.
     if (event.key === 'Alt') onInputCapture(event);
+    if (event.key !== 'Alt' || event.code !== 'AltLeft') return;
+    const suppress = leftAltGesture && !leftAltGesture.usedInCombination
+      && !event.ctrlKey && !event.metaKey && !event.shiftKey
+      && !event.isComposing && !event.getModifierState('AltGraph');
+    leftAltGesture = null;
+    if (suppress) {
+      // Pair with the consumed down even after a focus/window handoff. An OS
+      // switch may hide Tab; forwarding the unmatched up could focus the menu.
+      event.preventDefault();
+      event.stopPropagation();
+    }
   };
   const onWindowBlur = (): void => {
     restoreOnWindowReturn = getEditor()?.hasFocus() === true || editorWasLastFocused;
@@ -235,6 +269,9 @@ export function createEditorFocusController({
 
   return {
     restoreFromHost(): boolean {
+      // Panel/activity notifications may arrive after a Workbench control took
+      // focus. Only a native return into this document may grant focus again.
+      if (!document.hasFocus()) return false;
       return restoreWindowReturn();
     },
     dispose(): void {

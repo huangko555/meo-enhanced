@@ -1056,8 +1056,12 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     onPanelViewStateChanged();
   });
 
+  let windowWasFocused = vscode.window.state.focused;
   const windowStateSubscription = vscode.window.onDidChangeWindowState(({ focused }) => {
-    if (focused && panel.active) {
+    const returnedToWindow = focused && !windowWasFocused;
+    windowWasFocused = focused;
+    // WindowState can change for user activity while focus stays in a menu.
+    if (returnedToWindow && panel.active) {
       runBackground(postFocusEditor(), 'postFocusEditor.windowState');
     }
   });

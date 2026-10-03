@@ -105,6 +105,8 @@ Mermaid 图表和块级 LaTeX 公式提供 **Source、Split、Preview** 三种�
 
 从设置菜单打开 **更多设置**，调整输入辅助和快捷键。符号输入、表格粘贴及快捷键冲突规则见 [设置与剪贴板说明](docs/editing-preferences.md)。
 
+Windows 上在 Live / Source 文档编辑区单按左 Alt 会保留光标。VS Code 菜单仍可用鼠标打开，Alt 组合快捷键保留原有行为。
+
 ## 安装
 
 从 [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=huangko555.meo-enhanced) 安装 **MEO Enhanced - Markdown 编辑器**，或在终端中执行：
