@@ -2580,28 +2580,9 @@ button:focus-visible > .menu-switch {
   opacity: 0.95;
 }
 
-.cm-editor .meo-md-em {
-  font-style: italic;
-}
-
-.cm-editor.meo-mode-live .meo-md-subscript,
-.cm-editor.meo-mode-live .meo-md-superscript {
-  font-size: 0.75em;
-  line-height: 0;
-}
-
-.cm-editor.meo-mode-live .meo-md-subscript {
-  vertical-align: sub;
-}
-
-.cm-editor.meo-mode-live .meo-md-superscript {
-  vertical-align: super;
-}
-
 .cm-editor .meo-md-strong {
   color: inherit !important;
   -webkit-text-fill-color: inherit !important;
-  font-weight: 700;
 }
 
 .more-tools-option-text {
@@ -2707,10 +2688,6 @@ button:focus-visible > .menu-switch {
 .cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-code-marker-active {
   color: var(--meo-semantic-markdownSyntax) !important;
   -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;
-}
-
-.cm-editor .meo-md-strike {
-  text-decoration: line-through !important;
 }
 
 .cm-editor .meo-md-details-source-toggle {

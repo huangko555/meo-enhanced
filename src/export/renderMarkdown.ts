@@ -12,6 +12,7 @@ import type { SourceMappedMarkdown } from './sourceMappedMarkdown';
 import { installMathTransform } from './mathTransform';
 import { collectLatexMathRanges, renderLatexMathToHtml } from './math';
 import { installHighlightTransform } from './highlightTransform';
+import { installInlineScriptTransform } from './inlineScriptTransform';
 import { Info, Lightbulb, AlertCircle, AlertTriangle, XCircle } from 'lucide';
 import {
   getSupportedHtmlAttributes,
@@ -113,6 +114,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     return true;
   });
   installHighlightTransform(md);
+  installInlineScriptTransform(md);
   installSourcePositionAndHeadingAnchorTransform(md, (startIndex, endIndex) => ({
     start: bodySourceLines?.[startIndex] ?? 0,
     end: bodySourceLines?.[Math.max(startIndex, endIndex - 1)] ?? 0

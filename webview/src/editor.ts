@@ -26,6 +26,7 @@ import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
 import { insertMountedTableCellBreak } from './helpers/tables';
 import { insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
 import { sourceStrikeMarkerField } from './helpers/strikeMarkers';
+import { markdownInlineStyleTheme } from './helpers/inlineStyles';
 import { sourceHighlightField } from './helpers/highlightSyntax';
 import { sourceWikiMarkerField } from './helpers/wikiLinks';
 import { sourceFileLinkField } from './helpers/sourceRawLinks';
@@ -2371,6 +2372,7 @@ export function createEditor({
       // One editor-scoped renderer keeps fenced-code TextMate tokens identical
       // across Live and Source, and avoids disposing/recreating Shiki on mode switches.
       shikiCodeHighlight,
+      markdownInlineStyleTheme,
       modeCompartment.of(startMode === 'live' ? liveModeExtensions({ largeDocument }) : sourceMode()),
       searchQueryField,
       Prec.high(searchMatchField),

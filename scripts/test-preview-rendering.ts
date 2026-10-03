@@ -1,7 +1,32 @@
+import { inlineScriptFixtures } from './inline-script-fixtures';
 import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { buildExportStyles, buildPreviewStyles } from '../src/export/exportStyles';
 import exportRuntime from '../src/export/runtime';
 import { getBuiltInVisuals } from '../src/shared/builtInVisualBaseline';
+
+for (const [index, fixture] of inlineScriptFixtures.entries()) {
+  const results = [
+    ...(['html', 'pdf', 'docx'] as const).map((target) => ({
+      name: target,
+      html: renderMarkdownToHtml({ markdownText: fixture.markdown, markdownFilePath: 'C:/tmp/sub-super.md', target }).html
+    })),
+    { name: 'preview', html: exportRuntime.renderPreviewDocument({
+      markdownText: fixture.markdown,
+      sourceDocumentPath: 'C:/tmp/sub-super.md',
+      uiLanguage: 'zh-CN',
+      styleEnvironment: { previewFontFamily: '' }
+    }).html }
+  ];
+  for (const result of results) {
+    if (!result.html.includes(fixture.expected)) {
+      throw new Error(`${result.name} subscript/superscript case ${index} failed: ${fixture.markdown} => ${result.html}`);
+    }
+    for (const [tag, expectedCount] of [['sub', fixture.subs.length], ['sup', fixture.sups.length], ['s', fixture.strikes.length]] as const) {
+      const count = (result.html.match(new RegExp(`<${tag}>`, 'g')) ?? []).length;
+      if (count !== expectedCount) throw new Error(`${result.name} case ${index}: expected ${expectedCount} ${tag} elements, got ${count}`);
+    }
+  }
+}
 
 const escapedMultiBacktick = `${String.fromCharCode(92)}${String.fromCharCode(96).repeat(2)}#0a0${String.fromCharCode(96)} #0b0`;
 const backtick = String.fromCharCode(96);
@@ -606,7 +631,8 @@ if (
   !darkPreviewStyles.includes('--meo-heading-1-size: 1.6em') ||
   !darkPreviewStyles.includes('--meo-heading-1-weight: 600') ||
   getBuiltInVisuals('dark').typography.headingFontWeights[0] !== '400' ||
-  !darkPreviewStyles.includes('strong { color: inherit; font-weight: 700; }')
+  !darkPreviewStyles.includes('strong { color: inherit; }') ||
+  !darkPreviewStyles.includes('strong { font-weight: 700; }')
 ) {
   throw new Error('Preview headings must be semibold without changing Live heading weight or strong-text emphasis');
 }

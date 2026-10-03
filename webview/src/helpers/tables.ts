@@ -1,3 +1,4 @@
+import { matchInlineScript } from '../../../src/foundation/inlineScript';
 import { wireNativeSymbolInput, nativeSymbolInput } from '../editor/nativeTypingAssistance';
 import { automaticSymbolPairs, symbolOriginEpoch, replaceAutomaticSymbolPairArea, inputAssistanceFacet, type AutomaticSymbolPair } from '../editor/typingAssistance';
 import { markdownTableFromCells, serializeDelimitedTable, parseMarkdownTable, externalTableCellToMarkdown } from '../application/delimitedTable';
@@ -1495,7 +1496,7 @@ function parseTableInlineWikiLink(text: string, index: number) {
   return null;
 }
 
-function findTableInlineClosingMarker(text: string, startIndex: number, marker: string, { singleTilde = false }: { singleTilde?: boolean } = {}) {
+function findTableInlineClosingMarker(text: string, startIndex: number, marker: string) {
   const markerLen = marker.length;
   for (let i = startIndex; i <= text.length - markerLen; i += 1) {
     if (!text.startsWith(marker, i)) continue;
@@ -1514,10 +1515,6 @@ function findTableInlineClosingMarker(text: string, startIndex: number, marker: 
     }
     const close = runEnd - markerLen;
     if (!canCloseTableInlineDelimiter(text, close, marker)) {
-      i = runEnd - 1;
-      continue;
-    }
-    if (singleTilde && (text[close - 1] === '~' || text[close + 1] === '~')) {
       i = runEnd - 1;
       continue;
     }
@@ -1576,17 +1573,6 @@ function parseTableInlineDelimitedSpan(text: string, index: number) {
       const content = text.slice(start, close);
       if (!isTableInlineWhitespaceOnly(content)) {
         return { kind: 'em', content, nextIndex: close + 1 };
-      }
-    }
-  }
-
-  if (text[index] === '~' && text[index + 1] !== '~' && text[index - 1] !== '~') {
-    const start = index + 1;
-    const close = findTableInlineClosingMarker(text, start, '~', { singleTilde: true });
-    if (close > start) {
-      const content = text.slice(start, close);
-      if (!isTableInlineWhitespaceOnly(content)) {
-        return { kind: 'strike', content, nextIndex: close + 1 };
       }
     }
   }
@@ -1880,6 +1866,26 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
       }
     }
 
+    const script = matchInlineScript(text, i);
+    if (script) {
+      flushBuffer();
+      const el = document.createElement(script.kind === 'subscript' ? 'sub' : 'sup');
+      el.className = `meo-md-${script.kind}`;
+      setInlineSourceRange(el, { from: baseOffset + i, to: baseOffset + script.to });
+      let cursor = i + 1;
+      for (const escape of script.escapes) {
+        appendTablePlainText(el, text.slice(cursor, escape.from), baseOffset + cursor, diagnostics, searchState, sourceRange);
+        appendInlineMappedText(el, text.slice(escape.from + 1, escape.to), {
+          from: baseOffset + escape.from, to: baseOffset + escape.to
+        });
+        cursor = escape.to;
+      }
+      appendTablePlainText(el, text.slice(cursor, script.to - 1), baseOffset + cursor, diagnostics, searchState, sourceRange);
+      parent.appendChild(el);
+      i = script.to;
+      continue;
+    }
+
     const span = parseTableInlineDelimitedSpan(text, i);
     if (span) {
       flushBuffer();
@@ -1904,7 +1910,7 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
         el.className = 'meo-md-strike';
         appendTableInlinePreviewNodes(el, span.content, {
           ...options,
-          baseOffset: baseOffset + i + (text.startsWith('~~', i) ? 2 : 1)
+          baseOffset: baseOffset + i + 2
         });
         parent.appendChild(el);
       } else if (span.kind === 'highlight') {

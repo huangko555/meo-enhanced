@@ -28,7 +28,7 @@ import { ImageGroupWidget, ImageWidget, getImageData, isImageUrl, type ImageGrou
 import { getImagePresentationFactory } from './editor/imagePresentation';
 import { liveHighlightStyle, sourceMarkdownHighlightProps } from './theme';
 import { highlightMarkdownExtension } from './helpers/highlightSyntax';
-import { collectSingleTildeStrikePairs, collectStrikethroughRanges } from './helpers/strikeMarkers';
+import { inlineScriptMarkdownExtension } from './helpers/inlineStyles';
 import { collectKbdTagRangesFromText, hasKbdTagMarker } from './helpers/kbd';
 import { getFencedCodeInfo, headingLevelFromName, resolvedSyntaxTree, syntaxTreeChanged } from './helpers/markdownSyntax';
 import { detailsBlockLiveExtensions, getDetailsBlocks, toggleDetailsBlock } from './helpers/detailsBlocks';
@@ -745,7 +745,7 @@ function addStrongEmphasisDecorations(builder: DecorationCollector, state: Edito
 }
 
 function addStrikethroughDecorations(builder: DecorationCollector, state: EditorState, node: SyntaxNodeRef): void {
-  addDelimitedInlineStyleDecoration(builder, state, node, inlineStyleDecos.strike, ['~~', '~']);
+  addDelimitedInlineStyleDecoration(builder, state, node, inlineStyleDecos.strike, ['~~']);
 }
 
 function addHighlightDecorations(builder: DecorationCollector, state: EditorState, node: SyntaxNodeRef): void {
@@ -1522,35 +1522,6 @@ function addInlineMarkerRange(builder: DecorationCollector, activeLines: Set<num
   }
 }
 
-function addSingleTildeStrikeDecorations(builder: DecorationCollector, state: EditorState, activeLines: Set<number>, existingStrikeRanges: SourceRange[], codeBlockLines: Set<number> | null = null): void {
-  const pairs = collectSingleTildeStrikePairs(state, existingStrikeRanges);
-  for (const pair of pairs) {
-    if (codeBlockLines?.has(pair.lineNo)) {
-      continue;
-    }
-    addRange(builder, pair.strikeFrom, pair.strikeTo, inlineStyleDecos.strike);
-    addInlineMarkerRange(
-      builder,
-      activeLines,
-      pair.lineNo,
-      pair.openFrom,
-      pair.openTo,
-      strikeMarkerDeco,
-      activeStrikeMarkerDeco
-    );
-    addInlineMarkerRange(
-      builder,
-      activeLines,
-      pair.lineNo,
-      pair.closeFrom,
-      pair.closeTo,
-      strikeMarkerDeco,
-      activeStrikeMarkerDeco,
-      true
-    );
-  }
-}
-
 function addPunctuationClosingInlineStyleDecorations(
   builder: DecorationCollector,
   state: EditorState,
@@ -2002,7 +1973,6 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
   const tree = resolvedSyntaxTree(state);
   const footnotes = parseFootnotes(state);
   const detailsBlocks = getDetailsBlocks(state, tree);
-  const strikeRanges = collectStrikethroughRanges(tree);
   const parsedInlineStyleRanges: ParsedInlineStyleRange[] = [];
   tree.iterate({
     enter(node: SyntaxNodeRef) {
@@ -2309,6 +2279,12 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
             node.to - 1,
             node.name === 'Subscript' ? subscriptContentDeco : superscriptContentDeco
           );
+          const active = activeLines.has(state.doc.lineAt(node.from).number);
+          for (let child = node.node.firstChild; child; child = child.nextSibling) {
+            if (child.name === 'Escape') {
+              addRange(ranges, child.from, child.from + 1, active ? activeLineMarkerDeco : markerDeco);
+            }
+          }
         }
       }
 
@@ -2495,7 +2471,6 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
     [...renderedTableRanges, ...mathRanges],
     frontmatter
   );
-  addSingleTildeStrikeDecorations(ranges, state, activeLines, strikeRanges, codeBlockLines);
   addListLineDecorations(ranges, state, indentSelectedLines, parsedContainers, frontmatter, codeBlockLines);
   addMathDecorations(ranges, state, mathRanges, activeLines);
   addColorSwatchDecorations(
@@ -3775,7 +3750,7 @@ export const editorMarkdownLanguage = markdown({
   base: markdownLanguage,
   addKeymap: false,
   codeLanguages: resolveCodeLanguage,
-  extensions: [footnoteMarkdownExtension, highlightMarkdownExtension,
+  extensions: [footnoteMarkdownExtension, highlightMarkdownExtension, inlineScriptMarkdownExtension,
     { props: [sourceMarkdownHighlightProps] }, { remove: ['SetextHeading', 'Emoji'] }]
 });
 

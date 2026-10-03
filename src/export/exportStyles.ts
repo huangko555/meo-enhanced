@@ -1,3 +1,4 @@
+import { buildMarkdownInlineStyleCss } from '../shared/markdownInlineStyles';
 import {
   defaultThemeColors,
   getBuiltInVisuals,
@@ -750,8 +751,11 @@ sup.footnote-ref {
   color: var(--meo-muted);
 }
 
-strong { color: inherit; font-weight: 700; }
-em { font-style: italic; }
+strong { color: inherit; }
+${buildMarkdownInlineStyleCss({
+  emphasis: 'em', strong: 'strong', strikethrough: 's, del',
+  subscript: 'sub', superscript: 'sup:not(.footnote-ref)'
+})}
 mark {
   color: inherit;
   background-color: color-mix(in srgb, #ffd60a 34%, transparent);

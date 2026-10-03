@@ -1,3 +1,5 @@
+import assert from 'node:assert/strict';
+import { inlineScriptFixtures } from './inline-script-fixtures';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,7 +14,7 @@ const richHighlight = '==高亮 **粗体** *斜体* ~~删除~~ [链接](https://
 const rendered = await exportRuntime.renderExportHtmlDocument({
   readingSnapshot: {
     snapshotId: 'highlight',
-    text: [richHighlight, '', '**粗体里的 ==高亮==**', '', '====', '', '\\==不高亮=='].join('\n'),
+    text: [richHighlight, '', '**粗体里的 ==高亮==**', '', '====', '', '\\==不高亮==', '', 'H~2~O x^2^ ~~删除线~~'].join('\n'),
     appearance: 'dark',
     uiLanguage: 'en',
     environment: {
@@ -71,6 +73,7 @@ try {
     '',
     '普通行',
     '1. 原生列表颜色',
+    '~中~',
     richHighlight,
     '====',
     '\\==不高亮==',
@@ -131,6 +134,7 @@ try {
         boldStrokeWidth: boldIcon?.getAttribute('stroke-width') ?? null
       },
       headingHighlight: editor.getHeadings()[0]?.inlineSegments?.some((segment: any) => segment.highlight) ?? false,
+      overlappingTildeStyles: Array.from(document.querySelectorAll('.meo-md-subscript')).filter(node => node.closest('.meo-md-strike') || node.querySelector('.meo-md-strike')).map(node => node.textContent),
       subscripts: Array.from(document.querySelectorAll('.meo-md-subscript')).map((node) => node.textContent),
       superscripts: Array.from(document.querySelectorAll('.meo-md-superscript')).map((node) => node.textContent)
     };
@@ -159,8 +163,11 @@ try {
   ) {
     throw new Error(`Highlight integration is incomplete: ${JSON.stringify(live)}`);
   }
+  if (live.overlappingTildeStyles.length) {
+    throw new Error(`Single tilde must not render as both subscript and strikethrough: ${JSON.stringify(live.overlappingTildeStyles)}`);
+  }
   if (
-    JSON.stringify(live.subscripts) !== JSON.stringify(['2', '2'])
+    JSON.stringify(live.subscripts) !== JSON.stringify(['中', '2', '2'])
     || JSON.stringify(live.superscripts) !== JSON.stringify(['2'])
   ) {
     throw new Error(`Live subscript/superscript rendering is incomplete: ${JSON.stringify(live)}`);
@@ -245,6 +252,114 @@ try {
   if (!underlinedText.includes('==<u>格式化目标</u>==')) {
     throw new Error(`Underline toolbar action did not wrap the selection: ${underlinedText}`);
   }
+
+  for (const fixture of inlineScriptFixtures) {
+    const actual = await page.evaluate(async (markdown) => {
+      const harness = (window as any).HighlightHarness;
+      const previous = (window as any).__highlightEditor;
+      previous.destroy();
+      const parent = document.getElementById('app')!;
+      parent.replaceChildren();
+      const text = `${markdown}\n\n`;
+      const editor = harness.createEditor({ parent, text, initialMode: 'live', onApplyChanges() {} });
+      (window as any).__highlightEditor = editor;
+      editor.view.dispatch({ selection: { anchor: text.length } });
+      const settle = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      await settle();
+      const texts = (selector: string) => Array.from(parent.querySelectorAll(selector))
+        .filter((node) => !node.closest('.meo-md-html-table-sticky-header')).map((node) => {
+        const clone = node.cloneNode(true) as HTMLElement;
+        clone.querySelectorAll('.meo-md-marker, .meo-md-marker-active, .meo-md-strike-marker, .meo-md-strike-marker-active').forEach((marker) => marker.remove());
+        return clone.textContent;
+      });
+      const visuals = Array.from(parent.querySelectorAll<HTMLElement>('.meo-md-subscript, .meo-md-superscript')).map((node) => {
+        const style = getComputedStyle(node);
+        return {
+          scale: Number.parseFloat(style.fontSize) / Number.parseFloat(getComputedStyle(node.parentElement!).fontSize),
+          vertical: style.verticalAlign,
+          lineHeight: style.lineHeight
+        };
+      });
+      const live = { subs: texts('.meo-md-subscript'), sups: texts('.meo-md-superscript'), strikes: texts('.meo-md-strike'), visuals };
+      editor.setMode('source');
+      await settle();
+      const source = {
+        text: editor.getText(),
+        scriptCount: parent.querySelectorAll('.meo-md-subscript, .meo-md-superscript').length,
+        strikeMarkers: texts('.meo-md-strike-marker')
+      };
+      editor.setMode('live');
+      await settle();
+      return { live, source, restored: { subs: texts('.meo-md-subscript'), sups: texts('.meo-md-superscript'), strikes: texts('.meo-md-strike') } };
+    }, fixture.markdown);
+    const expected = { subs: fixture.subs, sups: fixture.sups, strikes: fixture.strikes };
+    assert.deepEqual({ subs: actual.live.subs, sups: actual.live.sups, strikes: actual.live.strikes }, expected, `Live inline scripts: ${fixture.markdown}`);
+    assert.deepEqual(actual.restored, expected, `Live/Source roundtrip: ${fixture.markdown}`);
+    assert.equal(actual.source.text, `${fixture.markdown}\n\n`, 'Mode switches must preserve Markdown source');
+    assert.equal(actual.source.scriptCount, 0, 'Source must not render script positioning');
+    assert(actual.source.strikeMarkers.every((marker) => marker === '~~'), 'Source must not mark single tildes as strikethrough');
+    assert(actual.live.visuals.every((style) => Math.abs(style.scale - 0.75) < 0.005 && style.lineHeight === '0px'
+      && (style.vertical === 'sub' || style.vertical === 'super')), `Live script styles: ${JSON.stringify(actual.live.visuals)}`);
+  }
+
+  const scriptHistory = await page.evaluate(async () => {
+    const harness = (window as any).HighlightHarness;
+    (window as any).__highlightEditor.destroy();
+    const parent = document.getElementById('app')!;
+    parent.replaceChildren();
+    const editor = harness.createEditor({ parent, text: '~中~\n\n', initialMode: 'live', onApplyChanges() {} });
+    (window as any).__highlightEditor = editor;
+    const settle = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    const snapshot = async () => {
+      await settle();
+      return { text: editor.getText(), subs: parent.querySelectorAll('.meo-md-subscript').length, strikes: parent.querySelectorAll('.meo-md-strike').length };
+    };
+    const initial = await snapshot();
+    editor.view.dispatch({ changes: [{ from: 0, insert: '~' }, { from: 3, insert: '~' }] });
+    const double = await snapshot();
+    editor.undo();
+    const undone = await snapshot();
+    editor.redo();
+    const redone = await snapshot();
+    return { initial, double, undone, redone };
+  });
+  const single = { text: '~中~\n\n', subs: 1, strikes: 0 };
+  const double = { text: '~~中~~\n\n', subs: 0, strikes: 1 };
+  assert.deepEqual(scriptHistory, { initial: single, double, undone: single, redone: double }, 'Changing tilde count and undo/redo must update script/strike presentation');
+
+  const readingPage = await browser.newPage();
+  try {
+    const preview = exportRuntime.renderPreviewDocument({
+      markdownText: '**粗体** *斜体* H~2~O x^2^ ~~删除线~~', sourceDocumentPath: 'C:/tmp/inline-styles.md',
+      uiLanguage: 'zh-CN', styleEnvironment: { previewFontFamily: '' }
+    });
+    for (const [name, html] of [
+      ['export', rendered.htmlDocument],
+      ['dark-preview', `<style>${preview.styles.dark}</style><main class="meo-export-doc">${preview.html}</main>`],
+      ['light-preview', `<style>${preview.styles.light}</style><main class="meo-export-doc">${preview.html}</main>`]
+    ]) {
+      await readingPage.setContent(html!);
+      const visuals = await readingPage.evaluate(() => {
+        const styles = (selector: string) => {
+          const node = document.querySelector<HTMLElement>(selector)!;
+          const style = getComputedStyle(node);
+          return { weight: style.fontWeight, italic: style.fontStyle, decoration: style.textDecorationLine,
+            scale: Number.parseFloat(style.fontSize) / Number.parseFloat(getComputedStyle(node.parentElement!).fontSize),
+            vertical: style.verticalAlign, lineHeight: style.lineHeight };
+        };
+        return { strong: styles('strong'), em: styles('em'), strike: styles('s'), sub: styles('sub'), sup: styles('sup') };
+      });
+      assert.equal(visuals.strong.weight, '700', `${name} shared strong style`);
+      assert.equal(visuals.em.italic, 'italic', `${name} shared emphasis style`);
+      assert.equal(visuals.strike.decoration, 'line-through', `${name} shared strike style`);
+      for (const kind of ['sub', 'sup'] as const) {
+        assert(Math.abs(visuals[kind].scale - 0.75) < 0.005, `${name} shared script font size`);
+        assert.equal(visuals[kind].lineHeight, '0px', `${name} shared script line height`);
+        assert.equal(visuals[kind].vertical, kind === 'sub' ? 'sub' : 'super', `${name} shared script alignment`);
+        assert.equal(visuals[kind].decoration, 'none', `${name} scripts must not have a strike decoration`);
+      }
+    }
+  } finally { await readingPage.close(); }
 
   const nativePaletteVisuals = await page.evaluate(async () => {
     const harness = (window as any).HighlightHarness;
