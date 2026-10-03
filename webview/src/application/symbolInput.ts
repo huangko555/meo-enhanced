@@ -5,6 +5,9 @@ export const symbolPairs: Readonly<Record<string, string>> = {
   '（': '）', '【': '】', '“': '”', '‘': '’', '《': '》', '「': '」', '『': '』'
 };
 
+// Markdown surrounding pairs are broader than empty-cursor auto-closing pairs.
+const surroundingPairs: Readonly<Record<string, string>> = { ...symbolPairs, '<': '>', '*': '*', '_': '_', '~': '~', '$': '$' };
+
 export function inlineCodeMarkers(text: string): { open: string; close: string } {
   let longest = 0;
   for (const match of text.matchAll(/`+/g)) longest = Math.max(longest, match[0].length);
@@ -27,14 +30,17 @@ export function planSymbolInput(options: {
   readonly preferences: InputAssistance;
 }): SymbolInputPlan | null {
   const { typed, selected, before, after, automaticRight, preferences } = options;
-  if (typed.length !== 1 || (/\\+$/.exec(before)?.[0].length ?? 0) % 2 === 1) return null;
-  const close = symbolPairs[typed];
+  if (typed.length !== 1) return null;
   if (selected) {
-    if (!preferences.wrapSelection || !close) return null;
+    const close = surroundingPairs[typed];
+    if (!preferences.wrapSelection || !close || /^[ \t\r\n]+$/.test(selected)) return null;
+    if ((typed === "'" || typed === '"') && (selected === "'" || selected === '"' || selected === '`')) return null;
     const markers = typed === '`' ? inlineCodeMarkers(selected) : { open: typed, close };
     return { type: 'insert', text: markers.open + selected + markers.close,
       anchor: markers.open.length, head: markers.open.length + selected.length, ...markers };
   }
+  if ((/\\+$/.exec(before)?.[0].length ?? 0) % 2 === 1) return null;
+  const close = symbolPairs[typed];
   // After an empty inline pair, further backticks belong to a literal Markdown fence.
   if (typed === '`' && /`{2,}$/.test(before)) return null;
   if (after.startsWith(typed) && Object.values(symbolPairs).includes(typed) && preferences.skipMode !== 'off') {

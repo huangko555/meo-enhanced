@@ -46,6 +46,52 @@ try {
       await page.keyboard.type(left);
       assert.equal(await text(), left + '文字' + right, `${mode}: reverse selected ${left}`);
     }
+    // These five entries are surroundingPairs in VS Code's Markdown configuration,
+    // independently of its autoClosingPairs. Keep the fixture independent of our rules.
+    for (const [left, right] of [['*', '*'], ['_', '_'], ['~', '~'], ['<', '>'], ['$', '$']]) {
+      for (const backward of [false, true]) {
+        await prepare(mode, 'word', backward ? 4 : 0, backward ? 0 : 4, { pairMode: 'off' });
+        await page.keyboard.type(left);
+        assert.equal(await text(), left + 'word' + right, `${mode}: selected ${left}, backward=${backward}`);
+        assert.deepEqual(await page.evaluate(() => (window as any).__inputEditor.view.state.selection.main.toJSON()),
+          backward ? { anchor: 5, head: 1 } : { anchor: 1, head: 5 }, 'keep the inner selection and its direction');
+        await page.evaluate(() => (window as any).__inputEditor.undo()); await waitText('word');
+        await page.evaluate(() => (window as any).__inputEditor.redo()); await waitText(left + 'word' + right);
+      }
+      await prepare(mode, 'word', 0, 4);
+      await page.keyboard.type(left.repeat(3));
+      assert.equal(await text(), left.repeat(3) + 'word' + right.repeat(3), `${mode}: repeated ${left} wraps the retained selection`);
+      await prepare(mode, 'one\ntwo', 0, 7);
+      await page.keyboard.type(left); assert.equal(await text(), left + 'one\ntwo' + right, `${mode}: multiline ${left}`);
+      await prepare(mode, 'word', 0, 4, { wrapSelection: false });
+      await page.keyboard.type(left); assert.equal(await text(), left, `${mode}: disabled wrapping replaces the selection`);
+      await prepare(mode, '', 0, 0, { pairMode: 'always', skipMode: 'always', deleteMode: 'always' });
+      await page.keyboard.type(left); assert.equal(await text(), left, `${mode}: surrounding-only ${left} does not auto-close`);
+      await prepare(mode, left + right, 1, 1, { pairMode: 'always', skipMode: 'always', deleteMode: 'always' });
+      await page.keyboard.type(right); assert.equal(await text(), left + right.repeat(2), `${mode}: surrounding-only closer is inserted rather than skipped`);
+      await prepare(mode, left + right, 1, 1, { deleteMode: 'always' });
+      await page.keyboard.press('Backspace'); assert.equal(await text(), right, `${mode}: surrounding-only pair keeps single-character deletion`);
+    }
+    for (const left of ['(', '[', '{', '"', "'", '`', '<', '*', '_', '~', '$']) {
+      await prepare(mode, '\\word', 1, 5);
+      await page.keyboard.type(left);
+      const right = left === '(' ? ')' : left === '[' ? ']' : left === '{' ? '}' : left === '<' ? '>' : left;
+      assert.equal(await text(), '\\' + left + 'word' + right, `${mode}: an escape before the selection does not suppress surrounding`);
+      await prepare(mode, ' \t\n ', 0, 4);
+      await page.keyboard.type(left); assert.equal(await text(), left, `${mode}: whitespace-only selection uses ordinary replacement`);
+    }
+    for (const typed of ['"', "'"]) for (const selected of ['"', "'", '`']) {
+      await prepare(mode, selected, 0, 1); await page.keyboard.type(typed);
+      assert.equal(await text(), typed, `${mode}: replacing a single quote does not surround it`);
+    }
+    await prepare(mode, '\u00a0', 0, 1); await page.keyboard.type('*');
+    assert.equal(await text(), '*\u00a0*', `${mode}: native whitespace exception is restricted to spaces, tabs and line breaks`);
+    for (const unsupported of ['=', '#', '+', '-', '|', ')', ']']) {
+      await prepare(mode, 'word', 0, 4); await page.keyboard.type(unsupported);
+      assert.equal(await text(), unsupported, `${mode}: non-surrounding ${unsupported} keeps replacement behavior`);
+    }
+    await prepare(mode, '`', 0, 1); await page.keyboard.type('`');
+    assert.equal(await text(), '`` ` ``', 'the existing adaptive backtick extension keeps a literal selected backtick');
     await prepare(mode, 'a`b', 0, 3);
     await page.keyboard.type('`');
     assert.equal(await text(), '``a`b``');
@@ -79,5 +125,5 @@ try {
     assert.equal(await text(), '- item\n- ');
   }
   assert.deepEqual(errors, []);
-  console.log('Production input assistance: Live/Source, English/Chinese pairs, reversed selection, backticks, origins through undo, all modes and list continuation passed');
+  console.log('Production input assistance: Live/Source, all native Markdown surrounding pairs/Chinese pairs, forward/reverse/multiline selection, repeated markers, quote/whitespace/escape boundaries, backticks, origins through undo, all modes and list continuation passed');
 } finally { await closeTestBrowser(browser); }

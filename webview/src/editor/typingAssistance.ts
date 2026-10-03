@@ -66,12 +66,17 @@ function automaticRightAt(view: EditorView, position: number): boolean {
 function typeSymbols(view: EditorView, typed: string): boolean {
   if (view.compositionStarted || typed.length !== 1) return false;
   const preferences = view.state.facet(inputAssistanceFacet);
-  let changed = false;
+  const ranges = view.state.selection.ranges;
+  const plans = ranges.map(range => planSymbolInput({ typed, selected: view.state.doc.sliceString(range.from, range.to),
+    before: view.state.doc.sliceString(Math.max(0, range.from - 256), range.from),
+    after: view.state.doc.sliceString(range.to, Math.min(view.state.doc.length, range.to + 4)),
+    automaticRight: automaticRightAt(view, range.to), preferences }));
+  // Match native surrounding: every range must qualify, otherwise ordinary input
+  // replaces all selections. Mixing wrapped text and replaced whitespace is surprising.
+  if (ranges.some(range => !range.empty) && (ranges.some(range => range.empty) || plans.some(plan => !plan || plan.type !== 'insert'))) return false;
+  let changed = false, index = 0;
   const transaction = view.state.changeByRange(range => {
-    const plan = planSymbolInput({ typed, selected: view.state.doc.sliceString(range.from, range.to),
-      before: view.state.doc.sliceString(Math.max(0, range.from - 256), range.from),
-      after: view.state.doc.sliceString(range.to, Math.min(view.state.doc.length, range.to + 4)),
-      automaticRight: automaticRightAt(view, range.to), preferences });
+    const plan = plans[index++];
     if (!plan) return { changes: { from: range.from, to: range.to, insert: typed }, range: EditorSelection.cursor(range.from + typed.length) };
     changed = true;
     if (plan.type === 'skip') return { range: EditorSelection.cursor(range.head + plan.length) };

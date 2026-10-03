@@ -62,6 +62,7 @@ try {
   assert.deepEqual(await page.$$eval('.settings-paste-contexts dt', elements => elements.map(e => e.textContent)), ['正文', '已有表格', '代码']);
   assert.ok(await page.$eval('.settings-paste-contexts dd:nth-of-type(2)', e => e.textContent?.includes('不受这个开关影响')));
   const wrap = '.settings-item[data-setting="wrapSelection"]';
+  for (const pair of ['<>', '*', '_', '~', '$', '``']) assert.ok(await page.$eval(wrap + ' .settings-description', (element, pair) => element.textContent?.includes(pair), pair), 'wrapping description includes ' + pair);
   await page.click(wrap + ' .settings-item-title');
   assert.equal(await page.$eval(wrap + ' [role="switch"]', element => element.getAttribute('aria-checked')), 'true');
   await page.click(wrap + ' [role="switch"]');
@@ -157,6 +158,9 @@ try {
     await page.click(`[data-setting="theme"] [data-value="${appearance}"]`);
     assert.equal(await page.evaluate(() => document.documentElement.lang), language);
     assert.equal(await page.evaluate(() => document.documentElement.dataset.editorAppearance), appearance);
+    await page.click('.settings-tab[data-tab="typing"]');
+    const wrappingDescription = await page.$eval(wrap + ' .settings-description', element => element.textContent ?? '');
+    for (const pair of ['<>', '*', '_', '~', '$', '``']) assert.ok(wrappingDescription.includes(pair), language + ': wrapping description includes ' + pair);
     const selectedColor = await page.$eval('.settings-tab[aria-selected="true"]', e => getComputedStyle(e).color.match(/\d+/g)!.map(Number));
     assert.ok(selectedColor[2] > selectedColor[0], 'selected tab keeps the product blue accent in both themes');
     assert.equal(await page.$eval('.more-tools-section-label:not(:first-child)', e => getComputedStyle(e).borderTopWidth), '0px', 'category uses one separator source');
@@ -215,6 +219,7 @@ try {
     for (const [language, appearance] of [['zh-CN', 'dark'], ['en', 'light']]) {
       await page.click('.settings-tab[data-tab="general"]'); await page.click(`[data-setting="language"] [data-value="${language}"]`); await page.click(`[data-setting="theme"] [data-value="${appearance}"]`);
       await page.click('.settings-tab[data-tab="typing"]');
+      await page.click('.settings-jump[data-section="symbols"]');
       await page.screenshot({ path: path.join(directory, `settings-${language}-${appearance}.png`) });
       await page.click('.settings-jump[data-section="paste"]');
       await page.screenshot({ path: path.join(directory, `settings-paste-${language}-${appearance}.png`) });

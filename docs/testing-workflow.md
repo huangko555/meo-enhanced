@@ -625,6 +625,12 @@ The table/history packs exercise the new editing paths; the appearance pack
 includes the actual settings and toolbar menus. Browser tests use the production
 editor and full Webview bootstrap. They assert resulting documents, undo results,
 actual remapped gestures, persisted projections, focus and DOM disposal.
+Symbol surrounding uses an explicit native Markdown fixture, independent of
+the production pair map. It covers all 11 native pairs plus Chinese extensions,
+repeated markers, forward/reverse/multiline/code-context selections, all-or-none
+multiple selections, quote/ASCII-whitespace/escape-prefix exceptions, cell-save
+projection and undo/redo. Surrounding-only markers are separately checked against
+empty-cursor auto-close, overtype and paired Backspace.
 CDP composition validates preedit/commit boundaries without proving a specific
 Windows IME. Clipboard events and the mocked VS Code clipboard validate payloads
 and ownership, without proving native Excel/OS permission or installed-VSIX behavior.

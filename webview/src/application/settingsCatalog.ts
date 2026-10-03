@@ -11,7 +11,7 @@ export const sectionTitles = {
   table: ['表格', 'Tables'], selection: ['选择与光标', 'Selections and cursors'], lines: ['行操作', 'Line operations'], navigation: ['模式与导航', 'Modes and navigation']
 } as const;
 export const typingCatalog: readonly { key: keyof InputAssistance; section: TypingSection; title: readonly [string, string]; description: readonly [string, string] }[] = [
-  { key: 'wrapSelection', section: 'symbols', title: ['选中文字后包裹符号', 'Wrap selected text'], description: ['支持 () [] {} 引号、` 和 ``，以及（）【】“”‘’《》「」『』。反引号长度会避开选中内容中的反引号。', 'Supports () [] {}, quotes, ` and ``, plus Chinese brackets and quotes. Backtick length adapts to the selected text.'] },
+  { key: 'wrapSelection', section: 'symbols', title: ['选中文字后包裹符号', 'Wrap selected text'], description: ['支持 () [] {} <>、引号、* _ ~ $、` 和 ``，以及（）【】“”‘’《》「」『』。反引号长度会避开选中内容中的反引号。', 'Supports () [] {} <>, quotes, * _ ~ $, ` and ``, plus Chinese brackets and quotes. Backtick length adapts to the selected text.'] },
   { key: 'pairMode', section: 'symbols', title: ['自动补全符号', 'Complete symbol pairs'], description: ['输入左符号时补出右符号，光标留在中间。', 'Insert the closing symbol and leave the cursor between the pair.'] },
   { key: 'skipMode', section: 'symbols', title: ['跳过已有右符号', 'Skip an existing closing symbol'], description: ['右侧已有匹配符号时，决定移动光标还是插入新符号。', 'Choose whether typing a matching closing symbol moves the cursor or inserts another symbol.'] },
   { key: 'deleteMode', section: 'symbols', title: ['退格删除空符号对', 'Backspace in an empty pair'], description: ['决定退格时删除一对符号还是一个字符。', 'Choose whether Backspace deletes the empty pair or a single character.'] },

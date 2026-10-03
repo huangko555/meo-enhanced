@@ -73,6 +73,27 @@ try {
     await prepare(mode, 'a b');
     await page.evaluate(() => { const global = window as any; global.editor.view.dispatch({ selection: global.EditingFeaturesHarness.EditorSelection.create([global.EditingFeaturesHarness.EditorSelection.range(0, 1), global.EditingFeaturesHarness.EditorSelection.range(2, 3)]) }); });
     await page.keyboard.type('（'); assert.equal(await text(), '（a） （b）');
+    for (const [left, right] of [['*', '*'], ['_', '_'], ['~', '~'], ['<', '>'], ['$', '$']]) {
+      await prepare(mode, 'a b');
+      await page.evaluate(() => { const g = window as any; g.editor.view.dispatch({ selection: g.EditingFeaturesHarness.EditorSelection.create([g.EditingFeaturesHarness.EditorSelection.range(1, 0), g.EditingFeaturesHarness.EditorSelection.range(2, 3)]) }); });
+      await page.keyboard.type(left); assert.equal(await text(), left + 'a' + right + ' ' + left + 'b' + right);
+      assert.deepEqual(await page.evaluate(() => (window as any).editor.view.state.selection.ranges.map((range: any) => range.toJSON())), [{ anchor: 2, head: 1 }, { anchor: 5, head: 6 }]);
+      await page.evaluate(() => (window as any).editor.undo()); await waitText('a b');
+      await page.evaluate(() => (window as any).editor.redo()); await waitText(left + 'a' + right + ' ' + left + 'b' + right);
+      for (const [document, from, to] of [['```\nword\n```', 4, 8], ['`word`', 1, 5]] as const) {
+        await prepare(mode, document, from, to); await page.keyboard.type(left);
+        assert.equal(await text(), document.slice(0, from) + left + 'word' + right + document.slice(to), 'selection surrounding also works in code contexts');
+      }
+      for (const second of [[3, 3], [2, 3]]) {
+        await prepare(mode, 'a  b', 0);
+        await page.evaluate(second => { const g = window as any; g.editor.view.dispatch({ selection: g.EditingFeaturesHarness.EditorSelection.create([g.EditingFeaturesHarness.EditorSelection.range(0, 1), g.EditingFeaturesHarness.EditorSelection.range(second[0], second[1])]) }); }, second);
+        await page.keyboard.type(left); assert.equal(await text(), left + (second[0] === second[1] ? '  ' : ' ') + left + 'b', 'native mixed or whitespace selections all use ordinary replacement');
+      }
+    }
+    await prepare(mode, 'word', 0, 4);
+    await session.send('Input.imeSetComposition', { text: '*', selectionStart: 1, selectionEnd: 1 }); assert.equal(await text(), '*', 'selected IME preedit is not surrounded');
+    await session.send('Input.insertText', { text: '*' }); await waitText('*word*');
+    await page.evaluate(() => (window as any).editor.undo()); await waitText('word');
     await prepare(mode); await page.keyboard.type('(');
     await page.evaluate(() => { const editor = (window as any).editor; editor.setText('()', false); editor.view.dispatch({ selection: { anchor: 1 } }); editor.view.focus(); });
     await page.keyboard.type(')'); assert.equal(await text(), '())', 'external presentation clears pair provenance');
@@ -148,6 +169,46 @@ try {
     await page.evaluate(() => (window as any).editor.getTextForSave());
     await page.keyboard.type(right); assert.equal(await cell(), left + right, 'native persisted skip ' + right);
   }
+  const selectedCellTable = table.replace('|  | x |', '| word | x |');
+  // Complete native Markdown fixture plus the existing Chinese extension; never
+  // derive expectations from the production pair map, which previously hid omissions.
+  for (const [left, right] of [['(', ')'], ['[', ']'], ['{', '}'], ['"', '"'], ["'", "'"], ['`', '`'], ['<', '>'], ['*', '*'], ['_', '_'], ['~', '~'], ['$', '$'], ['（', '）'], ['【', '】'], ['“', '”'], ['‘', '’'], ['《', '》'], ['「', '」'], ['『', '』']]) {
+    for (const backward of [false, true]) {
+      await prepare('live', selectedCellTable, 0, 0, { pairMode: 'off' }); await openCell();
+      await page.evaluate(backward => (document.activeElement as HTMLTextAreaElement).setSelectionRange(0, 4, backward ? 'backward' : 'forward'), backward);
+      await page.keyboard.type(left); assert.equal(await cell(), left + 'word' + right, 'native selected pair ' + left);
+      assert.deepEqual(await page.evaluate(() => { const input = document.activeElement as HTMLTextAreaElement; return [input.selectionStart, input.selectionEnd, input.selectionDirection]; }), [1, 5, backward ? 'backward' : 'forward']);
+      await page.evaluate(() => (window as any).editor.getTextForSave());
+      assert.ok((await text()).includes(left + 'word' + right), 'cell wrapping reaches the saved document');
+    }
+  }
+  for (const [left, right] of [['*', '*'], ['_', '_'], ['~', '~'], ['<', '>'], ['$', '$']]) {
+    await prepare('live', selectedCellTable, 0); await openCell(); await page.keyboard.type(left.repeat(2));
+    assert.equal(await cell(), left.repeat(2) + 'word' + right.repeat(2), 'native repeated marker ' + left);
+    await prepare('live', selectedCellTable, 0); await openCell(); await page.keyboard.type(left);
+    await page.evaluate(() => (window as any).editor.getTextForSave());
+    await page.evaluate(() => (window as any).editor.undo()); await waitText(selectedCellTable);
+    await page.evaluate(() => (window as any).editor.redo()); await waitText(selectedCellTable.replace('word', left + 'word' + right));
+    await prepare('live', selectedCellTable, 0, 0, { wrapSelection: false }); await openCell();
+    await page.keyboard.type(left); assert.equal(await cell(), left);
+    await prepare('live', table, 0, 0, { pairMode: 'always', skipMode: 'always', deleteMode: 'always' }); await openCell();
+    await page.keyboard.type(left.repeat(2)); assert.equal(await cell(), left.repeat(2), 'native surrounding-only markers stay literal without a selection');
+    await page.evaluate(() => (document.activeElement as HTMLTextAreaElement).setSelectionRange(1, 1));
+    await page.keyboard.press('Backspace'); assert.equal(await cell(), left, 'native surrounding-only markers do not delete as an automatic empty pair');
+  }
+  await prepare('live', selectedCellTable.replace('word', 'a   b'), 0); await openCell();
+  await page.evaluate(() => (document.activeElement as HTMLTextAreaElement).setSelectionRange(1, 4));
+  await page.keyboard.type('*'); assert.equal(await cell(), 'a*b', 'native whitespace selection is replaced');
+  for (const quote of ['"', "'", '`']) {
+    await prepare('live', selectedCellTable.replace('word', quote), 0); await openCell();
+    await page.keyboard.type('"'); assert.equal(await cell(), '"', 'native single quote is replaced');
+  }
+  await prepare('live', selectedCellTable, 0); await openCell();
+  await session.send('Input.imeSetComposition', { text: '*', selectionStart: 1, selectionEnd: 1 }); assert.equal(await cell(), '*');
+  await session.send('Input.insertText', { text: '*' }); assert.equal(await cell(), '*word*');
+  await prepare('live', selectedCellTable.replace('word', '\\word'), 0); await openCell();
+  await page.evaluate(() => (document.activeElement as HTMLTextAreaElement).setSelectionRange(1, 5));
+  await page.keyboard.type('_'); assert.equal(await cell(), '\\_word_');
   for (const ticks of ['```', '````']) {
     await prepare('live', table, 0); await openCell(); await page.keyboard.type(ticks); assert.equal(await cell(), ticks, 'native cell keeps literal backtick runs');
   }
