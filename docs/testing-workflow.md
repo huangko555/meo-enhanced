@@ -80,6 +80,14 @@ must contain the new-position caret. Frame observations also cover the unfrozen
 browser event path. These checks do not simulate Windows Alt+Tab or prove native
 activation event delivery; foreground acceptance remains a separate check.
 
+The same test observes the content-window keyboard forwarding boundary for the
+Windows bare-left-Alt policy. Live/Source prose, table cell selections and code,
+HTML, Mermaid and math inputs must keep focus and selection and accept immediate
+input. Repeated Alt, window handoff, lost keyup, Alt+Shift+M, Host combinations,
+AltGr/composition and read-only/outside controls are checked. These are browser
+contracts with an explicit Windows platform fixture; real Windows menu, Alt+Tab
+and input-method switching remain separate native acceptance checks.
+
 ## Preview pending code updates
 
 `scripts/test-preview-code-update.ts` runs the production Preview controller with

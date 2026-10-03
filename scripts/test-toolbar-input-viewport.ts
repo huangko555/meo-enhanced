@@ -328,6 +328,165 @@ async function runImmediateFocusReturn(browser: Browser, mode: 'live' | 'source'
   }
 }
 
+
+async function observeHostKeyForwarding(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    // Exercise the Windows policy deterministically on every browser-test OS.
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' });
+    (window as any).__forwardedKeys = [];
+    // VS Code listens on the content window and forwards even defaultPrevented
+    // events. Only stopping propagation before this boundary avoids menu focus.
+    for (const type of ['keydown', 'keyup']) window.addEventListener(type, (event) => {
+      const key = event as KeyboardEvent;
+      (window as any).__forwardedKeys.push({ type, key: key.key, code: key.code, alt: key.altKey });
+    });
+  });
+}
+
+async function expectBareAltPreservesInput(page: Page, label: string): Promise<void> {
+  await page.evaluate(() => {
+    const selection = document.getSelection();
+    const active = document.activeElement;
+    (window as any).__beforeAlt = {
+      active, anchor: selection?.anchorNode, anchorOffset: selection?.anchorOffset,
+      focus: selection?.focusNode, focusOffset: selection?.focusOffset,
+      range: active instanceof HTMLTextAreaElement ? [active.selectionStart, active.selectionEnd] : null
+    };
+    (window as any).__forwardedKeys = [];
+  });
+  await page.keyboard.press('Alt');
+  await page.keyboard.press('Alt');
+  const result = await page.evaluate(() => {
+    const previous = (window as any).__beforeAlt;
+    const selection = document.getSelection();
+    const active = document.activeElement;
+    return {
+      forwarded: (window as any).__forwardedKeys,
+      focused: document.hasFocus() && active === previous.active,
+      selectionKept: active instanceof HTMLTextAreaElement
+        ? active.selectionStart === previous.range[0] && active.selectionEnd === previous.range[1]
+        : selection?.anchorNode === previous.anchor && selection?.anchorOffset === previous.anchorOffset
+          && selection?.focusNode === previous.focus && selection?.focusOffset === previous.focusOffset,
+      caretVisible: active instanceof HTMLElement && getComputedStyle(active).caretColor !== 'rgba(0, 0, 0, 0)'
+    };
+  });
+  assert.deepEqual(result, { forwarded: [], focused: true, selectionKept: true, caretVisible: true },
+    label + ' bare Alt reached Host menu forwarding or changed the input point: ' + JSON.stringify(result));
+}
+
+async function runAltFocusPolicy(browser: Browser, mode: 'live' | 'source'): Promise<void> {
+  const page = await open(browser, mode);
+  try {
+    await page.click('.cm-line:nth-child(3)');
+    await page.keyboard.press('End');
+    await observeHostKeyForwarding(page);
+    await expectBareAltPreservesInput(page, mode);
+    await page.keyboard.type('ALT_INPUT');
+    await page.waitForFunction(() => (window as any).__hostMessages
+      .filter((message: any) => message.type === 'draftChanged').at(-1)?.text?.split('\n')[2] === 'line 3 ordinary contentALT_INPUT');
+
+    const reset = () => page.evaluate(() => { (window as any).__forwardedKeys = []; });
+    await reset();
+    await page.keyboard.down('Alt');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.up('Alt');
+    const chord = await page.evaluate(() => (window as any).__forwardedKeys);
+    assert.ok(chord.some((key: any) => key.type === 'keydown' && key.key === 'ArrowRight' && key.alt),
+      mode + ' Alt combination did not reach Host');
+    assert.ok(chord.some((key: any) => key.type === 'keyup' && key.key === 'Alt'),
+      mode + ' Alt combination left the Host modifier pressed');
+
+    await reset();
+    await page.keyboard.down('Control');
+    await page.keyboard.press('Alt');
+    await page.keyboard.up('Control');
+    assert.equal(await page.evaluate(() => (window as any).__forwardedKeys.filter((key: any) => key.key === 'Alt').length), 2,
+      mode + ' Ctrl+Alt was intercepted');
+    await reset();
+    await page.keyboard.press('AltRight');
+    assert.equal(await page.evaluate(() => (window as any).__forwardedKeys.filter((key: any) => key.code === 'AltRight').length), 2,
+      mode + ' right Alt was intercepted');
+
+    for (const flags of [{ isComposing: true }, { modifierAltGraph: true }]) {
+      const forwarded = await page.evaluate((flags) => {
+        const target = document.activeElement!;
+        (window as any).__forwardedKeys = [];
+        for (const type of ['keydown', 'keyup']) target.dispatchEvent(new KeyboardEvent(type, {
+          key: 'Alt', code: 'AltLeft', altKey: type === 'keydown', ...flags, bubbles: true, cancelable: true
+        }));
+        return (window as any).__forwardedKeys.length;
+      }, flags);
+      assert.equal(forwarded, 2, mode + ' composition/AltGraph was intercepted');
+    }
+
+    await reset();
+    await page.keyboard.down('Alt');
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event('blur'));
+      (document.activeElement as HTMLElement).blur();
+      window.dispatchEvent(new Event('focus'));
+    });
+    await page.keyboard.up('Alt');
+    assert.equal(await page.evaluate(() => (window as any).__forwardedKeys.length), 0,
+      mode + ' unmatched Alt release reached Host after window return');
+    assert.equal(await page.$eval('.cm-content', element => getComputedStyle(element).caretColor !== 'rgba(0, 0, 0, 0)'), true,
+      mode + ' Alt return left the caret hidden');
+
+    // An OS window switch can hide both Tab and Alt release from the Webview.
+    // The next complete gesture must work without a stuck suppression cycle.
+    await page.keyboard.down('Alt');
+    await page.focus('#outside');
+    await page.keyboard.up('Alt');
+    await page.focus('.cm-content');
+    await expectBareAltPreservesInput(page, mode + ' after focus transfer');
+    await page.evaluate(() => {
+      document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Alt', code: 'AltLeft', altKey: true, bubbles: true, cancelable: true
+      }));
+      window.dispatchEvent(new Event('blur'));
+      (document.activeElement as HTMLElement).blur();
+      window.dispatchEvent(new Event('focus'));
+    });
+    await expectBareAltPreservesInput(page, mode + ' after lost keyup');
+
+    await page.focus('#outside');
+    await reset();
+    await page.keyboard.press('Alt');
+    assert.equal(await page.evaluate(() => (window as any).__forwardedKeys.length), 2,
+      mode + ' bare Alt outside the document was intercepted');
+    await page.focus('.cm-content');
+    const readOnly = await page.evaluate(() => {
+      const target = document.activeElement!;
+      target.setAttribute('contenteditable', 'false');
+      (window as any).__forwardedKeys = [];
+      for (const type of ['keydown', 'keyup']) target.dispatchEvent(new KeyboardEvent(type, {
+        key: 'Alt', code: 'AltLeft', altKey: type === 'keydown', bubbles: true, cancelable: true
+      }));
+      target.setAttribute('contenteditable', 'true');
+      return (window as any).__forwardedKeys.length;
+    });
+    assert.equal(readOnly, 2, mode + ' read-only content was intercepted');
+    await page.keyboard.down('Alt');
+    await page.keyboard.down('Shift');
+    await page.keyboard.press('m');
+    await page.keyboard.up('Shift');
+    await page.keyboard.up('Alt');
+    const nextMode = mode === 'live' ? 'source' : 'live';
+    await page.waitForFunction((expected) => document.querySelector<HTMLElement>('.editor-root')?.dataset.mode === expected,
+      { timeout: 3000 }, nextMode);
+    await page.waitForFunction(() => document.activeElement?.classList.contains('cm-content'));
+    await expectBareAltPreservesInput(page, mode + ' after Alt+Shift+M');
+    await page.evaluate(() => Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Linux x86_64' }));
+    await reset();
+    await page.keyboard.press('Alt');
+    assert.equal(await page.evaluate(() => (window as any).__forwardedKeys.length), 2,
+      mode + ' non-Windows bare Alt was intercepted');
+    console.log(mode + ' bare Alt scope, combinations, input and lifecycle passed');
+  } finally {
+    await page.close();
+  }
+}
+
 async function runComponentFocusReturn(browser: Browser): Promise<void> {
   const fixtures = [
     { kind: 'table', text: '| A | B |\n| --- | --- |\n| alpha | beta |',
@@ -375,6 +534,8 @@ async function runComponentFocusReturn(browser: Browser): Promise<void> {
           await page.keyboard.up('Control');
         }
       }
+      await observeHostKeyForwarding(page);
+      await expectBareAltPreservesInput(page, fixture.kind);
       const restored = await page.evaluate((selector) => {
         const target = document.querySelector<HTMLElement>(selector)!;
         window.dispatchEvent(new Event('blur'));
@@ -728,6 +889,8 @@ async function main(): Promise<void> {
   const browser = await launchTestBrowser();
   let primaryError: unknown;
   try {
+    await runAltFocusPolicy(browser, 'live');
+    await runAltFocusPolicy(browser, 'source');
     await runPaintedActivationClick(browser, 'live');
     await runPaintedActivationClick(browser, 'source');
     await runSeparatedActivationClick(browser, 'live');

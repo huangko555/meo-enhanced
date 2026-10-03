@@ -105,6 +105,8 @@ Code blocks support syntax highlighting, select all, copy, and folding for long 
 
 Open **More settings** from the settings menu to adjust typing assistance and shortcuts. See the [settings and clipboard guide](docs/editing-preferences.md) for input rules, table paste behavior and shortcut conflicts.
 
+On Windows, pressing left Alt alone while editing in Live or Source keeps the caret in the document. Open the VS Code menu with the mouse; Alt combinations keep their existing behavior.
+
 ## Install
 
 Install **MEO Enhanced - Markdown Editor** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=huangko555.meo-enhanced), or run:
