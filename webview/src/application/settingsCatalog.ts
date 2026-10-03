@@ -21,7 +21,7 @@ export const typingCatalog: readonly { key: keyof InputAssistance; section: Typi
   { key: 'pasteUrl', section: 'paste', title: ['粘贴网址生成链接', 'Turn a pasted URL into a link'], description: ['选中文字后粘贴网址，以选中文字作为链接名称。代码中保持原样。', 'Paste a URL over selected text to use it as the link label. Code remains literal.'] },
   { key: 'pasteHtml', section: 'paste', title: ['粘贴时保留常用格式', 'Keep supported formatting when pasting'], description: ['将网页或文档的标题、列表和文字格式转换为 Markdown。纯文本粘贴跳过转换。', 'Convert headings, lists and common text styles from HTML to Markdown. Plain text paste bypasses conversion.'] },
   { key: 'documentSuggestions', section: 'candidates', title: ['文档、路径和标题候选', 'Document, path and heading suggestions'], description: ['输入链接或双链时显示候选，选择后插入。', 'Show suggestions while writing a link or wiki link. Choose one to insert it.'] },
-  { key: 'slash', section: 'candidates', title: ['斜杠命令', 'Slash commands'], description: ['在空段落输入 /，快速插入标题、列表、表格等。', 'Type / in an empty paragraph to insert a heading, list, table or another block.'] },
+  { key: 'slash', section: 'candidates', title: ['斜杠命令', 'Slash commands'], description: ['在正文输入 / 搜索命令；/table3x4 插入 3 数据行 × 4 列的表格。', 'Type / in prose to search commands. /table3x4 inserts 3 data rows × 4 columns.'] },
   { key: 'emoji', section: 'candidates', title: ['表情名称候选', 'Emoji name suggestions'], description: ['输入 :名称 并选择候选后插入表情；未选择时保留原文。', 'Type :name and choose a suggestion to insert an emoji. Unselected text stays literal.'] }
 ];
 export const tablePasteContexts = [

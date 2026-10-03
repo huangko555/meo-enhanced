@@ -1,41 +1,132 @@
 import { createRequestPrefix } from '../adapters/requestIdentity';
-import { EditorSelection, Transaction, type Extension } from '@codemirror/state';
+import { EditorSelection, Transaction, type Extension, type TransactionSpec, type EditorState } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import { parser } from '@lezer/markdown';
 import { isolateHistory } from '@codemirror/commands';
 import type { LinkCandidate } from '../../../src/protocol/editorServices';
 import { detectSuggestionContext, emojiSuggestions, type SuggestionContext } from '../application/inputSuggestions';
 import { inputAssistanceFacet } from './typingAssistance';
 import { isCodeInput } from './pasteAssistance';
 import { uiLanguageFacet } from './uiLanguage';
-import { commandTitle } from '../application/settingsCatalog';
-import type { EditorCommandId } from '../../../src/foundation/editingPreferences';
+import { slashCommandSuggestions, slashGroupTitle, type SlashCommand } from '../application/slashCommands';
+import { sourceTableAt } from './sourceTableCommands';
+import { blockInsertion, type MarkdownInputContext } from './blockInsertion';
 
-type Suggestion = LinkCandidate & { readonly caret?: number };
+type Suggestion = LinkCandidate & { readonly caret?: number; readonly slash?: SlashCommand };
 export function createInputSuggestions(options: {
+  readonly inputContext: (state: EditorState, position: number) => MarkdownInputContext;
   readonly requestLinks?: (context: { kind: 'documents' | 'paths' | 'headings'; query: string; target: string }) => Promise<readonly LinkCandidate[]>;
+  readonly replaceCell?: (input: HTMLTextAreaElement, value: string, anchor: number, head?: number) => boolean;
+  readonly focusTable?: () => void;
+  readonly focusMath?: () => boolean;
+  readonly cellCoords?: (input: HTMLTextAreaElement, offset: number) => { left: number; top: number };
   readonly currentHeadings: () => readonly LinkCandidate[];
 }): Extension {
   const plugin = ViewPlugin.fromClass(class {
     readonly popup = document.createElement('div');
+    ariaInput: HTMLElement | null = null;
     timer: ReturnType<typeof setTimeout> | null = null;
     generation = 0; disposed = false; index = 0;
+    slashFrom: number | null = null;
+    cellFrom: number | null = null; cellInput: HTMLTextAreaElement | null = null;
+    fieldInput: HTMLTextAreaElement | null = null; fieldValue = '';
+    selectedCommand = ''; resolvedQuery = '';
+    readonly nativeEvent = (event: Event) => {
+      const input = event.target;
+      if (!(input instanceof HTMLTextAreaElement) || !input.closest('.meo-md-html-table-wrap') || !this.view.dom.contains(input)) return;
+      if (event.type === 'keydown') {
+        if (this.keydown(event as KeyboardEvent)) event.stopImmediatePropagation();
+        return;
+      }
+      if (event.type === 'compositionstart') { this.composing = true; if (this.context?.type !== 'slash') this.clear(); return; }
+      if (event.type === 'compositionend') this.composing = false;
+      if (event.type === 'focusout') {
+        queueMicrotask(() => { if (input !== this.view.dom.ownerDocument.activeElement) { this.cellFrom = null; this.cellInput = null; this.fields = []; this.clear(); } }); return;
+      }
+      if (event.type === 'input') {
+        const typed = event as InputEvent;
+        if (this.cellFrom === null && typed.inputType === 'insertText' && typed.data === '/') { this.cellInput = input; this.cellFrom = input.selectionStart - 1; this.selectedCommand = ''; this.resolvedQuery = ''; }
+        if (this.fieldInput === input && this.fields.length) {
+          const before = this.fieldValue, after = input.value;
+          let start = 0, end = before.length, nextEnd = after.length;
+          while (start < end && start < nextEnd && before[start] === after[start]) start++;
+          while (end > start && nextEnd > start && before[end - 1] === after[nextEnd - 1]) { end--; nextEnd--; }
+          const map = (pos: number, right: boolean) => pos < start ? pos : pos > end ? pos + nextEnd - end : right ? nextEnd : start;
+          this.fields = this.fields.map(field => ({ from: map(field.from, false), to: map(field.to, true) }));
+          this.templateEnd = map(this.templateEnd, true); this.fieldValue = after;
+        }
+      }
+      this.schedule();
+    };
+    readonly reposition = () => { if (!this.popup.hidden) this.position(); };
+    fields: { from: number; to: number }[] = []; fieldIndex = 0; templateEnd = 0;
+    composing = false;
     items: readonly Suggestion[] = []; context: SuggestionContext | null = null; head = 0;
     constructor(readonly view: EditorView) {
       this.popup.className = 'meo-input-suggestions'; this.popup.hidden = true; this.popup.setAttribute('role', 'listbox');
       this.popup.id = 'meo-input-suggestions-' + createRequestPrefix();
       view.dom.ownerDocument.body.append(this.popup);
+      for (const type of ['input', 'keydown', 'select', 'pointerup', 'compositionstart', 'compositionend', 'focusout']) view.dom.addEventListener(type, this.nativeEvent, type === 'keydown' || type.startsWith('composition'));
+      view.dom.ownerDocument.addEventListener('scroll', this.reposition, true);
+      view.dom.ownerDocument.defaultView?.addEventListener('resize', this.reposition);
       this.popup.addEventListener('pointerdown', event => event.preventDefault());
       // EditorView initializes composition/focus state after constructing plugins.
       queueMicrotask(() => { if (!this.disposed) this.schedule(); });
     }
-    update(update: ViewUpdate) { if (update.transactions.some(transaction => transaction.isUserEvent('input.complete'))) { this.clear(); return; } if (update.docChanged || update.selectionSet || update.focusChanged || update.transactions.some(transaction => transaction.reconfigured)) this.schedule(); }
+    update(update: ViewUpdate) {
+      if (this.slashFrom !== null && update.docChanged) this.slashFrom = update.changes.mapPos(this.slashFrom, -1);
+      if (!this.fieldInput && this.fields.length && update.docChanged) {
+        this.fields = this.fields.map(field => ({ from: update.changes.mapPos(field.from, -1), to: update.changes.mapPos(field.to, 1) }));
+        this.templateEnd = update.changes.mapPos(this.templateEnd, 1);
+      }
+      for (const transaction of update.transactions) {
+        if (transaction.isUserEvent('input.complete')) { this.slashFrom = null; this.clear(); return; }
+        if (transaction.isUserEvent('undo') || transaction.isUserEvent('redo') || transaction.reconfigured) { this.slashFrom = null; this.fields = []; }
+        if (transaction.isUserEvent('input.type')) transaction.changes.iterChanges((_from, _to, from, to, inserted) => {
+          if (this.slashFrom === null && inserted.toString() === '/' && to === update.state.selection.main.head) { this.slashFrom = from; this.selectedCommand = ''; this.resolvedQuery = ''; }
+        });
+      }
+      if (update.selectionSet && !update.docChanged && !this.composing) this.slashFrom = null;
+      if (!this.fieldInput && this.fields.length && update.selectionSet) {
+        const selection = update.state.selection.main, field = this.fields[this.fieldIndex];
+        if (!field || selection.from < field.from || selection.to > field.to) this.fields = [];
+      }
+      if (update.docChanged || update.selectionSet || update.focusChanged || update.transactions.some(transaction => transaction.reconfigured)) this.schedule();
+    }
     getContext() {
       const selection = this.view.state.selection;
-      if (this.disposed || !selection.main.empty || selection.ranges.length !== 1 || this.view.compositionStarted || !this.view.hasFocus || this.view.dom.ownerDocument.activeElement !== this.view.contentDOM || isCodeInput(this.view)) return null;
-      const range = selection.main, line = this.view.state.doc.lineAt(range.head);
-      return detectSuggestionContext(this.view.state.sliceDoc(line.from, range.head), this.view.state.facet(inputAssistanceFacet));
+      const active = this.view.dom.ownerDocument.activeElement;
+      if (active instanceof HTMLTextAreaElement && this.cellInput === active && this.cellFrom !== null) {
+        const from = this.cellFrom, query = active.value.slice(from, this.composing ? active.selectionEnd : active.selectionStart), before = active.value.slice(0, from);
+        let node = parser.parse(active.value).resolveInner(from + 1, -1), inCode = false;
+        for (;;) {
+          if (/^(?:InlineCode|FencedCode|CodeBlock)$/.test(node.name)) inCode = true;
+          if (!node.parent) break;
+          node = node.parent;
+        }
+        if (!inCode && !this.disposed && !this.view.state.readOnly && this.view.state.facet(inputAssistanceFacet).slash && (this.composing || active.selectionStart === active.selectionEnd) && query.length <= 1001 && /^\/[a-z0-9×]*$/i.test(query) && before.slice(-1) !== '/' &&
+            !/\]\([^)]*$|<[^>]*$|(?:[a-z][a-z0-9+.-]*:\/+|www\.)[^\s]*$|\$[^$]*$/.test(before))
+          return { type: 'slash', query: query.slice(1), target: '', length: query.length, wiki: false } as SuggestionContext;
+        this.cellFrom = null; this.cellInput = null; return null;
+      }
+      if (this.disposed || this.view.state.readOnly || !selection.main.empty && !this.composing || selection.ranges.length !== 1 || !this.view.hasFocus || active !== this.view.contentDOM) {
+        this.slashFrom = null; return null;
+      }
+      const range = selection.main, line = this.view.state.doc.lineAt(this.composing ? range.to : range.head), preferences = this.view.state.facet(inputAssistanceFacet);
+      if (this.slashFrom !== null) {
+        const from = this.slashFrom;
+        const head = this.composing ? range.to : range.head;
+        const query = from >= line.from && from < head ? this.view.state.sliceDoc(from, head) : '';
+        if (preferences.slash && query.length <= 1001 && /^\/[a-z0-9×]*$/i.test(query) && this.view.state.sliceDoc(from - (from > 0 ? 1 : 0), from) !== '/' && options.inputContext(this.view.state, from + 1) !== 'excluded')
+          return { type: 'slash', query: query.slice(1), target: '', length: query.length, wiki: false } as SuggestionContext;
+        this.slashFrom = null;
+      }
+      if (this.composing || this.view.compositionStarted || isCodeInput(this.view)) return null;
+      const context = detectSuggestionContext(this.view.state.sliceDoc(line.from, range.head), preferences);
+      return context?.type === 'slash' ? null : context;
     }
     schedule() {
+      if (this.items[this.index]?.slash) this.selectedCommand = this.items[this.index].slash!.id;
       this.clear(); const context = this.getContext(); if (!context) return;
       const generation = this.generation;
       this.timer = setTimeout(() => { this.timer = null; void this.resolve(context, generation); }, context.type === 'documents' || context.type === 'paths' || context.type === 'headings' ? 160 : 40);
@@ -43,71 +134,135 @@ export function createInputSuggestions(options: {
     clear() {
       this.generation++; if (this.timer !== null) clearTimeout(this.timer); this.timer = null;
       this.popup.hidden = true; this.items = []; this.context = null;
-      this.view.contentDOM.removeAttribute('aria-controls'); this.view.contentDOM.removeAttribute('aria-activedescendant');
+      this.ariaInput?.removeAttribute('aria-controls'); this.ariaInput?.removeAttribute('aria-activedescendant'); this.ariaInput = null;
     }
     async resolve(context: SuggestionContext, generation: number) {
       const language = this.view.state.facet(uiLanguageFacet);
       let items: readonly Suggestion[];
       if (context.type === 'emoji') items = emojiSuggestions.filter(item => item.name.startsWith(context.query.toLowerCase())).map(item => ({ label: item.value + ' ' + item.name, insert: item.value, detail: '' }));
       else if (context.type === 'slash') {
-        const blocks: readonly [EditorCommandId, string, number?][] = [
-          ['heading1', '# '], ['heading2', '## '], ['heading3', '### '], ['heading4', '#### '], ['heading5', '##### '], ['heading6', '###### '],
-          ['bullet', '- '], ['ordered', '1. '], ['taskList', '- [ ] '], ['quote', '> '], ['codeBlock', '```\n\n```', 4],
-          ['insertTable', language === 'zh-CN' ? '| 列 1 | 列 2 |\n| --- | --- |\n|  |  |' : '| Column 1 | Column 2 |\n| --- | --- |\n|  |  |', 2], ['rule', '---\n'], ['blockMath', '$$\n\n$$', 3]
-        ];
-        items = blocks.filter(([command]) => [command, commandTitle(command, language)].some(value => value.toLocaleLowerCase().includes(context.query.toLocaleLowerCase())))
-          .map(([command, insert, caret]) => ({ label: commandTitle(command, language), insert, detail: '', caret }));
+        const scope = this.cellFrom !== null ? 'inline' : options.inputContext(this.view.state, this.slashFrom! + 1);
+        items = scope === 'excluded' ? [] : slashCommandSuggestions(context.query, scope).map(slash => ({ label: slash.label, insert: slash.insert, detail: language === 'zh-CN' ? slash.zh : slash.en, caret: slash.caret, slash }));
       } else if (context.type === 'headings' && !context.target) items = options.currentHeadings().filter(item => item.label.toLocaleLowerCase().includes(context.query.toLocaleLowerCase())).slice(0, 50);
       else {
         try { items = await options.requestLinks?.({ kind: context.type, query: context.query, target: context.target }) ?? []; }
         catch { items = []; }
       }
       if (this.disposed || generation !== this.generation || JSON.stringify(context) !== JSON.stringify(this.getContext()) || !items.length) return;
-      this.context = context; this.items = items; this.index = 0; this.head = this.view.state.selection.main.head;
+      this.context = context; this.items = items; const exact = context.type === 'slash' ? items.findIndex(item => [item.slash!.id.toLowerCase(), ...item.slash!.aliases].includes(context.query.toLowerCase())) : -1;
+      this.index = context.query !== this.resolvedQuery && exact >= 0 ? exact : Math.max(0, items.findIndex(item => item.slash?.id === this.selectedCommand));
+      this.resolvedQuery = context.query;
+      this.head = this.cellInput && this.cellFrom !== null ? this.cellInput.selectionStart : this.view.state.selection.main.head;
       this.render();
     }
     render() {
       this.popup.replaceChildren();
+      let group = '';
       this.items.forEach((item, index) => {
+        if (item.slash && item.slash.group !== group) {
+          group = item.slash.group;
+          const heading = document.createElement('div'); heading.className = 'meo-suggestion-group'; heading.textContent = slashGroupTitle(item.slash.group, this.view.state.facet(uiLanguageFacet)); this.popup.append(heading);
+        }
         const row = document.createElement('button'); row.type = 'button'; row.className = 'meo-input-suggestion'; row.setAttribute('role', 'option');
-        row.id = this.popup.id + '-' + index; row.setAttribute('aria-selected', String(index === this.index)); row.tabIndex = -1;
+        row.id = this.popup.id + '-' + index; row.setAttribute('aria-selected', String(index === this.index)); row.tabIndex = -1; row.setAttribute('aria-disabled', String(this.composing || this.view.compositionStarted));
+        if (item.slash) { const icon = document.createElement('span'); icon.className = 'meo-suggestion-icon'; icon.textContent = item.slash.icon; icon.setAttribute('aria-hidden', 'true'); row.append(icon); row.dataset.command = item.slash.id; row.classList.add('meo-slash-suggestion'); }
         const label = document.createElement('span'); label.textContent = item.label; row.append(label);
-        if (item.detail) { const detail = document.createElement('span'); detail.className = 'meo-input-suggestion-detail'; detail.textContent = item.detail; row.append(detail); }
+        if (item.detail && item.detail !== item.label) { const detail = document.createElement('span'); detail.className = 'meo-input-suggestion-detail'; detail.textContent = item.detail; row.append(detail); }
         row.addEventListener('click', () => this.choose(index)); this.popup.append(row);
       });
-      this.popup.hidden = false; this.view.contentDOM.setAttribute('aria-controls', this.popup.id); this.view.contentDOM.setAttribute('aria-activedescendant', this.popup.id + '-' + this.index);
-      const coords = this.view.coordsAtPos(this.head); if (!coords) { this.clear(); return; }
+      this.popup.hidden = false; this.ariaInput = this.cellInput ?? this.view.contentDOM;
+      this.ariaInput.setAttribute('aria-controls', this.popup.id); this.ariaInput.setAttribute('aria-activedescendant', this.popup.id + '-' + this.index);
+      this.popup.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+      this.position();
+    }
+    position() {
+      const native = this.cellInput && this.cellFrom !== null ? options.cellCoords?.(this.cellInput, this.cellFrom) : null;
+      const coords = native ? { ...native, bottom: native.top + (parseFloat(getComputedStyle(this.cellInput!).lineHeight) || 20) } : this.view.coordsAtPos(this.context?.type === 'slash' ? this.slashFrom! : this.head); if (!coords) { this.clear(); return; }
       const bounds = this.popup.getBoundingClientRect();
       this.popup.style.left = Math.max(8, Math.min(coords.left, innerWidth - bounds.width - 8)) + 'px';
       this.popup.style.top = (coords.bottom + bounds.height + 8 <= innerHeight ? coords.bottom + 4 : Math.max(8, coords.top - bounds.height - 4)) + 'px';
-      this.popup.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
     }
     choose(index: number) {
+      if (this.composing || this.view.compositionStarted) return;
       const context = this.context, item = this.items[index];
-      if (!context || !item || this.head !== this.view.state.selection.main.head || JSON.stringify(context) !== JSON.stringify(this.getContext())) { this.clear(); return; }
-      let insert = item.insert;
+      if (!context || !item || this.head !== (this.cellInput && this.cellFrom !== null ? this.cellInput.selectionStart : this.view.state.selection.main.head) || JSON.stringify(context) !== JSON.stringify(this.getContext())) { this.clear(); return; }
+      if (this.cellInput && this.cellFrom !== null && item.slash) {
+        const input = this.cellInput, from = this.cellFrom, command = item.slash;
+        const insert = command.id === 'lineBreak' ? '<br>\n' : command.insert;
+        const caret = from + (command.id === 'lineBreak' ? insert.length : command.caret);
+        const value = input.value.slice(0, from) + insert + input.value.slice(this.head);
+        this.cellFrom = null; this.cellInput = null; this.clear(); this.fields = [];
+        if (!options.replaceCell?.(input, value, caret)) return;
+        if (command.fields) {
+          this.fieldInput = input; this.fieldValue = value; this.fieldIndex = 0; this.templateEnd = from + insert.length;
+          this.fields = command.fields.map(([start, end]) => ({ from: from + start, to: from + end }));
+          input.setSelectionRange(this.fields[0].from, this.fields[0].to);
+        }
+        return;
+      }
+      const tableBreak = item.slash?.id === 'lineBreak' && !!sourceTableAt(this.view.state, this.head);
+      let insert = tableBreak ? '<br>' : item.insert;
       if (context.type === 'documents') insert = insert.replace(/\.(?:md|markdown|mdx|mdc)$/i, '');
       if (context.type === 'paths') insert = insert.split('/').map(part => encodeURIComponent(part)).join('/');
       if (context.type === 'headings' && !context.wiki) insert = encodeURIComponent(item.anchor ?? insert);
       const from = this.head - context.length;
-      const caret = from + (item.caret ?? insert.length);
-      this.clear();
-      this.view.dispatch({ changes: { from, to: this.head, insert }, selection: EditorSelection.cursor(caret), annotations: [Transaction.userEvent.of('input.complete'), isolateHistory.of('full')] });
+      const caret = from + (tableBreak ? insert.length : item.caret ?? insert.length);
+      const command = item.slash;
+      let fields = command?.fields?.map(([start, end]) => ({ from: from + start, to: from + end }));
+      let templateEnd = from + insert.length;
+      let transaction: TransactionSpec = { changes: { from, to: this.head, insert }, selection: EditorSelection.cursor(caret) };
+      if (item.slash?.scope === 'block') {
+        const plan = blockInsertion(this.view.state, from, this.head, insert, item.caret!, options.inputContext(this.view.state, from));
+        if (!plan) { this.slashFrom = null; this.clear(); return; }
+        transaction = plan.transaction;
+        fields = command?.fields?.map(([start, end]) => ({ from: plan.positionAt(start), to: plan.positionAt(end) }));
+        templateEnd = plan.positionAt(insert.length);
+      }
+      this.slashFrom = null; this.clear();
+      this.view.dispatch({ ...transaction, annotations: [Transaction.userEvent.of('input.complete'), isolateHistory.of('full')] });
+      if (fields) {
+        this.fieldInput = null;
+        this.fields = fields; this.fieldIndex = 0; this.templateEnd = templateEnd;
+        const field = this.fields[0]; this.view.dispatch({ selection: EditorSelection.range(field.from, field.to) });
+      }
       this.view.focus();
+      if (command?.id === 'blockMath') options.focusMath?.();
+      if (command?.id === 'table') options.focusTable?.();
     }
     keydown(event: KeyboardEvent) {
-      if (event.isComposing || this.view.compositionStarted || this.popup.hidden || event.ctrlKey || event.metaKey || event.altKey) return false;
-      if (event.key === 'Escape') { event.preventDefault(); this.clear(); return true; }
+      if (event.isComposing || this.composing || this.view.compositionStarted || event.keyCode === 229 || event.ctrlKey || event.metaKey || event.altKey) return false;
+      if (event.key === 'Tab' && this.fields.length) {
+        event.preventDefault();
+        const index = this.fieldIndex + (event.shiftKey ? -1 : 1), field = this.fields[index];
+        if (field) {
+          this.fieldIndex = index;
+          if (this.fieldInput) this.fieldInput.setSelectionRange(field.from, field.to);
+          else this.view.dispatch({ selection: EditorSelection.range(field.from, field.to) });
+        } else {
+          const end = this.templateEnd; this.fields = [];
+          if (this.fieldInput) this.fieldInput.setSelectionRange(end, end);
+          else this.view.dispatch({ selection: EditorSelection.cursor(end) });
+        }
+        return true;
+      }
+      if (event.key === 'Escape' && (this.slashFrom !== null || this.cellFrom !== null || !this.popup.hidden || this.fields.length)) { event.preventDefault(); this.slashFrom = null; this.cellFrom = null; this.cellInput = null; this.fields = []; this.clear(); return true; }
+      if (this.popup.hidden) return false;
+      if (event.key === 'Escape') { event.preventDefault(); this.slashFrom = null; this.cellFrom = null; this.cellInput = null; this.fields = []; this.clear(); return true; }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); this.index = (this.index + (event.key === 'ArrowDown' ? 1 : this.items.length - 1)) % this.items.length; this.render(); return true; }
       if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey) { event.preventDefault(); this.choose(this.index); return true; }
       return false;
     }
-    destroy() { this.disposed = true; this.clear(); this.popup.remove(); }
+    destroy() {
+      this.disposed = true; this.clear(); this.popup.remove();
+      for (const type of ['input', 'keydown', 'select', 'pointerup', 'compositionstart', 'compositionend', 'focusout']) this.view.dom.removeEventListener(type, this.nativeEvent, type === 'keydown' || type.startsWith('composition'));
+      this.view.dom.ownerDocument.removeEventListener('scroll', this.reposition, true);
+      this.view.dom.ownerDocument.defaultView?.removeEventListener('resize', this.reposition);
+    }
   }, { eventHandlers: {
     keydown(event) { return this.keydown(event); },
-    blur() { this.clear(); return false; },
-    compositionstart() { this.clear(); return false; },
-    compositionend() { this.schedule(); return false; }
+    blur() { this.slashFrom = null; this.fields = []; this.clear(); return false; },
+    compositionstart() { this.composing = true; if (this.context?.type !== 'slash') this.clear(); return false; },
+    compositionend() { this.composing = false; this.schedule(); return false; }
   } });
   return plugin;
 }

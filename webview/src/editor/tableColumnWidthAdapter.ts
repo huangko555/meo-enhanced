@@ -185,6 +185,8 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
   };
 
   const acquireStartupBaseline = (table: HTMLTableElement): StartupBaseline | null => {
+    const sourceTo = numberFromDataset(table, 'tableTo');
+    if (currentView && sourceTo !== null && sourceTo > currentView.state.doc.length) return null;
     const existing = findStartupBaseline(table);
     if (existing) {
       const from = numberFromDataset(table, 'tableFrom');
@@ -323,6 +325,8 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     // reset cannot overwrite the still-valid manual width intent.
     const from = numberFromDataset(table, 'tableFrom');
     const to = numberFromDataset(table, 'tableTo');
+    // A retained widget may still describe the previous document while its replacement mounts.
+    if (currentView && to !== null && to > currentView.state.doc.length) return;
     if (intents.some(intent => intent.table === table && (intent.from !== from || intent.to !== to))) {
       return;
     }
@@ -443,7 +447,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
   ): void => {
     const from = numberFromDataset(table, 'tableFrom');
     const to = numberFromDataset(table, 'tableTo');
-    if (from === null || to === null || disposed) return;
+    if (from === null || to === null || disposed || currentView && to > currentView.state.doc.length) return;
     const existing = intents.findIndex((intent) => intent.from === from && intent.to === to);
     const value = {
       from,

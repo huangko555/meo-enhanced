@@ -1,4 +1,5 @@
 import { currentHeadingSuggestions } from './editor/headingSuggestions';
+import { markdownSyntaxContext, type MarkdownInputContext } from './editor/blockInsertion';
 import { createInputSuggestions } from './editor/inputSuggestions';
 import type { LinkCandidate } from '../../src/protocol/editorServices';
 import { sourceTableAt, createSourceTableCommandTarget, tableShortcutCommands } from './editor/sourceTableCommands';
@@ -100,7 +101,7 @@ import {
   flushMountedTableLayouts,
   tableUsableViewportBounds
 } from './helpers/tables';
-import { parseFrontmatter, sourceFrontmatterField } from './helpers/frontmatter';
+import { parseFrontmatter, parseFrontmatterCandidate, sourceFrontmatterField } from './helpers/frontmatter';
 import { collectLatexMathRanges } from './helpers/math';
 import { diagnosticDataField, diagnosticField, setDiagnosticsEffect, type EditorDiagnostic } from './helpers/diagnostics';
 import type { GitBaselinePayload } from '../../src/protocol/git';
@@ -1084,6 +1085,30 @@ export function createEditor({
       return true;
     }
     return false;
+  };
+
+  const inputMathRanges = new WeakMap<object, ReturnType<typeof collectLatexMathRanges>>();
+  const inputContext = (state: EditorState, position: number): MarkdownInputContext => {
+    const frontmatter = parseFrontmatterCandidate(state);
+    if (frontmatter && position >= frontmatter.from && position <= frontmatter.to) return 'excluded';
+    let ranges = inputMathRanges.get(state.doc);
+    if (!ranges) { ranges = collectLatexMathRanges(state.doc.toString()); inputMathRanges.set(state.doc, ranges); }
+    if (ranges.some(range => position > range.from && position < range.to)) return 'excluded';
+    return markdownSyntaxContext(state, position);
+  };
+
+  const focusInsertedTable = () => {
+    if (currentMode !== 'live') return;
+    view.dispatch({ effects: supersedeLiveInputDerivedWork() });
+    const selection = view.state.selection.main;
+    restoreTableModeSelection({ anchor: selection.anchor, head: selection.head }, true);
+  };
+
+  const insertTableAtSelection = (cols = 3, rows = 2) => {
+    if (getActiveTableInput()) return false;
+    const inserted = insertTable(view, view.state.selection.main, inputContext, cols, rows, Transaction.userEvent.of('input.toolbar'));
+    if (inserted) focusInsertedTable();
+    return inserted;
   };
 
   const requestEditorHistoryReplay = async (direction: EditorHistoryDirection): Promise<boolean> => {
@@ -2110,7 +2135,28 @@ export function createEditor({
       inputAssistanceCompartment.of(inputAssistanceFacet.of(initialInputAssistance)),
       Prec.highest(typingAssistance),
       Prec.highest(pasteAssistance),
-      Prec.highest(createInputSuggestions({ requestLinks: requestLinkCandidates, currentHeadings: () => currentHeadingSuggestions(view.state.doc.toString()) })),
+      Prec.highest(createInputSuggestions({ inputContext, requestLinks: requestLinkCandidates, currentHeadings: () => currentHeadingSuggestions(view.state.doc.toString()),
+        cellCoords: measureTextareaSelectionStart,
+        focusTable: focusInsertedTable,
+        focusMath: () => {
+          if (currentMode !== 'live') return true;
+          const caret = view.state.selection.main.head, content = view.state.doc.lineAt(caret);
+          if (content.number <= 1) return true;
+          const opening = view.state.doc.line(content.number - 1);
+          if (!opening.text.includes('$$')) return true;
+          view.dispatch({ effects: [supersedeLiveInputDerivedWork(), setLatexMathBlockModeEffect.of({ anchor: opening.from, mode: 'source' })] });
+          return focusLatexMathEditingOffset(view, opening.from, caret - content.from);
+        },
+        replaceCell: (input, value, anchor, head) => {
+          if (input !== getActiveTableInput()) return false;
+          commitPendingTableEdits(view);
+          const current = getActiveTableInput();
+          if (!current) return false;
+          updateActiveTableInput(current, value, anchor, head);
+          commitPendingTableEdits(view);
+          return true;
+        }
+      })),
       EditorState.allowMultipleSelections.of(true),
       secondarySelections,
       orderedListRenumberTransactionFilter(() => !applyingExternal && !editorDestroyed),
@@ -3594,10 +3640,11 @@ export function createEditor({
         void tableCommandRuntime.dispatch({ type: 'request', command: tableCommand, target: { tableId: registration.id, row: sourceTable.row, column: sourceTable.column, selection: null }, enabled: true }).finally(() => registration.dispose());
         return true;
       }
+      if (command === 'insertTable') return insertTableAtSelection();
       const formats: Partial<Record<EditorCommandId, EditorFormatAction>> = {
         bold: 'bold', italic: 'italic', inlineCode: 'inlineCode', strike: 'strike', highlight: 'highlight',
         underline: 'underline', kbd: 'kbd', link: 'link', wikiLink: 'wikiLink', image: 'image',
-        codeBlock: 'codeBlock', rule: 'hr', insertTable: 'table'
+        codeBlock: 'codeBlock', rule: 'hr'
       };
       if (formats[command]) { this.insertFormat(formats[command]!); return true; }
       const nativeInput = getActiveTableInput();
@@ -3675,13 +3722,7 @@ export function createEditor({
         case 'hr':
           return insertHr(view, selection, userEvent);
         case 'table':
-          return insertTable(
-            view,
-            selection,
-            typeof level === 'object' ? level.cols : undefined,
-            typeof level === 'object' ? level.rows : undefined,
-            userEvent
-          );
+          return insertTableAtSelection(typeof level === 'object' ? level?.cols ?? 3 : 3, typeof level === 'object' ? level?.rows ?? 2 : 2);
         case 'link':
           return insertLink(view, inlineSelection(), userEvent);
         case 'wikiLink':

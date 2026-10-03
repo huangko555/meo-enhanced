@@ -139,4 +139,14 @@ for (const { label, text, options, expected } of scannerContractCases) {
   assert.deepEqual(scanLatexMath(text, options), expected, label);
 }
 
+
+for (const source of ['> $$\n> x^2\n> $$', '> > $$\n> > x^2\n> > $$', '- $$\n  x^2\n  $$', '> - $$\n>   x^2\n>   $$']) {
+  const [range] = scanLatexMath(source); assert.equal(range?.content, 'x^2'); assert.equal(range?.fencedDisplay, true);
+  assert.equal(source.slice(range.from, range.to), range.raw);
+}
+assert.deepEqual(scanLatexMath('> $$\nplain text\n> $$'), []);
+assert.deepEqual(scanLatexMath('> $$\n> x^2\n$$'), []);
+assert.deepEqual(scanLatexMath('> $$\n> \n> $$'), []);
+assert.equal(scanLatexMathAt('> $$\n> \n> $$', 2, { includeEmptyDisplay: true })?.content, '');
+
 console.log('Shared LaTeX math scanner checks passed');

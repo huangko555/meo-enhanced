@@ -83,6 +83,7 @@ function targetedCommands(
       return [
         script('scripts/test-input-assistance-production.ts'),
         script('scripts/test-editing-features-production.ts'),
+        script('scripts/test-slash-commands-production.ts'),
         script('scripts/test-editor-shortcuts.ts'),
         script('scripts/test-editor-history-runtime.ts'),
         script('scripts/test-editor-history-production-cutover.ts'),
@@ -95,6 +96,7 @@ function targetedCommands(
     case 'table':
       return [
         script('scripts/test-editing-features-production.ts'),
+        script('scripts/test-slash-commands-production.ts'),
         script('scripts/test-table-clipboard.ts'),
         script('scripts/test-table-clipboard-production.ts'),
         script('scripts/test-table-cell-editing.ts'),
@@ -238,6 +240,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-editor-services.ts'),
           script('scripts/test-input-assistance-production.ts'),
           script('scripts/test-editing-features-production.ts'),
+          script('scripts/test-slash-commands-production.ts'),
           script('scripts/test-settings-window-production.ts'),
           packageScript('test:reading-position'),
           script('scripts/test-test-workflow.ts'),

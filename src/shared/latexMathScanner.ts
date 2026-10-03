@@ -12,6 +12,8 @@ export type LatexMathRange = {
 export type LatexMathScanOptions = {
   /** Half-open input ranges whose contents do not participate in delimiter matching. */
   excludedRanges?: ReadonlyArray<Readonly<{ from: number; to: number }>>;
+  /** Editing adapters may retain an empty fenced block; reading surfaces leave it unrendered. */
+  includeEmptyDisplay?: boolean;
 };
 
 function isEscaped(text: string, index: number): boolean {
@@ -145,7 +147,8 @@ type LatexMathCandidate = {
 function scanLatexMathCandidateAt(
   text: string,
   open: number,
-  excludedRanges: ReadonlyArray<SourceRange>
+  excludedRanges: ReadonlyArray<SourceRange>,
+  includeEmptyDisplay = false
 ): LatexMathCandidate {
   const excluded = excludedRangeAt(excludedRanges, open);
   if (excluded) {
@@ -160,18 +163,30 @@ function scanLatexMathCandidateAt(
       return { range: null, nextOpen: open + 2 };
     }
     const rawContent = text.slice(open + 2, close);
-    const content = rawContent.trim();
-    if (!content) {
-      return { range: null, nextOpen: close + 2 };
-    }
+    let content = rawContent.trim();
     const openLineStart = text.lastIndexOf('\n', Math.max(0, open - 1)) + 1;
     const openLineEnd = text.indexOf('\n', open + 2);
     const closeLineStart = text.lastIndexOf('\n', Math.max(0, close - 1)) + 1;
     const closeLineEnd = text.indexOf('\n', close + 2);
-    const fencedDisplay = !text.slice(openLineStart, open).trim()
+    const openingPrefix = text.slice(openLineStart, open), closingPrefix = text.slice(closeLineStart, close);
+    const quoteDepth = openingPrefix.match(/>/g)?.length ?? 0;
+    let fencedDisplay = /^[ \t]*(?:>[ \t]*)*(?:(?:[-+*]|\d+[.)])[ \t]+)?$/.test(openingPrefix)
       && !text.slice(open + 2, openLineEnd < 0 ? text.length : openLineEnd).trim()
-      && !text.slice(closeLineStart, close).trim()
+      && /^[ \t]*(?:>[ \t]*)*$/.test(closingPrefix)
+      && (closingPrefix.match(/>/g)?.length ?? 0) === quoteDepth
       && !text.slice(close + 2, closeLineEnd < 0 ? text.length : closeLineEnd).trim();
+    if (fencedDisplay && quoteDepth) {
+      content = rawContent.split('\n').map(line => {
+        let value = line;
+        for (let depth = 0; depth < quoteDepth; depth++) {
+          const prefix = /^[ \t]*>[ \t]*/.exec(value)?.[0];
+          if (!prefix) { if (value.trim()) fencedDisplay = false; break; }
+          value = value.slice(prefix.length);
+        }
+        return value;
+      }).join('\n').trim();
+    }
+    if (!content && (!includeEmptyDisplay || !fencedDisplay)) return { range: null, nextOpen: close + 2 };
     if ((rawContent.includes('\n') || rawContent.includes('\r')) && !fencedDisplay) {
       return { range: null, nextOpen: close + 2 };
     }
@@ -222,7 +237,8 @@ export function scanLatexMathAt(
   return scanLatexMathCandidateAt(
     text,
     index,
-    normalizeExcludedRanges(options.excludedRanges ?? [])
+    normalizeExcludedRanges(options.excludedRanges ?? []),
+    options.includeEmptyDisplay
   ).range;
 }
 
@@ -234,7 +250,7 @@ export function scanLatexMath(text: string, options: LatexMathScanOptions = {}):
   const excludedRanges = normalizeExcludedRanges(options.excludedRanges ?? []);
   const ranges: LatexMathRange[] = [];
   for (let open = 0; open < text.length;) {
-    const candidate = scanLatexMathCandidateAt(text, open, excludedRanges);
+    const candidate = scanLatexMathCandidateAt(text, open, excludedRanges, options.includeEmptyDisplay);
     if (candidate.range) {
       ranges.push(candidate.range);
     }

@@ -48,4 +48,6 @@ assert.deepEqual(collectExportLatexMathRanges('before $$x^2$$ after'), [{
   fencedDisplay: false
 }]);
 
+assert.equal(parseLatexMathAt('> $$\n> \n> $$', 2, { includeEmptyDisplay: true })?.content, '');
+assert.equal(parseLatexMathAt('> $$\n> \n> $$', 2), null);
 console.log('LaTeX math scanner caller integration checks passed');

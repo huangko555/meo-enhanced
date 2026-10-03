@@ -11,6 +11,7 @@ export type { LatexMathMode, LatexMathRange } from '../../../src/shared/latexMat
 export interface ParseLatexMathAtOptions {
   allowInline?: boolean;
   allowDisplay?: boolean;
+  includeEmptyDisplay?: boolean;
 }
 
 export interface FencedDisplayMathInnerLineRange {
@@ -51,7 +52,7 @@ export function parseLatexMathAt(
   if (!text || index < 0 || index >= text.length) {
     return null;
   }
-  const range = scanLatexMathAt(text, index);
+  const range = scanLatexMathAt(text, index, { includeEmptyDisplay: options.includeEmptyDisplay });
   if (!range) {
     return null;
   }

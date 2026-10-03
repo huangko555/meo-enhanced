@@ -130,6 +130,11 @@ try {
     await prepare(mode, 'word', 0, 4); await command('image'); assert.ok((await text()).startsWith('!['));
     await prepare(mode, 'word'); await command('rule'); assert.ok((await text()).includes('---'));
     await prepare(mode); await command('insertTable'); assert.ok((await text()).includes('|'));
+    await prepare(mode, 'before after', 6); await command('insertTable');
+    await waitText('before\n\n|  |  |  |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |\n\n after');
+    await page.evaluate(() => (window as any).editor.undo()); await waitText('before after');
+    await page.evaluate(() => (window as any).editor.redo());
+    assert.ok((await text()).startsWith('before\n\n|'), 'table redo preserves surrounding text');
     await prepare(mode, 'word', 0, 4); await command('blockMath'); assert.equal(await text(), '$$\nword\n$$'); await command('blockMath'); assert.equal(await text(), 'word');
     await prepare(mode, '**word**', 4); await command('expandSelection'); await command('shrinkSelection');
     assert.equal(await page.evaluate(() => (window as any).editor.view.state.selection.main.head), 4);

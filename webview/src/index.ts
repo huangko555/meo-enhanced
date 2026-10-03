@@ -686,7 +686,7 @@ for (let row = 0; row < gridSize; row++) {
 
 const tableSizeLabel = document.createElement('div');
 tableSizeLabel.className = 'table-size-label';
-tableSizeLabel.textContent = '1 x 1';
+tableSizeLabel.textContent = '1 row × 1 col';
 
 tableDropdown.append(tableGrid, tableSizeLabel);
 tableDropdownWrapper.appendChild(tableDropdown);
@@ -705,7 +705,7 @@ const updateTableGridHighlight = (hoveredCol: number, hoveredRow: number) => {
     const cellRow = parseInt((cell as HTMLElement).dataset.row ?? '', 10);
     cell.classList.toggle('is-highlighted', cellCol <= hoveredCol && cellRow <= hoveredRow);
   });
-  tableSizeLabel.textContent = `${hoveredCol} x ${hoveredRow}`;
+  tableSizeLabel.textContent = activeUiLanguage === 'zh-CN' ? `${hoveredRow} 行 × ${hoveredCol} 列` : `${hoveredRow} ${hoveredRow === 1 ? 'row' : 'rows'} × ${hoveredCol} ${hoveredCol === 1 ? 'col' : 'cols'}`;
   selectedTableCols = hoveredCol;
   selectedTableRows = hoveredRow;
 };
@@ -1105,6 +1105,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   settingsWindow?.setLanguage(language);
   activeUiLanguage = language;
   activeUiStrings = strings;
+  updateTableGridHighlight(selectedTableCols, selectedTableRows);
   editor?.setUiLanguage?.(language);
   document.documentElement.lang = language;
   toolbar.setAttribute('aria-label', strings.editorToolbar);

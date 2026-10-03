@@ -3,8 +3,6 @@ export type SuggestionContext = { readonly type: 'slash' | 'emoji' | 'documents'
 /** Reads a bounded line prefix; code and selection exclusions belong to the editor adapter. */
 export function detectSuggestionContext(before: string, preferences: InputAssistance): SuggestionContext | null {
   if (before.length > 1000) return null;
-  const slash = preferences.slash ? /^\s{0,3}\/([\p{L}\p{N}_-]*)$/u.exec(before) : null;
-  if (slash) return { type: 'slash', query: slash[1], target: '', length: slash[1].length + 1, wiki: false };
   const emoji = preferences.emoji ? /(?:^|\s):([a-z0-9_+-][a-z0-9_+-]*)$/i.exec(before) : null;
   if (emoji) return { type: 'emoji', query: emoji[1], target: '', length: emoji[1].length + 1, wiki: false };
   if (!preferences.documentSuggestions) return null;

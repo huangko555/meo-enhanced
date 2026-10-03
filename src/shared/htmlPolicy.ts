@@ -5,6 +5,9 @@ export const supportedHtmlTags = new Set([
   'br',
   'code',
   'del',
+  'dl',
+  'dt',
+  'dd',
   'details',
   'div',
   'em',
@@ -33,6 +36,7 @@ export const supportedHtmlTags = new Set([
 ]);
 
 export const supportedHtmlBlockTags = new Set([
+  'dl',
   'blockquote',
   'details',
   'div',

@@ -2,7 +2,7 @@ import { EditorSelection, EditorState, StateEffect, StateField, Transaction } fr
 import { EditorView, Decoration, WidgetType, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
 import { defaultKeymap, indentLess, indentMore } from '@codemirror/commands';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
-import { renderLatexMathToHtml } from './math';
+import { renderLatexMathToHtml, parseLatexMathAt, type LatexMathRange } from './math';
 import { getViewportController, visualLineContextMargin } from './viewportController';
 import { applyLiveBlockIndent, liveBlockIndentKey, type LiveBlockIndentValue } from './blockIndent';
 import { consumeEditorHistoryCommand } from './historyCommands';
@@ -89,9 +89,31 @@ function isLatexMathAnchor(state: EditorState, anchor: number): boolean {
   }
   const line = state.doc.lineAt(anchor);
   if (line.from !== anchor) return false;
+  if (emptyMathEditingRange(state, anchor)) return true;
   return getLiveRenderedBlocks(state, { includeSelectedMath: true }).some((block) => (
     block.kind === 'math' && block.startLine === line.number
   ));
+}
+
+function emptyMathEditingRange(state: EditorState, anchor: number): LatexMathRange | null {
+  if (anchor < 0 || anchor > state.doc.length) return null;
+  const opening = state.doc.lineAt(anchor);
+  if (opening.from !== anchor || opening.number + 2 > state.doc.lines) return null;
+  const offset = opening.text.indexOf('$$');
+  if (offset < 0) return null;
+  const range = parseLatexMathAt(state.doc.toString(), opening.from + offset, { includeEmptyDisplay: true });
+  return range?.fencedDisplay && !range.content ? range : null;
+}
+
+/** An explicitly editable empty block is presentation state; Preview keeps its parsing semantics. */
+export function collectEmptyLatexMathEditingRanges(state: EditorState): LatexMathRange[] {
+  const ranges: LatexMathRange[] = [];
+  for (const [anchor, mode] of state.field(latexMathEditingStateField, false)?.modes ?? []) {
+    if (mode === 'preview') continue;
+    const range = emptyMathEditingRange(state, anchor);
+    if (range) ranges.push(range);
+  }
+  return ranges;
 }
 
 function resolveLatexMathAnchorAtLine(state: EditorState, lineNumber: number): number | null {

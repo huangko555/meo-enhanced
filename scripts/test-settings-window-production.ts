@@ -302,6 +302,37 @@ try {
   assert.equal(await toolbarVisible(), false, 'enabling in Preview does not expose the hidden editor toolbar');
   await chord('b');
   assert.equal(await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')).state.doc.toString()), beforePreview, 'Preview does not mutate the hidden editor');
+  await page.setViewport({ width: 1100, height: 780 });
+  await page.evaluate(() => { const g = window as any; g.__preferences.input.slash = true; window.dispatchEvent(new MessageEvent('message', { data: { type: 'editingPreferencesChanged', preferences: g.__preferences, revision: ++g.__revision } })); });
+  for (const language of ['en', 'zh-CN']) for (const appearance of ['light', 'dark']) {
+    await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button');
+    await page.click('.settings-tab[data-tab="general"]'); await page.click(`[data-setting="language"] [data-value="${language}"]`); await page.click(`[data-setting="theme"] [data-value="${appearance}"]`); await page.click('.settings-close');
+    await page.click('button[data-mode="source"]');
+    await page.waitForFunction(() => { const g = window as any, view = g.EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')); return !view.state.readOnly && view.contentDOM.isContentEditable && !document.querySelector('.editor-host')?.hasAttribute('hidden'); });
+    await page.evaluate(() => { const g = window as any, view = g.EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')); view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '正文' }, selection: { anchor: 2 } }); view.focus(); });
+    await page.click('.editor-host .cm-content'); await page.keyboard.press('End');
+    await page.keyboard.type('/'); await page.waitForSelector('.meo-input-suggestions:not([hidden])', { timeout: 3000 });
+    assert.equal(await page.$eval('.meo-suggestion-group', e => e.textContent), language === 'en' ? 'Text' : '文本');
+    assert.equal(await page.$eval('.meo-input-suggestion', e => e.children[1].textContent), 'Bold', 'command names remain English in both languages');
+    const surface = await page.$eval('.meo-input-suggestions', e => getComputedStyle(e).backgroundColor);
+    assert.notEqual(surface, 'rgba(0, 0, 0, 0)', 'popup uses the real Webview theme surface');
+    if (process.env.MEO_SETTINGS_SCREENSHOTS) {
+      const directory = path.resolve(process.env.MEO_SETTINGS_SCREENSHOTS); await fs.mkdir(directory, { recursive: true });
+      await page.screenshot({ path: path.join(directory, `slash-${language}-${appearance}.png`) });
+    }
+    const ime = await page.createCDPSession();
+    await ime.send('Input.imeSetComposition', { text: 'linktitle', selectionStart: 9, selectionEnd: 9 });
+    await page.waitForFunction(() => document.querySelectorAll('.meo-input-suggestion').length === 1);
+    for (const key of [' ', 'Enter', 'ArrowDown', 'Escape']) assert.equal(await page.evaluate(key => {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, isComposing: true });
+      document.activeElement!.dispatchEvent(event); return event.defaultPrevented;
+    }, key), false, 'the full shell leaves preedit keys to the IME');
+    assert.equal(await documentText(), '正文/linktitle');
+    await ime.send('Input.insertText', { text: 'linktitle' }); await ime.detach();
+    await page.waitForSelector('.meo-input-suggestions:not([hidden])');
+    await page.keyboard.press('Enter');
+    assert.equal(await documentText(), '正文[text](url "title")', 'the full shell does not steal the command confirmation');
+  }
   assert.ok(height > 500);
   assert.deepEqual(errors, []);
   if (process.env.MEO_SETTINGS_SCREENSHOTS) {
@@ -323,5 +354,5 @@ try {
 } catch (error) {
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'meo-settings-failure-'));
   await page.screenshot({ path: path.join(folder, 'settings.png') }); await fs.writeFile(path.join(folder, 'page.html'), await page.content());
-  console.error('Diagnostics:', folder, errors); throw error;
+  console.error('Diagnostics:', folder, errors, await page.evaluate(() => { const g = window as any, view = g.EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')); return { text: view.state.doc.toString(), readonly: view.state.readOnly, focus: view.hasFocus, active: document.activeElement?.outerHTML.slice(0, 200) }; })); throw error;
 } finally { await closeTestBrowser(browser); }

@@ -620,7 +620,8 @@ release acceptance session.
 
 The quick and release gates include `test-editing-preferences.ts`,
 `test-editor-services.ts`, `test-input-assistance-production.ts`,
-`test-editing-features-production.ts` and `test-settings-window-production.ts`.
+`test-editing-features-production.ts`, `test-slash-commands-production.ts` and
+`test-settings-window-production.ts`.
 The table/history packs exercise the new editing paths; the appearance pack
 includes the actual settings and toolbar menus. Browser tests use the production
 editor and full Webview bootstrap. They assert resulting documents, undo results,
@@ -634,6 +635,14 @@ repeated markers, forward/reverse/multiline/code-context selections, all-or-none
 multiple selections, quote/ASCII-whitespace/escape-prefix exceptions, cell-save
 projection and undo/redo. Surrounding-only markers are separately checked against
 empty-cursor auto-close, overtype and paired Backspace.
+Slash commands cover Source, Live and native cells: direct/no-space triggers,
+English aliases, context exclusions, every command template, field traversal,
+IME filtering without consuming candidate keys, cancellation and committed Chinese,
+settings updates, disposal and undo/redo. The table checks cover all 1–10 row/column
+combinations, default dimensions (data rows plus an additional header), invalid
+parameters, preserved selections, paragraph boundaries and list/quote nesting.
+The full Webview checks verify actual shortcut priority and Chinese/English,
+light/dark popup surfaces.
 CDP composition validates preedit/commit boundaries without proving a specific
 Windows IME. Clipboard events and the mocked VS Code clipboard validate payloads
 and ownership, without proving native Excel/OS permission or installed-VSIX behavior.

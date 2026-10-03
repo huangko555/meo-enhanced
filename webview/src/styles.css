@@ -7135,10 +7135,19 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-delet
   .settings-choice { flex-wrap: wrap; }
   .settings-shortcut-controls { justify-content: flex-start; }
 }
-.meo-input-suggestions { position: fixed; z-index: var(--meo-layer-document-popover); box-sizing: border-box; width: min(330px, calc(100vw - 16px)); max-height: 270px; overflow: auto; padding: 5px; border: 1px solid var(--vscode-panel-border); border-radius: 7px; background: var(--vscode-sideBar-background); box-shadow: var(--meo-elevated-shadow); }
+.meo-input-suggestions { position: fixed; z-index: var(--meo-layer-document-popover); box-sizing: border-box; width: min(330px, calc(100vw - 16px)); max-height: min(270px, calc(100vh - 16px)); overflow: auto; padding: 5px; border: 1px solid var(--vscode-panel-border); border-radius: 7px; background: var(--vscode-sideBar-background); box-shadow: var(--meo-elevated-shadow); }
 .meo-input-suggestions[hidden] { display: none; }
-.meo-input-suggestion { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; width: 100%; padding: 8px; border: 0; border-radius: 4px; background: transparent; color: var(--meo-foreground); font: 12px var(--vscode-font-family); text-align: left; cursor: pointer; }
+.meo-input-suggestion { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; width: 100%; padding: 8px; border: 0; border-radius: 4px; background: transparent; color: var(--meo-foreground); font: 12px/1.4 var(--vscode-font-family, system-ui, sans-serif); text-align: left; cursor: pointer; }
 .meo-input-suggestion:hover, .meo-input-suggestion[aria-selected='true'] { background: var(--vscode-toolbar-hoverBackground); }
 .meo-input-suggestion-detail { font-size: 11px; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
 
 html[data-editor-appearance='dark'] :is(.settings-warning, .settings-shortcut-conflict, .settings-status) { color: var(--vscode-errorForeground, #f48771); }
+
+.meo-suggestion-group { padding: 9px 8px 5px; color: var(--vscode-descriptionForeground); font: 11px/1.4 var(--vscode-font-family, system-ui, sans-serif); }
+.meo-slash-suggestion { display: grid; grid-template-columns: 26px minmax(0, 1fr) max-content; gap: 2px 8px; }
+.meo-suggestion-icon { grid-row: 1 / 3; align-self: center; text-align: center; color: var(--vscode-descriptionForeground); font-size: 14px; }
+.meo-slash-suggestion .meo-input-suggestion-detail { grid-column: 3; white-space: nowrap; }
+@media (max-width: 420px) {
+  .meo-slash-suggestion { grid-template-columns: 24px minmax(0, 1fr); }
+  .meo-slash-suggestion .meo-input-suggestion-detail { grid-column: 2; white-space: normal; }
+}

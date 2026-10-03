@@ -108,6 +108,7 @@ import {
 import {
   addLatexMathToolbar,
   createLatexMathToolbarWidget,
+  collectEmptyLatexMathEditingRanges,
   getLatexMathBlockMode,
   LatexMathEditingWidget,
   latexMathEditingStateField,
@@ -2005,7 +2006,7 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
     frontmatter = null;
   }
   addForcedThematicBreakDecorations(ranges, state, activeLines, frontmatter, codeBlockLines);
-  const mathRanges = collectMathRanges(state, tree, renderedTableRanges, frontmatter);
+  const mathRanges = [...collectMathRanges(state, tree, renderedTableRanges, frontmatter), ...collectEmptyLatexMathEditingRanges(state)];
   const inlineHtmlRanges: Array<{ from: number; to: number }> = [];
   const renderedHtmlBlocks = addHtmlContentDecorations(ranges, state, activeLines, previous, changes, inlineHtmlRanges);
 
@@ -2932,7 +2933,7 @@ function resolveFencedMathRenderSpan(
 
   const innerStartLine = state.doc.line(innerLineRange.innerStartLine);
   const innerEndLine = state.doc.line(innerLineRange.innerEndLine);
-  if (innerEndLine.to <= innerStartLine.from) {
+  if (innerEndLine.to < innerStartLine.from) {
     return null;
   }
 

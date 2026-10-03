@@ -1,7 +1,8 @@
+import { blockInsertion, type MarkdownInputContext } from '../editor/blockInsertion';
 import { matchInlineScript } from '../../../src/foundation/inlineScript';
 import { wireNativeSymbolInput, nativeSymbolInput } from '../editor/nativeTypingAssistance';
 import { automaticSymbolPairs, symbolOriginEpoch, replaceAutomaticSymbolPairArea, inputAssistanceFacet, type AutomaticSymbolPair } from '../editor/typingAssistance';
-import { markdownTableFromCells, serializeDelimitedTable, parseMarkdownTable, externalTableCellToMarkdown } from '../application/delimitedTable';
+import { emptyMarkdownTable, markdownTableFromCells, serializeDelimitedTable, parseMarkdownTable, externalTableCellToMarkdown } from '../application/delimitedTable';
 import { defaultInputAssistance, type EditorCommandId } from '../../../src/foundation/editingPreferences';
 import { EditorState, RangeSet, RangeValue, StateEffect, StateField, type Annotation, type Range, type SelectionRange as CodeMirrorSelectionRange, type Transaction } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
@@ -3790,6 +3791,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (this.composingInput || event.isComposing || event.keyCode === 229) return;
       if (this.handleHistoryShortcut(event, table)) {
         return;
       }
@@ -3810,6 +3812,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     };
 
     const onDocumentKeyDown = (event: KeyboardEvent) => {
+      if (this.composingInput || event.isComposing || event.keyCode === 229) return;
       if (event.key !== 'Escape') return;
       if (this.domRefs && !this.domRefs.contextMenu.hidden) {
         event.preventDefault();
@@ -6485,28 +6488,17 @@ export const sourceTableHeaderLineField = StateField.define<DecorationSet>({
 export function insertTable(
   view: EditorView,
   selection: CodeMirrorSelectionRange,
+  inputContext: (state: EditorState, position: number) => MarkdownInputContext,
   cols = 3,
   rows = 2,
   userEvent?: Annotation<string>
 ) {
-  const line = view.state.doc.lineAt(selection.from);
-  const lineText = view.state.doc.sliceString(line.from, line.to);
-  const leadingWhitespace = /^(\s*)/.exec(lineText)?.[1] ?? '';
-
-  const headerCells = Array.from({ length: cols }, () => '  ').join('|');
-  const separatorCells = Array.from({ length: cols }, () => ' --- ').join('|');
-  const bodyRows = Array.from({ length: rows }, () => {
-    const cells = Array.from({ length: cols }, () => '  ').join('|');
-    return `${leadingWhitespace}|${cells}|`;
-  }).join('\n');
-
-  const table = `${leadingWhitespace}|${headerCells}|\n${leadingWhitespace}|${separatorCells}|\n${bodyRows}`;
-
-  view.dispatch({
-    changes: { from: line.from, to: line.to, insert: table },
-    selection: { anchor: line.from + leadingWhitespace.length + 2 },
-    annotations: userEvent
-  });
+  const table = emptyMarkdownTable(cols, rows);
+  if (!table) return false;
+  const transaction = blockInsertion(view.state, selection.to, selection.to, table, 2, inputContext(view.state, selection.to));
+  if (!transaction) return false;
+  view.dispatch({ ...transaction.transaction, annotations: [...(userEvent ? [userEvent] : []), isolateHistory.of('full')] });
+  return true;
 }
 
 /** Reuses the mounted table's command target, pending-cell commit and selection owner. */
