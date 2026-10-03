@@ -25,7 +25,53 @@ try {
   const open = () => page.waitForSelector('.meo-input-suggestions:not([hidden])', { timeout: 3000 });
   const closed = async () => { await new Promise(resolve => setTimeout(resolve, 100)); await page.waitForFunction(() => !document.querySelector('.meo-input-suggestions:not([hidden])'), { timeout: 1000 }); };
   const waitText = (expected: string) => page.waitForFunction(expected => (window as any).editor.getText() === expected, { timeout: 4000 }, expected);
+  const settlePosition = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))));
+  const placeAnchor = async (offset: number) => {
+    await page.evaluate(() => (window as any).editor.view.dispatch({ scrollIntoView: true })); await settlePosition();
+    await page.evaluate(offset => {
+      const g = window as any, view = g.editor.view, coords = view.coordsAtPos(g.slashAnchor ?? view.state.selection.main.head);
+      view.scrollDOM.scrollTop += coords.top - view.scrollDOM.getBoundingClientRect().top - offset;
+    }, offset); await settlePosition();
+  };
+  const geometry = () => page.evaluate(() => {
+    const g = window as any, view = g.editor.view, anchor = view.coordsAtPos(g.slashAnchor), popup = document.querySelector<HTMLElement>('.meo-input-suggestions')!, menu = popup.getBoundingClientRect(), scroller = view.scrollDOM.getBoundingClientRect();
+    return { anchor: { top: anchor.top, bottom: anchor.bottom, left: anchor.left }, menu: { top: menu.top, bottom: menu.bottom, left: menu.left, right: menu.right, height: menu.height }, viewport: { top: scroller.top, bottom: scroller.bottom }, scrollTop: view.scrollDOM.scrollTop };
+  });
   for (const mode of ['source', 'live']) {
+    const longDocument = Array.from({ length: 120 }, (_, index) => 'Line ' + String(index).padStart(3, '0') + ' sample text').join('\n\n');
+    const anchor = longDocument.indexOf('Line 060') + 8;
+    await prepare(mode, longDocument, anchor); await page.evaluate(anchor => { (window as any).slashAnchor = anchor; }, anchor);
+    await placeAnchor(90); await page.keyboard.type('/'); await open();
+    const initial = await geometry();
+    assert.ok(Math.abs(initial.menu.top - initial.anchor.bottom - 4) < 2, mode + ': initially opens below the slash');
+    await page.evaluate(() => { (window as any).editor.view.scrollDOM.scrollTop -= 60; }); await settlePosition();
+    const moved = await geometry();
+    assert.ok(Math.abs(moved.menu.top - initial.menu.top - 60) < 2, mode + ': follows document scrolling');
+    await page.keyboard.type('bold'); await open();
+    assert.ok(Math.abs((await geometry()).menu.left - initial.menu.left) < 2, mode + ': follows the slash rather than the query caret');
+    await placeAnchor(675);
+    const above = await geometry(); assert.ok(above.menu.bottom <= above.anchor.top - 3, mode + ': flips above at the bottom edge');
+    await placeAnchor(22);
+    const below = await geometry(); assert.ok(below.menu.top >= below.anchor.bottom + 3, mode + ': flips below at the top edge');
+    await page.evaluate(() => { const g = window as any, view = g.editor.view; view.scrollDOM.scrollTop += view.coordsAtPos(g.slashAnchor).bottom - view.scrollDOM.getBoundingClientRect().top + 40; });
+    await closed();
+    await page.evaluate(scrollTop => { (window as any).editor.view.scrollDOM.scrollTop = scrollTop; }, below.scrollTop); await settlePosition(); await closed();
+    await page.keyboard.type('i'); await closed();
+    assert.equal(await text(), longDocument.slice(0, anchor) + '/boldi' + longDocument.slice(anchor), mode + ': automatic dismissal preserves text and does not reopen on scrolling back or typing');
+    await page.setViewport({ width: 1000, height: 320 });
+    await prepare(mode, longDocument, anchor); await page.evaluate(anchor => { (window as any).slashAnchor = anchor; }, anchor); await placeAnchor(150);
+    await page.keyboard.type('/'); await open();
+    const compact = await geometry();
+    assert.ok(compact.menu.height < 170 && compact.menu.top >= compact.viewport.top && compact.menu.bottom <= compact.viewport.bottom, mode + ': shrinks within the visible editor when neither side fits');
+    const beforeListScroll = compact.menu.top;
+    await page.evaluate(() => { document.querySelector('.meo-slash-list')!.scrollTop = 100; }); await settlePosition();
+    assert.ok(Math.abs((await geometry()).menu.top - beforeListScroll) < 2, mode + ': scrolling the candidate list does not move the document anchor');
+    await page.setViewport({ width: 800, height: 280 }); await settlePosition();
+    const resized = await geometry();
+    assert.ok(resized.menu.top >= resized.viewport.top && resized.menu.bottom <= resized.viewport.bottom && resized.menu.right <= 800, mode + ': remains inside the editor after a window resize');
+    await page.keyboard.press('End'); await closed();
+    await page.setViewport({ width: 1000, height: 720 });
+    await page.evaluate(() => { delete (window as any).slashAnchor; });
     await prepare(mode); await page.keyboard.type('/'); await open();
     const ime = await page.createCDPSession();
     await ime.send('Input.imeSetComposition', { text: 'bold', selectionStart: 4, selectionEnd: 4 });
@@ -45,6 +91,10 @@ try {
     await ime.send('Input.imeSetComposition', { text: 'italic', selectionStart: 6, selectionEnd: 6 });
     await ime.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0 });
     await waitText('****'); await closed();
+    await prepare(mode); await page.keyboard.type('/'); await open();
+    await ime.send('Input.imeSetComposition', { text: "bo'l", selectionStart: 4, selectionEnd: 4 });
+    await page.waitForFunction(() => document.querySelectorAll('.meo-input-suggestion').length === 2 && document.querySelector('.meo-suggestion-match')?.textContent === 'bol');
+    await ime.send('Input.insertText', { text: "bo'l" }); await open(); await page.keyboard.press('Enter'); await waitText('****');
     await prepare(mode); await page.keyboard.type('/'); await open();
     await ime.send('Input.imeSetComposition', { text: 'bold', selectionStart: 4, selectionEnd: 4 });
     await ime.send('Input.insertText', { text: '中文' }); await closed(); await waitText('/中文');
@@ -121,7 +171,7 @@ try {
       const g = window as any, data = new DataTransfer(); data.setData('text/plain', '/bold');
       g.editor.view.contentDOM.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
     }); await closed(); await waitText('/bold');
-    for (const invalid of [' ', '.', '-', '_', '中', '/']) {
+    for (const invalid of [' ', '.', '-', '_', '中', '/', '’']) {
       await prepare(mode); await page.keyboard.type('/b'); await open(); await page.keyboard.type(invalid); await closed(); await waitText('/b' + invalid);
     }
     await prepare(mode); await page.keyboard.type('/xyz'); await closed(); await page.keyboard.press('Escape'); await page.keyboard.press('Backspace'); await page.keyboard.press('Backspace'); await page.keyboard.press('Backspace'); await closed();
@@ -152,11 +202,16 @@ try {
     await page.evaluate(() => (window as any).editor.undo()); await waitText('before/h2 after');
     await page.evaluate(() => (window as any).editor.redo()); await waitText('before\n\n## \n\n after');
     await closed();
-    await prepare(mode); await page.keyboard.type('/table'); await open(); await page.keyboard.press('Enter');
+    await prepare(mode); await page.keyboard.type('/table'); await open();
+    assert.equal(await page.$eval('.meo-suggestion-command', row => row.textContent), '/tableNxN', 'default table advertises its optional dimensions');
+    await page.keyboard.press('Enter');
     await waitText('|  |  |  |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |');
     if (mode === 'live') await page.waitForFunction(() => document.activeElement instanceof HTMLTextAreaElement && document.activeElement.dataset.tableRow === '0');
     await page.keyboard.type('Header'); await waitText('| Header |  |  |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |');
-    await prepare(mode); await page.keyboard.type('/table3x4'); await open(); await page.keyboard.press('Enter');
+    await prepare(mode); await page.keyboard.type('/table3x4'); await open();
+    assert.equal(await page.$eval('.meo-suggestion-command', row => row.textContent), '/table3x4');
+    assert.equal(await page.$eval('.meo-input-suggestion-detail', row => row.textContent), '3 data rows × 4 cols');
+    await page.keyboard.press('Enter');
     await waitText('|  |  |  |  |\n| --- | --- | --- | --- |\n|  |  |  |  |\n|  |  |  |  |\n|  |  |  |  |');
     const defaultTable = '|  |  |  |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |';
     for (const [source, pos, expected] of [
@@ -238,8 +293,41 @@ try {
   for (const key of [' ', 'Enter', 'ArrowDown', 'Escape']) assert.equal(await page.evaluate(key => {
     const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, isComposing: true }); document.activeElement!.dispatchEvent(event); return event.defaultPrevented;
   }, key), false, 'native IME owns ' + key);
-  await nativeIme.send('Input.insertText', { text: 'bold' }); await open(); await page.keyboard.press('Enter');
+  await nativeIme.send('Input.imeSetComposition', { text: "bo'l", selectionStart: 4, selectionEnd: 4 });
+  await page.waitForFunction(() => document.querySelector('.meo-suggestion-match')?.textContent === 'bol');
+  await nativeIme.send('Input.insertText', { text: "bo'l" }); await open(); await page.keyboard.press('Enter');
   assert.equal(await page.evaluate(() => (document.activeElement as HTMLTextAreaElement).value), '****'); await nativeIme.detach();
+  const prefix = Array.from({ length: 60 }, (_, index) => 'Before ' + index).join('\n\n') + '\n\n';
+  await prepare('live', prefix + table + '\n\n' + prefix, prefix.length);
+  await page.evaluate(() => (window as any).editor.view.dispatch({ scrollIntoView: true })); await settlePosition();
+  await page.waitForSelector('tbody textarea');
+  await page.evaluate(() => { const input = document.querySelector<HTMLTextAreaElement>('tbody textarea')!; input.focus(); input.scrollIntoView({ block: 'center' }); input.setSelectionRange(0, 0); });
+  await settlePosition(); await page.keyboard.type('/bold'); await open();
+  const cellTop = () => page.$eval('.meo-input-suggestions', element => element.getBoundingClientRect().top);
+  const originalCellTop = await cellTop();
+  await page.evaluate(() => { (window as any).editor.view.scrollDOM.scrollTop -= 40; }); await settlePosition();
+  assert.ok(Math.abs(await cellTop() - originalCellTop - 40) < 2, 'native cell popup follows document scrolling');
+  await page.evaluate(() => { const input = document.activeElement as HTMLTextAreaElement, view = (window as any).editor.view; view.scrollDOM.scrollTop += input.getBoundingClientRect().bottom - view.scrollDOM.getBoundingClientRect().top + 40; });
+  await closed();
+  await page.evaluate(() => { (document.activeElement as HTMLTextAreaElement).scrollIntoView({ block: 'center' }); }); await settlePosition(); await closed();
+  const wideTable = ['A', '---', 'x'].map(value => '| ' + Array(10).fill(value).join(' | ') + ' |').join('\n');
+  await prepare('live', wideTable, 0); await page.waitForSelector('tbody textarea');
+  await page.evaluate(() => {
+    const input = document.querySelector<HTMLTextAreaElement>('tbody textarea')!, wrap = input.closest<HTMLElement>('.meo-md-html-table-wrap')!;
+    wrap.style.width = '150px'; input.focus(); input.setSelectionRange(0, 0);
+  }); await settlePosition(); await page.keyboard.type('/b'); await open();
+  assert.ok(await page.$eval('.meo-input-suggestions', popup => popup.getBoundingClientRect().width > 150), 'native menus can extend beyond a narrow cell');
+  await page.evaluate(() => {
+    const wrap = document.querySelector<HTMLElement>('.meo-md-html-table-wrap')!; wrap.scrollLeft = wrap.scrollWidth;
+    if (!wrap.scrollLeft) throw new Error('The horizontal clipping fixture must actually overflow');
+  }); await closed();
+  await page.evaluate(() => { document.querySelector('.meo-md-html-table-wrap')!.scrollLeft = 0; }); await settlePosition(); await closed();
+  await prepareCell('word '.repeat(50));
+  await page.evaluate(() => {
+    const input = document.activeElement as HTMLTextAreaElement;
+    input.style.height = '32px'; input.style.maxHeight = '32px'; input.style.overflowY = 'auto';
+  }); await page.keyboard.type('/b'); await open();
+  await page.evaluate(() => { (document.activeElement as HTMLTextAreaElement).scrollTop = 0; }); await closed();
   assert.deepEqual(errors, []);
   console.log('Slash commands production contracts passed');
 } catch (error) {

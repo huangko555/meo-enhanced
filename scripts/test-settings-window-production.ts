@@ -6,47 +6,50 @@ import { launchTestBrowser, closeTestBrowser } from './browser-test-helpers';
 const build = await Bun.build({ entrypoints: ['scripts/test-settings-window-production-entry.ts'], target: 'browser', format: 'iife' });
 if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
-const page = await browser.newPage();
+let page = await browser.newPage();
 const errors: string[] = []; page.on('pageerror', error => errors.push(String(error)));
 try {
   const chord = async (key: string) => { await page.keyboard.down('Control'); await page.keyboard.press(key); await page.keyboard.up('Control'); };
-  await page.setViewport({ width: 1100, height: 780 });
-  await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
-  await page.addStyleTag({ path: 'webview/src/styles.css' });
-  await page.addScriptTag({ content: `
-    window.__messages=[]; window.__revision=0; window.__clipboard='';
-    window.acquireVsCodeApi=()=>({getState(){},setState(){},postMessage(message){
-      window.__messages.push(message);
-      if(message.type==='updateEditingPreferences') {
-        const apply = () => {
-        if(window.__failNextUpdate) {
-          window.__failNextUpdate=false;
-          queueMicrotask(()=>window.dispatchEvent(new MessageEvent('message',{data:{type:'updatedEditingPreferences',requestId:message.requestId,revision:window.__revision,result:{ok:false,error:{code:'operation-failed',message:'fixture write failure'}}}})));
-          return;
+  const openFixture = async () => {
+    await page.setViewport({ width: 1100, height: 780 });
+    await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
+    await page.addStyleTag({ path: 'webview/src/styles.css' });
+    await page.addScriptTag({ content: `
+      window.__messages=[]; window.__revision=0; window.__clipboard='';
+      window.acquireVsCodeApi=()=>({getState(){},setState(){},postMessage(message){
+        window.__messages.push(message);
+        if(message.type==='updateEditingPreferences') {
+          const apply = () => {
+          if(window.__failNextUpdate) {
+            window.__failNextUpdate=false;
+            queueMicrotask(()=>window.dispatchEvent(new MessageEvent('message',{data:{type:'updatedEditingPreferences',requestId:message.requestId,revision:window.__revision,result:{ok:false,error:{code:'operation-failed',message:'fixture write failure'}}}})));
+            return;
+          }
+          try {
+            window.__preferences=window.EditingSettingsHarness.changeEditingPreferences(window.__preferences,message.change,'other');
+            const revision=++window.__revision;
+            queueMicrotask(()=>window.dispatchEvent(new MessageEvent('message',{data:{type:'updatedEditingPreferences',requestId:message.requestId,revision,result:{ok:true,value:window.__preferences}}})));
+          } catch(error) { queueMicrotask(()=>window.dispatchEvent(new MessageEvent('message',{data:{type:'updatedEditingPreferences',requestId:message.requestId,revision:window.__revision,result:{ok:false,error:{code:'operation-failed',message:String(error)}}}}))); }
+          };
+          if(window.__holdNextUpdate) { window.__holdNextUpdate=false; window.__flushUpdate=apply; } else apply();
         }
-        try {
-          window.__preferences=window.EditingSettingsHarness.changeEditingPreferences(window.__preferences,message.change,'other');
-          const revision=++window.__revision;
-          queueMicrotask(()=>window.dispatchEvent(new MessageEvent('message',{data:{type:'updatedEditingPreferences',requestId:message.requestId,revision,result:{ok:true,value:window.__preferences}}})));
-        } catch(error) { queueMicrotask(()=>window.dispatchEvent(new MessageEvent('message',{data:{type:'updatedEditingPreferences',requestId:message.requestId,revision:window.__revision,result:{ok:false,error:{code:'operation-failed',message:String(error)}}}}))); }
-        };
-        if(window.__holdNextUpdate) { window.__holdNextUpdate=false; window.__flushUpdate=apply; } else apply();
-      }
-      if(message.type==='editorService') {
-        const value=message.action==='links'?{candidates:[]}:{text:message.action==='readClipboard'?window.__clipboard:''};
-        if(message.action==='writeClipboard') window.__clipboard=message.text;
-        const reply=()=>queueMicrotask(()=>window.dispatchEvent(new MessageEvent('message',{data:{type:'editorServiceResult',requestId:message.requestId,result:{ok:true,value}}})));
-        if(message.action==='readClipboard' && window.__holdNextClipboardRead) { window.__holdNextClipboardRead=false; window.__flushClipboardRead=reply; } else reply();
-      }
-    }});
-  ` });
-  await page.addScriptTag({ content: await build.outputs[0].text() });
-  await page.evaluate(() => {
-    const global = window as any; global.__preferences = { input: { ...global.EditingSettingsHarness.defaultInputAssistance }, shortcuts: {} };
-    const text = 'hello\n\n# Heading\n\ntext';
-    global.__initMessage = { type: 'init', documentId: 'file:///settings.md', text, version: 1, savedRevision: { version: 1, text }, diagnostics: [], mode: 'source', uiLanguage: 'zh-CN', uiLanguagePreference: 'zh-CN', automaticUiLanguage: 'zh-CN', sourceLineNumbers: 'on', previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, previewShowComments: false, editorAppearance: 'dark', gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null, editingPreferences: global.__preferences, editingPreferencesRevision: 0 };
-    window.dispatchEvent(new MessageEvent('message', { data: global.__initMessage }));
-  });
+        if(message.type==='editorService') {
+          const value=message.action==='links'?{candidates:[]}:{text:message.action==='readClipboard'?window.__clipboard:''};
+          if(message.action==='writeClipboard') window.__clipboard=message.text;
+          const reply=()=>queueMicrotask(()=>window.dispatchEvent(new MessageEvent('message',{data:{type:'editorServiceResult',requestId:message.requestId,result:{ok:true,value}}})));
+          if(message.action==='readClipboard' && window.__holdNextClipboardRead) { window.__holdNextClipboardRead=false; window.__flushClipboardRead=reply; } else reply();
+        }
+      }});
+    ` });
+    await page.addScriptTag({ content: await build.outputs[0].text() });
+    await page.evaluate(() => {
+      const global = window as any; global.__preferences = { input: { ...global.EditingSettingsHarness.defaultInputAssistance }, shortcuts: {} };
+      const text = 'hello\n\n# Heading\n\ntext';
+      global.__initMessage = { type: 'init', documentId: 'file:///settings.md', text, version: 1, savedRevision: { version: 1, text }, diagnostics: [], mode: 'source', uiLanguage: 'zh-CN', uiLanguagePreference: 'zh-CN', automaticUiLanguage: 'zh-CN', sourceLineNumbers: 'on', previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, previewShowComments: false, editorAppearance: 'dark', gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null, editingPreferences: global.__preferences, editingPreferencesRevision: 0 };
+      window.dispatchEvent(new MessageEvent('message', { data: global.__initMessage }));
+    });
+  };
+  await openFixture();
   await page.waitForSelector('.cm-editor');
   await page.waitForFunction(() => !document.querySelector('.mode-toolbar')?.classList.contains('meo-preload-toolbar'));
   await page.click('.more-tools-wrapper > .format-button');
@@ -303,17 +306,28 @@ try {
   await chord('b');
   assert.equal(await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')).state.doc.toString()), beforePreview, 'Preview does not mutate the hidden editor');
   await page.setViewport({ width: 1100, height: 780 });
-  await page.evaluate(() => { const g = window as any; g.__preferences.input.slash = true; window.dispatchEvent(new MessageEvent('message', { data: { type: 'editingPreferencesChanged', preferences: g.__preferences, revision: ++g.__revision } })); });
+  // Keep the appearance/IME matrix independent of deliberately incomplete clipboard/mode host scenarios.
+  await page.close(); page = await browser.newPage(); page.on('pageerror', error => errors.push(String(error)));
+  await openFixture();
+  await page.waitForFunction(() => !document.querySelector('.mode-toolbar')?.classList.contains('meo-preload-toolbar'));
   for (const language of ['en', 'zh-CN']) for (const appearance of ['light', 'dark']) {
     await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button');
     await page.click('.settings-tab[data-tab="general"]'); await page.click(`[data-setting="language"] [data-value="${language}"]`); await page.click(`[data-setting="theme"] [data-value="${appearance}"]`); await page.click('.settings-close');
     await page.click('button[data-mode="source"]');
-    await page.waitForFunction(() => { const g = window as any, view = g.EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')); return !view.state.readOnly && view.contentDOM.isContentEditable && !document.querySelector('.editor-host')?.hasAttribute('hidden'); });
+    await page.waitForFunction(() => { const g = window as any, view = g.EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')); return view.dom.classList.contains('meo-mode-source') && !view.state.readOnly && view.contentDOM.isContentEditable && !document.querySelector('.editor-host')?.hasAttribute('hidden'); });
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await page.evaluate(() => { const g = window as any, view = g.EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')); view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '正文' }, selection: { anchor: 2 } }); view.focus(); });
     await page.click('.editor-host .cm-content'); await page.keyboard.press('End');
     await page.keyboard.type('/'); await page.waitForSelector('.meo-input-suggestions:not([hidden])', { timeout: 3000 });
-    assert.equal(await page.$eval('.meo-suggestion-group', e => e.textContent), language === 'en' ? 'Text' : '文本');
-    assert.equal(await page.$eval('.meo-input-suggestion', e => e.children[1].textContent), 'Bold', 'command names remain English in both languages');
+    assert.equal(await page.$eval('.meo-suggestion-command', e => e.textContent), '/bold', 'executable command names remain English in both languages');
+    assert.equal(await page.$eval('.meo-input-suggestion-detail', e => e.textContent), language === 'en' ? 'Bold' : '粗体');
+    assert.equal(await page.$('.meo-suggestion-group'), null, 'the compact menu has no extra group headers');
+    const layout = await page.evaluate(() => {
+      const popup = document.querySelector<HTMLElement>('.meo-input-suggestions')!, editor = document.querySelector<HTMLElement>('.editor-host .cm-content')!;
+      const font = getComputedStyle(popup), editorFont = getComputedStyle(editor);
+      return { width: popup.getBoundingClientRect().width, font: font.fontFamily, size: font.fontSize, editorFont: editorFont.fontFamily, editorSize: editorFont.fontSize };
+    });
+    assert.equal(layout.width, 360); assert.equal(layout.font, layout.editorFont); assert.equal(layout.size, layout.editorSize);
     const surface = await page.$eval('.meo-input-suggestions', e => getComputedStyle(e).backgroundColor);
     assert.notEqual(surface, 'rgba(0, 0, 0, 0)', 'popup uses the real Webview theme surface');
     if (process.env.MEO_SETTINGS_SCREENSHOTS) {
@@ -354,5 +368,5 @@ try {
 } catch (error) {
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'meo-settings-failure-'));
   await page.screenshot({ path: path.join(folder, 'settings.png') }); await fs.writeFile(path.join(folder, 'page.html'), await page.content());
-  console.error('Diagnostics:', folder, errors, await page.evaluate(() => { const g = window as any, view = g.EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')); return { text: view.state.doc.toString(), readonly: view.state.readOnly, focus: view.hasFocus, active: document.activeElement?.outerHTML.slice(0, 200) }; })); throw error;
+  console.error('Diagnostics:', folder, errors, await page.evaluate(() => { const g = window as any, view = g.EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')); return { text: view.state.doc.toString(), readonly: view.state.readOnly, focus: view.hasFocus, active: document.activeElement?.outerHTML.slice(0, 200), scroll: view.scrollDOM.getBoundingClientRect().toJSON() }; })); throw error;
 } finally { await closeTestBrowser(browser); }

@@ -642,7 +642,11 @@ settings updates, disposal and undo/redo. The table checks cover all 1–10 row/
 combinations, default dimensions (data rows plus an additional header), invalid
 parameters, preserved selections, paragraph boundaries and list/quote nesting.
 The full Webview checks verify actual shortcut priority and Chinese/English,
-light/dark popup surfaces.
+light/dark popup surfaces, localized descriptions and inherited editor fonts.
+Slash positioning checks cover document scrolling, stable slash anchors, above/below
+flips, limited viewport height, list-only scrolling, dismissal without reopening,
+native table clipping and textarea scrolling. Pinyin separators are exercised in
+Source, Live and native-cell preedit, including complete raw-query replacement.
 CDP composition validates preedit/commit boundaries without proving a specific
 Windows IME. Clipboard events and the mocked VS Code clipboard validate payloads
 and ownership, without proving native Excel/OS permission or installed-VSIX behavior.
