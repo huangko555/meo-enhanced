@@ -7151,9 +7151,8 @@ html[data-editor-appearance='dark'] :is(.settings-warning, .settings-shortcut-co
   max-height: var(--meo-suggestion-max-height);
   padding: 0;
   border-radius: 10px;
-  box-shadow: none;
+  box-shadow: var(--meo-elevated-shadow);
   overflow: hidden;
-  clip-path: inset(0 round 10px);
   background-image: linear-gradient(to bottom,
     transparent var(--meo-suggestion-selected-top),
     var(--meo-suggestion-selected-background) var(--meo-suggestion-selected-top),
@@ -7165,6 +7164,7 @@ html[data-editor-appearance='dark'] :is(.settings-warning, .settings-shortcut-co
 html[data-editor-appearance='dark'] .meo-slash-suggestions { --meo-suggestion-match-color: var(--meo-semantic-headingForeground, #79b8ff); }
 .meo-slash-list {
   max-height: calc(var(--meo-suggestion-max-height) - 2px);
+  clip-path: inset(0 round 9px);
   overflow-x: hidden;
   overflow-y: scroll;
   scrollbar-gutter: stable;

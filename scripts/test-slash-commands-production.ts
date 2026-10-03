@@ -38,6 +38,19 @@ try {
     return { anchor: { top: anchor.top, bottom: anchor.bottom, left: anchor.left }, menu: { top: menu.top, bottom: menu.bottom, left: menu.left, right: menu.right, height: menu.height }, viewport: { top: scroller.top, bottom: scroller.bottom }, scrollTop: view.scrollDOM.scrollTop };
   });
   for (const mode of ['source', 'live']) {
+    await prepare(mode); await page.keyboard.type('/table'); await open();
+    for (const [character, display, disabled] of [['6', '/table6xN', 'true'], ['x', '/table6xN', 'true'], ['6', '/table6x6', 'false']]) {
+      await page.keyboard.type(character); await open();
+      assert.equal(await page.$eval('.meo-suggestion-command', row => row.textContent), display);
+      assert.equal(await page.$eval('.meo-input-suggestion', row => row.getAttribute('aria-disabled')), disabled, mode + ': incomplete dimensions cannot execute');
+    }
+    await page.keyboard.press('Backspace'); await open();
+    assert.equal(await page.$eval('.meo-input-suggestion', row => row.getAttribute('aria-disabled')), 'true', mode + ': deleting a column count returns to a pending suggestion');
+    await page.keyboard.type('6'); await open();
+    await page.keyboard.press('Enter');
+    const sizedTable = await page.evaluate(() => (window as any).EditingFeaturesHarness.parseMarkdownTable((window as any).editor.getText()));
+    assert.equal(sizedTable.cells.length, 7, mode + ': six data rows plus header');
+    assert.ok(sizedTable.cells.every((row: string[]) => row.length === 6), mode + ': six columns');
     const longDocument = Array.from({ length: 120 }, (_, index) => 'Line ' + String(index).padStart(3, '0') + ' sample text').join('\n\n');
     const anchor = longDocument.indexOf('Line 060') + 8;
     await prepare(mode, longDocument, anchor); await page.evaluate(anchor => { (window as any).slashAnchor = anchor; }, anchor);
@@ -252,9 +265,32 @@ try {
     for (const { rows, cols, height, widths, empty } of dimensions) {
       assert.equal(height, rows + 1, mode + ': data rows plus header'); assert.ok(widths.every(width => width === cols)); assert.equal(empty, true);
     }
-    for (const query of ['table0x3', 'table11x2', 'table2x', '3x0', 'table3', '100x100']) {
-      await prepare(mode); await page.keyboard.type('/' + query); await closed(); await page.keyboard.press('Enter'); assert.ok((await text()).startsWith('/' + query + '\n'), 'invalid dimensions never execute a default');
+    for (const query of ['table0x3', 'table11x2', 'table2x', '3x0', 'table3', '100x100', '6', '6x', 'table10X']) {
+      await prepare(mode); await page.keyboard.type('/' + query); await open();
+      assert.equal(await page.$eval('.meo-input-suggestion', row => row.getAttribute('aria-disabled')), 'true', query + ': pending or out-of-range sizes stay visible');
+      await page.click('.meo-input-suggestion'); await waitText('/' + query); await open();
+      await page.keyboard.press('Enter'); assert.ok((await text()).startsWith('/' + query + '\n'), query + ': incomplete or invalid dimensions never execute a default'); await closed();
     }
+    for (const query of ['table6q', 'table6xx6', 'tablex6', 'table6x6x']) {
+      await prepare(mode); await page.keyboard.type('/' + query); await closed(); await waitText('/' + query);
+    }
+    for (const query of ['table10x10', 'table10X10', 'table10×10', '6x6', 'table06x04']) {
+      await prepare(mode); await page.keyboard.type('/' + query); await open();
+      await page.keyboard.press('Tab');
+      const table = await page.evaluate(() => (window as any).EditingFeaturesHarness.parseMarkdownTable((window as any).editor.getText()));
+      const [rows, cols] = query.replace(/^table/, '').split(/[xX×]/).map(Number);
+      assert.equal(table.cells.length, rows + 1, query + ': data rows plus header');
+      assert.ok(table.cells.every((row: string[]) => row.length === cols), query + ': requested columns');
+    }
+    await prepare(mode); await page.keyboard.type('/table11x2'); await open();
+    await page.keyboard.press('Backspace'); await page.keyboard.press('Backspace'); await page.keyboard.press('Backspace');
+    await page.keyboard.type('x2'); await open(); await page.keyboard.press('Enter');
+    await waitText('|  |  |\n| --- | --- |\n|  |  |');
+    await prepare(mode, '', 0, { slash: false }); await page.keyboard.type('/table6x'); await page.keyboard.press('Tab');
+    const literalTab = await text();
+    assert.ok(literalTab.includes('/table6x'), mode + ': ordinary Tab preserves the literal input');
+    await prepare(mode); await page.keyboard.type('/table6x'); await open(); await page.keyboard.press('Tab'); await waitText(literalTab);
+    await prepare(mode); await page.keyboard.type('/table6x'); await open(); await page.keyboard.press('Escape'); await closed(); await waitText('/table6x');
 
   }
   const table = '| A | B |\n| --- | --- |\n|  | x |';
@@ -284,7 +320,9 @@ try {
   assert.equal(await page.evaluate(() => (document.activeElement as HTMLTextAreaElement).value), '[value0](value1 "value2")');
   await prepareCell('``a`b``'); await page.keyboard.type('/b'); await open(); await page.keyboard.press('Escape'); await closed();
   await prepareCell('`word`', 3); await page.keyboard.type('/b'); await closed();
-  await prepareCell(); await page.keyboard.type('/table'); await closed();
+  for (const query of ['table', 'table6', 'table6x', 'table6x6']) {
+    await prepareCell(); await page.keyboard.type('/' + query); await closed();
+  }
   assert.equal(await page.evaluate(() => (window as any).editor.executeCommand('insertTable')), false);
   await prepareCell(); await page.keyboard.type('/'); await open();
   const nativeIme = await page.createCDPSession();

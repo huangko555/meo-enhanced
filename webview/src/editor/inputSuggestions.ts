@@ -181,7 +181,7 @@ export function createInputSuggestions(options: {
       }
       this.items.forEach((item, index) => {
         const row = document.createElement('button'); row.type = 'button'; row.className = 'meo-input-suggestion'; row.setAttribute('role', 'option');
-        row.id = this.popup.id + '-' + index; row.setAttribute('aria-selected', String(index === this.index)); row.tabIndex = -1; row.setAttribute('aria-disabled', String(this.composing || this.view.compositionStarted));
+        row.id = this.popup.id + '-' + index; row.setAttribute('aria-selected', String(index === this.index)); row.tabIndex = -1; row.setAttribute('aria-disabled', String(!!item.slash?.disabled || this.composing || this.view.compositionStarted));
         const label = document.createElement('span');
         if (item.slash) {
           row.dataset.command = item.slash.id; row.classList.add('meo-slash-suggestion');
@@ -200,8 +200,8 @@ export function createInputSuggestions(options: {
             const matched = document.createElement('span'); matched.className = 'meo-suggestion-match'; matched.textContent = command.slice(match, match + query.length);
             label.append(command.slice(0, match), matched, command.slice(match + query.length));
           } else label.append(command);
-          if (item.slash.id === 'table' && item.slash.command === 'table') {
-            const dimensions = document.createElement('span'); dimensions.className = 'meo-suggestion-parameters'; dimensions.textContent = 'NxN'; label.append(dimensions);
+          if (item.slash.parameters) {
+            const dimensions = document.createElement('span'); dimensions.className = 'meo-suggestion-parameters'; dimensions.textContent = item.slash.parameters; label.append(dimensions);
           }
         } else label.textContent = item.label;
         row.append(label);
@@ -303,6 +303,7 @@ export function createInputSuggestions(options: {
     choose(index: number) {
       if (this.composing || this.view.compositionStarted) return;
       const context = this.context, item = this.items[index];
+      if (item?.slash?.disabled) return;
       if (!context || !item || this.head !== (this.cellInput && this.cellFrom !== null ? this.cellInput.selectionStart : this.view.state.selection.main.head) || JSON.stringify(context) !== JSON.stringify(this.getContext())) { this.clear(); return; }
       if (this.cellInput && this.cellFrom !== null && item.slash) {
         const input = this.cellInput, from = this.cellFrom, command = item.slash;
@@ -367,7 +368,10 @@ export function createInputSuggestions(options: {
       if (this.popup.hidden) return false;
       if (event.key === 'Escape') { event.preventDefault(); this.slashFrom = null; this.cellFrom = null; this.cellInput = null; this.fields = []; this.clear(); return true; }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); this.index = (this.index + (event.key === 'ArrowDown' ? 1 : this.items.length - 1)) % this.items.length; this.render(); return true; }
-      if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey) { event.preventDefault(); this.choose(this.index); return true; }
+      if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey) {
+        if (this.items[this.index]?.slash?.disabled) return false;
+        event.preventDefault(); this.choose(this.index); return true;
+      }
       return false;
     }
     destroy() {

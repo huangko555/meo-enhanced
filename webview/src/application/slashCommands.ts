@@ -6,6 +6,7 @@ export type SlashCommand = {
   readonly icon: string; readonly zh: string; readonly en: string;
   readonly scope: 'inline' | 'block' | 'heading'; readonly insert: string; readonly caret: number;
   readonly fields?: readonly (readonly [number, number])[];
+  readonly parameters?: string; readonly disabled?: boolean;
 };
 const inline = (id: string, label: string, icon: string, zh: string, marker: string, aliases: readonly string[] = []): SlashCommand => ({ id, command: id.toLowerCase(), label, aliases, group: 'text', icon, zh, en: label, scope: 'inline', insert: marker + marker, caret: marker.length, fields: [[marker.length, marker.length]] });
 const block = (id: string, label: string, group: SlashCommand['group'], icon: string, zh: string, insert: string, caret = insert.length, aliases: readonly string[] = []): SlashCommand => ({ id, command: id.toLowerCase(), label, aliases, group, icon, zh, en: label, scope: 'block', insert, caret });
@@ -36,7 +37,7 @@ const commands: readonly SlashCommand[] = [
   block('codeBlock', 'Code Block', 'code', '{}', '代码块', '```\n\n```', 4, ['code', 'cb', 'fence']),
   { ...inline('inlineMath', 'Inline Math', '∑', '行内公式', '$', ['math']), group: 'code' },
   block('blockMath', 'Block Math', 'code', '∑', '公式块', '$$\n\n$$', 3, ['equation', 'latex']),
-  { ...block('table', 'Table', 'data', '▦', '表格 · 行×列', emptyMarkdownTable()!, 2, ['tbl']), en: 'Table · rows×cols' }
+  { ...block('table', 'Table', 'data', '▦', '表格 · 行×列', emptyMarkdownTable()!, 2, ['tbl']), en: 'Table · rows×cols', parameters: 'NxN' }
 ];
 const languages: readonly [string, string, readonly string[]][] = [
   ['javascript', 'JavaScript', ['js']], ['typescript', 'TypeScript', ['ts']], ['python', 'Python', ['py']],
@@ -49,10 +50,17 @@ export function readSlashQuery(value: string): string | null {
 }
 export function slashCommandSuggestions(query: string, context: 'block' | 'inline' | 'heading'): readonly SlashCommand[] {
   const q = query.toLowerCase();
-  const dimensions = /^(?:table)?([0-9]+)[x×]([0-9]+)$/i.exec(q);
+  const dimensions = /^(?:table)?([0-9]+)(?:[x×]([0-9]*))?$/i.exec(q);
   if (dimensions) {
-    const rows = Number(dimensions[1]), cols = Number(dimensions[2]), insert = emptyMarkdownTable(cols, rows);
-    return insert && context === 'block' ? [{ ...commands[commands.length - 1], command: 'table' + rows + 'x' + cols, insert, zh: rows + ' 数据行 × ' + cols + ' 列', en: rows + ' data rows × ' + cols + ' cols' }] : [];
+    if (context !== 'block') return [];
+    const rows = Number(dimensions[1]), cols = Number(dimensions[2]), complete = !!dimensions[2];
+    const table = commands[commands.length - 1], command = 'table' + q.replace(/^table/, '').replace(/×/g, 'x');
+    const insert = complete ? emptyMarkdownTable(cols, rows) : null;
+    if (insert) return [{ ...table, command, parameters: undefined, insert, zh: rows + ' 数据行 × ' + cols + ' 列', en: rows + ' data rows × ' + cols + ' cols' }];
+    const inRange = rows >= 1 && rows <= 10 && (!complete || cols >= 1 && cols <= 10);
+    // Keep a valid size prefix visible without allowing it to insert the default table.
+    return [{ ...table, command, insert: '', caret: 0, disabled: true, parameters: complete ? undefined : dimensions[2] === undefined ? 'xN' : 'N',
+      zh: inRange ? '继续输入列数' : '行列范围 1–10', en: inRange ? 'Enter column count' : 'Rows/cols: 1–10' }];
   }
   if (/^(?:table)?[0-9]/.test(q) || /^(?:table)?[x×]/.test(q)) return [];
   const language = languages.find(([id, , aliases]) => [id, ...aliases].includes(q));
