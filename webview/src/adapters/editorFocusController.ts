@@ -269,6 +269,9 @@ export function createEditorFocusController({
 
   return {
     restoreFromHost(): boolean {
+      // Panel/activity notifications may arrive after a Workbench control took
+      // focus. Only a native return into this document may grant focus again.
+      if (!document.hasFocus()) return false;
       return restoreWindowReturn();
     },
     dispose(): void {

@@ -876,6 +876,43 @@ async function runPaintedActivationClick(browser: Browser, mode: 'live' | 'sourc
   }
 }
 
+async function runWorkbenchMenuFocus(browser: Browser, mode: 'live' | 'source'): Promise<void> {
+  const page = await browser.newPage();
+  try {
+    await page.setViewport({ width: 1000, height: 700 });
+    // A same-document outside button cannot reproduce losing focus across the
+    // Workbench and Webview frames. Keep both Webview layers in this fixture.
+    await page.setContent('<button id="host-menu">Host menu</button><iframe id="webview" style="width:980px;height:640px" srcdoc="<iframe style=\'width:960px;height:620px\'></iframe>"></iframe>');
+    const shell = page.frames().find((frame) => frame.parentFrame() === page.mainFrame())!;
+    const content = page.frames().find((frame) => frame.parentFrame() === shell)!;
+    await content.setContent('<style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"></div>');
+    await content.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+    await content.addScriptTag({ content: 'window.__hostMessages=[];window.acquireVsCodeApi=()=>({postMessage(message){window.__hostMessages.push(message)},getState(){},setState(){}})' });
+    await content.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+    await content.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), init(mode, 'alpha\nbeta'));
+    await content.waitForSelector('.cm-content');
+    await (await content.$('.cm-line:nth-child(2)'))!.click();
+    const before = await content.evaluate(() => {
+      const element = document.querySelector('.cm-content') as HTMLElement & { cmView: any };
+      return element.cmView.rootView.view.state.selection.main.head as number;
+    });
+    await page.click('#host-menu');
+    assert.equal(await content.evaluate(() => document.hasFocus()), false, `${mode} menu fixture stayed focused`);
+    await content.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } })));
+    assert.equal(await page.evaluate(() => document.activeElement?.id), 'host-menu', `${mode} late Host notification dismissed the Workbench menu`);
+    assert.equal(await content.evaluate(() => document.hasFocus()), false, `${mode} late Host notification stole frame focus`);
+    // Restoring only the shell is not permission to steal focus. A real return
+    // into the content window must still reconnect input at the saved position.
+    await page.evaluate(() => document.querySelector<HTMLIFrameElement>('#webview')!.focus());
+    await shell.evaluate(() => document.querySelector<HTMLIFrameElement>('iframe')!.contentWindow!.focus());
+    await content.waitForFunction(() => document.activeElement === document.querySelector('.cm-content'));
+    await page.keyboard.type('MENU_RETURN');
+    const after = await content.evaluate(() => (window as any).__hostMessages.filter((message: any) => message.type === 'draftChanged').at(-1)?.text);
+    assert.equal(after, 'alpha\nbeta'.slice(0, before) + 'MENU_RETURN' + 'alpha\nbeta'.slice(before), `${mode} content-window return lost the saved position or first input`);
+  } finally {
+    await page.close();
+  }
+}
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-basic-capability-index-entry.ts')],
@@ -889,6 +926,8 @@ async function main(): Promise<void> {
   const browser = await launchTestBrowser();
   let primaryError: unknown;
   try {
+    await runWorkbenchMenuFocus(browser, 'live');
+    await runWorkbenchMenuFocus(browser, 'source');
     await runAltFocusPolicy(browser, 'live');
     await runAltFocusPolicy(browser, 'source');
     await runPaintedActivationClick(browser, 'live');

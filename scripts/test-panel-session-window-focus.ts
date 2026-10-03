@@ -9,7 +9,7 @@ import {
 } from './panel-session-test-helper';
 
 const document = createPanelSessionTestDocument(createPanelSessionTestUri('C:/focus-return.md'), 'Body');
-let onWindowState: ((state: { focused: boolean }) => void) | null = null;
+let onWindowState: ((state: { focused: boolean; active?: boolean }) => void) | null = null;
 mock.module('vscode', () => createPanelSessionVscodeMock(document, {
   onDidChangeWindowState(listener) {
     onWindowState = listener;
@@ -42,6 +42,13 @@ const controller = createPanelSessionController(createPanelSessionControllerPara
 }) as never);
 await controller.handleMessage({ type: 'ready' });
 assert.ok(onWindowState, 'panel session did not subscribe to VS Code window focus changes');
+onWindowState({ focused: true, active: false });
+await Bun.sleep(0);
+assert.equal(messages.filter((message) => message.type === 'focusEditor').length, 0,
+  'activity-only changes must not steal focus from VS Code menus');
+onWindowState({ focused: true, active: true });
+await Bun.sleep(0);
+assert.equal(messages.filter((message) => message.type === 'focusEditor').length, 0);
 onWindowState({ focused: false });
 await Bun.sleep(0);
 assert.equal(messages.filter((message) => message.type === 'focusEditor').length, 0);

@@ -72,6 +72,13 @@ passive controls, and nested table/rendered-block editors. Unknown activation ma
 briefly guard caret painting; input must remain ready and a click or input must
 end that guard early. Duplicate return notifications must not extend it.
 
+The Workbench-menu cases use nested Webview frames: a late Host notification
+must leave the outside menu focused, and an actual return into the content frame
+must retain the insertion position and first input. Activity-only WindowState
+changes are covered by `scripts/test-panel-session-window-focus.ts`; they must
+not be treated as window activation. A shell-only return is not a content-focus
+signal. Native menu dismissal still requires separate Windows verification.
+
 The Live and Source painting cases capture the browser's actual caret pixels,
 using a distinct caret color and a visible-caret positive control. Browser virtual
 time keeps screenshot transport from consuming the activation interval. Before

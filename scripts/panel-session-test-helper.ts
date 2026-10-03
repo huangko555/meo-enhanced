@@ -79,6 +79,7 @@ export const createPanelSessionVscodeMock = (
   extensions: { all: [] },
   languages: { onDidChangeDiagnostics: () => panelSessionDisposable() },
   window: {
+    state: { focused: true },
     tabGroups: { activeTabGroup: { activeTab: { input: { uri: document.uri } } } },
     showWarningMessage: overrides.showWarningMessage ?? (async () => undefined),
     onDidChangeTextEditorSelection: () => panelSessionDisposable(),
