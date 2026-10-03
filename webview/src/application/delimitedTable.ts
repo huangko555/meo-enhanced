@@ -85,12 +85,16 @@ export function parseMarkdownTable(text: string): MarkdownTable | null {
   if (!separator.length || separator.some(cell => !/^:?-+:?$/.test(cell))) return null;
   const cells = [splitMarkdownTableRow(lines[0]), ...lines.slice(2).map(splitMarkdownTableRow)];
   const width = separator.length;
-  if (cells[0].length !== width || cells.length * width > 10_000) return null;
+  if (cells[0].length !== width || cells.length * width > maxCells) return null;
   return { cells: cells.map(row => [...row.slice(0, width), ...Array<string>(Math.max(0, width - row.length)).fill('')]), alignments: separator.map(cell => cell.startsWith(':') && cell.endsWith(':') ? 'center' : cell.endsWith(':') ? 'right' : cell.startsWith(':') ? 'left' : null) };
 }
 
-/** Rows count data rows; the header and delimiter are additional. Invalid sizes never fall back. */
+/** Rows count data rows; the header counts toward the existing table interchange capacity. */
+export function isMarkdownTableSize(cols: number, rows: number): boolean {
+  return Number.isSafeInteger(cols) && Number.isSafeInteger(rows) && cols >= 1 && rows >= 1 && (rows + 1) * cols <= maxCells;
+}
+/** Invalid sizes never fall back to the default table. */
 export function emptyMarkdownTable(cols = 3, rows = 2): string | null {
-  if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 1 || cols > 10 || rows < 1 || rows > 10) return null;
+  if (!isMarkdownTableSize(cols, rows)) return null;
   return markdownTableFromCells(Array.from({ length: rows + 1 }, () => Array<string>(cols).fill('')), true);
 }

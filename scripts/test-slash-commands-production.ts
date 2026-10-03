@@ -2,6 +2,18 @@ import assert from 'node:assert/strict';
 import { launchTestBrowser, closeTestBrowser } from './browser-test-helpers';
 import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { defaultInputAssistance } from '../src/foundation/editingPreferences';
+import { emptyMarkdownTable, parseMarkdownTable } from '../webview/src/application/delimitedTable';
+
+for (const [cols, rows] of [[13, 12], [1, 9999], [5000, 1]]) {
+  const generated = emptyMarkdownTable(cols, rows);
+  assert.ok(generated, 'positive sizes can exceed ten while remaining within table capacity');
+  const table = parseMarkdownTable(generated)!;
+  assert.equal(table.cells.length, rows + 1, 'capacity counts the header');
+  assert.ok(table.cells.every(row => row.length === cols));
+}
+for (const [cols, rows] of [[0, 2], [3, 0], [-1, 2], [1.5, 2], [1, 10000], [5001, 1], [Number.MAX_SAFE_INTEGER, 1], [Infinity, 2], [1, NaN]]) {
+  assert.equal(emptyMarkdownTable(cols, rows), null, 'invalid or oversized values are rejected before allocating');
+}
 
 const build = await Bun.build({ entrypoints: ['scripts/test-editing-features-entry.ts'], target: 'browser', format: 'iife' });
 if (!build.success) throw new Error(build.logs.map(String).join('\n'));
@@ -266,7 +278,7 @@ try {
     for (const [source, pos] of [['```\ncode\n```', 6], ['$x^2$', 3], ['| A | B |\n| --- | --- |\n| x | y |', 26]] as const) {
       await prepare(mode, source, pos); await page.evaluate(() => (window as any).editor.insertFormat('table')); await waitText(source);
     }
-    for (const [cols, rows] of [[0, 2], [3, 0], [11, 2], [2, 11], [1.5, 2]]) {
+    for (const [cols, rows] of [[0, 2], [3, 0], [10000, 2], [2, 10000], [1.5, 2]]) {
       await prepare(mode, 'keep'); await page.evaluate(({ cols, rows }) => (window as any).editor.insertFormat('table', { cols, rows }), { cols, rows }); await waitText('keep');
     }
     await prepare(mode);
@@ -283,7 +295,7 @@ try {
     for (const { rows, cols, height, widths, empty } of dimensions) {
       assert.equal(height, rows + 1, mode + ': data rows plus header'); assert.ok(widths.every(width => width === cols)); assert.equal(empty, true);
     }
-    for (const query of ['table0x3', 'table11x2', 'table2x', '3x0', 'table3', '100x100', '6', '6x', 'table10X']) {
+    for (const query of ['table0x3', 'table2x', '3x0', 'table3', '100x100', '6', '6x', 'table10X', 'table100000000000000000000x2']) {
       await prepare(mode); await page.keyboard.type('/' + query); await open();
       assert.equal(await page.$eval('.meo-input-suggestion', row => row.getAttribute('aria-disabled')), 'true', query + ': pending or out-of-range sizes stay visible');
       await page.click('.meo-input-suggestion'); await waitText('/' + query); await open();
@@ -292,7 +304,7 @@ try {
     for (const query of ['table6q', 'table6xx6', 'tablex6', 'table6x6x']) {
       await prepare(mode); await page.keyboard.type('/' + query); await closed(); await waitText('/' + query);
     }
-    for (const query of ['table10x10', 'table10X10', 'table10×10', '6x6', 'table06x04']) {
+    for (const query of ['table10x10', 'table10X10', 'table10×10', '6x6', 'table06x04', 'table12x13', '11X2']) {
       await prepare(mode); await page.keyboard.type('/' + query); await open();
       await page.keyboard.press('Tab');
       const table = await page.evaluate(() => (window as any).EditingFeaturesHarness.parseMarkdownTable((window as any).editor.getText()));
@@ -300,9 +312,8 @@ try {
       assert.equal(table.cells.length, rows + 1, query + ': data rows plus header');
       assert.ok(table.cells.every((row: string[]) => row.length === cols), query + ': requested columns');
     }
-    await prepare(mode); await page.keyboard.type('/table11x2'); await open();
-    await page.keyboard.press('Backspace'); await page.keyboard.press('Backspace'); await page.keyboard.press('Backspace');
-    await page.keyboard.type('x2'); await open(); await page.keyboard.press('Enter');
+    await prepare(mode); await page.keyboard.type('/table1x0'); await open();
+    await page.keyboard.press('Backspace'); await page.keyboard.type('2'); await open(); await page.keyboard.press('Enter');
     await waitText('|  |  |\n| --- | --- |\n|  |  |');
     await prepare(mode, '', 0, { slash: false }); await page.keyboard.type('/table6x'); await page.keyboard.press('Tab');
     const literalTab = await text();

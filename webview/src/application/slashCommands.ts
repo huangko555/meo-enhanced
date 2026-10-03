@@ -1,4 +1,4 @@
-import { emptyMarkdownTable } from './delimitedTable';
+import { emptyMarkdownTable, isMarkdownTableSize } from './delimitedTable';
 
 export type SlashCommand = {
   readonly id: string; readonly command: string; readonly label: string; readonly aliases: readonly string[];
@@ -57,10 +57,11 @@ export function slashCommandSuggestions(query: string, context: 'block' | 'inlin
     const table = commands[commands.length - 1], command = 'table' + q.replace(/^table/, '').replace(/×/g, 'x');
     const insert = complete ? emptyMarkdownTable(cols, rows) : null;
     if (insert) return [{ ...table, command, parameters: undefined, insert, zh: rows + ' 数据行 × ' + cols + ' 列', en: rows + ' data rows × ' + cols + ' cols' }];
-    const inRange = rows >= 1 && rows <= 10 && (!complete || cols >= 1 && cols <= 10);
+    const positive = Number.isSafeInteger(rows) && rows >= 1 && (!complete || Number.isSafeInteger(cols) && cols >= 1);
+    const fits = isMarkdownTableSize(complete ? cols : 1, rows);
     // Keep a valid size prefix visible without allowing it to insert the default table.
     return [{ ...table, command, insert: '', caret: 0, disabled: true, parameters: complete ? undefined : dimensions[2] === undefined ? 'xN' : 'N',
-      zh: inRange ? '继续输入列数' : '行列范围 1–10', en: inRange ? 'Enter column count' : 'Rows/cols: 1–10' }];
+      zh: fits ? '继续输入列数' : positive ? '表格尺寸过大' : '行列数需为正整数', en: fits ? 'Enter column count' : positive ? 'Table size is too large' : 'Use positive row/column counts' }];
   }
   if (/^(?:table)?[0-9]/.test(q) || /^(?:table)?[x×]/.test(q)) return [];
   const language = languages.find(([id, , aliases]) => [id, ...aliases].includes(q));
