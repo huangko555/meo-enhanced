@@ -6,7 +6,7 @@ export const symbolPairs: Readonly<Record<string, string>> = {
 };
 
 // Markdown surrounding pairs are broader than empty-cursor auto-closing pairs.
-const surroundingPairs: Readonly<Record<string, string>> = { ...symbolPairs, '<': '>', '*': '*', '_': '_', '~': '~', '$': '$' };
+const surroundingPairs: Readonly<Record<string, string>> = { ...symbolPairs, '<': '>', '*': '*', '_': '_', '~': '~', '$': '$', '^': '^', '=': '=' };
 
 export function inlineCodeMarkers(text: string): { open: string; close: string } {
   let longest = 0;

@@ -73,7 +73,7 @@ try {
     await prepare(mode, 'a b');
     await page.evaluate(() => { const global = window as any; global.editor.view.dispatch({ selection: global.EditingFeaturesHarness.EditorSelection.create([global.EditingFeaturesHarness.EditorSelection.range(0, 1), global.EditingFeaturesHarness.EditorSelection.range(2, 3)]) }); });
     await page.keyboard.type('（'); assert.equal(await text(), '（a） （b）');
-    for (const [left, right] of [['*', '*'], ['_', '_'], ['~', '~'], ['<', '>'], ['$', '$']]) {
+    for (const [left, right] of [['*', '*'], ['_', '_'], ['~', '~'], ['<', '>'], ['$', '$'], ['^', '^'], ['=', '=']]) {
       await prepare(mode, 'a b');
       await page.evaluate(() => { const g = window as any; g.editor.view.dispatch({ selection: g.EditingFeaturesHarness.EditorSelection.create([g.EditingFeaturesHarness.EditorSelection.range(1, 0), g.EditingFeaturesHarness.EditorSelection.range(2, 3)]) }); });
       await page.keyboard.type(left); assert.equal(await text(), left + 'a' + right + ' ' + left + 'b' + right);
@@ -90,10 +90,13 @@ try {
         await page.keyboard.type(left); assert.equal(await text(), left + (second[0] === second[1] ? '  ' : ' ') + left + 'b', 'native mixed or whitespace selections all use ordinary replacement');
       }
     }
-    await prepare(mode, 'word', 0, 4);
-    await session.send('Input.imeSetComposition', { text: '*', selectionStart: 1, selectionEnd: 1 }); assert.equal(await text(), '*', 'selected IME preedit is not surrounded');
-    await session.send('Input.insertText', { text: '*' }); await waitText('*word*');
-    await page.evaluate(() => (window as any).editor.undo()); await waitText('word');
+    for (const marker of ['*', '^', '=']) {
+      await prepare(mode, 'word', 0, 4);
+      await session.send('Input.imeSetComposition', { text: marker, selectionStart: 1, selectionEnd: 1 });
+      assert.equal(await text(), marker, 'selected IME preedit is not surrounded');
+      await session.send('Input.insertText', { text: marker }); await waitText(marker + 'word' + marker);
+      await page.evaluate(() => (window as any).editor.undo()); await waitText('word');
+    }
     await prepare(mode); await page.keyboard.type('(');
     await page.evaluate(() => { const editor = (window as any).editor; editor.setText('()', false); editor.view.dispatch({ selection: { anchor: 1 } }); editor.view.focus(); });
     await page.keyboard.type(')'); assert.equal(await text(), '())', 'external presentation clears pair provenance');
@@ -170,9 +173,9 @@ try {
     await page.keyboard.type(right); assert.equal(await cell(), left + right, 'native persisted skip ' + right);
   }
   const selectedCellTable = table.replace('|  | x |', '| word | x |');
-  // Complete native Markdown fixture plus the existing Chinese extension; never
+  // Native Markdown fixture plus superscript/highlight and Chinese extensions; never
   // derive expectations from the production pair map, which previously hid omissions.
-  for (const [left, right] of [['(', ')'], ['[', ']'], ['{', '}'], ['"', '"'], ["'", "'"], ['`', '`'], ['<', '>'], ['*', '*'], ['_', '_'], ['~', '~'], ['$', '$'], ['（', '）'], ['【', '】'], ['“', '”'], ['‘', '’'], ['《', '》'], ['「', '」'], ['『', '』']]) {
+  for (const [left, right] of [['(', ')'], ['[', ']'], ['{', '}'], ['"', '"'], ["'", "'"], ['`', '`'], ['<', '>'], ['*', '*'], ['_', '_'], ['~', '~'], ['$', '$'], ['^', '^'], ['=', '='], ['（', '）'], ['【', '】'], ['“', '”'], ['‘', '’'], ['《', '》'], ['「', '」'], ['『', '』']]) {
     for (const backward of [false, true]) {
       await prepare('live', selectedCellTable, 0, 0, { pairMode: 'off' }); await openCell();
       await page.evaluate(backward => (document.activeElement as HTMLTextAreaElement).setSelectionRange(0, 4, backward ? 'backward' : 'forward'), backward);
@@ -182,7 +185,7 @@ try {
       assert.ok((await text()).includes(left + 'word' + right), 'cell wrapping reaches the saved document');
     }
   }
-  for (const [left, right] of [['*', '*'], ['_', '_'], ['~', '~'], ['<', '>'], ['$', '$']]) {
+  for (const [left, right] of [['*', '*'], ['_', '_'], ['~', '~'], ['<', '>'], ['$', '$'], ['^', '^'], ['=', '=']]) {
     await prepare('live', selectedCellTable, 0); await openCell(); await page.keyboard.type(left.repeat(2));
     assert.equal(await cell(), left.repeat(2) + 'word' + right.repeat(2), 'native repeated marker ' + left);
     await prepare('live', selectedCellTable, 0); await openCell(); await page.keyboard.type(left);
@@ -196,6 +199,20 @@ try {
     await page.evaluate(() => (document.activeElement as HTMLTextAreaElement).setSelectionRange(1, 1));
     await page.keyboard.press('Backspace'); assert.equal(await cell(), left, 'native surrounding-only markers do not delete as an automatic empty pair');
   }
+  for (const [marker, count, className] of [['^', 1, 'meo-md-superscript'], ['=', 2, 'meo-md-highlight']] as const) {
+    await prepare('live', selectedCellTable, 0); await openCell();
+    await page.keyboard.type(marker);
+    assert.equal(await cell(), marker + 'word' + marker, 'each cell input adds one layer');
+    if (count === 2) await page.keyboard.type(marker);
+    const marked = marker.repeat(count) + 'word' + marker.repeat(count);
+    const expected = selectedCellTable.replace('word', marked);
+    await page.evaluate(() => (window as any).editor.getTextForSave());
+    await page.keyboard.press('Escape');
+    await waitText(expected);
+    await page.waitForFunction(className => document.querySelector(`tbody .${className}`)?.textContent === 'word', {}, className);
+    await page.evaluate(() => (window as any).editor.undo()); await waitText(selectedCellTable);
+    await page.evaluate(() => (window as any).editor.redo()); await waitText(expected);
+  }
   await prepare('live', selectedCellTable.replace('word', 'a   b'), 0); await openCell();
   await page.evaluate(() => (document.activeElement as HTMLTextAreaElement).setSelectionRange(1, 4));
   await page.keyboard.type('*'); assert.equal(await cell(), 'a*b', 'native whitespace selection is replaced');
@@ -203,9 +220,12 @@ try {
     await prepare('live', selectedCellTable.replace('word', quote), 0); await openCell();
     await page.keyboard.type('"'); assert.equal(await cell(), '"', 'native single quote is replaced');
   }
-  await prepare('live', selectedCellTable, 0); await openCell();
-  await session.send('Input.imeSetComposition', { text: '*', selectionStart: 1, selectionEnd: 1 }); assert.equal(await cell(), '*');
-  await session.send('Input.insertText', { text: '*' }); assert.equal(await cell(), '*word*');
+  for (const marker of ['*', '^', '=']) {
+    await prepare('live', selectedCellTable, 0); await openCell();
+    await session.send('Input.imeSetComposition', { text: marker, selectionStart: 1, selectionEnd: 1 });
+    assert.equal(await cell(), marker, 'cell IME preedit remains literal');
+    await session.send('Input.insertText', { text: marker }); assert.equal(await cell(), marker + 'word' + marker);
+  }
   await prepare('live', selectedCellTable.replace('word', '\\word'), 0); await openCell();
   await page.evaluate(() => (document.activeElement as HTMLTextAreaElement).setSelectionRange(1, 5));
   await page.keyboard.type('_'); assert.equal(await cell(), '\\_word_');

@@ -46,9 +46,9 @@ try {
       await page.keyboard.type(left);
       assert.equal(await text(), left + '文字' + right, `${mode}: reverse selected ${left}`);
     }
-    // These five entries are surroundingPairs in VS Code's Markdown configuration,
-    // independently of its autoClosingPairs. Keep the fixture independent of our rules.
-    for (const [left, right] of [['*', '*'], ['_', '_'], ['~', '~'], ['<', '>'], ['$', '$']]) {
+    // Native Markdown surrounding pairs plus MEO's superscript/highlight markers.
+    // Keep the fixture independent of the production rules to catch omissions.
+    for (const [left, right] of [['*', '*'], ['_', '_'], ['~', '~'], ['<', '>'], ['$', '$'], ['^', '^'], ['=', '=']]) {
       for (const backward of [false, true]) {
         await prepare(mode, 'word', backward ? 4 : 0, backward ? 0 : 4, { pairMode: 'off' });
         await page.keyboard.type(left);
@@ -72,7 +72,20 @@ try {
       await prepare(mode, left + right, 1, 1, { deleteMode: 'always' });
       await page.keyboard.press('Backspace'); assert.equal(await text(), right, `${mode}: surrounding-only pair keeps single-character deletion`);
     }
-    for (const left of ['(', '[', '{', '"', "'", '`', '<', '*', '_', '~', '$']) {
+    await prepare(mode, 'word', 0, 4);
+    await page.keyboard.type('=');
+    assert.equal(await text(), '=word=', 'one equals key adds exactly one layer');
+    if (mode === 'live') assert.equal(await page.$('.meo-md-highlight'), null, 'one equals layer is literal text');
+    await page.keyboard.type('=');
+    assert.equal(await text(), '==word==', 'the second equals key forms highlight');
+    assert.deepEqual(await page.evaluate(() => (window as any).__inputEditor.view.state.selection.main.toJSON()),
+      { anchor: 2, head: 6 }, 'repeated equals preserves the inner selection');
+    if (mode === 'live') await page.waitForFunction(() => document.querySelector('.meo-md-highlight')?.textContent === 'word');
+    await prepare(mode, '上标', 0, 2);
+    await page.keyboard.type('^');
+    assert.equal(await text(), '^上标^');
+    if (mode === 'live') await page.waitForFunction(() => document.querySelector('.meo-md-superscript')?.textContent === '上标');
+    for (const left of ['(', '[', '{', '"', "'", '`', '<', '*', '_', '~', '$', '^', '=']) {
       await prepare(mode, '\\word', 1, 5);
       await page.keyboard.type(left);
       const right = left === '(' ? ')' : left === '[' ? ']' : left === '{' ? '}' : left === '<' ? '>' : left;
@@ -86,7 +99,7 @@ try {
     }
     await prepare(mode, '\u00a0', 0, 1); await page.keyboard.type('*');
     assert.equal(await text(), '*\u00a0*', `${mode}: native whitespace exception is restricted to spaces, tabs and line breaks`);
-    for (const unsupported of ['=', '#', '+', '-', '|', ')', ']']) {
+    for (const unsupported of ['#', '+', '-', '|', ')', ']']) {
       await prepare(mode, 'word', 0, 4); await page.keyboard.type(unsupported);
       assert.equal(await text(), unsupported, `${mode}: non-surrounding ${unsupported} keeps replacement behavior`);
     }
@@ -125,5 +138,5 @@ try {
     assert.equal(await text(), '- item\n- ');
   }
   assert.deepEqual(errors, []);
-  console.log('Production input assistance: Live/Source, all native Markdown surrounding pairs/Chinese pairs, forward/reverse/multiline selection, repeated markers, quote/whitespace/escape boundaries, backticks, origins through undo, all modes and list continuation passed');
+  console.log('Production input assistance: Live/Source, native Markdown, superscript/highlight and Chinese surrounding pairs, forward/reverse/multiline selection, repeated markers, quote/whitespace/escape boundaries, backticks, origins through undo, all modes and list continuation passed');
 } finally { await closeTestBrowser(browser); }

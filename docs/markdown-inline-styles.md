@@ -11,6 +11,10 @@
 Preview/导出的 Markdown-it 适配器调用。`~文字~` 是下标，`^文字^` 是上标，
 `~~文字~~` 是删除线。上下标内容按文字处理，空白必须转义；代码里的标记保持原文。
 
+选区包裹规则位于 `webview/src/application/symbolInput.ts`。`^` 和 `=` 与其他标记
+共用“选中文字后包裹符号”开关。一次输入只包一层，并保留内部选区：一次 `=`
+得到 `=文字=`，再输入一次才得到高亮 `==文字==`；空光标保持普通字符输入。
+
 其他行内/块级样式仍使用既有定义，在对应功能改动时逐步接入共享来源。
 
 修改后运行 `bun scripts/test-preview-rendering.ts` 和 `bun scripts/test-highlight.ts`。
