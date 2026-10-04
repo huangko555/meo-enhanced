@@ -1,5 +1,6 @@
 import { StateField, EditorState, type Annotation } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
+import type { SyntaxNodeRef } from '@lezer/common';
 import { StreamLanguage } from '@codemirror/language';
 import { javascript } from '@codemirror/lang-javascript';
 import { python } from '@codemirror/lang-python';
@@ -14,6 +15,7 @@ import { sql } from '@codemirror/lang-sql';
 import { markdownLanguage } from '@codemirror/lang-markdown';
 import { MermaidDiagramWidget, getFencedCodeContent } from './mermaidDiagram';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
+import { getUiStrings } from '../application/uiLanguage';
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import {
   addMermaidToolbar,
@@ -771,6 +773,14 @@ export function addFenceOpeningLineMarker(builder: any[], state: EditorState, fr
 }
 
 export function addCodeLanguageLabel(builder: any[], state: EditorState, node: any, activeLines: Set<number>): void {
+  if (node.name === 'CodeBlock') {
+    addTopLinePillLabel(
+      builder,
+      state.doc.lineAt(node.from).to,
+      getUiStrings(state.facet(uiLanguageFacet)).indentedCodeBlockLabel
+    );
+    return;
+  }
   if (node.name !== 'FencedCode') {
     return;
   }
@@ -991,9 +1001,26 @@ function addMermaidDiagramBlock(
   return decision.effectiveMode === 'preview';
 }
 
-export function addCopyCodeButton(builder: any[], state: EditorState, from: number, to: number): void {
+export function addCopyCodeButton(builder: any[], state: EditorState, node: SyntaxNodeRef): void {
+  const { from, to } = node;
   const startLine = state.doc.lineAt(from);
   const endLine = state.doc.lineAt(Math.max(to - 1, from));
+  if (node.name === 'CodeBlock') {
+    // CodeText ranges exclude container prefixes and the four-column code indent,
+    // while retaining payload indentation and internal blank lines.
+    const contentNodes = node.node.getChildren('CodeText');
+    if (!contentNodes.length) return;
+    addTopLineCopyButton(
+      builder,
+      startLine.to,
+      contentNodes.map(content => state.doc.sliceString(content.from, content.to)).join(''),
+      contentNodes[0].from,
+      contentNodes[contentNodes.length - 1].to,
+      startLine.from,
+      endLine.to
+    );
+    return;
+  }
   const quoteDepth = getQuotedFenceDepth(startLine.text);
 
   const codeLines: string[] = [];

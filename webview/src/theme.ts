@@ -3,7 +3,7 @@ import { styleTags, tags, Tag } from '@lezer/highlight';
 import { darkBuiltInVisuals, SYNTAX_TAG_SPECS, type SyntaxTokenStyleSpec } from '../../src/shared/builtInVisualBaseline';
 
 const defaultTheme = darkBuiltInVisuals;
-const liveDecoratedMarkdownTokenIds = new Set(['heading', 'emphasis', 'strong', 'strikethrough']);
+const liveDecoratedMarkdownTokenIds = new Set(['heading', 'emphasis', 'strong', 'strikethrough', 'monospace']);
 
 const buildSpec = (spec: SyntaxTokenStyleSpec) => {
   const color = `var(--meo-token-${spec.id}-color, ${defaultTheme.syntaxTokens[spec.id]})`;
@@ -49,5 +49,6 @@ export const sourceMarkdownHighlightProps = styleTags({
 });
 
 // Live Mode owns rendered Markdown presentation through decorations and line styles.
-// Excluding these parser tags prevents their styles from leaking onto Markdown markers.
+// Parser monospace coloring otherwise conflicts with plain code's native input projection.
+// Inline code owns its color in CSS; language code retains its Shiki tokens.
 export const liveHighlightStyle = createHighlightStyle(liveDecoratedMarkdownTokenIds);

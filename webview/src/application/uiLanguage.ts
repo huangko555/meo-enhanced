@@ -130,6 +130,7 @@ export type UiStrings = Readonly<{
   showHtmlSource: string;
   jumpToFootnote: (number: number) => string;
   jumpToFootnoteReference: (number: number) => string;
+  indentedCodeBlockLabel: string;
   copyCode: string;
   copied: string;
   copy: string;
@@ -366,6 +367,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     expandDetails: 'Expand details', collapseDetails: 'Collapse details', showHtmlSource: 'Show HTML source',
     jumpToFootnote: (number: number) => `Jump to footnote ${number}`,
     jumpToFootnoteReference: (number: number) => `Jump to footnote reference ${number}`,
+    indentedCodeBlockLabel: 'Indented code block',
     copyCode: 'Copy code', copied: 'copied', copy: 'copy', selectAllCode: 'Select all code', all: 'all',
     codeLines: (count: number) => `${count} lines`,
     showMoreCode: (count: number) => `Show ${count} more lines of code`,
@@ -554,6 +556,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     expandDetails: '展开详细信息', collapseDetails: '折叠详细信息', showHtmlSource: '显示 HTML 源码',
     jumpToFootnote: (number: number) => `跳转到脚注 ${number}`,
     jumpToFootnoteReference: (number: number) => `跳转到脚注引用 ${number}`,
+    indentedCodeBlockLabel: '缩进代码块',
     copyCode: '复制代码', copied: '已复制', copy: '复制', selectAllCode: '全选代码', all: '全选',
     codeLines: (count: number) => `${count} 行`,
     showMoreCode: (count: number) => `显示其余 ${count} 行代码`,

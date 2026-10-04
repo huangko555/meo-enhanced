@@ -63,7 +63,8 @@ async function main() {
   const browser = await launchTestBrowser();
   try {
     const page = await browser.newPage();
-    await page.setViewport({ width: 520, height: 700, deviceScaleFactor: 1 });
+    // Keep every row in this mixed-block fixture mounted, including visual toolbar space.
+    await page.setViewport({ width: 520, height: 900, deviceScaleFactor: 1 });
     await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addStyleTag({

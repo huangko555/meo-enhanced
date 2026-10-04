@@ -230,6 +230,9 @@ const hiddenDetailsSourceDeco = Decoration.replace({
 const tableDelimiterGutterLineClassMarker = new (class extends GutterMarker {
   elementClass = 'meo-md-hide-line-number';
 })();
+const indentedCodeGutterLineClassMarker = new (class extends GutterMarker {
+  elementClass = 'meo-md-indented-code-line-number';
+})();
 const headingGutterLineClassMarkers = Array.from({ length: 6 }, (_, index) => new (class extends GutterMarker {
   elementClass = `meo-md-heading-line-number meo-md-heading-line-number-h${index + 1}`;
 })());
@@ -489,6 +492,8 @@ const lineStyleDecos = {
   codeBlock: Decoration.line({ class: 'meo-md-code-block' }),
   codeBlockStart: Decoration.line({ class: 'meo-md-code-block-start' }),
   codeBlockEnd: Decoration.line({ class: 'meo-md-code-block-end' }),
+  indentedCodeBlockStart: Decoration.line({ class: 'meo-md-indented-code-block-start' }),
+  indentedCodeBlockEnd: Decoration.line({ class: 'meo-md-indented-code-block-end' }),
   renderedBlockPreviewAnchor: Decoration.line({ class: 'meo-rendered-block-preview-anchor-line' }),
   footnote: Decoration.line({ class: 'meo-md-footnote-line' }),
   footnoteContinuation: Decoration.line({ class: 'meo-md-footnote-line meo-md-footnote-continuation' }),
@@ -2131,10 +2136,14 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
             }
             return;
           }
-          addCodeLanguageLabel(ranges, state, node, activeLines);
+        }
+        addCodeLanguageLabel(ranges, state, node, activeLines);
+        if (node.name === 'CodeBlock') {
+          ranges.push(lineStyleDecos.indentedCodeBlockStart.range(state.doc.lineAt(node.from).from));
+          ranges.push(lineStyleDecos.indentedCodeBlockEnd.range(state.doc.lineAt(Math.max(node.to - 1, node.from)).from));
         }
         addCodeBlockLineNumbers(ranges, state, node);
-        addCopyCodeButton(ranges, state, node.from, node.to);
+        addCopyCodeButton(ranges, state, node);
       }
 
       if (node.name === 'Emphasis') {
@@ -3734,10 +3743,15 @@ const liveLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
   provide: (field) => gutterLineClass.from(field)
 });
 
-function buildHeadingLineNumberMarkers(state: EditorState): RangeSet<GutterMarker> {
+function buildStyledLineNumberMarkers(state: EditorState): RangeSet<GutterMarker> {
   const builder = new RangeSetBuilder<GutterMarker>();
   resolvedSyntaxTree(state).iterate({
     enter(node) {
+      if (node.name === 'CodeBlock' && !hasCodeBlockAncestor(node)) {
+        const line = state.doc.lineAt(node.from);
+        builder.add(line.from, line.from, indentedCodeGutterLineClassMarker);
+        return false;
+      }
       const level = headingLevelFromName(node.name);
       if (level === null) return;
       const line = state.doc.lineAt(node.from);
@@ -3747,11 +3761,11 @@ function buildHeadingLineNumberMarkers(state: EditorState): RangeSet<GutterMarke
   return builder.finish();
 }
 
-const headingLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
-  create: buildHeadingLineNumberMarkers,
+const styledLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
+  create: buildStyledLineNumberMarkers,
   update(markers, transaction) {
     if (!transaction.docChanged && !isLiveInputDerivedWorkRefresh(transaction)) return markers;
-    return buildHeadingLineNumberMarkers(transaction.state);
+    return buildStyledLineNumberMarkers(transaction.state);
   },
   provide: (field) => gutterLineClass.from(field)
 });
@@ -3782,7 +3796,7 @@ export function liveModeExtensions(options: { readonly largeDocument?: boolean }
     renderedBlockLineNumberMarker,
     ...longCodeBlockSessionUiExtension(),
     liveLineNumberMarkerField,
-    headingLineNumberMarkerField,
+    styledLineNumberMarkerField,
     ...mergeConflictSourceExtensions(),
     ...detailsBlockLiveExtensions()
   ];
