@@ -90,6 +90,10 @@ export function applyPreviewCodeHighlight(frameDocument: Document, nearViewportO
         span.textContent = run.content;
         fragment.append(span);
       }
+      // Keep blank rows selectable after replacing the server-rendered tokens.
+      if (fragment.textContent === '' && (source.length > 0 || sourceElement.querySelector('br'))) {
+        fragment.append(frameDocument.createElement('br'));
+      }
       sourceElement.replaceChildren(fragment);
       sourceElement.dataset.meoShiki = themeVersion;
     }

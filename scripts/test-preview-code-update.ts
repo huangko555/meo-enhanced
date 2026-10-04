@@ -177,6 +177,40 @@ try {
         const lines = Array.from(doc.querySelectorAll<HTMLElement>('[data-meo-shiki]'));
         return lines.length === 2 && lines.every(line => line.dataset.meoShiki !== previous);
       }, {}, lightVersion);
+      await render('```typescript\nalpha\n\n    beta\n```\n\n    alpha\n\n        beta');
+      await waitFor(() => (window as Harness).__previewController.host.querySelector('iframe')!
+        .contentDocument!.querySelectorAll('[data-meo-shiki]').length === 3);
+      const assertCodeSelection = async () => {
+        const selections = await page.evaluate(() => {
+          const doc = (window as Harness).__previewController.host.querySelector('iframe')!.contentDocument!;
+          return Array.from(doc.querySelectorAll('pre.meo-export-code-block code')).map(code => {
+            const range = doc.createRange();
+            range.selectNodeContents(code);
+            const selection = doc.defaultView!.getSelection()!;
+            selection.removeAllRanges();
+            selection.addRange(range);
+            const text = selection.toString().trimEnd();
+            selection.removeAllRanges();
+            return text;
+          });
+        });
+        assert.deepEqual(selections, ['alpha\n\n    beta', 'alpha\n\n    beta'],
+          'Indented and highlighted fenced code must retain blank lines without copying line numbers');
+      };
+      await assertCodeSelection();
+      const blankThemeVersion = await page.evaluate(() => (window as Harness).__previewController.host.querySelector('iframe')!
+        .contentDocument!.querySelector<HTMLElement>('[data-meo-shiki]')!.dataset.meoShiki);
+      await page.evaluate(() => (window as Harness).__previewController.setAppearance('light'));
+      await page.waitForFunction(previous => {
+        const doc = (window as Harness).__previewController.host.querySelector('iframe')!.contentDocument!;
+        const lines = Array.from(doc.querySelectorAll<HTMLElement>('[data-meo-shiki]'));
+        return lines.length === 3 && lines.every(line => line.dataset.meoShiki !== previous);
+      }, {}, blankThemeVersion);
+      await assertCodeSelection();
+      await page.evaluate(() => (window as Harness).__previewController.setAppearance('dark'));
+      await render(text('old'));
+      await waitFor(() => (window as Harness).__previewController.host.querySelector('iframe')!
+        .contentDocument!.querySelectorAll('[data-meo-shiki]').length === 2);
     }
     await page.evaluate(() => {
       const scope = window as Harness;

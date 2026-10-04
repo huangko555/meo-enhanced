@@ -93,16 +93,35 @@ const codeLineCases = [
   { name: 'one line', markdownText: '```text\nalpha\n```', lines: 1, source: 'alpha\n' },
   { name: 'multiple lines', markdownText: '```text\nalpha\n\nbeta\n```', lines: 3, source: 'alpha\n\nbeta\n' },
   { name: 'CRLF and whitespace', markdownText: '```text\r\n  alpha\t \r\n\r\n```', lines: 2, source: '  alpha\t \n\n' },
-  { name: 'escaped source', markdownText: '```text\n<span>& value\n```', lines: 1, source: '<span>& value\n' }
+  { name: 'escaped source', markdownText: '```text\n<span>& value\n```', lines: 1, source: '<span>& value\n' },
+  { name: 'indented one line', markdownText: '    **文字**', lines: 1, source: '**文字**\n' },
+  { name: 'indented multiline', markdownText: '    alpha\n\n        beta', lines: 3, source: 'alpha\n\n    beta\n' },
+  { name: 'indented tabs and escaping', markdownText: '\t<span>& value\n\t  next\t ', lines: 2, source: '<span>& value\n  next\t \n' },
+  { name: 'indented after heading', markdownText: '# Heading\n\n    **文字**', lines: 1, source: '**文字**\n' },
+  { name: 'indented literal math and diagram', markdownText: '    mermaid\n    graph TD; A-->B\n    $x$\n    ==highlight==', lines: 4, source: 'mermaid\ngraph TD; A-->B\n$x$\n==highlight==\n' },
+  { name: 'indented inside list', markdownText: '- Parent\n\n      <span>& value', lines: 1, source: '<span>& value\n' }
 ] as const;
-const renderedCodeLineCases = codeLineCases.map((fixture) => ({
-  fixture,
-  result: renderMarkdownToHtml({
-    markdownText: fixture.markdownText,
-    markdownFilePath: `C:/tmp/preview-code-${fixture.name}.md`,
-    target: 'html'
-  })
-}));
+const renderedCodeLineCases = codeLineCases.flatMap((fixture) => [
+  ...(['html', 'pdf', 'docx'] as const).map((target) => ({
+    fixture,
+    target,
+    result: renderMarkdownToHtml({
+      markdownText: fixture.markdownText,
+      markdownFilePath: `C:/tmp/preview-code-${fixture.name}.md`,
+      target
+    })
+  })),
+  {
+    fixture,
+    target: 'preview',
+    result: exportRuntime.renderPreviewDocument({
+      markdownText: fixture.markdownText,
+      sourceDocumentPath: `C:/tmp/preview-code-${fixture.name}.md`,
+      uiLanguage: 'en',
+      styleEnvironment: { previewFontFamily: '' }
+    })
+  }
+]);
 const highlightedCodeLines = renderMarkdownToHtml({
   markdownText: '```javascript\n/* comment\ncontinues */\nconst escaped = "<tag>&";\n```',
   markdownFilePath: 'C:/tmp/preview-code-highlight.md',
@@ -265,7 +284,7 @@ const formulaCoverage = renderMarkdownToHtml({
 if (!rendered.html.includes('id="intro"') || !rendered.html.includes('id="intro-2"')) {
   throw new Error('Preview headings must receive stable, unique anchors');
 }
-for (const { fixture, result } of renderedCodeLineCases) {
+for (const { fixture, result, target } of renderedCodeLineCases) {
   const rows = result.html.match(/class="meo-export-code-line"/g) ?? [];
   const gutters = Array.from(
     result.html.matchAll(/class="meo-export-code-line-number" aria-hidden="true" data-line-number="(\d+)"/g),
@@ -281,7 +300,18 @@ for (const { fixture, result } of renderedCodeLineCases) {
   ).join('\n') + (fixture.source.endsWith('\n') ? '\n' : '');
   const expectedGutters = Array.from({ length: fixture.lines }, (_, index) => String(index + 1));
   if (rows.length !== fixture.lines || JSON.stringify(gutters) !== JSON.stringify(expectedGutters) || sourceText !== fixture.source) {
-    throw new Error(`Preview fenced code ${fixture.name} must preserve independent lines and exact source text: ${result.html}`);
+    throw new Error(`${target} code ${fixture.name} must preserve independent lines and exact source text: ${result.html}`);
+  }
+  if (target === 'docx' && result.html.includes('<br')) {
+    throw new Error('Word must receive source rows without duplicating its normalized line breaks');
+  }
+  if (fixture.name.startsWith('indented')) {
+    const sourceLine = fixture.markdownText.split('\n').findIndex(line => /^(?: {4}|\t)/.test(line)) + 1;
+    const sourceEndLine = sourceLine + fixture.lines - 1;
+    if (!result.html.includes(`data-source-line="${sourceLine}" data-source-end-line="${sourceEndLine}"`)
+      || result.html.includes('meo-export-mermaid') || result.html.includes('meo-export-math') || result.html.includes('<strong>')) {
+      throw new Error(`${target} indented code must retain source mappings and literal Markdown: ${result.html}`);
+    }
   }
 }
 if (

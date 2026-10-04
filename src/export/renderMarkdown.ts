@@ -154,15 +154,15 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     return defaultImageRule(tokens, idx, opts, env, self);
   };
 
-  md.renderer.rules.fence = (tokens, idx) => {
-    const fenceBlock = tokens[idx];
-    const language = normalizeFenceLanguage(fenceBlock.info);
-    const sourceLine = fenceBlock.attrGet('data-source-line');
-    const sourceEndLine = fenceBlock.attrGet('data-source-end-line');
+  const renderCodeBlock: NonNullable<typeof md.renderer.rules.fence> = (tokens, idx) => {
+    const codeBlock = tokens[idx];
+    const language = codeBlock.type === 'fence' ? normalizeFenceLanguage(codeBlock.info) : '';
+    const sourceLine = codeBlock.attrGet('data-source-line');
+    const sourceEndLine = codeBlock.attrGet('data-source-end-line');
     const sourceAttrs = sourceLine
       ? ` data-source-line="${escapeHtmlAttr(sourceLine)}"${sourceEndLine ? ` data-source-end-line="${escapeHtmlAttr(sourceEndLine)}"` : ''}`
       : '';
-    const source = String(fenceBlock.content ?? '');
+    const source = String(codeBlock.content ?? '');
 
     if (MATH_FENCE_LANGUAGES.has(language)) {
       const trimmedSource = source.trim();
@@ -197,10 +197,12 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     return [
       `<div class="meo-export-code-block-wrap"${sourceAttrs}>`,
       languageLabel,
-      `<pre class="meo-export-code-block"><code${className}>${renderHighlightedCodeLines(highlighted, source)}</code></pre>`,
+      `<pre class="meo-export-code-block"><code${className}>${renderHighlightedCodeLines(highlighted, source, options.target)}</code></pre>`,
       '</div>'
     ].join('');
   };
+  md.renderer.rules.fence = renderCodeBlock;
+  md.renderer.rules.code_block = renderCodeBlock;
   const preparedMarkdown = prepareMarkdownWithFootnotes(extractedFrontmatter.body, {
     target: options.target,
     outputFilePath: options.outputFilePath,
@@ -364,7 +366,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   return { html, hasMermaid, hasMath };
 }
 
-function renderHighlightedCodeLines(highlighted: string, source: string): string {
+function renderHighlightedCodeLines(highlighted: string, source: string, target: RenderMarkdownOptions['target']): string {
   const rows: string[] = [];
   const openSpans: string[] = [];
   let rowHtml = '';
@@ -406,10 +408,12 @@ function renderHighlightedCodeLines(highlighted: string, source: string): string
     rows.push(rowHtml);
   }
 
+  // Browser grid rows need selectable breaks; Word normalization supplies its own.
+  const sourceLines = source.split('\n');
   return rows.map((row, index) => [
     '<span class="meo-export-code-line">',
     `<span class="meo-export-code-line-number" aria-hidden="true" data-line-number="${index + 1}"></span>`,
-    `<span class="meo-export-code-line-source">${row}</span>`,
+    `<span class="meo-export-code-line-source">${row}${target !== 'docx' && source.length > 0 && sourceLines[index] === '' ? '<br>' : ''}</span>`,
     '</span>'
   ].join('')).join('') + (source.endsWith('\n') ? '\n' : '');
 }
@@ -539,7 +543,7 @@ function installSourcePositionAndHeadingAnchorTransform(
         : null;
       const sourceLine = sourceRange?.start ?? 0;
       const sourceEndLine = sourceRange?.end ?? 0;
-      if ((headingOpen.nesting === 1 || headingOpen.type === 'fence' || headingOpen.type === 'meo_math_block') && sourceLine > 0) {
+      if ((headingOpen.nesting === 1 || headingOpen.type === 'fence' || headingOpen.type === 'code_block' || headingOpen.type === 'meo_math_block') && sourceLine > 0) {
         headingOpen.attrSet('data-source-line', String(sourceLine));
         headingOpen.attrSet('data-source-end-line', String(Math.max(sourceLine, sourceEndLine)));
       }
