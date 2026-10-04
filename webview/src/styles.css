@@ -7033,22 +7033,22 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-delet
 .settings-window { box-sizing: border-box; width: min(840px, calc(100vw - 40px)); height: min(680px, calc(100dvh - 40px)); max-width: none; max-height: none; padding: 0; border: 1px solid var(--vscode-panel-border); border-radius: 12px; background: var(--vscode-sideBar-background); color: var(--meo-foreground); box-shadow: var(--meo-elevated-shadow); overflow: hidden; font-size: 13px; }
 .settings-window[open] { display: flex; flex-direction: column; }
 .settings-window::backdrop { background: color-mix(in srgb, #000 32%, transparent); }
-.settings-titlebar { display: grid; grid-template-columns: minmax(76px, 1fr) minmax(0, 320px) minmax(76px, 1fr); align-items: center; gap: 12px; flex: 0 0 auto; padding: 14px 20px 10px; }
+.settings-titlebar { display: grid; grid-template-columns: minmax(76px, 1fr) minmax(0, 320px) minmax(76px, 1fr); align-items: center; gap: 12px; flex: 0 0 auto; padding: 10px 20px 4px; }
 .settings-title { font-size: 16px; font-weight: 400; margin: 0; white-space: nowrap; }
 .settings-close { justify-self: end; }
 .settings-close, .settings-search-clear { border: 0; background: transparent; color: inherit; cursor: pointer; border-radius: 5px; font: inherit; font-size: 20px; width: 28px; height: 28px; }
 .settings-close:hover, .settings-search-clear:hover { background: var(--vscode-toolbar-hoverBackground); }
 .settings-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex: 0 0 auto; margin: 0 20px; border-bottom: 1px solid var(--vscode-panel-border); }
 .settings-tabs { display: flex; align-self: stretch; gap: 26px; }
-.settings-tab { display: flex; align-items: center; gap: 5px; padding: 12px 0; border: 0; color: color-mix(in srgb, var(--meo-foreground) 84%, var(--vscode-sideBar-background)); background: transparent; font: inherit; font-size: 14px; font-weight: 400; line-height: 22px; cursor: pointer; }
+.settings-tab { display: flex; align-items: center; gap: 5px; padding: 9px 0; border: 0; color: color-mix(in srgb, var(--meo-foreground) 84%, var(--vscode-sideBar-background)); background: transparent; font: inherit; font-size: 14px; font-weight: 400; line-height: 22px; cursor: pointer; }
 .settings-tab:hover:not([aria-selected='true']) { color: var(--meo-foreground); }
 .settings-tab-label { position: relative; }
 .settings-tab[aria-selected='true'] { color: var(--meo-notice-info, #3483ff); }
-.settings-tab[aria-selected='true'] .settings-tab-label::after { content: ''; position: absolute; left: 0; right: 0; height: 3px; bottom: -13px; background: currentColor; }
+.settings-tab[aria-selected='true'] .settings-tab-label::after { content: ''; position: absolute; left: 0; right: 0; height: 3px; bottom: -10px; background: currentColor; }
 .settings-tab-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 19px; height: 19px; border-radius: 50%; font-size: 10px; background: color-mix(in srgb, var(--meo-foreground) 9%, transparent); color: var(--vscode-descriptionForeground); }
 .settings-tab-badge[hidden] { display: none; }
 /* Keep the opaque input surface and its foreground in the same theme palette. */
-.settings-searchbox { --meo-settings-search-muted: var(--vscode-input-placeholderForeground); --meo-settings-search-border: var(--meo-input-border); --meo-settings-search-focus-border: color-mix(in srgb, var(--vscode-input-foreground) 45%, var(--meo-input-border)); display: flex; align-items: center; gap: 7px; box-sizing: border-box; width: 100%; height: 34px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--meo-settings-search-border); border-radius: 6px; padding: 0 7px; }
+.settings-searchbox { --meo-settings-search-muted: var(--vscode-input-placeholderForeground); --meo-settings-search-border: var(--meo-input-border); --meo-settings-search-focus-border: color-mix(in srgb, var(--vscode-input-foreground) 45%, var(--meo-input-border)); display: flex; align-items: center; gap: 7px; box-sizing: border-box; width: 100%; height: 30px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--meo-settings-search-border); border-radius: 6px; padding: 0 7px; }
 .settings-searchbox:focus-within { border-color: var(--meo-settings-search-focus-border); }
 .settings-searchbox svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--meo-settings-search-muted); }
 .settings-search { width: 100%; min-width: 0; color: inherit; background: transparent; border: 0; padding: 0; font: inherit; outline: none; }
