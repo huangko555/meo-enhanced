@@ -7280,7 +7280,7 @@ html[data-editor-appearance='dark'] .meo-input-suggestions {
 .image-location-rule:focus { border-color: var(--vscode-focusBorder); }
 .image-location-variables { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
 .image-location-token { position: relative; height: auto; min-height: 27px; padding: 4px 8px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; }
-.image-location-token > .more-tools-option-tooltip { left: 50%; right: auto; width: max-content; max-width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; font-family: var(--vscode-font-family, sans-serif); text-align: center; transform: translateX(-50%); }
+.image-location-token > .more-tools-option-tooltip { position: fixed; left: 0; right: auto; top: 0; width: max-content; max-width: none; padding: 6px 8px; border: 0; border-radius: 6px; font-family: var(--vscode-font-family, sans-serif); white-space: nowrap; text-align: center; transform: translateX(-50%); }
 .image-location-token > .more-tools-option-tooltip::before { content: ''; position: absolute; top: -4px; left: 50%; width: 8px; height: 8px; background: inherit; transform: translateX(-50%) rotate(45deg); }
 .image-location-variables > button:is(:hover, :focus-visible) { z-index: 3; }
 .image-location-variables > button:is(:hover, :focus-visible) > .more-tools-option-tooltip { visibility: visible; opacity: 1; }

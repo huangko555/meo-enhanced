@@ -82,12 +82,24 @@ export function createImageLocationSettings(options: {
     const tooltip = node('span', 'more-tools-option-tooltip'); tooltip.id = 'meo-image-variable-' + name;
     tooltip.setAttribute('role', 'tooltip');
     button.setAttribute('aria-label', value); button.setAttribute('aria-describedby', tooltip.id); button.append(tooltip);
+    const positionHint = () => {
+      const bounds = button.getBoundingClientRect();
+      tooltip.style.left = (bounds.left + bounds.width / 2) + 'px';
+      tooltip.style.top = (bounds.bottom + 7) + 'px';
+    };
+    button.addEventListener('mouseenter', positionHint); button.addEventListener('focus', positionHint);
     button.addEventListener('click', () => {
       rule.setRangeText(value, rule.selectionStart ?? rule.value.length, rule.selectionEnd ?? rule.value.length, 'end');
       preferences = { ...preferences, rule: rule.value }; rule.focus(); edit();
     });
-    variables.append(button); return { tooltip, zh, en };
+    variables.append(button); return { button, tooltip, zh, en, positionHint };
   });
+  // Fixed positioning lets one-line hints escape the settings scroll area's clipping.
+  const positionHints = () => {
+    for (const token of tokens) if (token.button.matches(':hover, :focus-visible')) token.positionHint();
+  };
+  window.addEventListener('resize', positionHints);
+  window.addEventListener('scroll', positionHints, { capture: true, passive: true });
   const advanced = node('div', 'image-location-advanced'); advanced.append(ruleLabel, ruleBox, advancedHint, variables);
   modeControls[2].details.append(advanced);
   const legacy = node('p', 'settings-description image-location-legacy');
@@ -230,5 +242,9 @@ export function createImageLocationSettings(options: {
   });
   present();
   return { element, present, refresh, flush: () => { void save(); },
-    dispose() { void save(); disposed = true; clearTimeout(previewTimer); clearTimeout(saveTimer); element.remove(); } };
+    dispose() {
+      void save(); disposed = true; clearTimeout(previewTimer); clearTimeout(saveTimer);
+      window.removeEventListener('resize', positionHints); window.removeEventListener('scroll', positionHints, true);
+      element.remove();
+    } };
 }

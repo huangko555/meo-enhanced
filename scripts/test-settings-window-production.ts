@@ -607,12 +607,12 @@ try {
               const tooltip = element.querySelector<HTMLElement>('[role="tooltip"]')!, style = getComputedStyle(tooltip);
               const arrow = getComputedStyle(tooltip, '::before');
               const bounds = tooltip.getBoundingClientRect(), button = element.getBoundingClientRect();
-              const content = element.closest('.settings-content')!.getBoundingClientRect();
+              const content = element.closest('.settings-window')!.getBoundingClientRect();
               return { text: tooltip.textContent, title: element.getAttribute('title'), described: element.getAttribute('aria-describedby') === tooltip.id,
-                visible: style.visibility, opacity: style.opacity, delay: style.transitionDelay, border: style.borderTopWidth, arrow: arrow.content !== 'none' && arrow.width === '8px', centered: Math.abs((bounds.left + bounds.right) / 2 - (button.left + button.right) / 2) < 1 && Math.abs(parseFloat(arrow.left) - bounds.width / 2) < 1 && style.textAlign === 'center',
+                visible: style.visibility, opacity: style.opacity, delay: style.transitionDelay, border: style.borderTopWidth, singleLine: bounds.height < parseFloat(style.lineHeight) * 2, arrow: arrow.content !== 'none' && arrow.width === '8px', centered: Math.abs((bounds.left + bounds.right) / 2 - (button.left + button.right) / 2) < 1 && Math.abs(parseFloat(arrow.left) - bounds.width / 2) < 1 && style.textAlign === 'center',
                 below: bounds.top >= button.bottom, contained: bounds.left >= content.left && bounds.right <= content.right && bounds.bottom <= content.bottom };
             });
-            assert.deepEqual(hint, {text: description, title: null, described: true, visible: 'visible', opacity: '1', delay: '0s', border: '0px', arrow: true, centered: true, below: true, contained: true}, language + '/' + appearance + '/' + width + ': hover immediately shows one unobstructed hint below the button');
+            assert.deepEqual(hint, {text: description, title: null, described: true, visible: 'visible', opacity: '1', delay: '0s', border: '0px', singleLine: true, arrow: true, centered: true, below: true, contained: true}, language + '/' + appearance + '/' + width + ': hover immediately shows one unobstructed hint below the button');
             if (index === 2 && process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR) {
               await fs.mkdir(process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR, {recursive: true});
               await page.screenshot({path: path.join(process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR, 'image-tooltip-' + language + '-' + appearance + '-' + width + '.png')});
@@ -622,6 +622,12 @@ try {
           assert.ok(await page.$$eval('.image-location-token [role="tooltip"]', elements => elements.every(element => getComputedStyle(element).visibility === 'hidden')), 'moving away immediately hides the variable hints');
           await page.focus('#meo-image-rule'); await page.keyboard.press('Tab'); await page.keyboard.press('Tab');
           assert.equal(await page.$eval('.image-location-token [role="tooltip"]', element => getComputedStyle(element).visibility), 'visible', 'keyboard focus exposes the same hint');
+          await page.$eval('.settings-content', element => { element.scrollTop += 20; });
+          await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+          assert.ok(await page.$eval('.image-location-token', element => {
+            const button = element.getBoundingClientRect(), hint = element.querySelector<HTMLElement>('[role="tooltip"]')!.getBoundingClientRect();
+            return Math.abs((hint.left + hint.right) / 2 - (button.left + button.right) / 2) < 1 && Math.abs(hint.top - button.bottom - 7) < 1;
+          }), 'scrolling keeps the visible hint centered immediately below its button');
           await page.keyboard.down('Shift'); await page.keyboard.press('Tab'); await page.keyboard.up('Shift');
         }
       }
