@@ -360,7 +360,7 @@ export function createInputSuggestions(options: {
       let insert = tableBreak ? '<br>' : item.insert;
       if (context.type === 'documents') insert = insert.replace(/\.(?:md|markdown|mdx|mdc)$/i, '');
       if (context.type === 'paths') insert = insert.split('/').map(part => encodeURIComponent(part)).join('/');
-      if (context.type === 'headings' && !context.wiki) insert = encodeURIComponent(item.anchor ?? insert);
+      if (context.type === 'headings' && !context.wiki) insert = item.anchor ?? insert;
       const from = this.head - context.length;
       const caret = from + (tableBreak ? insert.length : item.caret ?? insert.length);
       const command = item.slash;

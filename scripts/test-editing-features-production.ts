@@ -286,6 +286,25 @@ try {
   assert.ok((await text()).endsWith('[Go](#setext-heading'));
   assert.equal(await page.evaluate(() => { const g = window as any; return g.EditingFeaturesHarness.findDocumentFragmentPosition(g.editor.view.state, '#setext-heading'); }), 0);
 
+  for (const mode of ['source', 'live']) {
+    const chineseHeadings = '# 快捷键 **UI** 输入\n\n# 快捷键 **UI** 输入\n\n';
+    const query = '[Go](#快';
+    await prepare(mode, chineseHeadings + query, undefined, undefined, { pairMode: 'off' });
+    await page.waitForSelector('.meo-input-suggestions:not([hidden])');
+    await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter');
+    await waitText(chineseHeadings + '[Go](#快捷键-ui-输入-2');
+    for (const href of ['#快捷键-ui-输入-2', '#' + encodeURIComponent('快捷键-ui-输入-2')]) {
+      assert.equal(await page.evaluate(href => { const g = window as any; return g.EditingFeaturesHarness.findDocumentFragmentPosition(g.editor.view.state, href); }, href), chineseHeadings.indexOf('# 快捷键', 1), 'readable and existing encoded links navigate to the same duplicate heading');
+    }
+    const remoteHeading = { label: '快捷键 UI 输入', insert: '快捷键 UI 输入', anchor: '快捷键-ui-输入-2', detail: 'docs/说明.md' };
+    for (const wiki of [false, true]) {
+      await prepare(mode, '', 0, 0, { pairMode: 'off' }, [remoteHeading]);
+      const prefix = wiki ? '[[说明#' : '[Go](说明.md#';
+      await page.keyboard.type(prefix + '快'); await page.waitForSelector('.meo-input-suggestions:not([hidden])');
+      await page.keyboard.press('Enter'); await waitText(prefix + (wiki ? remoteHeading.insert : remoteHeading.anchor));
+    }
+  }
+
   await prepare('source', ':smile:', 7, 7, { emoji: true }); assert.equal(await text(), ':smile:');
   await prepare('source', '', 0, 0, { emoji: true }); await page.keyboard.type(':smi'); await page.waitForSelector('.meo-input-suggestions:not([hidden])', { timeout: 5000 }); await page.keyboard.press('Tab'); assert.equal(await text(), '😄');
   await prepare('source', '', 0, 0, { pairMode: 'off' }, 'documents/note.md'); await page.keyboard.type('[[doc'); await page.waitForSelector('.meo-input-suggestions:not([hidden])', { timeout: 5000 }); await page.keyboard.press('Enter'); assert.equal(await text(), '[[documents/note');
