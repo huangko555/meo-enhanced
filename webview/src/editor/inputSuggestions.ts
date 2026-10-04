@@ -9,6 +9,9 @@ import { inputAssistanceFacet } from './typingAssistance';
 import { isCodeInput } from './pasteAssistance';
 import { uiLanguageFacet } from './uiLanguage';
 import { readSlashQuery, slashCommandSuggestions, type SlashCommand } from '../application/slashCommands';
+import { beginHtmlCommentTemplate } from './htmlCommentEditing';
+import { nativeSymbolInput } from './nativeTypingAssistance';
+import { addAutomaticSymbolPair } from './typingAssistance';
 import { sourceTableAt } from './sourceTableCommands';
 import { blockInsertion, type MarkdownInputContext } from './blockInsertion';
 
@@ -109,7 +112,7 @@ export function createInputSuggestions(options: {
         const from = this.cellFrom, value = active.value.slice(from, this.composing ? active.selectionEnd : active.selectionStart), query = readSlashQuery(value), before = active.value.slice(0, from);
         let node = parser.parse(active.value).resolveInner(from + 1, -1), inCode = false;
         for (;;) {
-          if (/^(?:InlineCode|FencedCode|CodeBlock)$/.test(node.name)) inCode = true;
+          if (/^(?:InlineCode|FencedCode|CodeBlock|HTMLBlock|HTMLTag|CommentBlock|ProcessingInstruction|Autolink|URL|LinkTitle)$/.test(node.name)) inCode = true;
           if (!node.parent) break;
           node = node.parent;
         }
@@ -351,6 +354,7 @@ export function createInputSuggestions(options: {
         const value = input.value.slice(0, from) + insert + input.value.slice(this.head);
         this.cellFrom = null; this.cellInput = null; this.clear(); this.fields = [];
         if (!options.replaceCell?.(input, value, caret)) return;
+        if (command.id === 'comment') nativeSymbolInput(input)?.beginComment(caret, caret);
         if (command.fields) {
           this.fieldInput = input; this.fieldValue = value; this.fieldIndex = 0; this.templateEnd = from + insert.length;
           this.fields = command.fields.map(([start, end]) => ({ from: from + start, to: from + end }));
@@ -377,7 +381,7 @@ export function createInputSuggestions(options: {
         templateEnd = plan.positionAt(insert.length);
       }
       this.slashFrom = null; this.clear();
-      this.view.dispatch({ ...transaction, annotations: [Transaction.userEvent.of('input.complete'), isolateHistory.of('full')] });
+      this.view.dispatch({ ...transaction, effects: command?.id === 'comment' ? [beginHtmlCommentTemplate.of({ from: caret, to: caret, end: templateEnd }), addAutomaticSymbolPair.of({ from, to: templateEnd, open: '<!--', close: '-->' })] : transaction.effects, annotations: [Transaction.userEvent.of('input.complete'), isolateHistory.of('full')] });
       if (fields) {
         this.fieldInput = null;
         this.fields = fields; this.fieldIndex = 0; this.templateEnd = templateEnd;

@@ -2723,6 +2723,7 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     initialDiagnostics: pendingDiagnostics,
     onApplyChanges: handleLocalEditorChange,
     onOpenLink: (href: string) => vscode.postMessage({ type: 'openLink', href }),
+    onCommentBlocked: () => editorNotice.setEditorNotice(activeUiStrings.commentSelectionBlocked),
     onSelectionChange: (state: any) => selectionMenuController.update(state),
     onSourcePositionChange: (change) => {
       sourcePreviewPosition = { line: change.line, active: change.active };

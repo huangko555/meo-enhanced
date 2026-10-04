@@ -63,6 +63,14 @@ still checking type safety, workflow policy, history, tables, rendered blocks,
 input-derived work, viewport behavior, and one production browser scenario in
 the quick gate.
 
+## HTML comment input
+
+`scripts/test-html-comment-input-production.ts` runs in the quick, targeted history
+and browser release gates. It uses the production editor to check comment commands,
+slash completion, selection/caret continuity, configurable pairing, template exit,
+undo/redo and native table cells. IME preedit is never rewritten; operating-system
+IME candidate handling still needs native verification.
+
 ## Window return focus and caret
 
 `scripts/test-toolbar-input-viewport.ts` runs in the quick and release gates.

@@ -275,6 +275,7 @@ export type UiStrings = Readonly<{
   changesComparedWith: (summary: string, baseline: string) => string;
   dismissNotification: string;
   dismissNotificationButton: string;
+  commentSelectionBlocked: string;
   noticeInfoTitle: string;
   noticeWarningTitle: string;
   noticeErrorTitle: string;
@@ -463,6 +464,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     changesComparedWith: (summary: string, baseline: string) => `${summary} · Compared with ${baseline}`,
     dismissNotification: 'Dismiss notification',
     dismissNotificationButton: 'Dismiss',
+    commentSelectionBlocked: 'The selection contains a comment or code. Narrow the selection and try again.',
     noticeInfoTitle: 'Status',
     noticeWarningTitle: 'Action needed',
     noticeErrorTitle: 'Editor issue',
@@ -647,6 +649,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     changesComparedWith: (summary: string, baseline: string) => `${summary} · 与${baseline}对比`,
     dismissNotification: '关闭通知',
     dismissNotificationButton: '关闭',
+    commentSelectionBlocked: '选区包含已有注释或代码，请缩小选区后重试。',
     noticeInfoTitle: '状态',
     noticeWarningTitle: '需要处理',
     noticeErrorTitle: '编辑器问题',

@@ -38,6 +38,7 @@ export function defaultShortcuts(platform: ShortcutPlatform): Record<EditorComma
     save: [`${primary} + S`], undo: [`${primary} + Z`], redo: platform === 'mac' ? ['Cmd + Shift + Z'] : ['Ctrl + Y', 'Ctrl + Shift + Z'],
     find: [`${primary} + F`], replace: platform === 'mac' ? ['Cmd + Alt + F'] : ['Ctrl + H'],
     all: [`${primary} + A`], copy: [`${primary} + C`], cut: [`${primary} + X`], paste: [`${primary} + V`],
+    lineComment: [`${primary} + /`], selectionComment: ['Alt + Shift + A'],
     bold: [`${primary} + B`], italic: [`${primary} + I`], mode: ['Alt + Shift + M'],
     moveUp: ['Alt + ArrowUp'], moveDown: ['Alt + ArrowDown'], copyUp: ['Alt + Shift + ArrowUp'], copyDown: ['Alt + Shift + ArrowDown'],
     deleteLine: platform === 'mac' ? ['Cmd + Shift + K'] : ['Ctrl + Shift + K'],

@@ -7,7 +7,7 @@ export const editorCommandIds = [
   'columnBefore', 'columnAfter', 'columnDelete', 'moveRowUp', 'moveRowDown', 'moveColumnLeft', 'moveColumnRight',
   'alignLeft', 'alignCenter', 'alignRight', 'copyMarkdown', 'copyCsv', 'convert',
   'selection', 'home', 'expandSelection', 'shrinkSelection', 'nextOccurrence', 'skipOccurrence', 'addCursor', 'splitCursors',
-  'moveUp', 'moveDown', 'copyUp', 'copyDown', 'deleteLine', 'blankAbove', 'blankBelow', 'mode', 'preview', 'enter', 'tab', 'escape', 'delete'
+  'lineComment', 'selectionComment', 'moveUp', 'moveDown', 'copyUp', 'copyDown', 'deleteLine', 'blankAbove', 'blankBelow', 'mode', 'preview', 'enter', 'tab', 'escape', 'delete'
 ] as const;
 
 export type EditorCommandId = typeof editorCommandIds[number];

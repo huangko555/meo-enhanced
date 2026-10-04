@@ -13,7 +13,7 @@ export const sectionTitles = {
 export const typingCatalog: readonly { key: keyof InputAssistance; section: TypingSection; title: readonly [string, string]; description: readonly [string, string] }[] = [
   { key: 'selectionToolbar', section: 'symbols', title: ['选区工具栏', 'Selection toolbar'], description: ['选中文字后显示常用格式工具栏。', 'Show common formatting actions when text is selected.'] },
   { key: 'wrapSelection', section: 'symbols', title: ['选中文字后包裹符号', 'Wrap selected text'], description: ['支持 () [] {} <>、引号、* _ ~ $ ^ =、` 和 ``，以及（）【】“”‘’《》「」『』。= 输入两次形成高亮。反引号长度会避开选中内容中的反引号。', 'Supports () [] {} <>, quotes, * _ ~ $ ^ =, ` and ``, plus Chinese brackets and quotes. Press = twice for highlight. Backtick length adapts to the selected text.'] },
-  { key: 'pairMode', section: 'symbols', title: ['自动补全符号', 'Complete symbol pairs'], description: ['输入左符号时补出右符号，光标留在中间。', 'Insert the closing symbol and leave the cursor between the pair.'] },
+  { key: 'pairMode', section: 'symbols', title: ['自动补全符号', 'Complete symbol pairs'], description: ['输入左符号或 <!-- 时补出闭合标记，光标留在中间。', 'Complete an opening symbol or <!-- and leave the cursor inside.'] },
   { key: 'skipMode', section: 'symbols', title: ['跳过已有右符号', 'Skip an existing closing symbol'], description: ['右侧已有匹配符号时，决定移动光标还是插入新符号。', 'Choose whether typing a matching closing symbol moves the cursor or inserts another symbol.'] },
   { key: 'deleteMode', section: 'symbols', title: ['退格删除空符号对', 'Backspace in an empty pair'], description: ['决定退格时删除一对符号还是一个字符。', 'Choose whether Backspace deletes the empty pair or a single character.'] },
   { key: 'lists', section: 'structure', title: ['自动续写列表', 'Continue lists automatically'], description: ['Enter 续写列表和任务项；空项再按 Enter 退出。', 'Enter continues lists and tasks. Enter on an empty item exits the list.'] },
@@ -33,6 +33,8 @@ export const shortcutDescriptions: Partial<Record<EditorCommandId, readonly [str
   copy: ['表格多格选区按行列复制，可粘贴到 Excel 等电子表格。', 'Copy selected table cells as rows and columns for pasting into spreadsheets such as Excel.'],
   plain: ['跳过富格式转换；合法 Markdown 仍按当前模式显示。', 'Bypass rich format conversion. Valid Markdown still displays according to the current mode.'],
   tableNav: ['在表格内切换单元格；正文中按缩进规则处理。', 'Move between cells in a table. In prose, follow the indentation rules.'],
+  lineComment: ['注释当前行或选区涉及的完整行；在注释内执行可取消。', 'Comment the current line or all selected lines. Run inside a comment to remove its markers.'],
+  selectionComment: ['注释所选文字；未选择时插入空注释。', 'Comment the selected text, or insert an empty comment at the cursor.'],
   copyCsv: ['复制选区或当前表格的单元格源码，以 CSV 编码。', 'Copy the cell source from the selection or current table, encoded as CSV.']
 };
 export function modeOptions(key: 'pairMode' | 'skipMode' | 'deleteMode', language: UiLanguage) {
@@ -47,7 +49,7 @@ export const shortcutSections: Readonly<Record<string, readonly EditorCommandId[
   blocks: ['heading1', 'heading2', 'heading3', 'heading4', 'heading5', 'heading6', 'headingUp', 'headingDown', 'bullet', 'ordered', 'taskList', 'taskDone', 'quote', 'codeBlock', 'rule', 'indent'],
   table: ['insertTable', 'tableNav', 'cellBreak', 'rowAbove', 'rowBelow', 'rowDelete', 'columnBefore', 'columnAfter', 'columnDelete', 'moveRowUp', 'moveRowDown', 'moveColumnLeft', 'moveColumnRight', 'alignLeft', 'alignCenter', 'alignRight', 'copyMarkdown', 'copyCsv', 'convert'],
   selection: ['selection', 'home', 'expandSelection', 'shrinkSelection', 'nextOccurrence', 'skipOccurrence', 'addCursor', 'splitCursors'],
-  lines: ['moveUp', 'moveDown', 'copyUp', 'copyDown', 'deleteLine', 'blankAbove', 'blankBelow'],
+  lines: ['lineComment', 'selectionComment', 'moveUp', 'moveDown', 'copyUp', 'copyDown', 'deleteLine', 'blankAbove', 'blankBelow'],
   navigation: ['mode', 'preview', 'enter', 'tab', 'escape', 'delete']
 };
 export const commandTitles: Record<EditorCommandId, readonly [string, string]> = {
@@ -56,6 +58,7 @@ export const commandTitles: Record<EditorCommandId, readonly [string, string]> =
   heading1: ['一级标题', 'Heading 1'], heading2: ['二级标题', 'Heading 2'], heading3: ['三级标题', 'Heading 3'], heading4: ['四级标题', 'Heading 4'], heading5: ['五级标题', 'Heading 5'], heading6: ['六级标题', 'Heading 6'], headingUp: ['提升标题级别', 'Promote heading'], headingDown: ['降低标题级别', 'Demote heading'], bullet: ['无序列表', 'Bullet list'], ordered: ['有序列表', 'Numbered list'], taskList: ['任务列表', 'Task list'], taskDone: ['切换任务完成状态', 'Toggle task completion'], quote: ['引用', 'Blockquote'], codeBlock: ['代码块', 'Code block'], rule: ['分割线', 'Horizontal rule'], indent: ['缩进与取消缩进', 'Indent and outdent'],
   insertTable: ['插入表格', 'Insert table'], tableNav: ['单元格导航', 'Cell navigation'], cellBreak: ['单元格内换行', 'Line break in a cell'], rowAbove: ['上方插入行', 'Insert row above'], rowBelow: ['下方插入行', 'Insert row below'], rowDelete: ['删除行', 'Delete row'], columnBefore: ['左侧插入列', 'Insert column before'], columnAfter: ['右侧插入列', 'Insert column after'], columnDelete: ['删除列', 'Delete column'], moveRowUp: ['上移行', 'Move row up'], moveRowDown: ['下移行', 'Move row down'], moveColumnLeft: ['左移列', 'Move column left'], moveColumnRight: ['右移列', 'Move column right'], alignLeft: ['左对齐', 'Align left'], alignCenter: ['居中对齐', 'Align center'], alignRight: ['右对齐', 'Align right'], copyMarkdown: ['复制为 Markdown 表格', 'Copy as Markdown table'], copyCsv: ['复制为 CSV', 'Copy as CSV'], convert: ['转换选中表格文本', 'Convert selected table text'],
   selection: ['扩展文本选区', 'Extend text selection'], home: ['行首与行尾', 'Line start and end'], expandSelection: ['扩大语义选区', 'Expand syntax selection'], shrinkSelection: ['缩小语义选区', 'Shrink syntax selection'], nextOccurrence: ['选择下一处相同内容', 'Select next occurrence'], skipOccurrence: ['跳过当前匹配', 'Skip current occurrence'], addCursor: ['向下添加光标', 'Add cursor below'], splitCursors: ['为选中各行添加光标', 'Add cursors to selected lines'],
+  lineComment: ['切换行注释', 'Toggle line comment'], selectionComment: ['切换选区注释', 'Toggle selection comment'],
   moveUp: ['上移当前行或块', 'Move line or block up'], moveDown: ['下移当前行或块', 'Move line or block down'], copyUp: ['向上复制行或块', 'Copy line or block above'], copyDown: ['向下复制行或块', 'Copy line or block below'], deleteLine: ['删除当前行或块', 'Delete line or block'], blankAbove: ['上方插入空行', 'Insert blank line above'], blankBelow: ['下方插入空行', 'Insert blank line below'], mode: ['切换实时与源码', 'Toggle Live and Source'], preview: ['切换预览', 'Toggle Preview'], enter: ['换行与续写', 'Newline and continuation'], tab: ['导航与缩进', 'Navigation and indentation'], escape: ['关闭当前操作', 'Dismiss current interaction'], delete: ['删除内容', 'Delete content']
 };
 export function commandTitle(command: EditorCommandId, language: UiLanguage): string { const [zh, en] = commandTitles[command]; return settingsText(language, zh, en); }

@@ -2,6 +2,10 @@ import { EditorSelection, Facet, RangeSet, RangeValue, StateEffect, StateField, 
 import { EditorView, keymap, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import { invertedEffects, isolateHistory } from '@codemirror/commands';
 import { defaultInputAssistance, type InputAssistance } from '../../../src/foundation/editingPreferences';
+import { markdownCodeRanges } from './blockInsertion';
+import { beginHtmlCommentTemplate } from './htmlCommentEditing';
+import { planHtmlCommentInput, deleteEmptyHtmlComment } from '../application/htmlCommentInput';
+import { syntaxTree } from '@codemirror/language';
 import { planSymbolInput, shouldDeleteSymbolPair } from '../application/symbolInput';
 import { isExternalDocumentPresentation } from './externalDocumentPresentation';
 
@@ -16,7 +20,7 @@ class AutomaticPair extends RangeValue {
 }
 
 const replacePairs = StateEffect.define<RangeSet<AutomaticPair>>({ map: (pairs, mapping) => pairs.map(mapping) });
-const addPair = StateEffect.define<{ from: number; to: number; open: string; close: string }>({
+export const addAutomaticSymbolPair = StateEffect.define<{ from: number; to: number; open: string; close: string }>({
   map: (pair, mapping) => ({ ...pair, from: mapping.mapPos(pair.from, 1), to: mapping.mapPos(pair.to, -1) })
 });
 export interface AutomaticSymbolPair { readonly from: number; readonly to: number; readonly open: string; readonly close: string }
@@ -45,7 +49,7 @@ const automaticPairs = StateField.define<RangeSet<AutomaticPair>>({
     for (const effect of transaction.effects) {
       if (effect.is(replacePairs)) pairs = effect.value;
       if (effect.is(replaceArea)) pairs = pairs.update({ filter: (from, to) => !(from >= effect.value.from && to <= effect.value.to), add: effect.value.pairs.map(pair => new AutomaticPair(pair.open, pair.close).range(pair.from, pair.to)), sort: true });
-      if (effect.is(addPair)) pairs = pairs.update({ add: [new AutomaticPair(effect.value.open, effect.value.close).range(effect.value.from, effect.value.to)], sort: true });
+      if (effect.is(addAutomaticSymbolPair)) pairs = pairs.update({ add: [new AutomaticPair(effect.value.open, effect.value.close).range(effect.value.from, effect.value.to)], sort: true });
     }
     return pairs;
   }
@@ -54,19 +58,37 @@ const automaticPairs = StateField.define<RangeSet<AutomaticPair>>({
 const originEpoch = StateField.define<number>({ create: () => 0, update: (epoch, transaction) => isExternalDocumentPresentation(transaction) || transaction.isUserEvent('undo') || transaction.isUserEvent('redo') ? epoch + 1 : epoch });
 export const symbolOriginEpoch = (state: EditorState) => state.field(originEpoch);
 
-function automaticRightAt(view: EditorView, position: number): boolean {
+function automaticRightAt(view: EditorView, position: number, closing?: string): boolean {
   let automatic = false;
-  view.state.field(automaticPairs).between(Math.max(0, position - 3), position + 3, (from, to, pair) => {
-    if (to - pair.close.length === position && view.state.doc.sliceString(from, from + pair.open.length) === pair.open
+  view.state.field(automaticPairs).between(Math.max(0, position - 4), position + 4, (from, to, pair) => {
+    if ((!closing || closing === pair.close) && to - pair.close.length === position && view.state.doc.sliceString(from, from + pair.open.length) === pair.open
       && view.state.doc.sliceString(position, to) === pair.close) automatic = true;
   });
   return automatic;
 }
 
+function insideCode(view: EditorView): boolean {
+  for (let node = syntaxTree(view.state).resolveInner(view.state.selection.main.head, -1); node; node = node.parent!)
+    if (/^(?:FencedCode|CodeBlock|InlineCode|CodeText|CodeInfo)$/.test(node.name)) return true;
+  return false;
+}
+
 function typeSymbols(view: EditorView, typed: string): boolean {
-  if (view.compositionStarted || typed.length !== 1) return false;
+  if (view.state.readOnly || view.compositionStarted || typed.length !== 1) return false;
   const preferences = view.state.facet(inputAssistanceFacet);
   const ranges = view.state.selection.ranges;
+  const at = ranges[0].head;
+  const commentMarker = typed === '-' && view.state.sliceDoc(Math.max(0, at - 3), at) === '<!-'
+    || typed === '>' && view.state.sliceDoc(Math.max(0, at - 2), at) === '--' && view.state.sliceDoc(at, Math.min(view.state.doc.length, at + 3)) === '-->';
+  if (commentMarker && ranges.length === 1 && ranges[0].empty && !insideCode(view)) {
+    const plan = planHtmlCommentInput(view.state.doc.toString(), at, typed, preferences, automaticRightAt(view, at, typed === '>' ? '-->' : undefined), markdownCodeRanges(syntaxTree(view.state)));
+    if (plan) {
+      view.dispatch({ changes: { from: plan.from, to: plan.to, insert: plan.insert }, selection: EditorSelection.cursor(plan.caret),
+        effects: plan.pair ? [addAutomaticSymbolPair.of(plan.pair), beginHtmlCommentTemplate.of({ from: plan.caret, to: plan.caret, end: plan.pair.to })] : [],
+        annotations: [Transaction.userEvent.of('input.type'), isolateHistory.of('full')], scrollIntoView: true });
+      return true;
+    }
+  }
   const plans = ranges.map(range => planSymbolInput({ typed, selected: view.state.doc.sliceString(range.from, range.to),
     before: view.state.doc.sliceString(Math.max(0, range.from - 256), range.from),
     after: view.state.doc.sliceString(range.to, Math.min(view.state.doc.length, range.to + 4)),
@@ -83,7 +105,7 @@ function typeSymbols(view: EditorView, typed: string): boolean {
     return { changes: { from: range.from, to: range.to, insert: plan.text },
       range: range.anchor > range.head ? EditorSelection.range(range.from + plan.head, range.from + plan.anchor)
         : EditorSelection.range(range.from + plan.anchor, range.from + plan.head),
-      effects: addPair.of({ from: range.from, to: range.from + plan.text.length, open: plan.open, close: plan.close }) };
+      effects: addAutomaticSymbolPair.of({ from: range.from, to: range.from + plan.text.length, open: plan.open, close: plan.close }) };
   });
   if (!changed) return false;
   // Pair insertion and pair deletion are separate user operations even when adjacent.
@@ -92,9 +114,14 @@ function typeSymbols(view: EditorView, typed: string): boolean {
 }
 
 function deleteEmptyPair(view: EditorView): boolean {
-  if (view.compositionStarted) return false;
+  if (view.state.readOnly || view.compositionStarted) return false;
   const ranges = view.state.selection.ranges;
   const preferences = view.state.facet(inputAssistanceFacet);
+  if (ranges.every(range => range.empty && deleteEmptyHtmlComment(view.state.sliceDoc(Math.max(0, range.head - 4), Math.min(view.state.doc.length, range.head + 3)), Math.min(range.head, 4), preferences, automaticRightAt(view, range.head)))) {
+    view.dispatch({ ...view.state.changeByRange(range => ({ changes: { from: range.head - 4, to: range.head + 3, insert: '' }, range: EditorSelection.cursor(range.head - 4) })),
+      annotations: [Transaction.userEvent.of('delete.backward'), isolateHistory.of('full')], scrollIntoView: true });
+    return true;
+  }
   if (ranges.some(range => !range.empty || range.from < 1
     || !shouldDeleteSymbolPair(view.state.doc.sliceString(range.from - 1, range.from), view.state.doc.sliceString(range.from, range.from + 1), automaticRightAt(view, range.from), preferences))) return false;
   view.dispatch({ ...view.state.changeByRange(range => ({
@@ -138,7 +165,7 @@ const committedCompositionSymbols = ViewPlugin.fromClass(class {
       if (plan.type === 'skip') this.view.dispatch({ changes: { from: snapshot.from, to: snapshot.from + 1, insert: '' }, selection: EditorSelection.cursor(snapshot.from + plan.length), annotations: Transaction.userEvent.of('input.type.compose') });
       else this.view.dispatch({ changes: { from: snapshot.from, to: snapshot.from + 1, insert: plan.text },
         selection: snapshot.anchor > snapshot.head ? EditorSelection.range(snapshot.from + plan.head, snapshot.from + plan.anchor) : EditorSelection.range(snapshot.from + plan.anchor, snapshot.from + plan.head),
-        effects: addPair.of({ from: snapshot.from, to: snapshot.from + plan.text.length, open: plan.open, close: plan.close }),
+        effects: addAutomaticSymbolPair.of({ from: snapshot.from, to: snapshot.from + plan.text.length, open: plan.open, close: plan.close }),
         annotations: Transaction.userEvent.of('input.type.compose') });
     }, 0);
   }
@@ -154,7 +181,7 @@ export const typingAssistance: Extension = [
   automaticPairs,
   originEpoch,
   committedCompositionSymbols,
-  invertedEffects.of(transaction => transaction.docChanged || transaction.effects.some(effect => effect.is(addPair) || effect.is(replacePairs) || effect.is(replaceArea))
+  invertedEffects.of(transaction => transaction.docChanged || transaction.effects.some(effect => effect.is(addAutomaticSymbolPair) || effect.is(replacePairs) || effect.is(replaceArea))
     ? [replacePairs.of(transaction.startState.field(automaticPairs))] : []),
   EditorView.inputHandler.of((view, from, to, text) => from === view.state.selection.main.from && to === view.state.selection.main.to ? typeSymbols(view, text) : false),
   keymap.of([{ key: 'Backspace', run: deleteEmptyPair }])

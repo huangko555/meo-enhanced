@@ -34,6 +34,7 @@ const commands: readonly SlashCommand[] = [
   template('image', 'Image', '▧', '图片', '![alt](url)', [[2, 5], [7, 10]], ['img']),
   template('imageTitle', 'Image With Title', '▧', '带提示的图片', '![alt](url "title")', [[2, 5], [7, 10], [12, 17]], ['imagetitle', 'imgtitle']),
   { ...inline('inlineCode', 'Inline Code', '</>', '行内代码', '`', ['ic', 'inline']), group: 'code' },
+  { id: 'comment', command: 'comment', label: 'HTML comment', aliases: [], group: 'code', icon: '</>', zh: 'HTML 注释', en: 'HTML comment', scope: 'inline', insert: '<!---->', caret: 4 },
   block('codeBlock', 'Code Block', 'code', '{}', '代码块', '```\n\n```', 4, ['code', 'cb', 'fence']),
   { ...inline('inlineMath', 'Inline Math', '∑', '行内公式', '$', ['math']), group: 'code' },
   block('blockMath', 'Block Math', 'code', '∑', '公式块', '$$\n\n$$', 3, ['equation', 'latex']),

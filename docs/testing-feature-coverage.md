@@ -40,6 +40,7 @@
 | --- | --- | --- |
 | 小菜单与完整设置 | 小菜单保持 288px 和原有主题/语言/字号控件；三个 Tab、连续章节、搜索、焦点返回、恢复默认范围正确；中英文和亮暗/窄屏可用 | [正式窗口](../scripts/test-settings-window-production.ts)、[工具栏菜单](../scripts/test-toolbar-menus-browser.ts) |
 | 包裹、补对、跳过、退格与列表续写 | 原生 Markdown 全部 11 组及中文符号、连续标记/单双反引号、正反/多行/代码内/多选区；空白、引号、转义前缀例外；包裹与空光标补齐独立，智能/始终/关闭；自动符号来源随撤销恢复、外部文档更新清除；正文与单元格一致；预编辑不改写、IME 自带整对不重复 | [输入辅助](../scripts/test-input-assistance-production.ts)、[编辑场景](../scripts/test-editing-features-production.ts)；CDP 输入法事件覆盖浏览器流程，原生中文输入法另验 |
+| HTML 注释输入与切换 | 行/精确选区切换，无内侧填充；现有注释取消且保留空白；混合选区不嵌套；`/comment`、手动补全/完整闭合标记跳过/空注释退格；Tab、Esc、Enter、IME、Live/Source、表格焦点、撤销及快捷键配置正确 | [注释生产输入](../scripts/test-html-comment-input-production.ts)；原生输入法及 VS Code 快捷键截获另验 |
 | 表格、URL、HTML 与纯文本粘贴 | 正文转换、代码原样、已有表格覆盖/扩展、Markdown 源码保留；CSV/TSV 引号/换行/管道、HTML 合并与换行；转换开关及撤销结果正确 | [编辑场景](../scripts/test-editing-features-production.ts)、[生产表格剪贴板](../scripts/test-table-clipboard-production.ts)、[服务合同](../scripts/test-editor-services.ts)；真实 Excel/系统剪贴板往返另验 |
 | 格式、结构、行/块、表格与多光标命令 | 命令实际改变正确选区；格式可取消；Source/Live 表格行列与对齐逐项验证及一次撤销；多选区、下一处匹配和光标添加有效 | [编辑场景](../scripts/test-editing-features-production.ts)、[基础功能矩阵](../scripts/test-basic-capability-production-matrix.ts)、[历史矩阵](../scripts/test-history-matrix.ts) |
 | 快捷键修改、清除与恢复默认 | 修改后新键执行操作、旧键不再响应；冲突必须明确替换；保留其他绑定；原生规则不可改；输入法和不同上下文不误执行；恢复仅影响快捷键 | [偏好合同](../scripts/test-editing-preferences.ts)、[快捷键路由](../scripts/test-editor-shortcuts.ts)、[正式窗口](../scripts/test-settings-window-production.ts)；操作系统/VS Code 优先处理的键需原生另验 |

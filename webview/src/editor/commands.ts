@@ -1,12 +1,17 @@
-import { EditorSelection, Transaction, type SelectionRange } from '@codemirror/state';
+import { EditorSelection, Transaction, type StateEffect, type SelectionRange } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
-import { moveLineUp, moveLineDown, copyLineUp, copyLineDown, deleteLine, selectParentSyntax } from '@codemirror/commands';
+import { moveLineUp, moveLineDown, copyLineUp, copyLineDown, deleteLine, selectParentSyntax, toggleComment, toggleBlockComment, isolateHistory } from '@codemirror/commands';
 import { selectNextOccurrence } from '@codemirror/search';
 import { syntaxTree } from '@codemirror/language';
 import { parseDelimitedTable, markdownTableFromCells } from '../application/delimitedTable';
 import { inlineCodeMarkers, planInlineWrapper } from '../application/symbolInput';
 import { isCodeInput } from './pasteAssistance';
 import type { EditorCommandId } from '../../../src/foundation/editingPreferences';
+
+import { markdownCodeRanges } from './blockInsertion';
+import { planHtmlCommentToggle } from '../application/htmlCommentInput';
+import { beginHtmlCommentTemplate } from './htmlCommentEditing';
+import { addAutomaticSymbolPair } from './typingAssistance';
 
 const selectionHistory = new WeakMap<EditorView, { after: EditorSelection; before: EditorSelection[] }>();
 // Programmatic edits share the existing toolbar caret-continuity path in both modes.
@@ -74,6 +79,26 @@ function structuralLineCommand(view: EditorView, run: (target: EditorView) => bo
     node = node.parent;
   }
   return run(view);
+}
+
+export function toggleHtmlComment(view: EditorView, lines: boolean, blocked: () => void): boolean {
+  if (view.state.readOnly || view.compositionStarted) return false;
+  const { state } = view;
+  const ranges = state.selection.ranges;
+  if (ranges.every(range => isCodeInput(view, range.from) && isCodeInput(view, range.to)))
+    return (lines ? toggleComment : toggleBlockComment)(view);
+  if (ranges.some(range => isCodeInput(view, range.from) || isCodeInput(view, range.to))) { blocked(); return true; }
+  const plan = planHtmlCommentToggle(state.doc.toString(), ranges, lines, markdownCodeRanges(syntaxTree(state)));
+  if (plan.blocked) { blocked(); return true; }
+  const changes = state.changes(plan.edits.map(({ from, to, insert }) => ({ from, to, insert })));
+  const selections = plan.edits.flatMap(edit => edit.selections).sort((a, b) => a.index - b.index).map(selection => EditorSelection.range(selection.anchor, selection.head));
+  const effects: StateEffect<unknown>[] = plan.edits.flatMap(edit => edit.template ? [
+    beginHtmlCommentTemplate.of({ ...edit.template, end: edit.template.to + 3 }),
+    addAutomaticSymbolPair.of({ from: edit.template.from - 4, to: edit.template.to + 3, open: '<!--', close: '-->' })
+  ] : []);
+  view.dispatch({ changes, selection: EditorSelection.create(selections, Math.min(state.selection.mainIndex, selections.length - 1)), effects,
+    annotations: [annotation, isolateHistory.of('full')], scrollIntoView: true });
+  view.focus(); return true;
 }
 
 export function runEditorCommand(view: EditorView, command: EditorCommandId): boolean {

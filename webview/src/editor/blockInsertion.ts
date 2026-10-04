@@ -1,7 +1,17 @@
 import { matchInlineScript } from '../../../src/foundation/inlineScript';
 import { EditorSelection, type EditorState, type TransactionSpec } from '@codemirror/state';
+import type { Tree } from '@lezer/common';
 import { syntaxTree } from '@codemirror/language';
 export type MarkdownInputContext = 'block' | 'inline' | 'heading' | 'excluded';
+
+/** Literal comment markers in code cannot affect later prose comment operations. */
+export function markdownCodeRanges(tree: Tree): { from: number; to: number }[] {
+  const ranges: { from: number; to: number }[] = [];
+  tree.iterate({ enter(node) {
+    if (/^(?:FencedCode|CodeBlock|InlineCode)$/.test(node.name)) { ranges.push({ from: node.from, to: node.to }); return false; }
+  } });
+  return ranges;
+}
 
 /** Code/HTML/address contexts never execute prose commands, including while syntax is incomplete. */
 export function markdownSyntaxContext(state: EditorState, position: number): MarkdownInputContext {

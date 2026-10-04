@@ -82,6 +82,7 @@ function targetedCommands(
     case 'history':
       return [
         script('scripts/test-input-assistance-production.ts'),
+        script('scripts/test-html-comment-input-production.ts'),
         script('scripts/test-editing-features-production.ts'),
         script('scripts/test-slash-commands-production.ts'),
         script('scripts/test-editor-shortcuts.ts'),
@@ -239,6 +240,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-editing-preferences.ts'),
           script('scripts/test-editor-services.ts'),
           script('scripts/test-input-assistance-production.ts'),
+          script('scripts/test-html-comment-input-production.ts'),
           script('scripts/test-editing-features-production.ts'),
           script('scripts/test-slash-commands-production.ts'),
           script('scripts/test-settings-window-production.ts'),

@@ -5,7 +5,9 @@ import type { LinkCandidate } from '../../src/protocol/editorServices';
 import { sourceTableAt, createSourceTableCommandTarget, tableShortcutCommands } from './editor/sourceTableCommands';
 import { parseMarkdownTable, serializeDelimitedTable } from './application/delimitedTable';
 import { executeMountedTableShortcut, mountedTableClipboardText } from './helpers/tables';
-import { formatMultipleSelections, runEditorCommand, secondarySelections } from './editor/commands';
+import { htmlCommentEditing } from './editor/htmlCommentEditing';
+import { nativeSymbolInput, planNativeHtmlCommentToggle } from './editor/nativeTypingAssistance';
+import { formatMultipleSelections, toggleHtmlComment, runEditorCommand, secondarySelections } from './editor/commands';
 import type { EditorCommandId } from '../../src/foundation/editingPreferences';
 import { pasteAssistance, insertPlainClipboardText } from './editor/pasteAssistance';
 import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type Annotation, type ChangeSpec, EditorSelection, type Extension, type SelectionRange, type Text } from '@codemirror/state';
@@ -220,6 +222,7 @@ type CreateEditorOptions = {
   text: string;
   onApplyChanges: (text: string) => void;
   onOpenLink?: (href: string) => void;
+  onCommentBlocked?: () => void;
   onSelectionChange?: (state: SelectionMenuState & { from?: number; to?: number }) => void;
   onSourcePositionChange?: (change: SourcePositionChange) => void;
   onGitDiffSummaryChange?: (summary: ChangesReviewDiffSummary) => void;
@@ -369,6 +372,7 @@ export function createEditor({
   text,
   onApplyChanges,
   onOpenLink,
+  onCommentBlocked,
   onSelectionChange,
   onSourcePositionChange,
   onGitDiffSummaryChange,
@@ -1095,6 +1099,13 @@ export function createEditor({
     if (!ranges) { ranges = collectLatexMathRanges(state.doc.toString()); inputMathRanges.set(state.doc, ranges); }
     if (ranges.some(range => position > range.from && position < range.to)) return 'excluded';
     return markdownSyntaxContext(state, position);
+  };
+
+  const runCommentCommand = (lines: boolean): boolean => {
+    const selection = view.state.selection.main;
+    const block = collectRenderableHtmlBlocks(view.state).find(block => selection.from >= block.from && selection.to <= block.to);
+    if (block && !view.state.readOnly && !view.compositionStarted) view.dispatch({ effects: setHtmlEditingRangeEffect.of({ from: block.from, to: block.to }) });
+    return toggleHtmlComment(view, lines, () => onCommentBlocked?.());
   };
 
   const focusInsertedTable = () => {
@@ -2133,6 +2144,7 @@ export function createEditor({
       EditorState.tabSize.of(4),
       indentUnit.of('  '),
       inputAssistanceCompartment.of(inputAssistanceFacet.of(initialInputAssistance)),
+      Prec.highest(htmlCommentEditing),
       Prec.highest(typingAssistance),
       Prec.highest(pasteAssistance),
       Prec.highest(createInputSuggestions({ inputContext, requestLinks: requestLinkCandidates, currentHeadings: () => currentHeadingSuggestions(view.state.doc.toString()),
@@ -2153,6 +2165,7 @@ export function createEditor({
           const current = getActiveTableInput();
           if (!current) return false;
           updateActiveTableInput(current, value, anchor, head);
+          if (value.slice(anchor - 4, anchor) === '<!--' && value.slice(anchor, anchor + 3) === '-->') nativeSymbolInput(current)?.beginComment(anchor, anchor);
           commitPendingTableEdits(view);
           return true;
         }
@@ -2161,6 +2174,8 @@ export function createEditor({
       secondarySelections,
       orderedListRenumberTransactionFilter(() => !applyingExternal && !editorDestroyed),
       keymap.of([
+        { key: 'Mod-/', run: () => runCommentCommand(true) },
+        { key: 'Alt-A', run: () => runCommentCommand(false) },
         { key: 'Tab', run: (view) => indentListByTwoSpaces(view) || indentMore(view) },
         { key: 'Shift-Tab', run: (view) => outdentListByTwoSpaces(view) || indentLess(view) },
         { key: 'Alt-]', run: indentListByTwoSpaces },
@@ -3640,6 +3655,20 @@ export function createEditor({
       return !matrix ? null : format === 'csv' ? serializeDelimitedTable(matrix.cells, ',') : raw;
     },
     executeCommand(command: EditorCommandId): boolean {
+      if (view.state.readOnly) return false;
+      if (command === 'lineComment' || command === 'selectionComment') {
+        const input = getActiveTableInput();
+        if (!input) return runCommentCommand(command === 'lineComment');
+        const plan = planNativeHtmlCommentToggle(input, command === 'lineComment');
+        if (!plan) return false;
+        if (plan.blocked) { onCommentBlocked?.(); return true; }
+        const edit = plan.edits[0], range = edit.selections[0];
+        commitPendingTableEdits(view);
+        updateActiveTableInput(input, input.value.slice(0, edit.from) + edit.insert + input.value.slice(edit.to), range.anchor, range.head);
+        if (edit.template) nativeSymbolInput(input)?.beginComment(edit.template.from, edit.template.to);
+        commitPendingTableEdits(view);
+        return true;
+      }
       if (executeMountedTableShortcut(view, command)) return true;
       const sourceTable = sourceTableAt(view.state);
       const tableCommand = tableShortcutCommands[command];
