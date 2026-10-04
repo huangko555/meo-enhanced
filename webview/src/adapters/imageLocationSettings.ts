@@ -79,7 +79,7 @@ export function createImageLocationSettings(options: {
   ].map(([name, zh, en]) => {
     const value = '${' + name + '}';
     const button = node('button', 'settings-button image-location-token', value); button.type = 'button';
-    const tooltip = node('span', 'more-tools-option-tooltip'); tooltip.id = 'meo-image-variable-' + name;
+    const tooltip = node('span', 'more-tools-option-tooltip meo-tooltip meo-tooltip--arrow'); tooltip.id = 'meo-image-variable-' + name;
     tooltip.setAttribute('role', 'tooltip');
     button.setAttribute('aria-label', value); button.setAttribute('aria-describedby', tooltip.id); button.append(tooltip);
     const positionHint = () => {

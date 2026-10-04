@@ -287,7 +287,7 @@ const appendMoreToolsOptionContent = (
   info.appendChild(createElement(Info, { width: 13, height: 13, 'aria-hidden': 'true' }));
   const tooltip = document.createElement('span');
   tooltip.id = description.id;
-  tooltip.className = 'more-tools-option-tooltip';
+  tooltip.className = 'more-tools-option-tooltip meo-tooltip';
   tooltip.setAttribute('role', 'tooltip');
   tooltip.textContent = description.text;
   info.appendChild(tooltip);

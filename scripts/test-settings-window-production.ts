@@ -672,6 +672,14 @@ try {
         }));
         assert.deepEqual(expanded, [{mode, input: mode === 'advanced' ? 'meo-image-rule' : 'meo-image-folder', belowLabel: true, beforeNext: true}], 'only the selected option expands its own controls beneath its label');
         if (mode === 'advanced') {
+          const centeredButtons = await page.$$eval('.settings-close, .settings-search-clear', buttons => buttons.map(element => {
+            const button = element.getBoundingClientRect(), icon = element.querySelector('svg')?.getBoundingClientRect();
+            const search = document.querySelector('.settings-searchbox')!.getBoundingClientRect();
+            return { square: Math.abs(button.width - button.height) < 1,
+              centered: !!icon && Math.abs((icon.left + icon.right - button.left - button.right) / 2) < 1 && Math.abs((icon.top + icon.bottom - button.top - button.bottom) / 2) < 1,
+              aligned: Math.abs((button.top + button.bottom - search.top - search.bottom) / 2) < 1 };
+          }));
+          assert.deepEqual(centeredButtons, [{square: true, centered: true, aligned: true}, {square: true, centered: true, aligned: true}], language + '/' + appearance + '/' + width + ': close and clear buttons align with the search field and center their icons');
           const descriptions = language === 'en'
             ? ['Document directory', 'File name with extension', 'File name without extension', 'Extension including the dot']
             : ['当前文档目录', '文档名，含扩展名', '文档名，不含扩展名', '扩展名，含点号'];
@@ -684,10 +692,26 @@ try {
               const bounds = tooltip.getBoundingClientRect(), button = element.getBoundingClientRect();
               const content = element.closest('.settings-window')!.getBoundingClientRect();
               return { text: tooltip.textContent, title: element.getAttribute('title'), described: element.getAttribute('aria-describedby') === tooltip.id,
-                visible: style.visibility, opacity: style.opacity, delay: style.transitionDelay, border: style.borderTopWidth, singleLine: bounds.height < parseFloat(style.lineHeight) * 2, arrow: arrow.content !== 'none' && arrow.width === '8px', centered: Math.abs((bounds.left + bounds.right) / 2 - (button.left + button.right) / 2) < 1 && Math.abs(parseFloat(arrow.left) - bounds.width / 2) < 1 && style.textAlign === 'center',
+                visible: style.visibility, opacity: style.opacity, delay: style.transitionDelay, border: style.borderTopWidth, background: style.backgroundColor, foreground: style.color, radius: style.borderRadius, shadow: style.boxShadow, arrowBackground: arrow.backgroundColor, singleLine: bounds.height < parseFloat(style.lineHeight) * 2, arrow: arrow.content !== 'none' && arrow.width === '8px', centered: Math.abs((bounds.left + bounds.right) / 2 - (button.left + button.right) / 2) < 1 && Math.abs(parseFloat(arrow.left) - bounds.width / 2) < 1 && style.textAlign === 'center',
                 below: bounds.top >= button.bottom, contained: bounds.left >= content.left && bounds.right <= content.right && bounds.bottom <= content.bottom };
             });
-            assert.deepEqual(hint, {text: description, title: null, described: true, visible: 'visible', opacity: '1', delay: '0s', border: '0px', singleLine: true, arrow: true, centered: true, below: true, contained: true}, language + '/' + appearance + '/' + width + ': hover immediately shows one unobstructed hint below the button');
+            assert.deepEqual(hint, {text: description, title: null, described: true, visible: 'visible', opacity: '1', delay: '0s', border: '0px', background: appearance === 'dark' ? 'rgb(26, 26, 26)' : 'rgb(13, 13, 13)', foreground: 'rgb(245, 245, 245)', radius: '10px', shadow: 'none', arrowBackground: appearance === 'dark' ? 'rgb(26, 26, 26)' : 'rgb(13, 13, 13)', singleLine: true, arrow: true, centered: true, below: true, contained: true}, language + '/' + appearance + '/' + width + ': hover immediately shows one unobstructed hint below the button');
+            if (index === 2) {
+              const tooltip = await page.$(selector + ' [role="tooltip"]'); const capture = await tooltip!.screenshot(); await tooltip!.dispose();
+              const tintedPixels = await page.evaluate(async data => {
+                const bitmap = await createImageBitmap(await (await fetch('data:image/png;base64,' + data)).blob());
+                const canvas = document.createElement('canvas'); canvas.width = bitmap.width; canvas.height = bitmap.height;
+                const context = canvas.getContext('2d')!; context.drawImage(bitmap, 0, 0); bitmap.close();
+                const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data; let tinted = 0;
+                // Inspect the text area, excluding rounded corners and the page behind the bubble.
+                for (let y = 6; y < canvas.height - 6; y++) for (let x = 8; x < canvas.width - 8; x++) {
+                  const offset = (y * canvas.width + x) * 4, channels = [pixels[offset], pixels[offset + 1], pixels[offset + 2]];
+                  if (Math.max(...channels) > 100 && Math.max(...channels) - Math.min(...channels) > 6) tinted++;
+                }
+                return tinted;
+              }, Buffer.from(capture).toString('base64'));
+              assert.equal(tintedPixels, 0, language + '/' + appearance + '/' + width + ': tooltip text has no colored rendering fringes');
+            }
             if (index === 2 && process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR) {
               await fs.mkdir(process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR, {recursive: true});
               await page.screenshot({path: path.join(process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR, 'image-tooltip-' + language + '-' + appearance + '-' + width + '.png')});
