@@ -7168,6 +7168,7 @@ html[data-editor-appearance='dark'] :is(.settings-warning, .settings-shortcut-co
   font-family: var(--meo-suggestion-font, var(--meo-active-editor-font));
   font-size: var(--meo-suggestion-font-size, 13px);
 }
+.meo-narrow-suggestions { width: min(240px, calc(100vw - 16px)); }
 .meo-input-suggestions[hidden] { display: none; }
 html[data-editor-appearance='dark'] .meo-input-suggestions {
   --meo-suggestion-match-color: var(--meo-semantic-headingForeground, #79b8ff);
@@ -7210,6 +7211,16 @@ html[data-editor-appearance='dark'] .meo-input-suggestions {
 }
 .meo-slash-suggestion { grid-template-columns: 16px max-content minmax(0, 1fr); }
 .meo-input-suggestion:not(:has(.meo-input-suggestion-detail)) { grid-template-columns: 16px minmax(0, 1fr); }
+.meo-narrow-suggestions .meo-input-suggestion { grid-template-columns: 16px minmax(0, 1fr) 1.5em; }
+.meo-link-suggestions .meo-input-suggestion {
+  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-rows: repeat(2, 1.45em);
+  row-gap: 0;
+  padding-block: 5px;
+}
+.meo-link-suggestions .meo-suggestion-marker { grid-column: 1; grid-row: 1; }
+.meo-link-suggestions .meo-suggestion-label { grid-column: 2; grid-row: 1; }
+.meo-link-suggestions .meo-input-suggestion-detail { grid-column: 2; grid-row: 2; text-align: left; }
 .meo-input-suggestion:hover, .meo-input-suggestion[aria-selected='true'] { background: transparent; }
 .meo-suggestion-marker { visibility: hidden; justify-self: center; display: flex; width: 16px; height: 14px; color: var(--meo-foreground); }
 .meo-suggestion-marker svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }

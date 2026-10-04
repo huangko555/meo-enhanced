@@ -185,8 +185,10 @@ export function createInputSuggestions(options: {
     }
     render() {
       this.popup.replaceChildren();
-      const slash = this.context?.type === 'slash';
+      const slash = this.context?.type === 'slash', links = this.context?.type === 'documents' || this.context?.type === 'paths';
       this.popup.classList.toggle('meo-slash-suggestions', slash);
+      this.popup.classList.toggle('meo-link-suggestions', links);
+      this.popup.classList.toggle('meo-narrow-suggestions', this.context?.type === 'emoji');
       this.popup.style.removeProperty('--meo-suggestion-max-height'); this.popup.style.removeProperty('max-width');
       const list = document.createElement('div'); list.className = 'meo-suggestion-list';
       if (slash) list.classList.add('meo-slash-list');
@@ -227,8 +229,8 @@ export function createInputSuggestions(options: {
           appendMatched(label, item.label, this.context?.query ?? ''); label.title = item.label;
         }
         row.append(label);
-        const detailValue = this.context?.type === 'headings' && item.anchor ? '#' + item.anchor : item.detail;
-        if (detailValue && (item.slash || detailValue !== item.label)) {
+        const detailValue = this.context?.type === 'headings' && item.anchor ? '#' + item.anchor : links ? item.detail || item.insert : item.detail;
+        if (links || (detailValue && (item.slash || detailValue !== item.label))) {
           const detail = document.createElement('span'); detail.className = 'meo-input-suggestion-detail';
           if (item.slash) detail.textContent = detailValue;
           else { appendMatched(detail, detailValue, this.context?.query ?? ''); detail.title = [item.detail, detailValue].filter((value, index, values) => value && values.indexOf(value) === index).join(' · '); }
