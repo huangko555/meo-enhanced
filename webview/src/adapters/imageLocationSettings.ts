@@ -77,12 +77,16 @@ export function createImageLocationSettings(options: {
     ['fileBasenameNoExtension', '文档名，不含扩展名', 'File name without extension'],
     ['fileExtname', '扩展名，含点号', 'Extension including the dot']
   ].map(([name, zh, en]) => {
-    const button = node('button', 'settings-button image-location-token', '${' + name + '}'); button.type = 'button';
+    const value = '${' + name + '}';
+    const button = node('button', 'settings-button image-location-token', value); button.type = 'button';
+    const tooltip = node('span', 'more-tools-option-tooltip'); tooltip.id = 'meo-image-variable-' + name;
+    tooltip.setAttribute('role', 'tooltip');
+    button.setAttribute('aria-label', value); button.setAttribute('aria-describedby', tooltip.id); button.append(tooltip);
     button.addEventListener('click', () => {
-      rule.setRangeText(button.textContent!, rule.selectionStart ?? rule.value.length, rule.selectionEnd ?? rule.value.length, 'end');
+      rule.setRangeText(value, rule.selectionStart ?? rule.value.length, rule.selectionEnd ?? rule.value.length, 'end');
       preferences = { ...preferences, rule: rule.value }; rule.focus(); edit();
     });
-    variables.append(button); return { button, zh, en };
+    variables.append(button); return { tooltip, zh, en };
   });
   const advanced = node('div', 'image-location-advanced'); advanced.append(ruleLabel, ruleBox, advancedHint, variables);
   modeControls[2].details.append(advanced);
@@ -153,7 +157,7 @@ export function createImageLocationSettings(options: {
     advancedHint.textContent = t('支持绝对路径、相对当前文档的路径及下方变量。点击变量可插入。', 'Use an absolute path, a path relative to the document, or the variables below. Click a variable to insert it.');
     picker.textContent = t('选择文件夹…', 'Choose folder…');
     picker.disabled = !loaded || selecting;
-    for (const token of tokens) token.button.title = t(token.zh, token.en);
+    for (const token of tokens) token.tooltip.textContent = t(token.zh, token.en);
     legacy.hidden = !state?.legacy || dirty;
     legacy.textContent = t('沿用原有目录配置；主动修改后使用这里的新规则。', 'Your previous folder configuration is preserved until you change it here.');
     notice.textContent = t('有效修改自动保存，既有图片不会移动。', 'Valid changes save automatically. Existing images stay where they are.');

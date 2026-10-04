@@ -303,6 +303,14 @@ try {
   assert.equal(imageContext.imageStorage!.mode, 'perDocument', 'native radio keyboard navigation selects the next mode');
   assert.equal(await page.$eval('#meo-image-folder', element => (element as HTMLInputElement).value), '图片', 'moving the folder controls preserves the draft');
   await page.click('.image-location-modes input[value="advanced"]'); await waitImageSaved();
+  await fillImage('#meo-image-rule', '${fileDirname}/assets'); await waitImageSaved();
+  await page.$eval('#meo-image-rule', element => {
+    const input = element as HTMLInputElement, start = input.value.indexOf('assets');
+    input.focus(); input.setSelectionRange(start, start + 'assets'.length);
+  });
+  await page.click('.image-location-variables > button:nth-child(3)'); await waitImageSaved();
+  assert.equal(await page.$eval('#meo-image-rule', element => (element as HTMLInputElement).value), '${fileDirname}/${fileBasenameNoExtension}', 'clicking a described variable replaces the selected path segment with only its token');
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'meo-image-rule');
   const previousRule = imageContext.imageStorage!.rule;
   await fillImage('#meo-image-rule', '${unknown}/images');
   await page.waitForSelector('.image-location-feedback.is-error');
@@ -588,6 +596,34 @@ try {
             beforeNext: !next || details.getBoundingClientRect().bottom <= next.getBoundingClientRect().top}];
         }));
         assert.deepEqual(expanded, [{mode, input: mode === 'advanced' ? 'meo-image-rule' : 'meo-image-folder', belowLabel: true, beforeNext: true}], 'only the selected option expands its own controls beneath its label');
+        if (mode === 'advanced') {
+          const descriptions = language === 'en'
+            ? ['Document directory', 'File name with extension', 'File name without extension', 'Extension including the dot']
+            : ['当前文档目录', '文档名，含扩展名', '文档名，不含扩展名', '扩展名，含点号'];
+          for (const [index, description] of descriptions.entries()) {
+            const selector = '.image-location-variables > button:nth-child(' + (index + 1) + ')';
+            await page.hover(selector);
+            const hint = await page.$eval(selector, element => {
+              const tooltip = element.querySelector<HTMLElement>('[role="tooltip"]')!, style = getComputedStyle(tooltip);
+              const arrow = getComputedStyle(tooltip, '::before');
+              const bounds = tooltip.getBoundingClientRect(), button = element.getBoundingClientRect();
+              const content = element.closest('.settings-content')!.getBoundingClientRect();
+              return { text: tooltip.textContent, title: element.getAttribute('title'), described: element.getAttribute('aria-describedby') === tooltip.id,
+                visible: style.visibility, opacity: style.opacity, delay: style.transitionDelay, border: style.borderTopWidth, arrow: arrow.content !== 'none' && arrow.width === '8px', centered: Math.abs((bounds.left + bounds.right) / 2 - (button.left + button.right) / 2) < 1 && Math.abs(parseFloat(arrow.left) - bounds.width / 2) < 1 && style.textAlign === 'center',
+                below: bounds.top >= button.bottom, contained: bounds.left >= content.left && bounds.right <= content.right && bounds.bottom <= content.bottom };
+            });
+            assert.deepEqual(hint, {text: description, title: null, described: true, visible: 'visible', opacity: '1', delay: '0s', border: '0px', arrow: true, centered: true, below: true, contained: true}, language + '/' + appearance + '/' + width + ': hover immediately shows one unobstructed hint below the button');
+            if (index === 2 && process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR) {
+              await fs.mkdir(process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR, {recursive: true});
+              await page.screenshot({path: path.join(process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR, 'image-tooltip-' + language + '-' + appearance + '-' + width + '.png')});
+            }
+          }
+          await page.hover('.image-location-settings .settings-item-title');
+          assert.ok(await page.$$eval('.image-location-token [role="tooltip"]', elements => elements.every(element => getComputedStyle(element).visibility === 'hidden')), 'moving away immediately hides the variable hints');
+          await page.focus('#meo-image-rule'); await page.keyboard.press('Tab'); await page.keyboard.press('Tab');
+          assert.equal(await page.$eval('.image-location-token [role="tooltip"]', element => getComputedStyle(element).visibility), 'visible', 'keyboard focus exposes the same hint');
+          await page.keyboard.down('Shift'); await page.keyboard.press('Tab'); await page.keyboard.up('Shift');
+        }
       }
       await page.setViewport({ width: 1100, height: 780 });
       if (process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR) {
