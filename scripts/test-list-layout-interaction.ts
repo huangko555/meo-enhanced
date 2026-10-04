@@ -42,6 +42,179 @@ function assertNoDirectionReversal(values: number[], label: string): void {
   }
 }
 
+async function assertListPrefixTyping(page: import('puppeteer-core').Page): Promise<void> {
+  const settle = () => page.evaluate(async () => {
+    for (let frame = 0; frame < 5; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  });
+  const scenarios = [
+    ...['1.', '10.', '001.', '123456789.', '1)', '10)', '123456789)', '-', '+', '*']
+      .map((marker) => ({ initial: '', marker })),
+    { initial: '- parent\n  ', marker: '1.' },
+    { initial: '> ', marker: '1)' },
+    { initial: '> - ', marker: '1.' }
+  ];
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((dark) => {
+      document.documentElement.style.setProperty('--meo-background', dark ? '#24292e' : '#fff');
+      document.documentElement.style.setProperty('--meo-foreground', dark ? '#eee' : '#111');
+    }, theme === 'dark');
+    for (const scenario of scenarios) {
+      const label = `${theme}: ${JSON.stringify(scenario)}`;
+      await page.evaluate(({ initial }) => {
+        const editor = (window as any).ListEditingHarness.createEditor({
+          parent: document.getElementById('editor-host'), text: initial, initialMode: 'live', onApplyChanges() {}
+        });
+        (window as any).__listPrefixEditor = editor;
+        (window as any).__readListPrefix = () => {
+          const lineNumber = editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number;
+          const line = editor.view.contentDOM.querySelectorAll('.cm-line')[lineNumber - 1]!;
+          const clip = editor.view.scrollDOM.getBoundingClientRect();
+          const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+          let visible = '';
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            const style = getComputedStyle(node.parentElement!);
+            if (Number.parseFloat(style.fontSize) === 0 || style.visibility !== 'visible') continue;
+            const marker = node.parentElement!.closest('.meo-md-list-marker');
+            const markerLeft = marker?.getBoundingClientRect().left ?? clip.left;
+            for (let offset = 0; offset < (node.textContent?.length ?? 0); offset += 1) {
+              const range = document.createRange();
+              range.setStart(node, offset);
+              range.setEnd(node, offset + 1);
+              if (Array.from(range.getClientRects()).some((rect) =>
+                rect.width > 0.5 && rect.height > 0.5
+                && rect.left >= Math.max(clip.left, markerLeft) - 0.5 && rect.right <= clip.right + 0.5
+              )) visible += node.textContent![offset];
+            }
+          }
+          const bullets = Array.from(line.querySelectorAll('.meo-md-list-marker-bullet-dot')).filter((dot) => {
+            const rect = dot.getBoundingClientRect();
+            return rect.width > 0.5 && rect.left >= clip.left - 0.5;
+          }).length;
+          return {
+            text: editor.getText(), visible: visible.trimEnd(), bullets,
+            ordered: line.querySelectorAll('.meo-md-list-marker-ordered').length, html: line.innerHTML
+          };
+        };
+        (window as any).__armListPrefixFrames = () => {
+          (window as any).__listPrefixFrames = new Promise((resolve) => {
+            editor.view.contentDOM.addEventListener('beforeinput', () => {
+              const samples: unknown[] = [];
+              const sample = () => requestAnimationFrame(() => queueMicrotask(() => {
+                samples.push((window as any).__readListPrefix());
+                if (samples.length === 4) resolve(samples);
+                else sample();
+              }));
+              sample();
+            }, { capture: true, once: true });
+          });
+        };
+        editor.view.dispatch({ selection: { anchor: initial.length } });
+        editor.focus();
+      }, scenario);
+      const assertLiteral = (sample: { visible: string }, prefix: string) => {
+        assert.ok(sample.visible.endsWith(prefix), `${label}: prefix ${prefix} was clipped: ${JSON.stringify(sample)}`);
+      };
+      try {
+        let prefix = '';
+        for (const character of scenario.marker) {
+          prefix += character;
+          await page.evaluate(() => (window as any).__armListPrefixFrames());
+          await page.keyboard.type(character);
+          const frames = await page.evaluate(() => (window as any).__listPrefixFrames);
+          for (const frame of frames) assertLiteral(frame, prefix);
+        }
+        await page.keyboard.type(' ');
+        await settle();
+        const completed = await page.evaluate(() => (window as any).__readListPrefix());
+        if (/^\d/.test(scenario.marker)) {
+          assertLiteral(completed, String(Number.parseInt(scenario.marker, 10)) + scenario.marker.at(-1));
+          assert.ok(completed.ordered > 0, `${label}: whitespace must complete the ordered marker`);
+        } else {
+          assert.ok(completed.bullets > 0, `${label}: whitespace must complete a visible bullet`);
+        }
+        // Delete only the separator; Backspace on an empty list normally exits it.
+        await page.keyboard.down('Shift');
+        await page.keyboard.press('ArrowLeft');
+        await page.keyboard.up('Shift');
+        await page.keyboard.press('Backspace');
+        await settle();
+        const deleted = await page.evaluate(() => (window as any).__readListPrefix());
+        assert.equal(deleted.text, scenario.initial + scenario.marker, `${label}: separator deletion`);
+        assertLiteral(deleted, scenario.marker);
+        await page.keyboard.type('word');
+        await settle();
+        const prose = await page.evaluate(() => (window as any).__readListPrefix());
+        assert.equal(prose.text, scenario.initial + scenario.marker + 'word');
+        assertLiteral(prose, scenario.marker + 'word');
+      } finally {
+        await page.evaluate(() => (window as any).__listPrefixEditor.destroy());
+      }
+    }
+  }
+  await page.evaluate(() => {
+    document.documentElement.style.removeProperty('--meo-background');
+    document.documentElement.style.removeProperty('--meo-foreground');
+  });
+  console.log('list prefix typing and separator deletion frames passed in light/dark themes');
+}
+
+async function assertOrderedMarkerWidths(page: import('puppeteer-core').Page): Promise<void> {
+  const fixtures = [
+    { initial: '', prefix: '', start: 1, count: 12, suffix: '.', task: false, repeated: 1 },
+    { initial: '', prefix: '> ', start: 98, count: 4, suffix: ')', task: false, repeated: 1 },
+    { initial: '- parent\n\n', prefix: '  ', start: 98, count: 4, suffix: '.', task: false, repeated: 1 },
+    { initial: 'paragraph\n', prefix: '', start: 9, count: 4, suffix: '.', task: false, repeated: 9 },
+    { initial: '', prefix: '', start: 98, count: 4, suffix: '.', task: true, repeated: 1 }
+  ];
+  for (const fixture of fixtures) {
+    const result = await page.evaluate(async ({ fixture, body }) => {
+      const items = Array.from({ length: fixture.count }, (_, index) =>
+        `${fixture.prefix}${index === 0 ? fixture.start : fixture.repeated}${fixture.suffix} ${fixture.task ? '[ ] ' : ''}item-${index} ${body}`
+      );
+      const text = fixture.initial + items.join('\n');
+      const editor = (window as any).ListEditingHarness.createEditor({
+        parent: document.getElementById('editor-host'), text, initialMode: 'live', onApplyChanges() {}
+      });
+      try {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+        const markers = Array.from(editor.view.contentDOM.querySelectorAll('.meo-md-list-marker-ordered')).map((marker) => {
+          const node = marker.firstChild!;
+          const range = document.createRange();
+          range.selectNode(node);
+          const textBounds = range.getBoundingClientRect();
+          return { text: node.textContent, left: textBounds.left, markerLeft: marker.getBoundingClientRect().left };
+        });
+        const alignment = [];
+        const walker = document.createTreeWalker(editor.view.contentDOM, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (!node.textContent?.includes('item-')) continue;
+          const range = document.createRange();
+          range.selectNode(node);
+          const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0.5);
+          alignment.push({ label: node.textContent, first: rects[0]?.left, continuation: rects[1]?.left, rectCount: rects.length });
+        }
+        return { markers, alignment, text: editor.getText(), original: text, checkboxes: editor.view.contentDOM.querySelectorAll('.meo-task-checkbox').length };
+      } finally {
+        editor.destroy();
+      }
+    }, { fixture, body: longText });
+    assert.equal(result.text, result.original, 'display-width adjustment must preserve source numbers');
+    assert.equal(result.markers.length, fixture.task ? 0 : fixture.count);
+    assert.equal(result.checkboxes, fixture.task ? fixture.count : 0);
+    for (const [index, marker] of result.markers.entries()) {
+      assert.equal(marker.text, `${fixture.start + index}${fixture.suffix}`);
+      assert.ok(marker.left >= marker.markerLeft - 0.5, `renumbered marker overflowed: ${JSON.stringify(marker)}`);
+    }
+    assert.equal(result.alignment.length, fixture.count);
+    for (const body of result.alignment) {
+      assert.ok(body.rectCount >= 2 && Math.abs(body.first! - body.continuation!) <= 1,
+        `renumbered list body lost hanging alignment: ${JSON.stringify({ fixture, body })}`);
+    }
+  }
+  console.log('ordered marker digit growth and hanging alignment checks passed');
+}
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-list-editing-entry.ts')],
@@ -81,6 +254,9 @@ async function main(): Promise<void> {
       #preview-host { margin-left: 320px; }
     ` });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+
+    await assertListPrefixTyping(page);
+    await assertOrderedMarkerWidths(page);
 
     const result = await page.evaluate(async ({ source, bodyText, previewHtml }) => {
       const harness = (window as any).ListEditingHarness;

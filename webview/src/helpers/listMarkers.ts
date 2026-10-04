@@ -22,6 +22,7 @@ interface ListMarkerData {
   markerEndOffset: number;
   toOffset: number;
   contentOffsetColumns: number;
+  displayExtraColumns: number;
   markerText: string;
   classes: string;
   orderedNumber: string | undefined;
@@ -432,7 +433,9 @@ export function listMarkerData(
   const markerCharLength = match[2]?.length ?? (orderedNumber?.length ?? 0) + (orderedSuffix?.length ?? 0);
   const markerEndOffset = indent + markerCharLength;
   const indentColumns = indentationColumns(leadingWhitespace, style);
-  const contentOffsetColumns = markerOffset + indentColumns + (match[0].length - indent);
+  // CommonMark display numbers can outgrow repeated source markers such as 1.
+  const displayExtraColumns = Math.max(0, markerText.length - markerCharLength);
+  const contentOffsetColumns = markerOffset + indentColumns + (match[0].length - indent) + displayExtraColumns;
   const indentLevel = Math.floor(indentColumns / style.columns);
   if (!orderedNumber && indentLevel % 2 === 1) {
     classes += ' meo-md-list-marker-bullet-hollow';
@@ -446,6 +449,7 @@ export function listMarkerData(
     markerEndOffset: markerOffset + markerEndOffset,
     toOffset: markerOffset + match[0].length,
     contentOffsetColumns,
+    displayExtraColumns,
     markerText,
     classes,
     orderedNumber,
@@ -458,7 +462,7 @@ export function listMarkerData(
     result.taskBracketStart = markerOffset + markerEndOffset + 1;
     result.taskStatus = taskStatusFromMarker(taskMarker);
     result.isTask = true;
-    result.taskHiddenPrefixColumns = hiddenTaskPrefixLength;
+    result.taskHiddenPrefixColumns = hiddenTaskPrefixLength + displayExtraColumns;
   }
 
   return result;
@@ -592,7 +596,9 @@ export function addListMarkerDecoration(
   const markerEnd = line.from + marker.markerEndOffset;
   const markerTo = line.from + marker.toOffset;
 
-  if (options?.useSourceStyleLiteral) {
+  // A marker without a separator has no room for the widget's trailing gap.
+  // Keep its source glyphs visible until whitespace completes the prefix.
+  if (options?.useSourceStyleLiteral || marker.toOffset === marker.markerEndOffset) {
     if (markerTo > indentEnd) {
       builder.push(sourceListMarkerDeco.range(indentEnd, markerTo));
     }
@@ -607,7 +613,7 @@ export function addListMarkerDecoration(
         widget: new ListMarkerWidget(
           marker.markerText,
           marker.classes,
-          marker.taskBracketStart - marker.fromOffset
+          marker.taskBracketStart - marker.fromOffset + marker.displayExtraColumns
         ),
         inclusive: false
       }).range(indentEnd, bracketStart));
@@ -631,7 +637,7 @@ export function addListMarkerDecoration(
         widget: new ListMarkerWidget(
           marker.markerText,
           marker.classes,
-          marker.toOffset - marker.fromOffset
+          marker.toOffset - marker.fromOffset + marker.displayExtraColumns
         ),
         inclusive: false
       }).range(indentEnd, markerTo)

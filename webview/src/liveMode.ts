@@ -1870,6 +1870,7 @@ function addListLineDecorations(
   builder: DecorationCollector,
   state: EditorState,
   indentSelectedLines: Set<number>,
+  activeLines: Set<number>,
   parsedContainers: ReturnType<typeof parsedListMarkersByLine>,
   frontmatter: FrontmatterInfo | null = null,
   codeBlockLines: Set<number> | null = null
@@ -1891,7 +1892,7 @@ function addListLineDecorations(
     if (!entries.length) {
       // Preserve Live's existing rendering for list-like lines that CommonMark
       // treats as paragraph continuations (for example, a non-1 ordered start).
-      const marker = listMarkerData(lineText, null, style);
+      let marker = listMarkerData(lineText, null, style);
       if (!marker) {
         legacyOrderedCountsByLevel.length = 0;
         continue;
@@ -1899,6 +1900,9 @@ function addListLineDecorations(
       const { expected } = nextOrderedSequenceNumber(
         legacyOrderedCountsByLevel, marker.indentLevel, marker.orderedNumber
       );
+      if (marker.orderedNumber && expected !== null && String(expected).length > marker.orderedNumber.length) {
+        marker = listMarkerData(lineText, expected, style)!;
+      }
       if (isInsideFrontmatterContent(frontmatter, line.from)) {
         addListMarkerDecoration(builder, state, line.from, expected, style, { useSourceStyleLiteral: true });
         continue;
@@ -1924,7 +1928,7 @@ function addListLineDecorations(
       const precedingQuoteMarks = (quoteMarksByLine.get(lineNo) ?? []).filter((mark) => mark.to <= entry.listMarkFrom);
       const quoteEnd = Math.max(line.from, ...precedingQuoteMarks.map((mark) => mark.to));
       const markerOffset = Math.max(quoteEnd, previousMarkerEnd) - line.from;
-      const marker = listMarkerData(lineText, null, style, markerOffset);
+      let marker = listMarkerData(lineText, null, style, markerOffset);
       if (!marker || line.from + marker.fromOffset !== entry.listMarkFrom) continue;
       previousMarkerEnd = line.from + marker.toOffset;
       const previousCount = orderedCountsByContainer.get(entry.containerKey);
@@ -1932,6 +1936,10 @@ function addListLineDecorations(
         ? null
         : previousCount === undefined ? Number.parseInt(marker.orderedNumber, 10) : previousCount + 1;
       if (orderedDisplayIndex !== null) orderedCountsByContainer.set(entry.containerKey, orderedDisplayIndex);
+      if (marker.orderedNumber && orderedDisplayIndex !== null
+        && String(orderedDisplayIndex).length > marker.orderedNumber.length) {
+        marker = listMarkerData(lineText, orderedDisplayIndex, style, markerOffset)!;
+      }
       if (inFrontmatterContent) {
         addListMarkerDecoration(builder, state, line.from, orderedDisplayIndex, style, {
           useSourceStyleLiteral: true
@@ -1948,7 +1956,7 @@ function addListLineDecorations(
       addListMarkerDecoration(builder, state, line.from, orderedDisplayIndex, style,
         showTaskListMarker ? { showTaskListMarker: true } : null, markerOffset);
       if (!deepest || entry.depth >= deepest.depth) {
-        deepest = { marker, depth: entry.depth, hiddenQuoteColumns: precedingQuoteMarks.length, showTaskListMarker };
+        deepest = { marker, depth: entry.depth, hiddenQuoteColumns: activeLines.has(lineNo) ? 0 : precedingQuoteMarks.length, showTaskListMarker };
       }
     }
     if (deepest && !inFrontmatterContent) {
@@ -2474,7 +2482,7 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
     [...renderedTableRanges, ...mathRanges],
     frontmatter
   );
-  addListLineDecorations(ranges, state, indentSelectedLines, parsedContainers, frontmatter, codeBlockLines);
+  addListLineDecorations(ranges, state, indentSelectedLines, activeLines, parsedContainers, frontmatter, codeBlockLines);
   addMathDecorations(ranges, state, mathRanges, activeLines);
   addColorSwatchDecorations(
     ranges,
