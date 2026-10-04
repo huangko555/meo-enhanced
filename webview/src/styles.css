@@ -3548,11 +3548,24 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 /* Indented blocks have no fence row to host actions. Reserve visual space only,
    keeping the source, selection and code line numbers unchanged. */
 .cm-editor.meo-mode-live .cm-line.meo-md-indented-code-block-start {
-  padding-top: var(--meo-indented-code-toolbar-height);
+  --meo-indented-code-top-space: var(--meo-indented-code-toolbar-height);
+  padding-top: var(--meo-indented-code-top-space);
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-indented-code-block-end {
-  padding-bottom: var(--meo-indented-code-toolbar-height);
+  --meo-indented-code-bottom-space: var(--meo-indented-code-toolbar-height);
+  padding-bottom: var(--meo-indented-code-bottom-space);
+}
+
+/* Keep the toolbar/footer surface unchanged while the text row is active. */
+.cm-editor.meo-mode-live .cm-activeLine:is(.meo-md-indented-code-block-start, .meo-md-indented-code-block-end) {
+  background-image: linear-gradient(
+    to bottom,
+    var(--meo-code-background) var(--meo-indented-code-top-space, 0px),
+    transparent var(--meo-indented-code-top-space, 0px),
+    transparent calc(100% - var(--meo-indented-code-bottom-space, 0px)),
+    var(--meo-code-background) calc(100% - var(--meo-indented-code-bottom-space, 0px))
+  );
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-code-block-end.meo-md-code-block-before-footer {
@@ -3567,6 +3580,7 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 }
 
 .cm-editor .meo-md-code-block {
+  color: var(--meo-token-foreground-color, var(--vscode-editor-foreground));
   padding-left: 2ch;
 }
 

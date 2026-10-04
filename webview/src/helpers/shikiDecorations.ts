@@ -8,7 +8,7 @@ import {
 } from '@codemirror/state';
 import { Decoration, ViewPlugin, EditorView, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import type { SyntaxNode } from '@lezer/common';
+import type { SyntaxNode, SyntaxNodeRef } from '@lezer/common';
 import {
   resolveShikiLang,
   getShikiTokens,
@@ -264,7 +264,7 @@ function addTokenDecorations(
 
 function addBlockDecorations(
   view: EditorView,
-  node: { name: string; from: number; to: number },
+  node: SyntaxNodeRef,
   builder: RangeSetBuilder<Decoration>,
   markCache: Map<string, Decoration>,
   previous: DecorationSet,
@@ -272,7 +272,14 @@ function addBlockDecorations(
   isNeeded: () => boolean
 ): void {
   const { state } = view;
-  const info = node.name === 'FencedCode' ? getFencedCodeInfo(state, node) : null;
+  if (node.name === 'CodeBlock') {
+    // Indented code has no fence rows to exclude and no language info string.
+    for (const content of node.node.getChildren('CodeText')) {
+      builder.add(content.from, content.to, pendingTokenDecoration);
+    }
+    return;
+  }
+  const info = getFencedCodeInfo(state, node);
   const startLine = state.doc.lineAt(node.from);
   const endLine = state.doc.lineAt(Math.max(node.to - 1, node.from));
   if (endLine.number - startLine.number < 2) {
