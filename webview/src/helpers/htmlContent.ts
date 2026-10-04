@@ -23,6 +23,7 @@ import {
   supportedHtmlTags
 } from '../../../src/shared/htmlPolicy';
 import { createOpenLinkButton } from './linkOpenButton';
+import { isPrimaryModifierPointerClick } from './linkNavigation';
 import { resolvedSyntaxTree } from './markdownSyntax';
 import { getViewportController } from './viewportController';
 import { ImageWidget } from './images';
@@ -281,7 +282,7 @@ function enhanceLinks(root: ParentNode, inline: boolean, uiLanguage: UiLanguage)
     linkText.title = anchor.title;
     linkText.append(...Array.from(anchor.childNodes));
     linkText.addEventListener('click', (event) => {
-      if (!event.ctrlKey && !event.metaKey) return;
+      if (!isPrimaryModifierPointerClick(event)) return;
       event.preventDefault();
       linkText.dispatchEvent(new CustomEvent('meo-open-link', { bubbles: true, detail: { href } }));
     });

@@ -69,6 +69,13 @@ inline format boundaries, nested formats, content replacement and history replay
 Input outside delimiters must remain unformatted; invalidated syntax must release
 the old formatting after the deferred refresh.
 
+`scripts/test-link-cursor-production.ts` checks Live links in inactive/active prose,
+HTML and native Markdown tables, with trusted pointer and modifier-key input.
+It verifies stationary Ctrl/Meta hover, excluded Alt/Shift combinations, focus
+outside the editor, window blur, plain clicks and one-time navigation in both
+themes. Source links and directly clickable footnote/open-link buttons remain
+covered. This check is part of the production browser gate.
+
 ## HTML comment input
 
 `scripts/test-html-comment-input-production.ts` runs in the quick, targeted history

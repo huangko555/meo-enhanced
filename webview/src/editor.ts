@@ -652,9 +652,7 @@ export function createEditor({
   };
   const isEditableLinkTarget = (target: EventTarget | null, editorView: EditorView) => {
     if (!(target instanceof Node)) return false;
-    if (currentMode === 'source') return editorView.contentDOM.contains(target);
-    const targetElement = targetElementFrom(target);
-    return currentMode === 'live' && Boolean(targetElement?.closest('.cm-activeLine'));
+    return (currentMode === 'source' || currentMode === 'live') && editorView.contentDOM.contains(target);
   };
   const updateEditableLinkHoverCursor = (event: PointerEvent, editorView: EditorView) => {
     const target = event.target;
@@ -2398,27 +2396,6 @@ export function createEditor({
           checkboxClick = null;
           return false;
         },
-        pointermove(event, view) {
-          updateEditableLinkHoverCursor(event, view);
-          return false;
-        },
-        pointerleave(_event, view) {
-          editableLinkHoverPosition = null;
-          setEditableLinkHoverCursor(view, false);
-          return false;
-        },
-        keydown(event, view) {
-          if (event.key === 'Control' || event.key === 'Meta' || event.key === 'Alt' || event.key === 'Shift') {
-            updateEditableLinkHoverCursorForModifier(event, view);
-          }
-          return false;
-        },
-        keyup(event, view) {
-          if (event.key === 'Control' || event.key === 'Meta' || event.key === 'Alt' || event.key === 'Shift') {
-            updateEditableLinkHoverCursorForModifier(event, view);
-          }
-          return false;
-        }
       }),
       ...detailsBlockStateExtensions(),
       tableHeaderAlignmentOverrideField,
@@ -2881,6 +2858,22 @@ export function createEditor({
   view.dom.addEventListener('pointerdown', onHistoryPointerDown, true);
   view.dom.addEventListener('wheel', onHistoryWheel, { capture: true, passive: true });
   view.dom.addEventListener('blur', onHistoryBlur, true);
+  // Widgets can filter CodeMirror handlers, and a hovered editor need not own
+  // keyboard focus. Observe these events without consuming editing shortcuts.
+  const onLinkPointerMove = (event: PointerEvent) => updateEditableLinkHoverCursor(event, view);
+  const onLinkPointerLeave = () => {
+    editableLinkHoverPosition = null;
+    setEditableLinkHoverCursor(view, false);
+  };
+  const onLinkModifierChange = (event: KeyboardEvent) => {
+    if (event.key === 'Control' || event.key === 'Meta' || event.key === 'Alt' || event.key === 'Shift') {
+      updateEditableLinkHoverCursorForModifier(event, view);
+    }
+  };
+  view.dom.addEventListener('pointermove', onLinkPointerMove, true);
+  view.dom.addEventListener('pointerleave', onLinkPointerLeave);
+  window.addEventListener('keydown', onLinkModifierChange, true);
+  window.addEventListener('keyup', onLinkModifierChange, true);
   onTableInteraction = (event) => {
     const detail: unknown = event instanceof CustomEvent ? event.detail : null;
     const active = Boolean(detail && typeof detail === 'object' && 'active' in detail && detail.active);
@@ -3028,6 +3021,7 @@ export function createEditor({
     onSelectionChange?.({ visible: false });
   };
   onWindowBlur = () => {
+    onLinkPointerLeave();
     clearPointerSelection();
     onSelectionChange?.({ visible: false });
   };
@@ -3388,6 +3382,10 @@ export function createEditor({
         window.removeEventListener('blur', onWindowBlur);
         onWindowBlur = null;
       }
+      view.dom.removeEventListener('pointermove', onLinkPointerMove, true);
+      view.dom.removeEventListener('pointerleave', onLinkPointerLeave);
+      window.removeEventListener('keydown', onLinkModifierChange, true);
+      window.removeEventListener('keyup', onLinkModifierChange, true);
       if (capturedPointerId !== null) {
         releasePointerCaptureIfHeld(capturedPointerId);
         capturedPointerId = null;

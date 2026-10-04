@@ -2761,14 +2761,10 @@ button:focus-visible > .menu-switch {
 }
 
 .cm-editor.meo-mode-live .meo-md-link[data-meo-link-href] {
-  cursor: pointer;
-}
-
-.cm-editor.meo-mode-live .cm-activeLine .meo-md-link[data-meo-link-href] {
   cursor: text;
 }
 
-.cm-editor.meo-mode-live.meo-link-modifier-hover .cm-activeLine .meo-md-link[data-meo-link-href] {
+.cm-editor.meo-mode-live.meo-link-modifier-hover .meo-md-link[data-meo-link-href] {
   cursor: pointer;
 }
 
