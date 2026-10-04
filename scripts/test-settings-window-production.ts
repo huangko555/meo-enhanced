@@ -491,11 +491,15 @@ try {
     const directory = path.resolve(process.env.MEO_SETTINGS_SCREENSHOTS); await fs.mkdir(directory, { recursive: true });
     await page.setViewport({ width: 1100, height: 780 });
     await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button');
-    for (const [language, appearance] of [['zh-CN', 'dark'], ['en', 'light']]) {
+    for (const [language, appearance] of [['zh-CN', 'dark'], ['zh-CN', 'light'], ['en', 'dark'], ['en', 'light']]) {
+      await page.setViewport({ width: 1100, height: 780 });
       await page.click('.settings-tab[data-tab="general"]'); await page.click(`[data-setting="language"] [data-value="${language}"]`); await page.click(`[data-setting="theme"] [data-value="${appearance}"]`);
       await page.click('.settings-tab[data-tab="typing"]');
       await page.click('.settings-jump[data-section="symbols"]');
       await page.screenshot({ path: path.join(directory, `settings-${language}-${appearance}.png`) });
+      await page.setViewport({ width: 430, height: 740 });
+      await page.screenshot({ path: path.join(directory, `settings-narrow-${language}-${appearance}.png`) });
+      await page.setViewport({ width: 1100, height: 780 });
       await page.click('.settings-jump[data-section="paste"]');
       await page.screenshot({ path: path.join(directory, `settings-paste-${language}-${appearance}.png`) });
     }

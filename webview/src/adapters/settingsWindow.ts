@@ -47,7 +47,7 @@ export function createSettingsWindow(options: {
   const dialog = element('dialog', 'settings-window'); dialog.dataset.meoSettings = '';
   const titlebar = element('header', 'settings-titlebar');
   const title = element('h2', 'settings-title');
-  const close = button('×', 'settings-close'); titlebar.append(title, close);
+  const close = button('×', 'settings-close');
   const top = element('div', 'settings-top');
   const tabs = element('div', 'settings-tabs'); tabs.setAttribute('role', 'tablist');
   const tabButtons = new Map<SettingsTab, { button: HTMLButtonElement; label: HTMLSpanElement; badge: HTMLSpanElement }>();
@@ -66,7 +66,7 @@ export function createSettingsWindow(options: {
   }
   const searchbox = element('div', 'settings-searchbox');
   const search = element('input', 'settings-search'); search.type = 'search'; search.autocomplete = 'off';
-  const clear = button('×', 'settings-search-clear'); searchbox.append(searchIcon(), search, clear); top.append(tabs, searchbox);
+  const clear = button('×', 'settings-search-clear'); searchbox.append(searchIcon(), search, clear); titlebar.append(title, searchbox, close); top.append(tabs);
   const layout = element('div', 'settings-layout');
   const navigation = element('nav', 'settings-navigation');
   const content = element('div', 'settings-content'); content.id = 'meo-settings-content'; content.setAttribute('role', 'tabpanel');
