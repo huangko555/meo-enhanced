@@ -196,8 +196,10 @@ const activeEmMarkerDeco = Decoration.mark({
 });
 const codeMarkerDeco = Decoration.mark({ class: 'meo-md-code-marker' });
 const activeCodeMarkerDeco = Decoration.mark({ class: 'meo-md-code-marker-active' });
-const subscriptContentDeco = Decoration.mark({ class: 'meo-md-subscript' });
-const superscriptContentDeco = Decoration.mark({ class: 'meo-md-superscript' });
+// Content-only ranges include input at either edge during deferred refreshes.
+// Delimiters keep separate marks, so typing outside them does not inherit styles.
+const subscriptContentDeco = Decoration.mark({ class: 'meo-md-subscript', inclusive: true });
+const superscriptContentDeco = Decoration.mark({ class: 'meo-md-superscript', inclusive: true });
 const fenceMarkerDeco = Decoration.mark({ class: 'meo-md-fence-marker' });
 const headingContentDeco = Decoration.mark({ class: 'meo-md-heading-content' });
 const strongMarkerDeco = Decoration.mark({
@@ -714,10 +716,10 @@ function listLineDeco(
 }
 
 const inlineStyleDecos = {
-  em: Decoration.mark({ class: 'meo-md-em' }),
-  strong: Decoration.mark({ class: 'meo-md-strong' }),
-  strike: Decoration.mark({ class: 'meo-md-strike' }),
-  highlight: Decoration.mark({ class: 'meo-md-highlight' }),
+  em: Decoration.mark({ class: 'meo-md-em', inclusive: true }),
+  strong: Decoration.mark({ class: 'meo-md-strong', inclusive: true }),
+  strike: Decoration.mark({ class: 'meo-md-strike', inclusive: true }),
+  highlight: Decoration.mark({ class: 'meo-md-highlight', inclusive: true }),
   inlineCode: Decoration.mark({ class: 'meo-md-inline-code' })
 };
 function addDelimitedInlineStyleDecoration(
@@ -3514,7 +3516,8 @@ const liveDecorationField = StateField.define<DecorationSet>({
     });
 
     // Guard against transient empty parse results on selection-only transactions.
-    if (!transaction.docChanged && isEmptyDecorationSet(next) && !isEmptyDecorationSet(decorations)) {
+    if (!transaction.docChanged && !isLiveInputDerivedWorkRefresh(transaction)
+      && isEmptyDecorationSet(next) && !isEmptyDecorationSet(decorations)) {
       return decorations;
     }
 

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { launchTestBrowser } from './browser-test-helpers';
@@ -156,6 +157,153 @@ async function readSettledFrame(page: import('puppeteer-core').Page): Promise<Fr
   return page.evaluate(() => (window as any).__liveInputSettledFrame);
 }
 
+async function assertInlineInputFormatting(page: import('puppeteer-core').Page): Promise<void> {
+  const formats = [
+    { name: 'superscript', open: '^', close: '^', classes: ['meo-md-superscript'] },
+    { name: 'subscript', open: '~', close: '~', classes: ['meo-md-subscript'] },
+    { name: 'strong', open: '**', close: '**', classes: ['meo-md-strong'] },
+    { name: 'emphasis', open: '*', close: '*', classes: ['meo-md-em'] },
+    { name: 'strike', open: '~~', close: '~~', classes: ['meo-md-strike'] },
+    { name: 'highlight', open: '==', close: '==', classes: ['meo-md-highlight'] },
+    { name: 'code', open: '`', close: '`', classes: ['meo-md-inline-code'] },
+    { name: 'strong superscript', open: '**^', close: '^**', classes: ['meo-md-strong', 'meo-md-superscript'] },
+    { name: 'strong emphasis', open: '***', close: '***', classes: ['meo-md-strong', 'meo-md-em'] }
+  ];
+  const classes = [...new Set(formats.flatMap((format) => format.classes))].sort();
+  const session = await page.createCDPSession();
+  try {
+    for (const format of formats) {
+      const text = `prefix ${format.open}abc${format.close} suffix`;
+      const start = 'prefix '.length + format.open.length;
+      const end = start + 'abc'.length;
+      const scenarios = [
+        { name: 'start', from: start, to: start, inside: true, composing: false },
+        { name: 'middle', from: start + 1, to: start + 1, inside: true, composing: false },
+        { name: 'end', from: end, to: end, inside: true, composing: false },
+        { name: 'before opening marker', from: start - format.open.length, to: start - format.open.length, inside: false, composing: false },
+        { name: 'after closing marker', from: end + format.close.length, to: end + format.close.length, inside: false, composing: false },
+        { name: 'replace content', from: start, to: end, inside: true, composing: false },
+        { name: 'IME end', from: end, to: end, inside: true, composing: true }
+      ];
+      for (const scenario of scenarios) {
+        const label = `${format.name}: ${scenario.name}`;
+        await page.evaluate(({ text, from, to, classes }) => {
+          const editor = (window as any).__createInputCursorEditor({
+            parent: document.getElementById('primary'), text, initialMode: 'live', onApplyChanges() {}
+          });
+          (window as any).__inlineInputFormattingEditor = editor;
+          editor.view.dispatch({ selection: { anchor: from, head: to } });
+          editor.focus();
+          (window as any).__readInlineInputFormatting = (sampleText: string) => {
+            const walker = document.createTreeWalker(editor.view.contentDOM, NodeFilter.SHOW_TEXT);
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+              if (!node.textContent?.includes(sampleText)) continue;
+              const element = node.parentElement!;
+              const style = getComputedStyle(element);
+              return {
+                classes: classes.filter((name) => element.closest(`.${name}`)),
+                fontSize: style.fontSize,
+                fontWeight: style.fontWeight,
+                fontStyle: style.fontStyle,
+                fontFamily: style.fontFamily,
+                verticalAlign: style.verticalAlign,
+                color: style.color,
+                backgroundColor: style.backgroundColor,
+                textDecorationLine: style.textDecorationLine
+              };
+            }
+            return null;
+          };
+          (window as any).__armInlineInputFormatting = (sampleText: string) => {
+            (window as any).__inlineInputFormattingFrames = new Promise((resolve) => {
+              editor.view.contentDOM.addEventListener('beforeinput', () => {
+                const samples: unknown[] = [];
+                const sample = () => requestAnimationFrame(() => {
+                  // Observe before the delayed decoration refresh can hide a
+                  // first-frame regression; include the intervening frames too.
+                  queueMicrotask(() => {
+                    samples.push((window as any).__readInlineInputFormatting(sampleText));
+                    if (samples.length === 4) resolve(samples);
+                    else sample();
+                  });
+                });
+                sample();
+              }, { capture: true, once: true });
+            });
+          };
+        }, { text, from: scenario.from, to: scenario.to, classes });
+        try {
+          await waitForFrames(page, 3);
+          const expected = await page.evaluate((inside) => (
+            (window as any).__readInlineInputFormatting(inside ? 'abc' : 'prefix')
+          ), scenario.inside);
+          assert.ok(expected, `${label}: initial text must be observable`);
+          assert.deepEqual(expected.classes, scenario.inside ? [...format.classes].sort() : [], `${label}: initial format`);
+          const insertedText = scenario.composing ? 'han' : 'Q';
+          await page.evaluate((sampleText) => (window as any).__armInlineInputFormatting(sampleText), insertedText);
+          if (scenario.composing) {
+            await session.send('Input.imeSetComposition', { text: insertedText, selectionStart: insertedText.length, selectionEnd: insertedText.length });
+          } else {
+            await page.keyboard.type(insertedText);
+          }
+          const samples = await page.evaluate(() => (window as any).__inlineInputFormattingFrames);
+          for (const [index, sample] of samples.entries()) {
+            assert.deepEqual(sample, expected, `${label}: formatting must persist in input frame ${index + 1}`);
+          }
+          if (scenario.composing) {
+            await page.evaluate(() => (window as any).__armInlineInputFormatting('汉'));
+            await session.send('Input.insertText', { text: '汉' });
+            const committed = await page.evaluate(() => (window as any).__inlineInputFormattingFrames);
+            for (const [index, sample] of committed.entries()) {
+              assert.deepEqual(sample, expected, `${label}: formatting must persist in commit frame ${index + 1}`);
+            }
+          }
+          const inserted = scenario.composing ? '汉' : insertedText;
+          const expectedText = text.slice(0, scenario.from) + inserted + text.slice(scenario.to);
+          assert.equal(await page.evaluate(() => (window as any).__inlineInputFormattingEditor.getText()), expectedText, `${label}: source text`);
+          if (scenario.name === 'end') {
+            assert.equal(await page.evaluate(() => (window as any).__inlineInputFormattingEditor.undo()), true, `${label}: undo applied`);
+            assert.equal(await page.evaluate(() => (window as any).__inlineInputFormattingEditor.getText()), text, `${label}: undo`);
+            assert.equal(await page.evaluate(() => (window as any).__inlineInputFormattingEditor.redo()), true, `${label}: redo applied`);
+            assert.equal(await page.evaluate(() => (window as any).__inlineInputFormattingEditor.getText()), expectedText, `${label}: redo`);
+          }
+        } finally {
+          await page.evaluate(() => (window as any).__inlineInputFormattingEditor.destroy());
+        }
+      }
+    }
+    for (const invalidation of [
+      { anchor: 11, key: 'Space', expectedText: 'prefix ^abc ^ suffix' },
+      { anchor: 12, key: 'Backspace', expectedText: 'prefix ^abc suffix' }
+    ]) {
+      await page.evaluate((anchor) => {
+        const editor = (window as any).__createInputCursorEditor({
+          parent: document.getElementById('primary'), text: 'prefix ^abc^ suffix', initialMode: 'live', onApplyChanges() {}
+        });
+        (window as any).__inlineInputFormattingEditor = editor;
+        editor.view.dispatch({ selection: { anchor } });
+        editor.focus();
+      }, invalidation.anchor);
+      try {
+        await waitForFrames(page, 3);
+        await page.keyboard.press(invalidation.key);
+        await waitForFrames(page, 6);
+        const facts = await page.evaluate(() => ({
+          text: (window as any).__inlineInputFormattingEditor.getText(),
+          superscripts: (window as any).__inlineInputFormattingEditor.view.contentDOM.querySelectorAll('.meo-md-superscript').length
+        }));
+        assert.equal(facts.text, invalidation.expectedText, `${invalidation.key}: source text`);
+        assert.equal(facts.superscripts, 0, `${invalidation.key}: invalid syntax must release the old format`);
+      } finally {
+        await page.evaluate(() => (window as any).__inlineInputFormattingEditor.destroy());
+      }
+    }
+    console.log('Live inline input formatting frames passed');
+  } finally {
+    await session.detach();
+  }
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-input-cursor-navigation-entry.ts')],
@@ -178,6 +326,8 @@ async function main(): Promise<void> {
       content: ':root{--meo-background:#fff;--meo-foreground:#111;--meo-code-background:#f4f4f4;--meo-surface-background:#fff;--meo-font-live:Arial;--meo-font-live-weight:400;--meo-font-live-size:16px;--meo-font-source:monospace;--meo-font-source-weight:400;--meo-font-source-size:14px;--meo-line-height-live:1.6;--meo-line-height-source:1.5}'
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+
+    await assertInlineInputFormatting(page);
 
     const longCode = Array.from({ length: 19 }, (_, index) => `const liveLine${index + 1} = ${index + 1};`);
     const coreOriginal = 'plain line\n**marked text**\n\n| A | B |\n| --- | --- |\n| cell | value |\nlast line';

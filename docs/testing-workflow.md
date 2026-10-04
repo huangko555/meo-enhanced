@@ -63,6 +63,12 @@ still checking type safety, workflow policy, history, tables, rendered blocks,
 input-derived work, viewport behavior, and one production browser scenario in
 the quick gate.
 
+`scripts/test-live-input-path-production.ts` observes inserted text's computed
+styles in the first four input frames, including IME preedit and commit. It covers
+inline format boundaries, nested formats, content replacement and history replay.
+Input outside delimiters must remain unformatted; invalidated syntax must release
+the old formatting after the deferred refresh.
+
 ## HTML comment input
 
 `scripts/test-html-comment-input-production.ts` runs in the quick, targeted history
