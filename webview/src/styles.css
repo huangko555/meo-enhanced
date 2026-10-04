@@ -7139,20 +7139,19 @@ html[data-editor-appearance='light'] .settings-searchbox { --meo-settings-search
   .settings-item[data-setting='fontSize'] .settings-segmented { min-width: 100px; }
   .settings-shortcut-controls { justify-content: flex-start; }
 }
-.meo-input-suggestions { position: fixed; z-index: var(--meo-layer-document-popover); box-sizing: border-box; width: min(330px, calc(100vw - 16px)); max-height: min(270px, calc(100vh - 16px)); overflow: auto; padding: 5px; border: 1px solid var(--vscode-panel-border); border-radius: 7px; background: var(--vscode-sideBar-background); box-shadow: var(--meo-elevated-shadow); }
-.meo-input-suggestions[hidden] { display: none; }
-.meo-input-suggestion { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; width: 100%; padding: 8px; border: 0; border-radius: 4px; background: transparent; color: var(--meo-foreground); font: 12px/1.4 var(--vscode-font-family, system-ui, sans-serif); text-align: left; cursor: pointer; }
-.meo-input-suggestion:hover, .meo-input-suggestion[aria-selected='true'] { background: var(--vscode-toolbar-hoverBackground); }
-.meo-input-suggestion-detail { font-size: 11px; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
-
 html[data-editor-appearance='dark'] :is(.settings-warning, .settings-shortcut-conflict, .settings-status) { color: var(--vscode-errorForeground, #f48771); }
 
-.meo-slash-suggestions {
+.meo-input-suggestions {
   --meo-suggestion-selected-background: color-mix(in srgb, var(--vscode-sideBar-background) 90%, var(--meo-foreground) 10%);
   --meo-suggestion-match-color: var(--meo-notice-info, #3483ff);
   --meo-suggestion-shadow-color: rgb(31 35 40 / 18%);
   --meo-suggestion-preferred-height: 342px;
   --meo-suggestion-max-height: min(var(--meo-suggestion-preferred-height), calc(100vh - 16px));
+  position: fixed;
+  z-index: var(--meo-layer-document-popover);
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-panel-border);
+  background-color: var(--vscode-sideBar-background);
   display: flex;
   flex-direction: column;
   width: min(360px, calc(100vw - 16px));
@@ -7169,11 +7168,12 @@ html[data-editor-appearance='dark'] :is(.settings-warning, .settings-shortcut-co
   font-family: var(--meo-suggestion-font, var(--meo-active-editor-font));
   font-size: var(--meo-suggestion-font-size, 13px);
 }
-html[data-editor-appearance='dark'] .meo-slash-suggestions {
+.meo-input-suggestions[hidden] { display: none; }
+html[data-editor-appearance='dark'] .meo-input-suggestions {
   --meo-suggestion-match-color: var(--meo-semantic-headingForeground, #79b8ff);
   --meo-suggestion-shadow-color: rgb(0 0 0 / 36%);
 }
-.meo-slash-list {
+.meo-suggestion-list {
   min-height: 0;
   clip-path: inset(0 round 9px);
   overflow-x: hidden;
@@ -7183,16 +7183,22 @@ html[data-editor-appearance='dark'] .meo-slash-suggestions {
   scrollbar-color: auto;
   background: transparent;
 }
-.meo-slash-list::-webkit-scrollbar { width: 6px; }
-.meo-slash-list::-webkit-scrollbar-track, .meo-slash-list::-webkit-scrollbar-track-piece { background: transparent; box-shadow: none; border: 0; }
-.meo-slash-list::-webkit-scrollbar-corner { background: transparent; }
-.meo-slash-list::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 999px; background: transparent; background-clip: padding-box; }
-.meo-slash-suggestions:hover .meo-slash-list::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--meo-foreground) 22%, transparent); }
-.meo-slash-suggestions:hover .meo-slash-list::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--meo-foreground) 32%, transparent); }
-.meo-slash-list::-webkit-scrollbar-button { display: none; }
-.meo-slash-suggestion {
+.meo-suggestion-list::-webkit-scrollbar { width: 6px; }
+.meo-suggestion-list::-webkit-scrollbar-track, .meo-suggestion-list::-webkit-scrollbar-track-piece { background: transparent; box-shadow: none; border: 0; }
+.meo-suggestion-list::-webkit-scrollbar-corner { background: transparent; }
+.meo-suggestion-list::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 999px; background: transparent; background-clip: padding-box; }
+.meo-input-suggestions:hover .meo-suggestion-list::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--meo-foreground) 22%, transparent); }
+.meo-input-suggestions:hover .meo-suggestion-list::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--meo-foreground) 32%, transparent); }
+.meo-suggestion-list::-webkit-scrollbar-button { display: none; }
+.meo-input-suggestion {
   display: grid;
-  grid-template-columns: 16px max-content minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr) fit-content(45%);
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--meo-foreground);
+  text-align: left;
+  cursor: pointer;
   align-items: center;
   gap: 8px;
   padding: 3px 8px;
@@ -7202,11 +7208,13 @@ html[data-editor-appearance='dark'] .meo-slash-suggestions {
   line-height: 1.45;
   white-space: nowrap;
 }
-.meo-slash-suggestion:hover, .meo-slash-suggestion[aria-selected='true'] { background: transparent; }
+.meo-slash-suggestion { grid-template-columns: 16px max-content minmax(0, 1fr); }
+.meo-input-suggestion:not(:has(.meo-input-suggestion-detail)) { grid-template-columns: 16px minmax(0, 1fr); }
+.meo-input-suggestion:hover, .meo-input-suggestion[aria-selected='true'] { background: transparent; }
 .meo-suggestion-marker { visibility: hidden; justify-self: center; display: flex; width: 16px; height: 14px; color: var(--meo-foreground); }
 .meo-suggestion-marker svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
-.meo-slash-suggestion[aria-selected='true'] .meo-suggestion-marker { visibility: visible; }
-.meo-suggestion-command { font: inherit; }
-.meo-suggestion-slash, .meo-suggestion-match { color: var(--meo-suggestion-match-color); }
+.meo-input-suggestion[aria-selected='true'] .meo-suggestion-marker { visibility: visible; }
+.meo-suggestion-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: inherit; }
+.meo-suggestion-trigger, .meo-suggestion-slash, .meo-suggestion-match { color: var(--meo-suggestion-match-color); }
 .meo-suggestion-parameters { color: var(--vscode-descriptionForeground); }
-.meo-slash-suggestion .meo-input-suggestion-detail { font: inherit; text-align: right; white-space: nowrap; overflow-wrap: normal; }
+.meo-input-suggestion-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--vscode-descriptionForeground); font: inherit; text-align: right; white-space: nowrap; overflow-wrap: normal; }

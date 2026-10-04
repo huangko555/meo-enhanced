@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { launchTestBrowser, closeTestBrowser } from './browser-test-helpers';
 import { defaultInputAssistance } from '../src/foundation/editingPreferences';
+import type { LinkCandidate } from '../src/protocol/editorServices';
 import { parseDelimitedTable, serializeDelimitedTable, splitMarkdownTableRow, parseMarkdownTable } from '../webview/src/application/delimitedTable';
 
 for (const delimiter of [',', '\t'] as const) {
@@ -25,12 +26,12 @@ try {
   await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
   await page.addStyleTag({ path: 'webview/src/styles.css' });
   await page.addScriptTag({ content: await build.outputs[0].text() });
-  const prepare = async (mode: string, text = '', from = text.length, to = from, input = {}, links?: string) => {
+  const prepare = async (mode: string, text = '', from = text.length, to = from, input = {}, links?: string | readonly LinkCandidate[]) => {
     await page.evaluate(({ mode, text, from, to, input, links }) => {
       const global = window as any;
       global.releaseLinks = null; global.editor?.destroy();
       global.editor = global.EditingFeaturesHarness.createEditor({ parent: document.getElementById('app')!, text, initialMode: mode, initialInputAssistance: input,
-        requestLinkCandidates: links === 'hold' ? () => new Promise(resolve => { global.releaseLinks = resolve; }) : links ? async () => [{ label: links, insert: links, detail: 'fixture' }] : undefined, onApplyChanges() {} });
+        requestLinkCandidates: links === 'hold' ? () => new Promise(resolve => { global.releaseLinks = resolve; }) : links ? async () => typeof links === 'string' ? [{ label: links, insert: links, detail: 'fixture' }] : links : undefined, onApplyChanges() {} });
       global.editor.view.dispatch({ selection: { anchor: from, head: to } }); global.editor.view.focus();
     }, { mode, text, from, to, input: { ...defaultInputAssistance, ...input }, links });
   };
@@ -298,6 +299,87 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.meo-input-suggestions').length === 0);
   await prepare('source', 'word', 0, 4); await page.keyboard.type('``'); assert.equal(await text(), '``word``');
   assert.equal(await page.evaluate(() => document.querySelectorAll('.meo-input-suggestions').length), 1, 'destroyed editors remove their popup');
+  const candidates: readonly LinkCandidate[] = Array.from({ length: 25 }, (_, index) => ({
+    label: index ? 'Note-' + index + '.md' : 'Note-' + '很长的文档标题'.repeat(8) + '.md',
+    insert: 'docs/' + index + '/Note with space.md', detail: 'project/docs/' + 'long-folder/'.repeat(8) + index + '/Note with space.md'
+  }));
+  const repeatedHeadings = '# Shared title\n\n'.repeat(25);
+  const openSuggestions = () => page.waitForSelector('.meo-input-suggestions:not([hidden])');
+  const settleSuggestions = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  const surface = () => page.$eval('.meo-input-suggestions:not([hidden])', popup => {
+    const style = getComputedStyle(popup), row = getComputedStyle(popup.querySelector('.meo-input-suggestion')!);
+    return { width: style.width, radius: style.borderRadius, shadow: style.boxShadow, font: style.fontFamily, size: style.fontSize, padding: style.padding, rowPadding: row.padding, rowHeight: row.minHeight, rowFont: row.fontFamily, rowSize: row.fontSize };
+  });
+  for (const mode of ['source', 'live']) for (const appearance of ['light', 'dark']) for (const language of ['en', 'zh-CN']) {
+    const configureSurface = () => page.evaluate(({ appearance, language }) => {
+      const root = document.documentElement, view = (window as any).editor.view;
+      root.dataset.editorAppearance = appearance;
+      root.style.setProperty('--vscode-sideBar-background', appearance === 'dark' ? '#20252a' : '#ffffff');
+      root.style.setProperty('--vscode-panel-border', appearance === 'dark' ? '#454b51' : '#d4d8de');
+      root.style.setProperty('--meo-foreground', appearance === 'dark' ? '#dce1e6' : '#24292f');
+      root.style.setProperty('--vscode-descriptionForeground', appearance === 'dark' ? '#959da5' : '#68727d');
+      (window as any).editor.setUiLanguage(language);
+      view.contentDOM.style.fontFamily = 'Consolas, monospace'; view.contentDOM.style.fontSize = '17px';
+      view.dispatch({ scrollIntoView: true }); view.requestMeasure();
+    }, { appearance, language });
+    await prepare(mode); await configureSurface(); await page.keyboard.type('/'); await openSuggestions();
+    const expectedSurface = await surface();
+    for (const kind of ['documents', 'paths', 'headings', 'emoji']) {
+      await prepare(mode, kind === 'headings' ? repeatedHeadings : '', undefined, undefined, { pairMode: 'off', emoji: true }, kind === 'documents' || kind === 'paths' ? candidates : undefined);
+      await configureSurface(); await settleSuggestions();
+      const query = kind === 'documents' ? '[[Note' : kind === 'paths' ? '[Go](Note' : kind === 'headings' ? '[Go](#Shared' : ':s';
+      await page.keyboard.type(query); await openSuggestions(); await settleSuggestions();
+      assert.deepEqual(await surface(), expectedSurface, [mode, appearance, language, kind].join(':') + ': shares slash surface, editor font and row dimensions');
+      const layout = await page.$eval('.meo-input-suggestions:not([hidden])', popup => {
+        const list = popup.querySelector<HTMLElement>('.meo-suggestion-list')!, row = list.querySelector<HTMLElement>('[aria-selected="true"]')!;
+        const label = row.querySelector<HTMLElement>('.meo-suggestion-label')!, detail = row.querySelector<HTMLElement>('.meo-input-suggestion-detail')!;
+        const bounds = popup.getBoundingClientRect(), rowBounds = row.getBoundingClientRect();
+        return {
+          clipped: label.getBoundingClientRect().width > 20 && detail.getBoundingClientRect().width > 10 && list.scrollWidth <= list.clientWidth + 1 && detail.getBoundingClientRect().right <= list.getBoundingClientRect().right + 1,
+          singleLine: getComputedStyle(label).whiteSpace === 'nowrap' && getComputedStyle(detail).whiteSpace === 'nowrap',
+          label: label.textContent, detail: detail.textContent, labelTitle: label.title, detailTitle: detail.title,
+          match: row.querySelector('.meo-suggestion-match')?.textContent,
+          ellipsis: getComputedStyle(label).textOverflow === 'ellipsis' && getComputedStyle(detail).textOverflow === 'ellipsis',
+          selectedTop: Math.abs(parseFloat(popup.style.getPropertyValue('--meo-suggestion-selected-top')) - (rowBounds.top - bounds.top - popup.clientTop)) < 1,
+          markerCount: Array.from(list.querySelectorAll('.meo-suggestion-marker')).filter(marker => getComputedStyle(marker).visibility === 'visible').length,
+          scrollbar: getComputedStyle(list, '::-webkit-scrollbar').width,
+          track: getComputedStyle(list, '::-webkit-scrollbar-track').backgroundColor
+        };
+      });
+      assert.equal(layout.clipped, true, kind + ': long names and paths stay inside the menu');
+      assert.equal(layout.singleLine, true); assert.equal(layout.ellipsis, true); assert.equal(layout.selectedTop, true); assert.equal(layout.markerCount, 1);
+      assert.equal(layout.scrollbar, '6px'); assert.equal(layout.track, 'rgba(0, 0, 0, 0)');
+      assert.equal(layout.match?.toLowerCase(), kind === 'headings' ? 'shared' : kind === 'emoji' ? 's' : 'note');
+      if (kind === 'headings') assert.equal(layout.detail, '#shared-title', 'duplicate headings expose their canonical anchors');
+      else if (kind === 'emoji') { assert.equal(layout.label, ':smile:'); assert.equal(layout.detail, '😄'); }
+      else { assert.equal(layout.labelTitle, candidates[0].label); assert.equal(layout.detailTitle, candidates[0].detail); }
+      await page.keyboard.press('ArrowDown'); await settleSuggestions();
+      assert.equal(await page.$eval('.meo-input-suggestions', popup => popup.querySelector('[aria-selected="true"]') === popup.querySelectorAll('[role="option"]')[1]), true);
+      if (kind !== 'emoji') {
+        const rowHeight = await page.$eval('.meo-input-suggestion', row => row.getBoundingClientRect().height);
+        for (let index = 0; index < 14; index++) await page.keyboard.press('ArrowDown');
+        const scrollTop = await page.$eval('.meo-suggestion-list', list => list.scrollTop);
+        assert.ok(scrollTop > 0, kind + ': keyboard navigation reaches the next page');
+        await page.keyboard.press('ArrowUp');
+        assert.equal(await page.$eval('.meo-suggestion-list', list => list.scrollTop), scrollTop, kind + ': navigation inside the viewport does not pin selection to the bottom');
+        assert.ok(rowHeight > 0);
+      }
+      await page.mouse.move(0, 0); await page.hover('.meo-input-suggestion:nth-child(2)');
+      assert.equal(await page.$eval('.meo-input-suggestions', popup => popup.querySelector('[aria-selected="true"]') === popup.querySelectorAll('[role="option"]')[1]), true, kind + ': pointer uses the same selected-row state');
+      await page.click('.meo-input-suggestion:nth-child(2)');
+      const inserted = kind === 'documents' ? '[[docs/1/Note with space' : kind === 'paths' ? '[Go](docs/1/Note%20with%20space.md' : kind === 'headings' ? repeatedHeadings + '[Go](#shared-title-2' : '✨';
+      await waitText(inserted);
+      assert.equal(await page.evaluate(() => (window as any).editor.view.hasFocus), true, kind + ': accepting keeps document input connected');
+    }
+  }
+  await page.setViewport({ width: 320, height: 320 });
+  await prepare('source', '', 0, 0, { pairMode: 'off' }, candidates); await page.keyboard.type('[[Note'); await openSuggestions(); await settleSuggestions();
+  const narrow = await page.$eval('.meo-input-suggestions', popup => {
+    const bounds = popup.getBoundingClientRect(), list = popup.querySelector('.meo-suggestion-list')!, visible = Array.from(list.children).map(row => row.getBoundingClientRect()).filter(row => row.bottom > list.getBoundingClientRect().top && row.top < list.getBoundingClientRect().bottom);
+    return { left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom, wholeRows: visible.every(row => row.top >= list.getBoundingClientRect().top - 1 && row.bottom <= list.getBoundingClientRect().bottom + 1) };
+  });
+  assert.ok(narrow.left >= 0 && narrow.right <= 320 && narrow.top >= 0 && narrow.bottom <= 320 && narrow.wholeRows, 'narrow viewport keeps complete rows inside the shared menu');
+  await page.keyboard.press('Escape'); await waitText('[[Note');
   assert.deepEqual(errors, []);
   console.log('Editing features: CSV/TSV/HTML codecs; IME, multi-selection, external origins, native table symbols/lists; paste contexts; commands and candidates passed');
 } catch (error) {

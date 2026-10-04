@@ -159,7 +159,7 @@ export function createInputSuggestions(options: {
     async resolve(context: SuggestionContext, generation: number) {
       const language = this.view.state.facet(uiLanguageFacet);
       let items: readonly Suggestion[];
-      if (context.type === 'emoji') items = emojiSuggestions.filter(item => item.name.startsWith(context.query.toLowerCase())).map(item => ({ label: item.value + ' ' + item.name, insert: item.value, detail: '' }));
+      if (context.type === 'emoji') items = emojiSuggestions.filter(item => item.name.startsWith(context.query.toLowerCase())).map(item => ({ label: ':' + item.name + ':', insert: item.value, detail: item.value }));
       else if (context.type === 'slash') {
         const scope = this.cellFrom !== null ? 'inline' : options.inputContext(this.view.state, this.slashFrom! + 1);
         items = scope === 'excluded' ? [] : slashCommandSuggestions(context.query, scope).map(slash => ({ label: slash.label, insert: slash.insert, detail: language === 'zh-CN' ? slash.zh : slash.en, caret: slash.caret, slash }));
@@ -172,6 +172,7 @@ export function createInputSuggestions(options: {
       if (!items.length) { this.clear(); return; }
       const unchanged = context.type === 'slash' && !this.popup.hidden && this.ariaInput === (this.cellInput ?? this.view.contentDOM) &&
         JSON.stringify(context) === JSON.stringify(this.context) && JSON.stringify(items) === JSON.stringify(this.items);
+      if (this.context?.type !== context.type) this.above = null;
       this.context = context; this.items = items; const exact = context.type === 'slash' ? items.findIndex(item => [item.slash!.id.toLowerCase(), ...item.slash!.aliases].includes(context.query.toLowerCase())) : -1;
       this.index = context.query !== this.resolvedQuery && exact >= 0 ? exact : Math.max(0, items.findIndex(item => item.slash?.id === this.selectedCommand));
       this.resolvedQuery = context.query;
@@ -187,42 +188,54 @@ export function createInputSuggestions(options: {
       const slash = this.context?.type === 'slash';
       this.popup.classList.toggle('meo-slash-suggestions', slash);
       this.popup.style.removeProperty('--meo-suggestion-max-height'); this.popup.style.removeProperty('max-width');
-      const list = slash ? document.createElement('div') : this.popup;
-      if (slash) { list.className = 'meo-slash-list'; this.popup.append(list); }
-      if (this.context?.type === 'slash') {
-        const font = getComputedStyle(this.view.contentDOM);
-        this.popup.style.setProperty('--meo-suggestion-font', font.fontFamily);
-        this.popup.style.setProperty('--meo-suggestion-font-size', font.fontSize);
-      }
+      const list = document.createElement('div'); list.className = 'meo-suggestion-list';
+      if (slash) list.classList.add('meo-slash-list');
+      this.popup.append(list);
+      const font = getComputedStyle(this.view.contentDOM);
+      this.popup.style.setProperty('--meo-suggestion-font', font.fontFamily);
+      this.popup.style.setProperty('--meo-suggestion-font-size', font.fontSize);
+      const appendMatched = (element: HTMLElement, value: string, query: string) => {
+        const match = query ? value.toLocaleLowerCase().indexOf(query.toLocaleLowerCase()) : -1;
+        if (match < 0) { element.append(value); return; }
+        const matched = document.createElement('span'); matched.className = 'meo-suggestion-match'; matched.textContent = value.slice(match, match + query.length);
+        element.append(value.slice(0, match), matched, value.slice(match + query.length));
+      };
       this.items.forEach((item, index) => {
         const row = document.createElement('button'); row.type = 'button'; row.className = 'meo-input-suggestion'; row.setAttribute('role', 'option');
         row.id = this.popup.id + '-' + index; row.setAttribute('aria-selected', String(index === this.index)); row.tabIndex = -1; row.setAttribute('aria-disabled', String(!!item.slash?.disabled || this.composing || this.view.compositionStarted));
-        const label = document.createElement('span');
+        const marker = document.createElement('span'); marker.className = 'meo-suggestion-marker'; marker.setAttribute('aria-hidden', 'true');
+        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); icon.setAttribute('viewBox', '0 0 20 16');
+        const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'path'); chevron.setAttribute('d', 'M3 3L8 8L3 13M10 3L15 8L10 13');
+        icon.append(chevron); marker.append(icon); row.append(marker);
+        const label = document.createElement('span'); label.className = 'meo-suggestion-label';
         if (item.slash) {
           row.dataset.command = item.slash.id; row.classList.add('meo-slash-suggestion');
-          const marker = document.createElement('span'); marker.className = 'meo-suggestion-marker'; marker.setAttribute('aria-hidden', 'true');
-          const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); icon.setAttribute('viewBox', '0 0 20 16');
-          const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'path'); chevron.setAttribute('d', 'M3 3L8 8L3 13M10 3L15 8L10 13');
-          icon.append(chevron); marker.append(icon); row.append(marker);
-          label.className = 'meo-suggestion-command';
+          label.classList.add('meo-suggestion-command');
           const prefix = document.createElement('span'); prefix.className = 'meo-suggestion-slash'; prefix.textContent = '/';
           label.append(prefix);
           const query = (this.context?.type === 'slash' ? this.context.query : '').toLowerCase().replace(/×/g, 'x');
           const exactAlias = item.slash.aliases.includes(query) || item.slash.id.startsWith('code-') || item.slash.label.toLowerCase().replace(/[^a-z0-9]/g, '') === query;
           const command = query && exactAlias && !item.slash.command.includes(query) ? query : item.slash.command;
-          const match = query ? command.indexOf(query) : -1;
-          if (match >= 0) {
-            const matched = document.createElement('span'); matched.className = 'meo-suggestion-match'; matched.textContent = command.slice(match, match + query.length);
-            label.append(command.slice(0, match), matched, command.slice(match + query.length));
-          } else label.append(command);
+          appendMatched(label, command, query);
           if (item.slash.parameters) {
             const dimensions = document.createElement('span'); dimensions.className = 'meo-suggestion-parameters'; dimensions.textContent = item.slash.parameters; label.append(dimensions);
           }
-        } else label.textContent = item.label;
+        } else if (this.context?.type === 'emoji') {
+          const prefix = document.createElement('span'); prefix.className = 'meo-suggestion-trigger'; prefix.textContent = ':'; label.append(prefix);
+          appendMatched(label, item.label.slice(1), this.context.query);
+        } else {
+          appendMatched(label, item.label, this.context?.query ?? ''); label.title = item.label;
+        }
         row.append(label);
-        if (item.detail && (item.slash || item.detail !== item.label)) { const detail = document.createElement('span'); detail.className = 'meo-input-suggestion-detail'; detail.textContent = item.detail; row.append(detail); }
+        const detailValue = this.context?.type === 'headings' && item.anchor ? '#' + item.anchor : item.detail;
+        if (detailValue && (item.slash || detailValue !== item.label)) {
+          const detail = document.createElement('span'); detail.className = 'meo-input-suggestion-detail';
+          if (item.slash) detail.textContent = detailValue;
+          else { appendMatched(detail, detailValue, this.context?.query ?? ''); detail.title = [item.detail, detailValue].filter((value, index, values) => value && values.indexOf(value) === index).join(' · '); }
+          row.append(detail);
+        }
         row.addEventListener('click', () => this.choose(index));
-        if (item.slash) row.addEventListener('pointermove', () => {
+        row.addEventListener('pointermove', () => {
           if (this.index === index) return;
           this.select(index, false);
         });
@@ -231,7 +244,7 @@ export function createInputSuggestions(options: {
       this.popup.hidden = false; this.ariaInput = this.cellInput ?? this.view.contentDOM;
       this.ariaInput.setAttribute('aria-controls', this.popup.id); this.ariaInput.setAttribute('aria-activedescendant', this.popup.id + '-' + this.index);
       this.position();
-      if (!this.popup.hidden) { this.scrollSelection(); if (slash) this.position(); }
+      if (!this.popup.hidden) { this.scrollSelection(); this.position(); }
     }
     select(index: number, scroll: boolean) {
       this.index = index;
@@ -242,7 +255,7 @@ export function createInputSuggestions(options: {
       this.position();
     }
     scrollSelection() {
-      const list = this.popup.querySelector<HTMLElement>('.meo-slash-list') ?? this.popup;
+      const list = this.popup.querySelector<HTMLElement>('.meo-suggestion-list')!;
       const selected = list.querySelector<HTMLElement>('[aria-selected="true"]');
       if (!selected) return;
       // Scroll only enough to reveal a candidate; keep both the list and document stable otherwise.
@@ -265,69 +278,63 @@ export function createInputSuggestions(options: {
       } : this.view.coordsAtPos(slash ? this.slashFrom! : this.head);
       if (!coords) { close(); return; }
       const viewport = document.documentElement;
-      if (slash) {
-        const scroller = this.view.scrollDOM, scroll = scroller.getBoundingClientRect();
-        const toolbar = document.querySelector('.mode-toolbar')?.getBoundingClientRect();
-        const top = Math.max(8, scroll.top + scroller.clientTop, toolbar?.bottom ?? 0);
-        const bottom = Math.min(viewport.clientHeight - 8, scroll.top + scroller.clientTop + scroller.clientHeight);
-        let left = Math.max(8, scroll.left + scroller.clientLeft + 8);
-        let right = Math.min(viewport.clientWidth - 8, scroll.left + scroller.clientLeft + scroller.clientWidth - 8);
-        const outline = this.view.dom.closest('.editor-wrapper')?.querySelector<HTMLElement>('.outline-sidebar');
-        if (outline && !outline.hidden) {
-          const bounds = outline.getBoundingClientRect();
-          if (bounds.bottom > top && bounds.top < bottom) {
-            if (outline.classList.contains('outline-left')) left = Math.max(left, bounds.right + 8);
-            else right = Math.min(right, bounds.left - 8);
-          }
+      const scroller = this.view.scrollDOM, scroll = scroller.getBoundingClientRect();
+      const toolbar = document.querySelector('.mode-toolbar')?.getBoundingClientRect();
+      const top = Math.max(8, scroll.top + scroller.clientTop, toolbar?.bottom ?? 0);
+      const bottom = Math.min(viewport.clientHeight - 8, scroll.top + scroller.clientTop + scroller.clientHeight);
+      let left = Math.max(8, scroll.left + scroller.clientLeft + 8);
+      let right = Math.min(viewport.clientWidth - 8, scroll.left + scroller.clientLeft + scroller.clientWidth - 8);
+      const outline = this.view.dom.closest('.editor-wrapper')?.querySelector<HTMLElement>('.outline-sidebar');
+      if (outline && !outline.hidden) {
+        const bounds = outline.getBoundingClientRect();
+        if (bounds.bottom > top && bounds.top < bottom) {
+          if (outline.classList.contains('outline-left')) left = Math.max(left, bounds.right + 8);
+          else right = Math.min(right, bounds.left - 8);
         }
-        let visibleTop = top, visibleBottom = bottom, visibleLeft = left - 8, visibleRight = right + 8;
-        // A cell can be clipped by its own scroll or by a horizontally scrolling table.
-        // The menu still uses the editor viewport, so it can extend beyond the small cell.
-        for (let node: HTMLElement | null = this.cellInput; node && node !== scroller; node = node.parentElement) {
-          const style = getComputedStyle(node), bounds = node.getBoundingClientRect();
-          if (node === this.cellInput || /auto|scroll|hidden|clip/.test(style.overflowY)) {
-            visibleTop = Math.max(visibleTop, bounds.top + node.clientTop);
-            visibleBottom = Math.min(visibleBottom, bounds.top + node.clientTop + node.clientHeight);
-          }
-          if (node === this.cellInput || /auto|scroll|hidden|clip/.test(style.overflowX)) {
-            visibleLeft = Math.max(visibleLeft, bounds.left + node.clientLeft);
-            visibleRight = Math.min(visibleRight, bounds.left + node.clientLeft + node.clientWidth);
-          }
+      }
+      let visibleTop = top, visibleBottom = bottom, visibleLeft = left - 8, visibleRight = right + 8;
+      // A cell can be clipped by its own scroll or by a horizontally scrolling table.
+      // The menu still uses the editor viewport, so it can extend beyond the small cell.
+      for (let node: HTMLElement | null = this.cellInput; node && node !== scroller; node = node.parentElement) {
+        const style = getComputedStyle(node), bounds = node.getBoundingClientRect();
+        if (node === this.cellInput || /auto|scroll|hidden|clip/.test(style.overflowY)) {
+          visibleTop = Math.max(visibleTop, bounds.top + node.clientTop);
+          visibleBottom = Math.min(visibleBottom, bounds.top + node.clientTop + node.clientHeight);
         }
-        if (coords.bottom <= visibleTop || coords.top >= visibleBottom || coords.left >= visibleRight ||
-            Math.max(coords.right, coords.left + this.view.defaultCharacterWidth) <= visibleLeft || right <= left) { close(); return; }
-        this.popup.style.maxWidth = (right - left) + 'px';
-        const list = this.popup.querySelector<HTMLElement>('.meo-slash-list')!, previous = list.getBoundingClientRect();
-        const selected = list.querySelector<HTMLElement>('[aria-selected="true"]'), selectedBefore = selected?.getBoundingClientRect();
-        const selectedVisible = selectedBefore && selectedBefore.top >= previous.top - 1 && selectedBefore.bottom <= previous.bottom + 1;
-        const first = list.firstElementChild!.getBoundingClientRect(), last = list.lastElementChild!.getBoundingClientRect();
-        const chrome = this.popup.getBoundingClientRect().height - previous.height;
-        // Measure content without enlarging the list: a temporary resize clamps its scroll position.
-        const preferred = Math.min(parseFloat(getComputedStyle(this.popup).getPropertyValue('--meo-suggestion-preferred-height')), last.bottom - first.top + chrome);
-        const below = Math.max(0, bottom - coords.bottom - 4), above = Math.max(0, coords.top - top - 4);
-        if (this.above === null) this.above = below < preferred && above > below;
-        else if ((this.above ? above : below) < preferred && (this.above ? below : above) >= preferred) this.above = !this.above;
-        else if (above < preferred && below < preferred) this.above = above > below;
-        const available = this.above ? above : below;
-        const rows = Math.floor((Math.min(preferred, available) - chrome + 0.001) / first.height);
-        if (rows < 1) { close(); return; }
-        // Keep the edge between rows, including fractional heights from editor fonts and zoom.
-        this.popup.style.setProperty('--meo-suggestion-max-height', rows * first.height + chrome + 'px');
-        const bounds = this.popup.getBoundingClientRect();
-        this.popup.style.left = Math.max(left, Math.min(coords.left, right - bounds.width)) + 'px';
-        this.popup.style.top = (this.above ? coords.top - bounds.height - 4 : coords.bottom + 4) + 'px';
-        // Shrinking the viewport must not hide a command that was already visible.
-        if (selectedVisible && list.getBoundingClientRect().height < previous.height) this.scrollSelection();
-        if (selected) {
-          // Paint a single selection background across the list and its reserved scrollbar gutter.
-          const row = selected.getBoundingClientRect(), offset = row.top - bounds.top - this.popup.clientTop;
-          this.popup.style.setProperty('--meo-suggestion-selected-top', offset + 'px');
-          this.popup.style.setProperty('--meo-suggestion-selected-bottom', offset + row.height + 'px');
+        if (node === this.cellInput || /auto|scroll|hidden|clip/.test(style.overflowX)) {
+          visibleLeft = Math.max(visibleLeft, bounds.left + node.clientLeft);
+          visibleRight = Math.min(visibleRight, bounds.left + node.clientLeft + node.clientWidth);
         }
-      } else {
-        const bounds = this.popup.getBoundingClientRect();
-        this.popup.style.left = Math.max(8, Math.min(coords.left, viewport.clientWidth - bounds.width - 8)) + 'px';
-        this.popup.style.top = (coords.bottom + bounds.height + 8 <= viewport.clientHeight ? coords.bottom + 4 : Math.max(8, coords.top - bounds.height - 4)) + 'px';
+      }
+      if (coords.bottom <= visibleTop || coords.top >= visibleBottom || coords.left >= visibleRight ||
+          Math.max(coords.right, coords.left + this.view.defaultCharacterWidth) <= visibleLeft || right <= left) { close(); return; }
+      this.popup.style.maxWidth = (right - left) + 'px';
+      const list = this.popup.querySelector<HTMLElement>('.meo-suggestion-list')!, previous = list.getBoundingClientRect();
+      const selected = list.querySelector<HTMLElement>('[aria-selected="true"]'), selectedBefore = selected?.getBoundingClientRect();
+      const selectedVisible = selectedBefore && selectedBefore.top >= previous.top - 1 && selectedBefore.bottom <= previous.bottom + 1;
+      const first = list.firstElementChild!.getBoundingClientRect(), last = list.lastElementChild!.getBoundingClientRect();
+      const chrome = this.popup.getBoundingClientRect().height - previous.height;
+      // Measure content without enlarging the list: a temporary resize clamps its scroll position.
+      const preferred = Math.min(parseFloat(getComputedStyle(this.popup).getPropertyValue('--meo-suggestion-preferred-height')), last.bottom - first.top + chrome);
+      const below = Math.max(0, bottom - coords.bottom - 4), above = Math.max(0, coords.top - top - 4);
+      if (this.above === null) this.above = below < preferred && above > below;
+      else if ((this.above ? above : below) < preferred && (this.above ? below : above) >= preferred) this.above = !this.above;
+      else if (above < preferred && below < preferred) this.above = above > below;
+      const available = this.above ? above : below;
+      const rows = Math.floor((Math.min(preferred, available) - chrome + 0.001) / first.height);
+      if (rows < 1) { close(); return; }
+      // Keep the edge between rows, including fractional heights from editor fonts and zoom.
+      this.popup.style.setProperty('--meo-suggestion-max-height', rows * first.height + chrome + 'px');
+      const bounds = this.popup.getBoundingClientRect();
+      this.popup.style.left = Math.max(left, Math.min(coords.left, right - bounds.width)) + 'px';
+      this.popup.style.top = (this.above ? coords.top - bounds.height - 4 : coords.bottom + 4) + 'px';
+      // Shrinking the viewport must not hide a command that was already visible.
+      if (selectedVisible && list.getBoundingClientRect().height < previous.height) this.scrollSelection();
+      if (selected) {
+        // Paint a single selection background across the list and its reserved scrollbar gutter.
+        const row = selected.getBoundingClientRect(), offset = row.top - bounds.top - this.popup.clientTop;
+        this.popup.style.setProperty('--meo-suggestion-selected-top', offset + 'px');
+        this.popup.style.setProperty('--meo-suggestion-selected-bottom', offset + row.height + 'px');
       }
     }
     choose(index: number) {
