@@ -46,11 +46,14 @@ const languages: readonly [string, string, readonly string[]][] = [
 ];
 /** Pinyin separators affect filtering only; replacement still uses the original input length. */
 export function readSlashQuery(value: string): string | null {
-  return value.length <= 1001 && /^\/(?:[a-z0-9×]+(?:'[a-z0-9×]*)*)?$/i.test(value) ? value.slice(1).replace(/'/g, '') : null;
+  if (value.length > 1001 || !/^\/(?:[a-z0-9×*]+(?:'[a-z0-9×*]*)*)?$/i.test(value)) return null;
+  const query = value.slice(1).replace(/'/g, '');
+  // Asterisk is a dimension separator only, not punctuation in ordinary commands.
+  return !query.includes('*') || /^(?:table)?[0-9]+\*[0-9]*$/i.test(query) ? query : null;
 }
 export function slashCommandSuggestions(query: string, context: 'block' | 'inline' | 'heading'): readonly SlashCommand[] {
   const q = query.toLowerCase();
-  const dimensions = /^(?:table)?([0-9]+)(?:[x×]([0-9]*))?$/i.exec(q);
+  const dimensions = /^(?:table)?([0-9]+)(?:[x×*]([0-9]*))?$/i.exec(q);
   if (dimensions) {
     if (context !== 'block') return [];
     const rows = Number(dimensions[1]), cols = Number(dimensions[2]), complete = !!dimensions[2];
@@ -63,7 +66,7 @@ export function slashCommandSuggestions(query: string, context: 'block' | 'inlin
     return [{ ...table, command, insert: '', caret: 0, disabled: true, parameters: complete ? undefined : dimensions[2] === undefined ? 'xN' : 'N',
       zh: fits ? '继续输入列数' : positive ? '表格尺寸过大' : '行列数需为正整数', en: fits ? 'Enter column count' : positive ? 'Table size is too large' : 'Use positive row/column counts' }];
   }
-  if (/^(?:table)?[0-9]/.test(q) || /^(?:table)?[x×]/.test(q)) return [];
+  if (/^(?:table)?[0-9]/.test(q) || /^(?:table)?[x×*]/.test(q)) return [];
   const language = languages.find(([id, , aliases]) => [id, ...aliases].includes(q));
   if (language && context === 'block') return [{ ...block('code-' + language[0], language[1] + ' Code', 'code', '{}', language[1] + ' 代码块', '```' + language[0] + '\n\n```', language[0].length + 4), command: language[0] }];
   const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');

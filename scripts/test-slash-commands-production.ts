@@ -82,19 +82,33 @@ try {
     assert.deepEqual(await popupContinuity(), { hiddenFrames: 0, replaced: false }, mode + ': filtering retains the visible popup without blank frames');
     await page.click('[data-command="bold"] .meo-suggestion-command'); await waitText('****');
     await page.keyboard.type('word'); await waitText('**word**');
-    await prepare(mode); await page.keyboard.type('/table'); await open();
-    for (const [character, display, disabled] of [['6', '/table6xN', 'true'], ['x', '/table6xN', 'true'], ['6', '/table6x6', 'false']]) {
-      await page.keyboard.type(character); await open();
-      assert.equal(await page.$eval('.meo-suggestion-command', row => row.textContent), display);
-      assert.equal(await page.$eval('.meo-input-suggestion', row => row.getAttribute('aria-disabled')), disabled, mode + ': incomplete dimensions cannot execute');
+    for (const separator of ['x', '*']) {
+      await prepare(mode); await page.keyboard.type('/table'); await open(); await watchPopup();
+      for (const [character, display, disabled] of [['6', '/table6xN', 'true'], [separator, '/table6' + separator + 'N', 'true'], ['6', '/table6' + separator + '6', 'false']]) {
+        await page.keyboard.type(character); await open();
+        assert.equal(await page.$eval('.meo-suggestion-command', row => row.textContent), display);
+        assert.equal(await page.$eval('.meo-suggestion-match', row => row.textContent), (await text()).slice(1), mode + ': matching includes the typed separator');
+        assert.equal(await page.$eval('.meo-input-suggestion', row => row.getAttribute('aria-disabled')), disabled, mode + ': incomplete dimensions cannot execute');
+      }
+      await page.keyboard.press('Backspace'); await open();
+      assert.equal(await page.$eval('.meo-suggestion-command', row => row.textContent), '/table6' + separator + 'N');
+      assert.equal(await page.$eval('.meo-input-suggestion', row => row.getAttribute('aria-disabled')), 'true', mode + ': deleting a column count returns to a pending suggestion');
+      await page.keyboard.type('6'); await open();
+      assert.deepEqual(await popupContinuity(), { hiddenFrames: 0, replaced: false }, mode + ': dimension prefixes and deletion keep the same visible popup');
+      await page.keyboard.press('Enter');
+      const sizedTable = await page.evaluate(() => (window as any).EditingFeaturesHarness.parseMarkdownTable((window as any).editor.getText()));
+      assert.equal(sizedTable.cells.length, 7, mode + ': six data rows plus header');
+      assert.ok(sizedTable.cells.every((row: string[]) => row.length === 6), mode + ': six columns');
     }
-    await page.keyboard.press('Backspace'); await open();
-    assert.equal(await page.$eval('.meo-input-suggestion', row => row.getAttribute('aria-disabled')), 'true', mode + ': deleting a column count returns to a pending suggestion');
-    await page.keyboard.type('6'); await open();
-    await page.keyboard.press('Enter');
-    const sizedTable = await page.evaluate(() => (window as any).EditingFeaturesHarness.parseMarkdownTable((window as any).editor.getText()));
-    assert.equal(sizedTable.cells.length, 7, mode + ': six data rows plus header');
-    assert.ok(sizedTable.cells.every((row: string[]) => row.length === 6), mode + ': six columns');
+    for (const language of ['en', 'zh-CN']) {
+      await prepare(mode); await page.evaluate(language => (window as any).editor.setUiLanguage(language), language);
+      await page.keyboard.type('/table3*4'); await open();
+      assert.equal(await page.$eval('.meo-suggestion-command', row => row.textContent), '/table3*4');
+      assert.equal(await page.$eval('.meo-input-suggestion-detail', row => row.textContent), language === 'en' ? '3 data rows × 4 cols' : '3 数据行 × 4 列');
+      await page.keyboard.press('Enter'); await waitText(emptyMarkdownTable(4, 3)!);
+      await page.evaluate(() => (window as any).editor.undo()); await waitText('/table3*4');
+      await page.evaluate(() => (window as any).editor.redo()); await waitText(emptyMarkdownTable(4, 3)!);
+    }
     const longDocument = Array.from({ length: 120 }, (_, index) => 'Line ' + String(index).padStart(3, '0') + ' sample text').join('\n\n');
     const anchor = longDocument.indexOf('Line 060') + 8;
     await prepare(mode, longDocument, anchor); await page.evaluate(anchor => { (window as any).slashAnchor = anchor; }, anchor);
@@ -365,31 +379,34 @@ try {
     for (const { rows, cols, height, widths, empty } of dimensions) {
       assert.equal(height, rows + 1, mode + ': data rows plus header'); assert.ok(widths.every(width => width === cols)); assert.equal(empty, true);
     }
-    for (const query of ['table0x3', 'table2x', '3x0', 'table3', '100x100', '6', '6x', 'table10X', 'table100000000000000000000x2']) {
+    for (const query of ['table0x3', 'table2x', '3x0', 'table3', '100x100', '6', '6x', 'table10X', 'table100000000000000000000x2', 'table6*', '6*', 'table0*3', 'table3*0', '100*100', 'table100000000000000000000*2']) {
       await prepare(mode); await page.keyboard.type('/' + query); await open();
       assert.equal(await page.$eval('.meo-input-suggestion', row => row.getAttribute('aria-disabled')), 'true', query + ': pending or out-of-range sizes stay visible');
       await page.click('.meo-input-suggestion'); await waitText('/' + query); await open();
       await page.keyboard.press('Enter'); assert.ok((await text()).startsWith('/' + query + '\n'), query + ': incomplete or invalid dimensions never execute a default'); await closed();
     }
-    for (const query of ['table6q', 'table6xx6', 'tablex6', 'table6x6x']) {
+    for (const query of ['table6q', 'table6xx6', 'tablex6', 'table6x6x', 'bold*', 'table*6', 'table6**4', 'table6*x4', 'table6*4x', 'table6*4*', 'table6*-4', 'table6*4.5']) {
       await prepare(mode); await page.keyboard.type('/' + query); await closed(); await waitText('/' + query);
     }
-    for (const query of ['table10x10', 'table10X10', 'table10×10', '6x6', 'table06x04', 'table12x13', '11X2']) {
+    for (const query of ['table10x10', 'table10X10', 'table10×10', '6x6', 'table06x04', 'table12x13', '11X2', 'table3*4', '6*4', 'table06*04', 'table12*13', "ta'ble6*4"]) {
       await prepare(mode); await page.keyboard.type('/' + query); await open();
       await page.keyboard.press('Tab');
       const table = await page.evaluate(() => (window as any).EditingFeaturesHarness.parseMarkdownTable((window as any).editor.getText()));
-      const [rows, cols] = query.replace(/^table/, '').split(/[xX×]/).map(Number);
+      const [rows, cols] = query.replace(/'/g, '').replace(/^table/, '').split(/[xX×*]/).map(Number);
       assert.equal(table.cells.length, rows + 1, query + ': data rows plus header');
       assert.ok(table.cells.every((row: string[]) => row.length === cols), query + ': requested columns');
     }
     await prepare(mode); await page.keyboard.type('/table1x0'); await open();
     await page.keyboard.press('Backspace'); await page.keyboard.type('2'); await open(); await page.keyboard.press('Enter');
     await waitText('|  |  |\n| --- | --- |\n|  |  |');
-    await prepare(mode, '', 0, { slash: false }); await page.keyboard.type('/table6x'); await page.keyboard.press('Tab');
-    const literalTab = await text();
-    assert.ok(literalTab.includes('/table6x'), mode + ': ordinary Tab preserves the literal input');
-    await prepare(mode); await page.keyboard.type('/table6x'); await open(); await page.keyboard.press('Tab'); await waitText(literalTab);
-    await prepare(mode); await page.keyboard.type('/table6x'); await open(); await page.keyboard.press('Escape'); await closed(); await waitText('/table6x');
+    for (const separator of ['x', '*']) {
+      const pending = '/table6' + separator;
+      await prepare(mode, '', 0, { slash: false }); await page.keyboard.type(pending); await page.keyboard.press('Tab');
+      const literalTab = await text();
+      assert.ok(literalTab.includes(pending), mode + ': ordinary Tab preserves the literal input');
+      await prepare(mode); await page.keyboard.type(pending); await open(); await page.keyboard.press('Tab'); await waitText(literalTab);
+      await prepare(mode); await page.keyboard.type(pending); await open(); await page.keyboard.press('Escape'); await closed(); await waitText(pending);
+    }
 
   }
   const table = '| A | B |\n| --- | --- |\n|  | x |';
@@ -450,7 +467,7 @@ try {
   assert.equal(await page.evaluate(() => (document.activeElement as HTMLTextAreaElement).value), '[value0](value1 "value2")');
   await prepareCell('``a`b``'); await page.keyboard.type('/b'); await open(); await page.keyboard.press('Escape'); await closed();
   await prepareCell('`word`', 3); await page.keyboard.type('/b'); await closed();
-  for (const query of ['table', 'table6', 'table6x', 'table6x6']) {
+  for (const query of ['table', 'table6', 'table6x', 'table6x6', 'table6*', 'table6*6']) {
     await prepareCell(); await page.keyboard.type('/' + query); await closed();
   }
   assert.equal(await page.evaluate(() => (window as any).editor.executeCommand('insertTable')), false);
