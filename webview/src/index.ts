@@ -1102,7 +1102,7 @@ editorFontSizeStepper.append(decreaseEditorFontSizeBtn, editorFontSizeValue, inc
 const applyUiLanguage = (language: UiLanguage): void => {
   const strings = getUiStrings(language);
   preferencesHeading.textContent = language === 'zh-CN' ? '偏好设置' : 'Preferences';
-  preferencesLabel.textContent = language === 'zh-CN' ? '输入辅助 · 快捷键等' : 'Typing · Shortcuts, etc.';
+  preferencesLabel.textContent = language === 'zh-CN' ? '输入 · 快捷键等' : 'Input · Shortcuts, etc.';
   moreSettingsButtonLabel.textContent = language === 'zh-CN' ? '更多设置' : 'More settings';
   settingsWindow?.setLanguage(language);
   activeUiLanguage = language;

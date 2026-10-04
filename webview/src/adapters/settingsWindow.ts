@@ -264,7 +264,7 @@ export function createSettingsWindow(options: {
   function present() {
     title.textContent = t('设置', 'Settings'); close.setAttribute('aria-label', t('关闭设置', 'Close settings'));
     tabs.setAttribute('aria-label', t('设置分类', 'Settings categories')); navigation.setAttribute('aria-label', t('跳转到章节', 'Jump to section'));
-    for (const [id, control] of tabButtons) control.label.textContent = id === 'general' ? t('常规', 'General') : id === 'typing' ? t('输入辅助', 'Typing') : t('快捷键', 'Shortcuts');
+    for (const [id, control] of tabButtons) control.label.textContent = id === 'general' ? t('常规', 'General') : id === 'typing' ? t('输入', 'Input') : t('快捷键', 'Shortcuts');
     search.placeholder = t('搜索设置', 'Search settings'); search.setAttribute('aria-label', search.placeholder); clear.setAttribute('aria-label', t('清除搜索', 'Clear search'));
     reset.textContent = t('恢复默认快捷键', 'Reset shortcuts'); reset.setAttribute('aria-expanded', String(resetOpen));
     resetTitle.textContent = t('恢复全部快捷键？', 'Reset all shortcuts?'); resetDescription.textContent = t('自定义绑定将被替换，其他设置保持不变。', 'Custom bindings will be replaced. Other settings stay unchanged.');
