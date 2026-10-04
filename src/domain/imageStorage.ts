@@ -3,7 +3,7 @@ import type { ImageStoragePreferences } from '../foundation/imageStorage';
 export const imagePathVariables = ['fileDirname', 'fileBasename', 'fileBasenameNoExtension', 'fileExtname'] as const;
 export type ImagePathContext = Readonly<Record<typeof imagePathVariables[number], string>>;
 
-/** ~/ is a fixed basic-UI marker, never a home-directory expansion. */
+/** Basic folders are anchored to the Markdown directory; advanced rules resolve against the same directory. */
 export function expandImageStorage(preferences: ImageStoragePreferences, context: ImagePathContext): string {
   if (preferences.mode !== 'advanced') {
     const folder = preferences.folder.trim().replace(/\\/g, '/');
@@ -15,7 +15,7 @@ export function expandImageStorage(preferences: ImageStoragePreferences, context
   }
   const rule = preferences.rule.trim();
   if (!rule) throw new Error('Enter an image folder path.');
-  if (rule.startsWith('~')) throw new Error('Use a relative path or an absolute path; ~/ is only a display marker.');
+  if (rule.startsWith('~')) throw new Error('Home-directory paths (~) are not supported; use a path relative to the document or an absolute path.');
   if (rule.replace(/\$\{[^}]*\}/g, '').includes('${')) throw new Error('Invalid image path variable.');
   return rule.replace(/\$\{([^}]*)\}/g, (_match, variable: string) => {
     if (!imagePathVariables.includes(variable as typeof imagePathVariables[number])) throw new Error('Unknown image path variable: ' + variable);

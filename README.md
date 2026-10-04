@@ -79,7 +79,7 @@ Markdown tables are displayed as interactive tables with support for:
 
 ### Images and HTML
 
-Images can use local paths, workspace-relative paths, Windows absolute paths, or remote URLs. Configure pasted images in **Settings → Input → Paste → Image save location**: beside the document, separate by document, or an advanced path rule. The fixed ~/ prefix means the current Markdown folder; no workspace is required. Valid changes save automatically and existing images stay in place. See [image folder settings](docs/image-storage.md).
+Images can use local paths, workspace-relative paths, Windows absolute paths, or remote URLs. Configure pasted images in **Settings → Input → Paste → Image save location**: beside the document, beside the document by file name, or a custom path (advanced). Each choice expands its own path controls when selected. The fixed ./ prefix starts in the current Markdown directory; no workspace is required. Valid changes save automatically and existing images stay in place. See [image folder settings](docs/image-storage.md).
 
 Supported safe inline and block HTML can be rendered in Live and Preview modes or switched to source for editing. The rendered output is also used for Preview, HTML export, and PDF export.
 

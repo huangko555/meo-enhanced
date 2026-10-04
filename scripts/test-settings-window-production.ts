@@ -269,7 +269,7 @@ try {
   await page.click('.settings-search'); await page.keyboard.type('图片');
   await page.waitForFunction(() => !!document.querySelector<HTMLInputElement>('#meo-image-folder') && !document.querySelector<HTMLInputElement>('#meo-image-folder')!.disabled);
   assert.equal(await page.$$eval('.settings-item', elements => elements.length), 1);
-  assert.equal(await page.$eval('.image-location-prefix', element => element.textContent), '~/');
+  assert.equal(await page.$eval('.image-location-prefix', element => element.textContent), './');
   assert.equal(await page.$eval('.image-location-prefix', element => element.tagName), 'SPAN');
   assert.equal(imageContext.imageStorage, undefined, 'opening the settings does not migrate defaults');
   const fillImage = async (selector: string, value: string) => {
@@ -280,7 +280,9 @@ try {
   const waitImageSaved = async () => { await page.waitForFunction(() => document.querySelector('.image-location-feedback')?.textContent === '已自动保存'); };
   await page.click('.image-location-modes input[value="perDocument"]'); await waitImageSaved();
   assert.equal(await page.$eval('.image-location-suffix', element => element.textContent), '/draft');
+  await page.focus('#meo-image-folder');
   await fillImage('#meo-image-folder', 'images/screenshots'); await waitImageSaved();
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'meo-image-folder', 'autosave keeps the active folder input focused');
   assert.equal(imageContext.imageStorage?.folder, 'images/screenshots');
   assert.equal(await page.$eval('.image-location-preview dd:last-child', element => element.textContent), path.join(os.tmpdir(), 'meo-image-notes', 'images', 'screenshots', 'draft'));
   const beforeComposition = imageContext.imageStorage!.folder;
@@ -296,6 +298,10 @@ try {
   await waitImageSaved(); assert.equal(imageContext.imageStorage!.folder, '图片');
   await page.click('.image-location-modes input[value="default"]'); await waitImageSaved();
   assert.equal(await page.$eval('#meo-image-folder', element => (element as HTMLInputElement).value), '图片');
+  await page.focus('.image-location-modes input[value="default"]');
+  await page.keyboard.press('ArrowDown'); await waitImageSaved();
+  assert.equal(imageContext.imageStorage!.mode, 'perDocument', 'native radio keyboard navigation selects the next mode');
+  assert.equal(await page.$eval('#meo-image-folder', element => (element as HTMLInputElement).value), '图片', 'moving the folder controls preserves the draft');
   await page.click('.image-location-modes input[value="advanced"]'); await waitImageSaved();
   const previousRule = imageContext.imageStorage!.rule;
   await fillImage('#meo-image-rule', '${unknown}/images');
@@ -571,12 +577,23 @@ try {
         await page.setViewport({ width, height: 780 });
         assert.ok(await page.$eval('.image-location-settings', element => element.scrollWidth <= element.clientWidth + 1), language + '/' + appearance + '/' + mode + '/' + width + ': no image-control overflow');
         assert.ok(await page.$eval('.image-location-preview', element => element.scrollWidth <= element.clientWidth + 1));
+        const expanded = await page.$$eval('.image-location-option', options => options.flatMap(option => {
+          const details = option.querySelector<HTMLElement>('.image-location-details')!;
+          if (details.hidden) return [];
+          const label = option.querySelector<HTMLElement>('.settings-radio')!;
+          const input = details.querySelector<HTMLInputElement>('input')!;
+          const next = option.nextElementSibling;
+          return [{mode: (option as HTMLElement).dataset.imageMode, input: input.id,
+            belowLabel: details.getBoundingClientRect().top >= label.getBoundingClientRect().bottom,
+            beforeNext: !next || details.getBoundingClientRect().bottom <= next.getBoundingClientRect().top}];
+        }));
+        assert.deepEqual(expanded, [{mode, input: mode === 'advanced' ? 'meo-image-rule' : 'meo-image-folder', belowLabel: true, beforeNext: true}], 'only the selected option expands its own controls beneath its label');
       }
       await page.setViewport({ width: 1100, height: 780 });
-    }
-    if (process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR) {
-      await fs.mkdir(process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR, {recursive: true});
-      await page.screenshot({path: path.join(process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR, 'image-settings-' + language + '-' + appearance + '.png')});
+      if (process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR) {
+        await fs.mkdir(process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR, {recursive: true});
+        await page.screenshot({path: path.join(process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR, 'image-settings-' + language + '-' + appearance + '-' + mode + '.png')});
+      }
     }
     await page.click('.settings-search-clear'); await page.click('.settings-close');
     await page.click('button[data-mode="source"]');

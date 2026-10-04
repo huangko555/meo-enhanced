@@ -7247,6 +7247,10 @@ html[data-editor-appearance='dark'] .meo-input-suggestions {
 /* The prefix and generated suffix are outside the editable folder field. */
 .image-location-settings { display: grid; justify-content: stretch; gap: 10px; min-width: 0; }
 .image-location-settings [hidden] { display: none; }
+.image-location-option { min-width: 0; }
+.image-location-mode-caption { min-width: 0; }
+.image-location-mode-description { display: block; margin-top: 2px; }
+.image-location-details { margin: 8px 0 4px 22px; min-width: 0; }
 .image-location-preview { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; margin: 0; padding: 12px; border-radius: 6px; background: color-mix(in srgb, var(--meo-foreground) 4%, transparent); font-size: 12px; line-height: 1.5; }
 .image-location-preview dt { color: var(--vscode-descriptionForeground); }
 .image-location-preview dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }

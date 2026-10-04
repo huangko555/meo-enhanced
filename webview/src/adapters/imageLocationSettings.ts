@@ -42,23 +42,29 @@ export function createImageLocationSettings(options: {
   preview.append(documentLabel, documentValue, targetLabel, targetValue);
   const modes = node('div', 'settings-radio-group image-location-modes'); modes.setAttribute('role', 'radiogroup');
   const modeControls = (['default', 'perDocument', 'advanced'] as const).map(mode => {
+    const option = node('div', 'image-location-option'); option.dataset.imageMode = mode;
     const label = node('label', 'settings-radio');
     const input = node('input', 'settings-radio-input'); input.type = 'radio'; input.name = 'meo-image-storage'; input.value = mode;
-    const text = node('span', ''); label.append(input, text); modes.append(label);
+    const text = node('span', 'image-location-mode-title');
+    const summary = node('span', 'settings-description image-location-mode-description');
+    const caption = node('span', 'image-location-mode-caption'); caption.append(text, summary);
+    const details = node('div', 'image-location-details');
+    label.append(input, caption); option.append(label, details); modes.append(option);
     input.addEventListener('change', () => {
       if (!input.checked) return;
       preferences = { ...preferences, mode }; fields(); edit(true);
     });
-    return { mode, input, text };
+    return { mode, input, text, summary, details };
   });
   const folderLabel = node('label', 'image-location-field-label');
   const folderBox = node('div', 'image-location-path');
-  const prefix = node('span', 'image-location-prefix', '~/');
+  const prefix = node('span', 'image-location-prefix', './');
   const folder = node('input', 'image-location-input'); folder.type = 'text'; folder.autocomplete = 'off';
   const suffix = node('span', 'image-location-suffix');
   folderBox.append(prefix, folder, suffix);
-  const basic = node('div', 'image-location-basic'); basic.append(folderLabel, folderBox);
-  const basicHint = node('p', 'settings-description');
+  const basic = node('div', 'image-location-basic');
+  const basicHint = node('p', 'settings-description'); basic.append(folderLabel, folderBox, basicHint);
+  modeControls[0].details.append(basic);
   const ruleLabel = node('label', 'image-location-field-label');
   const rule = node('input', 'image-location-input image-location-rule'); rule.type = 'text'; rule.autocomplete = 'off';
   const picker = node('button', 'settings-button image-location-picker'); picker.type = 'button';
@@ -79,11 +85,12 @@ export function createImageLocationSettings(options: {
     variables.append(button); return { button, zh, en };
   });
   const advanced = node('div', 'image-location-advanced'); advanced.append(ruleLabel, ruleBox, advancedHint, variables);
+  modeControls[2].details.append(advanced);
   const legacy = node('p', 'settings-description image-location-legacy');
   const notice = node('p', 'settings-description image-location-note');
   const feedback = node('p', 'image-location-feedback'); feedback.setAttribute('role', 'status');
   const retry = node('button', 'settings-button image-location-retry'); retry.type = 'button'; retry.hidden = true;
-  element.append(heading, preview, modes, basic, basicHint, advanced, legacy, notice, feedback, retry);
+  element.append(heading, preview, modes, legacy, notice, feedback, retry);
   folder.maxLength = rule.maxLength = 4096;
   basicHint.id = 'meo-image-folder-hint'; folder.setAttribute('aria-describedby', basicHint.id);
   advancedHint.id = 'meo-image-rule-hint'; rule.setAttribute('aria-describedby', advancedHint.id);
@@ -91,24 +98,29 @@ export function createImageLocationSettings(options: {
   ruleLabel.htmlFor = rule.id = 'meo-image-rule';
 
   function fields() {
-    basic.hidden = basicHint.hidden = preferences.mode === 'advanced';
+    basic.hidden = preferences.mode === 'advanced';
+    const selected = modeControls.find(item => item.mode === preferences.mode)!;
+    if (preferences.mode !== 'advanced' && basic.parentElement !== selected.details) selected.details.append(basic);
     advanced.hidden = preferences.mode !== 'advanced';
     suffix.hidden = preferences.mode !== 'perDocument';
     suffix.textContent = '/' + (state?.documentName || t('文档名', 'document-name'));
     if (!composing && folder.value !== preferences.folder) folder.value = preferences.folder;
     if (!composing && rule.value !== preferences.rule) rule.value = preferences.rule;
-    for (const item of modeControls) { item.input.checked = preferences.mode === item.mode; item.input.disabled = !loaded; }
+    for (const item of modeControls) {
+      item.input.checked = preferences.mode === item.mode; item.input.disabled = !loaded;
+      item.details.hidden = preferences.mode !== item.mode;
+    }
     folder.disabled = rule.disabled = !loaded;
   }
   function errorText(message: string) {
     if (language !== 'zh-CN') return message;
     if (message.startsWith('Unknown image path variable: ')) return '不支持的路径变量：' + message.slice('Unknown image path variable: '.length);
     const translations: Record<string, string> = {
-      'Use a folder inside the document directory; use Advanced for other locations.': '请填写当前文档中的子文件夹；其他位置请选择“高级”。',
+      'Use a folder inside the document directory; use Advanced for other locations.': '请填写当前文档中的子文件夹；其他位置请选择“自定义路径（高级）”。',
       'Enter an image folder path.': '请填写图片目录。',
       'Enter a valid folder path.': '请填写有效的目录路径。',
       'Invalid image path variable.': '路径变量格式不完整。',
-      'Use a relative path or an absolute path; ~/ is only a display marker.': '高级模式请填写相对或绝对路径；~/ 只用于界面提示。',
+      'Home-directory paths (~) are not supported; use a path relative to the document or an absolute path.': '暂不支持用 ~ 表示用户主目录；请填写相对当前文档的路径或绝对路径。',
       'The folder path contains a name that Windows cannot use.': '目录包含 Windows 不支持的名称或字符。',
       'Image settings request timed out.': '请求超时，请重试。'
     };
@@ -127,11 +139,16 @@ export function createImageLocationSettings(options: {
       : state.error ? t('路径无效，请检查下方输入。', 'Invalid path. Check the input below.')
       : state.targetDirectory ?? '—';
     modes.setAttribute('aria-label', title.textContent);
-    modeControls[0].text.textContent = t('文档旁的文件夹（默认）', 'Beside the document (default)');
-    modeControls[1].text.textContent = t('按文档分开', 'Separate by document');
-    modeControls[2].text.textContent = t('高级', 'Advanced');
+    modeControls[0].text.textContent = t('文档旁的文件夹（默认）', 'Beside document (default)');
+    modeControls[0].summary.textContent = t('同一目录下的文档共用这个图片文件夹。', 'Documents in the same directory share this image folder.');
+    modeControls[1].text.textContent = t('文档旁，按文档名分开', 'Beside document, by name');
+    modeControls[1].summary.textContent = t('图片仍在文档旁，并按文档名分别存放。', 'Keep images beside the document, in a subfolder named after it.');
+    modeControls[2].text.textContent = t('自定义路径（高级）', 'Custom path (advanced)');
+    modeControls[2].summary.textContent = t('选择其他文件夹，或用文档名等变量组合路径。', 'Choose another folder or build a path using file-name variables.');
     folderLabel.textContent = t('文件夹名称', 'Folder name');
-    basicHint.textContent = t('~/ 表示当前 Markdown 所在文件夹；按文档分开时自动追加文档名。', '~/ means the current Markdown folder. Separate by document adds its file name.');
+    basicHint.textContent = preferences.mode === 'perDocument'
+      ? t('./ 表示当前 Markdown 文档所在目录；末尾文档名自动生成，不含扩展名。', './ starts in the current Markdown directory. The file name is added without its extension.')
+      : t('./ 表示当前 Markdown 文档所在目录。', './ starts in the current Markdown directory.');
     ruleLabel.textContent = t('图片目录或路径规则', 'Image folder or path rule');
     advancedHint.textContent = t('支持绝对路径、相对当前文档的路径及下方变量。点击变量可插入。', 'Use an absolute path, a path relative to the document, or the variables below. Click a variable to insert it.');
     picker.textContent = t('选择文件夹…', 'Choose folder…');

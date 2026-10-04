@@ -3,10 +3,10 @@
 打开编辑器的 **设置 → 输入 → 粘贴 → 图片保存位置**：
 
 - **文档旁的文件夹（默认）**：输入 assets、images/screenshots 等文件夹名称。
-- **按文档分开**：自动追加不含扩展名的文档名。例如 draft.md 使用 assets/draft。
-- **高级**：输入绝对目录、相对当前文档的目录或变量规则；“选择文件夹”打开系统目录选择器，点击变量按钮可插入变量。
+- **文档旁，按文档名分开**：图片仍保存在文档旁，自动追加不含扩展名的文档名。例如 draft.md 使用 ./assets/draft。
+- **自定义路径（高级）**：输入绝对目录、相对当前文档的目录或变量规则；“选择文件夹”打开系统目录选择器，点击变量按钮可插入变量。
 
-固定的 ~/ 表示当前 Markdown 所在文件夹，只用于界面提示。无需工作区。有效修改自动保存；既有图片不会移动。未保存文档需要先保存为本地 Markdown 文件，再粘贴图片。
+选中某一项后，路径控件就在该选项下面展开。前两项的固定前缀 ./ 表示当前 Markdown 文档所在目录，不可编辑。无需工作区。有效修改自动保存；既有图片不会移动。未保存文档需要先保存为本地 Markdown 文件，再粘贴图片。
 
 | 变量 | 对 /notes/draft.md 的值 |
 | --- | --- |
@@ -35,6 +35,6 @@ mode 可为 default、perDocument、advanced。前两种使用 folder，高级�
 
 Open **Settings → Input → Paste → Image save location**. Choose a folder beside the Markdown file, separate images by the document's file name, or use an advanced path rule with the four variables above. Choose folder opens the native directory picker.
 
-The fixed ~/ prefix means the current Markdown folder. No workspace is needed. Valid changes save automatically, and existing images stay in place. Save untitled documents as local Markdown files before pasting.
+Each selected option expands its path controls directly below its label. The fixed ./ prefix in the first two options starts in the current Markdown directory and cannot be edited. No workspace is needed. Valid changes save automatically, and existing images stay in place. Save untitled documents as local Markdown files before pasting.
 
 Relative advanced rules use the Markdown directory. Absolute paths are supported, including Windows folders on another drive. Existing files are never overwritten; symbolic links and directory junctions are rejected. An absent/null imageStorage preserves the legacy imageFolder behavior until you edit the new controls. Changes normally use user settings; existing explicit folder/workspace overrides keep their scope.
