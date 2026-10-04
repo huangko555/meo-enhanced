@@ -3183,7 +3183,7 @@ settingsWindow = createSettingsWindow({
   getPreferences: () => editingPreferences, update: change => editingPreferencesTransport.update(change), returnFocus: () => getActiveEditorMode() === 'preview' ? moreToolsButton : editor ?? moreToolsButton,
   getGeneral: language => {
     const strings = getUiStrings(language);
-    const switchItem = (id: string, section: 'display' | 'opening', title: string, get: () => boolean, set: (value: boolean) => void, description?: string): GeneralSetting => ({ id, section, title, description, control: { kind: 'switch', get, set } });
+    const switchItem = (id: GeneralSetting['id'], section: 'display' | 'opening', title: string, get: () => boolean, set: (value: boolean) => void, description?: string): GeneralSetting => ({ id, section, title, description, control: { kind: 'switch', get, set } });
     return [
       switchItem('lineNumbers', 'display', strings.showLineNumbers, () => pendingSourceLineNumbers !== 'off', () => sourceLineNumbersBtn.click()),
       switchItem('foldCode', 'display', strings.foldLongCodeBlocks, () => longCodeBlockFoldingEnabled, () => longCodeBlockFoldingBtn.click()),

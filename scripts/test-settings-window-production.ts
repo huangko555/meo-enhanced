@@ -6,6 +6,7 @@ import { launchTestBrowser, closeTestBrowser } from './browser-test-helpers';
 import { saveClipboardImageFile } from '../src/host/clipboardImageSave';
 import { createImageStorageHost, type ImageStorageContext } from '../src/host/imageStorage';
 import type { ImageLocationRequest } from '../src/protocol/imageStorage';
+import { editorCommandIds } from '../src/foundation/editingPreferences';
 const build = await Bun.build({ entrypoints: ['scripts/test-settings-window-production-entry.ts'], target: 'browser', format: 'iife' });
 if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
@@ -416,6 +417,9 @@ try {
   await page.waitForFunction(() => (window as any).__preferences.shortcuts.bold?.[0] === 'Ctrl + Z');
   assert.deepEqual(await page.evaluate(() => (window as any).__preferences.shortcuts.undo), []);
   assert.equal(await page.evaluate(() => (document.activeElement as HTMLElement)?.dataset.editCommand), 'bold');
+  await page.click('.settings-search'); await page.keyboard.type('ctrl+z');
+  assert.deepEqual(await page.$$eval('.settings-item[data-command]', elements => elements.map(element => (element as HTMLElement).dataset.command)), ['bold'], 'shortcut search follows the new binding and omits the cleared default');
+  await page.click('.settings-search-clear');
   await page.click('.settings-close');
   await page.evaluate(() => { const global = window as any; const view = global.EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')); view.dispatch({ selection: { anchor: 0, head: 5 } }); view.focus(); });
   await chord('z');
@@ -570,12 +574,83 @@ try {
   await page.close(); page = await browser.newPage(); page.on('pageerror', error => errors.push(String(error)));
   await openFixture();
   await page.waitForFunction(() => !document.querySelector('.mode-toolbar')?.classList.contains('meo-preload-toolbar'));
+  type SearchTab = 'general' | 'typing' | 'shortcuts';
+  const searchCases: {tab: SearchTab; id: string; query: string}[] = [];
+  for (const locale of ['zh-CN', 'en']) {
+    await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button');
+    await page.click('.settings-tab[data-tab="general"]'); await page.click(`[data-setting="language"] [data-value="${locale}"]`);
+    for (const tab of ['general', 'typing', 'shortcuts'] as const) {
+      await page.click(`.settings-tab[data-tab="${tab}"]`);
+      const items = await page.$$eval('.settings-item', elements => elements.map(element => ({
+        id: (element as HTMLElement).dataset.setting ?? (element as HTMLElement).dataset.input ?? (element as HTMLElement).dataset.command!,
+        query: element.querySelector('.settings-item-title')!.textContent!,
+        values: [...element.querySelectorAll('.settings-key, .image-location-mode-title, .image-location-field-label, .image-location-picker, .image-location-token')].map(control => control.getAttribute('aria-label') ?? control.textContent!)
+      })));
+      assert.equal(items.length, tab === 'general' ? 11 : tab === 'typing' ? 13 : editorCommandIds.length, 'search inventory includes every setting and command');
+      searchCases.push(...items.flatMap(item => [item.query, ...item.values].map(query => ({tab, id: item.id, query}))));
+    }
+    await page.click('.settings-close');
+  }
+  const synonymCases: readonly [SearchTab, string, string, string][] = [
+    ['general', 'lineNumbers', '边栏', 'gutter'], ['general', 'foldCode', '收起代码', 'collapse'],
+    ['general', 'width', '版心', 'reading width'], ['general', 'strongColor', '加粗颜色', 'bold color'],
+    ['general', 'boldHeadings', '标题字重', 'heading weight'], ['general', 'stickyHeader', '冻结表头', 'freeze header'],
+    ['general', 'restorePosition', '上次位置', 'remember position'], ['general', 'largeDocument', '启动速度', 'large file'],
+    ['general', 'theme', '夜间', 'night'], ['general', 'language', '本地化', 'locale'], ['general', 'fontSize', '文字大小', 'zoom'],
+    ['typing', 'selectionToolbar', '浮动工具栏', 'floating toolbar'], ['typing', 'wrapSelection', '环绕选区', 'surround selection'],
+    ['typing', 'pairMode', '自动闭合', 'auto close'], ['typing', 'skipMode', '跳出符号', 'overtype'],
+    ['typing', 'deleteMode', '一起删除', 'paired deletion'], ['typing', 'lists', '清单', 'list continuation'],
+    ['typing', 'convertTables', '制表符', 'TSV'], ['typing', 'pasteUrl', '地址栏', 'web address'],
+    ['typing', 'pasteHtml', '富文本', 'rich text'], ['typing', 'documentSuggestions', '锚点', 'backlink'],
+    ['typing', 'slash', '命令面板', 'command palette'], ['typing', 'emoji', '小黄脸', 'smiley'],
+    ['typing', 'imageStorage', '自定义路径', 'image storage'],
+    ['shortcuts', 'save', '存盘', 'persist'], ['shortcuts', 'undo', '回退', 'rollback'],
+    ['shortcuts', 'bold', '字重', 'strong'], ['shortcuts', 'plain', '无格式粘贴', 'unformatted'],
+    ['shortcuts', 'wikiLink', '双向链接', 'backlink'], ['shortcuts', 'codeBlock', '代码片段', 'snippet'],
+    ['shortcuts', 'heading1', '大标题', 'h1'], ['shortcuts', 'ordered', '数字列表', 'numbering'],
+    ['shortcuts', 'taskList', '待办', 'checkbox'], ['shortcuts', 'rule', '分隔线', 'divider'],
+    ['shortcuts', 'insertTable', '新建表格', 'create table'], ['shortcuts', 'rowDelete', '移除表格行', 'remove row'],
+    ['shortcuts', 'copyCsv', '逗号分隔', 'comma separated'], ['shortcuts', 'addCursor', '多重光标', 'multi cursor'],
+    ['shortcuts', 'lineComment', '取消注释', 'uncomment'], ['shortcuts', 'mode', '实时模式', 'WYSIWYG'],
+    ['shortcuts', 'preview', '阅读模式', 'rendered view'], ['shortcuts', 'enter', '回车', 'return']
+  ];
+  searchCases.push(...synonymCases.flatMap(([tab, id, zh, en]) => [{tab, id, query: zh}, {tab, id, query: en}]));
+  const searchResults = new Map<string, {ids: string[]; counts: string[]}>();
+  const searchChecks = searchCases.length * 4;
   for (const language of ['en', 'zh-CN']) for (const appearance of ['light', 'dark']) {
     await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button');
     await page.click('.settings-tab[data-tab="general"]'); await page.click(`[data-setting="language"] [data-value="${language}"]`); await page.click(`[data-setting="theme"] [data-value="${appearance}"]`); await page.click('.settings-close');
     await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button');
-    await page.click('.settings-tab[data-tab="typing"]');
-    await page.click('.settings-search'); await page.keyboard.type(language === 'en' ? 'image' : '图片');
+    for (const tab of ['general', 'typing', 'shortcuts'] as const) {
+      await page.click(`.settings-tab[data-tab="${tab}"]`);
+      const results = await page.evaluate(cases => {
+        const search = document.querySelector<HTMLInputElement>('.settings-search')!; search.focus();
+        return cases.map(test => {
+          search.value = test.query; search.dispatchEvent(new Event('input', {bubbles: true}));
+          const ids = [...document.querySelectorAll<HTMLElement>('.settings-item')].map(element => element.dataset.setting ?? element.dataset.input ?? element.dataset.command!);
+          const counts = [...document.querySelectorAll('.settings-tab-badge')].map(element => element.textContent!);
+          return {...test, ids, counts, focus: document.activeElement === search};
+        });
+      }, searchCases.filter(test => test.tab === tab));
+      for (const result of results) {
+        assert.ok(result.ids.includes(result.id), language + '/' + appearance + '/' + tab + ': ' + result.query + ' finds ' + result.id);
+        assert.equal(result.focus, true, 'live search retains input focus');
+        const key = tab + '/' + result.query, current = {ids: result.ids, counts: result.counts};
+        if (searchResults.has(key)) assert.deepEqual(current, searchResults.get(key), 'the same query yields the same items and tab counts in both UI languages and themes');
+        else searchResults.set(key, current);
+      }
+    }
+    await page.click('.settings-search-clear'); await page.click('.settings-tab[data-tab="typing"]');
+    await page.click('.settings-search'); await page.keyboard.type(' AUTO  CLOSE ');
+    assert.deepEqual(await page.$$eval('.settings-item', elements => elements.map(element => (element as HTMLElement).dataset.setting)), ['pairMode']);
+    await page.click('.settings-search-clear'); await page.keyboard.type('图片 path');
+    assert.deepEqual(await page.$$eval('.settings-item', elements => elements.map(element => (element as HTMLElement).dataset.setting)), ['imageStorage']);
+    await page.click('.settings-search-clear'); await page.keyboard.type('图片 theme');
+    assert.deepEqual(await page.$$eval('.settings-tab-badge', elements => elements.map(element => element.textContent)), ['0', '0', '0']);
+    assert.ok(await page.$('.settings-empty'));
+    await page.click('.settings-search-clear'); await page.keyboard.type('不自动补全');
+    assert.deepEqual(await page.$$eval('.settings-item', elements => elements.map(element => (element as HTMLElement).dataset.setting)), ['pairMode'], 'choice labels are searchable in the other UI language');
+    await page.click('.settings-search-clear'); await page.keyboard.type(language === 'en' ? 'image' : '图片');
     await page.waitForFunction(() => !!document.querySelector<HTMLInputElement>('#meo-image-rule') && !document.querySelector<HTMLInputElement>('#meo-image-rule')!.disabled);
     assert.equal(await page.$eval('.image-location-settings .settings-item-title', element => element.textContent), language === 'en' ? 'Image save location' : '图片保存位置');
     for (const mode of ['default', 'perDocument', 'advanced']) {
@@ -724,6 +799,7 @@ try {
     }
   }
   assert.ok(height > 500);
+  console.log('Bilingual settings search passed (' + searchChecks + ' title, alias, option and shortcut checks across both languages/themes)');
   assert.deepEqual(errors, []);
   if (process.env.MEO_SETTINGS_SCREENSHOTS) {
     const directory = path.resolve(process.env.MEO_SETTINGS_SCREENSHOTS); await fs.mkdir(directory, { recursive: true });

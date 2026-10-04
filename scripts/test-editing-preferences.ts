@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { shortcutSections } from '../webview/src/application/settingsCatalog';
+import { generalSearchKeywords, imageLocationSearchKeywords, settingsSearchMatches, shortcutSearchKeywords, shortcutSections, typingSearchKeywords } from '../webview/src/application/settingsCatalog';
 import assert from 'node:assert/strict';
 import { defaultInputAssistance, editorCommandIds, isEditingPreferencesChange } from '../src/foundation/editingPreferences';
 import {
@@ -12,6 +12,20 @@ import { createEditingPreferencesTransport } from '../webview/src/adapters/editi
 import type { EditingPreferences } from '../src/foundation/editingPreferences';
 import type { UpdateEditingPreferencesRequest } from '../src/protocol/editingPreferences';
 
+assert.deepEqual(Object.keys(generalSearchKeywords).sort(), ['lineNumbers', 'foldCode', 'width', 'strongColor', 'boldHeadings', 'stickyHeader', 'restorePosition', 'largeDocument', 'theme', 'language', 'fontSize'].sort());
+assert.deepEqual(Object.keys(typingSearchKeywords).sort(), Object.keys(defaultInputAssistance).sort(), 'every input setting has search aliases');
+assert.deepEqual(Object.keys(shortcutSearchKeywords).sort(), [...editorCommandIds].sort(), 'every shortcut has search aliases');
+for (const [zh, en] of [...Object.values(generalSearchKeywords), ...Object.values(typingSearchKeywords), imageLocationSearchKeywords, ...Object.values(shortcutSearchKeywords)]) {
+  assert.match(zh, /[\u4e00-\u9fff]/); assert.match(en, /[a-z]/i);
+}
+assert.ok(settingsSearchMatches('  STORAGE   图片  ', '图片保存位置', 'Image storage folder'));
+assert.ok(settingsSearchMatches('text plain', 'Paste as plain text'));
+assert.ok(settingsSearchMatches('ＣＴＲＬ ＋ Ｂ', 'Ctrl + B'));
+assert.ok(settingsSearchMatches('ctrl+b', 'Ctrl + B'));
+assert.ok(settingsSearchMatches(' ', 'anything'));
+assert.ok(settingsSearchMatches('_', 'symbols * _ ~'));
+assert.equal(settingsSearchMatches('image theme', 'Image storage folder'), false, 'all query terms must match the same setting');
+assert.equal(settingsSearchMatches('csv table', 'CSV only'), false);
 const defaults = { input: { ...defaultInputAssistance }, shortcuts: {} };
 assert.equal(defaults.input.selectionToolbar, true, 'existing users keep the selection toolbar by default');
 const { selectionToolbar: _toolbar, ...previousInput } = defaultInputAssistance;

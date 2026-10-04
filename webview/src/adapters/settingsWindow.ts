@@ -5,11 +5,11 @@ import { canBindCommand, commandContext, effectiveShortcuts, shortcutConflicts, 
 import type { EditingPreferences, EditingPreferencesChange, EditorCommandId } from '../../../src/foundation/editingPreferences';
 import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 import { EDITOR_FONT_SIZE_MIN, EDITOR_FONT_SIZE_MAX, type EditorFontSizePreference } from '../../../src/foundation/editorFontSize';
-import { commandTitle, modeOptions, sectionTitles, settingsText, shortcutSections, shortcutDescriptions, tablePasteContexts, typingCatalog, typingSections, type SettingsTab } from '../application/settingsCatalog';
+import { commandTitle, commandTitles, generalSearchKeywords, imageLocationSearchKeywords, modeOptions, nativeShortcutLabels, normalizeSettingsSearch, sectionTitles, settingsSearchMatches, settingsText, shortcutSearchKeywords, shortcutSections, shortcutDescriptions, tablePasteContexts, typingCatalog, typingSearchKeywords, typingSections, type SettingsTab } from '../application/settingsCatalog';
 
 type Section = keyof typeof sectionTitles;
 export type GeneralSetting = {
-  readonly id: string; readonly section: 'display' | 'opening' | 'interface'; readonly title: string; readonly description?: string;
+  readonly id: keyof typeof generalSearchKeywords; readonly section: 'display' | 'opening' | 'interface'; readonly title: string; readonly description?: string;
   readonly control: { kind: 'switch'; get: () => boolean; set: (value: boolean) => void }
     | { kind: 'choice'; get: () => string; set: (value: string) => void; options: readonly { value: string; label: string }[] }
     | { kind: 'font'; get: () => EditorFontSizePreference; set: (value: EditorFontSizePreference) => void };
@@ -81,8 +81,8 @@ export function createSettingsWindow(options: {
   resetActions.append(cancelReset, confirmReset); resetPopover.append(resetTitle, resetDescription, resetActions); footer.append(resetPopover, reset);
   dialog.append(titlebar, top, status, layout, footer); document.body.append(dialog);
   const t = (zh: string, en: string) => settingsText(language, zh, en);
-  const query = () => search.value.trim().toLocaleLowerCase();
-  const matches = (...parts: (string | undefined)[]) => !query() || parts.join(' ').toLocaleLowerCase().includes(query());
+  const query = () => normalizeSettingsSearch(search.value);
+  const matches = (...parts: (string | undefined)[]) => settingsSearchMatches(query(), ...parts);
   const titleFor = (section: Section) => { const labels = sectionTitles[section]; return t(labels[0], labels[1]); };
   const dismissReset = () => { resetOpen = false; resetPopover.hidden = true; reset.setAttribute('aria-expanded', 'false'); };
   const focusCommand = (command: EditorCommandId) => (content.querySelector<HTMLButtonElement>(`[data-edit-command='${command}']`) ?? search).focus();
@@ -195,7 +195,7 @@ export function createSettingsWindow(options: {
       confirm.addEventListener('click', () => { void commit(true); }); cancel.addEventListener('click', finishRecording);
       controls.append(input, confirm, cancel); row.append(conflictLabel); updateConflict();
     } else {
-      const nativeKeys = command === 'selection' ? 'Shift + ← / → / ↑ / ↓' : command === 'home' ? 'Home / End' : '';
+      const nativeKeys = nativeShortcutLabels[command] ?? '';
       const keyGroup = element('span', 'settings-shortcut-keys');
       for (const key of keys.length ? keys : nativeKeys ? [nativeKeys] : []) keyGroup.append(element('kbd', 'settings-key', key));
       if (!keyGroup.childNodes.length) keyGroup.append(element('span', 'settings-unassigned', t('未设置', 'Unassigned')));
@@ -214,10 +214,15 @@ export function createSettingsWindow(options: {
     return row;
   }
   function filtered() {
-    const general = options.getGeneral(language).filter(item => matches(item.title, item.description, titleFor(item.section)));
-    const typing = typingCatalog.filter(item => matches(t(...item.title), t(...item.description), titleFor(item.section), ...(item.key === 'convertTables' ? tablePasteContexts.flatMap(context => [t(context.title[0], context.title[1]), t(context.description[0], context.description[1])]) : [])));
-    const shortcuts = Object.entries(shortcutSections).flatMap(([section, commands]) => commands.filter(command => matches(commandTitle(command, language), titleFor(section as Section), ...(shortcutDescriptions[command] ? [t(...shortcutDescriptions[command]!)] : []), ...effectiveShortcuts(options.getPreferences().shortcuts, options.platform)[command])).map(command => ({ section: section as Section, command })));
-    const imageLocation = !!options.imageLocation && matches(t('图片保存位置', 'Image save location'), t('截图 路径 文件夹 文档 高级', 'screenshot path folder document advanced'), titleFor('paste'));
+    const otherGeneral = options.getGeneral(language === 'zh-CN' ? 'en' : 'zh-CN');
+    const generalText = (item?: GeneralSetting) => item ? [item.title, item.description, ...(item.control.kind === 'choice' ? item.control.options.flatMap(choice => [choice.value, choice.label]) : [])] : [];
+    const general = options.getGeneral(language).filter(item => matches(item.id, '常规 General', ...generalText(item), ...generalText(otherGeneral.find(other => other.id === item.id)), ...sectionTitles[item.section], ...generalSearchKeywords[item.id]));
+    const typing = typingCatalog.filter(item => matches(item.key, '输入 Input', ...item.title, ...item.description, ...sectionTitles[item.section], ...typingSearchKeywords[item.key],
+      ...(['pairMode', 'skipMode', 'deleteMode'].includes(item.key) ? (['zh-CN', 'en'] as const).flatMap(locale => modeOptions(item.key as 'pairMode' | 'skipMode' | 'deleteMode', locale).flatMap(option => [option.value, option.label])) : []),
+      ...(item.key === 'convertTables' ? tablePasteContexts.flatMap(context => [...context.title, ...context.description]) : [])));
+    const keys = effectiveShortcuts(options.getPreferences().shortcuts, options.platform);
+    const shortcuts = Object.entries(shortcutSections).flatMap(([section, commands]) => commands.filter(command => matches(command, '快捷键 键位 绑定 Shortcuts hotkeys keybindings', ...commandTitles[command], ...sectionTitles[section as Section], ...(shortcutDescriptions[command] ?? []), ...shortcutSearchKeywords[command], ...(keys[command].length ? keys[command] : [nativeShortcutLabels[command]]))).map(command => ({ section: section as Section, command })));
+    const imageLocation = !!options.imageLocation && matches('imageStorage', '输入 Input', ...imageLocationSearchKeywords, ...sectionTitles.paste);
     return { general, typing, shortcuts, imageLocation };
   }
   function renderContent() {
