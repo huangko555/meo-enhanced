@@ -3,14 +3,44 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { launchTestBrowser, closeTestBrowser } from './browser-test-helpers';
+import { saveClipboardImageFile } from '../src/host/clipboardImageSave';
+import { createImageStorageHost, type ImageStorageContext } from '../src/host/imageStorage';
+import type { ImageLocationRequest } from '../src/protocol/imageStorage';
 const build = await Bun.build({ entrypoints: ['scripts/test-settings-window-production-entry.ts'], target: 'browser', format: 'iife' });
 if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
 let page = await browser.newPage();
+let imagePasteRoot: string | null = null;
 const errors: string[] = []; page.on('pageerror', error => errors.push(String(error)));
 try {
+  let imageContext: ImageStorageContext = { documentFsPath: path.join(os.tmpdir(), 'meo-image-notes', 'draft.md'), workspaceFsPath: path.join(os.tmpdir(), 'unrelated-workspace') };
+  let imageWriteFailure = false;
+  let imageChosenFolder: string | null = null;
+  const imageHost = createImageStorageHost({
+    read: () => imageContext,
+    write: async (_resource, preferences) => {
+      if (imageWriteFailure) throw new Error('fixture image write failure');
+      imageContext = { ...imageContext, imageStorage: preferences };
+    },
+    selectFolder: async () => imageChosenFolder
+  });
+  const imagePages = new WeakSet<object>();
   const chord = async (key: string) => { await page.keyboard.down('Control'); await page.keyboard.press(key); await page.keyboard.up('Control'); };
   const openFixture = async (text = 'hello\n\n# Heading\n\ntext', mode: 'source' | 'live' = 'source', stubMermaid = false) => {
+    if (!imagePages.has(page)) {
+      await page.exposeFunction('__imageLocationHost', (request: ImageLocationRequest) => imageHost.handle(request, 'settings-document'));
+      await page.exposeFunction('__imageSaveHost', async (request: {requestId: string; imageData: string; fileName: string}) => {
+        try {
+          if (!imageContext.documentFsPath) throw new Error('Save the document as a local Markdown file before pasting images.');
+          const saved = await saveClipboardImageFile({
+            ...imageContext, documentFsPath: imageContext.documentFsPath,
+            requestedFileName: request.fileName, contents: Buffer.from(request.imageData.replace(/^data:image\/[^;]+;base64,/, ''), 'base64')
+          });
+          return {type: 'savedImagePath', requestId: request.requestId, result: {ok: true, value: {path: saved.relativePath}}};
+        } catch (error) { return {type: 'savedImagePath', requestId: request.requestId, result: {ok: false, error: {code: 'operation-failed', message: String(error)}}}; }
+      });
+      imagePages.add(page);
+    }
     await page.setViewport({ width: 1100, height: 780 });
     await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
     await page.addStyleTag({ path: 'webview/src/styles.css' });
@@ -32,6 +62,16 @@ try {
           } catch(error) { queueMicrotask(()=>window.dispatchEvent(new MessageEvent('message',{data:{type:'updatedEditingPreferences',requestId:message.requestId,revision:window.__revision,result:{ok:false,error:{code:'operation-failed',message:String(error)}}}}))); }
           };
           if(window.__holdNextUpdate) { window.__holdNextUpdate=false; window.__flushUpdate=apply; } else apply();
+        }
+        if(message.type==='saveImageFromClipboard') {
+          window.__imageSaveHost(message).then(response => window.dispatchEvent(new MessageEvent('message', {data: response})));
+        }
+        if(message.type==='imageLocation') {
+          window.__imageLocationHost(message).then(response => {
+            const reply = () => window.dispatchEvent(new MessageEvent('message', {data: response}));
+            if(window.__holdImageReply && message.action==='preview') { window.__holdImageReply=false; window.__releaseImageReply=reply; }
+            else reply();
+          });
         }
         if(message.type==='editorService') {
           const value=message.action==='links'?{candidates:[]}:{text:message.action==='readClipboard'?window.__clipboard:''};
@@ -118,7 +158,7 @@ try {
   await page.click('[data-setting="fontSize"] [data-value="auto"]');
   assert.equal(await page.$eval(fontStepper + ' output', element => Number(element.textContent)), fontValue + 1, 'automatic mode preserves the last custom size');
   await page.click('.settings-tab[data-tab="typing"]');
-  assert.equal(await page.$$eval('.settings-item', elements => elements.length), 12);
+  assert.equal(await page.$$eval('.settings-item', elements => elements.length), 13);
   assert.deepEqual(await page.$$eval('.settings-paste-contexts dt', elements => elements.map(e => e.textContent)), ['正文', '已有表格', '代码']);
   assert.ok(await page.$eval('.settings-paste-contexts dd:nth-of-type(2)', e => e.textContent?.includes('不受这个开关影响')));
   const wrap = '.settings-item[data-setting="wrapSelection"]';
@@ -224,6 +264,125 @@ try {
   assert.equal(await page.$eval(toolbarSwitch, e => e.getAttribute('aria-checked')), 'true');
   await page.click('.settings-search-clear');
 
+  // Exercise the production settings control with the same Host path resolver as clipboard writes.
+  await page.click('.settings-tab[data-tab="typing"]');
+  await page.click('.settings-search'); await page.keyboard.type('图片');
+  await page.waitForFunction(() => !!document.querySelector<HTMLInputElement>('#meo-image-folder') && !document.querySelector<HTMLInputElement>('#meo-image-folder')!.disabled);
+  assert.equal(await page.$$eval('.settings-item', elements => elements.length), 1);
+  assert.equal(await page.$eval('.image-location-prefix', element => element.textContent), '~/');
+  assert.equal(await page.$eval('.image-location-prefix', element => element.tagName), 'SPAN');
+  assert.equal(imageContext.imageStorage, undefined, 'opening the settings does not migrate defaults');
+  const fillImage = async (selector: string, value: string) => {
+    await page.$eval(selector, (element, value) => {
+      (element as HTMLInputElement).value = value; element.dispatchEvent(new Event('input', { bubbles: true }));
+    }, value);
+  };
+  const waitImageSaved = async () => { await page.waitForFunction(() => document.querySelector('.image-location-feedback')?.textContent === '已自动保存'); };
+  await page.click('.image-location-modes input[value="perDocument"]'); await waitImageSaved();
+  assert.equal(await page.$eval('.image-location-suffix', element => element.textContent), '/draft');
+  await fillImage('#meo-image-folder', 'images/screenshots'); await waitImageSaved();
+  assert.equal(imageContext.imageStorage?.folder, 'images/screenshots');
+  assert.equal(await page.$eval('.image-location-preview dd:last-child', element => element.textContent), path.join(os.tmpdir(), 'meo-image-notes', 'images', 'screenshots', 'draft'));
+  const beforeComposition = imageContext.imageStorage!.folder;
+  await page.$eval('#meo-image-folder', element => {
+    element.dispatchEvent(new CompositionEvent('compositionstart', {bubbles: true}));
+    (element as HTMLInputElement).value = '图片';
+    element.dispatchEvent(new InputEvent('input', {bubbles: true, isComposing: true}));
+  });
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 500)));
+  assert.equal(imageContext.imageStorage!.folder, beforeComposition, 'IME preedit is not saved');
+  assert.equal(await page.$eval('#meo-image-folder', element => (element as HTMLInputElement).value), '图片');
+  await page.$eval('#meo-image-folder', element => element.dispatchEvent(new CompositionEvent('compositionend', {bubbles: true})));
+  await waitImageSaved(); assert.equal(imageContext.imageStorage!.folder, '图片');
+  await page.click('.image-location-modes input[value="default"]'); await waitImageSaved();
+  assert.equal(await page.$eval('#meo-image-folder', element => (element as HTMLInputElement).value), '图片');
+  await page.click('.image-location-modes input[value="advanced"]'); await waitImageSaved();
+  const previousRule = imageContext.imageStorage!.rule;
+  await fillImage('#meo-image-rule', '${unknown}/images');
+  await page.waitForSelector('.image-location-feedback.is-error');
+  assert.equal(imageContext.imageStorage!.rule, previousRule, 'invalid rules retain the last valid config');
+  assert.equal(await page.$eval('#meo-image-rule', element => (element as HTMLInputElement).value), '${unknown}/images');
+  await fillImage('#meo-image-rule', '${fileDirname}/pictures/${fileBasenameNoExtension}'); await waitImageSaved();
+  assert.equal(await page.$eval('.image-location-preview dd:last-child', element => element.textContent), path.join(os.tmpdir(), 'meo-image-notes', 'pictures', 'draft'));
+  // A late preview response must not replace a newer input or resolved directory.
+  await page.evaluate(() => { (window as any).__holdImageReply = true; });
+  await fillImage('#meo-image-rule', '${fileDirname}/old');
+  await page.waitForFunction(() => typeof (window as any).__releaseImageReply === 'function');
+  await fillImage('#meo-image-rule', '${fileDirname}/latest'); await waitImageSaved();
+  await page.evaluate(() => { (window as any).__releaseImageReply(); });
+  assert.equal(await page.$eval('#meo-image-rule', element => (element as HTMLInputElement).value), '${fileDirname}/latest');
+  assert.equal(await page.$eval('.image-location-preview dd:last-child', element => element.textContent), path.join(os.tmpdir(), 'meo-image-notes', 'latest'));
+  imageWriteFailure = true;
+  await fillImage('#meo-image-rule', '${fileDirname}/retry');
+  await page.waitForSelector('.image-location-feedback.is-error');
+  assert.equal(imageContext.imageStorage!.rule, '${fileDirname}/latest');
+  imageWriteFailure = false;
+  await page.click('.image-location-retry'); await waitImageSaved();
+  imageChosenFolder = null;
+  const beforePicker = imageContext.imageStorage!.rule;
+  await page.click('.image-location-picker');
+  await page.waitForFunction(() => !document.querySelector<HTMLButtonElement>('.image-location-picker')?.disabled);
+  assert.equal(imageContext.imageStorage!.rule, beforePicker);
+  imageChosenFolder = path.join(os.tmpdir(), 'selected-image-folder');
+  await page.click('.image-location-picker');
+  await page.waitForFunction(() => document.querySelector<HTMLInputElement>('#meo-image-rule')?.value.includes('selected-image-folder'));
+  await waitImageSaved();
+  assert.equal(imageContext.imageStorage!.rule, imageChosenFolder);
+  // Closing during the debounce sends the final valid draft without an Apply button.
+  await fillImage('#meo-image-rule', '${fileDirname}/closed');
+  await page.click('.settings-close');
+  await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button');
+  await page.waitForFunction(() => document.querySelector<HTMLInputElement>('#meo-image-rule')?.value === '${fileDirname}/closed' && document.querySelector('.image-location-preview dd:last-child')?.textContent?.endsWith('closed'));
+  assert.equal(imageContext.imageStorage!.rule, '${fileDirname}/closed');
+  imageContext = { documentFsPath: null, imageStorage: imageContext.imageStorage };
+  await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {data: {type: 'imageStorageChanged'}})));
+  await page.waitForFunction(() => document.querySelector('.image-location-preview dd:last-child')?.textContent === '先保存文档，再粘贴图片。');
+  imageContext = { ...imageContext, documentFsPath: path.join(os.tmpdir(), 'meo-image-notes', 'renamed.md') };
+  await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {data: {type: 'imageStorageChanged'}})));
+  await page.waitForFunction(() => document.querySelector('.image-location-preview dd:first-of-type')?.textContent?.includes('renamed.md'));
+  await page.click('.settings-search-clear');
+
+  await page.click('.settings-close');
+  const modeBeforeImagePaste = await page.$eval('.editor-root', element => element.getAttribute('data-mode'));
+  const textBeforeImagePaste = await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor')).state.doc.toString());
+  await page.click('button[data-mode="source"]');
+  await fs.mkdir(path.join(process.cwd(), '.local'), {recursive: true});
+  imagePasteRoot = await fs.mkdtemp(path.join(process.cwd(), '.local', 'image-paste-test-'));
+  imageContext = { documentFsPath: path.join(imagePasteRoot, 'draft.md'), imageStorage: {mode: 'default', folder: 'images with spaces (v1) #100%', rule: '${fileDirname}/assets'} };
+  await fs.writeFile(imageContext.documentFsPath!, '# Draft');
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6Nf8AAAAASUVORK5CYII=';
+  const pasteImage = async () => {
+    await page.evaluate(png => {
+      const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+      view.focus();
+      const bytes = Uint8Array.from(atob(png), character => character.charCodeAt(0));
+      const clipboard = new DataTransfer(); clipboard.items.add(new File([bytes], 'screenshot.png', {type: 'image/png'}));
+      view.contentDOM.dispatchEvent(new ClipboardEvent('paste', {clipboardData: clipboard, bubbles: true, cancelable: true}));
+    }, png);
+  };
+  console.log('Image settings autosave, validation, IME, stale replies, picker and close persistence passed');
+  await pasteImage();
+  await page.waitForFunction(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor')).state.doc.toString().includes('images%20with%20spaces%20%28v1%29%20%23100%25/'));
+  const images = await fs.readdir(path.join(imagePasteRoot, imageContext.imageStorage!.folder));
+  assert.equal(images.length, 1);
+  console.log('Image paste created a file and inserted an escaped Markdown path');
+  assert.equal((await fs.readFile(path.join(imagePasteRoot, imageContext.imageStorage!.folder, images[0]))).toString('base64'), png);
+  const beforeUntitledPaste = await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor')).state.doc.toString());
+  imageContext = {...imageContext, documentFsPath: null};
+  await pasteImage();
+  await page.waitForFunction(() => document.querySelector('.editor-notice')?.textContent?.includes('Save the document'));
+  assert.equal(await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor')).state.doc.toString()), beforeUntitledPaste);
+  imageContext = {...imageContext, documentFsPath: path.join(imagePasteRoot, 'draft.md')};
+  console.log('Untitled image paste retained the document and displayed an actionable failure');
+  await pasteImage();
+  await page.waitForFunction(before => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor')).state.doc.toString() !== before, {}, beforeUntitledPaste);
+  assert.equal((await fs.readdir(path.join(imagePasteRoot, imageContext.imageStorage!.folder))).length, 2);
+  await page.evaluate(text => {
+    const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+    view.dispatch({changes: {from: 0, to: view.state.doc.length, insert: text}, selection: {anchor: 0}});
+  }, textBeforeImagePaste);
+  if (modeBeforeImagePaste === 'live') await page.click('button[data-mode="live"]');
+  await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button');
   const cursors = await page.$$eval('.settings-radio-input', elements => elements.map(element => [getComputedStyle(element).cursor, getComputedStyle(element.parentElement!).cursor]));
   assert.ok(cursors.every(([input, label]) => input === 'pointer' && label === 'pointer'));
   await page.click('.settings-search'); await page.keyboard.type('空符号');
@@ -400,6 +559,26 @@ try {
   for (const language of ['en', 'zh-CN']) for (const appearance of ['light', 'dark']) {
     await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button');
     await page.click('.settings-tab[data-tab="general"]'); await page.click(`[data-setting="language"] [data-value="${language}"]`); await page.click(`[data-setting="theme"] [data-value="${appearance}"]`); await page.click('.settings-close');
+    await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button');
+    await page.click('.settings-tab[data-tab="typing"]');
+    await page.click('.settings-search'); await page.keyboard.type(language === 'en' ? 'image' : '图片');
+    await page.waitForFunction(() => !!document.querySelector<HTMLInputElement>('#meo-image-rule') && !document.querySelector<HTMLInputElement>('#meo-image-rule')!.disabled);
+    assert.equal(await page.$eval('.image-location-settings .settings-item-title', element => element.textContent), language === 'en' ? 'Image save location' : '图片保存位置');
+    for (const mode of ['default', 'perDocument', 'advanced']) {
+      await page.click('.image-location-modes input[value="' + mode + '"]');
+      await page.waitForFunction(() => !document.querySelector('.image-location-feedback')?.textContent?.includes('…'));
+      for (const width of [1100, 320]) {
+        await page.setViewport({ width, height: 780 });
+        assert.ok(await page.$eval('.image-location-settings', element => element.scrollWidth <= element.clientWidth + 1), language + '/' + appearance + '/' + mode + '/' + width + ': no image-control overflow');
+        assert.ok(await page.$eval('.image-location-preview', element => element.scrollWidth <= element.clientWidth + 1));
+      }
+      await page.setViewport({ width: 1100, height: 780 });
+    }
+    if (process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR) {
+      await fs.mkdir(process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR, {recursive: true});
+      await page.screenshot({path: path.join(process.env.MEO_IMAGE_SETTINGS_SCREENSHOT_DIR, 'image-settings-' + language + '-' + appearance + '.png')});
+    }
+    await page.click('.settings-search-clear'); await page.click('.settings-close');
     await page.click('button[data-mode="source"]');
     await page.waitForFunction(() => { const g = window as any, view = g.EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')); return view.dom.classList.contains('meo-mode-source') && !view.state.readOnly && view.contentDOM.isContentEditable && !document.querySelector('.editor-host')?.hasAttribute('hidden'); });
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -510,5 +689,8 @@ try {
 } catch (error) {
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'meo-settings-failure-'));
   await page.screenshot({ path: path.join(folder, 'settings.png') }); await fs.writeFile(path.join(folder, 'page.html'), await page.content());
-  console.error('Diagnostics:', folder, errors, await page.evaluate(() => { const g = window as any, view = g.EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')); return { text: view.state.doc.toString(), readonly: view.state.readOnly, focus: view.hasFocus, active: document.activeElement?.outerHTML.slice(0, 200), scroll: view.scrollDOM.getBoundingClientRect().toJSON() }; })); throw error;
-} finally { await closeTestBrowser(browser); }
+  console.error('Diagnostics:', folder, errors, await page.evaluate(() => { const g = window as any, view = g.EditingSettingsHarness?.EditorView.findFromDOM(document.querySelector('.cm-editor')); return view ? { text: view.state.doc.toString(), readonly: view.state.readOnly, focus: view.hasFocus, active: document.activeElement?.outerHTML.slice(0, 200), scroll: view.scrollDOM.getBoundingClientRect().toJSON() } : { initialized: false, active: document.activeElement?.outerHTML.slice(0, 200) }; })); throw error;
+} finally {
+  await closeTestBrowser(browser);
+  if (imagePasteRoot) await fs.rm(imagePasteRoot, {recursive: true, force: true});
+}

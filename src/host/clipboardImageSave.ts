@@ -1,11 +1,14 @@
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, realpath, unlink } from 'node:fs/promises';
 import path from 'node:path';
+import { expandImageStorage } from '../application/imageStorage';
+import type { ImageStoragePreferences } from '../foundation/imageStorage';
 
 export type ClipboardImageFileRequest = {
   readonly documentFsPath: string;
   readonly workspaceFsPath?: string;
   readonly configuredFolder?: string;
+  readonly imageStorage?: ImageStoragePreferences;
   readonly requestedFileName: string;
   readonly contents: Uint8Array;
 };
@@ -14,20 +17,54 @@ export type SavedClipboardImageFile = {
   readonly relativePath: string;
 };
 
+export type ClipboardImageDirectoryRequest = Pick<ClipboardImageFileRequest,
+  'documentFsPath' | 'workspaceFsPath' | 'configuredFolder' | 'imageStorage'>;
+
+/** Used by both settings previews and clipboard writes; resolving never creates directories. */
+export function resolveClipboardImageDirectory(request: ClipboardImageDirectoryRequest) {
+  const documentDirectory = path.dirname(path.resolve(request.documentFsPath));
+  if (request.imageStorage) {
+    const fileBasename = path.basename(request.documentFsPath);
+    const fileExtname = path.extname(fileBasename);
+    const expanded = expandImageStorage(request.imageStorage, {
+      fileDirname: documentDirectory, fileBasename, fileExtname,
+      fileBasenameNoExtension: fileBasename.slice(0, fileBasename.length - fileExtname.length)
+    });
+    if (expanded.includes('\0') || /^[a-z]:(?![\\/])/i.test(expanded)) {
+      throw new Error('Enter a valid folder path.');
+    }
+    const targetDirectory = request.imageStorage.mode === 'advanced'
+      ? path.resolve(documentDirectory, expanded)
+      : resolveContainedPath(documentDirectory, expanded, 'Image folder');
+    if (process.platform === 'win32') {
+      for (const segment of targetDirectory.slice(path.parse(targetDirectory).root.length).split(path.sep)) {
+        if (isUnsafeWindowsSegment(segment)) {
+          throw new Error('The folder path contains a name that Windows cannot use.');
+        }
+      }
+    }
+    // An advanced rule explicitly authorizes its destination. Walk from the volume root
+    // so a junction anywhere along that destination cannot silently redirect the write.
+    const baseDirectory = request.imageStorage.mode === 'advanced'
+      ? path.parse(targetDirectory).root : documentDirectory;
+    return { documentDirectory, baseDirectory, targetDirectory };
+  }
+  const configuredFolder = request.configuredFolder?.trim();
+  const baseDirectory = configuredFolder && request.workspaceFsPath
+    ? path.resolve(request.workspaceFsPath) : documentDirectory;
+  return { documentDirectory, baseDirectory,
+    targetDirectory: resolveContainedPath(baseDirectory, configuredFolder || 'assets', 'Image folder') };
+}
+
 export async function saveClipboardImageFile(
   request: ClipboardImageFileRequest
 ): Promise<SavedClipboardImageFile> {
-  const documentDirectory = path.dirname(path.resolve(request.documentFsPath));
-  const configuredFolder = request.configuredFolder?.trim();
-  const baseDirectory = configuredFolder && request.workspaceFsPath
-    ? path.resolve(request.workspaceFsPath)
-    : documentDirectory;
-  const relativeFolder = configuredFolder || 'assets';
-  const targetDirectory = resolveContainedPath(baseDirectory, relativeFolder, 'Image folder');
+  const { documentDirectory, baseDirectory, targetDirectory } = resolveClipboardImageDirectory(request);
   const requestedFileName = normalizeFileName(request.requestedFileName);
 
-  await mkdir(baseDirectory, { recursive: true });
-  const canonicalBaseDirectory = await realpath(baseDirectory);
+  if (baseDirectory !== path.parse(baseDirectory).root) await mkdir(baseDirectory, { recursive: true });
+  // Bun omits the separator for Windows volume roots; retain an absolute root.
+  const canonicalBaseDirectory = (await realpath(baseDirectory)).replace(/^([a-z]:)$/i, '$1' + path.sep);
   await ensureCanonicalDirectory(canonicalBaseDirectory, baseDirectory, targetDirectory);
   const extension = path.extname(requestedFileName);
   const stem = requestedFileName.slice(0, requestedFileName.length - extension.length);
@@ -77,7 +114,7 @@ async function ensureCanonicalDirectory(
       entry = await lstat(current);
     } catch (error) {
       if (!isNotFoundError(error)) throw error;
-      await mkdir(current);
+      await mkdir(current).catch(error => { if (!isAlreadyExistsError(error)) throw error; });
       entry = await lstat(current);
     }
     if (entry.isSymbolicLink()) {
@@ -90,8 +127,14 @@ async function ensureCanonicalDirectory(
   }
 }
 
+function isUnsafeWindowsSegment(value: string): boolean {
+  return /[<>:"|?*\x00-\x1f]/.test(value) || /[. ]$/.test(value)
+    || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(value);
+}
+
 function normalizeFileName(value: string): string {
-  if (!value || value === '.' || value === '..' || path.basename(value) !== value || /[\\/]/.test(value)) {
+  if (!value || value === '.' || value === '..' || path.basename(value) !== value || /[\\/]/.test(value)
+    || (process.platform === 'win32' && isUnsafeWindowsSegment(value))) {
     throw new Error('Image file name must be a single safe path segment');
   }
   return value;

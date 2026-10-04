@@ -39,5 +39,7 @@
   "config.showBeforeContent": "新打开的编辑器面板默认在变更行上方显示修改前内容。",
   "config.lineHighlights": "在源码模式中以淡色标示修改过的行。",
   "config.imageFolder": "保存粘贴图片的文件夹名称（相对于工作区根目录）。",
-  "config.editing.preferences": "输入辅助与编辑器快捷键偏好。可在编辑器的“更多设置”窗口中调整。"
+  "config.editing.preferences": "输入辅助与编辑器快捷键偏好。可在编辑器的“更多设置”窗口中调整。",
+  "config.imageStorage": "粘贴图片的保存方式。推荐在编辑器“设置 → 输入 → 粘贴”中设置；支持文档旁、按文档分开及高级路径规则。",
+  "config.imageFolderDeprecated": "旧目录配置会保留原有位置；请在编辑器设置中选择新的图片保存方式。"
 }

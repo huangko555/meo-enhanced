@@ -61,6 +61,7 @@
 | `meoEnhanced.readingPosition.restoreOnOpen` | 开启恢复保存位置，关闭从头打开，[阅读位置启动](../scripts/test-reading-position-preview-startup.ts)；原生跨进程另验 |
 | `meoEnhanced.performance.largeDocumentOptimization` | 阈值与保存模式覆盖策略生效，[大文档策略](../scripts/test-large-document-policy.ts)、[启动选项](../scripts/test-basic-capability-production-matrix.ts) |
 | `meoEnhanced.gitChanges.visible`、`meoEnhanced.changes.baseline`、`meoEnhanced.changes.showBeforeContent`、`meoEnhanced.gitChanges.lineHighlights` | 概览、基线、旧内容和行高亮有效，[审阅合同](../scripts/test-changes-review.ts)、[行高亮设置](../scripts/test-git-diff-line-highlights-setting.ts) |
+| `meoEnhanced.imageStorage` | 默认文档旁、按文档名分开及高级规则保存到预览目录；无工作区、旧配置、无效路径、未保存文档、同名防覆盖与链接转义正确；自动保存、关闭保存、输入法和迟到响应正确。[路径与持久化](../scripts/test-image-storage.ts)、[VS Code 配置及目录选择合同](../scripts/test-vscode-image-storage.ts)、[正式设置与写盘粘贴](../scripts/test-settings-window-production.ts)、[外部资源解析](../scripts/test-webview-image-src.ts)；系统剪贴板权限和原生文件对话框另验 |
 | `meoEnhanced.imageFolder` | 根目录解析和资源路径正确，[图片目录](../scripts/test-clipboard-image-root.ts)；真实剪贴板文件写入另验 |
 
 ## 公开命令与原生边界

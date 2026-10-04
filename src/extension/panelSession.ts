@@ -82,6 +82,8 @@ import { createVscodeDocumentReloadAdapter } from '../host/vscodeDocumentReloadA
 import { createVscodeDocumentCopyAdapter } from '../host/vscodeDocumentCopyAdapter';
 import { showSavedDocumentCopyFeedback } from '../host/vscodeDocumentCopyFeedback';
 import { createVscodeDocumentSaveLifecycleAdapter } from '../host/vscodeDocumentSaveLifecycleAdapter';
+import type { createImageStorageHost } from '../host/imageStorage';
+import { readVscodeImageStorage } from '../host/vscodeImageStorage';
 import { saveClipboardImageFile } from '../host/clipboardImageSave';
 import type { DocumentRevisionDto, DocumentRevisionResolution } from '../protocol/documentSession';
 import type { HostEditorEvent } from '../protocol/hostEditorEvents';
@@ -120,6 +122,7 @@ type PanelSessionControllerParams = {
   document: vscode.TextDocument;
   documentUri: vscode.Uri;
   context: vscode.ExtensionContext;
+  imageStorage?: ReturnType<typeof createImageStorageHost>;
   editingPreferences?: ReturnType<typeof createEditingPreferencesHost>;
   diagnostics: PanelDiagnostics;
   agentReviewHandoff: AgentReviewHandoffController;
@@ -616,6 +619,12 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       return;
     }
     switch (raw.type) {
+      case 'imageLocation':
+        await postToWebview(params.imageStorage ? await params.imageStorage.handle(raw, documentUri.toString()) : {
+          type: 'imageLocationResult', requestId: raw.requestId,
+          result: { ok: false, error: { code: 'operation-failed', message: 'Image storage owner is unavailable' } }
+        });
+        return;
       case 'editorService':
         await postToWebview(await runEditorService(raw, params.documentUri));
         return;
@@ -1199,21 +1208,15 @@ async function handleSaveImageFromClipboard(
   message: SaveImageFromClipboardRequest,
   documentUri: vscode.Uri
 ): Promise<SavedImagePathResponse> {
-  const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri);
-  const config = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION);
-  const imageFolderSetting = config.inspect<string>('imageFolder');
-  const imageFolder = imageFolderSetting?.workspaceFolderValue
-    ?? imageFolderSetting?.workspaceValue
-    ?? imageFolderSetting?.globalValue;
-
   try {
+    const storage = readVscodeImageStorage(documentUri);
+    if (!storage.documentFsPath) throw new Error('Save the document as a local Markdown file before pasting images.');
     const base64Data = message.imageData.replace(/^data:image\/[^;]+;base64,/, '');
     const imageBuffer = Buffer.from(base64Data, 'base64');
 
     const saved = await saveClipboardImageFile({
-      documentFsPath: documentUri.fsPath,
-      workspaceFsPath: workspaceFolder?.uri.fsPath,
-      configuredFolder: imageFolder,
+      ...storage,
+      documentFsPath: storage.documentFsPath,
       requestedFileName: message.fileName,
       contents: imageBuffer
     });

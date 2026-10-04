@@ -18,7 +18,10 @@ import { decodeInitMessage, decodeReadyMessage, type InitMessage, type ReadyMess
 import { decodeResolveWikiLinksRequest, decodeResolvedWikiLinksResponse, type ResolveWikiLinksRequest, type ResolvedWikiLinksResponse } from './wikiLinkResolution';
 import { decodeReadingPositionChangedMessage, type ReadingPositionChangedMessage } from './readingPosition';
 
+import { decodeImageLocationRequest, decodeImageLocationResponse, decodeImageStorageChangedEvent, type ImageLocationRequest, type ImageLocationResponse, type ImageStorageChangedEvent } from './imageStorage';
+
 export type WebviewToHostMessage =
+  | ImageLocationRequest
   | EditorServiceRequest
   | ReadyMessage
   | DocumentSyncCommand
@@ -37,6 +40,8 @@ export type WebviewToHostMessage =
   | ExportSnapshotResponse;
 
 export type HostToWebviewMessage =
+  | ImageLocationResponse
+  | ImageStorageChangedEvent
   | EditorServiceResponse
   | InitMessage
   | DocumentSyncMessage
@@ -58,7 +63,8 @@ export type HostToWebviewMessage =
   | GitBaselineChangedEvent;
 
 export function decodeWebviewToHostMessage(value: unknown): WebviewToHostMessage | null {
-  return decodeEditorServiceRequest(value)
+  return decodeImageLocationRequest(value)
+    ?? decodeEditorServiceRequest(value)
     ?? decodeReadyMessage(value)
     ?? decodeDocumentSyncCommand(value)
     ?? decodeSaveDocumentRevisionRequest(value)
@@ -77,7 +83,9 @@ export function decodeWebviewToHostMessage(value: unknown): WebviewToHostMessage
 }
 
 export function decodeHostToWebviewMessage(value: unknown): HostToWebviewMessage | null {
-  return decodeEditorServiceResponse(value)
+  return decodeImageLocationResponse(value)
+    ?? decodeImageStorageChangedEvent(value)
+    ?? decodeEditorServiceResponse(value)
     ?? decodeInitMessage(value)
     ?? decodeDocumentSyncMessage(value)
     ?? decodeSaveDocumentRevisionResponse(value)

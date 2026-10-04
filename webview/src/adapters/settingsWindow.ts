@@ -33,6 +33,7 @@ export function createSettingsWindow(options: {
   readonly update: (change: EditingPreferencesChange) => Promise<{ ok: boolean; error?: { message: string } }>;
   readonly returnFocus: () => { focus(): void } | null;
   readonly initialLanguage: UiLanguage;
+  readonly imageLocation?: { element: HTMLDivElement; present(language: UiLanguage): void; refresh(): Promise<void>; flush(): void };
 }) {
   let language = options.initialLanguage;
   let tab: SettingsTab = 'general';
@@ -216,14 +217,15 @@ export function createSettingsWindow(options: {
     const general = options.getGeneral(language).filter(item => matches(item.title, item.description, titleFor(item.section)));
     const typing = typingCatalog.filter(item => matches(t(...item.title), t(...item.description), titleFor(item.section), ...(item.key === 'convertTables' ? tablePasteContexts.flatMap(context => [t(context.title[0], context.title[1]), t(context.description[0], context.description[1])]) : [])));
     const shortcuts = Object.entries(shortcutSections).flatMap(([section, commands]) => commands.filter(command => matches(commandTitle(command, language), titleFor(section as Section), ...(shortcutDescriptions[command] ? [t(...shortcutDescriptions[command]!)] : []), ...effectiveShortcuts(options.getPreferences().shortcuts, options.platform)[command])).map(command => ({ section: section as Section, command })));
-    return { general, typing, shortcuts };
+    const imageLocation = !!options.imageLocation && matches(t('图片保存位置', 'Image save location'), t('截图 路径 文件夹 文档 高级', 'screenshot path folder document advanced'), titleFor('paste'));
+    return { general, typing, shortcuts, imageLocation };
   }
   function renderContent() {
     if (disposed) return;
     const visible = filtered();
     for (const [id, control] of tabButtons) {
       control.button.setAttribute('aria-selected', String(id === tab)); control.button.tabIndex = id === tab ? 0 : -1;
-      control.badge.textContent = String(visible[id].length); control.badge.hidden = !query();
+      control.badge.textContent = String(visible[id].length + (id === 'typing' && visible.imageLocation ? 1 : 0)); control.badge.hidden = !query();
       control.button.id = `meo-settings-tab-${id}`;
     }
     content.setAttribute('aria-labelledby', `meo-settings-tab-${tab}`);
@@ -240,6 +242,9 @@ export function createSettingsWindow(options: {
       const items = tab === 'general' ? visible.general.filter(item => item.section === section).map(renderGeneral)
         : tab === 'typing' ? visible.typing.filter(item => item.section === section).map(renderTyping)
         : visible.shortcuts.filter(item => item.section === section).map(item => renderShortcut(item.command));
+      if (tab === 'typing' && section === 'paste' && visible.imageLocation && options.imageLocation) {
+        options.imageLocation.present(language); items.unshift(options.imageLocation.element);
+      }
       if (!items.length) continue;
       const block = element('section', 'settings-section'); block.id = `meo-settings-${section}`;
       block.append(element('h3', 'settings-section-title', titleFor(section)), ...items); content.append(block);
@@ -262,6 +267,7 @@ export function createSettingsWindow(options: {
     scrollPositions[tab] = content.scrollTop; tab = next; recording = null; dismissReset(); renderContent(); content.scrollTop = scrollPositions[next]; updateNavigation();
   }
   function present() {
+    options.imageLocation?.present(language);
     title.textContent = t('设置', 'Settings'); close.setAttribute('aria-label', t('关闭设置', 'Close settings'));
     tabs.setAttribute('aria-label', t('设置分类', 'Settings categories')); navigation.setAttribute('aria-label', t('跳转到章节', 'Jump to section'));
     for (const [id, control] of tabButtons) control.label.textContent = id === 'general' ? t('常规', 'General') : id === 'typing' ? t('输入', 'Input') : t('快捷键', 'Shortcuts');
@@ -270,7 +276,7 @@ export function createSettingsWindow(options: {
     resetTitle.textContent = t('恢复全部快捷键？', 'Reset all shortcuts?'); resetDescription.textContent = t('自定义绑定将被替换，其他设置保持不变。', 'Custom bindings will be replaced. Other settings stay unchanged.');
     cancelReset.textContent = t('取消', 'Cancel'); confirmReset.textContent = t('恢复默认', 'Reset'); renderContent();
   }
-  function closeWindow() { recording = null; dismissReset(); if (dialog.open) dialog.close(); options.returnFocus()?.focus(); }
+  function closeWindow() { options.imageLocation?.flush(); recording = null; dismissReset(); if (dialog.open) dialog.close(); options.returnFocus()?.focus(); }
   close.addEventListener('click', closeWindow);
   dialog.addEventListener('cancel', event => { event.preventDefault(); if (resetOpen) { dismissReset(); reset.focus(); } else if (recording) finishRecording(); else closeWindow(); });
   dialog.addEventListener('click', event => { if (event.target === dialog) { const bounds = dialog.getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) closeWindow(); } });
@@ -284,7 +290,7 @@ export function createSettingsWindow(options: {
   document.addEventListener('focusin', event => { if (resetOpen && event.target instanceof Node && !resetPopover.contains(event.target) && !reset.contains(event.target)) dismissReset(); }, { signal: abort.signal });
   window.addEventListener('blur', dismissReset, { signal: abort.signal });
   present();
-  return { open() { if (disposed || dialog.open) return; present(); dialog.showModal(); updateNavigation(); search.focus(); }, close: closeWindow,
+  return { open() { if (disposed || dialog.open) return; present(); void options.imageLocation?.refresh(); dialog.showModal(); updateNavigation(); search.focus(); }, close: closeWindow,
     isOpen: () => dialog.open, present, setLanguage(next: UiLanguage) { language = next; present(); },
     dispose() { disposed = true; abort.abort(); if (dialog.open) dialog.close(); dialog.remove(); } };
 }

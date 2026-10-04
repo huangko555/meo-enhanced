@@ -81,6 +81,8 @@ import type { ExportStyleEnvironment } from './export/runtime';
 import type { ReadingSnapshot } from './protocol/exportSnapshot';
 import type { HostConfigurationEvent } from './protocol/hostConfigurationEvents';
 import { resolveUiLanguage } from './foundation/uiLanguage';
+import type { ImageStorageChangedEvent } from './protocol/imageStorage';
+import { createVscodeImageStorage } from './host/vscodeImageStorage';
 import { createVscodeEditingPreferences } from './host/vscodeEditingPreferences';
 import { EDITING_PREFERENCES_SETTING } from './host/editingPreferences';
 import type { EditingPreferencesChangedEvent } from './protocol/editingPreferences';
@@ -188,7 +190,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   void agentReviewOverrides.syncNow();
 
-  const provider = new MarkdownWebviewProvider(context, agentReviewHandoff, appearanceSettings, createVscodeEditingPreferences());
+  const provider = new MarkdownWebviewProvider(context, agentReviewHandoff, appearanceSettings, createVscodeEditingPreferences(), createVscodeImageStorage());
   void provider.initializeGitWatcher();
   provider.initializeDevelopmentStyleWatcher();
 
@@ -362,7 +364,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     private readonly context: vscode.ExtensionContext,
     private readonly agentReviewHandoff: AgentReviewHandoffController,
     private readonly appearanceSettings: AppearanceSettingsOwner,
-    private readonly editingPreferences: ReturnType<typeof createVscodeEditingPreferences>
+    private readonly editingPreferences: ReturnType<typeof createVscodeEditingPreferences>,
+    private readonly imageStorage: ReturnType<typeof createVscodeImageStorage>
   ) {}
 
   async initializeGitWatcher(): Promise<void> {
@@ -453,6 +456,9 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
   }
 
   async handleConfigurationChanged(event: vscode.ConfigurationChangeEvent): Promise<void> {
+    if (event.affectsConfiguration('meoEnhanced.imageStorage') || event.affectsConfiguration('meoEnhanced.imageFolder')) {
+      this.broadcast({ type: 'imageStorageChanged' });
+    }
     if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${EDITING_PREFERENCES_SETTING}`)) {
       this.broadcast({ type: 'editingPreferencesChanged', ...this.editingPreferences.snapshot() });
     }
@@ -558,6 +564,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       documentUri,
       context: this.context,
       editingPreferences: this.editingPreferences,
+      imageStorage: this.imageStorage,
       diagnostics: createVscodeDiagnosticsAdapter(document),
       agentReviewHandoff: this.agentReviewHandoff,
       pendingDraftRecovery: createVscodePendingDraftRecoveryAdapter({
@@ -651,7 +658,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     this.updateActiveEditorContext();
   }
 
-  private broadcast(message: HostConfigurationEvent | EditingPreferencesChangedEvent): void {
+  private broadcast(message: HostConfigurationEvent | EditingPreferencesChangedEvent | ImageStorageChangedEvent): void {
     for (const panel of this.activePanels) {
       void panel.webview.postMessage(message);
     }

@@ -194,4 +194,18 @@ assert(await resolveWebviewImageSrc('//images.example.test/image.png', documentU
   externalWebview.webview as never, { delivery: 'embedded' }) === 'https://images.example.test/image.png',
   'Protocol-relative Preview images must use the existing HTTPS normalization');
 
+// Encoded pasted-image names retain their identity outside initial resource roots.
+const specialImage = TestUri.file(path.join(path.dirname(newExternalImage.fsPath), 'images (v1) #100%', 'paste.png'));
+existingFiles.set(fileKey(specialImage.fsPath), new Uint8Array([4, 5, 6]));
+const specialPath = encodeURI(specialImage.fsPath.replace(/\\/g, '/')).replace(/[()#?]/g, character => '%' + character.charCodeAt(0).toString(16).toUpperCase());
+const specialPreview = exportRuntime.renderPreviewDocument({
+  markdownText: '![](' + specialPath + ')',
+  sourceDocumentPath: documentUri.fsPath,
+  uiLanguage: 'en'
+});
+const specialDeferred = /data-meo-deferred-image-src="([^"]+)"/.exec(specialPreview.html)?.[1];
+assert(specialDeferred, 'Preview must preserve a pasted image with escaped path characters');
+assert(await resolveWebviewImageSrc(specialDeferred, documentUri as never, externalWebview.webview as never, {delivery: 'embedded'}) === 'data:image/png;base64,BAUG',
+  'The encoded external image must resolve to its actual bytes');
+
 console.log('webview image source checks passed');

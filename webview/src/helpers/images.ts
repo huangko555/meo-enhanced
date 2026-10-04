@@ -238,7 +238,8 @@ export const handleImagePaste = async (
           if (result.ok === false) throw new Error(result.error.message);
           savedImage = { fileName, path: result.value.path };
         }
-        const imageMarkdown = `![${savedImage.fileName}](${savedImage.path})`;
+        const markdownPath = encodeURI(savedImage.path).replace(/[()#?]/g, character => '%' + character.charCodeAt(0).toString(16).toUpperCase());
+        const imageMarkdown = `![${savedImage.fileName}](${markdownPath})`;
         if (tableInput && tableSelection && tableInput.isConnected) {
           const start = tableInput.value === tableTextAtPaste
             ? tableSelection.start : tableInput.selectionStart;

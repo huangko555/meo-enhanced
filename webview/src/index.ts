@@ -1,6 +1,8 @@
 import { effectiveShortcuts } from '../../src/application/editingPreferences';
 import { commandTitle } from './application/settingsCatalog';
 import type { EditorCommandId } from '../../src/foundation/editingPreferences';
+import { createImageLocationSettings } from './adapters/imageLocationSettings';
+import { createImageStorageTransport } from './adapters/imageStorageTransport';
 import { createSettingsWindow, type GeneralSetting } from './adapters/settingsWindow';
 import { createEditingPreferencesTransport } from './adapters/editingPreferencesTransport';
 import { createEditorServicesTransport } from './adapters/editorServicesTransport';
@@ -3173,7 +3175,10 @@ const copyTableToHost = async (format: 'markdown' | 'csv') => {
   if (typeof text !== 'string') return;
   if (!await editorServicesTransport.request({ action: 'writeClipboard', text })) reportClipboardFailure();
 };
+const imageStorageTransport = createImageStorageTransport(request => vscode.postMessage(request));
+const imageLocationSettings = createImageLocationSettings({ language: activeUiLanguage, request: request => imageStorageTransport.request(request) });
 settingsWindow = createSettingsWindow({
+  imageLocation: imageLocationSettings,
   initialLanguage: activeUiLanguage, platform: /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? 'mac' : 'other',
   getPreferences: () => editingPreferences, update: change => editingPreferencesTransport.update(change), returnFocus: () => getActiveEditorMode() === 'preview' ? moreToolsButton : editor ?? moreToolsButton,
   getGeneral: language => {
@@ -3220,6 +3225,8 @@ window.addEventListener('message', (event) => {
   }
 
   queueMicrotask(() => { if (settingsWindow?.isOpen()) settingsWindow.present(); });
+  if (message.type === 'imageLocationResult') { imageStorageTransport.accept(message); return; }
+  if (message.type === 'imageStorageChanged') { if (settingsWindow?.isOpen()) void imageLocationSettings.refresh(); return; }
   if (message.type === 'updatedEditingPreferences') { editingPreferencesTransport.accept(message); return; }
   if (message.type === 'editingPreferencesChanged') { acceptEditingPreferences(message.preferences, message.revision); return; }
   if (message.type === 'editorServiceResult') { editorServicesTransport.accept(message); return; }
@@ -3527,6 +3534,8 @@ window.addEventListener('focus', () => {
 
 window.addEventListener('beforeunload', () => {
   settingsWindow?.dispose();
+  imageLocationSettings.dispose();
+  imageStorageTransport.dispose();
   editingPreferencesTransport.dispose();
   editorServicesTransport.dispose();
   clearReadyRetryTimers();

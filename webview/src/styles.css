@@ -7225,3 +7225,31 @@ html[data-editor-appearance='dark'] .meo-input-suggestions {
 .meo-suggestion-trigger, .meo-suggestion-slash, .meo-suggestion-match { color: var(--meo-suggestion-match-color); }
 .meo-suggestion-parameters { color: var(--vscode-descriptionForeground); }
 .meo-input-suggestion-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--vscode-descriptionForeground); font: inherit; text-align: right; white-space: nowrap; overflow-wrap: normal; }
+
+/* The prefix and generated suffix are outside the editable folder field. */
+.image-location-settings { display: grid; justify-content: stretch; gap: 10px; min-width: 0; }
+.image-location-settings [hidden] { display: none; }
+.image-location-preview { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; margin: 0; padding: 12px; border-radius: 6px; background: color-mix(in srgb, var(--meo-foreground) 4%, transparent); font-size: 12px; line-height: 1.5; }
+.image-location-preview dt { color: var(--vscode-descriptionForeground); }
+.image-location-preview dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.image-location-field-label { display: block; margin-bottom: 5px; font-size: 12px; }
+.image-location-path { display: flex; align-items: center; min-width: 0; border: 1px solid var(--meo-input-border); border-radius: 5px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); }
+.image-location-path:focus-within { border-color: var(--vscode-focusBorder); }
+.image-location-prefix, .image-location-suffix { flex: 0 1 auto; padding: 0 9px; font: 12px var(--vscode-editor-font-family, monospace); color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+.image-location-prefix { flex-shrink: 0; }
+.image-location-input { box-sizing: border-box; width: 100%; min-width: 0; height: 30px; padding: 4px 8px; border: 0; border-radius: 5px; outline: none; font: 12px var(--vscode-editor-font-family, monospace); color: var(--vscode-input-foreground); background: var(--vscode-input-background); }
+.image-location-path .image-location-input { flex: 1 1 100px; width: 0; }
+.image-location-rule-box { display: flex; gap: 7px; min-width: 0; }
+.image-location-rule { border: 1px solid var(--meo-input-border); }
+.image-location-rule:focus { border-color: var(--vscode-focusBorder); }
+.image-location-variables { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.image-location-token { height: auto; min-height: 27px; padding: 4px 8px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; }
+.image-location-feedback { margin: 0; min-height: 18px; color: var(--vscode-descriptionForeground); font-size: 12px; overflow-wrap: anywhere; }
+.image-location-feedback.is-error { color: var(--vscode-errorForeground, #be1100); }
+.image-location-retry { justify-self: start; }
+@media (max-width: 520px) {
+  .image-location-preview { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  .image-location-preview dd + dt { margin-top: 5px; }
+  .image-location-rule-box { flex-wrap: wrap; }
+  .image-location-picker { flex: 0 0 auto; }
+}
