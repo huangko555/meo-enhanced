@@ -244,6 +244,32 @@ try {
     if (await page.$eval(selector, element => element.matches(':focus-visible'))) await assertCurrentHint(selector);
     else assert.equal(await page.$eval(selector, element => document.getElementById(element.getAttribute('aria-describedby') ?? '')?.classList.contains('is-visible') ?? false), false, 'moving focus into the source editor closes the button hint');
   }
+  await page.hover('.meo-mermaid-block');
+  await page.click('.meo-mermaid-toolbar [aria-label="Fullscreen"]');
+  await page.waitForSelector('.meo-mermaid-fullscreen-controls');
+  for (const label of ['Zoom in', 'Zoom out', 'Reset zoom', 'Exit fullscreen']) {
+    const selector = `.meo-mermaid-fullscreen-controls [aria-label="${label}"]`;
+    assert.equal(await page.$eval(selector, element => (element as HTMLElement).dataset.tooltip), label, 'fullscreen controls use the localized shared tooltip');
+    const hint = await show(selector);
+    assert.equal(hint.text, label);
+    assert.equal(hint.nativeTitle, null);
+    assert.equal(hint.visibleCount, 1);
+    assert.equal(hint.inside, true, 'fullscreen hints stay within the viewport');
+    assert.equal(await page.$eval(selector, element => !!document.getElementById(element.getAttribute('aria-describedby')!)?.closest('.meo-mermaid-fullscreen-scrim')), true, 'the hint belongs to the fullscreen overlay');
+  }
+  const fullscreenReset = '.meo-mermaid-fullscreen-controls [aria-label="Reset zoom"]';
+  await page.mouse.move(0, 0);
+  await page.keyboard.press('Tab');
+  await page.focus(fullscreenReset);
+  await page.waitForFunction(selector => {
+    const button = document.querySelector(selector)!;
+    return document.getElementById(button.getAttribute('aria-describedby')!)?.classList.contains('is-visible');
+  }, {}, fullscreenReset);
+  await assertCurrentHint(fullscreenReset);
+  await page.click('.meo-mermaid-exit-btn');
+  await page.waitForFunction(() => !document.querySelector('.meo-mermaid-fullscreen-scrim'));
+  assert.equal(await page.$('.meo-tooltip.is-visible'), null, 'closing fullscreen removes its active hint');
+
   await page.click('[data-mode="source"]');
   await page.waitForSelector('.cm-editor.meo-mode-source');
   await page.click('.source-preview-button');
@@ -314,7 +340,7 @@ try {
   assert.equal(await frame.$('.meo-tooltip.is-visible'), null, 'parent and Preview share one active hint');
   assert.deepEqual(errors, []);
   await page.close();
-  console.log('Production tooltips: delay, stateful pointer/keyboard updates, dismissal, toolbar/menu scope, boundary placement and Preview theme isolation passed.');
+  console.log('Production tooltips: delay, stateful pointer/keyboard updates, dismissal, toolbar/menu scope, fullscreen controls, boundary placement and Preview theme isolation passed.');
 } finally {
   await browser.close();
 }

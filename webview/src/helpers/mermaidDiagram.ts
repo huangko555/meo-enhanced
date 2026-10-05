@@ -1278,6 +1278,10 @@ export class MermaidDiagramWidget extends WidgetType {
     exitBtn.appendChild(createElement(X, { width: 16, height: 16 }));
     exitBtn.setAttribute('aria-label', strings.exitFullscreen);
 
+    for (const button of [zoomIn, zoomOut, reset, exitBtn]) {
+      button.dataset.tooltip = button.getAttribute('aria-label')!;
+    }
+
     zoomIn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();
