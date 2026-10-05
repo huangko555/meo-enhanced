@@ -225,13 +225,11 @@ function showHtmlComments(
   const nodes: Comment[] = [];
   while (walker.nextNode()) nodes.push(walker.currentNode as Comment);
   const sidecarTails = new Map<Element, Element>();
-  const strings = getUiStrings(view.state.facet(uiLanguageFacet));
   for (const [index, comment] of comments.entries()) {
     const note = document.createElement('span');
     note.className = 'meo-md-html-comment';
     note.setAttribute('role', 'button');
     note.tabIndex = 0;
-    note.dataset.tooltip = strings.showHtmlSource;
     note.dataset.meoHtmlSourceLine = String(sourceStartLine + source.slice(0, comment.from).split('\n').length - 1);
     note.textContent = source.slice(comment.from, comment.to);
     const openSource = (event: Event): void => {

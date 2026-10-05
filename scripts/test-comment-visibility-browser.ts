@@ -21,10 +21,11 @@ try {
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 1000, height: 850 });
-    await page.setContent('<!doctype html><div id="app"></div>');
+    await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
     await page.evaluate(() => {
+      (window as any).__commentTooltips = (window as any).HtmlContentHarness.bindTooltips(document.body);
       (window as any).__commentEditor = (window as any).HtmlContentHarness.createEditor({
         parent: document.getElementById('app'),
         text: 'Intro\n\nInline <!-- secret --> text\n\nInline <strong>before<!-- inline html note -->after</strong>.\n\n<!-- block\nsecret -->\n\n<div>before<!-- nested -->after</div>\n\n<div>\n<p>First paragraph</p>\n<!-- nested multiline\ncomment -->\n<p>Second paragraph</p>\n<!-- second <script>window.__commentInjected=true</script> note -->\n</div>\n\n<table>\n<tbody>\n<!-- table note -->\n<tr><td>Cell</td></tr>\n</tbody>\n</table>\n\n<ul>\n<!-- list note -->\n<li>Item</li>\n</ul>\n\n<div><p>Adjacent</p></div>\n<!-- trailing note -->\n\n<section><!-- unsafe note --><p>Unsupported</p></section>\n\n```html\n<!-- example -->\n```',
@@ -52,6 +53,26 @@ try {
     ]);
     assert.equal(rendered.sourceVisible, false);
     assert.equal(rendered.injectedScript, false);
+    for (const appearance of ['light', 'dark']) {
+      await page.evaluate(appearance => {
+        document.documentElement.dataset.editorAppearance = appearance;
+      }, appearance);
+      const comments = await page.$$('.meo-md-html-comment');
+      const observations: Array<{ text: string | null; cursor: string; tooltip: string | null }> = [];
+      for (const comment of comments) {
+        await comment.hover();
+        await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 350)));
+        const hover = await comment.evaluate(element => ({
+          text: element.textContent,
+          cursor: getComputedStyle(element).cursor,
+          tooltip: document.querySelector('.meo-tooltip.is-visible')?.textContent ?? null
+        }));
+        observations.push(hover);
+        await comment.dispose();
+      }
+      assert.ok(observations.every(hover => hover.cursor === 'text' && hover.tooltip === null), JSON.stringify({ appearance, observations }));
+    }
+    await page.evaluate(() => { delete document.documentElement.dataset.editorAppearance; });
     const htmlCommentGap = await page.evaluate(() => {
       const paragraph = Array.from(document.querySelectorAll<HTMLParagraphElement>('.meo-md-html-block p'))
         .find(element => element.textContent === 'First paragraph')!;
@@ -174,7 +195,10 @@ try {
     await page.keyboard.type('X');
     assert.equal(await page.evaluate(() => (window as any).__commentEditor.view.state.doc.toString()
       .includes('<!-- secXret -->')), true);
-    await page.evaluate(() => (window as any).__commentEditor.destroy());
+    await page.evaluate(() => {
+      (window as any).__commentTooltips.dispose();
+      (window as any).__commentEditor.destroy();
+    });
     await page.close();
   } finally {
     await browser.close();

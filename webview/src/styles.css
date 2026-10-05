@@ -3943,7 +3943,7 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   font-style: italic;
   font-weight: normal;
   white-space: pre-wrap;
-  cursor: pointer;
+  cursor: text;
 }
 
 .cm-editor .meo-md-html-comment[data-display='block'] {
