@@ -3160,6 +3160,14 @@ html[data-editor-appearance='dark'] .meo-tooltip-shortcut { background: rgba(255
   border-radius: 0.35em;
 }
 
+.cm-editor.meo-mode-live .meo-md-inline-code,
+.cm-editor .meo-md-html-inline code,
+.cm-editor .meo-md-html-content code:not(pre code) {
+  padding: 0.08em 0.25em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
 .cm-editor.meo-mode-live .meo-md-tag {
   color: var(--meo-semantic-tagForeground) !important;
   background: var(--meo-semantic-tagBackground);
@@ -3557,10 +3565,12 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 .cm-editor .meo-md-code-block .meo-md-inline-code,
 .cm-editor .meo-mermaid-block .meo-md-inline-code {
   background: transparent;
+  padding: 0;
 }
 
 .cm-editor.meo-mode-live .meo-md-code-marker,
 .cm-editor.meo-mode-live .meo-md-code-marker * {
+  display: none !important;
   color: transparent !important;
   -webkit-text-fill-color: transparent !important;
   opacity: 0 !important;

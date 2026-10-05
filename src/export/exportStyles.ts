@@ -776,14 +776,19 @@ code {
   text-rendering: auto;
 }
 
+code:not(pre code) {
+  padding: 0.08em 0.25em;
+  border-radius: 0.35em;
+  background: var(--meo-inline-code-bg);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
 p code,
 li code,
 blockquote code,
 td code,
 th code {
-  padding: 0.08em 0.6em;
-  border-radius: 0.35em;
-  background: var(--meo-inline-code-bg);
   color: var(--meo-fg);
 }
 

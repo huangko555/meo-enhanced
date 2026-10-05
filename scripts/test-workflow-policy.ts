@@ -125,6 +125,7 @@ function targetedCommands(
       ];
     case 'appearance':
       return [
+        script('scripts/test-inline-code-layout-production.ts'),
         script('scripts/test-settings-window-production.ts'),
         script('scripts/test-toolbar-menus-browser.ts'),
         script('scripts/test-tooltips-production.ts'),
@@ -244,6 +245,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-editor-services.ts'),
           script('scripts/test-input-assistance-production.ts'),
           script('scripts/test-html-comment-input-production.ts'),
+          script('scripts/test-inline-code-layout-production.ts'),
           script('scripts/test-editing-features-production.ts'),
           script('scripts/test-slash-commands-production.ts'),
           script('scripts/test-settings-window-production.ts'),

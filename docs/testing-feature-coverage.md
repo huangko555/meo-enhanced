@@ -11,6 +11,7 @@
 | Live / Source / Preview 切换 | 文档一致；每个可见帧有内容；阅读位置和可编辑组件选区连续 | [模式矩阵](../scripts/test-mode-transition-matrix.ts)、[选区连续性](../scripts/test-mode-selection-continuity.ts) |
 | 初次打开、关闭重开、进程重启 | 保存模式直接显示正确内容且可交互，不靠切换模式补救 | [启动合同](../scripts/test-editor-startup-load.ts)；最终 VSIX 另做原生重开和重启检查 |
 | 正文输入、换行、选区、多光标、IME | 内容与光标一致，组合输入不重复提交，不丢字 | [输入路径](../scripts/test-live-input-path-production.ts)、[IME](../scripts/test-ime-composition.ts)、[快捷键](../scripts/test-editor-shortcuts.ts)；原生输入法另验 |
+| 行内代码 | 阅读态隐藏反引号不占宽；正文、引用、列表、标题、表格和 HTML 内边距一致；编辑边界、折行与 Source 正常 | [行内代码布局](../scripts/test-inline-code-layout-production.ts)；覆盖 Live、Preview 和 HTML 导出两种主题 |
 | 格式工具与选中文字菜单 | 加粗、斜体、删除线、高亮、代码、链接等实际修改正文，撤销重做准确 | [基础功能矩阵](../scripts/test-basic-capability-production-matrix.ts) |
 | 滚轮与阅读稳定 | 向下/向上持续前进；一次手势多帧完成时不被拉回；迟到布局只补偿几何变化 | [滚动进度](../scripts/test-native-scroll-progress-production.ts)、[虚拟块布局](../scripts/test-virtual-block-scroll-stability.ts)；全篇检查必须实际到达首尾 |
 | 搜索、替换、上一项/下一项 | 匹配正确；可见项不多滚；离屏项进入可用视口；替换及撤销内容准确 | [搜索替换](../scripts/test-search-replace-production.ts)、[搜索控件](../scripts/test-webview-search-controls.ts) |
