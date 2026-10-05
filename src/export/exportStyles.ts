@@ -207,6 +207,7 @@ ${headingSizeVarsCss}
 ${headingWeightVarsCss}
   --meo-line-height: ${lineHeight};
   --meo-code-line-height: ${sourceLineHeight};
+  --meo-inline-code-bg: ${theme.semanticColors.inlineCodeBackground};
   --meo-code-bg: ${codeBlockBackgroundColor};
   --meo-mermaid-background: var(--meo-code-bg);
   --meo-mermaid-node-background: ${appearance === 'light' ? '#ffffff' : sideBarBackgroundColor};
@@ -782,7 +783,7 @@ td code,
 th code {
   padding: 0.08em 0.6em;
   border-radius: 0.35em;
-  background: var(--meo-code-bg);
+  background: var(--meo-inline-code-bg);
   color: var(--meo-fg);
 }
 
