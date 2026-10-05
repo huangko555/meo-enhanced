@@ -364,6 +364,7 @@ export class ViewportController {
   private activeScrollLockCorrection: (() => void) | null = null;
   private elementRetentionGeneration = 0;
   private activeElementRetentionObserver: MutationObserver | null = null;
+  private activeElementRetentionCorrection: (() => void) | null = null;
   private activeScrollTarget: ActiveScrollTarget | null = null;
   private activeLayoutAnchor: ActiveLayoutAnchor | null = null;
   private anchorStabilizationGeneration: number | null = null;
@@ -562,7 +563,7 @@ export class ViewportController {
           this.view.requestMeasure();
           return;
         }
-        if (this.hasActiveDocumentAnchorStabilization()) {
+        if (this.hasActiveDocumentAnchorStabilization() || this.activeElementRetentionCorrection) {
           this.view.requestMeasure();
           return;
         }
@@ -604,6 +605,7 @@ export class ViewportController {
       }
       this.restartLayoutStabilization();
     }
+    this.activeElementRetentionCorrection?.();
     const activeTarget = this.activeScrollTarget;
     if (!this.isActiveScrollTargetValid(activeTarget)) return;
     if (this.writeScrollPosition(activeTarget.position)) {
@@ -665,6 +667,7 @@ export class ViewportController {
       if (retentionGeneration !== this.elementRetentionGeneration) return;
       this.activeElementRetentionObserver?.disconnect();
       this.activeElementRetentionObserver = null;
+      this.activeElementRetentionCorrection = null;
     };
     const reconcile = () => {
       if (!isRetentionCurrent()) {
@@ -679,13 +682,18 @@ export class ViewportController {
         }, current);
         this.writeScrollPosition(target);
       }
-      remainingFrames -= 1;
-      if (remainingFrames > 0) {
-        requestAnimationFrame(reconcile);
-      } else {
-        finish();
-      }
     };
+    const settleFrame = () => {
+      if (!isRetentionCurrent()) { finish(); return; }
+      reconcile();
+      remainingFrames -= 1;
+      if (remainingFrames > 0) requestAnimationFrame(settleFrame);
+      else finish();
+    };
+    // Observer notifications may arrive dozens of times within one frame.
+    // They correct geometry immediately without consuming the frame budget or
+    // starting parallel settlement loops. Editor measurements use this owner too.
+    this.activeElementRetentionCorrection = reconcile;
     const MutationObserverConstructor = element.ownerDocument.defaultView?.MutationObserver;
     if (MutationObserverConstructor) {
       this.activeElementRetentionObserver = new MutationObserverConstructor(() => reconcile());
@@ -701,12 +709,14 @@ export class ViewportController {
       return;
     }
     reconcile();
+    requestAnimationFrame(settleFrame);
   }
 
   private cancelElementRetention(): void {
     this.elementRetentionGeneration += 1;
     this.activeElementRetentionObserver?.disconnect();
     this.activeElementRetentionObserver = null;
+    this.activeElementRetentionCorrection = null;
   }
 
   private startScrollTopLock(targetTop: number, isCurrent: () => boolean): void {

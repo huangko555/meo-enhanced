@@ -254,19 +254,28 @@ function updateMermaidModeButton(
 function dispatchModeWhileRetainingViewport(
   view: EditorView,
   effects: StateEffect<unknown> | readonly StateEffect<unknown>[],
-  isCurrent: () => boolean
+  isCurrent: () => boolean,
+  toolbar: HTMLElement
 ): void {
   const controller = getViewportController(view);
   if (!controller) {
     view.dispatch({ effects });
     return;
   }
-  const scrollTop = view.scrollDOM.scrollTop;
-  view.dispatch({ effects });
-  // The mode effect can move the outer scroller before delayed block geometry
-  // settles. Retain the click's viewport without superseding the same
-  // navigation intent that restores toolbar focus.
-  controller.retainScrollTop(scrollTop, isCurrent);
+  const resolveToolbar = () => view.dom.querySelector<HTMLElement>(
+    `.meo-mermaid-toolbar[data-meo-block-from="${toolbar.dataset.meoBlockFrom}"]:not([data-meo-floating])`
+  );
+  const sourceToolbar = resolveToolbar();
+  if (sourceToolbar) {
+    // A fixed scrollTop cannot absorb late height-map changes above this block.
+    // Keep the clicked block's header at its screen Y through all three modes.
+    controller.retainElementTopWhileMutation(sourceToolbar, resolveToolbar,
+      () => view.dispatch({ effects }), isCurrent);
+  } else {
+    const scrollTop = view.scrollDOM.scrollTop;
+    view.dispatch({ effects });
+    controller.retainScrollTop(scrollTop, isCurrent);
+  }
 }
 
 class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
@@ -350,7 +359,8 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
           supersedeLiveInputDerivedWork(),
           setMermaidBlockModeEffect.of({ anchor: currentAnchor, mode: nextMode })
         ],
-        isRevealCurrent
+        isRevealCurrent,
+        toolbar
       );
       requestAnimationFrame(() => {
         if (!isRevealCurrent()) return;
@@ -384,7 +394,8 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
           supersedeLiveInputDerivedWork(),
           setMermaidBlockModeEffect.of({ anchor: currentAnchor, mode: 'source' })
         ],
-        isRevealCurrent
+        isRevealCurrent,
+        toolbar
       );
       requestAnimationFrame(() => {
         if (!isRevealCurrent()) return;

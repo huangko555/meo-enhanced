@@ -31,8 +31,12 @@ type Measurement = {
 };
 
 function codeNodeAt(view: EditorView, position: number): SyntaxNode | null {
-  for (let node: SyntaxNode | null = currentSyntaxTree(view.state).resolveInner(position, 1); node; node = node.parent) {
-    if (node.name === 'FencedCode' || node.name === 'CodeBlock') return node;
+  // At the last character boundary, the right side may already be outside
+  // the block. Losing that block for one measure drops the header's inset.
+  for (const side of [1, -1] as const) {
+    for (let node: SyntaxNode | null = currentSyntaxTree(view.state).resolveInner(position, side); node; node = node.parent) {
+      if (node.name === 'FencedCode' || node.name === 'CodeBlock') return node;
+    }
   }
   return null;
 }
@@ -237,6 +241,9 @@ export function blockStickyHeaderExtension() {
   return [ViewPlugin.fromClass(BlockStickyHeader), EditorView.scrollMargins.of((view) => {
     // Reserve space before a reveal mounts the header at a previously offscreen target.
     const block = blockHeaderAt(view, view.state.selection.main.head);
-    return { top: view.scrollDOM.dataset.meoBlockHeaderInset || (block && view.state.doc.lineAt(view.state.selection.main.head).from > block.from) ? HEADER_HEIGHT : 0 };
+    const reservesTargetHeader = block
+      && view.state.doc.lineAt(view.state.selection.main.head).from > block.from
+      && view.lineBlockAt(block.to).bottom - view.lineBlockAt(block.from).top >= HEADER_HEIGHT * 3;
+    return { top: view.scrollDOM.dataset.meoBlockHeaderInset || reservesTargetHeader ? HEADER_HEIGHT : 0 };
   })];
 }

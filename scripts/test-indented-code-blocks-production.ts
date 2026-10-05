@@ -148,7 +148,102 @@ async function verifyCodePaletteAndHighlightBounds(): Promise<void> {
   assert.deepEqual(failures, [], failures.join('\n'));
 }
 
+
+async function verifyInputAndNavigationFrames(): Promise<void> {
+  const page = await browser.newPage();
+  try {
+    await page.setViewport({ width: 1050, height: 620 });
+    await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app" class="editor-host"></div>');
+    await page.addStyleTag({ path: 'webview/src/styles.css' });
+    await page.addStyleTag({ content: ':root{--meo-background:#23272e;--meo-foreground:#d5dce5;--meo-code-background:#1c2026;--meo-font-live:Arial;--meo-font-live-weight:400;--meo-font-live-size:20px;--meo-font-source:monospace;--meo-font-source-weight:400;--meo-font-source-size:20px;--vscode-editor-font-family:monospace;--vscode-editor-font-size:20px;--vscode-editor-line-height:28px}' });
+    await page.addScriptTag({ content: bundle });
+    for (const indent of ['    ', '\t']) {
+      for (const action of ['split-last', 'enter-last', 'extend-blank', 'above', 'below', 'navigate'] as const) {
+        const initialText = [...Array.from({ length: 50 }, (_, index) => `前置 ${index}`), '',
+          indent + 'one', indent + 'two', indent + '多个行内公式: $a^2 + b^2 = c^2$, ...$\\alpha + \\beta = \\gamma$。',
+          ...(action === 'extend-blank' ? [indent] : []), '',
+          ...Array.from({ length: 50 }, (_, index) => `后置 ${index}`)].join('\n');
+        const setup = await page.evaluate(async ({ text, action, indentLength }) => {
+          const scope = window as any;
+          scope.__editor?.destroy();
+          document.getElementById('app')!.replaceChildren();
+          const editor = scope.__editor = scope.CodeBlockLineNumbersHarness.createEditor({
+            parent: document.getElementById('app')!, text, initialMode: 'live',
+            initialLongCodeBlockFolding: false, onApplyChanges() {}
+          });
+          editor.scrollToLine(54, 'center');
+          for (let frame = 0; frame < 10; frame++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+          const view = editor.view;
+          const target = view.state.doc.line(action === 'extend-blank' ? 55 : 54);
+          const position = action === 'split-last' ? target.from + indentLength + 15 : target.to;
+          view.dispatch({ selection: { anchor: position } });
+          view.focus();
+          for (let frame = 0; frame < 4; frame++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+          const caret = view.coordsAtPos(position)!;
+          const viewport = view.scrollDOM.getBoundingClientRect();
+          if (action === 'above') view.scrollDOM.scrollTop += caret.top - viewport.top + 5;
+          if (action === 'below') view.scrollDOM.scrollTop += caret.bottom - viewport.bottom - 5;
+          for (let frame = 0; frame < 4; frame++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+          const samples: Array<{ top: number | null; left: number | null; scroll: number; code: boolean; numbers: string[] }> = [];
+          let sampling = true;
+          const sample = () => {
+            const head = view.state.selection.main.head;
+            const coords = view.coordsAtPos(head);
+            const dom = view.domAtPos(head).node;
+            const row = (dom instanceof Element ? dom : dom.parentElement)?.closest('.cm-line');
+            samples.push({ top: coords?.top ?? null, left: coords?.left ?? null,
+              scroll: view.scrollDOM.scrollTop, code: Boolean(row?.classList.contains('meo-md-code-block')),
+              numbers: Array.from(view.contentDOM.querySelectorAll<HTMLElement>('.meo-md-code-line-numbered'))
+                .map(row => row.dataset.meoCodeLineNumber!) });
+            if (sampling) requestAnimationFrame(sample);
+          };
+          scope.__inputFrames = { samples, beforeScroll: view.scrollDOM.scrollTop, stop() { sampling = false; } };
+          // Trusted commands are sampled from their first painted frame.
+          if (action === 'navigate') {
+            editor.scrollToLine(54, 'top');
+            requestAnimationFrame(sample);
+          } else {
+            window.addEventListener('keydown', () => requestAnimationFrame(sample), { capture: true, once: true });
+          }
+          return { position };
+        }, { text: initialText, action, indentLength: indent.length });
+        if (action !== 'navigate') await page.keyboard.press(action === 'split-last' || action === 'enter-last' ? 'Enter' : 'X');
+        await settle(page);
+        await settle(page);
+        const result = await page.evaluate(() => {
+          const scope = window as any;
+          scope.__inputFrames.stop();
+          const view = scope.__editor.view;
+          const caret = view.coordsAtPos(view.state.selection.main.head);
+          const viewport = view.scrollDOM.getBoundingClientRect();
+          return { ...scope.__inputFrames, text: scope.__editor.getText(),
+            visible: Boolean(caret && caret.top >= viewport.top && caret.bottom <= viewport.bottom) };
+        });
+        const context = `${indent === '\t' ? 'tab' : 'spaces'}/${action}`;
+        assert.ok(result.samples.length >= 10, context + ': captured initial and settled frames');
+        const last = result.samples.at(-1)!;
+        assert.ok(result.visible, context + ': caret remains visible');
+        for (const sample of result.samples) {
+          assert.ok(sample.top !== null && Math.abs(sample.top - last.top) <= 1, context + ': caret Y jumped: ' + JSON.stringify(result.samples));
+          assert.ok(sample.left !== null && Math.abs(sample.left - last.left) <= 1, context + ': caret X jumped');
+          assert.ok(Math.abs(sample.scroll - last.scroll) <= 1, context + ': viewport scrolled twice');
+          assert.equal(sample.code, action !== 'enter-last', context + ': correct source surface from first frame');
+          assert.deepEqual(sample.numbers, last.numbers, context + ': gutter stable from first frame');
+        }
+        if (action !== 'above' && action !== 'below' && action !== 'navigate') {
+          assert.ok(Math.abs(last.scroll - result.beforeScroll) <= 1, context + ': visible input preserves viewport');
+        }
+        const insertion = action === 'split-last' || action === 'enter-last' ? '\n    ' : 'X';
+        const expectedText = action === 'navigate' ? initialText
+          : initialText.slice(0, setup.position) + insertion + initialText.slice(setup.position);
+        assert.equal(result.text, expectedText, context + ': source and indentation retained');
+      }
+    }
+  } finally { await page.close(); }
+}
+
 try {
+  await verifyInputAndNavigationFrames();
   await verifyCodePaletteAndHighlightBounds();
   for (const theme of ['dark', 'light'] as const) {
     for (const fixture of fixtures) {
@@ -301,5 +396,5 @@ try {
       } finally { await page.close(); }
     }
   }
-  console.log(`Live plain-code colors, selection/copy and wrapped layouts passed (${fixtures.length * 2} fixtures, 12 highlight pixel checks)`);
+  console.log(`Live indented-code input/navigation frames, plain-code colors, selection/copy and wrapped layouts passed (${fixtures.length * 2} fixtures, 12 highlight pixel checks)`);
 } finally { await browser.close(); }

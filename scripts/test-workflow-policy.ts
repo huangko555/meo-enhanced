@@ -153,6 +153,7 @@ function targetedCommands(
         script('scripts/test-line-number-typing-stability.ts'),
         script('scripts/test-line-number-no-wrap-stability.ts'),
         script('scripts/test-fenced-block-enter-stability.ts'),
+        script('scripts/test-indented-code-blocks-production.ts'),
         script('scripts/test-document-reload-mermaid-viewport.ts'),
         script('scripts/test-mode-roundtrip-reveal.ts'),
         script('scripts/test-mode-transition-matrix.ts'),

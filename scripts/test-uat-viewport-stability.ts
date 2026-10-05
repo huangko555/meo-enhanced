@@ -269,7 +269,75 @@ async function main(): Promise<void> {
       throw new Error(`UAT table input moved viewport or changed rows: ${JSON.stringify({ line288, line289, line315 })}`);
     }
 
-    console.log('UAT viewport stability regression test passed');
+    // Match a nested Mermaid after a footnote paragraph. Its header must stay
+    // at the clicked screen position even when upstream geometry settles late.
+    const footnote = [...Array.from({ length: 70 }, (_, index) => `前置正文 ${index}`),
+      '', '引用脚注[^mode]。', '', '[^mode]: 多段脚注，包含 `inline code`。', '',
+      '    ```mermaid', '    sequenceDiagram', '      participant User',
+      '      participant VSCode', '      participant Extension',
+      '      User->>VSCode: Press F5', '      VSCode->>Extension: Start Extension Host',
+      '      Extension-->>User: Open updated custom editor', '    ```', '',
+      ...Array.from({ length: 60 }, (_, index) => `后置正文 ${index}`)];
+    const footnoteLine = footnote.indexOf('    ```mermaid') + 1;
+    await page.addStyleTag({ content: '.late-footnote-layout .cm-line.meo-md-footnote-continuation:not(.meo-md-code-block){padding-bottom:28px!important}' });
+    const selector = await page.evaluate(async ({ text, lineNumber }) => {
+      (window as any).__uatEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      const editor = (window as any).__uatEditor = (window as any).EmbeddedInputViewportHarness.createEditor({
+        parent: document.getElementById('app')!, text, initialMode: 'live', onApplyChanges() {}
+      });
+      editor.scrollToLine(lineNumber, 'center');
+      for (let frame = 0; frame < 12; frame++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      return `.meo-mermaid-toolbar[data-meo-block-from="${editor.view.state.doc.line(lineNumber).from}"]:not([data-meo-floating]) .meo-mermaid-mode-btn`;
+    }, { text: footnote.join('\n'), lineNumber: footnoteLine });
+    await page.waitForSelector(selector);
+    await page.evaluate(selector => {
+      const view = (window as any).__uatEditor.view;
+      view.scrollDOM.scrollTop += document.querySelector(selector)!.getBoundingClientRect().top - 135;
+    }, selector);
+    await waitForFrames(page, 8);
+    for (let index = 0; index < 9; index++) {
+      const before = await page.evaluate(({ selector, lateLayout }) => {
+        const view = (window as any).__uatEditor.view;
+        const samples: number[] = [];
+        let sampling = true;
+        const readTop = () => document.querySelector(selector)?.getBoundingClientRect().top ?? null;
+        const sample = () => {
+          const top = readTop();
+          if (top === null) throw new Error('Footnote mode toolbar disappeared');
+          samples.push(top);
+          if (sampling) requestAnimationFrame(sample);
+        };
+        (window as any).__footnoteModeFrames = { samples, stop() { sampling = false; } };
+        window.addEventListener('click', () => {
+          requestAnimationFrame(sample);
+          if (lateLayout) {
+            // A stylesheet-driven late height change survives CM's DOM redraw,
+            // exercising the same correction as delayed widget/height-map work.
+            requestAnimationFrame(() => {
+              view.dom.classList.toggle('late-footnote-layout');
+              view.requestMeasure();
+            });
+          }
+        }, { capture: true, once: true });
+        return readTop()!;
+      }, { selector, lateLayout: index >= 3 });
+      await page.click(selector);
+      await waitForFrames(page, index < 3 ? 3 : 24);
+      const result = await page.evaluate(selector => {
+        const probe = (window as any).__footnoteModeFrames;
+        probe.stop();
+        return { samples: probe.samples as number[],
+          top: document.querySelector(selector)!.getBoundingClientRect().top,
+          mode: (document.querySelector(selector)!.parentElement as HTMLElement).dataset.meoMermaidMode };
+      }, selector);
+      if (!result.samples.length || result.samples.some(top => Math.abs(top - before) > 1.5)
+        || Math.abs(result.top - before) > 1.5 || result.mode !== ['split', 'source', 'preview'][index % 3]) {
+        throw new Error(`Footnote Mermaid mode switch ${index} moved its reading position: ${JSON.stringify({ before, ...result })}`);
+      }
+    }
+
+    console.log('UAT viewport stability regression test passed (including repeated footnote Mermaid modes and late layout)');
   } catch (error) {
     primaryError = error;
   } finally {

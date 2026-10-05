@@ -2253,9 +2253,15 @@ for (const settledShift of [0, 40]) {
   };
   let layoutTop = 1350;
   let scrollTop = 1000;
+  let notifyMutation = () => {};
+  class RetentionObserver {
+    constructor(callback: () => void) { notifyMutation = callback; }
+    observe() {}
+    disconnect() {}
+  }
   const makeToolbar = () => ({
     isConnected: true,
-    ownerDocument: { defaultView: null },
+    ownerDocument: { defaultView: { MutationObserver: RetentionObserver } },
     getBoundingClientRect: () => ({ top: layoutTop - scrollTop })
   });
   const originalToolbar = makeToolbar();
@@ -2285,7 +2291,15 @@ for (const settledShift of [0, 40]) {
     if (scrollTop !== 1240) {
       throw new Error(`Replacement toolbar initially moved the viewport to ${scrollTop}`);
     }
+    for (let notification = 0; notification < 30; notification++) notifyMutation();
+    if (frames.length !== 1) {
+      throw new Error(`Mutation bursts started parallel toolbar retention frames: ${frames.length}`);
+    }
     layoutTop += 40;
+    controller.reconcileAfterEditorUpdate();
+    if (scrollTop !== 1280) {
+      throw new Error(`Editor measurement did not retain the toolbar before paint: ${scrollTop}`);
+    }
     frames.shift()?.(0);
     if (scrollTop !== 1280) {
       throw new Error(`Late replacement layout moved the toolbar at ${scrollTop}`);

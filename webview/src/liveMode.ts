@@ -31,7 +31,7 @@ import { liveHighlightStyle, sourceMarkdownHighlightProps } from './theme';
 import { highlightMarkdownExtension } from './helpers/highlightSyntax';
 import { inlineScriptMarkdownExtension } from './helpers/inlineStyles';
 import { collectKbdTagRangesFromText, hasKbdTagMarker } from './helpers/kbd';
-import { getFencedCodeInfo, headingLevelFromName, resolvedSyntaxTree, syntaxTreeChanged } from './helpers/markdownSyntax';
+import { currentSyntaxTree, getFencedCodeInfo, headingLevelFromName, resolvedSyntaxTree, syntaxTreeChanged } from './helpers/markdownSyntax';
 import { detailsBlockLiveExtensions, getDetailsBlocks, toggleDetailsBlock } from './helpers/detailsBlocks';
 import {
   addListMarkerDecoration,
@@ -3408,9 +3408,9 @@ function projectInputBlockquoteLines(
  * Input-derived work intentionally waits for an idle frame, but a newline in a
  * code block creates a visible line immediately. Project just that block's line
  * decorations from the pre-input syntax tree so the first painted frame already
- * has the correct gutter; the normal derived-work refresh remains authoritative.
+ * has the correct gutter and block boundaries; the normal derived-work refresh remains authoritative.
  */
-function projectInputCodeBlockLineNumbers(
+function projectInputCodeBlockLines(
   decorations: DecorationSet,
   transaction: Transaction
 ): DecorationSet {
@@ -3420,9 +3420,15 @@ function projectInputCodeBlockLineNumbers(
   const projectedBlocks = new Set<string>();
   let projected = decorations;
 
-  transaction.changes.iterChangedRanges((fromA, toA) => {
+  transaction.changes.iterChangedRanges((fromA, toA, _fromB, toB) => {
     const lookupPosition = Math.min(fromA, startDocument.length);
-    const node = codeBlockAtInputPosition(tree, lookupPosition);
+    let node = codeBlockAtInputPosition(tree, lookupPosition);
+    if (!node) {
+      // Typing into a trailing indented blank can extend an existing block.
+      const nextNode = codeBlockAtInputPosition(currentSyntaxTree(transaction.state), toB);
+      if (nextNode?.name !== 'CodeBlock') return;
+      node = codeBlockAtInputPosition(tree, transaction.changes.invertedDesc.mapPos(nextNode.from, -1));
+    }
     if (!node) return;
 
     const startLine = startDocument.lineAt(node.from);
@@ -3437,7 +3443,7 @@ function projectInputCodeBlockLineNumbers(
 
     const contentFrom = startDocument.line(firstContentLine).from;
     const contentTo = startDocument.line(lastContentLine).to;
-    if (fromA < contentFrom || toA > contentTo) return;
+    if (node.name === 'FencedCode' && (fromA < contentFrom || toA > contentTo)) return;
 
     const key = `${node.from}:${node.to}`;
     if (projectedBlocks.has(key)) return;
@@ -3446,7 +3452,16 @@ function projectInputCodeBlockLineNumbers(
     const mappedFrom = transaction.changes.mapPos(node.from, -1);
     const mappedTo = transaction.changes.mapPos(node.to, 1);
     const nextStartLine = nextDocument.lineAt(Math.min(mappedFrom, nextDocument.length));
-    const nextEndLine = nextDocument.lineAt(Math.max(mappedFrom, Math.min(mappedTo - 1, nextDocument.length)));
+    const mappedEndLine = nextDocument.lineAt(Math.max(mappedFrom, Math.min(mappedTo - 1, nextDocument.length)));
+    // Indented blocks have padding on their boundary rows. Move those rows in
+    // the input transaction as well, rather than painting the old footer above
+    // the new text until the deferred presentation catches up.
+    const nextIndentedBlock = node.name === 'CodeBlock'
+      ? codeBlockAtInputPosition(currentSyntaxTree(transaction.state), nextStartLine.to)
+      : null;
+    const nextEndLine = nextIndentedBlock?.name === 'CodeBlock'
+      ? nextDocument.lineAt(Math.max(nextIndentedBlock.from, nextIndentedBlock.to - 1))
+      : mappedEndLine;
     const nextFirstContentLine = node.name === 'FencedCode'
       ? nextStartLine.number + 1
       : nextStartLine.number;
@@ -3460,12 +3475,26 @@ function projectInputCodeBlockLineNumbers(
         lineNumber - nextFirstContentLine + 1,
         numberWidth
       ).range(line.from));
+      if (node.name === 'CodeBlock') additions.push(lineStyleDecos.codeBlock.range(line.from));
+    }
+    const projectedClasses = new Set(['meo-md-code-line-numbered']);
+    if (node.name === 'CodeBlock') {
+      for (const decoration of [lineStyleDecos.codeBlock, lineStyleDecos.codeBlockStart,
+        lineStyleDecos.codeBlockEnd, lineStyleDecos.indentedCodeBlockStart, lineStyleDecos.indentedCodeBlockEnd]) {
+        projectedClasses.add(decoration.spec.class);
+      }
+      additions.push(lineStyleDecos.codeBlockStart.range(nextStartLine.from),
+        lineStyleDecos.indentedCodeBlockStart.range(nextStartLine.from),
+        lineStyleDecos.codeBlockEnd.range(nextEndLine.from),
+        lineStyleDecos.indentedCodeBlockEnd.range(nextEndLine.from));
+      addBlockIndentLines(additions, transaction.state, nextStartLine.from, nextEndLine.to,
+        getLiveBlockIndent(transaction.startState, node.from, node));
     }
 
     projected = projected.update({
       filterFrom: nextStartLine.from,
-      filterTo: nextEndLine.to,
-      filter: (_from, _to, value) => value.spec.class !== 'meo-md-code-line-numbered',
+      filterTo: Math.max(mappedEndLine.to, nextEndLine.to),
+      filter: (_from, _to, value) => !projectedClasses.has(value.spec.class),
       add: additions,
       sort: true
     });
@@ -3510,7 +3539,7 @@ const liveDecorationField = StateField.define<DecorationSet>({
                 add: [decoration.range(from, to)]
               });
             }, inputDecorations.map(transaction.changes))
-          : projectInputCodeBlockLineNumbers(
+          : projectInputCodeBlockLines(
             projectInputBlockquoteLines(
               mapLiveInputDerivedDecorations(inputDecorations, transaction),
               transaction
