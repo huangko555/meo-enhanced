@@ -1950,14 +1950,26 @@ button:focus-visible > .menu-switch {
   transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 
+.meo-code-block-pill[role='button'] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+}
+
+.meo-code-block-pill > svg {
+  display: block;
+}
+
 .meo-copy-code-btn {
   position: absolute;
   top: 4px;
   right: 5px;
   z-index: 10;
   cursor: pointer;
-  padding: 2px 8px;
-  font-size: 14px;
   color: var(--meo-semantic-codeCopyForeground);
   background-color: var(--meo-semantic-codeCopyBackground);
 }
@@ -1970,6 +1982,7 @@ button:focus-visible > .menu-switch {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  cursor: default;
   opacity: 0;
   transition: opacity 100ms ease;
 }
@@ -2081,18 +2094,18 @@ button:focus-visible > .menu-switch {
 
 .meo-select-all-code-btn {
   cursor: pointer;
-  padding: 2px 8px;
-  font-size: 14px;
   color: var(--meo-semantic-codeCopyForeground);
   background-color: var(--meo-semantic-codeCopyBackground);
 }
 
-.meo-select-all-code-btn:hover {
+.meo-select-all-code-btn:hover,
+.meo-select-all-code-btn:focus-visible {
   color: var(--meo-semantic-codeCopyHoverForeground);
   background-color: var(--meo-semantic-codeCopyHoverBackground);
 }
 
-.meo-copy-code-btn:hover {
+.meo-copy-code-btn:hover,
+.meo-copy-code-btn:focus-visible {
   color: var(--meo-semantic-codeCopyHoverForeground);
   background-color: var(--meo-semantic-codeCopyHoverBackground);
 }
@@ -3619,6 +3632,7 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  cursor: default;
   opacity: 0;
   pointer-events: none;
   transition: opacity 100ms ease;
@@ -3738,6 +3752,16 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   border-radius: 6px;
   background-color: var(--meo-code-background);
   background-image: none;
+}
+
+/* Layer hover feedback over the preview controls' opaque backing. */
+.cm-editor .meo-rendered-block-preview
+  > :is(.meo-mermaid-toolbar, .meo-latex-math-toolbar)
+  > :is(.meo-code-block-pill, .meo-mermaid-mode-btn, .meo-latex-math-mode-btn):is(:hover, :focus-visible) {
+  background-image: linear-gradient(
+    var(--meo-semantic-codeCopyHoverBackground),
+    var(--meo-semantic-codeCopyHoverBackground)
+  );
 }
 
 .cm-editor .meo-rendered-block-preview > .meo-mermaid-block,

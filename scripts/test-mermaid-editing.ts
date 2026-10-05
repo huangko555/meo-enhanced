@@ -2528,14 +2528,14 @@ async function main() {
     const localizedRenderedBlockActions = await page.evaluate(() => ({
       mermaid: Array.from(document.querySelectorAll<HTMLElement>(
         '#localized-rendered-block-actions .meo-mermaid-toolbar .meo-code-block-pill'
-      )).map((button) => ({ text: button.textContent?.trim(), label: button.getAttribute('aria-label') })),
+      )).map((button) => ({ tooltip: button.dataset.tooltip, label: button.getAttribute('aria-label') })),
       latex: Array.from(document.querySelectorAll<HTMLElement>(
         '#localized-rendered-block-actions .meo-latex-math-toolbar .meo-code-block-pill'
-      )).map((button) => ({ text: button.textContent?.trim(), label: button.getAttribute('aria-label') }))
+      )).map((button) => ({ tooltip: button.dataset.tooltip, label: button.getAttribute('aria-label') }))
     }));
     const expectedLocalizedActions = [
-      { text: '全选', label: '全选代码' },
-      { text: '复制', label: '复制代码' }
+      { tooltip: '全选代码', label: '全选代码' },
+      { tooltip: '复制代码', label: '复制代码' }
     ];
     if (
       JSON.stringify(localizedRenderedBlockActions.mermaid) !== JSON.stringify(expectedLocalizedActions)

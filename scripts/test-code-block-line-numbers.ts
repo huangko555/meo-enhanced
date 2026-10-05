@@ -120,6 +120,20 @@ async function main() {
     });
     await waitForFrames(page);
 
+    const languageLabelLayouts = await page.$$eval('.meo-code-language-label', (labels) => (
+      labels.filter((label) => label.getBoundingClientRect().width > 0).map((label) => {
+        const range = document.createRange();
+        range.selectNodeContents(label);
+        return {
+          text: label.textContent,
+          lines: new Set(Array.from(range.getClientRects(), (rect) => Math.round(rect.top))).size
+        };
+      })
+    ));
+    if (languageLabelLayouts.length === 0 || languageLabelLayouts.some((label) => label.lines !== 1)) {
+      throw new Error(`Code language labels did not stay on one line: ${JSON.stringify(languageLabelLayouts)}`);
+    }
+
     const result = await page.evaluate(() => {
       const lines = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-code-line-numbered'));
       const doubleDigitLine = lines.find((line) => line.dataset.meoCodeLineNumber === '10')!;
@@ -665,7 +679,7 @@ async function main() {
         toolbarHovered: toolbar?.classList.contains('is-block-hovered') ?? false,
         toolbarOpacity: toolbar ? Number.parseFloat(getComputedStyle(toolbar).opacity) : null,
         controls: Array.from(document.querySelector('.meo-code-block-actions')?.children ?? [])
-          .map((element) => element.textContent)
+          .map((element) => element.getAttribute('aria-label'))
       };
     });
     const expectedSelectedCode = [
@@ -691,7 +705,7 @@ async function main() {
     if (!selectedCode.toolbarHovered || selectedCode.toolbarOpacity === null || selectedCode.toolbarOpacity < 0.99) {
       throw new Error(`Code block actions disappeared after selection: ${JSON.stringify(selectedCode)}`);
     }
-    if (JSON.stringify(selectedCode.controls) !== JSON.stringify(['all', 'copy'])) {
+    if (JSON.stringify(selectedCode.controls) !== JSON.stringify(['Select all code', 'Copy code'])) {
       throw new Error(`Unexpected code block action order: ${JSON.stringify(selectedCode.controls)}`);
     }
 

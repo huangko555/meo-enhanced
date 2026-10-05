@@ -1,3 +1,4 @@
+import { createElement, Copy, Check, TextCursorInput } from 'lucide';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 
 export function createCopyCodeButton(
@@ -8,14 +9,16 @@ export function createCopyCodeButton(
   const button = document.createElement('span');
   button.className = 'meo-code-block-pill meo-copy-code-btn';
   button.setAttribute('aria-label', strings.copyCode);
+  button.dataset.tooltip = strings.copyCode;
   button.setAttribute('role', 'button');
   button.setAttribute('tabindex', '0');
-  button.textContent = strings.copy;
-
-  const updateText = (copied: boolean) => {
-    button.textContent = copied ? strings.copied : strings.copy;
+  const updateIcon = (copied: boolean) => {
+    button.replaceChildren(createElement(copied ? Check : Copy, {
+      width: 15, height: 15, 'aria-hidden': 'true'
+    }));
     button.classList.toggle('copied', copied);
   };
+  updateIcon(false);
 
   const copy = async (event: Event) => {
     event.preventDefault();
@@ -24,8 +27,8 @@ export function createCopyCodeButton(
       await navigator.clipboard.writeText(
         typeof codeContent === 'function' ? codeContent() : codeContent
       );
-      updateText(true);
-      setTimeout(() => updateText(false), 2000);
+      updateIcon(true);
+      setTimeout(() => updateIcon(false), 2000);
     } catch (error) {
       console.error('Failed to copy:', error);
     }
@@ -46,9 +49,10 @@ export function createSelectAllCodeButton(onSelectAll: () => void, language: UiL
   const button = document.createElement('span');
   button.className = 'meo-code-block-pill meo-select-all-code-btn';
   button.setAttribute('aria-label', strings.selectAllCode);
+  button.dataset.tooltip = strings.selectAllCode;
   button.setAttribute('role', 'button');
   button.setAttribute('tabindex', '0');
-  button.textContent = strings.all;
+  button.appendChild(createElement(TextCursorInput, { width: 15, height: 15, 'aria-hidden': 'true' }));
 
   const selectAll = (event: Event) => {
     event.preventDefault();
