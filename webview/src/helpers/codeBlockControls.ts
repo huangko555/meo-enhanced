@@ -1,36 +1,44 @@
 import { createElement, Copy, Check, TextCursorInput } from 'lucide';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 
+/** Pass the target document for iframe controls so events and tooltips share its DOM realm. */
 export function createCopyCodeButton(
   codeContent: string | (() => string),
-  language: UiLanguage
+  language: UiLanguage,
+  ownerDocument: Document = document
 ): HTMLSpanElement {
   const strings = getUiStrings(language);
-  const button = document.createElement('span');
+  const button = ownerDocument.createElement('span');
   button.className = 'meo-code-block-pill meo-copy-code-btn';
   button.setAttribute('aria-label', strings.copyCode);
   button.dataset.tooltip = strings.copyCode;
   button.setAttribute('role', 'button');
   button.setAttribute('tabindex', '0');
   const updateIcon = (copied: boolean) => {
-    button.replaceChildren(createElement(copied ? Check : Copy, {
+    button.replaceChildren(ownerDocument.importNode(createElement(copied ? Check : Copy, {
       width: 15, height: 15, 'aria-hidden': 'true'
-    }));
+    }), true));
     button.classList.toggle('copied', copied);
   };
   updateIcon(false);
+  let feedbackTimeout: ReturnType<typeof setTimeout> | undefined;
+  let copyAttempt = 0;
 
   const copy = async (event: Event) => {
     event.preventDefault();
     event.stopPropagation();
+    const attempt = ++copyAttempt;
+    clearTimeout(feedbackTimeout);
+    updateIcon(false);
     try {
       await navigator.clipboard.writeText(
         typeof codeContent === 'function' ? codeContent() : codeContent
       );
+      if (attempt !== copyAttempt) return;
       updateIcon(true);
-      setTimeout(() => updateIcon(false), 2000);
+      feedbackTimeout = setTimeout(() => updateIcon(false), 2000);
     } catch (error) {
-      console.error('Failed to copy:', error);
+      if (attempt === copyAttempt) console.error('Failed to copy:', error);
     }
   };
 

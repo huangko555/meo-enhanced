@@ -131,6 +131,14 @@ and selection of unchanged, structurally matched code while updating source
 mappings. Same-text language changes and theme replacement must still recolor.
 The pending-code test runs in the full browser suite.
 
+`scripts/test-preview-code-copy.ts` runs the production Preview controller with
+real clipboard reads and writes. It covers exact fenced and indented code,
+selection, keyboard activation, successful and failed feedback, language/theme
+changes and incremental rendering. It also checks that HTML, PDF and Word export
+inputs contain no reading controls or tooltips, and generates PDF/Word smoke
+artifacts. Run this focused check for Preview copy changes; it also belongs to
+the full browser suite.
+
 ## Editor startup and loading
 
 The quick and release gates run `scripts/test-panel-session-ready-init.ts` and

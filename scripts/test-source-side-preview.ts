@@ -260,7 +260,7 @@ try {
   });
   assert.deepEqual(sideTools, {
     expanded: 'true', open: true,
-    rows: ['Font', 'Preview theme', 'Code color', 'Show comments'],
+    rows: ['Font', 'Preview theme', 'Code color', 'HTML comments'],
     hasExport: false, belowSync: true, icon: 'ellipsis', text: '',
     size: { width: 20, height: 20 }, borderRadius: '50%', boxShadow: 'none',
     controlsVisible: [true, true, true, true], editorFocused: true
@@ -1086,23 +1086,27 @@ try {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   await page.evaluate(() => {
     const samples: Array<{ hidden: boolean; scrollTop: number }> = [];
-    let remaining = 24;
+    const startedAt = performance.now();
+    let visibleFrames = 0;
     const sample = () => {
       const host = document.querySelector<HTMLElement>('.preview-host')!;
       const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument;
-      samples.push({
-        hidden: host.hidden || getComputedStyle(host).visibility === 'hidden',
-        scrollTop: frameDocument?.scrollingElement?.scrollTop ?? 0
-      });
-      remaining -= 1;
-      if (remaining > 0) requestAnimationFrame(sample);
+      const hidden = host.hidden || getComputedStyle(host).visibility === 'hidden';
+      samples.push({ hidden, scrollTop: frameDocument?.scrollingElement?.scrollTop ?? 0 });
+      if (!hidden) visibleFrames += 1;
+      // Cover the first visible frames even when asynchronous rendering finishes later.
+      if (visibleFrames < 8 && performance.now() - startedAt < 3000) requestAnimationFrame(sample);
     };
     (window as typeof window & { __sourceSplitEntrySamples?: typeof samples }).__sourceSplitEntrySamples = samples;
     requestAnimationFrame(sample);
   });
   await page.click('button[data-mode="source"]');
   await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');
-  await new Promise(resolve => setTimeout(resolve, 450));
+  await page.waitForFunction(() => (
+    (window as typeof window & {
+      __sourceSplitEntrySamples: Array<{ hidden: boolean; scrollTop: number }>;
+    }).__sourceSplitEntrySamples.filter(sample => !sample.hidden).length >= 8
+  ), { timeout: 3500 });
   const splitEntrySamples = await page.evaluate(() => (
     (window as typeof window & {
       __sourceSplitEntrySamples: Array<{ hidden: boolean; scrollTop: number }>;

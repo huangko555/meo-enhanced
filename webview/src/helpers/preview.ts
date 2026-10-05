@@ -2,6 +2,7 @@ import morphdom from 'morphdom';
 import { createElement as createIconElement, PenLine, TextCursor } from 'lucide';
 import { getExportStyleEnvironment } from './export';
 import { createPreviewMermaidRenderer } from './previewMermaid';
+import { createCopyCodeButton } from './codeBlockControls';
 import { logWebviewRenderError } from './errors';
 import { createDocumentScrollToTopController } from './scrollToTop';
 import type { OutlineHeading } from './outline';
@@ -227,6 +228,60 @@ function preserveLoadedPreviewImage(fromImage: HTMLImageElement, toImage: HTMLIm
   return true;
 }
 
+// These reading controls are added only to the iframe DOM, never to shared export HTML.
+function addPreviewCodeCopyControls(root: ParentNode, language: UiLanguage): void {
+  const strings = getUiStrings(language);
+  for (const block of root.querySelectorAll<HTMLElement>('.meo-export-code-block-wrap')) {
+    const code = block.querySelector<HTMLElement>(':scope > pre > code');
+    if (!code || ['mermaid', 'latex', 'tex', 'math', 'katex'].some(name => code.classList.contains(`language-${name}`))) continue;
+    let button = block.querySelector<HTMLElement>(':scope > .meo-preview-code-actions > .meo-copy-code-btn');
+    if (!button) {
+      const copyButton = createCopyCodeButton(() => {
+        // Resolve the live DOM after incremental updates and Shiki token projection.
+        const currentCode = copyButton.closest('.meo-export-code-block-wrap')?.querySelector(':scope > pre > code');
+        if (!currentCode) return '';
+        const lines = Array.from(currentCode.querySelectorAll('.meo-export-code-line-source'));
+        const trailingNewline = currentCode.lastChild?.nodeType === 3 && currentCode.lastChild.textContent?.endsWith('\n');
+        return lines.map(line => line.textContent ?? '').join('\n') + (trailingNewline ? '\n' : '');
+      }, language, block.ownerDocument);
+      // A mouse click must not collapse the reader's existing text selection.
+      copyButton.addEventListener('mousedown', event => {
+        if (event.button === 0) event.preventDefault();
+      });
+      const actions = block.ownerDocument.createElement('span');
+      actions.className = 'meo-preview-code-actions';
+      actions.append(copyButton);
+      block.append(actions);
+      button = copyButton;
+    }
+    button.dataset.tooltip = strings.copyCode;
+    button.setAttribute('aria-label', strings.copyCode);
+  }
+}
+
+const previewCodeCopyStyles = `
+.meo-preview-code-actions {
+  position: absolute; top: 4px; right: 5px; z-index: 10;
+  display: inline-flex; align-items: center; cursor: default; user-select: none;
+  opacity: 0; pointer-events: none;
+}
+.meo-export-code-block-wrap:hover > .meo-preview-code-actions,
+.meo-preview-code-actions:focus-within { opacity: 1; pointer-events: auto; }
+.meo-preview-code-actions > .meo-copy-code-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  box-sizing: border-box; width: 22px; height: 20px; padding: 0; border: 0; border-radius: 6px;
+  cursor: pointer; color: var(--meo-preview-code-copy-fg); background: var(--meo-preview-code-copy-bg);
+}
+.meo-preview-code-actions > .meo-copy-code-btn:is(:hover, :focus-visible) {
+  color: var(--meo-preview-code-copy-hover-fg); background: var(--meo-preview-code-copy-hover-bg);
+}
+.meo-preview-code-actions > .meo-copy-code-btn:focus-visible {
+  outline: 1px solid var(--meo-preview-code-copy-hover-fg); outline-offset: 1px;
+}
+.meo-preview-code-actions svg { display: block; }
+@media print { .meo-preview-code-actions { display: none; } }
+`;
+
 type PreviewCodeBlockUpdate = {
   readonly current: HTMLElement;
   readonly next: HTMLElement;
@@ -246,6 +301,7 @@ function morphPreviewMain(
     const nextMain = frameDocument.createElement('main');
     nextMain.className = 'meo-export-doc';
     nextMain.innerHTML = html;
+    addPreviewCodeCopyControls(nextMain, frameDocument.documentElement.lang as UiLanguage);
     const currentTables = Array.from(currentMain.querySelectorAll<HTMLTableElement>('table'));
     Array.from(nextMain.querySelectorAll<HTMLTableElement>('table')).forEach((table, index) => {
       const columns = currentTables[index]
@@ -267,6 +323,10 @@ function morphPreviewMain(
           return element.getAttribute(previewPresentationMorphKeyAttribute) ?? (element.id || undefined);
         },
         onBeforeElUpdated(fromElement, toElement) {
+          if (
+            fromElement.classList.contains('meo-preview-code-actions')
+            && toElement.classList.contains('meo-preview-code-actions')
+          ) return false;
           if (
             fromElement.tagName === 'IMG'
             && toElement.tagName === 'IMG'
@@ -859,6 +919,7 @@ export function createPreviewController({
       sourceNavigation.setAttribute('aria-label', uiStrings.editInSource);
     }
     scrollToTopController.setUiLanguage(language);
+    if (frame.contentDocument) addPreviewCodeCopyControls(frame.contentDocument, language);
   };
 
   const scrollToTopController = createDocumentScrollToTopController(uiLanguage, onNavigateToTop);
@@ -1297,6 +1358,17 @@ export function createPreviewController({
     probe.style.position = 'fixed';
     probe.style.visibility = 'hidden';
     probe.style.pointerEvents = 'none';
+    for (const [property, variable, cssProperty] of [
+      ['--meo-preview-code-copy-fg', '--meo-code-action-foreground', 'color'],
+      ['--meo-preview-code-copy-hover-fg', '--meo-code-action-hover-foreground', 'color'],
+      ['--meo-preview-code-copy-bg', '--meo-semantic-codeCopyBackground', 'backgroundColor'],
+      ['--meo-preview-code-copy-hover-bg', '--meo-semantic-codeCopyHoverBackground', 'backgroundColor']
+    ] as const) {
+      probe.style[cssProperty] = `var(${variable})`;
+      document.body.appendChild(probe);
+      frameDocument.documentElement.style.setProperty(property, window.getComputedStyle(probe)[cssProperty]);
+      probe.remove();
+    }
     probe.style.backgroundColor = 'var(--meo-active-line-bg)';
     document.body.appendChild(probe);
     const background = window.getComputedStyle(probe).backgroundColor;
@@ -1431,6 +1503,7 @@ export function createPreviewController({
       scrollToTopController.setScrollElement(frameDocument.scrollingElement, frameDocument);
       frameDocument.body.tabIndex = -1;
       syncSourceActiveLineBackground(frameDocument);
+      addPreviewCodeCopyControls(frameDocument, uiLanguage);
       attachPreviewMathViewports(frameDocument);
       syncPreviewCodeHighlight(frameDocument);
       frameDocument.addEventListener('scroll', () => {
@@ -1571,7 +1644,7 @@ export function createPreviewController({
     previewTableLayout = null;
     loadingFrameText = renderedText;
     frame.onload = () => initializeFrame();
-    frame.srcdoc = `<!DOCTYPE html><html lang="${uiLanguage}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewLatexMathViewportStyles}${previewSourcePositionMarkerStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${payload.html}</main></div></body></html>`;
+    frame.srcdoc = `<!DOCTYPE html><html lang="${uiLanguage}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewCodeCopyStyles}${previewLatexMathViewportStyles}${previewSourcePositionMarkerStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${payload.html}</main></div></body></html>`;
   };
 
   const applyAppearanceToFrame = (preserveReadingPosition = false) => {
