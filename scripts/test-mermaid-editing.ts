@@ -132,7 +132,7 @@ async function assertEmbeddedMermaidSupportsPointerPanning(page: Page): Promise<
     throw new Error(`Embedded Mermaid drag did not pan the diagram: ${JSON.stringify({ initial, afterDrag })}`);
   }
 
-  await page.click('.meo-mermaid-block .meo-mermaid-zoom-btn[aria-label="Zoom in"]');
+  await page.click('.meo-mermaid-toolbar .meo-mermaid-zoom-btn[aria-label="Zoom in"]');
   await page.waitForFunction(
     ({ selector, scale }) => {
       const wrapper = document.querySelector<HTMLElement>(selector);
@@ -141,7 +141,7 @@ async function assertEmbeddedMermaidSupportsPointerPanning(page: Page): Promise<
     {},
     { selector: wrapperSelector, scale: initial.transform.scale }
   );
-  await page.click('.meo-mermaid-block .meo-mermaid-zoom-btn[aria-label="Reset zoom"]');
+  await page.click('.meo-mermaid-toolbar .meo-mermaid-zoom-btn[aria-label="Reset zoom"]');
   await page.waitForFunction(
     ({ selector, transform }) => {
       const wrapper = document.querySelector<HTMLElement>(selector);
@@ -157,15 +157,23 @@ async function assertEmbeddedMermaidSupportsPointerPanning(page: Page): Promise<
 }
 
 async function enterMermaidFullscreen(page: Page): Promise<void> {
+  const overflow = await page.$(
+    '.meo-mermaid-toolbar .meo-rendered-block-preview-actions.is-collapsed:not([open]) > summary'
+  );
+  if (overflow) {
+    await page.hover('.meo-mermaid-block');
+    await waitForFrames(page);
+    await overflow.click();
+  }
   const clicked = await page.evaluate(() => new Promise<boolean>((resolve) => {
     let stableButton: HTMLButtonElement | null = null;
     let stableFrames = 0;
     let remainingFrames = 120;
     const probe = () => {
       const button = Array.from(document.querySelectorAll<HTMLButtonElement>(
-        '.meo-mermaid-block .meo-mermaid-zoom-btn[aria-label="Fullscreen"]'
+        '.meo-mermaid-toolbar .meo-mermaid-zoom-btn[aria-label="Fullscreen"]'
       )).find((candidate) => {
-        if (!candidate.isConnected || candidate.closest('.meo-mermaid-block')?.getAttribute('aria-busy') === 'true') {
+        if (!candidate.isConnected || candidate.closest('.meo-rendered-block-preview')?.querySelector('.meo-mermaid-block')?.getAttribute('aria-busy') === 'true') {
           return false;
         }
         const rect = candidate.getBoundingClientRect();
@@ -174,11 +182,7 @@ async function enterMermaidFullscreen(page: Page): Promise<void> {
       stableFrames = button !== null && button === stableButton ? stableFrames + 1 : 0;
       stableButton = button;
       if (button && stableFrames >= 4) {
-        button.dispatchEvent(new PointerEvent('pointerdown', {
-          bubbles: true,
-          cancelable: true,
-          button: 0
-        }));
+        button.click();
         resolve(true);
         return;
       }
@@ -206,7 +210,7 @@ async function enterMermaidFullscreen(page: Page): Promise<void> {
 
 async function assertFullscreenNavigationIsSessionLocal(page: Page): Promise<void> {
   const embeddedSelector = '.meo-mermaid-block .meo-mermaid-svg-wrapper';
-  await page.click('.meo-mermaid-block .meo-mermaid-zoom-btn[aria-label="Reset zoom"]');
+  await page.click('.meo-mermaid-toolbar .meo-mermaid-zoom-btn[aria-label="Reset zoom"]');
   const embeddedBefore = await page.$eval(embeddedSelector, (wrapper) => {
     const matrix = new DOMMatrix(getComputedStyle(wrapper).transform);
     return { scale: matrix.a, x: matrix.e, y: matrix.f };
@@ -231,7 +235,7 @@ async function assertFullscreenNavigationIsSessionLocal(page: Page): Promise<voi
     const matrix = new DOMMatrix(getComputedStyle(wrapper).transform);
     return { scale: matrix.a, x: matrix.e, y: matrix.f };
   });
-  await page.click('.meo-mermaid-block .meo-mermaid-zoom-btn[aria-label="Zoom in"]');
+  await page.click('.meo-mermaid-toolbar .meo-mermaid-zoom-btn[aria-label="Zoom in"]');
   const embeddedAfterZoom = await page.$eval(embeddedSelector, (wrapper) => {
     const matrix = new DOMMatrix(getComputedStyle(wrapper).transform);
     return { scale: matrix.a, x: matrix.e, y: matrix.f };
@@ -250,7 +254,7 @@ async function assertFullscreenNavigationIsSessionLocal(page: Page): Promise<voi
       embeddedAfterZoom
     })}`);
   }
-  await page.click('.meo-mermaid-block .meo-mermaid-zoom-btn[aria-label="Reset zoom"]');
+  await page.click('.meo-mermaid-toolbar .meo-mermaid-zoom-btn[aria-label="Reset zoom"]');
 }
 
 async function assertFullscreenDisablesTextSelection(page: Page): Promise<void> {
@@ -529,6 +533,7 @@ async function assertLateFullscreenExitCannotCloseReplacementSession(page: Page)
       initialMode: 'live',
       onApplyChanges() {}
     });
+    document.getElementById('app')!.scrollIntoView({ block: 'start' });
   });
   await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-block svg')));
   await waitForFrames(page);
@@ -1058,8 +1063,7 @@ async function main() {
         const label = shell?.querySelector<HTMLElement>(
           ':scope > .meo-rendered-block-preview-language'
         ) ?? null;
-        const controls = Array.from(toolbar?.children ?? [])
-          .filter((element): element is HTMLElement => element instanceof HTMLElement);
+        const controls = Array.from(toolbar?.querySelectorAll<HTMLElement>('button, [role="button"]') ?? []);
         return {
           shell: Boolean(shell),
           label: label?.textContent ?? null,
@@ -1104,7 +1108,7 @@ async function main() {
       && (chrome.label === null || chrome.label === language)
       && (chrome.label === null || chrome.labelParent)
       && chrome.toolbarParent
-      && chrome.controlCount === 3
+      && chrome.controlCount === 7
       && chrome.chrome.filter((item) => item !== null).every((item) => item
         && item.borderRadius === '6px'
         && item.borderWidth === '0px'
@@ -1292,7 +1296,7 @@ async function main() {
       (window as any).__mermaidToolbarBeforeModeChange = document.querySelector('.meo-mermaid-toolbar');
       (window as any).__mermaidModeButtonBeforeModeChange = document.querySelector('.meo-mermaid-mode-btn');
       (window as any).__mermaidControlsBeforeModeChange = Array.from(
-        document.querySelector('.meo-mermaid-toolbar')?.children ?? []
+        document.querySelector('.meo-mermaid-toolbar')?.querySelectorAll(':scope > :is(button, [role="button"])') ?? []
       );
     });
     await page.click('.meo-mermaid-mode-btn');
@@ -1311,7 +1315,7 @@ async function main() {
       sameToolbar: (window as any).__mermaidToolbarBeforeModeChange === document.querySelector('.meo-mermaid-toolbar'),
       sameButton: (window as any).__mermaidModeButtonBeforeModeChange === document.querySelector('.meo-mermaid-mode-btn'),
       sameControls: (window as any).__mermaidControlsBeforeModeChange.every(
-        (control: Element, index: number) => control === document.querySelector('.meo-mermaid-toolbar')?.children[index]
+        (control: Element, index: number) => control === document.querySelector('.meo-mermaid-toolbar')?.querySelectorAll(':scope > :is(button, [role="button"])')[index]
       )
     }));
     if (
@@ -1344,7 +1348,7 @@ async function main() {
       (window as any).__latexToolbarBeforeModeChange = document.querySelector('.meo-latex-math-toolbar');
       (window as any).__latexModeButtonBeforeModeChange = document.querySelector('.meo-latex-math-mode-btn');
       (window as any).__latexControlsBeforeModeChange = Array.from(
-        document.querySelector('.meo-latex-math-toolbar')?.children ?? []
+        document.querySelector('.meo-latex-math-toolbar')?.querySelectorAll(':scope > :is(button, [role="button"])') ?? []
       );
     });
     await page.click('.meo-latex-math-mode-btn');
@@ -1363,7 +1367,7 @@ async function main() {
       sameToolbar: (window as any).__latexToolbarBeforeModeChange === document.querySelector('.meo-latex-math-toolbar'),
       sameButton: (window as any).__latexModeButtonBeforeModeChange === document.querySelector('.meo-latex-math-mode-btn'),
       sameControls: (window as any).__latexControlsBeforeModeChange.every(
-        (control: Element, index: number) => control === document.querySelector('.meo-latex-math-toolbar')?.children[index]
+        (control: Element, index: number) => control === document.querySelector('.meo-latex-math-toolbar')?.querySelectorAll(':scope > :is(button, [role="button"])')[index]
       )
     }));
     if (
@@ -1423,7 +1427,7 @@ async function main() {
         && getComputedStyle(toolbar).pointerEvents === 'auto';
     });
     const selectAllHitTarget = await page.evaluate(({ x, y }) => {
-      const target = document.elementFromPoint(x, y);
+      const target = document.elementFromPoint(x, y)?.closest('button, [role="button"]');
       return {
         className: target?.getAttribute('class') ?? null,
         label: target?.getAttribute('aria-label') ?? null
@@ -1464,7 +1468,7 @@ async function main() {
       return {
         source: Boolean(document.querySelector('.meo-mermaid-editing-block.is-source')),
         selectedText: selection ? innerView.state.doc.sliceString(selection.from, selection.to) : null,
-        controls: Array.from(document.querySelector('.meo-mermaid-toolbar')?.children ?? [])
+        controls: Array.from(document.querySelector('.meo-mermaid-toolbar')?.querySelectorAll(':scope > :is(button, [role="button"])') ?? [])
           .map((element) => element.getAttribute('aria-label') ?? element.textContent)
       };
     });
@@ -2223,7 +2227,7 @@ async function main() {
           canvasRect.left >= viewportRect.left - 1 &&
           canvasRect.right <= viewportRect.right + 1
         ),
-        controls: viewport?.querySelectorAll('.meo-latex-math-zoom-controls button').length ?? 0,
+        controls: document.querySelectorAll('#app .meo-latex-math-toolbar .meo-latex-math-zoom-controls button').length,
         presentation: canvas
           ? `${canvas.style.fontSize}|${canvas.style.left}|${canvas.style.top}`
           : ''
@@ -2257,7 +2261,7 @@ async function main() {
       const viewportRect = viewport.getBoundingClientRect();
       const canvasRect = canvas.getBoundingClientRect();
       return {
-        controls: viewport.querySelectorAll('.meo-latex-math-zoom-controls button').length,
+        controls: document.querySelectorAll('#app .meo-latex-math-toolbar .meo-latex-math-zoom-controls button').length,
         presentation: `${canvas.style.fontSize}|${canvas.style.transform}`,
         canvasRect: canvas.getBoundingClientRect().toJSON(),
         scrollTop: document.querySelector<HTMLElement>('#app > .cm-editor > .cm-scroller')!.scrollTop,

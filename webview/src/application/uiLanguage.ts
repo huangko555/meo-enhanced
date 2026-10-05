@@ -156,6 +156,7 @@ export type UiStrings = Readonly<{
   zoomIn: string;
   zoomOut: string;
   resetZoom: string;
+  morePreviewControls: string;
   fullscreen: string;
   exitFullscreen: string;
   mermaidError: (message: string) => string;
@@ -383,6 +384,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     editFormulaSplit: 'Switch to split view', showFormulaSource: 'Switch to source',
     showFormulaPreview: 'Switch to preview',
     loading: 'Loading...', zoomIn: 'Zoom in', zoomOut: 'Zoom out', resetZoom: 'Reset zoom',
+    morePreviewControls: 'More preview controls',
     fullscreen: 'Fullscreen', exitFullscreen: 'Exit fullscreen',
     mermaidError: (message: string) => `Mermaid error: ${message}`,
     openWithSystemApp: 'Open with system app', fullscreenImage: 'Fullscreen image', refreshImage: 'Refresh image',
@@ -573,6 +575,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     editFormulaSplit: '切换为分栏', showFormulaSource: '切换为源码',
     showFormulaPreview: '切换为预览',
     loading: '正在加载…', zoomIn: '放大', zoomOut: '缩小', resetZoom: '重置缩放',
+    morePreviewControls: '更多预览操作',
     fullscreen: '全屏', exitFullscreen: '退出全屏',
     mermaidError: (message: string) => `Mermaid 错误：${message}`,
     openWithSystemApp: '使用系统应用打开', fullscreenImage: '全屏查看图片', refreshImage: '刷新图片',

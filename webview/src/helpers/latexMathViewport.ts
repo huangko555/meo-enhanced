@@ -1,5 +1,6 @@
 import { createElement, Maximize2, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
+import { mountRenderedBlockPreviewControls } from './renderedBlockModeControls';
 
 export type LatexMathViewportController = {
   destroy(): void;
@@ -383,6 +384,7 @@ export function attachLatexMathViewport(
   }
 
   let controls: HTMLElement | null = null;
+  let controlsCleanup: () => void = () => undefined;
   if (interactive) {
     controls = ownerDocument.createElement('div');
     controls.className = 'meo-visual-controls meo-latex-math-zoom-controls';
@@ -448,6 +450,7 @@ export function attachLatexMathViewport(
       }));
     }
     root.appendChild(controls);
+    controlsCleanup = mountRenderedBlockPreviewControls(root, controls, strings.morePreviewControls);
 
     const finishPan = (event: PointerEvent) => {
       if (pointerId !== event.pointerId) return;
@@ -509,6 +512,7 @@ export function attachLatexMathViewport(
         ownerWindow.removeEventListener('resize', scheduleMeasure);
       }
       ownerDocument.fonts?.removeEventListener('loadingdone', scheduleMeasure);
+      controlsCleanup();
       controls?.remove();
     }
   };

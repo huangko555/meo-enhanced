@@ -25,6 +25,8 @@
     transparent 45%
   );
   --meo-inline-code-background: var(--meo-code-background);
+  --meo-code-action-foreground: #666666;
+  --meo-code-action-hover-foreground: #000000;
   --meo-code-block-active-line-bg: var(--meo-semantic-codeBlockActiveLineBackground, color-mix(
     in srgb,
     var(--meo-code-background, var(--vscode-textCodeBlock-background)) 82%,
@@ -90,6 +92,8 @@ html[data-editor-appearance='dark'] body.vscode-dark {
 }
 
 html[data-editor-appearance='dark'] {
+  --meo-code-action-foreground: #bac4cf;
+  --meo-code-action-hover-foreground: #ffffff;
   --meo-segmented-control-background: color-mix(in srgb, var(--vscode-sideBar-background) 88.5%, var(--meo-foreground) 11.5%);
 }
 
@@ -1970,7 +1974,7 @@ button:focus-visible > .menu-switch {
   right: 5px;
   z-index: 10;
   cursor: pointer;
-  color: var(--meo-semantic-codeCopyForeground);
+  color: var(--meo-code-action-foreground);
   background-color: var(--meo-semantic-codeCopyBackground);
 }
 
@@ -2034,7 +2038,7 @@ button:focus-visible > .menu-switch {
   min-height: 24px;
   padding: 3px 10px;
   border-radius: 6px;
-  color: var(--meo-semantic-codeCopyForeground, var(--meo-foreground));
+  color: var(--meo-code-action-foreground, var(--meo-foreground));
   background: var(--meo-semantic-codeCopyBackground, transparent);
   font: inherit;
   font-size: 12px;
@@ -2050,7 +2054,7 @@ button:focus-visible > .menu-switch {
 
 .meo-long-code-action:hover,
 .meo-long-code-floating-action:hover {
-  color: var(--meo-semantic-codeCopyHoverForeground, var(--meo-foreground));
+  color: var(--meo-code-action-hover-foreground, var(--meo-foreground));
   background: var(--meo-semantic-codeCopyHoverBackground, var(--meo-outline-hover-background));
 }
 
@@ -2094,19 +2098,19 @@ button:focus-visible > .menu-switch {
 
 .meo-select-all-code-btn {
   cursor: pointer;
-  color: var(--meo-semantic-codeCopyForeground);
+  color: var(--meo-code-action-foreground);
   background-color: var(--meo-semantic-codeCopyBackground);
 }
 
 .meo-select-all-code-btn:hover,
 .meo-select-all-code-btn:focus-visible {
-  color: var(--meo-semantic-codeCopyHoverForeground);
+  color: var(--meo-code-action-hover-foreground);
   background-color: var(--meo-semantic-codeCopyHoverBackground);
 }
 
 .meo-copy-code-btn:hover,
 .meo-copy-code-btn:focus-visible {
-  color: var(--meo-semantic-codeCopyHoverForeground);
+  color: var(--meo-code-action-hover-foreground);
   background-color: var(--meo-semantic-codeCopyHoverBackground);
 }
 
@@ -3670,13 +3674,16 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   padding: 0;
   border: 0;
   border-radius: 6px;
-  color: var(--meo-semantic-codeCopyForeground);
+  color: var(--meo-code-action-foreground);
   background: transparent;
   cursor: pointer;
 }
 
 .meo-mermaid-mode-btn:hover,
-.meo-latex-math-mode-btn:hover {
+.meo-mermaid-mode-btn:focus-visible,
+.meo-latex-math-mode-btn:hover,
+.meo-latex-math-mode-btn:focus-visible {
+  color: var(--meo-code-action-hover-foreground);
   background: var(--meo-semantic-codeCopyHoverBackground);
 }
 
@@ -3762,6 +3769,102 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
     var(--meo-semantic-codeCopyHoverBackground),
     var(--meo-semantic-codeCopyHoverBackground)
   );
+}
+
+
+/* Preview controls share the block toolbar without taking ownership of zoom state. */
+.meo-rendered-block-preview-actions {
+  position: relative;
+  display: block;
+  height: 20px;
+  /* Four pixels on each side of the one-pixel separator. */
+  padding-right: 5px;
+  cursor: default;
+}
+
+.meo-rendered-block-preview-actions::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  background: color-mix(in srgb, var(--meo-foreground) 18%, transparent);
+  pointer-events: none;
+}
+
+.meo-rendered-block-preview-actions > summary {
+  display: none;
+  list-style: none;
+}
+
+.meo-rendered-block-preview-actions > summary::-webkit-details-marker {
+  display: none;
+}
+
+.meo-rendered-block-preview-actions.is-collapsed > summary {
+  display: inline-flex;
+}
+
+.cm-editor .meo-rendered-block-preview-actions > .meo-visual-controls {
+  position: static;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 1;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.cm-editor .meo-rendered-block-preview-actions :is(.meo-visual-control-btn, summary) {
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--meo-code-action-foreground);
+  background-color: var(--meo-code-background);
+  cursor: pointer;
+}
+
+.cm-editor .meo-rendered-block-preview-actions .meo-visual-control-btn::before {
+  display: none;
+}
+
+.cm-editor .meo-rendered-block-preview-actions svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+}
+
+.cm-editor .meo-rendered-block-preview-actions :is(.meo-visual-control-btn, summary):is(:hover, :focus-visible) {
+  color: var(--meo-code-action-hover-foreground);
+  background-image: linear-gradient(
+    var(--meo-semantic-codeCopyHoverBackground),
+    var(--meo-semantic-codeCopyHoverBackground)
+  );
+}
+
+.cm-editor .meo-rendered-block-preview-actions.is-collapsed > .meo-visual-controls {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 8px;
+  padding: 4px;
+  border-radius: 6px;
+  background: var(--meo-code-background);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 22%);
+}
+
+.cm-editor .meo-rendered-block-preview:has(.meo-rendered-block-preview-actions.is-collapsed[open]) {
+  overflow: visible;
+}
+
+:is(.meo-mermaid-toolbar, .meo-latex-math-toolbar):has(> .meo-rendered-block-preview-actions.is-collapsed[open]) {
+  z-index: var(--meo-layer-document-popover);
 }
 
 .cm-editor .meo-rendered-block-preview > .meo-mermaid-block,

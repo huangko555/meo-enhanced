@@ -11,6 +11,7 @@ import type {
   MermaidDiagramPresentationHandle
 } from '../editor/mermaidDiagramPresentation';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
+import { mountRenderedBlockPreviewControls } from './renderedBlockModeControls';
 import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
 
 declare global {
@@ -589,6 +590,7 @@ export class MermaidDiagramWidget extends WidgetType {
   unsubscribeThemeRefresh: () => void;
   uiLanguage: UiLanguage;
   embeddedInteractionCleanup: () => void;
+  embeddedControlsCleanup: () => void;
 
   constructor(
     diagramText: string,
@@ -615,6 +617,7 @@ export class MermaidDiagramWidget extends WidgetType {
     this.presentationHandle = null;
     this.unsubscribeThemeRefresh = () => undefined;
     this.embeddedInteractionCleanup = () => undefined;
+    this.embeddedControlsCleanup = () => undefined;
     this.uiLanguage = options.uiLanguage ?? 'en';
     this.cachePreviewHeight = options.cachePreviewHeight ?? true;
     this.indentColumns = options.indentColumns ?? 0;
@@ -775,6 +778,7 @@ export class MermaidDiagramWidget extends WidgetType {
       },
       showError: (_source, error) => {
         finishPresentation();
+        this.embeddedControlsCleanup();
         // Keep the height reserved while loading. A failed diagram must not
         // contract just after a mode switch exposes the Live viewport.
         container.replaceChildren();
@@ -782,6 +786,7 @@ export class MermaidDiagramWidget extends WidgetType {
       },
       clearPresentation: () => {
         finishPresentation();
+        this.embeddedControlsCleanup();
         this.exitFullscreen('external');
         this.embeddedInteractionCleanup();
         container.style.removeProperty('min-height');
@@ -847,6 +852,7 @@ export class MermaidDiagramWidget extends WidgetType {
   }
 
   renderSvg(container: HTMLElement, svgContent: string): void {
+    this.embeddedControlsCleanup();
     const svgWrapper = document.createElement('div');
     svgWrapper.className = 'meo-mermaid-svg-wrapper';
     svgWrapper.innerHTML = svgContent;
@@ -859,6 +865,9 @@ export class MermaidDiagramWidget extends WidgetType {
 
     const controls = this.createZoomControls(svgWrapper);
     container.appendChild(controls);
+    this.embeddedControlsCleanup = mountRenderedBlockPreviewControls(
+      container, controls, getUiStrings(this.uiLanguage).morePreviewControls
+    );
     this.attachEmbeddedInteractions(container, svgWrapper);
   }
 
@@ -1103,19 +1112,19 @@ export class MermaidDiagramWidget extends WidgetType {
     fullscreen.appendChild(createElement(Maximize2, { width: 16, height: 16 }));
     fullscreen.setAttribute('aria-label', strings.fullscreen);
 
-    zoomIn.addEventListener('pointerdown', (e) => {
+    zoomIn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
       this.setZoom(svgContainer, Math.min(4, this.zoom + 0.5));
     });
 
-    zoomOut.addEventListener('pointerdown', (e) => {
+    zoomOut.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
       this.setZoom(svgContainer, Math.max(0.25, this.zoom - 0.5));
     });
 
-    reset.addEventListener('pointerdown', (e) => {
+    reset.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
       this.zoom = 1;
@@ -1124,11 +1133,18 @@ export class MermaidDiagramWidget extends WidgetType {
       this.applyTransform(svgContainer);
     });
 
-    fullscreen.addEventListener('pointerdown', (e) => {
+    fullscreen.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
       this.toggleFullscreen(svgContainer);
     });
+
+    controls.addEventListener('pointerdown', (event) => {
+      event.preventDefault(); event.stopPropagation();
+    });
+    for (const button of [zoomIn, zoomOut, reset, fullscreen]) {
+      button.dataset.tooltip = button.getAttribute('aria-label')!;
+    }
 
     controls.appendChild(zoomIn);
     controls.appendChild(zoomOut);
@@ -1525,6 +1541,7 @@ export class MermaidDiagramWidget extends WidgetType {
   }
 
   destroy() {
+    this.embeddedControlsCleanup();
     const errors: unknown[] = [];
     try {
       this.embeddedInteractionCleanup();
