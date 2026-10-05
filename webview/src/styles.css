@@ -2146,6 +2146,10 @@ button:focus-visible > .menu-switch {
   --meo-live-table-header-background: var(--meo-inset-background);
 }
 
+html[data-editor-appearance='dark'] .cm-editor.meo-mode-live {
+  --meo-foreground: #cbd8e4;
+}
+
 .cm-editor.meo-mode-source {
   --meo-active-editor-font: var(--meo-font-source);
   --meo-active-editor-font-weight: var(--meo-font-source-weight);
@@ -3144,10 +3148,15 @@ html[data-editor-appearance='dark'] .meo-tooltip-shortcut { background: rgba(255
   opacity: 0 !important;
 }
 
-.cm-editor .meo-md-inline-code {
+.cm-editor .meo-md-inline-code,
+.cm-editor .meo-md-html-inline code,
+.cm-editor .meo-md-html-content code {
   background: var(--meo-inline-code-background);
   color: var(--meo-foreground) !important;
   -webkit-text-fill-color: var(--meo-foreground) !important;
+}
+
+.cm-editor .meo-md-inline-code {
   border-radius: 0.35em;
 }
 
@@ -4088,8 +4097,6 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 .cm-editor .meo-md-html-content code {
   padding: 0.08em 0.3em;
   border-radius: 0.25em;
-  color: var(--meo-foreground);
-  background: var(--meo-semantic-inlineCodeBackground);
   font-family: var(--meo-font-source);
   font-size: 0.9em;
 }
