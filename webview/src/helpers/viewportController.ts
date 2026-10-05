@@ -1,3 +1,4 @@
+import { editorViewportBounds } from '../editor/editorViewportBounds';
 import { EditorView } from '@codemirror/view';
 import { createLinkedViewportMap, type LinkedViewportMap, type LinkedViewportPoint } from './linkedViewportMap';
 
@@ -1527,7 +1528,7 @@ export class ViewportController {
   ): void {
     this.runNavigationReveal(() => {
       if (!element.isConnected) return { kind: 'unavailable' };
-      const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+      const scrollerRect = editorViewportBounds(this.view);
       const elementRect = element.getBoundingClientRect();
       const margin = Math.min(
         Math.max(0, yMargin),
@@ -1593,7 +1594,7 @@ export class ViewportController {
       const bounds = readBounds();
       if (!bounds) return { kind: 'unavailable' };
       const current = this.readScrollPosition();
-      const scrollerRect = readViewportBounds?.() ?? this.view.scrollDOM.getBoundingClientRect();
+      const scrollerRect = readViewportBounds?.() ?? editorViewportBounds(this.view);
       const evaluationTop = Number.isFinite(originScrollTop)
         ? Math.max(0, originScrollTop as number)
         : current.top;
@@ -2273,7 +2274,7 @@ export class ViewportController {
     this.runNavigationReveal(() => {
       const current = this.readScrollPosition();
       const coords = geometry === 'caret' ? this.view.coordsAtPos(targetPosition) : null;
-      const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+      const scrollerRect = editorViewportBounds(this.view);
       const evaluationTop = Number.isFinite(originScrollTop)
         ? Math.max(0, originScrollTop as number)
         : current.top;

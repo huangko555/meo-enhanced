@@ -572,7 +572,7 @@
     "test:code-block-line-numbers": "bun scripts/test-code-block-line-numbers.ts",
     "test:live-ui-language": "bun scripts/test-live-ui-language-switch.ts",
     "test:outline-floating": "bun scripts/test-outline-floating-dismissal.ts",
-    "test:mermaid-editing": "bun scripts/test-rendered-block-mode-shell.ts && bun scripts/test-rendered-block-mode-shell-production.ts && bun scripts/test-mermaid-editing.ts",
+    "test:mermaid-editing": "bun scripts/test-rendered-block-mode-shell.ts && bun scripts/test-rendered-block-mode-shell-production.ts && bun scripts/test-mermaid-editing.ts && bun scripts/test-block-sticky-header-production.ts",
     "benchmark:large-document": "bun scripts/benchmark-large-document-production.ts",
     "test:mixed-history-focus": "bun scripts/test-mixed-history-focus.ts",
     "test:interaction-continuity": "bun scripts/test-live-caret-continuity.ts && bun scripts/test-history-preserves-rendered-block-mode.ts",

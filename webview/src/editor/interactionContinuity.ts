@@ -1,3 +1,4 @@
+import { editorViewportBounds } from './editorViewportBounds';
 import type { EditorView, ViewUpdate } from '@codemirror/view';
 import { isLiveInputDerivedWorkRefresh } from './liveInputDerivedWork';
 
@@ -237,7 +238,7 @@ export function createEditorInteractionContinuity(input: {
       ?? pendingCaretVisibleBeforeInput
       ?? (() => {
         const coords = view.coordsAtPos(view.state.selection.main.head);
-        const viewport = view.scrollDOM.getBoundingClientRect();
+        const viewport = editorViewportBounds(view);
         return Boolean(coords && coords.top >= viewport.top && coords.bottom <= viewport.bottom);
       })();
     const inputLineHeightBefore = pendingInputLineHeight;
@@ -288,7 +289,7 @@ export function createEditorInteractionContinuity(input: {
     const position = view.state.selection.main.head;
     pendingScrollTopBeforeInput = canCapture ? view.scrollDOM.scrollTop : null;
     const coords = canCapture ? view.coordsAtPos(position) : null;
-    const viewport = canCapture ? view.scrollDOM.getBoundingClientRect() : null;
+    const viewport = canCapture ? editorViewportBounds(view) : null;
     pendingCaretTopBeforeInput = coords?.top ?? null;
     pendingCaretVisibleBeforeInput = canCapture
       ? Boolean(coords && viewport && coords.top >= viewport.top && coords.bottom <= viewport.bottom)

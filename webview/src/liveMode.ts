@@ -1,3 +1,4 @@
+import { blockStickyHeaderExtension } from './helpers/blockStickyHeader';
 import { RangeSetBuilder, StateEffect, StateField, EditorState, type ChangeDesc, type Range, type RangeSet, type Extension, type EditorSelection, type Transaction } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting } from '@codemirror/language';
@@ -3795,6 +3796,7 @@ export function liveModeExtensions(options: { readonly largeDocument?: boolean }
     liveDecorationField,
     renderedBlockLineNumberMarker,
     ...longCodeBlockSessionUiExtension(),
+    ...blockStickyHeaderExtension(),
     liveLineNumberMarkerField,
     styledLineNumberMarkerField,
     ...mergeConflictSourceExtensions(),

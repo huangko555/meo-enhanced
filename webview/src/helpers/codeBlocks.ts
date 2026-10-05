@@ -1002,6 +1002,11 @@ function addMermaidDiagramBlock(
 }
 
 export function addCopyCodeButton(builder: any[], state: EditorState, node: SyntaxNodeRef): void {
+  const widget = createCodeBlockActionsWidget(state, node);
+  if (widget) addTopLineWidget(builder, state.doc.lineAt(node.from).to, widget);
+}
+
+export function createCodeBlockActionsWidget(state: EditorState, node: SyntaxNodeRef): WidgetType | null {
   const { from, to } = node;
   const startLine = state.doc.lineAt(from);
   const endLine = state.doc.lineAt(Math.max(to - 1, from));
@@ -1009,17 +1014,14 @@ export function addCopyCodeButton(builder: any[], state: EditorState, node: Synt
     // CodeText ranges exclude container prefixes and the four-column code indent,
     // while retaining payload indentation and internal blank lines.
     const contentNodes = node.node.getChildren('CodeText');
-    if (!contentNodes.length) return;
-    addTopLineCopyButton(
-      builder,
-      startLine.to,
+    if (!contentNodes.length) return null;
+    return new CodeBlockActionsWidget(
       contentNodes.map(content => state.doc.sliceString(content.from, content.to)).join(''),
       contentNodes[0].from,
       contentNodes[contentNodes.length - 1].to,
       startLine.from,
       endLine.to
     );
-    return;
   }
   const quoteDepth = getQuotedFenceDepth(startLine.text);
 
@@ -1039,19 +1041,17 @@ export function addCopyCodeButton(builder: any[], state: EditorState, node: Synt
 
   const codeContent = codeLines.join('\n');
   if (!codeContent) {
-    return;
+    return null;
   }
 
   const lastContentLineNumber = fenceLineRegex.test(stripLeadingQuotePrefix(endLine.text, quoteDepth))
     ? endLine.number - 1
     : endLine.number;
   if (lastContentLineNumber <= startLine.number) {
-    return;
+    return null;
   }
 
-  addTopLineCopyButton(
-    builder,
-    startLine.to,
+  return new CodeBlockActionsWidget(
     codeContent,
     state.doc.line(startLine.number + 1).from,
     state.doc.line(lastContentLineNumber).to,

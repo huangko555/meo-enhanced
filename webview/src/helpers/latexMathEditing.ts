@@ -1,3 +1,4 @@
+import { editorViewportBounds } from '../editor/editorViewportBounds';
 import { EditorSelection, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
 import { defaultKeymap, indentLess, indentMore } from '@codemirror/commands';
@@ -275,6 +276,12 @@ function preserveToolbarWhileDispatching(
     view.dispatch({ effects });
     return;
   }
+  if (toolbar.dataset.meoFloating === 'true') {
+    const scrollTop = view.scrollDOM.scrollTop;
+    view.dispatch({ effects });
+    controller.retainScrollTop(scrollTop, isCurrent);
+    return;
+  }
   const controlsLabel = toolbar.getAttribute('aria-label');
   controller.retainElementTopWhileMutation(
     toolbar,
@@ -290,7 +297,8 @@ class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
     readonly lineNumber: number,
     readonly mode: LatexMathBlockMode,
     readonly sourceText: string,
-    readonly blockTo: number
+    readonly blockTo: number,
+    readonly floating = false
   ) {
     super();
   }
@@ -310,7 +318,7 @@ class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
     const cache = getLatexToolbarDomCache(view);
     const cacheKey = `${this.anchor}:${this.lineNumber}:${uiLanguage}`;
     const cachedToolbar = cache.get(cacheKey);
-    if (cachedToolbar && this.updateDOM(cachedToolbar, view)) {
+    if (!this.floating && cachedToolbar && this.updateDOM(cachedToolbar, view)) {
       cache.delete(cacheKey);
       cache.set(cacheKey, cachedToolbar);
       return cachedToolbar;
@@ -324,6 +332,7 @@ class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
     });
     const toolbar = document.createElement('span') as LatexToolbarElement;
     toolbar.className = 'meo-latex-math-toolbar';
+    if (this.floating) toolbar.dataset.meoFloating = 'true';
     toolbar.setAttribute('role', 'group');
     toolbar.setAttribute('aria-label', decision.controlsLabel);
     toolbar.dataset.meoBlockFrom = String(this.anchor);
@@ -368,9 +377,11 @@ class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
       requestAnimationFrame(() => {
         if (!isRevealCurrent()) return;
         if (nextMode === 'preview') {
-          const currentModeButton = view.dom.querySelector<HTMLButtonElement>(
-            `.meo-latex-math-toolbar[data-meo-block-from="${currentAnchor}"] .meo-latex-math-mode-btn`
-          );
+          const currentModeButton = this.floating && toolbar.isConnected
+            ? modeButton
+            : view.dom.querySelector<HTMLButtonElement>(
+              `.meo-latex-math-toolbar[data-meo-block-from="${currentAnchor}"] .meo-latex-math-mode-btn`
+            );
           restoreRenderedBlockModeFocus(currentModeButton, event.detail > 0);
           return;
         }
@@ -410,7 +421,7 @@ class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
       selectAllButton,
       createCopyCodeButton(() => toolbar[latexToolbarSourceText] ?? '', uiLanguage)
     );
-    cache.set(cacheKey, toolbar);
+    if (!this.floating) cache.set(cacheKey, toolbar);
     if (cache.size > LATEX_TOOLBAR_DOM_CACHE_LIMIT) {
       const oldestKey = cache.keys().next().value;
       if (oldestKey !== undefined) cache.delete(oldestKey);
@@ -466,6 +477,17 @@ export function addLatexMathToolbar(
       side
     }).range(position)
   );
+}
+
+/** A separate control surface sharing the block's existing action handlers. */
+export function createFloatingLatexMathToolbarWidget(
+  anchor: number,
+  lineNumber: number,
+  mode: LatexMathBlockMode,
+  sourceText: string,
+  blockTo: number
+): WidgetType {
+  return new LatexMathToolbarWidget(anchor, lineNumber, mode, sourceText, blockTo, true);
 }
 
 export function createLatexMathToolbarWidget(
@@ -665,7 +687,7 @@ class LatexMathEditingController {
       isActive: () => this.root.isConnected,
       interactionTarget: this.outerView.scrollDOM,
       viewport: {
-        readBounds: () => this.outerView.scrollDOM.getBoundingClientRect(),
+        readBounds: () => editorViewportBounds(this.outerView),
         readScrollTop: () => this.outerView.scrollDOM.scrollTop,
         revealCaret: (position, isCurrent, originScrollTop) => {
           if (!isCurrent()) return;

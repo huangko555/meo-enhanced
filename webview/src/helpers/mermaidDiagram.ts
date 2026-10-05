@@ -866,7 +866,8 @@ export class MermaidDiagramWidget extends WidgetType {
     const controls = this.createZoomControls(svgWrapper);
     container.appendChild(controls);
     this.embeddedControlsCleanup = mountRenderedBlockPreviewControls(
-      container, controls, getUiStrings(this.uiLanguage).morePreviewControls
+      container, controls, getUiStrings(this.uiLanguage).morePreviewControls,
+      () => this.createZoomControls(svgWrapper)
     );
     this.attachEmbeddedInteractions(container, svgWrapper);
   }

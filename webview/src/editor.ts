@@ -1,3 +1,4 @@
+import { editorViewportBounds } from './editor/editorViewportBounds';
 import { currentHeadingSuggestions } from './editor/headingSuggestions';
 import { markdownSyntaxContext, type MarkdownInputContext } from './editor/blockInsertion';
 import { createInputSuggestions } from './editor/inputSuggestions';
@@ -1675,7 +1676,7 @@ export function createEditor({
     if (!coords) {
       return false;
     }
-    const viewport = view.scrollDOM.getBoundingClientRect();
+    const viewport = editorViewportBounds(view);
     return coords.top >= viewport.top && coords.bottom <= viewport.bottom;
   };
 
@@ -3833,7 +3834,7 @@ export function createEditor({
           const targetLine = view.state.doc.line(Math.min(line.number, view.state.doc.lines));
           const coords = view.coordsAtPos(targetLine.from);
           if (!coords) return;
-          const viewport = view.scrollDOM.getBoundingClientRect();
+          const viewport = editorViewportBounds(view);
           const landedInsideViewport = (
             coords.top >= viewport.top - 1 &&
             coords.bottom <= viewport.bottom + 1

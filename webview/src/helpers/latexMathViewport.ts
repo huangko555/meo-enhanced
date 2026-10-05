@@ -386,71 +386,75 @@ export function attachLatexMathViewport(
   let controls: HTMLElement | null = null;
   let controlsCleanup: () => void = () => undefined;
   if (interactive) {
-    controls = ownerDocument.createElement('div');
-    controls.className = 'meo-visual-controls meo-latex-math-zoom-controls';
-    controls.append(
-      createControlButton(ownerDocument, ZoomIn, strings.zoomIn, () => {
-        userZoom = Math.min(MAX_ZOOM, userZoom + ZOOM_STEP);
-        applyTransform();
-      }),
-      createControlButton(ownerDocument, ZoomOut, strings.zoomOut, () => {
-        userZoom = Math.max(MIN_ZOOM, userZoom - ZOOM_STEP);
-        applyTransform();
-      }),
-      createControlButton(ownerDocument, RotateCcw, strings.resetZoom, reset)
-    );
-    if (allowFullscreen) {
-      controls.append(createControlButton(ownerDocument, Maximize2, strings.fullscreen, () => {
-        if (!canvas || fullscreenCleanup) return;
-        const scroller = root.closest<HTMLElement>('.cm-scroller');
-        const savedScrollTop = scroller?.scrollTop ?? null;
-        const savedFocus = ownerDocument.activeElement instanceof HTMLElement
-          ? ownerDocument.activeElement
-          : null;
-        const overlay = ownerDocument.createElement('div');
-        overlay.className = 'meo-latex-math-fullscreen-scrim';
-        const fullscreen = ownerDocument.createElement('div');
-        fullscreen.className = 'meo-latex-math-fullscreen meo-md-math meo-md-math-display meo-md-math-fenced-display';
-        fullscreen.innerHTML = canvas.innerHTML;
-        overlay.appendChild(fullscreen);
-        ownerDocument.body.appendChild(overlay);
+    const createControls = () => {
+      const controls = ownerDocument.createElement('div');
+      controls.className = 'meo-visual-controls meo-latex-math-zoom-controls';
+      controls.append(
+        createControlButton(ownerDocument, ZoomIn, strings.zoomIn, () => {
+          userZoom = Math.min(MAX_ZOOM, userZoom + ZOOM_STEP);
+          applyTransform();
+        }),
+        createControlButton(ownerDocument, ZoomOut, strings.zoomOut, () => {
+          userZoom = Math.max(MIN_ZOOM, userZoom - ZOOM_STEP);
+          applyTransform();
+        }),
+        createControlButton(ownerDocument, RotateCcw, strings.resetZoom, reset)
+      );
+      if (allowFullscreen) {
+        controls.append(createControlButton(ownerDocument, Maximize2, strings.fullscreen, () => {
+          if (!canvas || fullscreenCleanup) return;
+          const scroller = root.closest<HTMLElement>('.cm-scroller');
+          const savedScrollTop = scroller?.scrollTop ?? null;
+          const savedFocus = ownerDocument.activeElement instanceof HTMLElement
+            ? ownerDocument.activeElement
+            : null;
+          const overlay = ownerDocument.createElement('div');
+          overlay.className = 'meo-latex-math-fullscreen-scrim';
+          const fullscreen = ownerDocument.createElement('div');
+          fullscreen.className = 'meo-latex-math-fullscreen meo-md-math meo-md-math-display meo-md-math-fenced-display';
+          fullscreen.innerHTML = canvas.innerHTML;
+          overlay.appendChild(fullscreen);
+          ownerDocument.body.appendChild(overlay);
 
-        const fullscreenViewport = attachLatexMathViewport(fullscreen, {
-          interactive: true,
-          uiLanguage,
-          allowFullscreen: false
-        });
-        const exitControls = ownerDocument.createElement('div');
-        exitControls.className = 'meo-visual-controls meo-latex-math-fullscreen-exit-controls';
-        const closeButton = createControlButton(ownerDocument, X, strings.exitFullscreen, () => {
-          fullscreenCleanup?.();
-        });
-        exitControls.append(closeButton);
-        fullscreen.append(exitControls);
-
-        const close = () => {
-          if (!fullscreenCleanup) return;
-          fullscreenCleanup = null;
-          ownerDocument.removeEventListener('keydown', onKeydown, true);
-          fullscreenViewport.destroy();
-          overlay.remove();
-          ownerWindow.requestAnimationFrame(() => {
-            if (savedScrollTop !== null && scroller?.isConnected) scroller.scrollTop = savedScrollTop;
-            if (savedFocus?.isConnected) savedFocus.focus({ preventScroll: true });
+          const fullscreenViewport = attachLatexMathViewport(fullscreen, {
+            interactive: true,
+            uiLanguage,
+            allowFullscreen: false
           });
-        };
-        const onKeydown = (event: KeyboardEvent) => {
-          if (event.key !== 'Escape') return;
-          event.preventDefault();
-          event.stopPropagation();
-          close();
-        };
-        fullscreenCleanup = close;
-        ownerDocument.addEventListener('keydown', onKeydown, true);
-      }));
-    }
+          const exitControls = ownerDocument.createElement('div');
+          exitControls.className = 'meo-visual-controls meo-latex-math-fullscreen-exit-controls';
+          const closeButton = createControlButton(ownerDocument, X, strings.exitFullscreen, () => {
+            fullscreenCleanup?.();
+          });
+          exitControls.append(closeButton);
+          fullscreen.append(exitControls);
+
+          const close = () => {
+            if (!fullscreenCleanup) return;
+            fullscreenCleanup = null;
+            ownerDocument.removeEventListener('keydown', onKeydown, true);
+            fullscreenViewport.destroy();
+            overlay.remove();
+            ownerWindow.requestAnimationFrame(() => {
+              if (savedScrollTop !== null && scroller?.isConnected) scroller.scrollTop = savedScrollTop;
+              if (savedFocus?.isConnected) savedFocus.focus({ preventScroll: true });
+            });
+          };
+          const onKeydown = (event: KeyboardEvent) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            event.stopPropagation();
+            close();
+          };
+          fullscreenCleanup = close;
+          ownerDocument.addEventListener('keydown', onKeydown, true);
+        }));
+      }
+      return controls;
+    };
+    controls = createControls();
     root.appendChild(controls);
-    controlsCleanup = mountRenderedBlockPreviewControls(root, controls, strings.morePreviewControls);
+    controlsCleanup = mountRenderedBlockPreviewControls(root, controls, strings.morePreviewControls, createControls);
 
     const finishPan = (event: PointerEvent) => {
       if (pointerId !== event.pointerId) return;

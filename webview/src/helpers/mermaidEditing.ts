@@ -1,3 +1,4 @@
+import { editorViewportBounds } from '../editor/editorViewportBounds';
 import { EditorSelection, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
 import { defaultKeymap, indentLess, indentMore } from '@codemirror/commands';
@@ -274,7 +275,8 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
     readonly lineNumber: number,
     readonly mode: MermaidBlockMode,
     readonly codeContent: string,
-    readonly blockTo: number
+    readonly blockTo: number,
+    readonly floating = false
   ) {
     super();
   }
@@ -294,7 +296,7 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
     const cache = getMermaidToolbarDomCache(view);
     const cacheKey = `${this.anchor}:${this.lineNumber}:${uiLanguage}`;
     const cachedToolbar = cache.get(cacheKey);
-    if (cachedToolbar && this.updateDOM(cachedToolbar, view)) {
+    if (!this.floating && cachedToolbar && this.updateDOM(cachedToolbar, view)) {
       cache.delete(cacheKey);
       cache.set(cacheKey, cachedToolbar);
       return cachedToolbar;
@@ -308,6 +310,7 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
     });
     const toolbar = document.createElement('span') as MermaidToolbarElement;
     toolbar.className = 'meo-mermaid-toolbar';
+    if (this.floating) toolbar.dataset.meoFloating = 'true';
     toolbar.setAttribute('role', 'group');
     toolbar.setAttribute('aria-label', decision.controlsLabel);
     toolbar.dataset.meoBlockFrom = String(this.anchor);
@@ -354,9 +357,11 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
         if (nextMode === 'preview') {
           // The opening line owns the toolbar in every mode. Restore focus
           // without asking the unrelated outer selection to reveal itself.
-          const currentModeButton = view.dom.querySelector<HTMLButtonElement>(
-            `.meo-mermaid-toolbar[data-meo-block-from="${currentAnchor}"] .meo-mermaid-mode-btn`
-          );
+          const currentModeButton = this.floating && toolbar.isConnected
+            ? modeButton
+            : view.dom.querySelector<HTMLButtonElement>(
+              `.meo-mermaid-toolbar[data-meo-block-from="${currentAnchor}"] .meo-mermaid-mode-btn`
+            );
           restoreRenderedBlockModeFocus(currentModeButton, event.detail > 0);
           return;
         }
@@ -393,7 +398,7 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
     const copyButton = createCopyCodeButton(() => toolbar[mermaidToolbarCodeContent] ?? '', uiLanguage);
 
     toolbar.append(modeButton, selectAllButton, copyButton);
-    cache.set(cacheKey, toolbar);
+    if (!this.floating) cache.set(cacheKey, toolbar);
     if (cache.size > MERMAID_TOOLBAR_DOM_CACHE_LIMIT) {
       const oldestKey = cache.keys().next().value;
       if (oldestKey !== undefined) cache.delete(oldestKey);
@@ -450,6 +455,17 @@ export function addMermaidToolbar(
       side
     }).range(position)
   );
+}
+
+/** A separate control surface sharing the block's existing action handlers. */
+export function createFloatingMermaidToolbarWidget(
+  anchor: number,
+  lineNumber: number,
+  mode: MermaidBlockMode,
+  codeContent: string,
+  blockTo: number
+): WidgetType {
+  return new MermaidToolbarWidget(anchor, lineNumber, mode, codeContent, blockTo, true);
 }
 
 export function createMermaidToolbarWidget(
@@ -910,7 +926,7 @@ class MermaidEditingController {
       isActive: () => this.root.isConnected,
       interactionTarget: this.outerView.scrollDOM,
       viewport: {
-        readBounds: () => this.outerView.scrollDOM.getBoundingClientRect(),
+        readBounds: () => editorViewportBounds(this.outerView),
         readScrollTop: () => this.outerView.scrollDOM.scrollTop,
         revealCaret: (position, isCurrent, originScrollTop) => {
           if (!isCurrent()) return;

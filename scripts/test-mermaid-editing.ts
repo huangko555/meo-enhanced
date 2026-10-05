@@ -15,6 +15,12 @@ async function waitForFrames(page: Page, count = 8): Promise<void> {
   }, count);
 }
 
+async function clickVisibleMermaidModeButton(page: Page): Promise<void> {
+  // The floating header owns the visible action while the opening line is offscreen.
+  const floating = '.meo-block-sticky-header:not([hidden]) .meo-mermaid-mode-btn';
+  await page.click(await page.$(floating) ? floating : '.meo-mermaid-mode-btn');
+}
+
 async function assertInitialInteractiveMathMeasurementStaysVisible(page: Page): Promise<void> {
   const result = await page.evaluate(() => new Promise<{
     rootClientWidth: number;
@@ -1667,13 +1673,13 @@ async function main() {
       throw new Error('Search navigation did not reapply temporary Mermaid split mode');
     }
 
-    await page.click('.meo-mermaid-mode-btn');
+    await clickVisibleMermaidModeButton(page);
     await waitForFrames(page);
     if (!(await page.$('.meo-mermaid-editing-block.is-source')) || (await page.$('.meo-mermaid-preview-shell'))) {
       throw new Error('Manual mode change did not override temporary Mermaid split mode');
     }
 
-    await page.click('.meo-mermaid-mode-btn');
+    await clickVisibleMermaidModeButton(page);
     await waitForFrames(page);
     if (!(await page.$('.meo-mermaid-block')) || (await page.$('.meo-mermaid-editing-block'))) {
       throw new Error('Manual preview mode remained overridden by the previous search match');
