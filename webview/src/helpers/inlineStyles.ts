@@ -1,7 +1,7 @@
 import { EditorView } from '@codemirror/view';
 import type { MarkdownConfig } from '@lezer/markdown';
 import { matchInlineScript } from '../../../src/foundation/inlineScript';
-import { markdownInlineStyles } from '../../../src/shared/markdownInlineStyles';
+import { darkDefaultStrongForeground, markdownInlineStyles } from '../../../src/shared/markdownInlineStyles';
 
 // Override the inherited parsers while retaining their node types and highlight tags.
 export const inlineScriptMarkdownExtension: MarkdownConfig = {
@@ -25,6 +25,13 @@ export const inlineScriptMarkdownExtension: MarkdownConfig = {
 export const markdownInlineStyleTheme = EditorView.baseTheme({
   '& .meo-md-em': markdownInlineStyles.emphasis,
   '& .meo-md-strong': markdownInlineStyles.strong,
+  ["html[data-editor-appearance='dark'] &.meo-mode-live " +
+    ':is(.meo-md-strong:not(.meo-live-strong-coloring *), .meo-md-html-inline strong, .meo-md-html-inline b, .meo-md-html-content strong, .meo-md-html-content b)' +
+    ':not(:is(.meo-md-strong, strong, b, .meo-md-heading-content, .meo-md-link, .meo-md-wiki-link, .meo-task-complete, .meo-task-dropped, h1, h2, h3, h4, h5, h6, a) *, ' +
+    '.meo-md-link, .meo-md-wiki-link, .meo-task-complete, .meo-task-dropped)']: {
+    color: `${darkDefaultStrongForeground} !important`,
+    WebkitTextFillColor: 'currentColor !important'
+  },
   '& .meo-md-strike': markdownInlineStyles.strikethrough,
   '&.meo-mode-live .meo-md-subscript': markdownInlineStyles.subscript,
   '&.meo-mode-live .meo-md-superscript': markdownInlineStyles.superscript

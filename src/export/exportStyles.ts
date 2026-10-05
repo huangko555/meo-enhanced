@@ -1,4 +1,4 @@
-import { buildMarkdownInlineStyleCss } from '../shared/markdownInlineStyles';
+import { buildMarkdownInlineStyleCss, darkDefaultStrongForeground } from '../shared/markdownInlineStyles';
 import {
   defaultThemeColors,
   getBuiltInVisuals,
@@ -752,7 +752,8 @@ sup.footnote-ref {
   color: var(--meo-muted);
 }
 
-strong { color: inherit; }
+strong, b { color: ${previewAppearanceIsDark ? darkDefaultStrongForeground : 'inherit'}; }
+:is(h1, h2, h3, h4, h5, h6, a, strong, b, .meo-export-task-text.is-done, .meo-export-task-text.is-dropped) :is(strong, b) { color: inherit; }
 ${buildMarkdownInlineStyleCss({
   emphasis: 'em', strong: 'strong', strikethrough: 's, del',
   subscript: 'sub', superscript: 'sup:not(.footnote-ref)'

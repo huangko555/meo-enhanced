@@ -1,3 +1,6 @@
+// Default dark emphasis adds brightness; optional semantic coloring owns its separate palette.
+export const darkDefaultStrongForeground = 'color-mix(in srgb, currentColor 88%, #fff 12%)';
+
 /** Shared content styles. Surface adapters supply selectors, never independent style values. */
 export const markdownInlineStyles = {
   emphasis: { fontStyle: 'italic' },
