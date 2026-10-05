@@ -6189,6 +6189,10 @@ body.outline-resizing .preview-frame {
   background-color: color-mix(in srgb, var(--meo-background) 80%, var(--meo-foreground) 20%);
 }
 
+.source-preview-tool-button:focus-visible {
+  border-color: var(--vscode-focusBorder, var(--meo-foreground));
+}
+
 .source-preview-tool-button:active {
   background-color: color-mix(in srgb, var(--meo-background) 72%, var(--meo-foreground) 28%);
 }
