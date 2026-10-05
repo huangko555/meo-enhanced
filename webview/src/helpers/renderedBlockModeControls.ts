@@ -16,15 +16,38 @@ export function renderRenderedBlockModeButton(
   button.dataset.tooltipLiveUpdate = 'true';
 }
 
+const modeButtonFocus = new WeakMap<HTMLButtonElement, { hovered: boolean; pointerFocus: boolean }>();
+
 export function retainRenderedBlockModePointerFocus(button: HTMLButtonElement): void {
+  const state = { hovered: false, pointerFocus: false };
+  modeButtonFocus.set(button, state);
+  button.addEventListener('mouseenter', () => { state.hovered = true; });
+  button.addEventListener('mouseleave', () => {
+    state.hovered = false;
+    if (state.pointerFocus) button.blur();
+  });
+  button.addEventListener('blur', () => { state.pointerFocus = false; });
+  button.addEventListener('keydown', () => { state.pointerFocus = false; });
   button.addEventListener('pointerdown', (event) => {
     if (event.button === 0) {
+      state.hovered = true;
       // Keep the embedded source editor alive until the click handler has
       // committed the mode transition. A pointer-driven blur can otherwise
       // project pending input and replace the toolbar before `click` fires.
       event.preventDefault();
     }
   });
+}
+
+/** Restore focus after returning to preview; pointer focus lasts only while hovered. */
+export function restoreRenderedBlockModeFocus(button: HTMLButtonElement | null, pointerDriven: boolean): void {
+  if (!button) return;
+  const state = modeButtonFocus.get(button);
+  if (state) state.pointerFocus = pointerDriven;
+  button.focus({ preventScroll: true });
+  // The toolbar can be reparented before this restoration. Use its tracked
+  // hover session, and also handle a pointer that left before the queued frame.
+  if (pointerDriven && !state?.hovered) button.blur();
 }
 
 /** Keeps preview-owned controls in the block toolbar; disposal removes the projection. */

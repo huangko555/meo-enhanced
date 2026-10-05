@@ -27,6 +27,7 @@ import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage
 import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 import {
   renderRenderedBlockModeButton,
+  restoreRenderedBlockModeFocus,
   retainRenderedBlockModePointerFocus
 } from './renderedBlockModeControls';
 import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
@@ -326,7 +327,7 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
     retainRenderedBlockModePointerFocus(modeButton);
     updateMermaidModeButton(modeButton, this.mode, this.lineNumber, uiLanguage);
 
-    const changeMode = (event: Event) => {
+    const changeMode = (event: MouseEvent) => {
       event.preventDefault();
       event.stopPropagation();
       const currentAnchor = resolveMermaidToolbarAnchor(view, toolbar, this.lineNumber);
@@ -356,7 +357,7 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
           const currentModeButton = view.dom.querySelector<HTMLButtonElement>(
             `.meo-mermaid-toolbar[data-meo-block-from="${currentAnchor}"] .meo-mermaid-mode-btn`
           );
-          currentModeButton?.focus({ preventScroll: true });
+          restoreRenderedBlockModeFocus(currentModeButton, event.detail > 0);
           return;
         }
         const editingBlock = view.dom.querySelector<HTMLElement>(

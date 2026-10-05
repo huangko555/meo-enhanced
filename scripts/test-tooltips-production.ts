@@ -221,6 +221,10 @@ try {
 
   for (const kind of ['mermaid', 'latex-math']) {
     const selector = `.meo-${kind}-mode-btn`;
+    await page.mouse.move(0, 0);
+    const restingStyle = await page.$eval(selector, element => ({
+      background: getComputedStyle(element).backgroundImage, color: getComputedStyle(element).color
+    }));
     await page.hover(kind === 'mermaid' ? '.meo-mermaid-block' : '.meo-latex-math-viewport');
     await show(selector);
     const hintId = await page.$eval(selector, element => element.getAttribute('aria-describedby'));
@@ -231,18 +235,40 @@ try {
       await assertCurrentHint(selector);
       assert.equal(await page.$eval(selector, element => element.getAttribute('aria-describedby')), hintId);
     }
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await page.mouse.move(0, 0);
+    const afterPointerLeave = await page.$eval(selector, element => ({
+      hovered: element.matches(':hover'), background: getComputedStyle(element).backgroundImage, color: getComputedStyle(element).color
+    }));
+    assert.equal(afterPointerLeave.hovered, false);
+    assert.deepEqual({ background: afterPointerLeave.background, color: afterPointerLeave.color }, restingStyle, 'pointer mode changes must not retain focus highlighting after leaving');
+    assert.equal(await page.$('.meo-tooltip.is-visible'), null, 'leaving a pointer-operated mode button dismisses its hint');
     await page.keyboard.press('Tab');
     await page.focus(selector);
     await page.waitForFunction(selector => {
       const button = document.querySelector(selector)!;
       return document.getElementById(button.getAttribute('aria-describedby')!)?.classList.contains('is-visible');
     }, {}, selector);
+    assert.equal(await page.$eval(selector, element => element.matches(':focus-visible') && getComputedStyle(element).backgroundImage !== 'none'), true, 'keyboard navigation retains visible focus feedback');
     const previous = await page.$eval(selector, element => (element as HTMLElement).dataset.tooltip);
     await page.keyboard.press('Enter');
     await page.waitForFunction(({ selector, previous }) => (document.querySelector(selector) as HTMLElement)?.dataset.tooltip !== previous, {}, { selector, previous });
     if (await page.$eval(selector, element => element.matches(':focus-visible'))) await assertCurrentHint(selector);
     else assert.equal(await page.$eval(selector, element => document.getElementById(element.getAttribute('aria-describedby') ?? '')?.classList.contains('is-visible') ?? false), false, 'moving focus into the source editor closes the button hint');
+
+    const splitHint = await page.$eval(selector, element => (element as HTMLElement).dataset.tooltip);
+    await page.click(selector);
+    await page.waitForFunction(({ selector, previous }) => (document.querySelector(selector) as HTMLElement)?.dataset.tooltip !== previous, {}, { selector, previous: splitHint });
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await page.mouse.move(0, 0);
+    await page.focus(selector);
+    const sourceHint = await page.$eval(selector, element => (element as HTMLElement).dataset.tooltip);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(({ selector, previous }) => {
+      const button = document.querySelector(selector) as HTMLElement;
+      return button?.dataset.tooltip !== previous && button.matches(':focus-visible');
+    }, {}, { selector, previous: sourceHint });
+    assert.equal(await page.$eval(selector, element => getComputedStyle(element).backgroundImage !== 'none'), true, 'keyboard return to preview retains the focused button highlight');
   }
   await page.hover('.meo-mermaid-block');
   await page.click('.meo-mermaid-toolbar [aria-label="Fullscreen"]');
@@ -340,7 +366,7 @@ try {
   assert.equal(await frame.$('.meo-tooltip.is-visible'), null, 'parent and Preview share one active hint');
   assert.deepEqual(errors, []);
   await page.close();
-  console.log('Production tooltips: delay, stateful pointer/keyboard updates, dismissal, toolbar/menu scope, fullscreen controls, boundary placement and Preview theme isolation passed.');
+  console.log('Production tooltips: delay, stateful pointer/keyboard updates, mode focus feedback, dismissal, toolbar/menu scope, fullscreen controls, boundary placement and Preview theme isolation passed.');
 } finally {
   await browser.close();
 }

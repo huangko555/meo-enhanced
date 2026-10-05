@@ -21,6 +21,7 @@ import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage
 import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 import {
   renderRenderedBlockModeButton,
+  restoreRenderedBlockModeFocus,
   retainRenderedBlockModePointerFocus
 } from './renderedBlockModeControls';
 import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
@@ -370,7 +371,7 @@ class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
           const currentModeButton = view.dom.querySelector<HTMLButtonElement>(
             `.meo-latex-math-toolbar[data-meo-block-from="${currentAnchor}"] .meo-latex-math-mode-btn`
           );
-          currentModeButton?.focus({ preventScroll: true });
+          restoreRenderedBlockModeFocus(currentModeButton, event.detail > 0);
           return;
         }
         const editingBlock = view.dom.querySelector<HTMLElement>(
