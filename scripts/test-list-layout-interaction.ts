@@ -658,7 +658,7 @@ async function main(): Promise<void> {
       },
       renderedBlocks: {
         controls: ['第 41 行 Mermaid 块控件', '第 46 行公式块控件'],
-        modes: ['以分栏视图编辑 Mermaid', '以分栏视图编辑公式']
+        modes: ['切换为分栏', '切换为分栏']
       }
     });
     assert.equal(result.appliedAfterCheckbox, result.afterCheckbox, 'checkbox must publish exactly its accepted text');

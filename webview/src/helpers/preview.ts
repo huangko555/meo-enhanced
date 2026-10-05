@@ -855,7 +855,7 @@ export function createPreviewController({
     defaultFontOption.textContent = uiStrings.previewFontPlaceholder;
     fontFamilySelectControl.refreshOptions();
     if (sourceNavigation) {
-      sourceNavigation.title = uiStrings.editInSource;
+      sourceNavigation.dataset.tooltip = uiStrings.editInSource;
       sourceNavigation.setAttribute('aria-label', uiStrings.editInSource);
     }
     scrollToTopController.setUiLanguage(language);
@@ -2131,7 +2131,7 @@ export function createPreviewController({
     navigation.className = 'meo-preview-source-navigation';
     navigation.hidden = true;
     navigation.tabIndex = -1;
-    navigation.title = uiStrings.editInSource;
+    navigation.dataset.tooltip = uiStrings.editInSource;
     navigation.setAttribute('aria-label', uiStrings.editInSource);
     const icon = frameDocument.createElement('span');
     icon.className = 'meo-preview-source-navigation-icon';

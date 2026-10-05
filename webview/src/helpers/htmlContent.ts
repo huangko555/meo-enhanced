@@ -231,7 +231,7 @@ function showHtmlComments(
     note.className = 'meo-md-html-comment';
     note.setAttribute('role', 'button');
     note.tabIndex = 0;
-    note.title = strings.showHtmlSource;
+    note.dataset.tooltip = strings.showHtmlSource;
     note.dataset.meoHtmlSourceLine = String(sourceStartLine + source.slice(0, comment.from).split('\n').length - 1);
     note.textContent = source.slice(comment.from, comment.to);
     const openSource = (event: Event): void => {
@@ -279,7 +279,8 @@ function enhanceLinks(root: ParentNode, inline: boolean, uiLanguage: UiLanguage)
     const linkText = document.createElement('span');
     linkText.className = 'meo-md-link meo-md-html-link';
     linkText.dataset.meoLinkHref = href;
-    linkText.title = anchor.title;
+    linkText.dataset.tooltip = anchor.title || anchor.dataset.tooltip || '';
+    linkText.dataset.tooltipKind = 'description';
     linkText.append(...Array.from(anchor.childNodes));
     linkText.addEventListener('click', (event) => {
       if (!isPrimaryModifierPointerClick(event)) return;
@@ -384,7 +385,7 @@ function createHtmlModeButton(className: string, label: string, icon: typeof Cod
   const button = document.createElement('button');
   button.type = 'button';
   button.className = className;
-  button.title = label;
+  button.dataset.tooltip = label;
   button.setAttribute('aria-label', label);
   button.appendChild(createElement(icon, { width: 18, height: 18, 'aria-hidden': 'true' }));
   button.addEventListener('pointerdown', (event) => {
@@ -647,8 +648,8 @@ class HtmlWarningWidget extends WidgetType {
     const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     const warning = document.createElement('span');
     warning.className = 'meo-md-html-warning';
-    warning.title = strings.unsupportedHtmlSource;
-    warning.setAttribute('aria-label', warning.title);
+    warning.dataset.tooltip = strings.unsupportedHtmlSource;
+    warning.setAttribute('aria-label', warning.dataset.tooltip ?? '');
     warning.appendChild(createElement(AlertTriangle, { width: 14, height: 14, 'aria-hidden': 'true' }));
     return warning;
   }

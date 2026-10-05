@@ -55,7 +55,7 @@ async function main() {
       const previews = document.querySelectorAll<HTMLElement>('tbody .meo-md-html-table-cell-preview');
       const swatchTitles = (root: ParentNode) => Array.from(
         root.querySelectorAll<HTMLElement>('.meo-md-color-swatch'),
-        (swatch) => swatch.dataset.colorValue ?? swatch.title
+        (swatch) => swatch.dataset.colorValue ?? swatch.dataset.tooltip
       );
       const tagTexts = (root: ParentNode) => Array.from(
         root.querySelectorAll<HTMLElement>('.meo-md-tag'),
@@ -816,7 +816,7 @@ async function main() {
         }
         results.push(Array.from(
           app.querySelectorAll<HTMLElement>('.meo-md-color-swatch'),
-          (swatch) => swatch.dataset.colorValue ?? swatch.title
+          (swatch) => swatch.dataset.colorValue ?? swatch.dataset.tooltip
         ));
         editor.destroy();
       }
@@ -838,7 +838,7 @@ async function main() {
       }
       const swatches = Array.from(
         app.querySelectorAll<HTMLElement>('.meo-md-color-swatch'),
-        (swatch) => swatch.dataset.colorValue ?? swatch.title
+        (swatch) => swatch.dataset.colorValue ?? swatch.dataset.tooltip
       );
       const result = {
         count: swatches.length,

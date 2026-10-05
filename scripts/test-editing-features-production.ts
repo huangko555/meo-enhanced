@@ -368,7 +368,7 @@ try {
           uniformHeight: Array.from(list.children).every(item => Math.abs(item.getBoundingClientRect().height - rowBounds.height) < 1),
           fallback: list.children[23]?.querySelector('.meo-input-suggestion-detail')?.textContent,
           repeatedDetail: list.children[24]?.querySelector('.meo-input-suggestion-detail')?.textContent,
-          label: label.textContent, detail: detail.textContent, labelTitle: label.title, detailTitle: detail.title,
+          label: label.textContent, detail: detail.textContent, labelTitle: label.dataset.tooltip, detailTitle: detail.dataset.tooltip,
           match: row.querySelector('.meo-suggestion-match')?.textContent,
           ellipsis: getComputedStyle(label).textOverflow === 'ellipsis' && getComputedStyle(detail).textOverflow === 'ellipsis',
           selectedTop: Math.abs(parseFloat(popup.style.getPropertyValue('--meo-suggestion-selected-top')) - (rowBounds.top - bounds.top - popup.clientTop)) < 1,

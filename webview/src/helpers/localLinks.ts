@@ -110,7 +110,7 @@ export function createMissingLocalLinkIndicator(language: UiLanguage = 'en'): HT
   const strings = getUiStrings(language);
   const badge = document.createElement('span');
   badge.className = 'meo-md-local-link-missing-icon';
-  badge.title = strings.missingLocalLink;
+  badge.dataset.tooltip = strings.missingLocalLink;
   badge.setAttribute('aria-label', strings.missingLocalLink);
   badge.appendChild(createElement(AlertCircle, { 'aria-hidden': 'true' }));
   return badge;

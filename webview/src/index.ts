@@ -1,9 +1,9 @@
 import { effectiveShortcuts } from '../../src/application/editingPreferences';
-import { commandTitle } from './application/settingsCatalog';
 import type { EditorCommandId } from '../../src/foundation/editingPreferences';
 import { createImageLocationSettings } from './adapters/imageLocationSettings';
 import { createImageStorageTransport } from './adapters/imageStorageTransport';
 import { createSettingsWindow, type GeneralSetting } from './adapters/settingsWindow';
+import { bindTooltips, createTooltip } from './adapters/tooltip';
 import { createEditingPreferencesTransport } from './adapters/editingPreferencesTransport';
 import { createEditorServicesTransport } from './adapters/editorServicesTransport';
 import { defaultInputAssistance, type EditingPreferences } from '../../src/foundation/editingPreferences';
@@ -154,6 +154,7 @@ if (!root) {
 }
 
 root.classList.add('editor-root');
+const tooltipBinding = bindTooltips(document.body);
 let activeUiLanguage: UiLanguage = 'en';
 let activeUiStrings = getUiStrings(activeUiLanguage);
 let activeUiLanguagePreference: UiLanguagePreference = 'auto';
@@ -175,7 +176,8 @@ const headingBtn = document.createElement('button');
 headingBtn.type = 'button';
 headingBtn.className = 'format-button';
 headingBtn.dataset.action = 'heading';
-headingBtn.title = activeUiStrings.heading;
+headingBtn.dataset.tooltipPlacement = 'right';
+headingBtn.dataset.tooltip = activeUiStrings.heading;
 headingBtn.appendChild(createElement(Heading, { width: 18, height: 18 }));
 
 const headingDropdown = document.createElement('div');
@@ -192,8 +194,11 @@ for (let level = 1; level <= 6; level++) {
   const option = document.createElement('button');
   option.type = 'button';
   option.className = 'heading-dropdown-option';
+  option.dataset.tooltipPlacement = 'right';
   option.dataset.level = String(level);
-  option.title = activeUiStrings.headingLevel(level);
+  option.dataset.tooltip = activeUiStrings.headingLevel(level);
+  option.setAttribute('aria-label', activeUiStrings.headingLevel(level));
+
   option.appendChild(createElement(headingIcons[level - 1], { width: 18, height: 18 }));
   headingDropdown.appendChild(option);
 }
@@ -208,21 +213,21 @@ const bulletListBtn = document.createElement('button');
 bulletListBtn.type = 'button';
 bulletListBtn.className = 'format-button';
 bulletListBtn.dataset.action = 'bulletList';
-bulletListBtn.title = activeUiStrings.bulletList;
+bulletListBtn.dataset.tooltip = activeUiStrings.bulletList;
 bulletListBtn.appendChild(createElement(List, { width: 18, height: 18 }));
 
 const numberedListBtn = document.createElement('button');
 numberedListBtn.type = 'button';
 numberedListBtn.className = 'format-button';
 numberedListBtn.dataset.action = 'numberedList';
-numberedListBtn.title = activeUiStrings.numberedList;
+numberedListBtn.dataset.tooltip = activeUiStrings.numberedList;
 numberedListBtn.appendChild(createElement(ListOrdered, { width: 18, height: 18 }));
 
 const taskBtn = document.createElement('button');
 taskBtn.type = 'button';
 taskBtn.className = 'format-button';
 taskBtn.dataset.action = 'task';
-taskBtn.title = activeUiStrings.task;
+taskBtn.dataset.tooltip = activeUiStrings.task;
 taskBtn.appendChild(createElement(SquareCheck, { width: 18, height: 18 }));
 
 let gitChangesGutterVisible = false;
@@ -252,8 +257,8 @@ const createOutlineButton = (position: 'left' | 'right') => {
   button.type = 'button';
   button.className = 'format-button toggle-button';
   button.dataset.action = `outline-${position}`;
-  button.title = position === 'left' ? activeUiStrings.showOutlineLeft : activeUiStrings.showOutlineRight;
-  button.setAttribute('aria-label', button.title);
+  button.dataset.tooltip = position === 'left' ? activeUiStrings.showOutlineLeft : activeUiStrings.showOutlineRight;
+  button.setAttribute('aria-label', button.dataset.tooltip ?? '');
   button.appendChild(createElement(ListTree, { width: 18, height: 18 }));
   return button;
 };
@@ -285,16 +290,13 @@ const appendMoreToolsOptionContent = (
   const info = document.createElement('span');
   info.className = 'more-tools-option-info';
   info.appendChild(createElement(Info, { width: 13, height: 13, 'aria-hidden': 'true' }));
-  const tooltip = document.createElement('span');
-  tooltip.id = description.id;
-  tooltip.className = 'more-tools-option-tooltip meo-tooltip';
-  tooltip.setAttribute('role', 'tooltip');
-  tooltip.textContent = description.text;
-  info.appendChild(tooltip);
+  const tooltip = createTooltip(info, {
+    id: description.id, content: { text: description.text, kind: 'description' }, focusTarget: button
+  });
   info.addEventListener('click', (event) => event.stopPropagation());
   text.append(label, info);
-  button.setAttribute('aria-describedby', description.id);
   button.append(iconElement, text, toggle);
+  return tooltip;
 };
 
 const createMoreToolsControlHeading = (icon: Parameters<typeof createElement>[0], label: HTMLElement): HTMLElement => {
@@ -350,11 +352,11 @@ largeDocumentOptimizationBtn.className = 'more-tools-option more-tools-toggle-op
 largeDocumentOptimizationBtn.dataset.action = 'largeDocumentOptimization';
 largeDocumentOptimizationBtn.setAttribute('role', 'menuitemcheckbox');
 largeDocumentOptimizationBtn.setAttribute('aria-checked', 'true');
-appendMoreToolsOptionContent(
+const largeDocumentTooltip = appendMoreToolsOptionContent(
   largeDocumentOptimizationBtn,
   FileCode2,
   activeUiStrings.largeDocumentStartup,
-  { id: 'large-document-startup-tooltip', text: activeUiStrings.largeDocumentStartupDescription }
+  { id: 'large-document-startup-tooltip', text: activeUiStrings.largeDocumentStartupHint }
 );
 
 const tableStickyHeaderBtn = document.createElement('button');
@@ -618,49 +620,50 @@ const codeBlockBtn = document.createElement('button');
 codeBlockBtn.type = 'button';
 codeBlockBtn.className = 'format-button';
 codeBlockBtn.dataset.action = 'codeBlock';
-codeBlockBtn.title = activeUiStrings.codeBlock;
+codeBlockBtn.dataset.tooltip = activeUiStrings.codeBlock;
 codeBlockBtn.appendChild(createElement(SquareCode, { width: 18, height: 18 }));
 
 const quoteBtn = document.createElement('button');
 quoteBtn.type = 'button';
 quoteBtn.className = 'format-button';
 quoteBtn.dataset.action = 'quote';
-quoteBtn.title = activeUiStrings.quote;
+quoteBtn.dataset.tooltip = activeUiStrings.quote;
 quoteBtn.appendChild(createElement(Quote, { width: 18, height: 18 }));
 
 const hrBtn = document.createElement('button');
 hrBtn.type = 'button';
 hrBtn.className = 'format-button';
 hrBtn.dataset.action = 'hr';
-hrBtn.title = activeUiStrings.horizontalRule;
+hrBtn.dataset.tooltip = activeUiStrings.horizontalRule;
 hrBtn.appendChild(createElement(Minus, { width: 18, height: 18 }));
 
 const linkBtn = document.createElement('button');
 linkBtn.type = 'button';
 linkBtn.className = 'format-button';
 linkBtn.dataset.action = 'link';
-linkBtn.title = activeUiStrings.link;
+linkBtn.dataset.tooltip = activeUiStrings.link;
 linkBtn.appendChild(createElement(Link, { width: 18, height: 18 }));
 
 const wikiLinkBtn = document.createElement('button');
 wikiLinkBtn.type = 'button';
 wikiLinkBtn.className = 'format-button';
 wikiLinkBtn.dataset.action = 'wikiLink';
-wikiLinkBtn.title = activeUiStrings.wikiLink;
+wikiLinkBtn.dataset.tooltip = activeUiStrings.wikiLink;
 wikiLinkBtn.appendChild(createElement(Brackets, { width: 18, height: 18 }));
 
 const imageBtn = document.createElement('button');
 imageBtn.type = 'button';
 imageBtn.className = 'format-button';
 imageBtn.dataset.action = 'image';
-imageBtn.title = activeUiStrings.image;
+imageBtn.dataset.tooltip = activeUiStrings.image;
 imageBtn.appendChild(createElement(Image, { width: 18, height: 18 }));
 
 const tableBtn = document.createElement('button');
 tableBtn.type = 'button';
 tableBtn.className = 'format-button';
 tableBtn.dataset.action = 'table';
-tableBtn.title = activeUiStrings.table;
+tableBtn.dataset.tooltipPlacement = 'right';
+tableBtn.dataset.tooltip = activeUiStrings.table;
 tableBtn.appendChild(createElement(Table2, { width: 18, height: 18 }));
 
 const tableDropdown = document.createElement('div');
@@ -837,7 +840,7 @@ const saveBtn = document.createElement('button');
 saveBtn.type = 'button';
 saveBtn.className = 'format-button';
 saveBtn.dataset.action = 'save';
-saveBtn.title = activeUiStrings.save;
+saveBtn.dataset.tooltip = activeUiStrings.save;
 saveBtn.setAttribute('aria-label', activeUiStrings.saveDocument);
 saveBtn.appendChild(createElement(Save, { width: 18, height: 18 }));
 
@@ -845,7 +848,7 @@ const discardBtn = document.createElement('button');
 discardBtn.type = 'button';
 discardBtn.className = 'format-button';
 discardBtn.dataset.action = 'discard';
-discardBtn.title = activeUiStrings.reloadDiskVersion;
+discardBtn.dataset.tooltip = activeUiStrings.reloadDiskVersion;
 discardBtn.setAttribute('aria-label', activeUiStrings.reloadDiskVersion);
 discardBtn.appendChild(createElement(HardDriveUpload, { width: 18, height: 18 }));
 
@@ -876,13 +879,13 @@ const findToggleBtn = document.createElement('button');
 findToggleBtn.type = 'button';
 findToggleBtn.className = 'format-button toggle-button';
 findToggleBtn.dataset.action = 'find';
-findToggleBtn.title = activeUiStrings.findAndReplace;
+findToggleBtn.dataset.tooltip = activeUiStrings.findAndReplace;
 findToggleBtn.appendChild(createElement(Search, { width: 18, height: 18 }));
 
 const exportButton = document.createElement('button');
 exportButton.type = 'button';
 exportButton.className = 'preview-toolbar-action preview-export-trigger';
-exportButton.title = activeUiStrings.exportDocument;
+exportButton.dataset.tooltip = activeUiStrings.exportDocument;
 exportButton.setAttribute('aria-label', activeUiStrings.exportDocument);
 exportButton.setAttribute('aria-haspopup', 'menu');
 exportButton.setAttribute('aria-expanded', 'false');
@@ -1002,7 +1005,7 @@ const moreToolsButton = document.createElement('button');
 moreToolsButton.type = 'button';
 moreToolsButton.className = 'format-button';
 moreToolsButton.dataset.action = 'settings';
-moreToolsButton.title = activeUiStrings.more;
+moreToolsButton.dataset.tooltip = activeUiStrings.more;
 moreToolsButton.setAttribute('aria-label', activeUiStrings.moreTools);
 moreToolsButton.setAttribute('aria-haspopup', 'menu');
 moreToolsButton.setAttribute('aria-expanded', 'false');
@@ -1114,32 +1117,34 @@ const applyUiLanguage = (language: UiLanguage): void => {
   document.documentElement.lang = language;
   toolbar.setAttribute('aria-label', strings.editorToolbar);
   formatGroup.setAttribute('aria-label', strings.formatting);
-  headingBtn.title = strings.heading;
+  headingBtn.dataset.tooltip = strings.heading;
   headingDropdown.setAttribute('aria-label', strings.headingLevels);
   for (const option of headingDropdown.querySelectorAll<HTMLElement>('[data-level]')) {
-    option.title = strings.headingLevel(Number.parseInt(option.dataset.level ?? '', 10));
+    const label = strings.headingLevel(Number.parseInt(option.dataset.level ?? '', 10));
+    option.dataset.tooltip = label;
+    option.setAttribute('aria-label', label);
   }
-  bulletListBtn.title = strings.bulletList;
-  numberedListBtn.title = strings.numberedList;
-  taskBtn.title = strings.task;
+  bulletListBtn.dataset.tooltip = strings.bulletList;
+  numberedListBtn.dataset.tooltip = strings.numberedList;
+  taskBtn.dataset.tooltip = strings.task;
   for (const button of [outlineLeftBtn, previewOutlineLeftBtn]) {
-    button.title = strings.showOutlineLeft;
-    button.setAttribute('aria-label', button.title);
+    button.dataset.tooltip = strings.showOutlineLeft;
+    button.setAttribute('aria-label', button.dataset.tooltip ?? '');
   }
-  outlineBtn.title = strings.showOutlineRight;
-  outlineBtn.setAttribute('aria-label', outlineBtn.title);
-  codeBlockBtn.title = strings.codeBlock;
-  quoteBtn.title = strings.quote;
-  hrBtn.title = strings.horizontalRule;
-  linkBtn.title = strings.link;
-  wikiLinkBtn.title = strings.wikiLink;
-  imageBtn.title = strings.image;
-  tableBtn.title = strings.table;
+  outlineBtn.dataset.tooltip = strings.showOutlineRight;
+  outlineBtn.setAttribute('aria-label', outlineBtn.dataset.tooltip ?? '');
+  codeBlockBtn.dataset.tooltip = strings.codeBlock;
+  quoteBtn.dataset.tooltip = strings.quote;
+  hrBtn.dataset.tooltip = strings.horizontalRule;
+  linkBtn.dataset.tooltip = strings.link;
+  wikiLinkBtn.dataset.tooltip = strings.wikiLink;
+  imageBtn.dataset.tooltip = strings.image;
+  tableBtn.dataset.tooltip = strings.table;
   lineJumpInput.placeholder = strings.line;
   lineJumpInput.setAttribute('aria-label', strings.goToLine);
-  saveBtn.title = strings.save;
+  saveBtn.dataset.tooltip = strings.save;
   saveBtn.setAttribute('aria-label', strings.saveDocument);
-  discardBtn.title = discardBtn.classList.contains('is-discard-armed')
+  discardBtn.dataset.tooltip = discardBtn.classList.contains('is-discard-armed')
     ? strings.reloadDiskVersionDoubleClick
     : strings.reloadDiskVersion;
   discardBtn.setAttribute('aria-label', strings.reloadDiskVersion);
@@ -1149,7 +1154,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   boldHeadingsBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.boldHeadings;
   longCodeBlockFoldingBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.foldLongCodeBlocks;
   largeDocumentOptimizationBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.largeDocumentStartup;
-  largeDocumentOptimizationBtn.querySelector<HTMLElement>('.more-tools-option-tooltip')!.textContent = strings.largeDocumentStartupDescription;
+  largeDocumentTooltip?.setContent({ text: strings.largeDocumentStartupHint, kind: 'description' });
   tableStickyHeaderBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.stickyTableHeader;
   restoreReadingPositionBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.resumeReadingPositionLabel;
   changesReviewControl.setUiLanguage(language);
@@ -1164,8 +1169,8 @@ const applyUiLanguage = (language: UiLanguage): void => {
   selectionMenuElements.setUiLanguage(language);
   refreshShortcutHints();
   editorScrollToTopController.setUiLanguage(language);
-  findToggleBtn.title = strings.findAndReplace;
-  exportButton.title = strings.exportDocument;
+  findToggleBtn.dataset.tooltip = strings.findAndReplace;
+  exportButton.dataset.tooltip = strings.exportDocument;
   exportButton.setAttribute('aria-label', strings.exportDocument);
   exportButtonLabel.textContent = strings.exportDocument;
   exportMenu.setAttribute('aria-label', strings.exportDocument);
@@ -1174,10 +1179,10 @@ const applyUiLanguage = (language: UiLanguage): void => {
     label.textContent = strings[labelKey];
   }
   previewFormatGroup.setAttribute('aria-label', strings.previewTools);
-  sourcePreviewMoreButton.title = strings.sidePreviewMore;
+  sourcePreviewMoreButton.dataset.tooltip = strings.sidePreviewMore;
   sourcePreviewMoreButton.setAttribute('aria-label', strings.sidePreviewMore);
   sourcePreviewMorePanel.setAttribute('aria-label', strings.previewTools);
-  moreToolsButton.title = strings.more;
+  moreToolsButton.dataset.tooltip = strings.more;
   moreToolsButton.setAttribute('aria-label', strings.moreTools);
   moreToolsPanel.setAttribute('aria-label', strings.moreTools);
   displaySettingsHeading.textContent = strings.documentDisplaySettings;
@@ -1186,7 +1191,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   feedbackPrompt.textContent = strings.feedbackPrompt;
   reportIssueButton.setAttribute('aria-label', strings.reportIssue);
   reportIssueLabel.textContent = strings.reportIssue;
-  toolbarOverflowIndicator.title = strings.toolbarOverflow;
+  toolbarOverflowIndicator.dataset.tooltip = strings.toolbarOverflow;
   toolbarOverflowIndicator.setAttribute('aria-label', strings.toolbarOverflow);
   toolbarOverflowSection.setAttribute('aria-label', strings.toolbarOverflow);
   editorAppearanceControl.element.setAttribute('aria-label', strings.editorAppearance);
@@ -1345,7 +1350,7 @@ const previewButton = modeControl.getButton('preview');
 const sourcePreviewButton = document.createElement('button');
 sourcePreviewButton.type = 'button';
 sourcePreviewButton.className = 'format-button source-preview-button';
-sourcePreviewButton.title = activeUiStrings.showSidePreview;
+sourcePreviewButton.dataset.tooltip = activeUiStrings.showSidePreview;
 sourcePreviewButton.setAttribute('aria-label', activeUiStrings.showSidePreview);
 sourcePreviewButton.setAttribute('aria-pressed', 'false');
 const sourcePreviewButtonLabel = document.createElement('span');
@@ -1365,13 +1370,15 @@ rightGroup.insertBefore(sourcePreviewButton, changesControls);
 const sourcePreviewScrollSyncButton = document.createElement('button');
 sourcePreviewScrollSyncButton.type = 'button';
 sourcePreviewScrollSyncButton.className = 'format-button source-preview-tool-button source-preview-scroll-sync-button';
+sourcePreviewScrollSyncButton.dataset.tooltipPlacement = 'right';
 sourcePreviewScrollSyncButton.setAttribute('aria-pressed', 'true');
 const sourcePreviewTools = document.createElement('div');
 sourcePreviewTools.className = 'source-preview-tools';
 const sourcePreviewMoreButton = document.createElement('button');
 sourcePreviewMoreButton.type = 'button';
 sourcePreviewMoreButton.className = 'format-button source-preview-tool-button source-preview-more-button';
-sourcePreviewMoreButton.title = activeUiStrings.sidePreviewMore;
+sourcePreviewMoreButton.dataset.tooltipPlacement = 'right';
+sourcePreviewMoreButton.dataset.tooltip = activeUiStrings.sidePreviewMore;
 sourcePreviewMoreButton.setAttribute('aria-label', activeUiStrings.sidePreviewMore);
 sourcePreviewMoreButton.setAttribute('aria-haspopup', 'dialog');
 sourcePreviewMoreButton.setAttribute('aria-expanded', 'false');
@@ -1416,7 +1423,7 @@ document.addEventListener('keydown', (event) => {
 const toolbarOverflowIndicator = document.createElement('button');
 toolbarOverflowIndicator.type = 'button';
 toolbarOverflowIndicator.className = 'format-button toolbar-overflow-indicator';
-toolbarOverflowIndicator.title = activeUiStrings.toolbarOverflow;
+toolbarOverflowIndicator.dataset.tooltip = activeUiStrings.toolbarOverflow;
 toolbarOverflowIndicator.setAttribute('aria-label', activeUiStrings.toolbarOverflow);
 toolbarOverflowIndicator.setAttribute('aria-expanded', 'false');
 toolbarOverflowIndicator.setAttribute('aria-controls', toolbarOverflowSection.id);
@@ -1819,7 +1826,7 @@ function presentSourcePreviewControls(): void {
   const sourcePreviewLabel = split
     ? activeUiStrings.hideSidePreview
     : activeUiStrings.showSidePreview;
-  sourcePreviewButton.title = sourcePreviewLabel;
+  sourcePreviewButton.dataset.tooltip = sourcePreviewLabel;
   sourcePreviewButton.setAttribute('aria-label', sourcePreviewLabel);
   sourcePreviewButtonLabel.textContent = split
     ? activeUiStrings.exitSidePreview
@@ -1828,7 +1835,7 @@ function presentSourcePreviewControls(): void {
   const syncLabel = sourcePreviewScrollSyncEnabled
     ? activeUiStrings.disableSynchronizedScrolling
     : activeUiStrings.enableSynchronizedScrolling;
-  sourcePreviewScrollSyncButton.title = syncLabel;
+  sourcePreviewScrollSyncButton.dataset.tooltip = syncLabel;
   sourcePreviewScrollSyncButton.setAttribute('aria-label', syncLabel);
   sourcePreviewScrollSyncButton.setAttribute('aria-pressed', sourcePreviewScrollSyncEnabled ? 'true' : 'false');
   sourcePreviewScrollSyncButton.classList.toggle('is-independent', !sourcePreviewScrollSyncEnabled);
@@ -2392,7 +2399,7 @@ const clearDiscardConfirmation = () => {
     discardConfirmationTimer = null;
   }
   discardBtn.classList.remove('is-discard-armed');
-  discardBtn.title = activeUiStrings.reloadDiskVersion;
+  discardBtn.dataset.tooltip = activeUiStrings.reloadDiskVersion;
   discardBtn.setAttribute('aria-label', activeUiStrings.reloadDiskVersion);
   discardBtn.replaceChildren(createElement(HardDriveUpload, { width: 18, height: 18 }));
 };
@@ -2430,7 +2437,7 @@ discardBtn.addEventListener('click', () => {
     return;
   }
   discardBtn.classList.add('is-discard-armed');
-  discardBtn.title = activeUiStrings.reloadDiskVersionDoubleClick;
+  discardBtn.dataset.tooltip = activeUiStrings.reloadDiskVersionDoubleClick;
   discardBtn.setAttribute('aria-label', activeUiStrings.reloadDiskVersionDoubleClick);
   discardBtn.replaceChildren(createElement(Check, { width: 18, height: 18, 'stroke-width': 2.5 }));
   discardConfirmationTimer = window.setTimeout(clearDiscardConfirmation, discardConfirmationWindowMs);
@@ -3534,6 +3541,8 @@ window.addEventListener('focus', () => {
 
 window.addEventListener('beforeunload', () => {
   settingsWindow?.dispose();
+  largeDocumentTooltip?.dispose();
+  tooltipBinding.dispose();
   imageLocationSettings.dispose();
   imageStorageTransport.dispose();
   editingPreferencesTransport.dispose();
@@ -3839,12 +3848,16 @@ scheduleEditorBundleWarmupAfterReady();
 function refreshShortcutHints(): void {
   const keys = effectiveShortcuts(editingPreferences.shortcuts, /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? 'mac' : 'other');
   const controls: [HTMLElement, EditorCommandId][] = [[saveBtn, 'save'], [findToggleBtn, 'find'], [bulletListBtn, 'bullet'], [numberedListBtn, 'ordered'], [taskBtn, 'taskList'], [codeBlockBtn, 'codeBlock'], [quoteBtn, 'quote'], [hrBtn, 'rule'], [linkBtn, 'link'], [wikiLinkBtn, 'wikiLink'], [imageBtn, 'image'], [tableBtn, 'insertTable']];
+  for (const option of headingDropdown.querySelectorAll<HTMLElement>('[data-level]')) {
+    controls.push([option, ('heading' + option.dataset.level) as EditorCommandId]);
+  }
   for (const control of selectionMenuElements.menu.querySelectorAll<HTMLElement>('[data-action]')) {
     const action = control.dataset.action === 'lineover' ? 'strike' : control.dataset.action;
     if (action && Object.hasOwn(keys, action)) controls.push([control, action as EditorCommandId]);
   }
   for (const [control, command] of controls) {
-    const label = commandTitle(command, activeUiLanguage);
-    control.title = label + (keys[command].length ? ' · ' + keys[command].join(' / ') : '');
+    // The control owns its copy; rebinding only updates the shortcut badge.
+    if (keys[command][0]) control.dataset.tooltipShortcut = keys[command][0];
+    else delete control.dataset.tooltipShortcut;
   }
 }

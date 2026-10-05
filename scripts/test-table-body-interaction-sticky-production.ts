@@ -170,7 +170,7 @@ async function main(): Promise<void> {
         cursor: hit instanceof Element ? getComputedStyle(hit).cursor : getComputedStyle(viewport).cursor,
         indicatorCount: document.querySelectorAll('.meo-md-html-table-sticky-navigation-indicator').length,
         hit: hit instanceof Element ? `${hit.tagName}.${hit.className}` : null,
-        title: viewport.title
+        title: viewport.dataset.tooltip
       };
     }, stickyNavigationPoint);
     if (

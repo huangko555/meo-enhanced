@@ -107,7 +107,7 @@ async function main(): Promise<void> {
       block: '.meo-mermaid-editing-block',
       controller: '__meoMermaidEditingController',
       marker: ' HISTORY',
-      previewLabel: 'Edit Mermaid in split view'
+      previewLabel: 'Switch to split view'
     });
     await assertPreviewModeSurvivesHistory(page, {
       kind: 'formula',
@@ -116,7 +116,7 @@ async function main(): Promise<void> {
       block: '.meo-latex-math-editing-block',
       controller: '__meoLatexMathEditingController',
       marker: ' + y',
-      previewLabel: 'Edit formula in split view'
+      previewLabel: 'Switch to split view'
     });
 
     console.log('rendered block Preview mode survives Undo/Redo');

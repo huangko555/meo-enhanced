@@ -44,13 +44,13 @@ async function main(): Promise<void> {
 
     await page.click('tbody tr:first-child td:first-child textarea');
     await page.evaluate(() => {
-      document.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!
+      document.querySelector<HTMLButtonElement>('button[data-tooltip="Insert row below"]')!
         .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
     });
     await waitForFrames(page);
     await page.click('tbody tr:first-child td:first-child textarea');
     await page.evaluate(() => {
-      document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
+      document.querySelector<HTMLButtonElement>('button[data-tooltip="Delete row"]')!
         .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
     });
     await waitForFrames(page);

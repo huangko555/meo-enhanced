@@ -63,7 +63,7 @@ async function main(): Promise<void> {
       const split = await page.evaluate(() => {
         const button = document.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn');
         if (!button) throw new Error('Missing Mermaid mode button');
-        if (button.getAttribute('aria-label') === 'Show Mermaid code only') return true;
+        if (button.getAttribute('aria-label') === 'Switch to source') return true;
         button.click();
         return false;
       });

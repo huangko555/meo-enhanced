@@ -509,10 +509,10 @@ async function largeDocumentStartupPreference(browser: Browser): Promise<void> {
       document.querySelector<HTMLElement>('#large-document-startup-tooltip')!
     ).visibility === 'visible');
     const tooltip = await page.$eval('#large-document-startup-tooltip', (element) => element.textContent ?? '');
-    assert.match(tooltip, /Source mode/);
+    assert.match(tooltip, /Source next time/);
     const tooltipBounds = await page.$eval('#large-document-startup-tooltip', (element) => {
       const rect = element.getBoundingClientRect();
-      const panelRect = element.closest('.more-tools-panel')!.getBoundingClientRect();
+      const panelRect = { top: 8, right: innerWidth - 8, bottom: innerHeight - 8, left: 8 };
       return {
         top: rect.top,
         right: rect.right,
@@ -529,7 +529,7 @@ async function largeDocumentStartupPreference(browser: Browser): Promise<void> {
         && tooltipBounds.right <= tooltipBounds.panelRight
         && tooltipBounds.bottom <= tooltipBounds.panelBottom
         && tooltipBounds.left >= tooltipBounds.panelLeft,
-      `Large-document tooltip was clipped by the settings panel: ${JSON.stringify(tooltipBounds)}`
+      `Large-document tooltip was clipped by the viewport: ${JSON.stringify(tooltipBounds)}`
     );
     await page.click('[data-action="largeDocumentOptimization"] .more-tools-option-label');
     const posted = await page.evaluate(() => (window as any).__hostMessages.filter(

@@ -1,6 +1,7 @@
 import { defaultImageStorage, type ImageLocationState, type ImageStoragePreferences } from '../../../src/foundation/imageStorage';
 import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 import type { ImageLocationRequest, ImageLocationResponse } from '../../../src/protocol/imageStorage';
+import { createTooltip } from './tooltip';
 
 type Request = Omit<Extract<ImageLocationRequest, { action: 'read' | 'selectFolder' }>, 'type' | 'requestId'>
   | Omit<Extract<ImageLocationRequest, { action: 'preview' | 'save' }>, 'type' | 'requestId'>;
@@ -79,27 +80,17 @@ export function createImageLocationSettings(options: {
   ].map(([name, zh, en]) => {
     const value = '${' + name + '}';
     const button = node('button', 'settings-button image-location-token', value); button.type = 'button';
-    const tooltip = node('span', 'more-tools-option-tooltip meo-tooltip meo-tooltip--arrow'); tooltip.id = 'meo-image-variable-' + name;
-    tooltip.setAttribute('role', 'tooltip');
-    button.setAttribute('aria-label', value); button.setAttribute('aria-describedby', tooltip.id); button.append(tooltip);
-    const positionHint = () => {
-      const bounds = button.getBoundingClientRect();
-      tooltip.style.left = (bounds.left + bounds.width / 2) + 'px';
-      tooltip.style.top = (bounds.bottom + 7) + 'px';
-    };
-    button.addEventListener('mouseenter', positionHint); button.addEventListener('focus', positionHint);
+    button.setAttribute('aria-label', value);
+    const tooltip = createTooltip(button, {
+      id: 'meo-image-variable-' + name, content: { text: t(zh, en) }
+    });
     button.addEventListener('click', () => {
       rule.setRangeText(value, rule.selectionStart ?? rule.value.length, rule.selectionEnd ?? rule.value.length, 'end');
       preferences = { ...preferences, rule: rule.value }; rule.focus(); edit();
     });
-    variables.append(button); return { button, tooltip, zh, en, positionHint };
+    variables.append(button); return { button, tooltip, zh, en };
   });
-  // Fixed positioning lets one-line hints escape the settings scroll area's clipping.
-  const positionHints = () => {
-    for (const token of tokens) if (token.button.matches(':hover, :focus-visible')) token.positionHint();
-  };
-  window.addEventListener('resize', positionHints);
-  window.addEventListener('scroll', positionHints, { capture: true, passive: true });
+
   const advanced = node('div', 'image-location-advanced'); advanced.append(ruleLabel, ruleBox, advancedHint, variables);
   modeControls[2].details.append(advanced);
   const legacy = node('p', 'settings-description image-location-legacy');
@@ -169,7 +160,7 @@ export function createImageLocationSettings(options: {
     advancedHint.textContent = t('支持绝对路径、相对当前文档的路径及下方变量。点击变量可插入。', 'Use an absolute path, a path relative to the document, or the variables below. Click a variable to insert it.');
     picker.textContent = t('选择文件夹…', 'Choose folder…');
     picker.disabled = !loaded || selecting;
-    for (const token of tokens) token.tooltip.textContent = t(token.zh, token.en);
+    for (const token of tokens) token.tooltip.setContent({ text: t(token.zh, token.en) });
     legacy.hidden = !state?.legacy || dirty;
     legacy.textContent = t('沿用原有目录配置；主动修改后使用这里的新规则。', 'Your previous folder configuration is preserved until you change it here.');
     notice.textContent = t('有效修改自动保存，既有图片不会移动。', 'Valid changes save automatically. Existing images stay where they are.');
@@ -244,7 +235,7 @@ export function createImageLocationSettings(options: {
   return { element, present, refresh, flush: () => { void save(); },
     dispose() {
       void save(); disposed = true; clearTimeout(previewTimer); clearTimeout(saveTimer);
-      window.removeEventListener('resize', positionHints); window.removeEventListener('scroll', positionHints, true);
+      for (const token of tokens) token.tooltip.dispose();
       element.remove();
     } };
 }

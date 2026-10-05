@@ -24,7 +24,7 @@ const createSelectionActionButton = (
   button.type = 'button';
   button.className = 'selection-inline-button';
   button.dataset.action = action;
-  button.title = label;
+  button.dataset.tooltip = label;
   button.setAttribute('aria-label', label);
   button.appendChild(createElement(Icon, { width: 16, height: 16, ...iconAttributes }));
   return button;
@@ -74,7 +74,7 @@ export const createSelectionMenu = (): SelectionMenuElements => {
     for (const button of menu.querySelectorAll<HTMLButtonElement>('[data-action]')) {
       const label = labels[button.dataset.action ?? ''];
       if (!label) continue;
-      button.title = label;
+      button.dataset.tooltip = label;
       button.setAttribute('aria-label', label);
     }
   };

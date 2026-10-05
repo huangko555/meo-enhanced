@@ -49,14 +49,13 @@ export const createFindPanel = (toggleBtn: HTMLButtonElement, uiLanguage: UiLang
   const findClearBtn = document.createElement('button');
   findClearBtn.type = 'button';
   findClearBtn.className = 'format-button find-clear-button';
-  findClearBtn.title = uiStrings.clearFind;
   findClearBtn.setAttribute('aria-label', uiStrings.clearFind);
   findClearBtn.appendChild(createElement(X, { width: 16, height: 16 }));
 
   const wholeWordBtn = document.createElement('button');
   wholeWordBtn.type = 'button';
   wholeWordBtn.className = 'format-button toggle-button find-option-button';
-  wholeWordBtn.title = uiStrings.wholeWord;
+  wholeWordBtn.dataset.tooltip = uiStrings.wholeWord;
   wholeWordBtn.appendChild(createElement(WholeWord, { width: 16, height: 16 }));
   wholeWordBtn.setAttribute('aria-label', uiStrings.wholeWord);
   wholeWordBtn.setAttribute('aria-pressed', 'false');
@@ -64,7 +63,7 @@ export const createFindPanel = (toggleBtn: HTMLButtonElement, uiLanguage: UiLang
   const caseSensitiveBtn = document.createElement('button');
   caseSensitiveBtn.type = 'button';
   caseSensitiveBtn.className = 'format-button toggle-button find-option-button';
-  caseSensitiveBtn.title = uiStrings.caseSensitive;
+  caseSensitiveBtn.dataset.tooltip = uiStrings.caseSensitive;
   caseSensitiveBtn.appendChild(createElement(CaseSensitive, { width: 16, height: 16 }));
   caseSensitiveBtn.setAttribute('aria-label', uiStrings.caseSensitive);
   caseSensitiveBtn.setAttribute('aria-pressed', 'false');
@@ -72,19 +71,18 @@ export const createFindPanel = (toggleBtn: HTMLButtonElement, uiLanguage: UiLang
   const findPrevBtn = document.createElement('button');
   findPrevBtn.type = 'button';
   findPrevBtn.className = 'format-button';
-  findPrevBtn.title = uiStrings.previousMatch;
+  findPrevBtn.dataset.tooltip = uiStrings.previousMatch;
   findPrevBtn.appendChild(createElement(ChevronUp, { width: 16, height: 16 }));
 
   const findNextBtn = document.createElement('button');
   findNextBtn.type = 'button';
   findNextBtn.className = 'format-button';
-  findNextBtn.title = uiStrings.nextMatch;
+  findNextBtn.dataset.tooltip = uiStrings.nextMatch;
   findNextBtn.appendChild(createElement(ChevronDown, { width: 16, height: 16 }));
 
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
   closeBtn.className = 'format-button find-close-button';
-  closeBtn.title = uiStrings.closeFind;
   closeBtn.setAttribute('aria-label', uiStrings.closeFind);
   closeBtn.appendChild(createElement(X, { width: 16, height: 16 }));
 
@@ -106,7 +104,6 @@ export const createFindPanel = (toggleBtn: HTMLButtonElement, uiLanguage: UiLang
   const replaceClearBtn = document.createElement('button');
   replaceClearBtn.type = 'button';
   replaceClearBtn.className = 'format-button find-clear-button';
-  replaceClearBtn.title = uiStrings.clearReplace;
   replaceClearBtn.setAttribute('aria-label', uiStrings.clearReplace);
   replaceClearBtn.appendChild(createElement(X, { width: 16, height: 16 }));
 
@@ -115,13 +112,13 @@ export const createFindPanel = (toggleBtn: HTMLButtonElement, uiLanguage: UiLang
   const replaceBtn = document.createElement('button');
   replaceBtn.type = 'button';
   replaceBtn.className = 'format-button';
-  replaceBtn.title = uiStrings.replaceCurrentMatch;
+  replaceBtn.dataset.tooltip = uiStrings.replaceCurrentMatch;
   replaceBtn.appendChild(createElement(Replace, { width: 16, height: 16 }));
 
   const replaceAllBtn = document.createElement('button');
   replaceAllBtn.type = 'button';
   replaceAllBtn.className = 'format-button';
-  replaceAllBtn.title = uiStrings.replaceAllMatches;
+  replaceAllBtn.dataset.tooltip = uiStrings.replaceAllMatches;
   replaceAllBtn.appendChild(createElement(ReplaceAll, { width: 16, height: 16 }));
 
   const closeSpacer = document.createElement('span');
@@ -135,22 +132,19 @@ export const createFindPanel = (toggleBtn: HTMLButtonElement, uiLanguage: UiLang
     panel.setAttribute('aria-label', strings.findAndReplacePanel);
     findInput.placeholder = strings.find;
     findInput.setAttribute('aria-label', strings.find);
-    findClearBtn.title = strings.clearFind;
     findClearBtn.setAttribute('aria-label', strings.clearFind);
-    wholeWordBtn.title = strings.wholeWord;
+    wholeWordBtn.dataset.tooltip = strings.wholeWord;
     wholeWordBtn.setAttribute('aria-label', strings.wholeWord);
-    caseSensitiveBtn.title = strings.caseSensitive;
+    caseSensitiveBtn.dataset.tooltip = strings.caseSensitive;
     caseSensitiveBtn.setAttribute('aria-label', strings.caseSensitive);
-    findPrevBtn.title = strings.previousMatch;
-    findNextBtn.title = strings.nextMatch;
-    closeBtn.title = strings.closeFind;
+    findPrevBtn.dataset.tooltip = strings.previousMatch;
+    findNextBtn.dataset.tooltip = strings.nextMatch;
     closeBtn.setAttribute('aria-label', strings.closeFind);
     replaceInput.placeholder = strings.replace;
     replaceInput.setAttribute('aria-label', strings.replace);
-    replaceClearBtn.title = strings.clearReplace;
     replaceClearBtn.setAttribute('aria-label', strings.clearReplace);
-    replaceBtn.title = strings.replaceCurrentMatch;
-    replaceAllBtn.title = strings.replaceAllMatches;
+    replaceBtn.dataset.tooltip = strings.replaceCurrentMatch;
+    replaceAllBtn.dataset.tooltip = strings.replaceAllMatches;
   };
 
   return {

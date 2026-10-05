@@ -290,7 +290,7 @@ async function main() {
       outlineClose: document.querySelector('[data-action="close"]')?.getAttribute('aria-label'),
       toolbar: document.querySelector('.mode-toolbar')?.getAttribute('aria-label'),
       formatting: document.querySelector('.format-group')?.getAttribute('aria-label'),
-      heading: document.querySelector('[data-action="heading"]')?.getAttribute('title'),
+      heading: document.querySelector('[data-action="heading"]')?.getAttribute('data-tooltip'),
       save: document.querySelector('[data-action="save"]')?.getAttribute('aria-label'),
       line: document.querySelector('.line-jump-input')?.getAttribute('placeholder'),
       dismissNotice: document.querySelector('.editor-notice-close')?.getAttribute('aria-label'),
@@ -1676,7 +1676,7 @@ async function main() {
         moreExports: document.querySelectorAll('.more-tools-panel [data-format]').length,
         floatingThemeToggle: Boolean(document.querySelector('.preview-host .preview-theme-toggle')),
         settingsVisible: getComputedStyle(settingsButton).display !== 'none',
-        settingsTitle: settingsButton.title,
+        settingsTitle: settingsButton.dataset.tooltip,
         settingsAfterOutline: settingsButton.closest('.more-tools-wrapper')?.previousElementSibling
           === document.querySelector('[data-action="outline-right"]'),
         settingsIcon: Boolean(
@@ -2291,7 +2291,7 @@ async function main() {
     if (syntheticWheelAfter <= syntheticWheelBefore) {
       throw new Error(`Preview wheel fallback did not recover scrolling: ${JSON.stringify({ syntheticWheelBefore, syntheticWheelAfter })}`);
     }
-    await page.click('.outline-item[title="Tall Mermaid"]');
+    await page.click('.outline-item[data-tooltip="Tall Mermaid"]');
     await waitForFrames(page, 2);
     const outlineScrollTop = await page.evaluate(() => (
       document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop
@@ -2305,14 +2305,14 @@ async function main() {
       frame.contentDocument!.dispatchEvent(new Event('scroll'));
     });
     await waitForFrames(page, 2);
-    const topOutlineVisible = await page.$eval('.outline-item[title="Short Mermaid"]', (element) => element.classList.contains('is-visible'));
+    const topOutlineVisible = await page.$eval('.outline-item[data-tooltip="Short Mermaid"]', (element) => element.classList.contains('is-visible'));
     await page.evaluate(() => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
       frame.contentDocument!.scrollingElement!.scrollTop = frame.contentDocument!.scrollingElement!.scrollHeight;
       frame.contentDocument!.dispatchEvent(new Event('scroll'));
     });
     await waitForFrames(page, 2);
-    const bottomOutlineVisible = await page.$eval('.outline-item[title="Tall Mermaid"]', (element) => element.classList.contains('is-visible'));
+    const bottomOutlineVisible = await page.$eval('.outline-item[data-tooltip="Tall Mermaid"]', (element) => element.classList.contains('is-visible'));
     if (!topOutlineVisible || !bottomOutlineVisible) {
       throw new Error(`Preview scrolling did not update the outline: ${JSON.stringify({ topOutlineVisible, bottomOutlineVisible })}`);
     }

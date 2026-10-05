@@ -1311,7 +1311,7 @@ function appendDiagnosticText(
     const span = document.createElement('span');
     const severityClass = tableDiagnosticSeverityClasses[diagnostic.severity] ?? tableDiagnosticSeverityClasses[0];
     span.className = `meo-diagnostic ${severityClass}`;
-    span.title = tableDiagnosticTitle(diagnostic);
+    span.dataset.tooltip = tableDiagnosticTitle(diagnostic);
     appendSearchHighlightedText(
       span,
       text.slice(diagnosticFrom - from, diagnosticTo - from),
@@ -1742,7 +1742,7 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
         if (diagnostic) {
           const severityClass = tableDiagnosticSeverityClasses[diagnostic.severity] ?? tableDiagnosticSeverityClasses[0];
           mapped.classList.add('meo-diagnostic', severityClass);
-          mapped.title = tableDiagnosticTitle(diagnostic);
+          mapped.dataset.tooltip = tableDiagnosticTitle(diagnostic);
         }
       }
       i += 2;
@@ -5526,7 +5526,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     button.type = 'button';
     button.tabIndex = -1;
     button.className = 'meo-md-html-table-context-btn';
-    button.title = label;
+    button.dataset.tooltip = label;
     button.setAttribute('aria-label', label);
     button.setAttribute('role', 'menuitem');
     if (command) button.dataset.command = command;
@@ -5565,10 +5565,10 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     if (!this.domRefs) return;
     const strings = getUiStrings(language);
     const { contextTrigger, contextMenu, contextButtons, stickyHeaderViewport } = this.domRefs;
-    contextTrigger.title = strings.tableActions;
+    contextTrigger.dataset.tooltip = strings.tableActions;
     contextTrigger.setAttribute('aria-label', strings.tableActions);
     contextMenu.setAttribute('aria-label', strings.tableActions);
-    stickyHeaderViewport.title = strings.returnToTableHeader;
+    stickyHeaderViewport.dataset.tooltip = strings.returnToTableHeader;
 
     const commandLabels: Array<[HTMLButtonElement, string]> = [
       [contextButtons.collapse, strings.tableCollapse],
@@ -5590,7 +5590,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       [contextButtons.alignColumnRight, strings.alignColumnRight]
     ];
     for (const [button, accessibleLabel] of commandLabels) {
-      button.title = accessibleLabel;
+      button.dataset.tooltip = accessibleLabel;
       button.setAttribute('aria-label', accessibleLabel);
     }
     this.updateContextControlsPosition();
@@ -5716,7 +5716,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     trigger.type = 'button';
     trigger.tabIndex = -1;
     trigger.className = 'meo-md-html-table-context-trigger';
-    trigger.title = strings.tableActions;
+    trigger.dataset.tooltip = strings.tableActions;
     trigger.setAttribute('aria-label', strings.tableActions);
     trigger.setAttribute('aria-haspopup', 'menu');
     trigger.setAttribute('aria-expanded', 'false');
@@ -6046,7 +6046,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     stickyChrome.setAttribute('aria-hidden', 'true');
     const stickyHeaderViewport = document.createElement('div');
     stickyHeaderViewport.className = 'meo-md-html-table-sticky-header';
-    stickyHeaderViewport.title = getUiStrings(view.state.facet(uiLanguageFacet)).returnToTableHeader;
+    stickyHeaderViewport.dataset.tooltip = getUiStrings(view.state.facet(uiLanguageFacet)).returnToTableHeader;
     const stickyTable = document.createElement('table');
     stickyTable.className = 'meo-md-html-table meo-md-html-table-sticky-table';
     const stickyColgroupElement = document.createElement('colgroup');

@@ -203,9 +203,9 @@ async function assertFormulaToolbarHistoryHitability(page: any): Promise<void> {
     const button = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
       .find((candidate) => {
         const label = candidate.getAttribute('aria-label');
-        return label === 'Edit formula in split view'
-          || label === 'Show formula source only'
-          || label === 'Show formula preview';
+        return label === 'Switch to split view'
+          || label === 'Switch to source'
+          || label === 'Switch to preview';
       }) ?? null;
     const rect = button?.getBoundingClientRect() ?? null;
     return {
@@ -220,9 +220,9 @@ async function assertFormulaToolbarHistoryHitability(page: any): Promise<void> {
     );
     return Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
       .map((button) => button.getAttribute('aria-label'))
-      .find((label) => label === 'Edit formula in split view'
-        || label === 'Show formula source only'
-        || label === 'Show formula preview') ?? null;
+      .find((label) => label === 'Switch to split view'
+        || label === 'Switch to source'
+        || label === 'Switch to preview') ?? null;
   }, formulaLine);
 
   await page.evaluate((lineNumber) => (window as any).__historyProductionEditor.scrollToLine(lineNumber, 'center'), formulaLine);
@@ -282,9 +282,9 @@ async function assertFormulaToolbarHistoryHitability(page: any): Promise<void> {
     const button = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
       .find((candidate) => {
         const label = candidate.getAttribute('aria-label');
-        return label === 'Edit formula in split view'
-          || label === 'Show formula source only'
-          || label === 'Show formula preview';
+        return label === 'Switch to split view'
+          || label === 'Switch to source'
+          || label === 'Switch to preview';
       }) ?? null;
     const currentButton = button?.closest<HTMLElement>('[role="group"]') === group ? button : null;
     const hit = document.elementFromPoint(point.x, point.y);
@@ -323,9 +323,9 @@ async function assertFormulaToolbarHistoryHitability(page: any): Promise<void> {
     const button = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
       .find((candidate) => {
         const label = candidate.getAttribute('aria-label');
-        return label === 'Edit formula in split view'
-          || label === 'Show formula source only'
-          || label === 'Show formula preview';
+        return label === 'Switch to split view'
+          || label === 'Switch to source'
+          || label === 'Switch to preview';
       });
     button?.focus();
   }, formulaLine);

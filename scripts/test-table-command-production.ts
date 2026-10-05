@@ -149,7 +149,7 @@ async function main() {
       })();
       pointer(document.querySelector<HTMLButtonElement>('.meo-md-html-table-shell:first-of-type .meo-md-html-table-context-trigger')!);
       const insert = document.querySelector<HTMLButtonElement>(
-        '.meo-md-html-table-shell:first-of-type button[title="Insert row below"]'
+        '.meo-md-html-table-shell:first-of-type button[data-tooltip="Insert row below"]'
       )!;
       const consumed = !pointer(insert);
       await waitUntil(() => editor.view.state.doc.toString().includes('edited'), 'atomic insert');
@@ -173,7 +173,7 @@ async function main() {
       const sortingCapabilityCount = contextButtons.filter((button) => (
         /\b(?:sort|order|reorder)(?:ing|ed)?\b/i.test([
           button.getAttribute('aria-label'),
-          button.title,
+          button.dataset.tooltip,
           button.textContent,
           button.dataset.action,
           button.dataset.command
@@ -181,10 +181,10 @@ async function main() {
       )).length;
       const secondInput = shells[1]?.querySelector<HTMLTextAreaElement>('tbody textarea');
       secondInput?.focus();
-      pointer(shells[0].querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
+      pointer(shells[0].querySelector<HTMLButtonElement>('button[data-tooltip="Insert row below"]')!);
       pointer(shells[1].querySelector<HTMLButtonElement>('.meo-md-html-table-context-trigger')!);
       pointer(shells[1].querySelector<HTMLButtonElement>('.meo-md-html-table-context-next')!);
-      pointer(shells[1].querySelector<HTMLButtonElement>('button[title="Align selected column right"]')!);
+      pointer(shells[1].querySelector<HTMLButtonElement>('button[data-tooltip="Align selected column right"]')!);
       await waitUntil(() => /\| C\s+\| D\s+\|\n\| ---:\s+\| ---\s+\|/.test(editor.view.state.doc.toString()), 'multi-table queue');
       const afterRapidMultiTable = editor.view.state.doc.toString();
       const contextTriggerCount = document.querySelectorAll('.meo-md-html-table-context-trigger').length;
@@ -192,7 +192,7 @@ async function main() {
       const stickyToolbarBandCount = document.querySelectorAll('.meo-md-html-table-sticky-toolbar-band').length;
       const resizeHandleCount = document.querySelectorAll('.meo-md-html-table-column-resize-handle').length;
       const stickyCount = document.querySelectorAll('.meo-md-html-table-sticky-chrome').length;
-      const detachedButton = shells[0].querySelector<HTMLButtonElement>('button[title="Insert row below"]')!;
+      const detachedButton = shells[0].querySelector<HTMLButtonElement>('button[data-tooltip="Insert row below"]')!;
       editor.destroy();
       const detachedConsumed = !pointer(detachedButton);
       app.replaceChildren();
@@ -204,20 +204,20 @@ async function main() {
         onApplyChanges() {}
       });
       await waitUntil(() => document.querySelectorAll('tbody textarea').length === 4, 'race table');
-      pointer(document.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
+      pointer(document.querySelector<HTMLButtonElement>('button[data-tooltip="Insert row below"]')!);
       const inputsAfterInsert = Array.from(document.querySelectorAll<HTMLTextAreaElement>('tbody textarea'));
       inputsAfterInsert.find((input) => input.value === 'two')!.dispatchEvent(new PointerEvent('pointerdown', {
         button: 0, bubbles: true, cancelable: true
       }));
-      pointer(document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!);
+      pointer(document.querySelector<HTMLButtonElement>('button[data-tooltip="Delete row"]')!);
       inputsAfterInsert.find((input) => input.value === 'one')!.dispatchEvent(new PointerEvent('pointerdown', {
         button: 0, bubbles: true, cancelable: true
       }));
       await waitUntil(() => !raceEditor.view.state.doc.toString().includes('| two | 2 |'), 'queued coordinate command');
       const afterQueuedCoordinateChange = raceEditor.view.state.doc.toString();
 
-      pointer(document.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
-      pointer(document.querySelector<HTMLButtonElement>('button[title="Delete column"]')!);
+      pointer(document.querySelector<HTMLButtonElement>('button[data-tooltip="Insert row below"]')!);
+      pointer(document.querySelector<HTMLButtonElement>('button[data-tooltip="Delete column"]')!);
       const externalText = ['| A | B |', '| --- | --- |', '| external | stable |'].join('\n');
       raceEditor.setText(externalText);
       await waitUntil(() => raceEditor.view.state.doc.toString() === externalText, 'external presentation');
@@ -255,7 +255,7 @@ async function main() {
       await waitUntil(() => document.querySelectorAll('.meo-md-html-table tbody .meo-md-html-table-cell-preview').length === 2, 'row guard table');
       const rowPreviews = Array.from(document.querySelectorAll('.meo-md-html-table tbody .meo-md-html-table-cell-preview'));
       selectCells(rowPreviews[0], rowPreviews[1], 91);
-      pointer(document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!);
+      pointer(document.querySelector<HTMLButtonElement>('button[data-tooltip="Delete row"]')!);
       const afterFullRangeRowDelete = rowGuardEditor.view.state.doc.toString();
       rowGuardEditor.destroy();
 
@@ -270,7 +270,7 @@ async function main() {
       await waitUntil(() => document.querySelectorAll('.meo-md-html-table tbody .meo-md-html-table-cell-preview').length === 2, 'column guard table');
       const columnPreviews = Array.from(document.querySelectorAll('.meo-md-html-table tbody .meo-md-html-table-cell-preview'));
       selectCells(columnPreviews[0], columnPreviews[1], 92);
-      pointer(document.querySelector<HTMLButtonElement>('button[title="Delete column"]')!);
+      pointer(document.querySelector<HTMLButtonElement>('button[data-tooltip="Delete column"]')!);
       const afterFullRangeColumnDelete = columnGuardEditor.view.state.doc.toString();
       columnGuardEditor.destroy();
 
@@ -285,10 +285,10 @@ async function main() {
       document.querySelector<HTMLTextAreaElement>('tbody textarea')!.dispatchEvent(new PointerEvent('pointerdown', {
         button: 0, bubbles: true, cancelable: true, pointerId: 93
       }));
-      const queuedDelete = document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!;
+      const queuedDelete = document.querySelector<HTMLButtonElement>('button[data-tooltip="Delete row"]')!;
       pointer(queuedDelete);
       pointer(queuedDelete);
-      pointer(document.querySelector<HTMLButtonElement>('button[title="Align selected column left"]')!);
+      pointer(document.querySelector<HTMLButtonElement>('button[data-tooltip="Align selected column left"]')!);
       await waitUntil(() => queuedGuardEditor.view.state.doc.toString().includes('| :--- |'), 'queued double-delete drain');
       const afterQueuedDoubleDelete = queuedGuardEditor.view.state.doc.toString();
       queuedGuardEditor.destroy();
@@ -316,12 +316,12 @@ async function main() {
         }
         return retryDispatch(...transactions);
       };
-      pointer(document.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
+      pointer(document.querySelector<HTMLButtonElement>('button[data-tooltip="Insert row below"]')!);
       await Promise.resolve();
       await Promise.resolve();
       const afterFailedDispatch = retryView.state.doc.toString();
       const retainedAfterFailedDispatch = document.querySelector<HTMLTextAreaElement>('tbody textarea')?.value;
-      pointer(document.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
+      pointer(document.querySelector<HTMLButtonElement>('button[data-tooltip="Insert row below"]')!);
       await waitUntil(() => retryView.state.doc.toString().includes('retry kept'), 'dispatch failure command retry');
       const afterDispatchRetry = retryView.state.doc.toString();
       const retryHistory = retryAfterDispatchFailureEditor.getHistoryDepth();
@@ -353,7 +353,7 @@ async function main() {
         }
         return blurDispatch(...transactions);
       };
-      pointer(document.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
+      pointer(document.querySelector<HTMLButtonElement>('button[data-tooltip="Insert row below"]')!);
       await Promise.resolve();
       await Promise.resolve();
       blurInput.blur();
@@ -384,7 +384,7 @@ async function main() {
         }
         return saveDispatch(...transactions);
       };
-      pointer(document.querySelector<HTMLButtonElement>('button[title="Align selected column right"]')!);
+      pointer(document.querySelector<HTMLButtonElement>('button[data-tooltip="Align selected column right"]')!);
       await Promise.resolve();
       await Promise.resolve();
       const saveCommitted = saveAfterDispatchFailureEditor.commitTransientEdits();
@@ -652,7 +652,7 @@ async function main() {
       }, { target: matrixCase.target, caret: matrixCase.caret });
       await page.evaluate((title) => {
         const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.meo-md-html-table-context-btn'))
-          .find((candidate) => candidate.title === title)!;
+          .find((candidate) => candidate.dataset.tooltip === title)!;
         button.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
       }, matrixCase.title);
       await page.waitForFunction((expected) => (
@@ -742,7 +742,7 @@ async function main() {
     const invokeRangeCommand = async (title: string) => {
       await page.evaluate((label) => {
         const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.meo-md-html-table-context-btn'))
-          .find((candidate) => candidate.title === label)!;
+          .find((candidate) => candidate.dataset.tooltip === label)!;
         button.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
       }, title);
     };

@@ -301,15 +301,15 @@ async function editRenderedBlock(
       const labels = blockKind === 'mermaid'
         ? {
             controls: `Mermaid block controls at line ${lineNumber}`,
-            preview: 'Edit Mermaid in split view',
-            split: 'Show Mermaid code only',
-            source: 'Show Mermaid preview'
+            preview: 'Switch to split view',
+            split: 'Switch to source',
+            source: 'Switch to preview'
           }
         : {
             controls: `Formula block controls at line ${lineNumber}`,
-            preview: 'Edit formula in split view',
-            split: 'Show formula source only',
-            source: 'Show formula preview'
+            preview: 'Switch to split view',
+            split: 'Switch to source',
+            source: 'Switch to preview'
           };
       const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${labels.controls}"]`);
       const button = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
@@ -365,9 +365,9 @@ async function editRenderedBlock(
     const safeReleaseLabel = 'History pointer safe release target';
     try {
       const targetMode: HistoryRenderedBlockTargetMode = transition.expectedLabel === (
-        kind === 'mermaid' ? 'Edit Mermaid in split view' : 'Edit formula in split view'
+        kind === 'mermaid' ? 'Switch to split view' : 'Switch to split view'
       ) ? 'split' : transition.expectedLabel === (
-        kind === 'mermaid' ? 'Show Mermaid code only' : 'Show formula source only'
+        kind === 'mermaid' ? 'Switch to source' : 'Switch to source'
       ) ? 'source' : 'preview';
       await runHistoryRenderedBlockInteraction({ kind, lineNumber: targetLineNumber, targetMode }, {
       isCurrent: async () => true,
@@ -765,7 +765,7 @@ async function editRenderedBlock(
         const controlsLabel = blockKind === 'mermaid'
           ? `Mermaid block controls at line ${lineNumber}`
           : `Formula block controls at line ${lineNumber}`;
-        const expectedLabel = blockKind === 'mermaid' ? 'Show Mermaid preview' : 'Show formula preview';
+        const expectedLabel = blockKind === 'mermaid' ? 'Switch to preview' : 'Switch to preview';
         const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`);
         const settledBeforePointer = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
           .some((button) => button.getAttribute('aria-label') === expectedLabel);
@@ -786,15 +786,15 @@ async function editRenderedBlock(
       const labels = blockKind === 'mermaid'
         ? {
             controls: `Mermaid block controls at line ${lineNumber}`,
-            preview: 'Edit Mermaid in split view',
-            split: 'Show Mermaid code only',
-            source: 'Show Mermaid preview'
+            preview: 'Switch to split view',
+            split: 'Switch to source',
+            source: 'Switch to preview'
           }
         : {
             controls: `Formula block controls at line ${lineNumber}`,
-            preview: 'Edit formula in split view',
-            split: 'Show formula source only',
-            source: 'Show formula preview'
+            preview: 'Switch to split view',
+            split: 'Switch to source',
+            source: 'Switch to preview'
           };
       const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${labels.controls}"]`);
       const currentLabel = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
@@ -829,7 +829,7 @@ async function assertFirstMermaidModeClickAfterAdjacentEdit(page: any, lineNeedl
   const hitPoint = await page.evaluate((label) => {
     const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${label}"]`);
     const button = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
-      .find((candidate) => candidate.getAttribute('aria-label') === 'Edit Mermaid in split view');
+      .find((candidate) => candidate.getAttribute('aria-label') === 'Switch to split view');
     if (!button) throw new Error(`Missing preview mode control: ${label}`);
     const rect = button.getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
@@ -838,7 +838,7 @@ async function assertFirstMermaidModeClickAfterAdjacentEdit(page: any, lineNeedl
   await page.waitForFunction((controlsLabel) => Array.from(
     document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`)
       ?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
-  ).some((candidate) => candidate.getAttribute('aria-label') === 'Show Mermaid code only'), {}, controlsLabel);
+  ).some((candidate) => candidate.getAttribute('aria-label') === 'Switch to source'), {}, controlsLabel);
 
   const regionLabel = `Mermaid editor at line ${targetLineNumber}`;
   await page.waitForFunction((label) => {
@@ -882,7 +882,7 @@ async function assertFirstMermaidModeClickAfterAdjacentEdit(page: any, lineNeedl
     document.querySelector<HTMLElement>(
       `[role="group"][aria-label="Mermaid block controls at line ${lineNumber}"]`
     )?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
-  ).some((candidate) => candidate.getAttribute('aria-label') === 'Edit Mermaid in split view'), {}, repeatedLineNumber);
+  ).some((candidate) => candidate.getAttribute('aria-label') === 'Switch to split view'), {}, repeatedLineNumber);
 }
 
 async function assertHistoryTarget(
@@ -935,14 +935,14 @@ async function assertHistoryTarget(
     const lineNumber = block.getAttribute('aria-label')?.match(/ at line (\d+)$/)?.[1] ?? null;
     const labels = kind === 'mermaid'
       ? {
-          preview: 'Edit Mermaid in split view',
-          split: 'Show Mermaid code only',
-          source: 'Show Mermaid preview'
+          preview: 'Switch to split view',
+          split: 'Switch to source',
+          source: 'Switch to preview'
         }
       : {
-          preview: 'Edit formula in split view',
-          split: 'Show formula source only',
-          source: 'Show formula preview'
+          preview: 'Switch to split view',
+          split: 'Switch to source',
+          source: 'Switch to preview'
         };
     const buttonLabel = lineNumber
       ? Array.from(document.querySelector<HTMLElement>(
@@ -1253,7 +1253,7 @@ async function main() {
     const commandConsumed = await page.evaluate(() => {
       const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
       const command = table?.closest<HTMLElement>('.meo-md-html-table-shell')
-        ?.querySelector<HTMLButtonElement>('button[title="Insert row below"]');
+        ?.querySelector<HTMLButtonElement>('button[data-tooltip="Insert row below"]');
       if (!command) throw new Error('Missing Insert row below control');
       return !command.dispatchEvent(new PointerEvent('pointerdown', {
         button: 0,

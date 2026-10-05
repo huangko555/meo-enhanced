@@ -979,7 +979,7 @@ class ClearLinkUrlWidget extends UiLanguageSensitiveWidget {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'meo-md-link-clear-btn';
-    button.title = strings.clearLinkUrl;
+    button.dataset.tooltip = strings.clearLinkUrl;
     button.setAttribute('aria-label', strings.clearLinkUrl);
     button.appendChild(createElement(Delete, { 'aria-hidden': 'true' }));
     button.addEventListener('pointerdown', (event) => {
@@ -1039,7 +1039,7 @@ class MissingWikiLinkWidget extends UiLanguageSensitiveWidget {
     const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     const badge = document.createElement('span');
     badge.className = 'meo-md-wiki-missing-icon';
-    badge.title = strings.missingWikiLink;
+    badge.dataset.tooltip = strings.missingWikiLink;
     badge.setAttribute('aria-label', strings.missingWikiLink);
     badge.appendChild(createElement(AlertCircle, { 'aria-hidden': 'true' }));
     return badge;
@@ -1169,8 +1169,8 @@ class DetailsSummaryWidget extends UiLanguageSensitiveWidget {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'meo-md-details-summary';
-    button.title = this.collapsed ? strings.expandDetails : strings.collapseDetails;
-    button.setAttribute('aria-label', button.title);
+    button.dataset.tooltip = this.collapsed ? strings.expandDetails : strings.collapseDetails;
+    button.setAttribute('aria-label', button.dataset.tooltip ?? '');
     button.setAttribute('aria-expanded', String(!this.collapsed));
 
     const icon = document.createElement('span');
@@ -1225,8 +1225,8 @@ class FootnoteReferenceWidget extends UiLanguageSensitiveWidget {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'meo-md-footnote-ref';
-    button.title = strings.jumpToFootnote(this.footnoteNumber);
-    button.setAttribute('aria-label', button.title);
+    button.dataset.tooltip = strings.jumpToFootnote(this.footnoteNumber);
+    button.setAttribute('aria-label', button.dataset.tooltip ?? '');
 
     const number = document.createElement('sup');
     number.textContent = String(this.footnoteNumber);
@@ -1280,8 +1280,8 @@ class FootnoteBacklinkWidget extends UiLanguageSensitiveWidget {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'meo-md-footnote-backref';
-    button.title = strings.jumpToFootnoteReference(this.footnoteNumber);
-    button.setAttribute('aria-label', button.title);
+    button.dataset.tooltip = strings.jumpToFootnoteReference(this.footnoteNumber);
+    button.setAttribute('aria-label', button.dataset.tooltip ?? '');
     button.textContent = `${this.footnoteNumber}.`;
 
     button.addEventListener('pointerdown', (event) => {
@@ -1375,7 +1375,7 @@ class DetailsSourceToggleWidget extends UiLanguageSensitiveWidget {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'meo-md-html-mode-btn meo-md-html-source-toggle meo-md-details-source-toggle';
-    button.title = strings.showHtmlSource;
+    button.dataset.tooltip = strings.showHtmlSource;
     button.setAttribute('aria-label', strings.showHtmlSource);
     button.appendChild(createElement(Code2, { width: 18, height: 18, 'aria-hidden': 'true' }));
     button.addEventListener('pointerdown', (event) => {

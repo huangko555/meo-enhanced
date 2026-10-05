@@ -264,7 +264,7 @@ async function main() {
     });
     if (
       afterSecondUndo.text.includes('y = 2') ||
-      afterSecondUndo.mode !== 'Edit formula in split view' ||
+      afterSecondUndo.mode !== 'Switch to split view' ||
       !afterSecondUndo.outerFocused || !afterSecondUndo.targetVisible
     ) {
       throw new Error(`Second mixed undo did not restore the formula Preview target: ${JSON.stringify(afterSecondUndo)}`);
@@ -286,7 +286,7 @@ async function main() {
     });
     if (
       afterThirdUndo.text.includes('C --> D') ||
-      afterThirdUndo.mode !== 'Edit Mermaid in split view' ||
+      afterThirdUndo.mode !== 'Switch to split view' ||
       !afterThirdUndo.outerFocused ||
       !afterThirdUndo.mermaidVisible
     ) {
@@ -382,7 +382,7 @@ async function main() {
     });
     if (
       !afterMermaidRedo.text.includes('C --> D') ||
-      afterMermaidRedo.mode !== 'Edit Mermaid in split view' ||
+      afterMermaidRedo.mode !== 'Switch to split view' ||
       !afterMermaidRedo.outerFocused || !afterMermaidRedo.targetVisible
     ) {
       throw new Error(`Mixed redo did not restore the Mermaid Preview target: ${JSON.stringify(afterMermaidRedo)}`);
@@ -403,7 +403,7 @@ async function main() {
     });
     if (
       !afterMathRedo.text.includes('y = 2') ||
-      afterMathRedo.mode !== 'Edit formula in split view' ||
+      afterMathRedo.mode !== 'Switch to split view' ||
       !afterMathRedo.outerFocused || !afterMathRedo.targetVisible
     ) {
       throw new Error(`Mixed redo did not restore the formula Preview target: ${JSON.stringify(afterMathRedo)}`);

@@ -649,7 +649,7 @@ async function ensureRenderedSplit(
 ): Promise<string> {
   const blockName = kind === 'mermaid' ? 'Mermaid' : 'Formula';
   const controlsLabel = `${blockName} block controls at line ${openingLine}`;
-  const splitAction = kind === 'mermaid' ? 'Show Mermaid code only' : 'Show formula source only';
+  const splitAction = kind === 'mermaid' ? 'Switch to source' : 'Switch to source';
   await page.waitForFunction((label) => Boolean(document.querySelector(`[role="group"][aria-label="${label}"]`)), {}, controlsLabel);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const state = await page.evaluate(({ label, splitLabel }) => {

@@ -377,7 +377,7 @@ async function main() {
       throw new Error(`second pointer prevented the owner pointerup: ${JSON.stringify(ownerCommit)}`);
     }
     await page.evaluate(() => {
-      document.querySelector<HTMLButtonElement>('button[title="Delete column"]')!
+      document.querySelector<HTMLButtonElement>('button[data-tooltip="Delete column"]')!
         .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
     });
     await page.waitForFunction(() => (window as any).__selectionEditor.getText().startsWith('| <tag> |'));

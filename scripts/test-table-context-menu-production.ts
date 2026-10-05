@@ -340,7 +340,7 @@ async function main(): Promise<void> {
       await frames(2);
       pointer(trigger);
       await frames(1);
-      pointer(menu.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
+      pointer(menu.querySelector<HTMLButtonElement>('button[data-tooltip="Insert row below"]')!);
       await waitUntil(() => (
         document.querySelectorAll('.meo-md-html-table-shell tbody tr').length === 19
         && Boolean(document.querySelector('.meo-md-html-table-shell.is-context-menu-open .meo-md-html-table-context-menu:not([hidden])'))
@@ -348,7 +348,7 @@ async function main(): Promise<void> {
       const firstRestoredMenu = document.querySelector<HTMLElement>(
         '.meo-md-html-table-shell.is-context-menu-open .meo-md-html-table-context-menu:not([hidden])'
       )!;
-      pointer(firstRestoredMenu.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
+      pointer(firstRestoredMenu.querySelector<HTMLButtonElement>('button[data-tooltip="Insert row below"]')!);
       await waitUntil(() => (
         document.querySelectorAll('.meo-md-html-table-shell tbody tr').length === 20
         && Boolean(document.querySelector('.meo-md-html-table-shell.is-context-menu-open .meo-md-html-table-context-menu:not([hidden])'))
@@ -377,7 +377,7 @@ async function main(): Promise<void> {
           )!);
           await frames(1);
         }
-        const button = currentMenu.querySelector<HTMLButtonElement>(`button[title="${title}"]`)!;
+        const button = currentMenu.querySelector<HTMLButtonElement>(`button[data-tooltip="${title}"]`)!;
         if (button.disabled) throw new Error(`${title} is unexpectedly disabled`);
         const textBefore = editor.getText();
         const visualAnchorBefore = document.querySelector<HTMLElement>('.meo-md-html-table-shell')!.getBoundingClientRect().top;
@@ -694,12 +694,12 @@ async function main(): Promise<void> {
       );
     };
     await resetTrustedClickScenario();
-    await trustedClick('Move column right', 'button[title="Move column right"]');
-    await trustedClick('Insert row below', 'button[title="Insert row below"]');
-    await trustedClick('Insert column right', 'button[title="Insert column right"]');
-    await trustedClick('Align column center', 'button[title="Align selected column center"]');
-    await trustedClick('Delete row', 'button[title="Delete row"]');
-    await trustedClick('Delete column', 'button[title="Delete column"]');
+    await trustedClick('Move column right', 'button[data-tooltip="Move column right"]');
+    await trustedClick('Insert row below', 'button[data-tooltip="Insert row below"]');
+    await trustedClick('Insert column right', 'button[data-tooltip="Insert column right"]');
+    await trustedClick('Align column center', 'button[data-tooltip="Align selected column center"]');
+    await trustedClick('Delete row', 'button[data-tooltip="Delete row"]');
+    await trustedClick('Delete column', 'button[data-tooltip="Delete column"]');
 
     assert.equal(result.triggerVisibleBeforeOpen, 'visible');
     assert.equal(result.triggerHiddenWhileOpen, 'hidden', 'the row action trigger must be replaced by the expanded toolbar');

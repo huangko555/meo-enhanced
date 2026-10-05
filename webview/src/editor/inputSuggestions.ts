@@ -229,14 +229,14 @@ export function createInputSuggestions(options: {
           const prefix = document.createElement('span'); prefix.className = 'meo-suggestion-trigger'; prefix.textContent = ':'; label.append(prefix);
           appendMatched(label, item.label.slice(1), this.context.query);
         } else {
-          appendMatched(label, item.label, this.context?.query ?? ''); label.title = item.label;
+          appendMatched(label, item.label, this.context?.query ?? ''); label.dataset.tooltip = item.label; label.dataset.tooltipKind = 'fulltext';
         }
         row.append(label);
         const detailValue = this.context?.type === 'headings' && item.anchor ? '#' + item.anchor : links ? item.detail || item.insert : item.detail;
         if (links || (detailValue && (item.slash || detailValue !== item.label))) {
           const detail = document.createElement('span'); detail.className = 'meo-input-suggestion-detail';
           if (item.slash) detail.textContent = detailValue;
-          else { appendMatched(detail, detailValue, this.context?.query ?? ''); detail.title = [item.detail, detailValue].filter((value, index, values) => value && values.indexOf(value) === index).join(' · '); }
+          else { appendMatched(detail, detailValue, this.context?.query ?? ''); detail.dataset.tooltip = [item.detail, detailValue].filter((value, index, values) => value && values.indexOf(value) === index).join(' · '); detail.dataset.tooltipKind = 'fulltext'; }
           row.append(detail);
         }
         row.addEventListener('click', () => this.choose(index));

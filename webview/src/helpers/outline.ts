@@ -121,7 +121,7 @@ function iconButton(icon: IconNode, action: string, title: string): HTMLButtonEl
   button.type = 'button';
   button.className = 'outline-header-button';
   button.dataset.action = action;
-  button.title = title;
+  if (action !== 'close') button.dataset.tooltip = title;
   button.setAttribute('aria-label', title);
   button.appendChild(createElement(icon, { width: 14, height: 14, 'aria-hidden': 'true' }));
   return button;
@@ -165,7 +165,7 @@ export function createOutlineController({
   visibleRangeHighlight.hidden = true;
   const outlineResizer = document.createElement('div');
   outlineResizer.className = 'outline-resizer';
-  outlineResizer.title = uiStrings.outlineResize;
+  outlineResizer.dataset.tooltip = uiStrings.outlineResize;
   outlineSidebar.append(outlineHeader, outlineContent, outlineResizer);
 
   let visible = false;
@@ -347,8 +347,8 @@ export function createOutlineController({
     if (node.children.length > 0) {
       const collapsed = collapsedKeys.has(node.key);
       foldButton.dataset.outlineKey = node.key;
-      foldButton.title = collapsed ? uiStrings.outlineExpand : uiStrings.outlineCollapse;
-      foldButton.setAttribute('aria-label', foldButton.title);
+      foldButton.dataset.tooltip = collapsed ? uiStrings.outlineExpand : uiStrings.outlineCollapse;
+      foldButton.setAttribute('aria-label', foldButton.dataset.tooltip ?? '');
       foldButton.appendChild(createElement(collapsed ? ChevronRight : ChevronDown, { width: 14, height: 14 }));
     } else {
       foldButton.disabled = true;
@@ -359,7 +359,8 @@ export function createOutlineController({
     item.type = 'button';
     item.className = `outline-item outline-level-${node.heading.level}`;
     appendHeadingContent(item, node.heading);
-    item.title = node.heading.text;
+    item.dataset.tooltip = node.heading.text;
+    item.dataset.tooltipKind = 'fulltext';
     item.dataset.headingFrom = String(node.heading.from);
     item.dataset.outlineKey = node.key;
     row.append(foldButton, item);
@@ -418,15 +419,15 @@ export function createOutlineController({
 
   const updateModeButton = () => {
     modeButton.replaceChildren(createElement(mode === 'floating' ? Pin : PinOff, { width: 14, height: 14 }));
-    modeButton.title = mode === 'floating' ? uiStrings.outlineSwitchFixed : uiStrings.outlineSwitchFloating;
-    modeButton.setAttribute('aria-label', modeButton.title);
+    modeButton.dataset.tooltip = mode === 'floating' ? uiStrings.outlineSwitchFixed : uiStrings.outlineSwitchFloating;
+    modeButton.setAttribute('aria-label', modeButton.dataset.tooltip ?? '');
   };
 
   const updatePositionButton = () => {
     const nextPosition = position === 'left' ? 'right' : 'left';
     positionButton.replaceChildren(createElement(nextPosition === 'left' ? PanelLeft : PanelRight, { width: 14, height: 14 }));
-    positionButton.title = nextPosition === 'left' ? uiStrings.outlineSwitchLeft : uiStrings.outlineSwitchRight;
-    positionButton.setAttribute('aria-label', positionButton.title);
+    positionButton.dataset.tooltip = nextPosition === 'left' ? uiStrings.outlineSwitchLeft : uiStrings.outlineSwitchRight;
+    positionButton.setAttribute('aria-label', positionButton.dataset.tooltip ?? '');
   };
 
   const updateOutlineUI = () => {
@@ -623,13 +624,12 @@ export function createOutlineController({
       uiStrings = getUiStrings(language);
       outlineSidebar.setAttribute('aria-label', uiStrings.documentOutline);
       outlineLabel.textContent = uiStrings.outline;
-      collapseButton.title = uiStrings.outlineCollapseTopTwo;
-      collapseButton.setAttribute('aria-label', collapseButton.title);
-      expandButton.title = uiStrings.outlineExpandAll;
-      expandButton.setAttribute('aria-label', expandButton.title);
-      closeButton.title = uiStrings.outlineClose;
-      closeButton.setAttribute('aria-label', closeButton.title);
-      outlineResizer.title = uiStrings.outlineResize;
+      collapseButton.dataset.tooltip = uiStrings.outlineCollapseTopTwo;
+      collapseButton.setAttribute('aria-label', collapseButton.dataset.tooltip ?? '');
+      expandButton.dataset.tooltip = uiStrings.outlineExpandAll;
+      expandButton.setAttribute('aria-label', expandButton.dataset.tooltip ?? '');
+      closeButton.setAttribute('aria-label', uiStrings.outlineClose);
+      outlineResizer.dataset.tooltip = uiStrings.outlineResize;
       updateModeButton();
       updatePositionButton();
       renderTree();

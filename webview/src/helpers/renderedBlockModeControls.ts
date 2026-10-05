@@ -12,7 +12,7 @@ export function renderRenderedBlockModeButton(
       : Eye;
   button.replaceChildren(createElement(icon, { width: 15, height: 15 }));
   button.setAttribute('aria-label', decision.modeButton.label);
-  button.title = decision.modeButton.label;
+  button.dataset.tooltip = decision.modeButton.label;
 }
 
 export function retainRenderedBlockModePointerFocus(button: HTMLButtonElement): void {

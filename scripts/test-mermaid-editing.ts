@@ -1112,7 +1112,7 @@ async function main() {
         && item.height > 0);
     if (
       !defaultMode.preview || defaultMode.editing
-      || defaultMode.buttonLabel !== 'Edit Mermaid in split view'
+      || defaultMode.buttonLabel !== 'Switch to split view'
       || defaultMode.visibleMermaidFenceLines !== 0
       || defaultMode.visibleLatexFenceLines !== 0
       || defaultMode.latexVisualTop < 12
@@ -1223,7 +1223,7 @@ async function main() {
       Math.abs(previewClickAfter.blockTop - previewClickBefore.blockTop) > 1 ||
       !previewClickAfter.preview ||
       previewClickAfter.editing ||
-      previewClickAfter.buttonLabel !== 'Edit Mermaid in split view'
+      previewClickAfter.buttonLabel !== 'Switch to split view'
     ) {
       throw new Error(`Clicking Mermaid preview changed editor state: ${JSON.stringify({
         before: previewClickBefore,
@@ -1235,7 +1235,7 @@ async function main() {
       !previewPointerDown.preview ||
       previewPointerDown.editing ||
       previewPointerDown.sourceVisible ||
-      previewPointerDown.buttonLabel !== 'Edit Mermaid in split view'
+      previewPointerDown.buttonLabel !== 'Switch to split view'
     ) {
       throw new Error(`Pressing Mermaid preview temporarily revealed source: ${JSON.stringify(previewPointerDown)}`);
     }
@@ -1517,7 +1517,7 @@ async function main() {
       splitMode.hasInternalVerticalScroll ||
       splitMode.sourceStickyPosition !== 'relative' ||
       splitMode.stickyPosition !== 'relative' ||
-      splitMode.nextLabel !== 'Show Mermaid code only'
+      splitMode.nextLabel !== 'Switch to source'
     ) {
       throw new Error(`Unexpected split mode controls or scrolling: ${JSON.stringify(splitMode)}`);
     }
@@ -1632,7 +1632,7 @@ async function main() {
       preview: Boolean(document.querySelector('.meo-mermaid-preview-shell')),
       nextLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label')
     }));
-    if (!codeMode.code || codeMode.preview || codeMode.nextLabel !== 'Show Mermaid preview') {
+    if (!codeMode.code || codeMode.preview || codeMode.nextLabel !== 'Switch to preview') {
       throw new Error(`Unexpected Mermaid code mode: ${JSON.stringify(codeMode)}`);
     }
 
@@ -1930,7 +1930,7 @@ async function main() {
         label: target?.closest('[aria-label]')?.getAttribute('aria-label') ?? null
       };
     }, latexModePoint);
-    if (latexModeHit.label !== 'Edit formula in split view') {
+    if (latexModeHit.label !== 'Switch to split view') {
       throw new Error(`LaTeX preview mode backing plate missed hit testing: ${JSON.stringify({
         latexModePoint,
         latexModeHit

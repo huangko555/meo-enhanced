@@ -153,7 +153,6 @@ function createHexColorAdjustmentPanel(view: EditorView, active: ActiveHexColorA
   closeButton.className = 'meo-hex-color-adjustment-close';
   closeButton.type = 'button';
   closeButton.textContent = '×';
-  closeButton.title = strings.closeColorControls;
   closeButton.setAttribute('aria-label', strings.closeColorControls);
   header.append(preview, valueInput, closeButton);
 
@@ -451,7 +450,7 @@ export function createColorSwatchElement(value: string, uiLanguage: UiLanguage =
   const swatch = document.createElement('span');
   swatch.className = 'meo-md-color-swatch';
   swatch.style.backgroundColor = value;
-  swatch.title = value;
+  swatch.dataset.tooltip = value;
   swatch.setAttribute('role', 'img');
   swatch.setAttribute('aria-label', getUiStrings(uiLanguage).colorLabel(value));
   return swatch;
@@ -467,7 +466,7 @@ export function createInteractiveColorSwatchElement(
   swatch.className = 'meo-md-color-swatch meo-md-color-swatch-interactive';
   swatch.type = 'button';
   swatch.style.backgroundColor = range.value;
-  swatch.title = strings.adjustColor(range.value);
+  swatch.dataset.tooltip = strings.adjustColor(range.value);
   swatch.dataset.colorValue = range.value;
   swatch.dataset.colorFrom = String(range.from);
   swatch.setAttribute('aria-label', strings.adjustColor(range.value));

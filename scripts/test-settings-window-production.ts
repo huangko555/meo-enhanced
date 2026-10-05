@@ -686,18 +686,24 @@ try {
           for (const [index, description] of descriptions.entries()) {
             const selector = '.image-location-variables > button:nth-child(' + (index + 1) + ')';
             await page.hover(selector);
+            await page.waitForFunction(selector => {
+              const id = document.querySelector(selector)?.getAttribute('aria-describedby');
+              return !!id && document.getElementById(id)?.classList.contains('is-visible');
+            }, {}, selector);
             const hint = await page.$eval(selector, element => {
-              const tooltip = element.querySelector<HTMLElement>('[role="tooltip"]')!, style = getComputedStyle(tooltip);
+              const tooltip = document.getElementById(element.getAttribute('aria-describedby')!)!, style = getComputedStyle(tooltip);
               const arrow = getComputedStyle(tooltip, '::before');
               const bounds = tooltip.getBoundingClientRect(), button = element.getBoundingClientRect();
-              const content = element.closest('.settings-window')!.getBoundingClientRect();
+              const window = element.closest('.settings-window')!, content = window.getBoundingClientRect();
+              const brightness = (color: string) => color.match(/\d+/g)!.slice(0, 3).map(Number).reduce((sum, channel) => sum + channel, 0);
+              const expectedCenter = Math.max(content.left + 8 + bounds.width / 2, Math.min((button.left + button.right) / 2, content.right - 8 - bounds.width / 2));
               return { text: tooltip.textContent, title: element.getAttribute('title'), described: element.getAttribute('aria-describedby') === tooltip.id,
-                visible: style.visibility, opacity: style.opacity, delay: style.transitionDelay, border: style.borderTopWidth, background: style.backgroundColor, foreground: style.color, radius: style.borderRadius, shadow: style.boxShadow, arrowBackground: arrow.backgroundColor, singleLine: bounds.height < parseFloat(style.lineHeight) * 2, arrow: arrow.content !== 'none' && arrow.width === '8px', centered: Math.abs((bounds.left + bounds.right) / 2 - (button.left + button.right) / 2) < 1 && Math.abs(parseFloat(arrow.left) - bounds.width / 2) < 1 && style.textAlign === 'center',
-                below: bounds.top >= button.bottom, contained: bounds.left >= content.left && bounds.right <= content.right && bounds.bottom <= content.bottom };
+                visible: style.visibility, opacity: style.opacity, delay: style.transitionDelay, border: style.borderTopWidth, background: style.backgroundColor, foreground: style.color, radius: style.borderRadius, shadow: style.boxShadow, singleLine: bounds.height < parseFloat(style.lineHeight) * 2, arrow: arrow.content !== 'none' && arrow.width === '8px', centered: Math.abs((bounds.left + bounds.right) / 2 - expectedCenter) < 1 && style.textAlign === 'center',
+                above: bounds.bottom <= button.top, lighterThanWindow: brightness(style.backgroundColor) > brightness(getComputedStyle(window).backgroundColor), contained: bounds.left >= content.left && bounds.right <= content.right && bounds.bottom <= content.bottom };
             });
-            assert.deepEqual(hint, {text: description, title: null, described: true, visible: 'visible', opacity: '1', delay: '0s', border: '0px', background: appearance === 'dark' ? 'rgb(26, 26, 26)' : 'rgb(13, 13, 13)', foreground: 'rgb(245, 245, 245)', radius: '10px', shadow: 'none', arrowBackground: appearance === 'dark' ? 'rgb(26, 26, 26)' : 'rgb(13, 13, 13)', singleLine: true, arrow: true, centered: true, below: true, contained: true}, language + '/' + appearance + '/' + width + ': hover immediately shows one unobstructed hint below the button');
+            assert.deepEqual(hint, {text: description, title: null, described: true, visible: 'visible', opacity: '1', delay: '0s', border: '0px', background: appearance === 'dark' ? 'rgb(58, 58, 58)' : 'rgb(13, 13, 13)', foreground: 'rgb(245, 245, 245)', radius: '10px', shadow: appearance === 'dark' ? 'rgba(0, 0, 0, 0.4) 0px 3px 10px 0px' : 'none', singleLine: true, arrow: false, centered: true, above: true, lighterThanWindow: appearance === 'dark', contained: true}, language + '/' + appearance + '/' + width + ': hover shows one unobstructed hint above the button after the shared delay');
             if (index === 2) {
-              const tooltip = await page.$(selector + ' [role="tooltip"]'); const capture = await tooltip!.screenshot(); await tooltip!.dispose();
+              const hintId = await page.$eval(selector, element => element.getAttribute('aria-describedby')); const tooltip = await page.$('#' + hintId); const capture = await tooltip!.screenshot(); await tooltip!.dispose();
               const tintedPixels = await page.evaluate(async data => {
                 const bitmap = await createImageBitmap(await (await fetch('data:image/png;base64,' + data)).blob());
                 const canvas = document.createElement('canvas'); canvas.width = bitmap.width; canvas.height = bitmap.height;
@@ -718,15 +724,19 @@ try {
             }
           }
           await page.hover('.image-location-settings .settings-item-title');
-          assert.ok(await page.$$eval('.image-location-token [role="tooltip"]', elements => elements.every(element => getComputedStyle(element).visibility === 'hidden')), 'moving away immediately hides the variable hints');
+          assert.ok(await page.$$eval('.image-location-token', elements => elements.every(element => getComputedStyle(document.getElementById(element.getAttribute('aria-describedby')!)!).visibility === 'hidden')), 'moving away immediately hides the variable hints');
           await page.focus('#meo-image-rule'); await page.keyboard.press('Tab'); await page.keyboard.press('Tab');
-          assert.equal(await page.$eval('.image-location-token [role="tooltip"]', element => getComputedStyle(element).visibility), 'visible', 'keyboard focus exposes the same hint');
+          await page.waitForFunction(() => {
+            const button = document.querySelector('.image-location-token')!;
+            return document.getElementById(button.getAttribute('aria-describedby')!)?.classList.contains('is-visible');
+          });
+          assert.equal(await page.$eval('.image-location-token', element => getComputedStyle(document.getElementById(element.getAttribute('aria-describedby')!)!).visibility), 'visible', 'keyboard focus exposes the same hint after the shared delay');
           await page.$eval('.settings-content', element => { element.scrollTop += 20; });
           await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
           assert.ok(await page.$eval('.image-location-token', element => {
-            const button = element.getBoundingClientRect(), hint = element.querySelector<HTMLElement>('[role="tooltip"]')!.getBoundingClientRect();
-            return Math.abs((hint.left + hint.right) / 2 - (button.left + button.right) / 2) < 1 && Math.abs(hint.top - button.bottom - 7) < 1;
-          }), 'scrolling keeps the visible hint centered immediately below its button');
+            const button = element.getBoundingClientRect(), hint = document.getElementById(element.getAttribute('aria-describedby')!)!.getBoundingClientRect();
+            return Math.abs((hint.left + hint.right) / 2 - (button.left + button.right) / 2) < 1 && Math.abs(button.top - hint.bottom - 6) < 1;
+          }), 'scrolling keeps the visible hint centered above its button');
           await page.keyboard.down('Shift'); await page.keyboard.press('Tab'); await page.keyboard.up('Shift');
         }
       }

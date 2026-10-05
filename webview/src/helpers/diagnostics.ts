@@ -54,7 +54,8 @@ function buildDiagnosticDecorations(docLength: number, diagnostics: EditorDiagno
       Decoration.mark({
         class: `meo-diagnostic ${severityClass}`,
         attributes: {
-          title: diagnosticTitle(diagnostic)
+          'data-tooltip': diagnosticTitle(diagnostic),
+          'data-tooltip-kind': 'description'
         }
       })
     );

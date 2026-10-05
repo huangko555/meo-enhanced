@@ -571,7 +571,7 @@ async function main() {
       const alignmentEditor = await create('| A | B |\n| --- | --- |\n| one | two |');
       document.querySelector<HTMLTextAreaElement>('tbody textarea')!.focus();
       await waitFrames(1);
-      document.querySelector<HTMLButtonElement>('button[title="Align selected column left"]')!
+      document.querySelector<HTMLButtonElement>('button[data-tooltip="Align selected column left"]')!
         .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
       await waitFrames();
       const alignmentBeforeShift = document.querySelector<HTMLTableCellElement>('thead th')?.style.textAlign ?? '';
@@ -731,7 +731,7 @@ async function main() {
       );
       const focusedTableStyle = getComputedStyle(document.querySelector('.meo-md-html-table')!);
       const focusedTableOutline = { style: focusedTableStyle.outlineStyle, width: focusedTableStyle.outlineWidth };
-      document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
+      document.querySelector<HTMLButtonElement>('button[data-tooltip="Delete row"]')!
         .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
       await waitFrames();
       const deleteRowsSource = deleteRowsEditor.view.state.doc.toString();
@@ -769,7 +769,7 @@ async function main() {
         document.querySelector<HTMLElement>('td[data-table-row="3"][data-table-col="0"]')!,
         25
       );
-      document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
+      document.querySelector<HTMLButtonElement>('button[data-tooltip="Delete row"]')!
         .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
       await waitFrames();
       const pendingEditDeleteSource = pendingEditDeleteEditor.view.state.doc.toString();
@@ -821,7 +821,7 @@ async function main() {
         document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
         26
       );
-      document.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!
+      document.querySelector<HTMLButtonElement>('button[data-tooltip="Insert row below"]')!
         .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
       await waitFrames(5);
       const insertDiffSource = insertDiffEditor.view.state.doc.toString();
@@ -894,7 +894,7 @@ async function main() {
       pendingAppendInput.focus();
       pendingAppendInput.value = 'expanded';
       pendingAppendInput.dispatchEvent(new Event('input', { bubbles: true }));
-      document.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!
+      document.querySelector<HTMLButtonElement>('button[data-tooltip="Insert row below"]')!
         .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
       await waitFrames(5);
       const pendingAppendSource = pendingAppendEditor.view.state.doc.toString();
@@ -921,7 +921,7 @@ async function main() {
       pendingPrependInput.focus();
       pendingPrependInput.value = 'new';
       pendingPrependInput.dispatchEvent(new Event('input', { bubbles: true }));
-      document.querySelector<HTMLButtonElement>('button[title="Insert row above"]')!
+      document.querySelector<HTMLButtonElement>('button[data-tooltip="Insert row above"]')!
         .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
       await waitFrames(5);
       const pendingPrependSource = pendingPrependEditor.view.state.doc.toString();
@@ -965,7 +965,7 @@ async function main() {
         document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
         27
       );
-      document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
+      document.querySelector<HTMLButtonElement>('button[data-tooltip="Delete row"]')!
         .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
       await waitFrames(5);
       const trackedRowDeleteSource = pendingPrependEditor.view.state.doc.toString();
@@ -989,7 +989,7 @@ async function main() {
         document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
         28
       );
-      document.querySelector<HTMLButtonElement>('button[title="Insert column right"]')!
+      document.querySelector<HTMLButtonElement>('button[data-tooltip="Insert column right"]')!
         .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
       await waitFrames(5);
       const trackedRowAfterColumnMarkers = Array.from(
@@ -1007,7 +1007,7 @@ async function main() {
         document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="1"]')!,
         22
       );
-      document.querySelector<HTMLButtonElement>('button[title="Delete column"]')!
+      document.querySelector<HTMLButtonElement>('button[data-tooltip="Delete column"]')!
         .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
       await waitFrames();
       const deleteColumnsSource = deleteColumnsEditor.view.state.doc.toString();
@@ -1898,7 +1898,7 @@ async function main() {
         bubbles: true,
         cancelable: true
       }));
-      document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
+      document.querySelector<HTMLButtonElement>('button[data-tooltip="Delete row"]')!
         .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
       for (let frame = 0; frame < 5; frame += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -1994,7 +1994,7 @@ async function main() {
         bubbles: true,
         cancelable: true
       }));
-      document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
+      document.querySelector<HTMLButtonElement>('button[data-tooltip="Delete row"]')!
         .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
       for (let frame = 0; frame < 5; frame += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -2097,7 +2097,7 @@ async function main() {
         bubbles: true,
         cancelable: true
       }));
-      document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
+      document.querySelector<HTMLButtonElement>('button[data-tooltip="Delete row"]')!
         .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
       for (let frame = 0; frame < 5; frame += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -2173,7 +2173,7 @@ async function main() {
           bubbles: true,
           cancelable: true
         }));
-        document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
+        document.querySelector<HTMLButtonElement>('button[data-tooltip="Delete row"]')!
           .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
         await waitFrames(5);
       };

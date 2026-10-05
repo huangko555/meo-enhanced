@@ -33,7 +33,7 @@ export const createSegmentedControl = <Value extends string>(options: SegmentedC
     button.type = 'button';
     button.className = `segmented-control-button ${options.buttonClassName}`;
     button.dataset[options.datasetKey] = option.value;
-    if (options.buttonTitles !== false) button.title = option.title ?? option.label;
+    if (options.buttonTitles !== false && option.title && option.title !== option.label) button.dataset.tooltip = option.title;
     if (options.role === 'tablist') {
       button.setAttribute('role', 'tab');
     }
@@ -94,7 +94,6 @@ export const createSegmentedControl = <Value extends string>(options: SegmentedC
       for (const [value, button] of buttons) {
         const label = labels[value];
         if (label === undefined) continue;
-        if (options.buttonTitles !== false) button.title = label;
         const labelElement = button.querySelector<HTMLElement>('.segmented-control-button-label');
         if (labelElement) labelElement.textContent = label;
       }

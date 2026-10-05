@@ -112,7 +112,7 @@ async function main(): Promise<void> {
     ), {}, afterMermaid);
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const modeLabel = await page.$eval('.meo-mermaid-mode-btn', (button) => button.getAttribute('aria-label'));
-      if (modeLabel === 'Edit Mermaid in split view') break;
+      if (modeLabel === 'Switch to split view') break;
       await page.click('.meo-mermaid-mode-btn');
       await waitForFrames(page, 3);
     }
@@ -206,7 +206,7 @@ async function main(): Promise<void> {
     await page.waitForFunction(() => (window as any).__historyEditor.getText().includes('FORMULA_EDIT'));
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const modeLabel = await page.$eval('.meo-latex-math-mode-btn', (button) => button.getAttribute('aria-label'));
-      if (modeLabel === 'Edit formula in split view') break;
+      if (modeLabel === 'Switch to split view') break;
       await page.click('.meo-latex-math-mode-btn');
       await waitForFrames(page, 3);
     }

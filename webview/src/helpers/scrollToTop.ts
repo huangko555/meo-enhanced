@@ -11,7 +11,7 @@ export function createDocumentScrollToTopController(
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'document-scroll-top';
-  button.title = strings.backToTop;
+  button.dataset.tooltip = strings.backToTop;
   button.setAttribute('aria-label', strings.backToTop);
   button.appendChild(createElement(ArrowUpToLine, {
     width: 18,
@@ -54,7 +54,7 @@ export function createDocumentScrollToTopController(
     sync,
     setUiLanguage(language: UiLanguage): void {
       const label = getUiStrings(language).backToTop;
-      button.title = label;
+      button.dataset.tooltip = label;
       button.setAttribute('aria-label', label);
     }
   };

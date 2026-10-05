@@ -461,6 +461,42 @@ try {
   assert.equal(reverseAction.color, reverseAction.accentColor);
   assert.equal(reverseAction.usesPenLineIcon, true);
   assert.equal(reverseAction.markerCursorDisplay, 'none');
+  const frameHandle = await page.$('.preview-frame');
+  const previewFrame = (await frameHandle!.contentFrame())!;
+  await previewFrame.hover('.meo-preview-source-navigation');
+  try {
+    await page.waitForFunction(() => !!document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('.meo-tooltip.is-visible'), { timeout: 5000 });
+  } catch (error) {
+    throw new Error('Source locator hint did not appear: ' + JSON.stringify(await page.evaluate(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const button = doc.querySelector<HTMLElement>('.meo-preview-source-navigation')!;
+      const hint = doc.querySelector<HTMLElement>('.meo-tooltip');
+      return {
+        hidden: button.hidden, tooltip: button.dataset.tooltip, label: button.getAttribute('aria-label'),
+        described: button.getAttribute('aria-describedby'), button: button.getBoundingClientRect().toJSON(),
+        hintClass: hint?.className, hint: hint?.getBoundingClientRect().toJSON(),
+        viewport: [doc.defaultView!.innerWidth, doc.defaultView!.innerHeight],
+        styles: doc.querySelectorAll('[data-meo-tooltip-style]').length
+      };
+    })), { cause: error });
+  }
+  const sourceHint = await page.evaluate(() => {
+    const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const button = doc.querySelector<HTMLElement>('.meo-preview-source-navigation')!;
+    const hint = doc.getElementById(button.getAttribute('aria-describedby')!)!;
+    const rect = hint.getBoundingClientRect(), target = button.getBoundingClientRect();
+    return {
+      text: hint.querySelector('.meo-tooltip-label')!.textContent,
+      label: button.getAttribute('aria-label'),
+      key: hint.querySelector('kbd:not([hidden])')?.textContent ?? null,
+      title: button.getAttribute('title'),
+      above: rect.bottom <= target.top,
+      inside: rect.left >= 8 && rect.right <= doc.defaultView!.innerWidth - 8
+    };
+  });
+  assert.deepEqual(sourceHint, {
+    text: 'Reveal in source', label: 'Reveal in source', key: null, title: null, above: true, inside: true
+  }, 'the source locator uses one concise shared hint with automatic placement and no invented shortcut');
 
   await page.mouse.click(
     frameRect.left + reverseAction.left + 4,

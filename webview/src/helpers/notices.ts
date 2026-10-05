@@ -52,7 +52,6 @@ export function createEditorNoticeController(
 
   const updateCloseButton = (): void => {
     const strings = getUiStrings(activeLanguage);
-    closeButton.title = strings.dismissNotification;
     closeButton.setAttribute('aria-label', strings.dismissNotification);
     closeButton.replaceChildren(
       createElement(X, { width: 14, height: 14, 'stroke-width': 2, 'aria-hidden': 'true' }),

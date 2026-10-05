@@ -106,14 +106,14 @@ async function main() {
       const titles = await page.evaluate((value) => {
         document.querySelector<HTMLButtonElement>(`[data-ui-language="${value}"]`)!.click();
         const button = document.querySelector<HTMLButtonElement>('[data-action="discard"]')!;
-        const normal = button.title;
+        const normal = button.dataset.tooltip!;
         button.click();
-        const armed = button.title;
+        const armed = button.dataset.tooltip!;
         // Clicking elsewhere cancels confirmation without discarding any content.
         document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
         return { normal, armed };
       }, language);
-      const warning = language === 'en' ? /unsaved changes/i : /未保存的更改/;
+      const warning = language === 'en' ? /unsaved changes/i : /未保存内容/;
       if (!warning.test(titles.normal) || !warning.test(titles.armed)) {
         throw new Error(`${language} reload tooltip omitted the unsaved-change warning: ${JSON.stringify(titles)}`);
       }

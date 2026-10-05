@@ -496,8 +496,8 @@ export class ImageWidget extends WidgetType {
       const openLink = document.createElement('button');
       openLink.type = 'button';
       openLink.className = 'meo-visual-control-btn meo-md-image-control-btn';
-      openLink.title = isDocumentFragment ? strings.jumpWithinDocument : strings.openLink;
-      openLink.setAttribute('aria-label', openLink.title);
+      openLink.dataset.tooltip = isDocumentFragment ? strings.jumpWithinDocument : strings.openLink;
+      openLink.setAttribute('aria-label', openLink.dataset.tooltip ?? '');
       openLink.appendChild(createElement(isDocumentFragment ? SquareArrowRightEnter : ExternalLink, { width: 16, height: 16 }));
       openLink.addEventListener('pointerdown', (event) => {
         event.preventDefault();
@@ -510,7 +510,7 @@ export class ImageWidget extends WidgetType {
     const openExternally = document.createElement('button');
     openExternally.type = 'button';
     openExternally.className = 'meo-visual-control-btn meo-md-image-control-btn';
-    openExternally.title = strings.openWithSystemApp;
+    openExternally.dataset.tooltip = strings.openWithSystemApp;
     openExternally.setAttribute('aria-label', strings.openWithSystemApp);
     openExternally.appendChild(createElement(AppWindow, { width: 16, height: 16 }));
     openExternally.addEventListener('pointerdown', (event) => {
@@ -522,7 +522,7 @@ export class ImageWidget extends WidgetType {
     const refresh = document.createElement('button');
     refresh.type = 'button';
     refresh.className = 'meo-visual-control-btn meo-md-image-control-btn';
-    refresh.title = strings.refreshImage;
+    refresh.dataset.tooltip = strings.refreshImage;
     refresh.setAttribute('aria-label', strings.refreshImage);
     refresh.appendChild(createElement(RefreshCw, { width: 16, height: 16 }));
     refresh.addEventListener('pointerdown', (event) => {
@@ -540,7 +540,7 @@ export class ImageWidget extends WidgetType {
     const fullscreen = document.createElement('button');
     fullscreen.type = 'button';
     fullscreen.className = 'meo-visual-control-btn meo-md-image-control-btn';
-    fullscreen.title = strings.fullscreenImage;
+    fullscreen.dataset.tooltip = strings.fullscreenImage;
     fullscreen.setAttribute('aria-label', strings.fullscreenImage);
     fullscreen.appendChild(createElement(Maximize2, { width: 16, height: 16 }));
     fullscreen.addEventListener('pointerdown', (event) => {
@@ -591,7 +591,7 @@ export class ImageWidget extends WidgetType {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'meo-visual-control-btn meo-md-image-control-btn';
-      button.title = label;
+      button.dataset.tooltip = label;
       button.setAttribute('aria-label', label);
       button.appendChild(createElement(icon, { width: 16, height: 16 }));
       button.addEventListener('pointerdown', (event) => {

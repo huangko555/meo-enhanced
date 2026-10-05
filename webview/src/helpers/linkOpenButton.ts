@@ -7,8 +7,8 @@ export function createOpenLinkButton(href: string, language: UiLanguage): HTMLBu
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'meo-md-link-open-btn';
-  button.title = isDocumentFragment ? strings.jumpWithinDocument : strings.openLink;
-  button.setAttribute('aria-label', button.title);
+  button.dataset.tooltip = isDocumentFragment ? strings.jumpWithinDocument : strings.openLink;
+  button.setAttribute('aria-label', button.dataset.tooltip ?? '');
   button.appendChild(createElement(isDocumentFragment ? SquareArrowRightEnter : ExternalLink, { 'aria-hidden': 'true' }));
   button.addEventListener('pointerdown', (event) => {
     event.preventDefault();

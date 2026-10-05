@@ -99,7 +99,7 @@ function createControlButton(
   button.className = 'meo-visual-control-btn meo-latex-math-zoom-btn';
   button.appendChild(createElement(icon, { width: 16, height: 16 }));
   button.setAttribute('aria-label', label);
-  button.title = label;
+  button.dataset.tooltip = label;
   button.addEventListener('pointerdown', (event) => {
     event.stopPropagation();
   });

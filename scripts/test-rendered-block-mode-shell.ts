@@ -16,17 +16,17 @@ const kinds: ReadonlyArray<{
     kind: 'mermaid',
     controls: 'Mermaid block controls at line 12',
     editor: 'Mermaid editor at line 12',
-    splitAction: 'Edit Mermaid in split view',
-    sourceAction: 'Show Mermaid code only',
-    previewAction: 'Show Mermaid preview'
+    splitAction: 'Switch to split view',
+    sourceAction: 'Switch to source',
+    previewAction: 'Switch to preview'
   },
   {
     kind: 'latex',
     controls: 'Formula block controls at line 12',
     editor: 'Formula editor at line 12',
-    splitAction: 'Edit formula in split view',
-    sourceAction: 'Show formula source only',
-    previewAction: 'Show formula preview'
+    splitAction: 'Switch to split view',
+    sourceAction: 'Switch to source',
+    previewAction: 'Switch to preview'
   }
 ];
 
@@ -94,9 +94,7 @@ for (const example of kinds) {
   assert.equal(localized.editorLabel, example.kind === 'mermaid'
     ? '第 12 行 Mermaid 编辑器'
     : '第 12 行公式编辑器');
-  assert.equal(localized.modeButton.label, example.kind === 'mermaid'
-    ? '以分栏视图编辑 Mermaid'
-    : '以分栏视图编辑公式');
+  assert.equal(localized.modeButton.label, '切换为分栏');
 }
 
 console.log('Rendered block mode shell tests passed.');

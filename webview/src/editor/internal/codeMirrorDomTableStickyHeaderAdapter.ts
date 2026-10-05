@@ -141,7 +141,7 @@ function clonePassiveHeader(source: HTMLTableRowElement): HTMLTableCellElement[]
       const swatch = document.createElement('span');
       swatch.className = 'meo-md-color-swatch';
       swatch.style.backgroundColor = button.style.backgroundColor;
-      swatch.title = button.dataset.colorValue ?? '';
+      swatch.dataset.tooltip = button.dataset.colorValue ?? '';
       button.replaceWith(swatch);
     }
     // The floating header is a passive projection, even when its source cell is

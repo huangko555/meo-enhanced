@@ -57,7 +57,7 @@ async function main() {
       const wide = loaded.find((image) => image.getBoundingClientRect().width > image.getBoundingClientRect().height);
       if (!wide) throw new Error('Wide image did not render in the reproduction fixture');
       const openLink = wide.closest<HTMLElement>('.meo-md-image')
-        ?.querySelector<HTMLButtonElement>('button[title="Jump within document"]');
+        ?.querySelector<HTMLButtonElement>('button[data-tooltip="Jump within document"]');
       if (!openLink) throw new Error('Linked image did not render its document jump button');
       openLink.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
       const rect = wide.getBoundingClientRect();
@@ -175,7 +175,7 @@ async function main() {
       editor.view.dispatch({ selection: { anchor: 0 } });
       return editor.view.state.doc.toString();
     });
-    const openViewer = '.meo-md-image button[title="Fullscreen image"]';
+    const openViewer = '.meo-md-image button[data-tooltip="Fullscreen image"]';
     await page.waitForSelector(openViewer);
     const expectedSrc = await page.$eval(openViewer, button =>
       button.closest('.meo-md-image')!.querySelector<HTMLImageElement>('img')!.src);
@@ -186,7 +186,7 @@ async function main() {
       const matrix = new DOMMatrix(getComputedStyle(image).transform);
       return { zoom: matrix.a, x: matrix.e, y: matrix.f };
     });
-    await page.click('.meo-md-image-fullscreen button[title="Zoom in"]');
+    await page.click('.meo-md-image-fullscreen button[data-tooltip="Zoom in"]');
     assert.equal((await transform()).zoom, 1.5);
     const viewerPoint = await page.$eval('.meo-md-image-fullscreen-img', image => {
       const rect = image.getBoundingClientRect();
@@ -200,12 +200,12 @@ async function main() {
     await page.mouse.wheel({ deltaY: 120 });
     await page.waitForFunction(() =>
       new DOMMatrix(getComputedStyle(document.querySelector('.meo-md-image-fullscreen-img')!).transform).a === 1.25);
-    await page.click('.meo-md-image-fullscreen button[title="Reset zoom"]');
+    await page.click('.meo-md-image-fullscreen button[data-tooltip="Reset zoom"]');
     assert.deepEqual(await transform(), { zoom: 1, x: 0, y: 0 });
     await page.keyboard.press('Escape');
     assert.equal(await page.$('.meo-md-image-fullscreen-scrim'), null);
     await page.click(openViewer);
-    await page.click('.meo-md-image-fullscreen button[title="Exit fullscreen"]');
+    await page.click('.meo-md-image-fullscreen button[data-tooltip="Exit fullscreen"]');
     assert.equal(await page.$('.meo-md-image-fullscreen-scrim'), null);
     assert.equal(await page.evaluate(() => (window as any).__imageLayoutEditor.view.state.doc.toString()), beforeViewer);
     console.log('image layout checks passed');

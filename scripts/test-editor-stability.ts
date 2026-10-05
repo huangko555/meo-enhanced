@@ -294,7 +294,7 @@ async function main() {
           const initialTransactionCount = diagnosticTransactions;
           const initiallyMarked = !!editor.view.dom.querySelector('.meo-diagnostic-warning');
           editor.setDiagnostics([{ ...diagnostic, message: 'Updated warning' }]);
-          const updated = !!editor.view.dom.querySelector('.meo-diagnostic-warning[title="Updated warning"]');
+          const updated = !!editor.view.dom.querySelector('.meo-diagnostic-warning[data-tooltip="Updated warning"]');
           editor.setDiagnostics([]);
           results.push({ mode, populated, diagnosticTransactions: initialTransactionCount, initiallyMarked, updated,
             cleared: !editor.view.dom.querySelector('.meo-diagnostic'),
