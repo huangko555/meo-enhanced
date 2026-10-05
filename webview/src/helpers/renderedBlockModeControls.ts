@@ -13,6 +13,7 @@ export function renderRenderedBlockModeButton(
   button.replaceChildren(createElement(icon, { width: 15, height: 15 }));
   button.setAttribute('aria-label', decision.modeButton.label);
   button.dataset.tooltip = decision.modeButton.label;
+  button.dataset.tooltipLiveUpdate = 'true';
 }
 
 export function retainRenderedBlockModePointerFocus(button: HTMLButtonElement): void {

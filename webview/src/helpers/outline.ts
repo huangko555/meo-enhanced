@@ -418,12 +418,14 @@ export function createOutlineController({
   };
 
   const updateModeButton = () => {
+    modeButton.dataset.tooltipLiveUpdate = 'true';
     modeButton.replaceChildren(createElement(mode === 'floating' ? Pin : PinOff, { width: 14, height: 14 }));
     modeButton.dataset.tooltip = mode === 'floating' ? uiStrings.outlineSwitchFixed : uiStrings.outlineSwitchFloating;
     modeButton.setAttribute('aria-label', modeButton.dataset.tooltip ?? '');
   };
 
   const updatePositionButton = () => {
+    positionButton.dataset.tooltipLiveUpdate = 'true';
     const nextPosition = position === 'left' ? 'right' : 'left';
     positionButton.replaceChildren(createElement(nextPosition === 'left' ? PanelLeft : PanelRight, { width: 14, height: 14 }));
     positionButton.dataset.tooltip = nextPosition === 'left' ? uiStrings.outlineSwitchLeft : uiStrings.outlineSwitchRight;

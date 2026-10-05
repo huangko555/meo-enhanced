@@ -14,6 +14,7 @@ try {
   await page.setViewport({ width: 1100, height: 780 });
   await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
   await page.addStyleTag({ path: 'webview/src/styles.css' });
+  await page.addScriptTag({ path: 'node_modules/mermaid/dist/mermaid.min.js' });
   await page.addScriptTag({ content: `
     window.acquireVsCodeApi=()=>({getState(){},setState(){},postMessage(message){
       if(message.type!=='requestPreviewRender') return;
@@ -28,7 +29,7 @@ try {
     }});
   ` });
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
-  const text = '# Tooltip fixture\n\nParagraph one.\n\nParagraph two.\n\nParagraph three.\n\n| Name | Value |\n| --- | --- |\n| A | B |\n\nAfter table.\n\n[Reference](https://example.com \"Link explanation\").';
+  const text = '# Tooltip fixture\n\nParagraph one.\n\nParagraph two.\n\nParagraph three.\n\n```mermaid\ngraph TD\nA-->B\n```\n\n$$\nx^2\n$$\n\n| Name | Value |\n| --- | --- |\n| A | B |\n\nAfter table.\n\n[Reference](https://example.com \"Link explanation\").';
   await page.evaluate(text => {
     const g = window as any;
     const preferences = { input: { ...g.EditingSettingsHarness.defaultInputAssistance }, shortcuts: {} };
@@ -140,6 +141,135 @@ try {
   assert.equal(await page.$('.meo-tooltip.is-visible'), null, 'click closes the shared hint');
   await page.$eval('#edge-tooltip', element => element.remove());
   assert.equal(await page.$('.meo-tooltip.is-visible'), null, 'removing a control leaves no visible hint');
+  // A stable pointer and the same tooltip instance must survive state changes,
+  // including replacement of the icon's descendants.
+  await page.evaluate(() => {
+    const button = document.createElement('button');
+    button.id = 'stateful-tooltip-probe';
+    button.dataset.tooltip = 'Enable fixture sync';
+    button.dataset.tooltipLiveUpdate = 'true';
+    button.style.cssText = 'position:fixed;left:520px;top:300px;width:32px;height:28px;z-index:700';
+    let enabled = false;
+    const icon = () => {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('width', '16'); svg.setAttribute('height', '16');
+      button.replaceChildren(svg);
+    };
+    button.addEventListener('click', () => {
+      enabled = !enabled;
+      button.dataset.tooltip = enabled ? 'Disable fixture sync' : 'Enable fixture sync';
+      icon();
+    });
+    icon();
+    document.body.append(button);
+    (window as any).__statefulTooltipChanges = [];
+    new MutationObserver(() => {
+      const hint = document.getElementById(button.getAttribute('aria-describedby') ?? '');
+      (window as any).__statefulTooltipChanges.push({
+        text: hint?.querySelector('.meo-tooltip-label')?.textContent,
+        visible: hint?.classList.contains('is-visible') ?? false,
+        expected: button.dataset.tooltip
+      });
+    }).observe(button, { attributes: true, attributeFilter: ['data-tooltip'] });
+  });
+  const stateful = '#stateful-tooltip-probe';
+  assert.equal(await page.$eval(stateful, element => {
+    element.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+    return document.getElementById(element.getAttribute('aria-describedby')!)!.classList.contains('is-visible');
+  }), false, 'live updates do not remove the initial hover delay');
+  await show(stateful);
+  const statefulHintId = await page.$eval(stateful, element => element.getAttribute('aria-describedby'));
+  const assertCurrentHint = async (selector: string) => {
+    const state = await page.$eval(selector, element => {
+      const hint = document.getElementById(element.getAttribute('aria-describedby') ?? '');
+      return { visible: hint?.classList.contains('is-visible') ?? false, text: hint?.querySelector('.meo-tooltip-label')?.textContent, expected: (element as HTMLElement).dataset.tooltip };
+    });
+    assert.equal(state.visible, true, `${selector} lost its hint after a state change`);
+    assert.equal(state.text, state.expected, `${selector} kept the previous action's hint`);
+  };
+  for (let index = 0; index < 3; index += 1) {
+    await page.mouse.down();
+    assert.equal(await page.$eval(stateful, element => document.getElementById(element.getAttribute('aria-describedby')!)!.classList.contains('is-visible')), true, 'pressing a stateful button retains its existing hint');
+    await page.mouse.up();
+    await assertCurrentHint(stateful);
+    assert.equal(await page.$eval(stateful, element => element.getAttribute('aria-describedby')), statefulHintId, 'state changes retain the same tooltip instance');
+  }
+  assert.equal(await page.evaluate(() => (window as any).__statefulTooltipChanges.length), 3, 'each stationary click commits a new tooltip action');
+  assert.equal(await page.evaluate(() => (window as any).__statefulTooltipChanges.every((change: any) => change.visible && change.text === change.expected)), true, 'content is refreshed in the mutation callback without another hover delay');
+  await page.keyboard.press('Escape');
+  await page.$eval(stateful, element => (element as HTMLElement).dataset.tooltip = 'Updated while dismissed');
+  assert.equal(await page.$('.meo-tooltip.is-visible'), null, 'content updates cannot undo Escape dismissal');
+  await page.mouse.down(); await page.mouse.up();
+  assert.equal(await page.$('.meo-tooltip.is-visible'), null, 'clicking without a new hover does not undo Escape dismissal');
+  await page.mouse.move(0, 0);
+  await page.$eval(stateful, element => (element as HTMLElement).dataset.tooltip = 'Updated after leaving');
+  assert.equal(await page.$('.meo-tooltip.is-visible'), null, 'content updates after leaving cannot reopen the hint');
+  await show(stateful);
+  await page.mouse.move(0, 0);
+  await page.keyboard.press('Tab');
+  await page.focus(stateful);
+  await page.waitForFunction(() => !!document.querySelector('.meo-tooltip.is-visible'));
+  for (const key of ['Enter', 'Space']) {
+    await page.keyboard.press(key);
+    await assertCurrentHint(stateful);
+  }
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await page.$eval(stateful, element => (element as HTMLElement).dataset.tooltip = 'Updated after window blur');
+  assert.equal(await page.$('.meo-tooltip.is-visible'), null, 'window blur prevents content updates from reopening a hint');
+  await page.$eval(stateful, element => element.remove());
+  assert.equal(await page.$('#' + statefulHintId), null, 'disposing a stateful control removes its hint');
+
+  for (const kind of ['mermaid', 'latex-math']) {
+    const selector = `.meo-${kind}-mode-btn`;
+    await page.hover(kind === 'mermaid' ? '.meo-mermaid-block' : '.meo-latex-math-viewport');
+    await show(selector);
+    const hintId = await page.$eval(selector, element => element.getAttribute('aria-describedby'));
+    for (let index = 0; index < 3; index += 1) {
+      const previous = await page.$eval(selector, element => (element as HTMLElement).dataset.tooltip);
+      await page.mouse.down(); await page.mouse.up();
+      await page.waitForFunction(({ selector, previous }) => (document.querySelector(selector) as HTMLElement)?.dataset.tooltip !== previous, {}, { selector, previous });
+      await assertCurrentHint(selector);
+      assert.equal(await page.$eval(selector, element => element.getAttribute('aria-describedby')), hintId);
+    }
+    await page.mouse.move(0, 0);
+    await page.keyboard.press('Tab');
+    await page.focus(selector);
+    await page.waitForFunction(selector => {
+      const button = document.querySelector(selector)!;
+      return document.getElementById(button.getAttribute('aria-describedby')!)?.classList.contains('is-visible');
+    }, {}, selector);
+    const previous = await page.$eval(selector, element => (element as HTMLElement).dataset.tooltip);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(({ selector, previous }) => (document.querySelector(selector) as HTMLElement)?.dataset.tooltip !== previous, {}, { selector, previous });
+    if (await page.$eval(selector, element => element.matches(':focus-visible'))) await assertCurrentHint(selector);
+    else assert.equal(await page.$eval(selector, element => document.getElementById(element.getAttribute('aria-describedby') ?? '')?.classList.contains('is-visible') ?? false), false, 'moving focus into the source editor closes the button hint');
+  }
+  await page.click('[data-mode="source"]');
+  await page.waitForSelector('.cm-editor.meo-mode-source');
+  await page.click('.source-preview-button');
+  const sync = '.source-preview-scroll-sync-button';
+  await page.waitForSelector(sync, { visible: true });
+  await show(sync);
+  for (let index = 0; index < 3; index += 1) {
+    const previous = await page.$eval(sync, element => (element as HTMLElement).dataset.tooltip);
+    await page.mouse.down(); await page.mouse.up();
+    await page.waitForFunction(previous => (document.querySelector('.source-preview-scroll-sync-button') as HTMLElement)?.dataset.tooltip !== previous, {}, previous);
+    await assertCurrentHint(sync);
+  }
+  await page.mouse.move(0, 0);
+  await page.keyboard.press('Tab');
+  await page.focus(sync);
+  await page.waitForFunction(() => {
+    const button = document.querySelector('.source-preview-scroll-sync-button')!;
+    return document.getElementById(button.getAttribute('aria-describedby')!)?.classList.contains('is-visible');
+  });
+  for (const key of ['Enter', 'Space']) {
+    const previous = await page.$eval(sync, element => (element as HTMLElement).dataset.tooltip);
+    await page.keyboard.press(key);
+    await page.waitForFunction(previous => (document.querySelector('.source-preview-scroll-sync-button') as HTMLElement)?.dataset.tooltip !== previous, {}, previous);
+    await assertCurrentHint(sync);
+  }
+  await page.click('.source-preview-button');
   await page.click('[data-mode="preview"]');
   await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('iframe.preview-frame')?.contentDocument?.querySelector('a'));
   const iframe = await page.$('iframe.preview-frame');
@@ -184,7 +314,7 @@ try {
   assert.equal(await frame.$('.meo-tooltip.is-visible'), null, 'parent and Preview share one active hint');
   assert.deepEqual(errors, []);
   await page.close();
-  console.log('Production tooltips: delay, shortcut, dismissal, toolbar/menu scope, boundary placement and Preview theme isolation passed.');
+  console.log('Production tooltips: delay, stateful pointer/keyboard updates, dismissal, toolbar/menu scope, boundary placement and Preview theme isolation passed.');
 } finally {
   await browser.close();
 }

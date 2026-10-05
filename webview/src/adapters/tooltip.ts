@@ -6,7 +6,7 @@ export type TooltipPlacement = 'top' | 'bottom' | 'left' | 'right';
 
 type Bounds = { left: number; top: number; right: number; bottom: number };
 let nextTooltipId = 0;
-let activeTooltip: { hide(): void; reposition(): void } | undefined;
+let activeTooltip: { hide(): void; reposition(): void; pointerDown(event: PointerEvent): void } | undefined;
 const ownedAnchors = new WeakSet<HTMLElement>();
 const menuSelector = '.heading-dropdown, .table-dropdown, .preview-dropdown-panel, [role="menu"], .changes-review-popover, .meo-md-html-table-context-menu';
 const modalSelector = 'dialog[open], .meo-md-image-fullscreen-scrim, .meo-mermaid-fullscreen-scrim, .meo-latex-math-fullscreen-scrim';
@@ -46,6 +46,8 @@ function visibleBounds(anchor: HTMLElement, area: Bounds): Bounds | null {
 /**
  * One shared hint: 200ms hover/focus, above/below/right/left placement, menu avoidance.
  * Optional placement prefers that side, then its opposite, while keeping the hint visible.
+ * Live updates retain a stateful control's hint and reveal changed content immediately
+ * while hovered or keyboard-focused, until dismissal or a new interaction target.
  * Callers supply localized, concise content and the current effective shortcut.
  * Full-text / multiline content must never contain a shortcut. Dispose with its owner.
  */
@@ -54,6 +56,7 @@ export function createTooltip(anchor: HTMLElement, options: {
   readonly id?: string;
   readonly focusTarget?: HTMLElement;
   readonly placement?: TooltipPlacement;
+  readonly liveUpdate?: boolean;
 }) {
   const doc = anchor.ownerDocument, view = doc.defaultView!;
   const focusTarget = options.focusTarget ?? anchor;
@@ -82,10 +85,11 @@ export function createTooltip(anchor: HTMLElement, options: {
   ownedAnchors.add(anchor);
   const events = new view.AbortController();
   let content = options.content;
-  let hovering = false, visible = false, disposed = false;
+  let hovering = anchor.matches(':hover'), visible = false, disposed = false;
+  let engaged = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let reportedConflict = '';
-  const handle = { hide, reposition: position };
+  const handle = { hide, reposition: position, pointerDown };
 
   function reportConflict() {
     const identity = content.text + '/' + content.shortcut;
@@ -172,23 +176,36 @@ export function createTooltip(anchor: HTMLElement, options: {
     hide();
   }
 
-  function show() {
+  function reveal() {
     if (disposed) return;
     if (activeTooltip !== handle) { activeTooltip?.hide(); activeTooltip = handle; }
+    clearTimeout(timer); timer = undefined;
+    visible = true;
+    position();
+    if (!visible) return;
+    tooltip.classList.add('is-visible');
+    view.addEventListener('resize', position);
+    view.addEventListener('scroll', position, { capture: true, passive: true });
+  }
+
+  function show() {
+    if (disposed) return;
+    engaged = true;
+    if (activeTooltip !== handle) { activeTooltip?.hide(); activeTooltip = handle; }
     clearTimeout(timer);
-    timer = setTimeout(() => {
-      timer = undefined;
-      visible = true;
-      position();
-      if (!visible) return;
-      tooltip.classList.add('is-visible');
-      view.addEventListener('resize', position);
-      view.addEventListener('scroll', position, { capture: true, passive: true });
-    }, 200);
+    timer = setTimeout(reveal, 200);
+  }
+
+  function pointerDown(event: PointerEvent) {
+    const live = options.liveUpdate ?? anchor.dataset.tooltipLiveUpdate === 'true';
+    if (live && event.button === 0 && event.target instanceof view.Node && focusTarget.contains(event.target)) {
+      // Keep an existing hint stable; a pending hint waits for the committed state.
+      clearTimeout(timer); timer = undefined;
+    } else hide();
   }
 
   function hide() {
-    clearTimeout(timer); timer = undefined; visible = false;
+    clearTimeout(timer); timer = undefined; visible = false; engaged = false;
     tooltip.classList.remove('is-visible');
     view.removeEventListener('resize', position); view.removeEventListener('scroll', position, true);
     if (activeTooltip === handle) activeTooltip = undefined;
@@ -196,23 +213,31 @@ export function createTooltip(anchor: HTMLElement, options: {
 
   function setContent(next: TooltipContent) {
     if (disposed) return;
+    const changed = content.text !== next.text || content.shortcut !== next.shortcut || content.kind !== next.kind;
     content = next;
     if (label.textContent !== content.text) label.textContent = content.text;
     if (shortcut.textContent !== (content.shortcut ?? '')) shortcut.textContent = content.shortcut ?? '';
     if (shortcut.hidden !== !content.shortcut) shortcut.hidden = !content.shortcut;
     tooltip.classList.toggle('meo-tooltip--shortcut', !!content.shortcut);
-    position();
+    const live = options.liveUpdate ?? anchor.dataset.tooltipLiveUpdate === 'true';
+    if (live && changed && engaged) {
+      // Reparenting a mode toolbar can temporarily clear :hover before the
+      // browser reconciles its pointer target; the hover session remains valid.
+      if (hovering || focusTarget.matches(':focus-visible')) reveal();
+      else hide();
+    } else position();
   }
 
   anchor.addEventListener('mouseenter', () => { hovering = true; show(); }, { signal: events.signal });
   anchor.addEventListener('mouseleave', () => { hovering = false; if (!focusTarget.matches(':focus-visible')) hide(); }, { signal: events.signal });
   focusTarget.addEventListener('focus', () => { if (focusTarget.matches(':focus-visible')) show(); }, { signal: events.signal });
   focusTarget.addEventListener('blur', () => { if (!hovering) hide(); }, { signal: events.signal });
-  focusTarget.addEventListener('pointerdown', hide, { signal: events.signal });
-  focusTarget.addEventListener('keydown', event => { if (event.key === 'Escape') hide(); }, { signal: events.signal });
+  focusTarget.addEventListener('pointerdown', pointerDown, { signal: events.signal });
+  focusTarget.addEventListener('keydown', event => { if (event.key === 'Escape' || event.key === 'Tab') hide(); }, { signal: events.signal });
   setContent(content);
   return {
     show, hide, setContent,
+    isHovered: () => hovering,
     dispose() {
       if (disposed) return;
       disposed = true; hide(); events.abort(); tooltip.remove(); ownedAnchors.delete(anchor);
@@ -225,7 +250,8 @@ export function createTooltip(anchor: HTMLElement, options: {
 
 /**
  * Bootstrap-owned binding for data-tooltip, optional data-tooltip-shortcut and
- * data-tooltip-kind="fulltext|description" and data-tooltip-placement="top|bottom|left|right".
+ * data-tooltip-kind="fulltext|description", data-tooltip-placement="top|bottom|left|right",
+ * and data-tooltip-live-update="true" for stateful controls.
  * Explicit placement uses the control's own anchor. Full-text reveals only clipped text.
  * Generated controls supply metadata; authored title attributes retain their meaning.
  */
@@ -275,6 +301,10 @@ export function bindTooltips(root: HTMLElement) {
 
   function enter(event: Event) {
     const anchor = fromTarget(event.target);
+    // A pointer-driven mode switch may focus its source editor while the same
+    // live-update button remains under the pointer. Keep that hint's ownership.
+    if (event.type === 'focusin' && current?.anchor.dataset.tooltipLiveUpdate === 'true'
+      && current.hint.isHovered() && (!anchor || !anchor.matches(':focus-visible'))) return;
     if (!anchor) { current?.hint.dispose(); current = undefined; return; }
     const content = contentFor(anchor);
     if (!content) { current?.hint.dispose(); current = undefined; return; }
@@ -338,15 +368,15 @@ export function bindTooltips(root: HTMLElement) {
     }
     activeTooltip?.reposition();
   });
-  observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-tooltip', 'data-tooltip-shortcut', 'data-tooltip-kind', 'data-tooltip-placement', 'hidden', 'open'] });
+  observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-tooltip', 'data-tooltip-shortcut', 'data-tooltip-kind', 'data-tooltip-placement', 'data-tooltip-live-update', 'hidden', 'open'] });
   const appearance = new view.MutationObserver(() => {
     for (const state of frames.values()) if (state.doc) state.doc.documentElement.dataset.meoTooltipAppearance = doc.documentElement.dataset.meoTooltipAppearance ?? doc.documentElement.dataset.editorAppearance ?? 'light';
   });
   appearance.observe(doc.documentElement, { attributes: true, attributeFilter: ['data-editor-appearance', 'data-meo-tooltip-appearance'] });
   root.addEventListener('pointerover', enter, { signal: events.signal });
   root.addEventListener('focusin', enter, { signal: events.signal });
-  root.addEventListener('pointerdown', () => activeTooltip?.hide(), { capture: true, signal: events.signal });
-  root.addEventListener('keydown', event => { if (event.key === 'Escape') activeTooltip?.hide(); }, { capture: true, signal: events.signal });
+  root.addEventListener('pointerdown', event => activeTooltip?.pointerDown(event), { capture: true, signal: events.signal });
+  root.addEventListener('keydown', event => { if (event.key === 'Escape' || event.key === 'Tab') activeTooltip?.hide(); }, { capture: true, signal: events.signal });
   view.addEventListener('blur', () => activeTooltip?.hide(), { signal: events.signal });
   view.addEventListener('scroll', () => activeTooltip?.reposition(), { capture: true, passive: true, signal: events.signal });
   view.addEventListener('resize', () => activeTooltip?.reposition(), { signal: events.signal });
