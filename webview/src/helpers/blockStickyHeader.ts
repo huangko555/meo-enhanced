@@ -19,6 +19,8 @@ type BlockHeader = {
   from: number;
   to: number;
   language: string;
+  languageClass: 'meo-code-language-label' | 'meo-rendered-block-preview-language';
+  quoted: boolean;
   widget: WidgetType;
   kind: 'code' | 'mermaid' | 'math';
 };
@@ -49,6 +51,10 @@ function blockHeaderAt(view: EditorView, position: number): BlockHeader | null {
 function readBlockHeader(view: EditorView, position: number): BlockHeader | null {
   const state = view.state;
   const line = state.doc.lineAt(position);
+  let quoted = false;
+  for (let node: SyntaxNode | null = currentSyntaxTree(state).resolveInner(line.to, -1); node; node = node.parent) {
+    if (node.name === 'Blockquote') { quoted = true; break; }
+  }
   const rendered = getLiveRenderedBlocks(state, { includeSelectedMath: true }).find((block) => (
     (block.kind === 'mermaid' || block.kind === 'math') && block.startLine <= line.number && block.endLine >= line.number
   ));
@@ -62,7 +68,8 @@ function readBlockHeader(view: EditorView, position: number): BlockHeader | null
       const mode = getMermaidBlockMode(
         state, opening.from, state.doc.line(opening.number + 1).from, state.doc.line(ending.number - 1).to
       ).decision.effectiveMode;
-      return { from: opening.from, to: ending.to, language: 'mermaid', kind: 'mermaid',
+      return { from: opening.from, to: ending.to, language: 'mermaid', kind: 'mermaid', quoted,
+        languageClass: mode === 'preview' ? 'meo-rendered-block-preview-language' : 'meo-code-language-label',
         widget: createFloatingMermaidToolbarWidget(opening.from, opening.number, mode, content, ending.to) };
     }
     if (ending.number <= opening.number + 1) return null;
@@ -70,7 +77,8 @@ function readBlockHeader(view: EditorView, position: number): BlockHeader | null
     const contentTo = state.doc.line(ending.number - 1).to;
     const content = state.doc.sliceString(contentFrom, contentTo);
     const mode = getLatexMathBlockMode(state, opening.from, contentFrom, contentTo).decision.effectiveMode;
-    return { from: opening.from, to: ending.to, language: 'latex', kind: 'math',
+    return { from: opening.from, to: ending.to, language: 'latex', kind: 'math', quoted,
+      languageClass: mode === 'preview' ? 'meo-rendered-block-preview-language' : 'meo-code-language-label',
       widget: createFloatingLatexMathToolbarWidget(opening.from, opening.number, mode, content, ending.to) };
   }
   const node = codeNodeAt(view, position);
@@ -79,7 +87,7 @@ function readBlockHeader(view: EditorView, position: number): BlockHeader | null
   if (!widget) return null;
   return { from: state.doc.lineAt(node.from).from, to: state.doc.lineAt(Math.max(node.from, node.to - 1)).to,
     language: node.name === 'CodeBlock' ? getUiStrings(state.facet(uiLanguageFacet)).indentedCodeBlockLabel : getFencedCodeInfo(state, { node }) || 'Plain text',
-    kind: 'code', widget };
+    languageClass: 'meo-code-language-label', kind: 'code', quoted, widget };
 }
 
 class BlockStickyHeader {
@@ -148,7 +156,12 @@ class BlockStickyHeader {
     if (bottom - top < HEADER_HEIGHT * 3 || top >= scroller.top - 1 || bottom < scroller.top + HEADER_HEIGHT) return null;
     const content = view.contentDOM.getBoundingClientRect();
     const line = view.domAtPos(Math.max(block.from, Math.min(topLine.from, block.to))).node;
-    const lineElement = (line instanceof Element ? line : line.parentElement)?.closest<HTMLElement>('.cm-line');
+    let lineElement = (line instanceof Element ? line : line.parentElement)?.closest<HTMLElement>('.cm-line');
+    // Code tail widgets have no .cm-line; keep the last source row's bounds and indentation.
+    if (!lineElement && block.kind === 'code' && topLine.from > block.from) {
+      const previous = view.domAtPos(topLine.from - 1).node;
+      lineElement = (previous instanceof Element ? previous : previous.parentElement)?.closest<HTMLElement>('.cm-line');
+    }
     const lineRect = lineElement?.getBoundingClientRect();
     const gutterRight = view.scrollDOM.querySelector(':scope > .cm-gutters')?.getBoundingClientRect().right ?? scroller.left;
     const scaleX = view.scrollDOM.offsetWidth > 0 ? scroller.width / view.scrollDOM.offsetWidth : 1;
@@ -187,6 +200,10 @@ class BlockStickyHeader {
       this.header.replaceChildren(label, this.toolbar);
       this.identity = identity;
     }
+    this.header.classList.toggle('is-quoted', block.quoted);
+    const label = this.header.firstElementChild!;
+    label.className = `meo-code-block-pill meo-block-sticky-language ${block.languageClass}`;
+    label.setAttribute('aria-hidden', 'true');
     this.widget = block.widget;
     this.header.dataset.meoBlockFrom = String(block.from);
     this.header.dataset.meoBlockTo = String(block.to);

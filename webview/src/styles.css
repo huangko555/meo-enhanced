@@ -3617,7 +3617,8 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-code-block,
-.cm-editor.meo-mode-live .cm-line.meo-md-code-block * {
+.cm-editor.meo-mode-live .cm-line.meo-md-code-block *,
+.cm-editor.meo-mode-live .meo-block-sticky-header .meo-code-language-label {
   font-family: var(--meo-font-source);
   font-weight: var(--meo-font-source-weight);
 }
@@ -7449,25 +7450,25 @@ html[data-editor-appearance='dark'] .meo-input-suggestions {
   position: fixed;
   z-index: var(--meo-layer-document-chrome);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
   box-sizing: border-box;
-  padding: 4px 5px 4px 12px;
+  padding: 4px 5px 4px 0;
   background: var(--meo-code-background);
   cursor: default;
   user-select: none;
 }
 .cm-editor .meo-block-sticky-header[hidden] { display: none; }
-.meo-block-sticky-language {
+.cm-editor .meo-block-sticky-header .meo-block-sticky-language {
+  position: static;
+  margin-left: 2ch;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--meo-semantic-mutedForeground);
-  font-size: 0.85em;
-  line-height: 20px;
 }
+.cm-editor .meo-block-sticky-header.is-quoted .meo-code-language-label { margin-left: 3ch; }
 .cm-editor .meo-block-sticky-header > :is(.meo-code-block-actions, .meo-mermaid-toolbar, .meo-latex-math-toolbar) {
   position: static;
   flex: none;
