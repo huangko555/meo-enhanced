@@ -7,8 +7,11 @@ const build = await Bun.build({
 });
 if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
+let phase = 'startup';
+let failurePage: Awaited<ReturnType<typeof browser.newPage>> | undefined;
 try {
   const page = await browser.newPage();
+  failurePage = page;
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(String(error)));
   await page.setViewport({ width: 1100, height: 780 });
@@ -50,6 +53,7 @@ try {
   await page.waitForFunction(() => !document.querySelector('.mode-toolbar')?.classList.contains('meo-preload-toolbar'));
 
   const show = async (selector: string) => {
+    phase = 'hover ' + selector;
     await page.hover(selector);
     await page.waitForFunction(selector => {
       const id = document.querySelector(selector)?.getAttribute('aria-describedby');
@@ -206,8 +210,16 @@ try {
   assert.equal(await page.$('.meo-tooltip.is-visible'), null, 'content updates after leaving cannot reopen the hint');
   await show(stateful);
   await page.mouse.move(0, 0);
+  // Tab from an unfocused body can retain pointer modality. Start at a real
+  // toolbar control and verify native keyboard focus before entering the probe.
+  phase = 'stateful keyboard hint';
+  await page.focus(find);
   await page.keyboard.press('Tab');
+  assert.equal(await page.evaluate(() => document.activeElement?.matches(':focus-visible')), true,
+    'native Tab must establish keyboard focus');
   await page.focus(stateful);
+  assert.equal(await page.$eval(stateful, element => element.matches(':focus-visible')), true,
+    'the stateful probe must receive keyboard focus');
   await page.waitForFunction(() => !!document.querySelector('.meo-tooltip.is-visible'));
   for (const key of ['Enter', 'Space']) {
     await page.keyboard.press(key);
@@ -244,6 +256,7 @@ try {
     assert.deepEqual({ background: afterPointerLeave.background, color: afterPointerLeave.color }, restingStyle, 'pointer mode changes must not retain focus highlighting after leaving');
     assert.equal(await page.$('.meo-tooltip.is-visible'), null, 'leaving a pointer-operated mode button dismisses its hint');
     await page.keyboard.press('Tab');
+    phase = kind + ' keyboard mode updates';
     await page.focus(selector);
     await page.waitForFunction(selector => {
       const button = document.querySelector(selector)!;
@@ -261,6 +274,7 @@ try {
     await page.waitForFunction(({ selector, previous }) => (document.querySelector(selector) as HTMLElement)?.dataset.tooltip !== previous, {}, { selector, previous: splitHint });
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await page.mouse.move(0, 0);
+    phase = kind + ' keyboard mode updates';
     await page.focus(selector);
     const sourceHint = await page.$eval(selector, element => (element as HTMLElement).dataset.tooltip);
     await page.keyboard.press('Enter');
@@ -286,6 +300,7 @@ try {
   const fullscreenReset = '.meo-mermaid-fullscreen-controls [aria-label="Reset zoom"]';
   await page.mouse.move(0, 0);
   await page.keyboard.press('Tab');
+  phase = 'fullscreen keyboard hint';
   await page.focus(fullscreenReset);
   await page.waitForFunction(selector => {
     const button = document.querySelector(selector)!;
@@ -310,6 +325,7 @@ try {
   }
   await page.mouse.move(0, 0);
   await page.keyboard.press('Tab');
+  phase = 'scroll sync keyboard hint';
   await page.focus(sync);
   await page.waitForFunction(() => {
     const button = document.querySelector('.source-preview-scroll-sync-button')!;
@@ -367,6 +383,19 @@ try {
   assert.deepEqual(errors, []);
   await page.close();
   console.log('Production tooltips: delay, stateful pointer/keyboard updates, mode focus feedback, dismissal, toolbar/menu scope, fullscreen controls, boundary placement and Preview theme isolation passed.');
+} catch (error) {
+  // Keep the failing interaction and actual geometry in CI timeout reports.
+  const state = await failurePage?.evaluate(() => ({
+    focusedVisible: document.activeElement?.matches(':focus-visible'),
+    focused: document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.className,
+    hovered: Array.from(document.querySelectorAll(':hover')).map(element => element.className),
+    hints: Array.from(document.querySelectorAll('.meo-tooltip.is-visible')).map(element => element.textContent),
+    modeButtons: Array.from(document.querySelectorAll<HTMLElement>('.meo-mermaid-mode-btn,.meo-latex-math-mode-btn')).map(element => ({
+      label: element.dataset.tooltip, bounds: element.getBoundingClientRect().toJSON(),
+      hovered: element.matches(':hover'), focused: element.matches(':focus-visible')
+    }))
+  })).catch(() => undefined);
+  throw new Error(`Tooltip production check failed during ${phase}: ${JSON.stringify(state)}`, { cause: error });
 } finally {
   await browser.close();
 }
