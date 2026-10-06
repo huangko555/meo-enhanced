@@ -2584,8 +2584,7 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
       style: '--meo-live-task-indent:' + liveTaskListIndentCssValue(taskIndent) + ';'
     } }).range(line.from));
     if (!prefix.prefix || parsedContainers.markers.has(lineNo) || listMarkerData(line.text)) continue;
-    const activeQuotes = activeLines.has(lineNo) ? prefix.quoteColumns.length : 0;
-    const proseIndent = liveBlockIndentCssValue({ ...indent, columns: indent.columns + activeQuotes });
+    const proseIndent = liveBlockIndentCssValue(indent);
     if (!proseIndent) continue;
     if (!prefix.quoteColumns.length && indent.footnoteNumber === null) ranges.push(Decoration.mark({ attributes: {
       class: 'meo-md-quote-prefix-space',
@@ -3472,6 +3471,14 @@ function projectInputBlockquoteLines(
     if (lineDecorations.length === 0) return;
 
     const changedLine = nextDocument.lineAt(Math.min(fromB, nextDocument.length));
+    const carriedContainerDecorations: Decoration[] = [];
+    decorations.between(changedLine.from, changedLine.from, (from, to, decoration) => {
+      const className = decoration.spec.attributes?.class ?? decoration.spec.class;
+      if (from === to && from === changedLine.from &&
+        ['meo-md-quote-source-order', 'meo-md-container-prose', 'meo-md-quote-nested'].includes(className)) {
+        carriedContainerDecorations.push(decoration);
+      }
+    });
     const firstInsertedLine = changedLine.number + 1;
     const lastInsertedLine = nextDocument.lineAt(Math.min(toB, nextDocument.length)).number;
     for (let lineNumber = changedLine.number; lineNumber <= lastInsertedLine; lineNumber += 1) {
@@ -3479,11 +3486,22 @@ function projectInputBlockquoteLines(
       const prefix = /^[ \t]{0,3}(?:>[ \t]?)+/.exec(line.text)?.[0];
       if (!prefix) continue;
       if (lineNumber >= firstInsertedLine) {
-        for (const decoration of lineDecorations) {
-          lineAdditions.set(`${line.from}:${decoration.spec.class as string}`, decoration.range(line.from));
+        // Preserve the container geometry while the deferred syntax tree catches up.
+        for (const decoration of [...lineDecorations, ...carriedContainerDecorations]) {
+          const className = decoration.spec.attributes?.class ?? decoration.spec.class;
+          lineAdditions.set(`${line.from}:${className}`, decoration.range(line.from));
+        }
+        for (const match of prefix.matchAll(/[ \t]+/g)) {
+          const startColumns = parseBlockLinePrefix(prefix.slice(0, match.index), transaction.state.tabSize).columns;
+          const endColumns = parseBlockLinePrefix(prefix.slice(0, match.index + match[0].length), transaction.state.tabSize).columns;
+          const from = line.from + match.index;
+          markerAdditions.set(`space:${from}`, Decoration.mark({ attributes: {
+            class: 'meo-md-quote-prefix-space',
+            style: '--meo-quote-space-width:calc(' + (endColumns - startColumns) + ' * var(--meo-live-container-ch));'
+          } }).range(from, from + match[0].length));
         }
       }
-      const markerDecoration = activeLines.has(lineNumber) ? activeLineMarkerDeco : markerDeco;
+      const markerDecoration = activeLines.has(lineNumber) ? activeQuoteMarkerDeco : markerDeco;
       for (let offset = 0; offset < prefix.length; offset += 1) {
         if (prefix[offset] !== '>') continue;
         const from = line.from + offset;
@@ -3497,7 +3515,7 @@ function projectInputBlockquoteLines(
   });
 
   if (lineAdditions.size === 0 && markerAdditions.size === 0) return decorations;
-  const markerClasses = new Set([markerDeco.spec.class, activeLineMarkerDeco.spec.class]);
+  const markerClasses = new Set([markerDeco.spec.class, activeLineMarkerDeco.spec.class, activeQuoteMarkerDeco.spec.class]);
   return decorations.update({
     filterFrom: markerFilterFrom,
     filterTo: markerFilterTo,

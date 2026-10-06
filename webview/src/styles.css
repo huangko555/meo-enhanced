@@ -3101,6 +3101,12 @@ html[data-editor-appearance='dark'] .meo-tooltip-shortcut { background: rgba(255
   text-indent: 0;
 }
 
+/* Prose quote syntax uses its prefix space without moving the rendered body. */
+.cm-editor.meo-mode-live .meo-md-container-prose .meo-md-quote-marker-active {
+  display: inline-block !important;
+  margin-inline-end: calc(-1 * var(--meo-live-container-ch));
+}
+
 /* Prefix spaces express nesting once; list wrapping adds only the content inset. */
 .cm-editor.meo-mode-live .cm-line.meo-md-quote-source-order.meo-md-quote:not(.meo-md-list-line):not(.meo-md-code-block):not(.meo-mermaid-block) {
   padding-left: var(--meo-live-container-ch);
@@ -3127,10 +3133,6 @@ html[data-editor-appearance='dark'] .meo-tooltip-shortcut { background: rgba(255
 .cm-editor .cm-line.meo-md-quote .meo-md-code-marker-active {
   color: var(--meo-semantic-markdownSyntax) !important;
   -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;
-}
-
-.cm-editor.meo-mode-live .cm-activeLine.meo-md-quote:not(.meo-md-list-line):not(.meo-md-code-block):not(.meo-mermaid-block):has(> .meo-md-marker-active:first-child) {
-  text-indent: -2ch;
 }
 
 .cm-editor .cm-line:is(.meo-md-quote, .meo-md-alert):is(.meo-md-code-block, .meo-mermaid-block) {
