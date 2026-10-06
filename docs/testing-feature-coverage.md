@@ -15,7 +15,7 @@
 | 滚轮与阅读稳定 | 向下/向上持续前进；一次手势多帧完成时不被拉回；迟到布局只补偿几何变化 | [滚动进度](../scripts/test-native-scroll-progress-production.ts)、[虚拟块布局](../scripts/test-virtual-block-scroll-stability.ts)；全篇检查必须实际到达首尾 |
 | 搜索、替换、上一项/下一项 | 匹配正确；可见项不多滚；离屏项进入可用视口；替换及撤销内容准确 | [搜索替换](../scripts/test-search-replace-production.ts)、[搜索控件](../scripts/test-webview-search-controls.ts) |
 | 目录、行号、链接导航、返回顶部 | 定位目标正确；返回顶部真实滚到开头；搜索、导航、输入、用户滚动不竞争旧定位 | [目录同步](../scripts/test-outline-scroll-sync.ts)、[行号](../scripts/test-line-jump.ts)、[光标导航](../scripts/test-input-cursor-navigation-production.ts)、[返回顶部](../scripts/test-webview-viewport.ts) |
-| 工具栏、菜单、外部窗口返回 | 非输入控件保留插入点；输入控件合理取得焦点；返回后马上能输入且点击优先 | [焦点与视口](../scripts/test-toolbar-input-viewport.ts)；浏览器不能证明 Windows Alt+Tab / 原生菜单 Esc 行为 |
+| 工具栏、菜单、外部窗口返回 | 非输入控件保留插入点；输入控件合理取得焦点；仅活动状态变化不触发窗口恢复；窗口返回不抢走其他页面的输入焦点，返回 MEO 后马上能输入且点击优先 | [焦点与视口](../scripts/test-toolbar-input-viewport.ts)、[窗口状态转换](../scripts/test-panel-session-window-focus.ts)、[页面焦点归属](../scripts/test-editor-focus-window-return.ts)；浏览器不能证明 Windows Alt+Tab / 原生菜单 Esc 行为 |
 | 撤销重做 | 正文与嵌套编辑共用历史；结构、选区、视口、渲染状态一起正确恢复 | [历史矩阵](../scripts/test-history-matrix.ts)、[渲染内容回放](../scripts/test-rendered-content-history-roundtrip.ts) |
 | 表格单元格与结构操作 | 编辑、多行、增加删除行列、对齐、跨模式选区及历史正确 | [表格编辑](../scripts/test-table-cell-editing-production.ts)、[表格历史](../scripts/test-table-history.ts) |
 | 表格复制粘贴 | 选区、Markdown 样式、转义管道、多行、外部 TSV 保留；粘贴和撤销准确 | [剪贴板合同](../scripts/test-table-clipboard.ts)、[生产复制粘贴](../scripts/test-table-clipboard-production.ts)；浏览器 ClipboardEvent 不能证明系统剪贴板权限 |
