@@ -205,6 +205,8 @@ class BlockStickyHeader {
       this.identity = identity;
     }
     this.header.classList.toggle('is-quoted', block.quoted);
+    this.header.classList.toggle('meo-md-code-block-start',
+      block.kind === 'math' || codeNodeAt(this.view, this.view.state.doc.lineAt(block.from).to)?.name === 'FencedCode');
     const label = this.header.firstElementChild!;
     label.className = `meo-code-block-pill meo-block-sticky-language ${block.languageClass}`;
     label.setAttribute('aria-hidden', 'true');

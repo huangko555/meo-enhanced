@@ -1,6 +1,7 @@
 import { EditorState } from '@codemirror/state';
 import type { SyntaxNodeRef, Tree } from '@lezer/common';
 import { isThematicBreakLine } from './frontmatter';
+import { parseBlockLinePrefix } from './blockIndent';
 import { getFencedCodeInfo, resolvedSyntaxTree } from './markdownSyntax';
 import { collectLatexMathRanges, resolveFencedDisplayMathInnerLineRange } from './math';
 import { isTableDelimiterLine, parseTableInfo } from './tables';
@@ -106,17 +107,18 @@ function detectFallbackTableBlocks(
     const delimiterText = state.doc.sliceString(delimiterLine.from, delimiterLine.to);
     if (isThematicBreakLine(delimiterText)) continue;
     if (!isTableDelimiterLine(delimiterText)) continue;
+    const prefix = parseBlockLinePrefix(delimiterText, state.tabSize).prefix;
 
     const headerLineNo = lineNo - 1;
     const headerLine = state.doc.line(headerLineNo);
     const headerText = state.doc.sliceString(headerLine.from, headerLine.to);
-    if (!isTableContentLine(headerText)) continue;
+    if (!isTableContentLine(headerText) || parseBlockLinePrefix(headerText, state.tabSize).prefix !== prefix) continue;
 
     let endLineNo = lineNo;
     for (let rowLineNo = lineNo + 1; rowLineNo <= state.doc.lines; rowLineNo += 1) {
       const rowLine = state.doc.line(rowLineNo);
       const rowText = state.doc.sliceString(rowLine.from, rowLine.to);
-      if (!isTableContentLine(rowText)) break;
+      if (!isTableContentLine(rowText) || parseBlockLinePrefix(rowText, state.tabSize).prefix !== prefix) break;
       endLineNo = rowLineNo;
     }
 

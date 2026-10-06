@@ -176,7 +176,7 @@ async function main(): Promise<void> {
         text: line.innerText,
         markers: line.querySelectorAll('.meo-md-list-marker').length,
         checkboxes: line.querySelectorAll('.meo-task-checkbox').length,
-        quoteDepthIndicator: getComputedStyle(line, '::before').width,
+        quoteDepthIndicator: String(getComputedStyle(line, '::before').backgroundPositionX.split(',').length),
         markerRects: Array.from(line.querySelectorAll<HTMLElement>('.meo-md-list-marker'))
           .map((marker) => ({ left: marker.getBoundingClientRect().left, right: marker.getBoundingClientRect().right }))
       }));

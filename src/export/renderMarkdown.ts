@@ -10,6 +10,7 @@ import { extractExportFrontmatter } from './frontmatter';
 import { prepareMarkdownWithFootnotes } from './footnotes';
 import type { SourceMappedMarkdown } from './sourceMappedMarkdown';
 import { installMathTransform } from './mathTransform';
+import { collectMarkdownCodeLines } from './markdownCodeLines';
 import { collectLatexMathRanges, renderLatexMathToHtml } from './math';
 import { installHighlightTransform } from './highlightTransform';
 import { installInlineScriptTransform } from './inlineScriptTransform';
@@ -90,7 +91,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
       : { src: rewriteImageSrc(rawSrc) }
   );
   const originalSourceLines = String(options.markdownText ?? '').split(/\r?\n/);
-  const normalized = normalizeMarkdownForExportWithSourceMap(options.markdownText);
+  const normalized = { markdown: String(options.markdownText ?? ''), sourceLines: originalSourceLines.map((_, index) => index + 1) };
   const extractedFrontmatter = extractExportFrontmatter(normalized, uiStrings.properties);
   const shouldEnableMathTransform = extractedFrontmatter.body.markdown.includes('$');
 
@@ -209,11 +210,15 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     renderMarkdown: (markdownText) => md.render(markdownText),
     normalizeMarkdown: normalizeMarkdownForExport,
     backToReference: uiStrings.backToReference,
-    backToNumberedReference: uiStrings.backToNumberedReference
+    backToNumberedReference: uiStrings.backToNumberedReference,
+    backToReferenceOccurrence: uiStrings.backToReferenceOccurrence
   });
-  bodySourceLines = preparedMarkdown.body.sourceLines;
+  // Extract definitions before table normalization can change their four-space
+  // continuation indent and accidentally detach subsequent blocks.
+  const normalizedBody = normalizeMarkdownForExportWithSourceMap(preparedMarkdown.body.markdown);
+  bodySourceLines = normalizedBody.sourceLines.map(line => preparedMarkdown.body.sourceLines[line - 1] ?? line);
   headings.length = 0;
-  const bodyHtml = md.render(preparedMarkdown.body.markdown);
+  const bodyHtml = md.render(normalizedBody.markdown);
   const tableOfContentsDocumentHref = options.target === 'html' && options.outputFilePath
     ? `./${encodeURIComponent(path.basename(options.outputFilePath))}`
     : '';
@@ -533,6 +538,7 @@ function installSourcePositionAndHeadingAnchorTransform(
   onHeading?: (heading: ExportHeading) => void
 ): void {
   md.core.ruler.after('inline', 'meo-heading-anchors', (state: any) => {
+    if (state.env?.meoTableCell) return;
     const slugCounts = new Map<string, number>();
     const tokens = state.tokens as any[];
 
@@ -584,6 +590,15 @@ function installTableContainerTransform(md: MarkdownIt, resolveIndent: (sourceLi
 }
 
 function installTableCellListTransform(md: MarkdownIt): void {
+  // A cell's explicit breaks delimit logical lines. Restrict these extensions
+  // to cells; normal prose retains Markdown's ordered-list and lazy-quote rules.
+  md.block.ruler.before('list', 'meo_cell_ordered_boundary', (state, line, _end, silent) => (
+    Boolean(silent && state.env?.meoTableCell
+      && /^\d{1,9}[.)][ \t]+/.test(state.src.slice(state.bMarks[line] + state.tShift[line], state.eMarks[line])))
+  ), { alt: ['paragraph', 'blockquote'] });
+  md.block.ruler.before('blockquote', 'meo_cell_quote_boundary', (state, _line, _end, silent) => (
+    Boolean(silent && state.env?.meoTableCell && state.parentType === 'blockquote')
+  ), { alt: ['blockquote'] });
   md.core.ruler.after('inline', 'meo_table_cell_lists', (state) => {
     for (let index = 1; index < state.tokens.length; index += 1) {
       const inlineNode = state.tokens[index];
@@ -604,59 +619,33 @@ function installTableCellListTransform(md: MarkdownIt): void {
 }
 
 function renderBreakSeparatedCellList(content: string, md: MarkdownIt): string | null {
-  const lines = content.split(/<br\s*\/?\s*>|\r?\n/gi).filter((line) => line.trim() !== '');
-  const items = lines.map((line) => {
-    const match = /^([ \t]*)(?:([-+*])|(\d+)\.)\s+(.+)$/.exec(line);
-    if (!match) {
-      return null;
-    }
-    const indent = [...match[1]].reduce((columns, char) => columns + (char === '\t' ? 2 : 1), 0);
-    return {
-      indent,
-      type: match[3] ? 'ol' as const : 'ul' as const,
-      start: match[3] ? Number.parseInt(match[3], 10) : 1,
-      content: match[4]
-    };
-  });
-  if (items.length === 0 || items.some((item) => item === null)) {
-    return null;
-  }
-
-  let html = '';
-  const stack: Array<{ indent: number; type: 'ul' | 'ol'; liOpen: boolean }> = [];
-  for (const item of items) {
-    if (!item) continue;
-    while (stack.length > 0 && item.indent < stack[stack.length - 1].indent) {
-      const current = stack.pop()!;
-      if (current.liOpen) html += '</li>';
-      html += `</${current.type}>`;
-    }
-    const current = stack[stack.length - 1];
-    if (!current || item.indent > current.indent) {
-      const start = item.type === 'ol' && item.start !== 1 ? ` start="${item.start}"` : '';
-      html += `<${item.type}${start}>`;
-      stack.push({ indent: item.indent, type: item.type, liOpen: false });
-    } else {
-      if (current.liOpen) html += '</li>';
-      if (current.type !== item.type) {
-        html += `</${current.type}>`;
-        stack.pop();
-        const start = item.type === 'ol' && item.start !== 1 ? ` start="${item.start}"` : '';
-        html += `<${item.type}${start}>`;
-        stack.push({ indent: item.indent, type: item.type, liOpen: false });
-      }
-    }
-    html += `<li>${md.renderInline(item.content)}`;
-    stack[stack.length - 1].liOpen = true;
-  }
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    if (current.liOpen) html += '</li>';
-    html += `</${current.type}>`;
-  }
-  return html;
+  const lines = splitCellLogicalLines(content, md);
+  if (!lines.some((line) => /^[ \t]*(?:>|[-+*]\s|\d+[.)]\s)/.test(line))) return null;
+  // Use the document parser so quotes, nested lists, task states and inline
+  // styles share their normal semantics inside break-separated cells.
+  return md.render(lines.join('\n'), { meoTableCell: true });
 }
 
+
+function splitCellLogicalLines(content: string, md: MarkdownIt): string[] {
+  const state = new md.inline.State(content, md, {}, []);
+  const lines: string[] = [];
+  let start = 0;
+  while (state.pos < state.posMax) {
+    const match = /^(?:<br\s*\/?\s*>|\r?\n)/i.exec(content.slice(state.pos));
+    if (match) {
+      lines.push(content.slice(start, state.pos));
+      state.pos += match[0].length;
+      start = state.pos;
+    } else {
+      // The inline parser skips complete code spans, links and escapes, so a
+      // literal <br> within them never becomes structural Markdown.
+      md.inline.skipToken(state);
+    }
+  }
+  lines.push(content.slice(start));
+  return lines;
+}
 
 function extractHeadingText(inlineToken: any): string {
   const collect = (tokens: any[]): string => tokens.map((token) => {
@@ -716,34 +705,20 @@ function normalizeMarkdownForExport(markdownText: string): string {
 }
 
 function normalizeMarkdownForExportWithSourceMap(markdownText: string): SourceMappedMarkdown {
-  const normalized = normalizeLooseTableDelimiters(markdownText);
-  const expandedLists = expandBreakSeparatedBodyLists(normalized);
-  return ensureBlankLinesAroundTableBlocks(expandedLists.markdown, expandedLists.sourceLines);
+  const codeLines = collectMarkdownCodeLines(markdownText);
+  const normalized = normalizeLooseTableDelimiters(markdownText, codeLines);
+  const expandedLists = expandBreakSeparatedBodyLists(normalized, codeLines);
+  return ensureBlankLinesAroundTableBlocks(expandedLists.markdown, expandedLists.sourceLines, codeLines);
 }
 
-function expandBreakSeparatedBodyLists(markdownText: string): { markdown: string; sourceLines: number[] } {
+function expandBreakSeparatedBodyLists(markdownText: string, codeLines: ReadonlySet<number>): { markdown: string; sourceLines: number[] } {
   const lines = String(markdownText ?? '').split(/\r?\n/);
   const out: string[] = [];
   const sourceLines: number[] = [];
-  let inFence = false;
-  let fenceChar = '';
-  let fenceLen = 0;
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? '';
-    const fence = parseFenceLine(line);
-    if (fence) {
-      if (!inFence) {
-        inFence = true;
-        fenceChar = fence.char;
-        fenceLen = fence.length;
-      } else if (fence.char === fenceChar && fence.length >= fenceLen) {
-        inFence = false;
-        fenceChar = '';
-        fenceLen = 0;
-      }
-    }
-    const expanded = !inFence && !line.includes('|')
-      ? line.replace(/<br\s*\/?\s*>\s*(?=(?:[-+*]|\d+\.)\s+)/gi, '\n').split('\n')
+    const expanded = !codeLines.has(index) && !line.includes('|')
+      ? expandBodyListBreaks(line)
       : [line];
     for (const expandedLine of expanded) {
       out.push(expandedLine);
@@ -753,33 +728,17 @@ function expandBreakSeparatedBodyLists(markdownText: string): { markdown: string
   return { markdown: out.join('\n'), sourceLines };
 }
 
-function normalizeLooseTableDelimiters(markdownText: string): string {
+function normalizeLooseTableDelimiters(markdownText: string, codeLines: ReadonlySet<number>): string {
   const lines = String(markdownText ?? '').split(/\r?\n/);
-  let inFence = false;
-  let fenceChar = '';
-  let fenceLen = 0;
   for (let index = 0; index < lines.length; index += 1) {
-    const fence = parseFenceLine(lines[index] ?? '');
-    if (fence) {
-      if (!inFence) {
-        inFence = true;
-        fenceChar = fence.char;
-        fenceLen = fence.length;
-      } else if (fence.char === fenceChar && fence.length >= fenceLen) {
-        inFence = false;
-        fenceChar = '';
-        fenceLen = 0;
-      }
-      continue;
-    }
-    if (inFence || index === 0) {
-      continue;
-    }
-    const delimiter = lines[index] ?? '';
+    if (codeLines.has(index) || index === 0) continue;
+    const originalDelimiter = lines[index] ?? '';
+    const containerPrefix = /^[ \t]*(?:>[ \t]*)*/.exec(originalDelimiter)?.[0] ?? '';
+    const delimiter = originalDelimiter.slice(containerPrefix.length);
     if (!isTableDelimiterLine(delimiter)) {
       continue;
     }
-    const headerColumnCount = countTableCells(lines[index - 1] ?? '');
+    const headerColumnCount = countTableCells((lines[index - 1] ?? '').replace(/^[ \t]*(?:>[ \t]*)*/, ''));
     const delimiterCells = splitTableCells(delimiter);
     if (headerColumnCount <= delimiterCells.length) {
       continue;
@@ -789,7 +748,7 @@ function normalizeLooseTableDelimiters(markdownText: string): string {
     while (delimiterCells.length < headerColumnCount) {
       delimiterCells.push('---');
     }
-    lines[index] = `${leadingPipe ? '| ' : ''}${delimiterCells.join(' | ')}${trailingPipe ? ' |' : ''}`;
+    lines[index] = `${containerPrefix}${leadingPipe ? '| ' : ''}${delimiterCells.join(' | ')}${trailingPipe ? ' |' : ''}`;
   }
   return lines.join('\n');
 }
@@ -812,35 +771,15 @@ function countLeadingIndentColumns(line: string): number {
 
 function ensureBlankLinesAroundTableBlocks(
   markdownText: string,
-  inputSourceLines: number[]
+  inputSourceLines: number[],
+  codeLines: ReadonlySet<number>
 ): { markdown: string; sourceLines: number[] } {
   const lines = String(markdownText ?? '').split(/\r?\n/);
   const out: string[] = [];
   const sourceLines: number[] = [];
-  let inFence = false;
-  let fenceChar = '';
-  let fenceLen = 0;
-
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i] ?? '';
-
-    const fence = parseFenceLine(line);
-    if (fence) {
-      if (!inFence) {
-        inFence = true;
-        fenceChar = fence.char;
-        fenceLen = fence.length;
-      } else if (fence.char === fenceChar && fence.length >= fenceLen) {
-        inFence = false;
-        fenceChar = '';
-        fenceLen = 0;
-      }
-      out.push(line);
-      sourceLines.push(inputSourceLines[i] ?? i + 1);
-      continue;
-    }
-
-    if (inFence) {
+    if (codeLines.has((inputSourceLines[i] ?? i + 1) - 1)) {
       out.push(line);
       sourceLines.push(inputSourceLines[i] ?? i + 1);
       continue;
@@ -895,7 +834,7 @@ function isTableNestedUnderList(lines: string[], tableLineIndex: number, tableIn
     if (!line.trim()) {
       continue;
     }
-    const listMarker = /^(?<indent>[ \t]*)(?<marker>[-+*]|\d+\.)\s+/.exec(line);
+    const listMarker = /^(?<indent>[ \t]*)(?<marker>[-+*]|\d+[.)])\s+/.exec(line);
     if (listMarker?.groups) {
       const contentIndent = countLeadingIndentColumns(listMarker.groups.indent)
         + listMarker.groups.marker.length
@@ -927,20 +866,23 @@ function isTableDelimiterLine(line: string): boolean {
   return /^\|?\s*:?[-]{3,}:?\s*(?:\|\s*:?[-]{3,}:?\s*)*\|?$/.test(trimmed);
 }
 
-function parseFenceLine(line: string): { char: '`' | '~'; length: number } | null {
-  const match = /^[ \t]{0,3}([`~]{3,})/.exec(line);
-  if (!match) {
-    return null;
+const bodyInlineParser = new MarkdownIt({ html: true });
+
+function expandBodyListBreaks(line: string): string[] {
+  if (!/<br/i.test(line)) return [line];
+  // Keep ordinary HTML breaks intact; only the supported list extension expands.
+  const state = new bodyInlineParser.inline.State(line, bodyInlineParser, {}, []);
+  let output = '';
+  let start = 0;
+  while (state.pos < state.posMax) {
+    const match = /^<br\s*\/?\s*>\s*(?=(?:[-+*]|\d+[.)])\s+)/i.exec(line.slice(state.pos));
+    if (match) {
+      output += line.slice(start, state.pos) + '\n';
+      state.pos += match[0].length;
+      start = state.pos;
+    } else bodyInlineParser.inline.skipToken(state);
   }
-  const marker = match[1];
-  const char = marker[0];
-  if (char !== '`' && char !== '~') {
-    return null;
-  }
-  return {
-    char,
-    length: marker.length
-  };
+  return (output + line.slice(start)).split('\n');
 }
 
 function installTaskListTransform(md: MarkdownIt): void {
@@ -976,6 +918,10 @@ function installTaskListTransform(md: MarkdownIt): void {
       const statusClass = taskStatusClassFromMarker(match[1]);
       current.token.attrJoin('class', 'meo-export-task-item');
       current.token.attrJoin('class', statusClass);
+      const parentItem = itemStack.at(-2)?.token;
+      if (parentItem && current.token.map?.[0] === parentItem.map?.[0]) {
+        current.token.attrJoin('class', 'meo-export-task-show-marker');
+      }
 
       removeTaskPrefixFromInlineToken(token, match[0].length);
 

@@ -225,7 +225,7 @@ async function verifyInputAndNavigationFrames(): Promise<void> {
         assert.ok(result.visible, context + ': caret remains visible');
         for (const sample of result.samples) {
           assert.ok(sample.top !== null && Math.abs(sample.top - last.top) <= 1, context + ': caret Y jumped: ' + JSON.stringify(result.samples));
-          assert.ok(sample.left !== null && Math.abs(sample.left - last.left) <= 1, context + ': caret X jumped');
+          assert.ok(sample.left !== null && Math.abs(sample.left - last.left) <= 1, context + ': caret X jumped: ' + JSON.stringify(result.samples));
           assert.ok(Math.abs(sample.scroll - last.scroll) <= 1, context + ': viewport scrolled twice');
           assert.equal(sample.code, action !== 'enter-last', context + ': correct source surface from first frame');
           assert.deepEqual(sample.numbers, last.numbers, context + ': gutter stable from first frame');

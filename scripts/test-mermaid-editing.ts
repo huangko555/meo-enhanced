@@ -1099,6 +1099,7 @@ async function main() {
           .filter((line) => (line.textContent ?? '').includes('```mermaid')).length,
         visibleLatexFenceLines: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
           .filter((line) => (line.textContent ?? '').includes('$$')).length,
+        latexLabelClearance: latexCanvasRect.top - (latexRoot.parentElement!.querySelector('.meo-rendered-block-preview-language')?.getBoundingClientRect().bottom ?? latexRootRect.top),
         latexVisualTop: latexCanvasRect.top - latexRootRect.top,
         latexVisualBottom: latexRootRect.bottom - latexCanvasRect.bottom,
         mermaidChrome: readPreviewChrome('mermaid'),
@@ -1127,7 +1128,7 @@ async function main() {
       || defaultMode.visibleLatexFenceLines !== 0
       || defaultMode.latexVisualTop < 12
       || defaultMode.latexVisualBottom < 12
-      || Math.abs(defaultMode.latexVisualTop - defaultMode.latexVisualBottom) > 1
+      || defaultMode.latexLabelClearance < 4
       || !hasExpectedPreviewChrome(defaultMode.mermaidChrome, 'mermaid')
       || !hasExpectedPreviewChrome(defaultMode.latexChrome, 'latex')
       || !defaultMode.sharedSplitIcon

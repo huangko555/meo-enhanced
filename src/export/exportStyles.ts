@@ -614,8 +614,15 @@ ol ol {
 }
 
 .meo-export-task-item {
+  --meo-export-task-inset: calc(17px + 0.55em);
+  position: relative;
+  padding-inline-start: var(--meo-export-task-inset);
   list-style: none;
   margin-left: -0.1em;
+}
+
+.meo-export-task-item.meo-export-task-show-marker {
+  list-style: inherit;
 }
 
 .meo-export-task-checkbox {
@@ -623,18 +630,18 @@ ol ol {
   box-sizing: border-box;
   width: 17px;
   height: 17px;
-  margin-right: 0.55em;
-  vertical-align: middle;
+  margin: 0;
   border: 1px solid var(--meo-border);
   border-radius: 4px;
   background: var(--meo-sidebar-bg);
-  position: relative;
-  top: -1px;
+  position: absolute;
+  inset-inline-start: 0;
+  top: calc((1lh - 17px) / 2);
 }
 
 .meo-export-task-text {
   display: inline-block;
-  width: calc(100% - 17px - 0.55em);
+  width: 100%;
   vertical-align: top;
 }
 
@@ -692,13 +699,15 @@ u {
   text-decoration: underline;
 }
 
-sup.footnote-ref {
+/* The HTML policy retains generated reference IDs; use them to identify note
+ * superscripts even when the input class is stripped by sanitization. */
+sup:has(> a[id^="fnref-"]) {
   font-size: 0.8em;
   line-height: 1;
   vertical-align: super;
 }
 
-.footnote-ref a,
+sup > a[id^="fnref-"],
 .footnote-backref {
   color: var(--meo-link);
   text-decoration: none;
@@ -748,15 +757,24 @@ sup.footnote-ref {
 }
 
 .footnote-backref {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.1em;
+  white-space: nowrap;
   margin-left: 0.35em;
   color: var(--meo-muted);
+}
+
+.footnote-backref:hover,
+.footnote-backref:focus-visible {
+  color: var(--meo-link);
 }
 
 strong, b { color: ${previewAppearanceIsDark ? darkDefaultStrongForeground : 'inherit'}; }
 :is(h1, h2, h3, h4, h5, h6, a, strong, b, .meo-export-task-text.is-done, .meo-export-task-text.is-dropped) :is(strong, b) { color: inherit; }
 ${buildMarkdownInlineStyleCss({
   emphasis: 'em', strong: 'strong', strikethrough: 's, del',
-  subscript: 'sub', superscript: 'sup:not(.footnote-ref)'
+  subscript: 'sub', superscript: 'sup:not(:has(> a[id^="fnref-"]))'
 })}
 mark {
   color: inherit;

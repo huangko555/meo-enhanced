@@ -8,6 +8,7 @@ export type ReadingUiStrings = Readonly<{
   colorLabel: (value: string) => string;
   backToReference: string;
   backToNumberedReference: (number: number) => string;
+  backToReferenceOccurrence: (number: number, occurrence: number) => string;
 }>;
 
 const CATALOG: Readonly<Record<UiLanguage, ReadingUiStrings>> = Object.freeze({
@@ -18,7 +19,8 @@ const CATALOG: Readonly<Record<UiLanguage, ReadingUiStrings>> = Object.freeze({
     alertLabel: (type: string) => type,
     colorLabel: (value: string) => `Color ${value}`,
     backToReference: 'Back to reference',
-    backToNumberedReference: (number: number) => `Back to reference ${number}`
+    backToNumberedReference: (number: number) => `Back to reference ${number}`,
+    backToReferenceOccurrence: (number: number, occurrence: number) => `Back to footnote ${number}, citation ${occurrence}`
   }),
   'zh-CN': Object.freeze({
     properties: 'Properties',
@@ -27,7 +29,8 @@ const CATALOG: Readonly<Record<UiLanguage, ReadingUiStrings>> = Object.freeze({
     alertLabel: (type: string) => ({ NOTE: '备注', TIP: '提示', IMPORTANT: '重要', WARNING: '警告', CAUTION: '注意' }[type] ?? type),
     colorLabel: (value: string) => `颜色 ${value}`,
     backToReference: '返回脚注引用',
-    backToNumberedReference: (number: number) => `返回脚注引用 ${number}`
+    backToNumberedReference: (number: number) => `返回脚注引用 ${number}`,
+    backToReferenceOccurrence: (number: number, occurrence: number) => `返回脚注 ${number} 的第 ${occurrence} 处引用`
   })
 });
 

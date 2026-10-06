@@ -1,5 +1,6 @@
 import path from 'node:path';
 import type { SourceMappedMarkdown } from './sourceMappedMarkdown';
+import { collectMarkdownCodeLines } from './markdownCodeLines';
 
 export type PrepareMarkdownWithFootnotesOptions = {
   target: 'html' | 'pdf' | 'docx';
@@ -8,6 +9,7 @@ export type PrepareMarkdownWithFootnotesOptions = {
   normalizeMarkdown: (markdownText: string) => string;
   backToReference: string;
   backToNumberedReference: (number: number) => string;
+  backToReferenceOccurrence: (number: number, occurrence: number) => string;
 };
 
 export type PreparedMarkdownWithFootnotes = {
@@ -34,42 +36,47 @@ export function prepareMarkdownWithFootnotes(
   const numberByLabel = new Map<string, number>();
   const referenceCountsByLabel = new Map<string, number>();
   const hrefPrefix = getInternalDocumentHrefPrefix(options);
-  const fenceState = createFenceState();
-  let nextNumber = 1;
-
-  const bodyLines = extracted.bodyLines.map((line) => {
-    if (updateFenceState(fenceState, line) || fenceState.inFence) {
-      return line;
+  const pendingDefinitions: ExportFootnoteDefinition[] = [];
+  const renderReference = (rawLabel: string): string | null => {
+    const normalizedLabel = normalizeFootnoteLabel(rawLabel);
+    const definition = extracted.definitionByLabel.get(normalizedLabel);
+    if (!definition) {
+      return null;
     }
 
-    return replaceFootnoteReferencesInLine(line, (rawLabel) => {
-      const normalizedLabel = normalizeFootnoteLabel(rawLabel);
-      const definition = extracted.definitionByLabel.get(normalizedLabel);
-      if (!definition) {
-        return null;
-      }
+    let footnoteNumber = numberByLabel.get(normalizedLabel);
+    if (!footnoteNumber) {
+      footnoteNumber = numberByLabel.size + 1;
+      numberByLabel.set(normalizedLabel, footnoteNumber);
+    }
 
-      let footnoteNumber = numberByLabel.get(normalizedLabel);
-      if (!footnoteNumber) {
-        footnoteNumber = nextNumber;
-        nextNumber += 1;
-        numberByLabel.set(normalizedLabel, footnoteNumber);
-      }
+    const nextCount = (referenceCountsByLabel.get(normalizedLabel) ?? 0) + 1;
+    referenceCountsByLabel.set(normalizedLabel, nextCount);
+    if (definition.number === null) pendingDefinitions.push(definition);
+    definition.number = footnoteNumber;
 
-      const nextCount = (referenceCountsByLabel.get(normalizedLabel) ?? 0) + 1;
-      referenceCountsByLabel.set(normalizedLabel, nextCount);
-      definition.number = footnoteNumber;
+    const referenceId = nextCount === 1 ? `fnref-${footnoteNumber}` : `fnref-${footnoteNumber}-${nextCount}`;
+    definition.referenceIds.push(referenceId);
 
-      const referenceId = nextCount === 1 ? `fnref-${footnoteNumber}` : `fnref-${footnoteNumber}-${nextCount}`;
-      definition.referenceIds.push(referenceId);
-
-      return [
-        '<sup class="footnote-ref">',
-        `<a href="${escapeHtmlAttr(buildInternalAnchorHref(hrefPrefix, `fn-${footnoteNumber}`))}" id="${escapeHtmlAttr(referenceId)}">${footnoteNumber}</a>`,
-        '</sup>'
-      ].join('');
-    });
-  });
+    return [
+      '<sup class="footnote-ref">',
+      `<a href="${escapeHtmlAttr(buildInternalAnchorHref(hrefPrefix, `fn-${footnoteNumber}`))}" id="${escapeHtmlAttr(referenceId)}">${footnoteNumber}</a>`,
+      '</sup>'
+    ].join('');
+  };
+  const rewriteReferences = (markdown: string): string => {
+    const codeLines = collectMarkdownCodeLines(markdown);
+    return markdown.split('\n').map((line, index) => (
+      codeLines.has(index) ? line : replaceFootnoteReferencesInLine(line, renderReference)
+    )).join('\n');
+  };
+  const bodyLines = rewriteReferences(extracted.bodyLines.join('\n')).split('\n');
+  // References inside a definition use the same rules as body text. Each
+  // reachable definition is visited once, including cycles and newly cited notes.
+  for (let index = 0; index < pendingDefinitions.length; index += 1) {
+    const definition = pendingDefinitions[index];
+    definition.contentMarkdown = rewriteReferences(definition.contentMarkdown);
+  }
 
   const footnotes = extracted.definitions
     .filter((definition) => definition.number !== null)
@@ -82,42 +89,6 @@ export function prepareMarkdownWithFootnotes(
     },
     footnotesHtml: renderFootnotesHtml(footnotes, hrefPrefix, options)
   };
-}
-
-type FenceState = {
-  inFence: boolean;
-  char: '`' | '~' | '';
-  length: number;
-};
-
-function createFenceState(): FenceState {
-  return {
-    inFence: false,
-    char: '',
-    length: 0
-  };
-}
-
-function updateFenceState(state: FenceState, line: string): boolean {
-  const fence = parseFenceLine(line);
-  if (!fence) {
-    return false;
-  }
-
-  if (!state.inFence) {
-    state.inFence = true;
-    state.char = fence.char;
-    state.length = fence.length;
-    return true;
-  }
-
-  if (fence.char === state.char && fence.length >= state.length) {
-    state.inFence = false;
-    state.char = '';
-    state.length = 0;
-  }
-
-  return true;
 }
 
 function getInternalDocumentHrefPrefix(options: PrepareMarkdownWithFootnotesOptions): string {
@@ -139,11 +110,11 @@ function extractExportFootnotes(source: SourceMappedMarkdown): {
   const consumedLineNumbers = new Set<number>();
   const definitions: ExportFootnoteDefinition[] = [];
   const definitionByLabel = new Map<string, ExportFootnoteDefinition>();
-  const fenceState = createFenceState();
+  const codeLines = collectMarkdownCodeLines(source.markdown);
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? '';
-    if (updateFenceState(fenceState, line) || fenceState.inFence) {
+    if (codeLines.has(index)) {
       continue;
     }
 
@@ -160,6 +131,7 @@ function extractExportFootnotes(source: SourceMappedMarkdown): {
     consumedLineNumbers.add(index);
     const definitionStartIndex = index;
     const contentLines = [line.slice(markerMatch[0].length)];
+    let continuationBaseline: 2 | 4 | null = null;
 
     while (index + 1 < lines.length) {
       const nextLine = lines[index + 1] ?? '';
@@ -173,7 +145,8 @@ function extractExportFootnotes(source: SourceMappedMarkdown): {
         continue;
       }
 
-      const stripped = stripFootnoteContinuationIndent(nextLine);
+      continuationBaseline ??= /^(?: {4}|\t| {1,3}\t)/.test(nextLine) ? 4 : 2;
+      const stripped = stripFootnoteContinuationIndent(nextLine, continuationBaseline);
       if (stripped === null) {
         break;
       }
@@ -208,7 +181,7 @@ function replaceFootnoteReferencesInLine(
   line: string,
   renderReference: (label: string) => string | null
 ): string {
-  if (!line || isIndentedCodeLine(line)) {
+  if (!line) {
     return line;
   }
 
@@ -298,9 +271,14 @@ function renderFootnoteItemHtml(
   const indexHtml = firstReferenceId
     ? `<a href="${escapeHtmlAttr(referenceHref)}" class="footnote-index" aria-label="${escapeHtmlAttr(options.backToNumberedReference(number))}">${number}.</a>`
     : `<span class="footnote-index">${number}.</span>`;
-  const backlinkHtml = firstReferenceId
-    ? `<a href="${escapeHtmlAttr(referenceHref)}" class="footnote-backref" aria-label="${escapeHtmlAttr(options.backToReference)}">↩</a>`
-    : '';
+  const repeated = footnote.referenceIds.length > 1;
+  const backlinkHtml = footnote.referenceIds.map((referenceId, index) => {
+    const label = repeated ? options.backToReferenceOccurrence(number, index + 1) : options.backToReference;
+    const href = escapeHtmlAttr(buildInternalAnchorHref(hrefPrefix, referenceId));
+    const suffix = repeated ? '<sup>' + (index + 1) + '</sup>' : '';
+    return '<a href="' + href + '" class="footnote-backref" title="' + escapeHtmlAttr(label)
+      + '" aria-label="' + escapeHtmlAttr(label) + '">↩' + suffix + '</a>';
+  }).join(' ');
 
   return [
     `<li id="fn-${number}" class="footnote-item" data-source-line="${footnote.sourceLine}" data-source-end-line="${footnote.sourceEndLine}">`,
@@ -333,50 +311,20 @@ function normalizeFootnoteLabel(rawLabel: string): string {
     .toLowerCase();
 }
 
-function stripFootnoteContinuationIndent(line: string): string | null {
-  let visibleIndent = 0;
+function stripFootnoteContinuationIndent(line: string, baseline: 2 | 4): string | null {
+  const whitespace = /^[ \t]*/.exec(line)?.[0] ?? '';
+  const columns = [...whitespace].reduce((value, ch) => value + (ch === '\t' ? 4 - value % 4 : 1), 0);
+  if (columns < 2) return null;
+  // Four columns are the normal definition baseline. Accept two-column
+  // legacy definitions without consuming the indent of their nested content.
+  const consumedBaseline = Math.min(columns, baseline);
+  let consumed = 0;
   let offset = 0;
-
-  while (offset < line.length) {
-    const ch = line[offset];
-    if (ch === ' ') {
-      visibleIndent += 1;
-      offset += 1;
-    } else if (ch === '\t') {
-      visibleIndent += 4 - (visibleIndent % 4);
-      offset += 1;
-    } else {
-      break;
-    }
-
-    if (visibleIndent >= 2) {
-      return line.slice(offset);
-    }
+  while (consumed < consumedBaseline) {
+    consumed += line[offset] === '\t' ? 4 - consumed % 4 : 1;
+    offset += 1;
   }
-
-  return null;
-}
-
-function isIndentedCodeLine(line: string): boolean {
-  return /^(?: {4,}|\t)/.test(line);
-}
-
-function parseFenceLine(line: string): { char: '`' | '~'; length: number } | null {
-  const match = /^[ \t]{0,3}([`~]{3,})/.exec(line);
-  if (!match) {
-    return null;
-  }
-
-  const marker = match[1];
-  const char = marker[0];
-  if (char !== '`' && char !== '~') {
-    return null;
-  }
-
-  return {
-    char,
-    length: marker.length
-  };
+  return line.slice(offset);
 }
 
 function escapeHtml(value: string): string {

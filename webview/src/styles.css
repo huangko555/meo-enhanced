@@ -1979,6 +1979,7 @@ button:focus-visible > .menu-switch {
 }
 
 .meo-code-block-actions {
+  text-indent: 0;
   position: absolute;
   top: 4px;
   right: 5px;
@@ -2137,7 +2138,15 @@ button:focus-visible > .menu-switch {
   position: relative;
 }
 
+@property --meo-live-container-ch {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 8px;
+}
+
 .cm-editor.meo-mode-live {
+  /* Compute container columns before child code blocks change the font. */
+  --meo-live-container-ch: 1ch;
   --meo-active-editor-font: var(--meo-font-live);
   --meo-active-editor-font-weight: var(--meo-font-live-weight);
   --meo-active-editor-font-size: var(--meo-font-live-size);
@@ -2918,7 +2927,15 @@ html[data-editor-appearance='dark'] .meo-tooltip-shortcut { background: rgba(255
   padding-left: 0;
 }
 
+.cm-editor.meo-mode-live .cm-line.meo-md-footnote-continuation.meo-md-quote:not(.meo-md-list-line):not(.meo-md-code-block) {
+  padding-left: calc(3ch + var(--meo-quote-extra-width, 0ch));
+}
+
 .cm-editor .meo-md-footnote-backref-spacer {
+  /* Use the same column slot as quote rails and rendered blocks. */
+  display: inline-block;
+  margin-right: 0;
+  text-indent: 0;
   visibility: hidden;
   pointer-events: none;
 }
@@ -3070,6 +3087,28 @@ html[data-editor-appearance='dark'] .meo-tooltip-shortcut { background: rgba(255
   width: calc(100% - var(--meo-quote-first-column));
   background: var(--meo-quote-bars);
   pointer-events: none;
+}
+
+.cm-editor.meo-mode-live .meo-md-quote-prefix-space {
+  display: inline-block;
+  width: var(--meo-quote-space-width);
+  white-space: pre;
+}
+
+.cm-editor.meo-mode-live .meo-md-quote-marker-active {
+  display: inline-block;
+  width: var(--meo-live-container-ch);
+  text-indent: 0;
+}
+
+/* Prefix spaces express nesting once; list wrapping adds only the content inset. */
+.cm-editor.meo-mode-live .cm-line.meo-md-quote-source-order.meo-md-quote:not(.meo-md-list-line):not(.meo-md-code-block):not(.meo-mermaid-block) {
+  padding-left: var(--meo-live-container-ch);
+  text-indent: 0;
+}
+
+.cm-editor.meo-mode-live .cm-line.meo-md-quote-source-order.meo-md-list-line.meo-md-quote-leading {
+  padding-left: calc(var(--meo-effective-list-hanging-indent) + var(--meo-live-container-ch));
 }
 
 .cm-editor .cm-line.meo-md-quote:not(.meo-md-code-block):not(.meo-mermaid-block) *,
@@ -3594,6 +3633,22 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   border-top-right-radius: 6px;
 }
 
+/* The fence row owns the label and actions; neither overlaps the first code row. */
+.cm-editor.meo-mode-live .cm-line.meo-md-code-block-start:not(.meo-md-indented-code-block-start) {
+  min-height: max(28px, calc(var(--meo-active-editor-line-height) * 1em));
+}
+
+.cm-editor .cm-line.meo-md-code-block-start:not(.meo-md-indented-code-block-start) .meo-code-language-label,
+.cm-editor .meo-rendered-block-preview-language,
+.cm-editor .meo-block-sticky-header.meo-md-code-block-start .meo-code-language-label {
+  top: 6px;
+  left: 12px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 16px;
+  background: transparent;
+}
+
 .cm-editor.meo-mode-live .cm-line.meo-md-code-block-end {
   border-bottom-left-radius: 6px;
   border-bottom-right-radius: 6px;
@@ -3758,8 +3813,6 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 
 .cm-editor .meo-rendered-block-preview-language {
   position: absolute;
-  top: 4px;
-  left: 2ch;
   z-index: 21;
   color: var(--meo-semantic-codeLanguageLabelForeground);
   background: var(--meo-code-background);
@@ -3892,6 +3945,10 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   box-sizing: border-box;
   width: 100%;
   margin: 0;
+}
+
+.cm-editor .meo-rendered-block-preview > :is(.meo-mermaid-block, .meo-md-math-fenced-display) {
+  padding-top: 28px;
 }
 
 .cm-editor .meo-rendered-block-preview > .meo-mermaid-block .meo-visual-controls,
@@ -4251,8 +4308,10 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   padding-left: calc(var(--meo-code-line-number-width) + 4ch);
 }
 
-.cm-editor.meo-mode-live .cm-line.meo-md-code-line-numbered::before {
+.cm-editor.meo-mode-live .cm-line.meo-md-code-line-numbered:not(.meo-md-quote):not(.meo-md-alert)::before,
+.cm-editor.meo-mode-live .cm-line.meo-md-code-line-numbered:is(.meo-md-quote, .meo-md-alert)::after {
   position: absolute;
+  top: var(--meo-indented-code-top-space, 0px);
   left: 1ch;
   box-sizing: content-box;
   width: calc(var(--meo-code-line-number-width) + 1.5ch);
@@ -4260,10 +4319,41 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   color: var(--meo-line-number-foreground, var(--vscode-editorLineNumber-foreground));
   text-align: right;
   content: attr(data-meo-code-line-number);
+  text-indent: 0;
   pointer-events: none;
   user-select: none;
   opacity: 0.8;
   -webkit-user-select: none;
+}
+
+/* Move the panel itself so its background, corners and header share one boundary.
+   Only the editable source prefix and quote rails compensate for that movement. */
+.cm-editor.meo-mode-live .cm-line.meo-md-code-block.meo-md-code-container-line {
+  padding-left: 2ch;
+  padding-right: 2ch;
+  text-indent: calc(var(--meo-code-prefix-inset) - var(--meo-code-prefix-width));
+}
+
+.cm-editor.meo-mode-live .cm-line.meo-md-code-block.meo-md-code-container-line.meo-md-code-line-numbered {
+  padding-left: calc(var(--meo-code-line-number-width) + 4ch);
+}
+
+.cm-editor.meo-mode-live .meo-md-code-container-prefix {
+  display: inline-block;
+  width: var(--meo-code-prefix-width);
+  white-space: pre;
+  text-indent: 0;
+  /* Container syntax remains in the document, while rails express it in Live. */
+  opacity: 0;
+}
+
+.cm-editor.meo-mode-live .cm-line.meo-md-quoted-code-block.meo-md-quote-source-order:is(.meo-md-quote, .meo-md-alert)::before {
+  left: calc(var(--meo-quote-first-column) - var(--meo-live-block-indent));
+  width: calc(var(--meo-live-block-indent) - var(--meo-quote-first-column));
+}
+
+.cm-editor.meo-mode-live .cm-line.meo-md-code-container-line .meo-code-language-label {
+  text-indent: 0;
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-list-line {
@@ -4290,6 +4380,23 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   --meo-effective-list-hanging-indent: calc(
     var(--meo-list-hanging-indent) - var(--meo-task-hidden-prefix-columns) + var(--meo-task-checkbox-size)
   );
+}
+
+.cm-editor.meo-mode-live .cm-line.meo-md-task-continuation {
+  padding-left: var(--meo-live-task-indent);
+}
+
+.cm-editor.meo-mode-live .cm-line.meo-md-task-continuation.meo-md-list-line {
+  padding-left: calc(var(--meo-effective-list-hanging-indent) + var(--meo-live-task-indent));
+}
+
+.cm-editor.meo-mode-live .cm-line.meo-md-task-continuation.meo-md-quote-source-order.meo-md-list-line.meo-md-quote-leading {
+  padding-left: calc(var(--meo-effective-list-hanging-indent) + var(--meo-live-container-ch) + var(--meo-live-task-indent));
+}
+
+.cm-editor.meo-mode-live .cm-line.meo-md-container-prose:not(.meo-md-list-line):not(.meo-live-indented-block-line):not(.meo-md-code-block):not(.meo-mermaid-block) {
+  padding-left: var(--meo-live-prose-indent);
+  text-indent: calc(-1 * var(--meo-live-prose-prefix));
 }
 
 .cm-editor .meo-md-list-marker {
@@ -7230,10 +7337,35 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-delet
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-live-indented-block-line,
+.cm-editor.meo-mode-live .cm-line.meo-md-code-container-line,
 .cm-editor.meo-mode-live .meo-live-indented-block {
   box-sizing: border-box;
   width: calc(100% - var(--meo-live-block-indent));
   margin-left: var(--meo-live-block-indent);
+}
+
+.cm-editor.meo-mode-live .meo-live-quoted-block {
+  position: relative;
+  overflow: visible;
+}
+
+.cm-editor.meo-mode-live .meo-md-html-table-shell.meo-live-indented-block {
+  width: calc(100% - 24px - var(--meo-live-block-indent));
+}
+
+.cm-editor .meo-rendered-block-preview.meo-live-quoted-block > :is(.meo-mermaid-block, .meo-md-math-fenced-display) {
+  border-radius: inherit;
+}
+
+.cm-editor.meo-mode-live .meo-live-quoted-block::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--meo-live-block-quote-base) - var(--meo-live-block-indent));
+  width: var(--meo-live-block-indent);
+  background: var(--meo-live-block-quote-bars);
+  pointer-events: none;
 }
 
 /* The native modal layer keeps editor popovers below the settings window. */
@@ -7490,6 +7622,11 @@ html[data-editor-appearance='dark'] .meo-input-suggestions {
   white-space: nowrap;
 }
 .cm-editor .meo-block-sticky-header.is-quoted .meo-code-language-label { margin-left: 3ch; }
+.cm-editor .meo-block-sticky-header.meo-md-code-block-start .meo-code-language-label,
+.cm-editor .meo-block-sticky-header .meo-rendered-block-preview-language {
+  margin-left: 12px;
+  margin-top: 2px;
+}
 .cm-editor .meo-block-sticky-header > :is(.meo-code-block-actions, .meo-mermaid-toolbar, .meo-latex-math-toolbar) {
   position: static;
   flex: none;

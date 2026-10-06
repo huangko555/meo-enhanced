@@ -12,7 +12,7 @@ import {
 } from '../editor/mermaidDiagramPresentation';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { getViewportController, visualLineContextMargin } from './viewportController';
-import { applyLiveBlockIndent, liveBlockIndentKey, type LiveBlockIndentValue } from './blockIndent';
+import { applyLiveBlockIndent, liveBlockIndentKey, parseBlockLinePrefix, type LiveBlockIndentValue } from './blockIndent';
 import { consumeEditorHistoryCommand } from './historyCommands';
 import {
   markLiveInputNestedProjection,
@@ -106,7 +106,7 @@ function isMermaidAnchor(state: EditorState, anchor: number): boolean {
     return false;
   }
   const line = state.doc.lineAt(anchor);
-  return line.from === anchor && mermaidAnchorLineRegex.test(line.text);
+  return line.from === anchor && mermaidAnchorLineRegex.test(parseBlockLinePrefix(line.text, state.tabSize).content);
 }
 
 function resolveMermaidAnchorAtLine(state: EditorState, lineNumber: number): number | null {

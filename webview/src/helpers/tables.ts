@@ -4,7 +4,7 @@ import { wireNativeSymbolInput, nativeSymbolInput } from '../editor/nativeTyping
 import { automaticSymbolPairs, symbolOriginEpoch, replaceAutomaticSymbolPairArea, inputAssistanceFacet, type AutomaticSymbolPair } from '../editor/typingAssistance';
 import { emptyMarkdownTable, markdownTableFromCells, serializeDelimitedTable, parseMarkdownTable, externalTableCellToMarkdown } from '../application/delimitedTable';
 import { defaultInputAssistance, type EditorCommandId } from '../../../src/foundation/editingPreferences';
-import { EditorState, RangeSet, RangeValue, StateEffect, StateField, type Annotation, type Range, type SelectionRange as CodeMirrorSelectionRange, type Transaction } from '@codemirror/state';
+import { countColumn, EditorState, RangeSet, RangeValue, StateEffect, StateField, type Annotation, type Range, type SelectionRange as CodeMirrorSelectionRange, type Transaction } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
 import type { SyntaxNode, SyntaxNodeRef, Tree } from '@lezer/common';
@@ -15,6 +15,8 @@ import {
   type ImagePresentationFactory
 } from '../editor/imagePresentation';
 import { parseKbdTagAt } from './kbd';
+import { AlertIconWidget, type AlertType } from './alerts';
+import { parseFootnotes } from './footnotes';
 import { createLatexMathElement, parseLatexMathAt } from './math';
 import { isPrimaryModifierPointerClick } from './linkNavigation';
 import { wikiLinkScheme } from './wikiLinks';
@@ -48,7 +50,9 @@ import {
 } from '../adapters/tableTransactionProvenance';
 import { currentSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
 import {
+  applyLiveBlockIndent,
   getLiveBlockIndent,
+  parseBlockLinePrefix,
   liveBlockIndentCssValue,
   liveBlockIndentKey,
   type LiveBlockIndentValue
@@ -1749,6 +1753,18 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
       continue;
     }
 
+    // Protected link labels keep their inline HTML breaks without starting a
+    // new logical list item. Code spans consume their whole payload below.
+    const inlineBreak = tableCellBreakAtRe.exec(text.slice(i));
+    if (inlineBreak) {
+      flushBuffer();
+      const br = document.createElement('br');
+      setInlineSourceRange(br, { from: baseOffset + i, to: baseOffset + i + inlineBreak[0].length }, { atomic: true });
+      parent.appendChild(br);
+      i += inlineBreak[0].length;
+      continue;
+    }
+
     const code = parseTableInlineCodeSpan(text, i);
     if (code) {
       flushBuffer();
@@ -1807,6 +1823,40 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
         appendToBuffer(text.slice(math.from, math.to), math.from);
       }
       i = math.to;
+      continue;
+    }
+
+    const footnoteMarker = !disableLinkParsers && text.startsWith('[^', i)
+      ? /^\[\^([^\]\r\n]+)\]/.exec(text.slice(i)) : null;
+    const footnote = footnoteMarker && sourceRange
+      ? parseFootnotes(options.view.state).references.find(reference => (
+          reference.from === sourceRange.from + baseOffset + i && reference.number !== null
+        )) : null;
+    if (footnote?.definition && footnoteMarker) {
+      flushBuffer();
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'meo-md-footnote-ref';
+      button.title = getUiStrings(options.uiLanguage).jumpToFootnote(footnote.number!);
+      button.setAttribute('aria-label', button.title);
+      const number = document.createElement('sup');
+      number.textContent = String(footnote.number);
+      button.appendChild(number);
+      setInlineSourceRange(button, { from: baseOffset + i, to: baseOffset + i + footnoteMarker[0].length }, { atomic: true });
+      button.addEventListener('pointerdown', event => { event.preventDefault(); event.stopPropagation(); });
+      button.addEventListener('click', event => {
+        event.preventDefault(); event.stopPropagation();
+        const definition = parseFootnotes(options.view.state).definitions.find(candidate => candidate.isPrimary && candidate.normalizedLabel === footnote.normalizedLabel);
+        if (!definition) return;
+        const viewport = getViewportController(options.view);
+        const reveal = viewport?.beginNavigationReveal();
+        options.view.dispatch({ selection: { anchor: definition.lineFrom } });
+        if (viewport && reveal) viewport.revealPosition(definition.lineFrom, { y: 'center' }, reveal);
+        else options.view.dispatch({ effects: EditorView.scrollIntoView(definition.lineFrom, { y: 'center' }) });
+        options.view.focus();
+      });
+      parent.appendChild(button);
+      i += footnoteMarker[0].length;
       continue;
     }
 
@@ -1983,7 +2033,7 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
 
 function tableCellIndentColumns(text: string): number {
   const indent = /^[ \t]*/.exec(text)?.[0] ?? '';
-  return [...indent].reduce((columns, char) => columns + (char === '\t' ? 2 : 1), 0);
+  return countColumn(indent, 4);
 }
 
 function parseTableCellListItem(line: TableCellLogicalLine) {
@@ -2000,13 +2050,13 @@ function parseTableCellListItem(line: TableCellLogicalLine) {
   } as const;
 }
 
-function parseTableCellQuotePrefix(line: TableCellLogicalLine) {
+function parseTableCellQuotePrefix(line: TableCellLogicalLine, maxIndentColumns = 3) {
   let text = line.text;
   let from = line.from;
   const indents: number[] = [];
   while (true) {
-    const match = /^([ \t]{0,3})>[ \t]?/.exec(text);
-    if (!match) break;
+    const match = /^([ \t]*)>[ \t]?/.exec(text);
+    if (!match || tableCellIndentColumns(match[1]) > maxIndentColumns) break;
     indents.push(tableCellIndentColumns(match[1]));
     text = text.slice(match[0].length);
     from += match[0].length;
@@ -2061,6 +2111,18 @@ function appendTableCellRenderedPreview(
     });
   };
 
+  const appendAlertContent = (parent: HTMLElement, content: string, from: number): boolean => {
+    if (parent.tagName !== 'BLOCKQUOTE' || parent.hasChildNodes()) return false;
+    const alert = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*/.exec(content);
+    if (!alert) return false;
+    parent.classList.add('meo-md-alert-' + alert[1].toLowerCase());
+    const header = document.createElement('div');
+    header.appendChild(new AlertIconWidget(alert[1] as AlertType).toDOM(view));
+    parent.appendChild(header);
+    if (content.length > alert[0].length) appendInline(parent, content.slice(alert[0].length), from + alert[0].length);
+    return true;
+  };
+
   const appendTaskContent = (
     parent: HTMLElement, content: string, from: number, nestedListOnLine: boolean
   ) => {
@@ -2084,8 +2146,8 @@ function appendTableCellRenderedPreview(
 
   const appendItemContent = (
     parent: HTMLLIElement, content: string, from: number,
-    baseQuoteDepth: number, nestedListOnLine = false
-  ) => {
+    baseQuoteDepth: number, nestedListOnLine = false, contentColumn = 0
+  ): ListEntry[] => {
     const nestedQuote = parseTableCellQuotePrefix({ text: content, from, breakText: '' });
     let quoteParent: HTMLElement = parent;
     for (let depth = 0; depth < nestedQuote.indents.length; depth += 1) {
@@ -2098,24 +2160,38 @@ function appendTableCellRenderedPreview(
     quoteStack.length = baseQuoteDepth + nestedQuote.indents.length;
     const nestedItem = parseTableCellListItem(nestedQuote.line);
     if (!nestedItem) {
-      appendTaskContent(quoteParent, nestedQuote.line.text, nestedQuote.line.from, nestedListOnLine);
-      return;
+      if (!appendAlertContent(quoteParent, nestedQuote.line.text, nestedQuote.line.from)) {
+        appendTaskContent(quoteParent, nestedQuote.line.text, nestedQuote.line.from, nestedListOnLine);
+      }
+      return [];
     }
     const list = document.createElement(nestedItem.type);
     list.className = 'meo-md-html-table-cell-list';
     if (list instanceof HTMLOListElement && nestedItem.start !== 1) list.start = nestedItem.start;
     const child = document.createElement('li');
-    appendItemContent(child, nestedItem.content, nestedItem.contentFrom,
-      baseQuoteDepth + nestedQuote.indents.length, true);
+    const prefix = nestedQuote.line.text.slice(0, nestedItem.contentFrom - nestedQuote.line.from);
+    const column = nestedQuote.indents.length ? 0 : contentColumn;
+    const nextContentColumn = countColumn(' '.repeat(column) + prefix, 4);
+    const descendants = appendItemContent(child, nestedItem.content, nestedItem.contentFrom,
+      baseQuoteDepth + nestedQuote.indents.length, true, nextContentColumn);
     list.appendChild(child);
     quoteParent.appendChild(list);
-    listStackFor(quoteParent).push({
-      indentColumns: nestedItem.indentColumns, type: nestedItem.type, list, lastItem: child
-    });
+    const entry: ListEntry = {
+      indentColumns: column + nestedItem.indentColumns, type: nestedItem.type, list, lastItem: child
+    };
+    if (nestedQuote.indents.length) {
+      listStackFor(quoteParent).push(entry, ...descendants);
+      return [];
+    }
+    // Same-line list levels also participate in the next logical line's stack;
+    // a continuation must keep its innermost item and ordered sequence.
+    return [entry, ...descendants];
   };
 
   for (const sourceLine of splitTableCellLogicalLines(text)) {
-    const quoted = parseTableCellQuotePrefix(sourceLine);
+    const hasContainingList = listStackFor(previewEl).length > 0
+      || quoteStack.some(quote => listStackFor(quote).length > 0);
+    const quoted = parseTableCellQuotePrefix(sourceLine, hasContainingList ? Infinity : 3);
     let parent: HTMLElement = previewEl;
     for (let depth = 0; depth < quoted.indents.length; depth += 1) {
       const previousList = listStackFor(parent).at(-1);
@@ -2137,6 +2213,13 @@ function appendTableCellRenderedPreview(
     const listStack = listStackFor(parent);
     const item = parseTableCellListItem(line);
     if (!item) {
+      // A blank logical line loosens a list instead of resetting its numbering.
+      // Keep the spacer in the previous item so subsequent items stay in order.
+      if (!line.text.trim() && listStack.at(-1)?.lastItem) {
+        listStack.at(-1)!.lastItem!.appendChild(document.createElement('br'));
+        continue;
+      }
+      if (appendAlertContent(parent, line.text, line.from)) continue;
       const indentColumns = tableCellIndentColumns(line.text);
       let contentParent: HTMLElement = parent;
       if (line.text.trim() && indentColumns > 0) {
@@ -2194,10 +2277,13 @@ function appendTableCellRenderedPreview(
     }
 
     const listItem = document.createElement('li');
-    appendItemContent(listItem, item.content, item.contentFrom, quoted.indents.length);
+    const contentColumn = countColumn(line.text.slice(0, item.contentFrom - line.from), 4);
+    const descendants = appendItemContent(listItem, item.content, item.contentFrom,
+      quoted.indents.length, false, contentColumn);
     entry.list.appendChild(listItem);
     entry.lastItem = listItem;
     listStack.length = level + 1;
+    listStack.push(...descendants);
   }
 }
 
@@ -2377,8 +2463,8 @@ function serializeTableMarkdown(indent: string, headerCells: string[], alignment
 }
 
 function parseTableLine(lineNo: number, from: number, to: number, text: string): ParsedTableLine {
-  const quoted = parseTableCellQuotePrefix({ text, from, breakText: '' });
-  const content = quoted.indents.length ? quoted.line : { text, from };
+  const prefix = parseBlockLinePrefix(text);
+  const content = { text: prefix.content, from: from + prefix.prefix.length };
   const { cells, pipes, segments } = parseTableRowCells(content.text, content.from);
   return { lineNo, from, to, text: content.text, cells, pipes, segments };
 }
@@ -2462,12 +2548,9 @@ function buildWidgetTableData(
   const { from, to, headerLine, dataLines, alignments, colCount, startLine, endLine } = data;
   if (colCount === 0 || !headerLine) return null;
   const sourceHeader = state.doc.sliceString(headerLine.from, headerLine.to);
-  const quotePrefix = parseTableCellQuotePrefix({ text: sourceHeader, from: headerLine.from, breakText: '' });
-  const indent = quotePrefix.indents.length
-    ? sourceHeader.slice(0, quotePrefix.line.from - headerLine.from)
-    : /^(\s*)/.exec(sourceHeader)?.[1] ?? '';
-  const blockIndent = getLiveBlockIndent(state, headerLine.from);
-  const visualIndent = blockIndent.footnoteNumber === null
+  const indent = parseBlockLinePrefix(sourceHeader, state.tabSize).prefix;
+  const blockIndent = getLiveBlockIndent(state, headerLine.from + indent.length);
+  const visualIndent = blockIndent.footnoteNumber === null && !blockIndent.quoteColumns?.length && !blockIndent.taskIndent?.checkboxes
     ? tableCellIndentColumns(indent)
     : blockIndent;
   const normalizedAlignments = normalizeRow(alignments, colCount, '').map((value) => value ?? null);
@@ -2490,7 +2573,10 @@ function buildWidgetTableData(
       rows,
       normalizedAlignments,
       diagnostics: tableDiagnostics,
-      diffFlagsByLine
+      diffFlagsByLine,
+      footnoteReferences: parseFootnotes(state).references
+        .filter(reference => reference.from >= from && reference.to <= to)
+        .map(reference => [reference.from - from, reference.number, reference.definition?.lineFrom])
     }),
     startLine,
     endLine,
@@ -2829,7 +2915,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const candidate = renderedLine - (row === 0 ? 0 : row + 1);
     if (
       Number.isInteger(candidate) && candidate >= 1 && candidate < view.state.doc.lines &&
-      tableDelimiterRegex.test(view.state.doc.line(candidate + 1).text)
+      isTableDelimiterLine(view.state.doc.line(candidate + 1).text)
     ) return candidate;
     const range = fallbackRange ?? (
       this.domRefs ? this.resolveCurrentTableRange(view, this.domRefs.wrap) : null
@@ -5392,7 +5478,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       this.view!
     );
     // A focusable color button cannot live inside an aria-hidden preview.
-    if (preview.querySelector('.meo-md-color-swatch-interactive')) preview.removeAttribute('aria-hidden');
+    if (preview.querySelector('.meo-md-color-swatch-interactive, .meo-md-footnote-ref')) preview.removeAttribute('aria-hidden');
     else if (preview.getAttribute('aria-hidden') !== 'true') preview.setAttribute('aria-hidden', 'true');
   }
 
@@ -5921,6 +6007,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const shell = document.createElement('div');
     shell.className = 'meo-md-html-table-shell';
     tableDomOwners.set(shell, this);
+    applyLiveBlockIndent(shell, this.tableData.visualIndent);
     shell.style.setProperty(
       '--meo-html-table-indent',
       liveBlockIndentCssValue(this.tableData.visualIndent) ?? '0ch'
@@ -5976,9 +6063,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const headerAlignmentOverrides = this.headerAlignmentOverrideColumns(view);
     for (let col = 0; col < this.tableData.colCount; col++) {
       const th = document.createElement('th');
-      const headerAlignment = headerAlignmentOverrides?.has(col)
-        ? this.tableData.alignments[col] ?? 'left'
-        : 'center';
+      const headerAlignment = this.tableData.alignments[col]
+        ?? (headerAlignmentOverrides?.has(col) ? 'left' : 'center');
       th.dataset.tableRow = '0';
       th.dataset.tableCol = String(col);
       th.style.textAlign = headerAlignment;
@@ -6195,7 +6281,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 }
 
 export function isTableDelimiterLine(lineText: string): boolean {
-  return tableDelimiterRegex.test(lineText);
+  return tableDelimiterRegex.test(parseBlockLinePrefix(lineText).content);
 }
 
 export function parseTableInfo(state: EditorState, tableNode: Pick<SyntaxNodeRef, 'from' | 'to'>) {

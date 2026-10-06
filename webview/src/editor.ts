@@ -29,6 +29,7 @@ import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLive
 import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
 import { insertMountedTableCellBreak } from './helpers/tables';
 import { insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
+import { getCodeBlockSourceLines } from './helpers/blockIndent';
 import { sourceStrikeMarkerField } from './helpers/strikeMarkers';
 import { markdownInlineStyleTheme } from './helpers/inlineStyles';
 import { sourceHighlightField } from './helpers/highlightSyntax';
@@ -262,8 +263,7 @@ const tableSearchStateEventName = 'meo-search-state-change';
 const existingListMarkerRegex = /^(\s*)([-+*]\s+\[[ xX~\-]\]|[-+*]|\d+[.)])\s+/;
 const existingHeadingMarkerRegex = /^(\s*)(#{1,6})\s+/;
 const existingTaskMarkerRegex = /^[-+*]\s+\[[ xX~\-]\]/;
-const blockquoteLinePrefixRegex = /^[ \t]{0,3}(?:>[ \t]?)+/;
-const quotedCodeBlockAncestorNames = new Set(['FencedCode', 'CodeBlock']);
+const codeBlockAncestorNames = new Set(['FencedCode', 'CodeBlock']);
 
 const buildSearchDecorations = (state: EditorState, matches: SearchMatchRange[]) => {
   if (!matches.length) {
@@ -2185,7 +2185,7 @@ export function createEditor({
         {
           key: 'Enter',
           run: (view) =>
-            handleEnterContinueQuotedCodeBlock(view) ||
+            handleEnterContinueContainedCodeBlock(view) ||
             (view.state.facet(inputAssistanceFacet).lists && (
               handleEnterOnEmptyListItem(view) ||
               handleEnterAtListContentStart(view) ||
@@ -4011,14 +4011,14 @@ function insertTableCellLineBreak(view: EditorView): boolean {
   return true;
 }
 
-function handleEnterContinueQuotedCodeBlock(view: EditorView): boolean {
+function handleEnterContinueContainedCodeBlock(view: EditorView): boolean {
   const { state } = view;
   const selection = state.selection.main;
   if (!selection.empty) {
     return false;
   }
 
-  const quotePrefix = getQuotedCodeBlockLinePrefix(state, selection.from);
+  const quotePrefix = getContainedCodeBlockLinePrefix(state, selection.from);
   if (!quotePrefix) {
     return false;
   }
@@ -4032,35 +4032,23 @@ function handleEnterContinueQuotedCodeBlock(view: EditorView): boolean {
   return true;
 }
 
-function getQuotedCodeBlockLinePrefix(state: EditorState, position: number): string | null {
+function getContainedCodeBlockLinePrefix(state: EditorState, position: number): string | null {
   const line = state.doc.lineAt(position);
-  const lineText = state.doc.sliceString(line.from, line.to);
-  const match = blockquoteLinePrefixRegex.exec(lineText);
-  if (!match) {
-    return null;
-  }
-
-  return isInsideQuotedCodeBlock(state, position) ? match[0] : null;
-}
-
-function isInsideQuotedCodeBlock(state: EditorState, position: number): boolean {
   let node: SyntaxNode | null = syntaxTree(state).resolveInner(position, -1);
-  let insideCodeBlock = false;
-  let insideBlockquote = false;
-
+  let codeBlock: SyntaxNode | null = null;
+  let insideContainer = false;
   while (node) {
-    if (quotedCodeBlockAncestorNames.has(node.name)) {
-      insideCodeBlock = true;
-    } else if (node.name === 'Blockquote') {
-      insideBlockquote = true;
-    }
-    if (insideCodeBlock && insideBlockquote) {
-      return true;
-    }
+    if (codeBlockAncestorNames.has(node.name)) codeBlock = node;
+    if (node.name === 'Blockquote' || node.name === 'ListItem' || node.name === 'FootnoteDefinition') insideContainer = true;
     node = node.parent;
   }
-
-  return false;
+  if (!codeBlock || !insideContainer) return null;
+  const source = getCodeBlockSourceLines(state, codeBlock).find(candidate => candidate.from === line.from);
+  if (!source) return null;
+  // Continue the complete container and payload indentation. A quote-only
+  // prefix or generic Markdown indentation loses nested lists and footnotes.
+  const payloadIndent = /^[ \t]*/.exec(state.doc.sliceString(source.prefixTo, line.to))?.[0] ?? '';
+  return state.doc.sliceString(line.from, source.prefixTo) + payloadIndent;
 }
 
 function deleteTableCellLineBreakBackward(view: EditorView): boolean {

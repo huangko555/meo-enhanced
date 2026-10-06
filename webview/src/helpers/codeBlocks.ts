@@ -23,7 +23,7 @@ import {
   getMermaidBlockMode,
   MermaidEditingWidget
 } from './mermaidEditing';
-import { getLiveBlockIndent, liveBlockIndentKey, type LiveBlockIndentValue } from './blockIndent';
+import { getCodeBlockSourceLines, getLiveBlockIndent, liveBlockIndentKey, type LiveBlockIndentValue } from './blockIndent';
 import { getViewportController } from './viewportController';
 import { getMermaidDiagramPresentationFactory } from '../editor/mermaidDiagramPresentation';
 import { currentSyntaxTree, getFencedCodeInfo, syntaxTreeChanged } from './markdownSyntax';
@@ -751,19 +751,13 @@ export function addTopLinePillLabel(
   addTopLineWidget(builder, position, new CodeLanguageLabelWidget(labelText), side);
 }
 
-const quotedFenceOpeningLineRegex = /^[ \t]{0,3}(?:>[ \t]?)*[ \t]{0,3}(?:`{3,}|~{3,})/;
-const fenceLineRegex = /^[ \t]*[`~]{3,}.*$/;
-const quotedFencePrefixRegex = /^[ \t]{0,3}((?:>[ \t]?)*)[ \t]{0,3}(?:`{3,}|~{3,})/;
 const renderedBlockPreviewAnchorLineDeco = Decoration.line({
   class: 'meo-rendered-block-preview-anchor-line'
 });
 export function addFenceOpeningLineMarker(builder: any[], state: EditorState, from: number, activeLines: Set<number>, addRange: Function, activeLineMarkerDeco: any, fenceMarkerDeco: any): void {
   const line = state.doc.lineAt(from);
-  const text = state.doc.sliceString(line.from, line.to);
-  // Support fenced code opening lines nested inside blockquotes/callouts, e.g. "> ```ts".
-  if (!quotedFenceOpeningLineRegex.test(text)) {
-    return;
-  }
+  // The caller already resolved FencedCode. Re-parsing the physical prefix
+  // would exclude valid list, footnote and tab-indented containers.
 
   if (activeLines.has(line.number)) {
     addRange(builder, line.from, line.to, activeLineMarkerDeco);
@@ -986,10 +980,10 @@ function addMermaidDiagramBlock(
     Decoration.replace({
       widget,
       block: true,
-      // Source/split mode edits project into the replaced range itself. Keep
-      // boundary insertions (especially appending at the last source line)
-      // owned by the current widget until its updateDOM receives new text.
-      inclusive: decision.effectiveMode !== 'preview'
+      // A block replacement must own both boundaries, including in preview,
+      // or CodeMirror leaves a phantom text line after the widget. Source/split
+      // projections also need boundary insertions owned until updateDOM runs.
+      inclusive: true
     }).range(
       decision.effectiveMode === 'preview' ? startLine.from : contentStartLine.from,
       decision.effectiveMode === 'preview' ? endLine.to : contentEndLine.to
@@ -1007,76 +1001,16 @@ export function addCopyCodeButton(builder: any[], state: EditorState, node: Synt
 }
 
 export function createCodeBlockActionsWidget(state: EditorState, node: SyntaxNodeRef): WidgetType | null {
-  const { from, to } = node;
-  const startLine = state.doc.lineAt(from);
-  const endLine = state.doc.lineAt(Math.max(to - 1, from));
-  if (node.name === 'CodeBlock') {
-    // CodeText ranges exclude container prefixes and the four-column code indent,
-    // while retaining payload indentation and internal blank lines.
-    const contentNodes = node.node.getChildren('CodeText');
-    if (!contentNodes.length) return null;
-    return new CodeBlockActionsWidget(
-      contentNodes.map(content => state.doc.sliceString(content.from, content.to)).join(''),
-      contentNodes[0].from,
-      contentNodes[contentNodes.length - 1].to,
-      startLine.from,
-      endLine.to
-    );
-  }
-  const quoteDepth = getQuotedFenceDepth(startLine.text);
-
-  const codeLines: string[] = [];
-  for (let lineNum = startLine.number + 1; lineNum <= endLine.number; lineNum += 1) {
-    const line = state.doc.line(lineNum);
-    const lineText = stripLeadingQuotePrefix(line.text, quoteDepth);
-
-    if (lineNum === endLine.number) {
-      if (fenceLineRegex.test(lineText)) {
-        continue;
-      }
-    }
-
-    codeLines.push(lineText);
-  }
-
-  const codeContent = codeLines.join('\n');
-  if (!codeContent) {
-    return null;
-  }
-
-  const lastContentLineNumber = fenceLineRegex.test(stripLeadingQuotePrefix(endLine.text, quoteDepth))
-    ? endLine.number - 1
-    : endLine.number;
-  if (lastContentLineNumber <= startLine.number) {
-    return null;
-  }
-
+  const sourceLines = getCodeBlockSourceLines(state, node.node);
+  const contentLines = sourceLines.filter(line => !line.isFence);
+  if (!contentLines.length) return null;
+  const codeContent = contentLines.map(line => ' '.repeat(line.payloadInset) + state.doc.sliceString(line.prefixTo, line.to)).join('\n');
+  if (!codeContent) return null;
   return new CodeBlockActionsWidget(
     codeContent,
-    state.doc.line(startLine.number + 1).from,
-    state.doc.line(lastContentLineNumber).to,
-    startLine.from,
-    endLine.to
+    contentLines[0]!.prefixTo,
+    contentLines[contentLines.length - 1]!.to,
+    sourceLines[0]!.from,
+    sourceLines[sourceLines.length - 1]!.to
   );
-}
-
-function getQuotedFenceDepth(lineText: string): number {
-  const match = quotedFencePrefixRegex.exec(lineText);
-  if (!match) {
-    return 0;
-  }
-  return (match[1].match(/>/g) ?? []).length;
-}
-
-function stripLeadingQuotePrefix(lineText: string, quoteDepth: number): string {
-  if (quoteDepth <= 0) {
-    return lineText;
-  }
-
-  const prefixRe = new RegExp(`^[ \\t]{0,3}(?:>[ \\t]?){${quoteDepth}}`);
-  const match = prefixRe.exec(lineText);
-  if (!match) {
-    return lineText;
-  }
-  return lineText.slice(match[0].length);
 }
