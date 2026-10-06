@@ -11,7 +11,7 @@ import { nativeSymbolInput, planNativeHtmlCommentToggle } from './editor/nativeT
 import { formatMultipleSelections, toggleHtmlComment, runEditorCommand, secondarySelections } from './editor/commands';
 import type { EditorCommandId } from '../../src/foundation/editingPreferences';
 import { pasteAssistance, insertPlainClipboardText } from './editor/pasteAssistance';
-import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type Annotation, type ChangeSpec, EditorSelection, type Extension, type SelectionRange, type Text } from '@codemirror/state';
+import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type Annotation, type ChangeSpec, type TransactionSpec, EditorSelection, type Extension, type SelectionRange, type Text } from '@codemirror/state';
 import { EditorView, keymap, highlightActiveLine, lineNumbers, highlightActiveLineGutter, Decoration, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
@@ -3414,6 +3414,19 @@ export function createEditor({
         detail: { owner: view.dom }
       }));
       viewportController.runDocumentChange(() => {
+        const dispatchTextUpdate = (spec: TransactionSpec): void => {
+          const transaction = view.state.update(spec);
+          if (!resetHistory) {
+            view.dispatch(transaction);
+            return;
+          }
+          // history() reuses its StateField. Remove and restore it in one view
+          // update to clear old entries without presenting an intermediate layout.
+          view.dispatch([transaction, transaction.state.update({
+            effects: historyCompartment.reconfigure(history()),
+            annotations: [Transaction.addToHistory.of(false), markExternalDocumentPresentation()]
+          })]);
+        };
         viewportController.markInteraction();
         tableCommandRuntime.externalDocumentPresented();
         imagePresentationFactory.externalDocumentPresented();
@@ -3422,11 +3435,11 @@ export function createEditor({
         const currentText = view.state.doc.toString();
         const syncChange = findSyncChange(currentText, textValue);
         if (!syncChange) {
-          view.dispatch({
+          dispatchTextUpdate({
             effects: [
               tableTransactionProvenanceAdapter.effect({ type: 'externalDocumentPresented' }),
               supersedeLiveInputDerivedWork(),
-              ...(resetHistory ? [historyCompartment.reconfigure(history())] : [])
+              ...(resetHistory ? [historyCompartment.reconfigure([])] : [])
             ],
             annotations: [
               Transaction.addToHistory.of(false),
@@ -3444,13 +3457,13 @@ export function createEditor({
         setTableInteractionActive(false);
         applyingExternal = true;
         try {
-          view.dispatch({
+          dispatchTextUpdate({
             changes: syncChange,
             selection: { anchor: mappedAnchor, head: mappedHead },
             effects: [
               tableTransactionProvenanceAdapter.effect({ type: 'externalDocumentPresented' }),
               supersedeLiveInputDerivedWork(),
-              ...(resetHistory ? [historyCompartment.reconfigure(history())] : [])
+              ...(resetHistory ? [historyCompartment.reconfigure([])] : [])
             ],
             annotations: [
               Transaction.addToHistory.of(false),
