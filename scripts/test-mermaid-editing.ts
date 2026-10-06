@@ -1652,7 +1652,7 @@ async function main() {
       throw new Error('Outer editor redo did not restore Mermaid source editing');
     }
 
-    await page.click('.meo-mermaid-mode-btn');
+    await clickVisibleMermaidModeButton(page);
     await waitForFrames(page);
     const codeMode = await page.evaluate(() => ({
       code: Boolean(document.querySelector('.meo-mermaid-editing-block.is-source')),
@@ -1663,7 +1663,7 @@ async function main() {
       throw new Error(`Unexpected Mermaid code mode: ${JSON.stringify(codeMode)}`);
     }
 
-    await page.click('.meo-mermaid-mode-btn');
+    await clickVisibleMermaidModeButton(page);
     await waitForFrames(page);
     await page.evaluate(() => {
       const editor = (window as any).__mermaidEditingEditor;
