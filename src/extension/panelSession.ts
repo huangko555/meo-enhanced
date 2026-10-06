@@ -1039,8 +1039,12 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     onPanelViewStateChanged();
   });
 
+  let previousWindowFocused = vscode.window.state.focused;
+  // WindowState events also report activity changes while focus stays true.
   const windowStateSubscription = vscode.window.onDidChangeWindowState(({ focused }) => {
-    if (focused && panel.active) {
+    const regainedWindowFocus = focused && !previousWindowFocused;
+    previousWindowFocused = focused;
+    if (regainedWindowFocus && panel.active) {
       runBackground(postFocusEditor(), 'postFocusEditor.windowState');
     }
   });

@@ -115,6 +115,8 @@ export function createEditorFocusController({
     }
     if (active !== document.body && active !== document.documentElement) return false;
     if (documentPointerGeneration !== windowReturnPointerGeneration) return false;
+    // An active VS Code panel can still leave keyboard focus in another Webview.
+    if (!document.hasFocus()) return false;
     // Input must be connected synchronously. Only painting waits for the
     // activation click's native selection to finish, never the first key.
     editor.focus();
