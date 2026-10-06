@@ -1579,9 +1579,21 @@ async function main() {
       if (persistedMode !== mode) {
         throw new Error(`Webview did not persist ${mode} mode: ${persistedMode}`);
       }
-      await page.evaluate(() => {
+      // Rendered blocks have variable heights, so a document-height fraction
+      // cannot locate a heading. Reveal its source position before sampling styles.
+      await page.evaluate((selection) => {
+        window.dispatchEvent(new MessageEvent('message', { data: {
+          type: 'revealSelection', anchor: selection, head: selection, focus: false
+        }}));
+      }, initialText.indexOf('## Short Mermaid'));
+      await page.waitForFunction(() => {
         const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
-        scroller.scrollTop = scroller.scrollHeight * (77 / 280);
+        const viewport = scroller.getBoundingClientRect();
+        return Array.from(document.querySelectorAll<HTMLElement>('.editor-host .cm-line')).some((line) => {
+          const rect = line.getBoundingClientRect();
+          return line.textContent?.includes('Short Mermaid')
+            && rect.top < viewport.bottom && rect.bottom > viewport.top;
+        });
       });
       await waitForFrames(page, 3);
       const readHeadingWeight = () => page.evaluate(() => {
