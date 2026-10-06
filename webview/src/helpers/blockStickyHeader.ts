@@ -59,7 +59,8 @@ function readBlockHeader(view: EditorView, position: number): BlockHeader | null
   for (let node: SyntaxNode | null = currentSyntaxTree(state).resolveInner(line.to, -1); node; node = node.parent) {
     if (node.name === 'Blockquote') { quoted = true; break; }
   }
-  const rendered = getLiveRenderedBlocks(state, { includeSelectedMath: true }).find((block) => (
+  // Geometry reads reuse the published tree rather than extending the parse.
+  const rendered = getLiveRenderedBlocks(state, { includeSelectedMath: true, tree: currentSyntaxTree(state) }).find((block) => (
     (block.kind === 'mermaid' || block.kind === 'math') && block.startLine <= line.number && block.endLine >= line.number
   ));
   if (rendered) {

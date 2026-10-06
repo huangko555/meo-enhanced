@@ -189,11 +189,12 @@ function selectionTouchesLineRange(state: EditorState, startLine: number, endLin
   return false;
 }
 
+/** Geometry readers can pass this state's published tree to avoid synchronous parsing. */
 export function getLiveRenderedBlocks(
   state: EditorState,
-  options: { includeSelectedMath?: boolean } = {}
+  options: { includeSelectedMath?: boolean; tree?: Tree } = {}
 ): LiveRenderedBlock[] {
-  const tree = resolvedSyntaxTree(state);
+  const tree = options.tree ?? resolvedSyntaxTree(state);
   const cached = renderedBlockCache.get(state);
   if (!options.includeSelectedMath && cached && cached.tree === tree) {
     return cached.blocks;
@@ -281,7 +282,7 @@ function discoverRenderedBlocks(state: EditorState, tree: Tree): DiscoveredBlock
     }
   }
 
-  for (const htmlBlock of collectRenderableHtmlBlocks(state)) {
+  for (const htmlBlock of collectRenderableHtmlBlocks(state, tree)) {
     const block = createRenderedBlock('html', htmlBlock.startLine, htmlBlock.endLine, null);
     if (!block) continue;
     block.lineNumberHiddenFrom = htmlBlock.startLine + 1;

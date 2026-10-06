@@ -8,7 +8,7 @@ import {
   lineNumberWidgetMarker,
   type DecorationSet
 } from '@codemirror/view';
-import type { SyntaxNodeRef } from '@lezer/common';
+import type { SyntaxNodeRef, Tree } from '@lezer/common';
 import { parseDocument } from 'htmlparser2';
 import type { ChildNode } from 'domhandler';
 import { createElement, AlertTriangle, Code2, Eye } from 'lucide';
@@ -129,8 +129,7 @@ export function getHtmlEditingRange(state: EditorState): HtmlEditingRange | null
   return state.field(htmlEditingRangeField, false) ?? null;
 }
 
-export function collectRenderableHtmlBlocks(state: EditorState): RenderableHtmlBlock[] {
-  const tree = resolvedSyntaxTree(state);
+export function collectRenderableHtmlBlocks(state: EditorState, tree: Tree = resolvedSyntaxTree(state)): RenderableHtmlBlock[] {
   const cached = renderableHtmlBlockCache.get(state);
   if (cached && cached.tree === tree) return cached.blocks;
   const blocks: RenderableHtmlBlock[] = [];
