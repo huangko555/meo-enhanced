@@ -604,6 +604,11 @@ async function main() {
       throw new Error(`Rendered-block line-number failures:\n${renderedBlockFailures.join('\n')}`);
     }
 
+    // Earlier mode changes can move blocks under the initial mouse position.
+    // Establish an actual pointer exit before checking the non-hovered state.
+    await page.mouse.move(-10, -10);
+    await page.waitForFunction(() => Array.from(document.querySelectorAll('.cm-scroller .meo-code-block-actions'))
+      .every((toolbar) => getComputedStyle(toolbar).opacity === '0'));
     const hiddenActionOpacities = await page.$$eval('.cm-scroller .meo-code-block-actions', (toolbars) => (
       toolbars.map((toolbar) => getComputedStyle(toolbar).opacity)
     ));
@@ -665,11 +670,17 @@ async function main() {
       throw new Error('External text sync disabled code block hover actions');
     }
 
-    await page.click('.cm-scroller .meo-code-block-actions .meo-select-all-code-btn');
-    const selectedCode = await page.evaluate(() => {
+    // Click the toolbar the user sees. Scrolling the original button into view
+    // can switch headers between pointer movement and the click itself.
+    const floatingToolbarSelector = '.meo-block-sticky-header:not([hidden]) .meo-code-block-actions[data-meo-block-from="0"]';
+    const interactedToolbarSelector = await page.$(floatingToolbarSelector)
+      ? floatingToolbarSelector
+      : '.cm-scroller .meo-code-block-actions[data-meo-block-from="0"]';
+    await page.click(`${interactedToolbarSelector} .meo-select-all-code-btn`);
+    const selectedCode = await page.evaluate((toolbarSelector) => {
       const editor = (window as any).__codeBlockLineNumbersEditor;
       const selection = editor.view.state.selection.main;
-      const toolbar = document.querySelector<HTMLElement>('.cm-scroller .meo-code-block-actions');
+      const toolbar = document.querySelector<HTMLElement>(toolbarSelector);
       return {
         anchor: selection.anchor,
         from: selection.from,
@@ -678,10 +689,10 @@ async function main() {
         to: selection.to,
         toolbarHovered: toolbar?.classList.contains('is-block-hovered') ?? false,
         toolbarOpacity: toolbar ? Number.parseFloat(getComputedStyle(toolbar).opacity) : null,
-        controls: Array.from(document.querySelector('.cm-scroller .meo-code-block-actions')?.children ?? [])
+        controls: Array.from(toolbar?.children ?? [])
           .map((element) => element.getAttribute('aria-label'))
       };
-    });
+    }, interactedToolbarSelector);
     const expectedSelectedCode = [
       'const first = 1;',
       '',

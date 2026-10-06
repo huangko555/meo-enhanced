@@ -703,7 +703,19 @@ try {
             });
             assert.deepEqual(hint, {text: description, title: null, described: true, visible: 'visible', opacity: '1', delay: '0s', border: '0px', background: appearance === 'dark' ? 'rgb(58, 58, 58)' : 'rgb(13, 13, 13)', foreground: 'rgb(245, 245, 245)', radius: '10px', shadow: appearance === 'dark' ? 'rgba(0, 0, 0, 0.4) 0px 3px 10px 0px' : 'none', singleLine: true, arrow: false, centered: true, above: true, lighterThanWindow: appearance === 'dark', contained: true}, language + '/' + appearance + '/' + width + ': hover shows one unobstructed hint above the button after the shared delay');
             if (index === 2) {
-              const hintId = await page.$eval(selector, element => element.getAttribute('aria-describedby')); const tooltip = await page.$('#' + hintId); const capture = await tooltip!.screenshot(); await tooltip!.dispose();
+              const hintId = await page.$eval(selector, element => element.getAttribute('aria-describedby'));
+              await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+              const clip = await page.$eval('#' + hintId, element => {
+                const rect = element.getBoundingClientRect();
+                return {x: rect.x, y: rect.y, width: rect.width, height: rect.height};
+              });
+              // Element screenshots may scroll and reposition a fixed tooltip.
+              // Capture its settled viewport rectangle without changing the scene.
+              const capture = await page.screenshot({clip, captureBeyondViewport: false});
+              assert.deepEqual(await page.$eval('#' + hintId, element => {
+                const rect = element.getBoundingClientRect(), style = getComputedStyle(element);
+                return {x: rect.x, y: rect.y, width: rect.width, height: rect.height, visibility: style.visibility, opacity: style.opacity};
+              }), {...clip, visibility: 'visible', opacity: '1'}, 'snapshot preserves the tooltip position and visibility');
               const tintedPixels = await page.evaluate(async data => {
                 const bitmap = await createImageBitmap(await (await fetch('data:image/png;base64,' + data)).blob());
                 const canvas = document.createElement('canvas'); canvas.width = bitmap.width; canvas.height = bitmap.height;
