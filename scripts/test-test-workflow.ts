@@ -36,6 +36,8 @@ assert.ok(viewportCommands.some((command) => (
   command.args.includes('scripts/test-mode-transition-matrix.ts')
 )));
 
+assert.ok(viewportCommands.some(command => command.args.includes('scripts/test-long-document-scroll.ts')));
+
 const history = createTestWorkflowPlan(
   parseTestWorkflowRequest(['targeted', 'history'])
 );

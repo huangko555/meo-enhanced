@@ -18,6 +18,14 @@ to the quick, targeted viewport and release gates. Late-layout compensation rema
 covered by the viewport and virtual-block contracts. Full-document scroll traversal
 must reach both boundaries; a capped or stalled loop cannot report full traversal.
 
+`scripts/test-long-document-scroll.ts` exercises the production Webview in Live,
+Source, Preview and split views, using shared visible-content witnesses in both
+scroll directions. The targeted viewport gate uses a bounded rich-document fixture
+and verifies that unchanged tables retain their measured height. For a reported
+local document, use `--document=<path>`; `--full` requires reaching both boundaries,
+and `--gesture` checks continuous native mouse scrolling. Full traversal follows
+the long-run authorization policy below.
+
 | Tier | Use it when | Expected time | Command |
 | --- | --- | --- | --- |
 | Quick | A coherent implementation change is ready for a general regression check | About 2–4 minutes | `bun run test:quick` |

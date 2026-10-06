@@ -2724,6 +2724,12 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     );
     if (equivalent && other instanceof HtmlTableWidget) {
       const mounted = this.domRefs ? this : other.domRefs ? other : null;
+      if (this.tableData.signature === other.tableData.signature) {
+        // CodeMirror keeps the mounted DOM but adopts the new decoration's widget.
+        // Its offscreen estimate must retain the same measured table height.
+        const height = mounted?.measuredHeight ?? Math.max(this.measuredHeight, other.measuredHeight);
+        this.measuredHeight = other.measuredHeight = height;
+      }
       const projected = mounted === this ? other.tableData : this.tableData;
       mounted?.adoptEquivalentTableData(projected);
     }

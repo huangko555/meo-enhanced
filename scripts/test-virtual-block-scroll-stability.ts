@@ -475,10 +475,11 @@ async function main(): Promise<void> {
     const reverseAfterJump = process.argv.includes('--reverse-after-jump');
     const continuousWheel = process.argv.includes('--continuous-wheel');
     if (reverseAfterJump) {
-      await page.evaluate(() => {
+      const startLineArgument = process.argv.find((argument) => argument.startsWith('--start-line='));
+      await page.evaluate((startLine) => {
         const editor = (window as any).__virtualBlockEditor;
-        editor.scrollToLine(editor.view.state.doc.lines, 'top');
-      });
+        editor.scrollToLine(startLine ?? editor.view.state.doc.lines, 'top');
+      }, startLineArgument ? Number(startLineArgument.slice('--start-line='.length)) : null);
       await waitForFrames(page, 8);
     }
     if (diagnosticMode) {
@@ -550,7 +551,9 @@ async function main(): Promise<void> {
       columnWidths?: number[];
     }> = [];
     const loadingObservations: Array<{ step: number; lines: string[] }> = [];
-    const maxSteps = continuousWheel ? 240 : reverseAfterJump ? 260 : 180;
+    const stepsArgument = process.argv.find((argument) => argument.startsWith('--steps='));
+    const maxSteps = stepsArgument ? Number(stepsArgument.slice('--steps='.length))
+      : continuousWheel ? 240 : reverseAfterJump ? 260 : 180;
     const wheelDelta = reverseAfterJump
       ? continuousWheel ? -72 : -180
       : continuousWheel ? 48 : 100;

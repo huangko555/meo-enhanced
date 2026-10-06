@@ -835,6 +835,7 @@ const readingScroller = Object.assign(new FakeEventTarget(), {
   getBoundingClientRect: () => ({ top: 40, bottom: 540, height: 500 })
 });
 let readingLineTop = 1200;
+let readingHeightMapTop = -1400;
 const readingLine = {
   getBoundingClientRect: () => ({ top: 40 + readingLineTop - readingScroller.scrollTop })
 };
@@ -846,7 +847,7 @@ const readingView = {
   coordsAtPos: () => readingLine.getBoundingClientRect(),
   posAtDOM: () => 42,
   // A rendered widget may share an aggregate height-map block with this line.
-  lineBlockAt: () => ({ top: readingLineTop - 2600 }),
+  lineBlockAt: () => ({ top: readingHeightMapTop }),
   requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => {
     write(read());
     afterReadingMeasure?.();
@@ -921,6 +922,7 @@ try {
   // The controller must compensate only the drift left after that anchoring.
   readingLineTop += 19.5;
   readingScroller.scrollHeight += 19.5;
+  readingHeightMapTop += 19.5;
   readingScroller.scrollTop += 19.5;
   readingController.reconcileAfterEditorUpdate();
   await readingFrame();
@@ -929,6 +931,7 @@ try {
   }
   readingLineTop += 19.5;
   readingScroller.scrollHeight += 19.5;
+  readingHeightMapTop += 6;
   readingScroller.scrollTop += 6;
   readingController.reconcileAfterEditorUpdate();
   await readingFrame();
@@ -1472,6 +1475,8 @@ if (wheelScrollDOM.scrollTop !== 1220) {
 const readingWheelDom = new FakeEventTarget();
 const readingWheelDocument = new FakeEventTarget();
 let readingAnchorDocumentTop = 1200;
+let readingCaretOffset = 0;
+let readingEstimatedOffset = 0;
 const readingWheelScrollDOM = Object.assign(new FakeEventTarget(), {
   ownerDocument: readingWheelDocument,
   scrollTop: 1000,
@@ -1496,15 +1501,41 @@ const readingWheelView = {
   scrollDOM: readingWheelScrollDOM,
   contentDOM: { querySelectorAll: () => [readingWheelLine] },
   posAtDOM: () => 42,
-  lineBlockAt: () => ({ from: 42, top: readingAnchorDocumentTop }),
-  lineBlockAtHeight: () => ({ from: 42, top: readingAnchorDocumentTop }),
+  lineBlockAt: () => ({ from: 42, top: readingAnchorDocumentTop + readingEstimatedOffset }),
+  lineBlockAtHeight: () => ({ from: 42, top: readingAnchorDocumentTop + readingEstimatedOffset }),
   coordsAtPos: () => ({
-    top: readingAnchorDocumentTop - readingWheelScrollDOM.scrollTop,
+    top: readingAnchorDocumentTop + readingCaretOffset - readingWheelScrollDOM.scrollTop,
     bottom: readingAnchorDocumentTop - readingWheelScrollDOM.scrollTop + 20
   }),
   requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
 };
 const readingWheelController = new ViewportController(readingWheelView as any);
+readingWheelScrollDOM.dispatch('wheel', { deltaX: 0, deltaY: -100, ctrlKey: false });
+readingWheelScrollDOM.scrollTop = 970;
+readingWheelScrollDOM.dispatch('scroll', {});
+// Font/token changes can move caret rectangles inside a stable line box.
+readingCaretOffset = 18;
+readingWheelScrollDOM.scrollTop = 920;
+readingWheelController.reconcileAfterEditorUpdate();
+if (readingWheelScrollDOM.scrollTop !== 920) {
+  throw new Error(`Caret geometry interrupted native reading progress: ${readingWheelScrollDOM.scrollTop}`);
+}
+readingWheelScrollDOM.dispatch('scroll', {});
+readingAnchorDocumentTop += 48;
+readingWheelScrollDOM.scrollTop += 48;
+readingWheelController.reconcileAfterEditorUpdate();
+if (readingWheelScrollDOM.scrollTop !== 968) {
+  throw new Error(`Measured line growth was compensated twice: ${readingWheelScrollDOM.scrollTop}`);
+}
+readingEstimatedOffset = 27;
+readingWheelScrollDOM.scrollTop += 27;
+readingWheelController.reconcileAfterEditorUpdate();
+if (readingWheelScrollDOM.scrollTop !== 968) {
+  throw new Error(`Height-map-only correction moved stable reading content: ${readingWheelScrollDOM.scrollTop}`);
+}
+readingWheelController.markInteraction();
+readingEstimatedOffset = 0;
+readingCaretOffset = 0;
 readingWheelScrollDOM.scrollTop = 820;
 readingWheelScrollDOM.dispatch('wheel', {
   deltaX: 0,

@@ -72,6 +72,7 @@ async function main(): Promise<void> {
       const harness = useControlledMermaid
         ? (window as any).MermaidEditingHarness
         : (window as any).EmbeddedInputViewportHarness;
+      (window as any).__embeddedHarness = harness;
       (window as any).__embeddedEditor = harness.createEditor({
         parent: document.getElementById('app')!,
         text,
@@ -168,21 +169,25 @@ async function main(): Promise<void> {
       failures.push(`Typing at the Mermaid tail moved the viewport or lost input: ${JSON.stringify(mermaidInput)}`);
     }
 
-    const mermaidTopBefore = await page.evaluate(() => {
+    const mermaidTopBefore = await page.evaluate(async () => {
       const editor = (window as any).__embeddedEditor;
       const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')!;
       const innerView = (block as any).__meoMermaidEditingController.innerView;
       innerView.dispatch({ selection: { anchor: 0 } });
       innerView.focus();
-      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      const viewport = (window as any).__embeddedHarness.editorViewportBounds(editor.view);
       const caret = innerView.coordsAtPos(0);
       if (!caret) throw new Error('Could not measure Mermaid top caret');
       editor.view.scrollDOM.dispatchEvent(new WheelEvent('wheel', { deltaY: 60, bubbles: true }));
       editor.view.scrollDOM.scrollTop += caret.top - viewport.top + 3;
+      for (let frame = 0; frame < 4; frame++) {
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      }
+      const settledViewport = (window as any).__embeddedHarness.editorViewportBounds(editor.view);
       return {
         scrollTop: editor.view.scrollDOM.scrollTop,
         caretTop: innerView.coordsAtPos(0)?.top ?? null,
-        viewportTop: viewport.top,
+        viewportTop: settledViewport.top,
         lineHeight: editor.view.defaultLineHeight
       };
     });
@@ -197,7 +202,7 @@ async function main(): Promise<void> {
       const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')!;
       const innerView = (block as any).__meoMermaidEditingController.innerView;
       const caret = innerView.coordsAtPos(innerView.state.selection.main.head);
-      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      const viewport = (window as any).__embeddedHarness.editorViewportBounds(editor.view);
       return {
         scrollTop: editor.view.scrollDOM.scrollTop,
         caretTop: caret?.top ?? null,
@@ -205,11 +210,15 @@ async function main(): Promise<void> {
         lineHeight: editor.view.defaultLineHeight
       };
     });
+    // Typing restores passive chrome hidden during the wheel gesture.
+    const revealViewportTop = Math.max(mermaidTopBefore.viewportTop, mermaidTopAfter.viewportTop);
     if (
       mermaidTopBefore.caretTop === null || mermaidTopAfter.caretTop === null ||
-      mermaidTopBefore.caretTop >= mermaidTopBefore.viewportTop ||
+      mermaidTopBefore.caretTop >= revealViewportTop ||
       mermaidTopAfter.caretTop < mermaidTopAfter.viewportTop + mermaidTopAfter.lineHeight - 2 ||
-      mermaidTopAfter.scrollTop < mermaidTopBefore.scrollTop - mermaidTopAfter.lineHeight - 10
+      mermaidTopAfter.scrollTop < mermaidTopBefore.scrollTop
+        - Math.max(0, revealViewportTop - mermaidTopBefore.caretTop)
+        - mermaidTopAfter.lineHeight - 10
     ) {
       failures.push(`Mermaid source did not use minimal top reveal: ${JSON.stringify({
         mermaidTopBefore,
@@ -262,13 +271,13 @@ async function main(): Promise<void> {
     await page.evaluate(async () => {
       const editor = (window as any).__embeddedEditor;
       const tablePosition = editor.getText().indexOf('| ID | 名称 | 状态 |');
-      editor.view.scrollDOM.scrollTop = editor.view.lineBlockAt(tablePosition).top - 120;
+      editor.scrollToLine(editor.view.state.doc.lineAt(tablePosition).number, 'center');
       for (let frame = 0; frame < 6; frame += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
     });
     await page.waitForSelector('.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(3) textarea');
-    await page.click('.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(3) textarea');
+    await page.locator('.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(3)').click();
     await page.keyboard.press('End');
     await page.evaluate(() => {
       const editor = (window as any).__embeddedEditor;

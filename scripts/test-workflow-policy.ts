@@ -148,6 +148,7 @@ function targetedCommands(
     case 'viewport':
       return [
         script('scripts/test-native-scroll-progress-production.ts'),
+        script('scripts/test-long-document-scroll.ts'),
         packageScript('test:reading-position'),
         script('scripts/test-font-size-viewport.ts'),
         script('scripts/test-embedded-source-font-size.ts'),

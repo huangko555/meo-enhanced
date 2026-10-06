@@ -90,7 +90,7 @@ try {
       await page.evaluate(() => { document.querySelector<HTMLElement>('#app > .cm-editor > .cm-scroller')!.scrollTop = 0; });
       await page.waitForSelector('.meo-mermaid-mode-btn');
     }
-    await page.click('.meo-mermaid-mode-btn');
+    await page.locator('.meo-mermaid-mode-btn').click();
     await page.waitForSelector(`.meo-mermaid-editing-block.is-${mode}`);
     for (const size of [15, 20, 15]) {
       const result = await measure('mermaid', size);
@@ -134,7 +134,7 @@ try {
       await page.evaluate(() => { document.querySelector<HTMLElement>('#app > .cm-editor > .cm-scroller')!.scrollTop = 0; });
       await page.waitForSelector('.meo-latex-math-mode-btn');
     }
-    await page.click('.meo-latex-math-mode-btn');
+    await page.locator('.meo-latex-math-mode-btn').click();
     await page.waitForSelector(`.meo-latex-math-editing-block.is-${mode}`);
     for (const size of [15, 20, 15]) {
       const result = await measure('latex-math', size);
