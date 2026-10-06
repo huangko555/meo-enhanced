@@ -102,8 +102,20 @@ try {
         }
         await mount(page, fixture.source, active);
         const clickPoint = await linkPoint(page);
+        const selectionBeforeClick = await page.evaluate(() => (window as any).__linkEditor.view.state.selection.main.toJSON());
         await page.keyboard.down('Control');
-        await page.mouse.click(clickPoint.x, clickPoint.y);
+        await page.mouse.move(clickPoint.x, clickPoint.y);
+        await page.mouse.down();
+        if (fixture.label.endsWith('HTML')) {
+          // Native selection can replace inline HTML between down and up. A
+          // navigation gesture must retain its target for the eventual click.
+          await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+          assert.equal(await page.evaluate(({x, y}) => document.elementFromPoint(x, y)?.closest('[data-meo-link-href]')?.getAttribute('data-meo-link-href'), clickPoint),
+            fixture.href, `${fixture.label}: modifier pointerdown retains the rendered link`);
+          assert.deepEqual(await page.evaluate(() => (window as any).__linkEditor.view.state.selection.main.toJSON()),
+            selectionBeforeClick, `${fixture.label}: modifier pointerdown retains the selection`);
+        }
+        await page.mouse.up();
         await page.keyboard.up('Control');
         if (fixture.href.startsWith('#')) {
           assert.equal(await page.evaluate(() => (window as any).__linkEditor.view.state.selection.main.head),

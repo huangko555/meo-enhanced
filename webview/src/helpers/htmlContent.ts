@@ -279,6 +279,12 @@ function enhanceLinks(root: ParentNode, inline: boolean, uiLanguage: UiLanguage)
     linkText.dataset.tooltip = anchor.title || anchor.dataset.tooltip || '';
     linkText.dataset.tooltipKind = 'description';
     linkText.append(...Array.from(anchor.childNodes));
+    linkText.addEventListener('pointerdown', (event) => {
+      if (event.button === 0 && isPrimaryModifierPointerClick(event)) {
+        // Native selection can unmount inline HTML before the click arrives.
+        event.preventDefault();
+      }
+    });
     linkText.addEventListener('click', (event) => {
       if (!isPrimaryModifierPointerClick(event)) return;
       event.preventDefault();
