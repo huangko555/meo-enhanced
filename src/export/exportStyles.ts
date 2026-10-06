@@ -803,6 +803,11 @@ code:not(pre code) {
   -webkit-box-decoration-break: clone;
 }
 
+p:has(code:not(pre code)) {
+  /* Leave room for cloned code decoration beyond the last wrapped glyph. */
+  padding-inline-end: 0.25em;
+}
+
 p code,
 li code,
 blockquote code,

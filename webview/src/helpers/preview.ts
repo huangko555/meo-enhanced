@@ -531,6 +531,12 @@ table.meo-preview-table-compressed :is(th, td) {
   padding-inline: var(--meo-preview-table-cell-inline-padding) !important;
 }
 
+table.meo-preview-table-compressed :is(th, td):has(code:not(pre code)) {
+  /* Cloned inline-code padding can paint past a wrapped fragment's text width.
+     Reserve its end inset rather than clipping the background or shrinking it. */
+  padding-inline-end: max(var(--meo-preview-table-cell-inline-padding), 0.25em) !important;
+}
+
 table.meo-preview-table-compressed :is(th, td) :is(ul, ol) {
   box-sizing: border-box;
   max-width: 100%;
