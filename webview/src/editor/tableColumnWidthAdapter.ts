@@ -448,7 +448,10 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     const from = numberFromDataset(table, 'tableFrom');
     const to = numberFromDataset(table, 'tableTo');
     if (from === null || to === null || disposed || currentView && to > currentView.state.doc.length) return;
-    const existing = intents.findIndex((intent) => intent.from === from && intent.to === to);
+    const existing = intents.findIndex((intent) => (
+      intent.from === from && intent.to === to
+      && intent.snapshot.widths.length === next.snapshot.widths.length
+    ));
     const value = {
       from,
       to,
