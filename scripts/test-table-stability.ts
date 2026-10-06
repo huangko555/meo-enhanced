@@ -591,6 +591,7 @@ async function main() {
         nestedOrderedItems: listPreview.querySelectorAll(':scope > ul > li > ol > li').length,
         nestedOrderedStart: listPreview.querySelector<HTMLOListElement>(':scope > ul > li > ol')?.start ?? null,
         plainLines: listPreview.querySelectorAll(':scope > .meo-md-html-table-cell-line').length,
+        listSpacerBreaks: listPreview.querySelectorAll(':scope > ul > li:last-child > br').length,
         inlineCodeText: listPreview.querySelector('code')?.textContent ?? '',
         text: listPreview.textContent ?? '',
         unorderedMarkerColor,
@@ -1453,7 +1454,8 @@ async function main() {
       result.renderedListState.topLevelItems !== 2 ||
       result.renderedListState.nestedOrderedItems !== 1 ||
       result.renderedListState.nestedOrderedStart !== 3 ||
-      result.renderedListState.plainLines !== 2 ||
+      result.renderedListState.plainLines !== 1 ||
+      result.renderedListState.listSpacerBreaks !== 1 ||
       result.renderedListState.inlineCodeText !== 'literal<br>code' ||
       result.renderedListState.unorderedMarkerColor !== 'rgb(121, 184, 255)' ||
       result.renderedListState.orderedMarkerColor !== 'rgb(121, 184, 255)' ||

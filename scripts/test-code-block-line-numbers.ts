@@ -604,7 +604,7 @@ async function main() {
       throw new Error(`Rendered-block line-number failures:\n${renderedBlockFailures.join('\n')}`);
     }
 
-    const hiddenActionOpacities = await page.$$eval('.meo-code-block-actions', (toolbars) => (
+    const hiddenActionOpacities = await page.$$eval('.cm-scroller .meo-code-block-actions', (toolbars) => (
       toolbars.map((toolbar) => getComputedStyle(toolbar).opacity)
     ));
     if (hiddenActionOpacities.some((opacity) => opacity !== '0')) {
@@ -620,7 +620,7 @@ async function main() {
     );
     await page.mouse.move(middleCodeLine.x, middleCodeLine.y);
     await page.waitForFunction(() => {
-      const states = Array.from(document.querySelectorAll<HTMLElement>('.meo-code-block-actions'))
+      const states = Array.from(document.querySelectorAll<HTMLElement>('.cm-scroller .meo-code-block-actions'))
         .map((toolbar) => ({
           hovered: toolbar.classList.contains('is-block-hovered'),
           opacity: Number.parseFloat(getComputedStyle(toolbar).opacity)
@@ -628,7 +628,7 @@ async function main() {
       return states.filter((state) => state.hovered && state.opacity >= 0.99).length === 1
         && states.filter((state) => state.opacity >= 0.99).length === 1;
     });
-    const hoveredActionState = await page.$$eval('.meo-code-block-actions', (toolbars) => (
+    const hoveredActionState = await page.$$eval('.cm-scroller .meo-code-block-actions', (toolbars) => (
       toolbars.map((toolbar) => ({
         hovered: toolbar.classList.contains('is-block-hovered'),
         opacity: Number.parseFloat(getComputedStyle(toolbar).opacity)
@@ -656,7 +656,7 @@ async function main() {
     );
     await page.mouse.move(syncedCodeLine.x, syncedCodeLine.y);
     await waitForFrames(page);
-    const hoveredAfterExternalSync = await page.$$eval('.meo-code-block-actions', (toolbars) => (
+    const hoveredAfterExternalSync = await page.$$eval('.cm-scroller .meo-code-block-actions', (toolbars) => (
       toolbars.filter((toolbar) => (
         toolbar.classList.contains('is-block-hovered') && Number.parseFloat(getComputedStyle(toolbar).opacity) >= 0.99
       )).length
@@ -665,11 +665,11 @@ async function main() {
       throw new Error('External text sync disabled code block hover actions');
     }
 
-    await page.click('.meo-code-block-actions .meo-select-all-code-btn');
+    await page.click('.cm-scroller .meo-code-block-actions .meo-select-all-code-btn');
     const selectedCode = await page.evaluate(() => {
       const editor = (window as any).__codeBlockLineNumbersEditor;
       const selection = editor.view.state.selection.main;
-      const toolbar = document.querySelector<HTMLElement>('.meo-code-block-actions');
+      const toolbar = document.querySelector<HTMLElement>('.cm-scroller .meo-code-block-actions');
       return {
         anchor: selection.anchor,
         from: selection.from,
@@ -678,7 +678,7 @@ async function main() {
         to: selection.to,
         toolbarHovered: toolbar?.classList.contains('is-block-hovered') ?? false,
         toolbarOpacity: toolbar ? Number.parseFloat(getComputedStyle(toolbar).opacity) : null,
-        controls: Array.from(document.querySelector('.meo-code-block-actions')?.children ?? [])
+        controls: Array.from(document.querySelector('.cm-scroller .meo-code-block-actions')?.children ?? [])
           .map((element) => element.getAttribute('aria-label'))
       };
     });
@@ -771,7 +771,7 @@ async function main() {
     const longBlockScrollBefore = await page.evaluate(() => (
       (window as any).__codeBlockLineNumbersEditor.view.scrollDOM.scrollTop
     ));
-    await page.click('.meo-code-block-actions .meo-select-all-code-btn');
+    await page.click('.cm-scroller .meo-code-block-actions .meo-select-all-code-btn');
     await waitForFrames(page, 2);
     const longBlockSelection = await page.evaluate(() => {
       const editor = (window as any).__codeBlockLineNumbersEditor;

@@ -661,7 +661,8 @@ if (
   !darkPreviewStyles.includes('--meo-heading-1-size: 1.6em') ||
   !darkPreviewStyles.includes('--meo-heading-1-weight: 600') ||
   getBuiltInVisuals('dark').typography.headingFontWeights[0] !== '400' ||
-  !darkPreviewStyles.includes('strong { color: inherit; }') ||
+  !darkPreviewStyles.includes('strong, b { color: color-mix(in srgb, currentColor 70%, #fff 30%); }') ||
+  !lightPreviewStyles.includes('strong, b { color: inherit; }') ||
   !darkPreviewStyles.includes('strong { font-weight: 700; }')
 ) {
   throw new Error('Preview headings must be semibold without changing Live heading weight or strong-text emphasis');

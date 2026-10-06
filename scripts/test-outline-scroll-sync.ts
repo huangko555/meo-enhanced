@@ -79,8 +79,9 @@ async function assertOutlineViewportStability(page: Page, mode: 'source' | 'live
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     }
     const target = Array.from(outline.sidebar.querySelectorAll<HTMLButtonElement>('.outline-item')).at(-2)!;
-    const heading = editor.getHeadings().find((candidate: { text: string }) => candidate.text === target.title);
-    if (!heading) throw new Error(`Missing outline target: ${target.title}`);
+    const title = target.dataset.tooltip ?? target.title;
+    const heading = editor.getHeadings().find((candidate: { text: string }) => candidate.text === title);
+    if (!heading) throw new Error(`Missing outline target: ${title}`);
     const position = editor.view.state.doc.line(heading.line).from;
     const offsets: number[] = [];
     target.click();
@@ -90,7 +91,7 @@ async function assertOutlineViewportStability(page: Page, mode: 'source' | 'live
       const viewport = editor.view.scrollDOM.getBoundingClientRect();
       if (coords) offsets.push(coords.top - viewport.top);
     }
-    return { title: target.title, offsets };
+    return { title, offsets };
   });
   if (
     jumpTrace.offsets.length < 2 ||

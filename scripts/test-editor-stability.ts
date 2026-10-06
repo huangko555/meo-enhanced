@@ -847,7 +847,7 @@ async function main() {
       const floatingBackground = getComputedStyle(outline.sidebar).backgroundColor;
       const visibleItems = Array.from(outline.sidebar.querySelectorAll<HTMLButtonElement>('.outline-item.is-visible'));
       const visibleClassState = visibleItems.map((item) => ({
-        title: item.title,
+        title: item.dataset.tooltip ?? item.title,
         first: item.classList.contains('is-visible-first')
       }));
       const resizer = outline.sidebar.querySelector<HTMLElement>('.outline-resizer')!;
@@ -896,7 +896,7 @@ async function main() {
         { text: '7.4 Target', level: 3, from: 260, line: 20 }
       ];
       const target = Array.from(outline.sidebar.querySelectorAll<HTMLButtonElement>('.outline-item'))
-        .find((item) => item.title === '7.4 Target');
+        .find((item) => (item.dataset.tooltip ?? item.title) === '7.4 Target');
       target?.click();
       root.remove();
       return {

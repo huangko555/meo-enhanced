@@ -320,7 +320,7 @@ async function main() {
       mode: 'Markdown 模式',
       modeLabels: ['实时', '源码', '预览'],
       selectionMenu: '行内 Markdown 格式',
-      selectionLabels: ['加粗', '斜体', '删除线', '高亮', '行内代码', '链接', 'Wiki 链接', '按键', '下划线'],
+      selectionLabels: ['加粗', '斜体', '删除线', '高亮', '行内代码', '链接', 'Wiki 链接', '按键样式', '下划线'],
       scrollToTop: ['回到顶部', '回到顶部']
     })) {
       throw new Error(`Resolved UI language did not project into the current Webview: ${JSON.stringify(chineseChrome)}`);
@@ -879,7 +879,7 @@ async function main() {
     if (
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
         '显示行号', '折叠长代码块', '限制宽度', '粗体文字着色', '标题加粗',
-        '表格浮动表头', '恢复阅读位置', '快速打开大文档'
+        '表格浮动表头'
       ]) ||
       moreToolsLayout.topHeading !== '文档显示' ||
       moreToolsLayout.languageAutoLabel !== '自动' ||
@@ -1063,7 +1063,7 @@ async function main() {
       }) ||
       lightAppearanceState.active !== 'light' ||
       lightAppearanceState.labelExists ||
-      JSON.stringify(lightAppearanceState.indicatorInsets) !== JSON.stringify({ top: 2, right: 0, bottom: 2, left: 0 }) ||
+      JSON.stringify(lightAppearanceState.indicatorInsets) !== JSON.stringify({ top: 2, right: 2, bottom: 2, left: 2 }) ||
       JSON.stringify(lightAppearanceState.messages) !== JSON.stringify(['light'])
     ) {
       throw new Error(`Editor light appearance did not preserve established accents: ${JSON.stringify({ darkAppearanceState, lightAppearanceState })}`);
@@ -1693,7 +1693,7 @@ async function main() {
       previewToolbarLayout.selectRadii.some((radius) => radius !== 8) ||
       previewToolbarLayout.segmentedCount !== 3 ||
       previewToolbarLayout.segmentedHeights.some((height) => height !== 26) ||
-      JSON.stringify(previewToolbarLayout.labels) !== JSON.stringify(['预览字体', '预览主题', '代码着色', '显示注释']) ||
+      JSON.stringify(previewToolbarLayout.labels) !== JSON.stringify(['预览字体', '预览主题', '代码着色', 'HTML 注释']) ||
       previewToolbarLayout.appearance !== 'light' ||
       previewToolbarLayout.colorSchemes.some((scheme) => scheme !== 'dark') ||
       previewToolbarLayout.oldAppearanceButtons !== 0 ||

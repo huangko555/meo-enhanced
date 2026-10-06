@@ -121,7 +121,15 @@ async function main(): Promise<void> {
           assert.equal(state.color, appearance === 'light' ? 'rgb(0, 0, 0)' : 'rgb(255, 255, 255)');
           assert.equal(state.cursor, 'pointer', `${selector} ${state.label} lost its button cursor`);
           assert.equal(state.iconCursor, 'pointer', `${selector} ${state.label} icon showed a text cursor`);
-          const screenshot = await button.screenshot({ encoding: 'base64' });
+          const clip = await button.evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            return { x: rect.left + window.scrollX, y: rect.top + window.scrollY, width: rect.width, height: rect.height };
+          });
+          // Element screenshots scroll their target again, which can move it
+          // away from the pointer after the hover assertions have passed.
+          const screenshot = await page.screenshot({ encoding: 'base64', clip, captureBeyondViewport: false });
+          assert.equal(await button.evaluate((element) => element.matches(':hover')), true,
+            `${selector} ${state.label} lost hover while capturing its background`);
           const backgroundPixel = await page.evaluate(async (png) => {
             const image = new Image();
             image.src = 'data:image/png;base64,' + png;

@@ -97,10 +97,21 @@ try {
       throw new Error(`${mode} font size step flashed the reading line (${maxDisplacement}px): ${JSON.stringify(samples)}`);
     }
   }
-  await page.evaluate(async () => {
-    document.querySelector<HTMLElement>('.editor-host .cm-scroller')!.scrollTop += 500;
-    for (let i = 0; i < 8; i++) await new Promise(requestAnimationFrame);
-  });
+  // Native scrolling establishes the reading position before testing font-size
+  // stability; a fixed scroll delta may leave the table below the reading edge.
+  for (let pass = 0; pass < 2; pass++) {
+    const target = await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
+      const viewport = scroller.getBoundingClientRect();
+      const row = scroller.querySelector<HTMLElement>('.meo-md-html-table-shell tbody tr')!;
+      return { x: viewport.left + 80, y: viewport.top + 80, delta: row.getBoundingClientRect().top - viewport.top + 8 };
+    });
+    await page.mouse.move(target.x, target.y);
+    await page.mouse.wheel({ deltaY: target.delta });
+    await page.evaluate(async () => { for (let i = 0; i < 8; i++) await new Promise(requestAnimationFrame); });
+  }
+  // Font changes are measured after the 250ms native wheel gesture has ended.
+  await new Promise((resolve) => setTimeout(resolve, 300));
   const tableRowSamples = await page.evaluate(async () => {
     const scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
     const viewport = scroller.getBoundingClientRect();

@@ -16,7 +16,7 @@ async function runCase(replacement: 0 | 1 | 2, moveSameNode: boolean, disposeAft
     const page: any = await browser.newPage();
     await page.setContent(`
       <div class="cm-editor"><div class="cm-scroller" style="height:40px;overflow:hidden">
-        <button aria-label="Edit Mermaid in split view" style="${offscreen ? 'margin-top:80px' : ''}">Split</button>
+        <button aria-label="Switch to split view" style="${offscreen ? 'margin-top:80px' : ''}">Split</button>
       </div></div>
     `);
     let acquires = 0;
@@ -98,7 +98,7 @@ async function runPublicFailureEvidenceCase() {
     await page.setContent(`
       <div class="cm-editor"><div class="cm-scroller" style="height:80px;overflow:hidden">
         <div role="group" aria-label="Mermaid block controls at line 1">
-          <button aria-label="Edit Mermaid in split view">Split</button>
+          <button aria-label="Switch to split view">Split</button>
         </div>
       </div>
     `);
@@ -109,14 +109,14 @@ async function runPublicFailureEvidenceCase() {
         throw new Error('synthetic public page error');
       });
       button.addEventListener('click', () => {
-        button.setAttribute('aria-label', 'Show Mermaid code only');
+        button.setAttribute('aria-label', 'Switch to source');
       });
     });
 
     const waitForFunction = page.waitForFunction.bind(page);
     page.waitForFunction = (...args: any[]) => {
       const known = args[2];
-      if (known && typeof known === 'object' && known.expectedLabel === 'Show Mermaid code only') {
+      if (known && typeof known === 'object' && known.expectedLabel === 'Switch to source') {
         return Promise.reject(new Error('synthetic target settlement timeout'));
       }
       return waitForFunction(...args);
@@ -164,7 +164,7 @@ async function runPublicFailureEvidenceCase() {
     check(events.every((entry: any) => Array.isArray(entry.currentModeLabels)), 'event evidence omitted current mode labels');
     check(events.every((entry: any) => entry.targetRect && typeof entry.targetHit === 'boolean'), 'event evidence omitted target rect/hit');
     check(Array.isArray(evidence.labelChanges) && evidence.labelChanges.some((entry: any) => (
-      entry.currentModeLabels.includes('Show Mermaid code only')
+      entry.currentModeLabels.includes('Switch to source')
     )), 'single MutationObserver omitted the label transition');
     check(Array.isArray(evidence.pageErrors) && evidence.pageErrors.some((entry: string) => (
       entry.includes('synthetic public page error')
@@ -195,7 +195,7 @@ async function runMaterializationFailureEvidenceCase() {
           <div class="cm-line">after target</div>
         </div>
         <div role="group" aria-label="Mermaid block controls at line 130" style="position:absolute;left:10px;top:20px;width:30px;height:20px">
-          <button aria-label="Edit Mermaid in split view">Old split</button>
+          <button aria-label="Switch to split view">Old split</button>
         </div>
       </div></div>
     `);
@@ -256,7 +256,7 @@ async function runMaterializationHandoffEvidenceCase() {
       <div class="cm-editor"><div class="cm-scroller" style="height:80px;overflow:auto;position:relative">
         <div class="cm-line"><span>\`\`\`mermaid</span><div class="mermaid-source-block">graph TD</div></div>
         <div role="group" aria-label="Mermaid block controls at line 130">
-          <button aria-label="Edit Mermaid in split view">Old split</button>
+          <button aria-label="Switch to split view">Old split</button>
         </div>
       </div></div>
     `);
@@ -267,9 +267,9 @@ async function runMaterializationHandoffEvidenceCase() {
           const group = document.createElement('div');
           group.setAttribute('role', 'group');
           group.setAttribute('aria-label', 'Mermaid block controls at line 131');
-          group.innerHTML = '<button aria-label="Edit Mermaid in split view">Target split</button>';
+          group.innerHTML = '<button aria-label="Switch to split view">Target split</button>';
           group.querySelector('button')!.addEventListener('click', (event) => {
-            (event.currentTarget as HTMLButtonElement).setAttribute('aria-label', 'Show Mermaid code only');
+            (event.currentTarget as HTMLButtonElement).setAttribute('aria-label', 'Switch to source');
           });
           scroller.append(group);
           document.querySelector('[aria-label="Mermaid block controls at line 130"]')!.remove();
@@ -279,7 +279,7 @@ async function runMaterializationHandoffEvidenceCase() {
     const waitForFunction = page.waitForFunction.bind(page);
     page.waitForFunction = (...args: any[]) => {
       const known = args[2];
-      if (known && typeof known === 'object' && known.expectedLabel === 'Show Mermaid code only') {
+      if (known && typeof known === 'object' && known.expectedLabel === 'Switch to source') {
         return Promise.reject(new Error('synthetic handoff settlement timeout'));
       }
       return waitForFunction(...args);
@@ -353,7 +353,7 @@ async function runRunnerOwnedUnsupportedCleanupCase() {
     await page.setContent(`
       <div class="cm-editor"><div class="cm-scroller" style="height:40px;overflow:hidden">
         <div role="group" aria-label="Mermaid block controls at line 1" style="margin-top:80px">
-          <button aria-label="Edit Mermaid in split view">Split</button>
+          <button aria-label="Switch to split view">Split</button>
         </div>
       </div></div>
     `);
@@ -404,7 +404,7 @@ async function runMultiStepUnsupportedTerminalCase() {
     await page.setContent(`
       <div class="cm-editor"><div class="cm-scroller" style="height:40px;overflow:hidden">
         <div role="group" aria-label="Mermaid block controls at line 1" style="margin-top:80px">
-          <button aria-label="Edit Mermaid in split view">Split</button>
+          <button aria-label="Switch to split view">Split</button>
         </div>
       </div></div>
     `);
@@ -456,7 +456,7 @@ async function runMultiStepCompletedCase() {
     await page.setContent(`
       <div class="cm-editor"><div class="cm-scroller" style="height:80px;overflow:hidden">
         <div role="group" aria-label="Mermaid block controls at line 1">
-          <button aria-label="Edit Mermaid in split view">Next mode</button>
+          <button aria-label="Switch to split view">Next mode</button>
         </div>
       </div></div>
     `);
@@ -467,7 +467,7 @@ async function runMultiStepCompletedCase() {
         const label = button.getAttribute('aria-label');
         button.setAttribute(
           'aria-label',
-          label === 'Edit Mermaid in split view' ? 'Show Mermaid code only' : 'Show Mermaid preview'
+          label === 'Switch to split view' ? 'Switch to source' : 'Switch to preview'
         );
       });
     });
@@ -486,7 +486,7 @@ async function runMultiStepCompletedCase() {
     );
     check(result.status === 'completed', 'normal multi-step runner did not complete');
     check(result.evidence?.registrations === 0 && result.evidence.cleaned && result.evidence.sentinelRejected, 'normal multi-step result leaked observer registry');
-    check(await page.$eval('button', (button) => button.getAttribute('aria-label')) === 'Show Mermaid preview', 'normal multi-step runner stopped before source mode');
+    check(await page.$eval('button', (button) => button.getAttribute('aria-label')) === 'Switch to preview', 'normal multi-step runner stopped before source mode');
     let retainedHandleClosed = false;
     try {
       await retainedLatestObserverHandle.evaluate((observer: any) => observer.snapshot());
@@ -506,7 +506,7 @@ async function runRunnerOwnedNoopCleanupCase() {
     await page.setContent(`
       <div class="cm-editor"><div class="cm-scroller" style="height:40px;overflow:hidden">
         <div role="group" aria-label="Mermaid block controls at line 1">
-          <button aria-label="Edit Mermaid in split view">Split</button>
+          <button aria-label="Switch to split view">Split</button>
         </div>
       </div></div>
     `);
@@ -516,7 +516,7 @@ async function runRunnerOwnedNoopCleanupCase() {
           const group = document.querySelector<HTMLElement>('[role="group"]')!;
           if (group.style.marginTop === '80px') {
             group.style.marginTop = '0';
-            group.querySelector('button')!.setAttribute('aria-label', 'Show Mermaid code only');
+            group.querySelector('button')!.setAttribute('aria-label', 'Switch to source');
             return;
           }
           queueMicrotask(() => { group.style.marginTop = '80px'; });
@@ -549,7 +549,7 @@ async function runRunnerOwnedPreOpeningFailureCase() {
     await page.setContent(`
       <div class="cm-editor"><div class="cm-scroller" style="height:0;overflow:hidden">
         <div role="group" aria-label="Mermaid block controls at line 1">
-          <button aria-label="Edit Mermaid in split view">Split</button>
+          <button aria-label="Switch to split view">Split</button>
         </div>
       </div></div>
     `);
@@ -595,7 +595,7 @@ async function runRunnerOwnedDisconnectCleanupFailureCase() {
     await page.setContent(`
       <div class="cm-editor"><div class="cm-scroller" style="height:40px;overflow:hidden">
         <div role="group" aria-label="Mermaid block controls at line 1">
-          <button aria-label="Edit Mermaid in split view">Split</button>
+          <button aria-label="Switch to split view">Split</button>
         </div>
       </div></div>
     `);
@@ -641,7 +641,7 @@ async function runMissingSemanticClickCase() {
     await page.setContent(`
       <div class="cm-editor"><div class="cm-scroller" style="height:80px;overflow:hidden">
         <div role="group" aria-label="Mermaid block controls at line 1">
-          <button aria-label="Edit Mermaid in split view" style="pointer-events:none">Split</button>
+          <button aria-label="Switch to split view" style="pointer-events:none">Split</button>
         </div>
       </div>
     `);
@@ -649,7 +649,7 @@ async function runMissingSemanticClickCase() {
     const waitForFunction = page.waitForFunction.bind(page);
     page.waitForFunction = (...args: any[]) => {
       const known = args[2];
-      if (known && typeof known === 'object' && known.expectedLabel === 'Show Mermaid code only') {
+      if (known && typeof known === 'object' && known.expectedLabel === 'Switch to source') {
         return Promise.reject(new Error('semantic click failure incorrectly entered target wait'));
       }
       return waitForFunction(...args);
@@ -685,10 +685,10 @@ async function runSameLabelDifferentGroupCase() {
     await page.setContent(`
       <div class="cm-editor"><div class="cm-scroller" style="height:80px;overflow:hidden;position:relative">
         <div role="group" aria-label="Mermaid block controls at line 1" style="position:absolute;left:0;top:0">
-          <button aria-label="Edit Mermaid in split view">Target split</button>
+          <button aria-label="Switch to split view">Target split</button>
         </div>
         <div role="group" aria-label="Mermaid block controls at line 2" style="position:absolute;left:0;top:0;z-index:1">
-          <button aria-label="Edit Mermaid in split view">Other split</button>
+          <button aria-label="Switch to split view">Other split</button>
         </div>
       </div></div>
     `);
@@ -696,7 +696,7 @@ async function runSameLabelDifferentGroupCase() {
     const waitForFunction = page.waitForFunction.bind(page);
     page.waitForFunction = (...args: any[]) => {
       const known = args[2];
-      if (known && typeof known === 'object' && known.expectedLabel === 'Show Mermaid code only') {
+      if (known && typeof known === 'object' && known.expectedLabel === 'Switch to source') {
         return Promise.reject(new Error('different group click incorrectly entered target wait'));
       }
       return waitForFunction(...args);
@@ -732,7 +732,7 @@ async function runMoveSettlementMismatchCase() {
     await page.setContent(`
       <div class="cm-editor"><div class="cm-scroller" style="height:80px;overflow:hidden;position:relative">
         <div role="group" aria-label="Mermaid block controls at line 1" style="position:absolute;left:0;top:0">
-          <button aria-label="Edit Mermaid in split view">Target split</button>
+          <button aria-label="Switch to split view">Target split</button>
         </div>
       </div></div>
     `);

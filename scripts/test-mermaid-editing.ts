@@ -681,6 +681,24 @@ async function assertSourceClickKeepsViewport(
   lineText: string,
   controllerProperty: '__meoMermaidEditingController' | '__meoLatexMathEditingController'
 ): Promise<void> {
+  // Position through the user's scroll path before recording click coordinates;
+  // a raw scrollTop write can be reconciled by the pending reading anchor.
+  const target = await page.evaluate(({ selector, text }) => {
+    const editor = (window as any).__mermaidEditingEditor;
+    const block = document.querySelector<HTMLElement>(selector)!;
+    const line = Array.from(block.querySelectorAll<HTMLElement>('.cm-line'))
+      .find((candidate) => candidate.textContent === text)!;
+    const viewport = editor.view.scrollDOM.getBoundingClientRect();
+    return {
+      x: viewport.left + 10,
+      y: viewport.top + viewport.height / 2,
+      delta: line.getBoundingClientRect().top - viewport.top - viewport.height / 2
+    };
+  }, { selector: blockSelector, text: lineText });
+  await page.mouse.move(target.x, target.y);
+  await page.mouse.wheel({ deltaY: target.delta });
+  await waitForFrames(page);
+  await new Promise((resolve) => setTimeout(resolve, 300));
   const before = await page.evaluate(({ selector, text }) => {
     const editor = (window as any).__mermaidEditingEditor;
     const block = document.querySelector<HTMLElement>(selector)!;
@@ -690,10 +708,8 @@ async function assertSourceClickKeepsViewport(
       ? '__meoLatexMathEditingController'
       : '__meoMermaidEditingController';
     const innerView = (block as any)[property]?.innerView;
-    const viewport = editor.view.scrollDOM.getBoundingClientRect();
-    const lineRect = line.getBoundingClientRect();
-    editor.view.scrollDOM.scrollTop += lineRect.top - viewport.top - viewport.height / 2;
     const positionedRect = line.getBoundingClientRect();
+
     return {
       scrollTop: editor.view.scrollDOM.scrollTop,
       lineTop: positionedRect.top,

@@ -25,15 +25,15 @@ function labelsFor(kind: HistoryRenderedBlockKind, lineNumber: number): ModeLabe
   return kind === 'mermaid'
     ? {
         controls: `Mermaid block controls at line ${lineNumber}`,
-        preview: 'Edit Mermaid in split view',
-        split: 'Show Mermaid code only',
-        source: 'Show Mermaid preview'
+        preview: 'Switch to split view',
+        split: 'Switch to source',
+        source: 'Switch to preview'
       }
     : {
         controls: `Formula block controls at line ${lineNumber}`,
-        preview: 'Edit formula in split view',
-        split: 'Show formula source only',
-        source: 'Show formula preview'
+        preview: 'Switch to split view',
+        split: 'Switch to source',
+        source: 'Switch to preview'
       };
 }
 

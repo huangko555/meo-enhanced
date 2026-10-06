@@ -10,6 +10,7 @@ class FakeElement {
   children: FakeElement[] = [];
   classList = new FakeClassList();
   className = '';
+  dataset: Record<string, string> = {};
   complete = false;
   isConnected = false;
   naturalWidth = 0;

@@ -1713,6 +1713,8 @@ async function main(): Promise<void> {
         const proseKbd = Array.from(doc.querySelectorAll<HTMLElement>('kbd')).find((item) => !item.closest('table'))!;
         const pageRoot = doc.querySelector<HTMLElement>('.meo-export-doc')!;
         const rootRect = pageRoot.getBoundingClientRect();
+        // Authored titles move into the shared tooltip on hover or focus.
+        const authoredTitle = (element: HTMLElement) => element.dataset.tooltip ?? element.title;
         const linkedImage = doc.querySelector<HTMLImageElement>('img[alt="Linked alt"]')!;
         const linkedAnchor = linkedImage.closest<HTMLAnchorElement>('a')!;
         const linkedFocusPreserved = doc.activeElement === linkedAnchor;
@@ -1954,7 +1956,7 @@ async function main(): Promise<void> {
               const rect = image.getBoundingClientRect();
               return {
                 alt: image.alt,
-                title: image.title,
+                title: authoredTitle(image),
                 complete: image.complete,
                 naturalWidth: image.naturalWidth,
                 naturalHeight: image.naturalHeight,
@@ -1994,8 +1996,8 @@ async function main(): Promise<void> {
               role: linkedAnchor.getAttribute('role'),
               tabIndex: linkedAnchor.tabIndex,
               href: linkedAnchor.dataset.meoPreviewHref,
-              anchorTitle: linkedAnchor.title,
-              imageTitle: linkedImage.title,
+              anchorTitle: authoredTitle(linkedAnchor),
+              imageTitle: authoredTitle(linkedImage),
               focusPreserved: linkedFocusPreserved,
               focusedAfterActivation: linkedFocusedAfterActivation
             },
@@ -2010,7 +2012,7 @@ async function main(): Promise<void> {
               naturalWidth: brokenImage.naturalWidth,
               naturalHeight: brokenImage.naturalHeight,
               alt: brokenImage.alt,
-              title: brokenImage.title,
+              title: authoredTitle(brokenImage),
               rect: (() => {
                 const rect = brokenImage.getBoundingClientRect();
                 return { width: rect.width, height: rect.height, left: rect.left, right: rect.right };

@@ -134,7 +134,7 @@ async function main(): Promise<void> {
           throw new Error(`${appearance}/${language} must preserve the original sample while updating the new sample: ${JSON.stringify(result)}`);
         }
         const editorBackground = dark ? 'rgb(36, 41, 47)' : 'rgb(247, 248, 250)';
-        const targetForeground = dark ? 'rgb(240, 242, 244)' : 'rgb(34, 38, 43)';
+        const targetForeground = dark ? 'rgb(203, 216, 228)' : 'rgb(34, 38, 43)';
         if (result.some((dialog) => dialog.background !== dialog.toolbarBackground ||
           dialog.border !== dialog.toolbarBorder || dialog.background === editorBackground ||
           dialog.foreground !== targetForeground)) {

@@ -496,51 +496,43 @@ async function headingWeightPreference(browser: Browser): Promise<void> {
 
 async function largeDocumentStartupPreference(browser: Browser): Promise<void> {
   const page = await open(browser, 'settings fixture', 'live');
-  try {
+  const option = '[data-setting="largeDocument"]';
+  const toggle = option + ' [role="switch"]';
+  const openPreferences = async () => {
     await page.click('[data-action="settings"]');
-    const option = await page.$('[data-action="largeDocumentOptimization"]');
-    assert.ok(option, 'Large-document startup option was not present');
-    assert.equal(
-      await option.evaluate((element) => element.querySelector('.more-tools-option-label')?.textContent),
-      'Open large documents faster'
-    );
-    await page.hover('[data-action="largeDocumentOptimization"] .more-tools-option-info');
-    await page.waitForFunction(() => getComputedStyle(
-      document.querySelector<HTMLElement>('#large-document-startup-tooltip')!
-    ).visibility === 'visible');
-    const tooltip = await page.$eval('#large-document-startup-tooltip', (element) => element.textContent ?? '');
-    assert.match(tooltip, /Source next time/);
-    const tooltipBounds = await page.$eval('#large-document-startup-tooltip', (element) => {
+    await page.click('.more-tools-settings-button');
+    await page.waitForSelector('.settings-window');
+  };
+  try {
+    await openPreferences();
+    assert.equal(await page.$eval(option + ' .settings-item-title', element => element.textContent),
+      'Open large documents faster');
+    assert.equal(await page.$eval(toggle, element => element.getAttribute('aria-checked')), 'true');
+    const description = option + ' .settings-description';
+    await page.$eval(description, element => element.scrollIntoView({ block: 'center' }));
+    const descriptionState = await page.$eval(description, element => {
       const rect = element.getBoundingClientRect();
-      const panelRect = { top: 8, right: innerWidth - 8, bottom: innerHeight - 8, left: 8 };
-      return {
-        top: rect.top,
-        right: rect.right,
-        bottom: rect.bottom,
-        left: rect.left,
-        panelTop: panelRect.top,
-        panelRight: panelRect.right,
-        panelBottom: panelRect.bottom,
-        panelLeft: panelRect.left
-      };
+      return { text: element.textContent ?? '', top: rect.top, right: rect.right,
+        bottom: rect.bottom, left: rect.left, visible: getComputedStyle(element).visibility };
     });
-    assert.ok(
-      tooltipBounds.top >= tooltipBounds.panelTop
-        && tooltipBounds.right <= tooltipBounds.panelRight
-        && tooltipBounds.bottom <= tooltipBounds.panelBottom
-        && tooltipBounds.left >= tooltipBounds.panelLeft,
-      `Large-document tooltip was clipped by the viewport: ${JSON.stringify(tooltipBounds)}`
-    );
-    await page.click('[data-action="largeDocumentOptimization"] .more-tools-option-label');
+    assert.match(descriptionState.text, /Source mode/);
+    assert.match(descriptionState.text, /next time/);
+    assert.equal(descriptionState.visible, 'visible');
+    assert.ok(descriptionState.top >= 8 && descriptionState.right <= 992
+      && descriptionState.bottom <= 692 && descriptionState.left >= 8,
+      `Large-document description was clipped by the viewport: ${JSON.stringify(descriptionState)}`);
+    await page.click(toggle);
+    assert.equal(await page.$eval(toggle, element => element.getAttribute('aria-checked')), 'false');
     const posted = await page.evaluate(() => (window as any).__hostMessages.filter(
       (message: any) => message.type === 'setLargeDocumentOptimization'
     ));
     assert.deepEqual(posted, [{ type: 'setLargeDocumentOptimization', enabled: false }]);
+    await page.click('.settings-close');
     await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
       data: { type: 'largeDocumentOptimizationChanged', enabled: true }
     })));
-    await page.waitForFunction(() => document.querySelector('[data-action="largeDocumentOptimization"]')
-      ?.getAttribute('aria-checked') === 'true');
+    await openPreferences();
+    assert.equal(await page.$eval(toggle, element => element.getAttribute('aria-checked')), 'true');
   } finally {
     await page.close();
   }
