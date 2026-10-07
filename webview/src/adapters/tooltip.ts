@@ -327,7 +327,10 @@ export function bindTooltips(root: HTMLElement, options: {
     if (live && href && !linkButton && !element.matches('.meo-md-image-linked') && !linkModifier) return null;
     const description = element.dataset.tooltip?.trim();
     const language = doc.documentElement.dataset.meoTooltipLanguage ?? doc.documentElement.lang;
-    const destination = href ? getUiStrings(language === 'zh-CN' ? 'zh-CN' : 'en').linkDestination(href) : '';
+    let displayHref = href;
+    try { if (href) displayHref = decodeURI(href); }
+    catch { /* Malformed URI escapes retain their original display text. */ }
+    const destination = displayHref ? getUiStrings(language === 'zh-CN' ? 'zh-CN' : 'en').linkDestination(displayHref) : '';
     const text = href ? (description && description !== href ? destination + '\n' + description : destination) : description;
     if (!text) return null;
     const kind = href ? 'link' : element.dataset.tooltipKind;

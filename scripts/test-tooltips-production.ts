@@ -25,14 +25,14 @@ try {
       queueMicrotask(()=>window.dispatchEvent(new MessageEvent('message',{data:{
         type:'previewRenderResult',requestId:message.requestId,
         result:{ok:true,value:{
-          html:'<p><a href="https://example.com" title="Link explanation">Reference</a></p><p><a id="fragment-link" href="#安装说明">安装说明</a></p><p><a id="plain-link" href="https://example.com/docs?section=setup#install">Documentation</a></p><h2 id="安装说明">安装说明</h2>',
+          html:'<p><a href="https://example.com" title="Link explanation">Reference</a></p><p><a id="fragment-link" href="#%E5%AE%89%E8%A3%85%E8%AF%B4%E6%98%8E">安装说明</a></p><p><a id="plain-link" href="https://example.com/docs?section=setup#install">Documentation</a></p><h2 id="安装说明">安装说明</h2>',
           hasMermaid:false,styles:{light:'body{font:18px serif}',dark:'body{font:18px serif}'}
         }}
       }})));
     }});
   ` });
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
-  const text = '# Tooltip fixture\n\nParagraph one.\n\nParagraph two.\n\nParagraph three.\n\n```mermaid\ngraph TD\nA-->B\n```\n\n$$\nx^2\n$$\n\n| Name | Value |\n| --- | --- |\n| A | B |\n\nAfter table.\n\n[Reference](https://example.com \"Link explanation\").';
+  const text = '# Tooltip fixture\n\n[Encoded anchor](#%E5%AE%89%E8%A3%85%E8%AF%B4%E6%98%8E)\n\nParagraph one.\n\nParagraph two.\n\nParagraph three.\n\n```mermaid\ngraph TD\nA-->B\n```\n\n$$\nx^2\n$$\n\n| Name | Value |\n| --- | --- |\n| A | B |\n\nAfter table.\n\n[Reference](https://example.com \"Link explanation\").';
   await page.evaluate(text => {
     const g = window as any;
     const preferences = { input: { ...g.EditingSettingsHarness.defaultInputAssistance }, shortcuts: {} };
@@ -76,6 +76,11 @@ try {
       };
     });
   };
+  const encodedAnchor = '.meo-md-link-open-btn[data-tooltip="#%E5%AE%89%E8%A3%85%E8%AF%B4%E6%98%8E"]';
+  assert.equal((await show(encodedAnchor)).text, 'Go to: #安装说明', 'encoded Chinese anchors display readable text');
+  assert.equal(await page.$eval(encodedAnchor, element => (element as HTMLElement).dataset.tooltipLinkHref), '#%E5%AE%89%E8%A3%85%E8%AF%B4%E6%98%8E', 'display formatting preserves the navigation target');
+  await page.mouse.move(0, 0);
+
   const find = '[data-action="find"]';
   const timing = await page.$eval(find, element => {
     const start = performance.now();
@@ -386,8 +391,11 @@ try {
   assert.equal(await frame.$('.meo-tooltip.is-visible'), null, 'parent and Preview share one active hint');
 
   const longHref = 'https://example.com/docs?section=' + 'installation-'.repeat(24) + '#setup';
+  const encodedHref = '#%E5%AE%89%E8%A3%85%E8%AF%B4%E6%98%8E';
+  const encodedFileHref = './%E4%B8%AD%E6%96%87.md?section=%E5%AE%89%E8%A3%85%2F%23%3F%26#%E8%AF%B4%E6%98%8E';
+  const readableFileHref = './中文.md?section=安装%2F%23%3F%26#说明';
   const image = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="100"><rect width="100%" height="100%" fill="gray"/></svg>');
-  const linkText = '# 安装说明\n\n[Documentation](' + longHref + ')\n\n[安装说明](#安装说明)\n\n<div><a href="./guide.md#setup" title="Author explanation">Guide</a></div>\n\n| Link |\n| --- |\n| [Table link](#安装说明) |\n\n[![Linked image](' + image + ')](https://example.com/picture#details)';
+  const linkText = '# 安装说明\n\n[Documentation](' + longHref + ')\n\n[安装说明](#安装说明)\n\n<div><a href="' + encodedFileHref + '" title="Author explanation">Guide</a> <a href="https://example.com/%E5%ZZ">Malformed URI</a></div>\n\n| Link |\n| --- |\n| [Table link](' + encodedHref + ') |\n\n[![Linked image](' + image + ')](https://example.com/picture#details)';
   await page.click('[data-mode="live"]');
   await page.evaluate(text => {
     const editor = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
@@ -409,8 +417,9 @@ try {
     const destinations = [
       { selector: `.meo-md-link-open-btn[data-tooltip="${longHref}"]`, text: longHref },
       { selector: '.meo-md-link-open-btn[data-tooltip="#安装说明"]', text: '#安装说明' },
-      { selector: '.meo-md-html-link[data-meo-link-href="./guide.md#setup"]', text: './guide.md#setup\nAuthor explanation', modifier: true },
-      { selector: '.meo-md-html-table-cell-preview .meo-md-link[data-meo-link-href="#安装说明"]', text: '#安装说明', modifier: true },
+      { selector: `.meo-md-html-link[data-meo-link-href="${encodedFileHref}"]`, text: readableFileHref + '\nAuthor explanation', modifier: true },
+      { selector: '.meo-md-html-link[data-meo-link-href="https://example.com/%E5%ZZ"]', text: 'https://example.com/%E5%ZZ', modifier: true },
+      { selector: `.meo-md-html-table-cell-preview .meo-md-link[data-meo-link-href="${encodedHref}"]`, text: '#安装说明', modifier: true },
       { selector: '.meo-md-image-linked', text: 'https://example.com/picture#details' },
       { selector: '.meo-md-image-linked .meo-md-image-controls button', text: 'https://example.com/picture#details' }
     ];
@@ -429,8 +438,8 @@ try {
     }
     const textLinks = [
       `.cm-line .meo-md-link[data-meo-link-href="${longHref}"]`,
-      '.meo-md-html-link[data-meo-link-href="./guide.md#setup"]',
-      '.meo-md-html-table-cell-preview .meo-md-link[data-meo-link-href="#安装说明"]'
+      `.meo-md-html-link[data-meo-link-href="${encodedFileHref}"]`,
+      `.meo-md-html-table-cell-preview .meo-md-link[data-meo-link-href="${encodedHref}"]`
     ];
     for (const selector of textLinks) {
       phase = language + '/' + appearance + ' text hover ' + selector;
@@ -461,7 +470,7 @@ try {
     assert.equal(await page.$eval('.meo-md-link-open-btn[data-tooltip="#安装说明"]', element => element.getAttribute('aria-label')), language === 'en' ? 'Jump within document' : '在文档内跳转');
     phase = language + '/' + appearance + ' editable table target';
     const tableInput = '.meo-md-html-table-shell tbody textarea';
-    await page.click('.meo-md-html-table-cell-preview .meo-md-link[data-meo-link-href="#安装说明"]');
+    await page.click(`.meo-md-html-table-cell-preview .meo-md-link[data-meo-link-href="${encodedHref}"]`);
     await page.waitForSelector(tableInput, { visible: true });
     const inputPoint = async (offset: number) => page.$eval(tableInput, (element, offset) => {
       const input = element as HTMLTextAreaElement, computed = getComputedStyle(input), rect = input.getBoundingClientRect();
