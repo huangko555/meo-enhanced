@@ -57,7 +57,7 @@ async function main() {
       const wide = loaded.find((image) => image.getBoundingClientRect().width > image.getBoundingClientRect().height);
       if (!wide) throw new Error('Wide image did not render in the reproduction fixture');
       const openLink = wide.closest<HTMLElement>('.meo-md-image')
-        ?.querySelector<HTMLButtonElement>('button[data-tooltip="Jump within document"]');
+        ?.querySelector<HTMLButtonElement>('button[data-tooltip-link-href="#after-target"]');
       if (!openLink) throw new Error('Linked image did not render its document jump button');
       openLink.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
       const rect = wide.getBoundingClientRect();

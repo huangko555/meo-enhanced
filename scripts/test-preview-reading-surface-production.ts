@@ -1449,6 +1449,10 @@ async function main(): Promise<void> {
         ?.contentDocument?.querySelectorAll('.meo-export-code-line').length ?? 0
     ));
     assert.equal(initialRows, 6, 'Preview must expose one independent row per fenced source line');
+    // Start a new reading interaction before measuring resize preservation;
+    // the font change can still be retaining the earlier reading position.
+    await page.mouse.move(previewFrameCenter.x, previewFrameCenter.y);
+    await page.mouse.wheel({ deltaY: 1 });
     await page.evaluate(() => {
       document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
         ?.querySelector('code.language-typescript')?.scrollIntoView({ block: 'center' });

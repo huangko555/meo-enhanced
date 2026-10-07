@@ -65,7 +65,7 @@ async function main(): Promise<void> {
       }}));
     });
     await page.waitForSelector('.editor-notice-action[data-action="save-copy"]');
-    await page.click('.editor-notice-action[data-action="save-copy"]');
+    await page.locator('.editor-notice-action[data-action="save-copy"]').click();
     await page.waitForFunction(() => (window as any).__hostMessages.some(
       (message: any) => message.type === 'saveDocumentCopy'
     ));
@@ -150,7 +150,7 @@ async function main(): Promise<void> {
 
     await page.waitForSelector('.editor-notice-action[data-action="retry-document-update"]');
     await page.evaluate(() => (window as any).__restoreDispatch());
-    await page.click('.editor-notice-action[data-action="retry-document-update"]');
+    await page.locator('.editor-notice-action[data-action="retry-document-update"]').click();
     await page.waitForFunction((expected) => {
       const editorElement = document.querySelector('.cm-editor');
       const view = (window as any).__EditorView.findFromDOM(editorElement);

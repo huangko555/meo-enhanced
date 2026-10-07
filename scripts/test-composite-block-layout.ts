@@ -194,6 +194,17 @@ async function verifyListContainerLayouts(browser: Awaited<ReturnType<typeof lau
                 view.scrollDOM.scrollTop = Math.max(0, view.lineBlockAt(pos).top - 120);
               }, active);
               await page.evaluate(async () => { for (let i = 0; i < 6; i++) await new Promise<void>(r => requestAnimationFrame(() => r())); });
+              // The initial height estimate can clamp the reveal before the
+              // continuation and following blocks enter the rendered viewport.
+              await page.evaluate(() => {
+                const view = (window as any).__listMatrix.view;
+                const pos = view.state.doc.toString().indexOf('Probe item');
+                view.scrollDOM.scrollTop = Math.max(0, view.lineBlockAt(pos).top - 120);
+              });
+              await page.waitForFunction(() => {
+                const view = (window as any).__listMatrix.view;
+                return view.viewport.to >= view.state.doc.toString().indexOf('| cell |');
+              });
               const result = await page.evaluate(() => {
                 const view = (window as any).__listMatrix.view;
                 const text = view.state.doc.toString();
