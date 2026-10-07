@@ -420,7 +420,10 @@ try {
       assert.equal(hint.text, prefix + destination.text, phase + ': ' + destination.selector);
       assert.equal(hint.shortcut, null);
       assert.equal(hint.inside, true, 'the full destination fits inside the viewport');
-      assert.equal(await page.$eval('.meo-tooltip.is-visible', element => element.getBoundingClientRect().width), 320, 'link targets share a fixed width');
+      const width = await page.$eval('.meo-tooltip.is-visible', element => element.getBoundingClientRect().width);
+      assert.ok(width <= 320, 'link targets retain their maximum width');
+      if (destination.text === longHref) assert.equal(width, 320, 'long destinations wrap at the width limit');
+      if (destination.text === '#安装说明') assert.ok(width < 160, 'short anchors do not leave an empty fixed-width panel');
       await page.mouse.move(0, 0);
       if (destination.modifier) await page.keyboard.up('Control');
     }
@@ -515,7 +518,9 @@ try {
       await frame.hover(selector);
       await frame.waitForSelector('.meo-tooltip.is-visible');
       assert.equal(await frame.$eval('.meo-tooltip.is-visible .meo-tooltip-label', element => element.textContent), prefix + expected);
-      assert.equal(await frame.$eval('.meo-tooltip.is-visible', element => element.getBoundingClientRect().width), 320);
+      const width = await frame.$eval('.meo-tooltip.is-visible', element => element.getBoundingClientRect().width);
+      assert.ok(width <= 320);
+      if (selector === '#fragment-link') assert.ok(width < 160, 'Preview short anchors are compact too');
       await page.keyboard.down('Control');
       assert.equal(await frame.$eval('.meo-tooltip.is-visible .meo-tooltip-label', element => element.textContent), prefix + expected, 'Preview does not require or suppress modifier hover');
       await page.keyboard.up('Control');
@@ -532,7 +537,7 @@ try {
   const narrow = await frame.$eval('.meo-tooltip.is-visible', element => {
     const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right, width: rect.width, viewport: innerWidth };
   });
-  assert.ok(narrow.width < 320 && narrow.left >= 8 && narrow.right <= narrow.viewport - 8, 'fixed target width shrinks to the available reading pane');
+  assert.ok(narrow.width < 320 && narrow.left >= 8 && narrow.right <= narrow.viewport - 8, 'target width stays inside the available reading pane');
   assert.deepEqual(errors, []);
   await page.close();
   console.log('Production tooltips: delay, stateful pointer/keyboard updates, mode focus feedback, dismissal, toolbar/menu scope, fullscreen controls, boundary placement and Preview theme isolation passed.');
