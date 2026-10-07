@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
 import exportRuntime from '../src/export/runtime';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 
@@ -128,6 +129,7 @@ try {
     const actual = Array.from(ruler.children).map(marker => Number.parseFloat((marker as HTMLElement).style.top));
     return expected.length > 0 && JSON.stringify(expected) === JSON.stringify(actual);
   });
+  await mkdir('.local/search-view-continuity', { recursive: true });
   await page.screenshot({ path: '.local/search-view-continuity/preview-search.png' });
   await page.click('button[data-mode="source"]');
   await page.waitForFunction(() => document.querySelector('.find-status')?.textContent === '7 matches');
