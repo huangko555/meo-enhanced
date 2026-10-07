@@ -1,6 +1,7 @@
 import { runEditorService } from '../host/editorServices';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { normalizeDocumentText } from '../foundation/documentText';
 import type { AgentReviewHandoffController } from '../agents/reviewHandoff';
 import type { PendingDraftRecovery } from '../application/pendingDraftRecovery';
 import {
@@ -112,7 +113,6 @@ type FindOptions = {
 
 const GIT_BASELINE_STARTUP_DELAY_MS = 350;
 const GIT_BASELINE_REFRESH_DELAY_MS = 150;
-const normalizeDocumentText = (text: string): string => text.replace(/\r\n/g, '\n');
 type PanelDiagnostics = {
   read(): SerializedDiagnostic[];
 };
@@ -398,17 +398,19 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   };
 
   const readInitialSavedRevision = async (): Promise<SavedRevisionDto | null> => {
-    if (!savedRevisionTracker.getCurrentEditBaseline()) {
+    let snapshot = savedRevisionTracker.getCurrentEditBaseline();
+    if (snapshot === null) {
       const initial = await savedRevisionLifecycle.readInitial();
       if (initial === null) return null;
       savedRevisionTracker.initialize(initial.text);
-      return initial;
+      snapshot = savedRevisionTracker.getCurrentEditBaseline();
     }
-    const snapshot = savedRevisionTracker.getCurrentEditBaseline();
     if (snapshot === null) return null;
+    // Init associates a version only with the same logical text as its document.
+    const text = normalizeDocumentText(snapshot.text);
     return {
-      version: snapshot.text === normalizeDocumentText(document.getText()) ? document.version : null,
-      text: snapshot.text
+      version: text === normalizeDocumentText(document.getText()) ? document.version : null,
+      text
     };
   };
 
