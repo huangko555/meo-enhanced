@@ -3,6 +3,15 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.28
+- Expanded bilingual settings search, editing assistance and configurable shortcuts, including image storage rules, contextual slash commands, link and emoji suggestions, and native table paste behavior.
+- Kept Live code, Mermaid and math block controls visible while scrolling, and added hover copy controls for Mermaid source and LaTeX expressions in document Preview.
+- Unified link destination tooltips across prose, tables and Preview, with readable Unicode targets, localized prefixes, consistent modifier-key behavior and compact content-sized bubbles.
+- Preserved search text and highlights across editor modes without delaying mode transitions or competing with navigation.
+- Stabilized rendered block geometry, nested lists and quotes, table widths, scrolling and embedded-editor viewports through input and history changes; corrected clicking and selecting empty quoted lines.
+- Prevented window activity changes from stealing editor focus and improved keyboard focus feedback on preview controls.
+- Harmonized inline-code spacing and colors, dark text contrast, and borderless block backgrounds between Live and Preview.
+
 ## 0.3.27
 - Improved caret continuity across window activation, toolbar and menu interactions, and Live/Source mode switches, including table cells, Mermaid, and math editors. Fixed reversed formula input when nearby tables were re-rendered. Kept typing carets visible through late layout changes without competing scroll corrections. Retired stale embedded-input positioning after undo/redo and external synchronization.
 - Preserved Mermaid and math source/split choices across mode switches and kept new Source selections authoritative; restored HTML source positions when editing rendered content again.
