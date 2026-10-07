@@ -1054,8 +1054,8 @@ async function main() {
       lightAppearanceState.heading !== '#0550ae' ||
       lightAppearanceState.lineNumber !== 'rgb(175, 184, 193)' ||
       lightAppearanceState.searchBackground !== darkAppearanceState.searchBackground ||
-      lightAppearanceState.searchForeground !== 'inherit' ||
-      lightAppearanceState.activeSearchForeground !== 'inherit' ||
+      lightAppearanceState.searchForeground !== '#000000' ||
+      lightAppearanceState.activeSearchForeground !== '#000000' ||
       JSON.stringify(lightAppearanceState.gitColors) !== JSON.stringify({
         added: '#2da44e',
         changed: '#0969da',
@@ -1315,8 +1315,8 @@ async function main() {
       match: getComputedStyle(match).color,
       line: getComputedStyle(match.closest('.cm-line')!).color
     }));
-    if (lightSearchColors.match !== lightSearchColors.line) {
-      throw new Error(`Light search changed the matched text color: ${JSON.stringify(lightSearchColors)}`);
+    if (lightSearchColors.match !== 'rgb(0, 0, 0)') {
+      throw new Error(`Light search did not use black matched text: ${JSON.stringify(lightSearchColors)}`);
     }
     await page.evaluate(() => {
       const input = document.querySelector<HTMLInputElement>('.find-input')!;

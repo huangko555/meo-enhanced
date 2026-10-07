@@ -2444,7 +2444,7 @@ html[data-editor-appearance='dark'] .cm-editor.meo-mode-live {
 
 .cm-editor .meo-search-match {
   background: var(--meo-semantic-searchMatchBackground) !important;
-  outline: 1px solid var(--meo-semantic-searchMatchBorder);
+  outline: none;
   border-radius: 2px;
 }
 
@@ -2455,7 +2455,6 @@ html[data-editor-appearance='dark'] .cm-editor.meo-mode-live {
 
 .cm-editor .meo-search-match-active {
   background: var(--meo-semantic-searchMatchActiveBackground) !important;
-  outline: 1px solid var(--meo-semantic-searchMatchActiveBorder);
 }
 
 .cm-editor .meo-search-match-active::selection,

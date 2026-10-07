@@ -483,12 +483,12 @@ export const defaultSemanticColors: SemanticVisualColors = Object.freeze({
   frontmatterKey: defaultThemeColors.base07,
   frontmatterValue: defaultThemeColors.base01,
   frontmatterPillBackground: defaultThemeColors.base03,
-  searchMatchForeground: 'var(--meo-background)',
-  searchMatchBackground: '#ffe600',
-  searchMatchBorder: '#ffe600',
-  searchMatchActiveForeground: 'var(--meo-background)',
-  searchMatchActiveBackground: '#ff8c00',
-  searchMatchActiveBorder: '#ff8c00',
+  searchMatchForeground: '#000000',
+  searchMatchBackground: '#ffff00',
+  searchMatchBorder: 'transparent',
+  searchMatchActiveForeground: '#000000',
+  searchMatchActiveBackground: '#ff9632',
+  searchMatchActiveBorder: 'transparent',
   scrollbarThumb: 'color-mix(in srgb, var(--meo-foreground) 38%, transparent)',
   scrollbarThumbHover: 'color-mix(in srgb, var(--meo-foreground) 50%, transparent)',
   scrollbarThumbActive: 'color-mix(in srgb, var(--meo-foreground) 62%, transparent)',
@@ -638,9 +638,7 @@ const createBuiltInVisuals = (appearance: 'light' | 'dark'): BuiltInVisuals => {
         imageBorder: '#d0d7de',
         imageFallbackForeground: '#57606a',
         kbdBorder: '#d0d7de',
-        frontmatterPillBackground: '#d0d7de',
-        searchMatchForeground: 'inherit',
-        searchMatchActiveForeground: 'inherit'
+        frontmatterPillBackground: '#d0d7de'
       } : {})
     });
 
