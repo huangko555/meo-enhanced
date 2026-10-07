@@ -598,6 +598,19 @@ async function runPassiveControls(browser: Browser, mode: 'live' | 'source'): Pr
     await page.keyboard.type('40');
     await page.keyboard.press('Enter');
     await page.waitForFunction(() => document.activeElement === document.querySelector('.cm-content'));
+    // Focus is synchronous; CodeMirror applies the requested scroll during its next measure.
+    await page.waitForFunction(() => {
+      const scroller = document.querySelector<HTMLElement>('.cm-scroller');
+      const line = document.getSelection()?.anchorNode?.parentElement?.closest('.cm-line');
+      return scroller !== null && scroller.scrollTop > 0 && line?.textContent === 'line 40 ordinary content';
+    }, { timeout: 3000 });
+    await page.evaluate(async () => {
+      for (let frame = 0; frame < 2; frame += 1) {
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      }
+    });
+    assert.equal(await page.evaluate(() => document.getSelection()?.anchorNode?.parentElement?.closest('.cm-line')?.textContent),
+      'line 40 ordinary content', `${mode} line-jump focus recovery moved the insertion point`);
     assert.ok(await page.$eval('.cm-scroller', element => element.scrollTop) > 0,
       `${mode} line-jump focus recovery undid navigation`);
 

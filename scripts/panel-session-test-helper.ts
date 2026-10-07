@@ -44,7 +44,7 @@ type VscodeMockOverrides = {
   readonly executeCommand?: (command: string) => Promise<unknown>;
   readonly onWillSaveTextDocument?: (listener: (event: never) => void) => PanelSessionTestDisposable;
   readonly onDidChangeTextDocument?: (listener: (event: never) => void) => PanelSessionTestDisposable;
-  readonly onDidChangeWindowState?: (listener: (state: { focused: boolean }) => void) => PanelSessionTestDisposable;
+  readonly onDidChangeWindowState?: (listener: (state: { focused: boolean; active: boolean }) => void) => PanelSessionTestDisposable;
   readonly onDidSaveTextDocument?: (listener: (document: never) => void) => PanelSessionTestDisposable;
   readonly createFileSystemWatcher?: () => {
     dispose(): void;
@@ -79,7 +79,7 @@ export const createPanelSessionVscodeMock = (
   extensions: { all: [] },
   languages: { onDidChangeDiagnostics: () => panelSessionDisposable() },
   window: {
-    state: { focused: true },
+    state: { focused: true, active: true },
     tabGroups: { activeTabGroup: { activeTab: { input: { uri: document.uri } } } },
     showWarningMessage: overrides.showWarningMessage ?? (async () => undefined),
     onDidChangeTextEditorSelection: () => panelSessionDisposable(),
