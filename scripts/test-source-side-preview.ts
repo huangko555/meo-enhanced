@@ -42,7 +42,7 @@ try {
   await page.exposeFunction('__getSourceSidePreviewRenderCount', () => previewRenderCount);
   await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
   await page.addStyleTag({ path: 'webview/src/styles.css' });
-  await page.addScriptTag({ content: `window.__sourceSideMessages=[];window.__sourceSideUiState={sourcePreviewScrollSyncEnabled:false};window.acquireVsCodeApi=()=>({getState(){return window.__sourceSideUiState},setState(state){window.__sourceSideUiState=state},postMessage(message){window.__sourceSideMessages.push(message);if(message.type==='reloadDocumentFromDisk'){setTimeout(()=>window.dispatchEvent(new MessageEvent('message',{data:{type:'documentReloadedFromDisk',reloadId:1,version:2,text:window.__sourceSideDiskText,topLine:message.topLine,topLineOffset:message.topLineOffset}})),0);return;}window.__renderSourceSidePreview(message).then(response=>{if(response)window.dispatchEvent(new MessageEvent('message',{data:response}));});}});` });
+  await page.addScriptTag({ content: `window.__sourceSideMessages=[];window.__sourceSideReloadId=0;window.__sourceSideUiState={sourcePreviewScrollSyncEnabled:false};window.acquireVsCodeApi=()=>({getState(){return window.__sourceSideUiState},setState(state){window.__sourceSideUiState=state},postMessage(message){window.__sourceSideMessages.push(message);if(message.type==='reloadDocumentFromDisk'){const reloadId=++window.__sourceSideReloadId;setTimeout(()=>window.dispatchEvent(new MessageEvent('message',{data:{type:'documentReloadedFromDisk',reloadId,version:reloadId+1,text:window.__sourceSideDiskText,topLine:message.topLine,topLineOffset:message.topLineOffset}})),0);return;}window.__renderSourceSidePreview(message).then(response=>{if(response)window.dispatchEvent(new MessageEvent('message',{data:response}));});}});` });
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
 
   const compactComplexBlock = [
@@ -1806,30 +1806,49 @@ try {
       geometry: { top: visible.top, bottom: visible.bottom }
     };
   });
-  await page.evaluate(line => {
-    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
-    const target = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
-      .find(element => Number(element.dataset.sourceLine) === line)!;
-    frameDocument.scrollingElement!.scrollTop += target.getBoundingClientRect().top - 40;
-    frameDocument.dispatchEvent(new Event('scroll', { bubbles: true }));
-  }, reloadAnchorLine);
-  await new Promise(resolve => setTimeout(resolve, 120));
-  const reloadBefore = await readSplitPreviewPosition();
-  assert.ok(reloadBefore.scrollTop > 100, JSON.stringify(reloadBefore));
-  await page.$eval<HTMLButtonElement>('[data-action="discard"]', button => {
-    button.click();
-    button.click();
-  });
-  await page.waitForFunction(() => (window as any).__sourceSideMessages.some(
-    (message: any) => message.type === 'documentReloadPresentationCompleted' && message.reloadId === 1
-  ));
-  await new Promise(resolve => setTimeout(resolve, 160));
-  const reloadAfter = await readSplitPreviewPosition();
-  assert.equal(reloadAfter.line, reloadBefore.line, JSON.stringify({ reloadBefore, reloadAfter }));
-  assert.ok(
-    Math.abs(reloadAfter.offset - reloadBefore.offset) <= 6,
-    JSON.stringify({ reloadBefore, reloadAfter })
-  );
+  for (const [index, lineEnding] of ['\n', '\r\n'].entries()) {
+    console.log(`Checking split disk reload with ${lineEnding === '\n' ? 'LF' : 'CRLF'}`);
+    const diskMarker = `Disk reload ${index + 1}`;
+    await page.evaluate(({ text, lineEnding, diskMarker }) => {
+      (window as any).__sourceSideDiskText = text.replace('Intro paragraph', diskMarker).replace(/\n/g, lineEnding);
+    }, { text, lineEnding, diskMarker });
+    await page.evaluate(line => {
+      const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const target = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
+        .find(element => Number(element.dataset.sourceLine) === line)!;
+      frameDocument.scrollingElement!.scrollTop += target.getBoundingClientRect().top - 40;
+      frameDocument.dispatchEvent(new Event('scroll', { bubbles: true }));
+    }, reloadAnchorLine);
+    await new Promise(resolve => setTimeout(resolve, 120));
+    const reloadBefore = await readSplitPreviewPosition();
+    assert.ok(reloadBefore.scrollTop > 100, JSON.stringify(reloadBefore));
+    await page.$eval<HTMLButtonElement>('[data-action="discard"]', button => {
+      button.click();
+      button.click();
+    });
+    await page.waitForFunction(reloadId => (window as any).__sourceSideMessages.some(
+      (message: any) => message.type === 'documentReloadPresentationCompleted' && message.reloadId === reloadId
+    ), {}, index + 1).catch(async error => {
+      throw new Error(`Disk reload did not complete: ${JSON.stringify(await page.evaluate(() => (window as any).__sourceSideMessages.slice(-5)))}`, { cause: error });
+    });
+    assert.equal(await page.evaluate(reloadId => (window as any).__sourceSideMessages.find(
+      (message: any) => message.type === 'documentReloadPresentationCompleted' && message.reloadId === reloadId
+    )?.presented, index + 1), true, 'Disk reload must present the new Revision');
+    await page.waitForFunction(marker => document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
+      ?.querySelector('main.meo-export-doc')?.textContent?.includes(marker), {}, diskMarker).catch(async error => {
+      throw new Error(`Disk reload did not render ${diskMarker}: ${JSON.stringify(await page.evaluate(() => ({
+        status: document.querySelector('.preview-status')?.textContent,
+        body: document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('main.meo-export-doc')?.textContent?.slice(0, 160)
+      })))}`, { cause: error });
+    });
+    await new Promise(resolve => setTimeout(resolve, 160));
+    const reloadAfter = await readSplitPreviewPosition();
+    assert.equal(reloadAfter.line, reloadBefore.line, JSON.stringify({ reloadBefore, reloadAfter }));
+    assert.ok(
+      Math.abs(reloadAfter.offset - reloadBefore.offset) <= 6,
+      JSON.stringify({ reloadBefore, reloadAfter })
+    );
+  }
 
   await page.click('.source-preview-button');
   const closed = await page.evaluate(() => ({

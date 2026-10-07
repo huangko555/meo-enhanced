@@ -13,6 +13,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Harmonized inline-code spacing and colors, dark text contrast, and borderless block backgrounds between Live and Preview.
 - Prevented Preview from announcing readiness for an initial blank iframe before its reading document is available.
 - Kept adopted Live table widgets synchronized with later height measurements after multiline rows finish laying out.
+- Unified logical text identity for CRLF document sync, local edits, save confirmations, Preview startup and split Preview disk reloads while preserving Host line endings.
 
 ## 0.3.27
 - Improved caret continuity across window activation, toolbar and menu interactions, and Live/Source mode switches, including table cells, Mermaid, and math editors. Fixed reversed formula input when nearby tables were re-rendered. Kept typing carets visible through late layout changes without competing scroll corrections. Retired stale embedded-input positioning after undo/redo and external synchronization.

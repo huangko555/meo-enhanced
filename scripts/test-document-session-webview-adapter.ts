@@ -215,4 +215,60 @@ assert.equal(await retryAdapter.retryPresentation(), false,
   'a later local edit must invalidate the stale failed presentation');
 retryAdapter.dispose();
 
+for (const input of ['init', 'docChanged', 'reload', 'revision-response'] as const) {
+  const logicalText = 'first\nsecond';
+  const messages: WebviewToHostMessage[] = [];
+  const failures: unknown[] = [];
+  const presentations: string[] = [];
+  const session = createDocumentSessionWebviewAdapter({
+    postMessage(message) {
+      messages.push(message);
+      if (message.type === 'requestDocumentRevision') {
+        session.accept({ type: 'documentRevisionResult', requestId: message.requestId,
+          result: { ok: true, value: { revision: { version: 2, text: logicalText.replace(/\n/g, '\r\n') } } } });
+      }
+      if (message.type === 'saveDocumentRevision') {
+        session.accept({ type: 'saveDocumentRevisionResult', requestId: message.requestId,
+          result: { ok: true, value: { revision: { ...message.revision, text: message.revision.text.replace(/\n/g, '\r\n') } } } });
+      }
+    },
+    presentText: text => { presentations.push(text); },
+    restoreReloadedView() {},
+    showNotice: notice => { failures.push(notice); },
+    reportUnexpectedError: (_, error) => { failures.push(error); }
+  });
+  const initialText = input === 'init' ? logicalText.replace(/\n/g, '\r\n') : logicalText;
+  session.start({ ...init, text: initialText, savedRevision: { version: 1, text: initialText } });
+  await session.whenIdle();
+  if (input === 'docChanged') session.accept({ type: 'docChanged', version: 2, text: 'first\r\nsecond' });
+  if (input === 'reload') session.accept({ type: 'documentReloadedFromDisk', reloadId: 1, version: 2,
+    text: 'first\r\nsecond', topLine: 1, topLineOffset: 0 });
+  if (input === 'revision-response') session.accept({ type: 'docChanged', version: 1, text: 'conflicting revision' });
+  await session.whenIdle();
+  const beforeEquivalentDraft = messages.length;
+  session.localDraftChanged(logicalText);
+  await session.whenIdle();
+  assert.equal(messages.length, beforeEquivalentDraft, `${input}: EOL-only differences must not create a Draft or Change`);
+  assert.ok(presentations.every(text => !text.includes('\r')), `${input}: presentation must be canonical`);
+  session.localDraftChanged(logicalText + '!');
+  await session.whenIdle();
+  const baseVersion = input === 'init' ? 1 : 2;
+  assert.deepEqual(messages.filter(message => message.type === 'applyChanges'), [{
+    type: 'applyChanges', baseVersion, changes: [{ from: logicalText.length, to: logicalText.length, insert: '!' }]
+  }], `${input}: a local edit must remain a local Change`);
+  session.accept({ type: 'applied', version: baseVersion + 1 });
+  await session.whenIdle();
+  session.requestSave();
+  await session.whenIdle();
+  const save = messages.find(message => message.type === 'saveDocumentRevision');
+  assert.ok(save?.type === 'saveDocumentRevision');
+  assert.deepEqual(save.revision, { version: baseVersion + 1, text: logicalText + '!' });
+  const beforeSavedEcho = messages.length;
+  session.localDraftChanged(logicalText + '!');
+  await session.whenIdle();
+  assert.equal(messages.length, beforeSavedEcho, `${input}: the saved Revision must remain clean`);
+  assert.deepEqual(failures, [], `${input}: CRLF save confirmation must succeed`);
+  session.dispose();
+}
+
 console.log('Document Session Webview Adapter checks passed');

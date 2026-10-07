@@ -257,6 +257,17 @@ assert.deepEqual(await mismatchedSavePromise, {
   message: 'Host confirmed a different document Revision'
 });
 
+for (const revision of [
+  { version: 5, text: 'first\r\nchanged' },
+  { version: 6, text: 'first\r\nsecond' }
+]) {
+  const confirmation = transport.execute({ type: 'saveDocument', revision: { number: 5, text: 'first\nsecond' } });
+  const requestId = (postedMessages.at(-1) as { requestId: string }).requestId;
+  transport.accept({ type: 'saveDocumentRevisionResult', requestId, result: { ok: true, value: { revision } } });
+  assert.deepEqual(await confirmation, { type: 'hostSaveFailed', version: 5, text: 'first\nsecond',
+    message: 'Host confirmed a different document Revision' }, 'Text and version mismatches must still reject CRLF save confirmations');
+}
+
 const timedOutRevision = transport.execute({ type: 'requestRevision' });
 const timedOutRequest = postedMessages.at(-1) as { requestId: string };
 scheduledTimeouts.at(-1)?.();

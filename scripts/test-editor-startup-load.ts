@@ -11,12 +11,12 @@ const bundle = await build.outputs[0]!.text();
 const browser = await launchTestBrowser();
 let primaryError: unknown;
 try {
-  for (const custom of [false, true]) for (const mode of ['live', 'source', 'preview'] as const) {
+  for (const lineEnding of ['\n', '\r\n']) for (const custom of [false, true]) for (const mode of ['live', 'source', 'preview'] as const) {
     let savedState: unknown;
     const manualMode = mode === 'live' ? 'source' : mode === 'source' ? 'preview' : 'live';
     for (const phase of ['startup', 'reload', 'manual-reload'] as const) {
       const expectedMode = phase === 'manual-reload' ? manualMode : mode;
-      console.log(`Checking ${expectedMode} ${phase} (${custom ? 'custom' : 'default'} settings)`);
+      console.log(`Checking ${expectedMode} ${phase} (${custom ? 'custom' : 'default'} settings, ${lineEnding === '\n' ? 'LF' : 'CRLF'})`);
       const page = await browser.newPage();
       await page.setViewport({ width: 1000, height: 700 });
       await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
@@ -41,7 +41,7 @@ try {
       await page.addScriptTag({ content: `window.acquireVsCodeApi=()=>({getState(){return window.__startupState},setState(state){window.__startupState=JSON.parse(JSON.stringify(state))},postMessage(message){window.__renderStartupPreview(message).then(response=>{if(response)window.dispatchEvent(new MessageEvent('message',{data:response}));});}});` });
       await page.addScriptTag({ content: bundle });
       const marker = `Startup content ${mode}`;
-      const markdown = `# ${marker}\n\nThe document body must load after opening.`;
+      const markdown = `# ${marker}${lineEnding}${lineEnding}The document body must load after opening.`;
       await page.evaluate(({ mode, markdown, custom }) => {
         const initMessage = {
           type: 'init', documentId: `file:///startup-${mode}.md`, text: markdown, version: 1,

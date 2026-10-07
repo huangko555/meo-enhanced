@@ -13,6 +13,7 @@ import {
 } from '../../../src/protocol/documentSession';
 import type { InitMessage } from '../../../src/protocol/readyInit';
 import { createRequestLifecycle, type RequestLifecycleOptions } from './requestLifecycle';
+import { normalizeDocumentText } from '../../../src/foundation/documentText';
 
 type RemoteDocumentSessionAction = Extract<
   DocumentSessionAction,
@@ -26,15 +27,14 @@ export type DocumentSessionTransport = {
 };
 
 export function createDocumentSessionCoordinatorFromInit(message: InitMessage) {
-  const normalize = (text: string): string => text.replace(/\r\n/g, '\n');
   return createDocumentSessionCoordinator({
     documentId: message.documentId,
-    revision: { number: message.version, text: normalize(message.text) },
+    revision: { number: message.version, text: message.text },
     savedRevision: message.savedRevision === null
       ? null
       : {
           revisionNumber: message.savedRevision.version,
-          text: normalize(message.savedRevision.text)
+          text: message.savedRevision.text
         }
   });
 }
@@ -77,7 +77,7 @@ export function createDocumentSessionTransport(
             message: result.error.message
           };
         }
-        const saved = result.value.revision;
+        const saved = { ...result.value.revision, text: normalizeDocumentText(result.value.revision.text) };
         if (saved.version !== expected.version || saved.text !== expected.text) {
           return {
             type: 'hostSaveFailed',

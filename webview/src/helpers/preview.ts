@@ -5,6 +5,7 @@ import { getExportStyleEnvironment } from './export';
 import { createPreviewMermaidRenderer } from './previewMermaid';
 import { createCopyCodeButton } from './codeBlockControls';
 import { logWebviewRenderError } from './errors';
+import { normalizeDocumentText } from '../../../src/foundation/documentText';
 import { createDocumentScrollToTopController } from './scrollToTop';
 import type { OutlineHeading } from './outline';
 import type { EditorAppearance as PreviewAppearance } from '../../../src/protocol/editorCommands';
@@ -33,6 +34,7 @@ type PreviewControllerOptions = {
   vscode: { postMessage: (message: WebviewMessage) => void };
   uiLanguage: UiLanguage;
   getEditorAppearance: () => 'light' | 'dark';
+  /** Compares LF-normalized presentation text with the current Draft. */
   isCurrentText?: (text: string) => boolean;
   getCodePalette: (appearance: 'light' | 'dark') => PreviewCodePalette;
   applyCodeTheme: (appearance: 'light' | 'dark') => void;
@@ -1837,6 +1839,8 @@ export function createPreviewController({
       preserveFrame?: boolean;
   } = {}
   ): Promise<void> => {
+    // Host preload can retain CRLF while CodeMirror's Draft and later renders use LF.
+    text = normalizeDocumentText(text);
     const preserveCurrentFrame = preserveFrame
       && activeFrameDocument !== null
       && frameRenderedText === text;

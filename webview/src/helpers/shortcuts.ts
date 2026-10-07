@@ -3,7 +3,7 @@ import type { ShortcutOverrides } from '../../../src/foundation/editingPreferenc
 const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 export const isPrimaryModifier = (event: KeyboardEvent): boolean => event.metaKey !== event.ctrlKey && (event.metaKey || event.ctrlKey);
 export const isShortcutKey = (event: KeyboardEvent, key: string, code: string): boolean => event.key.toLowerCase() === key || event.code === code;
-export const normalizeEol = (text: string): string => text.replace(/\r\n?/g, '\n');
+export { normalizeDocumentText as normalizeEol } from '../../../src/foundation/documentText';
 export interface ShortcutHandlerContext {
   editor: any;
   editableMode: 'live' | 'source';

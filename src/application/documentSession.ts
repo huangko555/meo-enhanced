@@ -9,6 +9,7 @@ import {
   type Revision,
   type SavedRevision
 } from '../domain/documentSession';
+import { normalizeDocumentText } from '../foundation/documentText';
 
 export type { DocumentPresentationSource } from '../domain/documentSession';
 export type { DocumentPresentationCompletion } from '../domain/documentSession';
@@ -72,16 +73,25 @@ export function createDocumentSessionCoordinator(input: {
   readonly revision: Revision;
   readonly savedRevision: SavedRevision | null;
 }): DocumentSessionCoordinator {
-  let state = createDocumentSession(input);
+  let state = createDocumentSession({
+    ...input,
+    revision: { ...input.revision, text: normalizeDocumentText(input.revision.text) },
+    savedRevision: input.savedRevision === null ? null : {
+      ...input.savedRevision, text: normalizeDocumentText(input.savedRevision.text)
+    }
+  });
   let nextDraftRecoveryReceiptVersion = 1;
   let latestDraftRecoveryReceiptVersion = 0;
 
   return {
     handle(applicationInput) {
-      const inputReceiptVersion = canProduceDraftRecoveryEffect(applicationInput)
+      const canonicalInput: DocumentSessionInput = 'text' in applicationInput
+        ? { ...applicationInput, text: normalizeDocumentText(applicationInput.text) }
+        : applicationInput;
+      const inputReceiptVersion = canProduceDraftRecoveryEffect(canonicalInput)
         ? nextDraftRecoveryReceiptVersion++
         : null;
-      const event = mapInput(state, applicationInput);
+      const event = mapInput(state, canonicalInput);
       if (event === null) return [];
 
       const previousState = state;

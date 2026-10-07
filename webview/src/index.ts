@@ -18,6 +18,7 @@ import { applyBuiltInVisualBaseline } from './helpers/theme';
 import { setShikiTheme } from './helpers/shikiHighlighter';
 import { createFailureNoticeManager, getErrorMessage, isTransientMermaidRuntimeError, shouldAutoFallbackToSourceForLiveError, logWebviewRenderError, type EditorNoticeAction, type FailureNoticeManager } from './helpers/errors';
 import { isPrimaryModifier, isShortcutKey, handleEditorShortcut, type ShortcutHandlerContext } from './helpers/shortcuts';
+import { normalizeDocumentText } from '../../src/foundation/documentText';
 import { createFindPanel, createFindPanelController, type FindPanelController } from './helpers/findPanel';
 import { createSelectionMenu, createSelectionMenuController, type SelectionMenuController } from './helpers/selectionMenu';
 import {
@@ -1661,7 +1662,7 @@ const previewController = createPreviewController({
   vscode,
   uiLanguage: activeUiLanguage,
   getEditorAppearance: () => resolveEditorAppearanceForPreview(),
-  isCurrentText: (text) => getCurrentEditorText() === text,
+  isCurrentText: (text) => normalizeDocumentText(getCurrentEditorText()) === text,
   getCodePalette: (appearance) => resolveCodePaletteForPreview(appearance),
   applyCodeTheme: (appearance) => applyCodeThemeForPreview(appearance),
   mermaidRenderResources: mermaidDiagramRenderPool,
