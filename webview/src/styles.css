@@ -2679,6 +2679,7 @@ html[data-editor-appearance='dark'] .meo-tooltip {
 }
 .meo-tooltip--window { z-index: var(--meo-layer-window-popover); }
 .meo-tooltip--wrap { max-width: min(320px, calc(100vw - 16px)); white-space: normal; text-align: left; }
+.meo-tooltip--link { width: 320px; justify-content: flex-start; }
 /* Equal top, bottom and end insets keep the nested shortcut corners concentric. */
 .meo-tooltip--shortcut { padding-right: 4px; }
 .meo-tooltip-label { min-width: 0; overflow-wrap: anywhere; }
@@ -2831,6 +2832,9 @@ html[data-editor-appearance='dark'] .meo-tooltip-shortcut { background: rgba(255
 }
 
 .cm-editor.meo-mode-live.meo-link-modifier-hover .meo-md-link[data-meo-link-href] {
+  cursor: pointer;
+}
+.cm-editor.meo-mode-live.meo-link-modifier-hover .meo-md-html-table-shell textarea {
   cursor: pointer;
 }
 

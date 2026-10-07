@@ -162,7 +162,7 @@ function inlineLinkDestinationFromText(linkText: string): string {
   return normalizeSourceHref(unwrapped);
 }
 
-function hrefFromSourceLinkNode(state: EditorState, linkNode: any): string {
+function hrefFromSourceLinkNode(state: EditorState, linkNode: any, referenceState = state): string {
   if (isWikiLinkNode(state, linkNode)) {
     return parseWikiLinkData(state, linkNode)?.href ?? '';
   }
@@ -178,7 +178,7 @@ function hrefFromSourceLinkNode(state: EditorState, linkNode: any): string {
   if (!referenceLabel) {
     return '';
   }
-  return getReferenceLinkMap(state).get(referenceLabel) ?? '';
+  return getReferenceLinkMap(referenceState).get(referenceLabel) ?? '';
 }
 
 function isPosInsideRange(pos: number, from: number, to: number, exactTextHit: boolean): boolean {
@@ -202,7 +202,8 @@ function hrefFromRawSourceUrlAtPos(state: EditorState, pos: number, exactTextHit
   return '';
 }
 
-function hrefFromSourceSyntaxAtPos(state: EditorState, pos: number, options: LinkLookupOptions = {}): string {
+/** Resolve a draft with document references; exact hits exclude Markdown delimiters. */
+export function getLinkHrefAtSourcePosition(state: EditorState, pos: number, options: LinkLookupOptions = {}, referenceState = state): string {
   const exactTextHit = options.exactTextHit === true;
   const tree = resolvedSyntaxTree(state);
   const candidates = [tree.resolveInner(pos, -1), tree.resolveInner(pos, 1)];
@@ -219,7 +220,14 @@ function hrefFromSourceSyntaxAtPos(state: EditorState, pos: number, options: Lin
       }
 
       if (node.name === 'Link') {
-        const href = hrefFromSourceLinkNode(state, node);
+        if (exactTextHit) {
+          let marker = node.firstChild;
+          while (marker) {
+            if (marker.name === 'LinkMark' && pos >= marker.from && pos < marker.to) return '';
+            marker = marker.nextSibling;
+          }
+        }
+        const href = hrefFromSourceLinkNode(state, node, referenceState);
         if (href) {
           return href;
         }
@@ -284,5 +292,5 @@ export function getLinkHrefAtPointer(
   if (pos === null) {
     return '';
   }
-  return hrefFromSourceSyntaxAtPos(editorView.state, pos, options);
+  return getLinkHrefAtSourcePosition(editorView.state, pos, options);
 }

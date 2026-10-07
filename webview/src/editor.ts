@@ -38,7 +38,7 @@ import { sourceFileLinkField } from './helpers/sourceRawLinks';
 import { sourceUrlBoundaryField } from './helpers/sourceUrlBoundaries';
 import { sourceFootnoteMarkerField } from './helpers/sourceFootnotes';
 import { markdownTagField } from './helpers/tags';
-import { findDocumentFragmentPosition, getLinkHrefAtPointer, isPrimaryModifierPointerClick } from './helpers/linkNavigation';
+import { findDocumentFragmentPosition, getLinkHrefAtPointer, getLinkHrefAtSourcePosition, isPrimaryModifierPointerClick } from './helpers/linkNavigation';
 import {
   gitDiffGutterBaselineExtensions,
   gitDiffGutterLiveRenderExtensions,
@@ -645,7 +645,7 @@ export function createEditor({
     if (!isPrimaryModifierPointerClick(event)) {
       return false;
     }
-    const href = getLinkHrefAtPointer(event, editorView);
+    const href = editableLinkHrefAtPointer(event, editorView);
     if (!href) {
       return false;
     }
@@ -676,7 +676,7 @@ export function createEditor({
     }
     editableLinkHoverPosition = { x: event.clientX, y: event.clientY };
     const href = isPrimaryModifierPointerClick(event)
-      ? getLinkHrefAtPointer(event, editorView, { exactTextHit: true })
+      ? editableLinkHrefAtPointer(event, editorView)
       : '';
     setEditableLinkHoverCursor(editorView, Boolean(href));
   };
@@ -700,7 +700,7 @@ export function createEditor({
       target
     };
     const href = isPrimaryModifierPointerClick(pointerEvent)
-      ? getLinkHrefAtPointer(pointerEvent, editorView, { exactTextHit: true })
+      ? editableLinkHrefAtPointer(pointerEvent, editorView)
       : '';
     setEditableLinkHoverCursor(editorView, Boolean(href));
   };
@@ -1196,6 +1196,42 @@ export function createEditor({
 
     mirror.remove();
     return coords;
+  };
+
+  let tableLinkLookup: { input: HTMLTextAreaElement; value: string; state: EditorState } | undefined;
+  const editableLinkHrefAtPointer = (event: Pick<MouseEvent, 'target' | 'clientX' | 'clientY'>, editorView: EditorView): string => {
+    const input = event.target;
+    if (!(input instanceof HTMLTextAreaElement) || !input.closest('.meo-md-html-table-shell')) {
+      return getLinkHrefAtPointer(event, editorView, { exactTextHit: true });
+    }
+    // Native textareas expose no character hit test. A temporary, transparent mirror
+    // resolves the pointer without moving the caret or committing the cell draft.
+    const doc = input.ownerDocument;
+    const mirror = doc.createElement('div');
+    const computed = getComputedStyle(input), rect = input.getBoundingClientRect();
+    for (const property of ['box-sizing', 'padding', 'border', 'font', 'font-family', 'font-size', 'font-weight', 'font-style', 'letter-spacing', 'line-height', 'text-transform', 'text-indent', 'text-align', 'tab-size', 'word-break', 'overflow-wrap']) {
+      mirror.style.setProperty(property, computed.getPropertyValue(property));
+    }
+    Object.assign(mirror.style, { position: 'fixed', left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px', height: rect.height + 'px', whiteSpace: 'pre-wrap', overflow: 'hidden', opacity: '0', zIndex: '2147483647' });
+    const textNode = doc.createTextNode(input.value);
+    mirror.append(textNode); doc.body.append(mirror);
+    mirror.scrollTop = input.scrollTop; mirror.scrollLeft = input.scrollLeft;
+    let offset: number | undefined;
+    try {
+      const caret = doc.caretRangeFromPoint(event.clientX, event.clientY);
+      if (caret?.startContainer === textNode) {
+        for (const candidate of [caret.startOffset, caret.startOffset - 1]) {
+          if (candidate < 0 || candidate >= input.value.length || /\s/.test(input.value[candidate]!)) continue;
+          const range = doc.createRange(); range.setStart(textNode, candidate); range.setEnd(textNode, candidate + 1);
+          if ([...range.getClientRects()].some(bounds => event.clientX >= bounds.left && event.clientX < bounds.right && event.clientY >= bounds.top && event.clientY < bounds.bottom)) { offset = candidate; break; }
+        }
+      }
+    } finally { mirror.remove(); }
+    if (offset === undefined) return '';
+    if (tableLinkLookup?.input !== input || tableLinkLookup.value !== input.value) {
+      tableLinkLookup = { input, value: input.value, state: EditorState.create({ doc: tableCellEditorValueToSource(input.value), extensions: [editorMarkdownLanguage] }) };
+    }
+    return getLinkHrefAtSourcePosition(tableLinkLookup.state, tableCellEditorOffsetToSourceOffset(input.value, offset), { exactTextHit: true }, editorView.state);
   };
 
   const getActiveTableSelectionState = (input: HTMLTextAreaElement): (SelectionMenuState & { from: number; to: number }) | null => {
@@ -2881,6 +2917,12 @@ export function createEditor({
   // Widgets can filter CodeMirror handlers, and a hovered editor need not own
   // keyboard focus. Observe these events without consuming editing shortcuts.
   const onLinkPointerMove = (event: PointerEvent) => updateEditableLinkHoverCursor(event, view);
+  const onTableLinkPointerDown = (event: PointerEvent) => {
+    // Embedded inputs filter CodeMirror's handlers; use the same link gesture here.
+    if (event.button === 0 && event.target instanceof HTMLTextAreaElement && event.target.closest('.meo-md-html-table-shell')) {
+      openLinkIfModifierClick(event, view);
+    }
+  };
   const onLinkPointerLeave = () => {
     editableLinkHoverPosition = null;
     setEditableLinkHoverCursor(view, false);
@@ -2891,6 +2933,7 @@ export function createEditor({
     }
   };
   view.dom.addEventListener('pointermove', onLinkPointerMove, true);
+  view.dom.addEventListener('pointerdown', onTableLinkPointerDown, true);
   view.dom.addEventListener('pointerleave', onLinkPointerLeave);
   window.addEventListener('keydown', onLinkModifierChange, true);
   window.addEventListener('keyup', onLinkModifierChange, true);
@@ -3144,6 +3187,13 @@ export function createEditor({
           () => !editorDestroyed && currentMode === presentationMode
         );
       }
+    },
+    /** Inspect Live text or a cell draft without moving selection or committing edits. */
+    getLinkHrefAtPoint(point: { x: number; y: number }): string {
+      if (currentMode !== 'live') return '';
+      const target = view.dom.ownerDocument.elementFromPoint(point.x, point.y);
+      if (!target || !view.contentDOM.contains(target)) return '';
+      return editableLinkHrefAtPointer({ target, clientX: point.x, clientY: point.y }, view);
     },
     getText() {
       commitActiveTableInput();
@@ -3431,6 +3481,7 @@ export function createEditor({
         onWindowBlur = null;
       }
       view.dom.removeEventListener('pointermove', onLinkPointerMove, true);
+      view.dom.removeEventListener('pointerdown', onTableLinkPointerDown, true);
       view.dom.removeEventListener('pointerleave', onLinkPointerLeave);
       window.removeEventListener('keydown', onLinkModifierChange, true);
       window.removeEventListener('keyup', onLinkModifierChange, true);

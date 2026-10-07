@@ -154,7 +154,9 @@ if (!root) {
 }
 
 root.classList.add('editor-root');
-const tooltipBinding = bindTooltips(document.body);
+const tooltipBinding = bindTooltips(document.body, {
+  editableLinkHrefAtPoint: point => editor?.getLinkHrefAtPoint(point) ?? ''
+});
 let activeUiLanguage: UiLanguage = 'en';
 let activeUiStrings = getUiStrings(activeUiLanguage);
 let activeUiLanguagePreference: UiLanguagePreference = 'auto';

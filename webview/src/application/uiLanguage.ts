@@ -124,6 +124,7 @@ export type UiStrings = Readonly<{
   clearLinkUrl: string;
   jumpWithinDocument: string;
   openLink: string;
+  linkDestination: (href: string) => string;
   missingWikiLink: string;
   missingLocalLink: string;
   expandDetails: string;
@@ -366,6 +367,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     underline: 'Underline', markTaskComplete: 'Mark task as complete',
     markTaskIncomplete: 'Mark task as incomplete', clearLinkUrl: 'Clear link URL',
     jumpWithinDocument: 'Jump within document', openLink: 'Open link',
+    linkDestination: (href: string) => 'Go to: ' + href,
     missingWikiLink: 'Wiki link target not found locally', missingLocalLink: 'Local file link target not found',
     expandDetails: 'Expand details', collapseDetails: 'Collapse details', showHtmlSource: 'Show HTML source',
     jumpToFootnote: (number: number) => `Jump to footnote ${number}`,
@@ -557,6 +559,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     kbd: '按键样式', underline: '下划线', markTaskComplete: '标记任务为已完成',
     markTaskIncomplete: '标记任务为未完成', clearLinkUrl: '清除链接地址',
     jumpWithinDocument: '在文档内跳转', openLink: '打开链接',
+    linkDestination: (href: string) => '跳转到：' + href,
     missingWikiLink: '本地未找到 Wiki 链接目标', missingLocalLink: '未找到本地文件链接目标',
     expandDetails: '展开详细信息', collapseDetails: '折叠详细信息', showHtmlSource: '显示 HTML 源码',
     jumpToFootnote: (number: number) => `跳转到脚注 ${number}`,

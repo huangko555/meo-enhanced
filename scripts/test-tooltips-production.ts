@@ -57,13 +57,14 @@ try {
     await page.hover(selector);
     await page.waitForFunction(selector => {
       return [...document.querySelectorAll(selector)].some(element => {
-        const id = element.getAttribute('aria-describedby');
+        const id = element.getAttribute('aria-describedby') ?? ((element as HTMLElement).isContentEditable ? element.closest('.cm-editor')?.getAttribute('aria-describedby') : null);
         return !!id && document.getElementById(id)?.classList.contains('is-visible');
       });
     }, {}, selector);
     return page.$$eval(selector, elements => {
-      const element = elements.find(element => document.getElementById(element.getAttribute('aria-describedby') ?? '')?.classList.contains('is-visible'))!;
-      const hint = document.getElementById(element.getAttribute('aria-describedby')!)!;
+      const described = (element: Element) => element.getAttribute('aria-describedby') ?? ((element as HTMLElement).isContentEditable ? element.closest('.cm-editor')?.getAttribute('aria-describedby') : null) ?? '';
+      const element = elements.find(element => document.getElementById(described(element))?.classList.contains('is-visible'))!;
+      const hint = document.getElementById(described(element))!;
       const rect = hint.getBoundingClientRect();
       return {
         text: hint.querySelector('.meo-tooltip-label')!.textContent,
@@ -378,7 +379,7 @@ try {
     documentTheme: document.documentElement.getAttribute('data-editor-appearance')
   }));
   assert.deepEqual(nestedHint, {
-    text: 'https://example.com\nLink explanation', background: 'rgb(58, 58, 58)', size: '12px',
+    text: 'Go to: https://example.com\nLink explanation', background: 'rgb(58, 58, 58)', size: '12px',
     bodyFont: before.font, bodySize: before.size, documentTheme: before.theme
   }, 'Preview hints use the UI theme without changing the document theme or font');
   await show(find);
@@ -404,33 +405,134 @@ try {
     // Remount them to check each language's accessible names at creation.
     await page.click('[data-mode="source"]');
     await page.click('[data-mode="live"]');
+    const prefix = language === 'en' ? 'Go to: ' : '跳转到：';
     const destinations = [
       { selector: `.meo-md-link-open-btn[data-tooltip="${longHref}"]`, text: longHref },
       { selector: '.meo-md-link-open-btn[data-tooltip="#安装说明"]', text: '#安装说明' },
-      { selector: '.meo-md-html-link[data-meo-link-href="./guide.md#setup"]', text: './guide.md#setup\nAuthor explanation' },
-      { selector: '.meo-md-html-table-cell-preview .meo-md-link[data-meo-link-href="#安装说明"]', text: '#安装说明' },
+      { selector: '.meo-md-html-link[data-meo-link-href="./guide.md#setup"]', text: './guide.md#setup\nAuthor explanation', modifier: true },
+      { selector: '.meo-md-html-table-cell-preview .meo-md-link[data-meo-link-href="#安装说明"]', text: '#安装说明', modifier: true },
       { selector: '.meo-md-image-linked', text: 'https://example.com/picture#details' },
       { selector: '.meo-md-image-linked .meo-md-image-controls button', text: 'https://example.com/picture#details' }
     ];
     for (const destination of destinations) {
+      if (destination.modifier) await page.keyboard.down('Control');
       const hint = await show(destination.selector);
-      assert.equal(hint.text, destination.text, phase + ': ' + destination.selector);
+      assert.equal(hint.text, prefix + destination.text, phase + ': ' + destination.selector);
       assert.equal(hint.shortcut, null);
       assert.equal(hint.inside, true, 'the full destination fits inside the viewport');
+      assert.equal(await page.$eval('.meo-tooltip.is-visible', element => element.getBoundingClientRect().width), 320, 'link targets share a fixed width');
+      await page.mouse.move(0, 0);
+      if (destination.modifier) await page.keyboard.up('Control');
+    }
+    const textLinks = [
+      `.cm-line .meo-md-link[data-meo-link-href="${longHref}"]`,
+      '.meo-md-html-link[data-meo-link-href="./guide.md#setup"]',
+      '.meo-md-html-table-cell-preview .meo-md-link[data-meo-link-href="#安装说明"]'
+    ];
+    for (const selector of textLinks) {
+      phase = language + '/' + appearance + ' text hover ' + selector;
+      await page.hover(selector);
+      await new Promise(resolve => setTimeout(resolve, 260));
+      assert.equal(await page.$('.meo-tooltip.is-visible'), null, 'plain Live text hover is for editing');
+      for (const modifier of ['Control', 'Meta'] as const) {
+        await page.keyboard.down(modifier);
+        await page.waitForSelector('.meo-tooltip.is-visible');
+        assert.ok((await page.$eval('.meo-tooltip.is-visible .meo-tooltip-label', element => element.textContent))?.startsWith(prefix), 'stationary modifier hover shows the destination');
+        for (const extra of ['Alt', 'Shift'] as const) {
+          await page.keyboard.down(extra);
+          assert.equal(await page.$('.meo-tooltip.is-visible'), null, 'extra modifiers cancel the link gesture');
+          await page.keyboard.up(extra);
+          await page.waitForSelector('.meo-tooltip.is-visible');
+        }
+        await page.keyboard.up(modifier);
+        assert.equal(await page.$('.meo-tooltip.is-visible'), null, 'modifier release immediately dismisses the target');
+      }
+      await page.mouse.move(0, 0);
+      await page.keyboard.down('Control');
+      await show(selector);
+      await page.keyboard.press('Escape');
+      assert.equal(await page.$('.meo-tooltip.is-visible'), null);
+      await page.keyboard.up('Control');
       await page.mouse.move(0, 0);
     }
     assert.equal(await page.$eval('.meo-md-link-open-btn[data-tooltip="#安装说明"]', element => element.getAttribute('aria-label')), language === 'en' ? 'Jump within document' : '在文档内跳转');
+    phase = language + '/' + appearance + ' editable table target';
+    const tableInput = '.meo-md-html-table-shell tbody textarea';
+    await page.click('.meo-md-html-table-cell-preview .meo-md-link[data-meo-link-href="#安装说明"]');
+    await page.waitForSelector(tableInput, { visible: true });
+    const inputPoint = async (offset: number) => page.$eval(tableInput, (element, offset) => {
+      const input = element as HTMLTextAreaElement, computed = getComputedStyle(input), rect = input.getBoundingClientRect();
+      const mirror = document.createElement('div');
+      for (const property of ['box-sizing', 'padding', 'border', 'font', 'font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'text-align', 'tab-size']) mirror.style.setProperty(property, computed.getPropertyValue(property));
+      Object.assign(mirror.style, { position: 'fixed', left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px', whiteSpace: 'pre-wrap', overflowWrap: 'break-word', visibility: 'hidden' });
+      const marker = document.createElement('span'); marker.textContent = input.value[offset]!;
+      mirror.append(document.createTextNode(input.value.slice(0, offset)), marker, document.createTextNode(input.value.slice(offset + 1)));
+      document.body.append(mirror);
+      const bounds = marker.getBoundingClientRect(); mirror.remove();
+      return { x: bounds.left + bounds.width / 2 - input.scrollLeft, y: bounds.top + bounds.height / 2 - input.scrollTop };
+    }, offset);
+    const labelPoint = await inputPoint(2);
+    await page.mouse.move(labelPoint.x, labelPoint.y);
+    await new Promise(resolve => setTimeout(resolve, 260));
+    assert.equal(await page.$('.meo-tooltip.is-visible'), null);
+    await page.keyboard.down('Control');
+    await page.waitForSelector('.meo-tooltip.is-visible');
+    assert.equal(await page.$eval('.meo-tooltip.is-visible .meo-tooltip-label', element => element.textContent), prefix + '#安装说明');
+    assert.equal(await page.$eval(tableInput, element => getComputedStyle(element).cursor), 'pointer');
+    const markerPoint = await inputPoint(0);
+    await page.mouse.move(markerPoint.x, markerPoint.y);
+    assert.equal(await page.$('.meo-tooltip.is-visible'), null, 'Markdown delimiters are not link targets');
+    assert.equal(await page.$eval(tableInput, element => getComputedStyle(element).cursor), 'text');
+    await page.keyboard.up('Control');
+    await page.mouse.move(0, 0);
+    if (language === 'en' && appearance === 'light') {
+      const original = await page.$eval(tableInput, element => (element as HTMLTextAreaElement).value);
+      await page.$eval(tableInput, element => {
+        (element as HTMLTextAreaElement).value = '[Table link](#changed) plain';
+        element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+      });
+      const draftPoint = await inputPoint(2);
+      await page.mouse.move(draftPoint.x, draftPoint.y);
+      await page.keyboard.down('Control');
+      await page.waitForSelector('.meo-tooltip.is-visible');
+      assert.equal(await page.$eval('.meo-tooltip.is-visible .meo-tooltip-label', element => element.textContent), 'Go to: #changed', 'the active cell uses its current draft destination');
+      await page.keyboard.up('Control');
+      await page.$eval(tableInput, (element, original) => {
+        (element as HTMLTextAreaElement).value = original;
+        element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+      }, original);
+    }
+    const clickPoint = await inputPoint(2);
+    await page.mouse.move(clickPoint.x, clickPoint.y);
+    await page.keyboard.down('Control');
+    await page.mouse.click(clickPoint.x, clickPoint.y);
+    await page.keyboard.up('Control');
+    assert.equal(await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor')).state.selection.main.head), 0, 'Ctrl click in an active native table cell navigates to the heading');
+    await page.mouse.move(0, 0);
     await page.click('[data-mode="preview"]');
     await frame.waitForSelector('#fragment-link');
     for (const [selector, expected] of [['#fragment-link', '#安装说明'], ['#plain-link', 'https://example.com/docs?section=setup#install'], ['a', 'https://example.com\nLink explanation']]) {
       await frame.hover(selector);
       await frame.waitForSelector('.meo-tooltip.is-visible');
-      assert.equal(await frame.$eval('.meo-tooltip.is-visible .meo-tooltip-label', element => element.textContent), expected);
+      assert.equal(await frame.$eval('.meo-tooltip.is-visible .meo-tooltip-label', element => element.textContent), prefix + expected);
+      assert.equal(await frame.$eval('.meo-tooltip.is-visible', element => element.getBoundingClientRect().width), 320);
+      await page.keyboard.down('Control');
+      assert.equal(await frame.$eval('.meo-tooltip.is-visible .meo-tooltip-label', element => element.textContent), prefix + expected, 'Preview does not require or suppress modifier hover');
+      await page.keyboard.up('Control');
       assert.equal(await frame.$eval('.meo-tooltip.is-visible', element => getComputedStyle(element).backgroundColor), appearance === 'dark' ? 'rgb(58, 58, 58)' : 'rgb(13, 13, 13)');
       await page.mouse.move(0, 0);
     }
     await page.click('[data-mode="live"]');
   }
+  phase = 'narrow Preview link width';
+  await page.click('[data-mode="preview"]');
+  await page.setViewport({ width: 280, height: 780 });
+  await frame.hover('#fragment-link');
+  await frame.waitForSelector('.meo-tooltip.is-visible');
+  const narrow = await frame.$eval('.meo-tooltip.is-visible', element => {
+    const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right, width: rect.width, viewport: innerWidth };
+  });
+  assert.ok(narrow.width < 320 && narrow.left >= 8 && narrow.right <= narrow.viewport - 8, 'fixed target width shrinks to the available reading pane');
   assert.deepEqual(errors, []);
   await page.close();
   console.log('Production tooltips: delay, stateful pointer/keyboard updates, mode focus feedback, dismissal, toolbar/menu scope, fullscreen controls, boundary placement and Preview theme isolation passed.');

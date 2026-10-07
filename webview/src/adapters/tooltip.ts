@@ -1,6 +1,8 @@
+import { getUiStrings } from '../application/uiLanguage';
+
 export type TooltipContent =
   | { readonly text: string; readonly shortcut?: string; readonly kind?: 'hint' }
-  | { readonly text: string; readonly shortcut?: never; readonly kind: 'fulltext' | 'description' };
+  | { readonly text: string; readonly shortcut?: never; readonly kind: 'fulltext' | 'description' | 'link' };
 
 export type TooltipPlacement = 'top' | 'bottom' | 'left' | 'right';
 
@@ -125,7 +127,8 @@ export function createTooltip(anchor: HTMLElement, options: {
     const bounds = visibleBounds(anchor, area);
     if (!bounds) { hide(); return; }
     tooltip.style.maxWidth = '';
-    tooltip.classList.toggle('meo-tooltip--wrap', content.kind === 'fulltext' || content.kind === 'description');
+    tooltip.classList.toggle('meo-tooltip--wrap', content.kind === 'fulltext' || content.kind === 'description' || content.kind === 'link');
+    tooltip.classList.toggle('meo-tooltip--link', content.kind === 'link');
     if (content.shortcut && ((content.kind && content.kind !== 'hint') || /[\r\n]/.test(content.text))) { reportConflict(); return; }
     let hint = tooltip.getBoundingClientRect();
     if (hint.width > area.right - area.left) {
@@ -292,14 +295,20 @@ export function createTooltip(anchor: HTMLElement, options: {
  * and data-tooltip-live-update="true" for stateful controls.
  * Explicit placement uses the control's own anchor. Full-text reveals only clipped text.
  * Generated controls supply metadata; links show their destination and any authored title.
+ * Bootstrap supplies editableLinkHrefAtPoint for editor-owned text and cell drafts;
+ * it resolves only pointer/key/input interactions, without committing an edit.
  */
-export function bindTooltips(root: HTMLElement) {
+export function bindTooltips(root: HTMLElement, options: {
+  readonly editableLinkHrefAtPoint?: (point: { x: number; y: number }) => string;
+} = {}) {
   const doc = root.ownerDocument, view = doc.defaultView!;
   const events = new view.AbortController();
-  let current: { anchor: HTMLElement; hint: ReturnType<typeof createTooltip> } | undefined;
+  let current: { anchor: HTMLElement; hint: ReturnType<typeof createTooltip>; editableHref?: string } | undefined;
   const ariaOwned = new WeakSet<HTMLElement>();
   const frames = new Map<HTMLIFrameElement, { doc: Document | null; dispose?: () => void }>();
   const conflicts = new WeakSet<HTMLElement>();
+  let pointer: { x: number; y: number } | undefined;
+  let linkModifier = false;
   const ignored = '.find-clear-button, .find-close-button, .outline-close-button, .editor-notice-close, .meo-hex-color-adjustment-close';
 
   function prepare(element: HTMLElement) {
@@ -308,32 +317,39 @@ export function bindTooltips(root: HTMLElement) {
     }
   }
 
-  function contentFor(element: HTMLElement): TooltipContent | null {
+  function contentFor(element: HTMLElement, editableHref?: string): TooltipContent | null {
     if (element.matches(ignored) || element.closest('[inert]')) return null;
-    const href = (element.getAttribute('data-meo-link-href') ?? element.getAttribute('data-meo-preview-href')
-      ?? (element.tagName === 'A' ? element.getAttribute('href') : null))?.trim();
+    const live = element.closest('.cm-editor.meo-mode-live');
+    const linkButton = element.hasAttribute('data-tooltip-link-href');
+    const href = (element.getAttribute('data-tooltip-link-href') ?? element.getAttribute('data-meo-link-href') ?? element.getAttribute('data-meo-preview-href')
+      ?? (element.tagName === 'A' ? element.getAttribute('href') : null) ?? editableHref)?.trim();
+    if (href && !linkButton && element.closest('.cm-editor.meo-mode-source')) return null;
+    if (live && href && !linkButton && !element.matches('.meo-md-image-linked') && !linkModifier) return null;
     const description = element.dataset.tooltip?.trim();
-    const text = href ? (description && description !== href ? href + '\n' + description : href) : description;
+    const language = doc.documentElement.dataset.meoTooltipLanguage ?? doc.documentElement.lang;
+    const destination = href ? getUiStrings(language === 'zh-CN' ? 'zh-CN' : 'en').linkDestination(href) : '';
+    const text = href ? (description && description !== href ? destination + '\n' + description : destination) : description;
     if (!text) return null;
-    const kind = href ? 'description' : element.dataset.tooltipKind;
+    const kind = href ? 'link' : element.dataset.tooltipKind;
     const key = element.dataset.tooltipShortcut;
     if (kind === 'fulltext' && element.scrollWidth <= element.clientWidth + 1 && element.scrollHeight <= element.clientHeight + 1) return null;
-    if (key && (kind === 'fulltext' || kind === 'description' || /[\r\n]/.test(text))) {
+    if (key && (kind === 'fulltext' || kind === 'description' || kind === 'link' || /[\r\n]/.test(text))) {
       if (!conflicts.has(element)) { conflicts.add(element); console.warn('[MEO tooltip] Full-text / multiline content with a shortcut needs review.', { text, shortcut: key, element }); }
       return null;
     }
-    if (kind === 'fulltext' || kind === 'description') return { text, kind };
+    if (kind === 'fulltext' || kind === 'description' || kind === 'link') return { text, kind };
     if (element.textContent?.trim().replace(/\s+/g, ' ') === text.replace(/\s+/g, ' ')) return null;
     return { text, shortcut: key || undefined };
   }
 
-  function fromTarget(target: EventTarget | null): HTMLElement | null {
+  function fromTarget(target: EventTarget | null, editableHref?: string): HTMLElement | null {
     if (!(target instanceof view.Element)) return null;
-    const element = target.closest<HTMLElement>('[data-tooltip], [title], [data-meo-link-href], [data-meo-preview-href], a[href]');
+    if (target.closest('.meo-md-link-marker, .meo-md-link-marker-active, .meo-md-link-label-bracket, .meo-md-link-label-bracket-active')) return null;
+    let element = target.closest<HTMLElement>('[data-tooltip], [title], [data-meo-link-href], [data-meo-preview-href], a[href]');
+    if (!element && editableHref && target.closest('.cm-editor.meo-mode-live')) {
+      element = target.closest<HTMLElement>('textarea, .cm-line');
+    }
     if (!element || !root.contains(element) || element.tagName === 'IFRAME' || (ownedAnchors.has(element) && current?.anchor !== element)) return null;
-    // Editable link marks belong to the editor renderer, which resets foreign attributes.
-    // Their existing open-link buttons provide the destination without mutating prose DOM.
-    if (element.isContentEditable && element.hasAttribute('data-meo-link-href')) return null;
     if (element.hasAttribute('title')) {
       // Authored HTML titles are content; they are displayed through the same bubble.
       element.dataset.tooltip = element.getAttribute('title') ?? '';
@@ -344,17 +360,28 @@ export function bindTooltips(root: HTMLElement) {
   }
 
   function enter(event: Event) {
-    const anchor = fromTarget(event.target);
+    if (event instanceof view.PointerEvent) {
+      pointer = { x: event.clientX, y: event.clientY };
+      linkModifier = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey;
+    }
+    // Character measurement can create temporary DOM. Resolve only for input events,
+    // never from the mutation observer that watches the resulting tooltip DOM.
+    const editableHref = linkModifier && pointer && event.target instanceof view.Element
+      && event.target.closest('.cm-editor.meo-mode-live') && !event.target.closest('[data-tooltip-link-href]')
+      ? options.editableLinkHrefAtPoint?.(pointer) : undefined;
+    const anchor = fromTarget(event.target, editableHref);
     // A pointer-driven mode switch may focus its source editor while the same
     // live-update button remains under the pointer. Keep that hint's ownership.
     if (event.type === 'focusin' && current?.anchor.dataset.tooltipLiveUpdate === 'true'
       && current.hint.isHovered() && (!anchor || !anchor.matches(':focus-visible'))) return;
     if (!anchor) { current?.hint.dispose(); current = undefined; return; }
-    const content = contentFor(anchor);
+    const content = contentFor(anchor, editableHref);
     if (!content) { current?.hint.dispose(); current = undefined; return; }
-    if (current?.anchor === anchor) return;
+    if (current?.anchor === anchor) { current.editableHref = editableHref; current.hint.setContent(content); return; }
     current?.hint.dispose(); prepare(anchor);
-    current = { anchor, hint: createTooltip(anchor, { content }) };
+    // CodeMirror resets attributes on editable marks; describe its stable root instead.
+    const focusTarget = anchor.isContentEditable ? anchor.closest<HTMLElement>('.cm-editor') ?? anchor : anchor;
+    current = { anchor, hint: createTooltip(anchor, { content, focusTarget }), editableHref };
     if (event.type !== 'focusin' || anchor.matches(':focus-visible')) current.hint.show();
   }
 
@@ -385,6 +412,7 @@ export function bindTooltips(root: HTMLElement) {
     // Keep tooltip UI appearance separate from Preview's own document theme and fonts.
     styles.textContent = sharedStyles(doc).replaceAll('data-editor-appearance', 'data-meo-tooltip-appearance'); child.head.append(styles);
     child.documentElement.dataset.meoTooltipAppearance = doc.documentElement.dataset.meoTooltipAppearance ?? doc.documentElement.dataset.editorAppearance ?? 'light';
+    child.documentElement.dataset.meoTooltipLanguage = doc.documentElement.dataset.meoTooltipLanguage ?? doc.documentElement.lang;
     const binding = bindTooltips(child.body);
     state.dispose = () => { binding.dispose(); styles.remove(); };
   }
@@ -407,22 +435,38 @@ export function bindTooltips(root: HTMLElement) {
       else if (state.doc) state.doc.documentElement.dataset.meoTooltipAppearance = doc.documentElement.dataset.meoTooltipAppearance ?? doc.documentElement.dataset.editorAppearance ?? 'light';
     }
     if (current) {
-      const content = contentFor(current.anchor);
+      const content = contentFor(current.anchor, current.editableHref);
       if (!content || !painted(current.anchor)) { current.hint.dispose(); current = undefined; }
       else current.hint.setContent(content);
     }
     activeTooltip?.reposition();
   });
-  observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-tooltip', 'data-tooltip-shortcut', 'data-tooltip-kind', 'data-tooltip-placement', 'data-tooltip-live-update', 'data-meo-link-href', 'data-meo-preview-href', 'href', 'hidden', 'open'] });
+  observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-tooltip', 'data-tooltip-link-href', 'data-tooltip-shortcut', 'data-tooltip-kind', 'data-tooltip-placement', 'data-tooltip-live-update', 'data-meo-link-href', 'data-meo-preview-href', 'href', 'hidden', 'open'] });
   const appearance = new view.MutationObserver(() => {
-    for (const state of frames.values()) if (state.doc) state.doc.documentElement.dataset.meoTooltipAppearance = doc.documentElement.dataset.meoTooltipAppearance ?? doc.documentElement.dataset.editorAppearance ?? 'light';
+    for (const state of frames.values()) if (state.doc) {
+      state.doc.documentElement.dataset.meoTooltipAppearance = doc.documentElement.dataset.meoTooltipAppearance ?? doc.documentElement.dataset.editorAppearance ?? 'light';
+      state.doc.documentElement.dataset.meoTooltipLanguage = doc.documentElement.dataset.meoTooltipLanguage ?? doc.documentElement.lang;
+    }
+    if (current) {
+      const content = contentFor(current.anchor, current.editableHref);
+      if (content) current.hint.setContent(content);
+    }
   });
-  appearance.observe(doc.documentElement, { attributes: true, attributeFilter: ['data-editor-appearance', 'data-meo-tooltip-appearance'] });
+  appearance.observe(doc.documentElement, { attributes: true, attributeFilter: ['data-editor-appearance', 'data-meo-tooltip-appearance', 'lang', 'data-meo-tooltip-language'] });
   root.addEventListener('pointerover', enter, { signal: events.signal });
+  root.addEventListener('pointermove', enter, { signal: events.signal });
+  root.addEventListener('input', event => { if (pointer && linkModifier) enter(event); }, { signal: events.signal });
+  const modifierChanged = (event: KeyboardEvent) => {
+    if (!['Control', 'Meta', 'Alt', 'Shift'].includes(event.key)) return;
+    linkModifier = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey;
+    if (pointer) enter({ target: doc.elementFromPoint(pointer.x, pointer.y), type: 'modifier' } as Event);
+  };
+  view.addEventListener('keydown', modifierChanged, { capture: true, signal: events.signal });
+  view.addEventListener('keyup', modifierChanged, { capture: true, signal: events.signal });
   root.addEventListener('focusin', enter, { signal: events.signal });
   root.addEventListener('pointerdown', event => activeTooltip?.pointerDown(event), { capture: true, signal: events.signal });
   root.addEventListener('keydown', event => { if (event.key === 'Escape' || event.key === 'Tab') activeTooltip?.hide(); }, { capture: true, signal: events.signal });
-  view.addEventListener('blur', () => activeTooltip?.hide(), { signal: events.signal });
+  view.addEventListener('blur', () => { pointer = undefined; linkModifier = false; activeTooltip?.hide(); }, { signal: events.signal });
   view.addEventListener('scroll', () => activeTooltip?.reposition(), { capture: true, passive: true, signal: events.signal });
   view.addEventListener('resize', () => activeTooltip?.reposition(), { signal: events.signal });
   scan(root);

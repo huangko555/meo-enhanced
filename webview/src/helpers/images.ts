@@ -497,6 +497,7 @@ export class ImageWidget extends WidgetType {
       openLink.type = 'button';
       openLink.className = 'meo-visual-control-btn meo-md-image-control-btn';
       openLink.dataset.tooltip = this.linkUrl;
+      openLink.dataset.tooltipLinkHref = this.linkUrl;
       openLink.dataset.tooltipKind = 'description';
       openLink.setAttribute('aria-label', isDocumentFragment ? strings.jumpWithinDocument : strings.openLink);
       openLink.appendChild(createElement(isDocumentFragment ? SquareArrowRightEnter : ExternalLink, { width: 16, height: 16 }));
