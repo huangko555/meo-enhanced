@@ -1481,7 +1481,11 @@ const findPanelController = createFindPanelController(
     }
     return '';
   },
-  activeUiLanguage
+  activeUiLanguage,
+  () => {
+    editor?.setSearchQuery('');
+    previewController.getSearchAdapter().setSearchQuery('');
+  }
 );
 
 const selectionMenuElements = createSelectionMenu();
@@ -1660,6 +1664,9 @@ const previewController = createPreviewController({
   applyCodeTheme: (appearance) => applyCodeThemeForPreview(appearance),
   mermaidRenderResources: mermaidDiagramRenderPool,
   onFindRequested: () => findPanelController.open('find'),
+  onSearchResultsChanged: () => {
+    if (getActiveEditorMode() === 'preview') findPanelController.updateFindStatusSummary();
+  },
   onNavigateToTop: () => {
     if (!isSidePreviewVisible() || !editor?.navigateLinkedViewportToTop?.('preview')) return false;
     readingPositionLifecycle?.userInteracted();
@@ -1677,6 +1684,7 @@ const previewController = createPreviewController({
     editorHost.removeAttribute('data-preview-cover');
     editorSurface.removeAttribute('data-source-preview-exit-cover');
     markSourcePreviewSurfaceReady();
+    if (getActiveEditorMode() === 'preview') findPanelController.refreshForModeChange();
   },
   onRendered: (options) => {
     if (outlineController?.isVisible()) {
@@ -2921,6 +2929,7 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     editorHost.toggleAttribute('data-preview-cover', !visible && !previewPaintReady);
     editorHost.inert = !interactive;
     editorHost.hidden = !visible;
+    if (visible && interactive && findPanelController.isVisible()) findPanelController.refreshForModeChange();
     if (preparingSourceSplit && editor) {
       (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
     }
@@ -2931,8 +2940,11 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     changesReviewMode = mode;
     presentChangesReview();
   },
-  closeFind: () => findPanelController.close(),
-  setSearchOwner: () => findPanelController.updateFindStatusSummary(),
+  setSearchOwner: (owner) => {
+    if (findPanelController.isVisible()) findPanelController.refreshForModeChange();
+    else if (owner === 'editor') editor?.focus();
+    else previewController.focus();
+  },
   setOutlineOwner: () => {
     if (outlineController.isVisible()) outlineController.refresh();
   },

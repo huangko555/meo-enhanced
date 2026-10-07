@@ -156,6 +156,7 @@ async function main() {
     await page.click('[data-mode="live"]');
     const liveHighlightCountAfterModeSwitch = await page.$$eval('.meo-search-match', (matches) => matches.length);
 
+    await page.click('.find-close-button');
     await page.click('[data-mode="preview"]');
     await page.waitForFunction(() => !document.querySelector<HTMLElement>('.preview-host')?.hidden);
     const previewState = await page.evaluate(async () => {
@@ -230,8 +231,8 @@ async function main() {
     if (tableSelectionText !== 'table-selected') {
       failures.push(`table selection was not copied into Find: ${JSON.stringify(tableSelectionText)}`);
     }
-    if (liveHighlightCountAfterModeSwitch !== 0) {
-      failures.push(`Live search highlights survived closing Find during a mode switch: ${liveHighlightCountAfterModeSwitch}`);
+    if (liveHighlightCountAfterModeSwitch === 0) {
+      failures.push(`Live search highlights disappeared during a mode switch: ${liveHighlightCountAfterModeSwitch}`);
     }
     if (previewState.selectedText !== 'Preview selected phrase') {
       failures.push(`Preview selection was not copied into Find: ${JSON.stringify(previewState.selectedText)}`);

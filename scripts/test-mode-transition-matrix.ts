@@ -3,6 +3,7 @@ import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 import exportRuntime from '../src/export/runtime';
 
 type Mode = 'live' | 'source' | 'preview';
+const searchOpen = process.argv.includes('--search');
 const svg = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="90"><rect width="240" height="90" fill="#3275bd"/></svg>');
 const cases = [
   { name: 'paragraph', selector: '.cm-line', markdown: 'Ordinary **bold**, *italic*, ~~strike~~ and [link](https://example.com).\n\nAnother paragraph with `inline code`.' },
@@ -89,6 +90,14 @@ try {
         await page.waitForFunction(() => document.querySelector('.editor-surface')?.hasAttribute('data-source-preview'));
         await page.evaluate(() => document.querySelector<HTMLButtonElement>('button[data-mode="live"]')!.click());
         await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live');
+      }
+      if (searchOpen) {
+        await page.click('[data-action="find"]');
+        await page.evaluate(() => {
+          const input = document.querySelector<HTMLInputElement>('.find-input')!;
+          input.value = 'Following';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
       }
       for (const sequence of sequences) {
         for (const mode of sequence) {
@@ -183,7 +192,7 @@ try {
   }
   const sorted = durations.map(item => item.ms).sort((a, b) => a - b);
   const p95 = sorted[Math.floor(sorted.length * 0.95)]!;
-  console.log(`Mode matrix: ${durations.length} switches, p95 ${p95} ms, max ${sorted.at(-1)} ms`);
+  console.log(`Mode matrix ${searchOpen ? '(search open)' : '(search closed)'}: ${durations.length} switches, p95 ${p95} ms, max ${sorted.at(-1)} ms`);
   assert.ok(p95 < 300, `mode switching p95 exceeded 300 ms: ${p95}`);
 } catch (error) {
   primaryError = error;

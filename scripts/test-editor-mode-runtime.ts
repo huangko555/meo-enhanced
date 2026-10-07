@@ -51,7 +51,6 @@ const capabilities: EditorModeEffectCapabilities = {
   },
   setEditorVisible: (visible) => events.push(`editor:${visible}`),
   presentModeControl: (mode) => events.push(`control:${mode}`),
-  closeFind: () => events.push('close-find'),
   setSearchOwner: (owner) => events.push(`search:${owner}`),
   setOutlineOwner: (owner) => events.push(`outline:${owner}`),
   setReplaceEnabled: (enabled) => events.push(`replace:${enabled}`),

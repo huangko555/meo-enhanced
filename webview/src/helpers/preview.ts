@@ -1,4 +1,5 @@
 import morphdom from 'morphdom';
+import { createPreviewSearchController, previewSearchStyles } from './previewSearch';
 import { createElement as createIconElement, PenLine, TextCursor } from 'lucide';
 import { getExportStyleEnvironment } from './export';
 import { createPreviewMermaidRenderer } from './previewMermaid';
@@ -38,6 +39,7 @@ type PreviewControllerOptions = {
   onRendered?: (options?: { readonly skipLinkedViewportProjection?: boolean }) => void;
   onPaintReady?: () => void;
   onFindRequested?: () => void;
+  onSearchResultsChanged?: () => void;
   onNavigateToTop?: () => boolean;
   onNavigateToSource?: (line: number) => void;
   onViewportInteraction?: () => void;
@@ -780,6 +782,7 @@ export function createPreviewController({
   onRendered,
   onPaintReady,
   onFindRequested,
+  onSearchResultsChanged,
   onNavigateToTop,
   onNavigateToSource,
   onViewportInteraction,
@@ -991,10 +994,23 @@ export function createPreviewController({
     mermaidRenderResources,
     (error) => logWebviewRenderError('preview.mermaid', error)
   );
-  let searchQuery = '';
-  let searchOptions = { wholeWord: false, caseSensitive: false };
-  let searchMatches: HTMLElement[] = [];
-  let activeSearchIndex = -1;
+  const search = createPreviewSearchController({
+    getDocument: () => activeFrameDocument,
+    isVisible: () => !host.hidden,
+    onResultsChanged: () => onSearchResultsChanged?.(),
+    onNavigate: () => {
+      // Explicit search navigation supersedes a mode/layout viewport projection.
+      viewportInteractionGeneration += 1;
+      retainedViewportProjection = null;
+      pendingExternalViewportRestore = null;
+      pendingPresentationScroll = null;
+      onViewportInteraction?.();
+    },
+    focus: () => {
+      frame.focus();
+      frame.contentWindow?.focus();
+    }
+  });
   let previewMathViewports = new Map<HTMLElement, {
     readonly controller: LatexMathViewportController;
     readonly signature: string;
@@ -1059,6 +1075,7 @@ export function createPreviewController({
         paintFrame = null;
         if (!disposed && !host.hidden) {
           stabilizePendingExternalViewport();
+          search.surfaceReady();
           onPaintReady?.();
           if (!hasPendingRequest) pendingExternalViewportRestore = null;
         }
@@ -1241,109 +1258,6 @@ export function createPreviewController({
     }
   };
 
-  const clearSearchMatches = (): void => {
-    const frameDocument = frame.contentDocument;
-    for (const match of Array.from(frameDocument?.querySelectorAll<HTMLElement>('.meo-preview-search-match') ?? [])) {
-      const parent = match.parentNode;
-      match.replaceWith(frameDocument!.createTextNode(match.textContent ?? ''));
-      parent?.normalize();
-    }
-    searchMatches = [];
-    activeSearchIndex = -1;
-  };
-
-  const refreshSearchMatches = (): void => {
-    clearSearchMatches();
-    const frameDocument = frame.contentDocument;
-    const root = frameDocument?.querySelector<HTMLElement>('.meo-export-doc');
-    if (!frameDocument || !root || !searchQuery) {
-      return;
-    }
-    const query = searchOptions.caseSensitive ? searchQuery : searchQuery.toLocaleLowerCase();
-    const textNodes: Text[] = [];
-    const walker = frameDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-      acceptNode: (node) => {
-        const parent = node.parentElement;
-        return parent && !parent.closest('script, style, noscript, svg')
-          ? NodeFilter.FILTER_ACCEPT
-          : NodeFilter.FILTER_REJECT;
-      }
-    });
-    while (walker.nextNode()) {
-      textNodes.push(walker.currentNode as Text);
-    }
-    for (const textNode of textNodes) {
-      const rawText = textNode.data;
-      const comparableText = searchOptions.caseSensitive ? rawText : rawText.toLocaleLowerCase();
-      const ranges: Array<{ start: number; end: number }> = [];
-      let offset = 0;
-      while (offset <= comparableText.length - query.length) {
-        const start = comparableText.indexOf(query, offset);
-        if (start < 0) {
-          break;
-        }
-        const end = start + query.length;
-        const isWordChar = (value: string) => /[\p{L}\p{N}_]/u.test(value);
-        const wholeWordMatch = !searchOptions.wholeWord || (
-          !isWordChar(rawText[start - 1] ?? '') && !isWordChar(rawText[end] ?? '')
-        );
-        if (wholeWordMatch) {
-          ranges.push({ start, end });
-        }
-        offset = Math.max(end, start + 1);
-      }
-      if (ranges.length === 0) {
-        continue;
-      }
-      const fragment = frameDocument.createDocumentFragment();
-      let cursor = 0;
-      for (const range of ranges) {
-        fragment.append(frameDocument.createTextNode(rawText.slice(cursor, range.start)));
-        const mark = frameDocument.createElement('mark');
-        mark.className = 'meo-preview-search-match';
-        mark.textContent = rawText.slice(range.start, range.end);
-        fragment.append(mark);
-        searchMatches.push(mark);
-        cursor = range.end;
-      }
-      fragment.append(frameDocument.createTextNode(rawText.slice(cursor)));
-      textNode.replaceWith(fragment);
-    }
-  };
-
-  const setSearchQuery = (
-    query: string,
-    options: { wholeWord?: boolean; caseSensitive?: boolean } = {}
-  ): void => {
-    const nextOptions = {
-      wholeWord: options.wholeWord === true,
-      caseSensitive: options.caseSensitive === true
-    };
-    if (
-      query === searchQuery &&
-      nextOptions.wholeWord === searchOptions.wholeWord &&
-      nextOptions.caseSensitive === searchOptions.caseSensitive
-    ) {
-      return;
-    }
-    searchQuery = query;
-    searchOptions = nextOptions;
-    refreshSearchMatches();
-  };
-
-  const findSearchMatch = (query: string, options: Record<string, unknown>, direction: 1 | -1) => {
-    setSearchQuery(query, options);
-    if (searchMatches.length === 0) {
-      return { found: false, current: 0, total: 0 };
-    }
-    activeSearchIndex = (activeSearchIndex + direction + searchMatches.length) % searchMatches.length;
-    for (const [index, match] of searchMatches.entries()) {
-      match.classList.toggle('is-active', index === activeSearchIndex);
-    }
-    searchMatches[activeSearchIndex].scrollIntoView({ block: 'center', inline: 'nearest' });
-    return { found: true, current: activeSearchIndex + 1, total: searchMatches.length };
-  };
-
   const updateThemeToggle = () => {
     appearanceSelect.value = appearancePreference;
     const toolbarAppearance = getEditorAppearance();
@@ -1436,10 +1350,7 @@ export function createPreviewController({
     hideSourceNavigation();
     frameEvents?.abort();
     frameEvents = null;
-    if (!reusableDocument) {
-      searchMatches = [];
-      activeSearchIndex = -1;
-    }
+    search.invalidate();
     const loadGeneration = frameGeneration + 1;
     frameGeneration = loadGeneration;
     mermaidPresentationGeneration += 1;
@@ -1550,7 +1461,6 @@ export function createPreviewController({
       bindSourceNavigation(frameDocument, mappedRoot, signal);
       bindPreviewWheelFallback(frameDocument, signal);
       bindPreviewFindShortcut(frameDocument, onFindRequested, signal);
-      refreshSearchMatches();
       const keepPosition = () => {
         if (
           disposed ||
@@ -1604,7 +1514,6 @@ export function createPreviewController({
       // before the browser can paint the new layout.
       frame.onload = null;
       const commit = (viewportSlot: PreviewViewportProjectionSlot | null) => {
-        clearSearchMatches();
         reusableDocument.documentElement.lang = uiLanguage;
         const deferredCodeBlocks = morphPreviewMain(
           reusableDocument,
@@ -1650,7 +1559,7 @@ export function createPreviewController({
     previewTableLayout = null;
     loadingFrameText = renderedText;
     frame.onload = () => initializeFrame();
-    frame.srcdoc = `<!DOCTYPE html><html lang="${uiLanguage}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewCodeCopyStyles}${previewLatexMathViewportStyles}${previewSourcePositionMarkerStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#ffff00!important;color:#000000!important;-webkit-text-fill-color:#000000!important;outline:none}.meo-preview-search-match.is-active{background:#ff9632!important}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${payload.html}</main></div></body></html>`;
+    frame.srcdoc = `<!DOCTYPE html><html lang="${uiLanguage}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewCodeCopyStyles}${previewLatexMathViewportStyles}${previewSourcePositionMarkerStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}${previewSearchStyles}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${payload.html}</main></div></body></html>`;
   };
 
   const applyAppearanceToFrame = (preserveReadingPosition = false) => {
@@ -2766,6 +2675,7 @@ export function createPreviewController({
       host.inert = !visible;
       if (!visible) {
         cancelPaintReady();
+        search.surfaceHidden();
         hideSourceNavigation();
       }
       else if (activeFrameDocument && !hasPendingRequest) schedulePaintReady();
@@ -2808,21 +2718,13 @@ export function createPreviewController({
     },
     refreshLayout: () => {
       previewTableLayout?.refresh();
+      search.refreshLayout();
       sourceMapDirty = true;
       refreshSourcePositionMarker();
       refreshSourceNavigation();
     },
     getSelectedText: () => frame.contentWindow?.getSelection()?.toString() ?? '',
-    getSearchAdapter: () => ({
-      setSearchQuery,
-      countMatches: () => searchMatches.length,
-      findNext: (query: string, options: Record<string, unknown>) => findSearchMatch(query, options, 1),
-      findPrevious: (query: string, options: Record<string, unknown>) => findSearchMatch(query, options, -1),
-      focus: () => {
-        frame.focus();
-        frame.contentWindow?.focus();
-      }
-    }),
+    getSearchAdapter: () => search.adapter,
     getOutlineAdapter: () => outlineAdapter,
     dispose: () => {
       if (disposed) return;
@@ -2879,7 +2781,7 @@ export function createPreviewController({
       frameEvents = null;
       disposeDeferredImages();
       scrollToTopController.setScrollElement(null);
-      clearSearchMatches();
+      search.dispose();
     }
   };
 }

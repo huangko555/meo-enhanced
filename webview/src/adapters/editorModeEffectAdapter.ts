@@ -30,7 +30,6 @@ export type EditorModeEffectCapabilities = {
   setPreviewActive(active: boolean, presentation?: EditorModePresentation): void;
   setEditorVisible(visible: boolean, interactive?: boolean): void;
   presentModeControl(mode: EditorMode): void;
-  closeFind(): void;
   setSearchOwner(owner: 'editor' | 'preview'): void;
   setOutlineOwner(owner: 'editor' | 'preview'): void;
   setReplaceEnabled(enabled: boolean): void;
@@ -78,7 +77,6 @@ export function createEditorModeEffectAdapter(
   const applyPresentation = (presentation: EditorModePresentation): void => {
     const generation = ++presentationGeneration;
     pendingAtomicReveal = null;
-    if (presentation.closeFind) capabilities.closeFind();
     if (presentation.atomicEditorReveal) {
       // Measure the control before unhiding the old editor to avoid laying it out before reconfiguration.
       capabilities.presentModeControl(presentation.mode);

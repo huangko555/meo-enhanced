@@ -67,7 +67,6 @@ export type EditorModeInput =
 export type EditorModePresentation = {
   readonly mode: EditorMode;
   readonly previousMode: EditorMode;
-  readonly closeFind: boolean;
   readonly previewActive: boolean;
   readonly editorVisible: boolean;
   readonly atomicEditorReveal: boolean;
@@ -155,7 +154,6 @@ const presentationFor = (
 ): EditorModePresentation => ({
   mode,
   previousMode,
-  closeFind: mode !== previousMode,
   previewActive: mode === 'preview',
   editorVisible: mode !== 'preview',
   atomicEditorReveal: mode !== 'preview' && previousMode === 'preview' && editorMounted,

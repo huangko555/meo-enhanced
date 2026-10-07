@@ -1,4 +1,5 @@
 import { createElement, CaseSensitive, ChevronUp, ChevronDown, Replace, ReplaceAll, WholeWord, X } from 'lucide';
+import type { SearchMatchAnchor } from '../application/searchMatchAnchor';
 import { getUiStrings, type UiLanguage, type UiStrings } from '../application/uiLanguage';
 
 export interface FindPanelElements {
@@ -172,10 +173,21 @@ export const createFindPanelController = (
   toolbar: HTMLElement,
   modeGroup: HTMLElement,
   getSelectedSurfaceText: (() => string) | undefined,
-  initialUiLanguage: UiLanguage
+  initialUiLanguage: UiLanguage,
+  clearSurfaceSearch: () => void = () => getEditor()?.setSearchQuery('')
 ) => {
   let uiStrings = getUiStrings(initialUiLanguage);
   let visible = false;
+  let surfaceRefreshFrame: number | null = null;
+  let surfaceRefreshTimer: number | null = null;
+  let activeSearchAnchor: SearchMatchAnchor | null = null;
+  let searchSignature = '';
+
+  const cancelSurfaceRefresh = (): void => {
+    if (surfaceRefreshFrame !== null) window.cancelAnimationFrame(surfaceRefreshFrame);
+    if (surfaceRefreshTimer !== null) window.clearTimeout(surfaceRefreshTimer);
+    surfaceRefreshFrame = surfaceRefreshTimer = null;
+  };
 
   const isWholeWordEnabled = (): boolean => {
     return elements.wholeWordBtn.classList.contains('is-active');
@@ -229,12 +241,22 @@ export const createFindPanelController = (
 
     const query = elements.findInput.value;
     const searchOptions = getSearchOptions();
+    const signature = JSON.stringify([query, searchOptions]);
+    if (signature !== searchSignature) {
+      searchSignature = signature;
+      activeSearchAnchor = null;
+    }
     editor.setSearchQuery(query, searchOptions);
     if (!query) {
+      clearSurfaceSearch();
       setFindStatus('');
       return;
     }
 
+    if (editor.isSearchPending?.()) {
+      setFindStatus('');
+      return;
+    }
     const total = editor.countMatches(query, searchOptions);
     if (!total) {
       setFindStatus(uiStrings.noMatches, true);
@@ -243,13 +265,36 @@ export const createFindPanelController = (
     setFindStatus(uiStrings.findMatches(total));
   };
 
+  const refreshForModeChange = (): void => {
+    cancelSurfaceRefresh();
+    if (!visible) return;
+    // The mode owner reveals and paints the target surface before search work.
+    const refresh = () => {
+      surfaceRefreshTimer = null;
+      if (!visible) return;
+      const editor = getEditor();
+      if (!editor || editor.isSearchReady?.() === false) return;
+      updateFindStatusSummary();
+      editor.setSearchAnchor?.(activeSearchAnchor);
+    };
+    surfaceRefreshFrame = window.requestAnimationFrame(() => {
+      surfaceRefreshFrame = window.requestAnimationFrame(() => {
+        surfaceRefreshFrame = null;
+        surfaceRefreshTimer = window.setTimeout(refresh, 0);
+      });
+    });
+  };
+
   const close = (): void => {
+    cancelSurfaceRefresh();
+    activeSearchAnchor = null;
     visible = false;
     elements.panel.classList.remove('is-visible');
     elements.toggleBtn.classList.remove('is-active');
     elements.findInput.value = '';
     elements.replaceInput.value = '';
     setFindStatus('');
+    clearSurfaceSearch();
     const editor = getEditor();
     if (editor) {
       editor.setSearchQuery('', getSearchOptions());
@@ -314,6 +359,7 @@ export const createFindPanelController = (
 
     const searchOptions = { ...options, ...getSearchOptions() };
     const result = backward ? editor.findPrevious(query, searchOptions) : editor.findNext(query, searchOptions);
+    activeSearchAnchor = editor.getSearchAnchor?.() ?? null;
     return applyFindResult(result);
   };
 
@@ -330,6 +376,7 @@ export const createFindPanelController = (
     }
 
     const result = editor.replaceCurrent(query, elements.replaceInput.value, getSearchOptions());
+    activeSearchAnchor = editor.getSearchAnchor?.() ?? null;
     if (!result.replaced) {
       return applyFindResult(result);
     }
@@ -406,6 +453,7 @@ export const createFindPanelController = (
     setSearchOptions,
     updateAnchor,
     updateFindStatusSummary,
+    refreshForModeChange,
     setUiLanguage(language: UiLanguage) {
       uiStrings = getUiStrings(language);
       elements.applyUiStrings(uiStrings);

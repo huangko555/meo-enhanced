@@ -85,7 +85,7 @@ assert.equal(localInit.getState().mode, 'source', 'Preview toggle must restore l
 assert.deepEqual(effectTypes(leavePreview), ['commitTransientEdits', 'presentMode', 'applyEditorMode']);
 const leavePresentation = leavePreview.find((effect) => effect.type === 'presentMode');
 assert.deepEqual(leavePresentation?.type === 'presentMode' ? leavePresentation.presentation : null, {
-  mode: 'source', previousMode: 'preview', closeFind: true, previewActive: false, editorVisible: true,
+  mode: 'source', previousMode: 'preview', previewActive: false, editorVisible: true,
   searchOwner: 'editor', outlineOwner: 'editor', replaceEnabled: true, hideSelectionMenu: false,
   viewport: previewViewport, restoreEditorFocus: true, atomicEditorReveal: true
 });
