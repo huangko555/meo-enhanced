@@ -2637,7 +2637,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   tableCommandTargetId: string;
   tableCommandTargetRegistration: TableCommandTargetRegistration | null;
   selectionDomAnchor: { node: Node; offset: number } | null;
-  measuredHeight: number;
+  measuredHeightCache: { height: number };
   pendingContextMenuRestore: boolean;
   contextPage: TableContextPage;
   tableCaretRevealGeneration: number;
@@ -2665,7 +2665,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     this.tableCommandTargetId = '';
     this.tableCommandTargetRegistration = null;
     this.selectionDomAnchor = null;
-    this.measuredHeight = -1;
+    this.measuredHeightCache = { height: -1 };
     this.pendingContextMenuRestore = false;
     this.contextPage = 'structure';
     this.tableCaretRevealGeneration = 0;
@@ -2700,6 +2700,10 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     });
   }
 
+  get measuredHeight(): number {
+    return this.measuredHeightCache.height;
+  }
+
   get estimatedHeight(): number {
     return estimateBlockWidgetHeight({
       kind: 'table',
@@ -2724,12 +2728,12 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     );
     if (equivalent && other instanceof HtmlTableWidget) {
       const mounted = this.domRefs ? this : other.domRefs ? other : null;
-      if (this.tableData.signature === other.tableData.signature) {
-        // CodeMirror keeps the mounted DOM but adopts the new decoration's widget.
-        // Its offscreen estimate must retain the same measured table height.
-        const height = mounted?.measuredHeight ?? Math.max(this.measuredHeight, other.measuredHeight);
-        this.measuredHeight = other.measuredHeight = height;
-      }
+      // CodeMirror keeps the mounted DOM but adopts the new decoration's widget.
+      // Keep its last measurement until the observer publishes the next row layout.
+      const cache = mounted?.measuredHeightCache ?? (
+        this.measuredHeight >= other.measuredHeight ? this.measuredHeightCache : other.measuredHeightCache
+      );
+      this.measuredHeightCache = other.measuredHeightCache = cache;
       const projected = mounted === this ? other.tableData : this.tableData;
       mounted?.adoptEquivalentTableData(projected);
     }
@@ -6030,7 +6034,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     if (typeof ResizeObserver !== 'undefined') {
       const heightObserver = new ResizeObserver(() => {
         const height = shell.getBoundingClientRect().height;
-        if (height > 0) this.measuredHeight = height;
+        if (height > 0) this.measuredHeightCache.height = height;
       });
       heightObserver.observe(shell);
       this.cleanupFns.push(() => heightObserver.disconnect());

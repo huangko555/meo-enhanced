@@ -5,13 +5,20 @@ import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 import exportRuntime from '../src/export/runtime';
 
 const option = (name: string) => process.argv.find(arg => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
-const fixture = Array.from({ length: 90 }, (_, index) => [
-  `## Section ${index + 1}`, '',
-  `- 1. **List item ${index + 1}** with wrapped content and ${'long reading text '.repeat(6)}`, '',
-  '> - [ ] Quoted task with **bold** text', '',
+// A table taller than the viewport keeps an adopted widget alive while its rows remeasure.
+const fixture = [
+  '# Table height cache regression', '',
   '| Content | Result |', '| --- | --- |',
-  `| Row ${index + 1}<br>- 1. Nested list | **Wrapped** ${'table text '.repeat(8)} |`, ''
-].join('\n')).join('\n');
+  ...Array.from({ length: 4 }, (_, row) => `| ${Array.from({ length: 8 }, (_, line) =>
+    `Row ${row} line ${line} ${'wrapping content '.repeat(6)}`).join('<br>')} | Row ${row} |`), '',
+  Array.from({ length: 90 }, (_, index) => [
+    `## Section ${index + 1}`, '',
+    `- 1. **List item ${index + 1}** with wrapped content and ${'long reading text '.repeat(6)}`, '',
+    '> - [ ] Quoted task with **bold** text', '',
+    '| Content | Result |', '| --- | --- |',
+    `| Row ${index + 1}<br>- 1. Nested list | **Wrapped** ${'table text '.repeat(8)} |`, ''
+  ].join('\n')).join('\n')
+].join('\n');
 const source = option('document') ? fs.readFileSync(option('document')!, 'utf8') : fixture;
 const modes = option('mode') ? [option('mode')!] : ['live', 'source', 'preview', 'split'];
 const starts = option('start-line') ? [Number(option('start-line'))] : [425, 610];
@@ -107,8 +114,8 @@ try {
       }
       if (mode === 'live') {
         await frames(page, 12);
-        const result = await page.evaluate(() => {
-          const { EditorView } = (window as any).LongDocumentScrollHarness;
+        const result = await page.evaluate(async () => {
+          const { EditorView, isolateHistory, redo, undo } = (window as any).LongDocumentScrollHarness;
           const view = EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor')!);
           const tables = () => {
             const widgets: any[] = [];
@@ -133,9 +140,39 @@ try {
           const after = tables().find(widget => widget.tableData.signature === signature);
           const result = { measured, after: after?.measuredHeight, estimate: after?.estimatedHeight };
           view.dispatch({ changes: { from: 0, to: 1 } });
-          return result;
+          const startLine = before.tableData.startLine;
+          const current = () => tables().find(widget => widget.tableData.startLine === startLine)!;
+          const shell = () => document.querySelector<HTMLElement>(
+            `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${startLine}"]`
+          )!;
+          const settle = async () => {
+            for (let frame = 0; frame < 12; frame++) await new Promise(requestAnimationFrame);
+          };
+          const originalDocument = view.state.doc.toString();
+          const range = current().tableData.sourceRanges[1][0];
+          const original = view.state.doc.sliceString(range.from, range.to);
+          const expanded = original + '<br>Height cache edited line'.repeat(20);
+          view.dispatch({ changes: { from: range.from, to: range.to, insert: expanded }, annotations: isolateHistory.of('full') });
+          await settle();
+          const measure = () => ({ measured: shell().getBoundingClientRect().height, cached: current().measuredHeight, estimate: current().estimatedHeight });
+          const edited = measure();
+          if (!undo(view)) throw new Error('Table height edit could not be undone');
+          await settle();
+          const restored = measure();
+          if (!redo(view)) throw new Error('Table height edit could not be redone');
+          await settle();
+          const redone = measure();
+          if (!undo(view)) throw new Error('Table height edit could not be restored');
+          await settle();
+          return { ...result, edited, restored, redone, final: measure(), documentRestored: view.state.doc.toString() === originalDocument };
         });
         assert.ok(result.after > 0 && Math.abs(result.after - result.measured) <= 1, 'Unchanged table lost its measured height during decoration replacement: ' + JSON.stringify(result));
+        assert.ok(result.edited.measured > result.measured + 1, 'Cell content edit did not increase table height');
+        for (const state of [result.edited, result.restored, result.redone, result.final]) {
+          assert.ok(Math.abs(state.cached - state.measured) <= 1 && Math.abs(state.estimate - state.measured) <= 1, 'Table content/history lost its measured height: ' + JSON.stringify(result));
+        }
+        assert.ok(Math.abs(result.redone.measured - result.edited.measured) <= 1, 'Redo did not restore the edited height');
+        assert.ok(Math.abs(result.restored.measured - result.measured) <= 1 && Math.abs(result.final.measured - result.measured) <= 1 && result.documentRestored, 'Table content or geometry was not restored');
         console.log('Unchanged table measurement survives decoration replacement');
         await frames(page, 30);
       }
