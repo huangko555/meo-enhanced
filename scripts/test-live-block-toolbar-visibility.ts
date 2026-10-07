@@ -278,24 +278,27 @@ async function main(): Promise<void> {
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     }
 
-    await page.keyboard.press('Tab');
     for (const selector of toolbarSelectors) {
       await page.evaluate((toolbarSelector) => {
         const toolbar = document.querySelector<HTMLElement>(toolbarSelector)!;
-        const copy = toolbar.querySelector<HTMLElement>('.meo-copy-code-btn')!;
-        copy.focus();
+        // Move to Copy with a real Tab event instead of inheriting the focus
+        // modality of whichever control the earlier pointer checks left behind.
+        toolbar.querySelector<HTMLElement>('.meo-select-all-code-btn')!.focus();
       }, selector);
+      await page.keyboard.press('Tab');
       await new Promise((resolve) => setTimeout(resolve, 150));
       const keyboardState = await page.evaluate((toolbarSelector) => {
         const toolbar = document.querySelector<HTMLElement>(toolbarSelector)!;
         const copy = toolbar.querySelector<HTMLElement>('.meo-copy-code-btn')!;
         return {
+          copyFocused: document.activeElement === copy,
           focusVisible: copy.matches(':focus-visible'),
           opacity: getComputedStyle(toolbar).opacity,
           hovered: toolbar.classList.contains('is-block-hovered')
         };
       }, selector);
       assert.equal(keyboardState.hovered, false, `${selector} keyboard check unexpectedly retained pointer hover`);
+      assert.equal(keyboardState.copyFocused, true, `${selector} Tab did not reach Copy`);
       assert.equal(keyboardState.focusVisible, true, `${selector} did not expose keyboard-visible focus`);
       assert.equal(keyboardState.opacity, '1', `${selector} hid its keyboard-focused controls`);
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
