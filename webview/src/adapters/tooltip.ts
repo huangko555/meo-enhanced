@@ -87,7 +87,9 @@ export function createTooltip(anchor: HTMLElement, options: {
   let content = options.content;
   let hovering = anchor.matches(':hover'), visible = false, disposed = false;
   let engaged = false;
+  let revealAt = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let positionFrame: number | undefined;
   let reportedConflict = '';
   const handle = { hide, reposition: position, pointerDown };
 
@@ -180,20 +182,43 @@ export function createTooltip(anchor: HTMLElement, options: {
     if (disposed) return;
     if (activeTooltip !== handle) { activeTooltip?.hide(); activeTooltip = handle; }
     clearTimeout(timer); timer = undefined;
+    clearPositionFrame();
     visible = true;
     position();
     if (!visible) return;
+    tooltip.classList.remove('is-pending');
     tooltip.classList.add('is-visible');
     view.addEventListener('resize', position);
     view.addEventListener('scroll', position, { capture: true, passive: true });
   }
 
   function show() {
-    if (disposed) return;
+    if (disposed || timer !== undefined || visible) return;
     engaged = true;
     if (activeTooltip !== handle) { activeTooltip?.hide(); activeTooltip = handle; }
-    clearTimeout(timer);
+    const started = view.performance.now();
+    revealAt = started + 200;
+    // Prepare after hover styles settle. The compositor can finish the wait
+    // even while a diagram's synchronous rendering blocks JavaScript.
+    positionFrame = view.requestAnimationFrame(() => {
+      positionFrame = undefined;
+      if (disposed || !engaged) return;
+      visible = true;
+      position();
+      if (!visible) return;
+      tooltip.classList.add('is-pending');
+      // Keep the deadline tied to input even if style/animation setup runs late.
+      const animation = tooltip.getAnimations()[0];
+      if (animation) animation.startTime = started;
+      view.addEventListener('resize', position);
+      view.addEventListener('scroll', position, { capture: true, passive: true });
+    });
     timer = setTimeout(reveal, 200);
+  }
+
+  function clearPositionFrame() {
+    if (positionFrame !== undefined) view.cancelAnimationFrame(positionFrame);
+    positionFrame = undefined;
   }
 
   function pointerDown(event: PointerEvent) {
@@ -201,12 +226,25 @@ export function createTooltip(anchor: HTMLElement, options: {
     if (live && event.button === 0 && event.target instanceof view.Node && focusTarget.contains(event.target)) {
       // Keep an existing hint stable; a pending hint waits for the committed state.
       clearTimeout(timer); timer = undefined;
+      clearPositionFrame();
+      if (tooltip.classList.contains('is-pending')) {
+        // Animated computed styles can lag the compositor; our deadline owns phase.
+        const shown = view.performance.now() >= revealAt;
+        tooltip.classList.remove('is-pending');
+        if (shown) tooltip.classList.add('is-visible');
+        else {
+          visible = false;
+          view.removeEventListener('resize', position);
+          view.removeEventListener('scroll', position, true);
+        }
+      }
     } else hide();
   }
 
   function hide() {
-    clearTimeout(timer); timer = undefined; visible = false; engaged = false;
-    tooltip.classList.remove('is-visible');
+    clearTimeout(timer); timer = undefined; visible = false; engaged = false; revealAt = 0;
+    clearPositionFrame();
+    tooltip.classList.remove('is-pending', 'is-visible');
     view.removeEventListener('resize', position); view.removeEventListener('scroll', position, true);
     if (activeTooltip === handle) activeTooltip = undefined;
   }
@@ -316,6 +354,7 @@ export function bindTooltips(root: HTMLElement) {
 
   function sharedStyles(source: Document): string {
     const visit = (rules: CSSRuleList): string[] => [...rules].flatMap(rule => {
+      if (rule instanceof view.CSSKeyframesRule && rule.name === 'meo-tooltip-reveal') return [rule.cssText];
       if ('selectorText' in rule) return String(rule.selectorText).includes('.meo-tooltip') ? [rule.cssText] : [];
       if ('cssRules' in rule) {
         const nested = visit(rule.cssRules as CSSRuleList);

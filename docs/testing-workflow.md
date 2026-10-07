@@ -84,6 +84,16 @@ outside the editor, window blur, plain clicks and one-time navigation in both
 themes. Source links and directly clickable footnote/open-link buttons remain
 covered. This check is part of the production browser gate.
 
+## Tooltip display timing
+
+`scripts/test-tooltip-display-latency.ts` observes actual Chromium compositor frames
+while a synchronous renderer task spans the 200ms hover deadline. It checks both
+themes, reduced motion, Preview iframe styles, pending dismissal and committed
+state updates. It complements the production control checks in
+`scripts/test-tooltips-production.ts` and runs in the targeted appearance and
+release browser gates. A JavaScript timer or RAF alone cannot prove paint timing
+while the renderer is busy.
+
 ## HTML comment input
 
 `scripts/test-html-comment-input-production.ts` runs in the quick, targeted history

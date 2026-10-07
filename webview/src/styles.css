@@ -2668,6 +2668,16 @@ html[data-editor-appearance='dark'] .meo-tooltip {
   box-shadow: 0 3px 10px rgb(0 0 0 / 40%);
 }
 .meo-tooltip.is-visible { visibility: visible; opacity: 1; }
+.meo-tooltip.is-pending {
+  visibility: visible;
+  will-change: opacity;
+  animation: meo-tooltip-reveal 200ms steps(1, end) forwards;
+}
+
+@keyframes meo-tooltip-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 .meo-tooltip--window { z-index: var(--meo-layer-window-popover); }
 .meo-tooltip--wrap { max-width: min(320px, calc(100vw - 16px)); white-space: normal; text-align: left; }
 /* Equal top, bottom and end insets keep the nested shortcut corners concentric. */
