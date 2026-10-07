@@ -1383,7 +1383,10 @@ export function createPreviewController({
     const initializeFrame = (viewportSlot: PreviewViewportProjectionSlot | null = null) => {
       if (disposed || loadGeneration !== frameGeneration) return;
       const frameDocument = frame.contentDocument;
-      if (!frameDocument) {
+      const mappedRoot = frameDocument?.querySelector<HTMLElement>('main.meo-export-doc');
+      // The initial about:blank load can arrive before the srcdoc document.
+      // Keep the presentation pending until its reading root exists.
+      if (!frameDocument || !mappedRoot) {
         return;
       }
       activeFrameDocument = frameDocument;
@@ -1401,7 +1404,6 @@ export function createPreviewController({
       const FrameResizeObserver = frame.contentWindow
         ? (frame.contentWindow as unknown as Pick<typeof globalThis, 'ResizeObserver'>).ResizeObserver
         : null;
-      const mappedRoot = frameDocument.querySelector<HTMLElement>('main.meo-export-doc');
       if (FrameResizeObserver && mappedRoot) {
         sourceMapResizeObserver = new FrameResizeObserver(() => {
           sourceMapDirty = true;

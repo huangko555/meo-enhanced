@@ -10,7 +10,7 @@ if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
 let primaryError: unknown;
 try {
-  for (const scenario of ['reuse', 'replace', 'force', 'failed', 'force-failed', 'force-failed-after-load', 'force-failed-ready', 'dispose']) {
+  for (const scenario of ['blank-load', 'reuse', 'replace', 'force', 'failed', 'force-failed', 'force-failed-after-load', 'force-failed-ready', 'dispose']) {
     const page = await browser.newPage();
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(String(error)));
@@ -33,6 +33,26 @@ try {
     const waitForReady = () => page.waitForFunction(() => Boolean((window as any).__previewRenderedAt));
     await page.setContent('<!doctype html><body></body>');
     await page.addScriptTag({ content: await build.outputs[0]!.text() });
+    if (scenario === 'blank-load') {
+      await page.waitForFunction(() => Boolean((window as any).__previewController.host.querySelector('iframe').contentDocument?.body));
+      await page.evaluate(() => {
+        const scope = window as any;
+        const frame = scope.__previewController.host.querySelector('iframe');
+        const descriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'srcdoc')!;
+        // Deliver the initial blank document's load before committing srcdoc.
+        Object.defineProperty(frame, 'srcdoc', {
+          configurable: true,
+          get() { return descriptor.get!.call(frame); },
+          set(value) {
+            scope.__commitPendingSrcdoc = () => {
+              delete frame.srcdoc;
+              descriptor.set!.call(frame, value);
+            };
+            frame.dispatchEvent(new Event('load'));
+          }
+        });
+      });
+    }
     const request = async (text: string, force = false) => page.evaluate(({ text, force }) => {
       const scope = window as any;
       void scope.__previewController.requestRender(text, { force });
@@ -60,6 +80,14 @@ try {
       await respond(1, '# Initial document');
     } else {
       await respond(0, '# Initial document');
+    }
+    if (scenario === 'blank-load') {
+      await page.evaluate(async () => {
+        for (let frame = 0; frame < 4; frame++) await new Promise(requestAnimationFrame);
+      });
+      assert.equal(await page.evaluate(() => (window as any).__previewRenderedAt ?? null), null,
+        'The initial blank iframe load must not publish a ready presentation');
+      await page.evaluate(() => (window as any).__commitPendingSrcdoc());
     }
     await page.waitForFunction(() => (window as any).__previewController.host.querySelector('iframe').contentDocument
       ?.querySelector('main.meo-export-doc')?.textContent?.includes('Initial document'));

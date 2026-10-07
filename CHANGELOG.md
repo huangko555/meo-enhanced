@@ -11,6 +11,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Stabilized rendered block geometry, nested lists and quotes, table widths, scrolling and embedded-editor viewports through input and history changes; corrected clicking and selecting empty quoted lines.
 - Prevented window activity changes from stealing editor focus and improved keyboard focus feedback on preview controls.
 - Harmonized inline-code spacing and colors, dark text contrast, and borderless block backgrounds between Live and Preview.
+- Prevented Preview from announcing readiness for an initial blank iframe before its reading document is available.
 
 ## 0.3.27
 - Improved caret continuity across window activation, toolbar and menu interactions, and Live/Source mode switches, including table cells, Mermaid, and math editors. Fixed reversed formula input when nearby tables were re-rendered. Kept typing carets visible through late layout changes without competing scroll corrections. Retired stale embedded-input positioning after undo/redo and external synchronization.
