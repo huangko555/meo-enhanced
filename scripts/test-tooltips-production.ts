@@ -25,7 +25,7 @@ try {
       queueMicrotask(()=>window.dispatchEvent(new MessageEvent('message',{data:{
         type:'previewRenderResult',requestId:message.requestId,
         result:{ok:true,value:{
-          html:'<p><a href="https://example.com" title="Link explanation">Reference</a></p>',
+          html:'<p><a href="https://example.com" title="Link explanation">Reference</a></p><p><a id="fragment-link" href="#安装说明">安装说明</a></p><p><a id="plain-link" href="https://example.com/docs?section=setup#install">Documentation</a></p><h2 id="安装说明">安装说明</h2>',
           hasMermaid:false,styles:{light:'body{font:18px serif}',dark:'body{font:18px serif}'}
         }}
       }})));
@@ -56,10 +56,13 @@ try {
     phase = 'hover ' + selector;
     await page.hover(selector);
     await page.waitForFunction(selector => {
-      const id = document.querySelector(selector)?.getAttribute('aria-describedby');
-      return !!id && document.getElementById(id)?.classList.contains('is-visible');
+      return [...document.querySelectorAll(selector)].some(element => {
+        const id = element.getAttribute('aria-describedby');
+        return !!id && document.getElementById(id)?.classList.contains('is-visible');
+      });
     }, {}, selector);
-    return page.$eval(selector, element => {
+    return page.$$eval(selector, elements => {
+      const element = elements.find(element => document.getElementById(element.getAttribute('aria-describedby') ?? '')?.classList.contains('is-visible'))!;
       const hint = document.getElementById(element.getAttribute('aria-describedby')!)!;
       const rect = hint.getBoundingClientRect();
       return {
@@ -375,11 +378,59 @@ try {
     documentTheme: document.documentElement.getAttribute('data-editor-appearance')
   }));
   assert.deepEqual(nestedHint, {
-    text: 'Link explanation', background: 'rgb(58, 58, 58)', size: '12px',
+    text: 'https://example.com\nLink explanation', background: 'rgb(58, 58, 58)', size: '12px',
     bodyFont: before.font, bodySize: before.size, documentTheme: before.theme
   }, 'Preview hints use the UI theme without changing the document theme or font');
   await show(find);
   assert.equal(await frame.$('.meo-tooltip.is-visible'), null, 'parent and Preview share one active hint');
+
+  const longHref = 'https://example.com/docs?section=' + 'installation-'.repeat(24) + '#setup';
+  const image = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="100"><rect width="100%" height="100%" fill="gray"/></svg>');
+  const linkText = '# 安装说明\n\n[Documentation](' + longHref + ')\n\n[安装说明](#安装说明)\n\n<div><a href="./guide.md#setup" title="Author explanation">Guide</a></div>\n\n| Link |\n| --- |\n| [Table link](#安装说明) |\n\n[![Linked image](' + image + ')](https://example.com/picture#details)';
+  await page.click('[data-mode="live"]');
+  await page.evaluate(text => {
+    const editor = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+    editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: text }, selection: { anchor: 0 } });
+  }, linkText);
+  for (const language of ['en', 'zh-CN']) for (const appearance of ['light', 'dark']) {
+    phase = language + '/' + appearance + ' link destinations';
+    await page.click('.more-tools-wrapper > .format-button');
+    await page.click(`[data-ui-language="${language}"]`);
+    await page.click(`[data-editor-appearance="${appearance}"]`);
+    await page.click('.more-tools-wrapper > .format-button');
+    assert.equal(await page.evaluate(() => document.documentElement.lang), language);
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.editorAppearance), appearance);
+    // Unchanged document widgets retain their DOM across panel-language changes.
+    // Remount them to check each language's accessible names at creation.
+    await page.click('[data-mode="source"]');
+    await page.click('[data-mode="live"]');
+    const destinations = [
+      { selector: `.meo-md-link-open-btn[data-tooltip="${longHref}"]`, text: longHref },
+      { selector: '.meo-md-link-open-btn[data-tooltip="#安装说明"]', text: '#安装说明' },
+      { selector: '.meo-md-html-link[data-meo-link-href="./guide.md#setup"]', text: './guide.md#setup\nAuthor explanation' },
+      { selector: '.meo-md-html-table-cell-preview .meo-md-link[data-meo-link-href="#安装说明"]', text: '#安装说明' },
+      { selector: '.meo-md-image-linked', text: 'https://example.com/picture#details' },
+      { selector: '.meo-md-image-linked .meo-md-image-controls button', text: 'https://example.com/picture#details' }
+    ];
+    for (const destination of destinations) {
+      const hint = await show(destination.selector);
+      assert.equal(hint.text, destination.text, phase + ': ' + destination.selector);
+      assert.equal(hint.shortcut, null);
+      assert.equal(hint.inside, true, 'the full destination fits inside the viewport');
+      await page.mouse.move(0, 0);
+    }
+    assert.equal(await page.$eval('.meo-md-link-open-btn[data-tooltip="#安装说明"]', element => element.getAttribute('aria-label')), language === 'en' ? 'Jump within document' : '在文档内跳转');
+    await page.click('[data-mode="preview"]');
+    await frame.waitForSelector('#fragment-link');
+    for (const [selector, expected] of [['#fragment-link', '#安装说明'], ['#plain-link', 'https://example.com/docs?section=setup#install'], ['a', 'https://example.com\nLink explanation']]) {
+      await frame.hover(selector);
+      await frame.waitForSelector('.meo-tooltip.is-visible');
+      assert.equal(await frame.$eval('.meo-tooltip.is-visible .meo-tooltip-label', element => element.textContent), expected);
+      assert.equal(await frame.$eval('.meo-tooltip.is-visible', element => getComputedStyle(element).backgroundColor), appearance === 'dark' ? 'rgb(58, 58, 58)' : 'rgb(13, 13, 13)');
+      await page.mouse.move(0, 0);
+    }
+    await page.click('[data-mode="live"]');
+  }
   assert.deepEqual(errors, []);
   await page.close();
   console.log('Production tooltips: delay, stateful pointer/keyboard updates, mode focus feedback, dismissal, toolbar/menu scope, fullscreen controls, boundary placement and Preview theme isolation passed.');
@@ -390,6 +441,8 @@ try {
     focused: document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.className,
     hovered: Array.from(document.querySelectorAll(':hover')).map(element => element.className),
     hints: Array.from(document.querySelectorAll('.meo-tooltip.is-visible')).map(element => element.textContent),
+    links: Array.from(document.querySelectorAll('[data-meo-link-href]')).map(element => ({ html: element.outerHTML.slice(0, 500), hovered: element.matches(':hover'), described: element.getAttribute('aria-describedby') })),
+    descriptions: Array.from(document.querySelectorAll('[aria-describedby]')).map(element => ({ tag: element.tagName, class: element.className, id: element.getAttribute('aria-describedby') })),
     modeButtons: Array.from(document.querySelectorAll<HTMLElement>('.meo-mermaid-mode-btn,.meo-latex-math-mode-btn')).map(element => ({
       label: element.dataset.tooltip, bounds: element.getBoundingClientRect().toJSON(),
       hovered: element.matches(':hover'), focused: element.matches(':focus-visible')

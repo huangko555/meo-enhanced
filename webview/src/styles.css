@@ -2682,6 +2682,7 @@ html[data-editor-appearance='dark'] .meo-tooltip {
 /* Equal top, bottom and end insets keep the nested shortcut corners concentric. */
 .meo-tooltip--shortcut { padding-right: 4px; }
 .meo-tooltip-label { min-width: 0; overflow-wrap: anywhere; }
+.meo-tooltip--wrap .meo-tooltip-label { white-space: pre-wrap; }
 .meo-tooltip-shortcut {
   flex: none;
   display: inline-block;

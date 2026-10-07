@@ -291,7 +291,7 @@ export function createTooltip(anchor: HTMLElement, options: {
  * data-tooltip-kind="fulltext|description", data-tooltip-placement="top|bottom|left|right",
  * and data-tooltip-live-update="true" for stateful controls.
  * Explicit placement uses the control's own anchor. Full-text reveals only clipped text.
- * Generated controls supply metadata; authored title attributes retain their meaning.
+ * Generated controls supply metadata; links show their destination and any authored title.
  */
 export function bindTooltips(root: HTMLElement) {
   const doc = root.ownerDocument, view = doc.defaultView!;
@@ -310,9 +310,12 @@ export function bindTooltips(root: HTMLElement) {
 
   function contentFor(element: HTMLElement): TooltipContent | null {
     if (element.matches(ignored) || element.closest('[inert]')) return null;
-    const text = element.dataset.tooltip?.trim();
+    const href = (element.getAttribute('data-meo-link-href') ?? element.getAttribute('data-meo-preview-href')
+      ?? (element.tagName === 'A' ? element.getAttribute('href') : null))?.trim();
+    const description = element.dataset.tooltip?.trim();
+    const text = href ? (description && description !== href ? href + '\n' + description : href) : description;
     if (!text) return null;
-    const kind = element.dataset.tooltipKind;
+    const kind = href ? 'description' : element.dataset.tooltipKind;
     const key = element.dataset.tooltipShortcut;
     if (kind === 'fulltext' && element.scrollWidth <= element.clientWidth + 1 && element.scrollHeight <= element.clientHeight + 1) return null;
     if (key && (kind === 'fulltext' || kind === 'description' || /[\r\n]/.test(text))) {
@@ -326,8 +329,11 @@ export function bindTooltips(root: HTMLElement) {
 
   function fromTarget(target: EventTarget | null): HTMLElement | null {
     if (!(target instanceof view.Element)) return null;
-    const element = target.closest<HTMLElement>('[data-tooltip], [title]');
+    const element = target.closest<HTMLElement>('[data-tooltip], [title], [data-meo-link-href], [data-meo-preview-href], a[href]');
     if (!element || !root.contains(element) || element.tagName === 'IFRAME' || (ownedAnchors.has(element) && current?.anchor !== element)) return null;
+    // Editable link marks belong to the editor renderer, which resets foreign attributes.
+    // Their existing open-link buttons provide the destination without mutating prose DOM.
+    if (element.isContentEditable && element.hasAttribute('data-meo-link-href')) return null;
     if (element.hasAttribute('title')) {
       // Authored HTML titles are content; they are displayed through the same bubble.
       element.dataset.tooltip = element.getAttribute('title') ?? '';
@@ -407,7 +413,7 @@ export function bindTooltips(root: HTMLElement) {
     }
     activeTooltip?.reposition();
   });
-  observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-tooltip', 'data-tooltip-shortcut', 'data-tooltip-kind', 'data-tooltip-placement', 'data-tooltip-live-update', 'hidden', 'open'] });
+  observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-tooltip', 'data-tooltip-shortcut', 'data-tooltip-kind', 'data-tooltip-placement', 'data-tooltip-live-update', 'data-meo-link-href', 'data-meo-preview-href', 'href', 'hidden', 'open'] });
   const appearance = new view.MutationObserver(() => {
     for (const state of frames.values()) if (state.doc) state.doc.documentElement.dataset.meoTooltipAppearance = doc.documentElement.dataset.meoTooltipAppearance ?? doc.documentElement.dataset.editorAppearance ?? 'light';
   });
