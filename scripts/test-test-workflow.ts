@@ -38,6 +38,10 @@ assert.ok(viewportCommands.some((command) => (
 
 assert.ok(viewportCommands.some(command => command.args.includes('scripts/test-long-document-scroll.ts')));
 
+for (const commands of [quickCommands, viewportCommands]) {
+  assert.ok(commands.some(command => command.args.includes('scripts/test-line-number-rendered-block-stability.ts')));
+}
+
 const history = createTestWorkflowPlan(
   parseTestWorkflowRequest(['targeted', 'history'])
 );

@@ -222,6 +222,38 @@ async function main(): Promise<void> {
       })}`);
     }
 
+    const repeatedText = Array.from({ length: 130 }, (_, index) =>
+      [9, 100, 120].includes(index) ? 'bulk' : 'repeated unchanged line'
+    ).join('\n');
+    for (const mode of ['source', 'live']) {
+      for (const replacement of ['done', 'first row\nsecond row']) {
+        await page.evaluate(({text, mode}) => {
+          (window as any).__replaceAllEditor.destroy();
+          document.getElementById('search')!.replaceChildren();
+          (window as any).__replaceAllEditor = (window as any).__createInputCursorEditor({
+            parent: document.getElementById('search')!, text, initialMode: mode, onApplyChanges() {}
+          });
+        }, {text: repeatedText, mode});
+        await waitForFrames(page, 8);
+        const result = await page.evaluate(async replacement => {
+          const editor = (window as any).__replaceAllEditor;
+          const position = editor.view.state.doc.line(60).from;
+          editor.revealSelection(position, position, {focusEditor: false, align: 'center'});
+          await editor.whenVisiblePresentationReady(1_200);
+          const before = editor.getTopVisiblePosition().line;
+          const replaced = editor.replaceAll('bulk', replacement);
+          await editor.whenVisiblePresentationReady(1_200);
+          return {before, after: editor.getTopVisiblePosition().line, replaced,
+            selectionLine: editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number};
+        }, replacement);
+        const upstreamLines = replacement.includes('\n') ? 1 : 0;
+        if (result.replaced.replaced !== 3 || result.selectionLine !== 60 + upstreamLines
+          || Math.abs(result.after - result.before - upstreamLines) > 1) {
+          throw new Error('Disjoint replace-all moved a repeated reading anchor (' + mode + '): ' + JSON.stringify(result));
+        }
+      }
+    }
+
     const richText = Array.from({ length: 80 }, (_, index) => [
       `# Section ${index}`, '', `paragraph bulk ${index}`, '',
       '| A | B |', '| --- | --- |', '| bulk | value |', '',

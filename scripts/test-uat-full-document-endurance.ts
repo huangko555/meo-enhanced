@@ -38,6 +38,7 @@ if (!documentPath) {
 }
 const baselineText = fs.readFileSync(documentPath, 'utf8').replace(/\r\n/g, '\n');
 const softFindings: Array<Record<string, unknown>> = [];
+let bottomConstrainedHistoryCommands = 0;
 
 const topDownOperations: Operation[] = [
   { id: 'frontmatter', kind: 'outer', needle: 'MEO Undo Redo User Acceptance Test', marker: '__E01__' },
@@ -178,6 +179,7 @@ async function centerLine(page: import('puppeteer-core').Page, lineNumber: numbe
   await page.evaluate(async () => {
     await (window as any).__fullUatEditor.whenVisiblePresentationReady(1_200);
   });
+  await page.evaluate(async () => { await document.fonts.ready; });
   await waitForScrollStability(page);
   const viewport = await page.evaluate((lineNumber) => {
     const editor = (window as any).__fullUatEditor;
@@ -517,19 +519,13 @@ async function editHtml(page: import('puppeteer-core').Page, operation: Operatio
 
 async function prepareTableInput(page: import('puppeteer-core').Page, operation: Operation, lineNumber: number): Promise<void> {
   const before = operation.tableCell!;
+  // Source-mapped rows include quoted tables; their quote prefixes are not cells.
   await page.waitForFunction(({ sourceLine, value }) => {
-    const editor = (window as any).__fullUatEditor;
-    const sourceValues = editor.view.state.doc.line(sourceLine).text
-      .trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell: string) => (
-        cell.trim().replace(/<br\s*\/?\s*>/gi, (breakTag: string) => `${breakTag}\n`)
-      ));
     return Array.from(document.querySelectorAll<HTMLElement>(
       '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tr'
     )).some((row) => {
       const inputs = Array.from(row.querySelectorAll<HTMLTextAreaElement>('textarea'));
-      return inputs.length === sourceValues.length
-        && inputs.every((input, index) => input.value === sourceValues[index])
-        && inputs.some((input) => input.value === value);
+      return Number(row.dataset.sourceLineNumber) === sourceLine && inputs.some((input) => input.value === value);
     });
   }, { timeout: 10_000 }, {
     sourceLine: lineNumber,
@@ -549,17 +545,9 @@ async function prepareTableInput(page: import('puppeteer-core').Page, operation:
   });
   const targetAttribute = `uat-${operation.id}`;
   const initialTarget = await page.evaluate(({ sourceLine, value, target }) => {
-    const editor = (window as any).__fullUatEditor;
-    const sourceValues = editor.view.state.doc.line(sourceLine).text
-      .trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell: string) => (
-        cell.trim().replace(/<br\s*\/?\s*>/gi, (breakTag: string) => `${breakTag}\n`)
-      ));
     const row = Array.from(document.querySelectorAll<HTMLElement>(
       '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tr'
-    )).find((candidate) => {
-      const inputs = Array.from(candidate.querySelectorAll<HTMLTextAreaElement>('textarea'));
-      return inputs.length === sourceValues.length && inputs.every((input, index) => input.value === sourceValues[index]);
-    });
+    )).find((candidate) => Number(candidate.dataset.sourceLineNumber) === sourceLine);
     const input = Array.from(row?.querySelectorAll<HTMLTextAreaElement>('textarea') ?? [])
       .find((candidate) => candidate.value === value);
     if (!input) throw new Error(`Missing table input at line ${sourceLine}: ${value}`);
@@ -801,6 +789,8 @@ async function targetState(page: import('puppeteer-core').Page, operation: Opera
   visible: boolean;
   focused: boolean;
   scrollTop: number;
+  maxScrollTop: number;
+  targetLineHeight: number;
   targetTop: number | null;
   targetBottom: number | null;
   activeLineTop: number | null;
@@ -826,16 +816,9 @@ async function targetState(page: import('puppeteer-core').Page, operation: Opera
       : null;
     let tableInput: HTMLTextAreaElement | null = null;
     if (operationKind === 'table') {
-      const sourceValues = editor.view.state.doc.line(lineNumber).text
-        .trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell: string) => (
-          cell.trim().replace(/<br\s*\/?\s*>/gi, (breakTag: string) => `${breakTag}\n`)
-        ));
       const row = Array.from(document.querySelectorAll<HTMLElement>(
         '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tr'
-      )).find((candidate) => {
-        const inputs = Array.from(candidate.querySelectorAll<HTMLTextAreaElement>('textarea'));
-        return inputs.length === sourceValues.length && inputs.every((input, index) => input.value === sourceValues[index]);
-      });
+      )).find((candidate) => Number(candidate.dataset.sourceLineNumber) === lineNumber);
       tableInput = Array.from(row?.querySelectorAll<HTMLTextAreaElement>('textarea') ?? [])
         .find((input) => input.value.includes(marker) || input.value === tableCell) ?? null;
     }
@@ -850,7 +833,13 @@ async function targetState(page: import('puppeteer-core').Page, operation: Opera
       bottom: viewport.top + lineBlock.bottom - editor.view.scrollDOM.scrollTop
     };
     const target = region ?? tableInput;
-    const rect = target?.getBoundingClientRect() ?? sourceRect;
+    const regionRect = target?.getBoundingClientRect();
+    // A diagram can exceed the outer viewport. Its edited source line is the
+    // visible-history target; requiring the entire diagram to fit is impossible.
+    const editedLine = region && regionRect && regionRect.height > viewport.height
+      ? region.querySelector<HTMLElement>('.meo-rendered-block-source-pane .cm-line')
+      : null;
+    const rect = editedLine?.getBoundingClientRect() ?? regionRect ?? sourceRect;
     const active = document.activeElement;
     const activeLineRect = region?.querySelector<HTMLElement>('.cm-activeLine')?.getBoundingClientRect() ?? null;
     const cursorRect = region?.querySelector<HTMLElement>('.cm-cursor-primary')?.getBoundingClientRect() ?? null;
@@ -863,6 +852,8 @@ async function targetState(page: import('puppeteer-core').Page, operation: Opera
       visible: Boolean(rect && rect.bottom > viewport.top && rect.top < viewport.bottom),
       focused,
       scrollTop: editor.view.scrollDOM.scrollTop,
+      maxScrollTop: editor.view.scrollDOM.scrollHeight - editor.view.scrollDOM.clientHeight,
+      targetLineHeight: lineBlock.height,
       targetTop: rect?.top ?? null,
       targetBottom: rect?.bottom ?? null,
       activeLineTop: activeLineRect?.top ?? null,
@@ -931,7 +922,9 @@ async function prepareHistoryViewport(
   for (let attempt = 0; shouldBeVisible && !isFullyVisible(previous) && attempt < 3; attempt++) {
     if (previous.targetTop === null) break;
     await page.mouse.move(640, 380);
-    await page.mouse.wheel({ deltaY: previous.targetTop + 24 - (previous.viewportTop + previous.viewportBottom) / 2 });
+    if (previous.targetBottom === null) break;
+    const targetCenter = (previous.targetTop + previous.targetBottom) / 2;
+    await page.mouse.wheel({ deltaY: targetCenter - (previous.viewportTop + previous.viewportBottom) / 2 });
     await waitForFrames(page, 4);
     await waitForScrollStability(page);
     previous = await targetState(page, operation);
@@ -976,7 +969,19 @@ async function replayHistory(
     throw new Error(`History target focus/visibility failure: ${JSON.stringify({ direction, ordinal, operation: operationEvidence, before, after, metrics })}`);
   }
   if (shouldBeVisible) {
-    if (Math.abs(after.scrollTop - before.scrollTop) > 2 || metrics.scrollSpan > 2) {
+    // Removing a wrapped source row at the document end reduces the browser's
+    // scroll limit. Accept only that exact clamp, with no sampled oscillation.
+    const removedHeight = before.maxScrollTop - after.maxScrollTop;
+    const bottomClamp = (operation.kind === 'outer' || operation.kind === 'html')
+      && removedHeight > 2
+      && Math.abs(before.scrollTop - before.maxScrollTop) <= 1
+      && Math.abs(after.scrollTop - after.maxScrollTop) <= 1
+      && Math.abs(before.targetLineHeight - after.targetLineHeight - removedHeight) <= 1
+      && before.targetTop !== null && after.targetTop !== null
+      && Math.abs(after.targetTop - before.targetTop - removedHeight) <= 1
+      && metrics.scrollSpan <= 2;
+    if (bottomClamp) bottomConstrainedHistoryCommands += 1;
+    if (!bottomClamp && (Math.abs(after.scrollTop - before.scrollTop) > 2 || metrics.scrollSpan > 2)) {
       if (operation.kind === 'table') {
         softFindings.push({
           kind: 'visible-table-history-viewport-movement',
@@ -1195,6 +1200,11 @@ async function main(): Promise<void> {
     await page.setViewport({ width: 1280, height: 760, deviceScaleFactor: 1 });
     await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+    // Match production KaTeX layout; unstyled MathML/HTML has different heights.
+    const katexDirectory = path.join(repoRoot, 'node_modules/katex/dist');
+    const katexStyles = fs.readFileSync(path.join(katexDirectory, 'katex.min.css'), 'utf8')
+      .replace(/url\(([^)]+)\)/g, (_match, fontPath) => `url(data:font/woff2;base64,${fs.readFileSync(path.join(katexDirectory, fontPath)).toString('base64')})`);
+    await page.addStyleTag({ content: katexStyles });
     await page.addStyleTag({
       content: ':root{--meo-background:#24292e;--meo-foreground:#e6edf3;--meo-code-background:#1b1f23;--meo-surface-background:#24292e;--meo-semantic-mutedForeground:#8b949e;--meo-font-live:Arial;--meo-font-live-weight:400;--meo-font-live-size:16px;--meo-font-source:monospace;--meo-font-source-weight:400;--meo-font-source-size:14px;--vscode-editor-font-family:monospace;--vscode-editor-font-size:14px;--vscode-editor-line-height:20px}'
     });
@@ -1208,6 +1218,7 @@ async function main(): Promise<void> {
       });
     }, baselineText);
     await page.waitForFunction(() => Boolean((window as any).__fullUatEditor?.getText()));
+    await page.evaluate(async () => { await document.fonts.ready; });
 
     const curatedOperations = [...topDownOperations, ...deterministicShuffle(shuffledWave)];
     const adaptive = curatedOperations.every(operation => baselineText.includes(operation.needle))
@@ -1303,6 +1314,7 @@ async function main(): Promise<void> {
       edits: records.length,
       checkedHistoryCommands: records.length * 4,
       softFindings,
+      bottomConstrainedHistoryCommands,
       ...aggregate
     })}`);
   } catch (error) {

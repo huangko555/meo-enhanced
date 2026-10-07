@@ -131,6 +131,9 @@ import {
 } from './helpers/blockIndent';
 import {
   createRenderedBlockPreviewShell,
+  RenderedBlockPreviewHeight,
+  renderedBlockPreviewHeight,
+  preserveRenderedBlockPreviewHeights,
   getRenderedBlockPreviewStartLine,
   renderedBlockPreviewStartLine
 } from './helpers/renderedBlockPreview';
@@ -2622,6 +2625,7 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
       htmlEditingRange.to === detailsBlock.sectionTo
     ))
   );
+  preserveRenderedBlockPreviewHeights(ranges, changes ? previous?.map(changes) : previous);
   const result = Decoration.set(ranges, true);
   return filterDecorationsOutsideMergeConflicts(state, result);
 }
@@ -2790,6 +2794,7 @@ type LatexMathWidgetElement = HTMLElement & {
 };
 
 class LatexMathWidget extends UiLanguageSensitiveWidget {
+  readonly [renderedBlockPreviewHeight]: RenderedBlockPreviewHeight;
   html: string;
   mode: LatexMathMode;
   fencedDisplay: boolean;
@@ -2812,6 +2817,9 @@ class LatexMathWidget extends UiLanguageSensitiveWidget {
     blockTo = 0
   ) {
     super();
+    this[renderedBlockPreviewHeight] = new RenderedBlockPreviewHeight(JSON.stringify([
+      'math', html, mode, fencedDisplay, liveBlockIndentKey(indentColumns)
+    ]));
     this.html = html;
     this.mode = mode;
     this.fencedDisplay = fencedDisplay;
@@ -2824,12 +2832,12 @@ class LatexMathWidget extends UiLanguageSensitiveWidget {
   }
 
   get estimatedHeight(): number {
-    return this.fencedDisplay && this.mode === 'display'
-      ? estimateBlockWidgetHeight({
-          kind: 'latex-display',
-          html: this.html
-        })
-      : -1;
+    if (!this.fencedDisplay || this.mode !== 'display') return -1;
+    const height = this[renderedBlockPreviewHeight].height;
+    return height > 0 ? height : estimateBlockWidgetHeight({
+      kind: 'latex-display',
+      html: this.html
+    });
   }
 
   eq(other: WidgetType): boolean {
@@ -2871,7 +2879,7 @@ class LatexMathWidget extends UiLanguageSensitiveWidget {
         interactive: true,
         uiLanguage: view.state.facet(uiLanguageFacet)
       });
-      return createRenderedBlockPreviewShell({
+      const shell = createRenderedBlockPreviewShell({
         kind: 'math',
         language: 'latex',
         startLine: this.startLine,
@@ -2886,6 +2894,8 @@ class LatexMathWidget extends UiLanguageSensitiveWidget {
         ).toDOM(view),
         content: wrapper
       });
+      this[renderedBlockPreviewHeight].observe(shell);
+      return shell;
     }
     applyLiveBlockIndent(wrapper, this.indentColumns);
     return wrapper;
@@ -2896,6 +2906,7 @@ class LatexMathWidget extends UiLanguageSensitiveWidget {
   }
 
   destroy(dom: HTMLElement): void {
+    this[renderedBlockPreviewHeight].destroy(dom);
     const wrapper = (dom.matches('.meo-md-math-fenced-display')
       ? dom
       : dom.querySelector('.meo-md-math-fenced-display')) as LatexMathWidgetElement | null;
@@ -2918,6 +2929,10 @@ function getMathWidget(
   sourceText = '',
   blockTo = 0
 ): WidgetType {
+  // Measured block geometry must never be shared by two editor instances.
+  if (fencedDisplay) {
+    return new LatexMathWidget(html, mode, true, startLine, endLine, indentColumns, anchor, sourceText, blockTo);
+  }
   const key = `${getUiLanguageWidgetEpoch()}:${mode}:${fencedDisplay ? 1 : 0}:${startLine}:${endLine}:${liveBlockIndentKey(indentColumns)}:${anchor}:${blockTo}:${sourceText}:${html}`;
   let widget = mathWidgetCache.get(key);
   if (widget) {

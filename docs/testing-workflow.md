@@ -71,6 +71,12 @@ still checking type safety, workflow policy, history, tables, rendered blocks,
 input-derived work, viewport behavior, and one production browser scenario in
 the quick gate.
 
+`scripts/test-line-number-rendered-block-stability.ts` runs in the quick, targeted
+viewport, and high-risk browser gates. With real Mermaid, KaTeX and fonts, it
+samples every animation frame while typing and deleting above rendered blocks.
+Unchanged preview heights and all downstream line numbers must stay stable;
+a settled final frame alone cannot pass this contract.
+
 `scripts/test-live-input-path-production.ts` observes inserted text's computed
 styles in the first four input frames, including IME preedit and commit. It covers
 inline format boundaries, nested formats, content replacement and history replay.
@@ -643,6 +649,13 @@ the smallest reproducer, inspect any skipped remainder, then run the required
 formal gate on the corrected candidate. Do not retry failures until one passes
 or lower endurance limits to obtain release evidence. A short runner preflight
 is useful during setup, but must be reported separately from the full run.
+
+Adaptive endurance loads production KaTeX styles and fonts and locates table
+cells by their source-mapped row, including quoted tables. Unsupported quoted
+formula shells are reported rather than edited through the outer editor. For
+rendered blocks taller than the viewport, visible history checks the edited source
+line. A document-end scroll clamp is counted separately only when the target line's
+removed height accounts for the entire scroll-limit change without oscillation.
 
 The full-document endurance runner exercises editor history and viewport
 stability; it does **not** exercise VS Code's auto-save scheduler or real disk

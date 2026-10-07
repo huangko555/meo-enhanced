@@ -29,6 +29,8 @@ import { getMermaidDiagramPresentationFactory } from '../editor/mermaidDiagramPr
 import { currentSyntaxTree, getFencedCodeInfo, syntaxTreeChanged } from './markdownSyntax';
 import {
   createRenderedBlockPreviewShell,
+  RenderedBlockPreviewHeight,
+  renderedBlockPreviewHeight,
   renderedBlockPreviewStartLine
 } from './renderedBlockPreview';
 import type { UiLanguage } from '../../../src/foundation/uiLanguage';
@@ -790,6 +792,7 @@ export function addCodeLanguageLabel(builder: any[], state: EditorState, node: a
 }
 
 class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
+  readonly [renderedBlockPreviewHeight]: RenderedBlockPreviewHeight;
   private readonly diagramWidget: MermaidDiagramWidget;
   private readonly toolbarWidget: WidgetType;
 
@@ -805,6 +808,9 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
     uiLanguage: UiLanguage
   ) {
     super();
+    this[renderedBlockPreviewHeight] = new RenderedBlockPreviewHeight(JSON.stringify([
+      'mermaid', diagramText, fullBlockText, liveBlockIndentKey(indentColumns), uiLanguage
+    ]));
     this.diagramWidget = new MermaidDiagramWidget(diagramText, startLine, endLine, {
       presentationFactory,
       indentColumns: 0,
@@ -820,7 +826,8 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
   }
 
   get estimatedHeight(): number {
-    return this.diagramWidget.estimatedHeight;
+    const height = this[renderedBlockPreviewHeight].height;
+    return height > 0 ? height : this.diagramWidget.estimatedHeight;
   }
 
   get [renderedBlockPreviewStartLine](): number {
@@ -842,6 +849,11 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
   }
 
   toDOM(view: EditorView): HTMLElement {
+    const height = this[renderedBlockPreviewHeight].height;
+    if (height > 0) {
+      this.diagramWidget.measuredHeight = height;
+      this.diagramWidget.initialHeightSeed = height;
+    }
     const content = this.diagramWidget.toDOM(view) as HTMLElement;
     delete content.dataset.meoRenderedBlockStartLine;
     delete content.dataset.meoRenderedBlockEndLine;
@@ -854,6 +866,7 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
       toolbar: this.toolbarWidget.toDOM(view),
       content
     });
+    this[renderedBlockPreviewHeight].observe(shell);
     (shell as MermaidPreviewShellElement).__meoMermaidPreviewDiagramWidget = this.diagramWidget;
     return shell;
   }
@@ -863,6 +876,7 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
   }
 
   destroy(dom: HTMLElement): void {
+    this[renderedBlockPreviewHeight].destroy(dom);
     const shell = dom as MermaidPreviewShellElement;
     const mountedDiagram = shell.__meoMermaidPreviewDiagramWidget;
     delete shell.__meoMermaidPreviewDiagramWidget;

@@ -40,9 +40,16 @@ async function main(): Promise<void> {
       { delay: 250, restore: false, cancel: false }
     ]) {
       const page = await browser.newPage();
+      let releasePreviewReply: (() => void) | undefined;
+      const previewReplyGate = scenario.cancel
+        ? new Promise<void>(resolve => { releasePreviewReply = resolve; })
+        : Promise.resolve();
+      let completedReplies = 0;
       await page.exposeFunction('__renderPreview', async (message: any) => {
         if (message.type !== 'requestPreviewRender') return null;
         await new Promise(resolve => setTimeout(resolve, scenario.delay));
+        await previewReplyGate;
+        completedReplies += 1;
         return { type: 'previewRenderResult', requestId: message.requestId, result: { ok: true,
           value: exportRuntime.renderPreviewDocument({ markdownText: message.text,
             sourceDocumentPath: 'C:/reading-position.md', uiLanguage: message.uiLanguage, styleEnvironment: message.environment }) } };
@@ -109,8 +116,11 @@ async function main(): Promise<void> {
       await page.waitForSelector('.editor-host > .cm-editor');
       if (scenario.cancel) {
         await page.waitForFunction(() => (window as any).__hostMessages.some((message: any) => message.type === 'requestPreviewRender'));
-        // Trusted intent while the Host response is pending cancels startup restore.
+        // A slow test runner can outlive any fixed delay. Hold the reply until
+        // trusted user intent has arrived, so this exercises cancellation while pending.
+        assert.equal(completedReplies, 0, 'the startup reply must still be pending');
         await page.click('button[data-mode="preview"]');
+        releasePreviewReply!();
       }
       await page.evaluate(waitForFrames, 10);
 

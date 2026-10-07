@@ -61,7 +61,7 @@ export function discoverDocumentOperations(text: string) {
   for (const token of tokens) {
     if (token.type !== 'tr_open' || !token.map) continue;
     const line = token.map[0];
-    const rowKey = (value: string) => value.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim()).join('|');
+    const rowKey = (value: string) => value.replace(/^(?:\s*>\s*)+/, '').trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim()).join('|');
     if (tokens.filter(other => other.type === 'tr_open' && other.map && rowKey(lines[other.map[0]]!) === rowKey(lines[line]!)).length > 1) {
       skip(line, 'table', 'duplicate rendered row values');
       continue;
@@ -69,7 +69,7 @@ export function discoverDocumentOperations(text: string) {
     // Header rows and escaped-pipe rows require different edit drivers.
     if (!lines[line - 1]?.includes('|') || /^\s*\|?\s*:?-+/.test(lines[line]!)) { skip(line, 'table', 'unsupported header row'); continue; }
     if (lines[line]!.includes('\\|')) { skip(line, 'table', 'escaped pipe needs a separate edit driver'); continue; }
-    const cells = lines[line]!.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim());
+    const cells = lines[line]!.replace(/^(?:\s*>\s*)+/, '').trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim());
     // Clicking rendered links activates navigation rather than the cell editor.
     const cell = [...cells].reverse().find(value => value && !/[\[<#]/.test(value)
       && !markdown.parseInline(value, {}).some(inline => inline.children?.some(child => child.type === 'link_open'))
@@ -78,10 +78,23 @@ export function discoverDocumentOperations(text: string) {
     else skip(line, 'table', 'no unique nonempty cell without a navigation target');
   }
   for (let line = 0; line < lines.length; line++) {
-    if (blocked.has(line) || lines[line]!.trim() !== '$$') continue;
-    const end = lines.findIndex((value, index) => index > line && !blocked.has(index) && value.trim() === '$$');
-    if (end < 0) { skip(line, 'math', 'unclosed delimiter'); continue; }
+    const delimiter = lines[line]!.trim().match(/^((?:>\s*)*)\$\$$/);
+    if (blocked.has(line) || !delimiter) continue;
+    const quotePrefix = delimiter[1]!.replace(/\s/g, '');
+    const end = lines.findIndex((value, index) => {
+      if (index <= line || blocked.has(index)) return false;
+      const closing = value.trim().match(/^((?:>\s*)*)\$\$$/);
+      return closing !== null && closing[1]!.replace(/\s/g, '') === quotePrefix;
+    });
+    if (end < 0) { skip(line, quotePrefix ? 'math-shell' : 'math', 'unclosed delimiter'); continue; }
     for (let at = line; at <= end; at++) blocked.add(at);
+    if (quotePrefix) {
+      // Quoted formulas are atomic previews; the outer driver would type after
+      // the block instead of editing its hidden source.
+      skip(line, 'math-shell', 'unsupported fence syntax');
+      line = end;
+      continue;
+    }
     const target = lines.findIndex((value, index) => index > line && index < end && unique(value.trim()));
     if (target >= 0) add(target, 'math', 'math', lines[target]!.trim());
     else skip(line, 'math', 'no unique body line');

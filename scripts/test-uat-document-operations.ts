@@ -50,6 +50,29 @@ for (const [category, fragment] of [
   const discovered = discoverDocumentOperations(`${fragment}\n\nOrdinary unique target`);
   assert.ok(discovered.unavailable.some(item => item.category === category && item.reason), `${category} omissions must be reported`);
 }
+const quotedTable = discoverDocumentOperations([
+  '> > | Name | Value |', '> > | --- | --- |', '> > | quoted row | unique quoted cell |', '',
+  'Ordinary unique target'
+].join('\n'));
+assert.equal(quotedTable.operations.find(operation => operation.kind === 'table')?.tableCell, 'unique quoted cell');
+const quotedLinks = discoverDocumentOperations([
+  '> | Name | Value |', '> | --- | --- |', '> | [first](https://example.com/first) | [second](https://example.com/second) |', '',
+  'Ordinary unique target'
+].join('\n'));
+assert.ok(!quotedLinks.operations.some(operation => operation.kind === 'table'), 'Quote prefixes cannot become phantom editable cells');
+assert.ok(quotedLinks.unavailable.some(item => item.category === 'table' && item.reason === 'no unique nonempty cell without a navigation target'));
+
+const quotedMath = discoverDocumentOperations([
+  '> $$', '> quotedFormulaOne', '> $$', '',
+  '> > $$', '> > nestedQuotedFormula', '> > $$', '',
+  '> Ordinary quoted edit target', '',
+  '$$', 'regularFormulaTarget', '$$'
+].join('\n'));
+assert.deepEqual(quotedMath.operations.filter(operation => operation.kind === 'math').map(operation => operation.needle), ['regularFormulaTarget']);
+assert.ok(quotedMath.operations.some(operation => operation.kind === 'outer' && operation.needle === '> Ordinary quoted edit target'));
+assert.ok(quotedMath.operations.every(operation => !operation.needle.includes('quotedFormulaOne') && !operation.needle.includes('nestedQuotedFormula')));
+assert.deepEqual(quotedMath.unavailable.filter(item => item.category === 'math-shell').map(item => item.line), [1, 5]);
+
 assert.throws(() => discoverDocumentOperations(''), /No uniquely addressable/);
 assert.throws(() => discoverDocumentOperations('unique __UAT_1__'), /already contains endurance marker/);
 console.log('Adaptive endurance operation discovery passed');

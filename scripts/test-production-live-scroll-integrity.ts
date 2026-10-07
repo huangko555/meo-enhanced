@@ -151,6 +151,11 @@ async function main(): Promise<void> {
       content: ':root{--vscode-editor-background:#24292e;--vscode-editor-foreground:#e6edf3;--vscode-sideBar-background:#20252a;--vscode-panel-border:#3e444d;--vscode-toolbar-hoverBackground:#30363d}html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}'
     });
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+    // Match production KaTeX layout; unstyled MathML/HTML has different heights.
+    const katexDirectory = path.join(repoRoot, 'node_modules/katex/dist');
+    const katexStyles = fs.readFileSync(path.join(katexDirectory, 'katex.min.css'), 'utf8')
+      .replace(/url\(([^)]+)\)/g, (_match, fontPath) => `url(data:font/woff2;base64,${fs.readFileSync(path.join(katexDirectory, fontPath)).toString('base64')})`);
+    await page.addStyleTag({ content: katexStyles });
     await page.addScriptTag({ content: `
       window.__hostMessages=[];
       window.acquireVsCodeApi=()=>({
@@ -182,6 +187,7 @@ async function main(): Promise<void> {
       }}));
     }, source);
     await page.waitForSelector('.editor-host > .cm-editor .cm-scroller');
+    await page.evaluate(async () => { await document.fonts.ready; });
     await waitForFrames(page, 1);
 
     await page.mouse.move(700, 500);

@@ -628,6 +628,14 @@ async function main() {
       await page.click(editSelector);
       await page.keyboard.press('End');
       await page.keyboard.type('!');
+      // Establish a committed edit, independently of the 250ms auto-commit timer.
+      // The next structural command must own its own undo boundary.
+      const editedBaseline = await page.evaluate(() => {
+        const editor = (window as any).__tableCommandMatrixEditor;
+        editor.commitTransientEdits();
+        return editor.getText();
+      });
+      await page.waitForSelector('.meo-md-html-table-shell tbody textarea');
       const beforeCommand = await page.evaluate(({ target, caret }) => {
         const editor = (window as any).__tableCommandMatrixEditor;
         const view = editor.view;
@@ -675,8 +683,8 @@ async function main() {
         };
       });
       assert.equal(afterCommand.markdown, matrixCase.expected, `${matrixCase.name}: exact Markdown`);
-      assert.deepEqual(beforeCommand.history, { undo: 0, redo: 0 }, `${matrixCase.name}: clean history baseline`);
-      assert.deepEqual(afterCommand.history, { undo: 1, redo: 0 }, `${matrixCase.name}: one Editor History item`);
+      assert.deepEqual(beforeCommand.history, { undo: 1, redo: 0 }, `${matrixCase.name}: committed edit baseline`);
+      assert.deepEqual(afterCommand.history, { undo: 2, redo: 0 }, `${matrixCase.name}: one additional Editor History item`);
       assert.deepEqual(afterCommand.focus, {
         ...matrixCase.focus,
         start: matrixCase.caret ?? 0,
@@ -687,13 +695,13 @@ async function main() {
       assert.equal(await page.evaluate(() => (window as any).__tableCommandMatrixEditor.undo()), true, `${matrixCase.name}: undo accepted`);
       await page.waitForFunction((expected) => (
         (window as any).__tableCommandMatrixEditor.view.state.doc.toString() === expected
-      ), {}, matrixOriginal);
+      ), {}, editedBaseline);
       const afterUndo = await page.evaluate(() => {
         const editor = (window as any).__tableCommandMatrixEditor;
         return { markdown: editor.view.state.doc.toString(), history: editor.getHistoryDepth(), scrollTop: editor.view.scrollDOM.scrollTop };
       });
-      assert.equal(afterUndo.markdown, matrixOriginal, `${matrixCase.name}: exact undo Markdown`);
-      assert.deepEqual(afterUndo.history, { undo: 0, redo: 1 }, `${matrixCase.name}: undo history depth`);
+      assert.equal(afterUndo.markdown, editedBaseline, `${matrixCase.name}: exact undo Markdown`);
+      assert.deepEqual(afterUndo.history, { undo: 1, redo: 1 }, `${matrixCase.name}: undo history depth`);
       assert.equal(afterUndo.scrollTop, beforeCommand.scrollTop, `${matrixCase.name}: undo scroll continuity`);
 
       assert.equal(await page.evaluate(() => (window as any).__tableCommandMatrixEditor.redo()), true, `${matrixCase.name}: redo accepted`);
@@ -705,9 +713,42 @@ async function main() {
         return { markdown: editor.view.state.doc.toString(), history: editor.getHistoryDepth(), scrollTop: editor.view.scrollDOM.scrollTop };
       });
       assert.equal(afterRedo.markdown, matrixCase.expected, `${matrixCase.name}: exact redo Markdown`);
-      assert.deepEqual(afterRedo.history, { undo: 1, redo: 0 }, `${matrixCase.name}: redo history depth`);
+      assert.deepEqual(afterRedo.history, { undo: 2, redo: 0 }, `${matrixCase.name}: redo history depth`);
       assert.equal(afterRedo.scrollTop, beforeCommand.scrollTop, `${matrixCase.name}: redo scroll continuity`);
+      assert.equal(await page.evaluate(() => (window as any).__tableCommandMatrixEditor.undo()), true);
+      await page.waitForFunction(expected => (window as any).__tableCommandMatrixEditor.getText() === expected, {}, editedBaseline);
+      assert.equal(await page.evaluate(() => (window as any).__tableCommandMatrixEditor.undo()), true);
+      await page.waitForFunction(expected => (window as any).__tableCommandMatrixEditor.getText() === expected, {}, matrixOriginal);
+
     }
+
+    await page.evaluate(text => {
+      (window as any).__tableCommandMatrixEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__tableCommandMatrixEditor = (window as any).TableStabilityHarness.createEditor({
+        parent: document.getElementById('app')!, text, initialMode: 'live', onApplyChanges() {}
+      });
+    }, matrixOriginal);
+    await page.waitForSelector('.meo-md-html-table-shell tbody textarea');
+    const pendingCommand = await page.evaluate(() => {
+      const editor = (window as any).__tableCommandMatrixEditor;
+      const input = document.querySelector<HTMLTextAreaElement>('textarea[data-table-row="1"][data-table-col="0"]')!;
+      input.dispatchEvent(new PointerEvent('pointerdown', {button: 0, bubbles: true, cancelable: true}));
+      input.focus({preventScroll: true});
+      input.setSelectionRange(input.value.length, input.value.length);
+      input.setRangeText('!', input.selectionStart, input.selectionEnd, 'end');
+      input.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: 'insertText', data: '!'}));
+      const before = editor.getHistoryDepth();
+      const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.meo-md-html-table-context-btn'))
+        .find(button => button.dataset.tooltip === 'Align selected column center')!;
+      button.dispatchEvent(new PointerEvent('pointerdown', {button: 0, bubbles: true, cancelable: true}));
+      return {before, after: editor.getHistoryDepth(), text: editor.getText()};
+    });
+    assert.deepEqual(pendingCommand.before, {undo: 0, redo: 0});
+    assert.deepEqual(pendingCommand.after, {undo: 1, redo: 0}, 'pending text and command form one atomic history entry');
+    assert.equal(pendingCommand.text, matrixCases.find(candidate => candidate.name === 'align center')!.expected);
+    assert.equal(await page.evaluate(() => (window as any).__tableCommandMatrixEditor.undo()), true);
+    await page.waitForFunction(expected => (window as any).__tableCommandMatrixEditor.getText() === expected, {}, matrixOriginal);
 
     const rangeOriginal = [
       '| A | B | C |',

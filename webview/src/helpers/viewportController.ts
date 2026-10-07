@@ -223,8 +223,8 @@ type ActiveAnchorTransactionScope = {
       readonly kind: 'current';
       readonly record: ViewportAnchorTokenRecord;
       readonly target: ViewportAnchorOwner;
-      readonly anchor: ViewportDocumentAnchor;
-      readonly previousDocumentText: string;
+      anchor: ViewportDocumentAnchor;
+      previousDocumentText: string;
       documentChangeObserved: boolean;
     }
   | {
@@ -588,11 +588,32 @@ export class ViewportController {
   }
 
   /** Reconciles after CodeMirror has finished its own height and scroll anchoring. */
-  reconcileAfterEditorUpdate(mapPosition?: (position: number) => number, measuredLayout = true): void {
+  reconcileAfterEditorUpdate(
+    mapPosition?: (position: number) => number,
+    measuredLayout = true,
+    externalDocumentPresentation = false
+  ): void {
     // View updates emitted from CodeMirror's measurement pass run after its
     // internal height-map anchoring and before the browser paints. Reconcile an
     // active history lock here so no intermediate anchored position is visible.
     this.activeScrollLockCorrection?.();
+    // External revisions collapse their text diff into one replacement, so
+    // anchors inside it still need content-based relocation at scope completion.
+    if (mapPosition && !externalDocumentPresentation && this.anchorTransactionScope.kind !== 'idle') {
+      // Text similarity cannot locate repeated lines after disjoint edits.
+      // Map every open scope while the exact CodeMirror change is available,
+      // including parents of an awaited nested anchor transaction.
+      const currentText = this.view.state.doc.toString();
+      let scope: AnchorTransactionScope = this.anchorTransactionScope;
+      while (scope.kind !== 'idle') {
+        if (scope.kind === 'current' && !scope.closed) {
+          scope.anchor = { ...scope.anchor, position: mapPosition(scope.anchor.position), sourceRange: undefined };
+          scope.previousDocumentText = currentText;
+          scope.documentChangeObserved = true;
+        }
+        scope = scope.parent;
+      }
+    }
     const activeAnchor = this.activeLayoutAnchor;
     if (activeAnchor) {
       if (mapPosition) activeAnchor.position = mapPosition(activeAnchor.position);
