@@ -26,7 +26,15 @@ export function buildPreviewStyles(
   environment: ExportStyleEnvironment = { previewFontFamily: '' },
   appearance: PreviewAppearance = 'dark'
 ): string {
-  return buildReadingStyles(environment, appearance, true);
+  return `${buildReadingStyles(environment, appearance, true)}
+
+/* Preview shares Live's borderless block surfaces. */
+pre.meo-export-code-block,
+.meo-export-mermaid,
+.meo-export-math-fenced-display {
+  border: 0;
+  background: var(--meo-code-bg);
+}`;
 }
 
 function buildReadingStyles(
@@ -78,9 +86,11 @@ function buildReadingStyles(
   const defaultSurfaceColor = appearance === 'light'
     ? '#f6f8fa'
     : `color-mix(in srgb, ${editorBackgroundColor} 86%, ${colors.base03} 14%)`;
-  const codeBlockBackgroundColor = appearance === 'light'
-    ? defaultCodeBlockColor
-    : `color-mix(in srgb, ${editorBackgroundColor} 82%, #000000 18%)`;
+  const codeBlockBackgroundColor = matchEditorBackground
+    ? theme.semanticColors.codeBlockBackground
+    : appearance === 'light'
+      ? defaultCodeBlockColor
+      : `color-mix(in srgb, ${editorBackgroundColor} 82%, #000000 18%)`;
   const sideBarBackgroundColor = appearance === 'light'
     ? defaultSurfaceColor
     : `color-mix(in srgb, ${editorBackgroundColor} 92%, ${previewForegroundColor} 8%)`;

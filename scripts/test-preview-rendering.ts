@@ -642,8 +642,18 @@ if (!/p\s*\{[^}]*orphans:\s*2;[^}]*widows:\s*2;/s.test(exportStyles)) {
 if (!/li:not\(:has\([^{]*\)\)\s*\{[^}]*break-inside:\s*avoid-page;[^}]*page-break-inside:\s*avoid;/s.test(exportStyles)) {
   throw new Error('Printed lists must keep simple items together while allowing complex items to paginate');
 }
-if (exportStyles !== lightPreviewStyles || darkExportStyles !== darkPreviewStyles) {
-  throw new Error('HTML/PDF export must reuse the exact Preview reading styles for the resolved appearance');
+const withoutBlockBackground = (styles: string): string => styles.replace(
+  /--meo-code-bg: [^;]+;/,
+  '--meo-code-bg: shared;'
+);
+for (const [exportCss, previewCss, visuals] of [
+  [exportStyles, lightPreviewStyles, lightVisuals],
+  [darkExportStyles, darkPreviewStyles, darkVisuals]
+] as const) {
+  if (!withoutBlockBackground(previewCss).startsWith(withoutBlockBackground(exportCss))
+    || !previewCss.includes(`--meo-code-bg: ${visuals.semanticColors.codeBlockBackground};`)) {
+    throw new Error('Preview must share export reading styles while matching Live block backgrounds');
+  }
 }
 for (const [preview, exported, color] of [
   [lightPreviewStyles, exportStyles, '#0969da'],
