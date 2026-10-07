@@ -157,6 +157,7 @@ The pending-code test runs in the full browser suite.
 
 `scripts/test-preview-code-copy.ts` runs the production Preview controller with
 real clipboard reads and writes. It covers exact fenced and indented code,
+Mermaid source and LaTeX expressions, including diagram redraws and fitted math,
 selection, keyboard activation, successful and failed feedback, language/theme
 changes and incremental rendering. It also checks that HTML, PDF and Word export
 inputs contain no reading controls or tooltips, and generates PDF/Word smoke

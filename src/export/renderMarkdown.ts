@@ -174,7 +174,8 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
       const renderedMath = renderLatexMathToHtml(mathContent, 'display');
       if (renderedMath) {
         hasMath = true;
-        return `<div class="meo-export-math meo-export-math-display meo-export-math-fenced-display"${sourceAttrs}>${renderedMath}</div>`;
+        const sourceB64 = Buffer.from(mathContent, 'utf8').toString('base64');
+        return `<div class="meo-export-math meo-export-math-display meo-export-math-fenced-display" data-source-b64="${sourceB64}"${sourceAttrs}>${renderedMath}</div>`;
       }
     }
 

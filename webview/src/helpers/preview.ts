@@ -109,7 +109,8 @@ function getPreviewPresentationSignature(element: Element): string | null {
   const layout = element.classList.contains('meo-export-math-display') ? 'display' : 'inline';
   const fenced = element.classList.contains('meo-export-math-fenced-display') ? ':fenced' : '';
   const canvas = element.querySelector<HTMLElement>(':scope > .meo-latex-math-canvas');
-  return `math:${layout}${fenced}:${canvas?.innerHTML ?? element.innerHTML}`;
+  const source = element.getAttribute('data-source-b64');
+  return `math:${layout}${fenced}:${source ?? canvas?.innerHTML ?? element.innerHTML}`;
 }
 
 function preparePreviewPresentationMorphKeys(
@@ -231,16 +232,23 @@ function preserveLoadedPreviewImage(fromImage: HTMLImageElement, toImage: HTMLIm
 }
 
 // These reading controls are added only to the iframe DOM, never to shared export HTML.
+const previewCopyBlockSelector = '.meo-export-code-block-wrap, .meo-export-mermaid, .meo-export-math-display';
+
 function addPreviewCodeCopyControls(root: ParentNode, language: UiLanguage): void {
   const strings = getUiStrings(language);
-  for (const block of root.querySelectorAll<HTMLElement>('.meo-export-code-block-wrap')) {
+  for (const block of root.querySelectorAll<HTMLElement>(previewCopyBlockSelector)) {
     const code = block.querySelector<HTMLElement>(':scope > pre > code');
-    if (!code || ['mermaid', 'latex', 'tex', 'math', 'katex'].some(name => code.classList.contains(`language-${name}`))) continue;
+    if (!code && block.dataset.sourceB64 === undefined) continue;
     let button = block.querySelector<HTMLElement>(':scope > .meo-preview-code-actions > .meo-copy-code-btn');
     if (!button) {
       const copyButton = createCopyCodeButton(() => {
         // Resolve the live DOM after incremental updates and Shiki token projection.
-        const currentCode = copyButton.closest('.meo-export-code-block-wrap')?.querySelector(':scope > pre > code');
+        const currentBlock = copyButton.closest<HTMLElement>(previewCopyBlockSelector);
+        if (currentBlock?.dataset.sourceB64 !== undefined) {
+          const binary = window.atob(currentBlock.dataset.sourceB64);
+          return new TextDecoder().decode(Uint8Array.from(binary, character => character.charCodeAt(0)));
+        }
+        const currentCode = currentBlock?.querySelector(':scope > pre > code');
         if (!currentCode) return '';
         const lines = Array.from(currentCode.querySelectorAll('.meo-export-code-line-source'));
         const trailingNewline = currentCode.lastChild?.nodeType === 3 && currentCode.lastChild.textContent?.endsWith('\n');
@@ -262,12 +270,14 @@ function addPreviewCodeCopyControls(root: ParentNode, language: UiLanguage): voi
 }
 
 const previewCodeCopyStyles = `
+.meo-export-mermaid, .meo-export-math-display { position: relative; }
+.meo-export-mermaid { padding-top: 24px; }
 .meo-preview-code-actions {
   position: absolute; top: 4px; right: 5px; z-index: 10;
   display: inline-flex; align-items: center; cursor: default; user-select: none;
   opacity: 0; pointer-events: none;
 }
-.meo-export-code-block-wrap:hover > .meo-preview-code-actions,
+:is(.meo-export-code-block-wrap, .meo-export-mermaid, .meo-export-math-display):hover > .meo-preview-code-actions,
 .meo-preview-code-actions:focus-within { opacity: 1; pointer-events: auto; }
 .meo-preview-code-actions > .meo-copy-code-btn {
   display: inline-flex; align-items: center; justify-content: center;
@@ -699,7 +709,7 @@ const previewSourcePositionMarkerStyles = `
 
 const previewLatexMathViewportStyles = `
 .meo-export-math-display.meo-export-math-fenced-display {
-  padding-block: 1em;
+  padding-block: max(1em, 24px) 1em;
 }
 
 .meo-export-math-display.meo-latex-math-viewport {
@@ -1249,9 +1259,12 @@ export function createPreviewController({
     }
     for (const element of roots) {
       if (previewMathViewports.has(element)) continue;
+      const copyActions = element.querySelector(':scope > .meo-preview-code-actions');
+      copyActions?.remove();
       const controller = element.classList.contains('meo-export-math-inline')
         ? attachLatexMathViewport(element, { layout: { kind: 'inline' } })
         : attachLatexMathViewport(element)
+      if (copyActions) element.append(copyActions);
       const signature = getPreviewPresentationSignature(element);
       if (signature) previewMathViewports.set(element, { controller, signature });
       else controller.destroy();

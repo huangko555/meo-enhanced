@@ -726,13 +726,15 @@ export function createEditor({
   const emptyBlockquoteLineCursorEnd = (state: EditorState, pos: number) => {
     const line = state.doc.lineAt(pos);
     const lineText = state.doc.sliceString(line.from, line.to);
-    const quoteMatch = /^[ \t]{0,3}(?:>[ \t]?)+$/.exec(lineText);
+    const quoteMatch = /^[ \t]*(?:>[ \t]*)+$/.exec(lineText);
     if (!quoteMatch) {
       return null;
     }
 
-    const probePos = Math.min(line.to, line.from + 1);
+    // Probe inside the final marker, including a quote with no trailing space.
+    const probePos = line.from + lineText.lastIndexOf('>');
     let node: SyntaxNode | null = resolvedSyntaxTree(state).resolveInner(probePos, 1);
+    if (node.name !== 'QuoteMark') return null;
     while (node) {
       if (node.name === 'Blockquote') {
         return line.from + quoteMatch[0].length;
@@ -2407,12 +2409,6 @@ export function createEditor({
           if (isLiveMode(view)) {
             const { head, empty } = view.state.selection.main;
             if (empty) {
-              const emptyQuoteCursorEnd = emptyBlockquoteLineCursorEnd(view.state, head);
-              if (emptyQuoteCursorEnd !== null && head < emptyQuoteCursorEnd) {
-                view.dispatch({ selection: { anchor: emptyQuoteCursorEnd } });
-                return false;
-              }
-
               const node = resolvedSyntaxTree(view.state).resolveInner(head, -1);
               if (node.name === 'HorizontalRule') {
                 const line = view.state.doc.lineAt(head);
@@ -3063,6 +3059,23 @@ export function createEditor({
     // Otherwise Chromium repaints the DOM range after pointerup and reveals
     // text from the other version under the same native range.
     clearPointerSelection(true);
+    // Pointer capture targets view.dom, bypassing contentDOM's pointerup handler.
+    // Only clicks beyond an empty quote's prefix should snap to its content start.
+    if (completedSelection && isLiveMode(view) && isPlainPrimaryPointerEvent(event)
+      && view.state.selection.ranges.length === 1 && view.state.selection.main.empty) {
+      const clickedPos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+      const cursorEnd = clickedPos === null ? null : emptyBlockquoteLineCursorEnd(view.state, clickedPos);
+      if (cursorEnd !== null) {
+        const line = view.state.doc.lineAt(cursorEnd);
+        const head = view.state.selection.main.head;
+        const coords = view.coordsAtPos(cursorEnd, -1);
+        const clickedElement = view.dom.ownerDocument.elementFromPoint(event.clientX, event.clientY);
+        const clickedPrefix = clickedElement?.closest('.meo-md-quote-marker-active, .meo-md-quote-prefix-space');
+        if (!clickedPrefix && coords && event.clientX >= coords.left && head >= line.from && head < cursorEnd) {
+          view.dispatch({ selection: { anchor: cursorEnd } });
+        }
+      }
+    }
     requestAnimationFrame(() => {
       if (completedSelection) emitSelectionChange();
       if (gitDiffSelectionPointerId !== null) return;

@@ -614,7 +614,7 @@ const createBuiltInVisuals = (appearance: 'light' | 'dark'): BuiltInVisuals => {
       alertCautionForeground: colors.base04,
       alertCautionBorder: colors.base04,
       ...(isLight ? {
-        codeBlockBackground: '#f6f8fa',
+        codeBlockBackground: '#f1f3f5',
         codeBlockActiveLineBackground: '#eef1f4',
         codeLanguageLabelForeground: '#57606a',
         codeCopyForeground: '#0550ae',
