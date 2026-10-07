@@ -7,7 +7,7 @@ import { bindTooltips, createTooltip } from './adapters/tooltip';
 import { createEditingPreferencesTransport } from './adapters/editingPreferencesTransport';
 import { createEditorServicesTransport } from './adapters/editorServicesTransport';
 import { defaultInputAssistance, type EditingPreferences } from '../../src/foundation/editingPreferences';
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Unlink, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, Save, HardDriveUpload, PanelLeftRightDashed, SquareSplitHorizontal, Settings, Check, Ellipsis, Sun, Moon, SunMoon, Languages, Type, Keyboard, ArrowRight, ExternalLink, History, Info } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Unlink, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, Save, HardDriveUpload, PanelLeftRightDashed, SquareSplitHorizontal, Settings, Check, Ellipsis, Sun, Moon, SunMoon, Languages, Type, Keyboard, ExternalLink, History, Info } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -1032,7 +1032,7 @@ const preferencesRow = document.createElement('div'); preferencesRow.className =
 const preferencesLabel = document.createElement('span'); preferencesLabel.className = 'more-tools-preferences-label';
 const moreSettingsButton = document.createElement('button'); moreSettingsButton.type = 'button'; moreSettingsButton.className = 'settings-button more-tools-settings-button';
 const moreSettingsButtonLabel = document.createElement('span');
-moreSettingsButton.append(moreSettingsButtonLabel, createElement(ArrowRight, { width: 14, height: 14, 'aria-hidden': 'true' }));
+moreSettingsButton.append(moreSettingsButtonLabel);
 preferencesRow.append(createMoreToolsControlHeading(Keyboard, preferencesLabel), moreSettingsButton);
 const openingDocumentsHeading = document.createElement('div');
 openingDocumentsHeading.className = 'more-tools-section-label';

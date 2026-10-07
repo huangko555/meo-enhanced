@@ -484,6 +484,8 @@ try {
     await page.click(`[data-setting="theme"] [data-value="${appearance}"]`);
     assert.equal(await page.evaluate(() => document.documentElement.lang), language);
     assert.equal(await page.evaluate(() => document.documentElement.dataset.editorAppearance), appearance);
+    assert.equal(await page.$eval('.more-tools-settings-button', element => element.textContent), language === 'en' ? 'More settings' : '更多设置');
+    assert.equal(await page.$('.more-tools-settings-button svg'), null, 'More settings uses a text-only button');
     await page.click('.settings-tab[data-tab="typing"]');
     assert.equal(await page.$eval('[data-setting="selectionToolbar"] .settings-item-title', e => e.textContent), language === 'en' ? 'Selection toolbar' : '选区工具栏');
     const wrappingDescription = await page.$eval(wrap + ' .settings-description', element => element.textContent ?? '');
