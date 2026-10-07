@@ -1,5 +1,10 @@
 import MarkdownIt from 'markdown-it';
-import { collectLatexMathRanges, renderLatexMathToHtml } from './math';
+import { collectLatexMathRanges, renderLatexMathToHtml, type LatexMathMode } from './math';
+
+function mathSourceAttribute(content: string, mode: LatexMathMode): string {
+  // KaTeX's display HTML does not retain the expression needed by Preview copy.
+  return mode === 'display' ? ` data-source-b64="${Buffer.from(content, 'utf8').toString('base64')}"` : '';
+}
 
 type MathInlineChunkPart = {
   token: any;
@@ -80,7 +85,7 @@ function renderMathFromRawInlineContent(
     htmlNode.meta = { ...(htmlNode.meta ?? {}), meoTrustedHtml: true };
     const fencedClass = fullMath.mode === 'display' && fullMath.fencedDisplay ? ' meo-export-math-fenced-display' : '';
     htmlNode.content = [
-      `<span class="meo-export-math meo-export-math-${fullMath.mode}${fencedClass}">`,
+      `<span class="meo-export-math meo-export-math-${fullMath.mode}${fencedClass}"${mathSourceAttribute(fullMath.content, fullMath.mode)}>`,
       renderedMath,
       '</span>'
     ].join('');
@@ -107,7 +112,7 @@ function renderMathFromRawInlineContent(
     htmlNode.meta = { ...(htmlNode.meta ?? {}), meoTrustedHtml: true };
     const fencedClass = mathRange.mode === 'display' && mathRange.fencedDisplay ? ' meo-export-math-fenced-display' : '';
     htmlNode.content = [
-      `<span class="meo-export-math meo-export-math-${mathRange.mode}${fencedClass}">`,
+      `<span class="meo-export-math meo-export-math-${mathRange.mode}${fencedClass}"${mathSourceAttribute(mathRange.content, mathRange.mode)}>`,
       renderedMath,
       '</span>'
     ].join('');
@@ -222,7 +227,7 @@ function renderMathChunk(
     htmlNode.meta = { ...(htmlNode.meta ?? {}), meoTrustedHtml: true };
     const fencedClass = mathRange.mode === 'display' && mathRange.fencedDisplay ? ' meo-export-math-fenced-display' : '';
     htmlNode.content = [
-      `<span class="meo-export-math meo-export-math-${mathRange.mode}${fencedClass}">`,
+      `<span class="meo-export-math meo-export-math-${mathRange.mode}${fencedClass}"${mathSourceAttribute(mathRange.content, mathRange.mode)}>`,
       renderedMath,
       '</span>'
     ].join('');
@@ -284,7 +289,7 @@ export function installMathTransform(
       return `<pre>${md.utils.escapeHtml(`$$\n${mathBlock.content}\n$$`)}</pre>\n`;
     }
     options.onRenderedMath?.();
-    return `<div class="meo-export-math meo-export-math-display meo-export-math-fenced-display"${self.renderAttrs(mathBlock)}>${renderedMath}</div>\n`;
+    return `<div class="meo-export-math meo-export-math-display meo-export-math-fenced-display"${mathSourceAttribute(String(mathBlock.content ?? ''), 'display')}${self.renderAttrs(mathBlock)}>${renderedMath}</div>\n`;
   };
 
   md.core.ruler.after('inline', 'meo-math-transform', (state: any) => {

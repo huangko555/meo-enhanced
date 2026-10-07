@@ -273,7 +273,7 @@ try {
   await page.waitForFunction(() => {
     const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
     return Boolean(
-      frameDocument?.querySelectorAll('.meo-export-mermaid.is-rendered svg').length === 2 &&
+      frameDocument?.querySelectorAll('.meo-export-mermaid.is-rendered > .meo-export-mermaid-svg > svg').length === 2 &&
       frameDocument.querySelector('.meo-export-mermaid.is-math .katex')
     );
   }, { timeout: 5000 });

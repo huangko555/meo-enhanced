@@ -19,19 +19,27 @@ assert.ok(build.success, build.logs.map(String).join('\n'));
 const script = await build.outputs[0]!.text();
 const styles = fs.readFileSync('webview/src/styles.css', 'utf8');
 const source = '  const text = "中文 <&>";\n\n\treturn text;  \n';
+const mermaidSource = 'flowchart LR\nA["中文 <&>"]-->B\n';
+const mathSource = '\\frac{x^2}{y} + \\text{中文}';
 const markdown = [
-  '# Copy fixture', 'Selection remains readable.',
+  '# Copy fixture', 'Selection remains readable.', 'Inline $a^2$ stays inline.',
   '~~~typescript\n' + source + '~~~', '~~~\nplain\n~~~',
   '    indented\n        nested', '~~~latex\nx^2\n~~~',
   // Invalid formulas still belong to the formula path, not ordinary code.
-  '~~~latex\n\\invalidcommand{\n~~~'
+  '~~~latex\n\\invalidcommand{\n~~~',
+  '~~~mermaid\n' + mermaidSource + '~~~', '$$\n' + mathSource + '\n$$'
 ].join('\n\n');
 const server = Bun.serve({
   hostname: '127.0.0.1', port: 0,
-  fetch: () => new Response('<!doctype html><style>' + styles
+  fetch: request => {
+    const pathname = new URL(request.url).pathname;
+    if (pathname === '/katex.css') return new Response(Bun.file('node_modules/katex/dist/katex.min.css'));
+    if (pathname.startsWith('/fonts/')) return new Response(Bun.file(path.join('node_modules/katex/dist/fonts', path.basename(pathname))));
+    return new Response('<!doctype html><style>' + styles
     + '</style><style>html,body{height:100%;margin:0}.preview-host:not([hidden]){height:100%;display:flex;flex-direction:column}.preview-frame{width:100%;height:100%;flex:1}'
     + ':root{--meo-semantic-codeCopyBackground:transparent;--meo-semantic-codeCopyHoverBackground:rgba(127,127,127,.2)}</style><body></body>',
-    { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+    { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+  }
 });
 const origin = 'http://127.0.0.1:' + server.port;
 const browser = await launchTestBrowser();
@@ -43,6 +51,9 @@ try {
   page.on('console', message => { if (message.type() === 'error') console.error(message.text()); });
   await page.goto(origin);
   await page.bringToFront();
+  await page.addStyleTag({ url: origin + '/katex.css' });
+  await page.evaluate(href => { document.body.dataset.meoKatexSrc = href; }, origin + '/katex.css');
+  await page.addScriptTag({ path: 'node_modules/mermaid/dist/mermaid.min.js' });
   await page.addScriptTag({ content: script });
   await page.evaluate(() => {
     const nativeWrite = navigator.clipboard.writeText.bind(navigator.clipboard);
@@ -71,7 +82,7 @@ try {
     }, { text, value, language });
     await page.waitForFunction(html => {
       const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
-      if (!doc || doc.querySelectorAll('.meo-preview-code-actions').length !== 3) return false;
+      if (!doc || !doc.querySelector('.meo-preview-code-actions')) return false;
       const expected = doc.createElement('main');
       expected.innerHTML = html;
       return doc.querySelector('code.hljs')?.textContent === expected.querySelector('code.hljs')?.textContent
@@ -80,8 +91,20 @@ try {
   };
   await render(markdown, 'en');
   const frame = page.frames().find(frame => frame.parentFrame() === page.mainFrame())!;
-  assert.equal(await frame.$eval('.meo-export-math-display', node => node.querySelectorAll('[role="button"]').length), 0);
-  assert.equal(await frame.$$eval('.meo-export-math-display .meo-preview-code-actions', nodes => nodes.length), 0);
+  assert.deepEqual(await frame.$$eval('.meo-export-math-display', nodes => nodes.map(node =>
+    node.querySelectorAll(':scope > .meo-preview-code-actions > .meo-copy-code-btn').length)), [1, 1, 1],
+  'Every formula block must expose a copy control outside its fitted canvas');
+  await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('iframe')!
+    .contentDocument?.querySelector('.meo-export-mermaid.is-rendered svg'));
+  assert.equal(await frame.$eval('.meo-export-mermaid', node => node.querySelectorAll('.meo-copy-code-btn').length), 1,
+    'Mermaid rendering must retain its copy control');
+  assert.equal(await frame.$$eval('.meo-preview-code-actions', nodes => nodes.length), 7);
+  assert.equal(await frame.$$eval('.meo-export-math-inline .meo-preview-code-actions', nodes => nodes.length), 0,
+    'Inline equations must not acquire block copy controls');
+  await page.evaluate(() => {
+    (window as any).__originalMathBlock = document.querySelector<HTMLIFrameElement>('iframe')!
+      .contentDocument!.querySelector('.meo-export-math-display');
+  });
   assert.equal(await page.$eval('iframe', node => node.getAttribute('sandbox')), 'allow-same-origin');
   const buttonSelector = '.meo-preview-code-actions > .meo-copy-code-btn';
   const copyPoint = async (index = 0) => {
@@ -210,6 +233,9 @@ try {
   assert.equal(await readClipboard(), source);
 
   await render(markdown.replace('Selection remains', 'Updated prose remains'), 'zh-CN');
+  assert.equal(await page.evaluate(() => (window as any).__originalMathBlock ===
+    document.querySelector<HTMLIFrameElement>('iframe')!.contentDocument!.querySelector('.meo-export-math-display')), true,
+  'Copy controls must not invalidate unchanged formula presentation');
   await clickCopy();
   assert.equal(await readClipboard(), source);
   const updated = source.replace('const text', 'let text');
@@ -227,6 +253,47 @@ try {
   });
   assert.deepEqual(afterGeometry, geometry, 'Hover, focus, copying and language changes must not shift layout');
 
+  const copyBlock = async (selector: string, expected: string) => {
+    await frame.$eval(selector, node => node.scrollIntoView({ block: 'center' }));
+    const index = await frame.$eval(selector, (node, buttonSelector) =>
+      Array.from(document.querySelectorAll(buttonSelector)).indexOf(node.querySelector(buttonSelector)!), buttonSelector);
+    const point = await copyPoint(index);
+    await page.mouse.move(point.x, point.y);
+    assert.equal(await frame.$eval(selector, node =>
+      getComputedStyle(node.querySelector('.meo-preview-code-actions')!).opacity), '1', 'Hover must reveal the block copy control');
+    const appearance = await page.evaluate(() => document.documentElement.dataset.editorAppearance);
+    fs.mkdirSync('.local/probes/preview-block-copy', { recursive: true });
+    await page.screenshot({ path: `.local/probes/preview-block-copy/${appearance}-${selector.includes('mermaid') ? 'mermaid' : 'math'}.png` });
+    await clickCopy(index);
+    await page.waitForFunction((selector) => document.querySelector<HTMLIFrameElement>('iframe')!
+      .contentDocument!.querySelector(selector)?.querySelector('.meo-copy-code-btn')?.classList.contains('copied'), {}, selector);
+    assert.equal(await readClipboard(), expected);
+    assert.equal(await page.evaluate(() => (window as any).__copyPayload), expected);
+  };
+  await copyBlock('.meo-export-math-display', 'x^2');
+  await copyBlock('.meo-export-math-display:has(.katex-error)', '\\invalidcommand{');
+  await copyBlock('.meo-export-mermaid', mermaidSource);
+  await copyBlock(`.meo-export-math-display[data-source-b64="${Buffer.from(mathSource).toString('base64')}"]`, mathSource);
+  assert.equal(await frame.$$eval('.meo-latex-math-canvas .meo-preview-code-actions', nodes => nodes.length), 0,
+    'Formula fitting must never scale or pan copy controls');
+  const updatedMermaid = mermaidSource.replace('-->B', '-->C');
+  const updatedMath = mathSource.replace('x^2', 'x^3');
+  await render(markdown.replace(mermaidSource, updatedMermaid).replace(mathSource, updatedMath), 'en');
+  await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('iframe')!
+    .contentDocument!.querySelector('.meo-export-mermaid')?.getAttribute('data-meo-preview-mermaid-pending') !== 'true');
+  await copyBlock('.meo-export-mermaid', updatedMermaid);
+  await copyBlock(`.meo-export-math-display[data-source-b64="${Buffer.from(updatedMath).toString('base64')}"]`, updatedMath);
+  assert.equal(await frame.$$eval('.meo-export-mermaid .meo-copy-code-btn', nodes => nodes.length), 1,
+    'Content and appearance changes must not duplicate Mermaid copy controls');
+  await page.evaluate(() => {
+    document.documentElement.dataset.editorAppearance = 'light';
+    (window as any).__previewController.setAppearance('light');
+  });
+  await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('iframe')!
+    .contentDocument!.querySelector<HTMLElement>('.meo-export-mermaid')?.dataset.meoPreviewMermaidAppearance === 'light');
+  await copyBlock('.meo-export-mermaid', updatedMermaid);
+  await copyBlock(`.meo-export-math-display[data-source-b64="${Buffer.from(updatedMath).toString('base64')}"]`, updatedMath);
+
   await render(markdown.replace('~~~\nplain\n~~~', '~~~\n~~~'), 'en');
   await clickCopy(1);
   assert.equal(await readClipboard(), '', 'An empty code body must copy no label or fence');
@@ -236,7 +303,7 @@ try {
 
   for (const target of ['html', 'pdf', 'docx'] as const) {
     const exported = await exportRuntime.renderExportHtmlDocument({
-      readingSnapshot: { snapshotId: 'copy-' + target, text: '~~~typescript\n' + source + '~~~', appearance: 'dark',
+      readingSnapshot: { snapshotId: 'copy-' + target, text: '~~~typescript\n' + source + '~~~\n\n~~~mermaid\n' + mermaidSource + '~~~\n\n$$\n' + mathSource + '\n$$', appearance: 'dark',
         uiLanguage: 'zh-CN', environment: { previewFontFamily: '', previewSourceColoring: false } },
       sourceDocumentPath: 'C:/preview-copy.md', outputFilePath: path.join(temporary, 'copy.' + target), target,
       mermaidRuntimeSrc: '', baseHref: 'file:///', title: 'Copy fixture', shikiLanguageAssetsRoot: ''

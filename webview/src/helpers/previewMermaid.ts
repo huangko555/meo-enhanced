@@ -195,7 +195,9 @@ async function renderMermaidBlocks(
       block.classList.remove('is-error');
       delete block.dataset.meoPreviewMermaidPending;
       block.dataset.meoPreviewMermaidAppearance = appearance;
+      const copyActions = block.querySelector(':scope > .meo-preview-code-actions');
       block.innerHTML = `<div class="meo-export-mermaid-svg">${svg}</div>`;
+      if (copyActions) block.append(copyActions);
     }
     for (const block of failed) {
       if (!block.classList.contains('is-rendered')) block.classList.add('is-error');
