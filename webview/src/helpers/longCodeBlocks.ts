@@ -584,6 +584,8 @@ class LongCodeFloatingButtonPlugin {
   button: HTMLButtonElement;
   view: EditorView;
   private readonly horizontalOffsets = new Map<number, number>();
+  private destroyed = false;
+  private measurePending = false;
   private readonly onScroll = (): void => this.refresh();
   private readonly onPointerDown = (event: PointerEvent): void => {
     const target = event.target instanceof Element ? event.target : null;
@@ -643,11 +645,22 @@ class LongCodeFloatingButtonPlugin {
     if (update.transactions.some(shouldDeferLiveInputDerivedWork)
       && !update.transactions.some(hasLongCodeImmediateEffect)) return;
     if (update.docChanged || update.viewportChanged || update.selectionSet || update.geometryChanged || update.transactions.some((transaction) => transaction.effects.length > 0)) {
-      this.refresh();
+      if (update.transactions.length > 0) {
+        this.refresh();
+      } else if (!this.measurePending) {
+        // Do not hold CodeMirror's scroll-anchor correction open with chrome
+        // requests from the layout update it is currently measuring.
+        this.measurePending = true;
+        queueMicrotask(() => {
+          this.measurePending = false;
+          this.refresh();
+        });
+      }
     }
   }
 
   destroy(): void {
+    this.destroyed = true;
     viewportGeneration.set(this.view, (viewportGeneration.get(this.view) ?? 0) + 1);
     this.view.dom.removeEventListener('pointerdown', this.onPointerDown, true);
     this.view.scrollDOM.removeEventListener('scroll', this.onScroll);
@@ -655,7 +668,9 @@ class LongCodeFloatingButtonPlugin {
   }
 
   private refresh(): void {
+    if (this.destroyed) return;
     this.view.requestMeasure({
+      key: this,
       read: (view) => {
         const state = view.state.field(longCodeBlockStateField, false);
         const scroller = view.scrollDOM.getBoundingClientRect();

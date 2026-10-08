@@ -282,6 +282,31 @@ try {
   await assertSourceLanguageLayout('math source');
   await page.evaluate(() => (window as any).__editor.setText('Removed block\n\nParagraph')); await frames(12);
   assert.equal(await page.$(header), null, 'deleted block cannot leave stale actions');
+  await mount(code + after); await pin(1, 2200);
+  await page.evaluate(() => (window as any).__editor.setMode('source')); await frames(8);
+  await page.evaluate(() => (window as any).__editor.setMode('live')); await frames(1);
+  assert.ok(await page.$(header), 'mode return measures the floating header before its first visible frame');
+  await page.evaluate((text) => {
+    (window as any).__editor.destroy();
+    for (let index = 0; index < 3; index += 1) {
+      const editor = (window as any).BlockStickyHeaderHarness.createEditor({
+        parent: document.getElementById('app'), text, initialMode: 'source',
+        initialLongCodeBlockFolding: true, onApplyChanges() {}
+      });
+      editor.view.dispatch({ selection: { anchor: editor.view.state.doc.line(100).from } });
+      editor.scrollToLine(100, 'top');
+      editor.setMode('live');
+      editor.destroy();
+    }
+    (window as any).__editor = (window as any).BlockStickyHeaderHarness.createEditor({
+      parent: document.getElementById('app'), text, initialMode: 'live', onApplyChanges() {}
+    });
+  }, code + after);
+  await frames(12);
+  assert.equal(await page.$$eval('.meo-block-sticky-header', elements => elements.length), 1,
+    'queued geometry callbacks from destroyed editors cannot restore old headers');
+  assert.equal(await page.$$eval('.meo-long-code-floating-action', elements => elements.length), 1,
+    'queued geometry callbacks from destroyed editors cannot restore old code controls');
   await page.evaluate(() => { (window as any).__editor.destroy(); (window as any).__disposeTooltips.dispose(); });
   assert.equal(await page.$('.meo-block-sticky-header'), null);
   assert.deepEqual(errors, []);

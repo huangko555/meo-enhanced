@@ -6,6 +6,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ## 0.3.28
 - Expanded bilingual settings search, editing assistance and configurable shortcuts, including image storage rules, contextual slash commands, link and emoji suggestions, and native table paste behavior.
 - Kept Live code, Mermaid and math block controls visible while scrolling, and added hover copy controls for Mermaid source and LaTeX expressions in document Preview.
+- Let floating block controls wait for geometry-only mode updates to settle, preventing CodeMirror measurement-budget warnings while preserving their first visible frame and cleanup.
 - Unified link destination tooltips across prose, tables and Preview, with readable Unicode targets, localized prefixes, consistent modifier-key behavior and compact content-sized bubbles.
 - Preserved search text and highlights across editor modes without delaying mode transitions or competing with navigation.
 - Stabilized rendered block geometry, nested lists and quotes, table widths, scrolling and embedded-editor viewports through input and history changes; corrected clicking and selecting empty quoted lines.

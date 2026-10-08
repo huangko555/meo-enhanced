@@ -105,6 +105,7 @@ class BlockStickyHeader {
   private readonly contentObserver: MutationObserver;
   private readonly fullscreenObserver: MutationObserver;
   private destroyed = false;
+  private measurePending = false;
 
   constructor(readonly view: EditorView) {
     this.header.className = 'meo-block-sticky-header';
@@ -135,7 +136,17 @@ class BlockStickyHeader {
   update(update: ViewUpdate): void {
     // Do not leave old document offsets clickable before the next geometry read.
     if (update.docChanged) this.clear();
-    this.requestMeasure();
+    if (update.transactions.length > 0) {
+      this.requestMeasure();
+    } else if (!this.measurePending) {
+      // Layout updates run inside CodeMirror's measure loop. Let its scroll
+      // anchor settle before chrome adds another read/write request.
+      this.measurePending = true;
+      queueMicrotask(() => {
+        this.measurePending = false;
+        this.requestMeasure();
+      });
+    }
   }
 
   private requestMeasure = (): void => {

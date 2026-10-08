@@ -151,7 +151,13 @@ async function main() {
   const browser = await launchTestBrowser();
   try {
     const page = await browser.newPage();
-    page.on('console', (message) => console.log(message.text()));
+    const measurementWarnings: string[] = [];
+    page.on('console', (message) => {
+      console.log(message.text());
+      if (/Measure loop restarted|Viewport failed to stabilize/.test(message.text())) {
+        measurementWarnings.push(message.text());
+      }
+    });
     await page.setViewport({ width: 420, height: 520, deviceScaleFactor: 1 });
     await page.setContent(`<!doctype html><body class="vscode-light"><div id="app" class="editor-root">
       <div class="mode-toolbar meo-preload-toolbar" role="presentation" aria-hidden="true"></div>
@@ -3060,6 +3066,9 @@ async function main() {
         previewVisibleAfterScroll,
         previewAfterClick
       })}`);
+    }
+    if (measurementWarnings.length > 0) {
+      throw new Error(`Viewport measurement exhausted its convergence budget: ${JSON.stringify(measurementWarnings)}`);
     }
     console.log('webview viewport checks passed');
   } finally {
