@@ -1213,7 +1213,7 @@ if (revealScrollDOM.scrollTop !== 420) {
   throw new Error(`A stale reveal moved the viewport to ${revealScrollDOM.scrollTop}`);
 }
 
-type GeometryShiftInterruption = 'none' | 'stale-frame' | 'destroy' | 'late-measure' | 'editor-update-overwrite' | 'read-write-layout' | 'layout-preservation';
+type GeometryShiftInterruption = 'none' | 'stale-frame' | 'destroy' | 'late-measure' | 'editor-update-overwrite' | 'read-write-layout' | 'layout-preservation' | 'overlap-layout-preservation';
 
 const runGeometryShiftReveal = async (
   kind: 'ordinary' | 'settled' | 'bounds',
@@ -1231,6 +1231,7 @@ const runGeometryShiftReveal = async (
   };
 
   let targetTop = 1600;
+  let readingLineTop = 1500;
   let scrollTop = 1000;
   const writes: number[] = [];
   const scrollDOM = {
@@ -1250,7 +1251,7 @@ const runGeometryShiftReveal = async (
     dom: new FakeEventTarget(),
     scrollDOM,
     contentDOM: {
-      querySelectorAll: () => [{ getBoundingClientRect: () => ({ top: 1500 - scrollTop }) }]
+      querySelectorAll: () => [{ getBoundingClientRect: () => ({ top: readingLineTop - scrollTop }) }]
     },
     posAtDOM: () => 100,
     state: { doc: { length: 4999 } },
@@ -1259,7 +1260,7 @@ const runGeometryShiftReveal = async (
       bottom: targetTop + 20 - scrollTop
     }),
     lineBlockAt: (position: number) => {
-      const top = position === 100 ? 1500 : targetTop;
+      const top = position === 100 ? readingLineTop : targetTop;
       return { top, bottom: top + 20, height: 20 };
     },
     requestMeasure: (measure?: { read: () => unknown; write: (value: unknown) => void }) => {
@@ -1299,7 +1300,14 @@ const runGeometryShiftReveal = async (
     } else {
       flushMeasure();
       await Promise.resolve();
-      if (interruption === 'layout-preservation') {
+      if (interruption === 'layout-preservation' || interruption === 'overlap-layout-preservation') {
+        if (interruption === 'overlap-layout-preservation') {
+          // The same navigation can request another reveal after adopting its
+          // target. Its no-op completion must not finish the pending reveal.
+          controller.revealPositionUntilStable(1600, { y: 'center' }, isCurrent);
+          flushMeasure();
+          await Promise.resolve();
+        }
         // A late block between the visible reading line and navigation target
         // must settle the explicit target rather than reserve that older line.
         controller.preserveLayoutChange({
@@ -1309,7 +1317,22 @@ const runGeometryShiftReveal = async (
         }, () => { targetTop += 600; });
         await flushAll();
         const targetVisible = targetTop >= scrollTop && targetTop + 20 <= scrollTop + 500;
-        return { scrollTop, writes, targetVisible };
+        const navigationResult = { scrollTop, writes: [...writes], targetVisible };
+        if (interruption === 'overlap-layout-preservation') {
+          // After both reveals finish, passive layout must again preserve the
+          // visible reading line rather than retain a completed navigation.
+          readingLineTop = scrollTop + 190;
+          controller.preserveLayoutChange({
+            element: { isConnected: true, getBoundingClientRect: () => ({ top: 50, bottom: 100 }) } as any,
+            from: 50,
+            to: 51
+          }, () => { readingLineTop += 40; targetTop += 40; });
+          await flushAll();
+          if (scrollTop !== navigationResult.scrollTop + 40) {
+            throw new Error(`Completed overlapping reveals blocked reading preservation: ${scrollTop}`);
+          }
+        }
+        return navigationResult;
       }
       if (interruption === 'editor-update-overwrite') {
         scrollTop = 1000;
@@ -1369,6 +1392,13 @@ if (
   JSON.stringify(layoutPreservedGeometryReveal.writes) !== '[1360,1960]'
 ) {
   throw new Error(`Late block layout replaced the navigation target: ${JSON.stringify(layoutPreservedGeometryReveal)}`);
+}
+const overlappingGeometryReveal = await runGeometryShiftReveal('settled', 'overlap-layout-preservation');
+if (
+  !overlappingGeometryReveal.targetVisible ||
+  JSON.stringify(overlappingGeometryReveal.writes) !== '[1360,1960]'
+) {
+  throw new Error(`An overlapping reveal released the pending navigation target: ${JSON.stringify(overlappingGeometryReveal)}`);
 }
 for (const interruption of ['stale-frame', 'destroy', 'late-measure'] as const) {
   const interruptedReveal = await runGeometryShiftReveal('settled', interruption);

@@ -358,7 +358,7 @@ export class ViewportController {
   private lastScrollDirection: -1 | 0 | 1 = 0;
   private interactionGeneration = 0;
   private navigationGeneration = 0;
-  private activeNavigationReveal: NavigationRevealState | null = null;
+  private readonly activeNavigationReveals = new Set<NavigationRevealState>();
   private explicitNavigationGeneration = 0;
   private pendingNavigationTarget: { position: number; generation: number } | null = null;
   private scrollLockGeneration = 0;
@@ -1747,7 +1747,7 @@ export class ViewportController {
 
   destroy(): void {
     this.destroyed = true;
-    this.activeNavigationReveal = null;
+    this.activeNavigationReveals.clear();
     this.cancelElementRetention();
     this.modeTransitionChain = null;
     this.linkedPreviewEnabled = false;
@@ -1875,7 +1875,7 @@ export class ViewportController {
       // Late rendered-block measurements must follow the navigation target,
       // rather than reserve a nearby reading line and pull the target away.
       this.activeLayoutAnchor = null;
-      this.activeNavigationReveal = state;
+      this.activeNavigationReveals.add(state);
     }
     let attempts = 0;
     let stableFrames = 0;
@@ -1885,7 +1885,7 @@ export class ViewportController {
       state.isCurrent()
     );
     const finish = (): void => {
-      if (this.activeNavigationReveal === state) this.activeNavigationReveal = null;
+      this.activeNavigationReveals.delete(state);
       state.phase = this.destroyed
         ? 'disposed'
         : isRevealCurrent()
@@ -2084,8 +2084,11 @@ export class ViewportController {
   }
 
   private hasActiveNavigationReveal(): boolean {
-    const state = this.activeNavigationReveal;
-    return Boolean(state && !this.destroyed && state.ownerGeneration === this.generation && state.isCurrent());
+    if (this.destroyed) return false;
+    for (const state of this.activeNavigationReveals) {
+      if (state.ownerGeneration === this.generation && state.isCurrent()) return true;
+    }
+    return false;
   }
 
   private hasActiveScrollLock(): boolean {
