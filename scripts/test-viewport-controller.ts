@@ -1213,7 +1213,7 @@ if (revealScrollDOM.scrollTop !== 420) {
   throw new Error(`A stale reveal moved the viewport to ${revealScrollDOM.scrollTop}`);
 }
 
-type GeometryShiftInterruption = 'none' | 'stale-frame' | 'destroy' | 'late-measure' | 'editor-update-overwrite' | 'read-write-layout';
+type GeometryShiftInterruption = 'none' | 'stale-frame' | 'destroy' | 'late-measure' | 'editor-update-overwrite' | 'read-write-layout' | 'layout-preservation';
 
 const runGeometryShiftReveal = async (
   kind: 'ordinary' | 'settled' | 'bounds',
@@ -1249,13 +1249,22 @@ const runGeometryShiftReveal = async (
   const controller = new ViewportController({
     dom: new FakeEventTarget(),
     scrollDOM,
+    contentDOM: {
+      querySelectorAll: () => [{ getBoundingClientRect: () => ({ top: 1500 - scrollTop }) }]
+    },
+    posAtDOM: () => 100,
     state: { doc: { length: 4999 } },
     coordsAtPos: () => ({
       top: targetTop - scrollTop,
       bottom: targetTop + 20 - scrollTop
     }),
-    lineBlockAt: () => ({ top: targetTop, bottom: targetTop + 20, height: 20 }),
-    requestMeasure: (measure: { read: () => unknown; write: (value: unknown) => void }) => measures.push(measure)
+    lineBlockAt: (position: number) => {
+      const top = position === 100 ? 1500 : targetTop;
+      return { top, bottom: top + 20, height: 20 };
+    },
+    requestMeasure: (measure?: { read: () => unknown; write: (value: unknown) => void }) => {
+      if (measure) measures.push(measure);
+    }
   } as any, { attachInteractions: false });
   const flushMeasure = (beforeWrite?: () => void) => {
     const batch = measures.splice(0);
@@ -1290,6 +1299,18 @@ const runGeometryShiftReveal = async (
     } else {
       flushMeasure();
       await Promise.resolve();
+      if (interruption === 'layout-preservation') {
+        // A late block between the visible reading line and navigation target
+        // must settle the explicit target rather than reserve that older line.
+        controller.preserveLayoutChange({
+          element: { isConnected: true, getBoundingClientRect: () => ({ top: 100, bottom: 200 }) } as any,
+          from: 1200,
+          to: 1201
+        }, () => { targetTop += 600; });
+        await flushAll();
+        const targetVisible = targetTop >= scrollTop && targetTop + 20 <= scrollTop + 500;
+        return { scrollTop, writes, targetVisible };
+      }
       if (interruption === 'editor-update-overwrite') {
         scrollTop = 1000;
         controller.reconcileAfterEditorUpdate();
@@ -1341,6 +1362,13 @@ if (
   throw new Error(
     `Editor measurement overrode an active reveal: ${JSON.stringify(reconciledGeometryReveal)}`
   );
+}
+const layoutPreservedGeometryReveal = await runGeometryShiftReveal('settled', 'layout-preservation');
+if (
+  !layoutPreservedGeometryReveal.targetVisible ||
+  JSON.stringify(layoutPreservedGeometryReveal.writes) !== '[1360,1960]'
+) {
+  throw new Error(`Late block layout replaced the navigation target: ${JSON.stringify(layoutPreservedGeometryReveal)}`);
 }
 for (const interruption of ['stale-frame', 'destroy', 'late-measure'] as const) {
   const interruptedReveal = await runGeometryShiftReveal('settled', interruption);

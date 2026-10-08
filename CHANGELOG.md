@@ -10,6 +10,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Unified link destination tooltips across prose, tables and Preview, with readable Unicode targets, localized prefixes, consistent modifier-key behavior and compact content-sized bubbles.
 - Preserved search text and highlights across editor modes without delaying mode transitions or competing with navigation.
 - Stabilized rendered block geometry, nested lists and quotes, table widths, scrolling and embedded-editor viewports through input and history changes; corrected clicking and selecting empty quoted lines.
+- Kept explicit Live navigation authoritative while late rendered-block layouts settle, preventing distant targets from being pulled back out of view.
 - Prevented window activity changes from stealing editor focus and improved keyboard focus feedback on preview controls.
 - Harmonized inline-code spacing and colors, dark text contrast, and borderless block backgrounds between Live and Preview.
 - Prevented Preview from announcing readiness for an initial blank iframe before its reading document is available.

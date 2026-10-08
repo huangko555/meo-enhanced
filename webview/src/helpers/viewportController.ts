@@ -358,6 +358,7 @@ export class ViewportController {
   private lastScrollDirection: -1 | 0 | 1 = 0;
   private interactionGeneration = 0;
   private navigationGeneration = 0;
+  private activeNavigationReveal: NavigationRevealState | null = null;
   private explicitNavigationGeneration = 0;
   private pendingNavigationTarget: { position: number; generation: number } | null = null;
   private scrollLockGeneration = 0;
@@ -564,7 +565,7 @@ export class ViewportController {
           this.view.requestMeasure();
           return;
         }
-        if (this.hasActiveDocumentAnchorStabilization() || this.activeElementRetentionCorrection) {
+        if (this.hasActiveDocumentAnchorStabilization() || this.hasActiveNavigationReveal() || this.activeElementRetentionCorrection) {
           this.view.requestMeasure();
           return;
         }
@@ -1746,6 +1747,7 @@ export class ViewportController {
 
   destroy(): void {
     this.destroyed = true;
+    this.activeNavigationReveal = null;
     this.cancelElementRetention();
     this.modeTransitionChain = null;
     this.linkedPreviewEnabled = false;
@@ -1869,6 +1871,12 @@ export class ViewportController {
       phase: 'reserved',
       isCurrent
     };
+    if (options.settle) {
+      // Late rendered-block measurements must follow the navigation target,
+      // rather than reserve a nearby reading line and pull the target away.
+      this.activeLayoutAnchor = null;
+      this.activeNavigationReveal = state;
+    }
     let attempts = 0;
     let stableFrames = 0;
     const isRevealCurrent = (): boolean => (
@@ -1877,6 +1885,7 @@ export class ViewportController {
       state.isCurrent()
     );
     const finish = (): void => {
+      if (this.activeNavigationReveal === state) this.activeNavigationReveal = null;
       state.phase = this.destroyed
         ? 'disposed'
         : isRevealCurrent()
@@ -2072,6 +2081,11 @@ export class ViewportController {
 
   private hasActiveDocumentAnchorStabilization(): boolean {
     return this.anchorStabilizationGeneration === this.generation;
+  }
+
+  private hasActiveNavigationReveal(): boolean {
+    const state = this.activeNavigationReveal;
+    return Boolean(state && !this.destroyed && state.ownerGeneration === this.generation && state.isCurrent());
   }
 
   private hasActiveScrollLock(): boolean {

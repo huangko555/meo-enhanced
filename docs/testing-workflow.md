@@ -200,6 +200,10 @@ late resources, external revisions, and disk reloads. Same-surface captures insi
 paragraph whitespace must preserve the gap; cross-mode checks do not require
 identical raw pixel offsets for differently sized rendered blocks.
 
+The controller contracts check that late block layout preserves an in-flight
+navigation target instead of replacing it with a nearby reading line, alongside
+new navigation, input, disposal and read/write measurement boundaries.
+
 `scripts/test-preview-loading-reuse.ts` holds the initial Preview iframe load after
 its Host response. It verifies that activation reuses that presentation while
 changed text, forced refresh, failed-response retry, and disposal retain their
