@@ -15,10 +15,22 @@ async function waitForFrames(page: Page, count = 8): Promise<void> {
   }, count);
 }
 
-async function clickVisibleMermaidModeButton(page: Page): Promise<void> {
+async function clickVisibleBlockModeButton(page: Page, kind: 'mermaid' | 'latex-math'): Promise<void> {
   // The floating header owns the visible action while the opening line is offscreen.
-  const floating = '.meo-block-sticky-header:not([hidden]) .meo-mermaid-mode-btn';
-  await page.click(await page.$(floating) ? floating : '.meo-mermaid-mode-btn');
+  const button = `.meo-${kind}-mode-btn`;
+  const floating = `.meo-block-sticky-header:not([hidden]) ${button}`;
+  const selector = await page.$(floating) ? floating : button;
+  // A recreated toolbar starts with pointer-events:none. Move the pointer first,
+  // then wait for the actual hit target before sending the click.
+  await page.hover(selector);
+  await page.waitForFunction((query) => {
+    const control = document.querySelector<HTMLElement>(query);
+    if (!control) return false;
+    const rect = control.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return rect.width > 0 && rect.height > 0 && hit !== null && control.contains(hit);
+  }, {}, selector);
+  await page.click(selector);
 }
 
 async function assertInitialInteractiveMathMeasurementStaysVisible(page: Page): Promise<void> {
@@ -1322,7 +1334,7 @@ async function main() {
         document.querySelector('.meo-mermaid-toolbar')?.querySelectorAll(':scope > :is(button, [role="button"])') ?? []
       );
     });
-    await page.click('.meo-mermaid-mode-btn');
+    await clickVisibleBlockModeButton(page, 'mermaid');
     await page.waitForFunction(() => {
       const toolbar = document.querySelector<HTMLElement>('.meo-mermaid-toolbar');
       return toolbar?.classList.contains('is-block-hovered')
@@ -1374,7 +1386,7 @@ async function main() {
         document.querySelector('.meo-latex-math-toolbar')?.querySelectorAll(':scope > :is(button, [role="button"])') ?? []
       );
     });
-    await page.click('.meo-latex-math-mode-btn');
+    await clickVisibleBlockModeButton(page, 'latex-math');
     await page.waitForFunction(() => {
       const toolbar = document.querySelector<HTMLElement>('.meo-latex-math-toolbar');
       return toolbar?.classList.contains('is-block-hovered')
@@ -1501,10 +1513,10 @@ async function main() {
     if (selectAllMode.controls.at(-2) !== 'Select all code' || selectAllMode.controls.at(-1) !== 'Copy code') {
       throw new Error(`Unexpected Mermaid action order: ${JSON.stringify(selectAllMode.controls)}`);
     }
-    await page.click('.meo-mermaid-mode-btn');
+    await clickVisibleBlockModeButton(page, 'mermaid');
     await waitForFrames(page);
 
-    await page.click('.meo-mermaid-mode-btn');
+    await clickVisibleBlockModeButton(page, 'mermaid');
     await waitForFrames(page);
     const splitMode = await page.evaluate(() => {
       const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
@@ -1652,7 +1664,7 @@ async function main() {
       throw new Error('Outer editor redo did not restore Mermaid source editing');
     }
 
-    await clickVisibleMermaidModeButton(page);
+    await clickVisibleBlockModeButton(page, 'mermaid');
     await waitForFrames(page);
     const codeMode = await page.evaluate(() => ({
       code: Boolean(document.querySelector('.meo-mermaid-editing-block.is-source')),
@@ -1663,7 +1675,7 @@ async function main() {
       throw new Error(`Unexpected Mermaid code mode: ${JSON.stringify(codeMode)}`);
     }
 
-    await clickVisibleMermaidModeButton(page);
+    await clickVisibleBlockModeButton(page, 'mermaid');
     await waitForFrames(page);
     await page.evaluate(() => {
       const editor = (window as any).__mermaidEditingEditor;
@@ -1690,13 +1702,13 @@ async function main() {
       throw new Error('Search navigation did not reapply temporary Mermaid split mode');
     }
 
-    await clickVisibleMermaidModeButton(page);
+    await clickVisibleBlockModeButton(page, 'mermaid');
     await waitForFrames(page);
     if (!(await page.$('.meo-mermaid-editing-block.is-source')) || (await page.$('.meo-mermaid-preview-shell'))) {
       throw new Error('Manual mode change did not override temporary Mermaid split mode');
     }
 
-    await clickVisibleMermaidModeButton(page);
+    await clickVisibleBlockModeButton(page, 'mermaid');
     await waitForFrames(page);
     if (!(await page.$('.meo-mermaid-block')) || (await page.$('.meo-mermaid-editing-block'))) {
       throw new Error('Manual preview mode remained overridden by the previous search match');
@@ -1709,7 +1721,7 @@ async function main() {
     }
 
     await page.setViewport({ width: 700, height: 720, deviceScaleFactor: 1 });
-    await page.click('.meo-mermaid-mode-btn');
+    await clickVisibleBlockModeButton(page, 'mermaid');
     await waitForFrames(page);
     const narrowLayout = await page.evaluate(() => {
       const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
@@ -1792,7 +1804,7 @@ async function main() {
     await waitForFrames(page, 8);
     await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(42, 'center'));
     await waitForFrames(page);
-    await page.click('.meo-mermaid-mode-btn');
+    await clickVisibleBlockModeButton(page, 'mermaid');
     await waitForFrames(page);
     await page.waitForFunction((expectedColors) => {
       const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split');
@@ -1906,7 +1918,7 @@ async function main() {
       (window as any).__mermaidEditingEditor.view.scrollDOM.scrollTop = 0;
     });
     await waitForFrames(page);
-    await page.click('.meo-mermaid-mode-btn');
+    await clickVisibleBlockModeButton(page, 'mermaid');
     await waitForFrames(page);
     const shortSourceLayout = await page.evaluate(() => {
       const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-source')!;
@@ -2042,7 +2054,7 @@ async function main() {
 
     await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(66, 'center'));
     await waitForFrames(page);
-    await page.click('.meo-mermaid-mode-btn');
+    await clickVisibleBlockModeButton(page, 'mermaid');
     await waitForFrames(page);
     await assertBlockAreaClickKeepsViewport(
       page,
@@ -2055,7 +2067,7 @@ async function main() {
       'CLICK_MERMAID_24 --> TARGET',
       '__meoMermaidEditingController'
     );
-    await page.click('.meo-mermaid-mode-btn');
+    await clickVisibleBlockModeButton(page, 'mermaid');
     await waitForFrames(page);
     await assertSourceClickKeepsViewport(
       page,
@@ -2081,7 +2093,7 @@ async function main() {
     await waitForFrames(page);
     await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(20, 'center'));
     await waitForFrames(page);
-    await page.click('.meo-latex-math-mode-btn');
+    await clickVisibleBlockModeButton(page, 'latex-math');
     await waitForFrames(page);
     await assertSourceClickKeepsViewport(
       page,
@@ -2089,7 +2101,7 @@ async function main() {
       'CLICK_LATEX_18 = x^2',
       '__meoLatexMathEditingController'
     );
-    await page.click('.meo-latex-math-mode-btn');
+    await clickVisibleBlockModeButton(page, 'latex-math');
     await waitForFrames(page);
     await assertSourceClickKeepsViewport(
       page,
@@ -2169,10 +2181,10 @@ async function main() {
 
     await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(147, 'center'));
     await waitForFrames(page);
-    await page.click('.meo-mermaid-mode-btn');
+    await clickVisibleBlockModeButton(page, 'mermaid');
     await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(165, 'center'));
     await waitForFrames(page);
-    await page.click('.meo-latex-math-mode-btn');
+    await clickVisibleBlockModeButton(page, 'latex-math');
     await waitForFrames(page);
     for (const lineNumber of [141, 142, 143, 144, 145, 146, 162, 163, 164]) {
       await assertDocumentLineClickKeepsViewport(page, lineNumber, false);
@@ -2273,7 +2285,7 @@ async function main() {
       })}`);
     }
 
-    await page.click('.meo-latex-math-mode-btn');
+    await clickVisibleBlockModeButton(page, 'latex-math');
     await waitForFrames(page);
     const splitInitial = await page.evaluate(() => {
       const viewport = document.querySelector<HTMLElement>(
@@ -2602,7 +2614,7 @@ async function main() {
       });
     });
     await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-block svg[width="2400"]')));
-    await page.click('.meo-mermaid-mode-btn');
+    await clickVisibleBlockModeButton(page, 'mermaid');
     await waitForFrames(page, 12);
     const wideSplitBounds = await page.evaluate(() => {
       const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
