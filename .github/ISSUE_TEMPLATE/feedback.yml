@@ -1,0 +1,41 @@
+name: 问题或建议 / Bug or suggestion
+description: 报告问题或提出改进建议 / Report a bug or suggest an improvement.
+body:
+  - type: textarea
+    id: feedback
+    attributes:
+      label: 反馈内容 / Feedback
+      placeholder: |
+        遇到的问题或希望改进的地方 / Problem or improvement:
+        期望效果（如有） / Desired outcome (if any):
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 步骤或示例（可选） / Steps or example (optional)
+      description: 可补充操作步骤或 Markdown 示例 / Add steps or a Markdown sample.
+      placeholder: |
+        1. ...
+        2. ...
+
+        ```md
+        最小示例 / Minimal sample
+        ```
+    validations:
+      required: false
+
+  - type: input
+    id: environment
+    attributes:
+      label: 环境（可选） / Environment (optional)
+      placeholder: MEO x.x.x · VS Code x.x.x · Windows/macOS/Linux
+    validations:
+      required: false
+
+  - type: textarea
+    id: details
+    attributes:
+      label: 截图或补充（可选） / Screenshots or details (optional)
+      description: 可拖入截图或录屏 / Drop screenshots or recordings here.
