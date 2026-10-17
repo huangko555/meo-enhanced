@@ -1190,6 +1190,7 @@ export function createPreviewController({
     end: number;
     top: number;
     bottom: number;
+    rendered: boolean;
   };
   let sourceMapDocument: Document | null = null;
   let sourceMap: PreviewSourceMapEntry[] = [];
@@ -2324,7 +2325,8 @@ export function createPreviewController({
             element,
             ...range,
             top: rect.top + scrollTop,
-            bottom: rect.bottom + scrollTop
+            bottom: rect.bottom + scrollTop,
+            rendered: element.getClientRects().length > 0
           };
         })
         .filter((entry): entry is PreviewSourceMapEntry => entry !== null)
@@ -2332,6 +2334,7 @@ export function createPreviewController({
         // footnotes and similar semantic blocks intentionally render elsewhere.
         .sort((left, right) => left.start - right.start || right.end - left.end || left.top - right.top);
       visualSourceMap = [...sourceMap]
+        .filter(entry => entry.rendered)
         .sort((left, right) => left.top - right.top || left.bottom - right.bottom || left.start - right.start);
       sourceMapByElement = new WeakMap();
       for (const entry of sourceMap) sourceMapByElement.set(entry.element, entry);
@@ -2450,7 +2453,6 @@ export function createPreviewController({
     }
     return ranges[Math.max(0, high)];
   };
-  const getSourceElements = (): HTMLElement[] => getSourceMap().map(({ element }) => element);
   const getSourceRange = (element: HTMLElement): { start: number; end: number } | null => {
     const start = Number.parseInt(element.dataset.sourceLine ?? '', 10);
     if (!Number.isFinite(start)) {
@@ -2812,34 +2814,40 @@ export function createPreviewController({
 
   const getVisibleDocumentRange = () => {
     const viewportHeight = frame.contentWindow?.innerHeight ?? host.clientHeight;
-    const elements = getSourceElements();
-    const visibleLines = elements
-      .filter((element) => {
-        if (element.getClientRects().length === 0) return false;
-        const rect = element.getBoundingClientRect();
-        return rect.height > 0 && rect.bottom > 0 && rect.top < viewportHeight;
-      })
-      .map((element) => Number.parseInt(element.dataset.sourceLine ?? '1', 10))
-      .filter(Number.isFinite);
-    const fromLine = visibleLines.length > 0 ? Math.min(...visibleLines) : 1;
+    const viewportTop = getFrameDocument()?.scrollingElement?.scrollTop ?? 0;
+    let first = Infinity;
+    let last = -Infinity;
+    // Geometry is already indexed for reading-position restoration. Scroll only
+    // changes the viewport bounds, not each block's document coordinates.
+    if (!host.hidden && host.getClientRects().length > 0) {
+      for (const entry of getVisualSourceMap()) {
+        if (entry.top >= viewportTop + viewportHeight) break;
+        if (entry.bottom <= viewportTop || entry.bottom <= entry.top) continue;
+        first = Math.min(first, entry.start);
+        last = Math.max(last, entry.start);
+      }
+    }
+    const fromLine = Number.isFinite(first) ? first : 1;
     // A hidden/unpainted surface has no visible range, never the entire document.
-    const toLine = visibleLines.length > 0 ? Math.max(...visibleLines) : fromLine;
+    const toLine = Number.isFinite(last) ? last : fromLine;
     return { from: fromLine, to: toLine, fromLine, toLine };
   };
 
   const outlineAdapter = {
     getHeadings,
     getViewportAnchorOffset: (ratio = 0.2) => {
-      const anchorY = (frame.contentWindow?.innerHeight ?? host.clientHeight) * ratio;
-      let activeLine = 1;
-      for (const heading of getSourceElements()) {
-        if (heading.getClientRects().length === 0) continue;
-        if (heading.getBoundingClientRect().top > anchorY) {
-          break;
-        }
-        activeLine = Number.parseInt(heading.dataset.sourceLine ?? '1', 10);
+      if (host.hidden || host.getClientRects().length === 0) return 1;
+      const anchorY = (getFrameDocument()?.scrollingElement?.scrollTop ?? 0)
+        + (frame.contentWindow?.innerHeight ?? host.clientHeight) * ratio;
+      const entries = getVisualSourceMap();
+      let low = 0;
+      let high = entries.length - 1;
+      while (low <= high) {
+        const middle = (low + high) >>> 1;
+        if (entries[middle].top <= anchorY) low = middle + 1;
+        else high = middle - 1;
       }
-      return activeLine;
+      return entries[high]?.start ?? 1;
     },
     getVisibleDocumentRange,
     getScrollElement: () => getFrameDocument() ?? frame,

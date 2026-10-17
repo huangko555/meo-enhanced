@@ -595,7 +595,7 @@
     "test:release": "bun scripts/test-workflow.ts release",
     "test:endurance": "bun scripts/test-workflow.ts endurance",
     "test:large-document": "bun scripts/test-workflow.ts large-document",
-    "test:large-document-budget": "bun scripts/test-source-range-index.ts && bun scripts/test-live-scan-budget.ts && bun scripts/test-live-decoration-history.ts && bun scripts/test-large-document-work-budget.ts",
+    "test:large-document-budget": "bun scripts/test-source-range-index.ts && bun scripts/test-live-scan-budget.ts && bun scripts/test-live-decoration-history.ts && bun scripts/test-preview-viewport-work-budget.ts && bun scripts/test-large-document-work-budget.ts",
     "test:latex-scanner": "bun scripts/test-ui-language.ts && bun scripts/test-latex-math-scanner.ts && bun scripts/test-latex-math-scanner-integration.ts && bun scripts/test-architecture-shared-module-contracts.ts",
     "test:table-provenance": "bun scripts/test-table-transaction-provenance.ts && bun scripts/test-table-provenance-adapter-browser.ts && bun scripts/test-table-provenance-external-presentation.ts",
     "test:table-column-width": "bun scripts/test-table-column-width-policy.ts && bun scripts/test-table-column-width-policy-browser.ts && bun scripts/test-table-column-width-adapter.ts && bun scripts/test-table-column-width-adapter-browser.ts && bun scripts/test-table-column-width-lifecycle.ts && bun scripts/test-table-column-width-production-cutover.ts && bun scripts/test-table-column-width-responsive.ts && bun scripts/test-live-table-tab-visibility.ts && bun scripts/test-source-lightweight-table-column-width.ts",

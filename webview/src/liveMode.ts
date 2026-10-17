@@ -1905,6 +1905,9 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
   const activeLines = collectActiveLines(state);
   const indentSelectedLines = collectIndentSelectedLines(state);
   const tree = resolvedSyntaxTree(state);
+  // Other helpers may extend the parser later in this build. Only the tree
+  // actually used for structural decoration proves that this result is complete.
+  const complete = usesLargeDocumentDerivedWorkBudget(state) && syntaxTreeAvailable(state, state.doc.length);
   const footnotes = parseFootnotes(state);
   const detailsBlocks = getDetailsBlocks(state, tree);
   const codeBlockLines = collectCodeBlockLines(state, tree);
@@ -2508,7 +2511,12 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
   );
   preserveRenderedBlockPreviewHeights(ranges, changes ? previous?.map(changes) : previous);
   const result = Decoration.set(ranges, true);
-  return filterDecorationsOutsideMergeConflicts(state, result);
+  const filtered = filterDecorationsOutsideMergeConflicts(state, result);
+  if (usesLargeDocumentDerivedWorkBudget(state)) {
+    liveDecorationMetadata.set(state, { ...liveDecorationMetadata.get(state), complete });
+    if (complete && !isEmptyDecorationSet(filtered)) completeLiveDecorationSets.add(filtered);
+  }
+  return filtered;
 }
 
 function hasCodeBlockAncestor(node: SyntaxNodeRef): boolean {
@@ -2559,13 +2567,7 @@ function safeBuildDecorations(
   extra: { docChanged?: boolean; selection?: EditorSelection; changes?: ChangeDesc } = {}
 ): DecorationSet {
   try {
-    const decorations = buildDecorations(state, fallback, extra.changes);
-    if (usesLargeDocumentDerivedWorkBudget(state)) {
-      liveDecorationMetadata.set(state, {
-        ...liveDecorationMetadata.get(state), complete: syntaxTreeAvailable(state, state.doc.length)
-      });
-    }
-    return decorations;
+    return buildDecorations(state, fallback, extra.changes);
   } catch (error) {
     liveDecorationMetadata.set(state, { complete: false });
     console.error('[MEO liveMode] decoration build failed', {
@@ -3471,6 +3473,9 @@ type LiveDecorationMetadata = {
 // One complete checkpoint per current editor state. Values retain no prior
 // EditorState or checkpoint chain, and disappear with their editor's state.
 const liveDecorationMetadata = new WeakMap<EditorState, LiveDecorationMetadata>();
+// Creation during reconfiguration may use a provisional state identity. The
+// value's proof survives that handoff without retaining the provisional state.
+const completeLiveDecorationSets = new WeakSet<DecorationSet>();
 
 function hasDefaultLivePresentation(state: EditorState): boolean {
   const mermaid = state.field(mermaidEditingStateField, false);
@@ -3553,8 +3558,7 @@ const liveDecorationField = StateField.define<DecorationSet>({
       // completed value with the final state too; failed creation returns none.
       if (usesLargeDocumentDerivedWorkBudget(transaction.state)) {
         liveDecorationMetadata.set(transaction.state, {
-          complete: !isEmptyDecorationSet(decorations)
-            && syntaxTreeAvailable(transaction.state, transaction.state.doc.length)
+          complete: completeLiveDecorationSets.has(decorations)
         });
       }
       return decorations;
