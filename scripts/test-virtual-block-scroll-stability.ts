@@ -315,7 +315,7 @@ async function main(): Promise<void> {
       content: ':root{--meo-background:#24292e;--meo-foreground:#e6edf3;--meo-code-background:#1b1f23;--meo-inset-background:#20252a;--meo-semantic-mutedForeground:#8b949e;--meo-semantic-tableBorder:#3e444d;--meo-font-live:Arial;--meo-font-live-weight:400;--meo-font-live-size:16px;--meo-font-source:monospace;--meo-font-source-weight:400;--meo-font-source-size:14px;--vscode-editor-font-family:monospace;--vscode-editor-font-size:14px;--vscode-editor-line-height:20px}'
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
-    const tableMeasurement = await page.evaluate(() => {
+    const tableMeasurement = await page.evaluate(async () => {
       const prototype = CanvasRenderingContext2D.prototype;
       const original = prototype.measureText;
       const calls: string[] = [];
@@ -330,14 +330,20 @@ async function main(): Promise<void> {
           rows: [['same', '**same**'], ['same<br>same', 'same']] };
         const firstHeight = estimate(request);
         const firstCalls = calls.length;
+        estimate(request);
+        const repeatedCalls = calls.length - firstCalls;
+        // Fonts may settle between browser tasks, never inside one synchronous
+        // height-map traversal. The next task must obtain fresh text metrics.
+        await Promise.resolve();
         scale = 100;
+        const beforeChanged = calls.length;
         const changedHeight = estimate(request);
-        return { firstHeight, changedHeight, firstCalls, secondCalls: calls.length - firstCalls };
+        return { firstHeight, changedHeight, firstCalls, repeatedCalls, secondCalls: calls.length - beforeChanged };
       } finally {
         prototype.measureText = original;
       }
     });
-    if (tableMeasurement.firstCalls !== 3 || tableMeasurement.secondCalls !== 3
+    if (tableMeasurement.firstCalls !== 3 || tableMeasurement.repeatedCalls !== 0 || tableMeasurement.secondCalls !== 3
       || tableMeasurement.firstHeight !== 123 || tableMeasurement.changedHeight !== 411) {
       throw new Error(`Table height must measure each distinct line once per estimate and remeasure later: ${JSON.stringify(tableMeasurement)}`);
     }

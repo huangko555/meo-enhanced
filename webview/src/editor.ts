@@ -17,7 +17,8 @@ import type { SyntaxNode } from '@lezer/common';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
 import { markdownKeymap } from '@codemirror/lang-markdown';
 import { editorMarkdownLanguage } from './liveMode';
-import { indentUnit, syntaxTree, forceParsing } from '@codemirror/language';
+import { indentUnit, syntaxTree, forceParsing, syntaxHighlighting } from '@codemirror/language';
+import { sourceHighlightStyle } from './theme';
 import { prepareSourceSyntax, sourceSyntax, sourceSyntaxPreparation } from './helpers/sourceSyntax';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
 import type { UiLanguage } from '../../src/foundation/uiLanguage';
@@ -2593,8 +2594,8 @@ export function createEditor({
         mermaidDiagramPresentationConsumer
       ),
       markdownInlineStyleTheme,
-      sourceSyntaxPreparation,
-      modeCompartment.of(startMode === 'live' ? [shikiCodeHighlight, ...liveModeExtensions({ largeDocument })] : sourceMode()),
+      largeDocument ? [] : sourceSyntaxPreparation,
+      modeCompartment.of(startMode === 'live' ? [shikiCodeHighlight, ...liveModeExtensions({ largeDocument })] : sourceMode(largeDocument)),
       searchQueryField,
       searchAnchorField,
       Prec.high(searchMatchField),
@@ -2808,7 +2809,9 @@ export function createEditor({
     getMode: () => currentMode === 'live' ? 'live' : 'source',
     previewSurface: previewViewportSurface
   });
-  mermaidDocumentPreloader = createMermaidDocumentPreloader(
+  // Large Live documents already mount visible diagram widgets on demand.
+  // Warming every distant diagram competes with input and defeats that window.
+  mermaidDocumentPreloader = largeDocument ? null : createMermaidDocumentPreloader(
     mermaidDiagramPresentationConsumer,
     () => {
       if (!editorDestroyed && currentMode === 'live') {
@@ -2817,7 +2820,7 @@ export function createEditor({
     },
     () => viewportController.isUserScrolling()
   );
-  if (startMode === 'live') mermaidDocumentPreloader.schedule(view.state);
+  if (startMode === 'live') mermaidDocumentPreloader?.schedule(view.state);
   interactionContinuity = createEditorInteractionContinuity({
     view,
     viewport: {
@@ -3328,6 +3331,7 @@ export function createEditor({
     state: view.state,
     prepareSourceSyntax(isCurrent: () => boolean) {
       commitActiveTableInput();
+      if (largeDocument) return Promise.resolve(!editorDestroyed && isCurrent());
       return prepareSourceSyntax(view, isCurrent);
     },
     async whenVisiblePresentationReady(timeoutMs: number) {
@@ -3853,7 +3857,7 @@ export function createEditor({
               setMermaidSearchRevealEffect.of(null),
               setLatexMathSearchRevealEffect.of(null),
               modeCompartment.reconfigure(
-                nextMode === 'live' ? [shikiCodeHighlight, ...liveModeExtensions({ largeDocument })] : sourceMode()
+                nextMode === 'live' ? [shikiCodeHighlight, ...liveModeExtensions({ largeDocument })] : sourceMode(largeDocument)
               ),
               gitGutterCompartment.reconfigure(
                 nextMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()
@@ -4915,13 +4919,15 @@ function insertWikiLink(
   });
 }
 
-function sourceMode(): Extension[] {
+function sourceMode(largeDocument: boolean): Extension[] {
   return [
     // Block display choices belong to the editing session, including Source.
     mermaidEditingStateField,
     latexMathEditingStateField,
     editorMarkdownLanguage,
-    sourceSyntax,
+    // Preserve parser context and viewport coloring without preparing TextMate
+    // tokens for every line before a large Source surface can become editable.
+    largeDocument ? syntaxHighlighting(sourceHighlightStyle) : sourceSyntax,
     sourceCodeBlockField,
     gitDiffLineHighlightsField,
     ...gitDiffDetailsExtensions(),

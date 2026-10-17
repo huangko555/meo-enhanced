@@ -81,6 +81,30 @@ if (!(reportedPreviewErrors[0] instanceof Error)
   || reportedPreviewErrors[0].message !== 'runtime failed') {
   throw new Error('Unexpected Preview Mermaid failures must be reported');
 }
+let viewportRequests = 0;
+let diagramTop = 50_000;
+const viewportRenderer = createPreviewMermaidRenderer({
+  acquireGroup: () => ({
+    runExclusive: async () => { viewportRequests += 1; },
+    end() {}
+  })
+} as MermaidDiagramRenderResources);
+const largeFrame = {
+  documentElement: { dataset: { meoPreviewLargeDocument: 'true' } },
+  defaultView: { innerHeight: 720 },
+  querySelectorAll: () => [{
+    classList: { contains: () => false },
+    dataset: {},
+    getBoundingClientRect: () => ({ top: diagramTop, bottom: diagramTop + 200, height: 200 })
+  }]
+} as unknown as Document;
+await viewportRenderer.render(largeFrame, 'dark');
+assert.equal(viewportRequests, 0, 'large Preview must not acquire the renderer for a distant diagram');
+diagramTop = 100;
+await viewportRenderer.render(largeFrame, 'dark');
+assert.equal(viewportRequests, 1, 'a diagram entering the viewport must become eligible');
+viewportRenderer.dispose();
+
 const browser = await launchTestBrowser();
 
 try {

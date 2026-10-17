@@ -128,6 +128,8 @@ function visualLineWidths(source: string, measure: (text: string) => number): re
 }
 
 let textMeasurementContext: CanvasRenderingContext2D | null | undefined;
+const textWidths = new Map<string, number>();
+let clearTextWidthsQueued = false;
 
 function textWidth(text: string, metrics: BlockWidgetLayoutMetrics): number {
   if (typeof document !== 'undefined') {
@@ -135,8 +137,20 @@ function textWidth(text: string, metrics: BlockWidgetLayoutMetrics): number {
       textMeasurementContext = document.createElement('canvas').getContext('2d');
     }
     if (textMeasurementContext) {
-      textMeasurementContext.font = `${metrics.fontWeight} ${metrics.fontSize}px ${metrics.fontFamily}`;
-      return textMeasurementContext.measureText(text).width;
+      const font = `${metrics.fontWeight} ${metrics.fontSize}px ${metrics.fontFamily}`;
+      const key = font + '\n' + text;
+      const cached = textWidths.get(key);
+      if (cached !== undefined) return cached;
+      if (!clearTextWidthsQueued) {
+        clearTextWidthsQueued = true;
+        // Reuse measurements within CodeMirror's synchronous height-map walk.
+        // Drop them before another task can load a font or alter its metrics.
+        queueMicrotask(() => { textWidths.clear(); clearTextWidthsQueued = false; });
+      }
+      if (textMeasurementContext.font !== font) textMeasurementContext.font = font;
+      const width = textMeasurementContext.measureText(text).width;
+      if (textWidths.size < 4_096) textWidths.set(key, width);
+      return width;
     }
   }
   let width = 0;

@@ -138,6 +138,12 @@ const scannerContractCases: ReadonlyArray<Readonly<{
 
 for (const { label, text, options, expected } of scannerContractCases) {
   assert.deepEqual(scanLatexMath(text, options), expected, label);
+  const padding = 'Ordinary prose without a math opener.\n'.repeat(3_000);
+  assert.deepEqual(scanLatexMath(padding + text, {
+    ...options,
+    excludedRanges: options?.excludedRanges?.map(range => ({ from: range.from + padding.length, to: range.to + padding.length }))
+  }), expected.map(range => ({ ...range, from: range.from + padding.length, to: range.to + padding.length })),
+  label + ' after a large prose prefix');
 }
 
 

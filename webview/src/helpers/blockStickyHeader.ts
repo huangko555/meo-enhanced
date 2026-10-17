@@ -11,6 +11,7 @@ import { uiLanguageFacet } from '../editor/uiLanguage';
 import { measureFixedContainingBlockMapping } from '../editor/fixedChromeDomGeometry';
 import { projectFixedChromeGeometry, type FixedChromeRect } from '../editor/fixedChromeGeometry';
 import { getRenderedBlockPreviewControlsOwner, mountFloatingRenderedBlockPreviewControls } from './renderedBlockModeControls';
+import { isLiveInputDerivedWorkPending, usesLargeDocumentDerivedWorkBudget } from '../editor/liveInputDerivedWork';
 
 const HEADER_HEIGHT = 30;
 const shellSelector = '.meo-rendered-block-preview, .meo-rendered-block-mode-shell';
@@ -161,6 +162,9 @@ class BlockStickyHeader {
   private measure(): Measurement | 'fullscreen' | null {
     const view = this.view;
     if (this.destroyed) return null;
+    // Header geometry must not rediscover every rich block between keystrokes.
+    // The accepted presentation refresh schedules another measurement.
+    if (usesLargeDocumentDerivedWorkBudget(view.state) && isLiveInputDerivedWorkPending(view.state)) return null;
     if (view.dom.ownerDocument.querySelector('.meo-mermaid-fullscreen-scrim, .meo-latex-math-fullscreen-scrim')) return 'fullscreen';
     const scroller = view.scrollDOM.getBoundingClientRect();
     if (scroller.height < HEADER_HEIGHT * 2) return null;

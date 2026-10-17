@@ -8,6 +8,7 @@ import { createPreviewMermaidRenderer } from './previewMermaid';
 import { createCopyCodeButton } from './codeBlockControls';
 import { logWebviewRenderError } from './errors';
 import { normalizeDocumentText } from '../../../src/foundation/documentText';
+import { assessLargeDocument } from '../../../src/foundation/largeDocument';
 import { createDocumentScrollToTopController } from './scrollToTop';
 import type { OutlineHeading } from './outline';
 import type { EditorAppearance as PreviewAppearance } from '../../../src/protocol/editorCommands';
@@ -1234,6 +1235,7 @@ export function createPreviewController({
     readonly controller: LatexMathViewportController;
     readonly signature: string;
   }>();
+  let previewMathObserver: IntersectionObserver | null = null;
   let previewTableLayout: PreviewTableLayoutController | null = null;
   let disposeDeferredImages = () => {};
   let frameEvents: AbortController | null = null;
@@ -1254,8 +1256,17 @@ export function createPreviewController({
     if (highlightFrame !== null) return;
     highlightFrame = window.requestAnimationFrame(() => {
       highlightFrame = null;
-      if (currentCodeHighlight(frameDocument)()) {
-        applyPreviewCodeHighlight(frameDocument, true, currentCodeHighlight(frameDocument));
+      if (!disposed && activeFrameDocument === frameDocument && !host.hidden) {
+        if (currentCodeHighlight(frameDocument)()) {
+          applyPreviewCodeHighlight(frameDocument, true, currentCodeHighlight(frameDocument));
+        }
+        if (frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true' && latestPayload?.hasMermaid) {
+          const generation = frameGeneration;
+          void previewMermaidRenderer.render(frameDocument, appearance,
+            () => { sourceMapDirty = true; },
+            () => !disposed && !host.hidden && generation === frameGeneration && activeFrameDocument === frameDocument,
+            mutate => withViewportTransaction(() => { mutate(); sourceMapDirty = true; }));
+        }
       }
     });
   };
@@ -1344,6 +1355,8 @@ export function createPreviewController({
   };
 
   const disposePreviewMathViewports = () => {
+    previewMathObserver?.disconnect();
+    previewMathObserver = null;
     for (const viewport of previewMathViewports.values()) {
       viewport.controller.destroy();
     }
@@ -1469,6 +1482,8 @@ export function createPreviewController({
   };
 
   const attachPreviewMathViewports = (frameDocument: Document) => {
+    previewMathObserver?.disconnect();
+    previewMathObserver = null;
     const roots = Array.from(frameDocument.querySelectorAll<HTMLElement>(
       '.meo-export-math-display, .meo-export-math-inline'
     ));
@@ -1482,8 +1497,11 @@ export function createPreviewController({
       viewport.controller.destroy();
       previewMathViewports.delete(element);
     }
-    for (const element of roots) {
-      if (previewMathViewports.has(element)) continue;
+    const attach = (element: HTMLElement) => {
+      if (previewMathViewports.has(element)) {
+        previewMathViewports.get(element)!.controller.setActive(true);
+        return;
+      }
       const copyActions = element.querySelector(':scope > .meo-preview-code-actions');
       copyActions?.remove();
       const controller = element.classList.contains('meo-export-math-inline')
@@ -1493,6 +1511,24 @@ export function createPreviewController({
       const signature = getPreviewPresentationSignature(element);
       if (signature) previewMathViewports.set(element, { controller, signature });
       else controller.destroy();
+    };
+    const frameWindow = frameDocument.defaultView;
+    if (frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true' && frameWindow?.IntersectionObserver) {
+      // A single observer gates the expensive per-formula resize/font measurements.
+      // Keep fitted DOM when suspending so scrolling does not change page geometry.
+      for (const viewport of previewMathViewports.values()) viewport.controller.setActive(false);
+      previewMathObserver = new frameWindow.IntersectionObserver(entries => {
+        if (disposed || activeFrameDocument !== frameDocument || host.hidden) return;
+        for (const entry of entries) {
+          const element = entry.target as HTMLElement;
+          if (!element.isConnected) continue;
+          if (entry.isIntersecting) attach(element);
+          else previewMathViewports.get(element)?.controller.setActive(false);
+        }
+      }, { rootMargin: '800px 0px' });
+      for (const element of roots) previewMathObserver.observe(element);
+    } else {
+      for (const element of roots) attach(element);
     }
   };
 
@@ -1689,6 +1725,7 @@ export function createPreviewController({
       frameEvents = new AbortController();
       const signal = frameEvents.signal;
       frameRenderedText = renderedText;
+      frameDocument.documentElement.dataset.meoPreviewLargeDocument = String(assessLargeDocument(renderedText).preferSource);
       loadingFrameText = null;
       sourceMapResizeObserver?.disconnect();
       const FrameResizeObserver = frame.contentWindow
@@ -1735,11 +1772,12 @@ export function createPreviewController({
       syncPreviewCodeHighlight(frameDocument);
       ensureReadableCode(frameDocument);
       frameDocument.addEventListener('scroll', () => {
-        if (!disposed && activeFrameDocument === frameDocument && isSourceColoringEnabled()) scheduleViewportHighlight(frameDocument);
+        if (!disposed && activeFrameDocument === frameDocument) scheduleViewportHighlight(frameDocument);
         if (!disposed && activeFrameDocument === frameDocument) {
           onViewportChange?.();
         }
       }, { passive: true, signal });
+      frameDocument.addEventListener('toggle', () => scheduleViewportHighlight(frameDocument), { capture: true, signal });
       const notifyTrustedViewportInteraction = (event: Event) => {
         if (!event.isTrusted) return;
         if (event.type === 'keydown') {
@@ -2921,12 +2959,19 @@ export function createPreviewController({
       host.inert = !visible;
       updateViewportAlignment();
       if (!visible) {
+        previewMathObserver?.disconnect();
+        previewMathObserver = null;
+        for (const viewport of previewMathViewports.values()) viewport.controller.setActive(false);
         appearanceRetentionGeneration += 1;
         appearanceRetention?.release();
         cancelPaintReady();
         search.surfaceHidden();
       }
-      else if (activeFrameDocument && !hasPendingRequest) schedulePaintReady();
+      else if (activeFrameDocument && !hasPendingRequest) {
+        attachPreviewMathViewports(activeFrameDocument);
+        scheduleViewportHighlight(activeFrameDocument);
+        schedulePaintReady();
+      }
     },
     focus: () => {
       frame.focus();

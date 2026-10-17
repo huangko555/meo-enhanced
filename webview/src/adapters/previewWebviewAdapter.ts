@@ -3,6 +3,7 @@ import type {
   PreviewRenderResponse
 } from '../../../src/protocol/previewRender';
 import type { EditorAppearance as PreviewAppearance } from '../../../src/protocol/editorCommands';
+import { assessLargeDocument } from '../../../src/foundation/largeDocument';
 import type { PreviewPresetDefinition, PreviewPresetDiagnostic, PreviewPresetId } from '../../../src/foundation/previewPresets';
 
 type ResolvedPreviewAppearance = Exclude<PreviewAppearance, 'auto'>;
@@ -136,7 +137,11 @@ export function createPreviewWebviewAdapter(
       surface.setFontFamily(input.fontFamily);
       surface.setCodeFontFamily?.(input.codeFontFamily ?? '');
       if (input.presetState !== undefined) surface.restorePresetState?.(input.presetState);
-      if (!input.active) trackBackgroundRender(surface.preload(input.text));
+      // Hidden Preview still parses the full document and initializes its rich
+      // renderers. Keep that work off the Source/Live startup path under pressure.
+      if (!input.active && !assessLargeDocument(input.text).preferSource) {
+        trackBackgroundRender(surface.preload(input.text));
+      }
     },
     setActive(input) {
       if (disposed) return;

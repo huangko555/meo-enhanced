@@ -4,6 +4,7 @@ import { renderLatexMathToHtml } from './math';
 import { collectDocumentMathRanges, getDisplayMathCopySource, getDisplayMathSource } from './displayMathBlocks';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { uiLanguageFacet } from '../editor/uiLanguage';
+import { isLiveInputDerivedWorkRefresh, shouldDeferLiveInputDerivedWork, usesLargeDocumentDerivedWorkBudget } from '../editor/liveInputDerivedWork';
 
 /** Formula editing belongs to the document selection, including both delimiters. */
 export function isDisplayMathEditing(state: EditorState, startLine: number, endLine: number): boolean {
@@ -16,14 +17,18 @@ export function isDisplayMathEditing(state: EditorState, startLine: number, endL
 
 type ValidResult = { from: number; to: number; html: string };
 
-function collectValidResults(state: EditorState, previous: readonly ValidResult[], transaction?: Transaction): ValidResult[] {
-  const mapped = transaction ? previous.filter(result => {
+function mapValidResults(previous: readonly ValidResult[], transaction: Transaction): ValidResult[] {
+  return previous.filter(result => {
     let deleted = false;
     transaction.changes.iterChangedRanges((from, to) => {
       if (from <= result.from && to >= result.to) deleted = true;
     });
     return !deleted;
-  }).map(result => ({ ...result, from: transaction.changes.mapPos(result.from, 1), to: transaction.changes.mapPos(result.to, -1) })) : previous;
+  }).map(result => ({ ...result, from: transaction.changes.mapPos(result.from, 1), to: transaction.changes.mapPos(result.to, -1) }));
+}
+
+function collectValidResults(state: EditorState, previous: readonly ValidResult[], transaction?: Transaction): ValidResult[] {
+  const mapped = transaction ? mapValidResults(previous, transaction) : previous;
   const results: ValidResult[] = [];
   for (const range of collectDocumentMathRanges(state)) {
     if (!range.fencedDisplay || !range.content.trim()) continue;
@@ -37,7 +42,21 @@ function collectValidResults(state: EditorState, previous: readonly ValidResult[
 // Retain a valid result across incomplete input, but never carry it to a replaced block.
 export const displayMathResultField = StateField.define<readonly ValidResult[]>({
   create: state => collectValidResults(state, []),
-  update: (value, transaction) => transaction.docChanged ? collectValidResults(transaction.state, value, transaction) : value
+  update(value, transaction) {
+    const largeDocument = usesLargeDocumentDerivedWorkBudget(transaction.state);
+    if (largeDocument && isLiveInputDerivedWorkRefresh(transaction)) return collectValidResults(transaction.state, value);
+    if (!transaction.docChanged) return value;
+    if (largeDocument && shouldDeferLiveInputDerivedWork(transaction)) {
+      let touchesKnownFormula = false;
+      transaction.changes.iterChangedRanges((from, to) => {
+        if (value.some(result => from <= result.to && to >= result.from)) touchesKnownFormula = true;
+      });
+      // Ordinary prose edits only map the last valid formula positions. Edits
+      // inside a known formula still capture every valid intermediate result.
+      if (!touchesKnownFormula) return mapValidResults(value, transaction);
+    }
+    return collectValidResults(transaction.state, value, transaction);
+  }
 });
 
 export function getPreviousDisplayMathResult(state: EditorState, from: number, to: number): string | undefined {

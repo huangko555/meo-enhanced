@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { EditorState, Transaction } from '@codemirror/state';
+import { markdown } from '@codemirror/lang-markdown';
+import { displayMathResultField } from '../webview/src/helpers/displayMathEditing';
 import {
   createLiveInputDerivedWorkScheduler,
   isLiveInputNestedProjection,
@@ -283,4 +285,28 @@ assert.deepEqual(
 );
 second.dispose();
 
-console.log('Live input derived-work scheduler tests passed');
+const mathState = EditorState.create({
+  doc: 'prose\n\n$$\nx^2\n$$',
+  extensions: [markdown(), ...liveInputDerivedWorkExtensions({ largeDocument: true }), displayMathResultField]
+});
+const firstResult = mathState.field(displayMathResultField)[0]!;
+assert.ok(firstResult.html.includes('katex'), 'the formula starts with a valid rendered result');
+const proseInput = mathState.update({ changes: { from: 0, insert: 'Z' }, annotations: Transaction.userEvent.of('input.type') });
+const mappedResult = proseInput.state.field(displayMathResultField)[0]!;
+assert.deepEqual(mappedResult, { ...firstResult, from: firstResult.from + 1, to: firstResult.to + 1 },
+  'deferred prose input must preserve the formula and map both source boundaries');
+const invalidFormula = proseInput.state.update({
+  changes: { from: mappedResult.to - 3, insert: '\\frac{' },
+  annotations: Transaction.userEvent.of('input.type')
+});
+assert.equal(invalidFormula.state.field(displayMathResultField)[0]?.html, firstResult.html,
+  'input within a known formula retains its last valid result when TeX becomes incomplete');
+const previousFormula = invalidFormula.state.field(displayMathResultField)[0]!;
+const replacement = invalidFormula.state.update({
+  changes: { from: previousFormula.from, to: previousFormula.to, insert: '$$\n\\frac{\n$$' },
+  annotations: Transaction.userEvent.of('input.paste')
+});
+assert.equal(replacement.state.field(displayMathResultField).length, 0,
+  'replacing the entire formula must not reuse a previous block result');
+
+console.log('Live input derived-work scheduler and large-document formula budget tests passed');

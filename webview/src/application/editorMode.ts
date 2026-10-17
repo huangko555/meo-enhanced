@@ -26,7 +26,7 @@ export type EditorModeState = {
 
 export type EditorModeInput =
   | { readonly type: 'restoreLocal'; readonly mode: EditorMode; readonly lastEditableMode: EditableMode }
-  | { readonly type: 'initialize'; readonly hostMode: EditorMode }
+  | { readonly type: 'initialize'; readonly hostMode: EditorMode; readonly backgroundMode?: EditableMode }
   | {
       readonly type: 'requestMode';
       readonly mode: EditorMode;
@@ -372,7 +372,9 @@ export function createEditorModeApplication(): EditorModeApplication {
           const policy = requestPolicy(source);
           pendingMount = {
             id: ++mountSequence,
-            mode: lastEditableMode,
+            // Initial Preview still needs an editor for document/history ownership.
+            // Its hidden presentation can be lightweight without changing user intent.
+            mode: input.backgroundMode ?? lastEditableMode,
             requestedMode: targetMode,
             manualIntentId: null,
             persist: policy.persist,

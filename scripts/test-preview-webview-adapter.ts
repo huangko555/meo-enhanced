@@ -213,6 +213,21 @@ resourceAdapter.accept({ type: 'previewPresetsChanged', presets: [], diagnostics
 assert.equal(resourceInvalidations, disposedInvalidations);
 assert.equal(catalogChanges.length, disposedCatalogChanges);
 
+const largeHiddenText = '# Large hidden preview\n\n' + 'Synthetic paragraph.\n\n'.repeat(5_000);
+const largePreviewWork: string[] = [];
+const largeAdapter = createPreviewWebviewAdapter({
+  ...surface,
+  preload() { largePreviewWork.push('preload'); },
+  setVisible() {},
+  requestRender(text) { largePreviewWork.push(text); },
+  dispose() {}
+});
+largeAdapter.start({ text: largeHiddenText, appearance: 'auto', fontFamily: '', sourceColoring: true, showComments: false, active: false });
+assert.deepEqual(largePreviewWork, [], 'opening a large document must not render its hidden Preview');
+largeAdapter.setActive({ active: true, text: largeHiddenText + 'latest edit' });
+assert.deepEqual(largePreviewWork, [largeHiddenText + 'latest edit'], 'Preview activation renders the latest full document on demand');
+largeAdapter.dispose();
+
 const repoRoot = path.resolve(import.meta.dir, '..');
 const bootstrap = fs.readFileSync(path.join(repoRoot, 'webview/src/index.ts'), 'utf8');
 assert.equal((bootstrap.match(/createPreviewWebviewAdapter\s*\(/g) ?? []).length, 1);

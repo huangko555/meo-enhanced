@@ -202,11 +202,18 @@ export function createPreviewTableLayoutController(
   const tables = () => Array.from(root.querySelectorAll<HTMLTableElement>(
     '.meo-table-scroll > table, .meo-export-html-block table, .meo-md-html-content table'
   ));
+  const frameWindow = frameDocument.defaultView;
+  const deferOffscreen = root === frameDocument
+    && frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true'
+    && !!frameWindow?.IntersectionObserver;
+  const nearbyTables = new Set<HTMLTableElement>();
   const refresh = () => {
     if (disposed) return;
-    const currentTables = tables();
+    const currentTables = deferOffscreen ? [...nearbyTables].filter(table => table.isConnected) : tables();
     // Nested tables depend on their parent geometry; retain document order there.
     if (currentTables.some(table => table.parentElement?.closest('table'))) {
+      currentTables.sort((left, right) => left === right ? 0
+        : left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
       for (const table of currentTables) layoutTables([table]);
     } else layoutTables(currentTables);
   };
@@ -229,12 +236,32 @@ export function createPreviewTableLayoutController(
     });
     if (widthChanged) scheduleRefresh();
   }) : null;
-  for (const table of tables()) {
-    const wrapper = table.closest<HTMLElement>('.meo-table-scroll, .meo-export-html-block, .meo-md-html-content') ?? table.parentElement;
+  const widthOwner = (table: HTMLTableElement) => table.closest<HTMLElement>(
+    '.meo-table-scroll, .meo-export-html-block, .meo-md-html-content') ?? table.parentElement;
+  const observeWidth = (table: HTMLTableElement, visible: boolean) => {
+    const wrapper = widthOwner(table);
     if (wrapper) {
-      observedWidths.set(wrapper, wrapper.clientWidth);
-      observer?.observe(wrapper);
+      if (visible) {
+        observedWidths.set(wrapper, wrapper.clientWidth);
+        observer?.observe(wrapper);
+      } else if (![...nearbyTables].some(nearby => widthOwner(nearby) === wrapper)) observer?.unobserve(wrapper);
     }
+  };
+  // Intrinsic column measurement forces layout. Limit it to tables approaching
+  // the viewport; revisiting a table still reuses its measured font/content key.
+  const visibilityObserver = deferOffscreen ? new frameWindow!.IntersectionObserver(entries => {
+    if (disposed) return;
+    for (const entry of entries) {
+      const table = entry.target as HTMLTableElement;
+      if (entry.isIntersecting) nearbyTables.add(table);
+      else nearbyTables.delete(table);
+      observeWidth(table, entry.isIntersecting);
+    }
+    scheduleRefresh();
+  }, { rootMargin: '800px 0px' }) : null;
+  for (const table of tables()) {
+    if (visibilityObserver) visibilityObserver.observe(table);
+    else observeWidth(table, true);
   }
   root.addEventListener('toggle', scheduleRefresh, true);
   refresh();
@@ -243,6 +270,8 @@ export function createPreviewTableLayoutController(
     dispose() {
       disposed = true;
       observer?.disconnect();
+      visibilityObserver?.disconnect();
+      nearbyTables.clear();
       root.removeEventListener('toggle', scheduleRefresh, true);
       if (frame !== null) frameDocument.defaultView?.cancelAnimationFrame(frame);
       frame = null;

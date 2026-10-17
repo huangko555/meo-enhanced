@@ -31,6 +31,7 @@ import { liveHighlightStyle, sourceMarkdownHighlightProps } from './theme';
 import { inlineMarkdownExtensions } from './helpers/inlineMarkdownParser';
 import { collectKbdTagRangesFromText, hasKbdTagMarker } from './helpers/kbd';
 import { currentSyntaxTree, getFencedCodeInfo, headingContentRange, headingLevelFromName, resolvedSyntaxTree, syntaxTreeChanged } from './helpers/markdownSyntax';
+import { indexSourceRanges } from './helpers/sourceRangeIndex';
 import { detailsBlockLiveExtensions, getDetailsBlocks, toggleDetailsBlock } from './helpers/detailsBlocks';
 import {
   addListMarkerDecoration,
@@ -1926,6 +1927,11 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
     frontmatter = null;
   }
   const mathRanges = collectMathRanges(state, tree, renderedTableRanges, frontmatter);
+  const insideMath = indexSourceRanges(mathRanges);
+  const insideFencedMathLine = indexSourceRanges(mathRanges.filter(math => math.fencedDisplay).map(math => ({
+    from: state.doc.lineAt(math.from).from,
+    to: math.to
+  })));
   // Markdown fallbacks must not turn TeX operators or indentation into prose widgets.
   const literalBlockLines = new Set(codeBlockLines);
   for (const math of mathRanges) {
@@ -1938,6 +1944,7 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
   addForcedThematicBreakDecorations(ranges, state, tree, activeLines, frontmatter, literalBlockLines);
   const literalRanges = collectMarkdownLiteralRanges(state, tree);
   const htmlCodeBodies = literalRanges.flatMap(range => range.htmlCode ? [range.htmlCode] : []);
+  const insideHtmlCode = indexSourceRanges(htmlCodeBodies);
   for (const body of htmlCodeBodies) addRange(ranges, body.from, body.to, inlineStyleDecos.inlineCode);
   const inlineHtmlRanges: Array<{ from: number; to: number }> = [];
   const renderedHtmlBlocks = addHtmlContentDecorations(ranges, state, activeLines, previous, changes, inlineHtmlRanges);
@@ -1946,14 +1953,12 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
     enter: (node: SyntaxNodeRef) => {
       // Formula source owns the whole line prefix. Hiding only opening-line
       // quote markers would give its delimiter a different visual source width.
-      if (node.name === 'QuoteMark' && mathRanges.some(math => math.fencedDisplay
-        && node.from >= state.doc.lineAt(math.from).from && node.to <= math.to)) return false;
+      if (node.name === 'QuoteMark' && insideFencedMathLine(node.from, node.to)) return false;
       // Literal HTML code and TeX source keep their original characters when widgets reveal source.
       // Lezer can otherwise pair a TeX caret with one in a later formula or style code contents.
-      if (htmlCodeBodies.some(body => node.from >= body.from && node.to <= body.to)
-        || mathRanges.some(math => node.from >= math.from && node.to <= math.to
-          || ['Subscript', 'Superscript', 'Emphasis', 'StrongEmphasis', 'Strikethrough', 'Highlight'].includes(node.name)
-            && node.from >= math.from && node.from < math.to)) return false;
+      if (insideHtmlCode(node.from, node.to) || insideMath(node.from, node.to)
+        || ['Subscript', 'Superscript', 'Emphasis', 'StrongEmphasis', 'Strikethrough', 'Highlight'].includes(node.name)
+          && insideMath(node.from, node.from + 1)) return false;
       if (hasCodeBlockAncestor(node)) {
         if (node.name === 'QuoteMark') {
           const line = state.doc.lineAt(node.from);
@@ -3256,7 +3261,7 @@ function projectInputBlockquoteLines(
 ): DecorationSet {
   const startDocument = transaction.startState.doc;
   const nextDocument = transaction.newDoc;
-  const tree = resolvedSyntaxTree(transaction.startState);
+  const tree = currentSyntaxTree(transaction.startState);
   const activeLines = collectActiveLines(transaction.state);
   const lineAdditions = new Map<string, Range<Decoration>>();
   const markerAdditions = new Map<string, Range<Decoration>>();
@@ -3344,7 +3349,7 @@ function projectInputCodeBlockLines(
 ): DecorationSet {
   const startDocument = transaction.startState.doc;
   const nextDocument = transaction.newDoc;
-  const tree = resolvedSyntaxTree(transaction.startState);
+  const tree = currentSyntaxTree(transaction.startState);
   const projectedBlocks = new Set<string>();
   let projected = decorations;
 

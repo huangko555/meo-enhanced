@@ -57,6 +57,14 @@ assert.deepEqual(
 );
 
 const localInit = createEditorModeApplication();
+const largePreviewInit = createEditorModeApplication();
+const largePreviewEffects = largePreviewInit.dispatch({ type: 'initialize', hostMode: 'preview', backgroundMode: 'source' });
+assert.deepEqual(largePreviewEffects[0], { type: 'scheduleEditorMount', mountId: 1, mode: 'source' });
+assert.equal(largePreviewInit.getState().mode, 'preview');
+assert.equal(largePreviewInit.getState().lastEditableMode, 'live', 'a lightweight hidden editor must not replace remembered user intent');
+mountEditor(largePreviewInit);
+assert.ok(largePreviewInit.dispatch({ type: 'requestMode', mode: 'live', source: 'user' })
+  .some(effect => effect.type === 'applyEditorMode' && effect.mode === 'live'), 'leaving Preview must still apply the requested editable mode');
 localInit.dispatch({ type: 'restoreLocal', mode: 'preview', lastEditableMode: 'source' });
 const localInitEffects = localInit.dispatch({ type: 'initialize', hostMode: 'live' });
 assert.equal(localInit.getState().mode, 'preview');

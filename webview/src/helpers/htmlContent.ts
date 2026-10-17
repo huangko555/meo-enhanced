@@ -25,6 +25,7 @@ import {
 import { createOpenLinkButton } from './linkOpenButton';
 import { isPrimaryModifierPointerClick } from './linkNavigation';
 import { resolvedSyntaxTree } from './markdownSyntax';
+import { indexSourceRanges } from './sourceRangeIndex';
 import { getViewportController } from './viewportController';
 import { ImageWidget } from './images';
 import { getImagePresentationFactory } from '../editor/imagePresentation';
@@ -692,10 +693,11 @@ function addInlineHtmlDecorations(
     }
   } });
   const pattern = /<(strong|b|em|i|del|s|mark|code|span|sub|sup|u|a)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
+  const overlapsBlock = indexSourceRanges(blockRanges, 'overlaps');
   for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
     if (activeLines.has(lineNo)) continue;
     const line = state.doc.line(lineNo);
-    if (blockRanges.some((block) => line.from < block.to && line.to > block.from)) continue;
+    if (overlapsBlock(line.from, line.to)) continue;
     pattern.lastIndex = 0;
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(line.text))) {

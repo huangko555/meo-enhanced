@@ -18,6 +18,13 @@ import {
 const PREVIEW_MERMAID_CACHE_LIMIT = 100;
 const previewMermaidSvgCache = new Map<string, string>();
 
+function isNearPreviewViewport(block: HTMLElement, frameDocument: Document): boolean {
+  if (frameDocument.documentElement.dataset.meoPreviewLargeDocument !== 'true') return true;
+  const height = frameDocument.defaultView?.innerHeight ?? 0;
+  const bounds = block.getBoundingClientRect();
+  return bounds.height > 0 && bounds.bottom >= -height && bounds.top <= height * 2;
+}
+
 type PreviewMermaidPalette = {
   background: string;
   nodeBackground: string;
@@ -55,7 +62,7 @@ export function createPreviewMermaidRenderer(
     let themeKey: string | undefined;
     const hasPendingBlocks = Array.from(frameDocument.querySelectorAll<HTMLElement>(
       '.meo-export-mermaid[data-source-b64]'
-    )).some((block) => (
+    )).some((block) => isNearPreviewViewport(block, frameDocument) && (
       !block.classList.contains('is-rendered')
       || block.dataset.meoPreviewMermaidAppearance !== appearance
       || (block.dataset.meoPreviewMermaidPreset ?? 'default') !== preset
@@ -126,10 +133,9 @@ async function renderMermaidBlocks(
       || block.dataset.meoPreviewMermaidTheme !== themeKey
     ))
     .map((block, documentIndex) => ({ block, documentIndex }))
-    .sort((left, right) =>
-      Math.abs(left.block.getBoundingClientRect().top - viewportCenter)
-      - Math.abs(right.block.getBoundingClientRect().top - viewportCenter)
-    );
+    .filter(({ block }) => isNearPreviewViewport(block, frameDocument))
+    .map((entry) => ({ ...entry, distance: Math.abs(entry.block.getBoundingClientRect().top - viewportCenter) }))
+    .sort((left, right) => left.distance - right.distance);
   if (blocks.length === 0) return;
 
   const mermaid = await loadMermaidRuntime();
@@ -190,6 +196,7 @@ async function renderMermaidBlocks(
     // between diagrams while retaining the exclusive theme lease.
     await new Promise<void>(resolve => setTimeout(resolve, 0));
     if (!isCurrent()) return;
+    if (!isNearPreviewViewport(block, frameDocument)) continue;
     const source = decodeBase64Utf8(block.dataset.sourceB64 ?? '');
     if (!source) continue;
 

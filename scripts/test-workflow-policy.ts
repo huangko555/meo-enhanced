@@ -334,6 +334,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-table-cell-editing.ts'),
           script('scripts/test-rendered-block-mode-shell.ts'),
           script('scripts/test-live-input-derived-work.ts'),
+          packageScript('test:large-document-budget'),
           script('scripts/test-viewport-controller.ts'),
           script('scripts/test-native-scroll-progress-production.ts'),
           script('scripts/test-toolbar-input-viewport.ts'),
@@ -392,6 +393,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
             ]
           },
           serialStage('High-risk browser regression preflight', [
+            packageScript('test:large-document-budget'),
             script('scripts/test-editor-startup-load.ts'),
             script('scripts/test-mode-roundtrip-reveal.ts'),
             script('scripts/test-preview-navigation-continuity.ts'),

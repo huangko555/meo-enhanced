@@ -5,6 +5,8 @@ import { mountRenderedBlockPreviewControls } from './renderedBlockModeControls';
 export type LatexMathViewportController = {
   /** Refit a mounted result in the input transaction, before a provisional height can paint. */
   setContent(html: string): void;
+  /** Suspend measurement outside the reading viewport, retaining the fitted presentation. */
+  setActive(active: boolean): void;
   destroy(): void;
 };
 
@@ -142,6 +144,7 @@ export function attachLatexMathViewport(
   let panY = 0;
   let measureFrame = 0;
   let destroyed = false;
+  let active = true;
   let pointerId: number | null = null;
   let lastPointerX = 0;
   let lastPointerY = 0;
@@ -296,7 +299,7 @@ export function attachLatexMathViewport(
 
   const measure = () => {
     measureFrame = 0;
-    if (destroyed || !root.isConnected) {
+    if (destroyed || !active || !root.isConnected) {
       return;
     }
     const measurementRoot = layout.kind === 'inline' ? root.parentElement : root;
@@ -397,7 +400,7 @@ export function attachLatexMathViewport(
   };
 
   const scheduleMeasure = () => {
-    if (destroyed || measureFrame !== 0) {
+    if (destroyed || !active || measureFrame !== 0) {
       return;
     }
     measureFrame = ownerWindow.requestAnimationFrame(measure);
@@ -531,6 +534,25 @@ export function attachLatexMathViewport(
   void ownerDocument.fonts?.ready.then(scheduleMeasure);
 
   return {
+    setActive(nextActive) {
+      if (destroyed || active === nextActive) return;
+      active = nextActive;
+      if (!active) {
+        resizeObserver?.disconnect();
+        ownerWindow.removeEventListener('resize', scheduleMeasure);
+        ownerDocument.fonts?.removeEventListener('loadingdone', scheduleMeasure);
+        if (measureFrame !== 0) ownerWindow.cancelAnimationFrame(measureFrame);
+        measureFrame = 0;
+      } else {
+        if (resizeObserver) {
+          resizeObserver.observe(root);
+          if (canvas) resizeObserver.observe(canvas);
+          if (observedMeasurementRoot) resizeObserver.observe(observedMeasurementRoot);
+        } else ownerWindow.addEventListener('resize', scheduleMeasure);
+        ownerDocument.fonts?.addEventListener('loadingdone', scheduleMeasure);
+        scheduleMeasure();
+      }
+    },
     setContent(html) {
       if (destroyed || !canvas) return;
       canvas.innerHTML = html;

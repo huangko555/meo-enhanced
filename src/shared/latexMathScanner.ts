@@ -294,12 +294,14 @@ export function scanLatexMathAt(
 export function scanLatexMath(text: string, options: LatexMathScanOptions = {}): LatexMathRange[] {
   const excludedRanges = normalizeExcludedRanges(options.excludedRanges ?? []);
   const ranges: LatexMathRange[] = [];
-  for (let open = 0; open < text.length;) {
+  // Only dollar signs can open a formula. Skipping ordinary text also avoids
+  // a binary exclusion lookup for every prose/code character in a large file.
+  for (let open = text.indexOf('$'); open >= 0;) {
     const candidate = scanLatexMathCandidateAt(text, open, excludedRanges, options.includeEmptyDisplay);
     if (candidate.range) {
       ranges.push(candidate.range);
     }
-    open = candidate.nextOpen;
+    open = text.indexOf('$', candidate.nextOpen);
   }
   return ranges;
 }

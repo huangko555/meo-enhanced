@@ -138,6 +138,7 @@ assert.equal(release.longRunning, true);
 assert.deepEqual(release.stages[0]?.commands, [{ args: ['run', 'build'] }]);
 assert.equal(release.stages[1]?.maxConcurrency, 3);
 assert.deepEqual(release.stages[2]?.commands, [
+  { args: ['run', 'test:large-document-budget'] },
   { args: ['scripts/test-editor-startup-load.ts'] },
   { args: ['scripts/test-mode-roundtrip-reveal.ts'] },
   { args: ['scripts/test-preview-navigation-continuity.ts'] },

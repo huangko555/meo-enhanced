@@ -79,7 +79,9 @@ try {
         try {
           const errors: string[] = [];
           page.on('pageerror', error => errors.push(error.message));
-          await page.setViewport({ width, height: 1800, deviceScaleFactor: 1 });
+          // Open Source's side preview before narrowing the window: its existing
+          // compact toolbar can place the entry button outside a 420px viewport.
+          await page.setViewport({ width: surface === 'source' ? Math.max(1100, width) : width, height: 1800, deviceScaleFactor: 1 });
           if (surface === 'html') {
             const rendered = await exportRuntime.renderExportHtmlDocument({
               readingSnapshot: {
@@ -128,11 +130,12 @@ try {
               await page.waitForSelector('.meo-md-math-fenced-display .katex-html .tag');
             } else {
               if (surface === 'source') {
-                await page.waitForSelector('.source-preview-button');
+                await page.waitForSelector('.source-preview-button', { visible: true });
                 await page.click('.source-preview-button');
               }
               await page.waitForFunction(count => document.querySelector<HTMLIFrameElement>('.preview-frame')
                 ?.contentDocument?.querySelectorAll('.katex-html > .tag').length === count, {}, expectedTagCount);
+              if (surface === 'source') await page.setViewport({ width, height: 1800, deviceScaleFactor: 1 });
             }
           }
           const context = `${surface}, ${appearance}, ${width}px`;

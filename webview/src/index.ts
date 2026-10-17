@@ -25,6 +25,7 @@ import { setShikiTheme } from './helpers/shikiHighlighter';
 import { createFailureNoticeManager, getErrorMessage, isTransientMermaidRuntimeError, shouldAutoFallbackToSourceForLiveError, logWebviewRenderError, type EditorNoticeAction, type FailureNoticeManager } from './helpers/errors';
 import { isPrimaryModifier, isShortcutKey, handleEditorShortcut, type ShortcutHandlerContext } from './helpers/shortcuts';
 import { normalizeDocumentText } from '../../src/foundation/documentText';
+import { assessLargeDocument } from '../../src/foundation/largeDocument';
 import { createFindPanel, createFindPanelController, type FindPanelController } from './helpers/findPanel';
 import { createSelectionMenu, createSelectionMenuController, type SelectionMenuController } from './helpers/selectionMenu';
 import {
@@ -3560,7 +3561,10 @@ window.addEventListener('message', (event) => {
         }
       }
 
-      void editorModeRuntime.dispatch({ type: 'initialize', hostMode: message.mode })
+      void editorModeRuntime.dispatch({
+        type: 'initialize', hostMode: message.mode,
+        ...(assessLargeDocument(message.text).preferSource ? { backgroundMode: 'source' as const } : {})
+      })
         .then(async () => {
           const initializedMode = editorModeApplication.getState().mode;
           if (message.saveAsViewState && editor) {

@@ -172,5 +172,18 @@ try {
   });
   assert.ok(samples.every(count => count === 0), 'Every revealed Source frame must contain complete syntax colors');
   assert.deepEqual(errors, []);
-  console.log('Source prewarm, roundtrip and identical-theme first-paint checks passed');
+  const largeSource = '# Large source budget\n\n' + 'Synthetic paragraph for the source work budget.\n\n'.repeat(5_000);
+  const largeSourceResult = await page.evaluate(async text => {
+    (window as any).__editor.destroy();
+    const harness = (window as any).SourceLightweightShikiHarness;
+    const editor = harness.createEditor({ parent: document.getElementById('app'), text, initialMode: 'source', onApplyChanges() {} });
+    const prepared = await editor.prepareSourceSyntax(() => true);
+    const result = { prepared, text: editor.getText(), fullTokens: harness.hasSourceTokens(editor) };
+    editor.destroy();
+    return result;
+  }, largeSource);
+  assert.equal(largeSourceResult.prepared, true, 'large Source must be available without waiting for whole-document tokens');
+  assert.equal(largeSourceResult.text, largeSource);
+  assert.equal(largeSourceResult.fullTokens, false, 'large Source must use incremental parser coloring instead of full-document TextMate work');
+  console.log('Source prewarm, roundtrip, first-paint colors and large-document budget checks passed');
 } finally { await closeTestBrowser(browser); }
