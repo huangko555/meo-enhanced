@@ -1,3 +1,4 @@
+import { documentLines } from './helpers/documentLines';
 import { blockStickyHeaderExtension } from './helpers/blockStickyHeader';
 import { countColumn, RangeSetBuilder, StateEffect, StateField, EditorState, type ChangeDesc, type Range, type RangeSet, type Extension, type EditorSelection, type Transaction } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
@@ -799,8 +800,8 @@ function addForcedThematicBreakDecorations(
   frontmatter: FrontmatterInfo | null,
   codeBlockLines: Set<number> | null = null
 ): void {
-  for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
-    const line = state.doc.line(lineNo);
+  for (const line of documentLines(state.doc)) {
+    const lineNo = line.number;
     if (
       !isThematicBreakLine(line.text) ||
       isInsideFrontmatter(frontmatter, line.from) ||
@@ -1793,13 +1794,13 @@ function addListLineDecorations(
   const orderedCountsByContainer = new Map<string, number>();
   const legacyOrderedCountsByLevel: Array<number | null> = [];
 
-  for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
+  for (const line of documentLines(state.doc)) {
+    const lineNo = line.number;
     if (literalBlockLines?.has(lineNo)) {
       legacyOrderedCountsByLevel.length = 0;
       continue;
     }
-    const line = state.doc.line(lineNo);
-    const lineText = state.doc.sliceString(line.from, line.to);
+    const lineText = line.text;
     const style = stylesByLine.get(lineNo);
     const entries = parsedMarkers.get(lineNo) ?? [];
     if (!entries.length) {
@@ -2451,9 +2452,9 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
   addFallbackTableDecorations(ranges, state, tree, parsedTableRanges, diagnostics);
   addRawFileUrlDecorations(ranges, state, tree, activeLines, frontmatter);
   // Source prose and rendered blocks consume the same task-marker width delta.
-  for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
+  for (const line of documentLines(state.doc)) {
+    const lineNo = line.number;
     if (literalBlockLines.has(lineNo)) continue;
-    const line = state.doc.line(lineNo);
     const prefix = parseBlockLinePrefix(line.text, state.tabSize);
     if (!prefix.prefix) continue;
     const contentFrom = line.from + prefix.prefix.length;
@@ -3021,17 +3022,17 @@ function addKbdTagDecorations(
   frontmatter: FrontmatterInfo | null = null,
   codeBlockLines: Set<number> | null = null
 ): void {
-  for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
+  for (const line of documentLines(state.doc)) {
+    const lineNo = line.number;
     if (activeLines.has(lineNo) || codeBlockLines?.has(lineNo)) {
       continue;
     }
 
-    const line = state.doc.line(lineNo);
     if (isInsideFrontmatterContent(frontmatter, line.from)) {
       continue;
     }
 
-    const lineText = state.doc.sliceString(line.from, line.to);
+    const lineText = line.text;
     if (!hasKbdTagMarker(lineText)) {
       continue;
     }
@@ -3564,30 +3565,32 @@ function buildLiveLineNumberMarkers(state: EditorState): RangeSet<GutterMarker> 
 
 function detectTableBlocks(state: EditorState): Array<{ startLineNo: number; endLineNo: number }> {
   const blocks: Array<{ startLineNo: number; endLineNo: number }> = [];
-  for (let lineNo = 2; lineNo <= state.doc.lines; lineNo += 1) {
-    const delimiterLine = state.doc.line(lineNo);
-    const delimiterText = state.doc.sliceString(delimiterLine.from, delimiterLine.to);
+  let scannedThrough = 1;
+  for (const delimiterLine of documentLines(state.doc)) {
+    const lineNo = delimiterLine.number;
+    if (lineNo <= scannedThrough) continue;
+    const delimiterText = delimiterLine.text;
     if (isThematicBreakLine(delimiterText)) continue;
     if (!isTableDelimiterLine(delimiterText)) continue;
     const commonIndent = parseBlockLinePrefix(delimiterText, state.tabSize).prefix;
 
     const headerLineNo = lineNo - 1;
     const headerLine = state.doc.line(headerLineNo);
-    const headerText = state.doc.sliceString(headerLine.from, headerLine.to);
+    const headerText = headerLine.text;
     if (parseBlockLinePrefix(headerText, state.tabSize).prefix !== commonIndent) continue;
     if (!isTableContentLine(headerText)) continue;
 
     let endLineNo = lineNo;
     for (let rowLineNo = lineNo + 1; rowLineNo <= state.doc.lines; rowLineNo += 1) {
       const rowLine = state.doc.line(rowLineNo);
-      const rowText = state.doc.sliceString(rowLine.from, rowLine.to);
+      const rowText = rowLine.text;
       if (!isTableContentLine(rowText)) break;
       if (parseBlockLinePrefix(rowText, state.tabSize).prefix !== commonIndent) break;
       endLineNo = rowLineNo;
     }
 
     blocks.push({ startLineNo: headerLineNo, endLineNo });
-    lineNo = endLineNo;
+    scannedThrough = endLineNo;
   }
   return blocks;
 }
@@ -3639,8 +3642,8 @@ function addRawFileUrlDecorations(
   activeLines: Set<number>,
   frontmatter: FrontmatterInfo | null = null
 ): void {
-  for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
-    const line = state.doc.line(lineNo);
+  for (const line of documentLines(state.doc)) {
+    const lineNo = line.number;
     if (line.text.indexOf(fileSchemePrefix) === -1) {
       continue;
     }

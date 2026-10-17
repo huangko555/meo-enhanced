@@ -1,3 +1,4 @@
+import { documentLines } from './documentLines';
 import { EditorState } from '@codemirror/state';
 import type { SyntaxNodeRef, Tree } from '@lezer/common';
 import { isThematicBreakLine } from './frontmatter';
@@ -103,22 +104,24 @@ function detectFallbackTableBlocks(
 ): LiveRenderedBlock[] {
   const blocks: LiveRenderedBlock[] = [];
 
-  for (let lineNo = 2; lineNo <= state.doc.lines; lineNo += 1) {
-    const delimiterLine = state.doc.line(lineNo);
-    const delimiterText = state.doc.sliceString(delimiterLine.from, delimiterLine.to);
+  let scannedThrough = 1;
+  for (const delimiterLine of documentLines(state.doc)) {
+    const lineNo = delimiterLine.number;
+    if (lineNo <= scannedThrough) continue;
+    const delimiterText = delimiterLine.text;
     if (isThematicBreakLine(delimiterText)) continue;
     if (!isTableDelimiterLine(delimiterText)) continue;
     const prefix = parseBlockLinePrefix(delimiterText, state.tabSize).prefix;
 
     const headerLineNo = lineNo - 1;
     const headerLine = state.doc.line(headerLineNo);
-    const headerText = state.doc.sliceString(headerLine.from, headerLine.to);
+    const headerText = headerLine.text;
     if (!isTableContentLine(headerText) || parseBlockLinePrefix(headerText, state.tabSize).prefix !== prefix) continue;
 
     let endLineNo = lineNo;
     for (let rowLineNo = lineNo + 1; rowLineNo <= state.doc.lines; rowLineNo += 1) {
       const rowLine = state.doc.line(rowLineNo);
-      const rowText = state.doc.sliceString(rowLine.from, rowLine.to);
+      const rowText = rowLine.text;
       if (!isTableContentLine(rowText) || parseBlockLinePrefix(rowText, state.tabSize).prefix !== prefix) break;
       endLineNo = rowLineNo;
     }
@@ -126,18 +129,18 @@ function detectFallbackTableBlocks(
     const from = state.doc.line(headerLineNo).from;
     const to = state.doc.line(endLineNo).to;
     if (parsedTableRanges.some((range) => rangesOverlap(from, to, range.from, range.to))) {
-      lineNo = endLineNo;
+      scannedThrough = endLineNo;
       continue;
     }
     if (isInsideCodeBlock(tree, from)) {
-      lineNo = endLineNo;
+      scannedThrough = endLineNo;
       continue;
     }
     const block = createRenderedBlock('table', headerLineNo, endLineNo, lineNo);
     if (block) {
       blocks.push(block);
     }
-    lineNo = endLineNo;
+    scannedThrough = endLineNo;
   }
 
   return blocks;

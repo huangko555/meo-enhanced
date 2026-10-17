@@ -1,3 +1,4 @@
+import { documentLines } from './documentLines';
 import { RangeSetBuilder, StateField, EditorState } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import {
@@ -38,8 +39,7 @@ interface MergeConflictState {
 }
 
 function lineText(state: EditorState, lineNo: number): string {
-  const line = state.doc.line(lineNo);
-  return state.doc.sliceString(line.from, line.to);
+  return state.doc.line(lineNo).text;
 }
 
 function lineEndWithBreak(doc: any, lineNo: number): number {
@@ -58,8 +58,10 @@ export function parseMergeConflicts(state: EditorState): MergeConflict[] {
   const { doc } = state;
   let lineNo = 1;
 
-  while (lineNo <= doc.lines) {
-    const startText = lineText(state, lineNo);
+  for (const candidate of documentLines(doc)) {
+    if (candidate.number < lineNo) continue;
+    lineNo = candidate.number;
+    const startText = candidate.text;
     if (!startText.startsWith('<<<<<<<')) {
       lineNo += 1;
       continue;

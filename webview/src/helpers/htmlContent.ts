@@ -1,3 +1,4 @@
+import { documentLines } from './documentLines';
 import { Prec, StateEffect, StateField, type ChangeDesc, type EditorState } from '@codemirror/state';
 import {
   Decoration,
@@ -694,9 +695,9 @@ function addInlineHtmlDecorations(
   } });
   const pattern = /<(strong|b|em|i|del|s|mark|code|span|sub|sup|u|a)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
   const overlapsBlock = indexSourceRanges(blockRanges, 'overlaps');
-  for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
+  for (const line of documentLines(state.doc)) {
+    const lineNo = line.number;
     if (activeLines.has(lineNo)) continue;
-    const line = state.doc.line(lineNo);
     if (overlapsBlock(line.from, line.to)) continue;
     pattern.lastIndex = 0;
     let match: RegExpExecArray | null;

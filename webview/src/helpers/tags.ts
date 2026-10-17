@@ -1,3 +1,4 @@
+import { documentLines } from './documentLines';
 import { RangeSetBuilder, StateField } from '@codemirror/state';
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
@@ -58,9 +59,9 @@ function isInsideMarkdownLinkDestination(text: string, position: number): boolea
 
 function buildMarkdownTagDecorations(state: any): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
-  for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber += 1) {
-    const line = state.doc.line(lineNumber);
+  for (const line of documentLines(state.doc)) {
     const text = line.text;
+    if (!text.includes('#')) continue;
     const colorRanges = collectHexColorRangesFromText(text, line.from);
     markdownTagRegex.lastIndex = 0;
     for (const match of text.matchAll(markdownTagRegex)) {

@@ -1,3 +1,4 @@
+import { documentLines } from './documentLines';
 import {
   StateField,
   RangeSetBuilder,
@@ -164,32 +165,25 @@ function inferListIndentStyle(listLineTexts: readonly string[]): ListIndentStyle
 
 export function detectListIndentStylesByLine(state: EditorState): Map<number, ListIndentStyle> {
   const stylesByLine = new Map<number, ListIndentStyle>();
-  let lineNo = 1;
-
-  while (lineNo <= state.doc.lines) {
-    const startLineNo = lineNo;
-    const listLineTexts: string[] = [];
-
-    while (lineNo <= state.doc.lines) {
-      const line = state.doc.line(lineNo);
-      const lineText = state.doc.sliceString(line.from, line.to);
-      if (!isListLine(lineText)) {
-        break;
-      }
-      listLineTexts.push(lineText);
-      lineNo += 1;
-    }
-
-    if (!listLineTexts.length) {
-      lineNo += 1;
-      continue;
-    }
-
+  let startLineNo = 1;
+  let listLineTexts: string[] = [];
+  const finishRun = () => {
+    if (!listLineTexts.length) return;
     const style = inferListIndentStyle(listLineTexts);
-    for (let currentLine = startLineNo; currentLine < lineNo; currentLine += 1) {
-      stylesByLine.set(currentLine, style);
+    for (let offset = 0; offset < listLineTexts.length; offset += 1) {
+      stylesByLine.set(startLineNo + offset, style);
+    }
+    listLineTexts = [];
+  };
+  for (const line of documentLines(state.doc)) {
+    if (isListLine(line.text)) {
+      if (!listLineTexts.length) startLineNo = line.number;
+      listLineTexts.push(line.text);
+    } else {
+      finishRun();
     }
   }
+  finishRun();
 
   return stylesByLine;
 }

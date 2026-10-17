@@ -1,3 +1,4 @@
+import { documentLines } from './documentLines';
 import { EditorState } from '@codemirror/state';
 import type { MarkdownConfig } from '@lezer/markdown';
 import { parseFrontmatter, isInsideFrontmatter } from './frontmatter';
@@ -200,14 +201,13 @@ function collectDefinitions(
   const definitions: FootnoteDefinition[] = [];
   const seenLabels = new Set<string>();
 
-  for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
-    const line = state.doc.line(lineNo);
-    if (isInsideFrontmatter(frontmatter, line.from) || isInsideProtectedRange(line.from, protectedRanges)) {
-      continue;
-    }
-
+  let scannedThrough = 0;
+  for (const line of documentLines(state.doc)) {
+    const lineNo = line.number;
+    if (lineNo <= scannedThrough) continue;
     const markerMatch = definitionMarkerPattern.exec(line.text);
-    if (!markerMatch) {
+    if (!markerMatch) continue;
+    if (isInsideFrontmatter(frontmatter, line.from) || isInsideProtectedRange(line.from, protectedRanges)) {
       continue;
     }
 
@@ -278,7 +278,7 @@ function collectDefinitions(
 
     definitions.push(definition);
     seenLabels.add(normalizedLabel);
-    lineNo = endLineNo;
+    scannedThrough = endLineNo;
   }
 
   return definitions;
