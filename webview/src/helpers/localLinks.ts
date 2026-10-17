@@ -56,19 +56,13 @@ export const requestLocalLinkStatuses = (text: string): void => {
   const generation = ++localLinkGeneration;
   const targets = collectLocalLinkTargets(text);
   if (!targets.length) {
-    replaceLocalLinkStatuses([]);
-    refreshContext?.refreshDecorations();
+    if (replaceLocalLinkStatuses([])) refreshContext?.refreshDecorations();
     return;
   }
 
   void localLinkTransport.resolve(targets).then((result) => {
     if (generation !== localLinkGeneration) return;
-    if (result.ok === true) {
-      replaceLocalLinkStatuses(result.value.results);
-    } else {
-      replaceLocalLinkStatuses([]);
-    }
-    refreshContext?.refreshDecorations();
+    if (replaceLocalLinkStatuses(result.ok === true ? result.value.results : [])) refreshContext?.refreshDecorations();
   });
 };
 
@@ -76,8 +70,9 @@ export const handleResolvedLocalLinks = (message: ResolvedLocalLinksResponse): b
   return localLinkTransport.accept(message);
 };
 
-export function replaceLocalLinkStatuses(entries: Array<{ target: string; exists: boolean }>): void {
-  localLinkStatusByTarget.clear();
+/** Returns whether the visible status cache changed, independent of result order. */
+export function replaceLocalLinkStatuses(entries: Array<{ target: string; exists: boolean }>): boolean {
+  const next = new Map<string, boolean>();
   for (const entry of entries) {
     if (!entry || typeof entry.target !== 'string') {
       continue;
@@ -86,8 +81,13 @@ export function replaceLocalLinkStatuses(entries: Array<{ target: string; exists
     if (!target) {
       continue;
     }
-    localLinkStatusByTarget.set(target, entry.exists === true);
+    next.set(target, entry.exists === true);
   }
+  if (next.size === localLinkStatusByTarget.size
+    && [...next].every(([target, exists]) => localLinkStatusByTarget.get(target) === exists)) return false;
+  localLinkStatusByTarget.clear();
+  for (const [target, exists] of next) localLinkStatusByTarget.set(target, exists);
+  return true;
 }
 
 export function getLocalLinkStatus(target: string | null | undefined): boolean | null {

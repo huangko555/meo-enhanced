@@ -21,7 +21,7 @@ try {
   await page.setContent('<style>html,body,#editor{height:100%;margin:0}</style><div id="editor"></div>');
   await page.addStyleTag({ path: path.join(root, 'webview/src/styles.css') });
   await page.addScriptTag({ path: path.join(directory, 'bundle.js') });
-  const original = 'EDIT\n\n' + 'Ordinary paragraph.\n\n'.repeat(4_100)
+  const original = 'EDIT\n\n**Prefix bold**\n\n[local](sample.md)\n\n' + 'Ordinary paragraph.\n\n'.repeat(4_100)
     + '## Distant heading\n\n**Distant bold**\n\n| Name | Value |\n| --- | --- |\n| item | 42 |\n\n$$x=1$$\n\n<div>HTML body</div>\n\nTAIL';
   await page.evaluate(text => {
     const api = (window as any).__liveHistory;
@@ -115,6 +115,90 @@ try {
     editor.setDiagnostics([]);
     if (empty !== editor.view.state) throw Error('Empty diagnostics must remain a no-op');
   });
+  // A plain edit after the last rich block must preserve its geometry on the
+  // input frame, and must not rebuild the same full presentation when idle.
+  await page.focus('.cm-content');
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
+  assert.equal(await page.evaluate(() => {
+    const scope = window as any;
+    const editor = scope.__editor;
+    const from = editor.getText().indexOf('Ordinary paragraph.') + 2;
+    editor.view.dispatch({ selection: { anchor: from } });
+    const before = scope.__liveHistory.decorations(editor);
+    editor.view.dispatch({ selection: { anchor: from + 1 } });
+    return scope.__liveHistory.decorations(editor) === before;
+  }), true, 'plain same-line navigation must also preserve later rich blocks whose source positions did not move');
+  const tail = await page.evaluate(() => {
+    const scope = window as any;
+    const editor = scope.__editor;
+    const api = scope.__liveHistory;
+    editor.view.dispatch({ selection: { anchor: editor.view.state.doc.length } });
+    scope.__tailBefore = api.decorations(editor);
+    scope.__tailOriginal = editor.getText();
+    api.input(editor, editor.view.state.doc.length, 'x', Date.now() + 20_000);
+    scope.__tailMapped = api.decorations(editor);
+    return { before: scope.__tailBefore.size, after: scope.__tailMapped.size };
+  });
+  assert.equal(tail.after, tail.before, 'plain tail input must retain distant block geometry on its first frame');
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
+  assert.equal(await page.evaluate(() => {
+    const scope = window as any;
+    return scope.__liveHistory.decorations(scope.__editor) === scope.__tailMapped;
+  }), true, 'settlement must reuse a complete plain-prose projection instead of rebuilding the document');
+  assert.equal(await page.evaluate(() => {
+    const scope = window as any;
+    const editor = scope.__editor;
+    editor.view.dispatch({ selection: { anchor: editor.view.state.doc.length - 1 } });
+    const left = scope.__liveHistory.decorations(editor);
+    editor.view.dispatch({ selection: { anchor: editor.view.state.doc.length } });
+    return left === scope.__tailMapped && scope.__liveHistory.decorations(editor) === scope.__tailMapped;
+  }), true, 'moving a collapsed caret inside unchanged plain prose must not rebuild distant content');
+  for (const mode of ['source', 'live', 'source', 'live']) {
+    await page.evaluate(mode => {
+      const scope = window as any;
+      const editor = scope.__editor;
+      const expected = scope.__tailOriginal + 'x';
+      const selection = editor.view.state.selection;
+      editor.setMode(mode);
+      if (editor.getText() !== expected) throw Error('Mode switch lost pending prose');
+      if (!editor.view.state.selection.eq(selection)) throw Error('Mode switch moved the prose selection');
+    }, mode);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  }
+  assert.equal(await page.evaluate(() => (window as any).__editor.undo()), true);
+  await page.waitForFunction(() => (window as any).__editor.getText() === (window as any).__tailOriginal);
+  assert.equal(await page.evaluate(() => (window as any).__editor.redo()), true);
+  await page.waitForFunction(() => (window as any).__editor.getText() === (window as any).__tailOriginal + 'x');
+  await page.evaluate(() => {
+    const scope = window as any;
+    const editor = scope.__editor;
+    scope.__liveHistory.input(editor, editor.view.state.doc.length, 'y', Date.now() + 30_000);
+    editor.setMode('source');
+    if (editor.getText() !== scope.__tailOriginal + 'xy') throw Error('Leaving pending Live input lost text');
+  });
+  await new Promise(resolve => setTimeout(resolve, 500));
+  await page.evaluate(() => {
+    const scope = window as any;
+    scope.__editor.setMode('live');
+    if (scope.__editor.getText() !== scope.__tailOriginal + 'xy') throw Error('Returning to Live lost accepted text');
+  });
+  await page.evaluate(() => {
+    const scope = window as any;
+    const editor = scope.__editor;
+    editor.focus();
+    editor.view.dispatch({ selection: { anchor: editor.view.state.doc.length } });
+    scope.__liveHistory.input(editor, editor.view.state.doc.length, 'z', Date.now() + 40_000);
+    scope.__liveHistory.setLocalStatuses([{ target: 'sample.md', exists: false }]);
+    editor.refreshDecorations();
+  });
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
+  assert.equal(await page.evaluate(() => {
+    const scope = window as any;
+    for (const cursor = scope.__liveHistory.decorations(scope.__editor).iter(); cursor.value; cursor.next()) {
+      if (cursor.value.spec.widget?.constructor.name === 'MissingLocalLinkWidget') return true;
+    }
+    return false;
+  }), true, 'a resource change during pending plain input must invalidate the complete projection and refresh its warning');
   assert.deepEqual(errors, []);
   await page.evaluate(() => (window as any).__editor.destroy());
   console.log('Live settlement geometry and repeated production Editor undo/redo checkpoints passed');

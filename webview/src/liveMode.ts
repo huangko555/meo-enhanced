@@ -3512,6 +3512,74 @@ function isPlainProseInput(transaction: Transaction): boolean {
   return valid && count === 1;
 }
 
+function hasUnchangedLivePresentationContext(transaction: Transaction): boolean {
+  return !transaction.reconfigured
+    && transaction.effects.every(effect => isLiveInputDerivedWorkBookkeeping(effect)
+      || isAutomaticSymbolPairHistoryEffect(effect) || effect.is(shikiRefreshEffect))
+    && hasDefaultLivePresentation(transaction.startState) && hasDefaultLivePresentation(transaction.state)
+    && (!transaction.selection || transaction.docChanged
+      || transaction.startState.selection.eq(transaction.state.selection));
+}
+
+function plainPresentationParagraph(state: EditorState, tree: Tree, position: number): SyntaxNode | null {
+  let node = tree.resolveInner(position, -1);
+  while (node.parent && node.name !== 'Paragraph') node = node.parent;
+  // These raw syntaxes have presentation outside the Markdown tree. Bound this
+  // proof so a huge paragraph cannot add a full text scan to every interaction.
+  if (node.name !== 'Paragraph' || node.firstChild || node.parent?.name !== 'Document'
+    || node.to - node.from > 4_096
+    || /[#$:<>\[\]\\|]/.test(state.doc.sliceString(node.from, node.to))) return null;
+  return node;
+}
+
+function canMapUnchangedProseDecorations(decorations: DecorationSet, transaction: Transaction): boolean {
+  if (!liveDecorationMetadata.get(transaction.startState)?.complete
+    || !hasUnchangedLivePresentationContext(transaction) || !isPlainProseInput(transaction)
+    || transaction.state.selection.ranges.length !== 1 || !transaction.state.selection.main.empty
+    || transaction.state.selection.main.head !== transaction.changes.mapPos(transaction.startState.selection.main.head, 1)) return false;
+  const before = currentSyntaxTree(transaction.startState);
+  const after = currentSyntaxTree(transaction.state);
+  if (before.length !== transaction.startState.doc.length || after.length !== transaction.newDoc.length
+    || !syntaxTreeAvailable(transaction.startState, before.length)
+    || !syntaxTreeAvailable(transaction.state, after.length)) return false;
+  let valid = true;
+  transaction.changes.iterChangedRanges((from, to, nextFrom, nextTo) => {
+    // Widget payloads may store absolute source positions. A mapped RangeSet
+    // alone cannot rebase them, so leave edits before/inside decorations to the
+    // authoritative rebuild until those widget types support rebasing.
+    if (decorations.iter(from).value) { valid = false; return; }
+    const previous = plainPresentationParagraph(transaction.startState, before, to);
+    const next = plainPresentationParagraph(transaction.state, after, nextTo);
+    if (!previous || !next || previous.from !== next.from || transaction.changes.mapPos(previous.to, 1) !== next.to) {
+      valid = false;
+      return;
+    }
+    const oldLine = transaction.startState.doc.lineAt(from);
+    const newLine = transaction.newDoc.lineAt(nextFrom);
+    valid &&= oldLine.text.match(/^[ \t]*/)![0] === newLine.text.match(/^[ \t]*/)![0];
+  });
+  return valid;
+}
+
+function canKeepPlainProseCaret(decorations: DecorationSet, transaction: Transaction): boolean {
+  if (transaction.docChanged || transaction.reconfigured || transaction.effects.length
+    || !transaction.selection || transaction.startState.selection.eq(transaction.state.selection)
+    || !liveDecorationMetadata.get(transaction.startState)?.complete
+    || !hasDefaultLivePresentation(transaction.startState) || !hasDefaultLivePresentation(transaction.state)
+    || transaction.startState.selection.ranges.length !== 1 || transaction.state.selection.ranges.length !== 1
+    || !transaction.startState.selection.main.empty || !transaction.state.selection.main.empty
+    || syntaxTreeChanged(transaction)) return false;
+  const doc = transaction.startState.doc;
+  const line = doc.lineAt(transaction.startState.selection.main.head);
+  const cursor = decorations.iter(line.from);
+  // Caret-only moves leave later widget offsets intact. Only decorations on
+  // this line can change their presentation when the caret moves within it.
+  if (doc.lineAt(transaction.state.selection.main.head).number !== line.number
+    || (cursor.value && cursor.from <= line.to)) return false;
+  const tree = currentSyntaxTree(transaction.startState);
+  return tree.length === doc.length && !!plainPresentationParagraph(transaction.startState, tree, line.to);
+}
+
 /** Exact history restoration can reuse a full presentation without remapping widgets. */
 function restoreLiveDecorationCheckpoint(
   decorations: DecorationSet,
@@ -3519,12 +3587,7 @@ function restoreLiveDecorationCheckpoint(
 ): DecorationSet | undefined {
   if (!usesLargeDocumentDerivedWorkBudget(transaction.state)) return;
   const previous = liveDecorationMetadata.get(transaction.startState);
-  const contextUnchanged = !transaction.reconfigured
-    && transaction.effects.every(effect => isLiveInputDerivedWorkBookkeeping(effect)
-      || isAutomaticSymbolPairHistoryEffect(effect) || effect.is(shikiRefreshEffect))
-    && hasDefaultLivePresentation(transaction.startState) && hasDefaultLivePresentation(transaction.state)
-    && (!transaction.selection || transaction.docChanged
-      || transaction.startState.selection.eq(transaction.state.selection));
+  const contextUnchanged = hasUnchangedLivePresentationContext(transaction);
   let checkpoint = contextUnchanged ? previous?.checkpoint : undefined;
   if (transaction.docChanged) {
     const isHistory = transaction.isUserEvent('undo') || transaction.isUserEvent('redo');
@@ -3542,7 +3605,7 @@ function restoreLiveDecorationCheckpoint(
       ? startsHistoryGroup ? current : checkpoint ?? current
       : undefined;
   }
-  liveDecorationMetadata.set(transaction.state, { checkpoint, complete: previous?.complete === true });
+  liveDecorationMetadata.set(transaction.state, { checkpoint, complete: contextUnchanged && previous?.complete === true });
 }
 
 const liveDecorationField = StateField.define<DecorationSet>({
@@ -3565,6 +3628,10 @@ const liveDecorationField = StateField.define<DecorationSet>({
     }
     const restored = restoreLiveDecorationCheckpoint(decorations, transaction);
     if (restored !== undefined) return restored;
+    if (usesLargeDocumentDerivedWorkBudget(transaction.state) && canKeepPlainProseCaret(decorations, transaction)) {
+      liveDecorationMetadata.set(transaction.state, { ...liveDecorationMetadata.get(transaction.state), complete: true });
+      return decorations;
+    }
     // Search highlights are maintained independently. Preserving the existing
     // live decorations prevents a transient parse result from exposing source.
     if (
@@ -3577,6 +3644,13 @@ const liveDecorationField = StateField.define<DecorationSet>({
       // Phase bookkeeping, especially settlement after an authoritative refresh,
       // must not discard distant block heights a second time.
       if (!transaction.docChanged) return decorations;
+      if (usesLargeDocumentDerivedWorkBudget(transaction.state)
+        && canMapUnchangedProseDecorations(decorations, transaction)) {
+        const mapped = decorations.map(transaction.changes);
+        liveDecorationMetadata.set(transaction.state, { ...liveDecorationMetadata.get(transaction.state), complete: true });
+        if (!isEmptyDecorationSet(mapped)) completeLiveDecorationSets.add(mapped);
+        return mapped;
+      }
       if (usesLargeDocumentDerivedWorkBudget(transaction.state)) {
         liveDecorationMetadata.set(transaction.state, { ...liveDecorationMetadata.get(transaction.state), complete: false });
       }
@@ -3604,6 +3678,11 @@ const liveDecorationField = StateField.define<DecorationSet>({
             transaction
           )
         : inputDecorations;
+    }
+    if (!transaction.docChanged && isLiveInputDerivedWorkRefresh(transaction)
+      && liveDecorationMetadata.get(transaction.startState)?.complete
+      && hasUnchangedLivePresentationContext(transaction) && !syntaxTreeChanged(transaction)) {
+      return decorations;
     }
     // Shiki owns its own decorations. Its token refresh does not change Live
     // structure, while other effects may refresh resources or presentation.

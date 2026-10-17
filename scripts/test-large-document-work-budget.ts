@@ -31,6 +31,7 @@ try {
   page.setDefaultTimeout(8_000);
   await page.setViewport({ width: 1100, height: 720 });
   const messages: string[] = [];
+  const previewTexts: string[] = [];
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(String(error)));
   await page.exposeFunction('__budgetHost', (message: any) => {
@@ -47,6 +48,7 @@ try {
       outlineVisible: false, outlineWidth: 260, restoreReadingPositionOnOpen: false, vscodeTheme: null
     };
     if (message.type !== 'requestPreviewRender') return null;
+    previewTexts.push(message.text);
     return { type: 'previewRenderResult', requestId: message.requestId, result: { ok: true,
       value: exportRuntime.renderPreviewDocument({ markdownText: message.text, sourceDocumentPath: 'C:/large-document-budget.md', uiLanguage: message.uiLanguage, styleEnvironment: message.environment }) } };
   });
@@ -136,8 +138,44 @@ try {
   });
   assert.equal(await page.evaluate(() => !!document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
     ?.querySelector('.meo-latex-math-canvas .meo-latex-math-canvas')), false, 'resuming formulas must not nest presentation wrappers');
+  stage = 'editing and immediate three-mode round trips';
+  let tail = 'DOCUMENT-END';
+  for (const mode of ['source', 'live'] as const) {
+    stage = `round trip ${mode}: activate`;
+    await page.click(`button[data-mode="${mode}"]`);
+    await page.waitForFunction(mode => document.getElementById('app')?.dataset.mode === mode
+      && !!document.querySelector(`.editor-host:not([hidden]):not([inert]):not([data-preview-cover]) .cm-editor.meo-mode-${mode}`), {}, mode);
+    await page.focus('.editor-host .cm-content');
+    await page.keyboard.down('Control'); await page.keyboard.press('End'); await page.keyboard.up('Control');
+    const suffix = mode === 'source' ? 'SOURCE' : 'LIVE';
+    await page.keyboard.type(suffix);
+    tail += suffix;
+    const client = await page.createCDPSession();
+    await client.send('Input.imeSetComposition', { text: '中文', selectionStart: 2, selectionEnd: 2 });
+    await client.send('Input.insertText', { text: '中文' });
+    await client.detach();
+    tail += '中文';
+    stage = `round trip ${mode}: accept input ${tail}`;
+    await page.waitForFunction(tail => document.querySelector('.editor-host .cm-content')?.textContent?.includes(tail), {}, tail);
+    // No quiet-window wait: clicking Preview must flush the latest accepted text.
+    await page.click('button[data-mode="preview"]');
+    stage = `round trip ${mode}: latest Preview`;
+    await page.waitForFunction(tail => document.getElementById('app')?.dataset.mode === 'preview'
+      && document.querySelector<HTMLElement>('.preview-status')?.hidden === true
+      && document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent?.includes(tail), {}, tail);
+    assert.equal(previewTexts.at(-1), text + tail.slice('DOCUMENT-END'.length), 'Preview must render the exact unsaved editing revision');
+    await page.click(`button[data-mode="${mode}"]`);
+    stage = `round trip ${mode}: restore reading position`;
+    await page.waitForFunction(({ mode, tail }) => {
+      if (document.getElementById('app')?.dataset.mode !== mode) return false;
+      const scroller = document.querySelector('.editor-host .cm-scroller')?.getBoundingClientRect();
+      const line = Array.from(document.querySelectorAll('.editor-host .cm-line')).find(line => line.textContent?.includes(tail));
+      const rect = line?.getBoundingClientRect();
+      return rect && scroller && rect.top < scroller.bottom && rect.bottom > scroller.top;
+    }, {}, { mode, tail });
+  }
   assert.deepEqual(errors, []);
-  console.log('Large document work budget: Source input/undo, hidden Preview, viewport math/tables/diagrams and suspension/resume passed');
+  console.log('Large document work budget: Source input/undo, hidden Preview, viewport resources, unsaved three-mode round trips and reading-position restoration passed');
 } catch (error) {
   console.error('Large document budget failed during ' + stage);
   primaryError = error;

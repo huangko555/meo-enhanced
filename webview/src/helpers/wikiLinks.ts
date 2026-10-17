@@ -52,19 +52,13 @@ export const requestWikiLinkStatuses = (text: string): void => {
   const generation = ++wikiLinkGeneration;
   const targets = collectWikiLinkTargets(text);
   if (!targets.length) {
-    replaceWikiLinkStatuses([]);
-    refreshContext?.refreshDecorations();
+    if (replaceWikiLinkStatuses([])) refreshContext?.refreshDecorations();
     return;
   }
 
   void wikiLinkTransport.resolve(targets).then((result) => {
     if (generation !== wikiLinkGeneration) return;
-    if (result.ok === true) {
-      replaceWikiLinkStatuses(result.value.results);
-    } else {
-      replaceWikiLinkStatuses([]);
-    }
-    refreshContext?.refreshDecorations();
+    if (replaceWikiLinkStatuses(result.ok === true ? result.value.results : [])) refreshContext?.refreshDecorations();
   });
 };
 
@@ -272,9 +266,10 @@ export function getWikiLinkStatus(target: string | null | undefined): boolean | 
 
 export function getWikiLinkIssue(target: string): string | undefined { return wikiLinkIssues.get(target); }
 
-export function replaceWikiLinkStatuses(entries: Array<{ target: string; exists: boolean; issue?: string }>): void {
-  wikiLinkStatusByTarget.clear();
-  wikiLinkIssues.clear();
+/** Status and issue changes both require a presentation refresh. */
+export function replaceWikiLinkStatuses(entries: Array<{ target: string; exists: boolean; issue?: string }>): boolean {
+  const next = new Map<string, boolean>();
+  const issues = new Map<string, string>();
   for (const entry of entries) {
     if (!entry || typeof entry.target !== 'string') {
       continue;
@@ -283,9 +278,17 @@ export function replaceWikiLinkStatuses(entries: Array<{ target: string; exists:
     if (!target) {
       continue;
     }
-    wikiLinkStatusByTarget.set(target, entry.exists === true);
-    if (entry.issue) wikiLinkIssues.set(target, entry.issue);
+    next.set(target, entry.exists === true);
+    if (entry.issue) issues.set(target, entry.issue);
   }
+  if (next.size === wikiLinkStatusByTarget.size && issues.size === wikiLinkIssues.size
+    && [...next].every(([target, exists]) => wikiLinkStatusByTarget.get(target) === exists)
+    && [...issues].every(([target, issue]) => wikiLinkIssues.get(target) === issue)) return false;
+  wikiLinkStatusByTarget.clear();
+  wikiLinkIssues.clear();
+  for (const [target, exists] of next) wikiLinkStatusByTarget.set(target, exists);
+  for (const [target, issue] of issues) wikiLinkIssues.set(target, issue);
+  return true;
 }
 
 const sourceWikiMarkerDeco = Decoration.mark({ class: 'meo-md-wiki-marker' });

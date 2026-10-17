@@ -3773,16 +3773,13 @@ window.addEventListener('message', (event) => {
   }
 
   if (message.type === 'resolvedWikiLinks') {
-    if (handleResolvedWikiLinks(message)) {
-      editor?.refreshDecorations();
-    }
+    // The request owner refreshes once, after accepting changed status data.
+    handleResolvedWikiLinks(message);
     return;
   }
 
   if (message.type === 'resolvedLocalLinks') {
-    if (handleResolvedLocalLinks(message)) {
-      editor?.refreshDecorations();
-    }
+    handleResolvedLocalLinks(message);
     return;
   }
 

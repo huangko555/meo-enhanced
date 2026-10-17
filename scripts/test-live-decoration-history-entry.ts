@@ -3,9 +3,11 @@ import { Transaction } from '@codemirror/state';
 import { createEditor } from './test-editor-factory';
 import { isLiveInputDerivedWorkPending } from '../webview/src/editor/liveInputDerivedWork';
 import { diagnosticDataField } from '../webview/src/helpers/diagnostics';
+import { replaceLocalLinkStatuses } from '../webview/src/helpers/localLinks';
 
 (window as any).__liveHistory = {
   create: createEditor,
+  setLocalStatuses: replaceLocalLinkStatuses,
   pending: (editor: ReturnType<typeof createEditor>) => isLiveInputDerivedWorkPending(editor.view.state),
   diagnostics: (editor: ReturnType<typeof createEditor>) => editor.view.state.field(diagnosticDataField),
   decorations(editor: ReturnType<typeof createEditor>): DecorationSet {

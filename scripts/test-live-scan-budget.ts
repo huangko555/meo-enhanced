@@ -89,3 +89,50 @@ for (const invalidation of ['selection', 'effect', 'presentation', 'reconfigure'
   assert.notEqual(mainDecorations(state), initial, `${invalidation}: rebuild instead of restoring an inapplicable checkpoint`);
 }
 console.log('Live history checkpoints preserve exact text/selection and reject changed presentation contexts');
+
+const decorationShape = (set: DecorationSet) => {
+  const ranges: unknown[] = [];
+  for (const cursor = set.iter(); cursor.value; cursor.next()) {
+    const spec = cursor.value.spec;
+    ranges.push([cursor.from, cursor.to, spec.class, spec.attributes, spec.block, spec.widget?.constructor.name]);
+  }
+  return ranges;
+};
+const prosePrefix = '**Prefix formatting**\n\n' + 'Ordinary filler.\n\n'.repeat(100);
+for (const paragraph of ['Plain prose', '中文正文', 'NATIVE_EDIT_TARGET', 'Sentence with punctuation.', 'Two lines\nPlain second line']) {
+  const text = prosePrefix + paragraph;
+  for (const operation of ['insert', 'delete', 'space'] as const) {
+    const from = operation === 'delete'
+      ? prosePrefix.length + paragraph.search(/[\p{L}\p{N}][^\p{L}\p{N}]*$/u) : text.length;
+    const to = operation === 'delete' ? from + 1 : from;
+    const insert = operation === 'delete' ? '' : operation === 'space' ? ' ' : 'x';
+    const state = EditorState.create({ doc: text, selection: { anchor: to }, extensions: liveModeExtensions({ largeDocument: true }) });
+    const next = state.update({ changes: { from, to, insert }, selection: { anchor: from + insert.length },
+      annotations: Transaction.userEvent.of('input.type') }).state;
+    const fresh = EditorState.create({ doc: next.doc, selection: next.selection, extensions: liveModeExtensions({ largeDocument: true }) });
+    assert.deepEqual(decorationShape(mainDecorations(next)), decorationShape(mainDecorations(fresh)),
+      `${paragraph}/${operation}: the input frame must match a fresh authoritative presentation`);
+    const positioned = next.update({ selection: { anchor: next.selection.main.head - 1 } }).state;
+    assert.equal(mainDecorations(positioned), mainDecorations(next), 'same-line plain caret navigation must reuse the full presentation');
+  }
+}
+for (const paragraph of ['plain $raw', 'plain #tag', 'plain file:///tmp/example', '[^unclosed', '<div>unclosed', 'plain | table', 'x'.repeat(4_100)]) {
+  const text = prosePrefix + paragraph;
+  const state = EditorState.create({ doc: text, selection: { anchor: text.length }, extensions: liveModeExtensions({ largeDocument: true }) });
+  const next = state.update({ changes: { from: text.length, insert: 'x' }, selection: { anchor: text.length + 1 },
+    annotations: Transaction.userEvent.of('input.type') }).state;
+  assert.ok(mainDecorations(next).size < mainDecorations(state).size,
+    'raw helper syntax and oversized paragraphs must keep the bounded fallback path');
+}
+{
+  const text = prosePrefix + 'Plain middle paragraph.\n\n**Later formatting**\n\n[local](sample.md)\n\n$$\nx^2\n$$';
+  const state = EditorState.create({ doc: text, selection: { anchor: prosePrefix.length + 2 },
+    extensions: liveModeExtensions({ largeDocument: true }) });
+  const next = state.update({ selection: { anchor: prosePrefix.length + 3 } }).state;
+  const fresh = EditorState.create({ doc: next.doc, selection: next.selection,
+    extensions: liveModeExtensions({ largeDocument: true }) });
+  assert.equal(mainDecorations(next), mainDecorations(state), 'plain caret navigation must preserve later rich blocks');
+  assert.deepEqual(decorationShape(mainDecorations(next)), decorationShape(mainDecorations(fresh)),
+    'middle paragraph caret navigation must match a fresh authoritative presentation');
+}
+console.log('Plain prose projections match full builds; raw syntax and oversized paragraphs retain conservative refresh');
