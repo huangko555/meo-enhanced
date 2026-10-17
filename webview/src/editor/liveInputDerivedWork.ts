@@ -130,6 +130,15 @@ const changeLiveInputCompositionEffect = StateEffect.define<true>();
 const completeLiveInputCompositionEffect = StateEffect.define<true>();
 const resumeLiveInputAcceptedWorkEffect = StateEffect.define<true>();
 
+/** Phase bookkeeping does not change the document's presentation choices. */
+export function isLiveInputDerivedWorkBookkeeping(effect: StateEffect<unknown>): boolean {
+  return [deferLiveInputDerivedWorkEffect, refreshLiveInputDerivedWorkEffect,
+    settleLiveInputDerivedWorkEffect, cancelLiveInputDerivedWorkEffect,
+    supersedeLiveInputDerivedWorkEffect, beginLiveInputCompositionEffect,
+    changeLiveInputCompositionEffect, completeLiveInputCompositionEffect,
+    resumeLiveInputAcceptedWorkEffect].some(type => effect.is(type));
+}
+
 type LiveInputDerivedWorkPhase =
   | 'idle'
   | 'pending-input'

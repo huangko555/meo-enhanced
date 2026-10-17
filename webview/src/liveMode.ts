@@ -1,8 +1,10 @@
 import { documentLines } from './helpers/documentLines';
+import { isAutomaticSymbolPairHistoryEffect } from './editor/typingAssistance';
+import { undoDepth } from '@codemirror/commands';
 import { blockStickyHeaderExtension } from './helpers/blockStickyHeader';
 import { countColumn, RangeSetBuilder, StateEffect, StateField, EditorState, type ChangeDesc, type Range, type RangeSet, type Extension, type EditorSelection, type Transaction } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { syntaxHighlighting } from '@codemirror/language';
+import { syntaxHighlighting, syntaxTreeAvailable } from '@codemirror/language';
 import {
   Decoration,
   EditorView,
@@ -144,6 +146,7 @@ import {
   uiLanguageFacet
 } from './editor/uiLanguage';
 import {
+  isLiveInputDerivedWorkBookkeeping,
   isLiveInputDerivedWorkRefresh,
   isLiveInputNestedProjection,
   liveInputDerivedWorkExtensions,
@@ -2556,8 +2559,15 @@ function safeBuildDecorations(
   extra: { docChanged?: boolean; selection?: EditorSelection; changes?: ChangeDesc } = {}
 ): DecorationSet {
   try {
-    return buildDecorations(state, fallback, extra.changes);
+    const decorations = buildDecorations(state, fallback, extra.changes);
+    if (usesLargeDocumentDerivedWorkBudget(state)) {
+      liveDecorationMetadata.set(state, {
+        ...liveDecorationMetadata.get(state), complete: syntaxTreeAvailable(state, state.doc.length)
+      });
+    }
+    return decorations;
   } catch (error) {
+    liveDecorationMetadata.set(state, { complete: false });
     console.error('[MEO liveMode] decoration build failed', {
       context,
       docLength: state.doc.length,
@@ -3449,6 +3459,87 @@ function projectInputCodeBlockLines(
   return projected;
 }
 
+type LiveDecorationCheckpoint = {
+  readonly doc: EditorState['doc'];
+  readonly selection: EditorSelection;
+  readonly decorations: DecorationSet;
+};
+type LiveDecorationMetadata = {
+  readonly complete: boolean;
+  readonly checkpoint?: LiveDecorationCheckpoint;
+};
+// One complete checkpoint per current editor state. Values retain no prior
+// EditorState or checkpoint chain, and disappear with their editor's state.
+const liveDecorationMetadata = new WeakMap<EditorState, LiveDecorationMetadata>();
+
+function hasDefaultLivePresentation(state: EditorState): boolean {
+  const mermaid = state.field(mermaidEditingStateField, false);
+  const math = state.field(latexMathEditingStateField, false);
+  return !mermaid?.modes.size && !mermaid?.searchReveal && !math?.modes.size && !math?.searchReveal
+    && !getHtmlEditingRange(state) && !state.field(livePointerSelectionActiveField).active
+    && !state.field(liveDocumentIdleField);
+}
+
+function isPlainProseInput(transaction: Transaction): boolean {
+  if (!transaction.isUserEvent('input') || transaction.startState.selection.ranges.length !== 1
+    || !transaction.startState.selection.main.empty) return false;
+  const document = transaction.startState.doc;
+  const tree = currentSyntaxTree(transaction.startState);
+  let count = 0;
+  let valid = true;
+  transaction.changes.iterChangedRanges((from, to, nextFrom, nextTo) => {
+    count += 1;
+    if (!/^[\p{L}\p{N} \t]*$/u.test(document.sliceString(from, to))
+      || !/^[\p{L}\p{N} \t]*$/u.test(transaction.newDoc.sliceString(nextFrom, nextTo))) {
+      valid = false;
+      return;
+    }
+    const line = document.lineAt(from);
+    if (document.lineAt(to).number !== line.number || from > tree.length) {
+      valid = false;
+      return;
+    }
+    let node = tree.resolveInner(from, from === line.from ? 1 : -1);
+    while (node.parent && node.name !== 'Paragraph') node = node.parent;
+    valid &&= node.name === 'Paragraph' && !node.firstChild && node.parent?.name === 'Document'
+      || node.name === 'Document' && line.text.length === 0;
+  });
+  return valid && count === 1;
+}
+
+/** Exact history restoration can reuse a full presentation without remapping widgets. */
+function restoreLiveDecorationCheckpoint(
+  decorations: DecorationSet,
+  transaction: Transaction
+): DecorationSet | undefined {
+  if (!usesLargeDocumentDerivedWorkBudget(transaction.state)) return;
+  const previous = liveDecorationMetadata.get(transaction.startState);
+  const contextUnchanged = !transaction.reconfigured
+    && transaction.effects.every(effect => isLiveInputDerivedWorkBookkeeping(effect)
+      || isAutomaticSymbolPairHistoryEffect(effect) || effect.is(shikiRefreshEffect))
+    && hasDefaultLivePresentation(transaction.startState) && hasDefaultLivePresentation(transaction.state)
+    && (!transaction.selection || transaction.docChanged
+      || transaction.startState.selection.eq(transaction.state.selection));
+  let checkpoint = contextUnchanged ? previous?.checkpoint : undefined;
+  if (transaction.docChanged) {
+    const isHistory = transaction.isUserEvent('undo') || transaction.isUserEvent('redo');
+    const current = contextUnchanged && previous?.complete ? {
+      doc: transaction.startState.doc, selection: transaction.startState.selection, decorations
+    } : undefined;
+    if (isHistory) {
+      const restored = checkpoint?.selection.eq(transaction.state.selection)
+        && checkpoint.doc.eq(transaction.newDoc) ? checkpoint.decorations : undefined;
+      liveDecorationMetadata.set(transaction.state, { checkpoint: current, complete: restored !== undefined });
+      return restored;
+    }
+    const startsHistoryGroup = undoDepth(transaction.state) > undoDepth(transaction.startState);
+    checkpoint = contextUnchanged && isPlainProseInput(transaction)
+      ? startsHistoryGroup ? current : checkpoint ?? current
+      : undefined;
+  }
+  liveDecorationMetadata.set(transaction.state, { checkpoint, complete: previous?.complete === true });
+}
+
 const liveDecorationField = StateField.define<DecorationSet>({
   create(state: EditorState): DecorationSet {
     return safeBuildDecorations(state, Decoration.none, 'create');
@@ -3458,8 +3549,18 @@ const liveDecorationField = StateField.define<DecorationSet>({
     // reconfiguration then calls update for that same state; rebuilding here
     // doubles the full-document work on every Source-to-Live switch.
     if (transaction.reconfigured && !transaction.startState.field(liveDecorationField, false)) {
+      // Creation can use a provisional reconfiguration state. Associate the
+      // completed value with the final state too; failed creation returns none.
+      if (usesLargeDocumentDerivedWorkBudget(transaction.state)) {
+        liveDecorationMetadata.set(transaction.state, {
+          complete: !isEmptyDecorationSet(decorations)
+            && syntaxTreeAvailable(transaction.state, transaction.state.doc.length)
+        });
+      }
       return decorations;
     }
+    const restored = restoreLiveDecorationCheckpoint(decorations, transaction);
+    if (restored !== undefined) return restored;
     // Search highlights are maintained independently. Preserving the existing
     // live decorations prevents a transient parse result from exposing source.
     if (
@@ -3469,6 +3570,12 @@ const liveDecorationField = StateField.define<DecorationSet>({
       return decorations;
     }
     if (shouldDeferLiveInputDerivedWork(transaction)) {
+      // Phase bookkeeping, especially settlement after an authoritative refresh,
+      // must not discard distant block heights a second time.
+      if (!transaction.docChanged) return decorations;
+      if (usesLargeDocumentDerivedWorkBudget(transaction.state)) {
+        liveDecorationMetadata.set(transaction.state, { ...liveDecorationMetadata.get(transaction.state), complete: false });
+      }
       const inputDecorations = usesLargeDocumentDerivedWorkBudget(transaction.state)
         ? retainLargeDocumentInputDecorations(decorations, transaction)
         : decorations;
@@ -3497,7 +3604,10 @@ const liveDecorationField = StateField.define<DecorationSet>({
     // Shiki owns its own decorations. Its token refresh does not change Live
     // structure, while other effects may refresh resources or presentation.
     // An explicit selection can end an editing/search reveal even at the same position.
-    if (!transaction.docChanged && !transaction.selection && !transaction.reconfigured
+    const identicalPlainSelection = usesLargeDocumentDerivedWorkBudget(transaction.state)
+      && transaction.startState.selection.eq(transaction.state.selection)
+      && hasDefaultLivePresentation(transaction.startState) && hasDefaultLivePresentation(transaction.state);
+    if (!transaction.docChanged && (!transaction.selection || identicalPlainSelection) && !transaction.reconfigured
       && transaction.effects.every((effect) => effect.is(shikiRefreshEffect))
       && !syntaxTreeChanged(transaction)) {
       return decorations;
@@ -3511,6 +3621,7 @@ const liveDecorationField = StateField.define<DecorationSet>({
     // Guard against transient empty parse results on selection-only transactions.
     if (!transaction.docChanged && !isLiveInputDerivedWorkRefresh(transaction)
       && isEmptyDecorationSet(next) && !isEmptyDecorationSet(decorations)) {
+      liveDecorationMetadata.set(transaction.state, { complete: false });
       return decorations;
     }
 

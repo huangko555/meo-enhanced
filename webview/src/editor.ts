@@ -4288,6 +4288,15 @@ export function createEditor({
     },
     setDiagnostics(diagnostics: EditorDiagnostic[]) {
       currentDiagnostics = Array.isArray(diagnostics) ? diagnostics : [];
+      const previous = view.state.field(diagnosticDataField);
+      // The host can republish identical diagnostics after every keystroke.
+      // Compare mapped positions too: unchanged messages may have moved in the document.
+      if (previous.length === currentDiagnostics.length && previous.every((diagnostic, index) => {
+        const next = currentDiagnostics[index];
+        return diagnostic.from === next.from && diagnostic.to === next.to
+          && diagnostic.severity === next.severity && diagnostic.message === next.message
+          && diagnostic.source === next.source && diagnostic.code === next.code;
+      })) return;
       view.dispatch({ effects: setDiagnosticsEffect.of(currentDiagnostics) });
     },
     refreshLayout() {

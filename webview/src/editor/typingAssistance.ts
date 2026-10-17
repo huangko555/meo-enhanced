@@ -20,6 +20,10 @@ class AutomaticPair extends RangeValue {
 }
 
 const replacePairs = StateEffect.define<RangeSet<AutomaticPair>>({ map: (pairs, mapping) => pairs.map(mapping) });
+/** History restores invisible pair identity independently of Markdown presentation. */
+export function isAutomaticSymbolPairHistoryEffect(effect: StateEffect<unknown>): boolean {
+  return effect.is(replacePairs);
+}
 export const addAutomaticSymbolPair = StateEffect.define<{ from: number; to: number; open: string; close: string }>({
   map: (pair, mapping) => ({ ...pair, from: mapping.mapPos(pair.from, 1), to: mapping.mapPos(pair.to, -1) })
 });

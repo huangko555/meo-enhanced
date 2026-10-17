@@ -100,4 +100,41 @@ assert.deepEqual(lifecycle, ['mount', 'update', 'invalidate', 'unmount']);
 adapter.dispose();
 assert.deepEqual(lifecycle, ['mount', 'update', 'invalidate', 'unmount', 'dispose']);
 
+let createdDelegates = 0;
+const mountedLifecycle: string[] = [];
+const lazyFactory = createToggleableTableStickyHeaderAdapterFactory({
+  create() {
+    createdDelegates += 1;
+    return {
+      mount: () => mountedLifecycle.push('mount'),
+      update: () => mountedLifecycle.push('update'),
+      invalidate: () => mountedLifecycle.push('invalidate'),
+      unmount: () => mountedLifecycle.push('unmount'),
+      dispose: () => mountedLifecycle.push('dispose')
+    };
+  }
+});
+const options = {
+  scheduler: { register: () => ({ request() {}, dispose() {} }) },
+  resolveElements: () => null,
+  controlsHeight: () => 0
+};
+// Live rebuilds create widgets for distant tables that never receive toDOM/destroy.
+const distantAdapters = Array.from({ length: 1_000 }, () => lazyFactory.create(options));
+assert.equal(createdDelegates, 0, 'unmounted table widgets must not allocate retained sticky-header delegates');
+const visibleAdapter = distantAdapters[0];
+visibleAdapter.mount();
+visibleAdapter.update();
+assert.equal(createdDelegates, 1);
+visibleAdapter.unmount();
+lazyFactory.setEnabled(false);
+lazyFactory.setEnabled(true);
+assert.deepEqual(mountedLifecycle, ['mount', 'update', 'unmount'], 'unmounted adapters must leave the active registry');
+visibleAdapter.mount();
+visibleAdapter.invalidate();
+assert.equal(createdDelegates, 1, 'remounting a live handle should reuse its delegate');
+visibleAdapter.dispose();
+lazyFactory.setEnabled(false);
+assert.deepEqual(mountedLifecycle, ['mount', 'update', 'unmount', 'mount', 'invalidate', 'dispose']);
+
 console.log('table sticky header policy contracts passed');

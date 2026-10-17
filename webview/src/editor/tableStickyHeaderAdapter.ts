@@ -44,46 +44,51 @@ export function createToggleableTableStickyHeaderAdapterFactory(
   delegateFactory: Pick<TableStickyHeaderAdapterFactory, 'create'>,
   initiallyEnabled = true
 ): TableStickyHeaderAdapterFactory {
-  const entries = new Set<{
-    readonly delegate: TableStickyHeaderAdapter;
-    mounted: boolean;
-  }>();
+  // Offscreen widgets may never mount or receive destroy. Register only mounted
+  // delegates so rebuilding a document cannot retain every discarded table.
+  const entries = new Set<TableStickyHeaderAdapter>();
   let enabled = initiallyEnabled;
 
   return {
     create(options) {
-      const delegate = delegateFactory.create(options);
-      const entry = { delegate, mounted: false };
-      entries.add(entry);
+      let delegate: TableStickyHeaderAdapter | null = null;
+      let mounted = false;
       return {
         mount() {
-          entry.mounted = true;
+          delegate ??= delegateFactory.create(options);
+          mounted = true;
+          entries.add(delegate);
           if (enabled) delegate.mount();
         },
         update() {
-          if (entry.mounted && enabled) delegate.update();
+          if (mounted && enabled) delegate?.update();
         },
         invalidate() {
-          if (entry.mounted && enabled) delegate.invalidate();
+          if (mounted && enabled) delegate?.invalidate();
         },
         unmount() {
-          entry.mounted = false;
-          delegate.unmount();
+          mounted = false;
+          if (delegate) {
+            entries.delete(delegate);
+            delegate.unmount();
+          }
         },
         dispose() {
-          entry.mounted = false;
-          entries.delete(entry);
-          delegate.dispose();
+          mounted = false;
+          if (delegate) {
+            entries.delete(delegate);
+            delegate.dispose();
+            delegate = null;
+          }
         }
       };
     },
     setEnabled(nextEnabled) {
       if (nextEnabled === enabled) return;
       enabled = nextEnabled;
-      for (const entry of entries) {
-        if (!entry.mounted) continue;
-        if (enabled) entry.delegate.mount();
-        else entry.delegate.unmount();
+      for (const delegate of entries) {
+        if (enabled) delegate.mount();
+        else delegate.unmount();
       }
     }
   };
