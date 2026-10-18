@@ -6,12 +6,12 @@ const literalNodes = new Set(['InlineCode', 'FencedCode', 'CodeBlock', 'CodeText
 const cache = new WeakMap<Tree, SourceRange[]>();
 
 /** Prose transforms share the parser's literal containers, while link labels remain prose. */
-export function collectMarkdownLiteralRanges(state: EditorState, tree: Tree): readonly SourceRange[] {
-  const cached = cache.get(tree);
+export function collectMarkdownLiteralRanges(state: EditorState, tree: Tree, scope?: { from: number; to: number }): readonly SourceRange[] {
+  const cached = !scope && cache.get(tree);
   if (cached) return cached;
   const ranges: SourceRange[] = [];
   const codeTags: Array<{ from: number; to: number; name: string }> = [];
-  tree.iterate({ enter(node) {
+  tree.iterate({ ...scope, enter(node) {
     if (node.name === 'InlineHTMLCode') {
       ranges.push({ from: node.from, to: node.to, htmlCode: { from: node.node.firstChild!.to, to: node.node.lastChild!.from } });
       return false;
@@ -37,6 +37,6 @@ export function collectMarkdownLiteralRanges(state: EditorState, tree: Tree): re
     }
   } });
   ranges.sort((left, right) => left.from - right.from || left.to - right.to);
-  cache.set(tree, ranges);
+  if (!scope) cache.set(tree, ranges);
   return ranges;
 }

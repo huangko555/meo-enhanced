@@ -10,6 +10,7 @@ import { logWebviewRenderError } from './errors';
 import { normalizeDocumentText } from '../../../src/foundation/documentText';
 import { assessLargeDocument } from '../../../src/foundation/largeDocument';
 import { observePreviewViewportResources } from './previewViewportResources';
+import { createPreviewSourceGeometry } from './previewSourceGeometry';
 import { createDocumentScrollToTopController } from './scrollToTop';
 import type { OutlineHeading } from './outline';
 import type { EditorAppearance as PreviewAppearance } from '../../../src/protocol/editorCommands';
@@ -1198,6 +1199,8 @@ export function createPreviewController({
   let visualSourceMap: PreviewSourceMapEntry[] = [];
   let sourceMapByElement = new WeakMap<HTMLElement, PreviewSourceMapEntry>();
   let sourceMapDirty = true;
+  let localSourceGeometry: ReturnType<typeof createPreviewSourceGeometry> = null;
+  let localGeometryViewport: { top: number; height: number; width: number } | null = null;
   let sourceMapResizeObserver: ResizeObserver | null = null;
   let sourceMapMeasureFrame: number | null = null;
   let sourcePositionMarker: HTMLElement | null = null;
@@ -1729,6 +1732,9 @@ export function createPreviewController({
       const signal = frameEvents.signal;
       frameRenderedText = renderedText;
       frameDocument.documentElement.dataset.meoPreviewLargeDocument = String(assessLargeDocument(renderedText).preferSource);
+      localSourceGeometry = frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true'
+        ? createPreviewSourceGeometry(frameDocument) : null;
+      localGeometryViewport = null;
       previewViewportResources?.dispose();
       previewViewportResources = observePreviewViewportResources(frameDocument, () => scheduleViewportHighlight(frameDocument));
       previewViewportResources?.setActive(!host.hidden);
@@ -1778,6 +1784,7 @@ export function createPreviewController({
       attachPreviewMathViewports(frameDocument);
       syncPreviewCodeHighlight(frameDocument);
       ensureReadableCode(frameDocument);
+      localSourceGeometry?.containOffscreenLayout();
       frameDocument.addEventListener('scroll', () => {
         if (!disposed && activeFrameDocument === frameDocument) scheduleViewportHighlight(frameDocument);
         if (!disposed && activeFrameDocument === frameDocument) {
@@ -2318,6 +2325,7 @@ export function createPreviewController({
   const getSourceMap = (measure = true) => {
     const frameDocument = getFrameDocument();
     if (!frameDocument) return [];
+    if (localSourceGeometry && activeFrameDocument === frameDocument) return localSourceGeometry.entries;
     // Source ranges survive resource-only reflow. Callers resolving a known
     // range can measure just that range; visual searches still refresh the index.
     if (!measure && sourceMapDocument === frameDocument) return sourceMap;
@@ -2438,6 +2446,18 @@ export function createPreviewController({
   updatePresetControls();
   updateFontPickerLabels();
   const getVisualSourceMap = (): PreviewSourceMapEntry[] => {
+    if (localSourceGeometry && activeFrameDocument === getFrameDocument()) {
+      const top = getFrameDocument()?.scrollingElement?.scrollTop ?? 0;
+      const height = frame.contentWindow?.innerHeight ?? host.clientHeight;
+      const width = frame.contentWindow?.innerWidth ?? host.clientWidth;
+      if (sourceMapDirty || !localGeometryViewport || localGeometryViewport.top !== top
+        || localGeometryViewport.height !== height || localGeometryViewport.width !== width) {
+        visualSourceMap = localSourceGeometry.viewport(top, height);
+        localGeometryViewport = { top, height, width };
+        sourceMapDirty = false;
+      }
+      return visualSourceMap;
+    }
     getSourceMap();
     return visualSourceMap;
   };
@@ -2496,8 +2516,9 @@ export function createPreviewController({
       if (line < entry.start) high = middle - 1;
       else low = middle + 1;
     }
-    const before = high >= 0 ? entries[high] : undefined;
-    const after = low < entries.length ? entries[low] : undefined;
+    const read = (entry: PreviewSourceMapEntry | undefined) => entry && localSourceGeometry ? localSourceGeometry.measure(entry) : entry;
+    const before = read(high >= 0 ? entries[high] : undefined);
+    const after = read(low < entries.length ? entries[low] : undefined);
     if (before && line <= before.end) return { exact: before };
     return { before, after };
   };
@@ -3019,7 +3040,7 @@ export function createPreviewController({
       const scrollElement = frameDocument?.scrollingElement;
       if (!frameDocument || !scrollElement) return null;
       return {
-        regions: getSourceMap().map(entry => ({
+        regions: localSourceGeometry ? localSourceGeometry.linkedRegions() : getSourceMap().map(entry => ({
           startLine: entry.start,
           endLine: entry.end,
           top: entry.top,
@@ -3070,6 +3091,8 @@ export function createPreviewController({
       visualSourceMap = [];
       sourceMapByElement = new WeakMap();
       sourceMapDirty = true;
+      localSourceGeometry = null;
+      localGeometryViewport = null;
       sourceMapResizeObserver?.disconnect();
       sourceMapResizeObserver = null;
       if (sourceMapMeasureFrame !== null) window.cancelAnimationFrame(sourceMapMeasureFrame);

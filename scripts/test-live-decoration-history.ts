@@ -7,7 +7,16 @@ import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 const root = path.resolve(import.meta.dir, '..');
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-live-decoration-history-'));
 const build = await Bun.build({ entrypoints: [path.join(root, 'scripts/test-live-decoration-history-entry.ts')],
-  target: 'browser', format: 'iife', outdir: directory, naming: 'bundle.js' });
+  target: 'browser', format: 'iife', outdir: directory, naming: 'bundle.js',
+  plugins: [{ name: 'count-authoritative-live-builds', setup(builder) {
+    builder.onLoad({ filter: /webview[\\/]src[\\/]liveMode\.ts$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text();
+      const boundary = 'return buildDecorations(state, fallback, extra.changes);';
+      assert.equal(source.split(boundary).length, 2);
+      return { loader: 'ts', contents: source.replace(boundary,
+        '((globalThis as any).__fullLiveBuilds ??= 0); (globalThis as any).__fullLiveBuilds++; ' + boundary) };
+    });
+  } }] });
 assert.ok(build.success, build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
 let primaryError: unknown;
@@ -127,6 +136,7 @@ try {
     const from = editor.getText().indexOf('Ordinary paragraph.') + 'Ordinary paragraph'.length;
     editor.view.dispatch({ selection: { anchor: from } });
     const before = api.decorations(editor).size;
+    scope.__middleFullBuilds = scope.__fullLiveBuilds;
     api.input(editor, from, 'x', Date.now() + 10_000);
     scope.__middleProjection = api.decorations(editor);
     scope.__middlePositions = api.positionSnapshot(editor);
@@ -148,8 +158,12 @@ try {
   assert.equal(middleInput.mathAnchor, middleInput.mathExpected, 'offscreen math controls must move with their range');
   assert.equal(middleInput.htmlFrom, middleInput.htmlExpected, 'offscreen HTML controls must move with their range');
   await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
-  assert.equal(await page.evaluate(() => (window as any).__middleProjection === (window as any).__liveHistory.decorations((window as any).__editor)),
-    true, 'settlement must reuse the complete middle-input projection');
+  assert.equal(await page.evaluate(() => (window as any).__middleFullBuilds === (window as any).__fullLiveBuilds),
+    true, 'settling input and following the caret may update viewport blocks, but must not rebuild the document');
+  await page.evaluate(() => {
+    const scope = window as any;
+    scope.__middlePositions = structuredClone(scope.__liveHistory.positionSnapshot(scope.__editor));
+  });
   assert.deepEqual(await page.evaluate(() => {
     const scope = window as any;
     scope.__editor.refreshDecorations();
@@ -168,6 +182,11 @@ try {
     editor.view.dispatch({ selection: { anchor: from + 1 } });
     return scope.__liveHistory.decorations(editor) === before;
   }), true, 'plain same-line navigation must also preserve later rich blocks whose source positions did not move');
+  await page.evaluate(() => {
+    const editor = (window as any).__editor;
+    editor.view.dispatch({ selection: { anchor: editor.view.state.doc.length }, scrollIntoView: true });
+  });
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const tail = await page.evaluate(() => {
     const scope = window as any;
     const editor = scope.__editor;
@@ -175,6 +194,7 @@ try {
     editor.view.dispatch({ selection: { anchor: editor.view.state.doc.length } });
     scope.__tailBefore = api.decorations(editor);
     scope.__tailOriginal = editor.getText();
+    scope.__tailFullBuilds = scope.__fullLiveBuilds;
     api.input(editor, editor.view.state.doc.length, 'x', Date.now() + 20_000);
     scope.__tailMapped = api.decorations(editor);
     return { before: scope.__tailBefore.size, after: scope.__tailMapped.size };
@@ -183,25 +203,32 @@ try {
   await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
   assert.equal(await page.evaluate(() => {
     const scope = window as any;
-    return scope.__liveHistory.decorations(scope.__editor) === scope.__tailMapped;
-  }), true, 'settlement must reuse a complete plain-prose projection instead of rebuilding the document');
+    return scope.__fullLiveBuilds === scope.__tailFullBuilds;
+  }), true, 'tail settlement may update viewport blocks but must not rebuild the document');
   assert.equal(await page.evaluate(() => (window as any).__editor.undo()), true);
   assert.equal(await page.evaluate(() => {
     const scope = window as any;
-    return scope.__liveHistory.decorations(scope.__editor) === scope.__tailBefore;
-  }), true, 'tail edits that keep widget coordinates unchanged must still reuse their history checkpoint');
+    return scope.__editor.getText() === scope.__tailOriginal && scope.__fullLiveBuilds === scope.__tailFullBuilds;
+  }), true, 'tail undo must restore exact text without rebuilding the document after viewport updates');
   assert.equal(await page.evaluate(() => (window as any).__editor.redo()), true);
   assert.equal(await page.evaluate(() => {
     const scope = window as any;
-    return scope.__liveHistory.decorations(scope.__editor) === scope.__tailMapped;
-  }), true, 'tail redo must retain its safe opposite checkpoint');
+    return scope.__editor.getText() === scope.__tailOriginal + 'x' && scope.__fullLiveBuilds === scope.__tailFullBuilds;
+  }), true, 'tail redo must restore exact text without rebuilding the document');
+  const tailPositions = await page.evaluate(() => (window as any).__liveHistory.positionSnapshot((window as any).__editor));
+  assert.deepEqual(await page.evaluate(() => {
+    const scope = window as any;
+    scope.__editor.refreshDecorations();
+    return scope.__liveHistory.positionSnapshot(scope.__editor);
+  }), tailPositions, 'tail history and viewport projection must match a complete presentation');
   assert.equal(await page.evaluate(() => {
     const scope = window as any;
     const editor = scope.__editor;
+    const before = scope.__liveHistory.decorations(editor);
     editor.view.dispatch({ selection: { anchor: editor.view.state.doc.length - 1 } });
     const left = scope.__liveHistory.decorations(editor);
     editor.view.dispatch({ selection: { anchor: editor.view.state.doc.length } });
-    return left === scope.__tailMapped && scope.__liveHistory.decorations(editor) === scope.__tailMapped;
+    return left === before && scope.__liveHistory.decorations(editor) === before;
   }), true, 'moving a collapsed caret inside unchanged plain prose must not rebuild distant content');
   for (const mode of ['source', 'live', 'source', 'live']) {
     await page.evaluate(mode => {
@@ -242,6 +269,11 @@ try {
     editor.refreshDecorations();
   });
   await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
+  await page.evaluate(() => {
+    const editor = (window as any).__editor;
+    editor.view.dispatch({ selection: { anchor: editor.getText().indexOf('[local]') }, scrollIntoView: true });
+  });
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal(await page.evaluate(() => {
     const scope = window as any;
     for (const cursor = scope.__liveHistory.decorations(scope.__editor).iter(); cursor.value; cursor.next()) {

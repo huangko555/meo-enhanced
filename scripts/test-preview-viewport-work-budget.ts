@@ -73,6 +73,16 @@ try {
     } finally { prototype.getBoundingClientRect = rect; }
   });
   assert.ok(resizeReads < 100, `resource reflow without a geometry consumer must not measure the entire document: ${resizeReads}`);
+  const invalidatedReads = await page.evaluate(() => {
+    const controller = (window as any).__previewController;
+    const frame = controller.host.querySelector('iframe') as HTMLIFrameElement;
+    const prototype = (frame.contentWindow as any).Element.prototype, original = prototype.getBoundingClientRect;
+    let reads = 0;
+    prototype.getBoundingClientRect = function() { if (this.hasAttribute('data-source-line')) reads++; return original.call(this); };
+    try { controller.getTopVisiblePosition(); controller.getOutlineAdapter().getVisibleDocumentRange(); return reads; }
+    finally { prototype.getBoundingClientRect = original; }
+  });
+  assert.ok(invalidatedReads < 200, `a reading query after resource reflow must measure local blocks (${invalidatedReads} reads)`);
   const restored = await page.evaluate(() => {
     const controller = (window as any).__previewController;
     const frame = controller.host.querySelector('iframe') as HTMLIFrameElement;

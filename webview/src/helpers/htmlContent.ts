@@ -136,14 +136,15 @@ export function getHtmlEditingRange(state: EditorState): HtmlEditingRange | null
   return state.field(htmlEditingRangeField, false) ?? null;
 }
 
-export function collectRenderableHtmlBlocks(state: EditorState, tree: Tree = resolvedSyntaxTree(state)): RenderableHtmlBlock[] {
-  const cached = renderableHtmlBlockCache.get(state);
+export function collectRenderableHtmlBlocks(state: EditorState, tree: Tree = resolvedSyntaxTree(state), scope?: { from: number; to: number }): RenderableHtmlBlock[] {
+  const cached = scope ? undefined : renderableHtmlBlockCache.get(state);
   if (cached && cached.tree === tree) return cached.blocks;
   const blocks: RenderableHtmlBlock[] = [];
   const detailsByAnchor = new Map(
     getDetailsBlocks(state).map((block) => [block.anchorFrom, block] as const)
   );
   tree.iterate({
+    ...scope,
     enter(node: SyntaxNodeRef) {
       if (node.name !== 'HTMLBlock') return;
       const parsedSource = state.doc.sliceString(node.from, node.to);
@@ -167,7 +168,7 @@ export function collectRenderableHtmlBlocks(state: EditorState, tree: Tree = res
       });
     }
   });
-  renderableHtmlBlockCache.set(state, { tree, blocks });
+  if (!scope) renderableHtmlBlockCache.set(state, { tree, blocks });
   return blocks;
 }
 
@@ -696,11 +697,12 @@ function addInlineHtmlDecorations(
   state: EditorState,
   activeLines: ReadonlySet<number>,
   blockRanges: readonly RenderableHtmlBlock[],
-  inlineRanges: Array<{ from: number; to: number }>
+  inlineRanges: Array<{ from: number; to: number }>,
+  scope?: { from: number; to: number }
 ): void {
   const tagStarts = new Set<number>();
   const tagEnds = new Set<number>();
-  resolvedSyntaxTree(state).iterate({ enter(node) {
+  resolvedSyntaxTree(state).iterate({ ...scope, enter(node) {
     if (node.name === 'HTMLTag') {
       tagStarts.add(node.from);
       tagEnds.add(node.to);
@@ -708,7 +710,8 @@ function addInlineHtmlDecorations(
   } });
   const pattern = /<(strong|b|em|i|del|s|mark|code|span|sub|sup|u|a)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
   const overlapsBlock = indexSourceRanges(blockRanges, 'overlaps');
-  for (const line of documentLines(state.doc)) {
+  for (const line of documentLines(state.doc, scope ? state.doc.lineAt(scope.from).number : 1,
+    scope ? state.doc.lineAt(scope.to).number : state.doc.lines)) {
     const lineNo = line.number;
     if (activeLines.has(lineNo)) continue;
     if (overlapsBlock(line.from, line.to)) continue;
@@ -735,10 +738,11 @@ export function addHtmlContentDecorations(
   activeLines: ReadonlySet<number>,
   previousDecorations?: DecorationSet,
   changes?: ChangeDesc,
-  inlineRanges: Array<{ from: number; to: number }> = []
+  inlineRanges: Array<{ from: number; to: number }> = [],
+  scope?: { from: number; to: number }
 ): RenderableHtmlBlock[] {
   const editingRange = getHtmlEditingRange(state);
-  const blocks = collectRenderableHtmlBlocks(state);
+  const blocks = collectRenderableHtmlBlocks(state, resolvedSyntaxTree(state), scope);
   const addSourceRange = (range: HtmlEditingRange, invalid = false): void => {
     const startLine = state.doc.lineAt(Math.min(range.from, state.doc.length));
     const inclusiveEnd = range.to > range.from ? range.to - 1 : range.to;
@@ -778,10 +782,11 @@ export function addHtmlContentDecorations(
       widget
     }).range(block.from, block.to));
   }
-  if (editingRange && !editingBlockFound) {
+  if (editingRange && !editingBlockFound && (!scope || editingRange.to >= scope.from && editingRange.from <= scope.to)) {
     addSourceRange(editingRange, true);
   }
   resolvedSyntaxTree(state).iterate({
+    ...scope,
     enter(node: SyntaxNodeRef) {
       if (node.name !== 'HTMLBlock') return;
       const source = state.doc.sliceString(node.from, node.to);
@@ -792,7 +797,7 @@ export function addHtmlContentDecorations(
       }).range(state.doc.lineAt(node.from).to));
     }
   });
-  addInlineHtmlDecorations(ranges, state, activeLines, blocks, inlineRanges);
+  addInlineHtmlDecorations(ranges, state, activeLines, blocks, inlineRanges, scope);
   return blocks;
 }
 

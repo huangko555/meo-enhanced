@@ -15,17 +15,22 @@ export type DocumentMathRange = LatexMathRange & {
 export function collectDocumentMathRanges(
   state: EditorState,
   tree: Tree = resolvedSyntaxTree(state),
-  excludedRanges: readonly { from: number; to: number }[] = []
+  excludedRanges: readonly { from: number; to: number }[] = [],
+  scope?: { from: number; to: number }
 ): DocumentMathRange[] {
-  const literalRanges = collectMarkdownLiteralRanges(state, tree);
-  const candidates: DocumentMathRange[] = collectLatexMathRanges(state.doc.toString(), {
-    excludedRanges: [...literalRanges.filter(range => !range.script), ...excludedRanges],
+  const literalRanges = collectMarkdownLiteralRanges(state, tree, scope);
+  const baseOffset = scope?.from ?? 0;
+  const exclusions = [...literalRanges.filter(range => !range.script), ...excludedRanges];
+  const candidates: DocumentMathRange[] = collectLatexMathRanges(scope ? state.doc.sliceString(scope.from, scope.to) : state.doc.toString(), {
+    baseOffset,
+    excludedRanges: exclusions.filter(range => !scope || range.to > scope.from && range.from < scope.to)
+      .map(range => ({ from: Math.max(0, range.from - baseOffset), to: range.to - baseOffset })),
     includeEmptyDisplay: true
   });
   const scripts = literalRanges.filter(range => range.script
     && !candidates.some(math => range.from >= math.from && range.from < math.to));
   const ranges = candidates.filter(math => !scripts.some(script => math.from >= script.from && math.from < script.to));
-  tree.iterate({ enter(node) {
+  tree.iterate({ ...scope, enter(node) {
     if (node.name !== 'FencedCode') return;
     if (!isMathFenceLanguage(getFencedCodeInfo(state, node))) return false;
     const opening = state.doc.lineAt(node.from);

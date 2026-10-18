@@ -7,10 +7,27 @@ import { parseFrontmatter } from '../webview/src/helpers/frontmatter';
 import { documentLines } from '../webview/src/helpers/documentLines';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
 import { mapStableLiveDecorations } from '../webview/src/editor/liveWidgetPositions';
-import { hasSameLiveMarkdownSyntax } from '../webview/src/helpers/livePresentationSyntax';
+import { hasSameLiveMarkdownSyntax, hasSameLiveMarkdownOutsideBlock } from '../webview/src/helpers/livePresentationSyntax';
 import { markdownLanguage } from '@codemirror/lang-markdown';
 import { parseMixed, Tree } from '@lezer/common';
 import { javascriptLanguage } from '@codemirror/lang-javascript';
+import { imagePresentationFactoryFacet, type ImagePresentationFactory } from '../webview/src/editor/imagePresentation';
+import { longCodeBlockSessionUiExtension } from '../webview/src/helpers/longCodeBlocks';
+
+{
+  const text = 'EDIT\n\n' + '```json\n{ "value": 1 }\n```\n\n'.repeat(600);
+  let state = EditorState.create({ doc: text, extensions: [editorMarkdownLanguage, longCodeBlockSessionUiExtension()] });
+  ensureSyntaxTree(state, state.doc.length, 2_000);
+  state = state.update({}).state;
+  const read = Text.prototype.line;
+  let calls = 0;
+  Text.prototype.line = function(number: number) { calls++; return read.call(this, number); };
+  try {
+    state = state.update({ selection: { anchor: 2 } }).state;
+    state = state.update({ effects: StateEffect.define<boolean>().of(true) }).state;
+  } finally { Text.prototype.line = read; }
+  assert.ok(calls < 50, `unchanged code block session UI must not rediscover all fences on caret/effect transactions (${calls} reads)`);
+}
 
 {
   const text = '```js\nlet value = 1;\n```\n\n**Paragraph** and reference[^note].\n\n[^note]: Definition.\n';
@@ -26,6 +43,13 @@ import { javascriptLanguage } from '@codemirror/lang-javascript';
   const missingTail = new Tree(plain.type, plain.children.slice(0, 1), plain.positions.slice(0, 1), plain.length);
   assert.equal(hasSameLiveMarkdownSyntax(missingTail, mixed), false,
     'matching document length must not hide unparsed paragraphs or late references outside embedded code');
+  const edit = EditorState.create({ doc: text }).update({ changes: { from: text.indexOf('value'), insert: 'x' } });
+  const changed = markdownLanguage.parser.parse(edit.newDoc.toString());
+  const code = plain.topNode.firstChild!, changedCode = changed.topNode.firstChild!;
+  assert.ok(hasSameLiveMarkdownOutsideBlock(plain, changed, edit.changes, code, changedCode));
+  const changedMissingTail = new Tree(changed.type, changed.children.slice(0, 1), changed.positions.slice(0, 1), changed.length);
+  assert.equal(hasSameLiveMarkdownOutsideBlock(plain, changedMissingTail, edit.changes, code, changedCode), false,
+    'an inline edit must not certify missing Markdown outside its block even when document lengths match');
 }
 
 {
@@ -150,7 +174,16 @@ for (const paragraph of ['Plain prose', '中文正文', 'NATIVE_EDIT_TARGET', 'S
     assert.equal(mainDecorations(positioned), mainDecorations(next), 'same-line plain caret navigation must reuse the full presentation');
   }
 }
-for (const paragraph of ['plain $raw', 'plain #tag', 'plain file:///tmp/example', '[^unclosed', '<div>unclosed', 'plain | table', 'x'.repeat(4_100)]) {
+for (const paragraph of ['plain $raw', 'plain #tag', 'plain file:///tmp/example', 'plain | table', '[^unclosed', 'x'.repeat(4_100)]) {
+  const text = prosePrefix + paragraph;
+  const state = EditorState.create({ doc: text, selection: { anchor: text.length }, extensions: liveModeExtensions({ largeDocument: true }) });
+  const next = state.update({ changes: { from: text.length, insert: 'x' }, selection: { anchor: text.length + 1 },
+    annotations: Transaction.userEvent.of('input.type') }).state;
+  const full = next.update({ effects: refreshLiveDecorationsAfterSearchEffect.of(true) }).state;
+  assert.deepEqual(decorationShape(mainDecorations(next)), decorationShape(mainDecorations(full)),
+    'local inline input must rebuild raw helper presentation from the complete Markdown context');
+}
+for (const paragraph of ['<div>unclosed', 'x'.repeat(32_769)]) {
   const text = prosePrefix + paragraph;
   const state = EditorState.create({ doc: text, selection: { anchor: text.length }, extensions: liveModeExtensions({ largeDocument: true }) });
   const next = state.update({ changes: { from: text.length, insert: 'x' }, selection: { anchor: text.length + 1 },
@@ -169,7 +202,7 @@ for (const paragraph of ['plain $raw', 'plain #tag', 'plain file:///tmp/example'
   assert.deepEqual(decorationShape(mainDecorations(next)), decorationShape(mainDecorations(fresh)),
     'middle paragraph caret navigation must match a fresh authoritative presentation');
 }
-console.log('Plain prose projections match full builds; raw syntax and oversized paragraphs retain conservative refresh');
+console.log('Inline input matches full builds; definitions, HTML and oversized blocks retain conservative refresh');
 
 {
   const text = '# Heading **bold**\n\nBody *italic* with a [**link**](sample.md).\n\nSecond heading\n---\n\n'
@@ -227,6 +260,67 @@ console.log('Live pointer selection keeps local work bounded and matches complet
   }
 }
 console.log('Frontmatter pointer phases match authoritative presentation with bounded local work');
+
+{
+  const block = '## Section\n\nParagraph with an image ![shape](shape.svg), $x^2$, <kbd>Ctrl</kbd>, #aabbcc and a footnote[^n].\n\n'
+    + '1. Parent\n   - Child **bold**\n\n   ```json\n   { "value": 1 }\n   ```\n\n> [!NOTE]\n> Quoted *text*.\n\n'
+    + '```math\nx^2 + y^2\n```\n\nAfter formula.\n\n';
+  const text = block.repeat(200) + '\n[^n]: Definition with **formatting**.\n\n    Continued paragraph.\n';
+  const images: ImagePresentationFactory = { acquire: () => () => {}, preload: async () => {}, getIntrinsicSize: () => null,
+    create() { throw new Error('State-only presentation checks must not mount image DOM'); },
+    whenVisiblePresentationsSettle: async () => {}, externalDocumentPresented() {}, dispose() {} };
+  let state = EditorState.create({ doc: text, extensions: [liveModeExtensions({ largeDocument: true }), imagePresentationFactoryFacet.of(images)] });
+  ensureSyntaxTree(state, state.doc.length, 2_000);
+  state = state.update({ effects: refreshLiveDecorationsAfterSearchEffect.of(true) }).state;
+  let placeholders = 0, controls = 0;
+  for (const cursor = mainDecorations(state).iter(); cursor.value; cursor.next()) {
+    const widget = cursor.value.spec.widget;
+    if (!widget) continue;
+    if (widget.constructor.name === 'ViewportWidgetPlaceholder') placeholders++;
+    else controls++;
+  }
+  assert.ok(placeholders > 500 && controls < 300,
+    `large documents must retain offscreen source/height without thousands of UI instances (${placeholders}/${controls})`);
+  for (const target of ['Child', '"value"', 'image', 'Quoted', 'x^2 +', 'After formula', 'Definition', 'Continued', '\n\n']) {
+    const position = text.indexOf(target, target === 'Definition' || target === 'Continued' ? 0 : block.length * 99)
+      + (target === '\n\n' ? 1 : 2);
+    for (const spec of [
+      { effects: setLivePointerSelectionActiveEffect.of({ active: true, preservedLine: null }) },
+      { selection: { anchor: position } },
+      { effects: setLivePointerSelectionActiveEffect.of({ active: false, preservedLine: null }) }
+    ]) {
+      const read = Text.prototype.line;
+      let calls = 0;
+      Text.prototype.line = function(number: number) { calls++; return read.call(this, number); };
+      try { state = state.update(spec).state; } finally { Text.prototype.line = read; }
+      assert.ok(calls < 1_000, `${target}: rich pointer work must not traverse distant document lines (${calls} reads)`);
+      const authoritative = state.update({ effects: refreshLiveDecorationsAfterSearchEffect.of(true) }).state;
+      assert.deepEqual(decorationShape(mainDecorations(state)), decorationShape(mainDecorations(authoritative)),
+        `${target}: local rich presentation must match a complete rebuild in every pointer phase`);
+    }
+  }
+}
+console.log('Rich Live caret invalidation preserves complete presentation with local work');
+
+{
+  const text = 'First[^a][^b] and repeated[^a].\n\nOrdinary **body**.\n\n'
+    + '[^a]: Definition paragraph.\n\n    Continued paragraph.\n\n    - Nested item.\n\n'
+    + '[^b]: Other definition.\n';
+  for (const position of [text.indexOf('Definition') + 3, text.indexOf('paragraph.') + 'paragraph.'.length,
+    text.indexOf('Continued') + 3, text.indexOf('Nested') + 3, text.indexOf('][^b]') + 1,
+    text.indexOf('body') + 2, text.indexOf('[^a]') + 2]) {
+    let state = EditorState.create({ doc: text, selection: { anchor: position }, extensions: liveModeExtensions({ largeDocument: true }) });
+    ensureSyntaxTree(state, state.doc.length, 2_000);
+    state = state.update({ effects: refreshLiveDecorationsAfterSearchEffect.of(true) }).state;
+    const next = state.update({ changes: { from: position, insert: 'x' }, selection: { anchor: position + 1 },
+      annotations: Transaction.userEvent.of('input.type') }).state;
+    // A new Text identity prevents an incorrect projected cache from becoming
+    // its own reference result during a forced presentation refresh.
+    const fresh = EditorState.create({ doc: next.doc.toString(), extensions: editorMarkdownLanguage });
+    ensureSyntaxTree(fresh, fresh.doc.length, 2_000);
+    assert.deepEqual(parseFootnotes(next), parseFootnotes(fresh), 'inline footnote projection must match independent source parsing');
+  }
+}
 
 {
   const prefix = '**Prefix formatting**\n\nPlain middle paragraph';

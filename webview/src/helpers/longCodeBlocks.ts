@@ -47,6 +47,9 @@ type LongCodeBlockRecord = LongCodeBlockDescriptor & {
 type LongCodeBlockState = {
   blocks: LongCodeBlockRecord[];
   decorations: DecorationSet;
+  descriptorDocument?: EditorState['doc'];
+  descriptorTree?: ReturnType<typeof syntaxTree>;
+  descriptorTabSize?: number;
 };
 
 const setLongCodeBlockPointerInteractionEffect = StateEffect.define<{ position: number }>();
@@ -432,7 +435,10 @@ function buildLongCodeState(
 
   return {
     blocks: reduced.blocks,
-    decorations: buildLongCodeDecorations(reduced.blocks, state.facet(longCodeBlockEnabledFacet))
+    decorations: buildLongCodeDecorations(reduced.blocks, state.facet(longCodeBlockEnabledFacet)),
+    descriptorDocument: state.doc,
+    descriptorTree: syntaxTree(state),
+    descriptorTabSize: state.tabSize
   };
 }
 
@@ -572,6 +578,20 @@ const longCodeBlockStateField = StateField.define<LongCodeBlockState>({
     }
     if (shouldDeferLiveInputDerivedWork(transaction)) {
       return updateDeferredLongCodeState(value, transaction);
+    }
+    // Source descriptors do not depend on the caret or passive presentation
+    // effects. Reuse the current owner's descriptors, but still reduce search,
+    // selection and manual folding intent. Deferred edits deliberately carry
+    // no proof, so their settlement reparses the changed source as before.
+    if (!transaction.docChanged && !transaction.reconfigured
+      && value.descriptorDocument === transaction.state.doc
+      && value.descriptorTree === syntaxTree(transaction.state)
+      && value.descriptorTabSize === transaction.state.tabSize) {
+      if (!transaction.selection && !hasLongCodeImmediateEffect(transaction)
+        && !transaction.isUserEvent('select.search')) return value;
+      const reduced = reduceLongCodeInteractions(value.blocks.map(block => ({ ...block })), transaction);
+      return reduced.presentationChanged ? { ...value, blocks: reduced.blocks,
+        decorations: buildLongCodeDecorations(reduced.blocks, transaction.state.facet(longCodeBlockEnabledFacet)) } : value;
     }
     return buildLongCodeState(transaction.state, value, transaction);
   },

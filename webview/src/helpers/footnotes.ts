@@ -1,8 +1,9 @@
 import { documentLines } from './documentLines';
-import { EditorState } from '@codemirror/state';
+import { EditorState, type ChangeDesc } from '@codemirror/state';
 import type { MarkdownConfig } from '@lezer/markdown';
 import { parseFrontmatter, isInsideFrontmatter } from './frontmatter';
-import { resolvedSyntaxTree } from './markdownSyntax';
+import { currentSyntaxTree, resolvedSyntaxTree } from './markdownSyntax';
+import { hasSameLiveMarkdownSyntax } from './livePresentationSyntax';
 import { collectInlineFootnoteMarkerRanges } from './inlineFootnotes';
 
 export interface FootnoteReference {
@@ -95,7 +96,8 @@ export function parseFootnotes(state: EditorState): ParsedFootnotes {
   // well as the text. A partial result must not become a complete projection.
   const tree = resolvedSyntaxTree(state);
   const cached = footnoteCache.get(state.doc);
-  if (cached?.tree === tree) {
+  if (cached && (cached.tree === tree || hasSameLiveMarkdownSyntax(cached.tree, tree))) {
+    if (cached.tree !== tree) footnoteCache.set(state.doc, { tree, parsed: cached.parsed });
     return cached.parsed;
   }
 
@@ -174,6 +176,38 @@ export function parseFootnotes(state: EditorState): ParsedFootnotes {
 
   footnoteCache.set(state.doc, { tree, parsed });
   return parsed;
+}
+
+/** Only after proving that an inline edit changes no footnote/reference label,
+ * definition or protected container. Numbering stays global; positions move. */
+export function projectUnchangedFootnotes(before: EditorState, state: EditorState, changes: ChangeDesc): void {
+  const previous = parseFootnotes(before);
+  const position = (value: number) => changes.mapPos(value, 1);
+  const end = (value: number) => changes.mapPos(value, -1);
+  const definitions = previous.definitions.map(definition => ({ ...definition,
+    markerFrom: position(definition.markerFrom), markerTo: end(definition.markerTo),
+    colonFrom: position(definition.colonFrom), colonTo: end(definition.colonTo),
+    contentFrom: changes.mapPos(definition.contentFrom, -1), contentTo: position(definition.contentTo),
+    lineFrom: position(definition.lineFrom), lineTo: position(definition.lineTo),
+    firstReferenceFrom: definition.firstReferenceFrom === null ? null : position(definition.firstReferenceFrom),
+    continuationLines: definition.continuationLines.map(line => ({ ...line, from: position(line.from), to: position(line.to),
+      hideIndentFrom: line.hideIndentFrom === null ? null : position(line.hideIndentFrom),
+      hideIndentTo: line.hideIndentTo === null ? null : end(line.hideIndentTo) }))
+  }));
+  const definitionMap = new Map(previous.definitions.map((definition, index) => [definition, definitions[index]]));
+  const references = previous.references.map(reference => ({ ...reference,
+    from: position(reference.from), to: end(reference.to), containerFrom: position(reference.containerFrom), containerTo: end(reference.containerTo),
+    definition: reference.definition ? definitionMap.get(reference.definition)! : null
+  }));
+  const referencesByContainerKey = new Map<string, FootnoteReference[]>();
+  for (const reference of references) {
+    const key = footnoteReferenceKey(reference.containerFrom, reference.containerTo);
+    const container = referencesByContainerKey.get(key) ?? [];
+    container.push(reference); referencesByContainerKey.set(key, container);
+  }
+  footnoteCache.set(state.doc, { tree: currentSyntaxTree(state), parsed: {
+    definitions, references, referencesByContainerKey, numberByLabel: previous.numberByLabel
+  } });
 }
 
 export function footnoteReferenceKey(from: number, to: number): string {

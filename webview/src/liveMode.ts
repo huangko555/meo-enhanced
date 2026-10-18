@@ -1,6 +1,8 @@
 import { documentLines } from './helpers/documentLines';
 import { isAutomaticSymbolPairHistoryEffect } from './editor/typingAssistance';
-import { mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions, replaceLiveCaretDecorations } from './editor/liveWidgetPositions';
+import { mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions, replaceLivePresentationRanges } from './editor/liveWidgetPositions';
+import { liveViewportPresentationExtensions, restrictLiveWidgetPresentation, getLivePresentationBand,
+  isLiveViewportPresentationEffect, livePresentationBandChanged } from './helpers/liveViewportPresentation';
 import { undoDepth } from '@codemirror/commands';
 import { blockStickyHeaderExtension } from './helpers/blockStickyHeader';
 import { countColumn, RangeSetBuilder, StateEffect, StateField, EditorState, type ChangeDesc, type Range, type RangeSet, type Extension, type EditorSelection, type Transaction } from '@codemirror/state';
@@ -35,12 +37,11 @@ import { liveHighlightStyle, sourceMarkdownHighlightProps } from './theme';
 import { inlineMarkdownExtensions } from './helpers/inlineMarkdownParser';
 import { collectKbdTagRangesFromText, hasKbdTagMarker } from './helpers/kbd';
 import { currentSyntaxTree, getFencedCodeInfo, headingContentRange, headingLevelFromName, resolvedSyntaxTree, syntaxTreeChanged } from './helpers/markdownSyntax';
-import { hasSameLiveMarkdownSyntax } from './helpers/livePresentationSyntax';
+import { hasSameLiveMarkdownSyntax, hasSameLiveMarkdownOutsideBlock } from './helpers/livePresentationSyntax';
 import { indexSourceRanges } from './helpers/sourceRangeIndex';
 import { detailsBlockLiveExtensions, getDetailsBlocks, toggleDetailsBlock } from './helpers/detailsBlocks';
 import {
   addListMarkerDecoration,
-  isCaretStableListWidget,
   listMarkerData,
   detectListIndentStylesByLine,
   nextOrderedSequenceNumber
@@ -70,6 +71,7 @@ import {
 } from './helpers/alerts';
 import {
   parseFootnotes,
+  projectUnchangedFootnotes,
   footnoteReferenceKey,
   type FootnoteReference,
   type ParsedFootnotes
@@ -369,6 +371,11 @@ const isTableContentLine = (lineText: string): boolean => lineText.includes('|')
 
 type DecorationCollector = Array<Range<Decoration>>;
 type SourceRange = { from: number; to: number };
+type LiveDecorationScope = SourceRange & { fromLine: number; toLine: number };
+
+function scopedDocumentLines(state: EditorState, scope?: LiveDecorationScope) {
+  return documentLines(state.doc, scope?.fromLine, scope?.toLine);
+}
 type ActiveImageGroup = { line: ReturnType<EditorState['doc']['line']>; items: ImageGroupItem[] };
 
 type LivePointerSelectionState = {
@@ -810,9 +817,10 @@ function addForcedThematicBreakDecorations(
   tree: Tree,
   activeLines: Set<number>,
   frontmatter: FrontmatterInfo | null,
-  codeBlockLines: Set<number> | null = null
+  codeBlockLines: Set<number> | null = null,
+  scope?: LiveDecorationScope
 ): void {
-  for (const line of documentLines(state.doc)) {
+  for (const line of scopedDocumentLines(state, scope)) {
     const lineNo = line.number;
     if (
       !isThematicBreakLine(line.text) ||
@@ -1625,8 +1633,9 @@ function addDetailsBlockDecorations(builder: DecorationCollector, state: EditorS
   }
 }
 
-function addFootnoteDefinitionDecorations(builder: DecorationCollector, state: EditorState, footnotes: ParsedFootnotes, activeLines: Set<number>, codeBlockLines: Set<number>): void {
+function addFootnoteDefinitionDecorations(builder: DecorationCollector, state: EditorState, footnotes: ParsedFootnotes, activeLines: Set<number>, codeBlockLines: Set<number>, scope?: LiveDecorationScope): void {
   for (const definition of footnotes.definitions) {
+    if (scope && (definition.lineTo < scope.from || definition.lineFrom > scope.to)) continue;
     if (!definition.isPrimary) {
       continue;
     }
@@ -1783,10 +1792,13 @@ interface ParsedListMarker {
   readonly depth: number;
 }
 
-function parsedListMarkersByLine(state: EditorState, tree: Tree) {
+function parsedListMarkersByLine(state: EditorState, tree: Tree, scope?: LiveDecorationScope) {
+  const cached = scope ? undefined : parsedContainerCache.get(state.doc);
+  if (cached?.tree === tree) return cached.value;
   const markers = new Map<number, ParsedListMarker[]>();
   const quoteMarks = new Map<number, Array<{ from: number; to: number }>>();
   tree.iterate({
+    ...scope,
     enter(node: SyntaxNodeRef) {
       if (node.name === 'QuoteMark') {
         const lineNo = state.doc.lineAt(node.from).number;
@@ -1814,8 +1826,13 @@ function parsedListMarkersByLine(state: EditorState, tree: Tree) {
       markers.set(lineNo, entries);
     }
   });
-  return { markers, quoteMarks };
+  const result = { markers, quoteMarks };
+  if (!scope) parsedContainerCache.set(state.doc, { tree, value: result });
+  return result;
 }
+
+const parsedContainerCache = new WeakMap<EditorState['doc'], { tree: Tree; value: { markers: Map<number, ParsedListMarker[]>;
+  quoteMarks: Map<number, Array<SourceRange>> } }>();
 
 function addListLineDecorations(
   builder: DecorationCollector,
@@ -1823,14 +1840,15 @@ function addListLineDecorations(
   indentSelectedLines: Set<number>,
   parsedContainers: ReturnType<typeof parsedListMarkersByLine>,
   frontmatter: FrontmatterInfo | null = null,
-  literalBlockLines: Set<number> | null = null
+  literalBlockLines: Set<number> | null = null,
+  scope?: LiveDecorationScope
 ): void {
-  const stylesByLine = detectListIndentStylesByLine(state);
+  const stylesByLine = detectListIndentStylesByLine(state, scope);
   const { markers: parsedMarkers, quoteMarks: quoteMarksByLine } = parsedContainers;
   const orderedCountsByContainer = new Map<string, number>();
   const legacyOrderedCountsByLevel: Array<number | null> = [];
 
-  for (const line of documentLines(state.doc)) {
+  for (const line of scopedDocumentLines(state, scope)) {
     const lineNo = line.number;
     if (literalBlockLines?.has(lineNo)) {
       legacyOrderedCountsByLevel.length = 0;
@@ -1932,7 +1950,9 @@ function addListLineDecorations(
   }
 }
 
-function buildDecorations(state: EditorState, previous?: DecorationSet, changes?: ChangeDesc): DecorationSet {
+function buildDecorationRanges(state: EditorState, previous?: DecorationSet, changes?: ChangeDesc, scope?: LiveDecorationScope): {
+  ranges: DecorationCollector; tree: Tree
+} {
   const ranges: DecorationCollector = [];
   const diagnostics = state.field(diagnosticDataField, false) ?? [];
   const activeLines = collectActiveLines(state);
@@ -1940,12 +1960,18 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
   const tree = resolvedSyntaxTree(state);
   const footnotes = parseFootnotes(state);
   const detailsBlocks = getDetailsBlocks(state, tree);
-  const codeBlockLines = collectCodeBlockLines(state, tree);
-  const renderedTableRanges = collectRenderedTableRanges(
-    state,
-    getLiveRenderedBlocks(state)
-  );
-  const parsedContainers = parsedListMarkersByLine(state, tree);
+  const codeBlockLines = collectCodeBlockLines(state, tree, scope);
+  const renderedTableRanges: SourceRange[] = [];
+  if (scope) tree.iterate({ ...scope, enter(node) {
+    if (node.name === 'Table') { renderedTableRanges.push({ from: node.from, to: node.to }); return false; }
+  } });
+  else renderedTableRanges.push(...collectRenderedTableRanges(state, getLiveRenderedBlocks(state)));
+  if (scope) for (const block of detectTableBlocks(state, scope)) {
+    const from = state.doc.line(block.startLineNo).from, to = state.doc.line(block.endLineNo).to;
+    if (!isInsideCodeBlock(tree, from) && !overlapsParsedTableRange(from, to, renderedTableRanges)) renderedTableRanges.push({ from, to });
+  }
+  renderedTableRanges.sort((left, right) => left.from - right.from);
+  const parsedContainers = parsedListMarkersByLine(state, tree, scope);
   const activeImageGroups = new Map<number, ActiveImageGroup>();
   const parsedTableRanges: SourceRange[] = [];
   const quoteDepthByLine = new Map<number, number>();
@@ -1955,15 +1981,16 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
   let frontmatter: FrontmatterInfo | null = null;
   try {
     frontmatter = parseFrontmatter(state);
-    if (frontmatter) {
+    if (frontmatter && (!scope || frontmatter.closingTo >= scope.from && frontmatter.openingFrom <= scope.to)) {
       addFrontmatterBoundaryDecorations(ranges, state, frontmatter, activeLines);
-    } else {
+    } else if (!frontmatter) {
       frontmatter = parseFrontmatterCandidate(state);
     }
   } catch {
     frontmatter = null;
   }
-  const mathRanges = collectMathRanges(state, tree, renderedTableRanges, frontmatter);
+  const mathRanges = collectMathRanges(state, tree, renderedTableRanges, frontmatter, scope)
+    .filter(range => !scope || range.to >= scope.from && range.from <= scope.to);
   const insideMath = indexSourceRanges(mathRanges);
   const insideFencedMathLine = indexSourceRanges(mathRanges.filter(math => math.fencedDisplay).map(math => ({
     from: state.doc.lineAt(math.from).from,
@@ -1978,16 +2005,27 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
       literalBlockLines.add(lineNo);
     }
   }
-  addForcedThematicBreakDecorations(ranges, state, tree, activeLines, frontmatter, literalBlockLines);
-  const literalRanges = collectMarkdownLiteralRanges(state, tree);
+  addForcedThematicBreakDecorations(ranges, state, tree, activeLines, frontmatter, literalBlockLines, scope);
+  const literalRanges = collectMarkdownLiteralRanges(state, tree, scope);
   const htmlCodeBodies = literalRanges.flatMap(range => range.htmlCode ? [range.htmlCode] : []);
   const insideHtmlCode = indexSourceRanges(htmlCodeBodies);
-  for (const body of htmlCodeBodies) addRange(ranges, body.from, body.to, inlineStyleDecos.inlineCode);
+  for (const body of htmlCodeBodies) if (!scope || body.to >= scope.from && body.from <= scope.to) addRange(ranges, body.from, body.to, inlineStyleDecos.inlineCode);
   const inlineHtmlRanges: Array<{ from: number; to: number }> = [];
-  const renderedHtmlBlocks = addHtmlContentDecorations(ranges, state, activeLines, previous, changes, inlineHtmlRanges);
+  const renderedHtmlBlocks = addHtmlContentDecorations(ranges, state, activeLines, previous, changes, inlineHtmlRanges, scope);
+
+  // Foundation readers can finish the parser while preparing shared context.
+  // Render the completed outer Markdown tree now, rather than publishing a
+  // partial presentation whose first caret movement must rebuild the file.
+  const preparedTree = resolvedSyntaxTree(state, 0);
+  if (!scope && usesLargeDocumentDerivedWorkBudget(state) && preparedTree !== tree
+    && syntaxTreeAvailable(state, state.doc.length) && !hasSameLiveMarkdownSyntax(tree, preparedTree)) {
+    return buildDecorationRanges(state, previous, changes);
+  }
 
   tree.iterate({
+    ...scope,
     enter: (node: SyntaxNodeRef) => {
+      if (scope && (node.to < scope.from || node.from > scope.to)) return false;
       // Formula source owns the whole line prefix. Hiding only opening-line
       // quote markers would give its delimiter a different visual source width.
       if (node.name === 'QuoteMark' && insideFencedMathLine(node.from, node.to)) return false;
@@ -2485,10 +2523,10 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
     );
   }
 
-  addFallbackTableDecorations(ranges, state, tree, parsedTableRanges, diagnostics);
-  addRawFileUrlDecorations(ranges, state, tree, activeLines, frontmatter);
+  addFallbackTableDecorations(ranges, state, tree, parsedTableRanges, diagnostics, scope);
+  addRawFileUrlDecorations(ranges, state, tree, activeLines, frontmatter, scope);
   // Source prose and rendered blocks consume the same task-marker width delta.
-  for (const line of documentLines(state.doc)) {
+  for (const line of scopedDocumentLines(state, scope)) {
     const lineNo = line.number;
     if (literalBlockLines.has(lineNo)) continue;
     const prefix = parseBlockLinePrefix(line.text, state.tabSize);
@@ -2513,7 +2551,7 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
         + liveTaskListIndentCssValue(taskIndent) + ');'
     } }).range(line.from));
   }
-  addListLineDecorations(ranges, state, indentSelectedLines, parsedContainers, frontmatter, literalBlockLines);
+  addListLineDecorations(ranges, state, indentSelectedLines, parsedContainers, frontmatter, literalBlockLines, scope);
   addMathDecorations(ranges, state, mathRanges, activeLines);
   addColorSwatchDecorations(
     ranges,
@@ -2524,15 +2562,16 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
       renderedTableRanges,
       mathRanges,
       frontmatter ? [{ from: frontmatter.openingFrom, to: frontmatter.closingTo }] : []
-    ]
+    ],
+    scope
   );
-  addKbdTagDecorations(ranges, state, activeLines, renderedTableRanges, mathRanges, frontmatter, codeBlockLines);
-  addFootnoteDefinitionDecorations(ranges, state, footnotes, activeLines, literalBlockLines);
+  addKbdTagDecorations(ranges, state, activeLines, renderedTableRanges, mathRanges, frontmatter, codeBlockLines, scope);
+  addFootnoteDefinitionDecorations(ranges, state, footnotes, activeLines, literalBlockLines, scope);
   const htmlEditingRange = getHtmlEditingRange(state);
   addDetailsBlockDecorations(
     ranges,
     state,
-    detailsBlocks.filter((detailsBlock) => !renderedHtmlBlocks.some((htmlBlock) => (
+    detailsBlocks.filter((detailsBlock) => (!scope || detailsBlock.sectionFrom >= scope.from && detailsBlock.sectionTo <= scope.to) && !renderedHtmlBlocks.some((htmlBlock) => (
       htmlBlock.from === detailsBlock.anchorFrom
     )) && !(
       htmlEditingRange?.from === detailsBlock.sectionFrom &&
@@ -2540,6 +2579,12 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
     ))
   );
   preserveRenderedBlockPreviewHeights(ranges, changes ? previous?.map(changes) : previous);
+  restrictLiveWidgetPresentation(ranges, state);
+  return { ranges, tree };
+}
+
+function buildDecorations(state: EditorState, previous?: DecorationSet, changes?: ChangeDesc): DecorationSet {
+  const { ranges, tree } = buildDecorationRanges(state, previous, changes);
   const result = Decoration.set(ranges, true);
   const filtered = filterDecorationsOutsideMergeConflicts(state, result);
   if (usesLargeDocumentDerivedWorkBudget(state)) {
@@ -2549,7 +2594,7 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
       && hasSameLiveMarkdownSyntax(tree, resolvedSyntaxTree(state, 0));
     liveDecorationMetadata.set(state, { ...liveDecorationMetadata.get(state), complete });
     if (complete && !isEmptyDecorationSet(filtered)) completeLiveDecorationSets.add(filtered);
-    if (complete) prepareLiveWidgetPositions(filtered);
+    if (complete) prepareLiveWidgetPositions(filtered, !!getLivePresentationBand(state));
   }
   return filtered;
 }
@@ -2664,9 +2709,13 @@ function filterDecorationsOutsideMergeConflicts(state: EditorState, decorations:
   return Decoration.set(filtered, true);
 }
 
-function collectCodeBlockLines(state: EditorState, tree: Tree): Set<number> {
+const codeBlockLineCache = new WeakMap<EditorState['doc'], { tree: Tree; lines: Set<number> }>();
+function collectCodeBlockLines(state: EditorState, tree: Tree, scope?: LiveDecorationScope): Set<number> {
+  const cached = scope ? undefined : codeBlockLineCache.get(state.doc);
+  if (cached?.tree === tree) return cached.lines;
   const lines = new Set<number>();
   tree.iterate({
+    ...scope,
     enter(node: SyntaxNodeRef) {
       if (node.name !== 'FencedCode' && node.name !== 'CodeBlock') {
         return;
@@ -2681,6 +2730,7 @@ function collectCodeBlockLines(state: EditorState, tree: Tree): Set<number> {
     }
   });
 
+  if (!scope) codeBlockLineCache.set(state.doc, { tree, lines });
   return lines;
 }
 
@@ -2977,19 +3027,25 @@ function collectRenderedTableRanges(
   return ranges;
 }
 
+const liveMathRangeCache = new WeakMap<EditorState['doc'], { tree: Tree; tabSize: number; ranges: DocumentMathRange[] }>();
 function collectMathRanges(
   state: EditorState,
   tree: Tree,
   renderedTableRanges: ReadonlyArray<SourceRange>,
-  frontmatter: FrontmatterInfo | null = null
+  frontmatter: FrontmatterInfo | null = null,
+  scope?: LiveDecorationScope
 ): DocumentMathRange[] {
+  const cached = scope ? undefined : liveMathRangeCache.get(state.doc);
+  if (cached?.tree === tree && cached.tabSize === state.tabSize) return cached.ranges;
   const excludedRanges = [...renderedTableRanges];
 
   if (frontmatter) {
     excludedRanges.push({ from: frontmatter.openingFrom, to: frontmatter.closingTo });
   }
 
-  return collectDocumentMathRanges(state, tree, excludedRanges);
+  const ranges = collectDocumentMathRanges(state, tree, excludedRanges, scope);
+  if (!scope) liveMathRangeCache.set(state.doc, { tree, tabSize: state.tabSize, ranges });
+  return ranges;
 }
 
 function addMathDecorations(
@@ -3086,9 +3142,10 @@ function addKbdTagDecorations(
   renderedTableRanges: ReadonlyArray<SourceRange>,
   mathRanges: ReadonlyArray<LatexMathRange> = [],
   frontmatter: FrontmatterInfo | null = null,
-  codeBlockLines: Set<number> | null = null
+  codeBlockLines: Set<number> | null = null,
+  scope?: LiveDecorationScope
 ): void {
-  for (const line of documentLines(state.doc)) {
+  for (const line of scopedDocumentLines(state, scope)) {
     const lineNo = line.number;
     if (activeLines.has(lineNo) || codeBlockLines?.has(lineNo)) {
       continue;
@@ -3149,14 +3206,18 @@ const colorExcludedSyntaxNodes = new Set([
   'HTMLBlock'
 ]);
 
-function collectColorSyntaxRanges(tree: Tree): {
+const colorSyntaxCache = new WeakMap<Tree, { scanRanges: SourceRange[]; excludedRanges: SourceRange[] }>();
+function collectColorSyntaxRanges(tree: Tree, scope?: SourceRange): {
   scanRanges: SourceRange[];
   excludedRanges: SourceRange[];
 } {
+  const cached = !scope && colorSyntaxCache.get(tree);
+  if (cached) return cached;
   const scanRanges: SourceRange[] = [];
   const excludedRanges: SourceRange[] = [];
   const blockStack: Array<SourceRange & { hasBlockChild: boolean }> = [];
   tree.iterate({
+    ...scope,
     enter(node: SyntaxNodeRef) {
       if (node.type.is('Block')) {
         const parentBlock = blockStack[blockStack.length - 1];
@@ -3175,7 +3236,9 @@ function collectColorSyntaxRanges(tree: Tree): {
       }
     }
   });
-  return { scanRanges, excludedRanges };
+  const result = { scanRanges, excludedRanges };
+  if (!scope) colorSyntaxCache.set(tree, result);
+  return result;
 }
 
 /** Merges the fixed set of source-ordered exclusion streams in O(total ranges). */
@@ -3217,13 +3280,21 @@ function addColorSwatchDecorations(
   state: EditorState,
   tree: Tree,
   activeLines: Set<number>,
-  excludedRangeStreams: ReadonlyArray<ReadonlyArray<SourceRange>>
+  excludedRangeStreams: ReadonlyArray<ReadonlyArray<SourceRange>>,
+  scope?: LiveDecorationScope
 ): void {
-  const documentText = state.doc.toString();
-  const syntaxRanges = collectColorSyntaxRanges(tree);
+  const offset = scope?.from ?? 0;
+  const documentText = scope ? state.doc.sliceString(scope.from, scope.to) : state.doc.toString();
+  const syntaxRanges = collectColorSyntaxRanges(tree, scope);
   const colorRanges = [];
   for (const scanRange of syntaxRanges.scanRanges) {
-    for (const colorRange of collectHexColorRangesFromText(documentText, 0, scanRange)) {
+    if (scope && (scanRange.to < scope.from || scanRange.from > scope.to)) continue;
+    // An empty source band can visit only the Document ancestor. Its bounds
+    // cover the file, so clip that fallback instead of discovering distant
+    // colors and forcing a complete presentation rebuild.
+    const scan = { from: Math.max(0, scanRange.from - offset),
+      to: Math.min(documentText.length, scanRange.to - offset) };
+    for (const colorRange of collectHexColorRangesFromText(documentText, offset, scan)) {
       colorRanges.push(colorRange);
     }
   }
@@ -3532,6 +3603,110 @@ const liveDecorationMetadata = new WeakMap<EditorState, LiveDecorationMetadata>(
 const completeLiveDecorationSets = new WeakSet<DecorationSet>();
 const localLiveSelectionUpdates = new WeakSet<EditorState>();
 
+/** A caret changes presentation in its old/new source blocks, never the rest of
+ * an unchanged document. Keep the complete Markdown context (reference labels,
+ * numbering and containers) while running the canonical renderer on those blocks. */
+function rebuildLiveSelectionBlocks(decorations: DecorationSet, transaction: Transaction): DecorationSet | undefined {
+  const before = transaction.startState, state = transaction.state;
+  if (!usesLargeDocumentDerivedWorkBudget(state) || transaction.docChanged || transaction.reconfigured
+    || !liveDecorationMetadata.get(before)?.complete || syntaxTreeChanged(transaction)
+    || !hasDefaultLiveBlockPresentation(before) || !hasDefaultLiveBlockPresentation(state)
+    || !transaction.effects.every(effect => effect.is(setLivePointerSelectionActiveEffect) || effect.is(setLiveDocumentIdleEffect) || isLiveViewportPresentationEffect(effect))
+    || before.selection.ranges.some(range => !range.empty) || state.selection.ranges.some(range => !range.empty)) return;
+  const tree = currentSyntaxTree(state);
+  if (tree.length !== state.doc.length) return;
+  const active = new Set([...collectActiveLines(before), ...collectActiveLines(state)]);
+  // The pointer's new selection can be masked during pointerdown; include both
+  // caret locations so later pointerup reveals exactly the same source block.
+  for (const selection of [before.selection, state.selection]) for (const range of selection.ranges) {
+    active.add(state.doc.lineAt(range.head).number);
+  }
+  if (livePresentationBandChanged(transaction)) for (const source of [before, state]) {
+    const band = getLivePresentationBand(source);
+    if (!band) continue;
+    tree.iterate({ from: band.from, to: band.to, enter(node) {
+      if (node.name === 'Document') return;
+      active.add(state.doc.lineAt(node.from).number);
+      active.add(state.doc.lineAt(node.to).number);
+      return false;
+    } });
+  }
+  const scopes: SourceRange[] = [];
+  const frontmatter = parseFrontmatter(state);
+  const details = getDetailsBlocks(state, tree);
+  const definitions = parseFootnotes(state).definitions;
+  const includeRoot = (range: SourceRange): SourceRange => {
+    const expanded = { ...range };
+    for (const position of [range.from, range.to]) {
+      let node = tree.resolveInner(position, position === range.from ? 1 : -1);
+      while (node.parent && node.parent.name !== 'Document') node = node.parent;
+      if (node.name !== 'Document' && node.from <= range.to && node.to >= range.from) {
+        expanded.from = Math.min(expanded.from, state.doc.lineAt(node.from).from);
+        expanded.to = Math.max(expanded.to, state.doc.lineAt(node.to).to);
+        if (node.name === 'FencedCode' && isMathFenceLanguage(getFencedCodeInfo(state, node))) {
+          const closing = state.doc.lineAt(Math.max(node.from, node.to - 1));
+          if (closing.number < state.doc.lines) expanded.to = Math.max(expanded.to, state.doc.line(closing.number + 1).from);
+        }
+      }
+    }
+    return expanded;
+  };
+  for (const lineNumber of active) {
+    const line = state.doc.line(lineNumber);
+    if (scopes.some(scope => line.from >= scope.from && line.to <= scope.to)) continue;
+    let scope = includeRoot({ from: line.from, to: line.to });
+    // HTML details and replacement widgets can span several Markdown roots.
+    // Never remove one half of a cross-block decoration.
+    let settled = false;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const previous = { ...scope };
+      if (frontmatter && scope.from <= frontmatter.closingTo && scope.to >= frontmatter.openingFrom) {
+        scope.from = Math.min(scope.from, frontmatter.openingFrom);
+        scope.to = Math.max(scope.to, frontmatter.closingTo);
+      }
+      for (const block of details) if (scope.from < block.sectionTo && scope.to > block.sectionFrom) {
+        scope.from = Math.min(scope.from, block.sectionFrom);
+        scope.to = Math.max(scope.to, block.sectionTo);
+      }
+      for (const definition of definitions) if (scope.from <= definition.lineTo && scope.to >= definition.lineFrom) {
+        scope.from = Math.min(scope.from, definition.lineFrom);
+        scope.to = Math.max(scope.to, definition.lineTo, ...definition.continuationLines.map(line => line.to));
+      }
+      decorations.between(scope.from, scope.to, (from, to) => {
+        scope.from = Math.min(scope.from, from); scope.to = Math.max(scope.to, to);
+      });
+      scope = includeRoot(scope);
+      if (scope.from === previous.from && scope.to === previous.to) { settled = true; break; }
+    }
+    if (!settled) return;
+    scopes.push(scope);
+  }
+  scopes.sort((left, right) => left.from - right.from);
+  const merged: SourceRange[] = [];
+  for (const scope of scopes) {
+    const last = merged.at(-1);
+    if (last && scope.from <= last.to) last.to = Math.max(last.to, scope.to);
+    else merged.push({ ...scope });
+  }
+  let result = decorations;
+  for (const range of merged) {
+    const scope = { ...range, fromLine: state.doc.lineAt(range.from).number, toLine: state.doc.lineAt(range.to).number };
+    const rebuilt = buildDecorationRanges(state, decorations, undefined, scope).ranges;
+    const additions: DecorationCollector = [];
+    const conflicts = mergeConflictRanges(state);
+    for (const range of rebuilt) {
+      if (range.from < scope.from || range.to > scope.to) return;
+      if (range.to > range.from ? rangeOverlapsRanges(range.from, range.to, conflicts) : pointInsideRanges(range.from, conflicts)) continue;
+      additions.push(range);
+    }
+    result = replaceLivePresentationRanges(result, scope.from, scope.to, additions);
+  }
+  localLiveSelectionUpdates.add(state);
+  liveDecorationMetadata.set(state, { ...liveDecorationMetadata.get(state), complete: true });
+  completeLiveDecorationSets.add(result);
+  return result;
+}
+
 function hasDefaultLiveBlockPresentation(state: EditorState): boolean {
   const mermaid = state.field(mermaidEditingStateField, false);
   const math = state.field(latexMathEditingStateField, false);
@@ -3542,160 +3717,6 @@ function hasDefaultLiveBlockPresentation(state: EditorState): boolean {
 function hasDefaultLivePresentation(state: EditorState): boolean {
   return hasDefaultLiveBlockPresentation(state) && !state.field(livePointerSelectionActiveField).active
     && !state.field(liveDocumentIdleField);
-}
-
-const caretMarkerPairs = [
-  [quoteMarkerDeco, activeQuoteMarkerDeco],
-  [markerDeco, activeLineMarkerDeco], [emMarkerDeco, activeEmMarkerDeco],
-  [strongMarkerDeco, activeStrongMarkerDeco], [strikeMarkerDeco, activeStrikeMarkerDeco],
-  [highlightMarkerDeco, activeHighlightMarkerDeco], [codeMarkerDeco, activeCodeMarkerDeco],
-  [linkMarkerDeco, activeLinkMarkerDeco], [linkLabelBracketDeco, activeLinkLabelBracketDeco]
-] as const;
-const caretInlineNodes = new Set(['Document', 'Paragraph', 'Emphasis', 'StrongEmphasis', 'Strikethrough', 'Highlight',
-  'InlineCode', 'CodeText', 'EmphasisMark', 'StrikethroughMark', 'HighlightMark', 'CodeMark', 'HeaderMark',
-  'Link', 'LinkLabel', 'LinkMark', 'LinkTitle', 'URL', 'Autolink', 'Subscript', 'Superscript',
-  'SubscriptMark', 'SuperscriptMark', 'Escape', 'HardBreak',
-  'BulletList', 'OrderedList', 'ListItem', 'ListMark', 'Task', 'TaskMarker', 'Blockquote', 'QuoteMark']);
-const caretContainerNodes = new Set(['Paragraph', 'BulletList', 'OrderedList', 'Blockquote']);
-
-/** Selection changes keep all source coordinates stable. Replace only proven local blocks;
- * unsupported containers, cross-block replacements and unknown widgets retain the complete builder. */
-function projectLiveCaretDecorations(decorations: DecorationSet, transaction: Transaction): DecorationSet | undefined {
-  if (!usesLargeDocumentDerivedWorkBudget(transaction.state) || transaction.docChanged || transaction.reconfigured
-    || !liveDecorationMetadata.get(transaction.startState)?.complete || syntaxTreeChanged(transaction)
-    || !hasDefaultLiveBlockPresentation(transaction.startState) || !hasDefaultLiveBlockPresentation(transaction.state)
-    || !transaction.effects.every(effect => effect.is(setLivePointerSelectionActiveEffect) || effect.is(setLiveDocumentIdleEffect))
-    || transaction.startState.selection.ranges.length !== 1 || transaction.state.selection.ranges.length !== 1
-    || !transaction.startState.selection.main.empty || !transaction.state.selection.main.empty) return undefined;
-  const state = transaction.state, tree = currentSyntaxTree(state);
-  if (tree.length !== state.doc.length) return undefined;
-  const previousActive = collectActiveLines(transaction.startState), active = collectActiveLines(state);
-  const lines = new Set([...previousActive, ...active,
-    state.doc.lineAt(transaction.startState.selection.main.head).number, state.doc.lineAt(state.selection.main.head).number]);
-  const blocks = new Map<number, { from: number; to: number; nodes: SyntaxNodeRef[]; closing: Set<string>; frontmatter?: FrontmatterInfo }>();
-  const frontmatter = parseFrontmatter(state);
-  for (const lineNo of lines) {
-    const line = state.doc.line(lineNo);
-    if (frontmatter && isInsideFrontmatter(frontmatter, line.from)) {
-      if (blocks.has(frontmatter.openingFrom)) continue;
-      if (frontmatter.closingTo - frontmatter.openingFrom > 4_096) return undefined;
-      let supported = true;
-      tree.iterate({ from: frontmatter.openingFrom, to: frontmatter.closingTo, enter(node) {
-        if (node.from >= frontmatter.closingTo || node.to <= frontmatter.openingFrom) return false;
-        if ((node.name === 'Link' && (findChildNode(node, 'URL') || isWikiLinkNode(state, node.node)))
-          || ['Autolink', 'Image', 'Subscript', 'Superscript', 'HTMLTag', 'HTMLBlock', 'CodeBlock', 'FencedCode'].includes(node.name)) {
-          supported = false; return false;
-        }
-      } });
-      if (!supported) return undefined;
-      blocks.set(frontmatter.openingFrom, { from: frontmatter.openingFrom, to: frontmatter.closingTo, nodes: [], closing: new Set(), frontmatter });
-      continue;
-    }
-    let node = tree.resolveInner(line.to, -1);
-    while (node.parent && node.parent.name !== 'Document') node = node.parent;
-    if (!line.length && (node.name === 'Document' || line.from > node.to || line.to < node.from)) {
-      if (isInsideFrontmatter(parseFrontmatter(state), line.from)
-        || pointInsideRanges(line.from, mergeConflictRanges(state))) return undefined;
-      blocks.set(line.from, { from: line.from, to: line.to, nodes: [], closing: new Set() });
-      continue;
-    }
-    if (!caretContainerNodes.has(node.name) && headingLevelFromName(node.name) === null) return undefined;
-    const from = state.doc.lineAt(node.from).from, to = state.doc.lineAt(node.to).to;
-    if (line.from < from || line.to > to || to - from > 4_096) return undefined;
-    if (isInsideFrontmatter(parseFrontmatter(state), from)
-      || rangeOverlapsRanges(from, to, mergeConflictRanges(state))) return undefined;
-    if (blocks.has(from)) continue;
-    const nodes: SyntaxNodeRef[] = [], protectedRanges: SourceRange[] = [], closing = new Set<string>();
-    let valid = true;
-    tree.iterate({ from: node.from, to: node.to, enter(candidate) {
-      if (candidate.to <= node.from || candidate.from >= node.to) return false;
-      if (!caretInlineNodes.has(candidate.name) && headingLevelFromName(candidate.name) === null) { valid = false; return false; }
-      if (candidate.name === 'Link' && (isWikiLinkNode(state, candidate.node)
-        || getEmptyImageLinkUrl(state, candidate) || state.doc.sliceString(candidate.from, candidate.to).includes('[^'))) {
-        valid = false; return false;
-      }
-      // Keep a stable SyntaxNode rather than the parser's reusable cursor.
-      nodes.push(candidate.node);
-      if (nodes.length > 512) { valid = false; return false; }
-      if (['Link', 'Autolink', 'InlineCode', 'TaskMarker'].includes(candidate.name)) protectedRanges.push({ from: candidate.from, to: candidate.to });
-      if (['EmphasisMark', 'StrikethroughMark', 'HighlightMark', 'CodeMark'].includes(candidate.name)
-        && candidate.node.parent?.to === candidate.to) closing.add(`${candidate.from}:${candidate.to}`);
-    } });
-    let raw = '', cursor = from;
-    for (const range of protectedRanges.sort((a,b) => a.from - b.from || b.to - a.to)) {
-      if (range.from < cursor) continue;
-      raw += state.doc.sliceString(cursor, range.from); cursor = range.to;
-    }
-    raw += state.doc.sliceString(cursor, to);
-    raw = raw.replace(/^(?:[ \t]*>[ \t]?)+/gm, '').replace(/^#{1,6}[ \t]+/gm, '');
-    if (!valid || /[#$:<>\[\]\\|]/.test(raw)) return undefined;
-    blocks.set(from, { from, to, nodes, closing });
-  }
-  let result = decorations;
-  for (const block of blocks.values()) {
-    if (block.frontmatter) {
-      // Reuse the canonical YAML renderer. Remove exactly its previous ranges,
-      // retaining independent inline styling and the original helper-first order.
-      const previous: DecorationCollector = [], next: DecorationCollector = [], retained: DecorationCollector = [];
-      addFrontmatterBoundaryDecorations(previous, transaction.startState, block.frontmatter, previousActive);
-      addFrontmatterBoundaryDecorations(next, state, block.frontmatter, active);
-      if (previous.length > 512 || next.length > 512) return undefined;
-      const owned = new Map<string, Decoration[]>();
-      for (const range of previous) {
-        const key = `${range.from}:${range.to}`;
-        const values = owned.get(key) ?? []; values.push(range.value); owned.set(key, values);
-      }
-      let valid = true, count = 0;
-      decorations.between(block.from, block.to, (from, to, value) => {
-        if (++count > 512 || from < block.from || to > block.to) { valid = false; return; }
-        const values = owned.get(`${from}:${to}`), index = values?.findIndex(candidate => candidate.eq(value)) ?? -1;
-        if (index >= 0) { values!.splice(index, 1); return; }
-        if (value.spec.widget) { valid = false; return; }
-        retained.push(value.range(from, to));
-      });
-      if (!valid || [...owned.values()].some(values => values.length > 0)) return undefined;
-      result = replaceLiveCaretDecorations(result, block.from, block.to, [...next, ...retained]);
-      continue;
-    }
-    const additions: DecorationCollector = [];
-    let valid = true;
-    let count = 0;
-    decorations.between(block.from, block.to, (from, to, value) => {
-      if (++count > 512) { valid = false; return; }
-      if (from < block.from || to > block.to) { valid = false; return; }
-      if (value === inlineSyntaxBoundaryDeco || value === hiddenLinkUrlDeco
-        || value.spec.widget instanceof OpenLinkWidget || value.spec.widget instanceof ClearLinkUrlWidget) return;
-      if (value.spec.widget && !(value.spec.widget instanceof MissingLocalLinkWidget)
-        && !(value.spec.widget instanceof ListIndentWidget) && !isCaretStableListWidget(value.spec.widget)) { valid = false; return; }
-      const pair = caretMarkerPairs.find(pair => pair[0] === value || pair[1] === value);
-      const setext = block.nodes.find(node => node.name.startsWith('SetextHeading')
-        && node.node.lastChild?.from === from && node.node.lastChild.to === to);
-      const isActive = setext ? rangeTouchesActiveLine(state, setext.from, setext.to, active)
-        : active.has(state.doc.lineAt(from).number);
-      additions.push((pair ? pair[isActive ? 1 : 0] : value).range(from, to));
-    });
-    if (!valid) return undefined;
-    const links: DecorationCollector = [];
-    for (const node of block.nodes) {
-      if (node.name === 'Link') addMarkdownLinkDecorations(links, state, node, active);
-      else if (node.name === 'Autolink') addAutolinkDecorations(links, state, node, active);
-      else if (node.name === 'URL' && node.node.parent?.name !== 'Link' && node.node.parent?.name !== 'Autolink') {
-        const href = getNodeHref(state, node.node);
-        addTrimmedUrlLinkMark(links, node.from, node.to, state.doc.sliceString(node.from, node.to), href,
-          !active.has(state.doc.lineAt(node.from).number));
-      }
-      if (block.closing.has(`${node.from}:${node.to}`) && active.has(state.doc.lineAt(node.from).number)) {
-        links.push(inlineSyntaxBoundaryDeco.range(node.to));
-      }
-    }
-    additions.push(...links.filter(range => range.value.spec.class !== 'meo-md-link'
-      && range.value !== linkBoundaryDeco && !(range.value.spec.widget instanceof MissingLocalLinkWidget)));
-    result = replaceLiveCaretDecorations(result, block.from, block.to, additions);
-  }
-  localLiveSelectionUpdates.add(state);
-  liveDecorationMetadata.set(state, { ...liveDecorationMetadata.get(state), complete: true });
-  if (!isEmptyDecorationSet(result)) completeLiveDecorationSets.add(result);
-  return result;
 }
 
 function isPlainProseInput(transaction: Transaction): boolean {
@@ -3772,6 +3793,88 @@ function canMapUnchangedProseDecorations(decorations: DecorationSet, transaction
   return valid;
 }
 
+/** Inline edits keep the surrounding block grammar intact. Rebuild that block
+ * from the shared renderer, map the remaining presentation and retain its
+ * heights. Definitions and reference labels keep the global invalidation path. */
+function projectLiveInlineInput(decorations: DecorationSet, transaction: Transaction): DecorationSet | undefined {
+  const before = transaction.startState, state = transaction.state;
+  if (!(transaction.isUserEvent('input') || transaction.isUserEvent('delete') || transaction.isUserEvent('undo') || transaction.isUserEvent('redo'))
+    || !liveDecorationMetadata.get(before)?.complete
+    || !hasUnchangedLivePresentationContext(transaction) || before.selection.ranges.length !== 1
+    || !before.selection.main.empty || state.selection.ranges.length !== 1 || !state.selection.main.empty) return;
+  let change: { from: number; to: number; nextFrom: number; nextTo: number } | undefined;
+  let supported = true;
+  transaction.changes.iterChangedRanges((from, to, nextFrom, nextTo) => {
+    if (change || !/^[\p{L}\p{N} \t]*$/u.test(before.doc.sliceString(from, to))
+      || !/^[\p{L}\p{N} \t]*$/u.test(state.doc.sliceString(nextFrom, nextTo))
+      || before.doc.lineAt(from).number !== before.doc.lineAt(to).number) { supported = false; return; }
+    change = { from, to, nextFrom, nextTo };
+  });
+  if (!supported || !change) return;
+  const oldTree = currentSyntaxTree(before), newTree = currentSyntaxTree(state);
+  if (oldTree.length !== before.doc.length || newTree.length !== state.doc.length) return;
+  const notes = parseFootnotes(before);
+  if (notes.references.some(reference => change!.from > reference.containerFrom && change!.from < reference.containerTo
+    || change!.to > reference.containerFrom && change!.from < reference.containerTo)) return;
+  const definition = notes.definitions.find(definition => change!.from >= definition.lineFrom && change!.from <= definition.lineTo);
+  if (definition) {
+    if (change.from < definition.contentFrom || change.to < definition.contentFrom) return;
+    const line = before.doc.lineAt(change.from), content = line.from + (line.text.match(/^[ \t]*/)?.[0].length ?? 0);
+    if (change.from < content || change.from === content && /^\s*$/.test(state.doc.sliceString(change.nextFrom, change.nextTo))) return;
+  }
+  const rootAt = (tree: Tree, position: number) => {
+    let node = tree.resolveInner(position, -1);
+    for (let ancestor: SyntaxNode | null = node; ancestor; ancestor = ancestor.parent) {
+      if (['LinkReference', 'HTMLBlock', 'HTMLTag'].includes(ancestor.name)) return null;
+    }
+    while (node.parent && node.parent.name !== 'Document') node = node.parent;
+    return node.name === 'Document' ? null : node;
+  };
+  const previous = rootAt(oldTree, change.from), next = rootAt(newTree, change.nextFrom);
+  if (!previous || !next || previous.from !== next.from
+    || transaction.changes.mapPos(previous.to, 1) !== next.to
+    || next.to - next.from > 32_768) return;
+  if (!syntaxTreeAvailable(state, state.doc.length)
+    && !hasSameLiveMarkdownOutsideBlock(oldTree, newTree, transaction.changes, previous, next)) return;
+  const frontmatter = parseFrontmatter(state);
+  let from = state.doc.lineAt(next.from).from, to = state.doc.lineAt(next.to).to;
+  if (frontmatter && change.nextFrom <= frontmatter.closingTo) {
+    from = frontmatter.openingFrom; to = frontmatter.closingTo;
+  }
+  if (definition) {
+    from = Math.min(from, transaction.changes.mapPos(definition.lineFrom, 1));
+    to = Math.max(to, transaction.changes.mapPos(definition.lineTo, 1),
+      ...definition.continuationLines.map(line => transaction.changes.mapPos(line.to, 1)));
+  }
+  if (next.name === 'FencedCode') {
+    const closing = state.doc.lineAt(next.to);
+    if (closing.number < state.doc.lines) to = state.doc.line(closing.number + 1).from;
+  }
+  const mapped = mapStableLiveDecorations(decorations, transaction.changes, state);
+  if (!mapped) return;
+  // The original block must remain closed over its replacement widgets too.
+  let crossesScope = false;
+  mapped.decorations.between(from, to, (start, end) => { if (start < from || end > to) crossesScope = true; });
+  if (crossesScope) return;
+  projectUnchangedFootnotes(before, state, transaction.changes);
+  const previousConflicts = mergeConflictRangeCache.get(before.doc);
+  if (previousConflicts) mergeConflictRangeCache.set(state.doc, previousConflicts.map(range => ({
+    from: transaction.changes.mapPos(range.from, 1), to: transaction.changes.mapPos(range.to, -1)
+  })));
+  const scope = { from, to, fromLine: state.doc.lineAt(from).number, toLine: state.doc.lineAt(to).number };
+  const ranges = buildDecorationRanges(state, mapped.decorations, undefined, scope).ranges;
+  const conflicts = mergeConflictRanges(state);
+  if (ranges.some(range => range.from < from || range.to > to)) return;
+  const result = replaceLivePresentationRanges(mapped.decorations, from, to, ranges.filter(range => !(
+    range.to > range.from ? rangeOverlapsRanges(range.from, range.to, conflicts) : pointInsideRanges(range.from, conflicts)
+  )));
+  liveDecorationMetadata.set(state, { complete: true,
+    checkpoint: mapped.rebasedWidgets ? undefined : liveDecorationMetadata.get(state)?.checkpoint });
+  markLiveInputPresentationMapped(state);
+  completeLiveDecorationSets.add(result);
+  return result;
+}
+
 function canKeepPlainProseCaret(decorations: DecorationSet, transaction: Transaction): boolean {
   if (transaction.docChanged || transaction.reconfigured || transaction.effects.length
     || !transaction.selection || transaction.startState.selection.eq(transaction.state.selection)
@@ -3843,8 +3946,10 @@ const liveDecorationField = StateField.define<DecorationSet>({
       liveDecorationMetadata.set(transaction.state, { ...liveDecorationMetadata.get(transaction.state), complete: true });
       return decorations;
     }
-    const selected = projectLiveCaretDecorations(decorations, transaction);
-    if (selected !== undefined) return selected;
+    let rebuiltSelection: DecorationSet | undefined;
+    try { rebuiltSelection = rebuildLiveSelectionBlocks(decorations, transaction); }
+    catch { /* The guarded authoritative builder below owns failures. */ }
+    if (rebuiltSelection !== undefined) return rebuiltSelection;
     // Search highlights are maintained independently. Preserving the existing
     // live decorations prevents a transient parse result from exposing source.
     if (
@@ -3852,6 +3957,13 @@ const liveDecorationField = StateField.define<DecorationSet>({
       !transaction.effects.some((effect) => effect.is(refreshLiveDecorationsAfterSearchEffect))
     ) {
       return decorations;
+    }
+    if (transaction.docChanged && usesLargeDocumentDerivedWorkBudget(transaction.state)
+      && (transaction.isUserEvent('delete') || transaction.isUserEvent('undo') || transaction.isUserEvent('redo'))) {
+      let inline: DecorationSet | undefined;
+      try { inline = projectLiveInlineInput(decorations, transaction); }
+      catch { /* The authoritative builder handles unsupported history edits. */ }
+      if (inline !== undefined) return inline;
     }
     if (shouldDeferLiveInputDerivedWork(transaction)) {
       // Phase bookkeeping, especially settlement after an authoritative refresh,
@@ -3869,6 +3981,12 @@ const liveDecorationField = StateField.define<DecorationSet>({
           if (!isEmptyDecorationSet(mapped.decorations)) completeLiveDecorationSets.add(mapped.decorations);
           return mapped.decorations;
         }
+      }
+      if (usesLargeDocumentDerivedWorkBudget(transaction.state)) {
+        let inline: DecorationSet | undefined;
+        try { inline = projectLiveInlineInput(decorations, transaction); }
+        catch { /* Keep the guarded deferred builder for unsupported input. */ }
+        if (inline !== undefined) return inline;
       }
       if (usesLargeDocumentDerivedWorkBudget(transaction.state)) {
         liveDecorationMetadata.set(transaction.state, { ...liveDecorationMetadata.get(transaction.state), complete: false });
@@ -3976,10 +4094,13 @@ function buildLiveLineNumberMarkers(state: EditorState): RangeSet<GutterMarker> 
   return builder.finish();
 }
 
-function detectTableBlocks(state: EditorState): Array<{ startLineNo: number; endLineNo: number }> {
+const fallbackTableCache = new WeakMap<EditorState['doc'], Array<{ startLineNo: number; endLineNo: number }>>();
+function detectTableBlocks(state: EditorState, scope?: LiveDecorationScope): Array<{ startLineNo: number; endLineNo: number }> {
+  const cached = !scope && fallbackTableCache.get(state.doc);
+  if (cached) return cached;
   const blocks: Array<{ startLineNo: number; endLineNo: number }> = [];
   let scannedThrough = 1;
-  for (const delimiterLine of documentLines(state.doc)) {
+  for (const delimiterLine of scopedDocumentLines(state, scope)) {
     const lineNo = delimiterLine.number;
     if (lineNo <= scannedThrough) continue;
     const delimiterText = delimiterLine.text;
@@ -4005,6 +4126,7 @@ function detectTableBlocks(state: EditorState): Array<{ startLineNo: number; end
     blocks.push({ startLineNo: headerLineNo, endLineNo });
     scannedThrough = endLineNo;
   }
+  if (!scope) fallbackTableCache.set(state.doc, blocks);
   return blocks;
 }
 
@@ -4013,10 +4135,12 @@ function addFallbackTableDecorations(
   state: EditorState,
   tree: Tree,
   parsedTableRanges: ReadonlyArray<SourceRange>,
-  diagnostics: EditorDiagnostic[] = []
+  diagnostics: EditorDiagnostic[] = [],
+  scope?: LiveDecorationScope
 ): void {
-  const tableBlocks = detectTableBlocks(state);
+  const tableBlocks = detectTableBlocks(state, scope);
   for (const block of tableBlocks) {
+    if (scope && (block.endLineNo < scope.fromLine || block.startLineNo > scope.toLine)) continue;
     const from = state.doc.line(block.startLineNo).from;
     const to = state.doc.line(block.endLineNo).to;
     if (overlapsParsedTableRange(from, to, parsedTableRanges)) continue;
@@ -4053,9 +4177,10 @@ function addRawFileUrlDecorations(
   state: EditorState,
   tree: Tree,
   activeLines: Set<number>,
-  frontmatter: FrontmatterInfo | null = null
+  frontmatter: FrontmatterInfo | null = null,
+  scope?: LiveDecorationScope
 ): void {
-  for (const line of documentLines(state.doc)) {
+  for (const line of scopedDocumentLines(state, scope)) {
     const lineNo = line.number;
     if (line.text.indexOf(fileSchemePrefix) === -1) {
       continue;
@@ -4175,6 +4300,7 @@ export const editorMarkdownLanguage = markdown({
 export function liveModeExtensions(options: { readonly largeDocument?: boolean } = {}): Extension[] {
   return [
     ...liveInputDerivedWorkExtensions(options),
+    ...(options.largeDocument ? liveViewportPresentationExtensions() : []),
     editorMarkdownLanguage,
     syntaxHighlighting(liveHighlightStyle),
     markdownTagField,

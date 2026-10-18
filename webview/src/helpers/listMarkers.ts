@@ -165,7 +165,10 @@ function inferListIndentStyle(listLineTexts: readonly string[]): ListIndentStyle
   return isFourSpaceList ? listIndentStyle.fourSpaces : defaultListIndentStyle;
 }
 
-export function detectListIndentStylesByLine(state: EditorState): Map<number, ListIndentStyle> {
+const listIndentStyleCache = new WeakMap<Text, Map<number, ListIndentStyle>>();
+export function detectListIndentStylesByLine(state: EditorState, scope?: { fromLine: number; toLine: number }): Map<number, ListIndentStyle> {
+  const cached = !scope && listIndentStyleCache.get(state.doc);
+  if (cached) return cached;
   const stylesByLine = new Map<number, ListIndentStyle>();
   let startLineNo = 1;
   let listLineTexts: string[] = [];
@@ -177,7 +180,7 @@ export function detectListIndentStylesByLine(state: EditorState): Map<number, Li
     }
     listLineTexts = [];
   };
-  for (const line of documentLines(state.doc)) {
+  for (const line of documentLines(state.doc, scope?.fromLine, scope?.toLine)) {
     if (isListLine(line.text)) {
       if (!listLineTexts.length) startLineNo = line.number;
       listLineTexts.push(line.text);
@@ -187,6 +190,7 @@ export function detectListIndentStylesByLine(state: EditorState): Map<number, Li
   }
   finishRun();
 
+  if (!scope) listIndentStyleCache.set(state.doc, stylesByLine);
   return stylesByLine;
 }
 
@@ -575,11 +579,6 @@ class CheckboxWidget extends UiLanguageSensitiveWidget {
   ignoreEvent(): boolean {
     return false;
   }
-}
-
-/** These widgets do not change when a collapsed caret moves; source edits still require position mapping. */
-export function isCaretStableListWidget(widget: WidgetType): boolean {
-  return widget instanceof ListMarkerWidget || widget instanceof CheckboxWidget;
 }
 
 export function addListMarkerDecoration(
