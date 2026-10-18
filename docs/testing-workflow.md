@@ -113,6 +113,12 @@ offsets and source lines against a complete build, and undo exact text. A newlin
 that introduces a global reference definition must invalidate its outside users.
 Large Live pointer input must delay cold code highlighting until caret frames
 have yielded, resume afterward, and cancel the pending retry on destruction.
+Also cover an internally complete parse whose published tree is still partial;
+the first input must not retire its complete presentation. Footnote continuation
+line metadata must match an independent new-state parse, including numbering and
+reference targets. Explicit line jumps must show their real target without a
+full Live rebuild, while pure geometry effects retain accepted presentation and
+unrelated resource effects still invalidate it.
 
 `test-preview-viewport-work-budget.ts` exposes the browser's native scrollbar.
 It checks range retention while a nearby block changes height, release outside

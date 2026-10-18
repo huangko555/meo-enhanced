@@ -1,3 +1,4 @@
+import { editorScrollIntoView } from './editor/scrollEffects';
 import { editorViewportBounds } from './editor/editorViewportBounds';
 import { sourceLinePositionAtTarget } from './editor/domSourceLine';
 import { currentHeadingSuggestions } from './editor/headingSuggestions';
@@ -1950,7 +1951,7 @@ export function createEditor({
       selection: { anchor: manualMode === 'preview' ? openingLine.from : targetPosition },
       effects: targetWasVisibleBeforeReplay
         ? []
-        : EditorView.scrollIntoView(openingLine.from, { y: 'center' })
+        : editorScrollIntoView(openingLine.from, { y: 'center' })
     });
     if (targetWasVisibleBeforeReplay) {
       viewportController.lockScrollTop(previousViewport.scrollTop, isCurrent);
@@ -4225,7 +4226,7 @@ export function createEditor({
         const isRevealCurrent = viewportController.beginNavigationReveal();
         view.dispatch({
           selection: { anchor: line.from, head: line.from },
-          effects: EditorView.scrollIntoView(line.from, { y: 'start' })
+          effects: editorScrollIntoView(line.from, { y: 'start' })
         });
         view.focus();
         requestAnimationFrame(() => {
@@ -4257,7 +4258,7 @@ export function createEditor({
         const isRevealCurrent = viewportController.beginNavigationReveal();
         view.dispatch({
           selection: { anchor: line.from, head: line.from },
-          effects: EditorView.scrollIntoView(line.from, { y: 'center' })
+          effects: editorScrollIntoView(line.from, { y: 'center' })
         });
         view.focus();
         viewportController.revealPositionUntilStable(
@@ -4299,7 +4300,7 @@ export function createEditor({
           }
           previousVisibleSignature = null;
           stableVisibleFrames = 0;
-          view.dispatch({ effects: EditorView.scrollIntoView(targetLine.from, { y: 'center' }) });
+          view.dispatch({ effects: editorScrollIntoView(targetLine.from, { y: 'center' }) });
           viewportController.revealPositionUntilStable(
             targetLine.from,
             { y: 'center' },
@@ -4323,7 +4324,7 @@ export function createEditor({
             targetBlock.bottom > viewportTop &&
             targetBlock.top < viewportTop + view.scrollDOM.clientHeight
           ) return;
-          view.dispatch({ effects: EditorView.scrollIntoView(targetLine.from, { y: 'center' }) });
+          view.dispatch({ effects: editorScrollIntoView(targetLine.from, { y: 'center' }) });
           viewportController.revealPositionUntilStable(
             targetLine.from,
             { y: 'center' },

@@ -1,3 +1,4 @@
+import { editorScrollIntoView } from '../editor/scrollEffects';
 import { EditorState, Facet, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { sourceLinePositionAtTarget } from '../editor/domSourceLine';
 import { Decoration, EditorView, WidgetType, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
@@ -190,7 +191,7 @@ function setLongCodeBlockCollapsed(view: EditorView, anchor: number, collapsed: 
     effects: [
       toggleLongCodeBlockEffect.of({ anchor, collapsed }),
       ...(collapsed && !startWasVisible && descriptor
-        ? [EditorView.scrollIntoView(descriptor.collapsedFrom, { y: 'nearest', yMargin: 8 })]
+        ? [editorScrollIntoView(descriptor.collapsedFrom, { y: 'nearest', yMargin: 8 })]
         : [])
     ]
   });

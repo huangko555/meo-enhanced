@@ -1,3 +1,4 @@
+import { editorScrollIntoView } from '../editor/scrollEffects';
 import { blockInsertion, type MarkdownInputContext } from '../editor/blockInsertion';
 import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
 import { matchInlineScript } from '../../../src/foundation/inlineScript';
@@ -639,7 +640,7 @@ export function focusHistoryChange(
         yMargin: visualLineContextMargin(view, 2.5)
       }, () => isCurrent() && navigationIsCurrent());
     } else {
-      view.dispatch({ effects: EditorView.scrollIntoView(selection.head, { y: 'nearest' }) });
+      view.dispatch({ effects: editorScrollIntoView(selection.head, { y: 'nearest' }) });
     }
   };
   const revealSelectionIfNeeded = () => {
@@ -1672,7 +1673,7 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
         const reveal = viewport?.beginNavigationReveal();
         options.view.dispatch({ selection: { anchor: definition.lineFrom } });
         if (viewport && reveal) viewport.revealPosition(definition.lineFrom, { y: 'center' }, reveal);
-        else options.view.dispatch({ effects: EditorView.scrollIntoView(definition.lineFrom, { y: 'center' }) });
+        else options.view.dispatch({ effects: editorScrollIntoView(definition.lineFrom, { y: 'center' }) });
         options.view.focus();
       });
       parent.appendChild(button);
@@ -3139,7 +3140,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         y: 'nearest',
         yMargin: visualLineContextMargin(view, 1)
       }, isRevealCurrent);
-      else view.dispatch({ effects: EditorView.scrollIntoView(targetPos, { y: 'nearest' }) });
+      else view.dispatch({ effects: editorScrollIntoView(targetPos, { y: 'nearest' }) });
       view.focus();
       return true;
     }
@@ -3156,7 +3157,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       y: 'nearest',
       yMargin: visualLineContextMargin(view, 1)
     }, isRevealCurrent);
-    else view.dispatch({ effects: EditorView.scrollIntoView(targetPos, { y: 'nearest' }) });
+    else view.dispatch({ effects: editorScrollIntoView(targetPos, { y: 'nearest' }) });
     view.focus();
     return true;
   }

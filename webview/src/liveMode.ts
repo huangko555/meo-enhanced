@@ -1,3 +1,4 @@
+import { editorScrollIntoView, isEditorScrollEffect } from './editor/scrollEffects';
 import { documentLines } from './helpers/documentLines';
 import { isAutomaticSymbolPairHistoryEffect } from './editor/typingAssistance';
 import { liveWidgetPresentationLayers, mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions, replaceLivePresentationRanges } from './editor/liveWidgetPositions';
@@ -1231,7 +1232,7 @@ class FootnoteReferenceWidget extends UiLanguageSensitiveWidget {
       const isRevealCurrent = viewport?.beginNavigationReveal();
       view.dispatch({ selection: { anchor: this.definitionFrom } });
       if (viewport && isRevealCurrent) viewport.revealPosition(this.definitionFrom, { y: 'center' }, isRevealCurrent);
-      else view.dispatch({ effects: EditorView.scrollIntoView(this.definitionFrom, { y: 'center' }) });
+      else view.dispatch({ effects: editorScrollIntoView(this.definitionFrom, { y: 'center' }) });
       view.focus();
     });
 
@@ -1289,7 +1290,7 @@ class FootnoteBacklinkWidget extends UiLanguageSensitiveWidget {
       const isRevealCurrent = viewport?.beginNavigationReveal();
       view.dispatch({ selection: { anchor: this.referenceFrom } });
       if (viewport && isRevealCurrent) viewport.revealPosition(this.referenceFrom, { y: 'center' }, isRevealCurrent);
-      else view.dispatch({ effects: EditorView.scrollIntoView(this.referenceFrom, { y: 'center' }) });
+      else view.dispatch({ effects: editorScrollIntoView(this.referenceFrom, { y: 'center' }) });
       view.focus();
     });
 
@@ -3608,7 +3609,7 @@ function rebuildLiveSelectionBlocks(decorations: DecorationSet, transaction: Tra
     || !liveDecorationMetadata.get(before)?.complete || syntaxTreeChanged(transaction)
     || !hasDefaultLiveBlockPresentation(before) || !hasDefaultLiveBlockPresentation(state)
     || !transaction.effects.every(effect => effect.is(setLivePointerSelectionActiveEffect) || effect.is(setLiveDocumentIdleEffect)
-      || isLiveViewportPresentationEffect(effect) || isLongCodeBlockInteractionEffect(effect))
+      || isLiveViewportPresentationEffect(effect) || isLongCodeBlockInteractionEffect(effect) || isEditorScrollEffect(effect))
     || before.selection.ranges.some(range => !range.empty) || state.selection.ranges.some(range => !range.empty)) return;
   const tree = currentSyntaxTree(state);
   if (tree.length !== state.doc.length) return;
@@ -3746,7 +3747,7 @@ function isPlainProseInput(transaction: Transaction): boolean {
 function hasUnchangedLivePresentationContext(transaction: Transaction): boolean {
   return !transaction.reconfigured
     && transaction.effects.every(effect => isLiveInputDerivedWorkBookkeeping(effect)
-      || isAutomaticSymbolPairHistoryEffect(effect) || effect.is(shikiRefreshEffect) || isLongCodeBlockInteractionEffect(effect))
+      || isAutomaticSymbolPairHistoryEffect(effect) || effect.is(shikiRefreshEffect) || isLongCodeBlockInteractionEffect(effect) || isEditorScrollEffect(effect))
     && hasDefaultLivePresentation(transaction.startState) && hasDefaultLivePresentation(transaction.state)
     && (!transaction.selection || transaction.docChanged
       || transaction.startState.selection.eq(transaction.state.selection));
@@ -3973,6 +3974,14 @@ const liveDecorationField = StateField.define<DecorationSet>({
         });
       }
       return decorations;
+    }
+    if (!transaction.docChanged && !transaction.selection && !transaction.reconfigured
+      && transaction.effects.length > 0 && transaction.effects.every(isEditorScrollEffect)) {
+      const previous = liveDecorationMetadata.get(transaction.startState);
+      if (previous?.complete) {
+        liveDecorationMetadata.set(transaction.state, previous);
+        return decorations;
+      }
     }
     if (!transaction.docChanged && !transaction.selection && !transaction.reconfigured
       && transaction.effects.length > 0 && transaction.effects.every(isLongCodeBlockInteractionEffect)

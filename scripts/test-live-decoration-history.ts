@@ -74,6 +74,29 @@ try {
   assert.equal(await page.evaluate(() => ((window as any).__fullLiveBuilds ?? 0) - (window as any).__unpublishedBuilds), 0,
     'an already completed internal Markdown tree must not be mistaken for missing syntax and trigger a delayed full build');
   await page.evaluate(() => (window as any).__unpublishedEditor.destroy());
+  await page.evaluate(() => {
+    const scope = window as any, api = scope.__liveHistory;
+    const text = 'EDIT\n\n' + Array.from({ length: 4_100 }, (_, i) => `**Paragraph ${i}**.\n\n`).join('');
+    const editor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'live', onApplyChanges() {} });
+    api.parse(editor); editor.refreshDecorations();
+    scope.__navigationEditor = editor; scope.__navigationBuilds = scope.__fullLiveBuilds ?? 0;
+    editor.scrollToLine(1501, 'center');
+  });
+  await page.evaluate(async () => { for (let i = 0; i < 8; i++) await new Promise(requestAnimationFrame); });
+  assert.equal(await page.evaluate(() => ((window as any).__fullLiveBuilds ?? 0) - (window as any).__navigationBuilds), 0,
+    'explicit line navigation must update selected blocks without invalidating the whole Live document');
+  assert.equal(await page.evaluate(() => {
+    const view = (window as any).__navigationEditor.view;
+    return view.scrollDOM.scrollTop > 0 && view.contentDOM.textContent.includes('Paragraph 749');
+  }), true, 'the optimized navigation must still display its actual target paragraph');
+  assert.equal(await page.evaluate(() => (window as any).__liveHistory.scrollOnly((window as any).__navigationEditor)), true,
+    'a geometry-only scroll request must retain the accepted canonical presentation');
+  const navigated = await page.evaluate(() => (window as any).__liveHistory.positionSnapshot((window as any).__navigationEditor));
+  assert.deepEqual(await page.evaluate(() => {
+    const scope = window as any; scope.__navigationEditor.refreshDecorations();
+    return scope.__liveHistory.positionSnapshot(scope.__navigationEditor);
+  }), navigated, 'line navigation must preserve the same selected-block presentation as a complete build');
+  await page.evaluate(() => (window as any).__navigationEditor.destroy());
   for (const mode of ['source', 'live']) {
     const budget = await page.evaluate(async mode => {
       const scope = window as any, api = scope.__liveHistory;

@@ -9,6 +9,7 @@ import { replaceLocalLinkStatuses } from '../webview/src/helpers/localLinks';
 import { getGitDiffSummary } from '../webview/src/helpers/gitDiffGutter';
 import { editorMarkdownLanguage, getLivePresentationDecorations } from '../webview/src/liveMode';
 import { parseFootnotes } from '../webview/src/helpers/footnotes';
+import { editorScrollIntoView } from '../webview/src/editor/scrollEffects';
 
 function footnoteSnapshot(state: EditorState) {
   const parsed = parseFootnotes(state);
@@ -26,6 +27,11 @@ function footnoteSnapshot(state: EditorState) {
   gitSummary: (editor: ReturnType<typeof createEditor>) => getGitDiffSummary(editor.view.state),
   syntaxInfo: (editor: ReturnType<typeof createEditor>) => ({ published: syntaxTree(editor.view.state).length,
     length: editor.view.state.doc.length, available: syntaxTreeAvailable(editor.view.state, editor.view.state.doc.length) }),
+  scrollOnly(editor: ReturnType<typeof createEditor>) {
+    const before = getLivePresentationDecorations(editor.view.state);
+    editor.view.dispatch({ effects: editorScrollIntoView(editor.view.state.selection.main.head) });
+    return getLivePresentationDecorations(editor.view.state) === before;
+  },
   footnotes: (editor: ReturnType<typeof createEditor>) => footnoteSnapshot(editor.view.state),
   freshFootnotes(editor: ReturnType<typeof createEditor>) {
     const state = EditorState.create({ doc: editor.getText(), extensions: editorMarkdownLanguage });

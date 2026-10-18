@@ -1,3 +1,4 @@
+import { editorScrollIntoView } from '../editor/scrollEffects';
 import { editorViewportBounds } from '../editor/editorViewportBounds';
 import { sourceLinePositionAtTarget } from '../editor/domSourceLine';
 import { EditorView } from '@codemirror/view';
@@ -1452,7 +1453,7 @@ export class ViewportController {
     if (immediateLayout && (this.getMode() === 'source' || foldedCodeNearTop || (!tableRow && anchorLineTop !== null)
       || topRenderedBlock?.querySelector('.meo-mermaid-toolbar'))) queueMicrotask(() => {
       if (!this.destroyed && !this.isUserScrolling()) this.view.dispatch({
-        effects: EditorView.scrollIntoView(fontAnchorPosition, { y: 'nearest' })
+        effects: editorScrollIntoView(fontAnchorPosition, { y: 'nearest' })
       });
     });
     const currentBlock = tableRow ? resolveTableRow() : visualAnchor
