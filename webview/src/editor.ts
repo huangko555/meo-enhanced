@@ -1,4 +1,5 @@
 import { editorScrollIntoView } from './editor/scrollEffects';
+import { markdownSyntaxPublication } from './editor/markdownSyntaxPublication';
 import { editorViewportBounds } from './editor/editorViewportBounds';
 import { sourceLinePositionAtTarget } from './editor/domSourceLine';
 import { currentHeadingSuggestions } from './editor/headingSuggestions';
@@ -2389,6 +2390,7 @@ export function createEditor({
     doc: text,
     selection: { anchor: initialCursorPos },
     extensions: [
+      markdownSyntaxPublication,
       EditorState.tabSize.of(4),
       indentUnit.of('  '),
       inputAssistanceCompartment.of(inputAssistanceFacet.of(initialInputAssistance)),

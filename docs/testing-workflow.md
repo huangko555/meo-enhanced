@@ -124,6 +124,10 @@ Cover that coalesced publication with frontmatter and distant footnotes, compare
 the selected canonical presentation with a complete build, and verify that its
 local readers do not advance embedded parsers. Incomplete or unproven syntax
 must retain the authoritative fallback.
+Also check completed syntax publication on the next microtask without source or
+canonical-presentation changes or another full Live build. This path must use
+the public zero-budget parse publication API and cancel on View destruction;
+unfinished syntax must not become a new Source prewarm path.
 
 `test-preview-viewport-work-budget.ts` exposes the browser's native scrollbar.
 It checks range retention while a nearby block changes height, release outside

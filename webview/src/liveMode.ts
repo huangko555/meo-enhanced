@@ -3826,7 +3826,14 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
   // state. Use that already completed tree; a lagging published snapshot must
   // not retire the complete presentation and force a later full rebuild.
   const oldTree = syntaxTreeAvailable(before, before.doc.length) ? resolvedSyntaxTree(before, 0) : currentSyntaxTree(before);
-  const newTree = syntaxTreeAvailable(state, state.doc.length) ? resolvedSyntaxTree(state, 0) : currentSyntaxTree(state);
+  let newTree = syntaxTreeAvailable(state, state.doc.length) ? resolvedSyntaxTree(state, 0) : currentSyntaxTree(state);
+  // An accepted inline edit can exhaust CodeMirror's update slice just before
+  // EOF. Finish only that small remainder once; nested readers below still use
+  // one snapshot. A genuinely incomplete parse retains the full proof checks.
+  if (!lineChanged && oldTree.length === before.doc.length && newTree.length >= change.nextTo
+    && newTree.length < state.doc.length && state.doc.length - newTree.length <= 1_024) {
+    newTree = resolvedSyntaxTree(state, 2);
+  }
   if (oldTree.length !== before.doc.length || newTree.length !== state.doc.length) return;
   const notes = parseFootnotes(before);
   if (notes.references.some(reference => change!.from > reference.containerFrom && change!.from < reference.containerTo

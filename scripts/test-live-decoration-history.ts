@@ -59,6 +59,24 @@ try {
   await page.addStyleTag({ path: path.join(root, 'webview/src/styles.css') });
   await page.addScriptTag({ path: path.join(directory, 'bundle.js') });
   const inputBudgets: Array<{ mode: string; pending: boolean; diffs: number; discoveries: number; htmlRequests: number }> = [];
+  const syntaxPublication = await page.evaluate(async () => {
+    const scope = window as any, api = scope.__liveHistory;
+    const text = 'EDIT\n\nReference[^note].\n\n[^note]: Footnote body.\n\n' + '**Distant paragraph**.\n\n'.repeat(4_100);
+    const editor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'live', onApplyChanges() {} });
+    const initial = api.syntaxInfo(editor), before = api.positionSnapshot(editor), builds = scope.__fullLiveBuilds ?? 0;
+    await Promise.resolve();
+    const published = api.syntaxInfo(editor), after = api.positionSnapshot(editor);
+    const result = { initial, published, before, after, builds: (scope.__fullLiveBuilds ?? 0) - builds, text: editor.getText() === text };
+    editor.destroy();
+    return result;
+  });
+  assert.ok(syntaxPublication.initial.published < syntaxPublication.initial.length && syntaxPublication.initial.available,
+    'publication fixture must begin with internally complete but unpublished Markdown');
+  assert.equal(syntaxPublication.published.published, syntaxPublication.published.length,
+    'already completed syntax must publish without waiting for a later parser idle receipt');
+  assert.equal(syntaxPublication.builds, 0, 'publishing unchanged Markdown must not rebuild the whole Live presentation');
+  assert.deepEqual(syntaxPublication.after, syntaxPublication.before, 'publication must retain the exact canonical presentation');
+  assert.ok(syntaxPublication.text, 'syntax publication must not change source text');
   const unpublishedSelection = await page.evaluate(() => {
     const scope = window as any, api = scope.__liveHistory;
     const text = '---\ntitle: First selection\naliases: [First, Second]\n---\n\nReference[^note].\n\n[^note]: Footnote body.\n\n'
