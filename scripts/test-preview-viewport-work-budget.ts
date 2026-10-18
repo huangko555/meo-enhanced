@@ -495,19 +495,33 @@ try {
     const write = (window as any).__writePreviewFrame;
     const expected = document.createElement('main'); expected.innerHTML = html;
     const frame = document.createElement('iframe'); document.body.append(frame);
-    let stale = 0, current = 0, frames = 0, running = true;
-    const tick = () => { if (running) { frames++; requestAnimationFrame(tick); } };
+    let stale = 0, current = 0, frames = 0, running = true, incompleteLayouts = 0;
+    const tick = () => {
+      if (running) {
+        frames++;
+        const body = frame.contentDocument?.body;
+        if (!current && body && body.getBoundingClientRect().height > 0) incompleteLayouts++;
+        requestAnimationFrame(tick);
+      }
+    };
     requestAnimationFrame(tick);
-    const header = '<!doctype html><html><body><main>', footer = '</main></body></html>';
+    const header = '<!doctype html><html><body style="display:block!important;color:red"><main>', footer = '</main></body></html>';
     const cancel = write(frame, header, '<p>Cancelled document</p>' + html, footer, () => true, () => { stale++; });
     cancel();
+    const cancelledDisplay = frame.contentDocument!.body.style.getPropertyValue('display');
     let cancelCurrent: () => void;
     await new Promise<void>(resolve => {
       cancelCurrent = write(frame, header, html, footer, () => true, () => { current++; resolve(); });
       cancel(); // An old cancellation must remain inert after the next document starts.
     });
     running = false;
-    const result = { equal: frame.contentDocument!.querySelector('main')!.innerHTML === expected.innerHTML, stale, current, frames };
+    const body = frame.contentDocument!.body;
+    const result = {
+      equal: frame.contentDocument!.querySelector('main')!.innerHTML === expected.innerHTML,
+      stale, current, frames, incompleteLayouts, cancelledDisplay,
+      display: body.style.getPropertyValue('display'), priority: body.style.getPropertyPriority('display'),
+      color: body.style.color, visibleHeight: body.getBoundingClientRect().height
+    };
     cancelCurrent!(); frame.remove();
     return result;
   }, '<p>' + 'x'.repeat(32_764) + '😀 &amp; 中文</p>' + codeValue.html + mathValue.html);
@@ -515,6 +529,11 @@ try {
   assert.equal(parserResult.stale, 0, 'cancelled parser work must never publish an older presentation');
   assert.equal(parserResult.current, 1, 'the current parser must publish ready exactly once');
   assert.ok(parserResult.frames > 0, 'large HTML parsing must yield to animation frames');
+  assert.equal(parserResult.incompleteLayouts, 0, 'growing HTML prefixes must not repeatedly participate in page layout');
+  assert.equal(parserResult.cancelledDisplay, 'block', 'cancelling a partial document must release its temporary layout hold');
+  assert.deepEqual([parserResult.display, parserResult.priority, parserResult.color], ['block', 'important', 'red'],
+    'ready presentation must restore authored body styles exactly');
+  assert.ok(parserResult.visibleHeight > 0, 'the complete document must enter normal layout before ready is published');
   console.log('Preview viewport source index, visual footnote order and hidden surface budget passed');
 } catch (error) {
   console.error('Preview viewport budget failed during:', stage);

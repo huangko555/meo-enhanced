@@ -14,15 +14,32 @@ export function writePreviewFrame(
   let timer: number | null = null;
   let firstFrame: number | null = null;
   let cancelled = false, written = false, ready = false, offset = 0;
+  let releaseLayout = () => {};
   const finish = () => {
     if (!written || ready || cancelled || !isCurrent() || document.readyState !== 'complete') return;
     ready = true;
     document.removeEventListener('readystatechange', finish);
+    releaseLayout();
     onReady();
   };
   document.open();
   document.addEventListener('readystatechange', finish);
   document.write(header);
+  // Streaming an attached page otherwise repeats style, layout and visibility
+  // intersection work for every growing prefix. The outer loading surface
+  // remains paintable while the parser builds the exact same document tree.
+  // Publish its normal flow once, before consumers initialize its geometry.
+  const body = document.body;
+  if (body) {
+    const display = body.style.getPropertyValue('display');
+    const priority = body.style.getPropertyPriority('display');
+    body.style.setProperty('display', 'none', 'important');
+    releaseLayout = () => {
+      if (display) body.style.setProperty('display', display, priority);
+      else body.style.removeProperty('display');
+      releaseLayout = () => {};
+    };
+  }
   const pump = () => {
     timer = null;
     if (cancelled || !isCurrent() || frame.contentDocument !== document) return;
@@ -52,5 +69,6 @@ export function writePreviewFrame(
     if (firstFrame !== null) window.cancelAnimationFrame(firstFrame);
     document.removeEventListener('readystatechange', finish);
     if (!written && frame.contentDocument === document) document.close();
+    releaseLayout();
   };
 }
