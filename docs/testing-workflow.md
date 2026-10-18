@@ -119,6 +119,11 @@ line metadata must match an independent new-state parse, including numbering and
 reference targets. Explicit line jumps must show their real target without a
 full Live rebuild, while pure geometry effects retain accepted presentation and
 unrelated resource effects still invalidate it.
+First caret selection can also publish an already completed internal parse.
+Cover that coalesced publication with frontmatter and distant footnotes, compare
+the selected canonical presentation with a complete build, and verify that its
+local readers do not advance embedded parsers. Incomplete or unproven syntax
+must retain the authoritative fallback.
 
 `test-preview-viewport-work-budget.ts` exposes the browser's native scrollbar.
 It checks range retention while a nearby block changes height, release outside

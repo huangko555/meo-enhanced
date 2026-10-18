@@ -3606,13 +3606,23 @@ const localLiveSelectionUpdates = new WeakSet<EditorState>();
 function rebuildLiveSelectionBlocks(decorations: DecorationSet, transaction: Transaction): DecorationSet | undefined {
   const before = transaction.startState, state = transaction.state;
   if (!usesLargeDocumentDerivedWorkBudget(state) || transaction.docChanged || transaction.reconfigured
-    || !liveDecorationMetadata.get(before)?.complete || syntaxTreeChanged(transaction)
+    || !liveDecorationMetadata.get(before)?.complete
     || !hasDefaultLiveBlockPresentation(before) || !hasDefaultLiveBlockPresentation(state)
     || !transaction.effects.every(effect => effect.is(setLivePointerSelectionActiveEffect) || effect.is(setLiveDocumentIdleEffect)
       || isLiveViewportPresentationEffect(effect) || isLongCodeBlockInteractionEffect(effect) || isEditorScrollEffect(effect))
     || before.selection.ranges.some(range => !range.empty) || state.selection.ranges.some(range => !range.empty)) return;
-  const tree = currentSyntaxTree(state);
+  const tree = syntaxTreeAvailable(state, state.doc.length) ? resolvedSyntaxTree(state, 0) : currentSyntaxTree(state);
   if (tree.length !== state.doc.length) return;
+  // A caret transaction can publish the already completed parse too. Only
+  // accept that publication when both complete outer Markdown trees agree;
+  // a genuinely extended/inconclusive syntax result still takes the full path.
+  if (syntaxTreeChanged(transaction) && (!syntaxTreeAvailable(before, before.doc.length)
+    || !hasSameLiveMarkdownSyntax(resolvedSyntaxTree(before, 0), tree))) return;
+  return withMarkdownSyntaxSnapshot(state, tree, () => rebuildLiveSelectionWithSyntax(decorations, transaction, tree));
+}
+
+function rebuildLiveSelectionWithSyntax(decorations: DecorationSet, transaction: Transaction, tree: Tree): DecorationSet | undefined {
+  const before = transaction.startState, state = transaction.state;
   const active = new Set([...collectActiveLines(before), ...collectActiveLines(state)]);
   // The pointer's new selection can be masked during pointerdown; include both
   // caret locations so later pointerup reveals exactly the same source block.

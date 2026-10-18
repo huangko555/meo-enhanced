@@ -59,6 +59,30 @@ try {
   await page.addStyleTag({ path: path.join(root, 'webview/src/styles.css') });
   await page.addScriptTag({ path: path.join(directory, 'bundle.js') });
   const inputBudgets: Array<{ mode: string; pending: boolean; diffs: number; discoveries: number; htmlRequests: number }> = [];
+  const unpublishedSelection = await page.evaluate(() => {
+    const scope = window as any, api = scope.__liveHistory;
+    const text = '---\ntitle: First selection\naliases: [First, Second]\n---\n\nReference[^note].\n\n[^note]: Footnote body.\n\n'
+      + '**Distant paragraph**.\n\n'.repeat(4_100);
+    const editor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'live', onApplyChanges() {} });
+    const syntax = api.syntaxInfo(editor), builds = scope.__fullLiveBuilds ?? 0, parses = scope.__localParseRequests ?? 0;
+    editor.view.dispatch({ selection: { anchor: text.indexOf('aliases:') + 10 } });
+    const fullBuilds = (scope.__fullLiveBuilds ?? 0) - builds, localParses = (scope.__localParseRequests ?? 0) - parses;
+    const selected = api.positionSnapshot(editor);
+    editor.refreshDecorations();
+    const complete = api.positionSnapshot(editor);
+    const visible = editor.view.contentDOM.textContent.includes('aliases:');
+    editor.destroy();
+    return { syntax, fullBuilds, localParses, selected, complete, visible };
+  });
+  assert.ok(unpublishedSelection.syntax.published < unpublishedSelection.syntax.length && unpublishedSelection.syntax.available,
+    'first-selection fixture must keep a partial published tree while the complete internal parse is ready');
+  assert.equal(unpublishedSelection.fullBuilds, 0,
+    'the first caret selection must reuse an already completed internal Markdown tree instead of rebuilding the whole document');
+  assert.equal(unpublishedSelection.localParses, 0,
+    'nested readers in a proven caret update must use one syntax snapshot without advancing embedded parsers');
+  assert.deepEqual(unpublishedSelection.selected, unpublishedSelection.complete,
+    'an immediate first selection must retain the complete builder\'s exact canonical presentation');
+  assert.ok(unpublishedSelection.visible, 'the optimized caret selection must still reveal its actual source line');
   const unpublishedInput = await page.evaluate(() => {
     const scope = window as any, api = scope.__liveHistory;
     const text = 'EDIT\n\n' + '**Distant paragraph**.\n\n'.repeat(4_100);
