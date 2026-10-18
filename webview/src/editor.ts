@@ -409,13 +409,19 @@ export function createEditor({
   const mermaidDiagramPresentationConsumer = mermaidDiagramPresentationFactory.createConsumer();
 
   const modeCompartment = new Compartment();
+  const sourcePreparationCompartment = new Compartment();
   const gitGutterCompartment = new Compartment();
   const lineNumberCompartment = new Compartment();
   const longCodeBlockPreferenceCompartment = new Compartment();
   const uiLanguageCompartment = new Compartment();
   let currentSourceLineNumbers = sourceLineNumbers;
   const startMode = initialMode === 'live' ? 'live' : 'source';
-  const largeDocument = assessLargeDocument(text).preferSource;
+  let documentAssessment = assessLargeDocument(text);
+  let largeDocument = documentAssessment.preferSource;
+  let unassessedCharacters = 0;
+  let assessedLines = documentAssessment.dimensions.lines;
+  let assessmentTimer: ReturnType<typeof setTimeout> | null = null;
+  let assessmentIdle: number | null = null;
   let gitGutterVisible = initialGitGutter !== false;
   let currentDiagnostics: EditorDiagnostic[] = Array.isArray(initialDiagnostics) ? initialDiagnostics : [];
   let applyingExternal = false;
@@ -489,6 +495,54 @@ export function createEditor({
   const tablePositionDerivedConsumer = {};
   const bootstrapDerivedConsumer = {};
   let editorDestroyed = false;
+
+  function scheduleLargeDocumentAssessment(): void {
+    if (largeDocument || editorDestroyed) return;
+    const doc = view.state.doc;
+    if (!unassessedCharacters) return;
+    // Ordinary keystrokes do not scan the whole document. Reassess material
+    // edits, or a document already close to the shared startup threshold.
+    if (unassessedCharacters < 512 && Math.abs(doc.lines - assessedLines) < 16
+      && documentAssessment.pressure < 0.8) return;
+    if (assessmentTimer !== null) clearTimeout(assessmentTimer);
+    if (assessmentIdle !== null) cancelIdleCallback(assessmentIdle);
+    assessmentIdle = null;
+    assessmentTimer = setTimeout(() => {
+      assessmentTimer = null;
+      const assess = (): void => {
+        assessmentIdle = null;
+        if (largeDocument || editorDestroyed) return;
+        if (imeCompositionActive || view.composing || isLiveInputDerivedWorkPending(view.state)
+          || viewportController.isUserScrolling() || view.dom.querySelector(':active')) {
+          scheduleLargeDocumentAssessment();
+          return;
+        }
+        const host = view.dom.closest<HTMLElement>('.editor-host');
+        const focused = view.dom.ownerDocument.activeElement;
+        if (host?.hidden || host?.inert || host?.hasAttribute('data-preview-cover')
+          || (focused instanceof HTMLElement && view.contentDOM.contains(focused)
+            && focused.matches('textarea,input'))) return;
+        const current = view.state.doc;
+        documentAssessment = assessLargeDocument(current.toString());
+        unassessedCharacters = 0;
+        assessedLines = current.lines;
+        if (!documentAssessment.preferSource) return;
+        // Latch for this session. Shrinking or crossing a nearby threshold must
+        // not repeatedly rebuild the presentation or change the user's mode.
+        viewportController.runAnchorTransaction(null, 'editor', () => {
+          largeDocument = true;
+          view.dispatch({ effects: [sourcePreparationCompartment.reconfigure([]), modeCompartment.reconfigure(
+            currentMode === 'live' ? [shikiCodeHighlight, ...liveModeExtensions({ largeDocument })] : sourceMode(largeDocument)
+          )], annotations: Transaction.addToHistory.of(false) });
+          flushEditorLayout(view);
+        });
+        mermaidDocumentPreloader?.dispose();
+        mermaidDocumentPreloader = null;
+      };
+      if (typeof requestIdleCallback === 'function') assessmentIdle = requestIdleCallback(assess, { timeout: 500 });
+      else assess();
+    }, 250);
+  }
   const emitSourcePositionChange = (active: boolean, revealIfOutside = false): void => {
     if (!view || currentMode !== 'source') return;
     onSourcePositionChange?.({
@@ -2594,7 +2648,7 @@ export function createEditor({
         mermaidDiagramPresentationConsumer
       ),
       markdownInlineStyleTheme,
-      largeDocument ? [] : sourceSyntaxPreparation,
+      sourcePreparationCompartment.of(largeDocument ? [] : sourceSyntaxPreparation),
       modeCompartment.of(startMode === 'live' ? [shikiCodeHighlight, ...liveModeExtensions({ largeDocument })] : sourceMode(largeDocument)),
       searchQueryField,
       searchAnchorField,
@@ -2606,6 +2660,7 @@ export function createEditor({
         return suppressHistoryAutoScrollAt(range.head);
       }),
       EditorView.updateListener.of((update) => {
+        if (update.focusChanged || update.viewportChanged || update.geometryChanged) scheduleLargeDocumentAssessment();
         // Rebuilt widgets already contain current positions. Only the deferred
         // suffix still carries mapped DOM whose datasets must move before paint.
         let mappedTableChanges: ChangeDesc | undefined;
@@ -2677,6 +2732,10 @@ export function createEditor({
         }
 
         if (update.docChanged) {
+          update.changes.iterChangedRanges((from, to, nextFrom, nextTo) => {
+            unassessedCharacters = Math.min(512, unassessedCharacters + to - from + nextTo - nextFrom);
+          });
+          scheduleLargeDocumentAssessment();
           if (currentMode === 'live') mermaidDocumentPreloader?.schedule(update.state);
           if (!applyingExternal && !isHistoryReplayUpdate(update)) {
             void editorHistoryRuntime?.dispatch({ type: 'localDocumentEdited' });
@@ -3705,6 +3764,8 @@ export function createEditor({
       tableColumnWidthAdapter.adapter.dispose();
       mermaidDocumentPreloader?.dispose();
       mermaidDocumentPreloader = null;
+      if (assessmentTimer !== null) clearTimeout(assessmentTimer);
+      if (assessmentIdle !== null) cancelIdleCallback(assessmentIdle);
       view.destroy();
       mermaidDiagramPresentationConsumer.dispose();
       imagePresentationFactory.dispose();
@@ -3804,6 +3865,7 @@ export function createEditor({
         commitActiveTableInput();
         const nextMode = mode === 'live' ? 'live' : 'source';
         if (nextMode === currentMode) {
+          scheduleLargeDocumentAssessment();
           return;
         }
 
@@ -3923,6 +3985,7 @@ export function createEditor({
             force: true
           });
         }
+        scheduleLargeDocumentAssessment();
       };
 
       if (deferViewportRestore && viewport) {

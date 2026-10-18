@@ -1,4 +1,6 @@
 import { documentLines } from './documentLines';
+import type { ChangeDesc } from '@codemirror/state';
+import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
 import {
   StateField,
   RangeSetBuilder,
@@ -476,6 +478,7 @@ export function listMarkerDataInContainerLine(lineText: string): ListMarkerData 
 }
 
 class ListMarkerWidget extends WidgetType {
+  [mapLiveWidgetPositions](): WidgetType { return this; }
   text: string;
   classes: string;
   widthColumns: number;
@@ -526,6 +529,10 @@ class ListMarkerWidget extends WidgetType {
 }
 
 class CheckboxWidget extends UiLanguageSensitiveWidget {
+  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+    const from = changes.mapPos(this.bracketStart, 1);
+    return from === this.bracketStart ? this : new CheckboxWidget(this.status, from);
+  }
   status: TaskStatus;
   bracketStart: number;
 

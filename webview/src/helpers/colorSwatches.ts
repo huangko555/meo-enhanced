@@ -1,5 +1,6 @@
 import { isolateHistory } from '@codemirror/commands';
-import { StateEffect, StateField, type Extension } from '@codemirror/state';
+import { StateEffect, StateField, type Extension, type ChangeDesc } from '@codemirror/state';
+import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
 import {
   Decoration,
   ViewPlugin,
@@ -492,6 +493,10 @@ export function createInteractiveColorSwatchElement(
 }
 
 export class ColorSwatchWidget extends UiLanguageSensitiveWidget {
+  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+    const from = changes.mapPos(this.range.from, 1), to = changes.mapPos(this.range.to, -1);
+    return from === this.range.from && to === this.range.to ? this : new ColorSwatchWidget({ ...this.range, from, to });
+  }
   readonly range: HexColorRange;
 
   constructor(range: HexColorRange) {

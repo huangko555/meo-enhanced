@@ -1,4 +1,5 @@
 import { WidgetType, type EditorView } from '@codemirror/view';
+import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
 import { createElement, Info, Lightbulb, AlertCircle, AlertTriangle, XCircle } from 'lucide';
 import { getUiStrings } from '../application/uiLanguage';
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
@@ -56,6 +57,7 @@ function getAlertIconElement(type: AlertType): Element {
 }
 
 export class AlertIconWidget extends UiLanguageSensitiveWidget {
+  [mapLiveWidgetPositions](): WidgetType { return this; }
   type: AlertType;
 
   constructor(type: AlertType) {

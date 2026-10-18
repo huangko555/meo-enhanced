@@ -136,3 +136,25 @@ for (const paragraph of ['plain $raw', 'plain #tag', 'plain file:///tmp/example'
     'middle paragraph caret navigation must match a fresh authoritative presentation');
 }
 console.log('Plain prose projections match full builds; raw syntax and oversized paragraphs retain conservative refresh');
+
+{
+  const prefix = '**Prefix formatting**\n\nPlain middle paragraph';
+  const text = prefix + '\n\n' + 'Ordinary filler.\n\n'.repeat(2_500) + '**Later formatting**\n\n[local](sample.md)';
+  const state = EditorState.create({ doc: text, selection: { anchor: prefix.length },
+    extensions: liveModeExtensions({ largeDocument: true }) }).update({}).state;
+  const next = state.update({ changes: { from: prefix.length, insert: 'x' },
+    selection: { anchor: prefix.length + 1 }, annotations: Transaction.userEvent.of('input.type') }).state;
+  const fresh = EditorState.create({ doc: next.doc, selection: next.selection,
+    extensions: liveModeExtensions({ largeDocument: true }) });
+  assert.deepEqual(decorationShape(mainDecorations(next)), decorationShape(mainDecorations(fresh)),
+    'plain middle input must retain the authoritative presentation and positions of later rich blocks');
+}
+for (const suffix of ['**Formatted paragraph**\n\n'.repeat(1_500), '$x$\n\n'.repeat(550)]) {
+  const state = EditorState.create({ doc: 'EDIT\n\n' + suffix, selection: { anchor: 4 },
+    extensions: liveModeExtensions({ largeDocument: true }) }).update({}).state;
+  const next = state.update({ changes: { from: 4, insert: 'x' }, selection: { anchor: 5 },
+    annotations: Transaction.userEvent.of('input.type') }).state;
+  assert.ok(mainDecorations(next).size < mainDecorations(state).size,
+    'high decoration/widget density must retain the bounded primary-input path');
+}
+console.log('Middle prose preserves supported widgets; dense presentations keep bounded input work');

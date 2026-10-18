@@ -1,4 +1,5 @@
 import { blockInsertion, type MarkdownInputContext } from '../editor/blockInsertion';
+import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
 import { matchInlineScript } from '../../../src/foundation/inlineScript';
 import { markdownTableSeparatorPipes } from '../../../src/foundation/markdownTableRow';
 import { matchInlineHtmlCode } from '../../../src/shared/htmlPolicy';
@@ -2415,6 +2416,26 @@ export function flushMountedTableLayouts(view: EditorView): boolean {
 }
 
 class HtmlTableWidget extends UiLanguageSensitiveWidget {
+  private positionDocument: WeakRef<EditorState['doc']> | null = null;
+
+  [mapLiveWidgetPositions](changes: ChangeDesc, state: EditorState): WidgetType {
+    const previous = this.tableData;
+    const from = changes.mapPos(previous.from, 1), to = changes.mapPos(previous.to, -1);
+    // The eligibility proof excludes line/structure changes. Only absolute
+    // source ranges and cross-document footnote targets need to move here.
+    const signature = JSON.parse(previous.signature);
+    signature.footnoteReferences = signature.footnoteReferences.map(([offset, number, target]: [number, number, number | null]) =>
+      [offset, number, target === null ? null : changes.mapPos(target, 1)]);
+    const nextSignature = JSON.stringify(signature);
+    if (from === previous.from && to === previous.to && nextSignature === previous.signature) return this;
+    const next = new HtmlTableWidget({ ...previous, from, to, signature: nextSignature,
+      sourceRanges: previous.sourceRanges?.map(row => row.map(range => ({ ...range,
+        from: changes.mapPos(range.from, 1), to: changes.mapPos(range.to, -1) })))
+    }, this.stickyHeaderAdapterFactory, this.tableCommandEnvironment);
+    next.measuredHeightCache = this.measuredHeightCache;
+    next.positionDocument = new WeakRef(state.doc);
+    return next;
+  }
   tableData: WidgetTableData;
   view: EditorView | null;
   layoutFrame: number;
@@ -2535,13 +2556,16 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         this.measuredHeight >= other.measuredHeight ? this.measuredHeightCache : other.measuredHeightCache
       );
       this.measuredHeightCache = other.measuredHeightCache = cache;
-      const projected = mounted === this ? other.tableData : this.tableData;
-      mounted?.adoptEquivalentTableData(projected);
+      const projected = mounted === this ? other : this;
+      mounted?.adoptEquivalentTableData(projected.tableData);
+      if (mounted) mounted.positionDocument = projected.positionDocument;
     }
     return equivalent;
   }
 
   projectPosition(state: EditorState, changes: ChangeDesc): void {
+    if (this.positionDocument?.deref() === state.doc) return;
+    this.positionDocument = new WeakRef(state.doc);
     const previous = this.tableData;
     let touched = false;
     changes.iterChangedRanges((from, to) => {

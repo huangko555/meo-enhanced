@@ -1,5 +1,6 @@
 import { documentLines } from './helpers/documentLines';
 import { isAutomaticSymbolPairHistoryEffect } from './editor/typingAssistance';
+import { mapLiveWidgetPositions, mapStableLiveDecorations } from './editor/liveWidgetPositions';
 import { undoDepth } from '@codemirror/commands';
 import { blockStickyHeaderExtension } from './helpers/blockStickyHeader';
 import { countColumn, RangeSetBuilder, StateEffect, StateField, EditorState, type ChangeDesc, type Range, type RangeSet, type Extension, type EditorSelection, type Transaction } from '@codemirror/state';
@@ -223,6 +224,7 @@ const activeStrongMarkerDeco = Decoration.mark({
   class: 'meo-md-marker-active meo-md-strong-marker-active'
 });
 class InlineSyntaxBoundaryWidget extends WidgetType {
+  [mapLiveWidgetPositions](): WidgetType { return this; }
   toDOM() {
     const span = document.createElement('span');
     span.className = 'meo-md-inline-syntax-boundary';
@@ -475,6 +477,7 @@ const frontmatterArrayPillWidgetCache = new Map<string, FrontmatterArrayPillsWid
 const htmlBreakTagRegex = /^<br\s*\/?>$/i;
 
 class HtmlBreakWidget extends WidgetType {
+  [mapLiveWidgetPositions](): WidgetType { return this; }
   eq(other: WidgetType): boolean {
     return other instanceof HtmlBreakWidget;
   }
@@ -534,6 +537,7 @@ function isMergeConflictMarkerLine(state: EditorState, pos: number): boolean {
 }
 
 class ListIndentWidget extends WidgetType {
+  [mapLiveWidgetPositions](): WidgetType { return this; }
   indentColumns: number;
 
   constructor(indentColumns: number) {
@@ -565,6 +569,7 @@ function listIndentWidget(indentColumns: number): ListIndentWidget {
 }
 
 class FootnoteBackrefSpacerWidget extends WidgetType {
+  [mapLiveWidgetPositions](): WidgetType { return this; }
   footnoteNumber: number;
 
   constructor(footnoteNumber: number) {
@@ -587,6 +592,7 @@ class FootnoteBackrefSpacerWidget extends WidgetType {
 }
 
 class FootnoteReferenceSeparatorWidget extends WidgetType {
+  [mapLiveWidgetPositions](): WidgetType { return this; }
   eq(other: WidgetType): boolean {
     return other instanceof FootnoteReferenceSeparatorWidget;
   }
@@ -889,6 +895,10 @@ function findChildNode(node: SyntaxNode | SyntaxNodeRef | null, name: string): S
 }
 
 class ClearLinkUrlWidget extends UiLanguageSensitiveWidget {
+  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+    const from = changes.mapPos(this.urlFrom, 1), to = changes.mapPos(this.urlTo, -1);
+    return from === this.urlFrom && to === this.urlTo ? this : new ClearLinkUrlWidget(from, to);
+  }
   urlFrom: number;
   urlTo: number;
 
@@ -939,6 +949,7 @@ class ClearLinkUrlWidget extends UiLanguageSensitiveWidget {
 }
 
 class OpenLinkWidget extends UiLanguageSensitiveWidget {
+  [mapLiveWidgetPositions](): WidgetType { return this; }
   href: string;
 
   constructor(href: string) {
@@ -962,6 +973,7 @@ class OpenLinkWidget extends UiLanguageSensitiveWidget {
 }
 
 class MissingWikiLinkWidget extends UiLanguageSensitiveWidget {
+  [mapLiveWidgetPositions](): WidgetType { return this; }
   constructor(readonly issue?: string) { super(); }
   eq(other: WidgetType): boolean {
     return other instanceof MissingWikiLinkWidget && other.issue === this.issue && this.hasSameUiLanguageEpoch(other);
@@ -984,6 +996,7 @@ class MissingWikiLinkWidget extends UiLanguageSensitiveWidget {
 }
 
 class MissingLocalLinkWidget extends UiLanguageSensitiveWidget {
+  [mapLiveWidgetPositions](): WidgetType { return this; }
   eq(other: WidgetType): boolean {
     return other instanceof MissingLocalLinkWidget && this.hasSameUiLanguageEpoch(other);
   }
@@ -998,6 +1011,7 @@ class MissingLocalLinkWidget extends UiLanguageSensitiveWidget {
 }
 
 class FrontmatterArrayPillsWidget extends WidgetType {
+  [mapLiveWidgetPositions](): WidgetType { return this; }
   itemLabels: string[];
   cacheKey: string;
 
@@ -1095,6 +1109,10 @@ function frontmatterArrayPillsWidget(itemLabels: string[]): FrontmatterArrayPill
 }
 
 class DetailsSummaryWidget extends UiLanguageSensitiveWidget {
+  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+    const anchor = changes.mapPos(this.anchor, 1), from = changes.mapPos(this.lineFrom, 1);
+    return anchor === this.anchor && from === this.lineFrom ? this : new DetailsSummaryWidget(anchor, from, this.summaryText, this.collapsed);
+  }
   anchor: number;
   lineFrom: number;
   summaryText: string;
@@ -1157,6 +1175,10 @@ class DetailsSummaryWidget extends UiLanguageSensitiveWidget {
 }
 
 class FootnoteReferenceWidget extends UiLanguageSensitiveWidget {
+  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+    const from = changes.mapPos(this.definitionFrom, 1);
+    return from === this.definitionFrom ? this : new FootnoteReferenceWidget(this.footnoteNumber, from);
+  }
   footnoteNumber: number;
   definitionFrom: number;
 
@@ -1212,6 +1234,10 @@ class FootnoteReferenceWidget extends UiLanguageSensitiveWidget {
 }
 
 class FootnoteBacklinkWidget extends UiLanguageSensitiveWidget {
+  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+    const from = changes.mapPos(this.referenceFrom, 1);
+    return from === this.referenceFrom ? this : new FootnoteBacklinkWidget(this.footnoteNumber, from);
+  }
   footnoteNumber: number;
   referenceFrom: number;
 
@@ -1317,6 +1343,10 @@ function addMarkdownLinkDecorations(builder: DecorationCollector, state: EditorS
 }
 
 class DetailsSourceToggleWidget extends UiLanguageSensitiveWidget {
+  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+    const from = changes.mapPos(this.from, 1), to = changes.mapPos(this.to, -1);
+    return from === this.from && to === this.to ? this : new DetailsSourceToggleWidget(from, to);
+  }
   constructor(readonly from: number, readonly to: number) {
     super();
   }
@@ -2645,6 +2675,7 @@ function collectCodeBlockLines(state: EditorState, tree: Tree): Set<number> {
 }
 
 class KbdTagWidget extends WidgetType {
+  [mapLiveWidgetPositions](): WidgetType { return this; }
   keyText: string;
 
   constructor(keyText: string) {
@@ -2685,6 +2716,10 @@ type LatexMathWidgetElement = HTMLElement & {
 };
 
 class DisplayMathSourceActionsWidget extends UiLanguageSensitiveWidget {
+  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+    const anchor = changes.mapPos(this.anchor, 1);
+    return anchor === this.anchor ? this : new DisplayMathSourceActionsWidget(anchor);
+  }
   constructor(readonly anchor: number) { super(); }
   eq(other: WidgetType): boolean { return other instanceof DisplayMathSourceActionsWidget && other.anchor === this.anchor; }
   toDOM(view: EditorView): HTMLElement {
@@ -2696,6 +2731,15 @@ class DisplayMathSourceActionsWidget extends UiLanguageSensitiveWidget {
 }
 
 class LatexMathWidget extends UiLanguageSensitiveWidget {
+  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+    if (!this.fencedDisplay) return this;
+    const anchor = changes.mapPos(this.anchor, 1), to = changes.mapPos(this.blockTo, -1);
+    if (anchor === this.anchor && to === this.blockTo) return this;
+    const next = new LatexMathWidget(this.html, this.mode, this.fencedDisplay, this.startLine, this.endLine,
+      this.indentColumns, anchor, this.sourceText, to, this.editing, this.stale);
+    next[renderedBlockPreviewHeight].seed(this[renderedBlockPreviewHeight]);
+    return next;
+  }
   readonly [renderedBlockPreviewHeight]: RenderedBlockPreviewHeight;
   html: string;
   mode: LatexMathMode;
@@ -3544,16 +3588,14 @@ function canMapUnchangedProseDecorations(decorations: DecorationSet, transaction
     || !syntaxTreeAvailable(transaction.state, after.length)) return false;
   let valid = true;
   transaction.changes.iterChangedRanges((from, to, nextFrom, nextTo) => {
-    // Widget payloads may store absolute source positions. A mapped RangeSet
-    // alone cannot rebase them, so leave edits before/inside decorations to the
-    // authoritative rebuild until those widget types support rebasing.
-    if (decorations.iter(from).value) { valid = false; return; }
     const previous = plainPresentationParagraph(transaction.startState, before, to);
     const next = plainPresentationParagraph(transaction.state, after, nextTo);
     if (!previous || !next || previous.from !== next.from || transaction.changes.mapPos(previous.to, 1) !== next.to) {
       valid = false;
       return;
     }
+    const cursor = decorations.iter(previous.from);
+    if (cursor.value && cursor.from <= previous.to) { valid = false; return; }
     const oldLine = transaction.startState.doc.lineAt(from);
     const newLine = transaction.newDoc.lineAt(nextFrom);
     valid &&= oldLine.text.match(/^[ \t]*/)![0] === newLine.text.match(/^[ \t]*/)![0];
@@ -3646,10 +3688,15 @@ const liveDecorationField = StateField.define<DecorationSet>({
       if (!transaction.docChanged) return decorations;
       if (usesLargeDocumentDerivedWorkBudget(transaction.state)
         && canMapUnchangedProseDecorations(decorations, transaction)) {
-        const mapped = decorations.map(transaction.changes);
-        liveDecorationMetadata.set(transaction.state, { ...liveDecorationMetadata.get(transaction.state), complete: true });
-        if (!isEmptyDecorationSet(mapped)) completeLiveDecorationSets.add(mapped);
-        return mapped;
+        const mapped = mapStableLiveDecorations(decorations, transaction.changes, transaction.state);
+        if (mapped) {
+          // Mounted tables can adopt the replacement's coordinates when their
+          // DOM is retained. A prior checkpoint must not reuse that old widget.
+          const previous = liveDecorationMetadata.get(transaction.state);
+          liveDecorationMetadata.set(transaction.state, { checkpoint: mapped.rebasedWidgets ? undefined : previous?.checkpoint, complete: true });
+          if (!isEmptyDecorationSet(mapped.decorations)) completeLiveDecorationSets.add(mapped.decorations);
+          return mapped.decorations;
+        }
       }
       if (usesLargeDocumentDerivedWorkBudget(transaction.state)) {
         liveDecorationMetadata.set(transaction.state, { ...liveDecorationMetadata.get(transaction.state), complete: false });

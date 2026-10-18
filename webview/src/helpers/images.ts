@@ -1,4 +1,6 @@
 import { EditorView, WidgetType } from '@codemirror/view';
+import type { ChangeDesc } from '@codemirror/state';
+import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
 import { AppWindow, createElement, ExternalLink, Maximize2, RefreshCw, RotateCcw, SquareArrowRightEnter, X, ZoomIn, ZoomOut } from 'lucide';
 import { getViewportController } from './viewportController';
 import { createImageResolutionTransport, type ImageResolutionTransport } from '../adapters/imageResolutionTransport';
@@ -322,6 +324,13 @@ export function isImageUrl(url: string | null | undefined): boolean {
 }
 
 export class ImageWidget extends WidgetType {
+  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+    const from = this.sourceFrom;
+    if (from === null || this.sourceFromResolver) return this;
+    const mapped = changes.mapPos(from, 1);
+    return mapped === from ? this : new ImageWidget(this.url, this.altText, this.linkUrl, mapped, this.presentationFactory,
+      { pointerInteractionOwner: this.pointerInteractionOwner, uiLanguage: this.uiLanguage, width: this.width, height: this.height });
+  }
   readonly width?: number;
   readonly height?: number;
   url: string;
@@ -809,13 +818,18 @@ export interface ImageGroupItem {
 }
 
 export class ImageGroupWidget extends WidgetType {
+  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+    const items = this.items.map(item => ({ ...item, sourceFrom: changes.mapPos(item.sourceFrom, 1) }));
+    return items.every((item, index) => item.sourceFrom === this.items[index].sourceFrom) ? this
+      : new ImageGroupWidget(items, this.presentationFactory, this.uiLanguage);
+  }
   readonly items: readonly ImageGroupItem[];
   private readonly widgets: ImageWidget[];
 
   constructor(
     items: readonly ImageGroupItem[],
-    presentationFactory: ImagePresentationFactory,
-    uiLanguage: UiLanguage = 'en'
+    private readonly presentationFactory: ImagePresentationFactory,
+    private readonly uiLanguage: UiLanguage = 'en'
   ) {
     super();
     this.items = items.map((item) => ({ ...item }));

@@ -22,7 +22,7 @@ try {
   await page.addStyleTag({ path: path.join(root, 'webview/src/styles.css') });
   await page.addScriptTag({ path: path.join(directory, 'bundle.js') });
   const original = 'EDIT\n\n**Prefix bold**\n\n[local](sample.md)\n\n' + 'Ordinary paragraph.\n\n'.repeat(4_100)
-    + '## Distant heading\n\n**Distant bold**\n\n| Name | Value |\n| --- | --- |\n| item | 42 |\n\n$$x=1$$\n\n<div>HTML body</div>\n\nTAIL';
+    + '## Distant heading\n\n**Distant bold**\n\n| Name | Value |\n| --- | --- |\n| item | 42 |\n\n$$\nx=1\n$$\n\n<div>HTML body</div>\n\nTAIL';
   await page.evaluate(text => {
     const api = (window as any).__liveHistory;
     const editor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'live', onApplyChanges() {} });
@@ -36,6 +36,7 @@ try {
     const editor = (window as any).__editor;
     editor.view.dispatch({ selection: { anchor: 4 } });
     (window as any).__before = api.decorations(editor);
+    (window as any).__beforePositions = structuredClone(api.positionSnapshot(editor));
     api.input(editor, 4, 'x');
     editor.setDiagnostics([]);
   });
@@ -44,6 +45,7 @@ try {
     const scope = window as any;
     const current = scope.__liveHistory.decorations(scope.__editor);
     scope.__after = current;
+    scope.__afterPositions = structuredClone(scope.__liveHistory.positionSnapshot(scope.__editor));
     return { before: scope.__before.size, after: current.size, text: scope.__editor.getText() };
   });
   assert.equal(settled.text, original.slice(0, 4) + 'x' + original.slice(4));
@@ -53,13 +55,13 @@ try {
     assert.equal(await page.evaluate(() => (window as any).__editor.getText()), original);
     assert.equal(await page.evaluate(() => {
       const scope = window as any;
-      return scope.__liveHistory.decorations(scope.__editor) === scope.__before;
-    }), true, 'the real Editor history path must restore the complete checkpoint');
+      return JSON.stringify(scope.__liveHistory.positionSnapshot(scope.__editor)) === JSON.stringify(scope.__beforePositions);
+    }), true, 'undo must restore complete presentation and current widget positions');
     assert.equal(await page.evaluate(() => (window as any).__editor.redo()), true);
     assert.equal(await page.evaluate(() => {
       const scope = window as any;
-      return scope.__liveHistory.decorations(scope.__editor) === scope.__after;
-    }), true, 'redo must reuse the opposite complete checkpoint');
+      return JSON.stringify(scope.__liveHistory.positionSnapshot(scope.__editor)) === JSON.stringify(scope.__afterPositions);
+    }), true, 'redo must restore complete presentation and current widget positions');
   }
   await page.evaluate(() => {
     const scope = window as any;
@@ -69,8 +71,8 @@ try {
   assert.equal(await page.evaluate(() => (window as any).__editor.undo()), true);
   assert.equal(await page.evaluate(() => {
     const scope = window as any;
-    return scope.__liveHistory.decorations(scope.__editor) === scope.__after;
-  }), true, 'a new native history group must capture its own complete presentation');
+    return JSON.stringify(scope.__liveHistory.positionSnapshot(scope.__editor)) === JSON.stringify(scope.__afterPositions);
+  }), true, 'a new native history group must restore its own complete presentation');
   assert.equal(await page.evaluate(() => (window as any).__editor.redo()), true);
   assert.equal(await page.evaluate(() => (window as any).__editor.undo()), true);
   await page.evaluate(() => {
@@ -119,6 +121,44 @@ try {
   // input frame, and must not rebuild the same full presentation when idle.
   await page.focus('.cm-content');
   await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
+  const middleInput = await page.evaluate(() => {
+    const scope = window as any, editor = scope.__editor, api = scope.__liveHistory;
+    scope.__middleBefore = editor.getText();
+    const from = editor.getText().indexOf('Ordinary paragraph.') + 'Ordinary paragraph'.length;
+    editor.view.dispatch({ selection: { anchor: from } });
+    const before = api.decorations(editor).size;
+    api.input(editor, from, 'x', Date.now() + 10_000);
+    scope.__middleProjection = api.decorations(editor);
+    scope.__middlePositions = api.positionSnapshot(editor);
+    const widgets: Record<string, any> = {};
+    for (const cursor = scope.__middleProjection.iter(); cursor.value; cursor.next()) {
+      const widget = cursor.value.spec.widget;
+      if (widget) widgets[widget.constructor.name] = widget;
+    }
+    return { before, after: scope.__middleProjection.size,
+      tableFrom: widgets.HtmlTableWidget?.tableData.from,
+      tableExpected: editor.getText().indexOf('| Name |'),
+      mathAnchor: widgets.LatexMathWidget?.anchor,
+      mathExpected: editor.getText().indexOf('$$\nx=1\n$$'),
+      htmlFrom: widgets.HtmlBlockWidget?.block.from,
+      htmlExpected: editor.getText().indexOf('<div>HTML body</div>') };
+  });
+  assert.equal(middleInput.after, middleInput.before, 'middle input must preserve distant rich block geometry');
+  assert.equal(middleInput.tableFrom, middleInput.tableExpected, 'offscreen table data must move with its range');
+  assert.equal(middleInput.mathAnchor, middleInput.mathExpected, 'offscreen math controls must move with their range');
+  assert.equal(middleInput.htmlFrom, middleInput.htmlExpected, 'offscreen HTML controls must move with their range');
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
+  assert.equal(await page.evaluate(() => (window as any).__middleProjection === (window as any).__liveHistory.decorations((window as any).__editor)),
+    true, 'settlement must reuse the complete middle-input projection');
+  assert.deepEqual(await page.evaluate(() => {
+    const scope = window as any;
+    scope.__editor.refreshDecorations();
+    return scope.__liveHistory.positionSnapshot(scope.__editor);
+  }), await page.evaluate(() => (window as any).__middlePositions),
+    'projected widget payloads must match a full authoritative rebuild');
+  assert.equal(await page.evaluate(() => (window as any).__editor.undo()), true);
+  await page.waitForFunction(() => (window as any).__editor.getText() === (window as any).__middleBefore);
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
   assert.equal(await page.evaluate(() => {
     const scope = window as any;
     const editor = scope.__editor;
@@ -145,6 +185,16 @@ try {
     const scope = window as any;
     return scope.__liveHistory.decorations(scope.__editor) === scope.__tailMapped;
   }), true, 'settlement must reuse a complete plain-prose projection instead of rebuilding the document');
+  assert.equal(await page.evaluate(() => (window as any).__editor.undo()), true);
+  assert.equal(await page.evaluate(() => {
+    const scope = window as any;
+    return scope.__liveHistory.decorations(scope.__editor) === scope.__tailBefore;
+  }), true, 'tail edits that keep widget coordinates unchanged must still reuse their history checkpoint');
+  assert.equal(await page.evaluate(() => (window as any).__editor.redo()), true);
+  assert.equal(await page.evaluate(() => {
+    const scope = window as any;
+    return scope.__liveHistory.decorations(scope.__editor) === scope.__tailMapped;
+  }), true, 'tail redo must retain its safe opposite checkpoint');
   assert.equal(await page.evaluate(() => {
     const scope = window as any;
     const editor = scope.__editor;

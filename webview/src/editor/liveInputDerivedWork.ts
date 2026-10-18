@@ -568,8 +568,8 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
   const hasAcceptedFrameDesired = (): boolean => (
     [...frameConsumers.values()].some((record) => record.state === 'accepted-generation')
   );
-  const largeDocument = view.state.facet(liveInputDerivedWorkLargeDocumentFacet);
-  const canRequestIdle = largeDocument && typeof window.requestIdleCallback === 'function';
+  let largeDocument = view.state.facet(liveInputDerivedWorkLargeDocumentFacet);
+  const canRequestIdle = typeof window.requestIdleCallback === 'function';
   let nextDeferredTaskId = 1;
   const deferredTasks = new Map<number, {
     idleId: number | null;
@@ -623,13 +623,14 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     },
     reportError
   };
-  const scheduler = largeDocument
+  const createScheduler = () => largeDocument
     ? createLiveInputDerivedWorkScheduler({
       ...schedulerOptions,
       requestDeferred: requestLargeDocumentDeferred,
       cancelDeferred: cancelLargeDocumentDeferred
     })
     : createLiveInputDerivedWorkScheduler(schedulerOptions);
+  let scheduler = createScheduler();
   return {
     request(key: object, operation: () => void) {
       requestConsumer(key, operation);
@@ -652,6 +653,12 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
       });
     },
     update(update: { transactions: readonly Transaction[] }) {
+      const nextLargeDocument = view.state.facet(liveInputDerivedWorkLargeDocumentFacet);
+      if (nextLargeDocument !== largeDocument) {
+        scheduler.dispose();
+        largeDocument = nextLargeDocument;
+        scheduler = createScheduler();
+      }
       for (const transaction of update.transactions) {
         const beginsComposition = transaction.effects.some((effect) => effect.is(beginLiveInputCompositionEffect));
         const changesComposition = transaction.effects.some((effect) => effect.is(changeLiveInputCompositionEffect));

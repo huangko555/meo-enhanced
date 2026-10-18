@@ -1,4 +1,5 @@
-import { StateField, EditorState, type Annotation } from '@codemirror/state';
+import { StateField, EditorState, type Annotation, type ChangeDesc } from '@codemirror/state';
+import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import type { SyntaxNodeRef } from '@lezer/common';
 import { StreamLanguage } from '@codemirror/language';
@@ -635,6 +636,12 @@ export function addCodeBlockLineNumbers(builder: any[], state: EditorState, node
 }
 
 class CodeBlockActionsWidget extends UiLanguageSensitiveWidget {
+  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+    const from = changes.mapPos(this.contentFrom, 1), to = changes.mapPos(this.contentTo, -1);
+    const blockFrom = changes.mapPos(this.blockFrom, 1), blockTo = changes.mapPos(this.blockTo, -1);
+    return from === this.contentFrom && to === this.contentTo && blockFrom === this.blockFrom && blockTo === this.blockTo ? this
+      : new CodeBlockActionsWidget(this.codeContent, from, to, blockFrom, blockTo);
+  }
   codeContent: string;
   contentFrom: number;
   contentTo: number;
@@ -693,6 +700,7 @@ class CodeBlockActionsWidget extends UiLanguageSensitiveWidget {
 }
 
 class CodeLanguageLabelWidget extends WidgetType {
+  [mapLiveWidgetPositions](): WidgetType { return this; }
   labelText: string;
 
   constructor(labelText: string) {
@@ -796,6 +804,14 @@ export function addCodeLanguageLabel(builder: any[], state: EditorState, node: a
 }
 
 class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
+  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+    const anchor = changes.mapPos(this.anchor, 1), to = changes.mapPos(this.blockTo, -1);
+    if (anchor === this.anchor && to === this.blockTo) return this;
+    const next = new MermaidPreviewWidget(this.diagramText, this.fullBlockText, anchor, to, this.startLine, this.endLine,
+      this.indentColumns, this.presentationFactory, this.uiLanguage, this.viewportState);
+    next[renderedBlockPreviewHeight].seed(this[renderedBlockPreviewHeight]);
+    return next;
+  }
   readonly [renderedBlockPreviewHeight]: RenderedBlockPreviewHeight;
   private readonly diagramWidget: MermaidDiagramWidget;
   private readonly toolbarWidget: WidgetType;
@@ -808,9 +824,9 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
     readonly startLine: number,
     readonly endLine: number,
     readonly indentColumns: LiveBlockIndentValue,
-    presentationFactory: ReturnType<typeof getMermaidDiagramPresentationFactory>,
-    uiLanguage: UiLanguage,
-    viewportState: ReturnType<typeof getMermaidBlockViewport>
+    private readonly presentationFactory: ReturnType<typeof getMermaidDiagramPresentationFactory>,
+    private readonly uiLanguage: UiLanguage,
+    private readonly viewportState: ReturnType<typeof getMermaidBlockViewport>
   ) {
     super();
     this[renderedBlockPreviewHeight] = new RenderedBlockPreviewHeight(JSON.stringify([

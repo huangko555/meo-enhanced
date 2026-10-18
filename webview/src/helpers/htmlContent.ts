@@ -1,4 +1,5 @@
 import { documentLines } from './documentLines';
+import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
 import { Prec, StateEffect, StateField, type ChangeDesc, type EditorState } from '@codemirror/state';
 import {
   Decoration,
@@ -409,6 +410,13 @@ type HtmlTableLayout = { frame: number | null; controller: PreviewTableLayoutCon
 const htmlTableLayouts = new WeakMap<HTMLElement, HtmlTableLayout>();
 
 class HtmlBlockWidget extends UiLanguageSensitiveWidget {
+  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+    const from = changes.mapPos(this.block.from, 1), to = changes.mapPos(this.block.to, -1);
+    if (from === this.block.from && to === this.block.to) return this;
+    const next = new HtmlBlockWidget({ ...this.block, from, to });
+    next.seedHeight(this);
+    return next;
+  }
   private imageWidgets: ImageWidget[] = [];
   private readonly height: RenderedBlockPreviewHeight;
 
@@ -636,6 +644,7 @@ class HtmlSourceControlWidget extends UiLanguageSensitiveWidget {
 }
 
 class HtmlWarningWidget extends WidgetType {
+  [mapLiveWidgetPositions](): WidgetType { return this; }
   toDOM(view: EditorView): HTMLElement {
     const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     const warning = document.createElement('span');
@@ -648,6 +657,10 @@ class HtmlWarningWidget extends WidgetType {
 }
 
 class InlineHtmlWidget extends UiLanguageSensitiveWidget {
+  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+    const from = changes.mapPos(this.from, 1);
+    return from === this.from ? this : new InlineHtmlWidget(this.source, from, this.startLine);
+  }
   constructor(readonly source: string, readonly from: number, readonly startLine: number) {
     super();
   }
