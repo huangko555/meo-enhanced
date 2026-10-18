@@ -93,7 +93,7 @@ export const generalSearchKeywords = {
   boldHeadings: ['标题加粗 标题字重 标题粗细', 'heading bold weight title thickness'],
   stickyHeader: ['表头固定 冻结表头 表头吸顶 表格滚动', 'sticky header freeze pin table header scrolling'],
   restorePosition: ['恢复位置 记住位置 继续阅读 阅读进度 上次位置', 'restore remember position resume reading progress last location'],
-  largeDocument: ['大文件 长文档 启动速度 打开速度 性能 源码优先', 'large file long document startup performance speed source first'],
+  largeDocument: ['大文档优化 快速打开大文档 大文件 长文档 启动速度 打开速度 性能 源码优先', 'large file long document startup performance optimization faster speed source first'],
   language: ['语言 中文 英文 英语 简体 翻译 本地化 自动', 'language Chinese English translation localization locale automatic'],
   fontSize: ['字号 字体大小 文字大小 放大 缩小 缩放 自动字号 自定义字号', 'font size text size zoom scale larger smaller auto custom']
 } as const satisfies Record<string, SearchKeywords>;

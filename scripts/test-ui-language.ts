@@ -52,7 +52,7 @@ assert.deepEqual(
 );
 assert.deepEqual(
   [english.largeDocumentStartup, chinese.largeDocumentStartup],
-  ['Open large documents faster', '快速打开大文档']
+  ['Open large documents in Source mode', '大文档优先以源码模式打开']
 );
 assert.deepEqual(
   [english.resumeFromLastPosition, chinese.resumeFromLastPosition],
