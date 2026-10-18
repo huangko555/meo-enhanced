@@ -1243,6 +1243,7 @@ export function createPreviewController({
   );
   const notifyViewportInteraction = (owner: 'source' | 'preview' = 'preview') => {
     cancelElementReveal();
+    previewScrollRange?.interrupt();
     // Explicit navigation owns the new reading position even when its control
     // lives outside the iframe or uses Enter without a pointer gesture.
     viewportInteractionGeneration += 1;
@@ -1901,7 +1902,8 @@ export function createPreviewController({
         notifyViewportInteraction();
       };
       const finishPointer = (event: Event) => {
-        previewScrollRange?.release((event as PointerEvent).pointerId);
+        if (event.type === 'pointercancel') previewScrollRange?.cancel((event as PointerEvent).pointerId);
+        else previewScrollRange?.release((event as PointerEvent).pointerId);
         if (activePreviewPointers.delete((event as PointerEvent).pointerId)) previewGestureUntil = performance.now() + 250;
       };
       for (const target of [frameDocument.defaultView, window]) {
@@ -1909,7 +1911,7 @@ export function createPreviewController({
         target?.addEventListener('pointercancel', finishPointer, { capture: true, signal });
       }
       frameDocument.defaultView?.addEventListener('blur', () => {
-        previewScrollRange?.release();
+        previewScrollRange?.cancel();
         activePreviewPointers.clear(); previewGestureUntil = 0;
       }, { signal });
       // Ownership follows gestures that can actually move the reading surface.
@@ -3153,7 +3155,7 @@ export function createPreviewController({
       previewViewportResources?.setActive(visible);
       updateViewportAlignment();
       if (!visible) {
-        previewScrollRange?.release();
+        previewScrollRange?.cancel();
         cancelHighlightFrame();
         cancelElementReveal();
         activePreviewPointers.clear();

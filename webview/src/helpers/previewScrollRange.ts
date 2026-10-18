@@ -4,7 +4,29 @@
 export function createPreviewScrollRange(document: Document) {
   const page = document.querySelector<HTMLElement>('.meo-export-page');
   const properties = ['height', 'overflow', 'box-sizing'] as const;
+  const owner = document.defaultView;
   let held: { pointer: number; styles: Array<{ value: string; priority: string }> } | null = null;
+  let keepBottom = false;
+  let boundaryFrame: number | null = null;
+  const interrupt = () => {
+    keepBottom = false;
+    if (boundaryFrame !== null) owner?.cancelAnimationFrame(boundaryFrame);
+    boundaryFrame = null;
+  };
+  const pinBottom = () => {
+    const scroll = document.scrollingElement;
+    if (!keepBottom || !scroll || !page?.isConnected) return;
+    const bottom = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
+    if (Math.abs(scroll.scrollTop - bottom) > 1) scroll.scrollTop = bottom;
+  };
+  // Releasing the thumb can reveal estimated blocks and start nearby resource
+  // presentation. Preserve the chosen bottom across that later height change,
+  // until another user navigation owns the reading position.
+  const observer = new ResizeObserver(() => {
+    if (!keepBottom || !owner || boundaryFrame !== null) return;
+    boundaryFrame = owner.requestAnimationFrame(() => { boundaryFrame = null; pinBottom(); });
+  });
+  if (page) observer.observe(page);
   const restore = (keepBoundary: boolean) => {
     if (!page || !held) return;
     const scroll = document.scrollingElement;
@@ -17,11 +39,13 @@ export function createPreviewScrollRange(document: Document) {
       else page.style.removeProperty(property);
     }
     if (keepBoundary && atBottom && scroll && page.isConnected) {
-      scroll.scrollTop = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
+      keepBottom = true;
+      pinBottom();
     }
   };
   return {
     start(event: Pick<PointerEvent, 'button' | 'pointerId' | 'clientX'>) {
+      interrupt();
       const width = document.defaultView?.innerWidth ?? 0;
       if (!page || held || event.button !== 0 || event.clientX < document.documentElement.clientWidth || event.clientX >= width) return;
       const height = page.getBoundingClientRect().height;
@@ -35,6 +59,10 @@ export function createPreviewScrollRange(document: Document) {
     release(pointer?: number) {
       if (pointer === undefined || held?.pointer === pointer) restore(true);
     },
-    dispose() { restore(false); }
+    interrupt,
+    cancel(pointer?: number) {
+      if (pointer === undefined || !held || held.pointer === pointer) { interrupt(); restore(false); }
+    },
+    dispose() { interrupt(); restore(false); observer.disconnect(); }
   };
 }

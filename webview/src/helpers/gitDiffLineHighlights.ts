@@ -1,6 +1,7 @@
 import { Decoration, DecorationSet, EditorView } from '@codemirror/view';
 import { StateField, StateEffect, Transaction, RangeSetBuilder, EditorState } from '@codemirror/state';
 import { gitDiffLineFlagsField, setGitBaselineEffect } from './gitDiffGutter';
+import { isLiveInputDerivedWorkRefresh, shouldDeferLiveInputDerivedWork } from '../editor/liveInputDerivedWork';
 
 const setGitDiffHighlightsEnabled = StateEffect.define<boolean>();
 
@@ -73,7 +74,8 @@ const gitDiffLineHighlightsField = StateField.define<DecorationSet>({
         highlightsEnabledChanged = true;
       }
     }
-    if (!tr.docChanged && !baselineChanged && !highlightsEnabledChanged) {
+    if (shouldDeferLiveInputDerivedWork(tr) && !highlightsEnabledChanged) return highlights.map(tr.changes);
+    if (!tr.docChanged && !baselineChanged && !highlightsEnabledChanged && !isLiveInputDerivedWorkRefresh(tr)) {
       return highlights.map(tr.changes);
     }
 

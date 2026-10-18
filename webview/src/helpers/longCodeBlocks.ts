@@ -54,6 +54,11 @@ type LongCodeBlockState = {
 
 const setLongCodeBlockPointerInteractionEffect = StateEffect.define<{ position: number }>();
 const toggleLongCodeBlockEffect = StateEffect.define<{ anchor: number; collapsed: boolean }>();
+/** These effects change this module's own folding decorations, not Markdown's
+ * source-dependent presentation. Other fields can retain their current value. */
+export function isLongCodeBlockInteractionEffect(effect: StateEffect<unknown>): boolean {
+  return effect.is(toggleLongCodeBlockEffect) || effect.is(setLongCodeBlockPointerInteractionEffect);
+}
 export const longCodeBlockEnabledFacet = Facet.define<boolean, boolean>({
   combine: (values) => values.at(-1) ?? true
 });
@@ -443,10 +448,7 @@ function buildLongCodeState(
 }
 
 function hasLongCodeImmediateEffect(transaction: Transaction): boolean {
-  return transaction.effects.some((effect) => (
-    effect.is(toggleLongCodeBlockEffect)
-    || effect.is(setLongCodeBlockPointerInteractionEffect)
-  ));
+  return transaction.effects.some(isLongCodeBlockInteractionEffect);
 }
 
 function applyTemporaryTarget(

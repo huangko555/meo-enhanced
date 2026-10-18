@@ -16,6 +16,14 @@ const build = await Bun.build({ entrypoints: [path.join(root, 'scripts/test-live
       return { loader: 'ts', contents: source.replace(boundary,
         '((globalThis as any).__fullLiveBuilds ??= 0); (globalThis as any).__fullLiveBuilds++; ' + boundary) };
     });
+    for (const [file, boundary, counter] of [
+      ['liveRenderedBlocks', 'function discoverRenderedBlocks(state: EditorState, tree: Tree): DiscoveredBlock[] {', '__renderedDiscoveries'],
+      ['gitDiffGutter', 'function buildCoalescedDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | null): (MarkerFlags | undefined)[] | null {', '__diffBuilds']
+    ]) builder.onLoad({ filter: new RegExp(`webview[\\\\/]src[\\\\/]helpers[\\\\/]${file}\\.ts$`) }, async ({ path }) => {
+      const source = await Bun.file(path).text();
+      assert.equal(source.split(boundary).length, 2);
+      return { loader: 'ts', contents: source.replace(boundary, `${boundary} ((globalThis as any).${counter} ??= 0); (globalThis as any).${counter}++;`) };
+    });
   } }] });
 assert.ok(build.success, build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
@@ -30,6 +38,54 @@ try {
   await page.setContent('<style>html,body,#editor{height:100%;margin:0}</style><div id="editor"></div>');
   await page.addStyleTag({ path: path.join(root, 'webview/src/styles.css') });
   await page.addScriptTag({ path: path.join(directory, 'bundle.js') });
+  const inputBudgets: Array<{ mode: string; pending: boolean; diffs: number; discoveries: number }> = [];
+  for (const mode of ['source', 'live']) {
+    const budget = await page.evaluate(mode => {
+      const scope = window as any, api = scope.__liveHistory;
+      const text = 'EDIT\n\n| Name | Value |\n| --- | --- |\n| item | 1 |\n\n' + '**Formatted paragraph**.\n\n'.repeat(4_100);
+      const editor = api.create({ parent: document.getElementById('editor'), text, initialMode: mode, initialGitGutter: true, onApplyChanges() {} });
+      api.parse(editor); editor.refreshDecorations();
+      editor.setGitBaseline({ available: true, tracked: true, mode: 'current-edit', baseText: text });
+      if (scope.__diffBuilds === undefined || (mode === 'live' && scope.__renderedDiscoveries === undefined)) throw Error('Derived-work counters were not installed');
+      scope.__budgetEditor = editor;
+      const diffs = scope.__diffBuilds ?? 0, discoveries = scope.__renderedDiscoveries ?? 0;
+      api.input(editor, 4, 'x');
+      if (!editor.getText().startsWith('EDITx')) throw Error('Primary input must commit before derived work');
+      return { mode, pending: api.pending(editor), diffs: (scope.__diffBuilds ?? 0) - diffs,
+        discoveries: (scope.__renderedDiscoveries ?? 0) - discoveries };
+    }, mode);
+    inputBudgets.push(budget);
+    await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__budgetEditor));
+    const summary = await page.evaluate(() => (window as any).__liveHistory.gitSummary((window as any).__budgetEditor));
+    assert.equal(summary.status, 'ready');
+    assert.equal(summary.added, 1, 'settled input must publish the real changed line');
+    await page.evaluate(() => (window as any).__budgetEditor.destroy());
+  }
+  await page.evaluate(() => {
+    const scope = window as any, api = scope.__liveHistory;
+    const text = 'EDIT\n\n```js\n' + Array.from({ length: 40 }, (_, index) => `const budget${String(index).padStart(2, '0')} = ${index};`).join('\n')
+      + '\n```\n\n' + '**Formatted paragraph**.\n\n'.repeat(4_100);
+    scope.__budgetEditor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'live', onApplyChanges() {} });
+    api.parse(scope.__budgetEditor); scope.__budgetEditor.refreshDecorations();
+  });
+  await page.waitForSelector('.meo-md-long-code-placeholder');
+  const codePoint = await page.evaluate(() => {
+    const line = [...document.querySelectorAll<HTMLElement>('.cm-line')].find(line => line.textContent?.includes('const budget03'));
+    if (!line) throw Error('The collapsed code fixture needs a visible source line');
+    const rect = line.getBoundingClientRect();
+    (window as any).__budgetBuilds = (window as any).__fullLiveBuilds ?? 0;
+    return { x: rect.left + 95, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.click(codePoint.x, codePoint.y);
+  const codeBuilds = await page.evaluate(() => ((window as any).__fullLiveBuilds ?? 0) - (window as any).__budgetBuilds);
+  await page.evaluate(() => (window as any).__budgetEditor.destroy());
+  console.log('Large input derived-work budgets:', { inputBudgets, codeBuilds });
+  for (const budget of inputBudgets) {
+    assert.equal(budget.pending, true, `${budget.mode}: primary input must own the first frame`);
+    assert.equal(budget.diffs, 0, `${budget.mode}: baseline comparisons must wait behind primary input`);
+    assert.equal(budget.discoveries, 0, `${budget.mode}: gutter widget painting must not discover the whole document`);
+  }
+  assert.equal(codeBuilds, 0, 'a code folding pointer effect must not rebuild unrelated Live presentation');
   const original = 'EDIT\n\n**Prefix bold**\n\n[local](sample.md)\n\n' + 'Ordinary paragraph.\n\n'.repeat(4_100)
     + '## Distant heading\n\n**Distant bold**\n\n| Name | Value |\n| --- | --- |\n| item | 42 |\n\n$$\nx=1\n$$\n\n<div>HTML body</div>\n\nTAIL';
   await page.evaluate(text => {

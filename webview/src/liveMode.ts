@@ -104,7 +104,7 @@ import { collectMarkdownLiteralRanges } from './helpers/markdownLiteralRanges';
 import { collectHexColorRangesFromText } from '../../src/shared/hexColorSwatches';
 import { shikiRefreshEffect } from './helpers/shikiDecorations';
 import { addColorSwatchDecoration, hexColorAdjustmentExtension } from './helpers/colorSwatches';
-import { longCodeBlockSessionUiExtension } from './helpers/longCodeBlocks';
+import { isLongCodeBlockInteractionEffect, longCodeBlockSessionUiExtension } from './helpers/longCodeBlocks';
 import { attachLatexMathViewport, type LatexMathViewportController } from './helpers/latexMathViewport';
 import { createCopyCodeButton } from './helpers/codeBlockControls';
 import { formatSourceLineNumber } from './editor/sourceLineNumbers';
@@ -3611,7 +3611,8 @@ function rebuildLiveSelectionBlocks(decorations: DecorationSet, transaction: Tra
   if (!usesLargeDocumentDerivedWorkBudget(state) || transaction.docChanged || transaction.reconfigured
     || !liveDecorationMetadata.get(before)?.complete || syntaxTreeChanged(transaction)
     || !hasDefaultLiveBlockPresentation(before) || !hasDefaultLiveBlockPresentation(state)
-    || !transaction.effects.every(effect => effect.is(setLivePointerSelectionActiveEffect) || effect.is(setLiveDocumentIdleEffect) || isLiveViewportPresentationEffect(effect))
+    || !transaction.effects.every(effect => effect.is(setLivePointerSelectionActiveEffect) || effect.is(setLiveDocumentIdleEffect)
+      || isLiveViewportPresentationEffect(effect) || isLongCodeBlockInteractionEffect(effect))
     || before.selection.ranges.some(range => !range.empty) || state.selection.ranges.some(range => !range.empty)) return;
   const tree = currentSyntaxTree(state);
   if (tree.length !== state.doc.length) return;
@@ -3749,7 +3750,7 @@ function isPlainProseInput(transaction: Transaction): boolean {
 function hasUnchangedLivePresentationContext(transaction: Transaction): boolean {
   return !transaction.reconfigured
     && transaction.effects.every(effect => isLiveInputDerivedWorkBookkeeping(effect)
-      || isAutomaticSymbolPairHistoryEffect(effect) || effect.is(shikiRefreshEffect))
+      || isAutomaticSymbolPairHistoryEffect(effect) || effect.is(shikiRefreshEffect) || isLongCodeBlockInteractionEffect(effect))
     && hasDefaultLivePresentation(transaction.startState) && hasDefaultLivePresentation(transaction.state)
     && (!transaction.selection || transaction.docChanged
       || transaction.startState.selection.eq(transaction.state.selection));
@@ -3938,6 +3939,13 @@ const liveDecorationField = StateField.define<DecorationSet>({
           complete: completeLiveDecorationSets.has(decorations)
         });
       }
+      return decorations;
+    }
+    if (!transaction.docChanged && !transaction.selection && !transaction.reconfigured
+      && transaction.effects.length > 0 && transaction.effects.every(isLongCodeBlockInteractionEffect)
+      && !syntaxTreeChanged(transaction)) {
+      const previous = liveDecorationMetadata.get(transaction.startState);
+      if (previous) liveDecorationMetadata.set(transaction.state, previous);
       return decorations;
     }
     const restored = restoreLiveDecorationCheckpoint(decorations, transaction);

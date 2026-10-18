@@ -90,9 +90,16 @@ Preview viewport width when targeting that scrollbar. Grab the thumb rather than
 the platform arrow buttons, and remeasure after virtualized content settles.
 Programmatic scroll assignments may prepare a case but cannot prove dragging.
 
+`test-live-decoration-history.ts` counts baseline comparisons and full rendered-block
+discovery during accepted large Source/Live input. Both stay behind the primary text
+frame; settled summaries must still describe the actual change. A real collapsed-code
+pointer click must not invalidate unrelated canonical Markdown presentation. Existing
+exact undo/redo, pending-input mode changes and widget-position checks remain required.
+
 `test-preview-viewport-work-budget.ts` exposes the browser's native scrollbar.
 It checks range retention while a nearby block changes height, release outside
-the iframe, exact restoration of authored styles, deferred reading controls,
+the iframe, exact restoration of authored styles, bottom retention through late
+range growth and retirement of that intention by a new wheel gesture, deferred reading controls,
 zero-size code typography, copied source after a preserved-frame update, and
 bounded geometry inside a 150-note footnote section. Its parser contract compares
 the browser's canonical HTML across UTF-16, entity, code, table and MathML chunk

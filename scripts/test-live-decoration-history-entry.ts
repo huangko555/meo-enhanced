@@ -6,6 +6,7 @@ import { sourceSyntaxPreparation } from '../webview/src/helpers/sourceSyntax';
 import { forceParsing } from '@codemirror/language';
 import { diagnosticDataField } from '../webview/src/helpers/diagnostics';
 import { replaceLocalLinkStatuses } from '../webview/src/helpers/localLinks';
+import { getGitDiffSummary } from '../webview/src/helpers/gitDiffGutter';
 
 (window as any).__liveHistory = {
   create: createEditor,
@@ -14,6 +15,7 @@ import { replaceLocalLinkStatuses } from '../webview/src/helpers/localLinks';
   largeBudget: (editor: ReturnType<typeof createEditor>) => usesLargeDocumentDerivedWorkBudget(editor.view.state),
   sourcePreparation: (editor: ReturnType<typeof createEditor>) => !!editor.view.plugin(sourceSyntaxPreparation),
   parse: (editor: ReturnType<typeof createEditor>) => forceParsing(editor.view, editor.view.state.doc.length, 2_000),
+  gitSummary: (editor: ReturnType<typeof createEditor>) => getGitDiffSummary(editor.view.state),
   positionSnapshot(editor: ReturnType<typeof createEditor>) {
     const result: unknown[] = [];
     for (const cursor = this.decorations(editor).iter(); cursor.value; cursor.next()) {

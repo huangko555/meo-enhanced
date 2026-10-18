@@ -157,6 +157,7 @@ import {
   completeLiveInputComposition,
   isLiveInputDerivedWorkPending,
   isLiveInputDerivedWorkRefresh,
+  liveInputDerivedWorkExtensions,
   mapLiveInputDerivedDecorations,
   requestLiveInputDerivedWork,
   requestLiveInputDerivedWorkOnFrame,
@@ -5003,6 +5004,7 @@ function insertWikiLink(
 
 function sourceMode(largeDocument: boolean): Extension[] {
   return [
+    ...(largeDocument ? liveInputDerivedWorkExtensions({ largeDocument }) : []),
     // Block display choices belong to the editing session, including Source.
     mermaidEditingStateField,
     latexMathEditingStateField,

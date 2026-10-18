@@ -115,6 +115,41 @@ try {
   assert.deepEqual({ ...releasedRange, height: 0 }, { height: 0, held: false, overflow: 'visible', priority: 'important' },
     'releasing outside the iframe must restore authored page styles and its natural range');
   await new Promise(resolve => setTimeout(resolve, 300));
+  stage = 'scrollbar bottom ownership';
+  await page.mouse.move(frameBounds.x + frameBounds.width - rangeBefore.scrollbar / 2, frameBounds.y + 14);
+  await page.mouse.down();
+  await page.mouse.move(frameBounds.x + frameBounds.width - rangeBefore.scrollbar / 2, frameBounds.y + frameBounds.height - 3, { steps: 15 });
+  await page.mouse.up();
+  await page.waitForFunction(() => {
+    const scroll = (window as any).__previewController.host.querySelector('iframe').contentDocument.scrollingElement;
+    return scroll.scrollTop >= scroll.scrollHeight - scroll.clientHeight - 2;
+  });
+  await page.evaluate(() => {
+    const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
+    const addition = doc.createElement('div'); addition.id = 'late-scrollbar-range'; addition.style.height = '900px';
+    doc.querySelector('.meo-export-page').appendChild(addition);
+  });
+  await page.waitForFunction(() => {
+    const scroll = (window as any).__previewController.host.querySelector('iframe').contentDocument.scrollingElement;
+    return scroll.scrollTop >= scroll.scrollHeight - scroll.clientHeight - 2;
+  }, { timeout: 2_000 });
+  await page.mouse.move(frameBounds.x + frameBounds.width / 2, frameBounds.y + frameBounds.height / 2);
+  await page.mouse.wheel({ deltaY: -250 });
+  await new Promise(resolve => setTimeout(resolve, 200));
+  const wheelTop = await page.evaluate(() => {
+    const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
+    const top = doc.scrollingElement.scrollTop;
+    doc.getElementById('late-scrollbar-range').style.height = '1600px';
+    return top;
+  });
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.ok(Math.abs(await page.evaluate(() => (window as any).__previewController.host.querySelector('iframe').contentDocument.scrollingElement.scrollTop) - wheelTop) < 3,
+    'a later wheel gesture must retire the scrollbar bottom intention');
+  await page.evaluate(() => {
+    const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
+    doc.getElementById('late-scrollbar-range').remove(); doc.scrollingElement.scrollTop = 0;
+  });
+  stage = 'viewport query budgets';
   const reads = await page.evaluate(() => {
     const controller = (window as any).__previewController;
     const adapter = controller.getOutlineAdapter();

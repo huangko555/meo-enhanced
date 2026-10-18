@@ -1,15 +1,15 @@
-import { RangeSetBuilder, StateEffect, StateField, EditorState, Transaction } from '@codemirror/state';
+import { RangeSetBuilder, StateEffect, StateField, EditorState, Transaction, type RangeSet } from '@codemirror/state';
 import { GutterMarker, gutter, EditorView } from '@codemirror/view';
 import {
   compareDocuments,
   splitDiffLines
 } from '../../../src/shared/gitDiffCore';
 import {
-  getLiveGitCollapsedBlockAtLine,
   getLiveGitCollapsedBlocks,
   getLiveRenderedBlockAtLine
 } from './liveRenderedBlocks';
 import { createGitDiffMarkerElement } from './gitDiffMarkerDom';
+import { getHtmlEditingRange } from './htmlContent';
 import {
   getTableTransactionProvenanceSnapshot
 } from '../adapters/tableTransactionProvenance';
@@ -630,19 +630,21 @@ function liveCollapsedBlockMarkerFlags(
   return flags;
 }
 
-function liveCollapsedBlockMarkerAtPos(
-  state: EditorState,
-  lineFlags: (MarkerFlags | undefined)[] | null,
-  pos: number
-): GitGutterMarker | null {
-  if (!Array.isArray(lineFlags)) {
-    return null;
+type LiveGitGutterPresentation = {
+  readonly markers: RangeSet<GutterMarker>;
+  readonly widgets: RangeSet<GutterMarker>;
+};
+
+function buildLiveGitGutterPresentation(state: EditorState, lineFlags: (MarkerFlags | undefined)[] | null): LiveGitGutterPresentation {
+  const widgets = new RangeSetBuilder<GutterMarker>();
+  for (const block of getLiveGitCollapsedBlocks(state, lineFlags)) {
+    // Tables own their visible row markers. Deletions still need a widget
+    // marker even when their line markers are represented at a boundary.
+    if (block.kind === 'table') continue;
+    widgets.add(state.doc.line(block.startLine).from, state.doc.line(block.endLine).to,
+      gitMarker(liveCollapsedBlockMarkerFlags(block, lineFlags!)));
   }
-  const lineNo = state.doc.lineAt(Math.max(0, Math.min(pos, state.doc.length))).number;
-  const block = getLiveGitCollapsedBlockAtLine(state, lineFlags, lineNo);
-  // Tables render one marker per visible source row inside their widget. Keeping
-  // the collapsed widget marker would paint the entire table as one change.
-  return block && block.kind !== 'table' ? gitMarker(liveCollapsedBlockMarkerFlags(block, lineFlags)) : null;
+  return { markers: buildLiveGitGutterMarkersFromLineFlags(state, lineFlags), widgets: widgets.finish() };
 }
 
 export const gitDiffLineFlagsField = StateField.define<(MarkerFlags | undefined)[] | null>({
@@ -680,29 +682,32 @@ const gitDiffGutterField = StateField.define<any>({
         break;
       }
     }
-    if (!tr.docChanged && !baselineChanged) {
+    if (shouldDeferLiveInputDerivedWork(tr)) return tr.docChanged ? value.map(tr.changes) : value;
+    if (!tr.docChanged && !baselineChanged && !isLiveInputDerivedWorkRefresh(tr)) {
       return value;
     }
     return buildGitGutterMarkersFromLineFlags(tr.state, tr.state.field(gitDiffLineFlagsField));
   }
 });
 
-const gitDiffLiveGutterField = StateField.define<any>({
-  create(state: EditorState): any {
-    return buildLiveGitGutterMarkersFromLineFlags(
+const gitDiffLiveGutterField = StateField.define<LiveGitGutterPresentation>({
+  create(state: EditorState): LiveGitGutterPresentation {
+    return buildLiveGitGutterPresentation(
       state,
       state.field(gitDiffLineFlagsField, false) ?? null
     );
   },
-  update(value: any, tr: Transaction): any {
+  update(value: LiveGitGutterPresentation, tr: Transaction): LiveGitGutterPresentation {
     const baselineChanged = tr.effects.some((effect) => effect.is(setGitBaselineEffect));
     if (shouldDeferLiveInputDerivedWork(tr)) {
-      return tr.docChanged ? value.map(tr.changes) : value;
+      return tr.docChanged ? { markers: value.markers.map(tr.changes), widgets: value.widgets.map(tr.changes) } : value;
     }
-    if (!tr.docChanged && !baselineChanged && !isLiveInputDerivedWorkRefresh(tr)) {
+    const presentationChanged = !tr.startState.selection.eq(tr.state.selection)
+      || getHtmlEditingRange(tr.startState) !== getHtmlEditingRange(tr.state);
+    if (!tr.docChanged && !baselineChanged && !presentationChanged && !isLiveInputDerivedWorkRefresh(tr)) {
       return value;
     }
-    return buildLiveGitGutterMarkersFromLineFlags(
+    return buildLiveGitGutterPresentation(
       tr.state,
       tr.state.field(gitDiffLineFlagsField, false) ?? null
     );
@@ -730,10 +735,14 @@ const gitDiffGutterLiveExtension = gutter({
     return spacerMarker;
   },
   markers(view: EditorView) {
-    return view.state.field(gitDiffLiveGutterField);
+    return view.state.field(gitDiffLiveGutterField).markers;
   },
   widgetMarker(view: EditorView, _widget: any, block: any) {
-    return liveCollapsedBlockMarkerAtPos(view.state, view.state.field(gitDiffLineFlagsField, false) ?? null, block.from);
+    // Gutter measurement is a read of the accepted presentation. Re-deriving
+    // blocks here bypasses input deferral for every intermediate EditorState.
+    let marker: GutterMarker | null = null;
+    view.state.field(gitDiffLiveGutterField).widgets.between(block.from, block.from, (_from, _to, value) => { marker = value; });
+    return marker;
   }
 });
 
