@@ -59,6 +59,21 @@ try {
   await page.addStyleTag({ path: path.join(root, 'webview/src/styles.css') });
   await page.addScriptTag({ path: path.join(directory, 'bundle.js') });
   const inputBudgets: Array<{ mode: string; pending: boolean; diffs: number; discoveries: number; htmlRequests: number }> = [];
+  const unpublishedInput = await page.evaluate(() => {
+    const scope = window as any, api = scope.__liveHistory;
+    const text = 'EDIT\n\n' + '**Distant paragraph**.\n\n'.repeat(4_100);
+    const editor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'live', onApplyChanges() {} });
+    const syntax = api.syntaxInfo(editor), builds = scope.__fullLiveBuilds ?? 0;
+    api.input(editor, 4, 'x');
+    scope.__unpublishedEditor = editor; scope.__unpublishedBuilds = builds;
+    return syntax;
+  });
+  assert.ok(unpublishedInput.published < unpublishedInput.length && unpublishedInput.available,
+    'the fixture must keep a partial published tree while the complete internal parse is already ready');
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__unpublishedEditor));
+  assert.equal(await page.evaluate(() => ((window as any).__fullLiveBuilds ?? 0) - (window as any).__unpublishedBuilds), 0,
+    'an already completed internal Markdown tree must not be mistaken for missing syntax and trigger a delayed full build');
+  await page.evaluate(() => (window as any).__unpublishedEditor.destroy());
   for (const mode of ['source', 'live']) {
     const budget = await page.evaluate(async mode => {
       const scope = window as any, api = scope.__liveHistory;
@@ -86,7 +101,7 @@ try {
   }
   const nestedParseBudget = await page.evaluate(() => {
     const scope = window as any, api = scope.__liveHistory;
-    const text = '# Nested input\n\n1. First item.\n\n   > Quoted content.\n\n   NESTED_TARGET\n\n   ```js\n   const value = 1;\n   ```\n\n2. Second item.\n\n'
+    const text = '# Nested input\n\nReference[^note].\n\n[^note]: Footnote body.\n\n    - First item.\n\n      > Quoted content.\n\n      NESTED_TARGET\n\n      ```js\n      const value = 1;\n      ```\n\n    - Second item.\n\n'
       + '| Name | Value |\n| --- | --- |\n| item | 1 |\n\n$$\nx=1\n$$\n\n<div>Later HTML</div>\n\n'
       + '**Distant paragraph**.\n\n'.repeat(4_100);
     const editor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'live', onApplyChanges() {} });
@@ -114,7 +129,7 @@ try {
     const scope = window as any, api = scope.__liveHistory, editor = scope.__nestedBudgetEditor;
     scope.__nestedBeforeEnter = editor.getText();
     const builds = scope.__fullLiveBuilds ?? 0;
-    api.input(editor, editor.getText().indexOf('NESTED_TARGETxx') + 'NESTED_TARGETxx'.length, '\n   ', Date.now() + 10_000);
+    api.input(editor, editor.getText().indexOf('NESTED_TARGETxx') + 'NESTED_TARGETxx'.length, '\n      ', Date.now() + 10_000);
     scope.__nestedBeforeEnterBuilds = builds;
     return (scope.__fullLiveBuilds ?? 0) - builds;
   });
@@ -122,6 +137,9 @@ try {
   await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__nestedBudgetEditor));
   assert.equal(await page.evaluate(() => ((window as any).__fullLiveBuilds ?? 0) - (window as any).__nestedBeforeEnterBuilds), 0,
     'settling a newline inside a closed Markdown block must not rebuild the whole document');
+  const projectedFootnotes = await page.evaluate(() => (window as any).__liveHistory.footnotes((window as any).__nestedBudgetEditor));
+  assert.deepEqual(await page.evaluate(() => (window as any).__liveHistory.freshFootnotes((window as any).__nestedBudgetEditor)), projectedFootnotes,
+    'a footnote continuation newline must match an independent parse, including new continuation lines and reference targets');
   const newlinePositions = await page.evaluate(() => (window as any).__liveHistory.positionSnapshot((window as any).__nestedBudgetEditor));
   assert.deepEqual(await page.evaluate(() => {
     const scope = window as any; scope.__nestedBudgetEditor.refreshDecorations();

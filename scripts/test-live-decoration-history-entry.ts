@@ -1,13 +1,20 @@
 import type { DecorationSet } from '@codemirror/view';
-import { Transaction } from '@codemirror/state';
+import { EditorState, Transaction } from '@codemirror/state';
 import { createEditor } from './test-editor-factory';
 import { beginLiveInputComposition, completeLiveInputComposition, isLiveInputDerivedWorkPending, usesLargeDocumentDerivedWorkBudget } from '../webview/src/editor/liveInputDerivedWork';
 import { sourceSyntaxPreparation } from '../webview/src/helpers/sourceSyntax';
-import { forceParsing } from '@codemirror/language';
+import { ensureSyntaxTree, forceParsing, syntaxTree, syntaxTreeAvailable } from '@codemirror/language';
 import { diagnosticDataField } from '../webview/src/helpers/diagnostics';
 import { replaceLocalLinkStatuses } from '../webview/src/helpers/localLinks';
 import { getGitDiffSummary } from '../webview/src/helpers/gitDiffGutter';
-import { getLivePresentationDecorations } from '../webview/src/liveMode';
+import { editorMarkdownLanguage, getLivePresentationDecorations } from '../webview/src/liveMode';
+import { parseFootnotes } from '../webview/src/helpers/footnotes';
+
+function footnoteSnapshot(state: EditorState) {
+  const parsed = parseFootnotes(state);
+  return { definitions: parsed.definitions, numbers: [...parsed.numberByLabel],
+    references: parsed.references.map(({ definition, ...reference }) => ({ ...reference, definitionFrom: definition?.lineFrom })) };
+}
 
 (window as any).__liveHistory = {
   create: createEditor,
@@ -17,6 +24,14 @@ import { getLivePresentationDecorations } from '../webview/src/liveMode';
   sourcePreparation: (editor: ReturnType<typeof createEditor>) => !!editor.view.plugin(sourceSyntaxPreparation),
   parse: (editor: ReturnType<typeof createEditor>) => forceParsing(editor.view, editor.view.state.doc.length, 2_000),
   gitSummary: (editor: ReturnType<typeof createEditor>) => getGitDiffSummary(editor.view.state),
+  syntaxInfo: (editor: ReturnType<typeof createEditor>) => ({ published: syntaxTree(editor.view.state).length,
+    length: editor.view.state.doc.length, available: syntaxTreeAvailable(editor.view.state, editor.view.state.doc.length) }),
+  footnotes: (editor: ReturnType<typeof createEditor>) => footnoteSnapshot(editor.view.state),
+  freshFootnotes(editor: ReturnType<typeof createEditor>) {
+    const state = EditorState.create({ doc: editor.getText(), extensions: editorMarkdownLanguage });
+    ensureSyntaxTree(state, state.doc.length, 2_000);
+    return footnoteSnapshot(state);
+  },
   positionSnapshot(editor: ReturnType<typeof createEditor>) {
     const result: unknown[] = [];
     for (const cursor = this.decorations(editor).iter(); cursor.value; cursor.next()) {

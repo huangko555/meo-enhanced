@@ -184,9 +184,10 @@ export function parseFootnotes(state: EditorState): ParsedFootnotes {
   return parsed;
 }
 
-/** Only after proving that an inline edit changes no footnote/reference label,
- * definition or protected container. Numbering stays global; positions move. */
-export function projectUnchangedFootnotes(before: EditorState, state: EditorState, changes: ChangeDesc): void {
+/** Only after proving unchanged labels, references and protected membership.
+ * Numbering stays global. A changed continuation gets fresh local line metadata. */
+export function projectUnchangedFootnotes(before: EditorState, state: EditorState, changes: ChangeDesc,
+  editedDefinition?: FootnoteDefinition): boolean {
   const previous = parseFootnotes(before);
   const position = (value: number) => changes.mapPos(value, 1);
   const end = (value: number) => changes.mapPos(value, -1);
@@ -200,6 +201,16 @@ export function projectUnchangedFootnotes(before: EditorState, state: EditorStat
       hideIndentFrom: line.hideIndentFrom === null ? null : position(line.hideIndentFrom),
       hideIndentTo: line.hideIndentTo === null ? null : end(line.hideIndentTo) }))
   }));
+  if (editedDefinition) {
+    const index = previous.definitions.indexOf(editedDefinition);
+    if (index < 0) return false;
+    const mapped = definitions[index];
+    const line = state.doc.lineAt(mapped.lineFrom).number;
+    const rebuilt = collectDefinitions(state, parseFrontmatter(state), [], { fromLine: line, toLine: line })[0];
+    if (!rebuilt || rebuilt.normalizedLabel !== mapped.normalizedLabel || rebuilt.lineTo !== mapped.lineTo) return false;
+    definitions[index] = { ...rebuilt, number: mapped.number, firstReferenceFrom: mapped.firstReferenceFrom,
+      isPrimary: mapped.isPrimary };
+  }
   const definitionMap = new Map(previous.definitions.map((definition, index) => [definition, definitions[index]]));
   const references = previous.references.map(reference => ({ ...reference,
     from: position(reference.from), to: end(reference.to), containerFrom: position(reference.containerFrom), containerTo: end(reference.containerTo),
@@ -214,6 +225,7 @@ export function projectUnchangedFootnotes(before: EditorState, state: EditorStat
   footnoteCache.set(state.doc, { tree: currentSyntaxTree(state), projected: true, parsed: {
     definitions, references, referencesByContainerKey, numberByLabel: previous.numberByLabel
   } });
+  return true;
 }
 
 export function footnoteReferenceKey(from: number, to: number): string {
@@ -238,13 +250,14 @@ function collectProtectedRanges(state: EditorState, tree: any): ProtectedRange[]
 function collectDefinitions(
   state: EditorState,
   frontmatter: ReturnType<typeof parseFrontmatter>,
-  protectedRanges: ProtectedRange[]
+  protectedRanges: ProtectedRange[],
+  scope?: { fromLine: number; toLine: number }
 ): FootnoteDefinition[] {
   const definitions: FootnoteDefinition[] = [];
   const seenLabels = new Set<string>();
 
   let scannedThrough = 0;
-  for (const line of documentLines(state.doc)) {
+  for (const line of documentLines(state.doc, scope?.fromLine, scope?.toLine)) {
     const lineNo = line.number;
     if (lineNo <= scannedThrough) continue;
     const markerMatch = definitionMarkerPattern.exec(line.text);

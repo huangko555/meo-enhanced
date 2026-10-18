@@ -3811,14 +3811,20 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
     change = { from, to, nextFrom, nextTo };
   });
   if (!supported || !change) return;
-  const oldTree = currentSyntaxTree(before), newTree = currentSyntaxTree(state);
+  // Foundation readers can finish parsing without publishing a new language
+  // state. Use that already completed tree; a lagging published snapshot must
+  // not retire the complete presentation and force a later full rebuild.
+  const oldTree = syntaxTreeAvailable(before, before.doc.length) ? resolvedSyntaxTree(before, 0) : currentSyntaxTree(before);
+  const newTree = syntaxTreeAvailable(state, state.doc.length) ? resolvedSyntaxTree(state, 0) : currentSyntaxTree(state);
   if (oldTree.length !== before.doc.length || newTree.length !== state.doc.length) return;
   const notes = parseFootnotes(before);
   if (notes.references.some(reference => change!.from > reference.containerFrom && change!.from < reference.containerTo
     || change!.to > reference.containerFrom && change!.from < reference.containerTo)) return;
   const definition = notes.definitions.find(definition => change!.from >= definition.lineFrom && change!.from <= definition.lineTo);
   if (definition) {
-    if (lineChanged) return;
+    if (lineChanged && (definition.lineTo - definition.lineFrom > 32_768
+      || change.from <= definition.contentTo || change.to > definition.lineTo
+      || before.doc.sliceString(definition.contentTo, definition.lineTo).includes('[^'))) return;
     if (change.from < definition.contentFrom || change.to < definition.contentFrom) return;
     const line = before.doc.lineAt(change.from), content = line.from + (line.text.match(/^[ \t]*/)?.[0].length ?? 0);
     if (change.from < content || change.from === content && /^\s*$/.test(state.doc.sliceString(change.nextFrom, change.nextTo))) return;
@@ -3835,7 +3841,9 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
   if (!previous) return;
   let oldScope: SourceRange = previous, nextScope: SourceRange;
   if (lineChanged) {
-    if (!['Paragraph', 'Blockquote', 'OrderedList', 'BulletList'].includes(previous.name)) return;
+    if (!['Paragraph', 'Blockquote', 'OrderedList', 'BulletList', 'FootnoteDefinition'].includes(previous.name)) return;
+    if (previous.name === 'FootnoteDefinition' && (!definition || !next || next.name !== previous.name
+      || previous.from !== next.from || transaction.changes.mapPos(previous.to, 1) !== next.to)) return;
     oldScope = { from: before.doc.lineAt(previous.from).from,
       to: before.doc.lineAt(Math.max(previous.to, change.to)).to };
     nextScope = { from: transaction.changes.mapPos(oldScope.from, -1), to: transaction.changes.mapPos(oldScope.to, 1) };
@@ -3847,7 +3855,8 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
       let found = false;
       tree.iterate({ ...scope, enter(node) {
         if (found) return false;
-        if (node.name === 'LinkReference' || node.name === 'FootnoteDefinition') { found = true; return false; }
+        if (node.name === 'LinkReference' || node.name === 'FootnoteDefinition'
+          && (!definition || node.from !== transaction.changes.mapPos(definition.lineFrom, 1))) { found = true; return false; }
       } });
       return found;
     };
@@ -3880,7 +3889,7 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
   let crossesScope = false;
   mapped.decorations.between(from, to, (start, end) => { if (start < from || end > to) crossesScope = true; });
   if (crossesScope) return;
-  projectUnchangedFootnotes(before, state, transaction.changes);
+  if (!projectUnchangedFootnotes(before, state, transaction.changes, lineChanged ? definition : undefined)) return;
   const previousConflicts = mergeConflictRangeCache.get(before.doc);
   if (previousConflicts) mergeConflictRangeCache.set(state.doc, previousConflicts.map(range => ({
     from: transaction.changes.mapPos(range.from, 1), to: transaction.changes.mapPos(range.to, -1)
