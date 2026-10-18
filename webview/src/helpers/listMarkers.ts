@@ -577,6 +577,11 @@ class CheckboxWidget extends UiLanguageSensitiveWidget {
   }
 }
 
+/** These widgets do not change when a collapsed caret moves; source edits still require position mapping. */
+export function isCaretStableListWidget(widget: WidgetType): boolean {
+  return widget instanceof ListMarkerWidget || widget instanceof CheckboxWidget;
+}
+
 export function addListMarkerDecoration(
   builder: Array<Range<Decoration>>,
   state: EditorState,

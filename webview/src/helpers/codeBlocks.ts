@@ -808,7 +808,7 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
     const anchor = changes.mapPos(this.anchor, 1), to = changes.mapPos(this.blockTo, -1);
     if (anchor === this.anchor && to === this.blockTo) return this;
     const next = new MermaidPreviewWidget(this.diagramText, this.fullBlockText, anchor, to, this.startLine, this.endLine,
-      this.indentColumns, this.presentationFactory, this.uiLanguage, this.viewportState);
+      this.indentColumns, this.presentationFactory, this.uiLanguage, this.viewportState, this.diagramWidget);
     next[renderedBlockPreviewHeight].seed(this[renderedBlockPreviewHeight]);
     return next;
   }
@@ -826,7 +826,8 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
     readonly indentColumns: LiveBlockIndentValue,
     private readonly presentationFactory: ReturnType<typeof getMermaidDiagramPresentationFactory>,
     private readonly uiLanguage: UiLanguage,
-    private readonly viewportState: ReturnType<typeof getMermaidBlockViewport>
+    private readonly viewportState: ReturnType<typeof getMermaidBlockViewport>,
+    mappedPresentation?: Pick<MermaidDiagramWidget, 'themeSignature' | 'measuredContentWidth'>
   ) {
     super();
     this[renderedBlockPreviewHeight] = new RenderedBlockPreviewHeight(JSON.stringify([
@@ -836,7 +837,8 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
       presentationFactory,
       viewportState,
       indentColumns: 0,
-      uiLanguage
+      uiLanguage,
+      mappedPresentation
     });
     this.toolbarWidget = createMermaidToolbarWidget(
       anchor,

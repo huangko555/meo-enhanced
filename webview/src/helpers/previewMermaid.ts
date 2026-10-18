@@ -1,6 +1,7 @@
 import type { EditorAppearance } from '../../../src/protocol/editorCommands';
 import { getGithubMermaidConfig } from '../../../src/preview/githubMermaid';
 import { getMermaidPalette } from '../../../src/shared/mermaidPalette';
+import { getPreviewMermaidResourceIndex, getPreviewViewportResources } from './previewViewportResources';
 
 type PreviewAppearance = Exclude<EditorAppearance, 'auto'>;
 import {
@@ -60,9 +61,9 @@ export function createPreviewMermaidRenderer(
     const revision = frameDocument.documentElement.dataset.meoPreviewPresetRevision ?? '';
     // A preserved SVG can outlive a theme change with the same appearance.
     let themeKey: string | undefined;
-    const hasPendingBlocks = Array.from(frameDocument.querySelectorAll<HTMLElement>(
+    const hasPendingBlocks = (getPreviewViewportResources(frameDocument, 'mermaid') ?? Array.from(frameDocument.querySelectorAll<HTMLElement>(
       '.meo-export-mermaid[data-source-b64]'
-    )).some((block) => isNearPreviewViewport(block, frameDocument) && (
+    ))).some((block) => isNearPreviewViewport(block, frameDocument) && (
       !block.classList.contains('is-rendered')
       || block.dataset.meoPreviewMermaidAppearance !== appearance
       || (block.dataset.meoPreviewMermaidPreset ?? 'default') !== preset
@@ -124,7 +125,8 @@ async function renderMermaidBlocks(
   const palette = readPreviewMermaidPalette(frameDocument, appearance);
   const themeKey = JSON.stringify(palette);
   const viewportCenter = (frameDocument.defaultView?.innerHeight ?? 0) / 2;
-  const blocks = Array.from(frameDocument.querySelectorAll<HTMLElement>('.meo-export-mermaid[data-source-b64]'))
+  const blocks = (getPreviewViewportResources(frameDocument, 'mermaid')
+    ?? Array.from(frameDocument.querySelectorAll<HTMLElement>('.meo-export-mermaid[data-source-b64]')))
     .filter((block) => (
       !block.classList.contains('is-rendered')
       || block.dataset.meoPreviewMermaidAppearance !== appearance
@@ -132,7 +134,7 @@ async function renderMermaidBlocks(
       || (block.dataset.meoPreviewMermaidPresetRevision ?? '') !== revision
       || block.dataset.meoPreviewMermaidTheme !== themeKey
     ))
-    .map((block, documentIndex) => ({ block, documentIndex }))
+    .map((block, documentIndex) => ({ block, documentIndex: getPreviewMermaidResourceIndex(frameDocument, block) ?? documentIndex }))
     .filter(({ block }) => isNearPreviewViewport(block, frameDocument))
     .map((entry) => ({ ...entry, distance: Math.abs(entry.block.getBoundingClientRect().top - viewportCenter) }))
     .sort((left, right) => left.distance - right.distance);

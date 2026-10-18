@@ -1,5 +1,6 @@
 import { Annotation, EditorState, Facet, StateEffect, StateField, Transaction, type Extension } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, type DecorationSet } from '@codemirror/view';
+import { syntaxTree } from '@codemirror/language';
 
 export type LiveInputDerivedWorkScheduler = {
   documentChanged(): void;
@@ -240,8 +241,23 @@ export function isLiveInputDerivedWorkRefresh(transaction: Transaction): boolean
   return transaction.effects.some((effect) => effect.is(refreshLiveInputDerivedWorkEffect));
 }
 
+const mappedInputPresentations = new WeakSet<EditorState>();
+
+/** Only the complete, syntax-proven plain-prose projection may provide this proof. */
+export function markLiveInputPresentationMapped(state: EditorState): void {
+  mappedInputPresentations.add(state);
+}
+
+/** A refresh still runs its consumers, but need not rebuild already mapped structure. */
+export function isMappedLiveInputRefresh(transaction: Transaction): boolean {
+  return isLiveInputDerivedWorkRefresh(transaction) && mappedInputPresentations.has(transaction.startState)
+    && !transaction.docChanged && !transaction.reconfigured && transaction.startState.selection.eq(transaction.state.selection)
+    && transaction.effects.every(effect => effect.is(refreshLiveInputDerivedWorkEffect))
+    && syntaxTree(transaction.startState) === syntaxTree(transaction.state);
+}
+
 export function shouldDeferLiveInputDerivedWork(transaction: Transaction): boolean {
-  if (isLiveInputDerivedWorkRefresh(transaction)) return false;
+  if (isLiveInputDerivedWorkRefresh(transaction)) return isMappedLiveInputRefresh(transaction);
   // Settling only retires an already applied generation. It must not rebuild
   // presentation a second time after accepted consumers finish.
   if (transaction.effects.some((effect) => effect.is(settleLiveInputDerivedWorkEffect))) return true;

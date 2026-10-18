@@ -67,6 +67,10 @@ function mountedSourceLine(view: EditorView, position: number): HTMLElement | nu
 function readBlockHeader(view: EditorView, position: number): BlockHeader | null {
   const state = view.state;
   const line = state.doc.lineAt(position);
+  // Prose never owns this header. Resolve the local syntax before consulting
+  // rich-block discovery, which otherwise scans the new document on each key.
+  const node = codeNodeAt(view, position);
+  if (!node) return null;
   let quoted = false;
   for (let node: SyntaxNode | null = currentSyntaxTree(state).resolveInner(line.to, -1); node; node = node.parent) {
     if (node.name === 'Blockquote') { quoted = true; break; }
@@ -91,8 +95,6 @@ function readBlockHeader(view: EditorView, position: number): BlockHeader | null
     }
     return null;
   }
-  const node = codeNodeAt(view, position);
-  if (!node) return null;
   const widget = createCodeBlockActionsWidget(state, node);
   if (!widget) return null;
   return { from: state.doc.lineAt(node.from).from, to: state.doc.lineAt(Math.max(node.from, node.to - 1)).to,

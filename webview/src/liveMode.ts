@@ -1,6 +1,6 @@
 import { documentLines } from './helpers/documentLines';
 import { isAutomaticSymbolPairHistoryEffect } from './editor/typingAssistance';
-import { mapLiveWidgetPositions, mapStableLiveDecorations } from './editor/liveWidgetPositions';
+import { mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions, replaceLiveCaretDecorations } from './editor/liveWidgetPositions';
 import { undoDepth } from '@codemirror/commands';
 import { blockStickyHeaderExtension } from './helpers/blockStickyHeader';
 import { countColumn, RangeSetBuilder, StateEffect, StateField, EditorState, type ChangeDesc, type Range, type RangeSet, type Extension, type EditorSelection, type Transaction } from '@codemirror/state';
@@ -35,10 +35,12 @@ import { liveHighlightStyle, sourceMarkdownHighlightProps } from './theme';
 import { inlineMarkdownExtensions } from './helpers/inlineMarkdownParser';
 import { collectKbdTagRangesFromText, hasKbdTagMarker } from './helpers/kbd';
 import { currentSyntaxTree, getFencedCodeInfo, headingContentRange, headingLevelFromName, resolvedSyntaxTree, syntaxTreeChanged } from './helpers/markdownSyntax';
+import { hasSameLiveMarkdownSyntax } from './helpers/livePresentationSyntax';
 import { indexSourceRanges } from './helpers/sourceRangeIndex';
 import { detailsBlockLiveExtensions, getDetailsBlocks, toggleDetailsBlock } from './helpers/detailsBlocks';
 import {
   addListMarkerDecoration,
+  isCaretStableListWidget,
   listMarkerData,
   detectListIndentStylesByLine,
   nextOrderedSequenceNumber
@@ -150,6 +152,7 @@ import {
   isLiveInputDerivedWorkBookkeeping,
   isLiveInputDerivedWorkRefresh,
   isLiveInputNestedProjection,
+  markLiveInputPresentationMapped,
   liveInputDerivedWorkExtensions,
   mapLiveInputDerivedDecorations,
   replaceLiveInputNestedDecorationEffect,
@@ -1935,9 +1938,6 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
   const activeLines = collectActiveLines(state);
   const indentSelectedLines = collectIndentSelectedLines(state);
   const tree = resolvedSyntaxTree(state);
-  // Other helpers may extend the parser later in this build. Only the tree
-  // actually used for structural decoration proves that this result is complete.
-  const complete = usesLargeDocumentDerivedWorkBudget(state) && syntaxTreeAvailable(state, state.doc.length);
   const footnotes = parseFootnotes(state);
   const detailsBlocks = getDetailsBlocks(state, tree);
   const codeBlockLines = collectCodeBlockLines(state, tree);
@@ -2543,8 +2543,13 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
   const result = Decoration.set(ranges, true);
   const filtered = filterDecorationsOutsideMergeConflicts(state, result);
   if (usesLargeDocumentDerivedWorkBudget(state)) {
+    // Helpers may finish embedded language parsing. Certify the actual outer
+    // Markdown structure against the completed parse, never a lagging snapshot.
+    const complete = syntaxTreeAvailable(state, state.doc.length)
+      && hasSameLiveMarkdownSyntax(tree, resolvedSyntaxTree(state, 0));
     liveDecorationMetadata.set(state, { ...liveDecorationMetadata.get(state), complete });
     if (complete && !isEmptyDecorationSet(filtered)) completeLiveDecorationSets.add(filtered);
+    if (complete) prepareLiveWidgetPositions(filtered);
   }
   return filtered;
 }
@@ -2610,11 +2615,16 @@ function safeBuildDecorations(
   }
 }
 
+const mergeConflictRangeCache = new WeakMap<EditorState['doc'], SourceRange[]>();
 function mergeConflictRanges(state: EditorState): SourceRange[] {
-  return parseMergeConflicts(state).map((conflict) => ({
+  const cached = mergeConflictRangeCache.get(state.doc);
+  if (cached) return cached;
+  const ranges = parseMergeConflicts(state).map((conflict) => ({
     from: conflict.blockFrom,
     to: conflict.blockTo
   }));
+  mergeConflictRangeCache.set(state.doc, ranges);
+  return ranges;
 }
 
 function pointInsideRanges(pos: number, ranges: ReadonlyArray<SourceRange>): boolean {
@@ -3520,13 +3530,172 @@ const liveDecorationMetadata = new WeakMap<EditorState, LiveDecorationMetadata>(
 // Creation during reconfiguration may use a provisional state identity. The
 // value's proof survives that handoff without retaining the provisional state.
 const completeLiveDecorationSets = new WeakSet<DecorationSet>();
+const localLiveSelectionUpdates = new WeakSet<EditorState>();
 
-function hasDefaultLivePresentation(state: EditorState): boolean {
+function hasDefaultLiveBlockPresentation(state: EditorState): boolean {
   const mermaid = state.field(mermaidEditingStateField, false);
   const math = state.field(latexMathEditingStateField, false);
   return !mermaid?.modes.size && !mermaid?.searchReveal && !math?.modes.size && !math?.searchReveal
-    && !getHtmlEditingRange(state) && !state.field(livePointerSelectionActiveField).active
+    && !getHtmlEditingRange(state);
+}
+
+function hasDefaultLivePresentation(state: EditorState): boolean {
+  return hasDefaultLiveBlockPresentation(state) && !state.field(livePointerSelectionActiveField).active
     && !state.field(liveDocumentIdleField);
+}
+
+const caretMarkerPairs = [
+  [quoteMarkerDeco, activeQuoteMarkerDeco],
+  [markerDeco, activeLineMarkerDeco], [emMarkerDeco, activeEmMarkerDeco],
+  [strongMarkerDeco, activeStrongMarkerDeco], [strikeMarkerDeco, activeStrikeMarkerDeco],
+  [highlightMarkerDeco, activeHighlightMarkerDeco], [codeMarkerDeco, activeCodeMarkerDeco],
+  [linkMarkerDeco, activeLinkMarkerDeco], [linkLabelBracketDeco, activeLinkLabelBracketDeco]
+] as const;
+const caretInlineNodes = new Set(['Document', 'Paragraph', 'Emphasis', 'StrongEmphasis', 'Strikethrough', 'Highlight',
+  'InlineCode', 'CodeText', 'EmphasisMark', 'StrikethroughMark', 'HighlightMark', 'CodeMark', 'HeaderMark',
+  'Link', 'LinkLabel', 'LinkMark', 'LinkTitle', 'URL', 'Autolink', 'Subscript', 'Superscript',
+  'SubscriptMark', 'SuperscriptMark', 'Escape', 'HardBreak',
+  'BulletList', 'OrderedList', 'ListItem', 'ListMark', 'Task', 'TaskMarker', 'Blockquote', 'QuoteMark']);
+const caretContainerNodes = new Set(['Paragraph', 'BulletList', 'OrderedList', 'Blockquote']);
+
+/** Selection changes keep all source coordinates stable. Replace only proven local blocks;
+ * unsupported containers, cross-block replacements and unknown widgets retain the complete builder. */
+function projectLiveCaretDecorations(decorations: DecorationSet, transaction: Transaction): DecorationSet | undefined {
+  if (!usesLargeDocumentDerivedWorkBudget(transaction.state) || transaction.docChanged || transaction.reconfigured
+    || !liveDecorationMetadata.get(transaction.startState)?.complete || syntaxTreeChanged(transaction)
+    || !hasDefaultLiveBlockPresentation(transaction.startState) || !hasDefaultLiveBlockPresentation(transaction.state)
+    || !transaction.effects.every(effect => effect.is(setLivePointerSelectionActiveEffect) || effect.is(setLiveDocumentIdleEffect))
+    || transaction.startState.selection.ranges.length !== 1 || transaction.state.selection.ranges.length !== 1
+    || !transaction.startState.selection.main.empty || !transaction.state.selection.main.empty) return undefined;
+  const state = transaction.state, tree = currentSyntaxTree(state);
+  if (tree.length !== state.doc.length) return undefined;
+  const previousActive = collectActiveLines(transaction.startState), active = collectActiveLines(state);
+  const lines = new Set([...previousActive, ...active,
+    state.doc.lineAt(transaction.startState.selection.main.head).number, state.doc.lineAt(state.selection.main.head).number]);
+  const blocks = new Map<number, { from: number; to: number; nodes: SyntaxNodeRef[]; closing: Set<string>; frontmatter?: FrontmatterInfo }>();
+  const frontmatter = parseFrontmatter(state);
+  for (const lineNo of lines) {
+    const line = state.doc.line(lineNo);
+    if (frontmatter && isInsideFrontmatter(frontmatter, line.from)) {
+      if (blocks.has(frontmatter.openingFrom)) continue;
+      if (frontmatter.closingTo - frontmatter.openingFrom > 4_096) return undefined;
+      let supported = true;
+      tree.iterate({ from: frontmatter.openingFrom, to: frontmatter.closingTo, enter(node) {
+        if (node.from >= frontmatter.closingTo || node.to <= frontmatter.openingFrom) return false;
+        if ((node.name === 'Link' && (findChildNode(node, 'URL') || isWikiLinkNode(state, node.node)))
+          || ['Autolink', 'Image', 'Subscript', 'Superscript', 'HTMLTag', 'HTMLBlock', 'CodeBlock', 'FencedCode'].includes(node.name)) {
+          supported = false; return false;
+        }
+      } });
+      if (!supported) return undefined;
+      blocks.set(frontmatter.openingFrom, { from: frontmatter.openingFrom, to: frontmatter.closingTo, nodes: [], closing: new Set(), frontmatter });
+      continue;
+    }
+    let node = tree.resolveInner(line.to, -1);
+    while (node.parent && node.parent.name !== 'Document') node = node.parent;
+    if (!line.length && (node.name === 'Document' || line.from > node.to || line.to < node.from)) {
+      if (isInsideFrontmatter(parseFrontmatter(state), line.from)
+        || pointInsideRanges(line.from, mergeConflictRanges(state))) return undefined;
+      blocks.set(line.from, { from: line.from, to: line.to, nodes: [], closing: new Set() });
+      continue;
+    }
+    if (!caretContainerNodes.has(node.name) && headingLevelFromName(node.name) === null) return undefined;
+    const from = state.doc.lineAt(node.from).from, to = state.doc.lineAt(node.to).to;
+    if (line.from < from || line.to > to || to - from > 4_096) return undefined;
+    if (isInsideFrontmatter(parseFrontmatter(state), from)
+      || rangeOverlapsRanges(from, to, mergeConflictRanges(state))) return undefined;
+    if (blocks.has(from)) continue;
+    const nodes: SyntaxNodeRef[] = [], protectedRanges: SourceRange[] = [], closing = new Set<string>();
+    let valid = true;
+    tree.iterate({ from: node.from, to: node.to, enter(candidate) {
+      if (candidate.to <= node.from || candidate.from >= node.to) return false;
+      if (!caretInlineNodes.has(candidate.name) && headingLevelFromName(candidate.name) === null) { valid = false; return false; }
+      if (candidate.name === 'Link' && (isWikiLinkNode(state, candidate.node)
+        || getEmptyImageLinkUrl(state, candidate) || state.doc.sliceString(candidate.from, candidate.to).includes('[^'))) {
+        valid = false; return false;
+      }
+      // Keep a stable SyntaxNode rather than the parser's reusable cursor.
+      nodes.push(candidate.node);
+      if (nodes.length > 512) { valid = false; return false; }
+      if (['Link', 'Autolink', 'InlineCode', 'TaskMarker'].includes(candidate.name)) protectedRanges.push({ from: candidate.from, to: candidate.to });
+      if (['EmphasisMark', 'StrikethroughMark', 'HighlightMark', 'CodeMark'].includes(candidate.name)
+        && candidate.node.parent?.to === candidate.to) closing.add(`${candidate.from}:${candidate.to}`);
+    } });
+    let raw = '', cursor = from;
+    for (const range of protectedRanges.sort((a,b) => a.from - b.from || b.to - a.to)) {
+      if (range.from < cursor) continue;
+      raw += state.doc.sliceString(cursor, range.from); cursor = range.to;
+    }
+    raw += state.doc.sliceString(cursor, to);
+    raw = raw.replace(/^(?:[ \t]*>[ \t]?)+/gm, '').replace(/^#{1,6}[ \t]+/gm, '');
+    if (!valid || /[#$:<>\[\]\\|]/.test(raw)) return undefined;
+    blocks.set(from, { from, to, nodes, closing });
+  }
+  let result = decorations;
+  for (const block of blocks.values()) {
+    if (block.frontmatter) {
+      // Reuse the canonical YAML renderer. Remove exactly its previous ranges,
+      // retaining independent inline styling and the original helper-first order.
+      const previous: DecorationCollector = [], next: DecorationCollector = [], retained: DecorationCollector = [];
+      addFrontmatterBoundaryDecorations(previous, transaction.startState, block.frontmatter, previousActive);
+      addFrontmatterBoundaryDecorations(next, state, block.frontmatter, active);
+      if (previous.length > 512 || next.length > 512) return undefined;
+      const owned = new Map<string, Decoration[]>();
+      for (const range of previous) {
+        const key = `${range.from}:${range.to}`;
+        const values = owned.get(key) ?? []; values.push(range.value); owned.set(key, values);
+      }
+      let valid = true, count = 0;
+      decorations.between(block.from, block.to, (from, to, value) => {
+        if (++count > 512 || from < block.from || to > block.to) { valid = false; return; }
+        const values = owned.get(`${from}:${to}`), index = values?.findIndex(candidate => candidate.eq(value)) ?? -1;
+        if (index >= 0) { values!.splice(index, 1); return; }
+        if (value.spec.widget) { valid = false; return; }
+        retained.push(value.range(from, to));
+      });
+      if (!valid || [...owned.values()].some(values => values.length > 0)) return undefined;
+      result = replaceLiveCaretDecorations(result, block.from, block.to, [...next, ...retained]);
+      continue;
+    }
+    const additions: DecorationCollector = [];
+    let valid = true;
+    let count = 0;
+    decorations.between(block.from, block.to, (from, to, value) => {
+      if (++count > 512) { valid = false; return; }
+      if (from < block.from || to > block.to) { valid = false; return; }
+      if (value === inlineSyntaxBoundaryDeco || value === hiddenLinkUrlDeco
+        || value.spec.widget instanceof OpenLinkWidget || value.spec.widget instanceof ClearLinkUrlWidget) return;
+      if (value.spec.widget && !(value.spec.widget instanceof MissingLocalLinkWidget)
+        && !(value.spec.widget instanceof ListIndentWidget) && !isCaretStableListWidget(value.spec.widget)) { valid = false; return; }
+      const pair = caretMarkerPairs.find(pair => pair[0] === value || pair[1] === value);
+      const setext = block.nodes.find(node => node.name.startsWith('SetextHeading')
+        && node.node.lastChild?.from === from && node.node.lastChild.to === to);
+      const isActive = setext ? rangeTouchesActiveLine(state, setext.from, setext.to, active)
+        : active.has(state.doc.lineAt(from).number);
+      additions.push((pair ? pair[isActive ? 1 : 0] : value).range(from, to));
+    });
+    if (!valid) return undefined;
+    const links: DecorationCollector = [];
+    for (const node of block.nodes) {
+      if (node.name === 'Link') addMarkdownLinkDecorations(links, state, node, active);
+      else if (node.name === 'Autolink') addAutolinkDecorations(links, state, node, active);
+      else if (node.name === 'URL' && node.node.parent?.name !== 'Link' && node.node.parent?.name !== 'Autolink') {
+        const href = getNodeHref(state, node.node);
+        addTrimmedUrlLinkMark(links, node.from, node.to, state.doc.sliceString(node.from, node.to), href,
+          !active.has(state.doc.lineAt(node.from).number));
+      }
+      if (block.closing.has(`${node.from}:${node.to}`) && active.has(state.doc.lineAt(node.from).number)) {
+        links.push(inlineSyntaxBoundaryDeco.range(node.to));
+      }
+    }
+    additions.push(...links.filter(range => range.value.spec.class !== 'meo-md-link'
+      && range.value !== linkBoundaryDeco && !(range.value.spec.widget instanceof MissingLocalLinkWidget)));
+    result = replaceLiveCaretDecorations(result, block.from, block.to, additions);
+  }
+  localLiveSelectionUpdates.add(state);
+  liveDecorationMetadata.set(state, { ...liveDecorationMetadata.get(state), complete: true });
+  if (!isEmptyDecorationSet(result)) completeLiveDecorationSets.add(result);
+  return result;
 }
 
 function isPlainProseInput(transaction: Transaction): boolean {
@@ -3674,6 +3843,8 @@ const liveDecorationField = StateField.define<DecorationSet>({
       liveDecorationMetadata.set(transaction.state, { ...liveDecorationMetadata.get(transaction.state), complete: true });
       return decorations;
     }
+    const selected = projectLiveCaretDecorations(decorations, transaction);
+    if (selected !== undefined) return selected;
     // Search highlights are maintained independently. Preserving the existing
     // live decorations prevents a transient parse result from exposing source.
     if (
@@ -3694,6 +3865,7 @@ const liveDecorationField = StateField.define<DecorationSet>({
           // DOM is retained. A prior checkpoint must not reuse that old widget.
           const previous = liveDecorationMetadata.get(transaction.state);
           liveDecorationMetadata.set(transaction.state, { checkpoint: mapped.rebasedWidgets ? undefined : previous?.checkpoint, complete: true });
+          markLiveInputPresentationMapped(transaction.state);
           if (!isEmptyDecorationSet(mapped.decorations)) completeLiveDecorationSets.add(mapped.decorations);
           return mapped.decorations;
         }
@@ -3940,6 +4112,7 @@ const liveLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
     return buildLiveLineNumberMarkers(state);
   },
   update(markers: RangeSet<GutterMarker>, transaction: Transaction): RangeSet<GutterMarker> {
+    if (localLiveSelectionUpdates.has(transaction.state)) return markers;
     if (shouldDeferLiveInputDerivedWork(transaction)) {
       return transaction.docChanged ? markers.map(transaction.changes) : markers;
     }
@@ -3982,6 +4155,7 @@ function buildStyledLineNumberMarkers(state: EditorState): RangeSet<GutterMarker
 const styledLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
   create: buildStyledLineNumberMarkers,
   update(markers, transaction) {
+    if (shouldDeferLiveInputDerivedWork(transaction)) return transaction.docChanged ? markers.map(transaction.changes) : markers;
     if (!transaction.docChanged && !isLiveInputDerivedWorkRefresh(transaction)) return markers;
     return buildStyledLineNumberMarkers(transaction.state);
   },

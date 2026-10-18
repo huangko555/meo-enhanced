@@ -53,7 +53,7 @@ interface ProtectedRange {
   to: number;
 }
 
-const footnoteCache = new WeakMap<object, ParsedFootnotes>();
+const footnoteCache = new WeakMap<object, { tree: ReturnType<typeof resolvedSyntaxTree>; parsed: ParsedFootnotes }>();
 const definitionMarkerPattern = /^[ \t]{0,3}\[\^([^\]\r\n]+)\]:(?:[ \t]|$)/;
 const footnoteCompositeMarkerPattern = /^\[\^([^\]\r\n]+)\]:(?:[ \t]|$)/;
 const footnoteContinuationIndent = 4;
@@ -91,13 +91,15 @@ export function normalizeFootnoteLabel(rawLabel: string): string {
 }
 
 export function parseFootnotes(state: EditorState): ParsedFootnotes {
+  // References and protected code ranges depend on the parser's progress as
+  // well as the text. A partial result must not become a complete projection.
+  const tree = resolvedSyntaxTree(state);
   const cached = footnoteCache.get(state.doc);
-  if (cached) {
-    return cached;
+  if (cached?.tree === tree) {
+    return cached.parsed;
   }
 
   const frontmatter = parseFrontmatter(state);
-  const tree = resolvedSyntaxTree(state);
   const protectedRanges = collectProtectedRanges(state, tree);
   const definitions = collectDefinitions(state, frontmatter, protectedRanges);
   const definitionMarkerToByFrom = new Map<number, number>();
@@ -170,7 +172,7 @@ export function parseFootnotes(state: EditorState): ParsedFootnotes {
     referencesByContainerKey
   };
 
-  footnoteCache.set(state.doc, parsed);
+  footnoteCache.set(state.doc, { tree, parsed });
   return parsed;
 }
 

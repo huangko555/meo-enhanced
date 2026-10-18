@@ -44,7 +44,7 @@ export const displayMathResultField = StateField.define<readonly ValidResult[]>(
   create: state => collectValidResults(state, []),
   update(value, transaction) {
     const largeDocument = usesLargeDocumentDerivedWorkBudget(transaction.state);
-    if (largeDocument && isLiveInputDerivedWorkRefresh(transaction)) return collectValidResults(transaction.state, value);
+    if (largeDocument && isLiveInputDerivedWorkRefresh(transaction) && !shouldDeferLiveInputDerivedWork(transaction)) return collectValidResults(transaction.state, value);
     if (!transaction.docChanged) return value;
     if (largeDocument && shouldDeferLiveInputDerivedWork(transaction)) {
       let touchesKnownFormula = false;

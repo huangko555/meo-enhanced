@@ -6,6 +6,7 @@ import {
   resolveShikiLang
 } from './shikiHighlighter';
 import { projectShikiTokenLines, type ShikiPresentationRun } from '../../../src/shared/shikiTokenPresentation';
+import { getPreviewViewportResources } from './previewViewportResources';
 
 const FONT_STYLE_ITALIC = 1;
 const FONT_STYLE_BOLD = 2;
@@ -64,7 +65,8 @@ export function hasAppliedPreviewCodeHighlight(root: ParentNode): boolean {
 export function applyPreviewCodeHighlight(frameDocument: Document, nearViewportOnly = false, isCurrent: () => boolean = () => true): void {
   if (!isCurrent()) return;
   const themeVersion = String(getShikiThemeVersion('preview'));
-  const codes = Array.from(frameDocument.querySelectorAll<HTMLElement>('code.hljs'));
+  const nearby = nearViewportOnly ? getPreviewViewportResources(frameDocument, 'code') : undefined;
+  const codes = nearby ?? Array.from(frameDocument.querySelectorAll<HTMLElement>('code.hljs'));
   const height = nearViewportOnly ? frameDocument.documentElement.clientHeight : 0;
   // Read the whole candidate band before token DOM writes can invalidate layout.
   const candidates = nearViewportOnly ? codes.filter(code => {

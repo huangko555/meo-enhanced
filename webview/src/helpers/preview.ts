@@ -9,6 +9,7 @@ import { createCopyCodeButton } from './codeBlockControls';
 import { logWebviewRenderError } from './errors';
 import { normalizeDocumentText } from '../../../src/foundation/documentText';
 import { assessLargeDocument } from '../../../src/foundation/largeDocument';
+import { observePreviewViewportResources } from './previewViewportResources';
 import { createDocumentScrollToTopController } from './scrollToTop';
 import type { OutlineHeading } from './outline';
 import type { EditorAppearance as PreviewAppearance } from '../../../src/protocol/editorCommands';
@@ -1238,6 +1239,7 @@ export function createPreviewController({
   }>();
   let previewMathObserver: IntersectionObserver | null = null;
   let previewTableLayout: PreviewTableLayoutController | null = null;
+  let previewViewportResources: ReturnType<typeof observePreviewViewportResources> = null;
   let disposeDeferredImages = () => {};
   let frameEvents: AbortController | null = null;
   let disposed = false;
@@ -1727,6 +1729,9 @@ export function createPreviewController({
       const signal = frameEvents.signal;
       frameRenderedText = renderedText;
       frameDocument.documentElement.dataset.meoPreviewLargeDocument = String(assessLargeDocument(renderedText).preferSource);
+      previewViewportResources?.dispose();
+      previewViewportResources = observePreviewViewportResources(frameDocument, () => scheduleViewportHighlight(frameDocument));
+      previewViewportResources?.setActive(!host.hidden);
       loadingFrameText = null;
       sourceMapResizeObserver?.disconnect();
       const FrameResizeObserver = frame.contentWindow
@@ -1739,7 +1744,8 @@ export function createPreviewController({
           sourceMapMeasureFrame = window.requestAnimationFrame(() => {
             sourceMapMeasureFrame = null;
             if (!disposed && activeFrameDocument === frameDocument) {
-              getSourceMap();
+              // Consumers measure on demand. A resource outside the reading
+              // band must not force a complete index read solely for resizing.
               refreshSourcePositionMarker();
               onGeometryChanged?.();
             }
@@ -2309,9 +2315,12 @@ export function createPreviewController({
   updateSourceColoringControl();
 
   const getFrameDocument = () => frame.contentDocument;
-  const getSourceMap = () => {
+  const getSourceMap = (measure = true) => {
     const frameDocument = getFrameDocument();
     if (!frameDocument) return [];
+    // Source ranges survive resource-only reflow. Callers resolving a known
+    // range can measure just that range; visual searches still refresh the index.
+    if (!measure && sourceMapDocument === frameDocument) return sourceMap;
     if (sourceMapDocument !== frameDocument || sourceMapDirty) {
       sourceMapDocument = frameDocument;
       sourceMapDirty = false;
@@ -2436,9 +2445,20 @@ export function createPreviewController({
     sourceRange: NonNullable<PreviewViewportPosition['sourceRange']>,
     viewportAnchor: number
   ): PreviewSourceMapEntry | undefined => {
-    const ranges = getVisualSourceMap().filter(entry => (
+    let ranges = getSourceMap(false).filter(entry => (
       entry.start === sourceRange.startLine && entry.end === sourceRange.endLine
     ));
+    if (ranges.some(entry => !entry.element.isConnected)) {
+      ranges = getVisualSourceMap().filter(entry => entry.start === sourceRange.startLine && entry.end === sourceRange.endLine);
+    } else {
+      const scrollTop = getFrameDocument()?.scrollingElement?.scrollTop ?? 0;
+      ranges = ranges.map(entry => {
+        const rect = entry.element.getBoundingClientRect();
+        return { ...entry, top: rect.top + scrollTop, bottom: rect.bottom + scrollTop,
+          rendered: entry.element.getClientRects().length > 0 };
+      }).filter(entry => entry.rendered)
+        .sort((left, right) => left.top - right.top || left.bottom - right.bottom || left.start - right.start);
+    }
     if (ranges.length === 0) return undefined;
     // Mirror getTopVisiblePosition: the visual entry whose top is the last one
     // at or above the reading band owns the anchor. Source order and nearest-top
@@ -2638,7 +2658,6 @@ export function createPreviewController({
     sourceRange?: { startLine: number; endLine: number; progress: number }
   ): void => {
     retainedViewportProjection = null;
-    const source = findSourceProjection(line);
     const scrollElement = getFrameDocument()?.scrollingElement;
     if (!scrollElement) {
       return;
@@ -2656,6 +2675,7 @@ export function createPreviewController({
         return;
       }
     }
+    const source = findSourceProjection(line);
     if (!source) return;
     if (source.exact) {
       const lineSpan = Math.max(1, source.exact.end - source.exact.start + 1);
@@ -2782,7 +2802,7 @@ export function createPreviewController({
       acceptingViewportProjection.restore = restore;
       return;
     }
-    const hasUsableFrame = frameRenderedText !== null && getSourceMap().length > 0;
+    const hasUsableFrame = frameRenderedText !== null && getSourceMap(false).length > 0;
     pendingExternalViewportRestore = hasPendingRequest || !hasUsableFrame
       ? { restore, requestGeneration }
       : null;
@@ -2965,6 +2985,7 @@ export function createPreviewController({
     setVisible: (visible: boolean) => {
       host.hidden = !visible;
       host.inert = !visible;
+      previewViewportResources?.setActive(visible);
       updateViewportAlignment();
       if (!visible) {
         previewMathObserver?.disconnect();
@@ -3036,6 +3057,8 @@ export function createPreviewController({
       frameGeneration += 1;
       mermaidPresentationGeneration += 1;
       previewMermaidRenderer.dispose();
+      previewViewportResources?.dispose();
+      previewViewportResources = null;
       unsubscribePreviewCodeHighlight();
       releasePreviewCodeHighlighting();
       activeFrameDocument = null;

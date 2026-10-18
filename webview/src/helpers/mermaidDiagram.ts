@@ -619,6 +619,9 @@ export class MermaidDiagramWidget extends WidgetType {
       indentColumns?: number;
       uiLanguage?: UiLanguage;
       viewportState?: MermaidViewportState;
+      // A proven prose-only source-position map keeps the existing presentation
+      // context. Mounted widgets still refresh independently on theme/layout changes.
+      mappedPresentation?: Pick<MermaidDiagramWidget, 'themeSignature' | 'measuredContentWidth'>;
     }
   ) {
     super();
@@ -629,7 +632,7 @@ export class MermaidDiagramWidget extends WidgetType {
     this.blockViewportState = options.viewportState;
     this.viewportState = options.viewportState ?? createMermaidViewportState();
     this.fullscreenSession = null;
-    this.themeSignature = getMermaidEditorPresentationIdentity().themeKey;
+    this.themeSignature = options.mappedPresentation?.themeSignature ?? getMermaidEditorPresentationIdentity().themeKey;
     this.presentationFactory = options.presentationFactory;
     this.presentationHandle = null;
     this.unsubscribeThemeRefresh = () => undefined;
@@ -641,7 +644,7 @@ export class MermaidDiagramWidget extends WidgetType {
     this.previewResizeObserver = null;
     const request = mermaidRenderRequest(this.diagramText, this.themeSignature);
     const cached = this.presentationFactory.getCached(request);
-    const contentWidth = currentMermaidContentWidth();
+    const contentWidth = options.mappedPresentation?.measuredContentWidth ?? currentMermaidContentWidth();
     const staleCandidate = cached?.ok === true ? null : this.presentationFactory.getStale(request);
     const staleEstimatedHeight = estimateCachedMermaidHeight(staleCandidate?.svg, contentWidth);
     const stale = staleCandidate;

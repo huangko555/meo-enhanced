@@ -320,6 +320,47 @@ try {
     'queued geometry callbacks from destroyed editors cannot restore old headers');
   assert.equal(await page.$$eval('.meo-long-code-floating-action', elements => elements.length), 1,
     'queued geometry callbacks from destroyed editors cannot restore old code controls');
+  await mount('EDIT\n\n' + 'Ordinary paragraph.\n\n'.repeat(4_100) + '```js\nconst value = 1;\n```');
+  const marginReads = await page.evaluate(() => {
+    const view = (window as any).__editor.view;
+    const prototype = Object.getPrototypeOf(view.state.doc);
+    const line = prototype.line;
+    const iterLines = prototype.iterLines;
+    let reads = 0;
+    prototype.line = function(number: number) { reads++; return line.call(this, number); };
+    prototype.iterLines = function(...args: unknown[]) {
+      const iterator = iterLines.apply(this, args), next = iterator.next;
+      iterator.next = function(...args: unknown[]) { reads++; return next.apply(this, args); };
+      return iterator;
+    };
+    try {
+      for (const margin of view.state.facet(view.constructor.scrollMargins)) margin(view);
+      return reads;
+    } finally { prototype.line = line; prototype.iterLines = iterLines; }
+  });
+  assert.ok(marginReads < 100, `a prose caret must not rediscover every rendered block to reserve a code header: ${marginReads}`);
+  await mount('EDIT\n\n' + 'Ordinary paragraph.\n\n'.repeat(4_100)
+    + '```mermaid\nflowchart LR\n A --> B\n```\n\n'.repeat(32));
+  await page.evaluate(() => (window as any).__editor.view.dispatch({ selection: { anchor: 4 } }));
+  await frames();
+  const inputWork = await page.evaluate(async () => {
+    const view = (window as any).__editor.view, readStyle = window.getComputedStyle;
+    const prototype = Object.getPrototypeOf(view.state.doc), iterLines = prototype.iterLines;
+    let reads = 0, lines = 0;
+    window.getComputedStyle = function(...args) { reads++; return readStyle.apply(this, args); };
+    prototype.iterLines = function(...args: unknown[]) {
+      const iterator = iterLines.apply(this, args), next = iterator.next;
+      iterator.next = function(...args: unknown[]) { lines++; return next.apply(this, args); };
+      return iterator;
+    };
+    try {
+      view.dispatch({ changes: { from: 4, insert: 'x' }, selection: { anchor: 5 }, userEvent: 'input.type' });
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return { styles: reads, lines };
+    } finally { window.getComputedStyle = readStyle; prototype.iterLines = iterLines; }
+  });
+  assert.ok(inputWork.styles < 100, `position mapping must not resolve every distant diagram's theme: ${inputWork.styles}`);
+  assert.ok(inputWork.lines < 500, `prose input and its scroll margin must not rediscover every distant block: ${inputWork.lines}`);
   await page.evaluate(() => { (window as any).__editor.destroy(); (window as any).__disposeTooltips.dispose(); });
   assert.equal(await page.$('.meo-block-sticky-header'), null);
   assert.deepEqual(errors, []);
