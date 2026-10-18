@@ -2421,14 +2421,19 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   [mapLiveWidgetPositions](changes: ChangeDesc, state: EditorState): WidgetType {
     const previous = this.tableData;
     const from = changes.mapPos(previous.from, 1), to = changes.mapPos(previous.to, -1);
-    // The eligibility proof excludes line/structure changes. Only absolute
-    // source ranges and cross-document footnote targets need to move here.
+    // The eligibility proof keeps this table's contents and global references
+    // unchanged. Edits above it can still move both offsets and source lines.
+    const startLine = state.doc.lineAt(from).number, endLine = state.doc.lineAt(Math.max(from, to - 1)).number;
+    const delta = startLine - previous.startLine;
+    const diffFlagsByLine = previous.diffFlagsByLine && Object.fromEntries(Object.entries(previous.diffFlagsByLine)
+      .map(([line, flags]) => [Number(line) + delta, flags]));
     const signature = JSON.parse(previous.signature);
     signature.footnoteReferences = signature.footnoteReferences.map(([offset, number, target]: [number, number, number | null]) =>
       [offset, number, target === null ? null : changes.mapPos(target, 1)]);
+    signature.diffFlagsByLine = diffFlagsByLine;
     const nextSignature = JSON.stringify(signature);
-    if (from === previous.from && to === previous.to && nextSignature === previous.signature) return this;
-    const next = new HtmlTableWidget({ ...previous, from, to, signature: nextSignature,
+    if (from === previous.from && to === previous.to && startLine === previous.startLine && endLine === previous.endLine && nextSignature === previous.signature) return this;
+    const next = new HtmlTableWidget({ ...previous, from, to, startLine, endLine, diffFlagsByLine, signature: nextSignature,
       sourceRanges: previous.sourceRanges?.map(row => row.map(range => ({ ...range,
         from: changes.mapPos(range.from, 1), to: changes.mapPos(range.to, -1) })))
     }, this.stickyHeaderAdapterFactory, this.tableCommandEnvironment);

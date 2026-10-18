@@ -1,7 +1,7 @@
 import { StateEffect, StateField, type EditorState, type Range, type Transaction } from '@codemirror/state';
 import { Decoration, ViewPlugin, WidgetType } from '@codemirror/view';
 import { mapLiveWidgetPositions, liveWidgetPositionsIndependent } from '../editor/liveWidgetPositions';
-import { renderedBlockPreviewHeight, renderedBlockPreviewStartLine } from './renderedBlockPreview';
+import { renderedBlockPreviewHeight, renderedBlockPreview } from './renderedBlockPreview';
 import { isLiveInputDerivedWorkPending } from '../editor/liveInputDerivedWork';
 
 type Band = { from: number; to: number };
@@ -28,7 +28,7 @@ export const getLivePresentationBand = (state: EditorState): Band | undefined =>
 class ViewportWidgetPlaceholder extends WidgetType {
   readonly [liveWidgetPositionsIndependent] = true;
   readonly [renderedBlockPreviewHeight]: unknown;
-  readonly [renderedBlockPreviewStartLine]: unknown;
+  readonly [renderedBlockPreview]: unknown;
   private readonly height: number;
   private readonly breaks: number;
   get estimatedHeight() { return this.height; }
@@ -38,7 +38,7 @@ class ViewportWidgetPlaceholder extends WidgetType {
     this.height = widget.estimatedHeight;
     this.breaks = widget.lineBreaks;
     this[renderedBlockPreviewHeight] = (widget as any)[renderedBlockPreviewHeight];
-    this[renderedBlockPreviewStartLine] = (widget as any)[renderedBlockPreviewStartLine];
+    this[renderedBlockPreview] = (widget as any)[renderedBlockPreview];
   }
   [mapLiveWidgetPositions]() { return this; }
   eq(other: WidgetType) {

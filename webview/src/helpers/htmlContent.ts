@@ -411,10 +411,11 @@ type HtmlTableLayout = { frame: number | null; controller: PreviewTableLayoutCon
 const htmlTableLayouts = new WeakMap<HTMLElement, HtmlTableLayout>();
 
 class HtmlBlockWidget extends UiLanguageSensitiveWidget {
-  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+  [mapLiveWidgetPositions](changes: ChangeDesc, state: EditorState): WidgetType {
     const from = changes.mapPos(this.block.from, 1), to = changes.mapPos(this.block.to, -1);
-    if (from === this.block.from && to === this.block.to) return this;
-    const next = new HtmlBlockWidget({ ...this.block, from, to });
+    const startLine = state.doc.lineAt(from).number, endLine = state.doc.lineAt(Math.max(from, to - 1)).number;
+    if (from === this.block.from && to === this.block.to && startLine === this.block.startLine && endLine === this.block.endLine) return this;
+    const next = new HtmlBlockWidget({ ...this.block, from, to, startLine, endLine });
     next.seedHeight(this);
     return next;
   }
@@ -658,9 +659,10 @@ class HtmlWarningWidget extends WidgetType {
 }
 
 class InlineHtmlWidget extends UiLanguageSensitiveWidget {
-  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+  [mapLiveWidgetPositions](changes: ChangeDesc, state: EditorState): WidgetType {
     const from = changes.mapPos(this.from, 1);
-    return from === this.from ? this : new InlineHtmlWidget(this.source, from, this.startLine);
+    const startLine = state.doc.lineAt(from).number;
+    return from === this.from && startLine === this.startLine ? this : new InlineHtmlWidget(this.source, from, startLine);
   }
   constructor(readonly source: string, readonly from: number, readonly startLine: number) {
     super();

@@ -54,7 +54,8 @@ interface ProtectedRange {
   to: number;
 }
 
-const footnoteCache = new WeakMap<object, { tree: ReturnType<typeof resolvedSyntaxTree>; parsed: ParsedFootnotes }>();
+const footnoteCache = new WeakMap<object, { tree: ReturnType<typeof resolvedSyntaxTree>; parsed: ParsedFootnotes;
+  projected?: true }>();
 const definitionMarkerPattern = /^[ \t]{0,3}\[\^([^\]\r\n]+)\]:(?:[ \t]|$)/;
 const footnoteCompositeMarkerPattern = /^\[\^([^\]\r\n]+)\]:(?:[ \t]|$)/;
 const footnoteContinuationIndent = 4;
@@ -94,8 +95,13 @@ export function normalizeFootnoteLabel(rawLabel: string): string {
 export function parseFootnotes(state: EditorState): ParsedFootnotes {
   // References and protected code ranges depend on the parser's progress as
   // well as the text. A partial result must not become a complete projection.
-  const tree = resolvedSyntaxTree(state);
   const cached = footnoteCache.get(state.doc);
+  // A local edit already proved the entire outer Markdown/reference structure.
+  // Reuse that projection until CodeMirror publishes a different tree, without
+  // extending every code language on every following key. Ordinary partial
+  // caches still take the resolved path and cannot hide late definitions.
+  if (cached?.projected && cached.tree === currentSyntaxTree(state)) return cached.parsed;
+  const tree = resolvedSyntaxTree(state);
   if (cached && (cached.tree === tree || hasSameLiveMarkdownSyntax(cached.tree, tree))) {
     if (cached.tree !== tree) footnoteCache.set(state.doc, { tree, parsed: cached.parsed });
     return cached.parsed;
@@ -205,7 +211,7 @@ export function projectUnchangedFootnotes(before: EditorState, state: EditorStat
     const container = referencesByContainerKey.get(key) ?? [];
     container.push(reference); referencesByContainerKey.set(key, container);
   }
-  footnoteCache.set(state.doc, { tree: currentSyntaxTree(state), parsed: {
+  footnoteCache.set(state.doc, { tree: currentSyntaxTree(state), projected: true, parsed: {
     definitions, references, referencesByContainerKey, numberByLabel: previous.numberByLabel
   } });
 }

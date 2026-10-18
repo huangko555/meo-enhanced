@@ -1,8 +1,8 @@
 import { RangeSet, RangeSetBuilder, type ChangeDesc, type EditorState, type Range } from '@codemirror/state';
 import { Decoration, type DecorationSet, type WidgetType } from '@codemirror/view';
 
-/** For proven inline changes with unchanged reference/definition identity and
- * no line changes. The owner regenerates every affected presentation block.
+/** For proven local changes with unchanged reference/definition identity and
+ * unchanged structure outside the regenerated presentation block.
  * Return an immutable replacement, or the same widget when its positions stay
  * valid. Unknown widgets conservatively keep the authoritative rebuild path.
  */

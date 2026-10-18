@@ -106,6 +106,13 @@ single-layer synthetic ranges do not catch height-summary propagation through
 joined layers. Shifting one control must retain unchanged line-point chunks.
 Caret clicks must not toggle the descendant drag-cursor override; real drags must
 still enable it and clean it up on release.
+Local input also fixes one proven Markdown syntax snapshot for nested readers;
+successive projected footnote reads must not repeatedly extend embedded parsers.
+Cover nested, middle and trailing Enter through settlement, compare later widget
+offsets and source lines against a complete build, and undo exact text. A newline
+that introduces a global reference definition must invalidate its outside users.
+Large Live pointer input must delay cold code highlighting until caret frames
+have yielded, resume afterward, and cancel the pending retry on destruction.
 
 `test-preview-viewport-work-budget.ts` exposes the browser's native scrollbar.
 It checks range retention while a nearby block changes height, release outside

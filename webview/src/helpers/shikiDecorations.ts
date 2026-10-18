@@ -22,8 +22,10 @@ import {
 } from './shikiHighlighter';
 import {
   isLiveInputDerivedWorkRefresh,
+  isLiveInputDerivedWorkPending,
   mapLiveInputDerivedDecorations,
-  shouldDeferLiveInputDerivedWork
+  shouldDeferLiveInputDerivedWork,
+  usesLargeDocumentDerivedWorkBudget
 } from '../editor/liveInputDerivedWork';
 import { getFencedCodeInfo, syntaxTreeChanged } from './markdownSyntax';
 import { getViewportController } from './viewportController';
@@ -348,21 +350,39 @@ const shikiPlugin = ViewPlugin.fromClass(
     decorations: DecorationSet;
     private inView: boolean;
     private destroyed = false;
-    private scrollRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+    private caretFrame: number | null = null;
+    private caretPending = false;
+    private highlightRetryTimer: ReturnType<typeof setTimeout> | null = null;
     private readonly canHighlight = (): boolean => {
       if (this.destroyed) return false;
-      if (!getViewportController(this.view)?.isUserScrolling()) return true;
+      if (!(usesLargeDocumentDerivedWorkBudget(this.view.state)
+        && (this.caretPending || isLiveInputDerivedWorkPending(this.view.state)))
+        && !getViewportController(this.view)?.isUserScrolling()) return true;
       // First-use grammar compilation can exceed a frame even for a short
-      // fence. Keep its current presentation and retry after native momentum;
-      // input retires the reading gesture, so editing need not wait for it.
-      if (this.scrollRefreshTimer === null) {
-        this.scrollRefreshTimer = setTimeout(() => {
-          this.scrollRefreshTimer = null;
+      // fence. Keep its current presentation while native reading or primary
+      // input owns the frame, then retry from the current document and viewport.
+      if (this.highlightRetryTimer === null) {
+        this.highlightRetryTimer = setTimeout(() => {
+          this.highlightRetryTimer = null;
           if (this.canHighlight()) this.view.dispatch({ effects: shikiRefreshEffect.of(null) });
         }, 50);
       }
       return false;
     };
+    deferHighlightForCaret(): void {
+      if (!usesLargeDocumentDerivedWorkBudget(this.view.state)) return;
+      if (this.caretFrame !== null) window.cancelAnimationFrame(this.caretFrame);
+      this.caretPending = true;
+      this.caretFrame = window.requestAnimationFrame(() => {
+        this.caretFrame = window.requestAnimationFrame(() => {
+          this.caretFrame = null;
+          this.caretPending = false;
+          // canHighlight's timer retries in a later task. Do not compile a cold
+          // grammar in this second frame before the caret has actually painted.
+        });
+      });
+      this.canHighlight();
+    }
     private prepareUnseen = true;
     private readonly allowUnseen: () => boolean;
     private readonly unsubscribe: () => void;
@@ -411,13 +431,15 @@ const shikiPlugin = ViewPlugin.fromClass(
 
     destroy(): void {
       this.destroyed = true;
-      if (this.scrollRefreshTimer !== null) clearTimeout(this.scrollRefreshTimer);
+      if (this.caretFrame !== null) window.cancelAnimationFrame(this.caretFrame);
+      if (this.highlightRetryTimer !== null) clearTimeout(this.highlightRetryTimer);
       this.unsubscribe();
       this.releaseHighlighting();
     }
   },
   {
-    decorations: (plugin) => plugin.decorations
+    decorations: (plugin) => plugin.decorations,
+    eventObservers: { pointerdown() { this.deferHighlightForCaret(); } }
   }
 );
 

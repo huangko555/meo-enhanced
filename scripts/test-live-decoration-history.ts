@@ -31,6 +31,19 @@ const build = await Bun.build({ entrypoints: [path.join(root, 'scripts/test-live
       return { loader: 'ts', contents: source.replace(boundary,
         `${boundary} if (!scope) { ((globalThis as any).__fullHtmlRequests ??= 0); (globalThis as any).__fullHtmlRequests++; }`) };
     });
+    builder.onLoad({ filter: /webview[\\/]src[\\/]helpers[\\/]markdownSyntax\.ts$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text();
+      const boundary = 'return ensureSyntaxTree(state, state.doc.length, timeout) ?? syntaxTree(state);';
+      assert.equal(source.split(boundary).length, 2);
+      return { loader: 'ts', contents: source.replace(boundary,
+        `const stack = new Error().stack ?? ''; if (stack.includes('buildDecorationRanges')) { ((globalThis as any).__localParseRequests ??= 0); (globalThis as any).__localParseRequests++; } if (stack.includes('projectLiveLocalInput') && stack.includes('parseFootnotes')) { ((globalThis as any).__projectedFootnoteParseRequests ??= 0); (globalThis as any).__projectedFootnoteParseRequests++; } ${boundary}`) };
+    });
+    builder.onLoad({ filter: /webview[\\/]src[\\/]helpers[\\/]shikiDecorations\.ts$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text();
+      const boundary = 'this.releaseHighlighting = activateShikiCodeHighlighting();';
+      return { loader: 'ts', contents: source.replace(boundary,
+        `${boundary} (view.dom as any).__canRequestCodeHighlight = this.canHighlight;`) };
+    });
   } }] });
 assert.ok(build.success, build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
@@ -71,6 +84,97 @@ try {
     assert.equal(summary.added, 1, 'settled input must publish the real changed line');
     await page.evaluate(() => (window as any).__budgetEditor.destroy());
   }
+  const nestedParseBudget = await page.evaluate(() => {
+    const scope = window as any, api = scope.__liveHistory;
+    const text = '# Nested input\n\n1. First item.\n\n   > Quoted content.\n\n   NESTED_TARGET\n\n   ```js\n   const value = 1;\n   ```\n\n2. Second item.\n\n'
+      + '| Name | Value |\n| --- | --- |\n| item | 1 |\n\n$$\nx=1\n$$\n\n<div>Later HTML</div>\n\n'
+      + '**Distant paragraph**.\n\n'.repeat(4_100);
+    const editor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'live', onApplyChanges() {} });
+    api.parse(editor); editor.refreshDecorations();
+    const from = text.indexOf('NESTED_TARGET') + 'NESTED_TARGET'.length;
+    editor.view.dispatch({ selection: { anchor: from } });
+    const before = scope.__localParseRequests ?? 0, builds = scope.__fullLiveBuilds ?? 0;
+    api.input(editor, from, 'x');
+    const footnotes = scope.__projectedFootnoteParseRequests ?? 0;
+    api.input(editor, from + 1, 'x');
+    scope.__nestedBudgetEditor = editor;
+    return { parseRequests: (scope.__localParseRequests ?? 0) - before, builds: (scope.__fullLiveBuilds ?? 0) - builds,
+      footnoteParseRequests: (scope.__projectedFootnoteParseRequests ?? 0) - footnotes };
+  });
+  assert.equal(nestedParseBudget.builds, 0, 'nested prose must update its closed block without a full Live build');
+  assert.equal(nestedParseBudget.parseRequests, 0, 'a proven local Markdown block must reuse its syntax snapshot instead of repeatedly extending embedded parsers');
+  assert.equal(nestedParseBudget.footnoteParseRequests, 0, 'a certified footnote projection must not restart full embedded parsing on each following key');
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__nestedBudgetEditor));
+  const projectedNested = await page.evaluate(() => (window as any).__liveHistory.positionSnapshot((window as any).__nestedBudgetEditor));
+  assert.deepEqual(await page.evaluate(() => {
+    const scope = window as any; scope.__nestedBudgetEditor.refreshDecorations();
+    return scope.__liveHistory.positionSnapshot(scope.__nestedBudgetEditor);
+  }), projectedNested, 'the bounded nested block must match a fresh authoritative presentation');
+  const newlineBuilds = await page.evaluate(() => {
+    const scope = window as any, api = scope.__liveHistory, editor = scope.__nestedBudgetEditor;
+    scope.__nestedBeforeEnter = editor.getText();
+    const builds = scope.__fullLiveBuilds ?? 0;
+    api.input(editor, editor.getText().indexOf('NESTED_TARGETxx') + 'NESTED_TARGETxx'.length, '\n   ', Date.now() + 10_000);
+    scope.__nestedBeforeEnterBuilds = builds;
+    return (scope.__fullLiveBuilds ?? 0) - builds;
+  });
+  assert.equal(newlineBuilds, 0, 'a local newline must preserve distant Live presentation on its input frame');
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__nestedBudgetEditor));
+  assert.equal(await page.evaluate(() => ((window as any).__fullLiveBuilds ?? 0) - (window as any).__nestedBeforeEnterBuilds), 0,
+    'settling a newline inside a closed Markdown block must not rebuild the whole document');
+  const newlinePositions = await page.evaluate(() => (window as any).__liveHistory.positionSnapshot((window as any).__nestedBudgetEditor));
+  assert.deepEqual(await page.evaluate(() => {
+    const scope = window as any; scope.__nestedBudgetEditor.refreshDecorations();
+    return scope.__liveHistory.positionSnapshot(scope.__nestedBudgetEditor);
+  }), newlinePositions, 'a local newline must also rebase later table, math and HTML line identities');
+  await page.evaluate(async () => {
+    const scope = window as any;
+    if (!await scope.__nestedBudgetEditor.undo() || scope.__nestedBudgetEditor.getText() !== scope.__nestedBeforeEnter) throw Error('Local Enter undo must restore exact text');
+  });
+  await page.evaluate(() => (window as any).__nestedBudgetEditor.destroy());
+  await page.evaluate(() => {
+    const scope = window as any, api = scope.__liveHistory;
+    const text = 'Paragraph\n[ref]: ./reference-image.png\n\nUse ![image][ref].\n\n' + '**Distant paragraph**.\n\n'.repeat(4_100);
+    const editor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'live', onApplyChanges() {} });
+    api.parse(editor); editor.refreshDecorations();
+    editor.view.dispatch({ selection: { anchor: 'Paragraph'.length } });
+    api.input(editor, 'Paragraph'.length, '\n');
+    scope.__referenceBudgetEditor = editor;
+  });
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__referenceBudgetEditor));
+  const referencePositions = await page.evaluate(() => (window as any).__liveHistory.positionSnapshot((window as any).__referenceBudgetEditor));
+  assert.deepEqual(await page.evaluate(() => {
+    const scope = window as any; scope.__referenceBudgetEditor.refreshDecorations();
+    return scope.__liveHistory.positionSnapshot(scope.__referenceBudgetEditor);
+  }), referencePositions, 'creating a link definition with Enter must also update references outside the changed block');
+  await page.evaluate(() => (window as any).__referenceBudgetEditor.destroy());
+  for (const target of ['middle', 'end']) {
+    await page.evaluate(target => {
+      const scope = window as any, api = scope.__liveHistory;
+      const text = 'Plain target paragraph.\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\n' + '**Distant paragraph**.\n\n'.repeat(4_100);
+      const editor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'live', onApplyChanges() {} });
+      api.parse(editor); editor.refreshDecorations();
+      const from = target === 'middle' ? 5 : 'Plain target paragraph.'.length;
+      editor.view.dispatch({ selection: { anchor: from } });
+      scope.__plainNewlineBuilds = scope.__fullLiveBuilds ?? 0;
+      scope.__plainNewlineOriginal = text;
+      api.input(editor, from, '\n');
+      scope.__plainNewlineEditor = editor;
+    }, target);
+    await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__plainNewlineEditor));
+    assert.equal(await page.evaluate(() => ((window as any).__fullLiveBuilds ?? 0) - (window as any).__plainNewlineBuilds), 0,
+      `${target}: plain Enter must not schedule a delayed full-document build`);
+    const projected = await page.evaluate(() => (window as any).__liveHistory.positionSnapshot((window as any).__plainNewlineEditor));
+    assert.deepEqual(await page.evaluate(() => {
+      const scope = window as any; scope.__plainNewlineEditor.refreshDecorations();
+      return scope.__liveHistory.positionSnapshot(scope.__plainNewlineEditor);
+    }), projected, `${target}: split and trailing blank lines must match complete presentation`);
+    await page.evaluate(async () => {
+      const scope = window as any;
+      if (!await scope.__plainNewlineEditor.undo() || scope.__plainNewlineEditor.getText() !== scope.__plainNewlineOriginal) throw Error('Plain Enter undo must restore exact source');
+      scope.__plainNewlineEditor.destroy();
+    });
+  }
   await page.evaluate(() => {
     const scope = window as any, api = scope.__liveHistory;
     const text = 'EDIT\n\n```js\n' + Array.from({ length: 40 }, (_, index) => `const budget${String(index).padStart(2, '0')} = ${index};`).join('\n')
@@ -87,6 +191,7 @@ try {
     const line = [...view.contentDOM.querySelectorAll<HTMLElement>('.cm-line')].find(line => line.textContent === 'EDIT');
     if (!line) throw Error('The pointer budget requires visible prose');
     const rect = line.getBoundingClientRect();
+    view.dom.addEventListener('pointerdown', () => { scope.__clickHighlightReady = view.dom.__canRequestCodeHighlight(); });
     scope.__clickCursorStyles = 0;
     scope.__clickCoordinateReads = 0;
     const coordinates = view.posAtCoords.bind(view);
@@ -98,7 +203,11 @@ try {
     return { x: rect.left + 12, y: rect.top + rect.height / 2 };
   });
   await page.mouse.click(prosePoint.x, prosePoint.y);
+  assert.equal(await page.evaluate(() => (window as any).__clickHighlightReady), false,
+    'a large Live caret click must paint before cold grammar compilation may start');
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await page.waitForFunction(() => (window as any).__budgetEditor.view.dom.__canRequestCodeHighlight(),
+    { timeout: 5_000 });
   assert.equal(await page.evaluate(() => (window as any).__clickCursorStyles), 0,
     'a caret click must not restyle every descendant with the drag-only cursor override');
   // CodeMirror owns two character hits; toolbar hover may retain one more.

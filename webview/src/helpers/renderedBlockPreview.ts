@@ -67,16 +67,13 @@ export function preserveRenderedBlockPreviewHeights(
   }
 }
 
-export const renderedBlockPreviewStartLine = Symbol('meoRenderedBlockPreviewStartLine');
+/** The mapped block range owns its source line. A viewport placeholder must
+ * not retain a second absolute line number when text above it changes. */
+export const renderedBlockPreview = Symbol('meoRenderedBlockPreview');
 
-export function getRenderedBlockPreviewStartLine(widget: unknown): number | null {
-  if (typeof widget !== 'object' || widget === null) return null;
-  const startLine = (widget as { [renderedBlockPreviewStartLine]?: unknown })[
-    renderedBlockPreviewStartLine
-  ];
-  return Number.isInteger(startLine) && (startLine as number) > 0
-    ? startLine as number
-    : null;
+export function hasRenderedBlockPreview(widget: unknown): boolean {
+  return typeof widget === 'object' && widget !== null
+    && (widget as { [renderedBlockPreview]?: unknown })[renderedBlockPreview] === true;
 }
 
 export function createRenderedBlockPreviewShell(options: {

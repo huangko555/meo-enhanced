@@ -33,7 +33,7 @@ import {
   createRenderedBlockPreviewShell,
   RenderedBlockPreviewHeight,
   renderedBlockPreviewHeight,
-  renderedBlockPreviewStartLine
+  renderedBlockPreview
 } from './renderedBlockPreview';
 import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 
@@ -804,10 +804,11 @@ export function addCodeLanguageLabel(builder: any[], state: EditorState, node: a
 }
 
 class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
-  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+  [mapLiveWidgetPositions](changes: ChangeDesc, state: EditorState): WidgetType {
     const anchor = changes.mapPos(this.anchor, 1), to = changes.mapPos(this.blockTo, -1);
-    if (anchor === this.anchor && to === this.blockTo) return this;
-    const next = new MermaidPreviewWidget(this.diagramText, this.fullBlockText, anchor, to, this.startLine, this.endLine,
+    const startLine = state.doc.lineAt(anchor).number, endLine = state.doc.lineAt(Math.max(anchor, to - 1)).number;
+    if (anchor === this.anchor && to === this.blockTo && startLine === this.startLine && endLine === this.endLine) return this;
+    const next = new MermaidPreviewWidget(this.diagramText, this.fullBlockText, anchor, to, startLine, endLine,
       this.indentColumns, this.presentationFactory, this.uiLanguage, this.viewportState, this.diagramWidget);
     next[renderedBlockPreviewHeight].seed(this[renderedBlockPreviewHeight]);
     return next;
@@ -854,9 +855,7 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
     return height > 0 ? height : this.diagramWidget.estimatedHeight;
   }
 
-  get [renderedBlockPreviewStartLine](): number {
-    return this.startLine;
-  }
+  readonly [renderedBlockPreview] = true;
 
   eq(other: WidgetType): boolean {
     return other instanceof MermaidPreviewWidget

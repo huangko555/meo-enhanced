@@ -23,7 +23,24 @@ export function getFencedCodeInfo(state: EditorState, node: any): string | null 
   return null;
 }
 
+const syntaxSnapshots = new WeakMap<EditorState, Tree>();
+
+/** A proven local presentation reads one outer Markdown snapshot throughout.
+ * Nested helpers must not advance embedded parsers and invalidate that proof.
+ * This scope is synchronous and never changes CodeMirror's published tree. */
+export function withMarkdownSyntaxSnapshot<T>(state: EditorState, tree: Tree, read: () => T): T {
+  const previous = syntaxSnapshots.get(state);
+  syntaxSnapshots.set(state, tree);
+  try { return read(); }
+  finally {
+    if (previous) syntaxSnapshots.set(state, previous);
+    else syntaxSnapshots.delete(state);
+  }
+}
+
 export function resolvedSyntaxTree(state: EditorState, timeout: number = 50): Tree {
+  const snapshot = syntaxSnapshots.get(state);
+  if (snapshot) return snapshot;
   return ensureSyntaxTree(state, state.doc.length, timeout) ?? syntaxTree(state);
 }
 export function headingLevelFromName(name: string): number | null {
