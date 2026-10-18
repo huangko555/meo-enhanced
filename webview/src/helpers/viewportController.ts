@@ -91,6 +91,8 @@ export interface PreviewViewportSurface {
   } | null;
   readScrollTop?(): number;
   writeScrollTop?(scrollTop: number): void;
+  /** Native gestures own their scroll position until pointer/momentum settles. */
+  isInteracting?(): boolean;
 }
 
 interface ViewportControllerOptions {
@@ -902,8 +904,17 @@ export class ViewportController {
       return;
     }
     if (this.previewSurface?.readScrollTop && this.previewSurface.writeScrollTop) {
+      if (this.previewSurface.isInteracting?.()) {
+        // Programmatic restoration can interrupt native scrollbar dragging.
+        // Let the browser finish the gesture before refreshing the linked map.
+        mutate();
+        this.linkedViewportMapDirty = true;
+        this.scheduleLinkedViewportMapRefresh();
+        return;
+      }
       const linkedPreviewEnabled = this.linkedPreviewEnabled;
       const heldPreviewTop = this.previewSurface.readScrollTop();
+      const interactionGeneration = this.interactionGeneration;
       const projectionGeneration = this.linkedProjectionGeneration;
       const projectionDriver = this.linkedViewportDriver;
       const previewGestureActive = linkedPreviewEnabled && projectionDriver === 'preview' && this.isLinkedInteractionActive();
@@ -964,6 +975,7 @@ export class ViewportController {
           sourceRange: projectedAnchor.sourceRange
         }, () => (
           !this.destroyed && this.linkedPreviewEnabled === linkedPreviewEnabled &&
+          interactionGeneration === this.interactionGeneration &&
           projectionGeneration === this.linkedProjectionGeneration &&
           (!linkedPreviewEnabled || this.linkedViewportDriver === projectionDriver)
         ));
@@ -1054,13 +1066,15 @@ export class ViewportController {
   }
 
   private isLinkedInteractionActive(): boolean {
-    return this.readClock() < this.linkedInteractionUntil;
+    return this.readClock() < this.linkedInteractionUntil
+      || this.linkedViewportDriver === 'preview' && this.previewSurface?.isInteracting?.() === true;
   }
 
   private scheduleLinkedViewportMapRefresh(): void {
     if (this.destroyed || !this.linkedPreviewEnabled) return;
     if (this.linkedViewportMapRefreshTimer !== null) clearTimeout(this.linkedViewportMapRefreshTimer);
-    const delay = Math.max(0, this.linkedInteractionUntil - this.readClock());
+    const delay = Math.max(this.previewSurface?.isInteracting?.() ? WHEEL_GESTURE_IDLE_MS : 0,
+      this.linkedInteractionUntil - this.readClock());
     this.linkedViewportMapRefreshTimer = setTimeout(() => {
       this.linkedViewportMapRefreshTimer = null;
       if (this.destroyed || !this.linkedPreviewEnabled) return;
@@ -1118,7 +1132,6 @@ export class ViewportController {
       ? currentPosition ?? undefined
       : undefined;
     const linkedMap = this.measureLinkedViewportMap(pinnedPoint);
-    if (!linkedMap) return;
     this.linkedViewportMap = linkedMap;
     this.linkedViewportMapDirty = false;
     if (project) this.projectLinkedViewport(this.linkedViewportDriver);

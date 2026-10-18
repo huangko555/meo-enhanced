@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 import exportRuntime from '../src/export/runtime';
 
+const largeDocument = process.argv.includes('--large');
+
 const build = await Bun.build({
   entrypoints: ['scripts/test-preview-reading-surface-production-entry.ts'],
   target: 'browser',
@@ -60,7 +62,7 @@ try {
     '![Late image](https://preview-layout.test/late.svg)',
     ...Array.from({ length: 2 }, (_, index) => `Between image and anchor ${index + 1}.`),
     anchorText,
-    ...Array.from({ length: 40 }, (_, index) => `After anchor paragraph ${index + 1}.`)
+    ...Array.from({ length: largeDocument ? 4_100 : 40 }, (_, index) => `After anchor paragraph ${index + 1}.`)
   ].join('\n\n');
   const anchorLine = text.slice(0, text.indexOf(anchorText)).split('\n').length;
   await page.evaluate(text => window.dispatchEvent(new MessageEvent('message', { data: {
@@ -97,6 +99,8 @@ try {
   assert.ok(imageResolutionRequested, 'The late image request must be held before the layout probe');
   await page.waitForFunction(anchorText => document.querySelector<HTMLIFrameElement>('.preview-frame')
     ?.contentDocument?.body.textContent?.includes(anchorText), {}, anchorText);
+  assert.equal(await page.evaluate(() => document.querySelector<HTMLIFrameElement>('.preview-frame')
+    ?.contentDocument?.documentElement.dataset.meoPreviewLargeDocument), String(largeDocument));
   await new Promise(resolve => setTimeout(resolve, 300));
   await page.evaluate(() => {
     const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
@@ -155,7 +159,7 @@ try {
     Math.max(...samples) - Math.min(...samples) <= 1,
     `A late Preview layout commit must preserve the visible semantic anchor: ${JSON.stringify(samples)}`
   );
-  console.log('Source Preview late-layout anchor checks passed');
+  console.log(`Source Preview late-layout anchor checks passed (${largeDocument ? 'large' : 'ordinary'} document)`);
 } catch (error) {
   primaryError = error;
 } finally {

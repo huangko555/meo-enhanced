@@ -72,7 +72,22 @@ export function createPreviewSourceGeometry(document: Document) {
         if (edge) visit(edge);
         return;
       }
-      for (const child of node.children) visit(child);
+      // Footnotes form one very tall source container. Descending every note
+      // would force skipped subtrees to lay out just to locate the few visible
+      // notes. Their generated list follows normal flow, like reading roots.
+      if (node.element.matches('section.footnotes')) {
+        let first = 0, last = node.children.length - 1;
+        while (first <= last) {
+          const middle = (first + last) >>> 1;
+          if (rect(node.children[middle]).bottom < minimum) first = middle + 1;
+          else last = middle - 1;
+        }
+        for (let index = Math.max(0, first - 1); index < node.children.length; index++) {
+          const child = node.children[index];
+          visit(child);
+          if (rect(child).top > maximum) break;
+        }
+      } else for (const child of node.children) visit(child);
     };
     let passedBand = false;
     let before: SourceNode | undefined, after: SourceNode | undefined;
@@ -105,17 +120,5 @@ export function createPreviewSourceGeometry(document: Document) {
     return [{ startLine: Math.min(...members.map(entry => entry.start)), endLine: Math.max(...members.map(entry => entry.end)),
       top: bounds.top + top, bottom: bounds.bottom + top }];
   });
-  const containOffscreenLayout = () => {
-    // Keep the initially laid-out block heights, so enabling containment does
-    // not replace the native scrollbar with a collection of tiny estimates.
-    // Read first, write second; interleaving these causes quadratic layout.
-    const heights = roots.map(root => root.element.getBoundingClientRect().height);
-    for (let index = 0; index < roots.length; index++) {
-      const element = roots[index].element;
-      if (heights[index] <= 0) continue;
-      element.style.containIntrinsicBlockSize = `auto ${heights[index]}px`;
-      element.style.contentVisibility = 'auto';
-    }
-  };
-  return { entries, measure, viewport, linkedRegions, containOffscreenLayout };
+  return { entries, measure, viewport, linkedRegions };
 }

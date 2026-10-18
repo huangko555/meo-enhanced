@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 import exportRuntime from '../src/export/runtime';
 
-const markdown = '[Jump to Section 12](#section-12)\n\n' + Array.from({ length: 24 }, (_, section) =>
+const largeDocument = process.argv.includes('--large');
+const selectedCase = process.argv.find(argument => argument.startsWith('--case='))?.slice(7);
+const markdown = '[Jump to Section 12](#section-12)\n\n' + Array.from({ length: largeDocument ? 240 : 24 }, (_, section) =>
   `## Section ${section + 1}\n\n` + Array.from({ length: 8 }, (_, paragraph) =>
     `Paragraph ${section + 1}-${paragraph + 1}: ` + 'reading content '.repeat(18)
   ).join('\n\n')
@@ -18,6 +20,7 @@ let primaryError: unknown;
 try {
   for (const mode of ['live', 'source'] as const) {
     for (const navigation of ['outline', 'fragment', 'top', 'unchanged'] as const) {
+      if (selectedCase && selectedCase !== `${mode}:${navigation}`) continue;
       const label = `${mode}: ${navigation}`;
       const page = await browser.newPage();
       try {
@@ -49,9 +52,19 @@ try {
             restoreReadingPositionOnOpen: false, vscodeTheme: null
           } }));
         }, { text: markdown, mode });
+        if (largeDocument && mode === 'live') {
+          await page.waitForSelector('.cm-content');
+          await page.click(`button[data-mode="${mode}"]`);
+        }
         await page.waitForFunction(mode => Boolean(document.querySelector(`.cm-editor.meo-mode-${mode}`))
           && !document.querySelector('.editor-wrapper')?.classList.contains('meo-preload-editor-shell'), {}, mode);
+        if (largeDocument && mode === 'source') {
+          await page.waitForFunction(() => document.querySelectorAll('.outline-item').length === 240
+            && document.querySelector('.outline-content')?.getAttribute('aria-busy') === 'false',
+          { timeout: selectedCase ? 5_000 : 30_000 });
+        }
         if (navigation === 'top' || navigation === 'unchanged') {
+          await page.waitForSelector('.outline-item[data-tooltip="Section 12"]', { timeout: selectedCase ? 5_000 : 30_000 });
           await page.click('.outline-item[data-tooltip="Section 12"]');
           await new Promise(resolve => setTimeout(resolve, 250));
         }
@@ -63,7 +76,10 @@ try {
         await new Promise(resolve => setTimeout(resolve, 250));
         const frame = await (await page.$('.preview-frame'))!.contentFrame();
         assert.ok(frame);
-        if (navigation === 'outline') await page.click('.outline-item[data-tooltip="Section 12"]');
+        if (navigation === 'outline') {
+          await page.waitForSelector('.outline-item[data-tooltip="Section 12"]');
+          await page.click('.outline-item[data-tooltip="Section 12"]');
+        }
         if (navigation === 'fragment') {
           await frame.focus('a[data-meo-preview-href="#section-12"]');
           await page.keyboard.press('Enter');
@@ -102,6 +118,14 @@ try {
           assert.ok(result.every(sample => sample.visible), `${label}: ${expectedHeading} lost after return: ${JSON.stringify(result)}`);
         }
         console.log(`PASS ${label}`);
+      } catch (error) {
+        console.error(label, await page.evaluate(() => ({
+          mode: document.querySelector<HTMLElement>('#app')?.dataset.mode,
+          outline: Array.from(document.querySelectorAll<HTMLElement>('.outline-item')).slice(0, 16).map(item => item.dataset.tooltip),
+          outlineCount: document.querySelectorAll('.outline-item').length,
+          editor: document.querySelector('.editor-host > .cm-editor')?.className
+        })));
+        throw error;
       } finally {
         await page.close();
       }

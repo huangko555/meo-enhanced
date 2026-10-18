@@ -14,6 +14,7 @@ export interface OutlineHeading {
 
 interface EditorApi {
   getHeadings(): OutlineHeading[];
+  isOutlinePending?(): boolean;
   getViewportAnchorOffset(ratio?: number): number;
   getVisibleDocumentRange(): { from: number; to: number; fromLine: number; toLine: number };
   getScrollElement(): EventTarget;
@@ -189,6 +190,7 @@ export function createOutlineController({
   let visibleHeadingIndexes = new Set<number>();
   let boundScrollElement: EventTarget | null = null;
   let scrollFrame = 0;
+  let headingRefreshTimer: number | null = null;
 
   const notifyUiState = () => onUiStateChange?.({ mode, width });
   const mutateLayoutWithViewportPreserved = (mutate: () => void) => {
@@ -404,10 +406,16 @@ export function createOutlineController({
     if (previousScrollTop !== null) outlineContent.scrollTop = previousScrollTop;
   };
 
+  const cancelHeadingRefresh = () => {
+    if (headingRefreshTimer !== null) window.clearTimeout(headingRefreshTimer);
+    headingRefreshTimer = null;
+  };
   const refresh = () => {
+    cancelHeadingRefresh();
     refreshAppearance();
     const editor = getEditor();
     if (!editor) {
+      outlineContent.setAttribute('aria-busy', 'false');
       currentOutlineHeadings = [];
       currentOutlineHeadingIndexByFrom = new Map();
       currentTreeRoots = [];
@@ -417,16 +425,27 @@ export function createOutlineController({
       renderTree();
       return;
     }
-    currentOutlineHeadings = editor.getHeadings();
-    currentOutlineHeadingIndexByFrom = new Map(currentOutlineHeadings.map((heading, index) => [heading.from, index]));
-    const tree = buildOutlineTree(currentOutlineHeadings);
-    currentTreeRoots = tree.roots;
-    currentNodeByIndex = tree.nodeByIndex;
-    const validKeys = new Set(Array.from(currentNodeByIndex.values(), (node) => node.key));
-    collapsedKeys = new Set([...collapsedKeys].filter((key) => validKeys.has(key)));
-    bindScroll();
-    updateActiveHeadings();
-    renderTree();
+    const headings = editor.getHeadings(), pending = editor.isOutlinePending?.() === true;
+    const busy = String(pending);
+    if (outlineContent.getAttribute('aria-busy') !== busy) outlineContent.setAttribute('aria-busy', busy);
+    // A partial CodeMirror tree is not a complete document outline. Advance it
+    // in bounded tasks, retaining identical rows until more metadata is ready.
+    if (!pending || headings !== currentOutlineHeadings) {
+      currentOutlineHeadings = headings;
+      currentOutlineHeadingIndexByFrom = new Map(currentOutlineHeadings.map((heading, index) => [heading.from, index]));
+      const tree = buildOutlineTree(currentOutlineHeadings);
+      currentTreeRoots = tree.roots;
+      currentNodeByIndex = tree.nodeByIndex;
+      const validKeys = new Set(Array.from(currentNodeByIndex.values(), (node) => node.key));
+      collapsedKeys = new Set([...collapsedKeys].filter((key) => validKeys.has(key)));
+      bindScroll();
+      updateActiveHeadings();
+      renderTree();
+    }
+    if (visible && pending) headingRefreshTimer = window.setTimeout(() => {
+      headingRefreshTimer = null;
+      if (visible && outlineSidebar.isConnected) refresh();
+    }, 0);
   };
 
   const updateModeButton = () => {
@@ -463,6 +482,7 @@ export function createOutlineController({
   };
 
   const setVisible = (nextVisible: boolean) => {
+    if (!nextVisible) cancelHeadingRefresh();
     const changed = visible !== (nextVisible === true);
     const update = () => {
       visible = nextVisible === true;

@@ -2996,4 +2996,77 @@ for (const interpolatedWhitespace of [undefined, true]) {
   if (controller.alignLinkedViewport('editor')) throw new Error('Disposed alignment must be inert');
 }
 
+// A native Preview scrollbar owns its position until the gesture finishes.
+// Resource commits must not interrupt it with semantic or pixel restoration,
+// including when Preview is standalone rather than a linked Source split.
+{
+  let interacting = true, top = 300, captures = 0, writes = 0;
+  const surface = {
+    isInteracting: () => interacting,
+    readScrollTop: () => top,
+    writeScrollTop: (next: number) => { writes++; top = next; },
+    captureTopVisiblePosition: () => { captures++; return { line: 3, lineOffset: 0 }; },
+    restoreTopVisiblePosition: () => { writes++; }
+  };
+  const controller = new ViewportController(anchorView as any, { attachInteractions: false, previewSurface: surface });
+  try {
+    controller.runPreviewPresentationTransaction(() => { top = 337; });
+    if (captures || writes || top !== 337) throw new Error(`Resource layout interrupted native Preview dragging: ${JSON.stringify({ captures, writes, top })}`);
+    interacting = false;
+    controller.runPreviewPresentationTransaction(() => {});
+    if (!captures || !writes) throw new Error('Idle Preview reading-anchor preservation must resume after pointer release');
+  } finally { controller.destroy(); }
+}
+
+{
+  let current: (() => boolean) | undefined;
+  const controller = new ViewportController(anchorView as any, { attachInteractions: false, previewSurface: {
+    readScrollTop: () => 300, writeScrollTop: () => {},
+    captureTopVisiblePosition: () => ({ line: 3, lineOffset: 0 }),
+    restoreTopVisiblePosition: (_position, isCurrent) => { current = isCurrent; }
+  } });
+  try {
+    controller.runPreviewPresentationTransaction(() => {});
+    if (!current?.()) throw new Error('The current standalone Preview projection must be usable');
+    controller.markPreviewInteraction();
+    if (current()) throw new Error('A new standalone Preview gesture must invalidate an older asynchronous resource projection');
+  } finally { controller.destroy(); }
+}
+
+// Switching from exact geometry to estimated large-document heights retires
+// the previous proportional map; the current source anchor owns the follower.
+{
+  const doc = Text.of(Array.from({ length: 100 }, () => 'line'));
+  let exact = true, pixelWrites = 0;
+  const projected: number[] = [];
+  const view = {
+    dom: {}, state: { doc },
+    scrollDOM: { scrollTop: 300, scrollLeft: 0, scrollHeight: 2000, clientHeight: 400 },
+    lineBlockAt: (position: number) => {
+      const line = doc.lineAt(position);
+      return { from: line.from, top: (line.number - 1) * 20, bottom: line.number * 20 };
+    },
+    lineBlockAtHeight: () => ({ from: doc.line(16).from, top: 300 })
+  };
+  const controller = new ViewportController(view as any, { attachInteractions: false, previewSurface: {
+    readScrollTop: () => 500, writeScrollTop: () => { pixelWrites++; },
+    captureTopVisiblePosition: () => null,
+    restoreTopVisiblePosition: position => { projected.push(position.line); },
+    captureLinkedGeometry: () => exact ? {
+      regions: [{ startLine: 11, endLine: 20, top: 400, bottom: 600 }], maximumScrollTop: 2800
+    } : null
+  } });
+  try {
+    controller.setLinkedPreviewEnabled(true);
+    if (!pixelWrites) throw new Error('The initial exact linked map must be active');
+    const previousWrites = pixelWrites;
+    exact = false;
+    controller.linkedPreviewReady();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    if (pixelWrites !== previousWrites || projected.at(-1) !== 16) {
+      throw new Error('Estimated Preview geometry must retire the stale proportional map and project the source anchor');
+    }
+  } finally { controller.destroy(); }
+}
+
 console.log('viewport controller checks passed');

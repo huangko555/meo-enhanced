@@ -2960,6 +2960,7 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     },
     onViewportChange: () => readingPositionLifecycle?.viewportChanged(),
     previewViewportSurface: {
+      isInteracting: () => previewController.isViewportInteracting(),
       captureTopVisiblePosition(viewportOffset) {
         const position = previewController.getTopVisiblePosition(viewportOffset);
         return position ? {

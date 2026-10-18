@@ -1,4 +1,5 @@
 import { createPreviewController } from '../webview/src/helpers/preview';
+import { writePreviewFrame } from '../webview/src/helpers/previewFrameWriter';
 import { createCodePaletteWebviewAdapter } from '../webview/src/adapters/codePaletteWebviewAdapter';
 import { setShikiTheme } from '../webview/src/helpers/shikiHighlighter';
 import { createMermaidDiagramRenderPool } from '../webview/src/editor/mermaidDiagramRenderPool';
@@ -17,6 +18,7 @@ const controller = createPreviewController({
     initialize: initializeMermaidEditorRuntime,
     render: renderMermaidRuntime
   }),
+  onViewportInteraction() { scope.__previewInteractionCount = (scope.__previewInteractionCount ?? 0) + 1; },
   onRendered() { scope.__previewRenderedAt = performance.now(); scope.__previewRenderProbe?.(); }
 });
 const scope = window as typeof window & {
@@ -24,7 +26,10 @@ const scope = window as typeof window & {
   __previewMessages: unknown[];
   __previewRenderedAt?: number;
   __previewRenderProbe?: () => void;
+  __writePreviewFrame: typeof writePreviewFrame;
+  __previewInteractionCount?: number;
 };
 scope.__previewController = controller;
 scope.__previewMessages = messages;
+scope.__writePreviewFrame = writePreviewFrame;
 document.body.append(controller.host);

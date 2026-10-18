@@ -12,12 +12,13 @@ export const previewSearchStyles = [
 ].join('\n');
 
 export function createPreviewSearchController({
-  getDocument, isVisible, onResultsChanged, onNavigate = () => {}, focus
+  getDocument, isVisible, onResultsChanged, onNavigate = () => {}, revealElement, focus
 }: {
   getDocument: () => Document | null;
   isVisible: () => boolean;
   onResultsChanged: () => void;
   onNavigate?: () => void;
+  revealElement?: (element: HTMLElement, block: ScrollLogicalPosition) => void;
   focus: () => void;
 }) {
   let query = '';
@@ -299,6 +300,9 @@ export function createPreviewSearchController({
 
   const find = (nextQuery: string, nextOptions: SearchOptions, direction: 1 | -1) => {
     setSearchQuery(nextQuery, nextOptions);
+    // An explicit intent supersedes opening/resource projections even if a
+    // background presentation temporarily made the search surface unready.
+    if (!disposed && isVisible()) onNavigate();
     // An explicit navigation may finish pending matching; mode switches never do.
     if (canRun() && dirty) {
       if (searchTimer !== null) window.clearTimeout(searchTimer);
@@ -313,8 +317,8 @@ export function createPreviewSearchController({
       : (activeIndex + direction + matches.length) % matches.length;
     anchor = matches[activeIndex]!.anchor;
     applyAnchor();
-    onNavigate();
-    matches[activeIndex]!.element.scrollIntoView({ block: 'center', inline: 'nearest' });
+    if (revealElement) revealElement(matches[activeIndex]!.element, 'center');
+    else matches[activeIndex]!.element.scrollIntoView({ block: 'center', inline: 'nearest' });
     return { found: true, current: activeIndex + 1, total: matches.length };
   };
 

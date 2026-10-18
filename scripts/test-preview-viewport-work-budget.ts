@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import puppeteer from 'puppeteer-core';
+import { closeTestBrowser, findBrowserExecutable, launchTestBrowser } from './browser-test-helpers';
 import exportRuntime from '../src/export/runtime';
 
 const build = await Bun.build({ entrypoints: ['scripts/test-preview-code-update-entry.ts'], target: 'browser', format: 'iife' });
@@ -8,8 +12,20 @@ const text = '# Viewport budget\n\nEarly reference[^early].\n\n[^early]: Footnot
   + Array.from({ length: 4_100 }, (_, index) => `Paragraph ${index}.\n\n`).join('')
   + '<details>\n<summary>Closed section</summary>\n\n## Hidden heading\n\nHidden paragraph.\n\n</details>\n\n'
   + '## Final section\n\nFinal paragraph.';
-const browser = await launchTestBrowser();
+const browser = await launchTestBrowser({
+  createUserDataDir: () => fs.promises.mkdtemp(path.join(os.tmpdir(), 'meo-preview-scrollbar-test-')),
+  launch: ({ userDataDir }) => puppeteer.launch({
+    executablePath: findBrowserExecutable(), headless: true, userDataDir,
+    ignoreDefaultArgs: ['--hide-scrollbars'], args: ['--no-sandbox', '--edge-skip-compat-layer-relaunch']
+  }),
+  cleanupUserDataDir: async directory => {
+    assert.ok(path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)
+      && path.basename(directory).startsWith('meo-preview-scrollbar-test-'));
+    await fs.promises.rm(directory, { recursive: true });
+  }
+});
 let primaryError: unknown;
+let stage = 'initialization';
 try {
   const page = await browser.newPage();
   const errors: string[] = [];
@@ -19,6 +35,16 @@ try {
   await page.addStyleTag({ path: 'webview/src/styles.css' });
   await page.addStyleTag({ content: '.preview-host:not([hidden]){height:100%;display:flex;flex-direction:column}.preview-frame{width:100%;height:100%;flex:1}' });
   await page.addScriptTag({ content: await build.outputs[0].text() });
+  const pendingFind = await page.evaluate(() => {
+    const scope = window as any, controller = scope.__previewController;
+    controller.setVisible(true);
+    const before = scope.__previewInteractionCount ?? 0;
+    const result = controller.getSearchAdapter().findNext('pending target', {});
+    controller.getSearchAdapter().setSearchQuery('');
+    return { found: result.found, interactions: (scope.__previewInteractionCount ?? 0) - before };
+  });
+  assert.deepEqual(pendingFind, { found: false, interactions: 1 },
+    'an explicit Find intent must retire old viewport restores even while Preview is preparing its search surface');
   const value = exportRuntime.renderPreviewDocument({ markdownText: text, sourceDocumentPath: 'C:/preview-budget.md', uiLanguage: 'en' });
   await page.evaluate(({ text, value }) => {
     const scope = window as any;
@@ -31,6 +57,64 @@ try {
   }, { text, value });
   await page.waitForFunction(() => !!(window as any).__previewRenderedAt);
   await new Promise(resolve => setTimeout(resolve, 250));
+  const frameBounds = await (await page.$('.preview-frame'))!.boundingBox();
+  assert.ok(frameBounds);
+  await page.mouse.move(frameBounds.x + 5, frameBounds.y + 50);
+  await page.mouse.down();
+  await new Promise(resolve => setTimeout(resolve, 350));
+  assert.equal(await page.evaluate(() => (window as any).__previewController.isViewportInteracting()), true,
+    'a held Preview pointer must stay active beyond the wheel idle interval');
+  const refreshedText = text + '\n\nRefresh while the pointer is held.\n';
+  const refreshedValue = exportRuntime.renderPreviewDocument({ markdownText: refreshedText, sourceDocumentPath: 'C:/preview-budget.md', uiLanguage: 'en' });
+  const heldRefresh = await page.evaluate(async ({ text, value }) => {
+    const scope = window as any, controller = scope.__previewController;
+    const previous = controller.host.querySelector('iframe').contentDocument;
+    void controller.requestRender(text, { force: true, preserveFrame: true });
+    const message = scope.__previewMessages.filter((message: any) => message.type === 'requestPreviewRender').at(-1);
+    const accepted = controller.acceptRenderResponse({ type: 'previewRenderResult', requestId: message.requestId, result: { ok: true, value } });
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return { accepted, sameDocument: controller.host.querySelector('iframe').contentDocument === previous, active: controller.isViewportInteracting() };
+  }, { text: refreshedText, value: refreshedValue });
+  assert.deepEqual(heldRefresh, { accepted: true, sameDocument: true, active: true },
+    'a preserved iframe refresh must keep the ongoing pointer gesture');
+  await page.mouse.move(0, 0);
+  await page.mouse.up();
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(await page.evaluate(() => (window as any).__previewController.isViewportInteracting()), false,
+    'releasing outside the iframe must end its gesture');
+  const rangeBefore = await page.evaluate(() => {
+    const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
+    doc.scrollingElement.scrollTop = 0;
+    const page = doc.querySelector('.meo-export-page');
+    page.style.setProperty('overflow', 'visible', 'important');
+    return { height: doc.scrollingElement.scrollHeight, scrollbar: doc.defaultView.innerWidth - doc.documentElement.clientWidth };
+  });
+  assert.ok(rangeBefore.scrollbar > 0, 'this contract must expose the real native scrollbar');
+  await page.mouse.move(frameBounds.x + frameBounds.width - rangeBefore.scrollbar / 2, frameBounds.y + 14);
+  await page.mouse.down();
+  const heldRange = await page.evaluate(() => {
+    const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
+    const page = doc.querySelector('.meo-export-page');
+    doc.querySelector('p[data-source-line]').style.minHeight = '800px';
+    return { height: doc.scrollingElement.scrollHeight, held: !!page.style.height };
+  });
+  assert.deepEqual(heldRange, { height: rangeBefore.height, held: true },
+    'a native scrollbar gesture must keep its range while nearby content changes size');
+  await page.mouse.move(0, 0);
+  await page.mouse.up();
+  const releasedRange = await page.evaluate(() => {
+    const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
+    const page = doc.querySelector('.meo-export-page');
+    const result = { height: doc.scrollingElement.scrollHeight, held: !!page.style.height,
+      overflow: page.style.getPropertyValue('overflow'), priority: page.style.getPropertyPriority('overflow') };
+    doc.querySelector('p[data-source-line]').style.removeProperty('min-height');
+    page.style.removeProperty('overflow');
+    return result;
+  });
+  assert.ok(releasedRange.height > rangeBefore.height + 500);
+  assert.deepEqual({ ...releasedRange, height: 0 }, { height: 0, held: false, overflow: 'visible', priority: 'important' },
+    'releasing outside the iframe must restore authored page styles and its natural range');
+  await new Promise(resolve => setTimeout(resolve, 300));
   const reads = await page.evaluate(() => {
     const controller = (window as any).__previewController;
     const adapter = controller.getOutlineAdapter();
@@ -139,11 +223,55 @@ try {
     return controller.getOutlineAdapter().getVisibleDocumentRange();
   });
   assert.deepEqual(hidden, { from: 1, to: 1, fromLine: 1, toLine: 1 });
+  const noteText = 'References: ' + Array.from({ length: 150 }, (_, index) => `[^dense-${index}]`).join(' ') + '\n\n'
+    + 'Ordinary paragraph.\n\n'.repeat(4_100)
+    + Array.from({ length: 150 }, (_, index) => `[^dense-${index}]: Note ${index}.\n\n    Continued paragraph.\n\n`).join('');
+  const noteValue = exportRuntime.renderPreviewDocument({ markdownText: noteText, sourceDocumentPath: 'C:/preview-notes.md', uiLanguage: 'en' });
+  await page.evaluate(({ text, value }) => {
+    const scope = window as any, controller = scope.__previewController;
+    scope.__previewRenderedAt = 0; controller.setVisible(true);
+    void controller.requestRender(text);
+    const message = scope.__previewMessages.filter((message: any) => message.type === 'requestPreviewRender').at(-1);
+    controller.acceptRenderResponse({ type: 'previewRenderResult', requestId: message.requestId, result: { ok: true, value } });
+  }, { text: noteText, value: noteValue });
+  await page.waitForFunction(() => !!(window as any).__previewRenderedAt);
+  await page.evaluate(async () => {
+    const controller = (window as any).__previewController, doc = controller.host.querySelector('iframe').contentDocument;
+    const target = [...doc.querySelectorAll('.footnote-item')].at(-1) as HTMLElement;
+    controller.getOutlineAdapter().scrollToLine(Number(target.dataset.sourceLine));
+    for (let frame = 0; frame < 14; frame++) await new Promise(resolve => requestAnimationFrame(resolve));
+  });
+  const noteReads = await page.evaluate(() => {
+    const controller = (window as any).__previewController, frame = controller.host.querySelector('iframe');
+    const prototype = frame.contentWindow.Element.prototype, original = prototype.getBoundingClientRect;
+    let reads = 0;
+    prototype.getBoundingClientRect = function() { if (this.hasAttribute('data-source-line')) reads++; return original.call(this); };
+    try { controller.refreshLayout(); controller.getTopVisiblePosition(); controller.getOutlineAdapter().getVisibleDocumentRange(); return reads; }
+    finally { prototype.getBoundingClientRect = original; }
+  });
+  assert.ok(noteReads < 120, `a reading band inside the footnote list must not measure every distant note (${noteReads} reads)`);
   const codeText = Array.from({ length: 600 }, (_, index) => `\`\`\`js\nconst value = ${index};\n\`\`\`\n\n`).join('')
     + 'Ordinary paragraph.\n\n'.repeat(4_100);
   const codeValue = exportRuntime.renderPreviewDocument({ markdownText: codeText, sourceDocumentPath: 'C:/preview-code-budget.md', uiLanguage: 'en' });
   await page.evaluate(({ text, value }) => {
     const scope = window as any, controller = scope.__previewController;
+    const frame = controller.host.querySelector('iframe') as HTMLIFrameElement;
+    scope.__typographyReads = 0;
+    scope.__typographyWindows = [];
+    const instrument = () => {
+      const win = frame.contentWindow as any;
+      if (scope.__typographyWindows.some((probe: any) => probe.wrapper === win.getComputedStyle)) return;
+      const original = win.getComputedStyle.bind(win);
+      const wrapper = (element: Element, pseudo?: string) => {
+        if (element.matches('.meo-export-code-line')) scope.__typographyReads++;
+        return original(element, pseudo);
+      };
+      scope.__typographyWindows.push({ win, original, wrapper });
+      win.getComputedStyle = wrapper;
+    };
+    scope.__typographyLoad = instrument;
+    frame.addEventListener('load', instrument);
+    instrument();
     scope.__previewRenderedAt = 0;
     controller.setVisible(true);
     controller.setSourceColoring(true);
@@ -152,7 +280,95 @@ try {
     controller.acceptRenderResponse({ type: 'previewRenderResult', requestId: message.requestId, result: { ok: true, value } });
   }, { text: codeText, value: codeValue });
   await page.waitForFunction(() => !!(window as any).__previewRenderedAt);
+  await page.evaluate(() => { (window as any).__previewController.host.querySelector('iframe').contentDocument.scrollingElement.scrollTop = 0; });
   await new Promise(resolve => setTimeout(resolve, 150));
+  const typographyReads = await page.evaluate(() => {
+    const scope = window as any;
+    scope.__previewController.host.querySelector('iframe').removeEventListener('load', scope.__typographyLoad);
+    for (const probe of scope.__typographyWindows) {
+      if (probe.win.getComputedStyle === probe.wrapper) probe.win.getComputedStyle = probe.original;
+    }
+    return scope.__typographyReads;
+  });
+  console.log('Preview initial code typography reads:', typographyReads);
+  assert.ok(typographyReads > 0 && typographyReads < 200, `initial large Preview must check nearby code typography instead of every source line (${typographyReads} reads)`);
+  const initialCopyControls = await page.evaluate(() => (window as any).__previewController.host
+    .querySelector('iframe').contentDocument.querySelectorAll('.meo-preview-code-actions').length);
+  assert.ok(initialCopyControls > 0 && initialCopyControls < 200,
+    `initial large Preview must only mount nearby reading controls (${initialCopyControls} controls)`);
+  const copyPointer = await page.evaluate(() => {
+    const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
+    const bounds = doc.querySelector('.meo-copy-code-btn').getBoundingClientRect();
+    return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
+  });
+  await page.mouse.move(frameBounds.x + copyPointer.x, frameBounds.y + copyPointer.y);
+  await page.mouse.down();
+  await page.evaluate(() => {
+    const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
+    const target = doc.querySelectorAll('code.hljs')[580];
+    target.dataset.typographyBudgetTarget = 'true';
+    const style = doc.createElement('style');
+    style.textContent = 'code[data-typography-budget-target] .meo-export-code-line{font-size:0;line-height:0}';
+    doc.head.appendChild(style);
+    (window as any).__previewController.getOutlineAdapter().scrollToLine(Number(target.closest('[data-source-line]')?.getAttribute('data-source-line')));
+  });
+  stage = 'deferred typography and copy controls';
+  await new Promise(resolve => setTimeout(resolve, 350));
+  assert.equal(await page.evaluate(() => {
+    const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
+    return !!doc.querySelector('code[data-typography-budget-target]')?.closest('.meo-export-code-block-wrap')?.querySelector('.meo-copy-code-btn');
+  }), false, 'background controls must wait while a native pointer gesture owns Preview');
+  await page.mouse.move(0, 0);
+  await page.mouse.up();
+  try { await page.waitForFunction(() => {
+    const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
+    const line = doc.querySelector('code[data-typography-budget-target] .meo-export-code-line');
+    return line && Number.parseFloat(doc.defaultView.getComputedStyle(line).fontSize) > 0 && line.getBoundingClientRect().height > 0
+      && doc.querySelector('code[data-typography-budget-target]')?.closest('.meo-export-code-block-wrap')?.querySelector('.meo-copy-code-btn');
+  }, { timeout: 5_000 }); } catch (error) {
+    console.error('Distant typography state:', await page.evaluate(() => {
+      const controller = (window as any).__previewController, doc = controller.host.querySelector('iframe').contentDocument;
+      const code = doc.querySelector('code[data-typography-budget-target]'), line = code?.querySelector('.meo-export-code-line');
+      return { interacting: controller.isViewportInteracting(), top: doc.scrollingElement.scrollTop,
+        pageHeight: doc.querySelector('.meo-export-page').style.height,
+        codeBounds: code?.getBoundingClientRect().toJSON(), lineBounds: line?.getBoundingClientRect().toJSON(),
+        font: line && doc.defaultView.getComputedStyle(line).fontSize,
+        copy: !!code?.closest('.meo-export-code-block-wrap')?.querySelector('.meo-copy-code-btn') };
+    }));
+    throw error;
+  }
+  stage = 'distant code clipboard';
+  await page.evaluate(() => {
+    const scope = window as any;
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+      async writeText(text: string) { scope.__budgetCopied = text; }
+    } });
+    const doc = scope.__previewController.host.querySelector('iframe').contentDocument;
+    scope.__budgetCopyButton = doc.querySelector('code[data-typography-budget-target]')
+      .closest('.meo-export-code-block-wrap').querySelector('.meo-copy-code-btn');
+    scope.__budgetCopyButton.click();
+  });
+  await page.waitForFunction(() => (window as any).__budgetCopied === 'const value = 580;');
+  const updatedCodeText = codeText + '\nUpdated final paragraph.\n';
+  const updatedCodeValue = exportRuntime.renderPreviewDocument({ markdownText: updatedCodeText, sourceDocumentPath: 'C:/preview-code-budget.md', uiLanguage: 'en' });
+  await page.evaluate(({ text, value }) => {
+    const scope = window as any, controller = scope.__previewController;
+    scope.__previewRenderedAt = 0;
+    void controller.requestRender(text, { force: true, preserveFrame: true });
+    const message = scope.__previewMessages.filter((message: any) => message.type === 'requestPreviewRender').at(-1);
+    controller.acceptRenderResponse({ type: 'previewRenderResult', requestId: message.requestId, result: { ok: true, value } });
+  }, { text: updatedCodeText, value: updatedCodeValue });
+  await page.waitForFunction(() => !!(window as any).__previewRenderedAt);
+  stage = 'retained code clipboard';
+  const retainedCopyButton = await page.evaluate(() => {
+    const scope = window as any, doc = scope.__previewController.host.querySelector('iframe').contentDocument;
+    const button = doc.querySelectorAll('code.hljs')[580].closest('.meo-export-code-block-wrap').querySelector('.meo-copy-code-btn');
+    scope.__budgetCopied = null;
+    button.click();
+    return button === scope.__budgetCopyButton;
+  });
+  assert.equal(retainedCopyButton, true, 'preserved iframe updates must retain mounted controls and their event handlers');
+  await page.waitForFunction(() => (window as any).__budgetCopied === 'const value = 580;');
   const scrollingReads = await page.evaluate(async () => {
     const frame = (window as any).__previewController.host.querySelector('iframe') as HTMLIFrameElement;
     const doc = frame.contentDocument!, prototype = (frame.contentWindow as any).Element.prototype;
@@ -188,7 +404,7 @@ try {
   await page.evaluate(() => {
     const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
     const last = [...doc.querySelectorAll('.meo-export-mermaid')].at(-1) as HTMLElement;
-    doc.scrollingElement.scrollTop += last.getBoundingClientRect().top - 100;
+    (window as any).__previewController.getOutlineAdapter().scrollToLine(Number(last.dataset.sourceLine));
   });
   await page.waitForFunction(() => {
     const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
@@ -199,8 +415,35 @@ try {
   assert.equal(new Set(diagramIds).size, 2, 'identical diagrams entering the viewport at different times must retain distinct SVG identities');
   assert.deepEqual(errors, []);
   await page.evaluate(() => (window as any).__previewController.dispose());
+  stage = 'streaming parser equivalence and cancellation';
+  const mathValue = exportRuntime.renderPreviewDocument({ markdownText: '$$\n\\frac{x^2+1}{y}=\\sqrt{z}\n$$\n\n| A | B |\n| --- | --- |\n| **bold** | $a+b$ |', sourceDocumentPath: 'C:/parser.md', uiLanguage: 'en' });
+  const parserResult = await page.evaluate(async html => {
+    const write = (window as any).__writePreviewFrame;
+    const expected = document.createElement('main'); expected.innerHTML = html;
+    const frame = document.createElement('iframe'); document.body.append(frame);
+    let stale = 0, current = 0, frames = 0, running = true;
+    const tick = () => { if (running) { frames++; requestAnimationFrame(tick); } };
+    requestAnimationFrame(tick);
+    const header = '<!doctype html><html><body><main>', footer = '</main></body></html>';
+    const cancel = write(frame, header, '<p>Cancelled document</p>' + html, footer, () => true, () => { stale++; });
+    cancel();
+    let cancelCurrent: () => void;
+    await new Promise<void>(resolve => {
+      cancelCurrent = write(frame, header, html, footer, () => true, () => { current++; resolve(); });
+      cancel(); // An old cancellation must remain inert after the next document starts.
+    });
+    running = false;
+    const result = { equal: frame.contentDocument!.querySelector('main')!.innerHTML === expected.innerHTML, stale, current, frames };
+    cancelCurrent!(); frame.remove();
+    return result;
+  }, '<p>' + 'x'.repeat(32_764) + '😀 &amp; 中文</p>' + codeValue.html + mathValue.html);
+  assert.equal(parserResult.equal, true, 'chunk boundaries must preserve UTF-16 pairs, entities, code, tables and MathML exactly');
+  assert.equal(parserResult.stale, 0, 'cancelled parser work must never publish an older presentation');
+  assert.equal(parserResult.current, 1, 'the current parser must publish ready exactly once');
+  assert.ok(parserResult.frames > 0, 'large HTML parsing must yield to animation frames');
   console.log('Preview viewport source index, visual footnote order and hidden surface budget passed');
 } catch (error) {
+  console.error('Preview viewport budget failed during:', stage);
   primaryError = error;
   throw error;
 } finally {

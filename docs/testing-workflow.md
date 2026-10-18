@@ -90,6 +90,27 @@ Preview viewport width when targeting that scrollbar. Grab the thumb rather than
 the platform arrow buttons, and remeasure after virtualized content settles.
 Programmatic scroll assignments may prepare a case but cannot prove dragging.
 
+`test-preview-viewport-work-budget.ts` exposes the browser's native scrollbar.
+It checks range retention while a nearby block changes height, release outside
+the iframe, exact restoration of authored styles, deferred reading controls,
+zero-size code typography, copied source after a preserved-frame update, and
+bounded geometry inside a 150-note footnote section. Its parser contract compares
+the browser's canonical HTML across UTF-16, entity, code, table and MathML chunk
+boundaries, including superseded writes and repeated cancellation.
+
+For changes to large Preview loading or positioning, the bounded variants
+`test-preview-loading-reuse.ts --large`,
+`test-source-preview-late-layout.ts --large`,
+`test-mode-roundtrip-reveal.ts --large` and
+`test-preview-navigation-continuity.ts --large` exercise the actual size policy
+and sliced parser. Their ordinary variants retain the existing gate membership.
+Run native VS Code measurements separately from other browser tests. Start the
+measurement after profiler activation and stop it before profiler teardown;
+those diagnostic operations can themselves pause animation frames. Retain actual
+trusted pointer receipt and visible scroll progress separately from CDP command
+delivery. A missing pointer event is an invalid drag sample, not evidence of a
+successful or slow product gesture.
+
 `scripts/test-long-document-scroll.ts` exercises the production Webview in Live,
 Source, Preview and split views, using shared visible-content witnesses in both
 scroll directions. The targeted viewport gate uses a bounded rich-document fixture

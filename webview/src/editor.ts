@@ -3385,6 +3385,10 @@ export function createEditor({
   emitSourcePositionChange(view.hasFocus);
   emitHistoryAvailability();
 
+  let outlinePending = false;
+  let outlineCache: {
+    doc: EditorState['doc']; tree: ReturnType<typeof resolvedSyntaxTree>; headings: ReturnType<typeof extractHeadings>;
+  } | null = null;
   return {
     view,
     state: view.state,
@@ -4168,8 +4172,14 @@ export function createEditor({
       });
     },
     getHeadings() {
-      return extractHeadings(view.state);
+      const state = view.state, tree = resolvedSyntaxTree(state, 8);
+      outlinePending = tree.length < state.doc.length;
+      if (outlineCache?.doc === state.doc && outlineCache.tree === tree) return outlineCache.headings;
+      const headings = extractHeadings(state, tree);
+      outlineCache = { doc: state.doc, tree, headings };
+      return headings;
     },
+    isOutlinePending: () => outlinePending,
     getViewportAnchorOffset(ratio = 0.2) {
       const normalizedRatio = Math.min(1, Math.max(0, Number.isFinite(ratio) ? ratio : 0.2));
       const height = view.scrollDOM.scrollTop + view.scrollDOM.clientHeight * normalizedRatio;

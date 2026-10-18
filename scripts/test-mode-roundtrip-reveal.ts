@@ -3,7 +3,8 @@ import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 import exportRuntime from '../src/export/runtime';
 
 const tableStartLine = 1131;
-const lines = Array.from({ length: 2005 }, (_, index) => `Reading line ${index + 1}`);
+const largeDocument = process.argv.includes('--large');
+const lines = Array.from({ length: largeDocument ? 10_005 : 2_005 }, (_, index) => `Reading line ${index + 1}`);
 lines[1124] = '> A quote above the table';
 lines[1125] = '> **Emphasized quote** with `inline code`';
 lines[1126] = '';
@@ -70,16 +71,20 @@ try {
       restoreReadingPositionOnOpen: false, vscodeTheme: null
     } }));
   }, markdown);
+  if (largeDocument) {
+    await page.waitForSelector('.cm-content');
+    await page.click('button[data-mode="live"]');
+  }
   await page.waitForSelector('.cm-editor.meo-mode-live');
-  await page.evaluate(async (line) => {
+  await page.evaluate(async ({ line, lineCount }) => {
     const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-    scroller.scrollTop = scroller.scrollHeight * line / 2005;
+    scroller.scrollTop = scroller.scrollHeight * line / lineCount;
     await new Promise(resolve => setTimeout(resolve, 300));
     const table = document.querySelector<HTMLElement>(
       `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${line}"]`
     );
     if (table) scroller.scrollTop += table.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 100;
-  }, tableStartLine);
+  }, { line: tableStartLine, lineCount: lines.length });
   await page.waitForFunction((line) => Boolean(document.querySelector(
     `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${line}"]`
   )), {}, tableStartLine);

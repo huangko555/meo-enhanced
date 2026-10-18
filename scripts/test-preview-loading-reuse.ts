@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 import exportRuntime from '../src/export/runtime';
 
+const largeDocument = process.argv.includes('--large');
+const expand = (text: string) => largeDocument ? text + '\n\n' + 'Rich document paragraph.\n\n'.repeat(4_100) : text;
+
 const build = await Bun.build({
   entrypoints: ['scripts/test-preview-mermaid-runtime-entry.ts'],
   target: 'browser', format: 'iife'
@@ -11,6 +14,7 @@ const browser = await launchTestBrowser();
 let primaryError: unknown;
 try {
   for (const scenario of ['blank-load', 'reuse', 'replace', 'force', 'failed', 'force-failed', 'force-failed-after-load', 'force-failed-ready', 'dispose']) {
+    if (largeDocument && scenario === 'blank-load') continue; // The sliced writer does not navigate through srcdoc.
     const page = await browser.newPage();
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(String(error)));
@@ -57,9 +61,9 @@ try {
       const scope = window as any;
       void scope.__previewController.requestRender(text, { force });
       return scope.__previewMessages.filter((m: any) => m.type === 'requestPreviewRender').length;
-    }, { text, force });
+    }, { text: expand(text), force });
     const respond = async (index: number, text: string, failure = false) => {
-      const value = exportRuntime.renderPreviewDocument({ markdownText: text,
+      const value = exportRuntime.renderPreviewDocument({ markdownText: expand(text),
         sourceDocumentPath: 'C:/tmp/preview-load.md', uiLanguage: 'en' });
       // Hold srcdoc's load event after the actual Host response has completed.
       value.html += '<span data-render-sequence="' + index + '"></span>';
@@ -138,7 +142,7 @@ try {
     assert.deepEqual(errors, []);
     await page.close();
   }
-  console.log('Preview pending-frame reuse, replacement, force, retry and disposal checks passed');
+  console.log(`Preview pending-frame reuse, replacement, force, retry and disposal checks passed (${largeDocument ? 'large' : 'ordinary'} document)`);
 } catch (error) { primaryError = error; }
 finally {
   if (primaryError === undefined) await closeTestBrowser(browser);

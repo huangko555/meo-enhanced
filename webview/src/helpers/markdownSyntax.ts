@@ -135,9 +135,8 @@ function extractHeadingInlineSegments(state: EditorState, headingNode: any): Hea
   return segments;
 }
 
-export function extractHeadings(state: EditorState): HeadingInfo[] {
+export function extractHeadings(state: EditorState, tree: Tree = resolvedSyntaxTree(state)): HeadingInfo[] {
   const headings: HeadingInfo[] = [];
-  const tree = resolvedSyntaxTree(state);
   const frontmatter = parseFrontmatter(state);
 
   tree.iterate({
