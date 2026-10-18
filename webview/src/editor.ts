@@ -1,4 +1,5 @@
 import { editorViewportBounds } from './editor/editorViewportBounds';
+import { sourceLinePositionAtTarget } from './editor/domSourceLine';
 import { currentHeadingSuggestions } from './editor/headingSuggestions';
 import { markdownSyntaxContext, type MarkdownInputContext } from './editor/blockInsertion';
 import { createInputSuggestions, refreshInputSuggestions } from './editor/inputSuggestions';
@@ -825,7 +826,8 @@ export function createEditor({
     if (!isLiveMode(editorView) || !isPlainPrimaryPointerEvent(event)) {
       return;
     }
-    const clickedPos = editorView.posAtCoords({ x: event.clientX, y: event.clientY });
+    const clickedPos = sourceLinePositionAtTarget(editorView, event.target)
+      ?? editorView.posAtCoords({ x: event.clientX, y: event.clientY });
     if (clickedPos === null) {
       return;
     }
@@ -2535,7 +2537,8 @@ export function createEditor({
           };
 
           if (currentMode === 'live') {
-            const pointerPos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+            const pointerPos = sourceLinePositionAtTarget(view, event.target)
+              ?? view.posAtCoords({ x: event.clientX, y: event.clientY });
             const pointerLine = pointerPos === null ? null : view.state.doc.lineAt(pointerPos).number;
             const preservedLine = pointerLine !== null && view.state.selection.ranges.some(
               (range) => view.state.doc.lineAt(range.head).number === pointerLine
@@ -2835,7 +2838,8 @@ export function createEditor({
       event.button !== 0 || currentMode !== 'source' ||
       !(event.target instanceof Node) || !view.contentDOM.contains(event.target)
     ) return;
-    const position = view.posAtCoords({ x: event.clientX, y: event.clientY });
+    const position = sourceLinePositionAtTarget(view, event.target)
+      ?? view.posAtCoords({ x: event.clientX, y: event.clientY });
     if (position === null) return;
     onSourcePositionChange?.({
       line: view.state.doc.lineAt(position).number,
@@ -3307,7 +3311,8 @@ export function createEditor({
     // Pointer capture targets view.dom, bypassing contentDOM's pointerup handler.
     // Only clicks beyond an empty quote's prefix should snap to its content start.
     if (completedSelection && isLiveMode(view) && isPlainPrimaryPointerEvent(event)
-      && view.state.selection.ranges.length === 1 && view.state.selection.main.empty) {
+      && view.state.selection.ranges.length === 1 && view.state.selection.main.empty
+      && /^[ \t]*(?:>[ \t]*)+$/.test(view.state.doc.lineAt(view.state.selection.main.head).text)) {
       const clickedPos = view.posAtCoords({ x: event.clientX, y: event.clientY });
       const cursorEnd = clickedPos === null ? null : emptyBlockquoteLineCursorEnd(view.state, clickedPos);
       if (cursorEnd !== null) {

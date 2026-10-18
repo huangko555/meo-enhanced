@@ -35,6 +35,28 @@ try {
   await page.addStyleTag({ path: 'webview/src/styles.css' });
   await page.addStyleTag({ content: '.preview-host:not([hidden]){height:100%;display:flex;flex-direction:column}.preview-frame{width:100%;height:100%;flex:1}' });
   await page.addScriptTag({ content: await build.outputs[0].text() });
+  const stableBottom = await page.evaluate(async () => {
+    const frame = document.createElement('iframe');
+    frame.style.cssText = 'position:fixed;left:0;top:0;width:320px;height:240px;border:0';
+    document.body.append(frame);
+    const doc = frame.contentDocument!;
+    doc.open(); doc.write('<!doctype html><style>html,body{margin:0}.meo-export-page{height:5000px}</style><main class="meo-export-page">Stable page</main>'); doc.close();
+    const controller = (window as any).__createPreviewScrollRange(doc);
+    const scroll = doc.scrollingElement!;
+    scroll.scrollTop = scroll.scrollHeight - scroll.clientHeight;
+    controller.start({ button: 0, pointerId: 31, clientX: frame.contentWindow!.innerWidth - 1, clientY: 20 });
+    controller.release(31, scroll.clientHeight - 3);
+    const frames = async () => { for (let i = 0; i < 4; i++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve())); };
+    await frames();
+    const height = scroll.scrollHeight;
+    scroll.scrollTop -= 129;
+    await frames();
+    const result = { heightUnchanged: scroll.scrollHeight === height, atBottom: scroll.scrollTop >= scroll.scrollHeight - scroll.clientHeight - 2 };
+    controller.dispose(); frame.remove();
+    return result;
+  });
+  assert.deepEqual(stableBottom, { heightUnchanged: true, atBottom: true },
+    'bottom intent must survive root-scroll correction after the last ResizeObserver delivery');
   const pendingFind = await page.evaluate(() => {
     const scope = window as any, controller = scope.__previewController;
     controller.setVisible(true);
@@ -139,6 +161,17 @@ try {
     const scroll = (window as any).__previewController.host.querySelector('iframe').contentDocument.scrollingElement;
     return scroll.scrollTop >= scroll.scrollHeight - scroll.clientHeight - 2;
   }, { timeout: 2_000 });
+  await page.evaluate(() => {
+    const scroll = (window as any).__previewController.host.querySelector('iframe').contentDocument.scrollingElement;
+    // Browser anchoring can move the root after ResizeObserver has already
+    // delivered the final page size. The drag's bottom intention still owns it.
+    scroll.scrollTop -= 129;
+  });
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  assert.equal(await page.evaluate(() => {
+    const scroll = (window as any).__previewController.host.querySelector('iframe').contentDocument.scrollingElement;
+    return scroll.scrollTop >= scroll.scrollHeight - scroll.clientHeight - 2;
+  }), true, 'a later root-scroll adjustment must retain the chosen bottom even without another resize');
   await page.mouse.move(frameBounds.x + frameBounds.width / 2, frameBounds.y + frameBounds.height / 2);
   await page.mouse.wheel({ deltaY: -250 });
   await new Promise(resolve => setTimeout(resolve, 200));

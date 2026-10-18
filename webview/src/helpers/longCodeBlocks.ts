@@ -1,4 +1,5 @@
 import { EditorState, Facet, StateEffect, StateField, Transaction } from '@codemirror/state';
+import { sourceLinePositionAtTarget } from '../editor/domSourceLine';
 import { Decoration, EditorView, WidgetType, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
 import { getFencedCodeInfo } from './markdownSyntax';
@@ -614,14 +615,13 @@ class LongCodeFloatingButtonPlugin {
     if (target?.closest('.meo-long-code-action, .meo-code-block-actions, .meo-code-language-label, .meo-md-long-code-placeholder, .meo-md-long-code-footer')) {
       return;
     }
-    const position = this.view.posAtCoords({ x: event.clientX, y: event.clientY });
-    if (position === null) {
-      return;
-    }
     const state = this.view.state.field(longCodeBlockStateField, false);
     if (!state) {
       return;
     }
+    const position = sourceLinePositionAtTarget(this.view, event.target)
+      ?? this.view.posAtCoords({ x: event.clientX, y: event.clientY });
+    if (position === null) return;
     const block = findBlockContainingPosition(state.blocks, position);
     if (block?.collapsed || block?.temporaryTargetKind === 'selection') {
       this.view.dispatch({ effects: setLongCodeBlockPointerInteractionEffect.of({ position }) });

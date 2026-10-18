@@ -88,6 +88,9 @@ try {
     if (!line) throw Error('The pointer budget requires visible prose');
     const rect = line.getBoundingClientRect();
     scope.__clickCursorStyles = 0;
+    scope.__clickCoordinateReads = 0;
+    const coordinates = view.posAtCoords.bind(view);
+    view.posAtCoords = (...args: Parameters<typeof coordinates>) => { scope.__clickCoordinateReads++; return coordinates(...args); };
     scope.__cursorObserver = new MutationObserver(records => {
       if (records.some(record => record.oldValue?.includes('meo-pointer-selecting')) || view.dom.classList.contains('meo-pointer-selecting')) scope.__clickCursorStyles++;
     });
@@ -98,6 +101,10 @@ try {
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   assert.equal(await page.evaluate(() => (window as any).__clickCursorStyles), 0,
     'a caret click must not restyle every descendant with the drag-only cursor override');
+  // CodeMirror owns two character hits; toolbar hover may retain one more.
+  // Source-line observers must not add their own coordinate measurements.
+  assert.ok(await page.evaluate(() => (window as any).__clickCoordinateReads <= 3),
+    'source-line observers must use the clicked DOM line instead of repeatedly forcing coordinate measurement');
   await page.mouse.move(prosePoint.x, prosePoint.y);
   await page.mouse.down();
   await page.mouse.move(prosePoint.x + 25, prosePoint.y, { steps: 3 });

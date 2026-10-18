@@ -4,6 +4,7 @@ import { createCodePaletteWebviewAdapter } from '../webview/src/adapters/codePal
 import { setShikiTheme } from '../webview/src/helpers/shikiHighlighter';
 import { createMermaidDiagramRenderPool } from '../webview/src/editor/mermaidDiagramRenderPool';
 import { initializeMermaidEditorRuntime, renderMermaidRuntime } from '../webview/src/helpers/mermaidDiagram';
+import { createPreviewScrollRange } from '../webview/src/helpers/previewScrollRange';
 
 // Resolving both export palettes must not change the active Preview theme.
 const palette = createCodePaletteWebviewAdapter({ setShikiTheme() {} });
@@ -28,8 +29,10 @@ const scope = window as typeof window & {
   __previewRenderProbe?: () => void;
   __writePreviewFrame: typeof writePreviewFrame;
   __previewInteractionCount?: number;
+  __createPreviewScrollRange: typeof createPreviewScrollRange;
 };
 scope.__previewController = controller;
 scope.__previewMessages = messages;
 scope.__writePreviewFrame = writePreviewFrame;
+scope.__createPreviewScrollRange = createPreviewScrollRange;
 document.body.append(controller.host);

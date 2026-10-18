@@ -22,11 +22,15 @@ export function createPreviewScrollRange(document: Document) {
   // Releasing the thumb can reveal estimated blocks and start nearby resource
   // presentation. Preserve the chosen bottom across that later height change,
   // until another user navigation owns the reading position.
-  const observer = new ResizeObserver(() => {
+  const scheduleBoundary = () => {
     if (!keepBottom || !owner || boundaryFrame !== null) return;
     boundaryFrame = owner.requestAnimationFrame(() => { boundaryFrame = null; pinBottom(); });
-  });
+  };
+  const observer = new ResizeObserver(scheduleBoundary);
   if (page) observer.observe(page);
+  // Root anchoring can settle after the final size notification. A later
+  // browser scroll correction must honor the same boundary owner too.
+  document.addEventListener('scroll', scheduleBoundary, { passive: true });
   const restore = (keepBoundary: boolean, releaseY?: number) => {
     if (!page || !held) return;
     const scroll = document.scrollingElement;
@@ -70,6 +74,6 @@ export function createPreviewScrollRange(document: Document) {
     cancel(pointer?: number) {
       if (pointer === undefined || !held || held.pointer === pointer) { interrupt(); restore(false); }
     },
-    dispose() { interrupt(); restore(false); observer.disconnect(); }
+    dispose() { interrupt(); restore(false); observer.disconnect(); document.removeEventListener('scroll', scheduleBoundary); }
   };
 }

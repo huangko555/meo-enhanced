@@ -431,8 +431,12 @@ console.log('Middle prose preserves supported widgets; partitioned dense present
   const position = 80_006;
   ranges.push(Decoration.widget({ widget: new PositionedControl(position), side: 1 }).range(position));
   const before = prepareLiveWidgetPositions(Decoration.set(ranges, true));
+  const spec = line.spec;
+  let specReads = 0;
+  Object.defineProperty(line, 'spec', { get() { specReads++; return spec; } });
   const change = state.update({ changes: { from: 0, insert: 'a' } });
   const after = mapStableLiveDecorations(before, change.changes, change.state)!;
+  assert.ok(specReads < 1_000, `widget rebasing must use its sparse index rather than inspect every line decoration (${specReads} reads)`);
   reads = 0;
   RangeSet.compare(liveWidgetPresentationLayers(before), liveWidgetPresentationLayers(after.decorations), change.changes,
     { compareRange() {}, comparePoint() {} }, 0);

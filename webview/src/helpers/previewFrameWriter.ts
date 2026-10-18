@@ -12,6 +12,7 @@ export function writePreviewFrame(
   const document = frame.contentDocument;
   if (!document) return null;
   let timer: number | null = null;
+  let firstFrame: number | null = null;
   let cancelled = false, written = false, ready = false, offset = 0;
   const finish = () => {
     if (!written || ready || cancelled || !isCurrent() || document.readyState !== 'complete') return;
@@ -41,11 +42,14 @@ export function writePreviewFrame(
       finish();
     }
   };
-  timer = window.setTimeout(pump, 0);
+  // Give the loading surface one observable frame before parsing begins. A
+  // fast document can otherwise finish all timer slices before the next paint.
+  firstFrame = window.requestAnimationFrame(() => { firstFrame = null; pump(); });
   return () => {
     if (cancelled) return;
     cancelled = true;
     if (timer !== null) window.clearTimeout(timer);
+    if (firstFrame !== null) window.cancelAnimationFrame(firstFrame);
     document.removeEventListener('readystatechange', finish);
     if (!written && frame.contentDocument === document) document.close();
   };

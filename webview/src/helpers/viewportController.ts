@@ -1,4 +1,5 @@
 import { editorViewportBounds } from '../editor/editorViewportBounds';
+import { sourceLinePositionAtTarget } from '../editor/domSourceLine';
 import { EditorView } from '@codemirror/view';
 import { createLinkedViewportMap, type LinkedViewportMap, type LinkedViewportPoint } from './linkedViewportMap';
 
@@ -2237,7 +2238,8 @@ export class ViewportController {
         '.meo-mermaid-editing-block, .meo-latex-math-editing-block, .meo-mermaid-toolbar, .meo-latex-math-toolbar, .meo-md-html-block, .meo-md-html-source-control, .meo-md-html-table-context-trigger, .meo-md-html-table-context-menu, .meo-md-code-block-start, .meo-md-code-block-end'
       )
     ) return;
-    const pointerPosition = this.view.posAtCoords({ x: event.clientX, y: event.clientY }) ??
+    const pointerPosition = sourceLinePositionAtTarget(this.view, event.target) ??
+      this.view.posAtCoords({ x: event.clientX, y: event.clientY }) ??
       this.view.posAtCoords({ x: this.view.contentDOM.getBoundingClientRect().left + 1, y: event.clientY });
     this.startInteractionLayoutStabilization(
       this.getInteractionLayoutRange(event.target, pointerPosition ?? this.view.state.selection.main.head)

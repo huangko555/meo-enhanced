@@ -22,6 +22,7 @@ type ProjectionParts = {
   stable: DecorationSet; // Pure marks, excluded from height comparison.
   points: DecorationSet; // Zero-width line decorations and controls.
   positioned: DecorationSet; // Nonempty replacements and block widgets.
+  widgetPositions: DecorationSet; // Rebuildable index of embedded positions only.
 };
 const mappableSets = new WeakMap<DecorationSet, ProjectionParts | false>();
 
@@ -36,6 +37,7 @@ function projectionParts(decorations: DecorationSet): ProjectionParts | false {
   const cached = mappableSets.get(decorations);
   if (cached !== undefined) return cached;
   const stable = new RangeSetBuilder<Decoration>(), points = new RangeSetBuilder<Decoration>(), positioned = new RangeSetBuilder<Decoration>();
+  const widgetPositions = new RangeSetBuilder<Decoration>();
   let count = 0;
   for (const cursor = decorations.iter(); cursor.value; cursor.next()) {
     const widget = cursor.value.spec.widget as (WidgetType & Partial<LiveWidgetPositions>) | undefined;
@@ -47,8 +49,9 @@ function projectionParts(decorations: DecorationSet): ProjectionParts | false {
     // Line decorations and replacements without a widget are points too.
     // Pure mark layers must retain maxPoint=-1 for height comparison.
     (cursor.value.point ? cursor.from === cursor.to ? points : positioned : stable).add(cursor.from, cursor.to, cursor.value);
+    if (widget && !widget[liveWidgetPositionsIndependent]) widgetPositions.add(cursor.from, cursor.to, cursor.value);
   }
-  const result = { stable: stable.finish(), points: points.finish(), positioned: positioned.finish() };
+  const result = { stable: stable.finish(), points: points.finish(), positioned: positioned.finish(), widgetPositions: widgetPositions.finish() };
   mappableSets.set(decorations, result);
   return result;
 }
@@ -80,7 +83,9 @@ export function replaceLivePresentationRanges(decorations: DecorationSet, from: 
   const nextParts = {
     stable: parts.stable.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => !range.value.point), sort: true }),
     points: parts.points.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => range.value.point && range.from === range.to), sort: true }),
-    positioned: parts.positioned.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => range.value.point && range.from !== range.to), sort: true })
+    positioned: parts.positioned.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => range.value.point && range.from !== range.to), sort: true }),
+    widgetPositions: parts.widgetPositions.update({ filterFrom: from, filterTo: to, filter,
+      add: accepted.filter(range => range.value.spec.widget && !range.value.spec.widget[liveWidgetPositionsIndependent]), sort: true })
   };
   const result = RangeSet.join([nextParts.stable, nextParts.points, nextParts.positioned]);
   mappableSets.set(result, nextParts);
@@ -99,34 +104,39 @@ export function mapStableLiveDecorations(decorations: DecorationSet, changes: Ch
   if (decorations.size > maxProjectionDecorations && !mappableSets.has(decorations)) return;
   const parts = projectionParts(decorations);
   if (!parts) return;
+  const mappedWidgets = parts.widgetPositions.map(changes);
+  const widgets = new RangeSetBuilder<Decoration>();
+  const replacements = new Map<Decoration, Decoration>();
+  const pointPositions = new Set<number>(), rangePositions = new Set<number>();
   let rebasedWidgets = false;
-  const mapPoints = (part: DecorationSet): DecorationSet => {
-    const mapped = part.map(changes);
-    const replacements = new Map<Decoration, Decoration>(), positions = new Set<number>();
-    let first = Infinity, last = -Infinity;
-    for (const cursor = mapped.iter(); cursor.value; cursor.next()) {
-      const value = cursor.value;
-      const widget = value.spec.widget as (WidgetType & LiveWidgetPositions) | undefined;
-      if (!widget) continue;
-      const next = widget[mapLiveWidgetPositions](changes, state);
-      if (next === widget) continue;
-      const spec = { ...value.spec, widget: next };
-      replacements.set(value, cursor.from === cursor.to ? Decoration.widget(spec) : Decoration.replace(spec));
-      positions.add(cursor.from); first = Math.min(first, cursor.from); last = Math.max(last, cursor.from);
-    }
-    if (!positions.size) return mapped;
+  for (const cursor = mappedWidgets.iter(); cursor.value; cursor.next()) {
+    const value = cursor.value, widget = value.spec.widget as WidgetType & LiveWidgetPositions;
+    const next = widget[mapLiveWidgetPositions](changes, state);
+    if (next === widget) { widgets.add(cursor.from, cursor.to, value); continue; }
+    const spec = { ...value.spec, widget: next };
+    const replacement = cursor.from === cursor.to ? Decoration.widget(spec) : Decoration.replace(spec);
+    replacements.set(value, replacement);
+    (cursor.from === cursor.to ? pointPositions : rangePositions).add(cursor.from);
+    widgets.add(cursor.from, cursor.to, replacement);
     rebasedWidgets = true;
+  }
+  const mapPoints = (part: DecorationSet, positions: Set<number>): DecorationSet => {
+    const mapped = part.map(changes);
+    if (!positions.size) return mapped;
     // Replace complete same-position groups to preserve action/label ordering,
     // while keeping unchanged line-point chunks structurally shared.
     const add: Range<Decoration>[] = [];
+    let first = Infinity, last = -Infinity;
     for (const position of positions) {
+      first = Math.min(first, position); last = Math.max(last, position);
       for (const cursor = mapped.iter(position); cursor.value && cursor.from <= position; cursor.next()) {
         if (cursor.from === position) add.push((replacements.get(cursor.value) ?? cursor.value).range(cursor.from, cursor.to));
       }
     }
     return mapped.update({ filterFrom: first, filterTo: last, filter: from => !positions.has(from), add, sort: true });
   };
-  const nextParts = { stable: parts.stable.map(changes), points: mapPoints(parts.points), positioned: mapPoints(parts.positioned) };
+  const nextParts = { stable: parts.stable.map(changes), points: mapPoints(parts.points, pointPositions),
+    positioned: mapPoints(parts.positioned, rangePositions), widgetPositions: rebasedWidgets ? widgets.finish() : mappedWidgets };
   // Rejoin even when widgets retain their identity. Mapping a joined set as
   // one layer loses the combined height-point summary when its first layer
   // contains only marks, which would hide widgets from height comparison.
