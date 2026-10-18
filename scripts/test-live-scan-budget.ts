@@ -6,7 +6,7 @@ import { parseFootnotes } from '../webview/src/helpers/footnotes';
 import { parseFrontmatter } from '../webview/src/helpers/frontmatter';
 import { documentLines } from '../webview/src/helpers/documentLines';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
-import { mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions } from '../webview/src/editor/liveWidgetPositions';
+import { liveWidgetPositionsIndependent, mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions } from '../webview/src/editor/liveWidgetPositions';
 import { hasSameLiveMarkdownSyntax, hasSameLiveMarkdownOutsideBlock } from '../webview/src/helpers/livePresentationSyntax';
 import { markdownLanguage } from '@codemirror/lang-markdown';
 import { parseMixed, Tree } from '@lezer/common';
@@ -377,5 +377,27 @@ for (const suffix of ['**Formatted paragraph**\n\n'.repeat(1_500), '$x$\n\n'.rep
   });
   assert.ok(sideReads < 1_000, `the first input must share accepted chunks, rather than compare every distant mark (${sideReads} reads)`);
   console.log(`First mapped input shares distant mark chunks: ${sideReads} boundary reads for 20,000 marks`);
+}
+{
+  class IndependentBlock extends WidgetType {
+    readonly [liveWidgetPositionsIndependent] = true;
+    [mapLiveWidgetPositions]() { return this; }
+  }
+  const mark = Decoration.mark({ class: 'shared-offscreen-presentation' });
+  let pointReads = 0;
+  const point = mark.point;
+  Object.defineProperty(mark, 'point', { get() { pointReads++; return point; } });
+  const ranges = Array.from({ length: 20_000 }, (_, index) => mark.range(10 + index * 5, 12 + index * 5));
+  for (let index = 0; index < 200; index++) ranges.push(Decoration.replace({ block: true, widget: new IndependentBlock() }).range(13 + index * 500, 14 + index * 500));
+  const state = EditorState.create({ doc: 'x'.repeat(100_010) });
+  const before = prepareLiveWidgetPositions(Decoration.set(ranges, true));
+  const change = state.update({ changes: { from: 0, insert: 'a' } });
+  const after = mapStableLiveDecorations(before, change.changes, change.state)!;
+  pointReads = 0;
+  RangeSet.compare([before], [after.decorations], change.changes, {
+    compareRange() {}, comparePoint(from, to, left, right) { assert.fail(`mapped independent blocks must remain equal: ${from}..${to} ${left?.spec.widget?.constructor.name}/${right?.spec.widget?.constructor.name} same=${left === right}`); }
+  }, 0);
+  assert.ok(pointReads < 1_000, `height comparison must skip unchanged marks beside offscreen blocks (${pointReads} reads)`);
+  console.log(`Height comparison with offscreen blocks: ${pointReads} mark reads for 20,000 marks`);
 }
 console.log('Middle prose preserves supported widgets; partitioned dense presentation keeps bounded work and conservative fallbacks');

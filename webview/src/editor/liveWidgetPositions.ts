@@ -33,7 +33,10 @@ function projectionParts(decorations: DecorationSet): ProjectionParts | false {
       mappableSets.set(decorations, false);
       return false;
     }
-    (widget && !widget[liveWidgetPositionsIndependent] ? positioned : stable).add(cursor.from, cursor.to, cursor.value);
+    // Even position-independent block widgets must stay out of mark chunks:
+    // CodeMirror cannot skip a shared chunk containing a nonempty replacement
+    // when comparing height-relevant points after a document change.
+    (widget ? positioned : stable).add(cursor.from, cursor.to, cursor.value);
   }
   const result = { stable: stable.finish(), positioned: positioned.finish() };
   mappableSets.set(decorations, result);
@@ -65,8 +68,8 @@ export function replaceLivePresentationRanges(decorations: DecorationSet, from: 
     accepted.push(cursor.value.range(cursor.from, cursor.to));
   }
   const nextParts = {
-    stable: parts.stable.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => !range.value.spec.widget || range.value.spec.widget[liveWidgetPositionsIndependent]), sort: true }),
-    positioned: parts.positioned.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => range.value.spec.widget && !range.value.spec.widget[liveWidgetPositionsIndependent]), sort: true })
+    stable: parts.stable.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => !range.value.spec.widget), sort: true }),
+    positioned: parts.positioned.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => !!range.value.spec.widget), sort: true })
   };
   const result = RangeSet.join([nextParts.stable, nextParts.positioned]);
   mappableSets.set(result, nextParts);
@@ -81,7 +84,7 @@ export function mapStableLiveDecorations(decorations: DecorationSet, changes: Ch
 } | undefined {
   let hasLaterDecorations = false;
   changes.iterChangedRanges(from => { hasLaterDecorations ||= !!decorations.iter(from).value; });
-  if (!hasLaterDecorations) return { decorations: decorations.map(changes), rebasedWidgets: false };
+  if (!hasLaterDecorations) return { decorations, rebasedWidgets: false };
   if (decorations.size > maxProjectionDecorations && !mappableSets.has(decorations)) return;
   const parts = projectionParts(decorations);
   if (!parts) return;
@@ -101,7 +104,10 @@ export function mapStableLiveDecorations(decorations: DecorationSet, changes: Ch
   // Preserve the original order of widgets sharing a position and side (code
   // labels/actions, for example). Removing/re-adding only one reorders its DOM.
   const nextParts = { stable: parts.stable.map(changes), positioned: rebasedWidgets ? widgets.finish() : mappedWidgets };
-  const result = rebasedWidgets ? RangeSet.join([nextParts.stable, nextParts.positioned]) : decorations.map(changes);
+  // Rejoin even when widgets retain their identity. Mapping a joined set as
+  // one layer loses the combined height-point summary when its first layer
+  // contains only marks, which would hide widgets from height comparison.
+  const result = RangeSet.join([nextParts.stable, nextParts.positioned]);
   mappableSets.set(result, nextParts);
   return { decorations: result, rebasedWidgets };
 }

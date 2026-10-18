@@ -24,6 +24,13 @@ const build = await Bun.build({ entrypoints: [path.join(root, 'scripts/test-live
       assert.equal(source.split(boundary).length, 2);
       return { loader: 'ts', contents: source.replace(boundary, `${boundary} ((globalThis as any).${counter} ??= 0); (globalThis as any).${counter}++;`) };
     });
+    builder.onLoad({ filter: /webview[\\/]src[\\/]helpers[\\/]htmlContent\.ts$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text();
+      const boundary = 'export function collectRenderableHtmlBlocks(state: EditorState, tree: Tree = resolvedSyntaxTree(state), scope?: { from: number; to: number }): RenderableHtmlBlock[] {';
+      assert.equal(source.split(boundary).length, 2);
+      return { loader: 'ts', contents: source.replace(boundary,
+        `${boundary} if (!scope) { ((globalThis as any).__fullHtmlRequests ??= 0); (globalThis as any).__fullHtmlRequests++; }`) };
+    });
   } }] });
 assert.ok(build.success, build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
@@ -38,7 +45,7 @@ try {
   await page.setContent('<style>html,body,#editor{height:100%;margin:0}</style><div id="editor"></div>');
   await page.addStyleTag({ path: path.join(root, 'webview/src/styles.css') });
   await page.addScriptTag({ path: path.join(directory, 'bundle.js') });
-  const inputBudgets: Array<{ mode: string; pending: boolean; diffs: number; discoveries: number }> = [];
+  const inputBudgets: Array<{ mode: string; pending: boolean; diffs: number; discoveries: number; htmlRequests: number }> = [];
   for (const mode of ['source', 'live']) {
     const budget = await page.evaluate(async mode => {
       const scope = window as any, api = scope.__liveHistory;
@@ -49,11 +56,13 @@ try {
       if (scope.__diffBuilds === undefined || (mode === 'live' && scope.__renderedDiscoveries === undefined)) throw Error('Derived-work counters were not installed');
       scope.__budgetEditor = editor;
       const diffs = scope.__diffBuilds ?? 0, discoveries = scope.__renderedDiscoveries ?? 0;
+      const htmlRequests = scope.__fullHtmlRequests ?? 0;
+      editor.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true }));
       api.input(editor, 4, 'x');
       if (!editor.getText().startsWith('EDITx')) throw Error('Primary input must commit before derived work');
       await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       return { mode, pending: api.pending(editor), diffs: (scope.__diffBuilds ?? 0) - diffs,
-        discoveries: (scope.__renderedDiscoveries ?? 0) - discoveries };
+        discoveries: (scope.__renderedDiscoveries ?? 0) - discoveries, htmlRequests: (scope.__fullHtmlRequests ?? 0) - htmlRequests };
     }, mode);
     inputBudgets.push(budget);
     await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__budgetEditor));
@@ -85,6 +94,7 @@ try {
     assert.equal(budget.pending, true, `${budget.mode}: primary input must own the first frame`);
     assert.equal(budget.diffs, 0, `${budget.mode}: baseline comparisons must wait behind primary input`);
     assert.equal(budget.discoveries, 0, `${budget.mode}: gutter widget painting must not discover the whole document`);
+    assert.equal(budget.htmlRequests, 0, `${budget.mode}: a native key guard must only inspect the caret's HTML block`);
   }
   assert.equal(codeBuilds, 0, 'a code folding pointer effect must not rebuild unrelated Live presentation');
   const original = 'EDIT\n\n**Prefix bold**\n\n[local](sample.md)\n\n' + 'Ordinary paragraph.\n\n'.repeat(4_100)

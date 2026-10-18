@@ -11,6 +11,7 @@ import {
   type DecorationSet
 } from '@codemirror/view';
 import type { SyntaxNodeRef, Tree } from '@lezer/common';
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { parseDocument } from 'htmlparser2';
 import type { ChildNode } from 'domhandler';
 import { createElement, AlertTriangle, Code2, Eye } from 'lucide';
@@ -140,9 +141,7 @@ export function collectRenderableHtmlBlocks(state: EditorState, tree: Tree = res
   const cached = scope ? undefined : renderableHtmlBlockCache.get(state);
   if (cached && cached.tree === tree) return cached.blocks;
   const blocks: RenderableHtmlBlock[] = [];
-  const detailsByAnchor = new Map(
-    getDetailsBlocks(state).map((block) => [block.anchorFrom, block] as const)
-  );
+  let detailsByAnchor: Map<number, ReturnType<typeof getDetailsBlocks>[number]> | undefined;
   tree.iterate({
     ...scope,
     enter(node: SyntaxNodeRef) {
@@ -157,6 +156,7 @@ export function collectRenderableHtmlBlocks(state: EditorState, tree: Tree = res
       const source = parsedSource.slice(0, rootEnd);
       if (!isSupportedHtmlBlockSource(masked.source.slice(0, rootEnd))) return;
       const to = node.from + rootEnd;
+      detailsByAnchor ??= new Map(getDetailsBlocks(state).map((block) => [block.anchorFrom, block] as const));
       const detailsBlock = detailsByAnchor.get(node.from) ?? null;
       blocks.push({
         from: node.from,
@@ -814,7 +814,10 @@ const htmlEscapeKeymap = keymap.of([{
 function revealHtmlSourceForInput(view: EditorView, target: EventTarget | null): void {
   if (target !== view.contentDOM || getHtmlEditingRange(view.state)) return;
   const selection = view.state.selection.main;
-  const block = collectRenderableHtmlBlocks(view.state).find((block) => (
+  // Native key/beforeinput guards only need the block containing this caret.
+  // Do not parse or discover unrelated suffix blocks on each input state.
+  const tree = ensureSyntaxTree(view.state, selection.to, 50) ?? syntaxTree(view.state);
+  const block = collectRenderableHtmlBlocks(view.state, tree, selection).find((block) => (
     selection.from >= block.from && selection.to <= block.to
   ));
   if (block) enterHtmlSource(view, block);
