@@ -3,9 +3,9 @@
  * native pointer handling or changing the rendered content's normal flow. */
 export function createPreviewScrollRange(document: Document) {
   const page = document.querySelector<HTMLElement>('.meo-export-page');
-  const properties = ['height', 'overflow', 'box-sizing'] as const;
+  const properties = ['height', 'overflow', 'box-sizing', 'overflow-anchor'] as const;
   const owner = document.defaultView;
-  let held: { pointer: number; styles: Array<{ value: string; priority: string }> } | null = null;
+  let held: { pointer: number; startY: number; styles: Array<{ value: string; priority: string }> } | null = null;
   let keepBottom = false;
   let boundaryFrame: number | null = null;
   const interrupt = () => {
@@ -27,10 +27,16 @@ export function createPreviewScrollRange(document: Document) {
     boundaryFrame = owner.requestAnimationFrame(() => { boundaryFrame = null; pinBottom(); });
   });
   if (page) observer.observe(page);
-  const restore = (keepBoundary: boolean) => {
+  const restore = (keepBoundary: boolean, releaseY?: number) => {
     if (!page || !held) return;
     const scroll = document.scrollingElement;
-    const atBottom = !!scroll && scroll.scrollTop >= scroll.scrollHeight - scroll.clientHeight - 2;
+    // Chromium may adjust the anchor while estimated blocks resolve, even
+    // within a fixed page height. A thumb deliberately dragged to the track's
+    // bottom still means bottom; a stationary arrow/track click does not.
+    const gutter = (owner?.innerWidth ?? 0) - document.documentElement.clientWidth;
+    const draggedToBottom = releaseY !== undefined && releaseY > held.startY + Math.max(4, gutter)
+      && !!scroll && releaseY >= scroll.clientHeight - Math.max(3, gutter);
+    const atBottom = !!scroll && (draggedToBottom || scroll.scrollTop >= scroll.scrollHeight - scroll.clientHeight - 2);
     const previous = held;
     held = null;
     for (const [index, property] of properties.entries()) {
@@ -44,20 +50,21 @@ export function createPreviewScrollRange(document: Document) {
     }
   };
   return {
-    start(event: Pick<PointerEvent, 'button' | 'pointerId' | 'clientX'>) {
+    start(event: Pick<PointerEvent, 'button' | 'pointerId' | 'clientX' | 'clientY'>) {
       interrupt();
       const width = document.defaultView?.innerWidth ?? 0;
       if (!page || held || event.button !== 0 || event.clientX < document.documentElement.clientWidth || event.clientX >= width) return;
       const height = page.getBoundingClientRect().height;
-      held = { pointer: event.pointerId, styles: properties.map(property => ({
+      held = { pointer: event.pointerId, startY: event.clientY, styles: properties.map(property => ({
         value: page.style.getPropertyValue(property), priority: page.style.getPropertyPriority(property)
       })) };
       page.style.setProperty('box-sizing', 'border-box', 'important');
       page.style.setProperty('height', `${height}px`, 'important');
       page.style.setProperty('overflow', 'clip', 'important');
+      page.style.setProperty('overflow-anchor', 'none', 'important');
     },
-    release(pointer?: number) {
-      if (pointer === undefined || held?.pointer === pointer) restore(true);
+    release(pointer?: number, clientY?: number) {
+      if (pointer === undefined || held?.pointer === pointer) restore(true, clientY);
     },
     interrupt,
     cancel(pointer?: number) {

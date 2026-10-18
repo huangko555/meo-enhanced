@@ -119,6 +119,12 @@ try {
   await page.mouse.move(frameBounds.x + frameBounds.width - rangeBefore.scrollbar / 2, frameBounds.y + 14);
   await page.mouse.down();
   await page.mouse.move(frameBounds.x + frameBounds.width - rangeBefore.scrollbar / 2, frameBounds.y + frameBounds.height - 3, { steps: 15 });
+  await page.evaluate(() => {
+    const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
+    // Reproduce the native large-document anchor adjustment just before the
+    // release. The user's thumb reached the bottom even when layout moved it.
+    doc.scrollingElement.scrollTop = doc.scrollingElement.scrollHeight - doc.scrollingElement.clientHeight - 300;
+  });
   await page.mouse.up();
   await page.waitForFunction(() => {
     const scroll = (window as any).__previewController.host.querySelector('iframe').contentDocument.scrollingElement;

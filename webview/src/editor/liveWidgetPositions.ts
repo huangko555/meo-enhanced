@@ -40,20 +40,36 @@ function projectionParts(decorations: DecorationSet): ProjectionParts | false {
   return result;
 }
 
-/** Prepare once with the complete presentation, before the next input frame. */
-export function prepareLiveWidgetPositions(decorations: DecorationSet, viewportBounded = false): void {
-  if (viewportBounded || decorations.size <= maxProjectionDecorations) projectionParts(decorations);
+/** Accept the same partition that later input maps. Merely caching a separate
+ * partition loses chunk identity on its first use and makes CodeMirror compare
+ * every unchanged mark whenever one positioned widget has to move. */
+export function prepareLiveWidgetPositions(decorations: DecorationSet, viewportBounded = false): DecorationSet {
+  if (!viewportBounded && decorations.size > maxProjectionDecorations) return decorations;
+  const parts = projectionParts(decorations);
+  if (!parts) return decorations;
+  const result = RangeSet.join([parts.stable, parts.positioned]);
+  mappableSets.set(result, parts);
+  return result;
 }
 
 /** Keep the prepared partition when replacing a closed presentation block. */
 export function replaceLivePresentationRanges(decorations: DecorationSet, from: number, to: number, add: Range<Decoration>[]): DecorationSet {
   const filter = (start: number, end: number) => start < from || end > to;
-  const result = decorations.update({ filterFrom: from, filterTo: to, filter, add, sort: true });
   const parts = mappableSets.get(decorations);
-  if (parts) mappableSets.set(result, {
-    stable: parts.stable.update({ filterFrom: from, filterTo: to, filter, add: add.filter(range => !range.value.spec.widget || range.value.spec.widget[liveWidgetPositionsIndependent]), sort: true }),
-    positioned: parts.positioned.update({ filterFrom: from, filterTo: to, filter, add: add.filter(range => range.value.spec.widget && !range.value.spec.widget[liveWidgetPositionsIndependent]), sort: true })
-  });
+  if (!parts) return decorations.update({ filterFrom: from, filterTo: to, filter, add, sort: true });
+  // Use the same accepted ordering as a complete Decoration.set before
+  // partitioning. Equal-position marks and controls can otherwise change
+  // nesting when a locally rebuilt block replaces the complete presentation.
+  const accepted: Range<Decoration>[] = [];
+  for (const cursor = Decoration.set(add, true).iter(); cursor.value; cursor.next()) {
+    accepted.push(cursor.value.range(cursor.from, cursor.to));
+  }
+  const nextParts = {
+    stable: parts.stable.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => !range.value.spec.widget || range.value.spec.widget[liveWidgetPositionsIndependent]), sort: true }),
+    positioned: parts.positioned.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => range.value.spec.widget && !range.value.spec.widget[liveWidgetPositionsIndependent]), sort: true })
+  };
+  const result = RangeSet.join([nextParts.stable, nextParts.positioned]);
+  mappableSets.set(result, nextParts);
   return result;
 }
 

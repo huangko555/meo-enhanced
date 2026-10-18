@@ -2586,15 +2586,15 @@ function buildDecorationRanges(state: EditorState, previous?: DecorationSet, cha
 function buildDecorations(state: EditorState, previous?: DecorationSet, changes?: ChangeDesc): DecorationSet {
   const { ranges, tree } = buildDecorationRanges(state, previous, changes);
   const result = Decoration.set(ranges, true);
-  const filtered = filterDecorationsOutsideMergeConflicts(state, result);
+  let filtered = filterDecorationsOutsideMergeConflicts(state, result);
   if (usesLargeDocumentDerivedWorkBudget(state)) {
     // Helpers may finish embedded language parsing. Certify the actual outer
     // Markdown structure against the completed parse, never a lagging snapshot.
     const complete = syntaxTreeAvailable(state, state.doc.length)
       && hasSameLiveMarkdownSyntax(tree, resolvedSyntaxTree(state, 0));
     liveDecorationMetadata.set(state, { ...liveDecorationMetadata.get(state), complete });
+    if (complete) filtered = prepareLiveWidgetPositions(filtered, !!getLivePresentationBand(state));
     if (complete && !isEmptyDecorationSet(filtered)) completeLiveDecorationSets.add(filtered);
-    if (complete) prepareLiveWidgetPositions(filtered, !!getLivePresentationBand(state));
   }
   return filtered;
 }

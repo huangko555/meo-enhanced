@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { EditorState, StateEffect, Text, Transaction } from '@codemirror/state';
+import { EditorState, RangeSet, StateEffect, Text, Transaction } from '@codemirror/state';
 import { editorMarkdownLanguage, liveModeExtensions, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from '../webview/src/liveMode';
 import { ensureSyntaxTree } from '@codemirror/language';
 import { parseFootnotes } from '../webview/src/helpers/footnotes';
 import { parseFrontmatter } from '../webview/src/helpers/frontmatter';
 import { documentLines } from '../webview/src/helpers/documentLines';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
-import { mapStableLiveDecorations } from '../webview/src/editor/liveWidgetPositions';
+import { mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions } from '../webview/src/editor/liveWidgetPositions';
 import { hasSameLiveMarkdownSyntax, hasSameLiveMarkdownOutsideBlock } from '../webview/src/helpers/livePresentationSyntax';
 import { markdownLanguage } from '@codemirror/lang-markdown';
 import { parseMixed, Tree } from '@lezer/common';
@@ -354,5 +354,28 @@ for (const suffix of ['**Formatted paragraph**\n\n'.repeat(1_500), '$x$\n\n'.rep
   const excessive = Decoration.set(Array.from({ length: 131_073 }, (_, index) => mark.range(index, index + 1)));
   assert.equal(mapStableLiveDecorations(excessive, change.changes, change.state), undefined,
     'the initial partition must remain bounded for extreme decoration counts');
+}
+{
+  const state = EditorState.create({ doc: 'x'.repeat(100_010) });
+  const mark = Decoration.mark({ class: 'shared-input-presentation' });
+  let sideReads = 0;
+  const endSide = mark.endSide;
+  Object.defineProperty(mark, 'endSide', { get() { sideReads++; return endSide; } });
+  class PositionedWidget extends WidgetType {
+    constructor(readonly from: number) { super(); }
+    [mapLiveWidgetPositions](changes: import('@codemirror/state').ChangeDesc) { return new PositionedWidget(changes.mapPos(this.from)); }
+  }
+  const original = Decoration.set([...Array.from({ length: 20_000 }, (_, index) => mark.range(10 + index * 5, 12 + index * 5)),
+    Decoration.widget({ widget: new PositionedWidget(100_009), side: 1 }).range(100_009)]);
+  const prepared = prepareLiveWidgetPositions(original);
+  const change = state.update({ changes: { from: 0, insert: 'a' } });
+  const mapped = mapStableLiveDecorations(prepared, change.changes, change.state)!;
+  sideReads = 0;
+  RangeSet.compare([prepared], [mapped.decorations], change.changes, {
+    compareRange() { assert.fail('unchanged distant marks must compare equal'); },
+    comparePoint() { /* The positioned control changes; distant marks do not. */ }
+  });
+  assert.ok(sideReads < 1_000, `the first input must share accepted chunks, rather than compare every distant mark (${sideReads} reads)`);
+  console.log(`First mapped input shares distant mark chunks: ${sideReads} boundary reads for 20,000 marks`);
 }
 console.log('Middle prose preserves supported widgets; partitioned dense presentation keeps bounded work and conservative fallbacks');

@@ -40,7 +40,7 @@ try {
   await page.addScriptTag({ path: path.join(directory, 'bundle.js') });
   const inputBudgets: Array<{ mode: string; pending: boolean; diffs: number; discoveries: number }> = [];
   for (const mode of ['source', 'live']) {
-    const budget = await page.evaluate(mode => {
+    const budget = await page.evaluate(async mode => {
       const scope = window as any, api = scope.__liveHistory;
       const text = 'EDIT\n\n| Name | Value |\n| --- | --- |\n| item | 1 |\n\n' + '**Formatted paragraph**.\n\n'.repeat(4_100);
       const editor = api.create({ parent: document.getElementById('editor'), text, initialMode: mode, initialGitGutter: true, onApplyChanges() {} });
@@ -51,6 +51,7 @@ try {
       const diffs = scope.__diffBuilds ?? 0, discoveries = scope.__renderedDiscoveries ?? 0;
       api.input(editor, 4, 'x');
       if (!editor.getText().startsWith('EDITx')) throw Error('Primary input must commit before derived work');
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       return { mode, pending: api.pending(editor), diffs: (scope.__diffBuilds ?? 0) - diffs,
         discoveries: (scope.__renderedDiscoveries ?? 0) - discoveries };
     }, mode);

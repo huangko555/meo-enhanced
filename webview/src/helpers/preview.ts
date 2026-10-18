@@ -1903,7 +1903,8 @@ export function createPreviewController({
       };
       const finishPointer = (event: Event) => {
         if (event.type === 'pointercancel') previewScrollRange?.cancel((event as PointerEvent).pointerId);
-        else previewScrollRange?.release((event as PointerEvent).pointerId);
+        else previewScrollRange?.release((event as PointerEvent).pointerId,
+          event.currentTarget === frameDocument.defaultView ? (event as PointerEvent).clientY : undefined);
         if (activePreviewPointers.delete((event as PointerEvent).pointerId)) previewGestureUntil = performance.now() + 250;
       };
       for (const target of [frameDocument.defaultView, window]) {
