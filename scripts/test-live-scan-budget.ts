@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { EditorState, RangeSet, StateEffect, Text, Transaction } from '@codemirror/state';
-import { editorMarkdownLanguage, liveModeExtensions, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from '../webview/src/liveMode';
+import { editorMarkdownLanguage, getLivePresentationDecorations, liveModeExtensions, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from '../webview/src/liveMode';
 import { ensureSyntaxTree } from '@codemirror/language';
 import { parseFootnotes } from '../webview/src/helpers/footnotes';
 import { parseFrontmatter } from '../webview/src/helpers/frontmatter';
 import { documentLines } from '../webview/src/helpers/documentLines';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
-import { liveWidgetPositionsIndependent, mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions } from '../webview/src/editor/liveWidgetPositions';
+import { liveWidgetPositionsIndependent, liveWidgetPresentationLayers, mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions } from '../webview/src/editor/liveWidgetPositions';
 import { hasSameLiveMarkdownSyntax, hasSameLiveMarkdownOutsideBlock } from '../webview/src/helpers/livePresentationSyntax';
 import { markdownLanguage } from '@codemirror/lang-markdown';
 import { parseMixed, Tree } from '@lezer/common';
@@ -107,9 +107,7 @@ try {
 }
 
 const checkpointText = 'EDIT\n\n' + '**Formatted paragraph**\n\n'.repeat(500);
-const mainDecorations = (state: EditorState): DecorationSet => state.facet(EditorView.decorations)
-  .filter((value): value is DecorationSet => typeof value !== 'function')
-  .sort((left, right) => right.size - left.size)[0];
+const mainDecorations = getLivePresentationDecorations;
 let checkpointState = EditorState.create({ doc: checkpointText, selection: { anchor: 4 },
   extensions: liveModeExtensions({ largeDocument: true }) });
 const beforeInput = mainDecorations(checkpointState);
@@ -384,10 +382,12 @@ for (const suffix of ['**Formatted paragraph**\n\n'.repeat(1_500), '$x$\n\n'.rep
     [mapLiveWidgetPositions]() { return this; }
   }
   const mark = Decoration.mark({ class: 'shared-offscreen-presentation' });
+  const nestedMark = Decoration.mark({ class: 'nested-offscreen-presentation' });
   let pointReads = 0;
   const point = mark.point;
   Object.defineProperty(mark, 'point', { get() { pointReads++; return point; } });
-  const ranges = Array.from({ length: 20_000 }, (_, index) => mark.range(10 + index * 5, 12 + index * 5));
+  Object.defineProperty(nestedMark, 'point', { get() { pointReads++; return point; } });
+  const ranges = Array.from({ length: 20_000 }, (_, index) => [mark.range(10 + index * 5, 12 + index * 5), nestedMark.range(10 + index * 5, 12 + index * 5)]).flat();
   for (let index = 0; index < 200; index++) ranges.push(Decoration.replace({ block: true, widget: new IndependentBlock() }).range(13 + index * 500, 14 + index * 500));
   const state = EditorState.create({ doc: 'x'.repeat(100_010) });
   const before = prepareLiveWidgetPositions(Decoration.set(ranges, true));
@@ -401,3 +401,41 @@ for (const suffix of ['**Formatted paragraph**\n\n'.repeat(1_500), '$x$\n\n'.rep
   console.log(`Height comparison with offscreen blocks: ${pointReads} mark reads for 20,000 marks`);
 }
 console.log('Middle prose preserves supported widgets; partitioned dense presentation keeps bounded work and conservative fallbacks');
+{
+  const text = 'EDIT\n\n' + '> ## **Nested heading** and *emphasis* with [link](sample.md).\n\n'.repeat(600);
+  let state = EditorState.create({ doc: text, selection: { anchor: 4 }, extensions: liveModeExtensions({ largeDocument: true }) });
+  ensureSyntaxTree(state, state.doc.length, 2_000);
+  state = state.update({}).state;
+  let pointReads = 0;
+  const values = new Set<Decoration>();
+  for (const it = mainDecorations(state).iter(); it.value; it.next()) if (!it.value.point) values.add(it.value);
+  for (const value of values) Object.defineProperty(value, 'point', { get() { pointReads++; return false; } });
+  const change = state.update({ changes: { from: 4, insert: 'x' }, selection: { anchor: 5 }, annotations: Transaction.userEvent.of('input.type') });
+  const sets = (state: EditorState) => state.facet(EditorView.decorations).filter((set): set is DecorationSet => typeof set !== 'function');
+  pointReads = 0;
+  RangeSet.compare(sets(state), sets(change.state), change.changes, { compareRange() {}, comparePoint() {} }, 0);
+  assert.ok(pointReads < 1_000, `real nested Live presentation must exclude ordinary marks from height comparison (${pointReads} reads)`);
+  console.log(`Nested production Live height comparison: ${pointReads} ordinary mark reads`);
+}
+{
+  class PositionedControl extends WidgetType {
+    constructor(readonly from: number) { super(); }
+    [mapLiveWidgetPositions](changes: import('@codemirror/state').ChangeDesc) { return new PositionedControl(changes.mapPos(this.from)); }
+  }
+  const state = EditorState.create({ doc: 'x\n'.repeat(40_010) });
+  const line = Decoration.line({ class: 'shared-height-line' });
+  const endSide = line.endSide;
+  let reads = 0;
+  Object.defineProperty(line, 'endSide', { get() { reads++; return endSide; } });
+  const ranges = Array.from({ length: 20_000 }, (_, index) => line.range(10 + index * 4));
+  const position = 80_006;
+  ranges.push(Decoration.widget({ widget: new PositionedControl(position), side: 1 }).range(position));
+  const before = prepareLiveWidgetPositions(Decoration.set(ranges, true));
+  const change = state.update({ changes: { from: 0, insert: 'a' } });
+  const after = mapStableLiveDecorations(before, change.changes, change.state)!;
+  reads = 0;
+  RangeSet.compare(liveWidgetPresentationLayers(before), liveWidgetPresentationLayers(after.decorations), change.changes,
+    { compareRange() {}, comparePoint() {} }, 0);
+  assert.ok(reads < 1_000, `one shifted control must not rebuild every unchanged line-point chunk (${reads} reads)`);
+  console.log(`One shifted control retains 20,000 line points: ${reads} boundary reads`);
+}

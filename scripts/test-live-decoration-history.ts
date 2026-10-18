@@ -75,8 +75,40 @@ try {
     const scope = window as any, api = scope.__liveHistory;
     const text = 'EDIT\n\n```js\n' + Array.from({ length: 40 }, (_, index) => `const budget${String(index).padStart(2, '0')} = ${index};`).join('\n')
       + '\n```\n\n' + '**Formatted paragraph**.\n\n'.repeat(4_100);
-    scope.__budgetEditor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'live', onApplyChanges() {} });
-    api.parse(scope.__budgetEditor); scope.__budgetEditor.refreshDecorations();
+    scope.__createCodeBudgetEditor = () => {
+      scope.__budgetEditor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'live', onApplyChanges() {} });
+      api.parse(scope.__budgetEditor); scope.__budgetEditor.refreshDecorations();
+    };
+    scope.__createCodeBudgetEditor();
+  });
+  await page.waitForSelector('.meo-md-long-code-placeholder');
+  const prosePoint = await page.evaluate(() => {
+    const scope = window as any, view = scope.__budgetEditor.view;
+    const line = [...view.contentDOM.querySelectorAll<HTMLElement>('.cm-line')].find(line => line.textContent === 'EDIT');
+    if (!line) throw Error('The pointer budget requires visible prose');
+    const rect = line.getBoundingClientRect();
+    scope.__clickCursorStyles = 0;
+    scope.__cursorObserver = new MutationObserver(records => {
+      if (records.some(record => record.oldValue?.includes('meo-pointer-selecting')) || view.dom.classList.contains('meo-pointer-selecting')) scope.__clickCursorStyles++;
+    });
+    scope.__cursorObserver.observe(view.dom, { attributes: true, attributeFilter: ['class'], attributeOldValue: true });
+    return { x: rect.left + 12, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.click(prosePoint.x, prosePoint.y);
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  assert.equal(await page.evaluate(() => (window as any).__clickCursorStyles), 0,
+    'a caret click must not restyle every descendant with the drag-only cursor override');
+  await page.mouse.move(prosePoint.x, prosePoint.y);
+  await page.mouse.down();
+  await page.mouse.move(prosePoint.x + 25, prosePoint.y, { steps: 3 });
+  assert.equal(await page.evaluate(() => (window as any).__budgetEditor.view.dom.classList.contains('meo-pointer-selecting')), true,
+    'an actual text drag must retain its cursor override');
+  await page.mouse.up();
+  assert.equal(await page.evaluate(() => (window as any).__budgetEditor.view.dom.classList.contains('meo-pointer-selecting')), false);
+  await page.evaluate(() => {
+    const scope = window as any;
+    scope.__cursorObserver.disconnect();
+    scope.__budgetEditor.destroy(); scope.__createCodeBudgetEditor();
   });
   await page.waitForSelector('.meo-md-long-code-placeholder');
   const codePoint = await page.evaluate(() => {

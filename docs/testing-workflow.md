@@ -92,13 +92,25 @@ Programmatic scroll assignments may prepare a case but cannot prove dragging.
 
 `test-live-decoration-history.ts` counts baseline comparisons and full rendered-block
 discovery during accepted large Source/Live input. Both stay behind the primary text
-frame; settled summaries must still describe the actual change. A real collapsed-code
+frame, including its first two animation frames; settled summaries must still describe
+the actual change. The real DOM keydown path must not request the full HTML block
+list to decide whether the current selection needs source editing. A real collapsed-code
 pointer click must not invalidate unrelated canonical Markdown presentation. Existing
 exact undo/redo, pending-input mode changes and widget-position checks remain required.
+`test-live-scan-budget.ts` also checks the actual CodeMirror height-comparison mode
+(`minPointSize=0`): shared offscreen widgets must not pull ordinary marks into that
+comparison. Preserve point semantics and the combined height summary when mapping
+partitioned ranges, including edits with no widget offset changes.
+The nested Markdown fixture must use the actual View decoration providers, since
+single-layer synthetic ranges do not catch height-summary propagation through
+joined layers. Shifting one control must retain unchanged line-point chunks.
+Caret clicks must not toggle the descendant drag-cursor override; real drags must
+still enable it and clean it up on release.
 
 `test-preview-viewport-work-budget.ts` exposes the browser's native scrollbar.
 It checks range retention while a nearby block changes height, release outside
-the iframe, exact restoration of authored styles, bottom retention through late
+the iframe, exact restoration of authored styles, a release-time upward anchor
+adjustment after the thumb reached the bottom, bottom retention through late
 range growth and retirement of that intention by a new wheel gesture, deferred reading controls,
 zero-size code typography, copied source after a preserved-frame update, and
 bounded geometry inside a 150-note footnote section. Its parser contract compares

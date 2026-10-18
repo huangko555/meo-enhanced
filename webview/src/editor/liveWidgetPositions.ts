@@ -18,13 +18,24 @@ interface LiveWidgetPositions {
 // larger mark set. These caps bound both the initial partition and later edits.
 const maxProjectionDecorations = 131_072;
 const maxProjectionWidgets = 16_384;
-type ProjectionParts = { stable: DecorationSet; positioned: DecorationSet };
+type ProjectionParts = {
+  stable: DecorationSet; // Pure marks, excluded from height comparison.
+  points: DecorationSet; // Zero-width line decorations and controls.
+  positioned: DecorationSet; // Nonempty replacements and block widgets.
+};
 const mappableSets = new WeakMap<DecorationSet, ProjectionParts | false>();
+
+/** Keep pure marks out of CodeMirror's height-point comparison. Joining them
+ * into one RangeSet propagates the point summary through all mark layers. */
+export function liveWidgetPresentationLayers(decorations: DecorationSet): readonly DecorationSet[] {
+  const parts = mappableSets.get(decorations);
+  return parts ? [parts.positioned, parts.points, parts.stable] : [decorations];
+}
 
 function projectionParts(decorations: DecorationSet): ProjectionParts | false {
   const cached = mappableSets.get(decorations);
   if (cached !== undefined) return cached;
-  const stable = new RangeSetBuilder<Decoration>(), positioned = new RangeSetBuilder<Decoration>();
+  const stable = new RangeSetBuilder<Decoration>(), points = new RangeSetBuilder<Decoration>(), positioned = new RangeSetBuilder<Decoration>();
   let count = 0;
   for (const cursor = decorations.iter(); cursor.value; cursor.next()) {
     const widget = cursor.value.spec.widget as (WidgetType & Partial<LiveWidgetPositions>) | undefined;
@@ -33,12 +44,11 @@ function projectionParts(decorations: DecorationSet): ProjectionParts | false {
       mappableSets.set(decorations, false);
       return false;
     }
-    // Even position-independent block widgets must stay out of mark chunks:
-    // CodeMirror cannot skip a shared chunk containing a nonempty replacement
-    // when comparing height-relevant points after a document change.
-    (widget ? positioned : stable).add(cursor.from, cursor.to, cursor.value);
+    // Line decorations and replacements without a widget are points too.
+    // Pure mark layers must retain maxPoint=-1 for height comparison.
+    (cursor.value.point ? cursor.from === cursor.to ? points : positioned : stable).add(cursor.from, cursor.to, cursor.value);
   }
-  const result = { stable: stable.finish(), positioned: positioned.finish() };
+  const result = { stable: stable.finish(), points: points.finish(), positioned: positioned.finish() };
   mappableSets.set(decorations, result);
   return result;
 }
@@ -50,7 +60,7 @@ export function prepareLiveWidgetPositions(decorations: DecorationSet, viewportB
   if (!viewportBounded && decorations.size > maxProjectionDecorations) return decorations;
   const parts = projectionParts(decorations);
   if (!parts) return decorations;
-  const result = RangeSet.join([parts.stable, parts.positioned]);
+  const result = RangeSet.join([parts.stable, parts.points, parts.positioned]);
   mappableSets.set(result, parts);
   return result;
 }
@@ -68,10 +78,11 @@ export function replaceLivePresentationRanges(decorations: DecorationSet, from: 
     accepted.push(cursor.value.range(cursor.from, cursor.to));
   }
   const nextParts = {
-    stable: parts.stable.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => !range.value.spec.widget), sort: true }),
-    positioned: parts.positioned.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => !!range.value.spec.widget), sort: true })
+    stable: parts.stable.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => !range.value.point), sort: true }),
+    points: parts.points.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => range.value.point && range.from === range.to), sort: true }),
+    positioned: parts.positioned.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => range.value.point && range.from !== range.to), sort: true })
   };
-  const result = RangeSet.join([nextParts.stable, nextParts.positioned]);
+  const result = RangeSet.join([nextParts.stable, nextParts.points, nextParts.positioned]);
   mappableSets.set(result, nextParts);
   return result;
 }
@@ -88,26 +99,38 @@ export function mapStableLiveDecorations(decorations: DecorationSet, changes: Ch
   if (decorations.size > maxProjectionDecorations && !mappableSets.has(decorations)) return;
   const parts = projectionParts(decorations);
   if (!parts) return;
-  const mappedWidgets = parts.positioned.map(changes);
-  const widgets = new RangeSetBuilder<Decoration>();
   let rebasedWidgets = false;
-  for (const cursor = mappedWidgets.iter(); cursor.value; cursor.next()) {
-    const value = cursor.value;
-    const widget = value.spec.widget as WidgetType & LiveWidgetPositions;
-    const next = widget[mapLiveWidgetPositions](changes, state);
-    if (next === widget) { widgets.add(cursor.from, cursor.to, value); continue; }
-    const spec = { ...value.spec, widget: next };
-    const decoration = cursor.from === cursor.to ? Decoration.widget(spec) : Decoration.replace(spec);
-    widgets.add(cursor.from, cursor.to, decoration);
+  const mapPoints = (part: DecorationSet): DecorationSet => {
+    const mapped = part.map(changes);
+    const replacements = new Map<Decoration, Decoration>(), positions = new Set<number>();
+    let first = Infinity, last = -Infinity;
+    for (const cursor = mapped.iter(); cursor.value; cursor.next()) {
+      const value = cursor.value;
+      const widget = value.spec.widget as (WidgetType & LiveWidgetPositions) | undefined;
+      if (!widget) continue;
+      const next = widget[mapLiveWidgetPositions](changes, state);
+      if (next === widget) continue;
+      const spec = { ...value.spec, widget: next };
+      replacements.set(value, cursor.from === cursor.to ? Decoration.widget(spec) : Decoration.replace(spec));
+      positions.add(cursor.from); first = Math.min(first, cursor.from); last = Math.max(last, cursor.from);
+    }
+    if (!positions.size) return mapped;
     rebasedWidgets = true;
-  }
-  // Preserve the original order of widgets sharing a position and side (code
-  // labels/actions, for example). Removing/re-adding only one reorders its DOM.
-  const nextParts = { stable: parts.stable.map(changes), positioned: rebasedWidgets ? widgets.finish() : mappedWidgets };
+    // Replace complete same-position groups to preserve action/label ordering,
+    // while keeping unchanged line-point chunks structurally shared.
+    const add: Range<Decoration>[] = [];
+    for (const position of positions) {
+      for (const cursor = mapped.iter(position); cursor.value && cursor.from <= position; cursor.next()) {
+        if (cursor.from === position) add.push((replacements.get(cursor.value) ?? cursor.value).range(cursor.from, cursor.to));
+      }
+    }
+    return mapped.update({ filterFrom: first, filterTo: last, filter: from => !positions.has(from), add, sort: true });
+  };
+  const nextParts = { stable: parts.stable.map(changes), points: mapPoints(parts.points), positioned: mapPoints(parts.positioned) };
   // Rejoin even when widgets retain their identity. Mapping a joined set as
   // one layer loses the combined height-point summary when its first layer
   // contains only marks, which would hide widgets from height comparison.
-  const result = RangeSet.join([nextParts.stable, nextParts.positioned]);
+  const result = RangeSet.join([nextParts.stable, nextParts.points, nextParts.positioned]);
   mappableSets.set(result, nextParts);
   return { decorations: result, rebasedWidgets };
 }

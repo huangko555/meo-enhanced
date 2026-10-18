@@ -1,6 +1,6 @@
 import { documentLines } from './helpers/documentLines';
 import { isAutomaticSymbolPairHistoryEffect } from './editor/typingAssistance';
-import { mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions, replaceLivePresentationRanges } from './editor/liveWidgetPositions';
+import { liveWidgetPresentationLayers, mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions, replaceLivePresentationRanges } from './editor/liveWidgetPositions';
 import { liveViewportPresentationExtensions, restrictLiveWidgetPresentation, getLivePresentationBand,
   isLiveViewportPresentationEffect, livePresentationBandChanged } from './helpers/liveViewportPresentation';
 import { undoDepth } from '@codemirror/commands';
@@ -4055,8 +4055,14 @@ const liveDecorationField = StateField.define<DecorationSet>({
 
     return next;
   },
-  provide: (field) => EditorView.decorations.from(field)
+  provide: (field) => EditorView.decorations.computeN([field], state => liveWidgetPresentationLayers(state.field(field)))
 });
+
+/** Canonical presentation remains one value even when the View consumes its
+ * point and mark layers separately. */
+export function getLivePresentationDecorations(state: EditorState): DecorationSet {
+  return state.field(liveDecorationField);
+}
 
 function isRenderedBlockPreview(state: EditorState, block: LiveRenderedBlock): boolean {
   if (block.kind === 'mermaid' && block.endLine > block.startLine + 1) {

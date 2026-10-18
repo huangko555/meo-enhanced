@@ -2534,8 +2534,6 @@ export function createEditor({
             )
           };
 
-          view.dom.classList.add('meo-pointer-selecting');
-
           if (currentMode === 'live') {
             const pointerPos = view.posAtCoords({ x: event.clientX, y: event.clientY });
             const pointerLine = pointerPos === null ? null : view.state.doc.lineAt(pointerPos).number;
@@ -2821,7 +2819,14 @@ export function createEditor({
   if (startMode === 'live') tableColumnWidthAdapter.adapter.acquire();
   // CodeMirror deliberately suppresses editor handlers for some block widgets.
   // Native listeners keep hover behavior consistent across code, Mermaid, and math blocks.
-  onBlockActionPointerMove = (event) => updateBlockActionToolbarHover(event, view);
+  onBlockActionPointerMove = (event) => {
+    updateBlockActionToolbarHover(event, view);
+    // Applying the descendant cursor override invalidates every mounted table
+    // cell's style. A caret click is not a drag and needs no subtree restyle.
+    if ((event.buttons & 1) && selectionMenuPointerId === event.pointerId) {
+      view.dom.classList.add('meo-pointer-selecting');
+    }
+  };
   onBlockActionPointerLeave = () => setHoveredBlockActionToolbar(null);
   view.dom.addEventListener('pointermove', onBlockActionPointerMove);
   view.dom.addEventListener('pointerleave', onBlockActionPointerLeave);
