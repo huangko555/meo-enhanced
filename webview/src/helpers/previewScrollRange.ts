@@ -6,25 +6,25 @@ export function createPreviewScrollRange(document: Document) {
   const properties = ['height', 'overflow', 'box-sizing', 'overflow-anchor'] as const;
   const owner = document.defaultView;
   let held: { pointer: number; startY: number; styles: Array<{ value: string; priority: string }> } | null = null;
-  let keepBottom = false;
+  let boundary: 'top' | 'bottom' | null = null;
   let boundaryFrame: number | null = null;
   const interrupt = () => {
-    keepBottom = false;
+    boundary = null;
     if (boundaryFrame !== null) owner?.cancelAnimationFrame(boundaryFrame);
     boundaryFrame = null;
   };
-  const pinBottom = () => {
+  const pinBoundary = () => {
     const scroll = document.scrollingElement;
-    if (!keepBottom || !scroll || !page?.isConnected) return;
-    const bottom = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
-    if (Math.abs(scroll.scrollTop - bottom) > 1) scroll.scrollTop = bottom;
+    if (!boundary || !scroll || !page?.isConnected) return;
+    const position = boundary === 'top' ? 0 : Math.max(0, scroll.scrollHeight - scroll.clientHeight);
+    if (Math.abs(scroll.scrollTop - position) > 1) scroll.scrollTop = position;
   };
   // Releasing the thumb can reveal estimated blocks and start nearby resource
-  // presentation. Preserve the chosen bottom across that later height change,
+  // presentation. Preserve the chosen edge across that later height change,
   // until another user navigation owns the reading position.
   const scheduleBoundary = () => {
-    if (!keepBottom || !owner || boundaryFrame !== null) return;
-    boundaryFrame = owner.requestAnimationFrame(() => { boundaryFrame = null; pinBottom(); });
+    if (!boundary || !owner || boundaryFrame !== null) return;
+    boundaryFrame = owner.requestAnimationFrame(() => { boundaryFrame = null; pinBoundary(); });
   };
   const observer = new ResizeObserver(scheduleBoundary);
   if (page) observer.observe(page);
@@ -36,11 +36,15 @@ export function createPreviewScrollRange(document: Document) {
     const scroll = document.scrollingElement;
     // Chromium may adjust the anchor while estimated blocks resolve, even
     // within a fixed page height. A thumb deliberately dragged to the track's
-    // bottom still means bottom; a stationary arrow/track click does not.
+    // edge still means that edge; a stationary arrow/track click does not.
     const gutter = (owner?.innerWidth ?? 0) - document.documentElement.clientWidth;
     const draggedToBottom = releaseY !== undefined && releaseY > held.startY + Math.max(4, gutter)
       && !!scroll && releaseY >= scroll.clientHeight - Math.max(3, gutter);
-    const atBottom = !!scroll && (draggedToBottom || scroll.scrollTop >= scroll.scrollHeight - scroll.clientHeight - 2);
+    const draggedToTop = releaseY !== undefined && releaseY < held.startY - Math.max(4, gutter)
+      && releaseY <= Math.max(3, gutter);
+    const nextBoundary = draggedToTop ? 'top' : draggedToBottom ? 'bottom'
+      : scroll && scroll.scrollTop <= 2 ? 'top'
+      : scroll && scroll.scrollTop >= scroll.scrollHeight - scroll.clientHeight - 2 ? 'bottom' : null;
     const previous = held;
     held = null;
     for (const [index, property] of properties.entries()) {
@@ -48,9 +52,9 @@ export function createPreviewScrollRange(document: Document) {
       if (style.value) page.style.setProperty(property, style.value, style.priority);
       else page.style.removeProperty(property);
     }
-    if (keepBoundary && atBottom && scroll && page.isConnected) {
-      keepBottom = true;
-      pinBottom();
+    if (keepBoundary && nextBoundary && scroll && page.isConnected) {
+      boundary = nextBoundary;
+      pinBoundary();
     }
   };
   return {

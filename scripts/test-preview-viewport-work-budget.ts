@@ -57,6 +57,37 @@ try {
   });
   assert.deepEqual(stableBottom, { heightUnchanged: true, atBottom: true },
     'bottom intent must survive root-scroll correction after the last ResizeObserver delivery');
+  const stableTop = await page.evaluate(async () => {
+    const frame = document.createElement('iframe');
+    frame.style.cssText = 'position:fixed;left:0;top:0;width:320px;height:240px;border:0';
+    document.body.append(frame);
+    const doc = frame.contentDocument!;
+    doc.open(); doc.write('<!doctype html><style>html,body{margin:0}.meo-export-page{height:5000px}</style><main class="meo-export-page">Stable page</main>'); doc.close();
+    const controller = (window as any).__createPreviewScrollRange(doc);
+    const scroll = doc.scrollingElement!, page = doc.querySelector<HTMLElement>('.meo-export-page')!;
+    const frames = async () => { for (let i = 0; i < 4; i++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve())); };
+    scroll.scrollTop = 1_000;
+    controller.start({ button: 0, pointerId: 32, clientX: frame.contentWindow!.innerWidth - 1, clientY: scroll.clientHeight - 20 });
+    controller.release(32, 3);
+    const releasedAtTop = scroll.scrollTop === 0;
+    await frames();
+    page.style.height = '5200px';
+    scroll.scrollTop = 129;
+    await frames();
+    const correctedAtTop = scroll.scrollTop === 0;
+    controller.interrupt();
+    scroll.scrollTop = 191;
+    await frames();
+    const navigationCanLeaveTop = scroll.scrollTop === 191;
+    controller.start({ button: 0, pointerId: 33, clientX: frame.contentWindow!.innerWidth - 1, clientY: 3 });
+    controller.release(33, 3);
+    await frames();
+    const arrowIsNotDrag = scroll.scrollTop === 191;
+    controller.dispose(); frame.remove();
+    return { releasedAtTop, correctedAtTop, navigationCanLeaveTop, arrowIsNotDrag };
+  });
+  assert.deepEqual(stableTop, { releasedAtTop: true, correctedAtTop: true, navigationCanLeaveTop: true, arrowIsNotDrag: true },
+    'top thumb intent must survive estimated layout and root correction, then yield to new navigation without treating arrow clicks as drags');
   const pendingFind = await page.evaluate(() => {
     const scope = window as any, controller = scope.__previewController;
     controller.setVisible(true);
