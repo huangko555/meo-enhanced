@@ -1,6 +1,8 @@
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as vscode from 'vscode';
+import { createBackgroundPreviewRenderer } from './host/previewRenderWorker';
+import { assessLargeDocument } from './foundation/largeDocument';
 import { disposeWikiResources, resolveDocumentWikiResources } from './host/wikiResources';
 import type { ResolvedWikiResources } from './foundation/wikiReference';
 import { shouldPreloadMermaid } from './extension/webviewResourceHints';
@@ -382,6 +384,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
+  private readonly previewRenderer: ReturnType<typeof createBackgroundPreviewRenderer>;
+  private nextPreviewOwner = 0;
   private readonly previewFonts = createPreviewFonts(() => vscode.env.remoteName
     ? Promise.reject(new Error('Local font list unavailable in remote Host')) : readSystemPreviewFonts());
   private readonly previewPresetPreferences: ReturnType<typeof createPreviewPresetPreferences>;
@@ -398,6 +402,9 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     private readonly imageStorage: ReturnType<typeof createVscodeImageStorage>,
     private readonly customPreviewPresets: Awaited<ReturnType<typeof createVscodePreviewPresets>>
   ) {
+    this.previewRenderer = createBackgroundPreviewRenderer(
+      vscode.Uri.joinPath(context.extensionUri, 'dist', 'preview-render-worker.js').fsPath);
+    context.subscriptions.push(this.previewRenderer);
     this.previewPresetPreferences = createPreviewPresetPreferences({
       readStored: () => context.globalState.get(PREVIEW_PRESET_PREFERENCES_STATE_KEY),
       writeStored: preferences => context.globalState.update(PREVIEW_PRESET_PREFERENCES_STATE_KEY, preferences),
@@ -606,6 +613,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     }
 
     this.activePanels.add(panel);
+    const previewOwner = `panel-${++this.nextPreviewOwner}`;
 
     const documentUri = resolveWorktreeUri(document);
     const distRoot = vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist');
@@ -675,11 +683,16 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       renderPreview: async (options) => {
         const definition = options.preset?.startsWith('user:') ? this.customPreviewPresets.get(options.preset) : getPreviewPreset(options.preset);
         if (!definition || definition.custom && definition.custom.revision !== options.presetRevision) throw new Error('Preview preset was removed or updated; select it again.');
-        const exportRuntime = await loadExportRuntimeModule(this.context.extensionUri);
-        return exportRuntime.renderPreviewDocument({ ...options, presetDefinition: definition,
+        const request = { ...options, presetDefinition: definition,
           wikiResources: await resolveDocumentWikiResources(options.markdownText, documentUri)
-        });
+        };
+        if (!this.activePanels.has(panel)) throw new Error('Preview was closed');
+        if (options.window) return this.previewRenderer.open(previewOwner, options.window.documentId, request, options.window.anchorLine);
+        if (assessLargeDocument(options.markdownText).preferSource) return this.previewRenderer.render(request);
+        const exportRuntime = await loadExportRuntimeModule(this.context.extensionUri);
+        return exportRuntime.renderPreviewDocument(request);
       },
+      operatePreviewDocument: (id, operation) => this.previewRenderer.operate(previewOwner, id, operation),
       getFindOptions: () => this.getFindOptions(),
       getUiLanguage: () => this.getUiLanguage(),
       getSourceLineNumbers: () => {
@@ -716,6 +729,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         this.updateActiveEditorContext();
       },
       onPanelDisposed: (disposedPanel) => {
+        void this.previewRenderer.release(previewOwner).catch(() => undefined);
         this.activePanels.delete(disposedPanel);
         this.panelSessions.delete(disposedPanel);
         if (this.lastActivePanel === disposedPanel) {

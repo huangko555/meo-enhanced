@@ -69,3 +69,58 @@ events. End-to-end targets on fixed hardware are P95 input/caret feedback near
 16–33 ms, with worst cases reported. The existing 500 ms severe-stall threshold
 is not a definition of a fluid editor. Small documents, the comprehensive 1 MiB
 fixture, larger stress fixtures and giant single blocks must all be exercised.
+
+## Preview reading window
+
+The full renderer now separates global parsing/context from HTML generation.
+`prepareMarkdownPresentation` exposes balanced presentation blocks and headings;
+`renderBlock` formats only the requested block, while `renderAll` retains the
+complete export semantics. Raw HTML containers spanning Markdown roots remain
+in one block. Reference links, footnotes and duplicate heading slugs retain the
+same global context. Repeated block rendering must be idempotent, including
+deferred images in the GitHub preset.
+
+The extension owns one Preview worker with a bounded request queue, idle shutdown
+and document/cache budgets. Expensive complete Preview requests already run off
+the extension event loop. The prepared-document path supports requested blocks,
+rendered-text search, source/fragment location and selection copying; each panel
+has a Host-assigned owner, and cannot access another panel's parsed context.
+The worker asset is included in build, installed-Node and VSIX checks.
+
+The comprehensive fixture diagnostic measured about 403 ms preparation, 5 ms
+for the first twelve blocks (19,256 HTML characters), and a further 688 ms for
+complete HTML generation (4,898,427 characters). This is a local producer
+diagnostic, not a native end-to-end comparison.
+
+Large Preview requests now use a logical block-height index and a bounded DOM
+window. The complete parse retains global reference/footnote/heading semantics;
+only nearby block HTML is generated and mounted. The full renderer remains the
+export and accessibility route. Explicit source and fragment navigation loads
+its target before revealing it, with a current-interaction guard. Native scroll
+boundary intent survives corrections to estimated gap heights.
+
+Search counts, offscreen headings, fragment location and copying use the prepared
+document, independently of mounted DOM. Only visible search matches get browser
+marks. Cross-window partial copying captures hydrated DOM endpoints and requests
+unmounted interior blocks; Ctrl+A/C includes the full document. Clipboard writes
+are still subject to native Webview acceptance, not established by a test writer.
+Hidden windows stop mounting/resource work. Appearance-only refreshes can reuse
+the current DOM and geometry with a new parser context. Image/math/table/diagram
+owners are refreshed when blocks enter and retire from the reading window.
+
+Browser verification covers 5,000 paragraphs, distant search/navigation,
+bounded DOM, complete and partial formatted copying, and runtime accessibility
+changes. The built production page covers Source input/undo, hidden Preview,
+distant resource mounting, immediate edited Source/Live-to-Preview round trips
+and reading-position restoration. Installed Node verifies the packaged worker,
+CPU isolation, requested blocks, offscreen search, owner isolation and release.
+Very large individual roots and end-to-end native latency remain open work.
+
+Accessibility detection must use VS Code's documented `vscode-using-screen-reader`
+body class, including a change during a session. Until continuous virtual reading
+is independently supported, that route retains complete accessible DOM while
+benefiting from background computation. See the official
+[Webview accessibility guidance](https://code.visualstudio.com/api/extension-guides/webview#accessibility).
+Virtual selection copying can start a ClipboardItem with promised HTML/text data
+at the user's copy event; this preserves activation while content is prepared.
+See [ClipboardItem data](https://developer.mozilla.org/en-US/docs/Web/API/ClipboardItem/ClipboardItem).

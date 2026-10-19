@@ -1,5 +1,10 @@
 import morphdom from 'morphdom';
 import { createPreviewSearchController, previewSearchStyles } from './previewSearch';
+import { createPreviewViewport, previewWindowProjection } from './previewViewport';
+import { createPreviewDocumentSearch } from './previewDocumentSearch';
+import { createPreviewDocumentTransport } from '../adapters/previewDocumentTransport';
+import type { PreviewDocumentResponse } from '../../../src/protocol/previewDocument';
+import type { SearchMatchAnchor } from '../application/searchMatchAnchor';
 import { createElement as createIconElement, TextCursor, BookOpen, FileText, Check, Plus } from 'lucide';
 import previewPresetBrandIcons from './previewPresetBrandIcons.json';
 import { getExportStyleEnvironment } from './export';
@@ -1244,6 +1249,11 @@ export function createPreviewController({
   };
   let latestPayload: PreviewRenderValue | null = null;
   const previewRenderTransport = createPreviewRenderTransport((message) => vscode.postMessage(message));
+  const previewDocumentTransport = createPreviewDocumentTransport(message => vscode.postMessage(message));
+  let previewViewport: ReturnType<typeof createPreviewViewport> | null = null;
+  let previewDocumentSearch: ReturnType<typeof createPreviewDocumentSearch> | null = null;
+  let searchQuery = '', searchOptions: { wholeWord?: boolean; caseSensitive?: boolean } = {};
+  let searchAnchor: SearchMatchAnchor | null = null;
   const previewMermaidRenderer = createPreviewMermaidRenderer(
     mermaidRenderResources,
     (error) => logWebviewRenderError('preview.mermaid', error)
@@ -1271,6 +1281,51 @@ export function createPreviewController({
       frame.contentWindow?.focus();
     }
   });
+  const searchTarget = () => previewDocumentSearch?.adapter ?? search.adapter;
+  const searchAdapter: typeof search.adapter = {
+    setSearchQuery(text, options = {}) {
+      if (text !== searchQuery || Boolean(options.wholeWord) !== Boolean(searchOptions.wholeWord)
+        || Boolean(options.caseSensitive) !== Boolean(searchOptions.caseSensitive)) searchAnchor = null;
+      searchQuery = text; searchOptions = options; searchTarget().setSearchQuery(text, options);
+    },
+    isSearchReady: () => searchTarget().isSearchReady(),
+    isSearchPending: () => searchTarget().isSearchPending(),
+    countMatches: () => searchTarget().countMatches(),
+    getSearchAnchor: () => searchAnchor = searchTarget().getSearchAnchor(),
+    setSearchAnchor(anchor) { searchAnchor = anchor; searchTarget().setSearchAnchor(anchor); },
+    findNext(text, options) { searchAdapter.setSearchQuery(text, options); return searchTarget().findNext(text, options); },
+    findPrevious(text, options) { searchAdapter.setSearchQuery(text, options); return searchTarget().findPrevious(text, options); },
+    focus: () => searchTarget().focus()
+  };
+  let recoveringExpiredDocument = false;
+  const requestPreviewDocument: typeof previewDocumentTransport.request = (id, operation) =>
+    previewDocumentTransport.request(id, operation).then(result => { recoveringExpiredDocument = false; return result; });
+  const handleWindowError = (error: unknown) => {
+    if (disposed) return;
+    const message = error instanceof Error ? error.message : String(error);
+    if (/document (?:expired|was released)/.test(message) && !recoveringExpiredDocument && frameRenderedText !== null
+      && isCurrentText?.(frameRenderedText) !== false) {
+      recoveringExpiredDocument = true;
+      void requestRender(frameRenderedText, { force: true, preserveViewport: true });
+      return;
+    }
+    latestAcceptedRequestGeneration = -1;
+    setStatus(uiStrings.previewFailed);
+    logWebviewRenderError('preview.window', error);
+  };
+  const connectDocumentSearch = () => {
+    if (previewDocumentSearch) searchAnchor = previewDocumentSearch.adapter.getSearchAnchor();
+    previewDocumentSearch?.dispose(); previewDocumentSearch = null;
+    if (!previewViewport) return;
+    previewDocumentSearch = createPreviewDocumentSearch(previewViewport.manifest, {
+      getDocument: () => activeFrameDocument,
+      visible: search, viewport: previewViewport, request: requestPreviewDocument,
+      isVisible: () => !host.hidden, onNavigate: notifyViewportInteraction,
+      onResultsChanged: () => onSearchResultsChanged?.(), focus: search.adapter.focus, error: handleWindowError
+    });
+    previewDocumentSearch.adapter.setSearchQuery(searchQuery, searchOptions);
+    previewDocumentSearch.adapter.setSearchAnchor(searchAnchor);
+  };
   let previewMathViewports = new Map<HTMLElement, {
     readonly controller: LatexMathViewportController;
     readonly signature: string;
@@ -1287,6 +1342,7 @@ export function createPreviewController({
   let cancelFrameWrite: (() => void) | null = null;
   let disposed = false;
   let paintFrame: number | null = null;
+  let paintGeneration = 0;
   let highlightFrame: number | null = null;
   let highlightTimer: number | null = null;
   let elementRevealFrame: number | null = null;
@@ -1339,6 +1395,7 @@ export function createPreviewController({
     });
   };
   const cancelPaintReady = () => {
+    paintGeneration += 1;
     if (paintFrame !== null) window.cancelAnimationFrame(paintFrame);
     paintFrame = null;
   };
@@ -1354,6 +1411,7 @@ export function createPreviewController({
   const schedulePaintReady = () => {
     cancelPaintReady();
     if (disposed || host.hidden) return;
+    const generation = paintGeneration;
     const stabilizePendingExternalViewport = () => {
       const restore = getCurrentPendingExternalViewportRestore();
       if (!restore) return;
@@ -1373,9 +1431,15 @@ export function createPreviewController({
         paintFrame = null;
         if (!disposed && !host.hidden) {
           stabilizePendingExternalViewport();
-          search.surfaceReady();
-          onPaintReady?.();
-          if (!hasPendingRequest) pendingExternalViewportRestore = null;
+          const finish = () => {
+            if (disposed || host.hidden || generation !== paintGeneration) return;
+            (previewDocumentSearch ?? search).surfaceReady();
+            onPaintReady?.();
+            if (!hasPendingRequest) pendingExternalViewportRestore = null;
+          };
+          if (previewViewport) void previewViewport.whenReady().then(finish,
+            error => { if (!disposed && generation === paintGeneration) { handleWindowError(error); finish(); } });
+          else finish();
         }
       });
     });
@@ -1435,6 +1499,7 @@ export function createPreviewController({
     disposeDeferredImages();
     const abortController = new AbortController();
     const pendingCommits: Array<() => void> = [];
+    const pendingImages = new Map<HTMLElement, { attribute: string; source: string }>();
     let commitFrame: number | null = null;
     const flushCommits = () => {
       commitFrame = null;
@@ -1460,11 +1525,13 @@ export function createPreviewController({
       const rawSrc = source.getAttribute('data-meo-deferred-image-srcset') ?? '';
       source.removeAttribute('data-meo-deferred-image-srcset');
       source.dataset.meoPreviewImageSource = rawSrc;
+      pendingImages.set(source, { attribute: 'data-meo-deferred-image-srcset', source: rawSrc });
       void resolveEmbeddedImageSrc(rawSrc, abortController.signal).then(resolved => {
         if (abortController.signal.aborted || disposed || activeFrameDocument !== frameDocument) return;
         enqueueCommit(() => {
           if (resolved) source.srcset = resolved;
           else source.removeAttribute('srcset');
+          pendingImages.delete(source);
         });
       });
     }
@@ -1475,6 +1542,7 @@ export function createPreviewController({
       const rawSrc = image.getAttribute('data-meo-deferred-image-src') ?? '';
       image.removeAttribute('data-meo-deferred-image-src');
       image.dataset.meoPreviewImageSource = rawSrc;
+      pendingImages.set(image, { attribute: 'data-meo-deferred-image-src', source: rawSrc });
       const resolvedSrc = await resolveEmbeddedImageSrc(rawSrc, abortController.signal);
       if (
         abortController.signal.aborted ||
@@ -1482,7 +1550,7 @@ export function createPreviewController({
         activeFrameDocument !== frameDocument
       ) return;
       if (!resolvedSrc) {
-        enqueueCommit(() => image.removeAttribute('src'));
+        enqueueCommit(() => { image.removeAttribute('src'); pendingImages.delete(image); });
         return;
       }
       // Load outside the reading layout so intrinsic dimensions do not change
@@ -1520,6 +1588,7 @@ export function createPreviewController({
       }
       enqueueCommit(() => {
         image.replaceWith(prepared);
+        pendingImages.delete(image);
       });
     };
     const FrameIntersectionObserver = frame.contentWindow
@@ -1542,6 +1611,8 @@ export function createPreviewController({
     disposeDeferredImages = () => {
       observer?.disconnect();
       abortController.abort();
+      for (const [element, pending] of pendingImages) if (element.isConnected) element.setAttribute(pending.attribute, pending.source);
+      pendingImages.clear();
       pendingCommits.length = 0;
       if (commitFrame !== null) frameDocument.defaultView?.cancelAnimationFrame(commitFrame);
       commitFrame = null;
@@ -1575,7 +1646,7 @@ export function createPreviewController({
       if (renderDeferredPreviewMath(element)) {
         sourceMapDirty = true;
         search.invalidate();
-        search.surfaceReady();
+        (previewDocumentSearch ?? search).surfaceReady();
       }
       const controller = element.classList.contains('meo-export-math-inline')
         ? attachLatexMathViewport(element, { layout: { kind: 'inline' } })
@@ -1795,6 +1866,10 @@ export function createPreviewController({
     const reusableDocument = activeFrameDocument === frame.contentDocument ? activeFrameDocument : null;
     const reusableMain = reusableDocument?.querySelector<HTMLElement>('main.meo-export-doc');
     const previousRenderedText = frameRenderedText;
+    searchAnchor = searchAdapter.getSearchAnchor();
+    previewDocumentSearch?.dispose(); previewDocumentSearch = null;
+    previewViewport?.dispose(); previewViewport = null;
+    previewDocumentTransport.cancel();
     frameEvents?.abort();
     frameEvents = null;
     search.invalidate();
@@ -1840,6 +1915,38 @@ export function createPreviewController({
       const signal = frameEvents.signal;
       frameRenderedText = renderedText;
       frameDocument.documentElement.dataset.meoPreviewLargeDocument = String(assessLargeDocument(renderedText).preferSource);
+      if (payload.document) {
+        let constructing = true;
+        previewViewport = createPreviewViewport(mappedRoot, payload.document, {
+          request: requestPreviewDocument,
+          mutate: run => { if (constructing) run(); else withViewportTransaction(() => run()); },
+          changed: () => {
+            if (constructing || disposed || activeFrameDocument !== frameDocument) return;
+            sourceMapDirty = true; localGeometryViewport = null;
+            localSourceGeometry = createPreviewSourceGeometry(frameDocument);
+            previewViewportResources?.refresh();
+            syncGithubPictures(frameDocument, appearance); preparePreviewLinks(frameDocument);
+            attachDeferredImages(frameDocument); attachPreviewMathViewports(frameDocument);
+            previewTableLayout?.refresh();
+            previewDocumentSearch?.windowChanged();
+            scheduleViewportHighlight(frameDocument);
+            refreshSourcePositionMarker(); onGeometryChanged?.();
+          },
+          error: handleWindowError,
+          reveal: (element, align) => revealPreviewElement(element, align),
+          writeClipboard: value => {
+            if (typeof ClipboardItem === 'function' && navigator.clipboard?.write) {
+              return navigator.clipboard.write([new ClipboardItem({
+                'text/plain': value.then(result => new Blob([result.text], { type: 'text/plain' })),
+                'text/html': value.then(result => new Blob([result.html], { type: 'text/html' }))
+              })]);
+            }
+            return value.then(result => navigator.clipboard.writeText(result.text));
+          }
+        });
+        constructing = false;
+        connectDocumentSearch();
+      }
       localSourceGeometry = frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true'
         ? createPreviewSourceGeometry(frameDocument) : null;
       if (!localSourceGeometry) { previewScrollRange?.dispose(); previewScrollRange = null; }
@@ -1948,7 +2055,11 @@ export function createPreviewController({
           buttons: event.buttons
         }));
       }, { capture: true, signal });
-      bindPreviewLinks(frameDocument, vscode, notifyViewportInteraction, signal, element => revealPreviewElement(element, 'start'));
+      bindPreviewLinks(frameDocument, vscode, notifyViewportInteraction, signal, element => revealPreviewElement(element, 'start'), anchor => {
+        const current = previewViewport, intent = viewportInteractionGeneration;
+        if (current) void current.ensure({ anchor, align: 'start', isCurrent: () => !disposed && !host.hidden
+          && previewViewport === current && intent === viewportInteractionGeneration }).catch(handleWindowError);
+      });
       bindPreviewWheelFallback(frameDocument, signal);
       bindPreviewShortcuts(frame, onShortcut, signal);
       const keepPosition = () => {
@@ -2010,7 +2121,7 @@ export function createPreviewController({
         const deferredCodeBlocks = morphPreviewMain(
           reusableDocument,
           reusableMain,
-          payload.html,
+          payload.document ? previewWindowProjection(reusableMain, payload.document) : payload.html,
           isSourceColoringEnabled(),
           pendingCodeBlocks,
           () => !disposed && isSourceColoringEnabled() && loadGeneration === frameGeneration,
@@ -2027,6 +2138,8 @@ export function createPreviewController({
         if (!preserveViewport && reusableDocument.scrollingElement) {
           reusableDocument.scrollingElement.scrollTop = 0;
         }
+        if (payload.document) reusableMain.dataset.meoPreviewDocument = payload.document.id;
+        else delete reusableMain.dataset.meoPreviewDocument;
         initializeFrame(viewportSlot);
       };
       if (preserveViewport) {
@@ -2289,7 +2402,8 @@ export function createPreviewController({
     // authorize reuse, both while srcdoc loads and after it becomes readable.
     const canReuseAcceptedPayload = !force && latestPayload !== null
       && latestAcceptedRequestGeneration === requestGeneration
-      && text === latestAcceptedText;
+      && text === latestAcceptedText
+      && !(latestPayload.document && document.body.classList.contains('vscode-using-screen-reader'));
     if (canReuseAcceptedPayload && text === loadingFrameText) return Promise.resolve();
     if (canReuseAcceptedPayload
       && text === frameRenderedText
@@ -2323,7 +2437,10 @@ export function createPreviewController({
       environment: getStyleEnvironment(),
       preset: presetPreference,
       ...(getPreviewPreset(presetPreference).custom ? { presetRevision: getPreviewPreset(presetPreference).custom!.revision } : {}),
-      contentWidth: contentWidthPreference
+      contentWidth: contentWidthPreference,
+      ...(!document.body.classList.contains('vscode-using-screen-reader') && assessLargeDocument(text).preferSource
+        ? { window: { anchorLine: getCurrentPendingExternalViewportRestore()?.line
+          ?? getTopVisiblePosition()?.topLine ?? sourcePositionMarkerState.line } } : {})
     }).then((result) => {
       if (generation !== requestGeneration) return;
       hasPendingRequest = false;
@@ -2351,7 +2468,12 @@ export function createPreviewController({
         preserveFrame && activeFrameDocument && frameRenderedText === requestText
         && !commitPendingCodeHighlight
       ) {
+        if (previewViewport && result.value.document) {
+          if (!previewViewport.rebind(result.value.document)) { renderFrame(requestText, preserveViewport); return; }
+          connectDocumentSearch();
+        }
         applyAppearanceToFrame(preserveViewport);
+        previewViewport?.refresh({ invalidateGeometry: true });
       } else {
         renderFrame(requestText, preserveViewport);
       }
@@ -2384,6 +2506,16 @@ export function createPreviewController({
   const acceptRenderResponse = (message: PreviewRenderResponse) => (
     disposed ? false : previewRenderTransport.accept(message)
   );
+  let usingScreenReader = document.body.classList.contains('vscode-using-screen-reader');
+  const accessibilityObserver = new MutationObserver(() => {
+    const enabled = document.body.classList.contains('vscode-using-screen-reader');
+    if (disposed || enabled === usingScreenReader) return;
+    usingScreenReader = enabled;
+    if (host.hidden) { latestAcceptedRequestGeneration = -1; return; }
+    const text = hasPendingRequest ? pendingText : latestAcceptedText;
+    if (text !== null) void requestRender(text, { force: true, preserveViewport: true });
+  });
+  accessibilityObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
   const updateSourceColoringControl = (): void => {
     updateBooleanPresetControls();
@@ -2611,9 +2743,11 @@ export function createPreviewController({
   ): PreviewSourceMapEntry | undefined => {
     let ranges = getSourceMap(false).filter(entry => (
       entry.start === sourceRange.startLine && entry.end === sourceRange.endLine
+      && !entry.element.hasAttribute('data-meo-preview-gap')
     ));
     if (ranges.some(entry => !entry.element.isConnected)) {
-      ranges = getVisualSourceMap().filter(entry => entry.start === sourceRange.startLine && entry.end === sourceRange.endLine);
+      ranges = getVisualSourceMap().filter(entry => entry.start === sourceRange.startLine && entry.end === sourceRange.endLine
+        && !entry.element.hasAttribute('data-meo-preview-gap'));
     } else {
       const scrollTop = getFrameDocument()?.scrollingElement?.scrollTop ?? 0;
       ranges = ranges.map(entry => {
@@ -2816,6 +2950,8 @@ export function createPreviewController({
     marker.style.height = `${projection.bottom - projection.top}px`;
     return revealed;
   };
+  let pendingWindowPosition: { line: number; generation: number; interaction: number;
+    lineOffset: number; viewportOffset: number; sourceRange?: { startLine: number; endLine: number; progress: number } } | null = null;
   const restoreTopLine = (
     line: number,
     lineOffset = 0,
@@ -2828,17 +2964,32 @@ export function createPreviewController({
       return;
     }
     if (sourceRange) {
-      const range = findVisualRangeProjection(
-        sourceRange,
-        scrollElement.scrollTop + Math.max(0, viewportOffset)
-      );
+      const range = findVisualRangeProjection(sourceRange, scrollElement.scrollTop + Math.max(0, viewportOffset));
       if (range) {
-        const progress = Math.max(0, Math.min(1, sourceRange.progress));
-        scrollElement.scrollTop = range.top
-          + (range.bottom - range.top) * progress
+        scrollElement.scrollTop = range.top + (range.bottom - range.top) * Math.max(0, Math.min(1, sourceRange.progress))
           - Math.max(0, viewportOffset);
         return;
       }
+    }
+    const currentWindow = previewViewport;
+    if (currentWindow && !currentWindow.containsLine(line)) {
+      currentWindow.projectLine(sourceRange?.startLine ?? line, lineOffset, viewportOffset, sourceRange?.progress);
+      const generation = frameGeneration, interaction = viewportInteractionGeneration;
+      if (pendingWindowPosition?.line !== line || pendingWindowPosition.generation !== generation
+        || pendingWindowPosition.interaction !== interaction) {
+        const ticket = { line, generation, interaction, lineOffset, viewportOffset, sourceRange };
+        pendingWindowPosition = ticket;
+        const isCurrent = () => !disposed && previewViewport === currentWindow && frameGeneration === generation
+          && viewportInteractionGeneration === interaction && pendingWindowPosition === ticket;
+        void currentWindow.ensure({ line, scroll: false, isCurrent }).then(() => {
+          if (!isCurrent()) return;
+          pendingWindowPosition = null;
+          restoreTopLine(ticket.line, ticket.lineOffset, ticket.viewportOffset, ticket.sourceRange);
+        }, error => { if (isCurrent()) { pendingWindowPosition = null; handleWindowError(error); } });
+      } else {
+        Object.assign(pendingWindowPosition, { lineOffset, viewportOffset, sourceRange });
+      }
+      return;
     }
     const source = findSourceProjection(line);
     if (!source) return;
@@ -2887,6 +3038,9 @@ export function createPreviewController({
     const frameDocument = getFrameDocument();
     const scrollElement = frameDocument?.scrollingElement;
     const boundedViewportOffset = Math.max(0, viewportOffset);
+    const windowAnchor = previewViewport?.readAnchor(boundedViewportOffset);
+    if (windowAnchor && !windowAnchor.rendered) return { topLine: windowAnchor.line, topLineOffset: 0,
+      editorLineOffset: 0, viewportOffset: boundedViewportOffset, sourceRange: windowAnchor.sourceRange };
     const retained = retainedViewportProjection;
     if (
       retained && frameDocument && scrollElement &&
@@ -2983,6 +3137,9 @@ export function createPreviewController({
     }
   };
   const getHeadings = (): OutlineHeading[] => {
+    if (previewViewport) return previewViewport.manifest.headings.map(heading => ({
+      text: heading.text.trim() || uiStrings.untitled, level: heading.level, line: heading.line, from: heading.line
+    }));
     const headingElements = Array.from(
       getFrameDocument()?.querySelectorAll<HTMLElement>('h1[data-source-line], h2[data-source-line], h3[data-source-line], h4[data-source-line], h5[data-source-line], h6[data-source-line]') ?? []
     );
@@ -3040,6 +3197,8 @@ export function createPreviewController({
     getHeadings,
     getViewportAnchorOffset: (ratio = 0.2) => {
       if (host.hidden || host.getClientRects().length === 0) return 1;
+      const windowAnchor = previewViewport?.readAnchor((frame.contentWindow?.innerHeight ?? host.clientHeight) * ratio);
+      if (windowAnchor && !windowAnchor.rendered) return windowAnchor.line;
       const anchorY = (getFrameDocument()?.scrollingElement?.scrollTop ?? 0)
         + (frame.contentWindow?.innerHeight ?? host.clientHeight) * ratio;
       const entries = getVisualSourceMap();
@@ -3066,6 +3225,13 @@ export function createPreviewController({
       }, () => true);
     },
     scrollToLine: (line: number) => {
+      if (previewViewport) {
+        notifyViewportInteraction();
+        const current = previewViewport, intent = viewportInteractionGeneration;
+        void current.ensure({ line, align: 'start', isCurrent: () => !disposed && !host.hidden
+          && previewViewport === current && viewportInteractionGeneration === intent }).catch(handleWindowError);
+        return;
+      }
       const target = getFrameDocument()?.querySelector<HTMLElement>(`[data-source-line="${line}"]`);
       if (!target) return;
       notifyViewportInteraction();
@@ -3100,6 +3266,7 @@ export function createPreviewController({
     requestRender,
     preload: (text: string) => requestRender(text, { background: true }),
     acceptRenderResponse,
+    acceptDocumentResponse: (message: PreviewDocumentResponse) => disposed ? false : previewDocumentTransport.accept(message),
     setAppearance: (nextAppearance: PreviewAppearance, options?: { readonly post?: boolean }) => {
       if (!options?.post && presetPreference !== 'default') {
         defaultAppearancePreference = nextAppearance;
@@ -3169,6 +3336,7 @@ export function createPreviewController({
       host.hidden = !visible;
       host.inert = !visible;
       previewViewportResources?.setActive(visible);
+      previewViewport?.refresh({ active: visible });
       updateViewportAlignment();
       if (!visible) {
         previewScrollRange?.cancel();
@@ -3182,7 +3350,7 @@ export function createPreviewController({
         appearanceRetentionGeneration += 1;
         appearanceRetention?.release();
         cancelPaintReady();
-        search.surfaceHidden();
+        (previewDocumentSearch ?? search).surfaceHidden();
       }
       else if (activeFrameDocument && !hasPendingRequest) {
         attachPreviewMathViewports(activeFrameDocument);
@@ -3229,16 +3397,21 @@ export function createPreviewController({
     },
     refreshLayout: () => {
       previewTableLayout?.refresh();
-      search.refreshLayout();
+      previewViewport?.refresh();
+      (previewDocumentSearch ?? search).refreshLayout();
       sourceMapDirty = true;
       refreshSourcePositionMarker();
     },
-    getSelectedText: () => frame.contentWindow?.getSelection()?.toString() ?? '',
-    getSearchAdapter: () => search.adapter,
+    getSelectedText: () => previewViewport?.selectedText() ?? frame.contentWindow?.getSelection()?.toString() ?? '',
+    getSearchAdapter: () => searchAdapter,
     getOutlineAdapter: () => outlineAdapter,
     dispose: () => {
       if (disposed) return;
       disposed = true;
+      accessibilityObserver.disconnect();
+      previewDocumentSearch?.dispose(); previewDocumentSearch = null;
+      previewViewport?.dispose(); previewViewport = null;
+      previewDocumentTransport.cancel(false);
       cancelFrameWrite?.();
       cancelFrameWrite = null;
       cancelElementReveal();
@@ -3322,13 +3495,7 @@ function syncGithubPictures(frameDocument: Document, appearance: 'light' | 'dark
   }
 }
 
-function bindPreviewLinks(
-  frameDocument: Document,
-  vscode: { postMessage: (message: WebviewMessage) => void },
-  onNavigate: () => void,
-  signal: AbortSignal,
-  revealElement: (element: HTMLElement) => void
-): void {
+function preparePreviewLinks(frameDocument: Document): void {
   for (const link of frameDocument.querySelectorAll<HTMLAnchorElement>('a[href]')) {
     const href = link.getAttribute('href')?.trim() ?? '';
     if (!href) {
@@ -3341,6 +3508,17 @@ function bindPreviewLinks(
       link.tabIndex = 0;
     }
   }
+}
+
+function bindPreviewLinks(
+  frameDocument: Document,
+  vscode: { postMessage: (message: WebviewMessage) => void },
+  onNavigate: () => void,
+  signal: AbortSignal,
+  revealElement: (element: HTMLElement) => void,
+  resolveFragment?: (anchor: string) => void
+): void {
+  preparePreviewLinks(frameDocument);
 
   const activateLink = (event: Event) => {
     const target = typeof (event.target as Element | null)?.closest === 'function'
@@ -3371,7 +3549,7 @@ function bindPreviewLinks(
       if (destination) {
         onNavigate();
         revealElement(destination);
-      }
+      } else if (resolveFragment) { onNavigate(); resolveFragment(fragmentId); }
       return;
     }
     vscode.postMessage({ type: 'openLink', href, source: 'preview' });

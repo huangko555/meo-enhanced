@@ -5,6 +5,8 @@ import path from 'node:path';
 import puppeteer from 'puppeteer-core';
 import { closeTestBrowser, findBrowserExecutable, launchTestBrowser } from './browser-test-helpers';
 import exportRuntime from '../src/export/runtime';
+import { createPreviewDocument } from '../src/export/previewDocument';
+import type { PreviewDocumentOperation } from '../src/foundation/previewDocument';
 
 const build = await Bun.build({ entrypoints: ['scripts/test-preview-code-update-entry.ts'], target: 'browser', format: 'iife' });
 assert.ok(build.success, build.logs.map(String).join('\n'));
@@ -35,6 +37,171 @@ try {
   await page.addStyleTag({ path: 'webview/src/styles.css' });
   await page.addStyleTag({ content: '.preview-host:not([hidden]){height:100%;display:flex;flex-direction:column}.preview-frame{width:100%;height:100%;flex:1}' });
   await page.addScriptTag({ content: await build.outputs[0].text() });
+  const windowText = '# Reading window\n\n' + Array.from({ length: 5000 }, (_, index) =>
+    `Paragraph ${index} with **needle-${index}** and editable source context.\n\n`).join('') + '## Complete tail';
+  const windowDocument = createPreviewDocument('window-fixture', {
+    markdownText: windowText, sourceDocumentPath: '/fixture/window.md', uiLanguage: 'en'
+  });
+  const openedWindow = windowDocument.open(1);
+  stage = 'window mounting and navigation';
+  await page.exposeFunction('__windowOperation', (_id: string, operation: PreviewDocumentOperation) => windowDocument.run(operation));
+  await page.evaluate(opened => {
+    const scope = window as any;
+    const frame = scope.__windowFrame = document.createElement('iframe');
+    frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:20';
+    document.body.append(frame);
+    const doc = frame.contentDocument!;
+    doc.open(); doc.write(`<!doctype html><style>${opened.styles.light}</style><body tabindex="-1"><div class="meo-export-page"><main class="meo-export-doc markdown-body"></main></div></body>`); doc.close();
+    scope.__windowChanges = 0;
+    scope.__windowErrors = [];
+    scope.__windowViewport = scope.__createPreviewViewport(doc.querySelector('main'), opened.document, {
+      request: (id: string, operation: unknown) => scope.__windowOperation(id, operation),
+      mutate: (run: () => void) => run(),
+      changed: () => { scope.__windowChanges += 1; },
+      error: (error: unknown) => scope.__windowErrors.push(String(error)),
+      reveal: (element: HTMLElement, block: ScrollLogicalPosition) => element.scrollIntoView({ block }),
+      writeClipboard: async (value: Promise<unknown>) => { scope.__windowCopied = await value; }
+    });
+  }, openedWindow);
+  for (const block of [750, 2500, 4999, 2]) {
+    const result = await page.evaluate(async block => {
+      const scope = window as any;
+      const element = await scope.__windowViewport.ensure({ block, align: 'center' });
+      const rect = element?.getBoundingClientRect();
+      return { visible: Boolean(rect && rect.top < innerHeight && rect.bottom > 0),
+        nodes: scope.__windowFrame.contentDocument.querySelectorAll('*').length };
+    }, block);
+    assert.ok(result.visible, `requested window block ${block} must be visible`);
+    assert.ok(result.nodes < 2000, `windowing retained ${result.nodes} DOM nodes for 5000 paragraphs`);
+  }
+  const tailWindow = await page.evaluate(async () => {
+    const scope = window as any;
+    const element = await scope.__windowViewport.ensure({ anchor: 'complete-tail', align: 'end' });
+    return element?.textContent;
+  });
+  assert.equal(tailWindow, 'Complete tail');
+  stage = 'window whole-document selection/copy';
+  await page.evaluate(() => {
+    const scope = window as any, doc = scope.__windowFrame.contentDocument;
+    doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true }));
+    doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true, cancelable: true }));
+    doc.body.dispatchEvent(new ClipboardEvent('copy', { bubbles: true, cancelable: true }));
+  });
+  await page.waitForFunction(() => Boolean((window as any).__windowCopied));
+  const copiedWindow = await page.evaluate(() => {
+    const scope = window as any;
+    return { first: scope.__windowCopied.text.includes('Reading window'), last: scope.__windowCopied.text.includes('Complete tail'),
+      paragraphs: (scope.__windowCopied.text.match(/Paragraph \d+ with/g) ?? []).length,
+      formatting: scope.__windowCopied.html.includes('<strong>needle-2500</strong>'), errors: scope.__windowErrors };
+  });
+  assert.deepEqual(copiedWindow, { first: true, last: true, paragraphs: 5000, formatting: true, errors: [] });
+  stage = 'window partial selection with hydrated endpoint text';
+  await page.evaluate(async () => {
+    const scope = window as any, doc = scope.__windowFrame.contentDocument;
+    doc.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    const first = await scope.__windowViewport.ensure({ block: 1 });
+    const selected = doc.defaultView.getSelection(), range = doc.createRange();
+    range.setStart(first.firstChild, 2); range.setEnd(first.firstChild, 3);
+    selected.removeAllRanges(); selected.addRange(range);
+    const last = await scope.__windowViewport.ensure({ block: 2501 });
+    last.querySelector('strong').textContent = 'hydrated-final-value';
+    selected.extend(last.querySelector('strong').firstChild, 14);
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    scope.__windowCopied = null;
+    doc.body.dispatchEvent(new ClipboardEvent('copy', { bubbles: true, cancelable: true }));
+  });
+  await page.waitForFunction(() => Boolean((window as any).__windowCopied));
+  const partial = await page.evaluate(() => (window as any).__windowCopied);
+  assert.ok(partial.text.startsWith('ragraph 0 with needle-0'), 'partial selection must retain the first DOM endpoint');
+  assert.ok(partial.text.endsWith('hydrated-final'), 'hydrated endpoint offsets must not be applied to parser source text');
+  assert.ok(partial.html.includes('<strong>needle-1250</strong>'), 'unmounted interior formatting must be copied');
+  await page.evaluate(() => {
+    const scope = window as any;
+    scope.__windowViewport.dispose(); scope.__windowFrame.remove();
+  });
+  windowDocument.dispose();
+  stage = 'production window transport, search and source navigation';
+  const controllerDocuments = new Map<string, ReturnType<typeof createPreviewDocument>>();
+  await page.exposeFunction('__previewControllerHost', async (message: any) => {
+    if (message.type === 'requestPreviewRender') {
+      const options = { markdownText: message.text, sourceDocumentPath: '/fixture/controller.md', uiLanguage: 'en' as const,
+        preset: message.preset, styleEnvironment: message.environment };
+      let value;
+      if (message.window) {
+        const parsed = createPreviewDocument(message.requestId, options);
+        controllerDocuments.set(message.requestId, parsed);
+        value = parsed.open(message.window.anchorLine);
+      } else value = exportRuntime.renderPreviewDocument(options);
+      return { type: 'previewRenderResult', requestId: message.requestId, result: { ok: true, value } };
+    }
+    if (message.type === 'requestPreviewDocument') {
+      const parsed = controllerDocuments.get(message.documentId);
+      return { type: 'previewDocumentResult', requestId: message.requestId, documentId: message.documentId,
+        result: parsed ? { ok: true, value: await parsed.run(message.operation) }
+          : { ok: false, error: { message: 'Preview document expired', code: 'failed' } } };
+    }
+    return null;
+  });
+  await page.evaluate(async text => {
+    const scope = window as any, controller = scope.__previewController;
+    scope.__previewBridgeErrors = [];
+    scope.__previewHostMessage = (message: any) => {
+      void scope.__previewControllerHost(message).then((response: any) => {
+        if (response?.type === 'previewRenderResult') controller.acceptRenderResponse(response);
+        else if (response?.type === 'previewDocumentResult') controller.acceptDocumentResponse(response);
+      }).catch((error: unknown) => scope.__previewBridgeErrors.push(String(error)));
+    };
+    controller.setVisible(true); controller.setSourceColoring(false);
+    await controller.requestRender(text, { force: true });
+  }, windowText);
+  await page.waitForFunction(() => {
+    const scope = window as any;
+    return scope.__previewController.getSearchAdapter().isSearchReady()
+      && scope.__previewController.host.querySelector('iframe').contentDocument.querySelector('[data-meo-preview-block]');
+  });
+  assert.ok(await page.evaluate(() => (window as any).__previewMessages.some((message: any) => message.type === 'requestPreviewRender' && message.window)),
+    'large production Preview must request a reading window');
+  const productionHeadings = await page.evaluate(() => (window as any).__previewController.getOutlineAdapter().getHeadings());
+  assert.equal(productionHeadings.at(-1).text, 'Complete tail', 'outline must include unmounted headings');
+  await page.evaluate(() => (window as any).__previewController.getOutlineAdapter().scrollToLine(10003));
+  await page.waitForFunction(() => {
+    const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
+    const bounds = doc.querySelector('#complete-tail')?.getBoundingClientRect();
+    return bounds && bounds.top < doc.defaultView.innerHeight && bounds.bottom > 0;
+  });
+  await page.evaluate(() => (window as any).__previewController.getSearchAdapter().setSearchQuery('needle-2500', { wholeWord: true }));
+  await page.waitForFunction(() => !(window as any).__previewController.getSearchAdapter().isSearchPending());
+  assert.equal(await page.evaluate(() => (window as any).__previewController.getSearchAdapter().countMatches('needle-2500', {})), 1);
+  await page.evaluate(() => (window as any).__previewController.getSearchAdapter().findNext('needle-2500', { wholeWord: true }));
+  await page.waitForFunction(() => {
+    const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
+    const element = [...doc.querySelectorAll('strong')].find((node: any) => node.textContent === 'needle-2500');
+    const bounds = element?.getBoundingClientRect();
+    return bounds && bounds.top < doc.defaultView.innerHeight && bounds.bottom > 0;
+  });
+  const productionWindow = await page.evaluate(() => {
+    const scope = window as any, controller = scope.__previewController;
+    return { nodes: controller.host.querySelector('iframe').contentDocument.querySelectorAll('*').length,
+      anchor: controller.getSearchAdapter().getSearchAnchor(), errors: scope.__previewBridgeErrors };
+  });
+  assert.ok(productionWindow.nodes < 2000, `production window retained ${productionWindow.nodes} nodes`);
+  assert.deepEqual(productionWindow.errors, []);
+  assert.equal(productionWindow.anchor.line, 5003);
+  stage = 'production accessibility complete-document route';
+  await page.evaluate(() => document.body.classList.add('vscode-using-screen-reader'));
+  await page.waitForFunction(() => (window as any).__previewController.host.querySelector('iframe').contentDocument.querySelectorAll('p').length === 5000);
+  assert.equal(await page.evaluate(() => (window as any).__previewMessages.filter((message: any) => message.type === 'requestPreviewRender').at(-1).window), undefined);
+  await page.evaluate(() => document.body.classList.remove('vscode-using-screen-reader'));
+  await page.waitForFunction(() => (window as any).__previewController.host.querySelector('iframe').contentDocument.querySelectorAll('p').length < 100);
+  await page.evaluate(() => {
+    const scope = window as any;
+    scope.__previewHostMessage = undefined;
+    scope.__previewController.getSearchAdapter().setSearchQuery('');
+    scope.__previewController.setVisible(false);
+    scope.__previewRenderedAt = undefined;
+  });
+  for (const parsed of controllerDocuments.values()) parsed.dispose();
+  stage = 'complete-DOM scrollbar regression';
   const stableBottom = await page.evaluate(async () => {
     const frame = document.createElement('iframe');
     frame.style.cssText = 'position:fixed;left:0;top:0;width:320px;height:240px;border:0';

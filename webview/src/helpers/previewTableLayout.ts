@@ -259,19 +259,30 @@ export function createPreviewTableLayoutController(
     }
     scheduleRefresh();
   }, { rootMargin: '800px 0px' }) : null;
-  for (const table of tables()) {
-    if (visibilityObserver) visibilityObserver.observe(table);
-    else observeWidth(table, true);
-  }
+  const trackedTables = new Set<HTMLTableElement>();
+  const synchronizeTables = () => {
+    const current = new Set(tables());
+    for (const table of trackedTables) if (!current.has(table)) {
+      trackedTables.delete(table); nearbyTables.delete(table);
+      visibilityObserver?.unobserve(table); observeWidth(table, false);
+    }
+    for (const table of current) if (!trackedTables.has(table)) {
+      trackedTables.add(table);
+      if (visibilityObserver) visibilityObserver.observe(table);
+      else observeWidth(table, true);
+    }
+  };
+  synchronizeTables();
   root.addEventListener('toggle', scheduleRefresh, true);
   refresh();
   return {
-    refresh,
+    refresh() { synchronizeTables(); refresh(); },
     dispose() {
       disposed = true;
       observer?.disconnect();
       visibilityObserver?.disconnect();
       nearbyTables.clear();
+      trackedTables.clear();
       root.removeEventListener('toggle', scheduleRefresh, true);
       if (frame !== null) frameDocument.defaultView?.cancelAnimationFrame(frame);
       frame = null;

@@ -46,4 +46,5 @@ export type PreviewRenderResult = {
   styles: PreviewStyles;
   preset?: import('../foundation/previewPresets').PreviewPresetId;
   presetRevision?: string;
+  document?: import('../foundation/previewDocument').PreviewDocumentManifest;
 };

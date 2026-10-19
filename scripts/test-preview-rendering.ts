@@ -1,8 +1,87 @@
 import { inlineScriptFixtures } from './inline-script-fixtures';
-import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
+import { prepareMarkdownPresentation, renderMarkdownToHtml } from '../src/export/renderMarkdown';
+import assert from 'node:assert/strict';
+import { createPreviewDocument } from '../src/export/previewDocument';
+import { createPreviewBlockLayout } from '../webview/src/application/previewBlockLayout';
 import { buildExportStyles, buildPreviewStyles } from '../src/export/exportStyles';
 import exportRuntime from '../src/export/runtime';
 import { getBuiltInVisuals } from '../src/shared/builtInVisualBaseline';
+
+{
+  const blocks = Array.from({ length: 1000 }, (_, index) => ({ index, sourceLine: index + 1,
+    sourceEndLine: index + 1, kind: 'paragraph_open', sourceCharacters: 20 }));
+  const layout = createPreviewBlockLayout(blocks, { width: 800, fontSize: 16, lineHeight: 24 });
+  const heights = blocks.map((_, index) => layout.height(index));
+  for (let index = 0; index < 300; index += 1) {
+    const changed = index * 17 % blocks.length;
+    const height = index % 23 + 1;
+    layout.measure(changed, height); heights[changed] = height;
+    const position = index * 31 % blocks.length;
+    const top = heights.slice(0, position).reduce((sum, value) => sum + value, 0);
+    assert.equal(layout.top(position), top);
+    assert.equal(layout.at(top + heights[position]! / 2), position);
+    const band = layout.window(top, 720);
+    assert.ok(band.from <= position && layout.top(band.to) >= Math.min(layout.total(), top + 720),
+      'a block-count prefetch budget must never omit currently visible content');
+  }
+}
+
+{
+  const document = createPreviewDocument('fixture', { markdownText: '# Heading\n\nvisible **needle** and [needle](hidden-target.md).\n\n'
+    + '<details>\n<summary>Summary</summary>\n\nclosed needle\n\n</details>\n\n[^note]: note needle\n\nreference[^note]',
+    sourceDocumentPath: 'C:/tmp/worker-document.md', uiLanguage: 'en' });
+  const opened = document.open(1);
+  assert.equal(opened.html, '', 'opening a window must not return a complete HTML document');
+  assert.equal(opened.document.headings[0]?.text, 'Heading');
+  const search = await document.run({ kind: 'search', query: 'needle', caseSensitive: false, wholeWord: true, selectIndex: 3 });
+  assert.equal(search.kind, 'search');
+  if (search.kind !== 'search') throw new Error('Search result was lost');
+  assert.equal(search.total, 4);
+  assert.equal(search.active?.index, 3);
+  const hidden = await document.run({ kind: 'search', query: 'hidden-target.md', caseSensitive: false, wholeWord: false });
+  assert.equal(hidden.kind === 'search' && hidden.total, 0, 'Preview search must use rendered text, not Markdown destinations');
+  const located = await document.run({ kind: 'locate', anchor: 'fn-1' });
+  assert.equal(located.kind === 'locate' && located.block, opened.document.blocks.length - 1);
+  const copied = await document.run({ kind: 'copy', from: { block: 0, offset: 2 }, to: { block: 1, offset: 14 } });
+  assert.equal(copied.kind, 'copy');
+  if (copied.kind !== 'copy') throw new Error('Copy result was lost');
+  assert.ok(copied.text.startsWith('ading\nvisible needle'));
+  assert.ok(copied.html.includes('<strong>needle</strong>'));
+  document.dispose();
+  await assert.rejects(document.run({ kind: 'blocks', indices: [0] }), /released/);
+}
+
+for (const preset of ['default', 'github-readme'] as const) {
+  const markdownText = '---\ntitle: Properties\n---\n\n# Same\n\n# Same\n\n'
+    + '<details open>\n<summary>Details</summary>\n\n**inside**\n\n- nested\n  - child\n\n</details>\n\n'
+    + '[ref][target] and [^note].\n\n| A | B |\n| --- | --- |\n| **one** | two |\n\n'
+    + '```js\nconst value = 42;\n```\n\n```mermaid\nflowchart LR\n A --> B\n```\n\n'
+    + '$x^2$\n\n$$\nx+1\n$$\n\n![image](image.png)\n\n'
+    + '[target]: https://example.com\n[^note]: **Note**\n';
+  const options = { markdownText, markdownFilePath: 'C:/tmp/blocks.md', target: 'html' as const,
+    preset, deferImages: true, deferDisplayMath: true, deferLocalLinks: true };
+  const prepared = prepareMarkdownPresentation(options);
+  const complete = prepared.renderAll().html;
+  const chunks = prepared.blocks.map(block => prepared.renderBlock(block.index).html).join('');
+  assert.equal(chunks, complete, `${preset} block rendering must preserve complete render semantics`);
+  assert.ok(prepared.blocks.length > 8);
+  assert.ok(chunks.includes('id="same-'));
+  const details = prepared.blocks.map(block => prepared.renderBlock(block.index).html).filter(html => html.includes('<details'));
+  assert.equal(details.length, 1);
+  assert.ok(details[0]!.includes('<strong>inside</strong>') && details[0]!.includes('</details>'),
+    'HTML containers spanning Markdown roots must stay balanced in one presentation block');
+}
+{
+  let highlighted = 0;
+  const markdownText = '# First viewport\n\n' + '```js\nconst value = 42;\n```\n\n'.repeat(1000);
+  const prepared = prepareMarkdownPresentation({ markdownText, markdownFilePath: 'C:/tmp/demand.md', target: 'html',
+    highlightCode: source => { highlighted += 1; return source; } });
+  assert.equal(highlighted, 0, 'preparing the document must not format offscreen code blocks');
+  assert.ok(prepared.renderBlock(0).html.includes('First viewport'));
+  assert.equal(highlighted, 0);
+  prepared.renderBlock(1);
+  assert.equal(highlighted, 1, 'one requested code block must not format the remaining 999 blocks');
+}
 
 for (const [index, fixture] of inlineScriptFixtures.entries()) {
   const results = [

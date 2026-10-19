@@ -1,4 +1,4 @@
-import { renderMarkdownToHtml } from './renderMarkdown';
+import { prepareMarkdownPresentation, renderMarkdownToHtml } from './renderMarkdown';
 import { buildExportHtmlDocument as buildStandaloneExportHtmlDocument } from './exportHtmlTemplate';
 import { buildExportStyles, type ExportStyleEnvironment } from './exportStyles';
 import { writeHtmlExport } from './htmlExport';
@@ -101,7 +101,7 @@ async function renderExportHtmlDocument(
   return { htmlDocument, hasMermaid, hasMath };
 }
 
-function renderPreviewDocument(options: {
+export type PreviewDocumentOptions = {
   wikiResources?: ResolvedWikiResources;
   markdownText: string;
   sourceDocumentPath: string;
@@ -110,7 +110,13 @@ function renderPreviewDocument(options: {
   preset?: PreviewPresetId;
   presetDefinition?: PreviewPresetDefinition;
   contentWidth?: PreviewContentWidth;
-}): PreviewRenderResult {
+};
+
+export function renderPreviewDocument(options: PreviewDocumentOptions): PreviewRenderResult {
+  return preparePreviewDocument(options).renderAll();
+}
+
+export function preparePreviewDocument(options: PreviewDocumentOptions) {
   const preset = options.preset ?? 'default';
   const definition = options.presetDefinition ?? getPreviewPreset(preset);
   if (definition.id !== preset) throw new Error('Preview preset does not match its request');
@@ -118,7 +124,7 @@ function renderPreviewDocument(options: {
     ...options.styleEnvironment,
     ...resolvePreviewPresetSettings(preset, options.styleEnvironment ?? { previewFontFamily: '' }, definition)
   };
-  const rendered = renderMarkdownToHtml({
+  const prepared = prepareMarkdownPresentation({
     wikiResources: options.wikiResources,
     markdownText: options.markdownText,
     markdownFilePath: options.sourceDocumentPath,
@@ -132,14 +138,23 @@ function renderPreviewDocument(options: {
     preset,
     presetDefinition: definition
   });
-  return {
-    html: rendered.html,
-    hasMermaid: rendered.hasMermaid,
+  const presentation = {
     preset,
     ...(definition.custom ? { presetRevision: definition.custom.revision } : {}),
     styles: {
       dark: buildPresetPreviewStyles(preset, environment, 'dark', options.contentWidth, definition),
       light: buildPresetPreviewStyles(preset, environment, 'light', options.contentWidth, definition)
+    }
+  };
+  return {
+    ...presentation,
+    blocks: prepared.blocks,
+    hasMermaid: prepared.hasMermaid,
+    headings: prepared.headings,
+    renderBlock: prepared.renderBlock,
+    renderAll: (): PreviewRenderResult => {
+      const rendered = prepared.renderAll();
+      return { html: rendered.html, hasMermaid: rendered.hasMermaid, ...presentation };
     }
   };
 }

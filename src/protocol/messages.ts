@@ -16,6 +16,7 @@ import { decodeHostEditorEvent, type HostEditorEvent } from './hostEditorEvents'
 import { decodeResolveImageSrcRequest, decodeResolvedImageSrcResponse, type ResolveImageSrcRequest, type ResolvedImageSrcResponse } from './imageResolution';
 import { decodeResolveLocalLinksRequest, decodeResolvedLocalLinksResponse, type ResolveLocalLinksRequest, type ResolvedLocalLinksResponse } from './localLinkResolution';
 import { decodePreviewRenderRequest, decodePreviewRenderResponse, type PreviewRenderRequest, type PreviewRenderResponse } from './previewRender';
+import { decodePreviewDocumentRequest, decodePreviewDocumentResponse, type PreviewDocumentRequest, type PreviewDocumentResponse } from './previewDocument';
 import { decodeInitMessage, decodeReadyMessage, type InitMessage, type ReadyMessage } from './readyInit';
 import { decodeResolveWikiLinksRequest, decodeResolvedWikiLinksResponse, type ResolveWikiLinksRequest, type ResolvedWikiLinksResponse } from './wikiLinkResolution';
 import { decodeReadingPositionChangedMessage, type ReadingPositionChangedMessage } from './readingPosition';
@@ -47,6 +48,7 @@ export type WebviewToHostMessage =
   | SaveDocumentCopyRequest
   | SaveDocumentAsRequest
   | PreviewRenderRequest
+  | PreviewDocumentRequest
   | ExportSnapshotResponse;
 
 export type HostToWebviewMessage =
@@ -76,6 +78,7 @@ export type HostToWebviewMessage =
   | DocumentCopyResponse
   | DocumentSaveAsResponse
   | PreviewRenderResponse
+  | PreviewDocumentResponse
   | ExportSnapshotRequest
   | GitBaselineChangedEvent;
 
@@ -101,6 +104,7 @@ export function decodeWebviewToHostMessage(value: unknown): WebviewToHostMessage
     ?? decodeSaveDocumentCopyRequest(value)
     ?? decodeSaveDocumentAsRequest(value)
     ?? decodePreviewRenderRequest(value)
+    ?? decodePreviewDocumentRequest(value)
     ?? decodeExportSnapshotResponse(value);
 }
 
@@ -131,6 +135,7 @@ export function decodeHostToWebviewMessage(value: unknown): HostToWebviewMessage
     ?? decodeDocumentCopyResponse(value)
     ?? decodeDocumentSaveAsResponse(value)
     ?? decodePreviewRenderResponse(value)
+    ?? decodePreviewDocumentResponse(value)
     ?? decodeExportSnapshotRequest(value)
     ?? decodeGitBaselineChangedEvent(value);
 }

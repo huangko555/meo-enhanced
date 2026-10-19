@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 import exportRuntime from '../src/export/runtime';
+import { createPreviewDocument } from '../src/export/previewDocument';
 
 const dist = path.resolve(import.meta.dir, '../webview/dist');
 assert.ok(fs.existsSync(path.join(dist, 'index.js')), 'Build the production Webview first');
@@ -32,9 +33,10 @@ try {
   await page.setViewport({ width: 1100, height: 720 });
   const messages: string[] = [];
   const previewTexts: string[] = [];
+  const previewDocuments = new Map<string, ReturnType<typeof createPreviewDocument>>();
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(String(error)));
-  await page.exposeFunction('__budgetHost', (message: any) => {
+  await page.exposeFunction('__budgetHost', async (message: any) => {
     messages.push(message.type);
     if (message.type === 'ready') return {
       type: 'init', documentId: 'file:///large-document-budget.md', text, version: 1,
@@ -47,10 +49,20 @@ try {
       findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right',
       outlineVisible: false, outlineWidth: 260, restoreReadingPositionOnOpen: false, vscodeTheme: null
     };
+    if (message.type === 'requestPreviewDocument') {
+      const document = previewDocuments.get(message.documentId);
+      assert.ok(document, 'Preview must reference an accepted parser context');
+      return { type: 'previewDocumentResult', documentId: message.documentId, requestId: message.requestId,
+        result: { ok: true, value: await document.run(message.operation) } };
+    }
     if (message.type !== 'requestPreviewRender') return null;
     previewTexts.push(message.text);
+    const options = { markdownText: message.text, sourceDocumentPath: 'C:/large-document-budget.md', uiLanguage: message.uiLanguage,
+      styleEnvironment: message.environment };
+    const document = message.window ? createPreviewDocument(message.requestId, options) : null;
+    if (document) previewDocuments.set(message.requestId, document);
     return { type: 'previewRenderResult', requestId: message.requestId, result: { ok: true,
-      value: exportRuntime.renderPreviewDocument({ markdownText: message.text, sourceDocumentPath: 'C:/large-document-budget.md', uiLanguage: message.uiLanguage, styleEnvironment: message.environment }) } };
+      value: document ? document.open(message.window.anchorLine) : exportRuntime.renderPreviewDocument(options) } };
   });
   await page.evaluateOnNewDocument(() => {
     const activeMath = new Set<Element>();
@@ -109,17 +121,32 @@ try {
   assert.equal(initial.distantDiagrams, 0, 'distant diagrams must remain unrendered');
   assert.equal(initial.distantTable, false, 'distant tables must not force intrinsic layout');
   stage = 'viewport reveal';
-  await page.evaluate(() => document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
-    .querySelector('.meo-export-mermaid')!.scrollIntoView({ block: 'center' }));
-  await page.waitForFunction(() => !!document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
-    ?.querySelector('.meo-export-mermaid.is-rendered svg'));
-  await page.waitForFunction(() => {
-    const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
-    const distant = frame.contentDocument!.querySelectorAll('.meo-export-math-display')[1];
-    return (frame.contentWindow as any).__budgetActiveMath.has(distant);
+  await page.evaluate(() => {
+    const scroll = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!;
+    scroll.scrollTop = scroll.scrollHeight - scroll.clientHeight;
   });
   await page.waitForFunction(() => !!document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
-    ?.querySelectorAll('table')[1]?.querySelector('colgroup[data-meo-preview-columns]'));
+    ?.querySelector('.meo-export-mermaid.is-rendered svg'));
+  stage = 'distant formula initialization';
+  await page.waitForFunction(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+    return [...frame.contentDocument!.querySelectorAll('.meo-export-math-display')]
+      .some(element => (frame.contentWindow as any).__budgetActiveMath.has(element));
+  });
+  stage = 'distant table layout';
+  for (let step = 0; step < 8; step += 1) {
+    const found = await page.evaluate(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const table = [...doc.querySelectorAll('table')].find(element => element.textContent?.includes('Distant'));
+      if (table) { table.scrollIntoView({ block: 'center' }); return true; }
+      doc.scrollingElement!.scrollTop -= 400;
+      return false;
+    });
+    if (found) break;
+    await new Promise(resolve => setTimeout(resolve, 80));
+  }
+  await page.waitForFunction(() => !!document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
+    ?.querySelector('table colgroup[data-meo-preview-columns]'));
   stage = 'viewport retirement';
   await page.evaluate(() => { document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop = 0; });
   await page.waitForFunction(() => {

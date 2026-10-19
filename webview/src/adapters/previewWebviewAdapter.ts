@@ -6,6 +6,7 @@ import type { EditorAppearance as PreviewAppearance } from '../../../src/protoco
 import { assessLargeDocument } from '../../../src/foundation/largeDocument';
 import type { PreviewPresetDefinition, PreviewPresetDiagnostic, PreviewPresetId } from '../../../src/foundation/previewPresets';
 import { readDocumentText, type DocumentText } from '../../../src/foundation/documentSnapshot';
+import type { PreviewDocumentResponse } from '../../../src/protocol/previewDocument';
 
 type ResolvedPreviewAppearance = Exclude<PreviewAppearance, 'auto'>;
 
@@ -27,6 +28,7 @@ export type PreviewSurface = {
     preserveFrame?: boolean;
   }): void | Promise<void>;
   acceptRenderResponse(message: PreviewRenderResponse): boolean;
+  acceptDocumentResponse?(message: PreviewDocumentResponse): boolean;
   getTopVisiblePosition(): { topLine: number; topLineOffset: number; editorLineOffset?: number } | null;
   dispose(): void;
 };
@@ -187,6 +189,10 @@ export function createPreviewWebviewAdapter(
       }
       if (message.type === 'previewRenderResult') {
         if (!disposed) surface.acceptRenderResponse(message);
+        return true;
+      }
+      if (message.type === 'previewDocumentResult') {
+        if (!disposed) surface.acceptDocumentResponse?.(message);
         return true;
       }
       return false;

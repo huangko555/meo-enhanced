@@ -1,0 +1,47 @@
+export type PreviewDocumentBlock = Readonly<{
+  index: number;
+  sourceLine: number;
+  sourceEndLine: number;
+  kind: string;
+  sourceCharacters: number;
+  sourceRanges?: readonly Readonly<{ start: number; end: number }>[];
+}>;
+
+export type PreviewDocumentHeading = Readonly<{ text: string; level: number; line: number; id: string }>;
+export type PreviewDocumentChunk = Readonly<{ index: number; html: string; hasMermaid: boolean }>;
+export type PreviewDocumentManifest = Readonly<{
+  id: string;
+  anchorLine: number;
+  blocks: readonly PreviewDocumentBlock[];
+  headings: readonly PreviewDocumentHeading[];
+  chunks: readonly PreviewDocumentChunk[];
+}>;
+
+export type PreviewDocumentPosition = Readonly<{ block: number; offset: number }>;
+export type PreviewDocumentMatch = PreviewDocumentPosition & Readonly<{
+  end: number; line: number; occurrence: number; index: number;
+}>;
+export type PreviewDocumentOperation =
+  | { readonly kind: 'blocks'; readonly indices: readonly number[] }
+  | { readonly kind: 'locate'; readonly sourceLine?: number; readonly anchor?: string }
+  | { readonly kind: 'search'; readonly query: string; readonly caseSensitive: boolean;
+      readonly wholeWord: boolean; readonly selectIndex?: number; readonly anchor?: { readonly line: number; readonly occurrence: number } }
+  | { readonly kind: 'copy'; readonly from: PreviewDocumentPosition; readonly to: PreviewDocumentPosition };
+
+export type PreviewDocumentResult =
+  | { readonly kind: 'blocks'; readonly chunks: readonly PreviewDocumentChunk[] }
+  | { readonly kind: 'locate'; readonly block: number | null }
+  | { readonly kind: 'search'; readonly total: number; readonly active: PreviewDocumentMatch | null;
+      readonly blocks: readonly [index: number, count: number][] }
+  | { readonly kind: 'copy'; readonly text: string; readonly html: string };
+
+/** Footnotes have visual order separate from their authored source locations. */
+export function previewBlockAtLine(blocks: readonly PreviewDocumentBlock[], line: number): number | null {
+  if (!blocks.length) return null;
+  const footnotes = blocks.at(-1)?.kind === 'footnotes' ? blocks.at(-1)! : null;
+  if (footnotes?.sourceRanges?.some(range => line >= range.start && line <= range.end)) return footnotes.index;
+  let low = 0, high = blocks.length - (footnotes ? 1 : 0);
+  while (low < high) { const middle = (low + high) >>> 1;
+    if (blocks[middle]!.sourceLine <= line) low = middle + 1; else high = middle; }
+  return Math.max(0, low - 1);
+}

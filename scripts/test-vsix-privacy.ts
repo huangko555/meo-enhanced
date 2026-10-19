@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { assertPackageTextIsPublic } from './vsix-privacy';
 
 const root = resolve(import.meta.dir, '..');
-for (const file of ['dist/puppeteer-runtime.js', 'dist/docx-runtime.js', 'README.md', 'package.json', 'extension.vsixmanifest']) {
+for (const file of ['dist/puppeteer-runtime.js', 'dist/docx-runtime.js', 'dist/preview-render-worker.js', 'README.md', 'package.json', 'extension.vsixmanifest']) {
   for (const contents of [root, root.replaceAll('\\', '/'), JSON.stringify(root), pathToFileURL(root).href,
     'C:\\Users\\example\\build\\entry.js', String.raw`C:\\Users\\example\\build\\entry.js`,
     'file:///C:/Users/example/build/entry.js', 'file:///C%3A%2FUsers%2Fexample%2Fbuild%2Fentry.js',

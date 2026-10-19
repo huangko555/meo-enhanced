@@ -85,6 +85,8 @@ import type { ResolvedWikiLinksResponse } from '../protocol/wikiLinkResolution';
 import type { ResolvedLocalLinksResponse } from '../protocol/localLinkResolution';
 import type { SaveImageFromClipboardRequest, SavedImagePathResponse } from '../protocol/clipboardImageSave';
 import type { PreviewRenderResponse } from '../protocol/previewRender';
+import type { PreviewDocumentResponse } from '../protocol/previewDocument';
+import type { PreviewDocumentOperation, PreviewDocumentResult } from '../foundation/previewDocument';
 import type { ReadingSnapshot } from '../protocol/exportSnapshot';
 import { createExportSnapshotTransport } from '../host/exportSnapshotTransport';
 import { respondToDocumentSessionRequest } from '../host/documentSessionRequestHandler';
@@ -161,7 +163,9 @@ type PanelSessionControllerParams = {
     preset?: import('../foundation/previewPresets').PreviewPresetId;
     presetRevision?: string;
     contentWidth?: import('../foundation/previewPresets').PreviewContentWidth;
+    window?: { documentId: string; anchorLine: number };
   }) => Promise<PreviewRenderResult>;
+  operatePreviewDocument?: (documentId: string, operation: PreviewDocumentOperation) => Promise<PreviewDocumentResult>;
   getFindOptions: () => FindOptions;
   getUiLanguage: () => InitMessage['uiLanguage'];
   getSourceLineNumbers: () => SourceLineNumberMode;
@@ -964,7 +968,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
             styleEnvironment: raw.environment,
             preset: raw.preset,
             presetRevision: raw.presetRevision,
-            contentWidth: raw.contentWidth
+            contentWidth: raw.contentWidth,
+            ...(raw.window ? { window: { documentId: raw.requestId, anchorLine: raw.window.anchorLine } } : {})
           });
           response = {
             type: 'previewRenderResult',
@@ -983,6 +988,21 @@ export function createPanelSessionController(params: PanelSessionControllerParam
               }
             }
           };
+        }
+        await postToWebview(response);
+        return;
+      }
+      case 'requestPreviewDocument': {
+        let response: PreviewDocumentResponse;
+        try {
+          if (!params.operatePreviewDocument) throw new Error('Preview document transport is unavailable');
+          const value = await params.operatePreviewDocument(raw.documentId, raw.operation);
+          response = { type: 'previewDocumentResult', requestId: raw.requestId, documentId: raw.documentId,
+            result: { ok: true, value } };
+        } catch (error) {
+          response = { type: 'previewDocumentResult', requestId: raw.requestId, documentId: raw.documentId,
+            result: { ok: false, error: { code: 'operation-failed',
+              message: error instanceof Error ? error.message : 'Preview document operation failed' } } };
         }
         await postToWebview(response);
         return;

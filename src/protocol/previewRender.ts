@@ -2,6 +2,8 @@ import { decodeRequestResult, type RequestResult } from './requestResult';
 import { decodeEditorStyleEnvironment, type EditorStyleEnvironment } from './editorStyleEnvironment';
 import { isUiLanguage, type UiLanguage } from '../foundation/uiLanguage';
 import { isPreviewPresetId, type PreviewPresetId, type PreviewContentWidth } from '../foundation/previewPresets';
+import type { PreviewDocumentManifest } from '../foundation/previewDocument';
+import { decodePreviewDocumentManifest } from './previewDocument';
 
 export const PREVIEW_RENDER_TIMEOUT_MS = 15_000;
 
@@ -20,6 +22,7 @@ export type PreviewRenderRequest = {
   readonly preset?: PreviewPresetId;
   readonly presetRevision?: string;
   readonly contentWidth?: PreviewContentWidth;
+  readonly window?: { readonly anchorLine: number };
 };
 
 export type PreviewRenderValue = {
@@ -28,6 +31,7 @@ export type PreviewRenderValue = {
   readonly styles: PreviewStyles;
   readonly preset?: PreviewPresetId;
   readonly presetRevision?: string;
+  readonly document?: PreviewDocumentManifest;
 };
 
 export type PreviewRenderResolution = RequestResult<PreviewRenderValue>;
@@ -54,7 +58,9 @@ export function decodePreviewRenderRequest(value: unknown): PreviewRenderRequest
     || !isUiLanguage(value.uiLanguage)
     || (value.preset !== undefined && !isPreviewPresetId(value.preset))
     || (value.presetRevision !== undefined && (typeof value.presetRevision !== 'string' || !/^[a-f0-9]{64}$/.test(value.presetRevision)))
-    || (value.contentWidth !== undefined && value.contentWidth !== 'responsive' && value.contentWidth !== 'reference')) return null;
+    || (value.contentWidth !== undefined && value.contentWidth !== 'responsive' && value.contentWidth !== 'reference')
+    || (value.window !== undefined && (!isRecord(value.window) || !Number.isSafeInteger(value.window.anchorLine)
+      || Number(value.window.anchorLine) < 1))) return null;
   const environment = decodeEditorStyleEnvironment(value.environment);
   if (environment === null) return null;
   return {
@@ -63,6 +69,7 @@ export function decodePreviewRenderRequest(value: unknown): PreviewRenderRequest
     text: value.text,
     uiLanguage: value.uiLanguage,
     environment,
+    ...(value.window === undefined ? {} : { window: value.window as { anchorLine: number } }),
     ...(value.presetRevision === undefined ? {} : { presetRevision: value.presetRevision as string }),
     ...(value.preset === undefined ? {} : { preset: value.preset as PreviewPresetId }),
     ...(value.contentWidth === undefined ? {} : { contentWidth: value.contentWidth as PreviewContentWidth })
@@ -79,11 +86,13 @@ export function decodePreviewRenderResponse(value: unknown): PreviewRenderRespon
           || typeof candidate.styles.dark !== 'string'
           || typeof candidate.styles.light !== 'string'
           || (candidate.preset !== undefined && !isPreviewPresetId(candidate.preset))
-          || (candidate.presetRevision !== undefined && (typeof candidate.presetRevision !== 'string' || !/^[a-f0-9]{64}$/.test(candidate.presetRevision)))) return null;
+          || (candidate.presetRevision !== undefined && (typeof candidate.presetRevision !== 'string' || !/^[a-f0-9]{64}$/.test(candidate.presetRevision)))
+          || (candidate.document !== undefined && decodePreviewDocumentManifest(candidate.document) === null)) return null;
         return {
           html: candidate.html,
           hasMermaid: candidate.hasMermaid,
           styles: { dark: candidate.styles.dark, light: candidate.styles.light },
+          ...(candidate.document === undefined ? {} : { document: candidate.document as PreviewDocumentManifest }),
           ...(candidate.presetRevision === undefined ? {} : { presetRevision: candidate.presetRevision as string }),
           ...(candidate.preset === undefined ? {} : { preset: candidate.preset as PreviewPresetId })
         };

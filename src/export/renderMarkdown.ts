@@ -28,6 +28,8 @@ import {
 import type { UiLanguage } from '../foundation/uiLanguage';
 import { getReadingUiStrings } from './readingUiLanguage';
 import { normalizeFenceLanguage } from './fenceLanguage';
+import { markdownPresentationBlocks, type MarkdownPresentationBlock } from './markdownPresentationBlocks';
+import type { PreviewDocumentHeading } from '../foundation/previewDocument';
 import { getPreviewPreset, type PreviewPresetId, type PreviewPresetDefinition } from '../foundation/previewPresets';
 import { load as loadYaml } from 'js-yaml';
 import { installWikiReferenceTransform } from './wikiReferences';
@@ -91,9 +93,23 @@ type ExportHeading = Readonly<{
   level: number;
   id: string;
   text: string;
+  line: number;
+}>;
+
+export type MarkdownPresentation = Readonly<{
+  blocks: readonly MarkdownPresentationBlock[];
+  hasMermaid: boolean;
+  headings: readonly PreviewDocumentHeading[];
+  renderBlock(index: number): RenderMarkdownResult;
+  renderAll(): RenderMarkdownResult;
 }>;
 
 export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMarkdownResult {
+  return prepareMarkdownPresentation(options).renderAll();
+}
+
+/** Parse global Markdown context once. HTML generation is a separate, demand-driven step. */
+export function prepareMarkdownPresentation(options: RenderMarkdownOptions): MarkdownPresentation {
   const github = (options.presetDefinition ?? getPreviewPreset(options.preset)).renderer === 'github-readme';
   const uiStrings = getReadingUiStrings(options.uiLanguage ?? 'en');
   let hasMermaid = false;
@@ -190,13 +206,15 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   }
 
   const defaultImageRule = md.renderer.rules.image ?? ((tokens, idx, opts, _env, self) => self.renderToken(tokens, idx, opts));
+  const imageSources = new WeakMap<object, string>();
   md.renderer.rules.image = (tokens, idx, opts, env, self) => {
-    const token = tokens[idx];
-    const src = token.attrGet('src') ?? '';
+    const imageNode = tokens[idx];
+    const src = imageSources.get(imageNode) ?? imageNode.attrGet('src') ?? '';
+    imageSources.set(imageNode, src);
     const rewritten = deferImageSrc(src);
-    token.attrSet('src', rewritten.src);
-    if (rewritten.deferredSrc) token.attrSet(DEFERRED_IMAGE_ATTRIBUTE, rewritten.deferredSrc);
-    token.attrSet('loading', 'eager');
+    imageNode.attrSet('src', rewritten.src);
+    if (rewritten.deferredSrc) imageNode.attrSet(DEFERRED_IMAGE_ATTRIBUTE, rewritten.deferredSrc);
+    imageNode.attrSet('loading', 'eager');
     return defaultImageRule(tokens, idx, opts, env, self);
   };
 
@@ -268,7 +286,11 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     : normalizeMarkdownForExportWithSourceMap(preparedMarkdown.body.markdown);
   bodySourceLines = normalizedBody.sourceLines.map(line => preparedMarkdown.body.sourceLines[line - 1] ?? line);
   headings.length = 0;
-  const bodyHtml = md.render(normalizedBody.markdown);
+  const environment = {};
+  const bodyTokens = md.parse(normalizedBody.markdown, environment);
+  hasMermaid ||= bodyTokens.some(node => node.type === 'fence'
+    && (github ? node.info.trim().split(/\s+/)[0] : normalizeFenceLanguage(node.info)) === 'mermaid');
+  const tokenBlocks = markdownPresentationBlocks(bodyTokens, bodySourceLines);
   const documentHref = options.target === 'html' && options.outputFilePath
     ? `./${encodeURIComponent(path.basename(options.outputFilePath))}`
     : '';
@@ -280,14 +302,10 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
         documentHref
       )
     : '';
-  const rawHtml = [
-    tableOfContentsHtml,
-    github && extractedFrontmatter.frontmatterHtml && !extractedFrontmatter.frontmatterHtml.includes('meo-export-frontmatter-source')
+  const frontmatterHtml = github && extractedFrontmatter.frontmatterHtml && !extractedFrontmatter.frontmatterHtml.includes('meo-export-frontmatter-source')
       ? renderGithubFrontmatter(originalSourceLines, extractedFrontmatter.body.sourceLines[0] ?? originalSourceLines.length + 1)
-      : extractedFrontmatter.frontmatterHtml,
-    bodyHtml,
-    preparedMarkdown.footnotesHtml
-  ].join('');
+      : extractedFrontmatter.frontmatterHtml;
+  const sanitize = (rawHtml: string): RenderMarkdownResult => {
   const html = sanitizeHtml(github ? replaceGithubEmoji(linkifyGithubFilteredHtml(addGithubDetailsSummary(stripGithubSelectMarkup(rawHtml))), deferImageSrc) : rawHtml, {
     allowedTags: [
       ...sanitizeHtml.defaults.allowedTags,
@@ -447,6 +465,38 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   });
 
   return { html, hasMermaid, hasMath };
+  };
+  const prefix = tableOfContentsHtml + frontmatterHtml;
+  const prefixBlocks: MarkdownPresentationBlock[] = prefix ? [{ index: 0, sourceLine: 1,
+    sourceEndLine: Math.max(1, (extractedFrontmatter.body.sourceLines[0] ?? 1) - 1),
+    kind: 'frontmatter', sourceCharacters: prefix.length }] : [];
+  const blocks: MarkdownPresentationBlock[] = [...prefixBlocks, ...tokenBlocks.map(({ from: _from, to: _to, ...block }) => ({
+    ...block, index: block.index + prefixBlocks.length
+  }))];
+  if (preparedMarkdown.footnotesHtml) {
+    const sourceRanges: { start: number; end: number }[] = [];
+    new Parser({ onopentag(name, attributes) {
+      if (name !== 'li' || !(attributes.class ?? '').split(/\s+/).includes('footnote-item')) return;
+      const start = Number(attributes['data-source-line']), end = Number(attributes['data-source-end-line']);
+      if (start > 0 && end >= start) sourceRanges.push({ start, end });
+    } }).end(preparedMarkdown.footnotesHtml);
+    blocks.push({ index: blocks.length, sourceLine: originalSourceLines.length, sourceEndLine: originalSourceLines.length,
+      kind: 'footnotes', sourceCharacters: preparedMarkdown.footnotesHtml.length, sourceRanges });
+  }
+  return {
+    blocks,
+    hasMermaid,
+    headings: headings.map(heading => ({ ...heading })),
+    renderBlock(index) {
+      if (!Number.isInteger(index) || index < 0 || index >= blocks.length) throw new RangeError('Unknown Markdown presentation block');
+      if (prefixBlocks.length && index === 0) return sanitize(prefix);
+      const block = tokenBlocks[index - prefixBlocks.length];
+      return sanitize(block
+        ? md.renderer.render(bodyTokens.slice(block.from, block.to), md.options, environment)
+        : preparedMarkdown.footnotesHtml);
+    },
+    renderAll: () => sanitize(prefix + md.renderer.render(bodyTokens, md.options, environment) + preparedMarkdown.footnotesHtml)
+  };
 }
 
 function renderHighlightedCodeLines(highlighted: string, source: string, target: RenderMarkdownOptions['target']): string {
@@ -692,7 +742,7 @@ function installSourcePositionAndHeadingAnchorTransform(
           new Parser({ ontext: part => { text += part; } }).end(match[2]);
           const id = githubId(text);
           ids.push(id);
-          onHeading?.({ level: Number(match[1]), id, text });
+          onHeading?.({ level: Number(match[1]), id, text, line: sourceLine });
         }
         if (ids.length) headingOpen.meta = { ...headingOpen.meta, meoGithubHeadingIds: ids };
       }
@@ -723,7 +773,8 @@ function installSourcePositionAndHeadingAnchorTransform(
       onHeading?.({
         level: Number.parseInt(String(headingOpen.tag).slice(1), 10),
         id,
-        text: extractHeadingText(inlineContent)
+        text: extractHeadingText(inlineContent),
+        line: sourceLine
       });
 
     }
@@ -845,7 +896,7 @@ function renderExportTableOfContents(
   documentHref: string
 ): string {
   type TocNode = ExportHeading & { children: TocNode[] };
-  const root: TocNode = { level: 0, id: '', text: '', children: [] };
+  const root: TocNode = { level: 0, id: '', text: '', line: 0, children: [] };
   const stack: TocNode[] = [root];
 
   for (const heading of headings) {

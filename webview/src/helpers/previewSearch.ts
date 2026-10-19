@@ -39,6 +39,7 @@ export function createPreviewSearchController({
   let rulerTimer: number | null = null;
   let rulerGeneration = 0;
   let ruler: HTMLElement | null = null;
+  let overviewEnabled = true;
   let observedDocument: Document | null = null;
   let resizeObserver: ResizeObserver | null = null;
 
@@ -73,7 +74,7 @@ export function createPreviewSearchController({
 
   const scheduleRuler = () => {
     cancelRuler();
-    if (!canRun() || dirty || !query) return;
+    if (!overviewEnabled || !canRun() || dirty || !query) return;
     const doc = getDocument()!;
     const revision = rulerGeneration;
     rulerFrame = window.requestAnimationFrame(() => {
@@ -342,6 +343,11 @@ export function createPreviewSearchController({
     surfaceHidden: () => { ready = false; cancelSearch(); cancelRuler(); },
     invalidate: () => { ready = false; dirty = Boolean(query); cancelSearch(); cancelRuler(); },
     refreshLayout: scheduleRuler,
+    setOverviewEnabled: (enabled: boolean) => {
+      overviewEnabled = enabled;
+      if (!enabled) { cancelRuler(); ruler?.remove(); ruler = null; }
+      else scheduleRuler();
+    },
     dispose: () => {
       disposed = true;
       cancelSearch();

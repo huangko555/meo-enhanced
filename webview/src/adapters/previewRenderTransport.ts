@@ -20,7 +20,7 @@ export type PreviewRenderTransportOptions = {
 };
 
 export type PreviewRenderTransport = {
-  render(request: { readonly text: string; readonly uiLanguage: UiLanguage; readonly environment: PreviewStyleEnvironment; readonly preset?: PreviewPresetId; readonly presetRevision?: string; readonly contentWidth?: PreviewContentWidth }): Promise<PreviewRenderResolution>;
+  render(request: { readonly text: string; readonly uiLanguage: UiLanguage; readonly environment: PreviewStyleEnvironment; readonly preset?: PreviewPresetId; readonly presetRevision?: string; readonly contentWidth?: PreviewContentWidth; readonly window?: { readonly anchorLine: number } }): Promise<PreviewRenderResolution>;
   accept(response: PreviewRenderResponse): boolean;
   cancelAll(message?: string): void;
 };
