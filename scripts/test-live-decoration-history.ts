@@ -149,6 +149,7 @@ try {
       if (scope.__diffBuilds === undefined || (mode === 'live' && scope.__renderedDiscoveries === undefined)) throw Error('Derived-work counters were not installed');
       scope.__budgetEditor = editor;
       const diffs = scope.__diffBuilds ?? 0, discoveries = scope.__renderedDiscoveries ?? 0;
+      scope.__budgetDiscoveries = discoveries;
       const htmlRequests = scope.__fullHtmlRequests ?? 0;
       editor.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true }));
       api.input(editor, 4, 'x');
@@ -162,7 +163,72 @@ try {
     const summary = await page.evaluate(() => (window as any).__liveHistory.gitSummary((window as any).__budgetEditor));
     assert.equal(summary.status, 'ready');
     assert.equal(summary.added, 1, 'settled input must publish the real changed line');
+    if (mode === 'live') assert.equal(await page.evaluate(() =>
+      ((window as any).__renderedDiscoveries ?? 0) - (window as any).__budgetDiscoveries), 0,
+    'settled plain input must reuse its unchanged rendered-block index while still updating real Git differences');
     await page.evaluate(() => (window as any).__budgetEditor.destroy());
+  }
+  for (const target of ['EDIT', 'Continued paragraph']) {
+    const indexProjection = await page.evaluate(target => {
+      const scope = window as any, api = scope.__liveHistory;
+      const padding = 'Ordinary padding paragraph.\n\n'.repeat(4_100);
+      const text = 'EDIT\n\n' + padding + '| A | B |\n| --- | --- |\n| 1 | 2 |\n\n```mermaid\ngraph LR; A-->B\n```\n\n'
+        + '```math\nx^2\n```\n\n<div>Later HTML</div>\n\nReference[^note].\n\n'
+        + '[^note]: Definition.\n\n    Continued paragraph.\n\n    <div>Footnote HTML</div>\n';
+      const editor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'live', onApplyChanges() {} });
+      api.parse(editor); editor.refreshDecorations();
+      const from = text.indexOf(target) + 2;
+      editor.view.dispatch({ selection: { anchor: from } });
+      const before = api.renderedBlocks(editor), inputs = [];
+      for (let index = 0; index < 3; index++) {
+        const discoveries = scope.__renderedDiscoveries ?? 0;
+        api.input(editor, from + index, 'x');
+        const actual = api.renderedBlocks(editor), scans = (scope.__renderedDiscoveries ?? 0) - discoveries;
+        inputs.push({ mapped: api.mapped(editor), scans, actual, expected: api.freshRenderedBlocks(editor) });
+      }
+      const htmlBefore = api.renderedBlocks(editor).filter((block: any) => block.kind === 'html').length;
+      const htmlFrom = editor.getText().indexOf('<div>Later HTML');
+      api.editHtml(editor, htmlFrom, htmlFrom + '<div>Later HTML</div>'.length);
+      const htmlAfter = api.renderedBlocks(editor).filter((block: any) => block.kind === 'html').length;
+      editor.destroy();
+      return { before, inputs, htmlBefore, htmlAfter };
+    }, target);
+    assert.ok(indexProjection.before.some((block: any) => block.kind === 'html'));
+    for (const input of indexProjection.inputs) {
+      assert.ok(input.mapped, `${target}: exercise certified prose projection`);
+      assert.equal(input.scans, 0, `${target}: repeated prose must not rediscover distant rich blocks`);
+      assert.deepEqual(input.actual, input.expected, `${target}: mapped discovery must equal an independent full build`);
+    }
+    assert.equal(indexProjection.htmlAfter, indexProjection.htmlBefore - 1, 'HTML editing must still filter the correctly shifted source anchor');
+  }
+  const changedFence = await page.evaluate(() => {
+    const api = (window as any).__liveHistory;
+    const editor = api.create({ parent: document.getElementById('editor'), text: '```js\nx^2\n```\n\nPlain paragraph.', initialMode: 'live', onApplyChanges() {} });
+    const before = api.renderedBlocks(editor);
+    editor.view.dispatch({ changes: { from: 3, to: 5, insert: 'math' }, selection: { anchor: 7 }, userEvent: 'input.type' });
+    const actual = api.renderedBlocks(editor), expected = api.freshRenderedBlocks(editor);
+    editor.destroy();
+    return { before, actual, expected };
+  });
+  assert.equal(changedFence.before.some((block: any) => block.kind === 'math'), false);
+  assert.ok(changedFence.actual.some((block: any) => block.kind === 'math'), 'changing a fence language must invalidate discovery');
+  assert.deepEqual(changedFence.actual, changedFence.expected);
+  for (const fence of ['```', '~~~']) {
+    const introducedFence = await page.evaluate(fence => {
+      const api = (window as any).__liveHistory;
+      const text = 'Ordinary padding paragraph.\n\n'.repeat(4_100) + 'EDIT ' + fence + 'mermaid';
+      const editor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'live', onApplyChanges() {} });
+      api.parse(editor); editor.refreshDecorations();
+      const before = api.renderedBlocks(editor), from = text.lastIndexOf('EDIT ') + 5;
+      editor.view.dispatch({ selection: { anchor: from } });
+      api.input(editor, from, '\n');
+      const actual = api.renderedBlocks(editor), expected = api.freshRenderedBlocks(editor);
+      editor.destroy();
+      return { before, actual, expected };
+    }, fence);
+    assert.equal(introducedFence.before.some((block: any) => block.kind === 'mermaid'), false);
+    assert.ok(introducedFence.actual.some((block: any) => block.kind === 'mermaid'), 'a newline can turn literal fence markers into a real rich block');
+    assert.deepEqual(introducedFence.actual, introducedFence.expected);
   }
   const nestedParseBudget = await page.evaluate(() => {
     const scope = window as any, api = scope.__liveHistory;
@@ -193,6 +259,8 @@ try {
   const newlineBuilds = await page.evaluate(() => {
     const scope = window as any, api = scope.__liveHistory, editor = scope.__nestedBudgetEditor;
     scope.__nestedBeforeEnter = editor.getText();
+    api.renderedBlocks(editor);
+    scope.__nestedBeforeEnterDiscoveries = scope.__renderedDiscoveries ?? 0;
     const builds = scope.__fullLiveBuilds ?? 0;
     api.input(editor, editor.getText().indexOf('NESTED_TARGETxx') + 'NESTED_TARGETxx'.length, '\n      ', Date.now() + 10_000);
     scope.__nestedBeforeEnterBuilds = builds;
@@ -202,6 +270,15 @@ try {
   await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__nestedBudgetEditor));
   assert.equal(await page.evaluate(() => ((window as any).__fullLiveBuilds ?? 0) - (window as any).__nestedBeforeEnterBuilds), 0,
     'settling a newline inside a closed Markdown block must not rebuild the whole document');
+  assert.equal(await page.evaluate(() => ((window as any).__renderedDiscoveries ?? 0) - (window as any).__nestedBeforeEnterDiscoveries), 0,
+    'a certified plain paragraph newline must map rich-block line coordinates without rediscovering distant blocks');
+  assert.deepEqual(await page.evaluate(() => {
+    const scope = window as any;
+    return scope.__liveHistory.renderedBlocks(scope.__nestedBudgetEditor);
+  }), await page.evaluate(() => {
+    const scope = window as any;
+    return scope.__liveHistory.freshRenderedBlocks(scope.__nestedBudgetEditor);
+  }), 'mapped newline coordinates must match independent complete discovery');
   const projectedFootnotes = await page.evaluate(() => (window as any).__liveHistory.footnotes((window as any).__nestedBudgetEditor));
   assert.deepEqual(await page.evaluate(() => (window as any).__liveHistory.freshFootnotes((window as any).__nestedBudgetEditor)), projectedFootnotes,
     'a footnote continuation newline must match an independent parse, including new continuation lines and reference targets');

@@ -1,5 +1,5 @@
 import { documentLines } from './documentLines';
-import { EditorState } from '@codemirror/state';
+import { EditorState, type ChangeDesc } from '@codemirror/state';
 import type { SyntaxNodeRef, Tree } from '@lezer/common';
 import { isThematicBreakLine } from './frontmatter';
 import { parseBlockLinePrefix } from './blockIndent';
@@ -42,6 +42,52 @@ type DiscoveredBlock = { block: LiveRenderedBlock; htmlFrom?: number };
 // Discovery depends on text and the resolved parse. Selection and HTML editing
 // only filter that discovery; they must not invalidate its whole-document scans.
 const discoveredBlockCache = new WeakMap<EditorState['doc'], { tree: Tree; blocks: DiscoveredBlock[] }>();
+
+/** The caller proves a complete plain-prose projection with unchanged rich
+ * membership. Map line coordinates and HTML editing anchors without discovering
+ * the same blocks again. Never warm a missing or provisional index. */
+export function projectUnchangedLiveRenderedBlocks(
+  before: EditorState,
+  state: EditorState,
+  changes: ChangeDesc,
+  oldTree: Tree,
+  newTree: Tree
+): void {
+  const previous = discoveredBlockCache.get(before.doc);
+  if (!previous || previous.tree !== oldTree || oldTree.length !== before.doc.length
+    || newTree.length !== state.doc.length || before.tabSize !== state.tabSize) return;
+  let unchangedLines = true;
+  changes.iterChangedRanges((from, to, nextFrom, nextTo) => {
+    if (before.doc.lineAt(from).number !== before.doc.lineAt(to).number
+      || state.doc.lineAt(nextFrom).number !== state.doc.lineAt(nextTo).number) unchangedLines = false;
+  });
+  const lineMap = new Map<number, number>();
+  const mapLine = (line: number) => {
+    let mapped = lineMap.get(line);
+    if (mapped === undefined) {
+      mapped = state.doc.lineAt(changes.mapPos(before.doc.line(line).from, 1)).number;
+      lineMap.set(line, mapped);
+    }
+    return mapped;
+  };
+  const blocks = previous.blocks.map(({ block, htmlFrom }) => {
+    let mapped = block;
+    if (!unchangedLines) {
+      const startLine = mapLine(block.startLine), endLine = mapLine(block.endLine);
+      mapped = { ...block, startLine, endLine,
+        delimiterLine: block.delimiterLine === null ? null : mapLine(block.delimiterLine),
+        // Empty HTML/code ranges still follow their block edges. Only the
+        // explicit 1..0 sentinel is independent of source line coordinates.
+        ...(block.lineNumberHiddenFrom === 1 && block.lineNumberHiddenTo === 0 ? {} : {
+          lineNumberHiddenFrom: block.lineNumberHiddenFrom + startLine - block.startLine,
+          lineNumberHiddenTo: block.lineNumberHiddenTo + endLine - block.endLine
+        })
+      };
+    }
+    return { block: mapped, htmlFrom: htmlFrom === undefined ? undefined : changes.mapPos(htmlFrom, 1) };
+  });
+  discoveredBlockCache.set(state.doc, { tree: newTree, blocks });
+}
 const collapsedBlockCache = new WeakMap<EditorState, {
   lineFlags: readonly LineFlagLike[];
   blocks: LiveCollapsedGitBlock[];

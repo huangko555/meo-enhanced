@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { EditorState, RangeSet, StateEffect, Text, Transaction } from '@codemirror/state';
+import { EditorState, Prec, RangeSet, StateEffect, Text, Transaction } from '@codemirror/state';
 import { editorMarkdownLanguage, getLivePresentationDecorations, liveModeExtensions, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from '../webview/src/liveMode';
 import { ensureSyntaxTree, syntaxTree, syntaxTreeAvailable } from '@codemirror/language';
 import { parseFootnotes } from '../webview/src/helpers/footnotes';
@@ -8,8 +8,8 @@ import { documentLines } from '../webview/src/helpers/documentLines';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
 import { liveWidgetPositionsIndependent, liveWidgetPresentationLayers, mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions } from '../webview/src/editor/liveWidgetPositions';
 import { hasSameLiveMarkdownSyntax, hasSameLiveMarkdownOutsideBlock } from '../webview/src/helpers/livePresentationSyntax';
-import { markdownLanguage } from '@codemirror/lang-markdown';
-import { parseMixed, Tree } from '@lezer/common';
+import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
+import { IterMode, parseMixed, Tree } from '@lezer/common';
 import { javascriptLanguage } from '@codemirror/lang-javascript';
 import { imagePresentationFactoryFacet, type ImagePresentationFactory } from '../webview/src/editor/imagePresentation';
 import { longCodeBlockSessionUiExtension } from '../webview/src/helpers/longCodeBlocks';
@@ -59,6 +59,23 @@ import { hasMappedLiveInputPresentation } from '../webview/src/editor/liveInputD
     annotations: Transaction.userEvent.of('input.type') }).state;
   assert.equal(hasMappedLiveInputPresentation(state), false,
     'a later plain key must not certify earlier unrefreshed structural edits');
+}
+
+{
+  const embeddedMarkdown = markdown({ base: markdownLanguage, extensions: [{ wrap: parseMixed(node =>
+    node.name === 'CodeText' ? { parser: markdownLanguage.parser } : null) }] });
+  const text = '```markdown\nPlain code body\n```\n\n' + 'Ordinary paragraph.\n\n'.repeat(500);
+  const from = text.indexOf('body') + 4;
+  let state = EditorState.create({ doc: text, selection: { anchor: from },
+    extensions: [Prec.high(embeddedMarkdown), liveModeExtensions({ largeDocument: true })] });
+  ensureSyntaxTree(state, state.doc.length, 2_000);
+  state = state.update({ effects: refreshLiveDecorationsAfterSearchEffect.of(true) }).state;
+  const tree = ensureSyntaxTree(state, state.doc.length, 2_000)!;
+  assert.equal(tree.resolveInner(from, -1).name, 'Paragraph', 'the fixture must enter an embedded Markdown paragraph');
+  assert.equal(tree.cursor(IterMode.IgnoreMounts).moveTo(from, -1).name, 'CodeText', 'the outer Markdown must still own a literal code body');
+  const next = state.update({ changes: { from, insert: 'x' }, selection: { anchor: from + 1 },
+    annotations: Transaction.userEvent.of('input.type') }).state;
+  assert.equal(hasMappedLiveInputPresentation(next), false, 'embedded Markdown code must never provide ordinary-prose structure proof');
 }
 
 {

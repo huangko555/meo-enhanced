@@ -1,7 +1,9 @@
 import type { DecorationSet } from '@codemirror/view';
 import { EditorState, Transaction } from '@codemirror/state';
 import { createEditor } from './test-editor-factory';
-import { beginLiveInputComposition, completeLiveInputComposition, isLiveInputDerivedWorkPending, usesLargeDocumentDerivedWorkBudget } from '../webview/src/editor/liveInputDerivedWork';
+import { beginLiveInputComposition, completeLiveInputComposition, hasMappedLiveInputPresentation, isLiveInputDerivedWorkPending, usesLargeDocumentDerivedWorkBudget } from '../webview/src/editor/liveInputDerivedWork';
+import { getLiveRenderedBlocks } from '../webview/src/helpers/liveRenderedBlocks';
+import { setHtmlEditingRangeEffect } from '../webview/src/helpers/htmlContent';
 import { sourceSyntaxPreparation } from '../webview/src/helpers/sourceSyntax';
 import { ensureSyntaxTree, forceParsing, syntaxTree, syntaxTreeAvailable } from '@codemirror/language';
 import { diagnosticDataField } from '../webview/src/helpers/diagnostics';
@@ -25,6 +27,16 @@ function footnoteSnapshot(state: EditorState) {
   sourcePreparation: (editor: ReturnType<typeof createEditor>) => !!editor.view.plugin(sourceSyntaxPreparation),
   parse: (editor: ReturnType<typeof createEditor>) => forceParsing(editor.view, editor.view.state.doc.length, 2_000),
   gitSummary: (editor: ReturnType<typeof createEditor>) => getGitDiffSummary(editor.view.state),
+  mapped: (editor: ReturnType<typeof createEditor>) => hasMappedLiveInputPresentation(editor.view.state),
+  renderedBlocks: (editor: ReturnType<typeof createEditor>) => getLiveRenderedBlocks(editor.view.state, { includeSelectedMath: true }),
+  freshRenderedBlocks(editor: ReturnType<typeof createEditor>) {
+    const state = EditorState.create({ doc: editor.getText(), selection: editor.view.state.selection, extensions: editorMarkdownLanguage });
+    ensureSyntaxTree(state, state.doc.length, 2_000);
+    return getLiveRenderedBlocks(state, { includeSelectedMath: true });
+  },
+  editHtml(editor: ReturnType<typeof createEditor>, from: number, to: number) {
+    editor.view.dispatch({ effects: setHtmlEditingRangeEffect.of({ from, to }) });
+  },
   syntaxInfo: (editor: ReturnType<typeof createEditor>) => ({ published: syntaxTree(editor.view.state).length,
     length: editor.view.state.doc.length, available: syntaxTreeAvailable(editor.view.state, editor.view.state.doc.length) }),
   scrollOnly(editor: ReturnType<typeof createEditor>) {

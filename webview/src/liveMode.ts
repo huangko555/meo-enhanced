@@ -77,7 +77,7 @@ import {
   type FootnoteReference,
   type ParsedFootnotes
 } from './helpers/footnotes';
-import { getLiveRenderedBlocks, type LiveRenderedBlock } from './helpers/liveRenderedBlocks';
+import { getLiveRenderedBlocks, projectUnchangedLiveRenderedBlocks, type LiveRenderedBlock } from './helpers/liveRenderedBlocks';
 import { findRawSourceUrlMatches, normalizeSourceHref } from './helpers/rawUrls';
 import { trimDecoratedUrlRange } from './helpers/urlDecorationRange';
 import { createOpenLinkButton } from './helpers/linkOpenButton';
@@ -3861,6 +3861,7 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
   const previous = rootAt(oldTree, change.from), next = rootAt(newTree, change.nextFrom);
   if (!previous) return;
   let oldScope: SourceRange = previous, nextScope: SourceRange;
+  let unchangedParagraphMembership = false;
   if (lineChanged) {
     if (!['Paragraph', 'Blockquote', 'OrderedList', 'BulletList', 'FootnoteDefinition'].includes(previous.name)) return;
     if (previous.name === 'FootnoteDefinition' && (!definition || !next || next.name !== previous.name
@@ -3868,8 +3869,19 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
     oldScope = { from: before.doc.lineAt(previous.from).from,
       to: before.doc.lineAt(Math.max(previous.to, change.to)).to };
     nextScope = { from: transaction.changes.mapPos(oldScope.from, -1), to: transaction.changes.mapPos(oldScope.to, 1) };
-    if (nextScope.to - nextScope.from > 32_768
-      || !hasSameLiveMarkdownOutsideBlock(oldTree, newTree, transaction.changes, oldScope, nextScope)) return;
+    if (nextScope.to - nextScope.from > 32_768) return;
+    // A tighter proof can also preserve the global rich-block index. Requiring
+    // every node outside this bare paragraph to match catches list/indentation
+    // changes that would absorb or expose an adjacent code, table or HTML block.
+    const paragraph = plainPresentationParagraph(before, oldTree, change.from, true);
+    unchangedParagraphMembership = !!paragraph && paragraph.from <= change.from && change.to <= paragraph.to
+      // A newline can turn literal unmatched backticks/tildes into a new fence
+      // wholly inside this scope, where the outside comparison cannot see it.
+      && !/[`~]/.test(before.doc.sliceString(paragraph.from, paragraph.to))
+      && hasSameLiveMarkdownOutsideBlock(oldTree, newTree, transaction.changes, paragraph,
+        { from: transaction.changes.mapPos(paragraph.from, -1), to: transaction.changes.mapPos(paragraph.to, 1) });
+    if (!unchangedParagraphMembership
+      && !hasSameLiveMarkdownOutsideBlock(oldTree, newTree, transaction.changes, oldScope, nextScope)) return;
     // A line break can create/remove a definition even though every outer node
     // beyond this region is identical. Its references are global consumers.
     const hasDefinition = (tree: Tree, scope: SourceRange) => {
@@ -3932,7 +3944,11 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
   const newParagraph = !lineChanged && plainPresentationParagraph(state, newTree, change.nextTo, true);
   if ((!isLiveInputDerivedWorkPending(before) || hasMappedLiveInputPresentation(before))
     && oldParagraph && newParagraph && oldParagraph.from === newParagraph.from
-    && transaction.changes.mapPos(oldParagraph.to, 1) === newParagraph.to) markLiveInputPresentationMapped(state);
+    && transaction.changes.mapPos(oldParagraph.to, 1) === newParagraph.to) {
+    markLiveInputPresentationMapped(state);
+    projectUnchangedLiveRenderedBlocks(before, state, transaction.changes, oldTree, newTree);
+  }
+  if (unchangedParagraphMembership) projectUnchangedLiveRenderedBlocks(before, state, transaction.changes, oldTree, newTree);
   completeLiveDecorationSets.add(result);
   return result;
 }
@@ -4069,6 +4085,8 @@ const liveDecorationField = StateField.define<DecorationSet>({
           liveDecorationMetadata.set(transaction.state, { checkpoint: mapped.rebasedWidgets ? undefined : previous?.checkpoint, complete: true });
           if (!isLiveInputDerivedWorkPending(transaction.startState) || hasMappedLiveInputPresentation(transaction.startState)) {
             markLiveInputPresentationMapped(transaction.state);
+            projectUnchangedLiveRenderedBlocks(transaction.startState, transaction.state, transaction.changes,
+              resolvedSyntaxTree(transaction.startState, 0), resolvedSyntaxTree(transaction.state, 0));
           }
           if (!isEmptyDecorationSet(mapped.decorations)) completeLiveDecorationSets.add(mapped.decorations);
           return mapped.decorations;
