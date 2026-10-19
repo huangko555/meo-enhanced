@@ -171,6 +171,62 @@ try {
     'settled plain input must reuse its unchanged rendered-block index while still updating real Git differences');
     await page.evaluate(() => (window as any).__budgetEditor.destroy());
   }
+  await page.evaluate(async () => {
+    const scope = window as any, api = scope.__liveHistory;
+    const text = 'EDIT\n\n| Name | Value |\n| --- | --- |\n| *item* | 1 |\n\n' + '**Distant paragraph**.\n\n'.repeat(4_100);
+    const editor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'live', initialGitGutter: true, onApplyChanges() {} });
+    api.parse(editor); editor.refreshDecorations();
+    editor.setGitBaseline({ available: true, tracked: false, headOid: null, mode: 'current-edit', baseText: null });
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    const previews = [...editor.view.dom.querySelectorAll('.meo-md-html-table-cell-preview')] as HTMLElement[];
+    const nodes = previews.map(preview => preview.firstChild);
+    const mappings = previews.flatMap(preview => [...preview.querySelectorAll('[data-meo-source-from][data-meo-source-to]')])
+      .map(element => ({ element, from: Number(element.getAttribute('data-meo-source-from')), to: Number(element.getAttribute('data-meo-source-to')) }));
+    if (!previews.length || !mappings.length) throw Error('The table projection fixture must contain real mapped cell previews');
+    const inputs = [...editor.view.dom.querySelectorAll('textarea[data-table-cell-from]')].map((input: HTMLTextAreaElement) => ({
+      input, from: Number(input.dataset.tableCellFrom), to: Number(input.dataset.tableCellTo)
+    }));
+    scope.__tableProjection = { editor, previews, nodes, mappings, inputs };
+    api.input(editor, 4, 'x');
+  });
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__tableProjection.editor));
+  const wordTableProjection = await page.evaluate(() => {
+    const { previews, nodes, mappings, inputs } = (window as any).__tableProjection;
+    return { retained: previews.every((preview: HTMLElement, index: number) => preview.firstChild === nodes[index]),
+      mapped: mappings.every(({ element, from, to }: any) => Number(element.getAttribute('data-meo-source-from')) === from
+        && Number(element.getAttribute('data-meo-source-to')) === to)
+        && inputs.every(({ input, from, to }: any) => Number(input.dataset.tableCellFrom) === from + 1 && Number(input.dataset.tableCellTo) === to + 1) };
+  });
+  assert.deepEqual(wordTableProjection, { retained: true, mapped: true },
+    'unchanged table cells must retain relative inline caret mappings while updating absolute cell bounds after earlier prose input');
+  await page.evaluate(() => {
+    const scope = window as any;
+    scope.__liveHistory.input(scope.__tableProjection.editor, 5, '\n', Date.now() + 10_000);
+  });
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__tableProjection.editor));
+  const newlineTableProjection = await page.evaluate(() => {
+    const { previews, nodes, mappings, inputs } = (window as any).__tableProjection;
+    const result = { retained: previews.every((preview: HTMLElement, index: number) => preview.firstChild === nodes[index]),
+      mapped: mappings.every(({ element, from, to }: any) => Number(element.getAttribute('data-meo-source-from')) === from
+        && Number(element.getAttribute('data-meo-source-to')) === to)
+        && inputs.every(({ input, from, to }: any) => Number(input.dataset.tableCellFrom) === from + 2 && Number(input.dataset.tableCellTo) === to + 2) };
+    return result;
+  });
+  assert.deepEqual(newlineTableProjection, { retained: true, mapped: true },
+    'moving unchanged Git line flags must retain cell previews and their relative caret mappings');
+  await page.evaluate(() => {
+    const scope = window as any, { editor } = scope.__tableProjection;
+    const input = editor.view.dom.querySelector('textarea[data-table-row="1"][data-table-col="0"]');
+    scope.__liveHistory.input(editor, Number(input.dataset.tableCellFrom) + 1, 'Z');
+  });
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__tableProjection.editor));
+  assert.equal(await page.evaluate(() => {
+    const { editor } = (window as any).__tableProjection;
+    const preview = editor.view.dom.querySelector('textarea[data-table-row="1"][data-table-col="0"]').parentElement.querySelector('.meo-md-html-table-cell-preview');
+    const current = preview.textContent.includes('Zitem');
+    editor.destroy();
+    return current;
+  }), true, 'an actual cell text change must still rebuild its preview after metadata-only reuse');
   for (const target of ['EDIT', 'Continued paragraph']) {
     const indexProjection = await page.evaluate(target => {
       const scope = window as any, api = scope.__liveHistory;

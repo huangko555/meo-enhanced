@@ -2377,6 +2377,17 @@ function buildWidgetTableData(
 
 const mountedTableWidgets = new WeakMap<EditorView, Set<HtmlTableWidget>>();
 const tableDomOwners = new WeakMap<HTMLElement, HtmlTableWidget>();
+const cellPreviewSignatures = new WeakMap<WidgetTableData, string>();
+
+function cellPreviewSignature(data: WidgetTableData): string {
+  let signature = cellPreviewSignatures.get(data);
+  if (signature === undefined) {
+    const { diffFlagsByLine: _diff, ...presentation } = JSON.parse(data.signature);
+    signature = JSON.stringify(presentation);
+    cellPreviewSignatures.set(data, signature);
+  }
+  return signature;
+}
 
 /** Ends native cell presentation when document navigation supersedes its return point. */
 export function endTableCellEditing(view: EditorView): void {
@@ -2591,7 +2602,10 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   adoptEquivalentTableData(tableData: WidgetTableData): void {
-    const contentChanged = this.tableData.signature !== tableData.signature;
+    // Git row flags own their separate gutter; changing their line coordinates
+    // does not change cell text, diagnostics or footnote presentation.
+    const contentChanged = this.tableData.signature !== tableData.signature
+      && cellPreviewSignature(this.tableData) !== cellPreviewSignature(tableData);
     this.tableData = tableData;
     if (!this.domRefs) return;
     const { shell, table, rowEntries, allRowInputs } = this.domRefs;
