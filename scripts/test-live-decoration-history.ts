@@ -10,6 +10,19 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-live-decoration-his
 const build = await Bun.build({ entrypoints: [path.join(root, 'scripts/test-live-decoration-history-entry.ts')],
   target: 'browser', format: 'iife', outdir: directory, naming: 'bundle.js',
   plugins: [{ name: 'count-authoritative-live-builds', setup(builder) {
+    builder.onLoad({ filter: /@codemirror[\\/]language[\\/]dist[\\/]index\.js$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text();
+      const boundary = 'newCx.work(20 /* Work.Apply */, upto)';
+      assert.equal(source.split(boundary).length, 2);
+      assert.equal(source.split('let upto = this.context.treeLen').length, 2);
+      assert.equal(source.split('return new LanguageState(newCx);').length, 2);
+      return { loader: 'js', contents: source.replace(boundary,
+        'newCx.work(20 /* Work.Apply */, globalThis.__liveTestParseEnd ?? upto)')
+        .replace('let upto = this.context.treeLen',
+          'if (globalThis.__liveTestFreshParse) newCx.fragments = []; let upto = this.context.treeLen')
+        .replace('return new LanguageState(newCx);',
+          'if (globalThis.__liveTestParseEnd !== undefined) (globalThis.__liveTestLimitedParses ??= []).push({ tree: newCx.tree.length, length: tr.newDoc.length, done: newCx.isDone(tr.newDoc.length) }); return new LanguageState(newCx);') };
+    });
     builder.onLoad({ filter: /webview[\\/]src[\\/]liveMode\.ts$/ }, async ({ path }) => {
       const source = await Bun.file(path).text();
       const boundary = 'return buildDecorations(state, fallback, extra.changes);';
@@ -113,6 +126,61 @@ try {
   assert.ok(coldLargeLive.sourceAfterCancellation, 'cancelling preparation must retain the existing Source surface');
   assert.ok(coldLargeLive.inputText && !coldLargeLive.pending);
   assert.equal(coldLargeLive.inputBuilds, 0, 'first prose input after cold preparation must not repair the whole Live document');
+  const partialInputs = await page.evaluate(async () => {
+    const scope = window as any, api = scope.__liveHistory;
+    const results = [];
+    for (const includeTail of [false, true]) {
+      const text = (includeTail
+        ? 'EDIT\n\nFootnote[^note], distant[^late].\n\n[^note]: Global definition.\n\n'
+        : 'EDIT\n\nFootnote[^note].\n\n[^note]: Global definition.\n\n') +
+        Array.from({ length: 1_600 }, (_, i) => `## Section ${i}\n\nA **formatted** paragraph.\n\n` +
+          '```javascript\nconst item = { value: 123 };\nconsole.log(item);\n```\n\n' +
+          '```markdown\n# Literal heading\n\nLiteral **Markdown**.\n```\n\n').join('') + (includeTail
+        ? '\n| Distant | Table |\n| --- | --- |\n| Tail | Value |\n\n[^late]: Distant definition.\n' : '');
+      const editor = api.create({ parent: document.getElementById('editor'), text,
+        initialMode: 'source', onApplyChanges() {} });
+      await editor.prepareLiveSyntax(() => true);
+      editor.setMode('live');
+      const blocksBefore = includeTail ? api.publishedRenderedBlocks(editor).length : 0;
+      const before = scope.__fullLiveBuilds ?? 0;
+      const scopedBefore = scope.__scopedLiveInputs ?? 0;
+      try {
+        // Model unfinished distant mixed-language work, with and without reusable
+        // parser fragments. All real presentation fields still execute.
+        scope.__liveTestParseEnd = 128;
+        scope.__liveTestFreshParse = includeTail;
+        scope.__liveTestLimitedParses = [];
+        api.input(editor, 4, 'x');
+        const afterInput = api.syntaxInfo(editor);
+        const blocksAfter = includeTail ? api.publishedRenderedBlocks(editor).length : 0;
+        api.input(editor, 5, 'y');
+        api.input(editor, 6, 'z');
+        const mapped = api.mapped(editor);
+        delete scope.__liveTestParseEnd;
+        delete scope.__liveTestFreshParse;
+        api.parse(editor);
+        const deadline = performance.now() + 5_000;
+        while (api.pending(editor) && performance.now() < deadline) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        for (let i = 0; i < 3; i++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        results.push({ includeTail, afterInput, limitedParses: scope.__liveTestLimitedParses, mapped, blocksBefore, blocksAfter,
+          scoped: (scope.__scopedLiveInputs ?? 0) - scopedBefore,
+          pending: api.pending(editor), builds: (scope.__fullLiveBuilds ?? 0) - before,
+          exact: editor.getText() === 'EDITxyz' + text.slice(4),
+          notes: JSON.stringify(api.footnotes(editor)) === JSON.stringify(api.freshFootnotes(editor)) });
+      } finally { delete scope.__liveTestParseEnd; delete scope.__liveTestFreshParse; editor.destroy(); }
+    }
+    return results;
+  });
+  for (const partialInput of partialInputs) {
+    assert.ok(partialInput.limitedParses.some((parse: { done: boolean }) => !parse.done),
+      'partial-input fixture must leave distant syntax unfinished before presentation fields execute');
+    assert.equal(partialInput.builds, 0,
+      'closed prose input must not rebuild the whole Live document merely because distant syntax is still pending');
+    assert.equal(partialInput.scoped, 0, 'unchanged plain prose needs no scoped renderer or global outside-block syntax comparison');
+    assert.ok(!partialInput.includeTail || partialInput.blocksBefore > 0 && partialInput.blocksAfter === partialInput.blocksBefore,
+      'geometry readers must retain distant rich blocks while the syntax publication is only a prefix');
+    assert.ok(partialInput.mapped && !partialInput.pending && partialInput.exact && partialInput.notes);
+  }
   const inputBudgets: Array<{ mode: string; pending: boolean; diffs: number; discoveries: number; htmlRequests: number }> = [];
   const syntaxPublication = await page.evaluate(async () => {
     const scope = window as any, api = scope.__liveHistory;

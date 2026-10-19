@@ -30,6 +30,8 @@ function footnoteSnapshot(state: EditorState) {
   originalBlocks: (editor: ReturnType<typeof createEditor>) => getGitDiffOriginalBlocks(editor.view.state),
   mapped: (editor: ReturnType<typeof createEditor>) => hasMappedLiveInputPresentation(editor.view.state),
   renderedBlocks: (editor: ReturnType<typeof createEditor>) => getLiveRenderedBlocks(editor.view.state, { includeSelectedMath: true }),
+  publishedRenderedBlocks: (editor: ReturnType<typeof createEditor>) => getLiveRenderedBlocks(editor.view.state,
+    { includeSelectedMath: true, tree: syntaxTree(editor.view.state) }),
   freshRenderedBlocks(editor: ReturnType<typeof createEditor>) {
     const state = EditorState.create({ doc: editor.getText(), selection: editor.view.state.selection, extensions: editorMarkdownLanguage });
     ensureSyntaxTree(state, state.doc.length, 2_000);

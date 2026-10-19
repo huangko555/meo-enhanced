@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import ts from 'typescript';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 
 const dist = path.resolve(import.meta.dir, '../webview/dist');
@@ -8,10 +9,40 @@ const text = '# Pending mode\n\n' + Array.from({ length: 1_600 }, (_, index) =>
   `## Section ${index}\n\nA **formatted** paragraph.\n\n` +
   '```javascript\nconst item = { key: "value", count: 123 };\nconsole.log(item);\n```\n\n' +
   '```markdown\n# Literal heading\n\nLiteral **Markdown**.\n```\n\n').join('');
+const preparedModules = new Map<string, string>();
+function withPreparationGate(file: string): string | undefined {
+  if (!path.basename(file).startsWith('editor-') || !file.endsWith('.js')) return;
+  const cached = preparedModules.get(file);
+  if (cached) return cached;
+  const source = fs.readFileSync(file, 'utf8');
+  const offset = source.indexOf('Live syntax preparation timed out');
+  if (offset < 0) return;
+  const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  let preparation: ts.FunctionDeclaration | undefined;
+  const visit = (node: ts.Node) => {
+    if (ts.isFunctionDeclaration(node) && node.body && node.pos <= offset && offset < node.end
+      && node.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword)) preparation = node;
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  assert.ok(preparation?.body, 'the built module must retain the actual asynchronous syntax preparation');
+  const position = preparation.body.getStart(ast) + 1;
+  // Pause only this async boundary, without perturbing the parser's budgets
+  // or unrelated production timers through a replacement of Date.now.
+  const result = source.slice(0, position)
+    + 'if(globalThis.__modePreparationGate)await globalThis.__modePreparationGate;'
+    + source.slice(position);
+  preparedModules.set(file, result);
+  return result;
+}
 const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
   const pathname = new URL(request.url).pathname;
   if (pathname === '/') return new Response('<!doctype html><link rel="stylesheet" href="/index.css"><style>html,body,#app{height:100%;margin:0}</style><body class="vscode-dark" data-meo-git-diff-worker-src="/git-diff-worker.js"><div id="app"></div><script type="module" src="/index.js"></script>', { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
   const file = path.resolve(dist, '.' + decodeURIComponent(pathname));
+  if (file.startsWith(dist + path.sep) && fs.existsSync(file)) {
+    const gated = withPreparationGate(file);
+    if (gated) return new Response(gated, { headers: { 'Content-Type': 'text/javascript; charset=utf-8' } });
+  }
   return file.startsWith(dist + path.sep) && fs.existsSync(file)
     ? new Response(Bun.file(file)) : new Response('Not found', { status: 404 });
 }});
@@ -20,6 +51,7 @@ let primaryError: unknown;
 let failed = false;
 let stage = 'startup';
 let activePage: Awaited<ReturnType<typeof browser.newPage>> | undefined;
+const consoleErrors: string[] = [];
 try {
   const page = await browser.newPage();
   activePage = page;
@@ -27,6 +59,12 @@ try {
   await page.setViewport({ width: 1100, height: 720 });
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(String(error)));
+  page.on('console', async message => {
+    if (message.type() !== 'error') return;
+    const parts = await Promise.all(message.args().map(argument => argument.evaluate(value =>
+      value instanceof Error ? value.stack : String(value)).catch(() => '<unavailable>')));
+    consoleErrors.push(parts.join(' '));
+  });
   await page.exposeFunction('__modeHost', (message: any) => message.type === 'ready' ? {
     type: 'init', documentId: 'file:///mode-preparation.md', text, version: 1,
     savedRevision: { version: 1, text }, diagnostics: [], mode: 'source', uiLanguage: 'en',
@@ -49,14 +87,15 @@ try {
   await page.waitForSelector('.editor-host > .cm-editor.meo-mode-source');
   await page.evaluate(() => {
     const scope = window as any;
-    const view = (document.querySelector('.editor-host .cm-content') as any).cmView.view;
-    const realNow = Date.now;
-    let ticks = realNow();
-    scope.__restoreModeClock = () => { Date.now = realNow; };
-    Date.now = () => ticks += 100;
-    // Replacing the document invalidates its complete parse even when its text
-    // is identical. Force the actual production preparation to span frames.
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: view.state.doc.toString() } });
+    scope.__modeTestClicks = [];
+    document.addEventListener('click', event => {
+      const button = (event.target as Element)?.closest('button');
+      scope.__modeTestClicks.push({ mode: button?.dataset.mode, label: button?.textContent, trusted: event.isTrusted });
+    }, true);
+  });
+  await page.evaluate(() => {
+    const scope = window as any;
+    scope.__modePreparationGate = new Promise<void>(resolve => { scope.__releaseModePreparation = resolve; });
     (document.querySelector('button[data-mode="live"]') as HTMLButtonElement).click();
     requestAnimationFrame(() => {
       scope.__modePreparationFrame = {
@@ -74,14 +113,20 @@ try {
   assert.ok(pending.cancellable, 'a mode preparation must allow a newer mode intent');
   if (process.env.MEO_TEST_SCREENSHOT) await page.screenshot({ path: process.env.MEO_TEST_SCREENSHOT });
   await page.evaluate(() => {
-    (window as any).__restoreModeClock();
+    const scope = window as any;
+    delete scope.__modePreparationGate;
     (document.querySelector('button[data-mode="source"]') as HTMLButtonElement).click();
+    scope.__releaseModePreparation();
   });
   stage = 'cancel';
   await page.waitForFunction(() => document.querySelector('#app')?.getAttribute('data-mode') === 'source'
     && !!document.querySelector('.editor-host > .cm-editor.meo-mode-source')
     && !document.querySelector('.mode-group [aria-busy="true"]'));
-  await page.click('button[data-mode="live"]');
+  // Source presentation can still rearrange toolbar groups in the next frame.
+  // Use Puppeteer's stable-bounds locator before issuing the real mouse click.
+  await page.locator('button[data-mode="live"]').click();
+  assert.ok(await page.evaluate(() => (window as any).__modeTestClicks.some((event: any) => event.trusted && event.mode === 'live')),
+    'the retry mouse click must reach Live itself');
   stage = 'retry';
   await page.waitForFunction(() => !!document.querySelector('.editor-host > .cm-editor.meo-mode-live')
     && !document.querySelector('.mode-group [aria-busy="true"]'));
@@ -92,11 +137,12 @@ try {
 } catch (error) {
   failed = true;
   primaryError = error;
-  console.error(stage, await activePage?.evaluate(() => ({
+  console.error(stage, consoleErrors, await activePage?.evaluate(() => ({
     mode: document.querySelector('#app')?.getAttribute('data-mode'),
     classes: document.querySelector('.editor-host > .cm-editor')?.className,
     busy: Array.from(document.querySelectorAll('.mode-group [aria-busy]')).map(element => element.outerHTML),
-    notice: document.querySelector('.editor-notice')?.textContent
+    clicks: (window as any).__modeTestClicks,
+    notice: Array.from(document.querySelectorAll('[class*="notice"]')).map(element => [element.className, element.textContent])
   })));
   throw error;
 }

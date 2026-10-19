@@ -3797,9 +3797,13 @@ function canMapUnchangedProseDecorations(decorations: DecorationSet, transaction
     || transaction.state.selection.main.head !== transaction.changes.mapPos(transaction.startState.selection.main.head, 1)) return false;
   const before = currentSyntaxTree(transaction.startState);
   const after = currentSyntaxTree(transaction.state);
-  if (before.length !== transaction.startState.doc.length || after.length !== transaction.newDoc.length
-    || !syntaxTreeAvailable(transaction.startState, before.length)
-    || !syntaxTreeAvailable(transaction.state, after.length)) return false;
+  // The accepted presentation already covers the whole document. A closed,
+  // unchanged plain paragraph below proves this edit without requiring distant
+  // embedded languages to finish again. Following proven edits may retain that
+  // same complete presentation while their published syntax is still a prefix.
+  if (!hasMappedLiveInputPresentation(transaction.startState)
+    && (before.length !== transaction.startState.doc.length
+      || !syntaxTreeAvailable(transaction.startState, before.length))) return false;
   let valid = true;
   transaction.changes.iterChangedRanges((from, to, nextFrom, nextTo) => {
     const previous = plainPresentationParagraph(transaction.startState, before, to, true);
