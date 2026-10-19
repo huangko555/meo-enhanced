@@ -10,25 +10,27 @@ import {
   type SavedRevision
 } from '../domain/documentSession';
 import { createDocumentTextReplacement, normalizeDocumentText } from '../foundation/documentText';
+import { readDocumentText, type DocumentText, type DocumentTextEdit,
+  type DocumentTextSnapshot } from '../foundation/documentSnapshot';
 
 export type { DocumentPresentationSource } from '../domain/documentSession';
 export type { DocumentPresentationCompletion } from '../domain/documentSession';
 
 export type DocumentSessionInput =
-  | { readonly type: 'localDraftChanged'; readonly text: string }
+  | { readonly type: 'localDraftChanged'; readonly text: DocumentText; readonly edit?: DocumentTextEdit }
   | { readonly type: 'submitPendingDraft' }
   | { readonly type: 'hostChangeApplied'; readonly version: number }
-  | { readonly type: 'hostRevisionChanged'; readonly version: number; readonly text: string }
+  | { readonly type: 'hostRevisionChanged'; readonly version: number; readonly text: DocumentText }
   | { readonly type: 'saveRequested' }
-  | { readonly type: 'hostSaveSucceeded'; readonly version: number; readonly text: string }
+  | { readonly type: 'hostSaveSucceeded'; readonly version: number; readonly text: DocumentText }
   | {
       readonly type: 'hostSaveFailed';
       readonly version: number;
-      readonly text: string;
+      readonly text: DocumentText;
       readonly message?: string;
     }
   | { readonly type: 'hostRevisionRequestFailed'; readonly message: string }
-  | { readonly type: 'hostReloadedFromDisk'; readonly version: number; readonly text: string };
+  | { readonly type: 'hostReloadedFromDisk'; readonly version: number; readonly text: DocumentText };
 
 export type ApplicationTextChange = {
   readonly from: number;
@@ -39,8 +41,9 @@ export type ApplicationTextChange = {
 export type DocumentSessionAction =
   | {
       readonly type: 'rememberDraft';
-      readonly text: string | null;
+      readonly text: DocumentText | null;
       readonly receiptVersion: number;
+      readonly edit?: DocumentTextEdit;
     }
   | {
       readonly type: 'applyTextChange';
@@ -72,12 +75,15 @@ export function createDocumentSessionCoordinator(input: {
   readonly documentId: string;
   readonly revision: Revision;
   readonly savedRevision: SavedRevision | null;
+  readonly createTextSnapshot?: (text: string) => DocumentTextSnapshot;
 }): DocumentSessionCoordinator {
+  const canonicalText = (text: DocumentText): DocumentText => typeof text === 'string'
+    ? input.createTextSnapshot?.(text) ?? normalizeDocumentText(text) : text;
   let state = createDocumentSession({
     ...input,
-    revision: { ...input.revision, text: normalizeDocumentText(input.revision.text) },
+    revision: { ...input.revision, text: canonicalText(input.revision.text) },
     savedRevision: input.savedRevision === null ? null : {
-      ...input.savedRevision, text: normalizeDocumentText(input.savedRevision.text)
+      ...input.savedRevision, text: canonicalText(input.savedRevision.text)
     }
   });
   let nextDraftRecoveryReceiptVersion = 1;
@@ -86,7 +92,7 @@ export function createDocumentSessionCoordinator(input: {
   return {
     handle(applicationInput) {
       const canonicalInput: DocumentSessionInput = 'text' in applicationInput
-        ? { ...applicationInput, text: normalizeDocumentText(applicationInput.text) }
+        ? { ...applicationInput, text: canonicalText(applicationInput.text) }
         : applicationInput;
       const inputReceiptVersion = canProduceDraftRecoveryEffect(canonicalInput)
         ? nextDraftRecoveryReceiptVersion++
@@ -101,7 +107,8 @@ export function createDocumentSessionCoordinator(input: {
         previousState,
         state,
         transition.effects,
-        inputReceiptVersion
+        inputReceiptVersion,
+        canonicalInput.type === 'localDraftChanged' ? canonicalInput.edit : undefined
       );
       if (actions.some((action) => action.type === 'rememberDraft')) {
         if (inputReceiptVersion === null) {
@@ -126,7 +133,7 @@ function mapInput(
   input: DocumentSessionInput
 ): DocumentSessionEvent | null {
   if (input.type === 'localDraftChanged') {
-    return { type: 'draftChanged', text: input.text };
+    return { type: 'draftChanged', text: input.text, ...(input.edit ? { edit: input.edit } : {}) };
   }
   if (input.type === 'submitPendingDraft') {
     return { type: 'submitDraft' };
@@ -174,7 +181,8 @@ function mapEffects(
   previousState: DocumentSessionState,
   nextState: DocumentSessionState,
   effects: readonly DocumentSessionEffect[],
-  inputReceiptVersion: number | null
+  inputReceiptVersion: number | null,
+  localEdit?: DocumentTextEdit
 ): readonly DocumentSessionAction[] {
   return effects.map((effect): DocumentSessionAction => {
     if (effect.type === 'persistDraft') {
@@ -184,7 +192,8 @@ function mapEffects(
       return {
         type: 'rememberDraft',
         text: effect.draft?.text ?? null,
-        receiptVersion: inputReceiptVersion
+        receiptVersion: inputReceiptVersion,
+        ...(localEdit && effect.draft?.text === localEdit.after ? { edit: localEdit } : {})
       };
     }
     if (effect.type === 'submitChange') {
@@ -194,13 +203,14 @@ function mapEffects(
       return {
         type: 'applyTextChange',
         baseVersion: effect.change.baseRevision,
-        changes: [createDocumentTextReplacement(baseRevision.text, effect.change.text)]
+        changes: effect.change.edit?.changes
+          ?? [createDocumentTextReplacement(readDocumentText(baseRevision.text), readDocumentText(effect.change.text))]
       };
     }
     if (effect.type === 'presentText') {
       return {
         type: 'presentText',
-        text: effect.text,
+        text: readDocumentText(effect.text),
         source: effect.source,
         ...(effect.onPresented ? { onPresented: effect.onPresented } : {})
       };

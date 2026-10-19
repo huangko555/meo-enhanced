@@ -1,4 +1,5 @@
 import { effectiveShortcuts } from '../../src/application/editingPreferences';
+import type { DocumentText, DocumentTextEdit } from '../../src/foundation/documentSnapshot';
 import { createImageLocationSettings } from './adapters/imageLocationSettings';
 import { createImageStorageTransport } from './adapters/imageStorageTransport';
 import { createSettingsWindow, type GeneralSetting } from './adapters/settingsWindow';
@@ -2704,12 +2705,13 @@ const setEditorTextSafely = async (
 };
 
 const viewportPresentationFailed = Object.freeze({});
-let pendingDocumentDerivedText = '';
+let pendingDocumentDerivedText: DocumentText = '';
 const runDocumentDerivedUiRefresh = (): void => {
+  const text = pendingDocumentDerivedText.toString();
   const operations: ReadonlyArray<readonly [string, () => void]> = [
     ['outline', () => { if (outlineController.isVisible()) outlineController.refresh(); }],
-    ['wikiLinks', () => scheduleWikiLinkStatusRefresh(pendingDocumentDerivedText)],
-    ['localLinks', () => scheduleLocalLinkStatusRefresh(pendingDocumentDerivedText)],
+    ['wikiLinks', () => scheduleWikiLinkStatusRefresh(text)],
+    ['localLinks', () => scheduleLocalLinkStatusRefresh(text)],
     ['findSummary', () => findPanelController.updateFindStatusSummary()]
   ];
   for (const [name, run] of operations) {
@@ -2720,7 +2722,7 @@ const runDocumentDerivedUiRefresh = (): void => {
     }
   }
 };
-const scheduleDocumentDerivedUiRefresh = (text: string): void => {
+const scheduleDocumentDerivedUiRefresh = (text: DocumentText): void => {
   pendingDocumentDerivedText = text;
   editor?.requestDerivedWork(runDocumentDerivedUiRefresh);
 };
@@ -2919,10 +2921,10 @@ const shortcutHandlerContext: ShortcutHandlerContext = {
   }
 };
 
-const handleLocalEditorChange = (nextText: string) => {
-  documentSessionAdapter.localDraftChanged(nextText);
-  scheduleDocumentDerivedUiRefresh(nextText);
-  if (isSidePreviewVisible()) previewAdapter.scheduleVisibleRefresh(nextText);
+const handleLocalEditorChange = (edit: DocumentTextEdit) => {
+  documentSessionAdapter.localDraftChanged(edit);
+  scheduleDocumentDerivedUiRefresh(edit.after);
+  if (isSidePreviewVisible()) previewAdapter.scheduleVisibleRefresh(edit.after);
 };
 
 const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal): Promise<void> => {
@@ -2942,7 +2944,7 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     initialLongCodeBlockFolding: longCodeBlockFoldingEnabled,
     initialTableStickyHeaderEnabled: tableStickyHeaderEnabled,
     initialDiagnostics: pendingDiagnostics,
-    onApplyChanges: handleLocalEditorChange,
+    onApplyTransaction: handleLocalEditorChange,
     onOpenLink: (href: string) => vscode.postMessage({ type: 'openLink', href }),
     onCommentBlocked: () => editorNotice.setEditorNotice(activeUiStrings.commentSelectionBlocked),
     onSelectionChange: (state: any) => selectionMenuController.update(state),

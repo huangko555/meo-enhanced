@@ -40,7 +40,13 @@ const factory = createMermaidDiagramPresentationFactory({
   }
 });
 
-export function createEditor(options: Parameters<typeof createProductionEditor>[0]) {
+type ProductionOptions = Parameters<typeof createProductionEditor>[0];
+type TestEditorOptions = Omit<ProductionOptions, 'onApplyTransaction'> & {
+  onApplyChanges?: (text: string) => void;
+  onApplyTransaction?: ProductionOptions['onApplyTransaction'];
+};
+
+export function createEditor(options: TestEditorOptions) {
   // Standalone browser fixtures bypass the webview bootstrap. Initialize its
   // native UI and Source surfaces without overwriting a fixture's explicit theme.
   if (!document.documentElement.style.getPropertyValue('--meo-ui-surface')) {
@@ -51,6 +57,7 @@ export function createEditor(options: Parameters<typeof createProductionEditor>[
   if (!isShikiThemeReady('source')) setShikiTheme(darkPlus, 'source');
   return createProductionEditor({
     ...options,
+    onApplyTransaction: options.onApplyTransaction ?? (edit => options.onApplyChanges?.(edit.after.toString())),
     mermaidDiagramPresentationFactory: factory
   });
 }

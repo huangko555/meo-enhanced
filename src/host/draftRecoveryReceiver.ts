@@ -16,8 +16,10 @@ export function createDraftRecoveryReceiver(
       if (message.type === 'draftChanged') {
         text = message.text;
       } else {
+        const changes = message.changes ?? [message.change];
         if (!checkpoint || message.baseReceiptVersion !== checkpoint.receiptVersion
-          || message.change.to > checkpoint.text.length) {
+          || changes.some((change, index) => change.to > checkpoint!.text.length
+            || (index > 0 && change.from < changes[index - 1]!.to))) {
           // Never guess at a missing base, advance the receipt, or discard the
           // last intact candidate. A complete latest snapshot repairs the stream.
           if (!snapshotRequested) {
@@ -28,8 +30,14 @@ export function createDraftRecoveryReceiver(
           }
           return receiptVersion;
         }
-        const { from, to, insert } = message.change;
-        text = checkpoint.text.slice(0, from) + insert + checkpoint.text.slice(to);
+        const parts: string[] = [];
+        let from = 0;
+        for (const change of changes) {
+          parts.push(checkpoint.text.slice(from, change.from), change.insert);
+          from = change.to;
+        }
+        parts.push(checkpoint.text.slice(from));
+        text = parts.join('');
       }
       receiptVersion = recovery.remember(text, message.receiptVersion);
       if (text !== null) checkpoint = { text, receiptVersion: message.receiptVersion };

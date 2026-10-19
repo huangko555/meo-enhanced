@@ -14,7 +14,9 @@ import { nativeSymbolInput, planNativeHtmlCommentToggle } from './editor/nativeT
 import { formatMultipleSelections, toggleHtmlComment, runEditorCommand, secondarySelections } from './editor/commands';
 import type { EditorCommandId } from '../../src/foundation/editingPreferences';
 import { pasteAssistance, insertPlainClipboardText } from './editor/pasteAssistance';
-import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type Annotation, type ChangeDesc, type ChangeSpec, type TransactionSpec, EditorSelection, type Extension, type SelectionRange, type Text } from '@codemirror/state';
+import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type Annotation, type ChangeDesc, type ChangeSet, type ChangeSpec, type TransactionSpec, EditorSelection, type Extension, type SelectionRange, type Text } from '@codemirror/state';
+import { documentEdit } from './adapters/documentSnapshot';
+import type { DocumentTextEdit } from '../../src/foundation/documentSnapshot';
 import { EditorView, keymap, highlightActiveLine, lineNumbers, highlightActiveLineGutter, Decoration, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
@@ -230,7 +232,7 @@ type SourcePositionChange = {
 type CreateEditorOptions = {
   parent: HTMLElement;
   text: string;
-  onApplyChanges: (text: string) => void;
+  onApplyTransaction: (edit: DocumentTextEdit) => void;
   onOpenLink?: (href: string) => void;
   onCommentBlocked?: () => void;
   onSelectionChange?: (state: SelectionMenuState & { from?: number; to?: number }) => void;
@@ -384,7 +386,7 @@ function lineNumberExtensions(
 export function createEditor({
   parent,
   text,
-  onApplyChanges,
+  onApplyTransaction,
   onOpenLink,
   onCommentBlocked,
   onSelectionChange,
@@ -433,7 +435,8 @@ export function createEditor({
   let applyingExternal = false;
   let imeCompositionActive = false;
   let imeCompositionChanged = false;
-  let imeCompositionBaseText: string | null = null;
+  let imeCompositionBaseText: Text | null = null;
+  let unpublishedChanges: { before: Text; changes: ChangeSet } | null = null;
   let imeCompositionFlushTimer: number | null = null;
   let capturedPointerId: number | null = null;
   let selectionMenuPointerId: number | null = null;
@@ -558,7 +561,7 @@ export function createEditor({
     });
   };
   const startImeComposition = () => {
-    imeCompositionBaseText ??= view.state.doc.toString();
+    imeCompositionBaseText ??= view.state.doc;
     imeCompositionActive = true;
     beginLiveInputComposition(view);
     if (imeCompositionFlushTimer !== null) {
@@ -571,7 +574,9 @@ export function createEditor({
       return;
     }
     imeCompositionBaseText = null;
-    onApplyChanges(view.state.doc.toString());
+    const pending = unpublishedChanges;
+    unpublishedChanges = null;
+    if (pending) onApplyTransaction(documentEdit(pending.changes, pending.before, view.state.doc));
   };
   const emitGitDiffSummary = (state: EditorState) => {
     if (typeof onGitDiffSummaryChange !== 'function') return;
@@ -2751,17 +2756,18 @@ export function createEditor({
         }
 
         if (update.docChanged && !applyingExternal) {
+          unpublishedChanges = unpublishedChanges
+            ? { before: unpublishedChanges.before, changes: unpublishedChanges.changes.compose(update.changes) }
+            : { before: update.startState.doc, changes: update.changes };
           if (imeCompositionActive) {
             imeCompositionChanged = true;
           } else {
             imeCompositionChanged = false;
-            if (isHistoryReplayUpdate(update)) {
-              imeCompositionBaseText = null;
-              onApplyChanges(update.state.doc.toString());
-            } else {
-              publishComposedDocumentChange();
-            }
+            publishComposedDocumentChange();
           }
+        } else if (update.docChanged && applyingExternal) {
+          unpublishedChanges = null;
+          if (imeCompositionBaseText !== null) imeCompositionBaseText = update.state.doc;
         }
 
         // Search indicators consume accepted Document/Selection and must not
@@ -3485,7 +3491,7 @@ export function createEditor({
     /** Save confirmed input without committing or cancelling an active IME candidate. */
     getTextForSave() {
       commitActiveTableInput();
-      return imeCompositionBaseText ?? view.state.doc.toString();
+      return (imeCompositionBaseText ?? view.state.doc).toString();
     },
     revealDocumentFragment(href: string) {
       const fragmentHref = href.startsWith('#') ? href : `#${href}`;
@@ -3797,7 +3803,6 @@ export function createEditor({
       imagePresentationResourcePool.dispose();
     },
     setText(textValue: string, resetHistory = false) {
-      if (imeCompositionBaseText !== null) imeCompositionBaseText = textValue;
       document.dispatchEvent(new CustomEvent('meo-table-selection-external-presentation', {
         detail: { owner: view.dom }
       }));

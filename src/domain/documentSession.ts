@@ -1,21 +1,26 @@
+import { equalDocumentText, isEmptyDocumentEdit, readDocumentText,
+  type DocumentText, type DocumentTextEdit } from '../foundation/documentSnapshot';
+
 export type Revision = {
   readonly number: number;
-  readonly text: string;
+  readonly text: DocumentText;
 };
 
 export type Draft = {
   readonly baseRevision: number;
-  readonly text: string;
+  readonly text: DocumentText;
+  readonly edit?: DocumentTextEdit;
 };
 
 export type Change = {
   readonly baseRevision: number;
-  readonly text: string;
+  readonly text: DocumentText;
+  readonly edit?: DocumentTextEdit;
 };
 
 export type SavedRevision = {
   readonly revisionNumber: number | null;
-  readonly text: string;
+  readonly text: DocumentText;
 };
 
 export type DocumentPresentationSource = 'revision' | 'rebased-draft' | 'disk-reload';
@@ -35,7 +40,7 @@ export type DocumentSessionState = {
 };
 
 export type DocumentSessionEvent =
-  | { readonly type: 'draftChanged'; readonly text: string }
+  | { readonly type: 'draftChanged'; readonly text: DocumentText; readonly edit?: DocumentTextEdit }
   | { readonly type: 'submitDraft' }
   | { readonly type: 'revisionReceived'; readonly revision: Revision }
   | { readonly type: 'saveRequested' }
@@ -48,7 +53,7 @@ export type DocumentSessionEffect =
   | { readonly type: 'submitChange'; readonly change: Change }
   | {
       readonly type: 'presentText';
-      readonly text: string;
+      readonly text: DocumentText;
       readonly source: DocumentPresentationSource;
       readonly onPresented?: DocumentPresentationCompletion;
     }
@@ -88,7 +93,12 @@ export function transitionDocumentSession(
   event: DocumentSessionEvent
 ): DocumentSessionTransition {
   if (event.type === 'draftChanged') {
-    if (state.pendingChange === null && event.text === state.revision.text) {
+    const previousText = state.draft?.text ?? state.revision.text;
+    const localEdit = event.edit && equalDocumentText(event.edit.before, previousText)
+      && event.edit.after === event.text ? event.edit : undefined;
+    const edit = localEdit && (state.draft === null ? localEdit
+      : state.draft.edit?.compose(localEdit));
+    if (state.pendingChange === null && (edit ? isEmptyDocumentEdit(edit) : equalDocumentText(event.text, state.revision.text))) {
       if (state.draft === null) {
         return state.lastRejectedExternalRevision === null
           ? { state, effects: [] }
@@ -102,7 +112,7 @@ export function transitionDocumentSession(
         effects: [{ type: 'persistDraft', draft: null }]
       };
     }
-    const draft = { baseRevision: state.revision.number, text: event.text };
+    const draft = { baseRevision: state.revision.number, text: event.text, ...(edit ? { edit } : {}) };
     return {
       state: { ...state, draft, lastRejectedExternalRevision: null },
       effects: [{ type: 'persistDraft', draft }]
@@ -119,13 +129,15 @@ export function transitionDocumentSession(
       return { state, effects: [] };
     }
     if (revision.number === state.revision.number) {
-      return revision.text === state.revision.text
+      return equalDocumentText(revision.text, state.revision.text)
         ? { state, effects: [] }
         : { state, effects: [{ type: 'requestResync' }] };
     }
-    if (state.pendingChange !== null && revision.text === state.pendingChange.text) {
-      if (state.draft !== null && state.draft.text !== state.pendingChange.text) {
-        const draft = { baseRevision: revision.number, text: state.draft.text };
+    if (state.pendingChange !== null && equalDocumentText(revision.text, state.pendingChange.text)) {
+      if (state.draft !== null && !equalDocumentText(state.draft.text, state.pendingChange.text)) {
+        const edit = state.pendingChange.edit && state.draft.edit
+          ? state.pendingChange.edit.invert().compose(state.draft.edit) : undefined;
+        const draft = { baseRevision: revision.number, text: state.draft.text, ...(edit ? { edit } : {}) };
         const pendingChange = { ...draft };
         return {
           state: {
@@ -162,9 +174,9 @@ export function transitionDocumentSession(
     const rebasedText = reconcileDraft(state.revision.text, state.draft?.text ?? null, revision.text);
     if (rebasedText === null
       && state.draft !== null
-      && state.draft.text !== revision.text) {
+      && !equalDocumentText(state.draft.text, revision.text)) {
       if (state.lastRejectedExternalRevision?.number === revision.number
-        && state.lastRejectedExternalRevision.text === revision.text) {
+        && equalDocumentText(state.lastRejectedExternalRevision.text, revision.text)) {
         return { state, effects: [] };
       }
       return {
@@ -218,7 +230,7 @@ export function transitionDocumentSession(
       return { state: { ...state, savePhase: 'awaiting-change' }, effects: [] };
     }
     if (state.draft !== null) {
-      const pendingChange = { baseRevision: state.revision.number, text: state.draft.text };
+      const pendingChange = { ...state.draft };
       return {
         state: { ...state, pendingChange, savePhase: 'awaiting-change' },
         effects: [{ type: 'submitChange', change: pendingChange }]
@@ -233,7 +245,7 @@ export function transitionDocumentSession(
   if (event.type === 'saveCompleted') {
     if (state.savePhase !== 'saving' || state.savingRevision === null
       || event.revision.number !== state.savingRevision.number
-      || event.revision.text !== state.savingRevision.text) {
+      || !equalDocumentText(event.revision.text, state.savingRevision.text)) {
       return { state, effects: [] };
     }
     const previousSavedNumber = state.savedRevision?.revisionNumber;
@@ -251,7 +263,7 @@ export function transitionDocumentSession(
     return state.savePhase !== 'saving'
       || state.savingRevision === null
       || event.revision.number !== state.savingRevision.number
-      || event.revision.text !== state.savingRevision.text
+      || !equalDocumentText(event.revision.text, state.savingRevision.text)
       ? { state, effects: [] }
       : { state: { ...state, savePhase: 'idle', savingRevision: null }, effects: [] };
   }
@@ -259,7 +271,7 @@ export function transitionDocumentSession(
   if (event.type === 'reloadedFromDisk') {
     if (event.revision.number < state.revision.number) return { state, effects: [] };
     if (event.revision.number === state.revision.number
-      && event.revision.text !== state.revision.text) {
+      && !equalDocumentText(event.revision.text, state.revision.text)) {
       return { state, effects: [{ type: 'requestResync' }] };
     }
     return {
@@ -287,7 +299,7 @@ export function transitionDocumentSession(
   if (state.draft === null || state.pendingChange !== null) {
     return { state, effects: [] };
   }
-  const pendingChange = { baseRevision: state.revision.number, text: state.draft.text };
+  const pendingChange = { ...state.draft };
   return {
     state: { ...state, pendingChange },
     effects: [{ type: 'submitChange', change: pendingChange }]
@@ -300,16 +312,18 @@ type TextChange = {
   readonly insert: string;
 };
 
-function reconcileDraft(baseText: string, draftText: string | null, incomingText: string): string | null {
-  if (draftText === null || draftText === baseText || draftText === incomingText) return null;
-  const draftChange = findTextChange(baseText, draftText);
-  const incomingChange = findTextChange(baseText, incomingText);
+function reconcileDraft(baseText: DocumentText, draftText: DocumentText | null, incomingText: DocumentText): DocumentText | null {
+  if (draftText === null || equalDocumentText(draftText, baseText) || equalDocumentText(draftText, incomingText)) return null;
+  const draftChange = findTextChange(readDocumentText(baseText), readDocumentText(draftText));
+  const incomingChange = findTextChange(readDocumentText(baseText), readDocumentText(incomingText));
   if (draftChange === null || incomingChange === null || changesOverlap(draftChange, incomingChange)) return null;
 
   const incomingDelta = incomingChange.insert.length - (incomingChange.to - incomingChange.from);
   const draftFrom = incomingChange.to <= draftChange.from ? draftChange.from + incomingDelta : draftChange.from;
   const draftTo = incomingChange.to <= draftChange.from ? draftChange.to + incomingDelta : draftChange.to;
-  return incomingText.slice(0, draftFrom) + draftChange.insert + incomingText.slice(draftTo);
+  return typeof incomingText === 'string'
+    ? incomingText.slice(0, draftFrom) + draftChange.insert + incomingText.slice(draftTo)
+    : incomingText.replace(draftFrom, draftTo, draftChange.insert);
 }
 
 function findTextChange(previousText: string, nextText: string): TextChange | null {

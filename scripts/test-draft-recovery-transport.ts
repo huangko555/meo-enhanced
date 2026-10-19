@@ -90,6 +90,19 @@ assert.equal(recovered, latest + ' after discard');
 const valid = { type: 'draftPatched', baseReceiptVersion: 1, receiptVersion: 2,
   change: { from: 0, to: 1, insert: '😁' } } as const;
 assert.deepEqual(decodeWebviewToHostMessage(valid), valid);
+const batch = { type: 'draftPatched', baseReceiptVersion: latestReceipt + 2, receiptVersion: latestReceipt + 3,
+  changes: [{ from: 0, to: 2, insert: '中文' }, { from: 10, to: 10, insert: '😀\n' }] } as const;
+assert.deepEqual(decodeWebviewToHostMessage(batch), batch);
+receiver.accept(batch);
+assert.equal(await recovery.recover(), true);
+const batchBase = latest + ' after discard';
+assert.equal(recovered, '中文' + batchBase.slice(2, 10) + '😀\n' + batchBase.slice(10));
+for (const changes of [
+  [{ from: 2, to: 4, insert: '' }, { from: 3, to: 5, insert: '' }],
+  [{ from: 4, to: 4, insert: '' }, { from: 1, to: 2, insert: '' }],
+  [{ from: 0, to: 1, insert: null }]
+]) assert.equal(decodeWebviewToHostMessage({ ...batch, changes }), null);
+assert.equal(decodeWebviewToHostMessage({ ...batch, change: valid.change }), null);
 for (const invalid of [
   { ...valid, baseReceiptVersion: -1 }, { ...valid, receiptVersion: 1 },
   { ...valid, receiptVersion: 1.5 }, { ...valid, change: { from: -1, to: 1, insert: '' } },

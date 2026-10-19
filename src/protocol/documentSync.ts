@@ -53,8 +53,10 @@ export type DraftPatchedMessage = {
   readonly type: 'draftPatched';
   readonly baseReceiptVersion: number;
   readonly receiptVersion: number;
-  readonly change: TextChange;
-};
+} & (
+  | { readonly change: TextChange; readonly changes?: never }
+  | { readonly changes: readonly TextChange[]; readonly change?: never }
+);
 export type DraftRecoveryMessage = DraftChangedMessage | DraftPatchedMessage;
 
 export type DocumentReloadPresentationCompletedMessage = {
@@ -135,10 +137,19 @@ export function decodeDocumentSyncCommand(value: unknown): DocumentSyncCommand |
   const text = value.text;
   if (value.type === 'draftPatched' && isReceiptVersion(value.baseReceiptVersion)
     && isReceiptVersion(value.receiptVersion) && value.receiptVersion > value.baseReceiptVersion
-    && isTextChange(value.change)) {
+    && isTextChange(value.change) && value.changes === undefined) {
     return {
       type: 'draftPatched', baseReceiptVersion: value.baseReceiptVersion,
       receiptVersion: value.receiptVersion, change: value.change
+    };
+  }
+  if (value.type === 'draftPatched' && isReceiptVersion(value.baseReceiptVersion)
+    && isReceiptVersion(value.receiptVersion) && value.receiptVersion > value.baseReceiptVersion
+    && value.change === undefined && Array.isArray(value.changes) && value.changes.every(isTextChange)
+    && value.changes.every((change, index, changes) => index === 0 || change.from >= changes[index - 1].to)) {
+    return {
+      type: 'draftPatched', baseReceiptVersion: value.baseReceiptVersion,
+      receiptVersion: value.receiptVersion, changes: value.changes
     };
   }
   if (value.type === 'draftChanged' && typeof text === 'string'

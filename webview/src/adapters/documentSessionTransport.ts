@@ -14,6 +14,7 @@ import {
 import type { InitMessage } from '../../../src/protocol/readyInit';
 import { createRequestLifecycle, type RequestLifecycleOptions } from './requestLifecycle';
 import { normalizeDocumentText } from '../../../src/foundation/documentText';
+import { readDocumentText, type DocumentTextSnapshot } from '../../../src/foundation/documentSnapshot';
 
 type RemoteDocumentSessionAction = Extract<
   DocumentSessionAction,
@@ -26,8 +27,9 @@ export type DocumentSessionTransport = {
   cancelAll(message?: string): void;
 };
 
-export function createDocumentSessionCoordinatorFromInit(message: InitMessage) {
+export function createDocumentSessionCoordinatorFromInit(message: InitMessage, createTextSnapshot?: (text: string) => DocumentTextSnapshot) {
   return createDocumentSessionCoordinator({
+    ...(createTextSnapshot ? { createTextSnapshot } : {}),
     documentId: message.documentId,
     revision: { number: message.version, text: message.text },
     savedRevision: message.savedRevision === null
@@ -57,7 +59,7 @@ export function createDocumentSessionTransport(
   return {
     async execute(action) {
       if (action.type === 'saveDocument') {
-        const expected = { version: action.revision.number, text: action.revision.text };
+        const expected = { version: action.revision.number, text: readDocumentText(action.revision.text) };
         const result = await saveLifecycle.start(
           (requestId) => postMessage({
             type: 'saveDocumentRevision',

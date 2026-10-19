@@ -94,8 +94,8 @@ const codePaletteAdapter = createCodePaletteWebviewAdapter({
 const previewMessages: unknown[] = [];
 type SharedMermaidEditorOptions = Omit<
   Parameters<typeof createEditor>[0],
-  'mermaidDiagramPresentationFactory'
->;
+  'mermaidDiagramPresentationFactory' | 'onApplyTransaction'
+> & { onApplyChanges?: (text: string) => void };
 const controller = createPreviewController({
   vscode: { postMessage(message) { previewMessages.push(message); } },
   uiLanguage: 'en',
@@ -120,6 +120,7 @@ document.body.append(controller.host);
   __createSharedMermaidEditor?: (options: SharedMermaidEditorOptions) => ReturnType<typeof createEditor>;
 }).__createSharedMermaidEditor = (options) => createEditor({
   ...options,
+  onApplyTransaction: edit => options.onApplyChanges?.(edit.after.toString()),
   mermaidDiagramPresentationFactory: mermaidPresentationFactory
 });
 (window as typeof window & { __renderEditorMermaid?: (source: string) => HTMLElement }).__renderEditorMermaid = (source) => {

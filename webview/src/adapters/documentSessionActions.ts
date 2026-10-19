@@ -9,6 +9,7 @@ import type {
   DraftRecoveryMessage
 } from '../../../src/protocol/documentSync';
 import { createDocumentTextReplacement } from '../../../src/foundation/documentText';
+import { equalDocumentText, readDocumentText, type DocumentText } from '../../../src/foundation/documentSnapshot';
 
 export type DocumentSessionNotice =
   | 'external-conflict'
@@ -51,22 +52,28 @@ export function createDocumentSessionActionAdapter(
   let failedPresentation: Extract<DocumentSessionAction, { readonly type: 'presentText' }> | null = null;
   // Compression checkpoints only. Draft truth and receipt allocation remain in
   // the coordinator; null recovery clears retain the last text checkpoint.
-  let recoveryCheckpoint: { text: string; receiptVersion: number } | null = null;
+  let recoveryCheckpoint: { text: DocumentText; receiptVersion: number } | null = null;
   let latestRecovery: Extract<DocumentSessionAction, { readonly type: 'rememberDraft' }> | null = null;
   const postRecovery = (action: NonNullable<typeof latestRecovery>, forceSnapshot = false): void => {
-    let message: DraftRecoveryMessage = {
-      type: 'draftChanged', text: action.text, receiptVersion: action.receiptVersion
-    };
+    let message: DraftRecoveryMessage | undefined;
     if (!forceSnapshot && action.text !== null && action.text.length >= 262_144 && recoveryCheckpoint) {
-      const change = createDocumentTextReplacement(recoveryCheckpoint.text, action.text);
-      if (change.insert.length + 128 < action.text.length) {
+      const changes = action.edit && equalDocumentText(recoveryCheckpoint.text, action.edit.before)
+        ? action.edit.changes
+        : equalDocumentText(recoveryCheckpoint.text, action.text) ? []
+        : [createDocumentTextReplacement(readDocumentText(recoveryCheckpoint.text), readDocumentText(action.text))];
+      if (changes.reduce((size, change) => size + change.insert.length + 96, 128) < action.text.length) {
         message = {
-          type: 'draftPatched', change,
+          type: 'draftPatched',
+          ...(changes.length <= 1 ? { change: changes[0] ?? { from: 0, to: 0, insert: '' } } : { changes }),
           baseReceiptVersion: recoveryCheckpoint.receiptVersion,
           receiptVersion: action.receiptVersion
         };
       }
     }
+    message ??= {
+      type: 'draftChanged', text: action.text === null ? null : readDocumentText(action.text),
+      receiptVersion: action.receiptVersion
+    };
     dependencies.postMessage(message);
     if (action.text !== null) recoveryCheckpoint = { text: action.text, receiptVersion: action.receiptVersion };
     latestRecovery = action;

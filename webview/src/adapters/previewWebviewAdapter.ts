@@ -5,6 +5,7 @@ import type {
 import type { EditorAppearance as PreviewAppearance } from '../../../src/protocol/editorCommands';
 import { assessLargeDocument } from '../../../src/foundation/largeDocument';
 import type { PreviewPresetDefinition, PreviewPresetDiagnostic, PreviewPresetId } from '../../../src/foundation/previewPresets';
+import { readDocumentText, type DocumentText } from '../../../src/foundation/documentSnapshot';
 
 type ResolvedPreviewAppearance = Exclude<PreviewAppearance, 'auto'>;
 
@@ -37,7 +38,7 @@ export type PreviewWebviewAdapter = {
     text: string;
   }): void;
   refreshVisible(text: string, options?: { preserveViewport?: boolean; preserveFrame?: boolean }): void;
-  scheduleVisibleRefresh(text: string): void;
+  scheduleVisibleRefresh(text: DocumentText): void;
   invalidateResources(text?: string): void;
   accept(message: HostToWebviewMessage): boolean;
   getAppearance(): ResolvedPreviewAppearance;
@@ -57,11 +58,11 @@ export function createPreviewWebviewAdapter(
   let disposed = false;
   let scheduledRefresh: unknown = null;
   let queuedRender: {
-    readonly text: string;
+    readonly text: DocumentText;
     readonly options: { force?: boolean; preserveViewport?: boolean; preserveFrame?: boolean };
   } | null = null;
   let renderInFlight = false;
-  let currentText: string | null = null;
+  let currentText: DocumentText | null = null;
   let resourcesInvalidated = false;
   const refreshDelayMs = options.refreshDelayMs ?? 300;
   const scheduleTimeout = options.scheduleTimeout ?? ((callback, delayMs) => globalThis.setTimeout(callback, delayMs));
@@ -81,7 +82,7 @@ export function createPreviewWebviewAdapter(
     renderInFlight = true;
     const forceResources = resourcesInvalidated;
     resourcesInvalidated = false;
-    const completion = surface.requestRender(request.text, {
+    const completion = surface.requestRender(readDocumentText(request.text), {
       ...request.options,
       ...(forceResources ? { force: true } : {})
     });
@@ -97,7 +98,7 @@ export function createPreviewWebviewAdapter(
   };
 
   const requestImmediateRender = (
-    text: string,
+    text: DocumentText,
     renderOptions: { force?: boolean; preserveViewport?: boolean; preserveFrame?: boolean } = {}
   ): void => {
     if (disposed || !active) return;

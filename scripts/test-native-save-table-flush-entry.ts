@@ -90,7 +90,7 @@ const harness = {
       text,
       initialMode: mode,
       initialGitGutter: false,
-      onApplyChanges: (nextText) => documentSession.localDraftChanged(nextText),
+      onApplyTransaction: edit => documentSession.localDraftChanged(edit),
       onOpenLink: () => undefined,
       onSelectionChange: () => undefined
     });

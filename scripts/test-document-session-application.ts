@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { createDocumentSessionCoordinator } from '../src/application/documentSession';
+import { createDocumentSessionCoordinator, type DocumentSessionAction, type DocumentSessionInput } from '../src/application/documentSession';
+import { readDocumentText } from '../src/foundation/documentSnapshot';
+import { documentEdit, documentSnapshotFromString } from '../webview/src/adapters/documentSnapshot';
+import { ChangeSet, Text } from '@codemirror/state';
 
 const createCoordinator = () => createDocumentSessionCoordinator({
   documentId: 'file:///notes.md',
@@ -241,6 +244,66 @@ for (const [before, after] of replacementCases) {
     { type: 'rememberDraft', text: null, receiptVersion: 2 },
     { type: 'saveDocument', revision: { number: 2, text: after } }
   ]);
+}
+
+// Compare the new snapshot/transaction path with the existing string semantics,
+// including edits queued behind ACKs and surrogate-pair boundary replacements.
+{
+  const initial = 'head 😀 middle 😁 tail\nsecond line';
+  const options = { documentId: 'file:///transaction-semantics.md', revision: { number: 1, text: initial },
+    savedRevision: { revisionNumber: 1, text: initial } };
+  const plain = createDocumentSessionCoordinator(options);
+  const snapshots = createDocumentSessionCoordinator({ ...options, createTextSnapshot: documentSnapshotFromString });
+  const revisions = new Map([[1, initial]]);
+  const replies: number[] = [];
+  let hostVersion = 1;
+  let value = Text.of(initial.split('\n'));
+  const project = (actions: readonly DocumentSessionAction[]) => actions.map(action => {
+    if (action.type === 'rememberDraft') return { type: action.type, receiptVersion: action.receiptVersion,
+      text: action.text === null ? null : readDocumentText(action.text) };
+    if (action.type === 'saveDocument') return { type: action.type,
+      revision: { ...action.revision, text: readDocumentText(action.revision.text) } };
+    if (action.type !== 'applyTextChange') return action;
+    const base = revisions.get(action.baseVersion);
+    assert.notEqual(base, undefined);
+    let text = base!;
+    for (const change of [...action.changes].reverse()) {
+      assert.ok(change.from >= 0 && change.to <= base!.length);
+      if (base!.isWellFormed() && value.toString().isWellFormed()) assert.ok(change.insert.isWellFormed());
+      text = text.slice(0, change.from) + change.insert + text.slice(change.to);
+    }
+    return { type: action.type, baseVersion: action.baseVersion, text };
+  });
+  const compare = (plainInput: DocumentSessionInput, snapshotInput = plainInput) => {
+    const left = plain.handle(plainInput);
+    const right = snapshots.handle(snapshotInput);
+    assert.deepEqual(project(right), project(left));
+    for (const action of project(right)) {
+      if (action.type === 'applyTextChange' && 'text' in action) {
+        assert.equal(action.baseVersion, hostVersion);
+        revisions.set(++hostVersion, action.text as string);
+        replies.push(hostVersion);
+      }
+    }
+  };
+  for (let index = 0; index < 120; index += 1) {
+    const from = index === 0 ? 6 : (index * 17) % value.length;
+    const changes = ChangeSet.of({ from, to: Math.min(value.length, from + index % 3),
+      insert: ['中文', '😀', '', '\nline', 'x'][index % 5] }, value.length);
+    const next = changes.apply(value);
+    const edit = documentEdit(changes, value, next);
+    value = next;
+    compare({ type: 'localDraftChanged', text: next.toString() },
+      { type: 'localDraftChanged', text: edit.after, edit });
+    compare({ type: 'submitPendingDraft' });
+    if (index % 7 === 0 && replies.length) compare({ type: 'hostChangeApplied', version: replies.shift()! });
+  }
+  while (replies.length) compare({ type: 'hostChangeApplied', version: replies.shift()! });
+  assert.equal(revisions.get(hostVersion), value.toString());
+  compare({ type: 'saveRequested' });
+  compare({ type: 'hostSaveSucceeded', version: hostVersion, text: value.toString() });
+  compare({ type: 'hostRevisionChanged', version: hostVersion - 1, text: 'stale' });
+  compare({ type: 'hostRevisionChanged', version: hostVersion + 1, text: 'external\n' + value.toString() });
 }
 
 console.log('Document Session application contract checks passed');

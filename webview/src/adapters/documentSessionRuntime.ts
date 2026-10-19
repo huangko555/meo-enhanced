@@ -13,6 +13,7 @@ import {
   type DocumentSessionNotice
 } from './documentSessionActions';
 import { createDocumentSessionCoordinatorFromInit } from './documentSessionTransport';
+import { documentSnapshotFromString } from './documentSnapshot';
 
 type RemoteDocumentSessionAction = Extract<
   DocumentSessionAction,
@@ -65,7 +66,7 @@ export function createDocumentSessionRuntime(
   return {
     initialize(message) {
       if (coordinator !== null) return operation;
-      coordinator = createDocumentSessionCoordinatorFromInit(message);
+      coordinator = createDocumentSessionCoordinatorFromInit(message, documentSnapshotFromString);
       actionAdapter = createDocumentSessionActionAdapter({
         ...dependencies,
         handleInput: (input) => requireSession().coordinator.handle(input)

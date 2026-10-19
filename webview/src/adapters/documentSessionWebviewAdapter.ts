@@ -5,6 +5,7 @@ import type { InitMessage } from '../../../src/protocol/readyInit';
 import { createDocumentSessionRuntime } from './documentSessionRuntime';
 import { createDocumentSessionTransport } from './documentSessionTransport';
 import type { DocumentSessionNotice } from './documentSessionActions';
+import type { DocumentTextEdit } from '../../../src/foundation/documentSnapshot';
 
 export type DocumentSessionViewPosition = {
   readonly topLine: number;
@@ -14,7 +15,7 @@ export type DocumentSessionViewPosition = {
 export type DocumentSessionWebviewAdapter = {
   start(message: InitMessage): void;
   accept(message: HostToWebviewMessage): boolean;
-  localDraftChanged(text: string): void;
+  localDraftChanged(change: string | DocumentTextEdit): void;
   requestSave(): void;
   requestReloadFromDisk(position: DocumentSessionViewPosition): void;
   retryPresentation(): Promise<boolean>;
@@ -134,9 +135,11 @@ export function createDocumentSessionWebviewAdapter(
     accept(message) {
       return acceptSessionMessage(message);
     },
-    localDraftChanged(text) {
+    localDraftChanged(change) {
       enqueueSession('local draft', async () => {
-        const changed = runtime.handle({ type: 'localDraftChanged', text });
+        const changed = runtime.handle(typeof change === 'string'
+          ? { type: 'localDraftChanged', text: change }
+          : { type: 'localDraftChanged', text: change.after, edit: change });
         const submitted = runtime.handle({ type: 'submitPendingDraft' });
         await Promise.all([changed, submitted]);
       });
