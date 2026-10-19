@@ -38,10 +38,18 @@ export type PreviewDocumentResult =
 /** Footnotes have visual order separate from their authored source locations. */
 export function previewBlockAtLine(blocks: readonly PreviewDocumentBlock[], line: number): number | null {
   if (!blocks.length) return null;
-  const footnotes = blocks.at(-1)?.kind === 'footnotes' ? blocks.at(-1)! : null;
-  if (footnotes?.sourceRanges?.some(range => line >= range.start && line <= range.end)) return footnotes.index;
-  let low = 0, high = blocks.length - (footnotes ? 1 : 0);
+  let bodyEnd = blocks.length;
+  while (bodyEnd > 0 && blocks[bodyEnd - 1]!.kind === 'footnotes') bodyEnd -= 1;
+  let previousNote: { index: number; end: number } | null = null;
+  for (let index = bodyEnd; index < blocks.length; index += 1) {
+    for (const range of blocks[index]!.sourceRanges ?? []) {
+      if (line >= range.start && line <= range.end) return index;
+      if (range.end < line && (!previousNote || range.end > previousNote.end)) previousNote = { index, end: range.end };
+    }
+  }
+  let low = 0, high = bodyEnd;
   while (low < high) { const middle = (low + high) >>> 1;
     if (blocks[middle]!.sourceLine <= line) low = middle + 1; else high = middle; }
-  return Math.max(0, low - 1);
+  const index = Math.max(0, low - 1);
+  return previousNote && (bodyEnd === 0 || previousNote.end > blocks[index]!.sourceEndLine) ? previousNote.index : index;
 }

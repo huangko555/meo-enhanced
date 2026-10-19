@@ -6,6 +6,8 @@ export type PrepareMarkdownWithFootnotesOptions = {
   target: 'html' | 'pdf' | 'docx';
   outputFilePath?: string;
   renderMarkdown: (markdownText: string) => string;
+  /** Capture parsing context now, while formatting the definition only on demand. */
+  prepareMarkdown?: (markdownText: string) => () => string;
   normalizeMarkdown: (markdownText: string) => string;
   backToReference: string;
   backToNumberedReference: (number: number) => string;
@@ -18,6 +20,7 @@ export type PrepareMarkdownWithFootnotesOptions = {
 export type PreparedMarkdownWithFootnotes = {
   body: SourceMappedMarkdown;
   footnotesHtml: string;
+  footnotes: readonly Readonly<{ sourceLine: number; sourceEndLine: number; sourceCharacters: number; render(): string }>[];
 };
 
 type ExportFootnoteDefinition = {
@@ -87,13 +90,21 @@ export function prepareMarkdownWithFootnotes(
   const footnotes = extracted.definitions
     .filter((definition) => definition.number !== null)
     .sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
+  const prepared = footnotes.map(footnote => {
+    const source = options.normalizeMarkdown(footnote.contentMarkdown);
+    const render = options.prepareMarkdown?.(source) ?? (() => options.renderMarkdown(source));
+    return { sourceLine: footnote.sourceLine, sourceEndLine: footnote.sourceEndLine,
+      sourceCharacters: footnote.contentMarkdown.length,
+      render: () => renderFootnoteItemHtml(footnote, hrefPrefix, options, render().trim()) };
+  });
 
   return {
     body: {
       markdown: bodyLines.join('\n'),
       sourceLines: extracted.bodySourceLines
     },
-    footnotesHtml: renderFootnotesHtml(footnotes, hrefPrefix, options)
+    footnotes: prepared,
+    get footnotesHtml() { return renderFootnotesHtml(prepared, options); }
   };
 }
 
@@ -244,15 +255,14 @@ function replaceFootnoteReferencesInLine(
 }
 
 function renderFootnotesHtml(
-  footnotes: ExportFootnoteDefinition[],
-  hrefPrefix: string,
+  footnotes: PreparedMarkdownWithFootnotes['footnotes'],
   options: PrepareMarkdownWithFootnotesOptions
 ): string {
   if (!footnotes.length) {
     return '';
   }
 
-  const itemsHtml = footnotes.map((footnote) => renderFootnoteItemHtml(footnote, hrefPrefix, options)).join('');
+  const itemsHtml = footnotes.map(footnote => footnote.render()).join('');
   const sourceLine = Math.min(...footnotes.map((footnote) => footnote.sourceLine));
   const sourceEndLine = Math.max(...footnotes.map((footnote) => footnote.sourceEndLine));
   return [
@@ -268,12 +278,12 @@ function renderFootnotesHtml(
 function renderFootnoteItemHtml(
   footnote: ExportFootnoteDefinition,
   hrefPrefix: string,
-  options: PrepareMarkdownWithFootnotesOptions
+  options: PrepareMarkdownWithFootnotesOptions,
+  contentHtml: string
 ): string {
   const number = footnote.number ?? 0;
   const firstReferenceId = footnote.referenceIds[0] ?? '';
   const referenceHref = buildInternalAnchorHref(hrefPrefix, firstReferenceId);
-  const contentHtml = options.renderMarkdown(options.normalizeMarkdown(footnote.contentMarkdown)).trim();
   const indexHtml = firstReferenceId
     ? `<a href="${escapeHtmlAttr(referenceHref)}" class="footnote-index" aria-label="${escapeHtmlAttr(options.backToNumberedReference(number))}">${number}.</a>`
     : `<span class="footnote-index">${number}.</span>`;

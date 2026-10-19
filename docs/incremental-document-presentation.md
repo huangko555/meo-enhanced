@@ -156,6 +156,22 @@ and reading-position restoration. Installed Node verifies the packaged worker,
 CPU isolation, requested blocks, offscreen search, owner isolation and release.
 Very large individual roots and end-to-end native latency remain open work.
 
+Endnotes also have individual reading blocks. Their Markdown is parsed in the
+original global preparation order, preserving reference and heading identities;
+code/HTML formatting is delayed until that definition is requested. The complete
+HTML/export route still emits the original single endnote section. A differential
+check on the comprehensive fixture found identical complete HTML/styles/metadata
+for both built-in presets (4,898,427 / 4,262,898 HTML characters). Its 150 endnotes
+no longer mount as one giant footer. Source lookup accounts for all endnote
+definitions, whose visual order can differ from authored order.
+
+Keyboard navigation has current-intent guards, ref-counted target leases and
+retirement of obsolete failures. A late Ctrl+End cannot override a later Ctrl+Home;
+cancelling a fragment lookup during replacement cannot fail the new surface.
+Tests cover these with deliberately delayed/rejected requests, along with
+cross-screen endnote source/fragment navigation. A 1,000-definition producer test
+requires one requested definition to return one small block.
+
 Accessibility detection must use VS Code's documented `vscode-using-screen-reader`
 body class, including a change during a session. Until continuous virtual reading
 is independently supported, that route retains complete accessible DOM while

@@ -72,7 +72,7 @@ function slicePreviewHtml(html: string, from: number, to: number): { html: strin
 
 /** A disposable parsed document, with bounded HTML/text caches and no browser DOM. */
 export function createPreviewDocument(id: string, options: PreviewDocumentOptions) {
-  const prepared = preparePreviewDocument(options);
+  const prepared = preparePreviewDocument(options, true);
   const cache = new Map<number, { chunk: PreviewDocumentChunk; parts: TextPart[]; bytes: number }>();
   let cacheBytes = 0, disposed = false, searchGeneration = 0;
   const read = (index: number) => {

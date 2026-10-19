@@ -73,6 +73,8 @@ export type RenderMarkdownOptions = {
   deferLocalLinks?: boolean;
   /** Large Preview generates display formulas in its existing viewport observer. */
   deferDisplayMath?: boolean;
+  /** Prepared Preview contexts expose individual endnotes as reading blocks. */
+  windowedFootnotes?: boolean;
   /** Permit local file destinations alongside the preset's safe URL schemes. */
   allowLocalLinks?: boolean;
   showComments?: boolean;
@@ -274,6 +276,12 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
     target: options.target,
     outputFilePath: options.outputFilePath,
     renderMarkdown: (markdownText) => md.render(markdownText, github ? { meoGithubFootnote: true } : undefined),
+    prepareMarkdown: markdownText => {
+      const context = github ? { meoGithubFootnote: true } : {};
+      const nodes = md.parse(markdownText, context);
+      if (!github) hasMermaid ||= nodes.some(node => node.type === 'fence' && normalizeFenceLanguage(node.info) === 'mermaid');
+      return () => md.renderer.render(nodes, md.options, context);
+    },
     normalizeMarkdown: github ? text => text : normalizeMarkdownForExport,
     backToReference: uiStrings.backToReference,
     backToNumberedReference: uiStrings.backToNumberedReference,
@@ -473,15 +481,17 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
   const blocks: MarkdownPresentationBlock[] = [...prefixBlocks, ...tokenBlocks.map(({ from: _from, to: _to, ...block }) => ({
     ...block, index: block.index + prefixBlocks.length
   }))];
-  if (preparedMarkdown.footnotesHtml) {
-    const sourceRanges: { start: number; end: number }[] = [];
-    new Parser({ onopentag(name, attributes) {
-      if (name !== 'li' || !(attributes.class ?? '').split(/\s+/).includes('footnote-item')) return;
-      const start = Number(attributes['data-source-line']), end = Number(attributes['data-source-end-line']);
-      if (start > 0 && end >= start) sourceRanges.push({ start, end });
-    } }).end(preparedMarkdown.footnotesHtml);
+  const footnotes = preparedMarkdown.footnotes;
+  const splitFootnotes = options.windowedFootnotes === true && footnotes.length > 1;
+  if (splitFootnotes) for (const footnote of footnotes) {
+    blocks.push({ index: blocks.length, sourceLine: footnote.sourceLine, sourceEndLine: footnote.sourceEndLine,
+      kind: 'footnotes', sourceCharacters: footnote.sourceCharacters,
+      sourceRanges: [{ start: footnote.sourceLine, end: footnote.sourceEndLine }] });
+  }
+  else if (footnotes.length) {
+    const sourceRanges = footnotes.map(note => ({ start: note.sourceLine, end: note.sourceEndLine }));
     blocks.push({ index: blocks.length, sourceLine: originalSourceLines.length, sourceEndLine: originalSourceLines.length,
-      kind: 'footnotes', sourceCharacters: preparedMarkdown.footnotesHtml.length, sourceRanges });
+      kind: 'footnotes', sourceCharacters: footnotes.reduce((sum, note) => sum + note.sourceCharacters, 0), sourceRanges });
   }
   return {
     blocks,
@@ -491,6 +501,12 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
       if (!Number.isInteger(index) || index < 0 || index >= blocks.length) throw new RangeError('Unknown Markdown presentation block');
       if (prefixBlocks.length && index === 0) return sanitize(prefix);
       const block = tokenBlocks[index - prefixBlocks.length];
+      const footerIndex = index - prefixBlocks.length - tokenBlocks.length;
+      if (!block && splitFootnotes) {
+        const note = footnotes[footerIndex]!;
+        return sanitize(`<section class="footnotes${footerIndex ? ' meo-preview-footnotes-continuation' : ''}" data-source-line="${note.sourceLine}" data-source-end-line="${note.sourceEndLine}">`
+          + `<ol class="footnotes-list" start="${footerIndex + 1}">${note.render()}</ol></section>`);
+      }
       return sanitize(block
         ? md.renderer.render(bodyTokens.slice(block.from, block.to), md.options, environment)
         : preparedMarkdown.footnotesHtml);

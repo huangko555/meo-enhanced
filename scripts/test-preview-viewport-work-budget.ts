@@ -38,7 +38,8 @@ try {
   await page.addStyleTag({ content: '.preview-host:not([hidden]){height:100%;display:flex;flex-direction:column}.preview-frame{width:100%;height:100%;flex:1}' });
   await page.addScriptTag({ content: await build.outputs[0].text() });
   const windowText = '# Reading window\n\n' + Array.from({ length: 5000 }, (_, index) =>
-    `Paragraph ${index} with **needle-${index}** and editable source context.\n\n`).join('') + '## Complete tail';
+    `Paragraph ${index} with **needle-${index}** and editable source context.\n\n`).join('')
+    + '## Complete tail\n\nNotes[^first] and[^second].\n\n[^second]: Second note.\n\n[^first]: First note.\n';
   const windowDocument = createPreviewDocument('window-fixture', {
     markdownText: windowText, sourceDocumentPath: '/fixture/window.md', uiLanguage: 'en'
   });
@@ -55,7 +56,15 @@ try {
     scope.__windowChanges = 0;
     scope.__windowErrors = [];
     scope.__windowViewport = scope.__createPreviewViewport(doc.querySelector('main'), opened.document, {
-      request: (id: string, operation: unknown) => scope.__windowOperation(id, operation),
+      request: async (id: string, operation: any) => {
+        const gate = scope.__windowDelay;
+        if (gate && (gate.kind === 'locate' && operation.kind === 'locate'
+          || gate.kind === 'blocks' && operation.kind === 'blocks' && operation.indices.includes(gate.block))) {
+          gate.started = true;
+          await new Promise((resolve, reject) => { gate.resolve = resolve; gate.reject = reject; });
+        }
+        return scope.__windowOperation(id, operation);
+      },
       mutate: (run: () => void) => run(),
       changed: () => { scope.__windowChanges += 1; },
       error: (error: unknown) => scope.__windowErrors.push(String(error)),
@@ -63,6 +72,24 @@ try {
       writeClipboard: async (value: Promise<unknown>) => { scope.__windowCopied = await value; }
     });
   }, openedWindow);
+  stage = 'window keyboard navigation supersession';
+  await page.evaluate(() => {
+    const scope = window as any, doc = scope.__windowFrame.contentDocument;
+    scope.__windowDelay = { kind: 'blocks', block: scope.__windowViewport.manifest.blocks.length - 1 };
+    doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', ctrlKey: true, bubbles: true, cancelable: true }));
+    doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', ctrlKey: true, bubbles: true, cancelable: true }));
+    doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', ctrlKey: true, bubbles: true, cancelable: true }));
+  });
+  await page.waitForFunction(() => (window as any).__windowDelay.started);
+  const supersededNavigation = await page.evaluate(async () => {
+    const scope = window as any;
+    scope.__windowDelay.reject(new Error('Obsolete block request')); scope.__windowDelay = null;
+    for (let index = 0; index < 4; index += 1) await new Promise(resolve => requestAnimationFrame(resolve));
+    const rect = scope.__windowFrame.contentDocument.querySelector('h1').getBoundingClientRect();
+    return rect.top >= 0 && rect.top < innerHeight;
+  });
+  assert.ok(supersededNavigation, 'a late Ctrl+End result must not override a newer Ctrl+Home intent');
+  assert.deepEqual(await page.evaluate(() => (window as any).__windowErrors), [], 'superseded block failures must not fail the current reading window');
   for (const block of [750, 2500, 4999, 2]) {
     const result = await page.evaluate(async block => {
       const scope = window as any;
@@ -80,6 +107,17 @@ try {
     return element?.textContent;
   });
   assert.equal(tailWindow, 'Complete tail');
+  const secondDefinitionLine = windowText.slice(0, windowText.indexOf('[^second]:')).split('\n').length;
+  const noteNavigation = await page.evaluate(async line => {
+    const scope = window as any;
+    const definition = await scope.__windowViewport.ensure({ line, align: 'center' });
+    const first = await scope.__windowViewport.ensure({ anchor: 'fn-1', align: 'center' });
+    const reference = await scope.__windowViewport.ensure({ anchor: 'fnref-2', align: 'center' });
+    return { definition: definition?.textContent.includes('Second note'), first: first?.textContent.includes('First note'),
+      reference: reference?.id };
+  }, secondDefinitionLine);
+  assert.deepEqual(noteNavigation, { definition: true, first: true, reference: 'fnref-2' },
+    'source and fragment navigation must preserve footnote visual order independently of definition order');
   stage = 'window whole-document selection/copy';
   await page.evaluate(() => {
     const scope = window as any, doc = scope.__windowFrame.contentDocument;
@@ -115,6 +153,15 @@ try {
   assert.ok(partial.text.startsWith('ragraph 0 with needle-0'), 'partial selection must retain the first DOM endpoint');
   assert.ok(partial.text.endsWith('hydrated-final'), 'hydrated endpoint offsets must not be applied to parser source text');
   assert.ok(partial.html.includes('<strong>needle-1250</strong>'), 'unmounted interior formatting must be copied');
+  const cancelledLocation = await page.evaluate(async () => {
+    const scope = window as any;
+    const gate = scope.__windowDelay = { kind: 'locate' };
+    const pending = scope.__windowViewport.ensure({ anchor: 'complete-tail' });
+    scope.__windowViewport.dispose();
+    gate.reject(new Error('Preview request cancelled')); scope.__windowDelay = null;
+    return await pending;
+  });
+  assert.equal(cancelledLocation, null, 'disposing a pending fragment request must not fail the replacement Preview');
   await page.evaluate(() => {
     const scope = window as any;
     scope.__windowViewport.dispose(); scope.__windowFrame.remove();
@@ -189,7 +236,7 @@ try {
   assert.equal(productionWindow.anchor.line, 5003);
   stage = 'production accessibility complete-document route';
   await page.evaluate(() => document.body.classList.add('vscode-using-screen-reader'));
-  await page.waitForFunction(() => (window as any).__previewController.host.querySelector('iframe').contentDocument.querySelectorAll('p').length === 5000);
+  await page.waitForFunction(() => (window as any).__previewController.host.querySelector('iframe').contentDocument.querySelectorAll('p').length === 5003);
   assert.equal(await page.evaluate(() => (window as any).__previewMessages.filter((message: any) => message.type === 'requestPreviewRender').at(-1).window), undefined);
   await page.evaluate(() => document.body.classList.remove('vscode-using-screen-reader'));
   await page.waitForFunction(() => (window as any).__previewController.host.querySelector('iframe').contentDocument.querySelectorAll('p').length < 100);

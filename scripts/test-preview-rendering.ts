@@ -5,7 +5,49 @@ import { createPreviewDocument } from '../src/export/previewDocument';
 import { createPreviewBlockLayout } from '../webview/src/application/previewBlockLayout';
 import { buildExportStyles, buildPreviewStyles } from '../src/export/exportStyles';
 import exportRuntime from '../src/export/runtime';
+import { DomUtils, parseDocument } from 'htmlparser2';
 import { getBuiltInVisuals } from '../src/shared/builtInVisualBaseline';
+
+for (const preset of ['default', 'github-readme'] as const) {
+  let formats = 0;
+  const markdownText = '# Same\n\nReference[^b] and repeated[^b], then[^a].\n\n'
+    + '[^a]: ## Same\n\n    ```js\n    const a = 1;\n    ```\n\n    ![image](image.gif)\n\n'
+    + '[^b]: ## Same\n\n    ```js\n    const b = 2;\n    ```\n';
+  const prepared = prepareMarkdownPresentation({ markdownText, markdownFilePath: 'C:/tmp/windowed-notes.md', target: 'html',
+    preset, windowedFootnotes: true, deferImages: true, highlightCode: source => { formats += 1; return source; } });
+  assert.equal(formats, 0, 'preparing footnote context must not format its offscreen code');
+  const footers = prepared.blocks.filter(block => block.kind === 'footnotes');
+  assert.equal(footers.length, 2);
+  const last = prepared.renderBlock(footers[1]!.index).html;
+  assert.equal(formats, 1, 'requesting one endnote must not format the other definition');
+  assert.equal(prepared.renderBlock(footers[1]!.index).html, last, 'endnotes must render idempotently out of order');
+  const complete = parseDocument(prepared.renderAll().html);
+  const items = DomUtils.findAll(element => element.name === 'li' && (element.attribs.class ?? '').includes('footnote-item'), complete.children);
+  for (const footer of footers) {
+    const fragment = parseDocument(prepared.renderBlock(footer.index).html);
+    const item = DomUtils.findOne(element => element.name === 'li' && (element.attribs.class ?? '').includes('footnote-item'), fragment.children)!;
+    assert.equal(DomUtils.getOuterHTML(item), DomUtils.getOuterHTML(items.find(entry => entry.attribs.id === item.attribs.id)!),
+      `${preset} windowed endnotes must preserve complete-render headings, images, numbering and backlinks`);
+  }
+}
+
+{
+  const markdownText = Array.from({ length: 1000 }, (_, index) => `Reference[^n${999 - index}].\n\n`).join('')
+    + Array.from({ length: 1000 }, (_, index) => `[^n${index}]: Definition-${index} with **formatting**.\n\n`).join('');
+  const prepared = createPreviewDocument('many-notes', { markdownText, sourceDocumentPath: '/fixture/many-notes.md', uiLanguage: 'en' });
+  const opened = prepared.open(1);
+  assert.equal(opened.document.blocks.filter(block => block.kind === 'footnotes').length, 1000,
+    'a thousand endnotes must not become a single giant DOM root');
+  const line = markdownText.slice(0, markdownText.indexOf('[^n700]:')).split('\n').length;
+  const located = await prepared.run({ kind: 'locate', sourceLine: line });
+  assert.equal(located.kind, 'locate');
+  if (located.kind !== 'locate' || located.block === null) throw new Error('Endnote source location missing');
+  const chunks = await prepared.run({ kind: 'blocks', indices: [located.block] });
+  if (chunks.kind !== 'blocks') throw new Error('Endnote block missing');
+  assert.ok(chunks.chunks[0]!.html.includes('Definition-700'));
+  assert.ok(chunks.chunks[0]!.html.length < 2000, 'one requested endnote must not return all definitions');
+  prepared.dispose();
+}
 
 {
   const blocks = Array.from({ length: 1000 }, (_, index) => ({ index, sourceLine: index + 1,

@@ -9,11 +9,12 @@ const ignoredText = 'script,style,noscript,svg,.meo-preview-code-actions,.meo-pr
 
 function gapRanges(blocks: readonly PreviewDocumentBlock[], from: number, to: number) {
   if (to <= from) return [];
-  const footer = blocks.at(-1)?.kind === 'footnotes' ? blocks.length - 1 : -1;
+  let footer = blocks.length;
+  while (footer > 0 && blocks[footer - 1]!.kind === 'footnotes') footer -= 1;
   const bounds = footer >= from && footer < to ? [[from, footer], [footer, to]] : [[from, to]];
   return bounds.filter(([start, end]) => end! > start!).map(([first, last]) => {
     const block = blocks[first!]!, final = blocks[last! - 1]!;
-    const ranges = first === footer ? block.sourceRanges : undefined;
+    const ranges = first! >= footer ? blocks.slice(first, last).flatMap(block => block.sourceRanges ?? []) : undefined;
     return { from: first!, to: last!, start: ranges?.length ? Math.min(...ranges.map(range => range.start)) : block.sourceLine,
       end: ranges?.length ? Math.max(...ranges.map(range => range.end)) : final.sourceEndLine };
   });
@@ -59,12 +60,18 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
   const gaps = new Set<HTMLElement>();
   const cache = new Map<number, PreviewDocumentChunk>();
   const loading = new Map<number, Promise<void>>();
-  const forced = new Set<number>();
+  const forced = new Map<number, number>();
+  const pin = (index: number) => forced.set(index, (forced.get(index) ?? 0) + 1);
+  const unpin = (index: number) => {
+    const count = (forced.get(index) ?? 0) - 1;
+    if (count > 0) forced.set(index, count); else forced.delete(index);
+  };
   const owners = new WeakMap<Node, number>();
   let cacheBytes = 0, disposed = false, active = true, frame: number | null = null;
   let logicalAll = false, geometrySignature = '';
   let geometryDirty = true;
   let documentGeneration = 0;
+  let navigationGeneration = 0;
   let layout = createLayout();
 
   function createLayout() {
@@ -132,7 +139,7 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
   };
   const desired = (): number[] => {
     const band = layout.window(Math.max(0, scroll.scrollTop - origin()), window.innerHeight);
-    const indices = new Set(forced);
+    const indices = new Set(forced.keys());
     for (let index = band.from; index < band.to; index += 1) indices.add(index);
     const selected = selection();
     if (selected && !logicalAll) { indices.add(selected.from.block); indices.add(selected.to.block); }
@@ -249,10 +256,15 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
       frame = null;
       if (disposed || !active) return;
       commit();
-      void ensureChunks(desired()).then(() => {
+      const requested = desired();
+      void ensureChunks(requested).then(() => {
         if (disposed || !active) return;
         commit();
-      }, error => { if (!disposed && active) dependencies.error(error); });
+      }, error => {
+        if (disposed || !active) return;
+        const current = new Set(desired());
+        if (requested.some(index => current.has(index) && !cache.has(index) && !mounted.has(index))) dependencies.error(error);
+      });
     });
   };
   const atLine = (line: number) => {
@@ -264,12 +276,17 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
     const revision = documentGeneration;
     let index = target.block ?? atLine(target.line ?? 1);
     if (target.anchor !== undefined) {
-      const result = await dependencies.request(manifest.id, { kind: 'locate', anchor: target.anchor });
+      let result: PreviewDocumentResult;
+      try { result = await dependencies.request(manifest.id, { kind: 'locate', anchor: target.anchor }); }
+      catch (error) {
+        if (disposed || revision !== documentGeneration || target.isCurrent?.() === false) return null;
+        throw error;
+      }
       if (disposed || revision !== documentGeneration || result.kind !== 'locate' || result.block === null) return null;
       index = result.block;
     }
     if (index < 0 || index >= manifest.blocks.length || disposed) return null;
-    forced.add(index);
+    pin(index);
     try {
       await ensureChunks([index]);
       if (disposed || revision !== documentGeneration || target.isCurrent?.() === false) return null;
@@ -285,13 +302,19 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
           .find(element => Number(element.dataset.sourceLine) === target.line) ?? roots[0] ?? null : roots[0] ?? null;
       if (element && target.scroll !== false) dependencies.reveal(element, target.align ?? 'start');
       return element;
-    } finally { forced.delete(index); refresh(); }
+    } catch (error) {
+      if (disposed || revision !== documentGeneration || target.isCurrent?.() === false) return null;
+      throw error;
+    } finally { unpin(index); refresh(); }
   };
 
   document.addEventListener('selectionchange', refresh, { signal: events.signal });
   document.addEventListener('scroll', refresh, { passive: true, signal: events.signal });
-  document.addEventListener('pointerdown', () => { logicalAll = false; }, { capture: true, signal: events.signal });
+  document.addEventListener('pointerdown', () => { logicalAll = false; navigationGeneration += 1; }, { capture: true, signal: events.signal });
+  for (const type of ['wheel', 'touchstart']) document.addEventListener(type, () => { navigationGeneration += 1; },
+    { capture: true, passive: true, signal: events.signal });
   document.addEventListener('keydown', event => {
+    if (['Home', 'End', 'PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(event.key)) navigationGeneration += 1;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a'
       && !(event.target as Element | null)?.closest?.('input,textarea,[contenteditable="true"]')) {
       event.preventDefault(); logicalAll = true;
@@ -303,8 +326,9 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
     } else if ((event.ctrlKey || event.metaKey) && ['Home', 'End'].includes(event.key)) {
       event.preventDefault(); logicalAll = false;
       const index = event.key === 'Home' ? 0 : manifest.blocks.length - 1;
-      void ensure({ block: index, align: event.key === 'Home' ? 'start' : 'end' }).then(element => {
-        if (!element || !event.shiftKey) return;
+      const intent = navigationGeneration;
+      void ensure({ block: index, align: event.key === 'Home' ? 'start' : 'end', isCurrent: () => intent === navigationGeneration }).then(element => {
+        if (!element || !event.shiftKey || intent !== navigationGeneration) return;
         const texts = textNodes(element);
         const target = event.key === 'Home' ? texts[0] : texts.at(-1);
         if (target) window.getSelection()?.extend(target, event.key === 'Home' ? 0 : target.length);
@@ -317,8 +341,9 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
       const index = layout.at(layout.top(focus.block) + window.innerHeight * direction);
       if (index === focus.block) return;
       event.preventDefault(); logicalAll = false;
-      void ensure({ block: index, align: 'nearest' }).then(element => {
-        if (!element) return;
+      const intent = navigationGeneration;
+      void ensure({ block: index, align: 'nearest', isCurrent: () => intent === navigationGeneration }).then(element => {
+        if (!element || intent !== navigationGeneration) return;
         const texts = textNodes(element);
         const target = direction > 0 ? texts.at(-1) : texts[0];
         if (target) window.getSelection()?.extend(target, direction > 0 ? target.length : 0);
@@ -390,7 +415,7 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
   root.dataset.meoPreviewDocument = manifest.id;
   for (const chunk of manifest.chunks) remember(chunk);
   const initial = atLine(manifest.anchorLine);
-  if (manifest.blocks.length) forced.add(initial);
+  if (manifest.blocks.length) pin(initial);
   commit();
   if (manifest.anchorLine > 1) scroll.scrollTop = origin() + layout.top(initial);
   forced.clear();
@@ -401,7 +426,13 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
     async whenReady() {
       while (!disposed && active) {
         const indices = desired();
-        await ensureChunks(indices); commit();
+        try { await ensureChunks(indices); }
+        catch (error) {
+          if (disposed || !active) return;
+          const current = new Set(desired());
+          if (indices.some(index => current.has(index) && !cache.has(index) && !mounted.has(index))) throw error;
+        }
+        commit();
         if (indices.every(index => mounted.has(index))) return;
       }
     },

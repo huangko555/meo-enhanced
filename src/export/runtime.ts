@@ -116,7 +116,7 @@ export function renderPreviewDocument(options: PreviewDocumentOptions): PreviewR
   return preparePreviewDocument(options).renderAll();
 }
 
-export function preparePreviewDocument(options: PreviewDocumentOptions) {
+export function preparePreviewDocument(options: PreviewDocumentOptions, windowed = false) {
   const preset = options.preset ?? 'default';
   const definition = options.presetDefinition ?? getPreviewPreset(preset);
   if (definition.id !== preset) throw new Error('Preview preset does not match its request');
@@ -133,6 +133,7 @@ export function preparePreviewDocument(options: PreviewDocumentOptions) {
     showComments: environment.previewShowComments === true,
     deferImages: true,
     deferDisplayMath: assessLargeDocument(options.markdownText).preferSource,
+    windowedFootnotes: windowed,
     deferLocalLinks: true,
     allowLocalLinks: true,
     preset,
@@ -142,8 +143,10 @@ export function preparePreviewDocument(options: PreviewDocumentOptions) {
     preset,
     ...(definition.custom ? { presetRevision: definition.custom.revision } : {}),
     styles: {
-      dark: buildPresetPreviewStyles(preset, environment, 'dark', options.contentWidth, definition),
+      dark: buildPresetPreviewStyles(preset, environment, 'dark', options.contentWidth, definition)
+        + (windowed ? '\n.footnotes.meo-preview-footnotes-continuation{margin-top:.45em!important;padding-top:0!important;border-top:0!important}' : ''),
       light: buildPresetPreviewStyles(preset, environment, 'light', options.contentWidth, definition)
+        + (windowed ? '\n.footnotes.meo-preview-footnotes-continuation{margin-top:.45em!important;padding-top:0!important;border-top:0!important}' : '')
     }
   };
   return {
