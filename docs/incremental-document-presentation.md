@@ -259,9 +259,36 @@ result arrives. Lifecycle regression tests drive multi-megabyte source revisions
 through the public facade, require old results to retire, and retain the current
 result without reinitializing its engine.
 
-The V37 archive at `ea790c7a` passed final archive/asset/privacy checks. Its fresh
-native run has not started: after restoring the saved VM, Guest Additions reports
-ready but Guest Control terminates every authenticated command/transfer session.
-The VM was saved again without starting test apps. Later changes have browser,
-type and targeted regression evidence only; native performance is still an open
-acceptance requirement. The last completed native measurement remains V36 above.
+The V37 archive at `ea790c7a` passed archive/asset/privacy checks, but was not run
+because Guest Control failed after resume. Restarting the guest VBoxService
+restored that channel without changing credentials, network or clipboard policy.
+Native V38 at `d4150677` then completed with the same OS 10.0.26200, Code 1.140.0,
+four CPUs, 6 GiB RAM and 1 GiB balloon as V36. Functional checks and the existing
+500 ms severe-input gate passed. This is not the smooth-experience target:
+comprehensive Live click samples still peaked at 321 ms, Source/Live input P95
+at 221/352 ms, and first Live/Preview at 5.04/5.52 seconds. Preview thumb-drag
+frame gaps reached 129 ms. These small native samples are not population P95.
+
+The first V38 attempt exposed a test witness bug: concatenating DOM textContent
+joined the code language label `js` and `console.log` into an unauthored word.
+The corrected witness joins bounded visible text nodes with separators, excludes
+controls/hidden text, and retains all timing, exact-source and native-input checks.
+Both attempts and the driver hash are retained under the ignored V38 evidence
+directory. The complete corrected acceptance is `native-final.json`.
+
+A separate V38 CPU profile (instrumented, not an acceptance timing comparison)
+found 60 ms in CodeMirror's syntax highlighter during a late Live click and
+23 ms reading source lines for Git gutter markers. That diagnostic failed its
+clicked-target witness when late image geometry changed; it supplies CPU evidence
+only and does not replace the complete native acceptance. The highlighter's
+range arguments do not avoid traversing preceding transparent balancing groups.
+Budgeted Live and large Source now pass a pruned, temporary syntax tree to the
+public Lezer highlighter. Absolute offsets, semantic ancestors, root properties,
+mounted language parsers and overlay coordinates are preserved. The authoritative
+parser tree is never modified. Only actual visible ranges get decorations; small
+documents retain CodeMirror's stock extension. Differential checks cover 128
+mixed-language ranges and distant rows in a 9,000-line code fence. The latter
+requires at most 1,000 sibling advances rather than visiting all preceding code.
+Git gutter rendering now resolves a source line only when a marker needs it.
+Production caret regression with a ready baseline reads 109 rows across two
+selections in a 24,001-line document, instead of enumerating every row per click.

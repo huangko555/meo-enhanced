@@ -23,8 +23,9 @@ import type { SyntaxNode } from '@lezer/common';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
 import { markdownKeymap } from '@codemirror/lang-markdown';
 import { editorMarkdownLanguage } from './liveMode';
-import { indentUnit, syntaxTree, forceParsing, syntaxHighlighting } from '@codemirror/language';
+import { indentUnit, syntaxTree, forceParsing } from '@codemirror/language';
 import { sourceHighlightStyle } from './theme';
+import { viewportSyntaxHighlighting } from './editor/viewportSyntaxHighlighting';
 import { prepareSourceSyntax, sourceSyntax, sourceSyntaxPreparation } from './helpers/sourceSyntax';
 import { prepareLiveSyntax } from './editor/liveSyntaxPreparation';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
@@ -5041,7 +5042,7 @@ function sourceMode(boundedEditorWork: boolean, lightweightSourceSyntax: boolean
     editorMarkdownLanguage,
     // Preserve parser context and viewport coloring without preparing TextMate
     // tokens for every line before a large Source surface can become editable.
-    lightweightSourceSyntax ? syntaxHighlighting(sourceHighlightStyle) : sourceSyntax,
+    lightweightSourceSyntax ? viewportSyntaxHighlighting(sourceHighlightStyle) : sourceSyntax,
     sourceCodeBlockLines,
     gitDiffLineHighlightsField,
     ...gitDiffDetailsExtensions(),

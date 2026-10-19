@@ -564,8 +564,6 @@ function buildLiveGitGutterMarkersFromLineFlags(state: EditorState, lineFlags: (
   const trailingEofProxyFlags = getTrailingEofProxyFlags(state.doc, lineFlags);
 
   for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
-    const line = state.doc.line(lineNo);
-
     while (activeCollapsedBlock && lineNo > activeCollapsedBlock.endLine) {
       collapsedBlockIndex += 1;
       activeCollapsedBlock = collapsedBlocks[collapsedBlockIndex] ?? null;
@@ -574,6 +572,7 @@ function buildLiveGitGutterMarkersFromLineFlags(state: EditorState, lineFlags: (
 
     if (activeCollapsedBlock && lineNo >= activeCollapsedBlock.startLine && activeCollapsedFlags) {
       if (!activeCollapsedFlags.deleted) {
+        const line = state.doc.line(lineNo);
         builder.add(line.from, line.from, gitMarker(activeCollapsedFlags));
       }
       continue;
@@ -581,6 +580,7 @@ function buildLiveGitGutterMarkersFromLineFlags(state: EditorState, lineFlags: (
 
     if (isTrailingEofVisualLine(state.doc, lineNo)) {
       if (trailingEofProxyFlags) {
+        const line = state.doc.line(lineNo);
         builder.add(line.from, line.from, gitMarker(trailingEofProxyFlags));
       }
       continue;
@@ -590,6 +590,7 @@ function buildLiveGitGutterMarkersFromLineFlags(state: EditorState, lineFlags: (
     if (!flags || flags.trailingEofProxyOnly || (!flags.added && !flags.modified && !flags.deleted)) {
       continue;
     }
+    const line = state.doc.line(lineNo);
     builder.add(line.from, line.from, gitMarker(flags));
   }
 

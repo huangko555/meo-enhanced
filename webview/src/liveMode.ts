@@ -1,4 +1,5 @@
 import { editorScrollIntoView, isEditorScrollEffect } from './editor/scrollEffects';
+import { viewportSyntaxHighlighting } from './editor/viewportSyntaxHighlighting';
 import { documentLines } from './helpers/documentLines';
 import { isAutomaticSymbolPairHistoryEffect } from './editor/typingAssistance';
 import { liveWidgetPresentationLayers, mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions, replaceLivePresentationRanges } from './editor/liveWidgetPositions';
@@ -4518,7 +4519,7 @@ export function liveModeExtensions(options: { readonly largeDocument?: boolean }
     ...liveInputDerivedWorkExtensions(options),
     ...(options.largeDocument ? liveViewportPresentationExtensions() : []),
     editorMarkdownLanguage,
-    syntaxHighlighting(liveHighlightStyle),
+    options.largeDocument ? viewportSyntaxHighlighting(liveHighlightStyle) : syntaxHighlighting(liveHighlightStyle),
     markdownTagField,
     livePointerSelectionActiveField,
     liveDocumentIdleField,

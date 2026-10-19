@@ -1,5 +1,15 @@
 {
   "separate": {
+    "scripts/test-live-gutter-read-budget.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-live-gutter-read-budget.ts",
+      "reason": "Production Live caret movement with a ready Git baseline must not enumerate every source line in an unchanged large document."
+    },
+    "scripts/test-viewport-syntax-highlighting.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-viewport-syntax-highlighting.ts",
+      "reason": "Exact mixed-language and ancestor-style parity for visible-range syntax trees, with a bounded-work assertion for a distant viewport."
+    },
     "scripts/test-table-source-geometry.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-table-source-geometry.ts",
