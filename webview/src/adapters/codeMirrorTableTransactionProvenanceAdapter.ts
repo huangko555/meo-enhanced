@@ -59,6 +59,11 @@ const provenanceEffect = StateEffect.define<AdapterEffectValue>({
   }
 });
 
+/** Baseline bookkeeping accompanies Git refreshes without changing cell source. */
+export function isTableBaselineRefreshEffect(effect: StateEffect<unknown>): boolean {
+  return effect.is(provenanceEffect) && effect.value.type === 'baselineRefreshed';
+}
+
 function normalizedChanges(transaction: Transaction) {
   const changes: Array<{ from: number; to: number; insertedLength: number }> = [];
   transaction.changes.iterChanges((fromA, toA, fromB, toB) => {

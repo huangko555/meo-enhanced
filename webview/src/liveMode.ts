@@ -92,7 +92,8 @@ import {
 import { collectDocumentMathRanges, getDisplayMathSource, type DocumentMathRange } from './helpers/displayMathBlocks';
 import { isMathFenceLanguage } from '../../src/shared/mathFence';
 import { diagnosticDataField, type EditorDiagnostic } from './helpers/diagnostics';
-import { gitDiffLineFlagsField, isGitDiffResultRefresh } from './helpers/gitDiffGutter';
+import { gitDiffLineFlagsField, isGitDiffPresentationEffect } from './helpers/gitDiffGutter';
+import { isTableBaselineRefreshEffect } from './adapters/codeMirrorTableTransactionProvenanceAdapter';
 import { markdownTagField } from './helpers/tags';
 import {
   getMermaidBlockMode,
@@ -3603,6 +3604,11 @@ const liveDecorationMetadata = new WeakMap<EditorState, LiveDecorationMetadata>(
 const completeLiveDecorationSets = new WeakSet<DecorationSet>();
 const localLiveSelectionUpdates = new WeakSet<EditorState>();
 
+function isGitOnlyPresentationUpdate(transaction: Transaction): boolean {
+  return transaction.effects.some(isGitDiffPresentationEffect)
+    && transaction.effects.every(effect => isGitDiffPresentationEffect(effect) || isTableBaselineRefreshEffect(effect));
+}
+
 /** A caret changes presentation in its old/new source blocks, never the rest of
  * an unchanged document. Keep the complete Markdown context (reference labels,
  * numbering and containers) while running the canonical renderer on those blocks. */
@@ -4055,7 +4061,8 @@ const liveDecorationField = StateField.define<DecorationSet>({
     // Preserve the full presentation, including an active search range and its
     // focused widgets, when the complete outer Markdown is identical.
     if (!transaction.docChanged && !transaction.selection && !transaction.reconfigured
-      && transaction.effects.every(effect => isLiveInputDerivedWorkBookkeeping(effect) || isEditorScrollEffect(effect))
+      && (transaction.effects.every(effect => isLiveInputDerivedWorkBookkeeping(effect) || isEditorScrollEffect(effect))
+        || isGitOnlyPresentationUpdate(transaction))
       && liveDecorationMetadata.get(transaction.startState)?.complete
       && (!syntaxTreeChanged(transaction) || syntaxTreeAvailable(transaction.startState, transaction.startState.doc.length)
         && syntaxTreeAvailable(transaction.state, transaction.state.doc.length)
@@ -4172,7 +4179,7 @@ const liveDecorationField = StateField.define<DecorationSet>({
       && hasDefaultLivePresentation(transaction.startState) && hasDefaultLivePresentation(transaction.state);
     if (!transaction.docChanged && (!transaction.selection || identicalPlainSelection) && !transaction.reconfigured
       && (transaction.effects.every((effect) => effect.is(shikiRefreshEffect))
-        || (transaction.effects.length === 1 && isGitDiffResultRefresh(transaction)))
+        || isGitOnlyPresentationUpdate(transaction))
       && !syntaxTreeChanged(transaction)) {
       const previous = liveDecorationMetadata.get(transaction.startState);
       if (previous) liveDecorationMetadata.set(transaction.state, previous);

@@ -163,6 +163,11 @@ export function isGitDiffResultRefresh(transaction: Transaction): boolean {
   return transaction.effects.some(effect => effect.is(acceptBackgroundDiff));
 }
 
+/** These effects change comparison presentation, never Markdown structure. */
+export function isGitDiffPresentationEffect(effect: StateEffect<unknown>): boolean {
+  return effect.is(acceptBackgroundDiff) || effect.is(setGitBaselineEffect);
+}
+
 function isCurrentComparison(state: EditorState, flags: GitDiffLineFlags | null | undefined): boolean {
   const owner = flags && comparisonOwners.get(flags);
   return !!owner && owner.doc === state.doc && owner.baseline === state.field(gitBaselineField);

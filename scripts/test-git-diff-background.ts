@@ -83,9 +83,12 @@ try {
     'mode changes must reuse a result for the same document and baseline');
   await page.evaluate(() => {
     const scope = window as any, editor = scope.__editor;
+    scope.__buildsBeforeBaseline = scope.__fullLiveBuilds;
     editor.setGitBaseline({ available: true, tracked: true, baseText: editor.getText().replace('distant-item', 'old-item') });
     scope.__buildsBeforeResult = scope.__fullLiveBuilds;
   });
+  assert.equal(await page.evaluate(() => (window as any).__buildsBeforeResult - (window as any).__buildsBeforeBaseline), 0,
+    'a Git baseline change must not rebuild unchanged Live Markdown');
   await ready();
   assert.equal(await page.evaluate(() => (window as any).__fullLiveBuilds - (window as any).__buildsBeforeResult), 0,
     'a comparison result must not trigger a full Live Markdown rebuild');
@@ -217,6 +220,23 @@ try {
   });
   await ready();
   assert.deepEqual(await summary(), { status: 'ready', added: 0, deleted: 0 }, 'a new baseline may retry after a failed worker');
+  await page.evaluate(() => (window as any).__editor.destroy());
+  const unpublishedBaseline = await page.evaluate(() => {
+    const scope = window as any, api = scope.__liveHistory;
+    const text = 'EDIT\n\nReference[^note].\n\n[^note]: Footnote body.\n\n' + '**Distant paragraph**.\n\n'.repeat(4_100);
+    const editor = api.create({ parent: document.getElementById('editor'), text,
+      initialMode: 'live', initialGitGutter: true, onApplyChanges() {} });
+    scope.__editor = editor;
+    const syntax = api.syntaxInfo(editor), builds = scope.__fullLiveBuilds;
+    editor.setGitBaseline({ available: true, tracked: true, baseText: text.replace('EDIT', 'ORIGINAL') });
+    return { syntax, builds: scope.__fullLiveBuilds - builds };
+  });
+  assert.ok(unpublishedBaseline.syntax.published < unpublishedBaseline.syntax.length && unpublishedBaseline.syntax.available,
+    'baseline publication regression must start with a complete internal parse and a partial published tree');
+  assert.equal(unpublishedBaseline.builds, 0,
+    'a baseline transaction publishing identical completed Markdown must retain the canonical Live presentation');
+  await ready();
+  assert.deepEqual(await summary(), { status: 'ready', added: 1, deleted: 1 });
   await page.evaluate(() => (window as any).__editor.destroy());
   const ordinary = await page.evaluate(() => {
     const scope = window as any;
