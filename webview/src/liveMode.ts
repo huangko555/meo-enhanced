@@ -18,7 +18,7 @@ import {
   lineNumberWidgetMarker,
   type DecorationSet
 } from '@codemirror/view';
-import type { SyntaxNode, SyntaxNodeRef, Tree } from '@lezer/common';
+import { IterMode, type SyntaxNode, type SyntaxNodeRef, type Tree } from '@lezer/common';
 import { createElement, AlertCircle, Code2, Delete } from 'lucide';
 import {
   resolveCodeLanguage,
@@ -3730,7 +3730,7 @@ function hasDefaultLivePresentation(state: EditorState): boolean {
     && !state.field(liveDocumentIdleField);
 }
 
-function isPlainProseInput(transaction: Transaction): boolean {
+function isPlainProseInput(transaction: Transaction, nested = false): boolean {
   if (!transaction.isUserEvent('input') || transaction.startState.selection.ranges.length !== 1
     || !transaction.startState.selection.main.empty) return false;
   const document = transaction.startState.doc;
@@ -3749,9 +3749,10 @@ function isPlainProseInput(transaction: Transaction): boolean {
       valid = false;
       return;
     }
-    let node = tree.resolveInner(from, from === line.from ? 1 : -1);
+    const side = from === line.from ? 1 : -1;
+    let node = nested ? tree.cursor(IterMode.IgnoreMounts).moveTo(from, side).node : tree.resolveInner(from, side);
     while (node.parent && node.name !== 'Paragraph') node = node.parent;
-    valid &&= node.name === 'Paragraph' && !node.firstChild && node.parent?.name === 'Document'
+    valid &&= node.name === 'Paragraph' && !node.firstChild && (nested || node.parent?.name === 'Document')
       || node.name === 'Document' && line.text.length === 0;
   });
   return valid && count === 1;
@@ -3767,7 +3768,8 @@ function hasUnchangedLivePresentationContext(transaction: Transaction): boolean 
 }
 
 function plainPresentationParagraph(state: EditorState, tree: Tree, position: number, nested = false): SyntaxNode | null {
-  let node = tree.resolveInner(position, -1);
+  // Mounted Markdown inside a literal code fence is not editable document prose.
+  let node = nested ? tree.cursor(IterMode.IgnoreMounts).moveTo(position, -1).node : tree.resolveInner(position, -1);
   while (node.parent && node.name !== 'Paragraph') node = node.parent;
   // These raw syntaxes have presentation outside the Markdown tree. Bound this
   // proof so a huge paragraph cannot add a full text scan to every interaction.
@@ -3779,7 +3781,7 @@ function plainPresentationParagraph(state: EditorState, tree: Tree, position: nu
 
 function canMapUnchangedProseDecorations(decorations: DecorationSet, transaction: Transaction): boolean {
   if (!liveDecorationMetadata.get(transaction.startState)?.complete
-    || !hasUnchangedLivePresentationContext(transaction) || !isPlainProseInput(transaction)
+    || !hasUnchangedLivePresentationContext(transaction) || !isPlainProseInput(transaction, true)
     || transaction.state.selection.ranges.length !== 1 || !transaction.state.selection.main.empty
     || transaction.state.selection.main.head !== transaction.changes.mapPos(transaction.startState.selection.main.head, 1)) return false;
   const before = currentSyntaxTree(transaction.startState);
@@ -3789,19 +3791,26 @@ function canMapUnchangedProseDecorations(decorations: DecorationSet, transaction
     || !syntaxTreeAvailable(transaction.state, after.length)) return false;
   let valid = true;
   transaction.changes.iterChangedRanges((from, to, nextFrom, nextTo) => {
-    const previous = plainPresentationParagraph(transaction.startState, before, to);
-    const next = plainPresentationParagraph(transaction.state, after, nextTo);
+    const previous = plainPresentationParagraph(transaction.startState, before, to, true);
+    const next = plainPresentationParagraph(transaction.state, after, nextTo, true);
     if (!previous || !next || previous.from !== next.from || transaction.changes.mapPos(previous.to, 1) !== next.to) {
       valid = false;
       return;
     }
-    const cursor = decorations.iter(previous.from);
-    if (cursor.value && cursor.from <= previous.to) { valid = false; return; }
+    // Prefix spacers and container styling elsewhere in a nested paragraph do
+    // not depend on the edited word. Touching any presentation, including its
+    // boundary, still keeps the authoritative scoped path for that content.
+    decorations.between(Math.max(previous.from, from - 1), Math.min(previous.to, to + 1), () => { valid = false; });
+    if (!valid) return;
     const oldLine = transaction.startState.doc.lineAt(from);
     const newLine = transaction.newDoc.lineAt(nextFrom);
     valid &&= oldLine.text.match(/^[ \t]*/)![0] === newLine.text.match(/^[ \t]*/)![0];
   });
-  return valid;
+  // Nested prose can move definition/reference coordinates without changing
+  // their syntax. Keep that shared cache current before preserving its widgets.
+  if (!valid) return false;
+  try { return projectUnchangedFootnotes(transaction.startState, transaction.state, transaction.changes); }
+  catch { return false; } // The guarded scoped builder owns unsupported projections.
 }
 
 /** Rebuild a closed changed block from the shared renderer and map the rest.

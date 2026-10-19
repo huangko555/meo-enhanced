@@ -13,8 +13,11 @@ const build = await Bun.build({ entrypoints: [path.join(root, 'scripts/test-live
       const source = await Bun.file(path).text();
       const boundary = 'return buildDecorations(state, fallback, extra.changes);';
       assert.equal(source.split(boundary).length, 2);
+      const localBoundary = 'function projectLiveLocalInput(decorations: DecorationSet, transaction: Transaction): DecorationSet | undefined {';
+      assert.equal(source.split(localBoundary).length, 2);
       return { loader: 'ts', contents: source.replace(boundary,
-        '((globalThis as any).__fullLiveBuilds ??= 0); (globalThis as any).__fullLiveBuilds++; ' + boundary) };
+        '((globalThis as any).__fullLiveBuilds ??= 0); (globalThis as any).__fullLiveBuilds++; ' + boundary)
+        .replace(localBoundary, localBoundary + ' ((globalThis as any).__scopedLiveInputs ??= 0); (globalThis as any).__scopedLiveInputs++;') };
     });
     for (const [file, boundary, counter] of [
       ['liveRenderedBlocks', 'function discoverRenderedBlocks(state: EditorState, tree: Tree): DiscoveredBlock[] {', '__renderedDiscoveries'],
@@ -239,15 +242,17 @@ try {
     api.parse(editor); editor.refreshDecorations();
     const from = text.indexOf('NESTED_TARGET') + 'NESTED_TARGET'.length;
     editor.view.dispatch({ selection: { anchor: from } });
-    const before = scope.__localParseRequests ?? 0, builds = scope.__fullLiveBuilds ?? 0;
+    const before = scope.__localParseRequests ?? 0, builds = scope.__fullLiveBuilds ?? 0, scoped = scope.__scopedLiveInputs ?? 0;
     api.input(editor, from, 'x');
     const footnotes = scope.__projectedFootnoteParseRequests ?? 0;
     api.input(editor, from + 1, 'x');
     scope.__nestedBudgetEditor = editor;
     return { parseRequests: (scope.__localParseRequests ?? 0) - before, builds: (scope.__fullLiveBuilds ?? 0) - builds,
-      footnoteParseRequests: (scope.__projectedFootnoteParseRequests ?? 0) - footnotes };
+      footnoteParseRequests: (scope.__projectedFootnoteParseRequests ?? 0) - footnotes,
+      scopedBuilds: (scope.__scopedLiveInputs ?? 0) - scoped, syntax: api.syntaxInfo(editor) };
   });
   assert.equal(nestedParseBudget.builds, 0, 'nested prose must update its closed block without a full Live build');
+  assert.equal(nestedParseBudget.scopedBuilds, 0, `bare nested prose must map stable presentation instead of rebuilding its whole definition on every key (${JSON.stringify(nestedParseBudget.syntax)})`);
   assert.equal(nestedParseBudget.parseRequests, 0, 'a proven local Markdown block must reuse its syntax snapshot instead of repeatedly extending embedded parsers');
   assert.equal(nestedParseBudget.footnoteParseRequests, 0, 'a certified footnote projection must not restart full embedded parsing on each following key');
   await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__nestedBudgetEditor));
