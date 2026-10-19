@@ -3730,6 +3730,10 @@ function hasDefaultLivePresentation(state: EditorState): boolean {
     && !state.field(liveDocumentIdleField);
 }
 
+// Ordinary punctuation cannot introduce reference/fence delimiters. The mapped
+// path additionally proves both complete paragraph trees and raw helper syntax.
+const ordinaryProseInputCharacters = /^[\p{L}\p{N} \t.,!?;'"()，。！？；、：“”‘’（）《》【】…—–-]*$/u;
+
 function isPlainProseInput(transaction: Transaction, nested = false): boolean {
   if (!transaction.isUserEvent('input') || transaction.startState.selection.ranges.length !== 1
     || !transaction.startState.selection.main.empty) return false;
@@ -3737,10 +3741,11 @@ function isPlainProseInput(transaction: Transaction, nested = false): boolean {
   const tree = currentSyntaxTree(transaction.startState);
   let count = 0;
   let valid = true;
+  const characters = nested ? ordinaryProseInputCharacters : /^[\p{L}\p{N} \t]*$/u;
   transaction.changes.iterChangedRanges((from, to, nextFrom, nextTo) => {
     count += 1;
-    if (!/^[\p{L}\p{N} \t]*$/u.test(document.sliceString(from, to))
-      || !/^[\p{L}\p{N} \t]*$/u.test(transaction.newDoc.sliceString(nextFrom, nextTo))) {
+    if (!characters.test(document.sliceString(from, to))
+      || !characters.test(transaction.newDoc.sliceString(nextFrom, nextTo))) {
       valid = false;
       return;
     }
@@ -3829,7 +3834,7 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
     lineChanged = removed.includes('\n') || inserted.includes('\n');
     if (change || (lineChanged
       ? !/^[ \t\n]*$/.test(removed) || !/^[ \t\n]*$/.test(inserted) || Math.max(removed.length, inserted.length) > 256
-      : !/^[\p{L}\p{N} \t]*$/u.test(removed) || !/^[\p{L}\p{N} \t]*$/u.test(inserted)
+      : !ordinaryProseInputCharacters.test(removed) || !ordinaryProseInputCharacters.test(inserted)
         || before.doc.lineAt(from).number !== before.doc.lineAt(to).number)) { supported = false; return; }
     change = { from, to, nextFrom, nextTo };
   });
@@ -3860,7 +3865,9 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
     if (change.from < content || change.from === content && /^\s*$/.test(state.doc.sliceString(change.nextFrom, change.nextTo))) return;
   }
   const rootAt = (tree: Tree, position: number) => {
-    let node = tree.resolveInner(position, -1);
+    // Embedded Markdown has its own Document root. Presentation is owned by
+    // the outer fence, so an inner paragraph is not a closed rebuild scope.
+    let node = tree.cursor(IterMode.IgnoreMounts).moveTo(position, -1).node;
     for (let ancestor: SyntaxNode | null = node; ancestor; ancestor = ancestor.parent) {
       if (['LinkReference', 'HTMLBlock', 'HTMLTag'].includes(ancestor.name)) return null;
     }
@@ -3906,10 +3913,27 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
   } else {
     if (!next) return;
     nextScope = next;
-    if (previous.from !== next.from || transaction.changes.mapPos(previous.to, 1) !== next.to
+    const oldLine = before.doc.lineAt(change.from), newLine = state.doc.lineAt(change.nextFrom);
+    if (previous.name !== next.name || previous.from !== next.from || transaction.changes.mapPos(previous.to, 1) !== next.to
+      || oldLine.text.match(/^[ \t]*/)![0] !== newLine.text.match(/^[ \t]*/)![0]
       || next.to - next.from > 32_768) return;
     if (!syntaxTreeAvailable(state, state.doc.length)
       && !hasSameLiveMarkdownOutsideBlock(oldTree, newTree, transaction.changes, previous, next)) return;
+  }
+  // A previously empty/invalid marker can gain a label/body without adding any
+  // delimiter. Its numbering is global, so it must not inherit the old cache.
+  if (previous.to - previous.from > 32_768 + 256) return;
+  for (const marker of before.doc.sliceString(previous.from, previous.to).matchAll(/\[\^[^\]]*\]|\^\[[^\]]*\]/g)) {
+    const start = previous.from + marker.index!, end = start + marker[0].length;
+    const isProtected = (tree: Tree, position: number) => {
+      for (let node: SyntaxNode | null = tree.cursor(IterMode.IgnoreMounts).moveTo(position, 1).node; node; node = node.parent) {
+        if (node.name === 'InlineCode' || node.name === 'FencedCode' || node.name === 'CodeBlock') return true;
+      }
+      return false;
+    };
+    const protectedBefore = isProtected(oldTree, start), protectedAfter = isProtected(newTree, transaction.changes.mapPos(start, 1));
+    if (protectedBefore !== protectedAfter || !protectedBefore
+      && (change.from > start && change.from < end || change.to > start && change.from < end)) return;
   }
   const frontmatter = parseFrontmatter(state);
   let from = state.doc.lineAt(nextScope.from).from, to = state.doc.lineAt(nextScope.to).to;

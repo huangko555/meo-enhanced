@@ -13,7 +13,8 @@ import { IterMode, parseMixed, Tree } from '@lezer/common';
 import { javascriptLanguage } from '@codemirror/lang-javascript';
 import { imagePresentationFactoryFacet, type ImagePresentationFactory } from '../webview/src/editor/imagePresentation';
 import { longCodeBlockSessionUiExtension } from '../webview/src/helpers/longCodeBlocks';
-import { hasMappedLiveInputPresentation } from '../webview/src/editor/liveInputDerivedWork';
+import { hasMappedLiveInputPresentation, supersedeLiveInputDerivedWork } from '../webview/src/editor/liveInputDerivedWork';
+import { getLiveRenderedBlocks } from '../webview/src/helpers/liveRenderedBlocks';
 
 {
   const text = 'Selected words\n\nReference[^note].\n\n[^note]: Definition.\n\n' + '**Distant paragraph**.\n\n'.repeat(4_100);
@@ -62,6 +63,29 @@ import { hasMappedLiveInputPresentation } from '../webview/src/editor/liveInputD
 }
 
 {
+  const text = 'Reference[^].\n\n[^note]: Known definition.\n\n' + 'Ordinary paragraph.\n\n'.repeat(500);
+  const from = text.indexOf('[^') + 2;
+  const state = EditorState.create({ doc: text, selection: { anchor: from }, extensions: liveModeExtensions({ largeDocument: true }) });
+  assert.equal(parseFootnotes(state).references.length, 0);
+  const next = state.update({ changes: { from, insert: 'note' }, selection: { anchor: from + 4 },
+    annotations: Transaction.userEvent.of('input.type') }).state;
+  const fresh = EditorState.create({ doc: next.doc.toString(), extensions: editorMarkdownLanguage });
+  assert.deepEqual(parseFootnotes(next).references.map(reference => [reference.label, reference.number]),
+    parseFootnotes(fresh).references.map(reference => [reference.label, reference.number]),
+    'filling an empty footnote marker must not preserve a cache that had no reference');
+  assert.equal(parseFootnotes(next).references[0]?.number, 1);
+  const listText = '- [^note]\n\n[^note]: Definition.\n\n' + 'Ordinary paragraph.\n\n'.repeat(500);
+  const list = EditorState.create({ doc: listText, selection: { anchor: 2 }, extensions: liveModeExtensions({ largeDocument: true }) });
+  const indented = list.update({ changes: { from: 2, insert: '    ' }, selection: { anchor: 6 },
+    annotations: Transaction.userEvent.of('input.type') }).state;
+  const freshIndented = EditorState.create({ doc: indented.doc.toString(), extensions: editorMarkdownLanguage });
+  assert.equal(parseFootnotes(freshIndented).references.length, 0, 'the changed list padding must turn the marker into literal code');
+  assert.deepEqual(parseFootnotes(indented).references.map(reference => [reference.label, reference.number]),
+    parseFootnotes(freshIndented).references.map(reference => [reference.label, reference.number]),
+    'moving a marker into code must retire its old global numbering');
+}
+
+{
   const embeddedMarkdown = markdown({ base: markdownLanguage, extensions: [{ wrap: parseMixed(node =>
     node.name === 'CodeText' ? { parser: markdownLanguage.parser } : null) }] });
   const text = '```markdown\nPlain code body\n```\n\n' + 'Ordinary paragraph.\n\n'.repeat(500);
@@ -76,6 +100,14 @@ import { hasMappedLiveInputPresentation } from '../webview/src/editor/liveInputD
   const next = state.update({ changes: { from, insert: 'x' }, selection: { anchor: from + 1 },
     annotations: Transaction.userEvent.of('input.type') }).state;
   assert.equal(hasMappedLiveInputPresentation(next), false, 'embedded Markdown code must never provide ordinary-prose structure proof');
+  const retired = next.update({ effects: supersedeLiveInputDerivedWork() }).state;
+  assert.equal(getLivePresentationDecorations(retired), getLivePresentationDecorations(next),
+    'an embedded Markdown code edit must rebuild its closed outer fence without leaving a whole-document repair for settlement');
+  const literal = EditorState.create({ doc: '````markdown\n```mermaid\ngraph TD; A-->B\n```\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n````\n',
+    extensions: embeddedMarkdown });
+  const literalTree = ensureSyntaxTree(literal, literal.doc.length, 2_000)!;
+  assert.deepEqual(getLiveRenderedBlocks(literal, { tree: literalTree }), [],
+    'Markdown embedded in a literal code fence must not contribute rendered Mermaid or fallback table blocks');
 }
 
 {

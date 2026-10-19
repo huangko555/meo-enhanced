@@ -246,6 +246,7 @@ try {
     api.input(editor, from, 'x');
     const footnotes = scope.__projectedFootnoteParseRequests ?? 0;
     api.input(editor, from + 1, 'x');
+    api.input(editor, from + 2, '，。,.!?');
     scope.__nestedBudgetEditor = editor;
     return { parseRequests: (scope.__localParseRequests ?? 0) - before, builds: (scope.__fullLiveBuilds ?? 0) - builds,
       footnoteParseRequests: (scope.__projectedFootnoteParseRequests ?? 0) - footnotes,

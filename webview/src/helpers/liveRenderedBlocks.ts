@@ -1,6 +1,6 @@
 import { documentLines } from './documentLines';
 import { EditorState, type ChangeDesc } from '@codemirror/state';
-import type { SyntaxNodeRef, Tree } from '@lezer/common';
+import { IterMode, type SyntaxNode, type SyntaxNodeRef, type Tree } from '@lezer/common';
 import { isThematicBreakLine } from './frontmatter';
 import { parseBlockLinePrefix } from './blockIndent';
 import { getFencedCodeInfo, resolvedSyntaxTree } from './markdownSyntax';
@@ -132,13 +132,11 @@ function isTableContentLine(lineText: string): boolean {
   return lineText.includes('|');
 }
 
-function isInsideCodeBlock(tree: any, pos: number): boolean {
-  let node = tree.resolveInner(pos, 1);
-  while (node) {
+function isInsideCodeBlock(tree: Tree, pos: number): boolean {
+  for (let node: SyntaxNode | null = tree.cursor(IterMode.IgnoreMounts).moveTo(pos, 1).node; node; node = node.parent) {
     if (node.name === 'FencedCode' || node.name === 'CodeBlock') {
       return true;
     }
-    node = node.parent;
   }
   return false;
 }
@@ -255,6 +253,7 @@ function discoverRenderedBlocks(state: EditorState, tree: Tree): DiscoveredBlock
   const parsedTableRanges: Array<{ from: number; to: number }> = [];
 
   tree.iterate({
+    mode: IterMode.IgnoreMounts,
     enter(node: SyntaxNodeRef) {
       if (node.name === 'Table') {
         const tableInfo = parseTableInfo(state, node);
