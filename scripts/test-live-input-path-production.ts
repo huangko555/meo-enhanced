@@ -408,6 +408,109 @@ async function assertDerivedPointerLifecycle(page: import('puppeteer-core').Page
   });
 }
 
+async function assertLargeConsumerPaintBudget(page: import('puppeteer-core').Page): Promise<void> {
+  const facts = await page.evaluate(async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const probe = (window as any).__createLiveInputConsumerProbe(host, true);
+    const frames: number[] = [];
+    let paint = 0, observing = true;
+    const observe = () => requestAnimationFrame(() => { if (observing) { paint++; observe(); } });
+    observe();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const deadline = setTimeout(() => reject(new Error('large consumer publication did not finish')), 5000);
+        probe.input('x');
+        for (let index = 0; index < 4; index++) probe.request({}, () => {
+          frames.push(paint);
+          // Real work over one slice: a later consumer must allow a paint,
+          // rather than merely move the same long task to another microtask.
+          const started = performance.now();
+          while (performance.now() - started < 12) { /* controlled consumer */ }
+          if (frames.length === 4) { clearTimeout(deadline); resolve(); }
+        });
+      });
+      return { frames, text: probe.view.state.doc.toString() };
+    } finally {
+      observing = false;
+      probe.destroy(); host.remove();
+    }
+  });
+  assert.equal(facts.text, 'probex');
+  assert.equal(new Set(facts.frames).size, 4,
+    'large consumers that exhaust a slice must permit separate painted frames');
+  const idleFrames = await page.evaluate(async () => {
+    const host = document.createElement('div'); document.body.append(host);
+    const probe = (window as any).__createLiveInputConsumerProbe(host, true);
+    const frames: number[] = [];
+    let paint = 0, observing = true;
+    const observe = () => requestAnimationFrame(() => { if (observing) { paint++; observe(); } });
+    observe();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const deadline = setTimeout(() => reject(new Error('idle frame consumers did not finish')), 5000);
+        for (let index = 0; index < 3; index++) probe.requestOnFrame({}, () => {
+          frames.push(paint);
+          const started = performance.now();
+          while (performance.now() - started < 12) { /* controlled frame consumer */ }
+          if (frames.length === 3) { clearTimeout(deadline); resolve(); }
+        });
+      });
+      return frames;
+    } finally { observing = false; probe.destroy(); host.remove(); }
+  });
+  assert.equal(new Set(idleFrames).size, 3,
+    'background results arriving after input settles must share the same frame budget');
+  const cancelled = await page.evaluate(async () => {
+    const host = document.createElement('div'); document.body.append(host);
+    const probe = (window as any).__createLiveInputConsumerProbe(host, true);
+    let obsolete = 0;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const deadline = setTimeout(() => reject(new Error('replacement input did not settle')), 5000);
+        probe.input('x');
+        probe.request({}, () => {
+          requestAnimationFrame(() => {
+            probe.input('y');
+            probe.request({}, () => { clearTimeout(deadline); resolve(); });
+          });
+          const started = performance.now();
+          while (performance.now() - started < 12) { /* exhaust first batch */ }
+        });
+        probe.request({}, () => { obsolete++; });
+      });
+      return { obsolete, text: probe.view.state.doc.toString() };
+    } finally { probe.destroy(); host.remove(); }
+  });
+  assert.deepEqual(cancelled, { obsolete: 0, text: 'probexy' },
+    'input arriving between batches must cancel the old generation and retain the new one');
+  const composition = await page.evaluate(async () => {
+    const host = document.createElement('div'); document.body.append(host);
+    const probe = (window as any).__createLiveInputConsumerProbe(host, true);
+    let second = 0, duringComposition = -1;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const deadline = setTimeout(() => reject(new Error('composition did not resume accepted batches')), 5000);
+        probe.input('x');
+        probe.request({}, () => {
+          requestAnimationFrame(async () => {
+            probe.beginComposition();
+            for (let i = 0; i < 5; i++) await new Promise<void>(done => requestAnimationFrame(() => done()));
+            duringComposition = second;
+            probe.completeComposition();
+          });
+          const started = performance.now();
+          while (performance.now() - started < 12) { /* exhaust first batch */ }
+        });
+        probe.requestOnFrame({}, () => { second++; clearTimeout(deadline); resolve(); });
+      });
+      return { duringComposition, second };
+    } finally { probe.destroy(); host.remove(); }
+  });
+  assert.deepEqual(composition, { duringComposition: 0, second: 1 },
+    'composition between batches must pause accepted frame work and resume it exactly once');
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-input-cursor-navigation-entry.ts')],
@@ -430,6 +533,7 @@ async function main(): Promise<void> {
       content: ':root{--meo-background:#fff;--meo-foreground:#111;--meo-code-background:#f4f4f4;--meo-surface-background:#fff;--meo-font-live:Arial;--meo-font-live-weight:400;--meo-font-live-size:16px;--meo-font-source:monospace;--meo-font-source-weight:400;--meo-font-source-size:14px;--meo-line-height-live:1.6;--meo-line-height-source:1.5}'
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+    await assertLargeConsumerPaintBudget(page);
 
     await assertInlineInputFormatting(page);
 

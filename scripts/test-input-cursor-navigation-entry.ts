@@ -51,7 +51,7 @@ import { refreshLiveDecorationsAfterSearchEffect } from '../webview/src/liveMode
   };
 };
 
-(window as any).__createLiveInputConsumerProbe = (parent: HTMLElement) => {
+(window as any).__createLiveInputConsumerProbe = (parent: HTMLElement, largeDocument = false) => {
   let throwNextRefresh = false;
   let throwNextSettle = false;
   let refreshAccepted = false;
@@ -82,7 +82,7 @@ import { refreshLiveDecorationsAfterSearchEffect } from '../webview/src/liveMode
     state: EditorState.create({
       doc: 'probe',
       extensions: [
-        ...liveInputDerivedWorkExtensions(),
+        ...liveInputDerivedWorkExtensions({ largeDocument }),
         throwingRefreshField
       ]
     })

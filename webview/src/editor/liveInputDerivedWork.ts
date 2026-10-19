@@ -28,6 +28,7 @@ const LARGE_DOCUMENT_DERIVED_WORK_DEADLINE_MS = 500;
 // large documents a real quiet window first, otherwise one full decoration
 // rebuild blocks later key events and makes characters arrive in batches.
 const LARGE_DOCUMENT_INPUT_QUIET_MS = 120;
+const LARGE_DOCUMENT_CONSUMER_SLICE_MS = 8;
 
 /**
  * Coalesces derived presentation behind one observable primary-text frame.
@@ -330,6 +331,7 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
 
   let consumerGeneration: ConsumerGeneration | null = null;
   let settleGenerationToken = 0;
+  let consumerFrameId: number | null = null;
   const immediateConsumers = new Set<object>();
   const runningFrameConsumers = new Set<object>();
   const frameConsumers = new Map<object, FrameConsumerRecord>();
@@ -374,6 +376,10 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
   };
   const cancelConsumerGeneration = (): void => {
     settleGenerationToken += 1;
+    if (consumerFrameId !== null) {
+      window.cancelAnimationFrame(consumerFrameId);
+      consumerFrameId = null;
+    }
     const generation = consumerGeneration;
     if (!generation || generation.state === 'cancelled') return;
     generation.state = 'cancelled';
@@ -472,6 +478,7 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
   };
   const drainConsumerGeneration = (generation: ConsumerGeneration): number => {
     let ran = 0;
+    const started = largeDocument ? performance.now() : 0;
     generation.state = 'flushing';
     // Consumer keys are stable, caller-owned identities. Draining queued
     // records dynamically includes cross-key requests while each key can run
@@ -485,6 +492,9 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
       if (generation === consumerGeneration && next.state === 'running') {
         next.state = 'settled';
       }
+      // A consumer cannot be interrupted, but several consumers must not turn
+      // one accepted update into an unbounded main-thread task.
+      if (largeDocument && performance.now() - started >= LARGE_DOCUMENT_CONSUMER_SLICE_MS) break;
     }
     return ran;
   };
@@ -493,20 +503,25 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
   );
   const scheduleConsumerCheckpoint = (
     generation: ConsumerGeneration,
-    quietCandidate: boolean
+    quietCandidate: boolean,
+    afterPaint = false
   ): void => {
     const settleToken = settleGenerationToken += 1;
+    if (consumerFrameId !== null) {
+      window.cancelAnimationFrame(consumerFrameId);
+      consumerFrameId = null;
+    }
     // Each callback runs after observer delivery for the preceding drain.
     // A zero-work round becomes a quiet candidate and must survive one more
     // checkpoint before committed-refresh may settle.
-    queueMicrotask(() => {
+    const checkpoint = () => {
       if (settleToken !== settleGenerationToken
         || disposed || isLiveInputDerivedWorkPending(view.state)
         || !isCurrentConsumerGeneration(generation)) return;
       const ran = drainConsumerGeneration(generation);
       if (!isCurrentConsumerGeneration(generation)) return;
       if (ran > 0) {
-        scheduleConsumerCheckpoint(generation, false);
+        scheduleConsumerCheckpoint(generation, false, largeDocument);
         return;
       }
       if (!quietCandidate) {
@@ -514,21 +529,37 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
         return;
       }
       generation.state = 'settled';
-      if (view.state.field(liveInputDerivedWorkPhaseField, false)?.phase !== 'committed-refresh') return;
       try {
-        view.dispatch({
-          effects: settleLiveInputDerivedWorkEffect.of(true),
-          annotations: Transaction.addToHistory.of(false)
-        });
+        if (view.state.field(liveInputDerivedWorkPhaseField, false)?.phase === 'committed-refresh') {
+          view.dispatch({
+            effects: settleLiveInputDerivedWorkEffect.of(true),
+            annotations: Transaction.addToHistory.of(false)
+          });
+        }
         scheduleOutstandingFrameConsumers();
       } catch (error) {
         reportError(closeConsumerGenerationAfterTransactionFailure(error));
       }
-    });
+    };
+    if (afterPaint) {
+      // A single RAF still runs before layout/paint. A second RAF gives the
+      // accepted text or previous batch an actual presentation opportunity.
+      consumerFrameId = window.requestAnimationFrame(() => {
+        if (settleToken !== settleGenerationToken || disposed) return;
+        consumerFrameId = window.requestAnimationFrame(() => {
+          consumerFrameId = null;
+          checkpoint();
+        });
+      });
+    } else queueMicrotask(checkpoint);
   };
   const flushConsumers = (): void => {
     if (disposed || isLiveInputDerivedWorkPending(view.state)) return;
     const generation = currentConsumerGeneration();
+    if (largeDocument) {
+      scheduleConsumerCheckpoint(generation, false, true);
+      return;
+    }
     const ran = drainConsumerGeneration(generation);
     scheduleConsumerCheckpoint(generation, ran === 0);
   };
@@ -570,7 +601,10 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
   function scheduleOutstandingFrameConsumers(): void {
     if (disposed || isLiveInputDerivedWorkPending(view.state)
       || view.state.field(liveInputDerivedWorkPhaseField, false)?.phase === 'committed-refresh') return;
-    for (const [key, record] of frameConsumers) scheduleFrameConsumer(key, record);
+    for (const [key, record] of frameConsumers) {
+      if (largeDocument) requestConsumerOnFrame(key, record.operation);
+      else scheduleFrameConsumer(key, record);
+    }
   }
   const requestConsumerOnFrame = (key: object, operation: () => void): void => {
     if (disposed || immediateConsumers.has(key) || runningFrameConsumers.has(key)) return;
@@ -578,6 +612,12 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     const phase = view.state.field(liveInputDerivedWorkPhaseField, false)?.phase;
     if (isLiveInputDerivedWorkPending(view.state) || phase === 'committed-refresh') {
       queueFrameConsumer(currentConsumerGeneration(), key, record);
+      return;
+    }
+    if (largeDocument) {
+      const generation = currentConsumerGeneration();
+      queueFrameConsumer(generation, key, record);
+      if (consumerFrameId === null) scheduleConsumerCheckpoint(generation, false, true);
       return;
     }
     scheduleFrameConsumer(key, record);
