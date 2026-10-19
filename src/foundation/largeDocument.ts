@@ -19,6 +19,12 @@ const REFERENCE_BYTES = 300_000;
 const REFERENCE_LINES = 8_000;
 const REFERENCE_RICH_BLOCKS = 256;
 
+/** Cheap proof using the same size budgets. A UTF-16 length may be passed as a
+ * lower bound for UTF-8 bytes when the caller must not scan a changing document. */
+export function exceedsLargeDocumentTextBudget(minimumBytes: number, lines: number): boolean {
+  return minimumBytes / REFERENCE_BYTES + lines / REFERENCE_LINES >= 1;
+}
+
 const countMatches = (text: string, pattern: RegExp): number => {
   let count = 0;
   for (const _match of text.matchAll(pattern)) count += 1;

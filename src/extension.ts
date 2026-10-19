@@ -1001,6 +1001,9 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     const mermaidRuntimeUri = webview
       .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'mermaid.min.js'))
       .toString();
+    const gitDiffWorkerUri = webview
+      .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'git-diff-worker.js'))
+      .toString();
     const nonce = getNonce();
     const initialHtmlClass = getContentMaxWidthEnabled(this.context)
       ? ' class="meo-content-max-width-enabled"'
@@ -1010,6 +1013,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       `img-src ${webview.cspSource} https: http: data: blob:`,
       `font-src ${webview.cspSource} data:`,
       `style-src ${webview.cspSource} 'unsafe-inline'`,
+      `connect-src ${webview.cspSource}`,
+      'worker-src blob:',
       `script-src ${webview.cspSource} 'nonce-${nonce}' 'wasm-unsafe-eval'`
     ].join('; ');
 
@@ -1024,7 +1029,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         <link href="${katexStyleUri}" rel="stylesheet" />
         <link href="${styleUri}" rel="stylesheet" />
       </head>
-      <body data-meo-katex-src="${katexStyleUri}" data-meo-mermaid-src="${mermaidRuntimeUri}" data-meo-script-nonce="${nonce}">
+      <body data-meo-katex-src="${katexStyleUri}" data-meo-mermaid-src="${mermaidRuntimeUri}" data-meo-git-diff-worker-src="${gitDiffWorkerUri}" data-meo-script-nonce="${nonce}">
         <div id="app" class="editor-root">
           ${getWebviewPreloadShellMarkup()}
         </div>

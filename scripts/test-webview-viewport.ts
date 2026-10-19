@@ -476,7 +476,7 @@ async function main() {
       };
     });
     if (
-      JSON.stringify(toolbarLayout.left.slice(0, 5)) !== JSON.stringify(['outline-left', 'line-jump', 'save', 'discard', 'separator']) ||
+      JSON.stringify(toolbarLayout.left.slice(0, 8)) !== JSON.stringify(['outline-left', 'line-jump', 'save', 'saveAs', 'undo', 'redo', 'discard', 'separator']) ||
       JSON.stringify(toolbarLayout.right) !== JSON.stringify(['split-preview', 'changes', 'separator', 'find', 'outline-right', 'more']) ||
       JSON.stringify(toolbarLayout.changes) !== JSON.stringify(['changes-review-trigger', 'changes-review-panel'])
     ) {
@@ -1924,6 +1924,13 @@ async function main() {
     if (stalePreviewApplied) {
       throw new Error('A stale Preview response replaced the current request');
     }
+    await page.evaluate(() => {
+      window.addEventListener('message', event => {
+        if (event.data?.type === 'previewRenderResult' && event.data.result?.ok) {
+          (window as any).__viewportPreviewValue = event.data.result.value;
+        }
+      });
+    });
     await page.evaluate((requestId) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'previewRenderResult',
@@ -2459,6 +2466,21 @@ async function main() {
     await page.waitForFunction(editableSelectionMatches, {}, backwardSelectionText);
     await page.click('[data-mode="preview"]');
     await page.waitForSelector('.preview-host:not([hidden]) .preview-frame');
+    // An existing iframe may still show an older accepted environment while a
+    // newer render request is pending. Complete this fixture's Host response
+    // before asserting that a later unchanged switch can reuse its cache.
+    await page.evaluate(() => {
+      const scope = window as any;
+      const request = scope.__hostMessages.findLast((message: any) => message.type === 'requestPreviewRender');
+      if (!request?.requestId || !scope.__viewportPreviewValue) throw Error('Missing cache acceptance fixture');
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'previewRenderResult', requestId: request.requestId,
+        result: { ok: true, value: scope.__viewportPreviewValue }
+      } }));
+    });
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('.preview-status')?.hidden
+      && !document.querySelector('.editor-host')?.hasAttribute('data-preview-cover'));
+    await waitForFrames(page, 2);
     await page.click('[data-mode="source"]');
     await page.waitForFunction(editableSelectionMatches, {}, backwardSelectionText);
     await page.evaluate((text) => {

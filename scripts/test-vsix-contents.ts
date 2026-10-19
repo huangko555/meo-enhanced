@@ -58,6 +58,7 @@ const requiredFiles = [
   'dist/docx-runtime.js',
   'dist/puppeteer-runtime.js',
   'webview/dist/index.js',
+  'webview/dist/git-diff-worker.js',
   'webview/dist/index.css',
   'webview/dist/mermaid.min.js',
   'webview/dist/package.json',

@@ -210,6 +210,7 @@ function targetedCommands(
       ];
     case 'changes':
       return [
+        script('scripts/test-git-diff-background.ts'),
         script('scripts/test-changes-review.ts'),
         script('scripts/test-changes-review-consistency.ts'),
         script('scripts/test-git-diff-line-highlights-setting.ts'),
@@ -334,6 +335,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-table-cell-editing.ts'),
           script('scripts/test-rendered-block-mode-shell.ts'),
           script('scripts/test-live-input-derived-work.ts'),
+          script('scripts/test-git-diff-background.ts'),
           packageScript('test:large-document-budget'),
           script('scripts/test-viewport-controller.ts'),
           script('scripts/test-native-scroll-progress-production.ts'),

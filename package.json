@@ -634,7 +634,7 @@
     "test:html-break-rendering": "bun scripts/test-html-break-rendering.ts",
     "test:editor-stability": "bun scripts/test-editor-stability.ts",
     "test:highlight": "bun scripts/test-highlight.ts && bun scripts/test-preview-code-highlight-layout.ts && bun scripts/test-highlight-typing.ts",
-    "test:changes-review": "bun scripts/test-changes-review.ts",
+    "test:changes-review": "bun scripts/test-changes-review.ts && bun scripts/test-git-diff-background.ts",
     "test:basic-capability-production": "bun scripts/test-basic-capability-production-matrix.ts",
     "typecheck": "bun run typecheck:extension && bun run typecheck:webview",
     "typecheck:extension": "tsc -p tsconfig.json --noEmit",

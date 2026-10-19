@@ -48,3 +48,4 @@ secrets.*
 .npmrc
 .pypirc
 features.md
+large-markdown-demo.md

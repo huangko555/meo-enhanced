@@ -45,7 +45,8 @@ import {
   gitDiffGutterRenderExtensions,
   gitDiffLineFlagsField,
   getGitDiffSummary,
-  setGitBaselineEffect
+  setGitBaselineEffect,
+  isGitDiffResultRefresh
 } from './helpers/gitDiffGutter';
 import type { ChangesReviewDiffSummary } from './application/changesReview';
 import { gitDiffLineHighlightsField } from './helpers/gitDiffLineHighlights';
@@ -2675,6 +2676,7 @@ export function createEditor({
         }
         if (mappedTableChanges) projectMountedTablePositions(update.view, mappedTableChanges);
         const liveDerivedRefresh = update.transactions.some(isLiveInputDerivedWorkRefresh);
+        const gitDiffResultRefresh = update.transactions.some(isGitDiffResultRefresh);
         const searchQueryChanged = update.transactions.some((transaction) => (
           transaction.effects.some((effect) => effect.is(setSearchQueryEffect))
         ));
@@ -2691,7 +2693,7 @@ export function createEditor({
           || update.selectionSet
           || update.geometryChanged
           || renderedPresentationChanged;
-        if (update.docChanged || gitBaselineChanged || liveDerivedRefresh) {
+        if (update.docChanged || gitBaselineChanged || liveDerivedRefresh || gitDiffResultRefresh) {
           emitGitDiffSummary(update.state);
         }
         if (!liveDerivedRefresh && presentationMayHaveChanged) {
@@ -2699,7 +2701,7 @@ export function createEditor({
             scheduleBlockActionToolbarReconcile();
           });
         }
-        if (!liveDerivedRefresh && (update.docChanged || gitBaselineChanged)) {
+        if (!liveDerivedRefresh && (update.docChanged || gitBaselineChanged || gitDiffResultRefresh)) {
           requestLiveInputDerivedWorkOnFrame(update.view, tablePositionDerivedConsumer, () => {
             refreshMountedTablePositions(
               update.view,
@@ -2720,7 +2722,7 @@ export function createEditor({
         }
 
         syncModeClasses();
-        if (!liveDerivedRefresh && presentationMayHaveChanged) {
+        if (!liveDerivedRefresh && (presentationMayHaveChanged || gitDiffResultRefresh)) {
           requestLiveInputDerivedWork(update.view, gitDerivedConsumer, () => {
             syncGitGutterVisibility();
           });

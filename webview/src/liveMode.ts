@@ -92,7 +92,7 @@ import {
 import { collectDocumentMathRanges, getDisplayMathSource, type DocumentMathRange } from './helpers/displayMathBlocks';
 import { isMathFenceLanguage } from '../../src/shared/mathFence';
 import { diagnosticDataField, type EditorDiagnostic } from './helpers/diagnostics';
-import { gitDiffLineFlagsField } from './helpers/gitDiffGutter';
+import { gitDiffLineFlagsField, isGitDiffResultRefresh } from './helpers/gitDiffGutter';
 import { markdownTagField } from './helpers/tags';
 import {
   getMermaidBlockMode,
@@ -4171,8 +4171,11 @@ const liveDecorationField = StateField.define<DecorationSet>({
       && transaction.startState.selection.eq(transaction.state.selection)
       && hasDefaultLivePresentation(transaction.startState) && hasDefaultLivePresentation(transaction.state);
     if (!transaction.docChanged && (!transaction.selection || identicalPlainSelection) && !transaction.reconfigured
-      && transaction.effects.every((effect) => effect.is(shikiRefreshEffect))
+      && (transaction.effects.every((effect) => effect.is(shikiRefreshEffect))
+        || (transaction.effects.length === 1 && isGitDiffResultRefresh(transaction)))
       && !syntaxTreeChanged(transaction)) {
+      const previous = liveDecorationMetadata.get(transaction.startState);
+      if (previous) liveDecorationMetadata.set(transaction.state, previous);
       return decorations;
     }
     const next = safeBuildDecorations(transaction.state, decorations, 'update', {

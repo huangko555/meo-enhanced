@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
+import { installGitDiffWorker } from './git-diff-worker-fixture';
 
 const root = path.resolve(import.meta.dir, '..');
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-live-decoration-history-'));
@@ -61,6 +62,7 @@ try {
   await page.setContent('<style>html,body,#editor{height:100%;margin:0}</style><div id="editor"></div>');
   await page.addStyleTag({ path: path.join(root, 'webview/src/styles.css') });
   await page.addScriptTag({ path: path.join(directory, 'bundle.js') });
+  await installGitDiffWorker(page);
   const inputBudgets: Array<{ mode: string; pending: boolean; diffs: number; discoveries: number; htmlRequests: number }> = [];
   const syntaxPublication = await page.evaluate(async () => {
     const scope = window as any, api = scope.__liveHistory;
@@ -163,6 +165,7 @@ try {
     }, mode);
     inputBudgets.push(budget);
     await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__budgetEditor));
+    await page.waitForFunction(() => (window as any).__liveHistory.gitSummary((window as any).__budgetEditor).status === 'ready');
     const summary = await page.evaluate(() => (window as any).__liveHistory.gitSummary((window as any).__budgetEditor));
     assert.equal(summary.status, 'ready');
     assert.equal(summary.added, 1, 'settled input must publish the real changed line');

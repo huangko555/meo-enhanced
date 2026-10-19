@@ -19,7 +19,7 @@ import {
   type DecorationSet
 } from '@codemirror/view';
 import { Minus, Plus, createElement as createIconElement } from 'lucide';
-import { getGitDiffOriginalBlocks, gitDiffLineFlagsField, setGitBaselineEffect } from './gitDiffGutter';
+import { getGitDiffOriginalBlocks, gitDiffLineFlagsField, setGitBaselineEffect, isGitDiffResultRefresh } from './gitDiffGutter';
 
 const setGitDiffDetailsVisibleEffect = StateEffect.define<boolean>();
 let gitDiffDetailsVisible = false;
@@ -194,7 +194,7 @@ const gitDiffDetailsField = StateField.define<GitDiffDetailsState>({
         visibilityChanged = true;
       }
     }
-    if (!transaction.docChanged && !baselineChanged && !visibilityChanged) {
+    if (!transaction.docChanged && !baselineChanged && !visibilityChanged && !isGitDiffResultRefresh(transaction)) {
       return details;
     }
     return { ...buildGitDiffDetails(transaction.state, visible), visible };

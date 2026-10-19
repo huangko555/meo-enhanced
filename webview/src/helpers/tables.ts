@@ -46,6 +46,7 @@ import {
   type InlineDomCaret
 } from './inlinePresentation';
 import { updateGitDiffMarkerElement } from './gitDiffMarkerDom';
+import { gitDiffLineFlagsFacet } from './gitDiffPresentation';
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 import { getTableHistoryFocus, type TableHistoryFocusTarget } from '../adapters/tableHistoryFocus';
@@ -214,6 +215,7 @@ interface CellMatrix {
 }
 
 interface WidgetTableData extends TableData {
+  diffBaseline?: object;
   from: number;
   to: number;
   startLine: number;
@@ -2346,6 +2348,7 @@ function buildWidgetTableData(
   const headerCells = normalizeRow(headerLine.cells, colCount, '');
   const rows = dataLines.map((line) => normalizeRow(line.cells, colCount, ''));
   const diffFlagsByLine = collectTableDiffFlags(data, diffLineFlags);
+  const comparison = state.facet(gitDiffLineFlagsFacet);
   const tableDiagnostics = collectTableDiagnostics(data, diagnostics);
   return {
     from,
@@ -2371,6 +2374,7 @@ function buildWidgetTableData(
     endLine,
     diagnostics: tableDiagnostics,
     sourceRanges: collectTableSourceRanges(data),
+    diffBaseline: comparison?.lines === diffLineFlags ? comparison.baseline : undefined,
     diffFlagsByLine
   };
 }
@@ -4849,6 +4853,13 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     if (!range) return null;
 
     const tableStartLine = view.state.doc.lineAt(range.from).number;
+    // Presentation can retain the previous comparison while its replacement is
+    // computing. Its row identities must never become provenance for a new
+    // baseline. With no accepted mapping, the actual diff resolves the deletion.
+    const comparison = view.state.facet(gitDiffLineFlagsFacet);
+    const currentLines = comparison?.baselineCurrent && comparison.doc === view.state.doc ? comparison.lines : null;
+    const projectedBaselineCurrent = comparison?.baselineCurrent !== false
+      && (!comparison || this.tableData.diffBaseline === comparison.baseline);
     const sortedIndexes = [...rowIndexes].sort((left, right) => left - right);
     const removedIndexes = new Set(sortedIndexes);
     const groups: Array<{ from: number; to: number }> = [];
@@ -4864,7 +4875,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     >> = groups.flatMap((group) => {
       const baselineLines = sortedIndexes
         .filter((index) => index >= group.from && index <= group.to)
-        .map((index) => this.tableData.diffFlagsByLine?.[tableStartLine + 2 + index]?.baselineLineNumber)
+        .map((index) => currentLines
+          ? currentLines[tableStartLine + 1 + index]?.baselineLineNumber
+          : projectedBaselineCurrent ? this.tableData.diffFlagsByLine?.[tableStartLine + 2 + index]?.baselineLineNumber : undefined)
         .filter((lineNumber): lineNumber is number => typeof lineNumber === 'number' && lineNumber > 0)
         .sort((left, right) => left - right);
       const baselineRanges: Array<[number, number]> = [];
@@ -6141,6 +6154,12 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   toDOM(view: EditorView) {
+    const acceptedDiff = view.state.facet(gitDiffLineFlagsFacet);
+    if (acceptedDiff?.doc === view.state.doc) {
+      const diffFlagsByLine = collectTableDiffFlags(buildTableData(view.state, this.tableData), acceptedDiff.lines);
+      const signature = { ...JSON.parse(this.tableData.signature), diffFlagsByLine };
+      this.tableData = { ...this.tableData, diffFlagsByLine, diffBaseline: acceptedDiff.baseline, signature: JSON.stringify(signature) };
+    }
     // CodeMirror can draw a widget instance again after destroying its previous DOM.
     if (this.destroyed) {
       this.cellSelection = new TableCellSelection();

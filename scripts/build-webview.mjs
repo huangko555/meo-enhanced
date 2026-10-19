@@ -31,6 +31,12 @@ if (build.status !== 0) {
   process.exit(build.status ?? 1);
 }
 
+const workerBuild = spawnSync(process.execPath, [
+  'build', 'webview/src/helpers/gitDiffWorker.ts', '--target=browser', '--format=iife',
+  '--minify', '--outfile=webview/dist/git-diff-worker.js'
+], { cwd: root, stdio: 'inherit' });
+if (workerBuild.status !== 0) process.exit(workerBuild.status ?? 1);
+
 const buildMetadata = JSON.parse(readFileSync(buildMetadataPath, 'utf8'));
 const languageModules = new Map();
 for (const [outputPath, output] of Object.entries(buildMetadata.outputs ?? {})) {

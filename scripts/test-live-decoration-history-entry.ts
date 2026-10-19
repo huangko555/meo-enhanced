@@ -8,7 +8,7 @@ import { sourceSyntaxPreparation } from '../webview/src/helpers/sourceSyntax';
 import { ensureSyntaxTree, forceParsing, syntaxTree, syntaxTreeAvailable } from '@codemirror/language';
 import { diagnosticDataField } from '../webview/src/helpers/diagnostics';
 import { replaceLocalLinkStatuses } from '../webview/src/helpers/localLinks';
-import { getGitDiffSummary } from '../webview/src/helpers/gitDiffGutter';
+import { getGitDiffSummary, getGitDiffOriginalBlocks } from '../webview/src/helpers/gitDiffGutter';
 import { editorMarkdownLanguage, getLivePresentationDecorations } from '../webview/src/liveMode';
 import { parseFootnotes } from '../webview/src/helpers/footnotes';
 import { editorScrollIntoView } from '../webview/src/editor/scrollEffects';
@@ -27,6 +27,7 @@ function footnoteSnapshot(state: EditorState) {
   sourcePreparation: (editor: ReturnType<typeof createEditor>) => !!editor.view.plugin(sourceSyntaxPreparation),
   parse: (editor: ReturnType<typeof createEditor>) => forceParsing(editor.view, editor.view.state.doc.length, 2_000),
   gitSummary: (editor: ReturnType<typeof createEditor>) => getGitDiffSummary(editor.view.state),
+  originalBlocks: (editor: ReturnType<typeof createEditor>) => getGitDiffOriginalBlocks(editor.view.state),
   mapped: (editor: ReturnType<typeof createEditor>) => hasMappedLiveInputPresentation(editor.view.state),
   renderedBlocks: (editor: ReturnType<typeof createEditor>) => getLiveRenderedBlocks(editor.view.state, { includeSelectedMath: true }),
   freshRenderedBlocks(editor: ReturnType<typeof createEditor>) {

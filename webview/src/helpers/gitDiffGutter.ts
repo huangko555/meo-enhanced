@@ -1,8 +1,13 @@
-import { RangeSetBuilder, StateEffect, StateField, EditorState, Transaction, type RangeSet } from '@codemirror/state';
-import { GutterMarker, gutter, EditorView } from '@codemirror/view';
+import { RangeSetBuilder, StateEffect, StateField, EditorState, Transaction, type RangeSet, type Text } from '@codemirror/state';
+import { GutterMarker, gutter, EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import { createBackgroundDocumentDiff } from './backgroundDocumentDiff';
+import { gitDiffLineFlagsFacet, type MarkerFlags } from './gitDiffPresentation';
+import { exceedsLargeDocumentTextBudget } from '../../../src/foundation/largeDocument';
+export type { MarkerFlags } from './gitDiffPresentation';
 import {
   compareDocuments,
-  splitDiffLines
+  splitDiffLines,
+  type DocumentDiff
 } from '../../../src/shared/gitDiffCore';
 import {
   getLiveGitCollapsedBlocks,
@@ -15,7 +20,10 @@ import {
 } from '../adapters/tableTransactionProvenance';
 import {
   isLiveInputDerivedWorkRefresh,
-  shouldDeferLiveInputDerivedWork
+  shouldDeferLiveInputDerivedWork,
+  isLiveInputDerivedWorkPending,
+  requestLiveInputDerivedWorkOnFrame,
+  usesLargeDocumentDerivedWorkBudget
 } from '../editor/liveInputDerivedWork';
 import type {
   ChangesReviewDiffSummary,
@@ -36,24 +44,6 @@ interface BaselineSnapshot {
   mode?: 'current-edit' | 'recent-save' | 'git-head' | 'fixed';
   headOid?: string | null;
   reason?: Exclude<ChangesReviewUnavailableReason, 'timeout'>;
-}
-
-export interface MarkerFlags {
-  added: boolean;
-  modified: boolean;
-  baselineLineNumber?: number;
-  modifiedRanges?: Array<[number, number]>;
-  deleted?: boolean;
-  deletionBoundary?: number;
-  deletionAtEnd?: boolean;
-  baselineFromLine?: number;
-  baselineToLine?: number;
-  deletionRanges?: Array<[number, number]>;
-  eofProxy?: boolean;
-  trailingEofProxyOnly?: boolean;
-  trailingEofProxySource?: boolean;
-  liveBlockStartLine?: number;
-  liveBlockEndLine?: number;
 }
 
 const emptyBaseline: BaselineSnapshot = Object.freeze({
@@ -163,6 +153,30 @@ type GitDiffLineFlags = (MarkerFlags | undefined)[] & {
     readonly reason?: ChangesReviewUnavailableReason;
   };
 };
+
+type ComparisonOwner = { readonly doc: Text; readonly baseline: BaselineSnapshot };
+const comparisonOwners = new WeakMap<GitDiffLineFlags, ComparisonOwner>();
+const comparisonCounts = new WeakMap<GitDiffLineFlags, GitDiffLineCounts>();
+const acceptBackgroundDiff = StateEffect.define<ComparisonOwner & { readonly result: DocumentDiff | null }>();
+
+export function isGitDiffResultRefresh(transaction: Transaction): boolean {
+  return transaction.effects.some(effect => effect.is(acceptBackgroundDiff));
+}
+
+function isCurrentComparison(state: EditorState, flags: GitDiffLineFlags | null | undefined): boolean {
+  const owner = flags && comparisonOwners.get(flags);
+  return !!owner && owner.doc === state.doc && owner.baseline === state.field(gitBaselineField);
+}
+
+function needsBackgroundComparison(state: EditorState, baseline: BaselineSnapshot): boolean {
+  if (!canRenderGitDiffBaseline(baseline) || typeof baseline.baseText !== 'string'
+    || state.doc.length > MAX_DIFF_TEXT_CHARS || baseline.baseText.length > MAX_DIFF_TEXT_CHARS) return false;
+  // A paste can grow a small Source editor before its idle assessment runs. A
+  // large baseline also costs work when the current document has become small.
+  return usesLargeDocumentDerivedWorkBudget(state)
+    || exceedsLargeDocumentTextBudget(state.doc.length, state.doc.lines)
+    || exceedsLargeDocumentTextBudget(baseline.baseText.length, baseline.baseLines?.length ?? 1);
+}
 
 function lineFlagsWithStatus(
   lineCount: number,
@@ -372,7 +386,7 @@ function getTrailingEofProxyFlags(
   };
 }
 
-function buildDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | null): GitDiffLineFlags {
+function buildDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | null, computed?: DocumentDiff | null): GitDiffLineFlags {
   if (!baseline || (!baseline.available && !baseline.reason)) {
     return lineFlagsWithStatus(0, 'pending');
   }
@@ -400,9 +414,10 @@ function buildDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | nul
     return lineFlagsWithStatus(0, 'unavailable', 'too-large');
   }
 
-  const result = compareDocuments(baseline.baseText, state.doc.sliceString(0, state.doc.length), {
+  const result = computed === undefined ? compareDocuments(baseline.baseText, state.doc.sliceString(0, state.doc.length), {
     maxComputationTimeMs: MAX_DIFF_COMPUTATION_TIME_MS
-  });
+  }) : computed;
+  if (!result) return lineFlagsWithStatus(0, 'unavailable', 'error');
   if (result.hitTimeout || result.failed) {
     return lineFlagsWithStatus(0, 'unavailable', result.hitTimeout ? 'timeout' : 'error');
   }
@@ -495,7 +510,9 @@ function buildDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | nul
 }
 
 function buildCoalescedDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | null): (MarkerFlags | undefined)[] | null {
-  return coalesceTrailingEofVisualLineFlag(state.doc, buildDiffLineFlags(state, baseline));
+  const flags = coalesceTrailingEofVisualLineFlag(state.doc, buildDiffLineFlags(state, baseline));
+  if (flags && baseline) comparisonOwners.set(flags, { doc: state.doc, baseline });
+  return flags;
 }
 
 function buildGitGutterMarkersFromLineFlags(state: EditorState, lineFlags: (MarkerFlags | undefined)[] | null): any {
@@ -649,7 +666,9 @@ function buildLiveGitGutterPresentation(state: EditorState, lineFlags: (MarkerFl
 
 export const gitDiffLineFlagsField = StateField.define<(MarkerFlags | undefined)[] | null>({
   create(state: EditorState): (MarkerFlags | undefined)[] | null {
-    return buildCoalescedDiffLineFlags(state, state.field(gitBaselineField));
+    const baseline = state.field(gitBaselineField);
+    return needsBackgroundComparison(state, baseline) ? lineFlagsWithStatus(0, 'pending')
+      : buildCoalescedDiffLineFlags(state, baseline);
   },
   update(value: (MarkerFlags | undefined)[] | null, tr: Transaction): (MarkerFlags | undefined)[] | null {
     let baselineChanged = false;
@@ -659,14 +678,86 @@ export const gitDiffLineFlagsField = StateField.define<(MarkerFlags | undefined)
         break;
       }
     }
+    const baseline = tr.state.field(gitBaselineField);
+    for (const effect of tr.effects) {
+      if (effect.is(acceptBackgroundDiff) && !tr.docChanged && !baselineChanged
+        && effect.value.doc === tr.state.doc && effect.value.baseline === baseline
+        && !isLiveInputDerivedWorkPending(tr.state)) {
+        const flags = coalesceTrailingEofVisualLineFlag(tr.state.doc,
+          buildDiffLineFlags(tr.state, baseline, effect.value.result));
+        if (flags) comparisonOwners.set(flags, { doc: tr.state.doc, baseline });
+        return flags;
+      }
+    }
     if (shouldDeferLiveInputDerivedWork(tr)) {
       return value;
     }
-    if (!tr.docChanged && !baselineChanged && !isLiveInputDerivedWorkRefresh(tr)) {
+    const budgetChanged = usesLargeDocumentDerivedWorkBudget(tr.state) !== usesLargeDocumentDerivedWorkBudget(tr.startState);
+    if (!tr.docChanged && !baselineChanged && !budgetChanged && !isLiveInputDerivedWorkRefresh(tr)) {
       return value;
     }
-    const baseline = tr.state.field(gitBaselineField);
+    if (needsBackgroundComparison(tr.state, baseline)) return value;
     return buildCoalescedDiffLineFlags(tr.state, baseline);
+  },
+  provide: field => gitDiffLineFlagsFacet.compute([field, gitBaselineField], state => {
+    const flags = state.field(field);
+    const owner = flags && comparisonOwners.get(flags);
+    return flags && owner ? { doc: owner.doc, lines: flags, baseline: owner.baseline,
+      baselineCurrent: owner.baseline === state.field(gitBaselineField) } : undefined;
+  })
+});
+
+const backgroundDiffPlugin = ViewPlugin.fromClass(class {
+  private disposed = false;
+  private attempted: ComparisonOwner | undefined;
+  private readonly requestKey = {};
+  private readonly publishKey = {};
+  private readonly computation = createBackgroundDocumentDiff(result => {
+    const owner = this.attempted;
+    if (!owner) return;
+    requestLiveInputDerivedWorkOnFrame(this.view, this.publishKey, () => {
+      if (this.disposed || owner !== this.attempted || owner.doc !== this.view.state.doc
+        || owner.baseline !== this.view.state.field(gitBaselineField)
+        || !needsBackgroundComparison(this.view.state, owner.baseline)) return;
+      this.view.dispatch({ effects: acceptBackgroundDiff.of({ ...owner, result }) });
+    });
+  });
+
+  constructor(private readonly view: EditorView) {
+    queueMicrotask(() => { if (!this.disposed) this.schedule(); });
+  }
+
+  private schedule(): void {
+    const state = this.view.state;
+    const baseline = state.field(gitBaselineField);
+    if (!needsBackgroundComparison(state, baseline)
+      || isCurrentComparison(state, state.field(gitDiffLineFlagsField))) return;
+    requestLiveInputDerivedWorkOnFrame(this.view, this.requestKey, () => {
+      if (this.disposed) return;
+      const current = this.view.state;
+      const currentBaseline = current.field(gitBaselineField);
+      if (!needsBackgroundComparison(current, currentBaseline)
+        || isCurrentComparison(current, current.field(gitDiffLineFlagsField))
+        || (this.attempted?.doc === current.doc && this.attempted.baseline === currentBaseline)) return;
+      this.attempted = { doc: current.doc, baseline: currentBaseline };
+      this.computation.request(currentBaseline.baseText!, current.doc.toString());
+    });
+  }
+
+  update(update: ViewUpdate): void {
+    if (this.attempted && (this.attempted.doc !== update.state.doc
+      || this.attempted.baseline !== update.state.field(gitBaselineField)
+      || !needsBackgroundComparison(update.state, this.attempted.baseline))) {
+      this.computation.cancel();
+      this.attempted = undefined;
+    }
+    this.schedule();
+  }
+
+  destroy(): void {
+    this.disposed = true;
+    this.attempted = undefined;
+    this.computation.dispose();
   }
 });
 
@@ -683,7 +774,7 @@ const gitDiffGutterField = StateField.define<any>({
       }
     }
     if (shouldDeferLiveInputDerivedWork(tr)) return tr.docChanged ? value.map(tr.changes) : value;
-    if (!tr.docChanged && !baselineChanged && !isLiveInputDerivedWorkRefresh(tr)) {
+    if (!tr.docChanged && !baselineChanged && !isLiveInputDerivedWorkRefresh(tr) && !isGitDiffResultRefresh(tr)) {
       return value;
     }
     return buildGitGutterMarkersFromLineFlags(tr.state, tr.state.field(gitDiffLineFlagsField));
@@ -704,7 +795,7 @@ const gitDiffLiveGutterField = StateField.define<LiveGitGutterPresentation>({
     }
     const presentationChanged = !tr.startState.selection.eq(tr.state.selection)
       || getHtmlEditingRange(tr.startState) !== getHtmlEditingRange(tr.state);
-    if (!tr.docChanged && !baselineChanged && !presentationChanged && !isLiveInputDerivedWorkRefresh(tr)) {
+    if (!tr.docChanged && !baselineChanged && !presentationChanged && !isLiveInputDerivedWorkRefresh(tr) && !isGitDiffResultRefresh(tr)) {
       return value;
     }
     return buildLiveGitGutterPresentation(
@@ -749,7 +840,8 @@ const gitDiffGutterLiveExtension = gutter({
 export function gitDiffGutterBaselineExtensions(): any[] {
   return [
     gitBaselineField,
-    gitDiffLineFlagsField
+    gitDiffLineFlagsField,
+    backgroundDiffPlugin
   ];
 }
 
@@ -777,7 +869,7 @@ export type GitDiffLineCounts = {
 export function getGitDiffSummary(state: EditorState): ChangesReviewDiffSummary {
   const lineFlags = state.field(gitDiffLineFlagsField, false) as GitDiffLineFlags | undefined;
   const computation = lineFlags?.[comparisonStatus];
-  if (!computation || computation.status === 'pending') {
+  if (!computation || computation.status === 'pending' || !isCurrentComparison(state, lineFlags)) {
     return { status: 'pending', added: 0, deleted: 0 };
   }
   if (computation.status === 'unavailable') {
@@ -788,7 +880,7 @@ export function getGitDiffSummary(state: EditorState): ChangesReviewDiffSummary 
       deleted: 0
     };
   }
-  return { status: 'ready', ...countGitDiffLines(lineFlags) };
+  return { status: 'ready', ...getGitDiffLineCounts(state) };
 }
 
 export type GitDiffOriginalBlock = {
@@ -820,13 +912,17 @@ function countGitDiffLines(
 }
 
 export function getGitDiffLineCounts(state: EditorState): GitDiffLineCounts {
-  return countGitDiffLines(state.field(gitDiffLineFlagsField, false));
+  const flags = state.field(gitDiffLineFlagsField, false);
+  if (!flags) return { added: 0, deleted: 0 };
+  let counts = comparisonCounts.get(flags);
+  if (!counts) { counts = countGitDiffLines(flags); comparisonCounts.set(flags, counts); }
+  return counts;
 }
 
 export function getGitDiffOriginalBlocks(state: EditorState): GitDiffOriginalBlock[] {
   const lineFlags = state.field(gitDiffLineFlagsField, false);
   const baseline = state.field(gitBaselineField, false);
-  if (!Array.isArray(lineFlags) || !baseline?.baseLines) return [];
+  if (!Array.isArray(lineFlags) || !baseline?.baseLines || !isCurrentComparison(state, lineFlags)) return [];
 
   const seenRanges = new Set<string>();
   const grouped = new Map<string, { at: number; side: -1 | 1; ranges: Array<[number, number]> }>();
