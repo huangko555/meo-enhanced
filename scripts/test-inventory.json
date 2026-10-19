@@ -1,5 +1,10 @@
 {
   "separate": {
+    "scripts/test-shiki-worker.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-shiki-worker.ts",
+      "reason": "Real classic Worker differential and cancellation checks for editor coloring, plus a bounded foreground responsiveness probe; run after build:webview when changing the highlighting execution boundary."
+    },
     "scripts/test-block-copy-consistency.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-block-copy-consistency.ts",

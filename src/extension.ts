@@ -1018,6 +1018,9 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     const gitDiffWorkerUri = webview
       .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'git-diff-worker.js'))
       .toString();
+    const shikiWorkerUri = webview
+      .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'shiki-highlight-worker.js'))
+      .toString();
     const nonce = getNonce();
     const initialHtmlClass = getContentMaxWidthEnabled(this.context)
       ? ' class="meo-content-max-width-enabled"'
@@ -1043,7 +1046,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         <link href="${katexStyleUri}" rel="stylesheet" />
         <link href="${styleUri}" rel="stylesheet" />
       </head>
-      <body data-meo-katex-src="${katexStyleUri}" data-meo-mermaid-src="${mermaidRuntimeUri}" data-meo-git-diff-worker-src="${gitDiffWorkerUri}" data-meo-script-nonce="${nonce}">
+      <body data-meo-katex-src="${katexStyleUri}" data-meo-mermaid-src="${mermaidRuntimeUri}" data-meo-git-diff-worker-src="${gitDiffWorkerUri}" data-meo-shiki-worker-src="${shikiWorkerUri}" data-meo-script-nonce="${nonce}">
         <div id="app" class="editor-root">
           ${getWebviewPreloadShellMarkup()}
         </div>

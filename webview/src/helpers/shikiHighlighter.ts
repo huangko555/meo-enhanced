@@ -1,12 +1,9 @@
 import type { HighlighterCore } from 'shiki/core';
 import { bundledLanguages, bundledLanguagesInfo } from 'shiki/langs';
-
-export type RawVscodeTheme = {
-  name: string;
-  type: 'light' | 'dark';
-  colors: Record<string, string>;
-  tokenColors: unknown[];
-};
+import { createBackgroundShiki } from './backgroundShiki';
+import { toShikiTheme } from './shikiTheme';
+import type { RawVscodeTheme, ShikiToken, ShikiTokenLines, ShikiSurface } from './shikiTypes';
+export type { RawVscodeTheme, ShikiToken, ShikiTokenLines, ShikiSurface } from './shikiTypes';
 
 const THEME_NAME = 'meo-code-theme';
 const CACHE_LIMIT = 300;
@@ -38,23 +35,10 @@ export function resolveShikiLang(info: string | null | undefined): string | null
   return LANGUAGE_IDS.get(requested) ?? null;
 }
 
-export type ShikiToken = {
-  readonly offset: number;
-  readonly content: string;
-  readonly color?: string;
-  readonly fontStyle?: number;
-  readonly isStringComment?: boolean;
-  readonly scopeNames?: readonly string[];
-};
-
-type ShikiTokenLines = readonly (readonly ShikiToken[])[];
-
 export type ShikiThemeMeta = {
   bracketColors: string[];
   unexpectedBracket: string;
 };
-
-export type ShikiSurface = 'editor' | 'preview' | 'source';
 
 const DEFAULT_BRACKET_COLORS_DARK = ['#FFD700', '#DA70D6', '#179FFF'];
 const DEFAULT_BRACKET_COLORS_LIGHT = ['#0431FA', '#319331', '#7B3814'];
@@ -106,6 +90,7 @@ type ShikiRuntimeState = {
   activeHighlightConsumers: number;
   workGeneration: number;
   refreshTimer: ReturnType<typeof setTimeout> | null;
+  background?: ReturnType<typeof createBackgroundShiki>;
 };
 
 function createRuntimeState(): ShikiRuntimeState {
@@ -153,6 +138,8 @@ export function getShikiThemeVersion(surface: ShikiSurface = 'editor'): number {
 }
 
 function discardHighlighter(state: ShikiRuntimeState): void {
+  state.background?.dispose();
+  state.background = undefined;
   const discarded = state.highlighterRecord;
   state.highlighterRecord = null;
   if (discarded) {
@@ -262,19 +249,6 @@ export function requestShikiTokens(
   };
   state.pending.set(key, request);
   void tokenizeAndCache(state, key, lang, code, request);
-}
-
-function toShikiTheme(theme: RawVscodeTheme) {
-  return {
-    name: THEME_NAME,
-    type: theme.type,
-    // Shiki inserts a default rule into settings while normalizing a theme.
-    // Sharing that array would let Live's defaults overwrite Source user colors.
-    colors: { ...theme.colors },
-    settings: structuredClone(theme.tokenColors ?? []) as any[],
-    fg: theme.colors?.['editor.foreground'],
-    bg: theme.colors?.['editor.background']
-  };
 }
 
 async function createHighlighter(theme: RawVscodeTheme): Promise<HighlighterCore> {
@@ -501,6 +475,36 @@ async function tokenizeAndCache(
   try {
     if (request.priority === 'background' && request.deferBackground()) await waitForRunnable();
     if (!isCurrent()) { finish(); return; }
+    const workerUri = typeof document === 'undefined' ? undefined : document.body.dataset.meoShikiWorkerSrc;
+    if (workerUri && state.rawTheme) {
+      state.background ??= createBackgroundShiki(workerUri, state.rawTheme, async (language, content, loaded) => {
+        const required = new Set([language]);
+        if (state === runtimeStates.source && language === 'markdown') {
+          required.add('yaml'); required.add('html'); required.add('html-derivative');
+          for (const fence of content.matchAll(/^[ \t]*(?:>[ \t]*)*(?:`{3,}|~{3,})[ \t]*([^\s`~]+)/gm)) {
+            const embedded = resolveShikiLang(fence[1]);
+            if (embedded) required.add(embedded);
+          }
+        }
+        const grammars: unknown[] = [];
+        for (const requiredLanguage of required) if (!loaded.has(requiredLanguage) && LANG_LOADERS[requiredLanguage]) {
+          grammars.push((await LANG_LOADERS[requiredLanguage]!()).default);
+          loaded.add(requiredLanguage);
+        }
+        return grammars;
+      });
+      const tokens = await state.background.request(lang, code, isCurrent);
+      if (tokens && isCurrent()) {
+        if (state.tokenCache.size >= (state === runtimeStates.source ? 2 : CACHE_LIMIT)) {
+          const oldest = state.tokenCache.keys().next().value;
+          if (oldest !== undefined) state.tokenCache.delete(oldest);
+        }
+        state.tokenCache.set(key, tokens);
+        scheduleTokenRefresh(state);
+      }
+      finish();
+      return;
+    }
     const record = getHighlighter(state, lang);
     if (!record) {
       finish();

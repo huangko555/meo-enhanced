@@ -36,6 +36,11 @@ const workerBuild = spawnSync(process.execPath, [
   '--minify', '--outfile=webview/dist/git-diff-worker.js'
 ], { cwd: root, stdio: 'inherit' });
 if (workerBuild.status !== 0) process.exit(workerBuild.status ?? 1);
+const shikiWorkerBuild = spawnSync(process.execPath, [
+  'build', 'webview/src/helpers/shikiHighlightWorker.ts', '--target=browser', '--format=iife',
+  '--minify', '--outfile=webview/dist/shiki-highlight-worker.js'
+], { cwd: root, stdio: 'inherit' });
+if (shikiWorkerBuild.status !== 0) process.exit(shikiWorkerBuild.status ?? 1);
 
 const buildMetadata = JSON.parse(readFileSync(buildMetadataPath, 'utf8'));
 const languageModules = new Map();

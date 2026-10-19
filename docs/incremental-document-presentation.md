@@ -180,3 +180,29 @@ benefiting from background computation. See the official
 Virtual selection copying can start a ClipboardItem with promised HTML/text data
 at the user's copy event; this preserves activation while content is prepared.
 See [ClipboardItem data](https://developer.mozilla.org/en-US/docs/Web/API/ClipboardItem/ClipboardItem).
+
+Native V36 acceptance at `fe5e773e` passed functional checks, including complete
+formatted Windows clipboard copying. Performance remained below target: the
+1 MiB comprehensive fixture entered Live/Preview in 5.2/5.8 seconds, Live caret
+samples reached 592 ms, and Source/Live input peaks reached 585/593 ms. Preview
+native scrollbar samples reached 191 ms. These are not completion criteria.
+The guest used four CPUs, 6 GiB RAM and a 1 GiB memory balloon, so timings are not
+an unqualified comparison with previous guest runs. A separate profiling run is
+diagnostic only; instrumentation changes latency.
+
+That native CPU profile found 414 ms of synchronous Shiki grammar compilation
+and tokenization overlapping a Live click. Production Shiki now owns a classic
+blob Worker per active coloring surface. The packaged 737 KB script includes
+the engine and WASM; language registrations are loaded lazily and cloned into
+the worker, so the sandboxed worker needs no imports or remote access. The
+foreground retains the existing presentation/cache interface. Each engine has
+one running request and a bounded pending queue; superseded text cannot publish,
+and theme replacement or last-consumer release terminates the engine. Failure
+does not route CPU work back to the editor thread. Test harnesses without the
+packaged worker URI retain the original route for differential verification.
+
+`test-shiki-worker.ts` compares 60 actual Worker outputs with the original
+browser route across Live/Preview/Source, injected languages, empty lines,
+Unicode and CRLF. It also checks engine disposal, cancellation on theme change,
+and that a cold grammar plus 6,000 code lines lets the foreground event loop
+continue. This establishes the coloring boundary, not final native latency.
