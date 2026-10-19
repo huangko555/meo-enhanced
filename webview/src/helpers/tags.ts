@@ -6,6 +6,7 @@ import { collectHexColorRangesFromText, isHexColorLikeLiteral } from '../../../s
 import { currentSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
 import {
   isLiveInputDerivedWorkRefresh,
+  isMappedLiveInputRefresh,
   mapLiveInputDerivedDecorations,
   shouldDeferLiveInputDerivedWork
 } from '../editor/liveInputDerivedWork';
@@ -93,7 +94,7 @@ export const markdownTagField = StateField.define<DecorationSet>({
     return buildMarkdownTagDecorations(state);
   },
   update(value, transaction) {
-    if (shouldDeferLiveInputDerivedWork(transaction)) {
+    if (isMappedLiveInputRefresh(transaction) || shouldDeferLiveInputDerivedWork(transaction)) {
       return transaction.docChanged
         ? mapLiveInputDerivedDecorations(value, transaction)
         : value;

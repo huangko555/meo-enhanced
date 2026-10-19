@@ -9,6 +9,7 @@ import {
 import { getViewportController } from './viewportController';
 import {
   isLiveInputDerivedWorkRefresh,
+  isMappedLiveInputRefresh,
   shouldDeferLiveInputDerivedWork
 } from '../editor/liveInputDerivedWork';
 
@@ -89,7 +90,7 @@ const detailsBlockStateField = StateField.define<DetailsBlockRecord[]>({
   create: (state) => rebuildDetailsBlocks(state, [], null),
   update(previous, transaction) {
     const toggleEffects = transaction.effects.filter((effect) => effect.is(toggleDetailsBlockEffect));
-    if (shouldDeferLiveInputDerivedWork(transaction)) {
+    if (isMappedLiveInputRefresh(transaction) || shouldDeferLiveInputDerivedWork(transaction)) {
       const mapped = transaction.docChanged
         ? previous.map((block) => mapDetailsBlock(block, transaction))
         : previous;

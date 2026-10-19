@@ -251,6 +251,12 @@ try {
             const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
             // Keep input and Find in one task so the derived input refresh cannot
             // finish first and conceal an outdated match cache or cell range.
+            // Pin the ordering where an outside click's post-click cleanup is
+            // still queued when Find returns to a newly chosen table cell.
+            const outside = view.contentDOM.querySelector('.cm-line')!;
+            for (const type of ['pointerdown', 'pointerup']) outside.dispatchEvent(new PointerEvent(type, {
+              bubbles: true, button: 0, pointerId: 91
+            }));
             view.focus();
             view.dispatch({changes: {from: 0, insert: 'Added text\n\n'}, selection: {anchor: 12}, userEvent: 'input.type'});
             document.querySelector<HTMLButtonElement>('[data-action="find"]')!.click();
@@ -266,8 +272,15 @@ try {
           assert.deepEqual(immediateSearch, {focused: true, start: 0, end: query.length, selected: query},
             'Find immediately after typing must use the accepted document and current table cell');
           await frame.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-          assert.equal(await frame.$eval(selector, cell => document.activeElement === cell), true,
-            'the derived refresh must retain the searched cell focus');
+          const refreshedFocus = await frame.$eval(selector, cell => ({
+            retained: document.activeElement === cell,
+            connected: cell.isConnected,
+            editing: cell.parentElement?.classList.contains('is-editing'),
+            activeTag: document.activeElement?.tagName,
+            activeClass: document.activeElement?.className
+          }));
+          assert.equal(refreshedFocus.retained, true,
+            `the derived refresh must retain the searched cell focus (${mode}/${query}: ${JSON.stringify(refreshedFocus)})`);
         }
         const unchangedQuery = await frame.evaluate(() => {
           const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));

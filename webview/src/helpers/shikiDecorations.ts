@@ -23,6 +23,7 @@ import {
 import {
   isLiveInputDerivedWorkRefresh,
   isLiveInputDerivedWorkPending,
+  isMappedLiveInputRefresh,
   mapLiveInputDerivedDecorations,
   shouldDeferLiveInputDerivedWork,
   usesLargeDocumentDerivedWorkBudget
@@ -416,7 +417,7 @@ const shikiPlugin = ViewPlugin.fromClass(
           );
         }
       }
-      if (update.transactions.some(shouldDeferLiveInputDerivedWork)) {
+      if (update.transactions.some(transaction => isMappedLiveInputRefresh(transaction) || shouldDeferLiveInputDerivedWork(transaction))) {
         return;
       }
       const refreshed = update.transactions.some((transaction) =>

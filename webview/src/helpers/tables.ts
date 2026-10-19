@@ -3574,6 +3574,11 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     let pendingOutsidePointerId: number | null = null;
     let pendingTableSwitchPointerId: number | null = null;
     let outsidePointerExitTimer: number | null = null;
+    const cancelOutsidePointerExit = () => {
+      pendingOutsidePointerId = null;
+      if (outsidePointerExitTimer !== null) window.clearTimeout(outsidePointerExitTimer);
+      outsidePointerExitTimer = null;
+    };
 
     const applyPointerTransition = (
       transition: TableCellSelectionTransition,
@@ -3618,6 +3623,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
     const onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0) return;
+      cancelOutsidePointerExit();
       const modifierHref = getModifierLinkActivationHref(event);
       if (modifierHref) {
         event.preventDefault();
@@ -3932,6 +3938,10 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     table.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('keydown', onDocumentKeyDown, true);
     table.addEventListener('focusout', onFocusOut);
+    // Find and other explicit navigation can return to a cell before a prior
+    // outside click's deferred commit runs. That old gesture must not end the
+    // new native editing session or blur its selection on the following frame.
+    table.addEventListener('focusin', cancelOutsidePointerExit);
     document.addEventListener('pointerdown', onDocumentPointerDown, true);
     document.addEventListener('pointermove', onDocumentPointerMove, true);
     document.addEventListener('pointerup', onDocumentPointerEnd, true);
@@ -3966,6 +3976,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       table.removeEventListener('keydown', onKeyDown, true);
       document.removeEventListener('keydown', onDocumentKeyDown, true);
       table.removeEventListener('focusout', onFocusOut);
+      table.removeEventListener('focusin', cancelOutsidePointerExit);
       document.removeEventListener('pointerdown', onDocumentPointerDown, true);
       document.removeEventListener('pointermove', onDocumentPointerMove, true);
       document.removeEventListener('pointerup', onDocumentPointerEnd, true);

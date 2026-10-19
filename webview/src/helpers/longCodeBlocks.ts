@@ -12,6 +12,7 @@ import {
 } from './blockIndent';
 import {
   mapLiveInputDerivedDecorations,
+  isMappedLiveInputRefresh,
   shouldDeferLiveInputDerivedWork
 } from '../editor/liveInputDerivedWork';
 import { isExternalDocumentPresentation } from '../editor/externalDocumentPresentation';
@@ -580,7 +581,7 @@ const longCodeBlockStateField = StateField.define<LongCodeBlockState>({
     if (isExternalDocumentPresentation(transaction)) {
       return buildLongCodeState(transaction.state);
     }
-    if (shouldDeferLiveInputDerivedWork(transaction)) {
+    if (isMappedLiveInputRefresh(transaction) || shouldDeferLiveInputDerivedWork(transaction)) {
       return updateDeferredLongCodeState(value, transaction);
     }
     // Source descriptors do not depend on the caret or passive presentation

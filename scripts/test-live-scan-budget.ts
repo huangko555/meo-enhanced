@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { EditorState, RangeSet, StateEffect, Text, Transaction } from '@codemirror/state';
 import { editorMarkdownLanguage, getLivePresentationDecorations, liveModeExtensions, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from '../webview/src/liveMode';
-import { ensureSyntaxTree } from '@codemirror/language';
+import { ensureSyntaxTree, syntaxTree, syntaxTreeAvailable } from '@codemirror/language';
 import { parseFootnotes } from '../webview/src/helpers/footnotes';
 import { parseFrontmatter } from '../webview/src/helpers/frontmatter';
 import { documentLines } from '../webview/src/helpers/documentLines';
@@ -13,6 +13,53 @@ import { parseMixed, Tree } from '@lezer/common';
 import { javascriptLanguage } from '@codemirror/lang-javascript';
 import { imagePresentationFactoryFacet, type ImagePresentationFactory } from '../webview/src/editor/imagePresentation';
 import { longCodeBlockSessionUiExtension } from '../webview/src/helpers/longCodeBlocks';
+import { hasMappedLiveInputPresentation } from '../webview/src/editor/liveInputDerivedWork';
+
+{
+  const text = 'Selected words\n\nReference[^note].\n\n[^note]: Definition.\n\n' + '**Distant paragraph**.\n\n'.repeat(4_100);
+  const state = EditorState.create({ doc: text, selection: { anchor: 0, head: 8 },
+    extensions: liveModeExtensions({ largeDocument: true }) });
+  const before = getLivePresentationDecorations(state);
+  assert.ok(syntaxTree(state).length < state.doc.length && syntaxTreeAvailable(state, state.doc.length),
+    'the selected-range fixture must have completed but unpublished Markdown');
+  const published = state.update({}).state;
+  assert.equal(syntaxTree(published).length, published.doc.length);
+  assert.equal(getLivePresentationDecorations(published), before,
+    'publishing unchanged Markdown with a selected range must retain the canonical presentation and its widget identities');
+  assert.ok(published.selection.eq(state.selection), 'syntax publication must preserve the active search selection');
+  const unknown = state.update({ effects: StateEffect.define<boolean>().of(true) }).state;
+  assert.notEqual(getLivePresentationDecorations(unknown), before,
+    'an unknown effect must still invalidate presentation even when syntax publishes in the same transaction');
+}
+
+{
+  const state = EditorState.create({ doc: 'EDIT\n\n' + '**Distant paragraph**.\n\n'.repeat(4_100),
+    selection: { anchor: 4 }, extensions: liveModeExtensions({ largeDocument: true }) });
+  const input = state.update({ changes: { from: 4, insert: 'x' }, selection: { anchor: 5 },
+    annotations: Transaction.userEvent.of('input.type') }).state;
+  assert.ok(hasMappedLiveInputPresentation(input), 'accepted prose input must carry a complete mapped presentation');
+  const unchanged = input.update({}).state;
+  assert.equal(getLivePresentationDecorations(unchanged), getLivePresentationDecorations(input),
+    'an empty publication must not rebuild already mapped presentation');
+  assert.ok(hasMappedLiveInputPresentation(unchanged), 'publication must retain the mapping proof needed by deferred structure consumers');
+  const unknown = unchanged.update({ effects: StateEffect.define<boolean>().of(true) }).state;
+  assert.equal(hasMappedLiveInputPresentation(unknown), false, 'unknown resource choices must retire the mapped-input proof');
+}
+
+{
+  const text = 'EDIT\n\n```js\nlet value = 1;\n```\n\n' + '**Distant paragraph**.\n\n'.repeat(500);
+  const from = text.indexOf('value') + 5;
+  let state = EditorState.create({ doc: text, selection: { anchor: from }, extensions: liveModeExtensions({ largeDocument: true }) });
+  state = state.update({ changes: { from, insert: 'x' }, selection: { anchor: from + 1 },
+    annotations: Transaction.userEvent.of('input.type') }).state;
+  assert.equal(hasMappedLiveInputPresentation(state), false,
+    'a locally rebuilt code block still requires its other content consumers to refresh');
+  state = state.update({ selection: { anchor: 4 } }).state;
+  state = state.update({ changes: { from: 4, insert: 'x' }, selection: { anchor: 5 },
+    annotations: Transaction.userEvent.of('input.type') }).state;
+  assert.equal(hasMappedLiveInputPresentation(state), false,
+    'a later plain key must not certify earlier unrefreshed structural edits');
+}
 
 {
   const text = 'EDIT\n\n' + '```json\n{ "value": 1 }\n```\n\n'.repeat(600);

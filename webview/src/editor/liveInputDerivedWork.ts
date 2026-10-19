@@ -248,16 +248,22 @@ export function markLiveInputPresentationMapped(state: EditorState): void {
   mappedInputPresentations.add(state);
 }
 
+export function hasMappedLiveInputPresentation(state: EditorState): boolean {
+  return mappedInputPresentations.has(state);
+}
+
 /** A refresh still runs its consumers, but need not rebuild already mapped structure. */
 export function isMappedLiveInputRefresh(transaction: Transaction): boolean {
-  return isLiveInputDerivedWorkRefresh(transaction) && mappedInputPresentations.has(transaction.startState)
+  return isLiveInputDerivedWorkRefresh(transaction) && hasMappedLiveInputPresentation(transaction.startState)
     && !transaction.docChanged && !transaction.reconfigured && transaction.startState.selection.eq(transaction.state.selection)
     && transaction.effects.every(effect => effect.is(refreshLiveInputDerivedWorkEffect))
     && syntaxTree(transaction.startState) === syntaxTree(transaction.state);
 }
 
 export function shouldDeferLiveInputDerivedWork(transaction: Transaction): boolean {
-  if (isLiveInputDerivedWorkRefresh(transaction)) return isMappedLiveInputRefresh(transaction);
+  // Text consumers (Find, Git diff, conflict contents) must read the accepted
+  // source even when its structural presentation was already mapped exactly.
+  if (isLiveInputDerivedWorkRefresh(transaction)) return false;
   // Settling only retires an already applied generation. It must not rebuild
   // presentation a second time after accepted consumers finish.
   if (transaction.effects.some((effect) => effect.is(settleLiveInputDerivedWorkEffect))) return true;

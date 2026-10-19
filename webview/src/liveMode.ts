@@ -156,6 +156,9 @@ import {
   isLiveInputDerivedWorkRefresh,
   isLiveInputNestedProjection,
   markLiveInputPresentationMapped,
+  hasMappedLiveInputPresentation,
+  isLiveInputDerivedWorkPending,
+  isMappedLiveInputRefresh,
   liveInputDerivedWorkExtensions,
   mapLiveInputDerivedDecorations,
   replaceLiveInputNestedDecorationEffect,
@@ -3763,12 +3766,12 @@ function hasUnchangedLivePresentationContext(transaction: Transaction): boolean 
       || transaction.startState.selection.eq(transaction.state.selection));
 }
 
-function plainPresentationParagraph(state: EditorState, tree: Tree, position: number): SyntaxNode | null {
+function plainPresentationParagraph(state: EditorState, tree: Tree, position: number, nested = false): SyntaxNode | null {
   let node = tree.resolveInner(position, -1);
   while (node.parent && node.name !== 'Paragraph') node = node.parent;
   // These raw syntaxes have presentation outside the Markdown tree. Bound this
   // proof so a huge paragraph cannot add a full text scan to every interaction.
-  if (node.name !== 'Paragraph' || node.firstChild || node.parent?.name !== 'Document'
+  if (node.name !== 'Paragraph' || node.firstChild || (!nested && node.parent?.name !== 'Document')
     || node.to - node.from > 4_096
     || /[#$:<>\[\]\\|]/.test(state.doc.sliceString(node.from, node.to))) return null;
   return node;
@@ -3922,7 +3925,14 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
   )));
   liveDecorationMetadata.set(state, { complete: true,
     checkpoint: mapped.rebasedWidgets ? undefined : liveDecorationMetadata.get(state)?.checkpoint });
-  markLiveInputPresentationMapped(state);
+  // Rebuilding a closed code/image/formula block proves canonical correctness,
+  // not that every other structure consumer has already accepted its contents.
+  // A later plain key must also retain any earlier unrefreshed structural edit.
+  const oldParagraph = !lineChanged && plainPresentationParagraph(before, oldTree, change.to, true);
+  const newParagraph = !lineChanged && plainPresentationParagraph(state, newTree, change.nextTo, true);
+  if ((!isLiveInputDerivedWorkPending(before) || hasMappedLiveInputPresentation(before))
+    && oldParagraph && newParagraph && oldParagraph.from === newParagraph.from
+    && transaction.changes.mapPos(oldParagraph.to, 1) === newParagraph.to) markLiveInputPresentationMapped(state);
   completeLiveDecorationSets.add(result);
   return result;
 }
@@ -3992,6 +4002,19 @@ const liveDecorationField = StateField.define<DecorationSet>({
       }
       return decorations;
     }
+    // Publishing completed syntax changes neither the source nor its selection.
+    // Preserve the full presentation, including an active search range and its
+    // focused widgets, when the complete outer Markdown is identical.
+    if (!transaction.docChanged && !transaction.selection && !transaction.reconfigured
+      && transaction.effects.every(effect => isLiveInputDerivedWorkBookkeeping(effect) || isEditorScrollEffect(effect))
+      && liveDecorationMetadata.get(transaction.startState)?.complete
+      && (!syntaxTreeChanged(transaction) || syntaxTreeAvailable(transaction.startState, transaction.startState.doc.length)
+        && syntaxTreeAvailable(transaction.state, transaction.state.doc.length)
+        && hasSameLiveMarkdownSyntax(resolvedSyntaxTree(transaction.startState, 0), resolvedSyntaxTree(transaction.state, 0)))) {
+      liveDecorationMetadata.set(transaction.state, liveDecorationMetadata.get(transaction.startState)!);
+      if (hasMappedLiveInputPresentation(transaction.startState)) markLiveInputPresentationMapped(transaction.state);
+      return decorations;
+    }
     if (!transaction.docChanged && !transaction.selection && !transaction.reconfigured
       && transaction.effects.length > 0 && transaction.effects.every(isEditorScrollEffect)) {
       const previous = liveDecorationMetadata.get(transaction.startState);
@@ -4044,7 +4067,9 @@ const liveDecorationField = StateField.define<DecorationSet>({
           // DOM is retained. A prior checkpoint must not reuse that old widget.
           const previous = liveDecorationMetadata.get(transaction.state);
           liveDecorationMetadata.set(transaction.state, { checkpoint: mapped.rebasedWidgets ? undefined : previous?.checkpoint, complete: true });
-          markLiveInputPresentationMapped(transaction.state);
+          if (!isLiveInputDerivedWorkPending(transaction.startState) || hasMappedLiveInputPresentation(transaction.startState)) {
+            markLiveInputPresentationMapped(transaction.state);
+          }
           if (!isEmptyDecorationSet(mapped.decorations)) completeLiveDecorationSets.add(mapped.decorations);
           return mapped.decorations;
         }
@@ -4311,7 +4336,7 @@ const liveLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
   },
   update(markers: RangeSet<GutterMarker>, transaction: Transaction): RangeSet<GutterMarker> {
     if (localLiveSelectionUpdates.has(transaction.state)) return markers;
-    if (shouldDeferLiveInputDerivedWork(transaction)) {
+    if (isMappedLiveInputRefresh(transaction) || shouldDeferLiveInputDerivedWork(transaction)) {
       return transaction.docChanged ? markers.map(transaction.changes) : markers;
     }
     const renderedBlockPresentationChanged = transaction.effects.some((effect) => (
@@ -4353,7 +4378,7 @@ function buildStyledLineNumberMarkers(state: EditorState): RangeSet<GutterMarker
 const styledLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
   create: buildStyledLineNumberMarkers,
   update(markers, transaction) {
-    if (shouldDeferLiveInputDerivedWork(transaction)) return transaction.docChanged ? markers.map(transaction.changes) : markers;
+    if (isMappedLiveInputRefresh(transaction) || shouldDeferLiveInputDerivedWork(transaction)) return transaction.docChanged ? markers.map(transaction.changes) : markers;
     if (!transaction.docChanged && !isLiveInputDerivedWorkRefresh(transaction)) return markers;
     return buildStyledLineNumberMarkers(transaction.state);
   },
