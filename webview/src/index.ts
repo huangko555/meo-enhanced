@@ -1467,6 +1467,15 @@ const liveButton = modeControl.getButton('live');
 const sourceButton = modeControl.getButton('source');
 const previewButton = modeControl.getButton('preview');
 
+// This is presentation of the existing mode intent, not another mode owner.
+const presentModePreparation = (mode: 'live' | 'source' | null): void => {
+  for (const name of ['live', 'source'] as const) {
+    const button = modeControl.getButton(name);
+    if (name === mode) button.setAttribute('aria-busy', 'true');
+    else button.removeAttribute('aria-busy');
+  }
+};
+
 const sourcePreviewButton = document.createElement('button');
 sourcePreviewButton.type = 'button';
 sourcePreviewButton.className = 'format-button source-preview-button';
@@ -3045,44 +3054,50 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     const isCurrent = () => editor === preparingEditor
       && editorModeApplication.getState().lifecycle === 'ready'
       && editorModeApplication.getState().intentId === intent;
-    const prepared = mode === 'source'
-      ? await preparingEditor.prepareSourceSyntax(isCurrent)
-      : await preparingEditor.prepareLiveSyntax(isCurrent);
-    if (!prepared || !isCurrent()) return;
-    // Preview exits keep the old Preview as a cover while the editor changes
-    // mode. A Source split defers restoration until the covered editor already
-    // occupies its final grid column.
-    const deferViewportRestore = deferEditorViewportUntilPreviewExit
-      && pendingEditorViewportAfterPreviewExit === viewport;
-    editor.setMode(mode, viewport, { deferViewportRestore });
-    const preparingSourceSplit = mode === 'source'
-      && editorSurface.hasAttribute('data-source-preview-preparing');
-    if (preparingSourceSplit && pendingEditorViewportAfterPreviewExit) {
-      // Prepare only the covered editor. The visible full Preview remains the
-      // transition cover until its own final split geometry is committed.
-      restorePendingEditorViewportAfterPreviewExit({
-        restoreCaptureSurface: false,
-        consume: false
-      });
-      (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
+    presentModePreparation(mode);
+    try {
+      const prepared = mode === 'source'
+        ? await preparingEditor.prepareSourceSyntax(isCurrent)
+        : await preparingEditor.prepareLiveSyntax(isCurrent);
+      if (!prepared || !isCurrent()) return;
+      // Preview exits keep the old Preview as a cover while the editor changes
+      // mode. A Source split defers restoration until the covered editor already
+      // occupies its final grid column.
+      const deferViewportRestore = deferEditorViewportUntilPreviewExit
+        && pendingEditorViewportAfterPreviewExit === viewport;
+      editor.setMode(mode, viewport, { deferViewportRestore });
+      const preparingSourceSplit = mode === 'source'
+        && editorSurface.hasAttribute('data-source-preview-preparing');
+      if (preparingSourceSplit && pendingEditorViewportAfterPreviewExit) {
+        // Prepare only the covered editor. The visible full Preview remains the
+        // transition cover until its own final split geometry is committed.
+        restorePendingEditorViewportAfterPreviewExit({
+          restoreCaptureSurface: false,
+          consume: false
+        });
+        (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
+      }
+      if (mode === 'source' && pendingSourcePreviewReveal) {
+        (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
+        markSourcePreviewEditorReady();
+      }
+      if (
+        !previewController.host.hidden &&
+        (mode === 'live' || (mode === 'source' && editorHost.inert))
+      ) {
+        await editor.whenVisiblePresentationReady(LIVE_PRESENTATION_REVEAL_WAIT_MS);
+      }
+      changesReviewMode = mode;
+      syncGitDiffDetails();
+      syncGitDiffLineHighlights();
+      if (outlineController.isVisible()) outlineController.refresh();
+      failureNotice.clearFailureNotice(editorNoticeIssue.editorModeTransition);
+      if (mode === 'live') failureNotice.clearFailureNotice(editorNoticeIssue.liveModeUnavailable);
+      failureNotice.updateEditorNotice();
+    } finally {
+      // An older preparation must not clear the newer intent's indicator.
+      if (isCurrent()) presentModePreparation(null);
     }
-    if (mode === 'source' && pendingSourcePreviewReveal) {
-      (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
-      markSourcePreviewEditorReady();
-    }
-    if (
-      !previewController.host.hidden &&
-      (mode === 'live' || (mode === 'source' && editorHost.inert))
-    ) {
-      await editor.whenVisiblePresentationReady(LIVE_PRESENTATION_REVEAL_WAIT_MS);
-    }
-    changesReviewMode = mode;
-    syncGitDiffDetails();
-    syncGitDiffLineHighlights();
-    if (outlineController.isVisible()) outlineController.refresh();
-    failureNotice.clearFailureNotice(editorNoticeIssue.editorModeTransition);
-    if (mode === 'live') failureNotice.clearFailureNotice(editorNoticeIssue.liveModeUnavailable);
-    failureNotice.updateEditorNotice();
   },
   setPreviewActive(active, presentation) {
     const atomicSplit = !active
@@ -3144,6 +3159,7 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     outlineController.refreshAppearance();
   },
   presentModeControl(mode) {
+    presentModePreparation(null);
     root.dataset.mode = mode;
     refreshDocumentActionButtons();
     outlineController.refreshAppearance();
@@ -3260,6 +3276,7 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     return shouldAutoFallbackToSourceForLiveError(error) ? 'live-incompatible' : 'transient-live';
   },
   dispose() {
+    presentModePreparation(null);
     editor?.destroy?.();
     editor = null;
   }
