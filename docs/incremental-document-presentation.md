@@ -292,3 +292,31 @@ requires at most 1,000 sibling advances rather than visiting all preceding code.
 Git gutter rendering now resolves a source line only when a marker needs it.
 Production caret regression with a ready baseline reads 109 rows across two
 selections in a 24,001-line document, instead of enumerating every row per click.
+
+Outer Markdown readiness is now an explicit per-tree certificate written by a
+public parser wrapper before the mixed-language pass. It requires complete input
+coverage, EOF and an unstopped outer pass. A same-length unknown tree, stopped
+prefix or suspended embedded grammar cannot invent this proof. Live completeness
+checks use that certificate while retaining their existing outside-edit and
+same-structure comparisons. A state-owned preparation receipt is reset whenever
+another outer pass starts, and only requests publication of the actual parser
+tree; it never certifies a lagging tree.
+
+Budgeted embedded code and HTML parsers use the documented ParseContext viewport,
+skipUntilInView and getSkippingParser APIs to defer offscreen languages. The
+original grammar, mounts and language data are retained, and normal documents
+still parse every embedded language. During explicit whole-Markdown preparation,
+an override preserves the real editing viewport because ensureSyntaxTree otherwise
+temporarily expands it to EOF. Publication requests the editing viewport, so it
+does not invalidate all the skipped ranges again. Preparation publishes once
+after structure is complete, rather than causing Source observers to repaint on
+every slice. Structural readers then reuse the certified tree without extending
+all its embedded parsers. Switching to Live or refreshing layout no longer issues
+another synchronous 500 ms whole-document parse after that work is ready.
+
+The browser demand regression requires complete Markdown with intentionally
+incomplete distant JavaScript before Live, the original syntax palette after
+scrolling there and exact source across mode changes. Suspended-language and
+partial-tree rejection cases are separate deterministic checks. Initial Live
+profiling still shows substantial outer parsing and presentation work; these
+changes do not establish the final first-viewport or native input targets.

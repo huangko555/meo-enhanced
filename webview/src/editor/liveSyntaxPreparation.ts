@@ -1,8 +1,17 @@
-import { ensureSyntaxTree, forceParsing, syntaxTreeAvailable } from '@codemirror/language';
+import { ensureSyntaxTree, forceParsing, syntaxTree } from '@codemirror/language';
 import type { EditorView } from '@codemirror/view';
+import { hasPreparedMarkdownStructure, isCompleteMarkdownStructure, markdownStructureAvailable, withMarkdownPreparationViewport } from './markdownStructure';
 
 const PARSE_SLICE_MS = 8;
 const PREPARATION_DEADLINE_MS = 10_000;
+
+/** Layout/mode changes must not force every embedded language to finish after
+ * structural preparation has already made the document ready to edit. */
+export function refreshLiveSyntax(view: EditorView, bounded: boolean): void {
+  if (!bounded) { forceParsing(view, view.state.doc.length, 500); return; }
+  if (markdownStructureAvailable(view.state)) return;
+  withMarkdownPreparationViewport(view.state, view.viewport, () => forceParsing(view, view.state.doc.length, PARSE_SLICE_MS));
+}
 
 function yieldForPresentation(): Promise<void> {
   const scheduler = (globalThis as typeof globalThis & {
@@ -20,15 +29,19 @@ export async function prepareLiveSyntax(view: EditorView, isCurrent: () => boole
   const deadline = performance.now() + PREPARATION_DEADLINE_MS;
   while (isCurrent()) {
     const state = view.state;
-    const tree = ensureSyntaxTree(state, state.doc.length, PARSE_SLICE_MS);
+    if (isCompleteMarkdownStructure(syntaxTree(state), state.doc.length)) return true;
+    withMarkdownPreparationViewport(state, view.viewport, () => {
+      ensureSyntaxTree(state, state.doc.length, PARSE_SLICE_MS);
+      // Avoid publishing every slice: Source subscribers would otherwise turn
+      // preparation into repeated presentation and embedded-parser work.
+      // Publishing must request the editing viewport. A second full-document
+      // request would invalidate every deliberately skipped code range again.
+      if (hasPreparedMarkdownStructure(state) || markdownStructureAvailable(state)) forceParsing(view, view.viewport.to, 0);
+    });
     if (!isCurrent()) return false;
-    if (tree && syntaxTreeAvailable(state, state.doc.length)) {
-      // Publish once before Live StateFields are installed. Both modes retain
-      // this same language, so reconfiguration can reuse its completed parse.
-      forceParsing(view, state.doc.length, 0);
-      if (isCurrent() && view.state.doc === state.doc
-        && syntaxTreeAvailable(view.state, view.state.doc.length)) return true;
-    }
+    // The outer Markdown tree owns complete document semantics. Embedded code
+    // languages can finish on demand after the first editable Live surface.
+    if (view.state.doc === state.doc && markdownStructureAvailable(view.state)) return true;
     if (performance.now() >= deadline) throw new Error('Live syntax preparation timed out');
     await yieldForPresentation();
   }

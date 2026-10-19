@@ -1,5 +1,15 @@
 {
   "separate": {
+    "scripts/test-mixed-code-viewport-demand.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-mixed-code-viewport-demand.ts",
+      "reason": "Real editor prepares complete outer Markdown without distant code parsing, keeps source intact across modes and recovers the same code palette when scrolling to skipped grammar."
+    },
+    "scripts/test-markdown-structure.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-markdown-structure.ts",
+      "reason": "Checks explicit complete outer-Markdown proof, incomplete-tree rejection, deferred embedded languages and viewport demand without weakening ordinary parsing."
+    },
     "scripts/test-live-gutter-read-budget.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-live-gutter-read-budget.ts",

@@ -10,7 +10,9 @@ import { undoDepth } from '@codemirror/commands';
 import { blockStickyHeaderExtension } from './helpers/blockStickyHeader';
 import { countColumn, RangeSetBuilder, StateEffect, StateField, EditorState, type ChangeDesc, type Range, type RangeSet, type Extension, type EditorSelection, type Transaction } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { syntaxHighlighting, syntaxTreeAvailable } from '@codemirror/language';
+import { html } from '@codemirror/lang-html';
+import { LanguageSupport, syntaxHighlighting } from '@codemirror/language';
+import { certifyMarkdownStructure, markdownStructureAvailable, viewportCodeLanguage } from './editor/markdownStructure';
 import {
   Decoration,
   EditorView,
@@ -2025,7 +2027,7 @@ function buildDecorationRanges(state: EditorState, previous?: DecorationSet, cha
   // partial presentation whose first caret movement must rebuild the file.
   const preparedTree = resolvedSyntaxTree(state, 0);
   if (!scope && usesLargeDocumentDerivedWorkBudget(state) && preparedTree !== tree
-    && syntaxTreeAvailable(state, state.doc.length) && !hasSameLiveMarkdownSyntax(tree, preparedTree)) {
+    && markdownStructureAvailable(state) && !hasSameLiveMarkdownSyntax(tree, preparedTree)) {
     return buildDecorationRanges(state, previous, changes);
   }
 
@@ -2601,7 +2603,7 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
   if (usesLargeDocumentDerivedWorkBudget(state)) {
     // Helpers may finish embedded language parsing. Certify the actual outer
     // Markdown structure against the completed parse, never a lagging snapshot.
-    const complete = syntaxTreeAvailable(state, state.doc.length)
+    const complete = markdownStructureAvailable(state)
       && hasSameLiveMarkdownSyntax(tree, resolvedSyntaxTree(state, 0));
     liveDecorationMetadata.set(state, { ...liveDecorationMetadata.get(state), complete });
     if (complete) filtered = prepareLiveWidgetPositions(filtered, !!getLivePresentationBand(state));
@@ -3631,12 +3633,12 @@ function rebuildLiveSelectionBlocks(decorations: DecorationSet, transaction: Tra
   for (const selection of [before.selection, state.selection]) for (const range of selection.ranges) {
     if (state.doc.lineAt(range.to).number - state.doc.lineAt(range.from).number > 128) return;
   }
-  const tree = syntaxTreeAvailable(state, state.doc.length) ? resolvedSyntaxTree(state, 0) : currentSyntaxTree(state);
+  const tree = markdownStructureAvailable(state) ? resolvedSyntaxTree(state, 0) : currentSyntaxTree(state);
   if (tree.length !== state.doc.length) return;
   // A caret transaction can publish the already completed parse too. Only
   // accept that publication when both complete outer Markdown trees agree;
   // a genuinely extended/inconclusive syntax result still takes the full path.
-  if (syntaxTreeChanged(transaction) && (!syntaxTreeAvailable(before, before.doc.length)
+  if (syntaxTreeChanged(transaction) && (!markdownStructureAvailable(before)
     || !hasSameLiveMarkdownSyntax(resolvedSyntaxTree(before, 0), tree))) return;
   return withMarkdownSyntaxSnapshot(state, tree, () => rebuildLiveSelectionWithSyntax(decorations, transaction, tree));
 }
@@ -3850,7 +3852,7 @@ function canMapUnchangedProseDecorations(decorations: DecorationSet, transaction
   // same complete presentation while their published syntax is still a prefix.
   if (!hasMappedLiveInputPresentation(transaction.startState)
     && (before.length !== transaction.startState.doc.length
-      || !syntaxTreeAvailable(transaction.startState, before.length))) return false;
+      || !markdownStructureAvailable(transaction.startState))) return false;
   let valid = true;
   transaction.changes.iterChangedRanges((from, to, nextFrom, nextTo) => {
     const previous = plainPresentationParagraph(transaction.startState, before, to, true);
@@ -3899,8 +3901,8 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
   // Foundation readers can finish parsing without publishing a new language
   // state. Use that already completed tree; a lagging published snapshot must
   // not retire the complete presentation and force a later full rebuild.
-  const oldTree = syntaxTreeAvailable(before, before.doc.length) ? resolvedSyntaxTree(before, 0) : currentSyntaxTree(before);
-  let newTree = syntaxTreeAvailable(state, state.doc.length) ? resolvedSyntaxTree(state, 0) : currentSyntaxTree(state);
+  const oldTree = markdownStructureAvailable(before) ? resolvedSyntaxTree(before, 0) : currentSyntaxTree(before);
+  let newTree = markdownStructureAvailable(state) ? resolvedSyntaxTree(state, 0) : currentSyntaxTree(state);
   // An accepted inline edit can exhaust CodeMirror's update slice just before
   // EOF. Finish only that small remainder once; nested readers below still use
   // one snapshot. A genuinely incomplete parse retains the full proof checks.
@@ -3974,7 +3976,7 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
     if (previous.name !== next.name || previous.from !== next.from || transaction.changes.mapPos(previous.to, 1) !== next.to
       || oldLine.text.match(/^[ \t]*/)![0] !== newLine.text.match(/^[ \t]*/)![0]
       || next.to - next.from > 32_768) return;
-    if (!syntaxTreeAvailable(state, state.doc.length)
+    if (!markdownStructureAvailable(state)
       && !hasSameLiveMarkdownOutsideBlock(oldTree, newTree, transaction.changes, previous, next)) return;
   }
   // A previously empty/invalid marker can gain a label/body without adding any
@@ -4115,8 +4117,8 @@ const liveDecorationField = StateField.define<DecorationSet>({
       && (transaction.effects.every(effect => isLiveInputDerivedWorkBookkeeping(effect) || isEditorScrollEffect(effect))
         || isGitOnlyPresentationUpdate(transaction))
       && liveDecorationMetadata.get(transaction.startState)?.complete
-      && (!syntaxTreeChanged(transaction) || syntaxTreeAvailable(transaction.startState, transaction.startState.doc.length)
-        && syntaxTreeAvailable(transaction.state, transaction.state.doc.length)
+      && (!syntaxTreeChanged(transaction) || markdownStructureAvailable(transaction.startState)
+        && markdownStructureAvailable(transaction.state)
         && hasSameLiveMarkdownSyntax(resolvedSyntaxTree(transaction.startState, 0), resolvedSyntaxTree(transaction.state, 0)))) {
       liveDecorationMetadata.set(transaction.state, liveDecorationMetadata.get(transaction.startState)!);
       if (hasMappedLiveInputPresentation(transaction.startState)) markLiveInputPresentationMapped(transaction.state);
@@ -4506,11 +4508,16 @@ const styledLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
 
 // Both modes edit the same grammar. Stable language identity lets CodeMirror
 // retain its incremental parse when only presentation extensions change.
+const markdownHtmlLanguage = html({ matchClosingTags: false });
 export const editorMarkdownLanguage = markdown({
   base: markdownLanguage,
   addKeymap: false,
-  codeLanguages: resolveCodeLanguage,
-  extensions: [...inlineMarkdownExtensions,
+  htmlTagLanguage: new LanguageSupport(viewportCodeLanguage(markdownHtmlLanguage.language), markdownHtmlLanguage.support),
+  codeLanguages: info => {
+    const language = resolveCodeLanguage(info);
+    return language ? viewportCodeLanguage(language) : null;
+  },
+  extensions: [certifyMarkdownStructure, ...inlineMarkdownExtensions,
     { props: [sourceMarkdownHighlightProps] }, { remove: ['Emoji'] }]
 });
 

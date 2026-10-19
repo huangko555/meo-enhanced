@@ -2,6 +2,7 @@ import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { EditorState, type Transaction } from '@codemirror/state';
 import type { SyntaxNode, Tree } from '@lezer/common';
 import { isInsideFrontmatter, parseFrontmatter } from './frontmatter';
+import { isCompleteMarkdownStructure } from '../editor/markdownStructure';
 
 /** Returns CodeMirror's published, possibly partial tree without extending the parse synchronously. */
 export function currentSyntaxTree(state: EditorState): ReturnType<typeof syntaxTree> {
@@ -41,6 +42,8 @@ export function withMarkdownSyntaxSnapshot<T>(state: EditorState, tree: Tree, re
 export function resolvedSyntaxTree(state: EditorState, timeout: number = 50): Tree {
   const snapshot = syntaxSnapshots.get(state);
   if (snapshot) return snapshot;
+  const published = syntaxTree(state);
+  if (isCompleteMarkdownStructure(published, state.doc.length)) return published;
   return ensureSyntaxTree(state, state.doc.length, timeout) ?? syntaxTree(state);
 }
 export function headingLevelFromName(name: string): number | null {

@@ -27,7 +27,7 @@ import { indentUnit, syntaxTree, forceParsing } from '@codemirror/language';
 import { sourceHighlightStyle } from './theme';
 import { viewportSyntaxHighlighting } from './editor/viewportSyntaxHighlighting';
 import { prepareSourceSyntax, sourceSyntax, sourceSyntaxPreparation } from './helpers/sourceSyntax';
-import { prepareLiveSyntax } from './editor/liveSyntaxPreparation';
+import { prepareLiveSyntax, refreshLiveSyntax } from './editor/liveSyntaxPreparation';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
 import type { UiLanguage } from '../../src/foundation/uiLanguage';
 import { longCodeBlockEnabledFacet } from './helpers/longCodeBlocks';
@@ -3983,10 +3983,7 @@ export function createEditor({
           releaseMermaidPresentationResources = acquiredMermaidPresentationResources;
         }
         if (nextMode === 'live') {
-          // Live decorations consume the full Markdown tree. Bound the synchronous
-          // attempt; a false result keeps the published partial tree, and the Live
-          // field refreshes when CodeMirror publishes later parser transactions.
-          forceParsing(view, view.state.doc.length, 500);
+          refreshLiveSyntax(view, boundedEditorWork);
           tableColumnWidthAdapter.adapter.acquire();
           mermaidDocumentPreloader?.schedule(view.state);
         }
@@ -4407,7 +4404,7 @@ export function createEditor({
     refreshLayout() {
       view.requestMeasure();
       if (currentMode === 'live') {
-        forceParsing(view, view.state.doc.length, 500);
+        refreshLiveSyntax(view, boundedEditorWork);
       }
       emitSelectionChange();
     },
