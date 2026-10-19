@@ -219,3 +219,17 @@ whole-document StateField. Input in a 9,000-row code fixture originally performe
 background styling when mounted. The existing long-code interaction and Live
 scan-budget suites still pass. Hidden or inactive Preview source markers retain
 source intent without reading their iframe document/layout during editor input.
+
+Outer Markdown comparisons now skip a shared immutable Lezer subtree after
+checking its type and mapped bounds. A subtree spanning another edit must still
+be traversed, including compensating insert/delete edits with unchanged outer
+endpoints. The shared 6,000-line rich-paragraph regression originally took
+144,012 cursor steps across two comparisons and now takes fewer than 200.
+
+Editing work budgets are independent from the default Source opening and
+lightweight Source syntax policies. A quarter of the shared pressure budget,
+or at least 48 named code fences, activates bounded editor work. This covers
+the short rich-document native failure without changing its initial mode or
+Source palette. Sessions already using a work budget continue assessing growth
+into the larger Source policy. Regression coverage includes full Source tokens,
+composition deferral, exact text/undo, reading position and mode transitions.

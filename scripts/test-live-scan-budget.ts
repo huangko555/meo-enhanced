@@ -20,6 +20,36 @@ import { setHtmlEditingRangeEffect } from '../webview/src/helpers/htmlContent';
 import { parseMergeConflicts } from '../webview/src/helpers/mergeConflicts';
 
 {
+  const left = markdownLanguage.parser.parse('edit\n\n' + '**Shared content** and _style_.\n'.repeat(6_000));
+  const same = new Tree(left.type, left.children, left.positions, left.length);
+  const changes = (await import('@codemirror/state')).ChangeSet.of({ from: 2, insert: 'x' }, left.length);
+  const first = left.children[0] as Tree;
+  const changedFirst = new Tree(first.type, first.children, first.positions, first.length + 1);
+  const changed = new Tree(left.type, [changedFirst, ...left.children.slice(1)], left.positions.map((position, i) => position + (i ? 1 : 0)), left.length + 1);
+  const factory = Tree.prototype.cursor;
+  let steps = 0;
+  Tree.prototype.cursor = function(...args) {
+    const cursor = factory.apply(this, args), next = cursor.next;
+    cursor.next = function(...parameters) { steps++; return next.apply(this, parameters); };
+    return cursor;
+  };
+  try {
+    assert.ok(hasSameLiveMarkdownSyntax(left, same));
+    assert.ok(hasSameLiveMarkdownOutsideBlock(left, changed, changes,
+      { from: 0, to: first.length }, { from: 0, to: first.length + 1 }));
+    assert.ok(steps < 200, `immutable shared Markdown subtrees must not be rescanned: ${steps} cursor steps`);
+    const secondFrom = left.positions[1]!;
+    const multiChange = (await import('@codemirror/state')).ChangeSet.of([
+      { from: 2, insert: 'x' }, { from: secondFrom + 4, insert: 'y' },
+      { from: secondFrom + 30, to: secondFrom + 31, insert: '' }
+    ], left.length);
+    assert.equal(hasSameLiveMarkdownOutsideBlock(left, changed, multiChange,
+      { from: 0, to: first.length }, { from: 0, to: first.length + 1 }), false,
+    'shared identity and matching endpoints cannot hide compensating changes inside a different source subtree');
+  } finally { Tree.prototype.cursor = factory; }
+}
+
+{
   const text = 'Ordinary line\n'.repeat(1000) + '<<<<<<< current\nOne\n=======\nTwo\n>>>>>>> incoming\n';
   const state = EditorState.create({ doc: text });
   const parsed = parseMergeConflicts(state);

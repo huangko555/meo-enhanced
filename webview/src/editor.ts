@@ -426,7 +426,8 @@ export function createEditor({
   let currentSourceLineNumbers = sourceLineNumbers;
   const startMode = initialMode === 'live' ? 'live' : 'source';
   let documentAssessment = assessLargeDocument(text);
-  let largeDocument = documentAssessment.preferSource;
+  let boundedEditorWork = documentAssessment.boundedEditorWork;
+  let lightweightSourceSyntax = documentAssessment.preferSource;
   let unassessedCharacters = 0;
   let assessedLines = documentAssessment.dimensions.lines;
   let assessmentTimer: ReturnType<typeof setTimeout> | null = null;
@@ -507,7 +508,7 @@ export function createEditor({
   let editorDestroyed = false;
 
   function scheduleLargeDocumentAssessment(): void {
-    if (largeDocument || editorDestroyed) return;
+    if ((boundedEditorWork && lightweightSourceSyntax) || editorDestroyed) return;
     const doc = view.state.doc;
     if (!unassessedCharacters) return;
     // Ordinary keystrokes do not scan the whole document. Reassess material
@@ -521,7 +522,7 @@ export function createEditor({
       assessmentTimer = null;
       const assess = (): void => {
         assessmentIdle = null;
-        if (largeDocument || editorDestroyed) return;
+        if ((boundedEditorWork && lightweightSourceSyntax) || editorDestroyed) return;
         if (imeCompositionActive || view.composing || isLiveInputDerivedWorkPending(view.state)
           || viewportController.isUserScrolling() || view.dom.querySelector(':active')) {
           scheduleLargeDocumentAssessment();
@@ -536,13 +537,16 @@ export function createEditor({
         documentAssessment = assessLargeDocument(readDocumentTextProjection(current));
         unassessedCharacters = 0;
         assessedLines = current.lines;
-        if (!documentAssessment.preferSource) return;
+        const nextBoundedEditorWork = boundedEditorWork || documentAssessment.boundedEditorWork;
+        const nextLightweightSource = lightweightSourceSyntax || documentAssessment.preferSource;
+        if (nextBoundedEditorWork === boundedEditorWork && nextLightweightSource === lightweightSourceSyntax) return;
         // Latch for this session. Shrinking or crossing a nearby threshold must
         // not repeatedly rebuild the presentation or change the user's mode.
         viewportController.runAnchorTransaction(null, 'editor', () => {
-          largeDocument = true;
-          view.dispatch({ effects: [sourcePreparationCompartment.reconfigure([]), modeCompartment.reconfigure(
-            currentMode === 'live' ? [shikiCodeHighlight, ...liveModeExtensions({ largeDocument })] : sourceMode(largeDocument)
+          boundedEditorWork = nextBoundedEditorWork;
+          lightweightSourceSyntax = nextLightweightSource;
+          view.dispatch({ effects: [sourcePreparationCompartment.reconfigure(lightweightSourceSyntax ? [] : sourceSyntaxPreparation), modeCompartment.reconfigure(
+            currentMode === 'live' ? [shikiCodeHighlight, ...liveModeExtensions({ largeDocument: boundedEditorWork })] : sourceMode(boundedEditorWork, lightweightSourceSyntax)
           )], annotations: Transaction.addToHistory.of(false) });
           flushEditorLayout(view);
         });
@@ -2661,8 +2665,8 @@ export function createEditor({
         mermaidDiagramPresentationConsumer
       ),
       markdownInlineStyleTheme,
-      sourcePreparationCompartment.of(largeDocument ? [] : sourceSyntaxPreparation),
-      modeCompartment.of(startMode === 'live' ? [shikiCodeHighlight, ...liveModeExtensions({ largeDocument })] : sourceMode(largeDocument)),
+      sourcePreparationCompartment.of(lightweightSourceSyntax ? [] : sourceSyntaxPreparation),
+      modeCompartment.of(startMode === 'live' ? [shikiCodeHighlight, ...liveModeExtensions({ largeDocument: boundedEditorWork })] : sourceMode(boundedEditorWork, lightweightSourceSyntax)),
       searchQueryField,
       searchAnchorField,
       Prec.high(searchMatchField),
@@ -2893,7 +2897,7 @@ export function createEditor({
   });
   // Large Live documents already mount visible diagram widgets on demand.
   // Warming every distant diagram competes with input and defeats that window.
-  mermaidDocumentPreloader = largeDocument ? null : createMermaidDocumentPreloader(
+  mermaidDocumentPreloader = boundedEditorWork ? null : createMermaidDocumentPreloader(
     mermaidDiagramPresentationConsumer,
     () => {
       if (!editorDestroyed && currentMode === 'live') {
@@ -3418,11 +3422,11 @@ export function createEditor({
     state: view.state,
     prepareSourceSyntax(isCurrent: () => boolean) {
       commitActiveTableInput();
-      if (largeDocument) return Promise.resolve(!editorDestroyed && isCurrent());
+      if (lightweightSourceSyntax) return Promise.resolve(!editorDestroyed && isCurrent());
       return prepareSourceSyntax(view, isCurrent);
     },
     prepareLiveSyntax(isCurrent: () => boolean) {
-      if (!largeDocument) return Promise.resolve(!editorDestroyed && isCurrent());
+      if (!boundedEditorWork) return Promise.resolve(!editorDestroyed && isCurrent());
       return prepareLiveSyntax(view, () => !editorDestroyed && isCurrent());
     },
     async whenVisiblePresentationReady(timeoutMs: number) {
@@ -3950,7 +3954,7 @@ export function createEditor({
               setMermaidSearchRevealEffect.of(null),
               setLatexMathSearchRevealEffect.of(null),
               modeCompartment.reconfigure(
-                nextMode === 'live' ? [shikiCodeHighlight, ...liveModeExtensions({ largeDocument })] : sourceMode(largeDocument)
+                nextMode === 'live' ? [shikiCodeHighlight, ...liveModeExtensions({ largeDocument: boundedEditorWork })] : sourceMode(boundedEditorWork, lightweightSourceSyntax)
               ),
               gitGutterCompartment.reconfigure(
                 nextMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()
@@ -5028,16 +5032,16 @@ function insertWikiLink(
   });
 }
 
-function sourceMode(largeDocument: boolean): Extension[] {
+function sourceMode(boundedEditorWork: boolean, lightweightSourceSyntax: boolean): Extension[] {
   return [
-    ...(largeDocument ? liveInputDerivedWorkExtensions({ largeDocument }) : []),
+    ...(boundedEditorWork ? liveInputDerivedWorkExtensions({ largeDocument: boundedEditorWork }) : []),
     // Block display choices belong to the editing session, including Source.
     mermaidEditingStateField,
     latexMathEditingStateField,
     editorMarkdownLanguage,
     // Preserve parser context and viewport coloring without preparing TextMate
     // tokens for every line before a large Source surface can become editable.
-    largeDocument ? syntaxHighlighting(sourceHighlightStyle) : sourceSyntax,
+    lightweightSourceSyntax ? syntaxHighlighting(sourceHighlightStyle) : sourceSyntax,
     sourceCodeBlockLines,
     gitDiffLineHighlightsField,
     ...gitDiffDetailsExtensions(),

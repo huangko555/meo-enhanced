@@ -19,7 +19,8 @@ assert.deepEqual(assessLargeDocument('').dimensions, {
   mermaid: 0,
   images: 0,
   math: 0,
-  richBlocks: 0
+  richBlocks: 0,
+  codeFences: 0
 });
 assert.equal(assessLargeDocument('你好').dimensions.bytes, 6, 'byte pressure must use UTF-8');
 assert.equal(ordinary.preferSource, false, 'ordinary documents must retain the Live default');
@@ -27,6 +28,15 @@ assert.equal(bytesHeavy.preferSource, true, 'byte pressure must independently se
 assert.equal(linesHeavy.preferSource, true, 'line pressure must independently select Source');
 assert.equal(richHeavy.preferSource, true, 'rich-block pressure must independently select Source');
 assert.equal(composite.preferSource, true, 'combined pressure must select Source');
+
+const shortRich = assessLargeDocument(('| A | B |\n| --- | --- |\n| one | two |\n\n').repeat(100));
+assert.equal(shortRich.preferSource, false, 'a shorter rich document keeps the ordinary opening policy');
+assert.equal(shortRich.boundedEditorWork, true, 'rendering pressure must not wait for the Source startup threshold');
+assert.equal(assessLargeDocument('# Short\n\nOrdinary **text**.').boundedEditorWork, false);
+const shortCode = assessLargeDocument(('```javascript\nconst x = 1;\n```\n\n').repeat(50));
+assert.equal(shortCode.preferSource, false);
+assert.equal(shortCode.dimensions.codeFences, 50);
+assert.equal(shortCode.boundedEditorWork, true, 'many short fences also require a bounded editing budget');
 
 const combinedSubthresholdText = [
   ...Array.from({ length: 3_900 }, (_, index) => `line-${index} ${'x'.repeat(28)}`),

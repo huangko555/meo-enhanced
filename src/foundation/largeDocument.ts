@@ -6,12 +6,15 @@ export type LargeDocumentDimensions = {
   readonly images: number;
   readonly math: number;
   readonly richBlocks: number;
+  readonly codeFences: number;
 };
 
 export type LargeDocumentAssessment = {
   readonly dimensions: LargeDocumentDimensions;
   readonly pressure: number;
   readonly preferSource: boolean;
+  /** Rendering can need a bounded work budget before startup should prefer Source. */
+  readonly boundedEditorWork: boolean;
 };
 
 // These reference budgets are calibrated by the Phase I production benchmark.
@@ -46,6 +49,7 @@ export function assessLargeDocument(text: string): LargeDocumentAssessment {
   const images = countMatches(text, /!\[[^\]\r\n]*\]\([^\r\n]+\)/gu);
   const displayMathDelimiters = countMatches(text, /^\$\$\s*$/gmu);
   const math = Math.floor(displayMathDelimiters / 2);
+  const codeFences = countMatches(text, /^[ \t]*(?:>[ \t]*)*(?:`{3,}|~{3,})[ \t]*[^\s`~]+[^\r\n]*$/gmu);
   const dimensions: LargeDocumentDimensions = {
     bytes: new TextEncoder().encode(text).byteLength,
     lines: countLines(text),
@@ -53,10 +57,15 @@ export function assessLargeDocument(text: string): LargeDocumentAssessment {
     mermaid,
     images,
     math,
-    richBlocks: tables + mermaid + images + math
+    richBlocks: tables + mermaid + images + math,
+    codeFences
   };
   const pressure = dimensions.bytes / REFERENCE_BYTES
     + dimensions.lines / REFERENCE_LINES
     + dimensions.richBlocks / REFERENCE_RICH_BLOCKS;
-  return { dimensions, pressure, preferSource: pressure >= 1 };
+  // Native acceptance found whole-presentation work already expensive in a
+  // 14 KiB document with 100 tables/fences. Preserve its normal opening policy
+  // and Source palette, but start bounding presentation at a quarter budget.
+  return { dimensions, pressure, preferSource: pressure >= 1,
+    boundedEditorWork: pressure >= 0.25 || codeFences >= 48 };
 }

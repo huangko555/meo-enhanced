@@ -77,6 +77,29 @@ try {
       'the performance policy stays stable across shrinking and mode switches in this session');
     await page.evaluate(() => (window as any).__editor.destroy());
   }
+  const medium = await page.evaluate(async () => {
+    const scope = window as any, api = scope.__liveHistory;
+    const text = '# Short rich document\n\nEDIT\n\n' + ('| A | B |\n| --- | --- |\n| one | two |\n\n```javascript\nconst value = 1;\n```\n\n').repeat(100);
+    const editor = scope.__editor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'live', onApplyChanges() {} });
+    const result = { budget: api.largeBudget(editor), sourcePreparation: api.sourcePreparation(editor), live: editor.view.dom.classList.contains('meo-mode-live') };
+    await editor.prepareSourceSyntax(() => true);
+    editor.setMode('source');
+    return result;
+  });
+  assert.deepEqual(medium, { budget: true, sourcePreparation: true, live: true },
+    'a short rich document must gain bounded editing without changing its normal mode or full Source coloring');
+  await page.waitForFunction(() => !!document.querySelector('.meo-source-token'));
+  await page.evaluate(() => {
+    const scope = window as any, editor = scope.__editor;
+    scope.__mediumText = editor.getText();
+    scope.__liveHistory.input(editor, editor.view.state.doc.length, '\n\n' + 'Growth paragraph.\n\n'.repeat(5_000));
+  });
+  await page.waitForFunction(() => !(window as any).__liveHistory.sourcePreparation((window as any).__editor), { timeout: 8_000 });
+  assert.equal(await page.evaluate(() => (window as any).__liveHistory.largeBudget((window as any).__editor)), true,
+    'an already bounded session must still reassess growth into the large Source syntax policy');
+  assert.equal(await page.evaluate(() => (window as any).__editor.undo()), true);
+  assert.equal(await page.evaluate(() => (window as any).__editor.getText() === (window as any).__mediumText), true);
+  await page.evaluate(() => (window as any).__editor.destroy());
   await page.evaluate(() => {
     const scope = window as any;
     scope.__editor = scope.__liveHistory.create({ parent: document.getElementById('editor'), text: 'plain line.\n'.repeat(512),
