@@ -3040,14 +3040,15 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
   mountEditor: mountEditorForMode,
   async applyEditorMode(mode, viewport) {
     if (!editor) throw new Error('Editor is not mounted');
-    if (mode === 'source') {
-      const preparingEditor = editor;
-      const intent = editorModeApplication.getState().intentId;
-      const isCurrent = () => editor === preparingEditor
-        && editorModeApplication.getState().lifecycle === 'ready'
-        && editorModeApplication.getState().intentId === intent;
-      if (!await preparingEditor.prepareSourceSyntax(isCurrent) || !isCurrent()) return;
-    }
+    const preparingEditor = editor;
+    const intent = editorModeApplication.getState().intentId;
+    const isCurrent = () => editor === preparingEditor
+      && editorModeApplication.getState().lifecycle === 'ready'
+      && editorModeApplication.getState().intentId === intent;
+    const prepared = mode === 'source'
+      ? await preparingEditor.prepareSourceSyntax(isCurrent)
+      : await preparingEditor.prepareLiveSyntax(isCurrent);
+    if (!prepared || !isCurrent()) return;
     // Preview exits keep the old Preview as a cover while the editor changes
     // mode. A Source split defers restoration until the covered editor already
     // occupies its final grid column.

@@ -23,6 +23,7 @@ import { editorMarkdownLanguage } from './liveMode';
 import { indentUnit, syntaxTree, forceParsing, syntaxHighlighting } from '@codemirror/language';
 import { sourceHighlightStyle } from './theme';
 import { prepareSourceSyntax, sourceSyntax, sourceSyntaxPreparation } from './helpers/sourceSyntax';
+import { prepareLiveSyntax } from './editor/liveSyntaxPreparation';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
 import type { UiLanguage } from '../../src/foundation/uiLanguage';
 import { longCodeBlockEnabledFacet } from './helpers/longCodeBlocks';
@@ -3412,6 +3413,10 @@ export function createEditor({
       commitActiveTableInput();
       if (largeDocument) return Promise.resolve(!editorDestroyed && isCurrent());
       return prepareSourceSyntax(view, isCurrent);
+    },
+    prepareLiveSyntax(isCurrent: () => boolean) {
+      if (!largeDocument) return Promise.resolve(!editorDestroyed && isCurrent());
+      return prepareLiveSyntax(view, () => !editorDestroyed && isCurrent());
     },
     async whenVisiblePresentationReady(timeoutMs: number) {
       if (editorDestroyed) return;

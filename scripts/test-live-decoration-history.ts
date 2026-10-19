@@ -17,7 +17,8 @@ const build = await Bun.build({ entrypoints: [path.join(root, 'scripts/test-live
       const localBoundary = 'function projectLiveLocalInput(decorations: DecorationSet, transaction: Transaction): DecorationSet | undefined {';
       assert.equal(source.split(localBoundary).length, 2);
       return { loader: 'ts', contents: source.replace(boundary,
-        '((globalThis as any).__fullLiveBuilds ??= 0); (globalThis as any).__fullLiveBuilds++; ' + boundary)
+        '((globalThis as any).__fullLiveBuilds ??= 0); (globalThis as any).__fullLiveBuilds++; ' +
+        '((globalThis as any).__fullLiveBuildStates ??= []).push({ context, complete: syntaxTreeAvailable(state, state.doc.length) }); ' + boundary)
         .replace(localBoundary, localBoundary + ' ((globalThis as any).__scopedLiveInputs ??= 0); (globalThis as any).__scopedLiveInputs++;') };
     });
     for (const [file, boundary, counter] of [
@@ -63,6 +64,55 @@ try {
   await page.addStyleTag({ path: path.join(root, 'webview/src/styles.css') });
   await page.addScriptTag({ path: path.join(directory, 'bundle.js') });
   await installGitDiffWorker(page);
+  const coldLargeLive = await page.evaluate(async () => {
+    const scope = window as any, api = scope.__liveHistory;
+    const text = 'EDIT\n\n' + Array.from({ length: 1_600 }, (_, i) =>
+      `## Section ${i}\n\nA paragraph with **formatting** and a [link](https://example.com).\n\n` +
+      '```javascript\nconst item = { key: "value", count: 123 };\nconsole.log(item);\n```\n\n' +
+      '```markdown\n# Code heading\n\nLiteral **Markdown** code.\n```\n\n' +
+      '<section><p>Literal HTML example with <strong>content</strong>.</p></section>\n\n').join('');
+    const realNow = Date.now;
+    let ticks = realNow(), paintBeforeCommit = false;
+    // Model a parser that cannot finish in the current foreground slice.
+    // The first real frame restores its normal clock, independently of the
+    // implementation used to prepare Live.
+    Date.now = () => ticks += 100;
+    const editor = api.create({ parent: document.getElementById('editor'), text,
+      initialMode: 'source', onApplyChanges() {} });
+    const initial = api.syntaxInfo(editor), before = (scope.__fullLiveBuildStates ??= []).length;
+    let current = true;
+    requestAnimationFrame(() => {
+      Date.now = realNow;
+      paintBeforeCommit = editor.view.dom.classList.contains('meo-mode-source');
+      api.input(editor, 4, 'p');
+      current = false;
+    });
+    try {
+      const cancelled = await editor.prepareLiveSyntax?.(() => current);
+      const sourceAfterCancellation = editor.view.dom.classList.contains('meo-mode-source');
+      await editor.prepareLiveSyntax?.(() => true);
+      editor.setMode('live');
+      const builds = scope.__fullLiveBuildStates.slice(before);
+      const sourceUnchanged = editor.getText() === 'EDITp' + text.slice(4);
+      const beforeInput = scope.__fullLiveBuilds;
+      api.input(editor, 5, 'x');
+      const deadline = performance.now() + 5_000;
+      while (api.pending(editor) && performance.now() < deadline) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      for (let i = 0; i < 3; i++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      return { initial, builds, paintBeforeCommit, sourceUnchanged, cancelled, sourceAfterCancellation, pending: api.pending(editor),
+        inputText: editor.getText().startsWith('EDITpx'), inputBuilds: scope.__fullLiveBuilds - beforeInput };
+    } finally { Date.now = realNow; editor.destroy(); }
+  });
+  assert.ok(!coldLargeLive.initial.available, 'cold transition must begin with unfinished shared Markdown syntax');
+  assert.ok(coldLargeLive.builds.length > 0);
+  assert.ok(coldLargeLive.builds.every((build: { complete: boolean }) => build.complete),
+    'large Live must build its canonical presentation from complete shared syntax, rather than repair a partial first build later');
+  assert.ok(coldLargeLive.paintBeforeCommit, 'Source must get a real frame while large Live syntax is prepared');
+  assert.ok(coldLargeLive.sourceUnchanged);
+  assert.equal(coldLargeLive.cancelled, false, 'a newer mode intent must cancel incomplete Live syntax preparation');
+  assert.ok(coldLargeLive.sourceAfterCancellation, 'cancelling preparation must retain the existing Source surface');
+  assert.ok(coldLargeLive.inputText && !coldLargeLive.pending);
+  assert.equal(coldLargeLive.inputBuilds, 0, 'first prose input after cold preparation must not repair the whole Live document');
   const inputBudgets: Array<{ mode: string; pending: boolean; diffs: number; discoveries: number; htmlRequests: number }> = [];
   const syntaxPublication = await page.evaluate(async () => {
     const scope = window as any, api = scope.__liveHistory;
