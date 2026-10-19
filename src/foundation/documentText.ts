@@ -14,9 +14,19 @@ export function createDocumentTextReplacement(previousText: string, nextText: st
 } {
   let from = 0;
   const commonLength = Math.min(previousText.length, nextText.length);
+  // Keep equal megabyte prefixes/suffixes inside the engine's string compare.
+  // Scalar scans cover only the unequal edge chunks, not the whole document.
+  const chunkSize = 4096;
+  while (from + chunkSize <= commonLength
+    && previousText.slice(from, from + chunkSize) === nextText.slice(from, from + chunkSize)) from += chunkSize;
   while (from < commonLength && previousText.charCodeAt(from) === nextText.charCodeAt(from)) from += 1;
   let previousTo = previousText.length;
   let nextTo = nextText.length;
+  while (previousTo - from >= chunkSize && nextTo - from >= chunkSize
+    && previousText.slice(previousTo - chunkSize, previousTo) === nextText.slice(nextTo - chunkSize, nextTo)) {
+    previousTo -= chunkSize;
+    nextTo -= chunkSize;
+  }
   while (previousTo > from && nextTo > from
     && previousText.charCodeAt(previousTo - 1) === nextText.charCodeAt(nextTo - 1)) {
     previousTo -= 1;
