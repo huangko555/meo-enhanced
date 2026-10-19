@@ -6,6 +6,8 @@ import * as vscode from 'vscode';
 import { normalizeDocumentText } from '../foundation/documentText';
 import type { AgentReviewHandoffController } from '../agents/reviewHandoff';
 import type { PendingDraftRecovery } from '../application/pendingDraftRecovery';
+import { createDraftRecoveryReceiver } from '../host/draftRecoveryReceiver';
+import { createDocumentEditEchoFilter } from '../host/documentEditEcho';
 import {
   createGitBaselineRefreshCoordinator,
   type GitBaselineRefreshOptions,
@@ -268,6 +270,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   });
   let nextDiskReloadId = 1;
   let draftRecoveryReceiptVersion = 0;
+  const documentEditEcho = createDocumentEditEchoFilter();
   const pendingDiskReloadPresentations = new Map<number, {
     readonly receiptVersion: number;
     readonly text: string;
@@ -300,6 +303,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       return false;
     }
   };
+  const draftRecoveryReceiver = createDraftRecoveryReceiver(pendingDraftRecovery,
+    () => postToWebview({ type: 'requestDraftRecoverySnapshot' }));
 
   type ExternalFileStatus = Extract<HostEditorEvent, { type: 'externalFileStatusChanged' }>['status'];
   let externalFileStatus: ExternalFileStatus = 'current';
@@ -985,16 +990,14 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       case 'applyChanges':
         agentReviewHandoff.noteRecentMEOOwnedFileChangeForUri(document.uri);
         const applyCompletion = enqueue(async () => {
-          await applyDocumentChanges(document, raw, sendDocChanged, sendApplied);
+          await applyDocumentChanges(document, raw, sendDocChanged, sendApplied, documentEditEcho);
         });
         latestDocumentApplyCompletion = applyCompletion.then(() => undefined, () => undefined);
         await applyCompletion;
         return;
       case 'draftChanged':
-        draftRecoveryReceiptVersion = pendingDraftRecovery.remember(
-          raw.text,
-          raw.receiptVersion
-        );
+      case 'draftPatched':
+        draftRecoveryReceiptVersion = draftRecoveryReceiver.accept(raw);
         return;
       case 'documentReloadPresentationCompleted': {
         const pendingReload = pendingDiskReloadPresentations.get(raw.reloadId);
@@ -1096,6 +1099,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     if (event.contentChanges.length === 0) {
       return;
     }
+    if (documentEditEcho.accept(event.document.version, event.contentChanges)) return;
 
     runBackground(enqueue(async () => {
       await sendDocChanged();
@@ -1246,7 +1250,8 @@ async function applyDocumentChanges(
   document: vscode.TextDocument,
   message: ApplyChangesMessage,
   sendDocChanged: () => Promise<boolean>,
-  sendApplied: (version: number) => Promise<boolean>
+  sendApplied: (version: number) => Promise<boolean>,
+  echoFilter: ReturnType<typeof createDocumentEditEchoFilter>
 ): Promise<void> {
   if (message.baseVersion !== document.version) {
     await sendDocChanged();
@@ -1257,6 +1262,7 @@ async function applyDocumentChanges(
   const sortedChanges = [...message.changes].sort((a, b) => b.from - a.from);
   const documentText = document.getText();
   const mappedOffsetCache = new Map<number, number>();
+  const expectedChanges: Array<{ rangeOffset: number; rangeLength: number; text: string }> = [];
   const mapOffset = (offset: number): number => {
     const cached = mappedOffsetCache.get(offset);
     if (typeof cached === 'number') {
@@ -1278,16 +1284,24 @@ async function applyDocumentChanges(
       document.positionAt(endOffset)
     );
     edit.replace(document.uri, range, change.insert);
+    expectedChanges.push({ rangeOffset: startOffset, rangeLength: endOffset - startOffset, text: change.insert });
   }
 
-  const applied = await vscode.workspace.applyEdit(edit);
+  const receipt = echoFilter.expect(document.version, expectedChanges);
+  let acceptedVersion: number | null = null;
+  let applied: boolean;
+  try {
+    applied = await vscode.workspace.applyEdit(edit);
+  } finally {
+    acceptedVersion = receipt.close();
+  }
 
   if (!applied) {
     await sendDocChanged();
     return;
   }
 
-  await sendApplied(document.version);
+  await sendApplied(acceptedVersion ?? document.version);
 }
 
 function mapNormalizedOffsetToDocumentOffset(documentText: string, normalizedOffset: number): number {

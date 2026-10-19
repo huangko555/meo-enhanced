@@ -9,7 +9,7 @@ import {
   type Revision,
   type SavedRevision
 } from '../domain/documentSession';
-import { normalizeDocumentText } from '../foundation/documentText';
+import { createDocumentTextReplacement, normalizeDocumentText } from '../foundation/documentText';
 
 export type { DocumentPresentationSource } from '../domain/documentSession';
 export type { DocumentPresentationCompletion } from '../domain/documentSession';
@@ -194,7 +194,7 @@ function mapEffects(
       return {
         type: 'applyTextChange',
         baseVersion: effect.change.baseRevision,
-        changes: [createReplacement(baseRevision.text, effect.change.text)]
+        changes: [createDocumentTextReplacement(baseRevision.text, effect.change.text)]
       };
     }
     if (effect.type === 'presentText') {
@@ -213,33 +213,4 @@ function mapEffects(
     }
     return { type: 'requestRevision' };
   });
-}
-
-function createReplacement(previousText: string, nextText: string): ApplicationTextChange {
-  let from = 0;
-  const commonLength = Math.min(previousText.length, nextText.length);
-  while (from < commonLength && previousText.charCodeAt(from) === nextText.charCodeAt(from)) from += 1;
-
-  let previousTo = previousText.length;
-  let nextTo = nextText.length;
-  while (previousTo > from && nextTo > from
-    && previousText.charCodeAt(previousTo - 1) === nextText.charCodeAt(nextTo - 1)) {
-    previousTo -= 1;
-    nextTo -= 1;
-  }
-
-  // Transport one bounded replacement while keeping UTF-16 pairs intact. The
-  // Revision and recovery Draft still retain the complete authoritative text.
-  if (splitsSurrogatePair(previousText, from) || splitsSurrogatePair(nextText, from)) from -= 1;
-  if (splitsSurrogatePair(previousText, previousTo) || splitsSurrogatePair(nextText, nextTo)) {
-    previousTo += 1;
-    nextTo += 1;
-  }
-  return { from, to: previousTo, insert: nextText.slice(from, nextTo) };
-}
-
-function splitsSurrogatePair(text: string, offset: number): boolean {
-  const before = text.charCodeAt(offset - 1);
-  const after = text.charCodeAt(offset);
-  return before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff;
 }

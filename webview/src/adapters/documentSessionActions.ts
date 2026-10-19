@@ -6,8 +6,9 @@ import type {
 } from '../../../src/application/documentSession';
 import type {
   ApplyChangesMessage,
-  DraftChangedMessage
+  DraftRecoveryMessage
 } from '../../../src/protocol/documentSync';
+import { createDocumentTextReplacement } from '../../../src/foundation/documentText';
 
 export type DocumentSessionNotice =
   | 'external-conflict'
@@ -24,10 +25,11 @@ export type DocumentSessionActionAdapter = {
     readonly DocumentPresentationCompletion[]
   >;
   retryPresentation(): Promise<boolean>;
+  resendDraftRecovery(): void;
 };
 
 export type DocumentSessionActionAdapterDependencies = {
-  readonly postMessage: (message: ApplyChangesMessage | DraftChangedMessage) => void;
+  readonly postMessage: (message: ApplyChangesMessage | DraftRecoveryMessage) => void;
   readonly presentText: (
     text: string,
     source: DocumentPresentationSource
@@ -47,6 +49,28 @@ export function createDocumentSessionActionAdapter(
   dependencies: DocumentSessionActionAdapterDependencies
 ): DocumentSessionActionAdapter {
   let failedPresentation: Extract<DocumentSessionAction, { readonly type: 'presentText' }> | null = null;
+  // Compression checkpoints only. Draft truth and receipt allocation remain in
+  // the coordinator; null recovery clears retain the last text checkpoint.
+  let recoveryCheckpoint: { text: string; receiptVersion: number } | null = null;
+  let latestRecovery: Extract<DocumentSessionAction, { readonly type: 'rememberDraft' }> | null = null;
+  const postRecovery = (action: NonNullable<typeof latestRecovery>, forceSnapshot = false): void => {
+    let message: DraftRecoveryMessage = {
+      type: 'draftChanged', text: action.text, receiptVersion: action.receiptVersion
+    };
+    if (!forceSnapshot && action.text !== null && action.text.length >= 262_144 && recoveryCheckpoint) {
+      const change = createDocumentTextReplacement(recoveryCheckpoint.text, action.text);
+      if (change.insert.length + 128 < action.text.length) {
+        message = {
+          type: 'draftPatched', change,
+          baseReceiptVersion: recoveryCheckpoint.receiptVersion,
+          receiptVersion: action.receiptVersion
+        };
+      }
+    }
+    dependencies.postMessage(message);
+    if (action.text !== null) recoveryCheckpoint = { text: action.text, receiptVersion: action.receiptVersion };
+    latestRecovery = action;
+  };
   const present = async (
     action: Extract<DocumentSessionAction, { readonly type: 'presentText' }>
   ): Promise<boolean> => {
@@ -56,6 +80,9 @@ export function createDocumentSessionActionAdapter(
     return succeeded;
   };
   return {
+    resendDraftRecovery() {
+      if (latestRecovery) postRecovery(latestRecovery, true);
+    },
     async retryPresentation() {
       return failedPresentation ? present(failedPresentation) : false;
     },
@@ -70,11 +97,7 @@ export function createDocumentSessionActionAdapter(
 
         if (action.type === 'rememberDraft') {
           failedPresentation = null;
-          dependencies.postMessage({
-            type: 'draftChanged',
-            text: action.text,
-            receiptVersion: action.receiptVersion
-          });
+          postRecovery(action);
           continue;
         }
         if (action.type === 'applyTextChange') {

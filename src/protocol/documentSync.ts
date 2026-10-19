@@ -28,7 +28,8 @@ export type DocumentSyncMessage =
   | DocumentChangedMessage
   | AppliedMessage
   | DocumentReloadedFromDiskMessage
-  | DocumentReloadFromDiskFailedMessage;
+  | DocumentReloadFromDiskFailedMessage
+  | { readonly type: 'requestDraftRecoverySnapshot' };
 
 export type TextChange = {
   readonly from: number;
@@ -48,6 +49,14 @@ export type DraftChangedMessage = {
   readonly receiptVersion: number;
 };
 
+export type DraftPatchedMessage = {
+  readonly type: 'draftPatched';
+  readonly baseReceiptVersion: number;
+  readonly receiptVersion: number;
+  readonly change: TextChange;
+};
+export type DraftRecoveryMessage = DraftChangedMessage | DraftPatchedMessage;
+
 export type DocumentReloadPresentationCompletedMessage = {
   readonly type: 'documentReloadPresentationCompleted';
   readonly reloadId: number;
@@ -57,7 +66,7 @@ export type DocumentReloadPresentationCompletedMessage = {
 
 export type DocumentSyncCommand =
   | ApplyChangesMessage
-  | DraftChangedMessage
+  | DraftRecoveryMessage
   | DocumentReloadPresentationCompletedMessage;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -97,6 +106,7 @@ function normalizeTopLineOffset(value: unknown): number {
 
 export function decodeDocumentSyncMessage(value: unknown): DocumentSyncMessage | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null;
+  if (value.type === 'requestDraftRecoverySnapshot') return { type: 'requestDraftRecoverySnapshot' };
   if (value.type === 'docChanged' && typeof value.text === 'string' && isVersion(value.version)) {
     return { type: 'docChanged', text: value.text, version: value.version };
   }
@@ -123,6 +133,14 @@ export function decodeDocumentSyncMessage(value: unknown): DocumentSyncMessage |
 export function decodeDocumentSyncCommand(value: unknown): DocumentSyncCommand | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null;
   const text = value.text;
+  if (value.type === 'draftPatched' && isReceiptVersion(value.baseReceiptVersion)
+    && isReceiptVersion(value.receiptVersion) && value.receiptVersion > value.baseReceiptVersion
+    && isTextChange(value.change)) {
+    return {
+      type: 'draftPatched', baseReceiptVersion: value.baseReceiptVersion,
+      receiptVersion: value.receiptVersion, change: value.change
+    };
+  }
   if (value.type === 'draftChanged' && typeof text === 'string'
     && isReceiptVersion(value.receiptVersion)) {
     return { type: 'draftChanged', text, receiptVersion: value.receiptVersion };

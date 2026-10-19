@@ -5,7 +5,7 @@ import type {
   DocumentPresentationCompletion,
   DocumentPresentationSource
 } from '../../../src/application/documentSession';
-import type { ApplyChangesMessage, DraftChangedMessage } from '../../../src/protocol/documentSync';
+import type { ApplyChangesMessage, DraftRecoveryMessage } from '../../../src/protocol/documentSync';
 import type { InitMessage } from '../../../src/protocol/readyInit';
 import {
   createDocumentSessionActionAdapter,
@@ -23,12 +23,13 @@ export type DocumentSessionRuntime = {
   initialize(message: InitMessage): Promise<void>;
   handle(input: DocumentSessionInput): Promise<readonly DocumentPresentationCompletion[]>;
   retryPresentation(): Promise<boolean>;
+  resendDraftRecovery(): Promise<void>;
   draftRecoveryReceiptVersion(): number;
   whenIdle(): Promise<void>;
 };
 
 export type DocumentSessionRuntimeDependencies = {
-  readonly postMessage: (message: ApplyChangesMessage | DraftChangedMessage) => void;
+  readonly postMessage: (message: ApplyChangesMessage | DraftRecoveryMessage) => void;
   readonly presentText: (
     text: string,
     source: DocumentPresentationSource
@@ -80,6 +81,9 @@ export function createDocumentSessionRuntime(
     },
     retryPresentation() {
       return enqueue(() => requireSession().actionAdapter.retryPresentation());
+    },
+    resendDraftRecovery() {
+      return enqueue(async () => { requireSession().actionAdapter.resendDraftRecovery(); });
     },
     draftRecoveryReceiptVersion() {
       return requireSession().coordinator.draftRecoveryReceiptVersion();

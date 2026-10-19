@@ -68,6 +68,10 @@ export function createDocumentSessionWebviewAdapter(
   };
 
   const acceptSessionMessage = (message: HostToWebviewMessage): boolean => {
+    if (message.type === 'requestDraftRecoverySnapshot') {
+      enqueueSession('draft recovery resync', () => runtime.resendDraftRecovery());
+      return true;
+    }
     if (message.type === 'saveDocumentRevisionResult' || message.type === 'documentRevisionResult') {
       transport.accept(message);
       return true;
