@@ -3,7 +3,7 @@ import { EditorState, type ChangeDesc } from '@codemirror/state';
 import { IterMode, type SyntaxNode, type SyntaxNodeRef, type Tree } from '@lezer/common';
 import { isThematicBreakLine } from './frontmatter';
 import { parseBlockLinePrefix } from './blockIndent';
-import { getFencedCodeInfo, resolvedSyntaxTree } from './markdownSyntax';
+import { getFencedCodeInfo, resolvedSyntaxTree, withMarkdownSyntaxSnapshot } from './markdownSyntax';
 import { resolveFencedDisplayMathInnerLineRange } from './math';
 import { collectDocumentMathRanges } from './displayMathBlocks';
 import { isTableDelimiterLine, parseTableInfo } from './tables';
@@ -233,7 +233,7 @@ export function getLiveRenderedBlocks(
 
   let discovered = discoveredBlockCache.get(state.doc);
   if (!discovered || discovered.tree !== tree) {
-    discovered = { tree, blocks: discoverRenderedBlocks(state, tree) };
+    discovered = { tree, blocks: withMarkdownSyntaxSnapshot(state, tree, () => discoverRenderedBlocks(state, tree)) };
     discoveredBlockCache.set(state.doc, discovered);
   }
   const htmlEditingRange = getHtmlEditingRange(state);

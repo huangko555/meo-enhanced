@@ -1,7 +1,7 @@
 import { StateField, EditorState, type Annotation, type ChangeDesc } from '@codemirror/state';
 import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
-import { Decoration, EditorView, WidgetType } from '@codemirror/view';
-import type { SyntaxNodeRef } from '@lezer/common';
+import { Decoration, EditorView, WidgetType, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
+import { IterMode, type SyntaxNodeRef } from '@lezer/common';
 import { StreamLanguage } from '@codemirror/language';
 import { javascript } from '@codemirror/lang-javascript';
 import { python } from '@codemirror/lang-python';
@@ -567,49 +567,33 @@ export function codeBlockLineNumberDecoration(codeLineNumber: number, numberWidt
   });
 }
 
-function computeSourceCodeBlockLines(state: EditorState): any {
-  const ranges: any[] = [];
-  currentSyntaxTree(state).iterate({
-    enter(node: any) {
-      if (node.name !== 'FencedCode' && node.name !== 'CodeBlock') {
-        return;
-      }
-      let line = state.doc.lineAt(node.from);
-      const end = state.doc.lineAt(Math.max(node.to - 1, node.from)).number;
-      while (line.number <= end) {
-        ranges.push(sourceCodeBlockLine.range(line.from));
-        if (line.number === end) {
-          break;
-        }
-        line = state.doc.line(line.number + 1);
-      }
+function computeSourceCodeBlockLines(view: EditorView): DecorationSet {
+  const { state } = view;
+  const positions = new Set<number>();
+  for (const visible of view.visibleRanges) currentSyntaxTree(state).iterate({
+    from: visible.from, to: visible.to, mode: IterMode.IgnoreMounts,
+    enter(node) {
+      if (node.name !== 'FencedCode' && node.name !== 'CodeBlock') return;
+      const first = state.doc.lineAt(Math.max(node.from, visible.from)).number;
+      const last = state.doc.lineAt(Math.min(Math.max(node.to - 1, node.from), visible.to)).number;
+      for (let line = first; line <= last; line++) positions.add(state.doc.line(line).from);
       return false;
     }
   });
-
-  return Decoration.set(ranges, true);
+  return Decoration.set([...positions].map(position => sourceCodeBlockLine.range(position)), true);
 }
 
-export const sourceCodeBlockField = StateField.define<any>({
-  create(state: EditorState) {
-    try {
-      return computeSourceCodeBlockLines(state);
-    } catch {
-      return Decoration.none;
+/** Source row styling belongs to CodeMirror's mounted window. A large fence
+ * does not require a decoration for every offscreen line on each keystroke. */
+export const sourceCodeBlockLines = ViewPlugin.fromClass(class {
+  decorations: DecorationSet;
+  constructor(view: EditorView) { this.decorations = computeSourceCodeBlockLines(view); }
+  update(update: ViewUpdate) {
+    if (update.docChanged || update.viewportChanged || update.transactions.some(syntaxTreeChanged)) {
+      this.decorations = computeSourceCodeBlockLines(update.view);
     }
-  },
-  update(lines: any, transaction: any) {
-    if (!transaction.docChanged && !syntaxTreeChanged(transaction)) {
-      return lines;
-    }
-    try {
-      return computeSourceCodeBlockLines(transaction.state);
-    } catch {
-      return lines;
-    }
-  },
-  provide: (field: any) => EditorView.decorations.from(field)
-});
+  }
+}, { decorations: plugin => plugin.decorations });
 
 export function isFenceMarker(state: EditorState, from: number, to: number): boolean {
   const text = state.doc.sliceString(from, to);

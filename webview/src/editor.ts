@@ -38,7 +38,7 @@ import { uiLanguageFacet } from './editor/uiLanguage';
 import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
 import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
 import { insertMountedTableCellBreak } from './helpers/tables';
-import { insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
+import { insertCodeBlock, sourceCodeBlockLines } from './helpers/codeBlocks';
 import { getCodeBlockSourceLines } from './helpers/blockIndent';
 import { markdownInlineStyleTheme } from './helpers/inlineStyles';
 import { markdownTagField } from './helpers/tags';
@@ -5038,7 +5038,7 @@ function sourceMode(largeDocument: boolean): Extension[] {
     // Preserve parser context and viewport coloring without preparing TextMate
     // tokens for every line before a large Source surface can become editable.
     largeDocument ? syntaxHighlighting(sourceHighlightStyle) : sourceSyntax,
-    sourceCodeBlockField,
+    sourceCodeBlockLines,
     gitDiffLineHighlightsField,
     ...gitDiffDetailsExtensions(),
     ...mergeConflictSourceExtensions()

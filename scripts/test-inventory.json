@@ -1,5 +1,15 @@
 {
   "separate": {
+    "scripts/test-source-code-window.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-source-code-window.ts",
+      "reason": "Production Source input into a 9,000-row code document must avoid offscreen row enumeration while distant mounted code rows retain their styling."
+    },
+    "scripts/test-structural-syntax-snapshot.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-structural-syntax-snapshot.ts",
+      "reason": "Locks down parser advancement at the actual mixed code/table/footnote descriptor boundary; run for changes to shared structural readers."
+    },
     "scripts/test-shiki-worker.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-shiki-worker.ts",

@@ -2910,6 +2910,12 @@ export function createPreviewController({
     });
   };
   const refreshSourcePositionMarker = (revealIfOutside = false): boolean => {
+    // Editing continues while the Preview iframe is hidden. Keep the latest
+    // source intent without touching that frame's document or forcing layout.
+    if (disposed || host.hidden || !sourcePositionMarkerState.visible) {
+      if (sourcePositionMarker) sourcePositionMarker.hidden = true;
+      return false;
+    }
     const frameDocument = getFrameDocument();
     const scrollElement = frameDocument?.scrollingElement;
     if (!frameDocument || !scrollElement) return false;

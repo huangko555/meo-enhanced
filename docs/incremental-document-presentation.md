@@ -206,3 +206,16 @@ browser route across Live/Preview/Source, injected languages, empty lines,
 Unicode and CRLF. It also checks engine disposal, cancellation on theme change,
 and that a cold grammar plus 6,000 code lines lets the foreground event loop
 continue. This establishes the coloring boundary, not final native latency.
+
+Structural descriptor readers now pin the syntax tree they started traversing.
+Nested code-indent/footnote readers cannot repeatedly advance embedded parsers
+or change the tree mid-collection. The regression fixture originally made 160
+ensure calls for 80 code blocks; the same production collection now makes zero,
+and complete table discovery resolves at most one syntax snapshot.
+
+Source code-row presentation now belongs to a viewport ViewPlugin instead of a
+whole-document StateField. Input in a 9,000-row code fixture originally performed
+9,004 line lookups; it now performs 58, while distant rows receive the same
+background styling when mounted. The existing long-code interaction and Live
+scan-budget suites still pass. Hidden or inactive Preview source markers retain
+source intent without reading their iframe document/layout during editor input.

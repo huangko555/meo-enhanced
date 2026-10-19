@@ -3,7 +3,8 @@ import { EditorState, Facet, StateEffect, StateField, Transaction } from '@codem
 import { sourceLinePositionAtTarget } from '../editor/domSourceLine';
 import { Decoration, EditorView, WidgetType, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import { getFencedCodeInfo } from './markdownSyntax';
+import { IterMode } from '@lezer/common';
+import { getFencedCodeInfo, withMarkdownSyntaxSnapshot } from './markdownSyntax';
 import {
   applyLiveBlockIndent,
   getLiveBlockIndent,
@@ -73,7 +74,12 @@ function isMermaidLanguage(info: string | null): boolean {
 
 function collectLongCodeBlockDescriptors(state: EditorState): LongCodeBlockDescriptor[] {
   const descriptors: LongCodeBlockDescriptor[] = [];
-  syntaxTree(state).iterate({
+  const tree = syntaxTree(state);
+  // Nested indent/footnote readers must use this same published structure.
+  // Advancing an embedded language per fence both repeats work and mixes trees
+  // in one descriptor collection. A later parser publication refreshes it.
+  withMarkdownSyntaxSnapshot(state, tree, () => tree.iterate({
+    mode: IterMode.IgnoreMounts,
     enter(node) {
       if (node.name !== 'FencedCode') {
         return;
@@ -121,7 +127,7 @@ function collectLongCodeBlockDescriptors(state: EditorState): LongCodeBlockDescr
       });
       return false;
     }
-  });
+  }));
   return descriptors;
 }
 
