@@ -1,3 +1,4 @@
+import { readDocumentTextProjection } from '../application/documentTextProjection';
 import {
   RangeSetBuilder,
   StateEffect,
@@ -500,7 +501,7 @@ export function shikiDocumentHighlight(language: string): Extension {
           builder,
           new Map<string, Decoration>(),
           lang,
-          view.state.doc.toString(),
+          readDocumentTextProjection(view.state.doc),
           0,
           view.state.doc.length,
           previous,

@@ -1,3 +1,4 @@
+import { readDocumentTextProjection } from '../application/documentTextProjection';
 import { RangeSetBuilder, StateEffect, StateField, EditorState, Transaction, type RangeSet, type Text } from '@codemirror/state';
 import { GutterMarker, gutter, EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import { createBackgroundDocumentDiff } from './backgroundDocumentDiff';
@@ -745,7 +746,7 @@ const backgroundDiffPlugin = ViewPlugin.fromClass(class {
         || isCurrentComparison(current, current.field(gitDiffLineFlagsField))
         || (this.attempted?.doc === current.doc && this.attempted.baseline === currentBaseline)) return;
       this.attempted = { doc: current.doc, baseline: currentBaseline };
-      this.computation.request(currentBaseline.baseText!, current.doc.toString());
+      this.computation.request(currentBaseline.baseText!, readDocumentTextProjection(current.doc));
     });
   }
 

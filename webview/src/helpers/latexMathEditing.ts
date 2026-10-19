@@ -153,6 +153,11 @@ export const latexMathEditingStateField = StateField.define<LatexMathEditingStat
     return { modes: new Map(), searchReveal: null };
   },
   update(value, transaction) {
+    if (!transaction.docChanged && !transaction.effects.some(effect => effect.is(setLatexMathBlockModeEffect)
+      || effect.is(setLatexMathSearchRevealEffect)) && (!value.searchReveal || !transaction.selection
+      || transaction.state.selection.main.from === value.searchReveal.from && transaction.state.selection.main.to === value.searchReveal.to)) {
+      return value;
+    }
     const modes = new Map<number, LatexMathBlockMode>();
     for (const [anchor, mode] of value.modes) {
       const mappedAnchor = transaction.changes.mapPos(anchor, 1);

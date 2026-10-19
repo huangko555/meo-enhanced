@@ -152,6 +152,11 @@ export const mermaidEditingStateField = StateField.define<MermaidEditingState>({
     return { modes: new Map(), searchReveal: null, viewports: new Map() };
   },
   update(value, transaction) {
+    if (!transaction.docChanged && !transaction.effects.some(effect => effect.is(setMermaidBlockModeEffect)
+      || effect.is(setMermaidSearchRevealEffect)) && (!value.searchReveal || !transaction.selection
+      || transaction.state.selection.main.from === value.searchReveal.from && transaction.state.selection.main.to === value.searchReveal.to)) {
+      return value;
+    }
     let viewports = value.viewports;
     if (transaction.docChanged) {
       viewports = new Map();

@@ -1,3 +1,4 @@
+import { readDocumentTextProjection } from '../application/documentTextProjection';
 import { documentLines } from './documentLines';
 import { RangeSetBuilder, StateField, EditorState } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
@@ -278,7 +279,7 @@ const mergeConflictField = StateField.define<MergeConflictState>({
 });
 
 function detectDocEol(state: EditorState): string {
-  const text = state.doc.toString();
+  const text = readDocumentTextProjection(state.doc);
   return text.includes('\r\n') ? '\r\n' : '\n';
 }
 

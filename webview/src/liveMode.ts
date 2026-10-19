@@ -116,6 +116,7 @@ import {
   addHtmlContentDecorations,
   enterHtmlSource,
   getHtmlEditingRange,
+  setHtmlEditingRangeEffect,
   htmlContentExtensions
 } from './helpers/htmlContent';
 
@@ -3616,10 +3617,14 @@ function rebuildLiveSelectionBlocks(decorations: DecorationSet, transaction: Tra
   const before = transaction.startState, state = transaction.state;
   if (!usesLargeDocumentDerivedWorkBudget(state) || transaction.docChanged || transaction.reconfigured
     || !liveDecorationMetadata.get(before)?.complete
-    || !hasDefaultLiveBlockPresentation(before) || !hasDefaultLiveBlockPresentation(state)
     || !transaction.effects.every(effect => effect.is(setLivePointerSelectionActiveEffect) || effect.is(setLiveDocumentIdleEffect)
-      || isLiveViewportPresentationEffect(effect) || isLongCodeBlockInteractionEffect(effect) || isEditorScrollEffect(effect))
-    || before.selection.ranges.some(range => !range.empty) || state.selection.ranges.some(range => !range.empty)) return;
+      || isLiveViewportPresentationEffect(effect) || isLongCodeBlockInteractionEffect(effect) || isEditorScrollEffect(effect)
+      || effect.is(setMermaidBlockModeEffect) || effect.is(setMermaidSearchRevealEffect)
+      || effect.is(setLatexMathBlockModeEffect) || effect.is(setLatexMathSearchRevealEffect)
+      || effect.is(setHtmlEditingRangeEffect))) return;
+  for (const selection of [before.selection, state.selection]) for (const range of selection.ranges) {
+    if (state.doc.lineAt(range.to).number - state.doc.lineAt(range.from).number > 128) return;
+  }
   const tree = syntaxTreeAvailable(state, state.doc.length) ? resolvedSyntaxTree(state, 0) : currentSyntaxTree(state);
   if (tree.length !== state.doc.length) return;
   // A caret transaction can publish the already completed parse too. Only
@@ -3632,12 +3637,37 @@ function rebuildLiveSelectionBlocks(decorations: DecorationSet, transaction: Tra
 
 function rebuildLiveSelectionWithSyntax(decorations: DecorationSet, transaction: Transaction, tree: Tree): DecorationSet | undefined {
   const before = transaction.startState, state = transaction.state;
+  let changedBlockContext = false;
   const active = new Set([...collectActiveLines(before), ...collectActiveLines(state)]);
   // The pointer's new selection can be masked during pointerdown; include both
   // caret locations so later pointerup reveals exactly the same source block.
   for (const selection of [before.selection, state.selection]) for (const range of selection.ranges) {
-    active.add(state.doc.lineAt(range.head).number);
+    const first = state.doc.lineAt(range.from).number, last = state.doc.lineAt(range.to).number;
+    for (let line = first; line <= last; line += 1) active.add(line);
   }
+  const includeChangedModes = (previous: ReadonlyMap<number, string> | undefined, next: ReadonlyMap<number, string> | undefined) => {
+    if (previous === next) return;
+    for (const anchor of new Set([...(previous?.keys() ?? []), ...(next?.keys() ?? [])])) {
+      if (previous?.get(anchor) !== next?.get(anchor)) {
+        changedBlockContext = true; active.add(state.doc.lineAt(anchor).number);
+      }
+    }
+  };
+  const includeChangedRange = (previous: SourceRange | null | undefined, next: SourceRange | null | undefined) => {
+    if (previous?.from === next?.from && previous?.to === next?.to) return;
+    changedBlockContext = true;
+    for (const range of [previous, next]) if (range) {
+      active.add(state.doc.lineAt(range.from).number); active.add(state.doc.lineAt(range.to).number);
+    }
+  };
+  for (const [previous, next] of [
+    [before.field(mermaidEditingStateField, false), state.field(mermaidEditingStateField, false)],
+    [before.field(latexMathEditingStateField, false), state.field(latexMathEditingStateField, false)]
+  ] as const) {
+    includeChangedModes(previous?.modes, next?.modes);
+    includeChangedRange(previous?.searchReveal, next?.searchReveal);
+  }
+  includeChangedRange(getHtmlEditingRange(before), getHtmlEditingRange(state));
   if (livePresentationBandChanged(transaction)) for (const source of [before, state]) {
     const band = getLivePresentationBand(source);
     if (!band) continue;
@@ -3718,7 +3748,7 @@ function rebuildLiveSelectionWithSyntax(decorations: DecorationSet, transaction:
     }
     result = replaceLivePresentationRanges(result, scope.from, scope.to, additions);
   }
-  localLiveSelectionUpdates.add(state);
+  if (!changedBlockContext) localLiveSelectionUpdates.add(state);
   liveDecorationMetadata.set(state, { ...liveDecorationMetadata.get(state), complete: true });
   completeLiveDecorationSets.add(result);
   return result;

@@ -70,6 +70,22 @@ events. End-to-end targets on fixed hardware are P95 input/caret feedback near
 is not a definition of a fluid editor. Small documents, the comprehensive 1 MiB
 fixture, larger stress fixtures and giant single blocks must all be exercised.
 
+## Shared projections and Live invalidation
+
+Full-string readers in synchronization, editor/search, viewport mapping, Git,
+Source highlighting and math share one immutable Text projection. Its cache has
+an 8 MiB byte budget (one oversized current projection is allowed). Historical
+snapshots do not individually retain complete strings. Tests require one read
+per current revision across consumers, and eviction of old projections.
+
+Live caret/word selection and manual math/Mermaid/HTML presentation changes
+invalidate their affected source roots. Search-reveal removal also invalidates
+its previous range. Changing a manual block mode does not disable local caret
+updates elsewhere. Long text selections and unknown effects keep an authoritative
+fallback. Tests compare these local results with a complete build under the same
+presentation state. Unchanged math/diagram mode fields preserve their values
+without validating every manual anchor on unrelated transactions.
+
 ## Preview reading window
 
 The full renderer now separates global parsing/context from HTML generation.

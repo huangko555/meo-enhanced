@@ -1,3 +1,4 @@
+import { readDocumentTextProjection } from '../application/documentTextProjection';
 import { editorScrollIntoView } from '../editor/scrollEffects';
 import { editorViewportBounds } from '../editor/editorViewportBounds';
 import { sourceLinePositionAtTarget } from '../editor/domSourceLine';
@@ -625,7 +626,7 @@ export class ViewportController {
       // Text similarity cannot locate repeated lines after disjoint edits.
       // Map every open scope while the exact CodeMirror change is available,
       // including parents of an awaited nested anchor transaction.
-      const currentText = this.view.state.doc.toString();
+      const currentText = readDocumentTextProjection(this.view.state.doc);
       let scope: AnchorTransactionScope = this.anchorTransactionScope;
       while (scope.kind !== 'idle') {
         if (scope.kind === 'current' && !scope.closed) {
@@ -2637,7 +2638,7 @@ export class ViewportController {
         record,
         target: owner,
         anchor: { ...record.anchor },
-        previousDocumentText: this.view.state.doc.toString(),
+        previousDocumentText: readDocumentTextProjection(this.view.state.doc),
         documentChangeObserved: false,
         parent,
         closed: false,
@@ -2747,7 +2748,7 @@ export class ViewportController {
     const anchor = this.mapAnchorThroughDocumentChange(
       scope.anchor,
       scope.previousDocumentText,
-      this.view.state.doc.toString()
+      readDocumentTextProjection(this.view.state.doc)
     );
     if (!anchor) return;
     this.projectAnchorRecord(scope.record, scope.target, anchor);

@@ -4,9 +4,27 @@ import type { InitMessage } from '../src/protocol/readyInit';
 import type { WebviewToHostMessage } from '../src/protocol/messages';
 import { createDocumentTextReplacement } from '../src/foundation/documentText';
 import { ChangeSet, Text } from '@codemirror/state';
-import { documentEdit } from '../webview/src/adapters/documentSnapshot';
+import { documentEdit, documentSnapshot } from '../webview/src/adapters/documentSnapshot';
+import { readDocumentTextProjection } from '../webview/src/application/documentTextProjection';
 
 const initial = 'paragraph 😀\n'.repeat(65_536);
+{
+  const read = Text.prototype.toString;
+  let reads = 0;
+  const revisions = Array.from({ length: 12 }, (_, index) => Text.of([String(index) + 'x'.repeat(600_000)]));
+  Text.prototype.toString = function() { reads += 1; return read.call(this); };
+  try {
+    for (const revision of revisions) {
+      const text = documentSnapshot(revision).toString();
+      assert.equal(readDocumentTextProjection(revision), text, 'editor and synchronization consumers share the same projection');
+    }
+    assert.equal(reads, revisions.length, 'each immutable revision must flatten only once while current');
+    documentSnapshot(revisions.at(-1)!).toString();
+    assert.equal(reads, revisions.length, 'the current revision must stay cached');
+    documentSnapshot(revisions[0]!).toString();
+    assert.equal(reads, revisions.length + 1, 'historical snapshots must not retain an unbounded set of full strings');
+  } finally { Text.prototype.toString = read; }
+}
 {
   const before = Text.of(['😀😁😃']);
   const changes = ChangeSet.of([

@@ -1,3 +1,4 @@
+import { readDocumentTextProjection } from './application/documentTextProjection';
 import { editorScrollIntoView } from './editor/scrollEffects';
 import { markdownSyntaxPublication } from './editor/markdownSyntaxPublication';
 import { editorViewportBounds } from './editor/editorViewportBounds';
@@ -352,7 +353,7 @@ const searchMatchField = StateField.define<SearchMatchFieldValue>({
     if (tr.docChanged || changedQuery || isLiveInputDerivedWorkRefresh(tr)) {
       const searchQuery = changedQuery ?? tr.state.field(searchQueryField);
       const matches = searchQuery.text
-        ? findSearchMatchRanges(tr.state.doc.toString(), searchQuery.text, searchQuery)
+        ? findSearchMatchRanges(readDocumentTextProjection(tr.state.doc), searchQuery.text, searchQuery)
         : [];
       return {
         matches,
@@ -532,7 +533,7 @@ export function createEditor({
           || (focused instanceof HTMLElement && view.contentDOM.contains(focused)
             && focused.matches('textarea,input'))) return;
         const current = view.state.doc;
-        documentAssessment = assessLargeDocument(current.toString());
+        documentAssessment = assessLargeDocument(readDocumentTextProjection(current));
         unassessedCharacters = 0;
         assessedLines = current.lines;
         if (!documentAssessment.preferSource) return;
@@ -1263,7 +1264,7 @@ export function createEditor({
     const frontmatter = parseFrontmatterCandidate(state);
     if (frontmatter && position >= frontmatter.from && position <= frontmatter.to) return 'excluded';
     let ranges = inputMathRanges.get(state.doc);
-    if (!ranges) { ranges = collectLatexMathRanges(state.doc.toString()); inputMathRanges.set(state.doc, ranges); }
+    if (!ranges) { ranges = collectLatexMathRanges(readDocumentTextProjection(state.doc)); inputMathRanges.set(state.doc, ranges); }
     if (ranges.some(range => position > range.from && position < range.to)) return 'excluded';
     return markdownSyntaxContext(state, position);
   };
@@ -2226,7 +2227,7 @@ export function createEditor({
     ) {
       return searchResultCache.matches;
     }
-    const matches = findSearchMatchRanges(view.state.doc.toString(), query, { wholeWord, caseSensitive });
+    const matches = findSearchMatchRanges(readDocumentTextProjection(view.state.doc), query, { wholeWord, caseSensitive });
     searchResultCache = { doc: view.state.doc, query, wholeWord, caseSensitive, matches };
     return matches;
   };
@@ -2404,7 +2405,7 @@ export function createEditor({
       Prec.highest(htmlCommentEditing),
       Prec.highest(typingAssistance),
       Prec.highest(pasteAssistance(displayMathPasteText)),
-      Prec.highest(createInputSuggestions({ inputContext, requestLinks: requestLinkCandidates, currentHeadings: () => currentHeadingSuggestions(view.state.doc.toString()),
+      Prec.highest(createInputSuggestions({ inputContext, requestLinks: requestLinkCandidates, currentHeadings: () => currentHeadingSuggestions(readDocumentTextProjection(view.state.doc)),
         cellCoords: measureTextareaSelectionStart,
         focusTable: focusInsertedTable,
         focusMath: () => {
@@ -3486,12 +3487,12 @@ export function createEditor({
     },
     getText() {
       commitActiveTableInput();
-      return view.state.doc.toString();
+      return readDocumentTextProjection(view.state.doc);
     },
     /** Save confirmed input without committing or cancelling an active IME candidate. */
     getTextForSave() {
       commitActiveTableInput();
-      return (imeCompositionBaseText ?? view.state.doc).toString();
+      return readDocumentTextProjection(imeCompositionBaseText ?? view.state.doc);
     },
     revealDocumentFragment(href: string) {
       const fragmentHref = href.startsWith('#') ? href : `#${href}`;
@@ -3824,7 +3825,7 @@ export function createEditor({
         imagePresentationFactory.externalDocumentPresented();
         void editorHistoryRuntime?.dispatch({ type: 'externalDocumentPresented' });
         mermaidDiagramPresentationConsumer.externalDocumentPresented();
-        const currentText = view.state.doc.toString();
+        const currentText = readDocumentTextProjection(view.state.doc);
         const syncChange = findSyncChange(currentText, textValue);
         if (!syncChange) {
           dispatchTextUpdate({
@@ -5076,7 +5077,7 @@ function getLatexSelectionBlockRanges(state: EditorState): Array<{ from: number;
     return cached;
   }
 
-  const text = state.doc.toString();
+  const text = readDocumentTextProjection(state.doc);
   if (text.indexOf('$') === -1) {
     latexSelectionBlockCache.set(docKey, []);
     return [];

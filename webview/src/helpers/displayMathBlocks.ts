@@ -1,3 +1,4 @@
+import { readDocumentTextProjection } from '../application/documentTextProjection';
 import type { EditorState } from '@codemirror/state';
 import type { Tree } from '@lezer/common';
 import { isMathFenceLanguage, mathFenceBodyRange, mathFenceContent } from '../../../src/shared/mathFence';
@@ -21,7 +22,7 @@ export function collectDocumentMathRanges(
   const literalRanges = collectMarkdownLiteralRanges(state, tree, scope);
   const baseOffset = scope?.from ?? 0;
   const exclusions = [...literalRanges.filter(range => !range.script), ...excludedRanges];
-  const candidates: DocumentMathRange[] = collectLatexMathRanges(scope ? state.doc.sliceString(scope.from, scope.to) : state.doc.toString(), {
+  const candidates: DocumentMathRange[] = collectLatexMathRanges(scope ? state.doc.sliceString(scope.from, scope.to) : readDocumentTextProjection(state.doc), {
     baseOffset,
     excludedRanges: exclusions.filter(range => !scope || range.to > scope.from && range.from < scope.to)
       .map(range => ({ from: Math.max(0, range.from - baseOffset), to: range.to - baseOffset })),

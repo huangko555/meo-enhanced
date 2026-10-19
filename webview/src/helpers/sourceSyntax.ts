@@ -1,3 +1,4 @@
+import { readDocumentTextProjection } from '../application/documentTextProjection';
 import { Prec, RangeSetBuilder, StateEffect, type ChangeDesc } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { activateShikiCodeHighlighting, getShikiTokens, getShikiThemeVersion, isShikiThemeReady, requestShikiTokens, subscribeShikiRefresh, type ShikiToken } from './shikiHighlighter';
@@ -150,7 +151,7 @@ export const sourceSyntax = Prec.highest(ViewPlugin.fromClass(class {
     }
     if (this.document !== view.state.doc) {
       this.document = view.state.doc;
-      this.text = view.state.doc.toString();
+      this.text = readDocumentTextProjection(view.state.doc);
     }
     const doc = this.document;
     // Hidden revisions supersede pending work; tokenize only the latest document on reveal.

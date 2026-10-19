@@ -1,11 +1,11 @@
 import { ChangeSet, Text } from '@codemirror/state';
+import { readDocumentTextProjection } from '../application/documentTextProjection';
 import { normalizeDocumentText } from '../../../src/foundation/documentText';
 import type { DocumentTextEdit, DocumentTextSnapshot } from '../../../src/foundation/documentSnapshot';
 
 const snapshots = new WeakMap<Text, CodeMirrorDocumentSnapshot>();
 
 class CodeMirrorDocumentSnapshot implements DocumentTextSnapshot {
-  private cachedText: string | undefined;
   constructor(readonly value: Text) {}
   get length(): number { return this.value.length; }
   sliceString(from: number, to: number): string { return this.value.sliceString(from, to); }
@@ -16,7 +16,7 @@ class CodeMirrorDocumentSnapshot implements DocumentTextSnapshot {
   replace(from: number, to: number, insert: string): DocumentTextSnapshot {
     return documentSnapshot(this.value.replace(from, to, Text.of(insert.split('\n'))));
   }
-  toString(): string { return this.cachedText ??= this.value.toString(); }
+  toString(): string { return readDocumentTextProjection(this.value); }
 }
 
 export function documentSnapshot(text: Text): DocumentTextSnapshot {

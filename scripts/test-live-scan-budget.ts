@@ -15,6 +15,8 @@ import { imagePresentationFactoryFacet, type ImagePresentationFactory } from '..
 import { longCodeBlockSessionUiExtension } from '../webview/src/helpers/longCodeBlocks';
 import { hasMappedLiveInputPresentation, supersedeLiveInputDerivedWork } from '../webview/src/editor/liveInputDerivedWork';
 import { getLiveRenderedBlocks } from '../webview/src/helpers/liveRenderedBlocks';
+import { setLatexMathBlockModeEffect } from '../webview/src/helpers/latexMathEditing';
+import { setHtmlEditingRangeEffect } from '../webview/src/helpers/htmlContent';
 
 {
   const text = 'Selected words\n\nReference[^note].\n\n[^note]: Definition.\n\n' + '**Distant paragraph**.\n\n'.repeat(4_100);
@@ -326,6 +328,46 @@ console.log('Inline input matches full builds; definitions, HTML and oversized b
   }
 }
 console.log('Live pointer selection keeps local work bounded and matches complete presentation');
+
+{
+  const text = 'Body **formatted text** and prose.\n\n' + '## Distant heading\n\nParagraph *with* formatting.\n\n'.repeat(600);
+  let state = EditorState.create({ doc: text, selection: { anchor: 2 }, extensions: liveModeExtensions({ largeDocument: true }) });
+  ensureSyntaxTree(state, state.doc.length, 2_000);
+  state = state.update({}).state;
+  for (const selection of [{ anchor: 7, head: 16 }, { anchor: 25 }, { anchor: 3, head: 30 }]) {
+    const read = Text.prototype.line;
+    let calls = 0;
+    Text.prototype.line = function(number: number) { calls++; return read.call(this, number); };
+    try { state = state.update({ selection }).state; }
+    finally { Text.prototype.line = read; }
+    assert.ok(calls < 200, `entering/leaving a word selection must not rebuild distant blocks (${calls} line reads)`);
+    const fresh = EditorState.create({ doc: state.doc, selection: state.selection, extensions: liveModeExtensions({ largeDocument: true }) });
+    assert.deepEqual(decorationShape(mainDecorations(state)), decorationShape(mainDecorations(fresh)));
+  }
+}
+
+{
+  const text = '$$\nx^2 + 1\n$$\n\nBody **formatted text** and prose.\n\n<div>HTML body</div>\n\n'
+    + '## Distant heading\n\nParagraph *with* formatting.\n\n'.repeat(600);
+  let state = EditorState.create({ doc: text, selection: { anchor: text.indexOf('Body') },
+    extensions: liveModeExtensions({ largeDocument: true }) });
+  ensureSyntaxTree(state, state.doc.length, 2_000); state = state.update({}).state;
+  for (const effect of [setLatexMathBlockModeEffect.of({ anchor: 0, mode: 'source' }),
+    setHtmlEditingRangeEffect.of({ from: text.indexOf('<div>'), to: text.indexOf('</div>') + 6 }),
+    setHtmlEditingRangeEffect.of(null), setLatexMathBlockModeEffect.of({ anchor: 0, mode: 'preview' })]) {
+    const read = Text.prototype.line;
+    let calls = 0;
+    Text.prototype.line = function(number: number) { calls++; return read.call(this, number); };
+    try {
+      state = state.update({ effects: effect }).state;
+      state = state.update({ selection: { anchor: text.indexOf('Body') + 6, head: text.indexOf('Body') + 12 } }).state;
+    } finally { Text.prototype.line = read; }
+    assert.ok(calls < 250, `local block mode and text selection must keep distant work bounded (${calls} line reads)`);
+    const authoritative = state.update({ effects: StateEffect.define<boolean>().of(true) }).state;
+    assert.deepEqual(decorationShape(mainDecorations(state)), decorationShape(mainDecorations(authoritative)),
+      'local invalidation must match a full build with the same manual block modes');
+  }
+}
 
 {
   const text = '---\ntitle: Example\naliases: [one, two]\ndraft: false\nhomepage: https://example.com\nvalue: "`code`"\n---\n\n# Body\n\n'
