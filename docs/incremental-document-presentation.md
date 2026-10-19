@@ -86,6 +86,30 @@ fallback. Tests compare these local results with a complete build under the same
 presentation state. Unchanged math/diagram mode fields preserve their values
 without validating every manual anchor on unrelated transactions.
 
+Large Live builds now retain a structural geometry plan for offscreen rich
+roots, while constructing marks and widgets for the reading window. Source-root,
+HTML/details and replacement boundaries close that window; window changes also
+retire old ordinary marks. Source snapshots and preview/source mode decisions
+certify reused geometry. Gutters follow the same window. Small documents retain
+their complete presentation path. A window-local authoritative rebuild remains
+the fallback for unknown presentation changes.
+
+The formula last-valid-result owner follows the same band and caret. It no
+longer formats every unseen formula on entry or Ctrl+A. Visited results have a
+2 MiB HTML budget; shared formula discovery has a 4 MiB/four-snapshot budget.
+Merge conflict analysis is immutable per source snapshot across Source/Live.
+Parser preparation yields browser tasks rather than waiting two display frames
+per slice, retaining cancellation and the previous visible mode. See the
+[task scheduling specification](https://wicg.github.io/scheduling-apis/#dom-scheduler-posttask).
+
+On the comprehensive fixture, the local browser diagnostic changed Live build
+time from approximately 832 ms to 229 ms, and mount-to-two-frames from 1,357 ms to
+635 ms. These are diagnostic samples, not native P95 acceptance. The remaining
+global parse/context work is still visible under CPU throttling. Four warm
+top-of-document mouse clicks measured 12–20 ms to two frames with no complete
+build; this does not establish behavior across the whole document. Native
+scrollbar/caret and memory acceptance remains required.
+
 ## Preview reading window
 
 The full renderer now separates global parsing/context from HTML generation.

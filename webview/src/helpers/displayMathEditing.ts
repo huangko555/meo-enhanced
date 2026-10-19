@@ -5,6 +5,7 @@ import { collectDocumentMathRanges, getDisplayMathCopySource, getDisplayMathSour
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { uiLanguageFacet } from '../editor/uiLanguage';
 import { isLiveInputDerivedWorkRefresh, isMappedLiveInputRefresh, shouldDeferLiveInputDerivedWork, usesLargeDocumentDerivedWorkBudget } from '../editor/liveInputDerivedWork';
+import { getLivePresentationBand, livePresentationBandChanged } from './liveViewportPresentation';
 
 /** Formula editing belongs to the document selection, including both delimiters. */
 export function isDisplayMathEditing(state: EditorState, startLine: number, endLine: number): boolean {
@@ -29,12 +30,23 @@ function mapValidResults(previous: readonly ValidResult[], transaction: Transact
 
 function collectValidResults(state: EditorState, previous: readonly ValidResult[], transaction?: Transaction): ValidResult[] {
   const mapped = transaction ? mapValidResults(previous, transaction) : previous;
-  const results: ValidResult[] = [];
-  for (const range of collectDocumentMathRanges(state)) {
+  const ranges = collectDocumentMathRanges(state);
+  const band = getLivePresentationBand(state);
+  const current = ranges.filter(range => !band || range.to >= band.from && range.from <= band.to
+    || state.selection.ranges.some(selection => selection.head <= range.to && selection.head >= range.from));
+  const candidates = new Set(current.map(range => `${range.from}:${range.to}`));
+  const remaining = new Set(ranges.map(range => `${range.from}:${range.to}`));
+  const results: ValidResult[] = band ? mapped.filter(result => remaining.has(`${result.from}:${result.to}`)
+    && !candidates.has(`${result.from}:${result.to}`)) : [];
+  for (const range of current) {
     if (!range.fencedDisplay || !range.content.trim()) continue;
     const html = renderLatexMathToHtml(range.content, 'display');
     const valid = html && !html.includes('class="katex-error"') ? html : mapped.find(result => result.from === range.from && result.to === range.to)?.html;
     if (valid) results.push({ from: range.from, to: range.to, html: valid });
+  }
+  let bytes = results.reduce((sum, result) => sum + result.html.length * 2 + 64, 0);
+  while (bytes > 2 * 1024 * 1024 && results.length > 1) {
+    const oldest = results.shift()!; bytes -= oldest.html.length * 2 + 64;
   }
   return results;
 }
@@ -46,7 +58,8 @@ export const displayMathResultField = StateField.define<readonly ValidResult[]>(
     const largeDocument = usesLargeDocumentDerivedWorkBudget(transaction.state);
     if (largeDocument && isMappedLiveInputRefresh(transaction)) return value;
     if (largeDocument && isLiveInputDerivedWorkRefresh(transaction)) return collectValidResults(transaction.state, value);
-    if (!transaction.docChanged) return value;
+    if (!transaction.docChanged) return largeDocument && (livePresentationBandChanged(transaction) || transaction.selection)
+      ? collectValidResults(transaction.state, value) : value;
     if (largeDocument && shouldDeferLiveInputDerivedWork(transaction)) {
       let touchesKnownFormula = false;
       transaction.changes.iterChangedRanges((from, to) => {

@@ -36,6 +36,7 @@ const build = await Bun.build({ entrypoints: [path.join(root, 'scripts/test-live
     });
     for (const [file, boundary, counter] of [
       ['liveRenderedBlocks', 'function discoverRenderedBlocks(state: EditorState, tree: Tree): DiscoveredBlock[] {', '__renderedDiscoveries'],
+      ['math', 'export function renderLatexMathToHtml(content: string, mode: LatexMathMode): string | null {', '__mathFormats'],
       ['gitDiffGutter', 'function buildCoalescedDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | null): (MarkerFlags | undefined)[] | null {', '__diffBuilds']
     ]) builder.onLoad({ filter: new RegExp(`webview[\\\\/]src[\\\\/]helpers[\\\\/]${file}\\.ts$`) }, async ({ path }) => {
       const source = await Bun.file(path).text();
@@ -77,6 +78,28 @@ try {
   await page.addStyleTag({ path: path.join(root, 'webview/src/styles.css') });
   await page.addScriptTag({ path: path.join(directory, 'bundle.js') });
   await installGitDiffWorker(page);
+  const windowConstruction = await page.evaluate(async () => {
+    const scope = window as any, api = scope.__liveHistory;
+    const text = '# First reading window\n\n' + 'Visible prose.\n\n'.repeat(120)
+      + Array.from({ length: 300 }, (_, index) => `| Column | Value |\n| --- | --- |\n| Row ${index} | value |\n\n$$\nx_{${index}}^2 + 1\n$$\n\n`).join('');
+    const editor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'source', onApplyTransaction() {} });
+    await editor.prepareLiveSyntax(() => true);
+    scope.__mathFormats = 0;
+    editor.setMode('live');
+    const formats = scope.__mathFormats;
+    let geometry = 0;
+    for (const cursor = api.decorations(editor).iter(); cursor.value; cursor.next()) {
+      if (cursor.value.spec.widget?.constructor.name === 'ViewportWidgetPlaceholder') geometry += 1;
+    }
+    scope.__mathFormats = 0;
+    editor.view.dispatch({ selection: { anchor: 0, head: editor.view.state.doc.length } });
+    const selectAllFormats = scope.__mathFormats;
+    editor.destroy();
+    return { formats, geometry, selectAllFormats };
+  });
+  assert.ok(windowConstruction.formats < 10, `entering Live must not format 300 distant formulas (${windowConstruction.formats})`);
+  assert.equal(windowConstruction.geometry, 600, 'all distant tables/formulas must retain structural geometry without full widgets');
+  assert.ok(windowConstruction.selectAllFormats < 10, 'selecting the document must not format every selected formula');
   const coldLargeLive = await page.evaluate(async () => {
     const scope = window as any, api = scope.__liveHistory;
     const text = 'EDIT\n\n' + Array.from({ length: 1_600 }, (_, i) =>

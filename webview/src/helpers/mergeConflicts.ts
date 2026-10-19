@@ -35,7 +35,7 @@ interface MergeConflict {
 }
 
 interface MergeConflictState {
-  conflicts: MergeConflict[];
+  conflicts: readonly MergeConflict[];
   decorations: any;
 }
 
@@ -54,7 +54,11 @@ function markerLabel(text: string, marker: string): string {
   return text.slice(marker.length).trim();
 }
 
-export function parseMergeConflicts(state: EditorState): MergeConflict[] {
+const conflictCache = new WeakMap<EditorState['doc'], readonly MergeConflict[]>();
+
+export function parseMergeConflicts(state: EditorState): readonly MergeConflict[] {
+  const cached = conflictCache.get(state.doc);
+  if (cached) return cached;
   const conflicts: MergeConflict[] = [];
   const { doc } = state;
   let lineNo = 1;
@@ -138,7 +142,9 @@ export function parseMergeConflicts(state: EditorState): MergeConflict[] {
     lineNo = endLineNo + 1;
   }
 
-  return conflicts;
+  const result = Object.freeze(conflicts.map(conflict => Object.freeze(conflict)));
+  conflictCache.set(doc, result);
+  return result;
 }
 
 class MergeConflictActionsWidget extends UiLanguageSensitiveWidget {
@@ -210,7 +216,7 @@ function addLineDeco(builder: RangeSetBuilder<any>, state: EditorState, lineNo: 
   builder.add(line.from, line.from, deco);
 }
 
-function buildConflictDecorations(state: EditorState, conflicts: MergeConflict[]): any {
+function buildConflictDecorations(state: EditorState, conflicts: readonly MergeConflict[]): any {
   const builder = new RangeSetBuilder<any>();
 
   for (const conflict of conflicts) {

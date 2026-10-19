@@ -5,18 +5,13 @@ const PARSE_SLICE_MS = 8;
 const PREPARATION_DEADLINE_MS = 10_000;
 
 function yieldForPresentation(): Promise<void> {
-  return new Promise(resolve => {
-    let frame: number | null = null;
-    const finish = () => {
-      if (frame !== null) cancelAnimationFrame(frame);
-      clearTimeout(fallback);
-      resolve();
-    };
-    // Hidden Webviews can receive mode intents too. Let cancellation complete
-    // even when the browser suspends their animation frames.
-    const fallback = setTimeout(finish, 50);
-    frame = requestAnimationFrame(() => { frame = requestAnimationFrame(finish); });
-  });
+  const scheduler = (globalThis as typeof globalThis & {
+    scheduler?: { postTask(callback: () => void, options: { priority: 'user-visible' }): Promise<void> }
+  }).scheduler;
+  if (scheduler?.postTask) return scheduler.postTask(() => {}, { priority: 'user-visible' });
+  // Each slice yields a task, allowing input and paint without tying parser
+  // progress to two display refreshes. Older runtimes use the ordinary task queue.
+  return new Promise(resolve => setTimeout(resolve, 0));
 }
 
 /** Finish the shared parser while the old surface remains mounted. Installing

@@ -33,7 +33,7 @@ class ViewportWidgetPlaceholder extends WidgetType {
   private readonly breaks: number;
   get estimatedHeight() { return this.height; }
   get lineBreaks() { return this.breaks; }
-  constructor(widget: WidgetType, readonly block: boolean) {
+  constructor(widget: Pick<WidgetType, 'estimatedHeight' | 'lineBreaks'>, readonly block: boolean) {
     super();
     this.height = widget.estimatedHeight;
     this.breaks = widget.lineBreaks;
@@ -58,8 +58,15 @@ class ViewportWidgetPlaceholder extends WidgetType {
   ignoreEvent() { return true; }
 }
 
-/** Called by the canonical full and local renderer before ranges are stored.
- * Complete text/marks remain present; only offscreen UI instances are omitted. */
+/** Structural geometry can be retained without constructing the rich widget. */
+export function createLiveViewportPlaceholder(estimatedHeight: number, previous?: WidgetType, preview = false): WidgetType {
+  return new ViewportWidgetPlaceholder(previous ?? {
+    estimatedHeight, lineBreaks: 0, [renderedBlockPreview]: preview
+  } as Pick<WidgetType, 'estimatedHeight' | 'lineBreaks'>, true);
+}
+
+/** Cross-root renderers can still emit widgets beyond the current band. Keep
+ * their geometry without retaining those UI instances in the window value. */
 export function restrictLiveWidgetPresentation(ranges: Range<Decoration>[], state: EditorState): void {
   const band = getLivePresentationBand(state);
   if (!band) return;

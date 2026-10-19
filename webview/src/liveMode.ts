@@ -2,6 +2,7 @@ import { editorScrollIntoView, isEditorScrollEffect } from './editor/scrollEffec
 import { documentLines } from './helpers/documentLines';
 import { isAutomaticSymbolPairHistoryEffect } from './editor/typingAssistance';
 import { liveWidgetPresentationLayers, mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions, replaceLivePresentationRanges } from './editor/liveWidgetPositions';
+import { livePresentationWindow } from './helpers/livePresentationWindow';
 import { liveViewportPresentationExtensions, restrictLiveWidgetPresentation, getLivePresentationBand,
   isLiveViewportPresentationEffect, livePresentationBandChanged } from './helpers/liveViewportPresentation';
 import { undoDepth } from '@codemirror/commands';
@@ -2589,8 +2590,12 @@ function buildDecorationRanges(state: EditorState, previous?: DecorationSet, cha
 }
 
 function buildDecorations(state: EditorState, previous?: DecorationSet, changes?: ChangeDesc): DecorationSet {
-  const { ranges, tree } = buildDecorationRanges(state, previous, changes);
-  const result = Decoration.set(ranges, true);
+  const initialTree = resolvedSyntaxTree(state);
+  const window = withMarkdownSyntaxSnapshot(state, initialTree, () => livePresentationWindow(state, initialTree));
+  const { ranges, tree } = window
+    ? withMarkdownSyntaxSnapshot(state, initialTree, () => buildDecorationRanges(state, previous, changes, window.scope))
+    : buildDecorationRanges(state, previous, changes);
+  const result = Decoration.set(window ? window.project(ranges, changes ? previous?.map(changes) : previous) : ranges, true);
   let filtered = filterDecorationsOutsideMergeConflicts(state, result);
   if (usesLargeDocumentDerivedWorkBudget(state)) {
     // Helpers may finish embedded language parsing. Certify the actual outer
@@ -3748,6 +3753,17 @@ function rebuildLiveSelectionWithSyntax(decorations: DecorationSet, transaction:
     }
     result = replaceLivePresentationRanges(result, scope.from, scope.to, additions);
   }
+  const band = getLivePresentationBand(state);
+  if (band && (livePresentationBandChanged(transaction)
+    || merged.some(range => range.from < band.from || range.to > band.to))) {
+    const window = livePresentationWindow(state, tree);
+    if (window) {
+      const ranges: Range<Decoration>[] = [];
+      for (const cursor = result.iter(); cursor.value; cursor.next()) ranges.push(cursor.value.range(cursor.from, cursor.to));
+      result = prepareLiveWidgetPositions(filterDecorationsOutsideMergeConflicts(state,
+        Decoration.set(window.project(ranges, decorations), true)), true);
+    }
+  }
   if (!changedBlockContext) localLiveSelectionUpdates.add(state);
   liveDecorationMetadata.set(state, { ...liveDecorationMetadata.get(state), complete: true });
   completeLiveDecorationSets.add(result);
@@ -4227,7 +4243,8 @@ const liveDecorationField = StateField.define<DecorationSet>({
 
     // Guard against transient empty parse results on selection-only transactions.
     if (!transaction.docChanged && !isLiveInputDerivedWorkRefresh(transaction)
-      && isEmptyDecorationSet(next) && !isEmptyDecorationSet(decorations)) {
+      && isEmptyDecorationSet(next) && !isEmptyDecorationSet(decorations)
+      && !liveDecorationMetadata.get(transaction.state)?.complete) {
       liveDecorationMetadata.set(transaction.state, { complete: false });
       return decorations;
     }
@@ -4261,6 +4278,9 @@ function isRenderedBlockPreview(state: EditorState, block: LiveRenderedBlock): b
 
 function buildLiveLineNumberMarkers(state: EditorState): RangeSet<GutterMarker> {
   const builder = new RangeSetBuilder<GutterMarker>();
+  const band = getLivePresentationBand(state);
+  const firstLine = band ? state.doc.lineAt(band.from).number : 1;
+  const lastLine = band ? state.doc.lineAt(band.to).number : state.doc.lines;
   const conflictLineNumbers = new Set<number>();
   for (const conflict of parseMergeConflicts(state)) {
     for (let lineNo = conflict.startLineNo; lineNo <= conflict.endLineNo; lineNo += 1) {
@@ -4268,6 +4288,7 @@ function buildLiveLineNumberMarkers(state: EditorState): RangeSet<GutterMarker> 
     }
   }
   for (const block of getLiveRenderedBlocks(state, { includeSelectedMath: true })) {
+    if (block.endLine < firstLine || block.startLine > lastLine) continue;
     if (block.kind === 'math' && isDisplayMathEditing(state, block.startLine, block.endLine)) continue;
     if (isRenderedBlockPreview(state, block)) {
       const anchorLine = state.doc.line(block.startLine);
@@ -4276,7 +4297,7 @@ function buildLiveLineNumberMarkers(state: EditorState): RangeSet<GutterMarker> 
     if (block.lineNumberHiddenFrom < 1 || block.lineNumberHiddenTo < block.lineNumberHiddenFrom) {
       continue;
     }
-    for (let lineNo = block.lineNumberHiddenFrom; lineNo <= block.lineNumberHiddenTo; lineNo += 1) {
+    for (let lineNo = Math.max(firstLine, block.lineNumberHiddenFrom); lineNo <= Math.min(lastLine, block.lineNumberHiddenTo); lineNo += 1) {
       if (conflictLineNumbers.has(lineNo)) {
         continue;
       }
@@ -4430,7 +4451,7 @@ const liveLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
     return buildLiveLineNumberMarkers(state);
   },
   update(markers: RangeSet<GutterMarker>, transaction: Transaction): RangeSet<GutterMarker> {
-    if (localLiveSelectionUpdates.has(transaction.state)) return markers;
+    if (localLiveSelectionUpdates.has(transaction.state) && !livePresentationBandChanged(transaction)) return markers;
     if (isMappedLiveInputRefresh(transaction) || shouldDeferLiveInputDerivedWork(transaction)) {
       return transaction.docChanged ? markers.map(transaction.changes) : markers;
     }
@@ -4442,6 +4463,7 @@ const liveLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
     ));
     if (!transaction.docChanged
       && !isLiveInputDerivedWorkRefresh(transaction)
+      && !livePresentationBandChanged(transaction)
       && !renderedBlockPresentationChanged
       && transaction.startState.selection.eq(transaction.state.selection)) {
       return markers;
@@ -4455,6 +4477,7 @@ function buildStyledLineNumberMarkers(state: EditorState): RangeSet<GutterMarker
   const builder = new RangeSetBuilder<GutterMarker>();
   const frontmatter = parseFrontmatter(state);
   resolvedSyntaxTree(state).iterate({
+    ...getLivePresentationBand(state),
     enter(node) {
       if (node.name === 'CodeBlock' && !hasCodeBlockAncestor(node)) {
         const line = state.doc.lineAt(node.from);
@@ -4474,7 +4497,7 @@ const styledLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
   create: buildStyledLineNumberMarkers,
   update(markers, transaction) {
     if (isMappedLiveInputRefresh(transaction) || shouldDeferLiveInputDerivedWork(transaction)) return transaction.docChanged ? markers.map(transaction.changes) : markers;
-    if (!transaction.docChanged && !isLiveInputDerivedWorkRefresh(transaction)) return markers;
+    if (!transaction.docChanged && !isLiveInputDerivedWorkRefresh(transaction) && !livePresentationBandChanged(transaction)) return markers;
     return buildStyledLineNumberMarkers(transaction.state);
   },
   provide: (field) => gutterLineClass.from(field)
