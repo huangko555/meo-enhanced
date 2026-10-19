@@ -246,6 +246,28 @@ try {
     'pasting a large document into an ordinary editor must not synchronously compare it before adaptive assessment');
   assert.equal(growth.summary.status, 'pending');
   await page.evaluate(() => (window as any).__editor.destroy());
+  await installGitDiffWorker(page, 0, 100);
+  await page.evaluate(() => {
+    const scope = window as any, text = 'CHANGED\n\n' + 'Large paragraph.\n\n'.repeat(5_000);
+    scope.__editor = scope.__liveHistory.create({ parent: document.getElementById('editor'), text,
+      initialMode: 'source', initialGitGutter: true, onApplyChanges() {} });
+    scope.__editor.setGitBaseline({ available: true, tracked: true, baseText: text.replace('CHANGED', 'ORIGINAL') });
+  });
+  await page.waitForFunction(() => (window as any).__liveHistory.gitSummary((window as any).__editor).status !== 'pending');
+  assert.deepEqual(await summary(), { status: 'ready', added: 1, deleted: 1 },
+    'background comparison must tolerate line preparation beyond the foreground 50ms budget');
+  await page.evaluate(() => (window as any).__editor.destroy());
+  await installGitDiffWorker(page, 0, 2_000);
+  await page.evaluate(() => {
+    const scope = window as any, text = 'CHANGED\n\n' + 'Large paragraph.\n\n'.repeat(5_000);
+    scope.__editor = scope.__liveHistory.create({ parent: document.getElementById('editor'), text,
+      initialMode: 'source', initialGitGutter: true, onApplyChanges() {} });
+    scope.__editor.setGitBaseline({ available: true, tracked: true, baseText: text.replace('CHANGED', 'ORIGINAL') });
+  });
+  await page.waitForFunction(() => (window as any).__liveHistory.gitSummary((window as any).__editor).status !== 'pending');
+  assert.deepEqual(await summary(), { status: 'unavailable', reason: 'timeout', added: 0, deleted: 0 },
+    'background comparison must still enforce a finite computation budget');
+  await page.evaluate(() => (window as any).__editor.destroy());
   assert.deepEqual(errors, []);
   console.log('Background diff editor contracts passed: real worker, pending/current ownership, cancellation, undo, IME, mode reuse, failure and small-document behavior.');
 } catch (error) { primaryError = error; throw error; }

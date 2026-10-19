@@ -18,6 +18,9 @@ const worker = self as unknown as {
   postMessage(message: GitDiffWorkerResponse, transfer: Transferable[]): void;
 };
 worker.onmessage = ({ data }) => {
-  const result = compareDocuments(data.baseline, data.current, { maxComputationTimeMs: 50 });
+  // The foreground's 50ms budget includes line preparation and can expire
+  // before a large comparison starts. Use the shared 1s background budget;
+  // the owner still cancels superseded work and enforces a 5s outer deadline.
+  const result = compareDocuments(data.baseline, data.current);
   worker.postMessage({ id: data.id, result }, [result.currentToBaselineLine.buffer]);
 };
