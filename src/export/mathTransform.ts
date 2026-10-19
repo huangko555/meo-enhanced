@@ -1,5 +1,5 @@
 import MarkdownIt from 'markdown-it';
-import { parseLatexMathAt, renderLatexMathToHtml, type LatexMathMode } from './math';
+import { parseLatexMathAt, renderLatexMathPresentation, type LatexMathMode } from './math';
 import { mathFenceBodyRange } from '../shared/mathFence';
 
 function mathSourceAttribute(content: string, mode: LatexMathMode): string {
@@ -12,6 +12,7 @@ export function installMathTransform(
   options: {
     onRenderedMath?: () => void;
     githubStyle?: boolean;
+    deferDisplay?: boolean;
   } = {}
 ): void {
   const lookingAhead = new WeakSet<object>();
@@ -71,13 +72,13 @@ export function installMathTransform(
     if (options.githubStyle && math.mode === 'display' && listInlineTokens.has(state.tokens)) return false;
     if (options.githubStyle && /\n[ \t]*\n/.test(math.raw)) return false;
     if (!silent) {
-      const html = renderLatexMathToHtml(math.content, math.mode);
-      if (!html) return false;
+      const presentation = renderLatexMathPresentation(math.content, math.mode, options.deferDisplay);
+      if (!presentation) return false;
       const node = state.push('html_inline', '', 0);
       node.meta = { meoTrustedHtml: true, meoMathSource: math.raw };
       const source = state.src.slice(math.from, math.to);
       const body = mathFenceBodyRange(source);
-      node.content = `<span class="meo-export-math meo-export-math-${math.mode}"${mathSourceAttribute(source.slice(body.from, body.to), math.mode)}>${html}</span>`;
+      node.content = `<span class="meo-export-math meo-export-math-${math.mode}"${mathSourceAttribute(source.slice(body.from, body.to), math.mode)}${presentation.attributes}>${presentation.html}</span>`;
       options.onRenderedMath?.();
     }
     state.pos = math.to;
@@ -98,6 +99,13 @@ export function installMathTransform(
     for (let line = startLine + 1; line < scopeEnd; line++) {
       if (state.sCount[line] < state.blkIndent && state.src.slice(state.bMarks[line], state.eMarks[line]).trim()) {
         scopeEnd = line;
+        break;
+      }
+      // The shared scanner consumes at most the first standalone closer. Do
+      // not copy the rest of the document for each individual formula.
+      const payload = state.src.slice(state.bMarks[line] + state.tShift[line], state.eMarks[line]);
+      if (payload.trim() === '$$') {
+        scopeEnd = line + 1;
         break;
       }
     }
@@ -121,11 +129,11 @@ export function installMathTransform(
 
   md.renderer.rules.meo_math_block = (tokens, idx, _options, _env, self) => {
     const mathBlock = tokens[idx];
-    const renderedMath = renderLatexMathToHtml(String(mathBlock.content ?? ''), 'display');
-    if (!renderedMath) {
+    const presentation = renderLatexMathPresentation(String(mathBlock.content ?? ''), 'display', options.deferDisplay);
+    if (!presentation) {
       return `<pre>${md.utils.escapeHtml(`$$\n${mathBlock.content}\n$$`)}</pre>\n`;
     }
     options.onRenderedMath?.();
-    return `<div class="meo-export-math meo-export-math-display meo-export-math-fenced-display"${mathSourceAttribute(String(mathBlock.meta?.copySource ?? mathBlock.content ?? ''), 'display')}${self.renderAttrs(mathBlock)}>${renderedMath}</div>\n`;
+    return `<div class="meo-export-math meo-export-math-display meo-export-math-fenced-display"${mathSourceAttribute(String(mathBlock.meta?.copySource ?? mathBlock.content ?? ''), 'display')}${presentation.attributes}${self.renderAttrs(mathBlock)}>${presentation.html}</div>\n`;
   };
 }

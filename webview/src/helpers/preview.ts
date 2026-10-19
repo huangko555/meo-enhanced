@@ -13,6 +13,7 @@ import { getPreviewViewportResources, observePreviewViewportResources } from './
 import { createPreviewSourceGeometry } from './previewSourceGeometry';
 import { createPreviewScrollRange } from './previewScrollRange';
 import { writePreviewFrame } from './previewFrameWriter';
+import { renderDeferredPreviewMath } from './previewMath';
 import { createDocumentScrollToTopController } from './scrollToTop';
 import type { OutlineHeading } from './outline';
 import type { EditorAppearance as PreviewAppearance } from '../../../src/protocol/editorCommands';
@@ -433,6 +434,12 @@ function morphPreviewMain(
           ) {
             syncSourceMappingAttributes(fromElement, toElement);
             return false;
+          }
+          // A previously generated formula must update atomically. Deferral is
+          // for unseen content, not a reason to replace a readable result with
+          // raw TeX until the next intersection delivery.
+          if (fromPresentation?.startsWith('math:') && fromElement.querySelector('.katex')) {
+            renderDeferredPreviewMath(toElement as HTMLElement);
           }
           if (
             deferUnreadyCodeBlock
@@ -1565,6 +1572,11 @@ export function createPreviewController({
       }
       const copyActions = element.querySelector(':scope > .meo-preview-code-actions');
       copyActions?.remove();
+      if (renderDeferredPreviewMath(element)) {
+        sourceMapDirty = true;
+        search.invalidate();
+        search.surfaceReady();
+      }
       const controller = element.classList.contains('meo-export-math-inline')
         ? attachLatexMathViewport(element, { layout: { kind: 'inline' } })
         : attachLatexMathViewport(element)
@@ -1583,7 +1595,10 @@ export function createPreviewController({
         for (const entry of entries) {
           const element = entry.target as HTMLElement;
           if (!element.isConnected) continue;
-          if (entry.isIntersecting) attach(element);
+          if (entry.isIntersecting) {
+            if (element.hasAttribute('data-meo-deferred-math')) withViewportTransaction(() => attach(element));
+            else attach(element);
+          }
           else previewMathViewports.get(element)?.controller.setActive(false);
         }
       }, { rootMargin: '800px 0px' });

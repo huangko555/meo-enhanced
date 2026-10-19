@@ -1,6 +1,8 @@
 import MarkdownIt from 'markdown-it';
 
-const structureParser = new MarkdownIt();
+// Only block types and source ranges participate in this index. The default
+// inline phase would parse every paragraph again for each preprocessing pass.
+const structureParser = new MarkdownIt().disable('inline');
 
 /** Code is opaque to table/list normalization and footnote substitution, including
  * fences and indented code inside lists and quotes. Line indexes are zero based. */

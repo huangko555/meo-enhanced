@@ -13,6 +13,7 @@ import { getPreviewPreset, getPreviewPresetCodeTheme, resolvePresetAppearance, r
 import { buildPresetPreviewStyles } from '../preview/presetStyles';
 import type { ResolvedWikiResources } from '../foundation/wikiReference';
 import { githubPictureMedia } from '../shared/githubPicture';
+import { assessLargeDocument } from '../foundation/largeDocument';
 
 export type ExportRuntimeBuildHtmlOptions = {
   wikiResources?: ResolvedWikiResources;
@@ -125,6 +126,7 @@ function renderPreviewDocument(options: {
     uiLanguage: options.uiLanguage,
     showComments: environment.previewShowComments === true,
     deferImages: true,
+    deferDisplayMath: assessLargeDocument(options.markdownText).preferSource,
     deferLocalLinks: true,
     allowLocalLinks: true,
     preset,

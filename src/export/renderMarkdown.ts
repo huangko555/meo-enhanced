@@ -13,7 +13,7 @@ import { prepareMarkdownWithFootnotes } from './footnotes';
 import type { SourceMappedMarkdown } from './sourceMappedMarkdown';
 import { installMathTransform } from './mathTransform';
 import { collectMarkdownCodeLines } from './markdownCodeLines';
-import { renderLatexMathToHtml } from './math';
+import { renderLatexMathPresentation } from './math';
 import { isMathFenceLanguage, mathFenceBodyRange, mathFenceContent } from '../shared/mathFence';
 import { installHighlightTransform } from './highlightTransform';
 import { installInlineScriptTransform } from './inlineScriptTransform';
@@ -69,6 +69,8 @@ export type RenderMarkdownOptions = {
   deferImages?: boolean;
   /** Preview leaves workspace-root links for Host URI resolution. */
   deferLocalLinks?: boolean;
+  /** Large Preview generates display formulas in its existing viewport observer. */
+  deferDisplayMath?: boolean;
   /** Permit local file destinations alongside the preset's safe URL schemes. */
   allowLocalLinks?: boolean;
   showComments?: boolean;
@@ -180,6 +182,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   if (shouldEnableMathTransform) {
     installMathTransform(md, {
       githubStyle: github,
+      deferDisplay: options.deferDisplayMath,
       onRenderedMath: () => {
         hasMath = true;
       }
@@ -211,13 +214,13 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
 
     if (renderRichContent && (github ? richLanguage === 'math' : isMathFenceLanguage(language))) {
       const mathContent = mathFenceContent(source);
-      const renderedMath = renderLatexMathToHtml(mathContent, 'display');
-      if (renderedMath) {
+      const presentation = renderLatexMathPresentation(mathContent, 'display', options.deferDisplayMath);
+      if (presentation) {
         hasMath = true;
         const copySource = source.replace(/\n$/, '');
         const body = mathFenceBodyRange(copySource);
         const sourceB64 = Buffer.from(copySource.slice(body.from, body.to), 'utf8').toString('base64');
-        return `<div class="meo-export-math meo-export-math-display meo-export-math-fenced-display" data-source-b64="${sourceB64}"${sourceAttrs}>${renderedMath}</div>`;
+        return `<div class="meo-export-math meo-export-math-display meo-export-math-fenced-display" data-source-b64="${sourceB64}"${presentation.attributes}${sourceAttrs}>${presentation.html}</div>`;
       }
     }
 
@@ -329,7 +332,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
       img: ['src', 'alt', 'title', 'width', 'height', 'loading', DEFERRED_IMAGE_ATTRIBUTE, ...(github ? githubHtmlAttributes.img : [])],
       ol: ['start', 'reversed', ...(github ? githubHtmlAttributes.ol : [])],
       li: ['value'],
-      '*': ['class', 'style', 'id', 'data-source-b64', 'data-source-line', 'data-source-end-line', 'aria-hidden', ...(github ? githubHtmlAttributes['*'] : [])],
+      '*': ['class', 'style', 'id', 'data-source-b64', 'data-meo-deferred-math', 'data-source-line', 'data-source-end-line', 'aria-hidden', ...(github ? githubHtmlAttributes['*'] : [])],
       span: ['class', 'style', 'title', 'role', 'aria-label', 'aria-hidden', 'data-line-number'],
       th: ['colspan', 'rowspan', 'scope', 'style'],
       td: ['colspan', 'rowspan', 'style'],
