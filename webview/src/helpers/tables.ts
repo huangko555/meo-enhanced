@@ -6457,6 +6457,30 @@ export function isTableDelimiterLine(lineText: string): boolean {
   return tableDelimiterRegex.test(parseBlockLinePrefix(lineText).content.trimEnd());
 }
 
+/** Source geometry does not need cell segmentation, inline Markdown or widget
+ * data. Keep the same header/delimiter/body bounds as the detailed table model. */
+export function getTableSourceBounds(state: EditorState, tableNode: Pick<SyntaxNodeRef, 'from' | 'to'>) {
+  const first = state.doc.lineAt(tableNode.from);
+  const last = state.doc.lineAt(Math.max(tableNode.to - 1, tableNode.from));
+  let delimiterLine: number | null = null, headerLine = first.number, endLine = last.number;
+  for (let number = first.number; number <= last.number; number++) {
+    const line = state.doc.line(number);
+    const content = parseBlockLinePrefix(line.text).content;
+    if (delimiterLine === null) {
+      if (isTableDelimiterLine(content)) {
+        delimiterLine = number;
+        headerLine = Math.max(first.number, number - 1);
+        endLine = number;
+      }
+    } else {
+      if (!isTableContentLine(content)) break;
+      endLine = number;
+    }
+  }
+  return { from: state.doc.line(headerLine).from, to: state.doc.line(endLine).to,
+    startLine: headerLine, endLine, delimiterLine };
+}
+
 export function parseTableInfo(state: EditorState, tableNode: Pick<SyntaxNodeRef, 'from' | 'to'>) {
   const data = buildTableData(state, tableNode);
   const { from, to, lines, delimiterIdx, headerLine, dataLines, alignments, colCount, startLine, endLine } = data;

@@ -12,7 +12,10 @@ const server = Bun.serve({ port: 0, fetch(request) {
   const path = new URL(request.url).pathname;
   if (path === '/bundle.js') return new Response(bundle, { headers: { 'content-type': 'text/javascript' } });
   if (path === '/worker.js') return new Response(workerFile, { headers: { 'content-type': 'text/javascript' } });
-  return new Response(`<body ${new URL(request.url).searchParams.has('foreground') ? '' : 'data-meo-shiki-worker-src="/worker.js"'}><script src="/bundle.js"></script></body>`, { headers: { 'content-type': 'text/html' } });
+  return new Response(`<body ${new URL(request.url).searchParams.has('foreground') ? '' : 'data-meo-shiki-worker-src="/worker.js"'}><script src="/bundle.js"></script></body>`, { headers: {
+    'content-type': 'text/html',
+    'content-security-policy': "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; worker-src blob:"
+  } });
 } });
 const browser = await launchTestBrowser();
 try {

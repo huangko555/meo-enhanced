@@ -233,3 +233,35 @@ the short rich-document native failure without changing its initial mode or
 Source palette. Sessions already using a work budget continue assessing growth
 into the larger Source policy. Regression coverage includes full Source tokens,
 composition deferral, exact text/undo, reading position and mode transitions.
+
+Global table geometry no longer constructs detailed cell models. Its reader
+retains the content model's header, delimiter and body bounds while skipping
+cell splitting and inline parsing. The regression fixture previously constructed
+107 detailed models for a position query; it now constructs none and preserves
+all source ranges, including list/quote/footnote containers. An additional
+diagnostic found exact geometry parity for all 361 tables in the comprehensive
+fixture. This work-count reduction is not a native latency claim.
+
+CodeMirror's documented parser scheduler and immutable tree sharing remain the
+syntax owner. Its maintainers explain why moving the complete state/tree through
+worker boundaries introduces significant coordination and serialization costs:
+[parser scheduling discussion](https://discuss.codemirror.net/t/some-thoughts-and-requests-about-how-cm6-schedules-parsing/3045).
+The [public ParseContext API](https://codemirror.net/docs/ref/#language.ParseContext)
+provides skipping and asynchronous nested-language loading; it does not itself
+provide asynchronous document-state editing. Shiki's independent output is a
+better fit for CPU isolation than duplicating the authoritative editing state.
+
+Each coloring surface now has an 8 MiB estimated retained-token budget, including
+source keys, token text and scope metadata. The existing entry limits remain
+(300 for fenced coloring, two for complete Source coloring); recent reads refresh
+LRU order. One oversized current result is allowed and evicted when a different
+result arrives. Lifecycle regression tests drive multi-megabyte source revisions
+through the public facade, require old results to retire, and retain the current
+result without reinitializing its engine.
+
+The V37 archive at `ea790c7a` passed final archive/asset/privacy checks. Its fresh
+native run has not started: after restoring the saved VM, Guest Additions reports
+ready but Guest Control terminates every authenticated command/transfer session.
+The VM was saved again without starting test apps. Later changes have browser,
+type and targeted regression evidence only; native performance is still an open
+acceptance requirement. The last completed native measurement remains V36 above.

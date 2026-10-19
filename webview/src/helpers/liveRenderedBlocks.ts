@@ -6,7 +6,7 @@ import { parseBlockLinePrefix } from './blockIndent';
 import { getFencedCodeInfo, resolvedSyntaxTree, withMarkdownSyntaxSnapshot } from './markdownSyntax';
 import { resolveFencedDisplayMathInnerLineRange } from './math';
 import { collectDocumentMathRanges } from './displayMathBlocks';
-import { isTableDelimiterLine, parseTableInfo } from './tables';
+import { isTableDelimiterLine, getTableSourceBounds } from './tables';
 import { collectRenderableHtmlBlocks, getHtmlEditingRange } from './htmlContent';
 
 type LineFlagLike = {
@@ -256,13 +256,13 @@ function discoverRenderedBlocks(state: EditorState, tree: Tree): DiscoveredBlock
     mode: IterMode.IgnoreMounts,
     enter(node: SyntaxNodeRef) {
       if (node.name === 'Table') {
-        const tableInfo = parseTableInfo(state, node);
+        const tableInfo = getTableSourceBounds(state, node);
         parsedTableRanges.push({ from: tableInfo.from, to: tableInfo.to });
         const block = createRenderedBlock(
           'table',
           tableInfo.startLine,
           tableInfo.endLine,
-          tableInfo.delimiterRow?.lineNo ?? null
+          tableInfo.delimiterLine
         );
         if (block) {
           blocks.push(block);

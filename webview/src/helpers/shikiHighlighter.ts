@@ -2,6 +2,7 @@ import type { HighlighterCore } from 'shiki/core';
 import { bundledLanguages, bundledLanguagesInfo } from 'shiki/langs';
 import { createBackgroundShiki } from './backgroundShiki';
 import { toShikiTheme } from './shikiTheme';
+import { createShikiTokenCache } from './shikiTokenCache';
 import type { RawVscodeTheme, ShikiToken, ShikiTokenLines, ShikiSurface } from './shikiTypes';
 export type { RawVscodeTheme, ShikiToken, ShikiTokenLines, ShikiSurface } from './shikiTypes';
 
@@ -84,7 +85,7 @@ type ShikiRuntimeState = {
   themeMeta: ShikiThemeMeta;
   themeVersion: number;
   highlighterRecord: HighlighterRecord | null;
-  tokenCache: Map<string, ShikiTokenLines>;
+  tokenCache: ReturnType<typeof createShikiTokenCache>;
   pending: Map<string, PendingHighlight>;
   refreshListeners: Set<() => void>;
   activeHighlightConsumers: number;
@@ -93,7 +94,7 @@ type ShikiRuntimeState = {
   background?: ReturnType<typeof createBackgroundShiki>;
 };
 
-function createRuntimeState(): ShikiRuntimeState {
+function createRuntimeState(cacheLimit = CACHE_LIMIT): ShikiRuntimeState {
   return {
     rawTheme: null,
     tokenThemeKey: null,
@@ -103,7 +104,7 @@ function createRuntimeState(): ShikiRuntimeState {
     },
     themeVersion: 0,
     highlighterRecord: null,
-    tokenCache: new Map(),
+    tokenCache: createShikiTokenCache(cacheLimit),
     pending: new Map(),
     refreshListeners: new Set(),
     activeHighlightConsumers: 0,
@@ -117,7 +118,7 @@ function createRuntimeState(): ShikiRuntimeState {
 const runtimeStates: Record<ShikiSurface, ShikiRuntimeState> = {
   editor: createRuntimeState(),
   preview: createRuntimeState(),
-  source: createRuntimeState()
+  source: createRuntimeState(2)
 };
 
 // Only ready token calculations share execution order. Initialization, grammar
@@ -495,10 +496,6 @@ async function tokenizeAndCache(
       });
       const tokens = await state.background.request(lang, code, isCurrent);
       if (tokens && isCurrent()) {
-        if (state.tokenCache.size >= (state === runtimeStates.source ? 2 : CACHE_LIMIT)) {
-          const oldest = state.tokenCache.keys().next().value;
-          if (oldest !== undefined) state.tokenCache.delete(oldest);
-        }
         state.tokenCache.set(key, tokens);
         scheduleTokenRefresh(state);
       }
@@ -564,10 +561,6 @@ async function tokenizeAndCache(
     if (!mapped || !isCurrent()) {
       finish();
       return;
-    }
-    if (state.tokenCache.size >= (state === runtimeStates.source ? 2 : CACHE_LIMIT)) {
-      const oldest = state.tokenCache.keys().next().value;
-      if (oldest !== undefined) state.tokenCache.delete(oldest);
     }
     state.tokenCache.set(key, mapped);
     finish();

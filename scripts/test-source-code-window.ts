@@ -9,6 +9,7 @@ try {
   await page.setViewport({ width: 1000, height: 640 });
   await page.setContent('<style>html,body,#editor{height:100%;margin:0}</style><div id="editor"></div>');
   await page.addStyleTag({ path: 'webview/src/styles.css' });
+  await page.addStyleTag({ content: ':root{color:#d4d4d4;--vscode-editor-foreground:#d4d4d4;--vscode-editor-background:#1e1e1e;--meo-foreground:#d4d4d4;--meo-background:#1e1e1e}' });
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
   await page.evaluate(() => {
     const api = (window as any).__liveHistory;
@@ -34,6 +35,7 @@ try {
   await page.evaluate(() => (window as any).sourceWindowEditor.scrollToLine(4500, 'center'));
   await page.waitForFunction(() => document.querySelectorAll('.cm-line.meo-src-code-block').length > 10);
   assert.ok(await page.evaluate(() => [...document.querySelectorAll('.cm-line')].every(line => line.classList.contains('meo-src-code-block'))), 'newly mounted distant code rows must retain their styling');
+  if (process.argv.includes('--screenshot')) await page.screenshot({ path: '.local/source-code-window.png' });
   await page.evaluate(() => (window as any).sourceWindowEditor.destroy());
   console.log(`Source code presentation follows the actual viewport: ${JSON.stringify(sample)}`);
 } finally { await closeTestBrowser(browser); }

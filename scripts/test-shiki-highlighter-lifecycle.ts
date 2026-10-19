@@ -889,6 +889,29 @@ await consumersShareOneInstanceUntilTheLastRelease();
 await pendingInitializationDisposesWithoutPublishing();
 await oldLanguageCompletionCannotPolluteReplacementTheme();
 await languageFailureCanRetryOnTheSameInstance();
+async function largeCodeCachesHaveAByteBudget(): Promise<void> {
+  const release = shiki.activateShikiCodeHighlighting('editor');
+  shiki.setShikiTheme(theme('byte-budget', 'dark'), 'editor');
+  planHighlighter();
+  const revisions = Array.from({ length: 3 }, (_, index) => String(index) + 'x'.repeat(1_100_000));
+  try {
+    for (const code of revisions) {
+      shiki.requestShikiTokens('typescript', code, 'editor');
+      await waitFor(() => !!shiki.getShikiTokens('typescript', code, 'editor'), 'large code revision');
+    }
+    assert.ok(shiki.getShikiTokens('typescript', revisions[0]!, 'editor') === null,
+      'a small number of large token results must be bounded by bytes, not just the 300-entry limit');
+    assert.ok(shiki.getShikiTokens('typescript', revisions[2]!, 'editor'), 'the current large result remains reusable');
+    const oversized = 'z'.repeat(3_000_000);
+    shiki.requestShikiTokens('typescript', oversized, 'editor');
+    await waitFor(() => !!shiki.getShikiTokens('typescript', oversized, 'editor'), 'one oversized current result');
+    assert.equal(shiki.getShikiTokens('typescript', revisions[2]!, 'editor'), null);
+    shiki.requestShikiTokens('typescript', 'small current block', 'editor');
+    await waitFor(() => !!shiki.getShikiTokens('typescript', 'small current block', 'editor'), 'current small result');
+    assert.equal(shiki.getShikiTokens('typescript', oversized, 'editor'), null, 'moving away must release the oversized old result');
+  } finally { release(); shiki.setShikiTheme(null, 'editor'); }
+}
+await largeCodeCachesHaveAByteBudget();
 assert.equal(plannedHighlighters.length, 0, 'every planned external HighlighterCore should be consumed');
 
 console.log('Shiki highlighter instance lifecycle checks passed');
