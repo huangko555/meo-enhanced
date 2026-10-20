@@ -9,6 +9,7 @@ import { collectDocumentMathRanges } from './displayMathBlocks';
 import { isTableDelimiterLine, getTableSourceBounds } from './tables';
 import { collectRenderableHtmlBlocks, getHtmlEditingRange } from './htmlContent';
 import { markdownStructureIdentity } from '../editor/markdownStructure';
+import type { MarkdownBlockKind, MarkdownBlock, DiscoveredMarkdownBlock } from '../../../src/foundation/markdownDocumentContext';
 
 type LineFlagLike = {
   added?: boolean;
@@ -17,17 +18,10 @@ type LineFlagLike = {
   trailingEofProxyOnly?: boolean;
 } | undefined;
 
-export type LiveRenderedBlockKind = 'table' | 'mermaid' | 'math' | 'html';
+export type LiveRenderedBlockKind = MarkdownBlockKind;
 export type LiveGitChangeKind = 'added' | 'modified' | 'deleted';
 
-export interface LiveRenderedBlock {
-  kind: LiveRenderedBlockKind;
-  startLine: number;
-  endLine: number;
-  delimiterLine: number | null;
-  lineNumberHiddenFrom: number;
-  lineNumberHiddenTo: number;
-}
+export type LiveRenderedBlock = MarkdownBlock;
 
 export interface LiveCollapsedGitBlock {
   kind: LiveRenderedBlockKind;
@@ -39,10 +33,18 @@ export interface LiveCollapsedGitBlock {
 }
 
 const renderedBlockCache = new WeakMap<EditorState, { tree: any; blocks: LiveRenderedBlock[] }>();
-type DiscoveredBlock = { block: LiveRenderedBlock; htmlFrom?: number };
+type DiscoveredBlock = DiscoveredMarkdownBlock;
 // Discovery depends on text and the resolved parse. Selection and HTML editing
 // only filter that discovery; they must not invalidate its whole-document scans.
 const discoveredBlockCache = new WeakMap<EditorState['doc'], { tree: Tree; tabSize: number; blocks: DiscoveredBlock[] }>();
+
+export function prepareLiveBlockContext(state: EditorState, tree: Tree): DiscoveredMarkdownBlock[] {
+  return withMarkdownSyntaxSnapshot(state, tree, () => discoverRenderedBlocks(state, tree));
+}
+
+export function adoptLiveBlockContext(doc: EditorState['doc'], tree: Tree, tabSize: number, blocks: DiscoveredMarkdownBlock[]): void {
+  discoveredBlockCache.set(doc, { tree, tabSize, blocks });
+}
 
 /** The caller proves a complete plain-prose projection with unchanged rich
  * membership. Map line coordinates and HTML editing anchors without discovering
@@ -234,7 +236,7 @@ export function getLiveRenderedBlocks(
 
   let discovered = discoveredBlockCache.get(state.doc);
   if (!discovered || markdownStructureIdentity(discovered.tree) !== markdownStructureIdentity(tree) || discovered.tabSize !== state.tabSize) {
-    discovered = { tree, tabSize: state.tabSize, blocks: withMarkdownSyntaxSnapshot(state, tree, () => discoverRenderedBlocks(state, tree)) };
+    discovered = { tree, tabSize: state.tabSize, blocks: prepareLiveBlockContext(state, tree) };
     discoveredBlockCache.set(state.doc, discovered);
   }
   const htmlEditingRange = getHtmlEditingRange(state);

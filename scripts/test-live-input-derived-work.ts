@@ -85,6 +85,12 @@ assert.equal(
   false,
   'History must supersede pending input and rebuild its current document'
 );
+const budgetedHistory = EditorState.create({ doc: 'large input', extensions: liveInputDerivedWorkExtensions({ largeDocument: true }) });
+for (const userEvent of ['undo', 'redo']) {
+  const replay = budgetedHistory.update({ changes: { from: 0, insert: 'restored ' }, annotations: Transaction.userEvent.of(userEvent) });
+  assert.equal(shouldDeferLiveInputDerivedWork(replay), true,
+    'large-document history accepts text while waiting for the matching presentation revision');
+}
 const inputBeforeEqualReload = historyReplay.state.update({
   changes: { from: historyReplay.state.doc.length, insert: '#' },
   annotations: Transaction.userEvent.of('input.type')

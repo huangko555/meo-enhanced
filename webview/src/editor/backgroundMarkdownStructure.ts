@@ -8,20 +8,28 @@ import { acceptCompletedMarkdownStructure, isCompleteMarkdownStructure } from '.
 import { createMarkdownTreeReceiver } from './markdownTreeTransfer';
 import type { MarkdownParseRequest, MarkdownParseResponse } from './markdownParseProtocol';
 import { createClassicWorkerTransport } from '../adapters/classicWorkerTransport';
+import type { MarkdownContextPart } from '../../../src/foundation/markdownDocumentContext';
+
+type DocumentContextAdapter = {
+  enabled(): boolean;
+  receive(doc: Text, tree: Tree, tabSize: number, part: MarkdownContextPart): void;
+};
 
 type Result = { readonly doc: Text; readonly ready: Promise<void>; resolve(): void;
-  status: 'pending' | 'ready' | 'superseded'; tree?: Tree };
+  status: 'pending' | 'ready' | 'superseded'; tree?: Tree;
+  footnotesTab?: number; blocksTab?: number; blocksRequested?: true };
 
-function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet) {
+function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet, context: DocumentContextAdapter) {
   const receiver = createMarkdownTreeReceiver(nodeSet), cache = new WeakMap<Text, Result>(), waiting = new Set<Result>();
   const grammar = nodeSet.types.map(type => type.name).join('\0');
   let mixedFragments: readonly TreeFragment[] = [];
   const pendingMixed = new WeakMap<Text, { tree: Tree; partial: boolean }>();
   let latest: Text | undefined, posted: Text | undefined, requested: Text | undefined;
+  let tabSize = 4;
   let changes: ChangeSet | null = null, sequence = 0, postedRevision = 0;
   let worker: Awaited<ReturnType<typeof createClassicWorkerTransport<MarkdownParseRequest, MarkdownParseResponse>>> | undefined;
   let loading = false, disposed = false, queued = false, attached = false;
-  let failure: Error | undefined, flight: { id: number; result: Result } | undefined;
+  let failure: Error | undefined, flight: { id: number; result: Result; tabSize: number; blocks: boolean; syntaxReceived: boolean } | undefined;
   let timeout: ReturnType<typeof setTimeout> | undefined;
 
   const stop = () => {
@@ -39,7 +47,7 @@ function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet) {
   };
   const read = (doc: Text): Result => {
     const existing = cache.get(doc);
-    if (existing && existing.status !== 'superseded') return existing;
+    if (existing && existing.status !== 'superseded') { schedule(); return existing; }
     let resolve!: () => void;
     const result: Result = { doc, status: 'pending', ready: new Promise<void>(done => { resolve = done; }), resolve: () => resolve() };
     cache.set(doc, result); requested = doc;
@@ -55,7 +63,9 @@ function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet) {
     const doc = latest ?? requested;
     if (!doc) return;
     const result = cache.get(doc);
-    if (!result || result.status !== 'pending') return;
+    if (!result || result.status === 'superseded') return;
+    const blocks = context.enabled() || !!result.blocksRequested;
+    if (result.tree && result.footnotesTab === tabSize && (!blocks || result.blocksTab === tabSize)) return;
     if (!worker) {
       loading = true;
       try {
@@ -63,10 +73,26 @@ function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet) {
           try {
             if (!flight || data.id !== flight.id) throw new Error('Markdown parser response revision mismatch');
             if (data.error !== undefined) throw new Error(data.error);
-            if (data.grammar !== grammar || data.length !== flight.result.doc.length) throw new Error('Markdown parser response grammar/document mismatch');
-            const tree = acceptCompletedMarkdownStructure(receiver.receive(data.tree), data.length);
             const accepted = flight.result;
-            accepted.tree = tree; accepted.status = 'ready'; accepted.resolve(); waiting.delete(accepted);
+            if (data.tabSize !== flight.tabSize) throw new Error('Markdown parser context settings mismatch');
+            if (data.kind === 'syntax') {
+              if (flight.syntaxReceived || data.grammar !== grammar || data.length !== accepted.doc.length) throw new Error('Markdown parser response grammar/document mismatch');
+              const received = receiver.receive(data.tree);
+              const tree = accepted.tree ?? acceptCompletedMarkdownStructure(received, data.length);
+              if (!Array.isArray(data.footnotes.references) || !Array.isArray(data.footnotes.definitions)
+                || !(data.footnotes.numberByLabel instanceof Map) || !(data.footnotes.referencesByContainerKey instanceof Map)) throw new Error('Invalid Markdown footnote context');
+              context.receive(accepted.doc, tree, flight.tabSize, { kind: 'footnotes', value: data.footnotes });
+              accepted.tree = tree; accepted.footnotesTab = flight.tabSize;
+              accepted.status = 'ready'; accepted.resolve(); waiting.delete(accepted);
+              flight.syntaxReceived = true;
+              // Publish syntax promptly. Only Live needs the later rich index;
+              // its presentation scheduler keeps waiting for that second stage.
+              if (flight.blocks) return;
+            } else {
+              if (!flight.syntaxReceived || !flight.blocks || !accepted.tree || !Array.isArray(data.value)) throw new Error('Invalid Markdown block context order');
+              context.receive(accepted.doc, accepted.tree, flight.tabSize, { kind: 'blocks', value: data.value });
+              accepted.blocksTab = flight.tabSize;
+            }
             if (timeout !== undefined) clearTimeout(timeout);
             timeout = undefined; flight = undefined; schedule();
           } catch (error) { fail(error); }
@@ -80,18 +106,25 @@ function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet) {
     try {
       const id = ++sequence;
       let request: MarkdownParseRequest;
-      if (!posted) request = { id, base: 0, text: readDocumentTextProjection(doc) };
+      if (!posted) request = { id, base: 0, text: readDocumentTextProjection(doc), tabSize, blocks };
       else {
-        if (!changes || changes.length !== posted.length || changes.newLength !== doc.length) throw new Error('Missing incremental Markdown parser changes');
-        request = { id, base: postedRevision, changes: changes.toJSON() };
+        const update = changes ?? (posted === doc ? ChangeSet.empty(posted.length) : null);
+        if (!update || update.length !== posted.length || update.newLength !== doc.length) throw new Error('Missing incremental Markdown parser changes');
+        request = { id, base: postedRevision, changes: update.toJSON(), tabSize, blocks };
       }
-      flight = { id, result }; posted = doc; postedRevision = id; changes = null;
+      flight = { id, result, tabSize, blocks, syntaxReceived: false }; posted = doc; postedRevision = id; changes = null;
       timeout = setTimeout(() => fail(new Error('Markdown parser worker timed out')), 20_000);
       worker.send(request);
     } catch (error) { fail(error); }
   };
   return {
     read,
+    configure(value: number) { if (tabSize !== value) { tabSize = value; schedule(); } },
+    presentationReady(doc: Text, value: number) {
+      const result = cache.get(doc);
+      return result?.footnotesTab === value && result.blocksTab === value;
+    },
+    requestPresentation(doc: Text) { const result = read(doc); result.blocksRequested = true; schedule(); },
     observe(before: Text, after: Text, update: ChangeSet) {
       if (disposed || before === after) return;
       if (failure) { latest = after; return; }
@@ -141,15 +174,18 @@ export const backgroundMarkdownParser: { wrap: ParseWrapper } = { wrap(inner, in
     stopAt(position) { stoppedAt = stoppedAt === null ? position : Math.min(stoppedAt, position); }, advance: () => tree };
 } };
 
-export function backgroundMarkdownStructureExtensions(uri: string | undefined, nodeSet: NodeSet): Extension {
+export function backgroundMarkdownStructureExtensions(uri: string | undefined, nodeSet: NodeSet, context: DocumentContextAdapter): Extension {
   if (!uri) return [];
-  const backend = createBackgroundMarkdownStructure(uri, nodeSet);
+  const backend = createBackgroundMarkdownStructure(uri, nodeSet, context);
   return [runtime.of(backend), liveInputDerivedWorkReadiness.of(state => !!backend.error
-    || !usesLargeDocumentDerivedWorkBudget(state) || isCompleteMarkdownStructure(syntaxTree(state), state.doc.length)), ViewPlugin.define(view => {
+    || !usesLargeDocumentDerivedWorkBudget(state) || isCompleteMarkdownStructure(syntaxTree(state), state.doc.length)
+      && (!context.enabled() || backend.presentationReady(state.doc, state.tabSize))), ViewPlugin.define(view => {
+    backend.configure(view.state.tabSize);
     backend.attach(view.state.doc);
     if (usesLargeDocumentDerivedWorkBudget(view.state)) backend.read(view.state.doc);
     return {
       update(update) {
+        backend.configure(update.state.tabSize);
         if (update.docChanged) backend.observe(update.startState.doc, update.state.doc, update.changes);
         if (!backend.error && usesLargeDocumentDerivedWorkBudget(update.state)) backend.read(update.state.doc);
       },
@@ -161,6 +197,16 @@ export function backgroundMarkdownStructureExtensions(uri: string | undefined, n
 export function assertBackgroundMarkdownPreparation(state: EditorState): void {
   const error = state.facet(runtime)?.error;
   if (error) throw error;
+}
+
+/** Explicit Live preparation requests global source facts while the old surface
+ * remains mounted. Source-only sessions never request the rich block index. */
+export function prepareBackgroundMarkdownPresentation(state: EditorState): boolean {
+  const backend = state.facet(runtime);
+  if (!backend || !usesLargeDocumentDerivedWorkBudget(state)) return true;
+  backend.configure(state.tabSize);
+  backend.requestPresentation(state.doc);
+  return backend.presentationReady(state.doc, state.tabSize);
 }
 
 /** Waiting for another thread must not repeatedly start placeholder parses and

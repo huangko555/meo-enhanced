@@ -31,7 +31,7 @@ const build = await Bun.build({ entrypoints: [path.join(root, 'scripts/test-live
       assert.equal(source.split(localBoundary).length, 2);
       return { loader: 'ts', contents: source.replace(boundary,
         '((globalThis as any).__fullLiveBuilds ??= 0); (globalThis as any).__fullLiveBuilds++; ' +
-        '((globalThis as any).__fullLiveBuildStates ??= []).push({ context, complete: syntaxTreeAvailable(state, state.doc.length) }); ' + boundary)
+        '((globalThis as any).__fullLiveBuildStates ??= []).push({ context, complete: markdownStructureAvailable(state) }); ' + boundary)
         .replace(localBoundary, localBoundary + ' ((globalThis as any).__scopedLiveInputs ??= 0); (globalThis as any).__scopedLiveInputs++;') };
     });
     for (const [file, boundary, counter] of [

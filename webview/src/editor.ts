@@ -27,6 +27,7 @@ import { indentUnit, syntaxTree, forceParsing } from '@codemirror/language';
 import { sourceHighlightStyle } from './theme';
 import { viewportSyntaxHighlighting } from './editor/viewportSyntaxHighlighting';
 import { backgroundMarkdownStructureExtensions } from './editor/backgroundMarkdownStructure';
+import { adoptMarkdownDocumentContext } from './markdownDocumentContext';
 import type { MarkdownParser } from '@lezer/markdown';
 import { prepareSourceSyntax, sourceSyntax, sourceSyntaxPreparation } from './helpers/sourceSyntax';
 import { prepareLiveSyntax, refreshLiveSyntax } from './editor/liveSyntaxPreparation';
@@ -167,6 +168,7 @@ import {
   beginLiveInputComposition,
   completeLiveInputComposition,
   isLiveInputDerivedWorkPending,
+  isLiveInputDerivedWorkReady,
   isLiveInputDerivedWorkRefresh,
   liveInputDerivedWorkExtensions,
   mapLiveInputDerivedDecorations,
@@ -2411,7 +2413,10 @@ export function createEditor({
     selection: { anchor: initialCursorPos },
     extensions: [
       backgroundMarkdownStructureExtensions(document.body.dataset.meoMarkdownWorkerSrc,
-        (editorMarkdownLanguage.language.parser as MarkdownParser).nodeSet),
+        (editorMarkdownLanguage.language.parser as MarkdownParser).nodeSet, {
+          enabled: () => currentMode === 'live',
+          receive: (doc, tree, tabSize, part) => adoptMarkdownDocumentContext(doc, tree, tabSize, part, editorMarkdownLanguage.language.parser)
+        }),
       markdownSyntaxPublication,
       EditorState.tabSize.of(4),
       indentUnit.of('  '),
@@ -2973,6 +2978,8 @@ export function createEditor({
     },
     attemptBoundaryRestore(request: EditorHistoryRestoreRequest, isCurrent) {
       if (!isCurrent()) return 'not-rendered';
+      if (currentMode !== 'live') return 'not-rendered';
+      if (!isLiveInputDerivedWorkReady(view.state)) return 'retry';
       const changedRangeIsTable = request.changedRange
         ? isTableHistoryRange(view.state, request.changedRange)
         : false;
@@ -4551,6 +4558,7 @@ function isTableHistoryRange(
     }
   }
   const changedLines = [...positions].map((position) => state.doc.lineAt(position).number);
+  if (!changedLines.some(line => state.doc.line(line).text.includes('|'))) return false;
   return getLiveRenderedBlocks(state).some((block) => (
     block.kind === 'table' && changedLines.some((line) => line >= block.startLine && line <= block.endLine)
   ));

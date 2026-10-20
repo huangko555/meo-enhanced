@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { mock } from 'bun:test';
 import * as language from '@codemirror/language';
-import { EditorState } from '@codemirror/state';
+import { EditorState, StateEffect } from '@codemirror/state';
 import { Tree } from '@lezer/common';
+import { markdownLanguage } from '@codemirror/lang-markdown';
+import type { MarkdownParser } from '@lezer/markdown';
 import { markdownStructureIdentity } from '../webview/src/editor/markdownStructure';
 import { hasSameLiveMarkdownSyntax } from '../webview/src/helpers/livePresentationSyntax';
 import { collectDocumentMathRanges } from '../webview/src/helpers/displayMathBlocks';
@@ -17,6 +19,9 @@ const { editorMarkdownLanguage } = await import('../webview/src/liveMode');
 const { longCodeBlockSessionUiExtension } = await import('../webview/src/helpers/longCodeBlocks');
 const { getLiveRenderedBlocks } = await import('../webview/src/helpers/liveRenderedBlocks');
 const { parseFootnotes } = await import('../webview/src/helpers/footnotes');
+const { prepareMarkdownDocumentContext, adoptMarkdownDocumentContext } = await import('../webview/src/markdownDocumentContext');
+const { inlineMarkdownExtensions } = await import('../webview/src/helpers/inlineMarkdownParser');
+const { htmlEditingRangeField, setHtmlEditingRangeEffect } = await import('../webview/src/helpers/htmlContent');
 
 const text = 'Reference[^note].\n\n[^note]: Definition\n\n' + Array.from({ length: 80 }, (_, i) =>
   `## Block ${i}\n\n\u0060\u0060\u0060javascript\nconst value = ${i};\n\u0060\u0060\u0060\n\n| A | B |\n| --- | --- |\n| one | two |\n\n`).join('');
@@ -47,4 +52,42 @@ try {
   assert.equal(collectMarkdownLiteralRanges(state, republished), literals);
   assert.equal(traversals, 0, 'publishing code tokens must reuse structural discovery, math and literal indexes');
 } finally { Tree.prototype.iterate = iterate; }
+
+const outerParser = (markdownLanguage.parser as MarkdownParser).configure([...inlineMarkdownExtensions, { remove: ['Emoji'] }]);
+for (const sample of [
+  'Reference[^n], literal `[^unused]`.\n\n[^n]: **Definition**\n\n    continued\n\n    ```\n    literal[^unused]\n    ```\n\n[^unused]: Unused\n',
+  '> | A | B |\n> | --- | --- |\n> | one | two |\n\n```mermaid\ngraph TD; A-->B\n```\n\n$$\nx^2\n$$\n\n<div>HTML</div>\n',
+  '---\ntitle: "[^hidden]"\n---\n\n# Heading\n\n- item[^n]\n\n[^n]: definition\n\n\tcontinued\n\n    | A | B |\n    | --- | --- |\n    | one | two |\n'
+]) for (const tabSize of [2, 4, 8]) {
+  let surface = EditorState.create({ doc: sample, selection: { anchor: sample.indexOf('x^2') < 0 ? 0 : sample.indexOf('x^2') },
+    extensions: [editorMarkdownLanguage, EditorState.tabSize.of(tabSize), htmlEditingRangeField] });
+  ensure(surface, surface.doc.length, 2_000);
+  surface = surface.update({}).state;
+  const expectedNotes = parseFootnotes(surface);
+  const expectedBlocks = getLiveRenderedBlocks(surface);
+  const workerDoc = EditorState.create({ doc: sample }).doc;
+  const outer = outerParser.parse(sample);
+  const prepared = prepareMarkdownDocumentContext(workerDoc, outer, tabSize);
+  const notes = structuredClone(prepared.footnotes), discovered = structuredClone(prepared.blocks());
+  assert.deepEqual(notes, expectedNotes, 'worker outer syntax must preserve mixed-parser global footnotes');
+  adoptMarkdownDocumentContext(surface.doc, language.syntaxTree(surface), tabSize, { kind: 'footnotes', value: notes }, editorMarkdownLanguage.language.parser);
+  adoptMarkdownDocumentContext(surface.doc, language.syntaxTree(surface), tabSize, { kind: 'blocks', value: discovered }, editorMarkdownLanguage.language.parser);
+  assert.equal(parseFootnotes(surface), notes, 'a transferred verified context must be reused directly');
+  assert.deepEqual(getLiveRenderedBlocks(surface.update({}).state), expectedBlocks,
+    'worker facts retain surface selection filtering for math and nested tables');
+  assert.deepEqual(getLiveRenderedBlocks(surface, { includeSelectedMath: true }),
+    discovered.map(({ block }) => block), 'transport preserves all source blocks before dynamic selection filtering');
+  const html = discovered.find(item => item.block.kind === 'html');
+  if (html) {
+    const editing = surface.update({ effects: setHtmlEditingRangeEffect.of({ from: html.htmlFrom!, to: surface.doc.line(html.block.endLine).to }) }).state;
+    assert.equal(getLiveRenderedBlocks(editing, { includeSelectedMath: true }).filter(block => block.kind === 'html').length,
+      discovered.filter(item => item.block.kind === 'html').length - 1, 'HTML editing remains a surface filter over adopted source facts');
+  }
+  if (notes.references.length) {
+    const changedGrammar = surface.update({ effects: StateEffect.reconfigure.of([markdownLanguage, EditorState.tabSize.of(tabSize)]) }).state;
+    assert.notEqual(parseFootnotes(changedGrammar), notes, 'a different grammar cannot reuse a verified worker context');
+    const changedTabs = surface.update({ effects: StateEffect.reconfigure.of([editorMarkdownLanguage, EditorState.tabSize.of(tabSize === 4 ? 8 : 4)]) }).state;
+    assert.notEqual(parseFootnotes(changedTabs), notes, 'tab size participates in context identity');
+  }
+}
 console.log('Structural readers share a stable syntax snapshot across code, table and footnote discovery');

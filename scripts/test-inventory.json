@@ -8,7 +8,7 @@
     "scripts/test-background-markdown-structure.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-background-markdown-structure.ts",
-      "reason": "Actual CSP-constrained Markdown worker through Source/Live, composed changes, CJK input, undo, disposal and failure, with an assertion that large outer parsing never runs on the foreground thread."
+      "reason": "Actual CSP-constrained Markdown worker through Source/Live, staged global context, numbering changes, CJK input and undo, with zero foreground full parsing or global footnote/rich-block discovery."
     },
     "scripts/test-markdown-tree-transfer.ts": {
       "kind": "targeted",

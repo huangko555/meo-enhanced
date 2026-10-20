@@ -3,6 +3,20 @@ import { launchTestBrowser, closeTestBrowser } from './browser-test-helpers';
 
 const build = await Bun.build({ entrypoints: ['scripts/test-live-decoration-history-entry.ts'], target: 'browser', format: 'iife',
   plugins: [{ name: 'observe-foreground-outer-parse', setup(builder) {
+    builder.onLoad({ filter: /webview[\\/]src[\\/]helpers[\\/]footnotes\.ts$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text();
+      const marker = /\): FootnoteDefinition\[\] \{\r?\n  const definitions/;
+      assert.equal(source.match(new RegExp(marker.source, 'g'))?.length, 1);
+      return { loader: 'ts', contents: source.replace(marker,
+        '): FootnoteDefinition[] {\n  if (!scope && state.doc.length > 100000) (globalThis as any).__foregroundFootnoteScans = ((globalThis as any).__foregroundFootnoteScans ?? 0) + 1;\n  const definitions') };
+    });
+    builder.onLoad({ filter: /webview[\\/]src[\\/]helpers[\\/]liveRenderedBlocks\.ts$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text();
+      const marker = 'function discoverRenderedBlocks(state: EditorState, tree: Tree): DiscoveredBlock[] {';
+      assert.equal(source.split(marker).length, 2);
+      return { loader: 'ts', contents: source.replace(marker, marker
+        + '\n  if (state.doc.length > 100000) (globalThis as any).__foregroundBlockScans = ((globalThis as any).__foregroundBlockScans ?? 0) + 1;') };
+    });
     builder.onLoad({ filter: /node_modules[\\/]@lezer[\\/]lr[\\/]dist[\\/]index\.js$/ }, async ({ path }) => {
       const source = await Bun.file(path).text(), marker = '    advanceStack(stack, stacks, split) {';
       assert.equal(source.split(marker).length, 2);
@@ -55,14 +69,15 @@ try {
       constructor(url: string | URL, options?: WorkerOptions) {
         super(url, options); scope.__workerCreates++;
         this.addEventListener('message', event => {
-          if (!scope.__holdParseReplies) return;
+          if (!scope.__holdParseReplies && !(scope.__holdBlockReplies && event.data.kind === 'blocks')) return;
           event.stopImmediatePropagation();
           (scope.__heldParseReplies ??= []).push({ worker: this, data: event.data });
         });
       }
       postMessage(message: any, ...rest: any[]) {
         scope.__parseRequests.push({ initial: typeof message.text === 'string', units: message.text?.length,
-          changesBytes: JSON.stringify(message.changes ?? null).length, base: message.base, id: message.id });
+          changesBytes: JSON.stringify(message.changes ?? null).length, base: message.base, id: message.id,
+          blocks: message.blocks, tabSize: message.tabSize, changes: message.changes });
         super.postMessage(message, ...rest);
         if (typeof message.text === 'string' && scope.__editOnInitial) {
           scope.__editOnInitial = false;
@@ -85,17 +100,20 @@ try {
   assert.equal(await page.evaluate(() => (window as any).__workerCreates), 0, 'ordinary documents keep their original parser');
   await page.evaluate(() => {
     const scope = window as any;
-    const text = 'EDIT\n\n```javascript\nconst nearValue = "near";\n```\n\n'
+    const text = 'EDIT\n\n```javascript\nconst nearValue = "near";\n```\n\nNear note[^global] and literal `[^fake]`.\n\n'
       + '**Paragraph** with *formatting* and ordinary words.\n\n'.repeat(9_000)
-      + '```javascript\nconst distantValue = "distant";\n```\n\nDOCUMENT-END\n';
+      + '```javascript\nconst distantValue = "distant";\n```\n\n'
+      + '[^global]: formatted **definition**\n\n    continuation\n\n    ```\n    literal[^fake]\n    ```\n\n[^fake]: Unused\n\n[^other]: A later global definition\n\n'
+      + '| A | B |\n| --- | --- |\n| one | two |\n\n<div>HTML block</div>\n\n$$\nx^2\n$$\n\nDOCUMENT-END\n';
     scope.__original = text;
     scope.__editOnInitial = true;
     scope.__editor = scope.__liveHistory.create({ parent: document.getElementById('editor'), text, initialMode: 'source' });
-    scope.__initialPreparation = scope.__editor.prepareLiveSyntax(() => true);
   });
   const ready = () => page.waitForFunction(() => (window as any).__liveHistory.markdownReady((window as any).__editor));
   stage = 'initial structure'; await ready();
-  assert.ok(await page.evaluate(() => (window as any).__initialPreparation));
+  assert.ok(await page.evaluate(() => (window as any).__parseRequests.every((request: any) => !request.blocks)),
+    'Source-only revisions prepare global notes without preparing Live block presentation');
+  await page.evaluate(async () => { await (window as any).__editor.prepareLiveSyntax(() => true); });
   assert.ok(await page.evaluate(() => (window as any).__backgroundWaiterStarts < 100), 'background preparation cannot busy-poll the placeholder parser');
   assert.ok(await page.evaluate(() => (window as any).__editedDuringInitial
     && (window as any).__editor.getText().startsWith('EDITpre')), 'input during the initial worker request reaches the latest revision');
@@ -124,6 +142,15 @@ try {
     }
     await ready();
     assert.ok(await page.evaluate(() => (window as any).__editor.getText().startsWith('EDITbackground中文')));
+    const note = await page.evaluate(() => {
+      const scope = window as any, text = scope.__editor.getText();
+      return { parsed: scope.__liveHistory.footnotes(scope.__editor), referenceFrom: text.indexOf('[^global]'),
+        definitionFrom: text.indexOf('[^global]:') };
+    });
+    assert.deepEqual(note.parsed.numbers, [['global', 1]]);
+    assert.equal(note.parsed.references.length, 1, 'inline and fenced code cannot become references');
+    assert.equal(note.parsed.references[0].from, note.referenceFrom);
+    assert.equal(note.parsed.references[0].definitionFrom, note.definitionFrom);
     await page.keyboard.down('Control');
     try { await page.keyboard.press('z'); } finally { await page.keyboard.up('Control'); }
     stage = mode + ' undo';
@@ -159,6 +186,42 @@ try {
   assert.ok(await page.evaluate(() => (window as any).__editor.getText() === (window as any).__beforeDelayed), 'paced input retains exact single-group undo after worker publication');
   assert.equal(await page.evaluate(() => (window as any).__foregroundLargeMarkdownAdvances ?? 0), 0,
     'Source, Live, input and undo must never parse the entire Markdown on the foreground thread');
+  stage = 'syntax publishes before rich block context';
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
+  await page.evaluate(() => {
+    const scope = window as any;
+    scope.__holdBlockReplies = true;
+    scope.__liveHistory.input(scope.__editor, 4, 'staged');
+  });
+  await ready();
+  await page.waitForFunction(() => (window as any).__heldParseReplies?.length);
+  await new Promise(resolve => setTimeout(resolve, 650));
+  assert.ok(await page.evaluate(() => {
+    const scope = window as any;
+    return scope.__liveHistory.pending(scope.__editor) && scope.__liveHistory.markdownReady(scope.__editor)
+      && scope.__liveHistory.footnotes(scope.__editor).numbers[0][1] === 1;
+  }), 'published syntax and notes cannot release a Live refresh before the matching rich index arrives');
+  await page.evaluate(() => {
+    const scope = window as any; scope.__holdBlockReplies = false;
+    for (const { worker, data } of scope.__heldParseReplies.splice(0)) worker.dispatchEvent(new MessageEvent('message', { data }));
+  });
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
+  stage = 'changed global footnote context';
+  await page.evaluate(() => {
+    const scope = window as any;
+    scope.__beforeNewReference = scope.__editor.getText();
+    scope.__liveHistory.input(scope.__editor, 4, '[^other]', Date.now() + 1_000);
+  });
+  await ready();
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
+  assert.deepEqual(await page.evaluate(() => (window as any).__liveHistory.footnotes((window as any).__editor).numbers),
+    [['other', 1], ['global', 2]], 'adding a reference updates global numbering beyond the viewport');
+  await page.evaluate(async () => { await (window as any).__editor.undo(); });
+  await ready();
+  assert.ok(await page.evaluate(() => (window as any).__editor.getText() === (window as any).__beforeNewReference));
+  assert.deepEqual(await page.evaluate(() => ({ notes: (window as any).__foregroundFootnoteScans ?? 0,
+    blocks: (window as any).__foregroundBlockScans ?? 0 })), { notes: 0, blocks: 0 },
+  'entry, input, undo and syntax publication must reuse worker context without foreground global discovery');
   stage = 'near code palette';
   await page.evaluate(async () => {
     const scope = window as any;
@@ -183,6 +246,8 @@ try {
   assert.ok(await page.evaluate(() => (window as any).__outerIdentity === (window as any).__liveHistory.markdownIdentity((window as any).__editor)),
     'real mixed-language publication must retain the outer Markdown identity');
   assert.equal(requests.filter((request: any) => request.initial).length, 1, 'send one initial full snapshot');
+  assert.ok(requests.some((request: any) => request.blocks && JSON.stringify(request.changes) === `[${requests[0].units}]`),
+    'same-document Live preparation reuses the worker replica and syntax with an empty edit');
   assert.ok(requests.length >= 5 && requests.filter((request: any) => !request.initial).every((request: any) => request.changesBytes < 2_000),
     `following jobs transfer composed edits only: ${JSON.stringify(requests)}`);
   await page.evaluate(() => (window as any).__editor.destroy());

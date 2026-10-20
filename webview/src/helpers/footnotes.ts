@@ -5,49 +5,11 @@ import { parseFrontmatter, isInsideFrontmatter } from './frontmatter';
 import { currentSyntaxTree, resolvedSyntaxTree } from './markdownSyntax';
 import { hasSameLiveMarkdownSyntax } from './livePresentationSyntax';
 import { collectInlineFootnoteMarkerRanges } from './inlineFootnotes';
-
-export interface FootnoteReference {
-  from: number;
-  to: number;
-  containerFrom: number;
-  containerTo: number;
-  label: string;
-  normalizedLabel: string;
-  number: number | null;
-  definition: FootnoteDefinition | null;
-}
-
-export interface FootnoteDefinition {
-  label: string;
-  normalizedLabel: string;
-  markerFrom: number;
-  markerTo: number;
-  colonFrom: number;
-  colonTo: number;
-  contentFrom: number;
-  contentTo: number;
-  lineFrom: number;
-  lineTo: number;
-  number: number | null;
-  firstReferenceFrom: number | null;
-  continuationLines: FootnoteContinuationLine[];
-  isPrimary: boolean;
-}
-
-export interface FootnoteContinuationLine {
-  from: number;
-  to: number;
-  hideIndentFrom: number | null;
-  hideIndentTo: number | null;
-  extraIndentColumns: number;
-}
-
-export interface ParsedFootnotes {
-  references: FootnoteReference[];
-  definitions: FootnoteDefinition[];
-  numberByLabel: Map<string, number>;
-  referencesByContainerKey: Map<string, FootnoteReference[]>;
-}
+import { language } from '@codemirror/language';
+import type { Parser, Tree } from '@lezer/common';
+import type { FootnoteReference, FootnoteDefinition, FootnoteContinuationLine, ParsedFootnotes } from '../../../src/foundation/markdownDocumentContext';
+import { readDocumentTextProjection } from '../application/documentTextProjection';
+export type { FootnoteReference, FootnoteDefinition, FootnoteContinuationLine, ParsedFootnotes } from '../../../src/foundation/markdownDocumentContext';
 
 interface ProtectedRange {
   from: number;
@@ -55,7 +17,12 @@ interface ProtectedRange {
 }
 
 const footnoteCache = new WeakMap<object, { tree: ReturnType<typeof resolvedSyntaxTree>; parsed: ParsedFootnotes;
-  projected?: true }>();
+  tabSize: number; verified?: { parser: Parser | null } }>();
+
+export function adoptFootnoteContext(doc: EditorState['doc'], tree: Tree, tabSize: number,
+  parsed: ParsedFootnotes, parser: Parser): void {
+  footnoteCache.set(doc, { tree, tabSize, parsed, verified: { parser } });
+}
 const definitionMarkerPattern = /^[ \t]{0,3}\[\^([^\]\r\n]+)\]:(?:[ \t]|$)/;
 const footnoteCompositeMarkerPattern = /^\[\^([^\]\r\n]+)\]:(?:[ \t]|$)/;
 const footnoteContinuationIndent = 4;
@@ -95,15 +62,24 @@ export function normalizeFootnoteLabel(rawLabel: string): string {
 export function parseFootnotes(state: EditorState): ParsedFootnotes {
   // References and protected code ranges depend on the parser's progress as
   // well as the text. A partial result must not become a complete projection.
-  const cached = footnoteCache.get(state.doc);
-  // A local edit already proved the entire outer Markdown/reference structure.
-  // Reuse that projection until CodeMirror publishes a different tree, without
-  // extending every code language on every following key. Ordinary partial
-  // caches still take the resolved path and cannot hide late definitions.
-  if (cached?.projected && cached.tree === currentSyntaxTree(state)) return cached.parsed;
+  const entry = footnoteCache.get(state.doc);
+  const parser = state.facet(language)?.parser ?? null;
+  const cached = entry?.tabSize === state.tabSize && (!entry.verified || entry.verified.parser === parser) ? entry : undefined;
+  // A worker result or a proven local edit owns this exact document/grammar.
+  // Embedded language publication cannot invalidate those source facts.
+  // Ordinary partial caches still resolve the parse and cannot hide late notes.
+  if (cached?.verified) return cached.parsed;
+  // The read-only worker context has no language field. Ordinary editor states
+  // retain the existing syntax-resolution contract used by local edit proofs.
+  if (!cached && !parser && !readDocumentTextProjection(state.doc).includes('[^')) {
+    const parsed: ParsedFootnotes = { references: [], definitions: [], numberByLabel: new Map(), referencesByContainerKey: new Map() };
+    footnoteCache.set(state.doc, { tree: currentSyntaxTree(state), tabSize: state.tabSize, parsed,
+      verified: { parser } });
+    return parsed;
+  }
   const tree = resolvedSyntaxTree(state);
   if (cached && (cached.tree === tree || hasSameLiveMarkdownSyntax(cached.tree, tree))) {
-    if (cached.tree !== tree) footnoteCache.set(state.doc, { tree, parsed: cached.parsed });
+    if (cached.tree !== tree) footnoteCache.set(state.doc, { tree, tabSize: state.tabSize, parsed: cached.parsed });
     return cached.parsed;
   }
 
@@ -180,7 +156,7 @@ export function parseFootnotes(state: EditorState): ParsedFootnotes {
     referencesByContainerKey
   };
 
-  footnoteCache.set(state.doc, { tree, parsed });
+  footnoteCache.set(state.doc, { tree, tabSize: state.tabSize, parsed });
   return parsed;
 }
 
@@ -188,6 +164,7 @@ export function parseFootnotes(state: EditorState): ParsedFootnotes {
  * Numbering stays global. A changed continuation gets fresh local line metadata. */
 export function projectUnchangedFootnotes(before: EditorState, state: EditorState, changes: ChangeDesc,
   editedDefinition?: FootnoteDefinition): boolean {
+  if (before.tabSize !== state.tabSize || before.facet(language)?.parser !== state.facet(language)?.parser) return false;
   const previous = parseFootnotes(before);
   const position = (value: number) => changes.mapPos(value, 1);
   const end = (value: number) => changes.mapPos(value, -1);
@@ -222,7 +199,8 @@ export function projectUnchangedFootnotes(before: EditorState, state: EditorStat
     const container = referencesByContainerKey.get(key) ?? [];
     container.push(reference); referencesByContainerKey.set(key, container);
   }
-  footnoteCache.set(state.doc, { tree: currentSyntaxTree(state), projected: true, parsed: {
+  footnoteCache.set(state.doc, { tree: currentSyntaxTree(state), tabSize: state.tabSize,
+    verified: { parser: state.facet(language)?.parser ?? null }, parsed: {
     definitions, references, referencesByContainerKey, numberByLabel: previous.numberByLabel
   } });
   return true;

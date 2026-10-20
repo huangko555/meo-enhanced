@@ -423,3 +423,41 @@ task state, heading stability, endnotes and the full comprehensive 1 MiB sample.
 Host Node single-sample opens changed from 454/297 ms cold/warm to 365/245 ms
 before the footnote-free fast path. These are directional probes only; native
 Preview acceptance and the Live/save-flush stall remain open.
+
+A separate V40 guest diagnostic captured Live save spending about 1.21 s in
+CodeMirror language publication, including a 717 ms Live rebuild. Global block
+discovery, math and footnotes dominate that rebuild. The save request arrived
+while presentation was superseded; increasing the one-second flush timeout would
+hide the foreground blockage rather than remove it.
+
+The existing Markdown worker now also prepares cloneable global source facts.
+It publishes syntax and footnotes first, then the richer table/math/Mermaid/HTML
+index only for Live or explicit Live preparation. Source-only revisions avoid
+that second stage. A read-only EditorState supplies existing algorithms with
+text and tab size; it has no View, language field, DOM or history, and it never
+crosses the wire. Context-only requests reuse the existing text and syntax with
+an empty ChangeSet. The surface retains selection and HTML-editing filters.
+
+Cache adoption happens before parser publication. Verified footnotes belong to
+the exact Text, grammar and tab size, and survive embedded language publication.
+Live preparation and derived refresh wait for the matching rich index. Large
+undo/redo accepts text immediately and starts a new deferred generation instead
+of synchronously rebuilding the new revision. Its boundary focus restoration
+waits for presentation readiness; Source uses its native editor restoration.
+
+The real CSP worker regression now covers a distant definition, inline/fenced
+literal markers, a numbering-changing reference, syntax arriving before rich
+context, native paced typing, exact undo, colors, disposal and failure. Across
+entry/input/undo it observes zero foreground global footnote or rich-block scans
+and one initial text snapshot. Small complex fixtures compare cloned worker
+facts with fresh mixed-grammar parsing at tab sizes 2/4/8. Production three-mode
+round trips, layout/row shrink, history interaction and save protocol checks pass.
+
+Two broader checks remain open: the standalone no-worker Live history fixture
+still rebuilds twice after cold preparation (also reproduced on unchanged HEAD),
+and the IME fixture's nested closing-marker pointer boundary needs investigation
+(the identical suffix mismatch also reproduces on unchanged HEAD).
+The history test's injected completeness observer now checks certified outer
+Markdown instead of an obsolete, unbound `syntaxTreeAvailable` reference; its
+strict zero-rebuild assertion remains. Neither issue is counted as a pass.
+Native latency acceptance for the new context pipeline is still required.

@@ -173,6 +173,10 @@ const liveInputDerivedWorkLargeDocumentFacet = Facet.define<boolean, boolean>({
  * can consume their result only after it belongs to the published revision. */
 export const liveInputDerivedWorkReadiness = Facet.define<(state: EditorState) => boolean>();
 
+export function isLiveInputDerivedWorkReady(state: EditorState): boolean {
+  return state.facet(liveInputDerivedWorkReadiness).every(ready => ready(state));
+}
+
 export function usesLargeDocumentDerivedWorkBudget(state: EditorState): boolean {
   return state.facet(liveInputDerivedWorkLargeDocumentFacet);
 }
@@ -677,7 +681,7 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     // Mermaid yields internally while measuring SVG labels. A full-document
     // rebuild in those gaps can turn a tiny split edit into a second-long wait.
     shouldWaitForPresentation: () => activePointers.size > 0
-      || view.state.facet(liveInputDerivedWorkReadiness).some(ready => !ready(view.state))
+      || !isLiveInputDerivedWorkReady(view.state)
       || Boolean(view.dom.querySelector(
       '.meo-mermaid-editing-block[data-meo-mermaid-rendering="true"], '
         + '.meo-mermaid-editing-block [data-meo-mermaid-rendering="true"]'
@@ -833,6 +837,12 @@ export function liveInputDerivedWorkExtensions(options: { readonly largeDocument
       const provenance = transaction.annotation(liveInputDerivedWorkProvenance);
       if (transaction.effects.some((effect) => effect.is(supersedeLiveInputDerivedWorkEffect))) {
         return null;
+      }
+      // History accepts text immediately, just like typing. The replacement
+      // revision's background source facts must arrive before rebuilding Live.
+      // Starting a new generation retires the input generation it supersedes.
+      if (isHistoryTransaction(transaction) && usesLargeDocumentDerivedWorkBudget(transaction.startState)) {
+        return { effects: deferLiveInputDerivedWorkEffect.of(true) };
       }
       if (isHistoryTransaction(transaction) && phase !== 'idle') {
         return { effects: supersedeLiveInputDerivedWorkEffect.of(true) };
