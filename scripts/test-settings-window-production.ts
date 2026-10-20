@@ -915,7 +915,8 @@ try {
       const font = getComputedStyle(popup), editorFont = getComputedStyle(editor);
       return { width: popup.getBoundingClientRect().width, font: font.fontFamily, size: font.fontSize, editorFont: editorFont.fontFamily, editorSize: editorFont.fontSize };
     });
-    assert.equal(layout.width, 360); assert.equal(layout.font, layout.editorFont); assert.equal(layout.size, layout.editorSize);
+    assert.ok(Math.abs(layout.width - (language === 'en' ? 336 : 288)) < 0.1, 'slash menu uses its fixed language width');
+    assert.equal(layout.font, layout.editorFont); assert.equal(layout.size, layout.editorSize);
     const surface = await page.$eval('.meo-input-suggestions', e => getComputedStyle(e).backgroundColor);
     assert.notEqual(surface, 'rgba(0, 0, 0, 0)', 'popup uses the real Webview theme surface');
     if (process.env.MEO_SETTINGS_SCREENSHOTS) {

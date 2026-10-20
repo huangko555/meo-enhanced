@@ -1,6 +1,7 @@
 import { createRequestPrefix } from '../adapters/requestIdentity';
-import { EditorSelection, Transaction, StateEffect, type Extension, type TransactionSpec, type EditorState } from '@codemirror/state';
+import { EditorSelection, EditorState, Transaction, StateEffect, type Extension, type TransactionSpec } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import { syntaxTree } from '@codemirror/language';
 import { CompletionContext, type Completion } from '@codemirror/autocomplete';
 import { htmlCompletionSource, htmlLanguage } from '@codemirror/lang-html';
 import { parser } from '@lezer/markdown';
@@ -17,6 +18,7 @@ import { addAutomaticSymbolPair } from './typingAssistance';
 import { sourceTableAt } from './sourceTableCommands';
 import { blockInsertion, type MarkdownInputContext } from './blockInsertion';
 import { encodeMarkdownPath } from '../../../src/foundation/linkDestination';
+import { scanHtmlTags } from '../../../src/foundation/htmlSyntax';
 import { candidateMatchPositions, candidateTextMatch } from '../../../src/foundation/candidateText';
 import { createTooltip } from '../adapters/tooltip';
 import { detectMathCompletion, mathCompletionSuggestions, planMathCompletion, type MathCompletion, type MathCompletionContext, type MathCompletionBody } from './mathCompletion';
@@ -26,6 +28,21 @@ export const refreshInputSuggestions = StateEffect.define<null>();
 type Suggestion = LinkCandidate & { readonly caret?: number; readonly slash?: SlashCommand; readonly math?: MathCompletion };
 type HtmlCompletionContext = { readonly type: 'html'; readonly from: number; readonly to: number; readonly query: string; readonly options: readonly Completion[] };
 type InputSuggestionContext = SuggestionContext | MathCompletionContext | HtmlCompletionContext;
+
+/** Markdown recognizes some opening tags only after `>`; complete the unfinished token independently. */
+function incompleteHtmlCompletion(state: EditorState, position: number, explicit: boolean, inputContext: (state: EditorState, position: number) => MarkdownInputContext) {
+  let node = syntaxTree(state).resolveInner(position, -1);
+  while (node.parent && node.name !== 'Paragraph') node = node.parent;
+  if (node.name !== 'Paragraph') return null;
+  const from = Math.max(node.from, state.doc.lineAt(position).from), source = state.sliceDoc(from, position);
+  if (!/^ {0,3}<[a-z][\w:-]*(?:\s[\s\S]*)?$/i.test(source) || scanHtmlTags(source).length) return null;
+  if (inputContext(state, from + source.indexOf('<')) !== 'block') return null;
+  // Value completion must see an existing closing quote to the right of the caret.
+  const htmlState = EditorState.create({ doc: state.sliceDoc(from, state.doc.lineAt(position).to), extensions: htmlLanguage });
+  const result = htmlCompletionSource(new CompletionContext(htmlState, source.length, explicit));
+  return result ? { from: from + result.from, to: from + (result.to ?? source.length), options: result.options } : null;
+}
+
 export function createInputSuggestions(options: {
   readonly inputContext: (state: EditorState, position: number) => MarkdownInputContext;
   readonly mathContext: (state: EditorState, position: number) => MathCompletionBody | null;
@@ -172,12 +189,15 @@ export function createInputSuggestions(options: {
       const range = selection.main, line = this.view.state.doc.lineAt(this.composing ? range.to : range.head), preferences = this.view.state.facet(inputAssistanceFacet);
       const position = this.composing ? range.to : range.head;
       if (preferences.html && this.htmlActivation && (this.composing || this.view.compositionStarted) && this.context?.type === 'html') return this.context;
-      if (htmlLanguage.isActiveAt(this.view.state, position, -1)) {
+      const htmlActive = htmlLanguage.isActiveAt(this.view.state, position, -1);
+      const unfinishedHtml = !htmlActive && preferences.html && this.htmlActivation && !this.composing && !this.view.compositionStarted
+        ? incompleteHtmlCompletion(this.view.state, position, this.htmlActivation === 'explicit', options.inputContext) : null;
+      if (htmlActive || unfinishedHtml) {
         this.slashFrom = null;
         if (!preferences.html || !this.htmlActivation) return null;
         // Composition updates retain the last query; preedit text never changes candidates or accepts an item.
         if (this.composing || this.view.compositionStarted) return this.context?.type === 'html' ? this.context : null;
-        const result = htmlCompletionSource(new CompletionContext(this.view.state, position, this.htmlActivation === 'explicit'));
+        const result = unfinishedHtml ?? htmlCompletionSource(new CompletionContext(this.view.state, position, this.htmlActivation === 'explicit'));
         return result ? { type: 'html' as const, from: result.from, to: result.to ?? position,
           query: this.view.state.sliceDoc(result.from, position), options: result.options } : null;
       }
@@ -580,7 +600,8 @@ export function createInputSuggestions(options: {
       const manualHtml = !event.shiftKey && !event.metaKey && (event.ctrlKey && !event.altKey && event.code === 'Space'
         || !event.ctrlKey && event.altKey && /Mac/.test(navigator.platform) && ['Backquote', 'KeyI'].includes(event.code));
       if (manualHtml && !this.cellInput && this.view.state.facet(inputAssistanceFacet).html
-        && htmlLanguage.isActiveAt(this.view.state, this.view.state.selection.main.head, -1)) {
+        && (htmlLanguage.isActiveAt(this.view.state, this.view.state.selection.main.head, -1)
+          || incompleteHtmlCompletion(this.view.state, this.view.state.selection.main.head, true, options.inputContext))) {
         event.preventDefault(); this.dismissed = false; this.htmlActivation = 'explicit'; this.schedule(); return true;
       }
       if (event.ctrlKey || event.metaKey || event.altKey) return false;

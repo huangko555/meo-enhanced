@@ -46,6 +46,9 @@ native text selection, disclosure/link actions, undo and mode continuity,
 tag/attribute completion, closing tags, literal paste and IME input. They
 use the shared input candidate menu. `scripts/test-html-completion-production.ts`
 covers its Live/Source tag, attribute and value insertion, single-step undo/redo,
+unfinished block tags across Markdown parse transitions (`<p` → `<pr`), quiet
+unfinished markup and retained warnings for completed unsupported tags,
+paired quotes to the right of an unfinished tag's attribute value,
 manual activation, disabled and reconfigured settings, Escape caret retention,
 IME ownership, shared placement and bilingual light/dark/narrow screenshots under
 `.local/html-completion-acceptance/`; it belongs to quick and browser/release gates.

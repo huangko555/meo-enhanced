@@ -42,6 +42,24 @@ try {
     await closed();
   };
   for (const mode of ['source', 'live']) {
+    step = mode + ': unfinished block tag names';
+    await prepare(mode, '|'); await page.keyboard.type('<p'); await open();
+    const visibleWarnings = () => page.$$eval('.meo-md-html-warning', nodes => nodes.filter(node => !(node as HTMLElement).hidden && node.getClientRects().length).length);
+    assert.equal(await visibleWarnings(), 0, 'an unfinished tag does not show an unsupported HTML warning');
+    await page.keyboard.type('r'); await open(); await choose('pre');
+    assert.equal(await text(), '<pre', 'a Markdown parse transition must not close tag completion');
+    await page.keyboard.type('>');
+    assert.equal(await text(), '<pre></pre>', 'completing an unfinished tag preserves automatic closing');
+    await prepare(mode, '|'); await page.keyboard.type('<span ti'); await open(); await choose('title');
+    assert.equal(await text(), '<span title', 'unfinished inline tag attributes also complete at a block boundary');
+    await prepare(mode, '<span dir="|"'); await page.keyboard.type('r'); await choose('rtl');
+    assert.equal(await text(), '<span dir="rtl"', 'unfinished tag values preserve the paired quote to the right of the caret');
+    await prepare(mode, '<pr|'); await manual(); await choose('pre');
+    assert.equal(await text(), '<pre', 'manual completion also recognizes unfinished block tags');
+    for (const marked of ['```js\n|\n```', '`|`', '$$\n|\n$$']) {
+      await prepare(mode, marked); await page.keyboard.type('<pr'); await closed();
+    }
+
     step = mode + ': attributes and history';
     await prepare(mode); await page.keyboard.type('ti'); await open();
     assert.equal(await page.$eval(menu + ' [aria-selected="true"] .meo-suggestion-label', node => node.textContent), 'title');
@@ -103,6 +121,15 @@ try {
     await manual();
     await choose('title');
   }
+  step = 'Live warning waits for a complete opening tag';
+  for (const prefix of ['<p', '<script', '<p title=">']) {
+    await prepare('live', '|'); await page.keyboard.type(prefix); await page.keyboard.press('Escape');
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    assert.equal(await page.$$eval('.meo-md-html-warning', nodes => nodes.filter(node => !(node as HTMLElement).hidden && node.getClientRects().length).length), 0, prefix + ': unfinished markup stays quiet, including quoted angle brackets');
+  }
+  await prepare('live', '|'); await page.keyboard.type('<script'); await page.keyboard.type('>');
+  await page.waitForSelector('.meo-md-html-warning', { visible: true, timeout: 3000 });
+  assert.ok((await page.$eval('.meo-md-html-warning', node => (node as HTMLElement).dataset.tooltip))?.includes('script'), 'a completed unsupported tag still explains the filtering');
   await fs.mkdir(artifacts, { recursive: true });
   for (const language of ['zh-CN', 'en']) for (const appearance of ['light', 'dark']) {
     step = language + '/' + appearance + ': shared placement and visual smoke';

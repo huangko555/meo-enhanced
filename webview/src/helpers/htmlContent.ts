@@ -1017,6 +1017,8 @@ export function addHtmlContentDecorations(
       if (node.name !== 'HTMLBlock' && node.name !== 'HTMLTag') return;
       const source = state.doc.sliceString(node.from, node.to);
       if (isSupportedHtmlWithComments(source)) return;
+      // A partially typed opening tag is not yet an unsupported HTML fragment.
+      if (!scanHtmlTags(source).length && !/^\s*<(?:!|\?)[\s\S]*>/.test(source)) return;
       const line = state.doc.lineAt(node.from);
       if (warningLines.has(line.number)) return;
       warningLines.add(line.number);
