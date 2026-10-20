@@ -793,3 +793,29 @@ The standalone Source-force fixture also fails on unchanged V49 at its historica
 requirement for exactly one synchronous force call (zero observed). The baseline
 is reproduced by substituting unchanged committed sources; it is not counted
 as passing. Existing IME, table-reveal and no-worker history failures remain open.
+
+V50 (`4047e33c`, archive SHA-256
+`c0799b190f6c4e7568610af8e095cc07b4f8f418b514d3167e4933ddab660e2b`)
+cold Source input has median/P95/maximum 36/257/380 ms, with a 32 ms click;
+cold Live has 73/313/417 ms, with a 117 ms click. Source and Live frame gaps are
+376/355 ms; exact source, undo/save and clocks pass. Cursor traversal reduction
+therefore does not by itself establish low end-to-end input latency. No full
+functional acceptance is claimed for V50.
+
+The same fixture's initial outer-tree message has 33,633 records, 2,815,360 JSON
+metadata units and 3,934 transferable handles. An isolated host reproduction
+measures 50.4 ms structured cloning plus 21.3 ms reception. The tree protocol now
+packs new graph metadata into one Float64Array and packed nodes into one
+Uint16Array. Only two buffers cross threads, while immutable branch IDs and
+reference retirement retain their existing meaning. Doubles preserve safe IDs
+beyond 32 bits and signed context hashes. The receiver validates packet lengths,
+types, child positions and properties; malformed packets retire partial graphs.
+
+Received packed branches copy their own small byte slices, so a surviving branch
+cannot retain an obsolete document's whole transfer allocation. The initial
+packed message is 2,587,712 bytes. In the same isolated reproduction, cloning is
+0.24 ms and reception 26.3 ms; these are host component samples, not native input
+measurements. Forty incremental edits, exact tree structure/positions, graph
+identity and retirement, independent byte ownership, sparse IDs, signed hashes,
+truncated/corrupt packets and real CSP-worker revision/undo checks pass. Native
+remeasurement remains required.

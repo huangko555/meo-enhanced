@@ -13,10 +13,14 @@ let doc = Text.of(('# Heading\n\nParagraph **bold** and [a link](https://example
   + '```javascript\nconst value = 1;\n```\n\n').repeat(1_000).split('\n'));
 let tree = parser.parse(new DocInput(doc)), fragments = TreeFragment.addTree(tree);
 const initial = encoder.encode(tree), copy = structuredClone(initial.value, { transfer: initial.transfers });
-assert.equal(receiver.receive(copy).toString(), tree.toString());
+assert.ok(initial.transfers.length <= 2, 'initial syntax must use bounded binary transfers rather than one handle per packed node');
+const receivedInitial = receiver.receive(copy);
+assert.equal(receivedInitial.toString(), tree.toString());
+copy.buffers.fill(0);
+assert.equal(receivedInitial.toString(), tree.toString(), 'retained branches own their bytes independently of the aggregate wire buffer');
 const count = encoder.retainedNodes;
 assert.equal(count, receiver.retainedNodes);
-assert.equal(encoder.encode(tree).value.records.length, 0, 'identical revisions send no syntax objects');
+assert.equal(encoder.encode(tree).value.count, 0, 'identical revisions send no syntax objects');
 // Receiving every revision includes stale presentations; graph ownership stays
 // synchronized even when a caller only presents the last one.
 let maxPatch = 0;
@@ -27,7 +31,7 @@ for (let index = 0; index < 40; index++) {
   fragments = TreeFragment.applyChanges(fragments, ranges);
   doc = changes.apply(doc); tree = parser.parse(new DocInput(doc), fragments);
   fragments = TreeFragment.addTree(tree, fragments);
-  const patch = encoder.encode(tree); maxPatch = Math.max(maxPatch, patch.value.records.length);
+  const patch = encoder.encode(tree); maxPatch = Math.max(maxPatch, patch.value.count);
   const received = receiver.receive(structuredClone(patch.value, { transfer: patch.transfers }));
   assert.equal(received.toString(), tree.toString(), `incremental transfer ${index} preserves every node and offset`);
   assert.equal(encoder.retainedNodes, receiver.retainedNodes);
@@ -48,8 +52,34 @@ const markedPatch = encoder.encode(marked);
 const markedCopy = receiver.receive(structuredClone(markedPatch.value, { transfer: markedPatch.transfers }));
 assert.equal(markedCopy.prop(NodeProp.contextHash), 123);
 assert.equal(markedCopy.prop(NodeProp.lookAhead), 5);
-assert.throws(() => receiver.receive({ root: 999_999, records: [] }), /Unknown Markdown syntax root/);
+const sparseRoot = 2 ** 40;
+const sparse = createMarkdownTreeEncoder().encode(new Tree(first.type, [], [], 4,
+  [[NodeProp.contextHash, -123], [NodeProp.lookAhead, 5]])).value;
+sparse.records[0] = sparseRoot;
+const sparseReceiver = createMarkdownTreeReceiver(parser.nodeSet);
+const sparseTree = sparseReceiver.receive({ ...sparse, root: sparseRoot });
+assert.equal(sparseTree.length, 4);
+assert.equal(sparseTree.prop(NodeProp.contextHash), -123, 'binary metadata preserves signed context hashes and safe IDs above 32 bits');
+sparseReceiver.clear();
+
+const cleanPacket = () => createMarkdownTreeEncoder().encode(parser.parse('one **bold** and *emphasis*')).value;
+for (const corrupt of [
+  (value: ReturnType<typeof cleanPacket>) => ({ ...value, count: value.count + 1 }),
+  (value: ReturnType<typeof cleanPacket>) => ({ ...value, records: value.records.slice(0, -1) }),
+  (value: ReturnType<typeof cleanPacket>) => ({ ...value, buffers: value.buffers.slice(0, -1) }),
+  (value: ReturnType<typeof cleanPacket>) => ({ ...value, buffers: new Uint16Array(value.buffers.length + 4) }),
+  (value: ReturnType<typeof cleanPacket>) => { value.records[0] = NaN; return value; },
+  (value: ReturnType<typeof cleanPacket>) => { value.records[2] = parser.nodeSet.types.length + 1; return value; }
+]) {
+  const invalid = createMarkdownTreeReceiver(parser.nodeSet);
+  assert.throws(() => invalid.receive(corrupt(cleanPacket())), /Markdown syntax/);
+  assert.equal(invalid.retainedNodes, 0, 'malformed binary packets retire every partially received branch');
+}
+const invalidProps = { ...sparse, root: sparseRoot, records: sparse.records.slice() };
+invalidProps.records[4] = Infinity;
+assert.throws(() => createMarkdownTreeReceiver(parser.nodeSet).receive(invalidProps), /Invalid Markdown syntax properties/);
+assert.throws(() => receiver.receive({ root: 999_999, count: 0, records: new Float64Array(), buffers: new Uint16Array() }), /Unknown Markdown syntax root/);
 assert.equal(receiver.retainedNodes, 0, 'a corrupt response retires the graph before the worker is reset');
 encoder.clear(); receiver.clear();
 assert.equal(encoder.retainedNodes, 0);
-console.log(`Markdown tree transfer: ${count} initial objects, at most ${maxPatch} per edit; exact structure, shared identity and revision retirement passed`);
+console.log(`Markdown tree transfer: ${count} initial nodes in two buffers, at most ${maxPatch} per edit; exact structure, byte ownership, malformed packets and revision retirement passed`);
