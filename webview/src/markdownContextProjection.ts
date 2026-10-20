@@ -11,7 +11,6 @@ function paragraphAt(tree: Tree, position: number): SyntaxNode | undefined {
   for (const side of [1, -1] as const) {
     let paragraph: SyntaxNode | undefined;
     for (let node: SyntaxNode | null = tree.cursor(IterMode.IgnoreMounts).moveTo(position, side).node; node; node = node.parent) {
-      if (node.name === 'FootnoteDefinition') { paragraph = undefined; break; }
       if (node.name === 'Paragraph') paragraph = node;
     }
     if (paragraph) return paragraph;
@@ -19,7 +18,7 @@ function paragraphAt(tree: Tree, position: number): SyntaxNode | undefined {
 }
 
 /** Project only ordinary text inside one unchanged paragraph. Changed syntax,
- * definitions, line structure or an inconclusive outside proof use discovery.
+ * definition labels, line structure or an inconclusive outside proof use discovery.
  * No partial or different-grammar tree may be supplied by the worker owner. */
 export function projectMarkdownDocumentContext(before: MarkdownSourceContext, doc: Text, tree: Tree,
   tabSize: number, changes: ChangeSet): MarkdownSourceContext | undefined {
@@ -41,7 +40,7 @@ export function projectMarkdownDocumentContext(before: MarkdownSourceContext, do
     || changes.mapPos(oldParagraph.from, -1) !== nextParagraph.from || changes.mapPos(oldParagraph.to, 1) !== nextParagraph.to
     || globalParagraphSyntax.test(before.doc.sliceString(oldParagraph.from, oldParagraph.to))
     || globalParagraphSyntax.test(doc.sliceString(nextParagraph.from, nextParagraph.to))
-    || before.footnotes.definitions.some(definition => changes.touchesRange(definition.lineFrom, definition.lineTo))
+    || before.footnotes.definitions.some(definition => changes.touchesRange(definition.markerFrom, definition.colonTo))
     || before.blocks?.math.some(range => changes.touchesRange(range.from, range.to))
     || before.blocks?.details.some(block => changes.touchesRange(block.summaryFrom, block.summaryTo))
     || !hasSameLiveMarkdownOutsideBlock(before.tree, tree, changes, oldParagraph, nextParagraph)) return;

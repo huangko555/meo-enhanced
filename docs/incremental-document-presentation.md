@@ -819,3 +819,28 @@ measurements. Forty incremental edits, exact tree structure/positions, graph
 identity and retirement, independent byte ownership, sparse IDs, signed hashes,
 truncated/corrupt packets and real CSP-worker revision/undo checks pass. Native
 remeasurement remains required.
+
+V51 (`af022e1f`, archive SHA-256
+`42d7572b934197b0b45742bb408b7c5e4844a3ea6cb6f75b9456b41c2fd4c97d`)
+has cold Source input median/P95/maximum 40/108/170 ms, a 128 ms frame gap and
+33 ms click. Cold Live remains 70/278/465 ms, with a 379 ms frame gap and 137 ms
+click. Both retain exact source, undo/save and clock checks. The full run stops
+at a Source caret-witness timeout; a strict rich-document repeat passes Source
+click/input but stops at image-caption movement in Live. Neither is a full pass.
+
+The native typing target is inside a nested footnote definition. Its ordinary
+body text was explicitly excluded from context projection, rediscovering all
+source facts after each edit. Definition facts contain source coordinates rather
+than copied body text. The projection proof now admits one unchanged paragraph
+inside a definition while protecting definition markers/labels and retaining
+the same outside-tree, literal, formula, summary and line-structure guards.
+Line/continuation coordinates and definition/reference aliases use the existing
+shared mapper. Structural or uncertain edits still rediscover authoritative facts.
+
+Fresh complete-discovery parity now covers definition heads and continuation
+paragraphs, nested lists/quotes, tabs 2/4/8, CJK edits, undo and grammar boundaries.
+The real-worker test covers both Source and Live, requires receipt-only body
+edits/undo with unchanged global preparation count, and verifies numbering and
+zero foreground global discovery across 31 jobs. The mode test follows the
+product's explicit Live-preparation seam before activating that surface. Native
+latency after the expanded footnote proof remains to be measured.

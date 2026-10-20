@@ -154,7 +154,7 @@ try {
     const text = 'EDIT\n\n```javascript\nconst nearValue = "near";\n```\n\nNear note[^global] and literal `[^fake]`.\n\n'
       + '**Paragraph** with *formatting* and ordinary words.\n\n'.repeat(9_000)
       + '```javascript\nconst distantValue = "distant";\n```\n\n'
-      + '[^global]: formatted **definition**\n\n    continuation\n\n    ```\n    literal[^fake]\n    ```\n\n[^fake]: Unused\n\n[^other]: A later global definition\n\n'
+      + '[^global]: formatted **definition**\n\n    continuation\n\n    - Nested item.\n\n      > Nested quote.\n\n      Nested tail.\n\n    ```\n    literal[^fake]\n    ```\n\n[^fake]: Unused\n\n[^other]: A later global definition\n\n'
       + '| A | B |\n| --- | --- |\n| one | two |\n\n<div>HTML block</div>\n\n$$\nx^2\n$$\n\nDOCUMENT-END\n';
     scope.__original = text;
     scope.__editOnInitial = true;
@@ -252,6 +252,29 @@ try {
     'formatted prose undo also maps the unchanged source indexes');
   await projectedReceipt();
   assert.equal(await page.evaluate(() => (window as any).__editor.getText() === (window as any).__beforeFormatted), true);
+  for (const mode of ['source', 'live'] as const) for (const target of ['definition', 'continuation', 'Nested tail.']) {
+    stage = `${mode} footnote-body projection: ${target}`;
+    const prepares = await page.evaluate(async ({ mode, target }) => {
+      const scope = window as any;
+      if (mode === 'live') await scope.__editor.prepareLiveSyntax(() => true);
+      await scope.__editor.setMode(mode);
+      scope.__beforeFootnote = scope.__editor.getText();
+      const prepares = scope.__workerContextReceipts.at(-1).prepares;
+      scope.__liveHistory.input(scope.__editor, scope.__beforeFootnote.indexOf(target) + 3, '中文');
+      return prepares;
+    }, { mode, target });
+    await ready();
+    await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
+    await projectedReceipt();
+    assert.equal(await page.evaluate(() => (window as any).__workerContextReceipts.at(-1).prepares), prepares,
+      'plain footnote-body input must not rediscover global source facts');
+    assert.deepEqual(await page.evaluate(() => (window as any).__liveHistory.footnotes((window as any).__editor).numbers), [['global', 1]]);
+    await page.evaluate(async () => { await (window as any).__editor.undo(); });
+    await ready(); await projectedReceipt();
+    assert.equal(await page.evaluate(() => (window as any).__workerContextReceipts.at(-1).prepares), prepares,
+      'footnote-body undo also uses a base-revision receipt');
+    assert.ok(await page.evaluate(() => (window as any).__editor.getText() === (window as any).__beforeFootnote));
+  }
   stage = 'published revision gates derived refresh';
   await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
   await page.evaluate(() => {

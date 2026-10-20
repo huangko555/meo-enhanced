@@ -120,6 +120,7 @@ for (const sample of [
 const projectionSource = [
   '# Heading', '', 'Editable intro.', '', '**Formatted** word with a [link](https://example.invalid).', '', '> Quoted body.', '', '- List body.', '',
   'Note[^n] and `literal`.', '', '[^n]: Definition', '', '    continuation', '',
+  '    - Nested item.', '', '      > Nested quote.', '', '      Continuation body.', '',
   '    ```math', '    x^2', '    ```', '', '```javascript', 'const sample = 1;', '```', '',
   '<details>', '<summary>Title</summary>', '', 'Inside details.', '', '</details>', '',
   '| A | B |', '| --- | --- |', '| one | two |', '', '$$', 'y^2', '$$', '',
@@ -133,7 +134,8 @@ function sourceContext(source: string, tabSize: number): MarkdownSourceContext {
 const facts = ({ footnotes, code, blocks }: MarkdownSourceContext) => ({ footnotes, code, blocks });
 for (const tabSize of [2, 4, 8]) {
   const previous = sourceContext(projectionSource, tabSize), original = structuredClone(facts(previous));
-  for (const text of ['Editable intro.', '**Formatted** word with a [link](https://example.invalid).', 'Quoted body.', 'List body.', 'Inside details.', 'Tail prose.']) {
+  for (const text of ['Editable intro.', '**Formatted** word with a [link](https://example.invalid).', 'Quoted body.', 'List body.',
+    'Definition', 'continuation', 'Nested item.', 'Nested quote.', 'Continuation body.', 'Inside details.', 'Tail prose.']) {
     for (const edit of [{ from: projectionSource.indexOf(text), insert: 'New ' },
       { from: projectionSource.indexOf(text) + text.length, insert: '中文，。!? ' },
       { from: projectionSource.indexOf(text) + (text.startsWith('**') ? 4 : 2),
@@ -153,7 +155,7 @@ for (const tabSize of [2, 4, 8]) {
   }
   for (const edit of [{ from: projectionSource.indexOf('Editable') + 2, insert: '*' },
     { from: projectionSource.indexOf('Editable') + 2, insert: '\n' },
-    { from: projectionSource.indexOf('Definition') + 2, insert: 'x' },
+    { from: projectionSource.indexOf('[^n]:') + 2, insert: 'x' },
     { from: projectionSource.indexOf('literal') + 2, insert: 'x' },
     { from: projectionSource.indexOf('sample') + 2, insert: 'x' },
     { from: projectionSource.indexOf('Plain display body.') + 2, insert: 'x' },
@@ -161,7 +163,7 @@ for (const tabSize of [2, 4, 8]) {
     { from: projectionSource.indexOf('one') + 2, insert: 'x' }]) {
     const changes = ChangeSet.of(edit, previous.doc.length), doc = changes.apply(previous.doc), tree = outerParser.parse(doc.toString());
     assert.equal(projectMarkdownDocumentContext(previous, doc, tree, tabSize, changes), undefined,
-      'syntax, definitions, literals, code and table edits keep authoritative discovery');
+      'syntax, definition labels, literals, code and table edits keep authoritative discovery');
   }
   const first = ChangeSet.of({ from: projectionSource.indexOf('Editable') + 3, insert: 'a' }, previous.doc.length);
   const changes = first.compose(ChangeSet.of({ from: projectionSource.indexOf('Editable') + 4, insert: '文' }, first.newLength));
