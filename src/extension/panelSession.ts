@@ -92,6 +92,7 @@ import { createVscodeDocumentCopyAdapter } from '../host/vscodeDocumentCopyAdapt
 import { createVscodeDocumentSaveAsAdapter } from '../host/vscodeDocumentSaveAsAdapter';
 import { showSavedDocumentCopyFeedback } from '../host/vscodeDocumentCopyFeedback';
 import { createVscodeDocumentSaveLifecycleAdapter } from '../host/vscodeDocumentSaveLifecycleAdapter';
+import { createVscodeLocalLinkWatcher } from '../host/vscodeLocalLinkWatcher';
 import type { createImageStorageHost } from '../host/imageStorage';
 import { readVscodeImageStorage } from '../host/vscodeImageStorage';
 import { saveClipboardImageFile } from '../host/clipboardImageSave';
@@ -669,6 +670,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     getGitRepoRoot: () => gitDocumentState.getRepoRoot()
   };
 
+  const refreshLocalLinks = (): void => {
+    runBackground(postToWebview({ type: 'localLinkResourcesChanged' } satisfies HostEditorEvent), 'localLinks.refresh');
+  };
+  const localLinkWatcher = createVscodeLocalLinkWatcher(documentUri, refreshLocalLinks);
+
   const handleMessage = async (raw: WebviewToHostMessage): Promise<void> => {
     if (disposed) {
       return;
@@ -893,8 +899,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
           .update('lineNumbers', raw.mode, vscode.ConfigurationTarget.Global);
         return;
       case 'openLink': {
-        if (await viewNavigation.revealDocumentLink(raw.href)) return;
-        await openLink(raw.href, documentUri);
+        if (!await viewNavigation.revealDocumentLink(raw.href)) await openLink(raw.href, documentUri);
+        refreshLocalLinks();
         return;
       }
       case 'openImageExternally':
@@ -955,6 +961,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       case 'resolveLocalLinks': {
         let response: ResolvedLocalLinksResponse;
         try {
+          await localLinkWatcher.update(raw.targets);
           response = {
             type: 'resolvedLocalLinks',
             requestId: raw.requestId,
@@ -1182,6 +1189,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const viewStateSubscription = panel.onDidChangeViewState((event) => {
     runBackground(postToWebview({ type: 'webviewVisibilityChanged', visible: event.webviewPanel.visible }), 'webview.visibility');
     if (event.webviewPanel.active) {
+      refreshLocalLinks();
       onPanelActivated(event.webviewPanel);
       refreshGitBaseline({ forcePost: true, delayMs: GIT_BASELINE_REFRESH_DELAY_MS });
       runBackground(enqueue(async () => {
@@ -1200,6 +1208,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     windowWasFocused = focused;
     // WindowState can change for user activity while focus stays in a menu.
     if (returnedToWindow && panel.active) {
+      refreshLocalLinks();
       runBackground(postFocusEditor(), 'postFocusEditor.windowState');
     }
   });
@@ -1226,6 +1235,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       return;
     }
     disposed = true;
+    localLinkWatcher.dispose();
     wikiResourcesSubscription.dispose();
     viewNavigation.dispose();
     diffBaselineSelection.dispose();

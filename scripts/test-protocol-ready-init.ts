@@ -25,6 +25,8 @@ import { decodeHostToWebviewMessage, decodeWebviewToHostMessage } from '../src/p
 import { createDocumentSessionCoordinatorFromInit } from '../webview/src/adapters/documentSessionTransport';
 import { MAX_PREVIEW_FONT_FAMILY_LENGTH, normalizePreviewFontFamily } from '../src/shared/preview';
 
+assert.deepEqual(decodeHostToWebviewMessage({ type: 'localLinkResourcesChanged' }), { type: 'localLinkResourcesChanged' });
+
 const codeTheme = { name: 'VS Dark', type: 'dark' as const, colors: {}, tokenColors: [] };
 const completeInit = {
   type: 'init' as const,

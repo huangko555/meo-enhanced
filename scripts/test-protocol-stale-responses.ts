@@ -9,6 +9,10 @@ import {
   getLocalLinkStatus,
   handleResolvedLocalLinks,
   initializeLocalLinkHandling,
+  invalidateLocalLinkStatuses,
+  isMissingLocalLinkTarget,
+  replaceLocalLinkStatuses,
+  collectLocalLinkTargets,
   requestLocalLinkStatuses
 } from '../webview/src/helpers/localLinks';
 
@@ -88,5 +92,18 @@ assert.equal(handleResolvedLocalLinks({
 await flushPromises();
 assert.equal(getLocalLinkStatus('latest.md'), true);
 assert.equal(getLocalLinkStatus('older.md'), null, 'An out-of-order local-link response must not replace the latest result');
+
+const angleTarget = 'folder/文档 file.md';
+assert.deepEqual(collectLocalLinkTargets(`[label](<${angleTarget}>)`), [angleTarget]);
+assert.deepEqual(collectLocalLinkTargets(`<${angleTarget}>`), [], 'a relative path in standalone angle brackets is not an autolink');
+replaceLocalLinkStatuses([{ target: angleTarget, exists: false }]);
+assert.equal(isMissingLocalLinkTarget(angleTarget), true);
+invalidateLocalLinkStatuses(`[label](<${angleTarget}>)`);
+const refreshedLocalRequest = localMessages.at(-1)!;
+assert.equal(getLocalLinkStatus(angleTarget), null, 'an invalidated missing result must disappear while its replacement is pending');
+handleResolvedLocalLinks({ type: 'resolvedLocalLinks', requestId: refreshedLocalRequest.requestId,
+  result: { ok: true, value: { results: [{ target: angleTarget, exists: true }] } } });
+await flushPromises();
+assert.equal(isMissingLocalLinkTarget(angleTarget), false);
 
 console.log('Protocol stale-response checks passed');

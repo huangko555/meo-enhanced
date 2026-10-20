@@ -318,6 +318,8 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-html-completion-production.ts'),
           script('scripts/test-editor-services.ts'),
           script('scripts/test-link-candidates.ts'),
+          script('scripts/test-document-links.ts'),
+          script('scripts/test-local-links-production.ts'),
           script('scripts/test-input-assistance-production.ts'),
           script('scripts/test-html-comment-input-production.ts'),
           script('scripts/test-inline-code-layout-production.ts'),

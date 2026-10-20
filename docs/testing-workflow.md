@@ -427,6 +427,17 @@ multiline tags, unquoted attributes and entities, with code/comments and unsafe
 schemes excluded. Browser message delivery and Host command routing are distinct
 evidence; final installed-VSIX behavior still requires native acceptance.
 
+`scripts/test-local-links-production.ts` covers angle-wrapped local paths with
+Chinese and spaces in Live prose and tables, real Ctrl clicks, file-resource
+invalidation and out-of-order responses through the full Webview bootstrap in
+Chinese/light and English/dark. It runs in quick and browser/release gates.
+`scripts/test-document-links.ts` also runs in quick and retains Host coverage for
+creation/deletion, extension fallback, external file URIs, missing directory
+ancestors, watcher disposal, asynchronous native registration races and Markdown
+filenames that must not fall back to websites.
+`test-protocol-stale-responses.ts` covers immediate invalidation of
+obsolete missing hints; these focused checks take seconds rather than a long run.
+
 `scripts/test-export-links.ts` and `scripts/test-export-links-browser.ts` run in
 quick, targeted appearance and release gates. They cover all built-in presets and
 a custom preset with the GitHub base, both path separators, encoded filenames,

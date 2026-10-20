@@ -2,11 +2,8 @@ import { AlertCircle, createElement } from 'lucide';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 import { createLocalLinkResolutionTransport, type LocalLinkResolutionTransport } from '../adapters/localLinkResolutionTransport';
 import type { ResolvedLocalLinksResponse } from '../../../src/protocol/localLinkResolution';
-import { normalizeLinkDestination } from '../../../src/foundation/linkDestination';
-
-const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
-const HOSTNAME_RE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
-const LOCAL_DOCUMENT_EXTENSION_RE = /\.(?:md|markdown|mdx|mdc)$/i;
+import { normalizeLinkDestination, isLikelyLocalLinkDestination as isLikelyLocalLinkTarget } from '../../../src/foundation/linkDestination';
+export { isLikelyLocalLinkTarget };
 
 const localLinkStatusByTarget = new Map<string, boolean>();
 let vscodeApi: any = null;
@@ -72,6 +69,13 @@ export const requestLocalLinkStatuses = (text: string): void => {
   });
 };
 
+export const invalidateLocalLinkStatuses = (text: string): void => {
+  cancelPendingLocalLinkStatusRefresh();
+  replaceLocalLinkStatuses([]);
+  requestLocalLinkStatuses(text);
+  refreshContext?.refreshDecorations();
+};
+
 export const handleResolvedLocalLinks = (message: ResolvedLocalLinksResponse): boolean => {
   return localLinkTransport.accept(message);
 };
@@ -119,63 +123,6 @@ export function createMissingLocalLinkIndicator(language: UiLanguage = 'en'): HT
 
 export function normalizeLocalLinkTarget(rawTarget: string): string {
   return normalizeLinkDestination(`${rawTarget ?? ''}`);
-}
-
-export function isLikelyLocalLinkTarget(rawTarget: string): boolean {
-  const normalized = normalizeLocalLinkTarget(rawTarget);
-  if (!normalized || normalized.startsWith('#')) {
-    return false;
-  }
-  if (/^\/\//.test(normalized)) {
-    return false;
-  }
-  if (/^file:/i.test(normalized)) {
-    return true;
-  }
-
-  const [targetPath = ''] = normalized.split(/[?#]/, 1);
-  if (!targetPath) {
-    return false;
-  }
-  if (SCHEME_RE.test(targetPath)) {
-    return false;
-  }
-
-  const pathLike = targetPath.replace(/\\/g, '/');
-  if (!pathLike) {
-    return false;
-  }
-  if (
-    pathLike.startsWith('./') ||
-    pathLike.startsWith('../') ||
-    pathLike.startsWith('/') ||
-    pathLike.startsWith('~')
-  ) {
-    return true;
-  }
-  if (/^[a-zA-Z]:\//.test(pathLike)) {
-    return true;
-  }
-  if (pathLike.toLowerCase().startsWith('www.')) {
-    return false;
-  }
-  if (LOCAL_DOCUMENT_EXTENSION_RE.test(pathLike)) {
-    return true;
-  }
-
-  const firstSegment = pathLike.split('/', 1)[0] ?? '';
-  const hostPart = firstSegment.includes(':') ? firstSegment.split(':', 1)[0] : firstSegment;
-  if (hostPart === 'localhost') {
-    return false;
-  }
-  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostPart)) {
-    return false;
-  }
-  if (HOSTNAME_RE.test(hostPart)) {
-    return false;
-  }
-
-  return true;
 }
 
 export const collectLocalLinkTargets = (text: string): string[] => {

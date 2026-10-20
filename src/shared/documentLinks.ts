@@ -6,13 +6,12 @@ import { safeDecodeURIComponent } from '../agents/resourceMatching';
 import { WIKI_IMAGE_SCHEME, WIKI_LINK_SCHEME, wikiTargetFromImageSrc } from '../foundation/wikiReference';
 import { resolveWikiResource } from '../host/wikiResources';
 import { canResolveImageFromRoot, getImagePathCandidates } from './imagePaths';
-import { normalizeLinkDestination } from '../foundation/linkDestination';
+import { normalizeLinkDestination, isLikelyLocalLinkDestination } from '../foundation/linkDestination';
 import { markdownPathTarget, resolveMarkdownReference } from '../host/markdownPathTargets';
 import { isMarkdownDocumentPath, MARKDOWN_EDITOR_VIEW_TYPE } from './extensionConfig';
 
 const ALLOWED_IMAGE_SRC_RE = /^(?:https?:|data:|blob:|vscode-webview:|vscode-webview-resource:|vscode-resource:)/i;
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
-const HOSTNAME_RE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
 const WINDOWS_ABSOLUTE_PATH_RE = /^[a-z]:[\\/]/i;
 // Preview's Markdown renderer URI-encodes backslashes before requesting an
 // image. Classify that drive path before interpreting the colon as a scheme;
@@ -41,7 +40,7 @@ export async function openImageExternally(rawUrl: string, documentUri: vscode.Ur
     return;
   }
   if (wikiTarget !== null) return;
-  if (looksLikeLocalHref(rawUrl)) {
+  if (isLikelyLocalLinkDestination(rawUrl)) {
     console.warn('[meo] Local image target not found', { url: rawUrl });
     return;
   }
@@ -79,7 +78,7 @@ export async function openLink(
   if (await openLocalLink(rawHref, documentUri)) {
     return;
   }
-  if (looksLikeLocalHref(rawHref)) {
+  if (isLikelyLocalLinkDestination(rawHref)) {
     console.warn('[meo] Local link target not found', {
       href: rawHref,
       documentUri: documentUri.toString(),
@@ -396,60 +395,6 @@ function toDocumentScopedUri(candidatePath: string, baseUri: vscode.Uri): vscode
     query: '',
     fragment: ''
   });
-}
-
-function looksLikeLocalHref(rawHref: string): boolean {
-  const trimmed = rawHref.trim();
-  if (!trimmed || trimmed.startsWith('#')) {
-    return false;
-  }
-  if (/^\/\//.test(trimmed)) {
-    return false;
-  }
-  if (/^file:/i.test(trimmed)) {
-    return true;
-  }
-  const [targetPath = ''] = trimmed.split(/[?#]/, 1);
-  if (!targetPath) {
-    return false;
-  }
-  const decodedTargetPath = safeDecodeURIComponent(targetPath);
-  if (SCHEME_RE.test(targetPath) && !WINDOWS_ABSOLUTE_PATH_RE.test(decodedTargetPath)) {
-    return false;
-  }
-
-  const normalized = decodedTargetPath.trim().replace(/\\/g, '/');
-  if (!normalized) {
-    return false;
-  }
-  if (
-    normalized.startsWith('./') ||
-    normalized.startsWith('../') ||
-    normalized.startsWith('/') ||
-    normalized.startsWith('~')
-  ) {
-    return true;
-  }
-  if (/^[a-zA-Z]:\//.test(normalized)) {
-    return true;
-  }
-  if (normalized.toLowerCase().startsWith('www.')) {
-    return false;
-  }
-
-  const firstSegment = normalized.split('/', 1)[0] ?? '';
-  const hostPart = firstSegment.includes(':') ? firstSegment.split(':', 1)[0] : firstSegment;
-  if (hostPart === 'localhost') {
-    return false;
-  }
-  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostPart)) {
-    return false;
-  }
-  if (HOSTNAME_RE.test(hostPart)) {
-    return false;
-  }
-
-  return true;
 }
 
 async function findFirstExistingUri(candidateUris: readonly vscode.Uri[]): Promise<vscode.Uri | null> {

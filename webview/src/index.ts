@@ -20,7 +20,7 @@ import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleIm
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
 import { normalizeWikiTarget, replaceWikiLinkStatuses, initializeWikiLinkHandling, collectWikiLinkTargets, requestWikiLinkStatuses, scheduleWikiLinkStatusRefresh, setWikiLinkRefreshContext, cancelPendingWikiStatusRefresh, handleResolvedWikiLinks } from './helpers/wikiLinks';
-import { initializeLocalLinkHandling, requestLocalLinkStatuses, scheduleLocalLinkStatusRefresh, setLocalLinkRefreshContext, cancelPendingLocalLinkStatusRefresh, handleResolvedLocalLinks } from './helpers/localLinks';
+import { initializeLocalLinkHandling, requestLocalLinkStatuses, invalidateLocalLinkStatuses, scheduleLocalLinkStatusRefresh, setLocalLinkRefreshContext, cancelPendingLocalLinkStatusRefresh, handleResolvedLocalLinks } from './helpers/localLinks';
 import { setGitDiffLineHighlightsEnabled } from './helpers/gitDiffLineHighlights';
 import { applyBuiltInVisualBaseline, applyUiVisualBaseline } from './helpers/theme';
 import { setShikiTheme } from './helpers/shikiHighlighter';
@@ -3806,6 +3806,10 @@ window.addEventListener('message', (event) => {
 
   if (message.type === 'wikiCandidatesChanged') {
     editor?.refreshInputSuggestions();
+    return;
+  }
+  if (message.type === 'localLinkResourcesChanged') {
+    if (editor) invalidateLocalLinkStatuses(editor.getText());
     return;
   }
   if (message.type === 'wikiResourcesChanged') {
