@@ -12,6 +12,8 @@ import { getGitDiffSummary, getGitDiffOriginalBlocks } from '../webview/src/help
 import { editorMarkdownLanguage, getLivePresentationDecorations } from '../webview/src/liveMode';
 import { parseFootnotes } from '../webview/src/helpers/footnotes';
 import { editorScrollIntoView } from '../webview/src/editor/scrollEffects';
+import { isCompleteMarkdownStructure } from '../webview/src/editor/markdownStructure';
+import { assertBackgroundMarkdownPreparation } from '../webview/src/editor/backgroundMarkdownStructure';
 
 function footnoteSnapshot(state: EditorState) {
   const parsed = parseFootnotes(state);
@@ -42,6 +44,16 @@ function footnoteSnapshot(state: EditorState) {
   },
   syntaxInfo: (editor: ReturnType<typeof createEditor>) => ({ published: syntaxTree(editor.view.state).length,
     length: editor.view.state.doc.length, available: syntaxTreeAvailable(editor.view.state, editor.view.state.doc.length) }),
+  markdownReady: (editor: ReturnType<typeof createEditor>) => isCompleteMarkdownStructure(syntaxTree(editor.view.state), editor.view.state.doc.length),
+  parseFailure(editor: ReturnType<typeof createEditor>) {
+    try { assertBackgroundMarkdownPreparation(editor.view.state); return null; }
+    catch (error) { return String(error); }
+  },
+  syntaxPath(editor: ReturnType<typeof createEditor>, position: number) {
+    const path: string[] = [];
+    for (let node = syntaxTree(editor.view.state).resolveInner(position); node; node = node.parent!) path.push(node.name);
+    return path;
+  },
   scrollOnly(editor: ReturnType<typeof createEditor>) {
     const before = getLivePresentationDecorations(editor.view.state);
     editor.view.dispatch({ effects: editorScrollIntoView(editor.view.state.selection.main.head) });

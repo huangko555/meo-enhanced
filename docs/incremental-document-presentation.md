@@ -298,12 +298,13 @@ public parser wrapper before the mixed-language pass. It requires complete input
 coverage, EOF and an unstopped outer pass. A same-length unknown tree, stopped
 prefix or suspended embedded grammar cannot invent this proof. Live completeness
 checks use that certificate while retaining their existing outside-edit and
-same-structure comparisons. A state-owned preparation receipt is reset whenever
+same-structure comparisons. A document/grammar-owned preparation receipt is reset whenever
 another outer pass starts, and only requests publication of the actual parser
 tree; it never certifies a lagging tree.
 
-Budgeted embedded code and HTML parsers use the documented ParseContext viewport,
-skipUntilInView and getSkippingParser APIs to defer offscreen languages. The
+Budgeted mixed parsing uses the documented ParseContext viewport and
+skipUntilInView APIs to defer offscreen code/HTML before packed-node
+materialization or inner-job allocation. The
 original grammar, mounts and language data are retained, and normal documents
 still parse every embedded language. During explicit whole-Markdown preparation,
 an override preserves the real editing viewport because ensureSyntaxTree otherwise
@@ -315,8 +316,43 @@ all its embedded parsers. Switching to Live or refreshing layout no longer issue
 another synchronous 500 ms whole-document parse after that work is ready.
 
 The browser demand regression requires complete Markdown with intentionally
-incomplete distant JavaScript before Live, the original syntax palette after
+unparsed distant JavaScript before Live, the original syntax palette after
 scrolling there and exact source across mode changes. Suspended-language and
 partial-tree rejection cases are separate deterministic checks. Initial Live
 profiling still shows substantial outer parsing and presentation work; these
 changes do not establish the final first-viewport or native input targets.
+
+The outer parser now has an editor-owned classic Worker. Text, changes,
+selection, history and persistence remain in CodeMirror/DocumentSession. The
+worker receives one initial snapshot, then composed ChangeSets; only one request
+is in flight and intervening requests coalesce. It owns incremental Lezer
+fragments and returns newly allocated Tree/TreeBuffer branches. Both endpoints
+retain the current graph with reference counts, dropping retired branches when
+exchanging roots. Node IDs are checked against the surface grammar before the
+receiver accepts a complete-document certificate. No private CodeMirror state
+effects or transported EditorState are involved.
+
+The mixed pass remains in CodeMirror. An independent mapped fragment cache
+preserves its inner-language reuse while the outer worker is pending; the
+standard asynchronous placeholder would otherwise discard all those fragments.
+Only committed View updates advance that cache. Wrapper order uses successive
+public configure calls because an extension array composes wrappers outside-in.
+Visible code/HTML retain the original parsers and language data, with complete
+palette, coordinate and nested-path parity against 18 official-parser fixtures.
+CodeMirror's Markdown support extensions still supply completion and folding.
+
+Preparation waits for the worker without repeatedly starting placeholder parses
+or chaining pending promises. Cancellation is checked every 16 ms. Source maps
+its existing colors and code-row decorations until the next valid tree, rather
+than flashing an uncolored document on each key. A CSP-constrained real-worker
+editor regression covers input during the first request, Source/Live CJK input,
+exact undo, distant code colors, disposal and failure without a blocking parse
+fallback. Its 9,000-row code edit used 1,637 LR steps, below the 5,000-step reuse
+guard. Forty graph revisions preserve exact authoritative syntax and retire old
+nodes; 16,560 initial objects need at most 1,564 new objects per tested edit.
+
+These worker checks establish ownership, correctness and foreground work bounds.
+They do not replace native latency acceptance. A cold comprehensive browser
+sample still spends about 0.65 seconds entering Live, with presentation and mixed
+parsing remaining visible costs. Preview's first-response pipeline is separate
+and still requires further measurement.

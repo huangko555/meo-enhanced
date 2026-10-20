@@ -63,7 +63,9 @@ export function viewportSyntaxHighlighting(style: HighlightStyle): Extension {
     update(update: ViewUpdate) {
       const tree = syntaxTree(update.state);
       const to = update.changes.mapPos(this.decoratedTo, 1);
-      if (tree.length < update.view.viewport.to && tree.type === this.tree.type && to >= update.view.viewport.to) {
+      const placeholder = tree.type.isAnonymous && !tree.type.isTop;
+      if (placeholder && (update.docChanged || !update.viewportChanged)
+        || tree.length < update.view.viewport.to && tree.type === this.tree.type && to >= update.view.viewport.to) {
         this.decorations = this.decorations.map(update.changes);
         this.decoratedTo = to;
       } else if (tree !== this.tree || update.viewportChanged) {

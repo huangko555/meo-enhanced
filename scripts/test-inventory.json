@@ -1,5 +1,20 @@
 {
   "separate": {
+    "scripts/test-markdown-mixed-languages.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-markdown-mixed-languages.ts",
+      "reason": "Exact comparison with official CodeMirror Markdown mixed parsing for source coordinates, nested language paths and the complete palette across code aliases, containers and HTML overlays."
+    },
+    "scripts/test-background-markdown-structure.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-background-markdown-structure.ts",
+      "reason": "Actual CSP-constrained Markdown worker through Source/Live, composed changes, CJK input, undo, disposal and failure, with an assertion that large outer parsing never runs on the foreground thread."
+    },
+    "scripts/test-markdown-tree-transfer.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-markdown-tree-transfer.ts",
+      "reason": "Exact incremental syntax graph transfer, structural sharing and reference-counted retirement across edits, old-root reuse and failure."
+    },
     "scripts/test-mixed-code-viewport-demand.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-mixed-code-viewport-demand.ts",

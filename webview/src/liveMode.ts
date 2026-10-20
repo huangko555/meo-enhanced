@@ -1,5 +1,7 @@
 import { editorScrollIntoView, isEditorScrollEffect } from './editor/scrollEffects';
 import { viewportSyntaxHighlighting } from './editor/viewportSyntaxHighlighting';
+import { backgroundMarkdownParser } from './editor/backgroundMarkdownStructure';
+import { markdownMixedLanguages } from './editor/markdownMixedLanguages';
 import { documentLines } from './helpers/documentLines';
 import { isAutomaticSymbolPairHistoryEffect } from './editor/typingAssistance';
 import { liveWidgetPresentationLayers, mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions, replaceLivePresentationRanges } from './editor/liveWidgetPositions';
@@ -11,8 +13,9 @@ import { blockStickyHeaderExtension } from './helpers/blockStickyHeader';
 import { countColumn, RangeSetBuilder, StateEffect, StateField, EditorState, type ChangeDesc, type Range, type RangeSet, type Extension, type EditorSelection, type Transaction } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { html } from '@codemirror/lang-html';
-import { LanguageSupport, syntaxHighlighting } from '@codemirror/language';
-import { certifyMarkdownStructure, markdownStructureAvailable, viewportCodeLanguage } from './editor/markdownStructure';
+import { Language, LanguageSupport, syntaxHighlighting } from '@codemirror/language';
+import type { MarkdownParser } from '@lezer/markdown';
+import { certifyMarkdownStructure, markdownStructureAvailable } from './editor/markdownStructure';
 import {
   Decoration,
   EditorView,
@@ -4509,17 +4512,19 @@ const styledLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
 // Both modes edit the same grammar. Stable language identity lets CodeMirror
 // retain its incremental parse when only presentation extensions change.
 const markdownHtmlLanguage = html({ matchClosingTags: false });
-export const editorMarkdownLanguage = markdown({
-  base: markdownLanguage,
-  addKeymap: false,
-  htmlTagLanguage: new LanguageSupport(viewportCodeLanguage(markdownHtmlLanguage.language), markdownHtmlLanguage.support),
-  codeLanguages: info => {
-    const language = resolveCodeLanguage(info);
-    return language ? viewportCodeLanguage(language) : null;
-  },
-  extensions: [certifyMarkdownStructure, ...inlineMarkdownExtensions,
-    { props: [sourceMarkdownHighlightProps] }, { remove: ['Emoji'] }]
-});
+// Separate configure calls preserve wrapper order. Markdown extension arrays
+// compose wrappers outside-in; the background pass must replace only the outer
+// grammar, while CodeMirror still runs its mixed-language pass afterwards.
+const editorOuterMarkdownParser = (markdownLanguage.parser as MarkdownParser)
+  .configure([...inlineMarkdownExtensions, { props: [sourceMarkdownHighlightProps] }, { remove: ['Emoji'] }])
+  .configure(backgroundMarkdownParser)
+  .configure(certifyMarkdownStructure);
+const editorOuterMarkdownLanguage = new Language(markdownLanguage.data, editorOuterMarkdownParser, [], 'markdown');
+const editorMarkdownSupport = markdown({ base: editorOuterMarkdownLanguage, addKeymap: false, htmlTagLanguage: markdownHtmlLanguage });
+export const editorMarkdownLanguage = new LanguageSupport(new Language(markdownLanguage.data,
+  editorOuterMarkdownParser.configure(markdownMixedLanguages({
+    codeLanguage: resolveCodeLanguage, htmlParser: markdownHtmlLanguage.language.parser
+  })), [], 'markdown'), editorMarkdownSupport.support);
 
 export function liveModeExtensions(options: { readonly largeDocument?: boolean } = {}): Extension[] {
   return [

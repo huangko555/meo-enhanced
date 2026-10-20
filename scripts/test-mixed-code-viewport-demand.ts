@@ -19,17 +19,18 @@ try {
     (window as any).demandOriginal = text;
     const ready = await editor.prepareLiveSyntax(() => true);
     const syntax = api.syntaxInfo(editor);
+    const distantPath = api.syntaxPath(editor, text.indexOf('const distantValue') + 7);
     const keyword = [...document.querySelectorAll('.cm-line span')].find(node => node.textContent === 'const');
     (window as any).demandKeywordColor = keyword ? getComputedStyle(keyword).color : null;
     await editor.setMode('live');
     await editor.setMode('source');
     const line = editor.view.state.doc.lineAt(text.indexOf('const distantValue')).number;
     editor.scrollToLine(line, 'center');
-    return { ready, syntax, keywordColor: (window as any).demandKeywordColor };
+    return { ready, syntax, distantPath, keywordColor: (window as any).demandKeywordColor };
   });
   assert.ok(preparation.ready);
   assert.equal(preparation.syntax.published, preparation.syntax.length, 'all outer Markdown is available before showing Live');
-  assert.equal(preparation.syntax.available, false, 'the distant embedded parser is intentionally still pending');
+  assert.ok(!preparation.distantPath.includes('Script'), 'the distant embedded parser is intentionally still pending');
   assert.ok(preparation.keywordColor, 'visible near code has a syntax palette');
   await page.waitForFunction(() => {
     const line = [...document.querySelectorAll('.cm-line')].find(node => node.textContent?.includes('const distantValue'));

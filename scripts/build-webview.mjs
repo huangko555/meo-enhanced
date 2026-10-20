@@ -41,6 +41,11 @@ const shikiWorkerBuild = spawnSync(process.execPath, [
   '--minify', '--outfile=webview/dist/shiki-highlight-worker.js'
 ], { cwd: root, stdio: 'inherit' });
 if (shikiWorkerBuild.status !== 0) process.exit(shikiWorkerBuild.status ?? 1);
+const markdownWorkerBuild = spawnSync(process.execPath, [
+  'build', 'webview/src/markdownParseWorker.ts', '--target=browser', '--format=iife',
+  '--minify', '--outfile=webview/dist/markdown-parse-worker.js'
+], { cwd: root, stdio: 'inherit' });
+if (markdownWorkerBuild.status !== 0) process.exit(markdownWorkerBuild.status ?? 1);
 
 const buildMetadata = JSON.parse(readFileSync(buildMetadataPath, 'utf8'));
 const languageModules = new Map();

@@ -1,5 +1,6 @@
 import { ensureSyntaxTree, forceParsing, syntaxTree } from '@codemirror/language';
 import type { EditorView } from '@codemirror/view';
+import { assertBackgroundMarkdownPreparation, isBackgroundMarkdownPreparationPending } from './backgroundMarkdownStructure';
 import { hasPreparedMarkdownStructure, isCompleteMarkdownStructure, markdownStructureAvailable, withMarkdownPreparationViewport } from './markdownStructure';
 
 const PARSE_SLICE_MS = 8;
@@ -29,6 +30,12 @@ export async function prepareLiveSyntax(view: EditorView, isCurrent: () => boole
   const deadline = performance.now() + PREPARATION_DEADLINE_MS;
   while (isCurrent()) {
     const state = view.state;
+    assertBackgroundMarkdownPreparation(state);
+    if (isBackgroundMarkdownPreparationPending(state)) {
+      if (performance.now() >= deadline) throw new Error('Live syntax preparation timed out');
+      await new Promise(resolve => setTimeout(resolve, 16));
+      continue;
+    }
     if (isCompleteMarkdownStructure(syntaxTree(state), state.doc.length)) return true;
     withMarkdownPreparationViewport(state, view.viewport, () => {
       ensureSyntaxTree(state, state.doc.length, PARSE_SLICE_MS);

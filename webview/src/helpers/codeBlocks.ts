@@ -589,6 +589,11 @@ export const sourceCodeBlockLines = ViewPlugin.fromClass(class {
   decorations: DecorationSet;
   constructor(view: EditorView) { this.decorations = computeSourceCodeBlockLines(view); }
   update(update: ViewUpdate) {
+    const tree = currentSyntaxTree(update.state);
+    if (tree.type.isAnonymous && !tree.type.isTop && (update.docChanged || !update.viewportChanged)) {
+      if (update.docChanged) this.decorations = this.decorations.map(update.changes);
+      return;
+    }
     if (update.docChanged || update.viewportChanged || update.transactions.some(syntaxTreeChanged)) {
       this.decorations = computeSourceCodeBlockLines(update.view);
     }

@@ -19,7 +19,7 @@ const text = [
 ].join('\n');
 const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
   const pathname = new URL(request.url).pathname;
-  if (pathname === '/') return new Response('<!doctype html><link rel="stylesheet" href="/index.css"><link rel="stylesheet" href="/katex/katex-embedded.css"><style>html,body,#app{height:100%;margin:0}</style><body class="vscode-dark" data-meo-mermaid-src="/mermaid.min.js" data-meo-katex-src="/katex/katex-embedded.css" data-meo-git-diff-worker-src="/git-diff-worker.js" data-meo-shiki-worker-src="/shiki-highlight-worker.js"><div id="app"></div><script type="module" src="/index.js"></script>', { headers: { 'Content-Type': 'text/html' } });
+  if (pathname === '/') return new Response('<!doctype html><link rel="stylesheet" href="/index.css"><link rel="stylesheet" href="/katex/katex-embedded.css"><style>html,body,#app{height:100%;margin:0}</style><body class="vscode-dark" data-meo-mermaid-src="/mermaid.min.js" data-meo-katex-src="/katex/katex-embedded.css" data-meo-git-diff-worker-src="/git-diff-worker.js" data-meo-shiki-worker-src="/shiki-highlight-worker.js" data-meo-markdown-worker-src="/markdown-parse-worker.js"><div id="app"></div><script type="module" src="/index.js"></script>', { headers: { 'Content-Type': 'text/html' } });
   const file = path.resolve(dist, '.' + decodeURIComponent(pathname));
   return file.startsWith(dist + path.sep) && fs.existsSync(file)
     ? new Response(Bun.file(file)) : new Response('Not found', { status: 404 });

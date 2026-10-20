@@ -26,6 +26,8 @@ import { editorMarkdownLanguage } from './liveMode';
 import { indentUnit, syntaxTree, forceParsing } from '@codemirror/language';
 import { sourceHighlightStyle } from './theme';
 import { viewportSyntaxHighlighting } from './editor/viewportSyntaxHighlighting';
+import { backgroundMarkdownStructureExtensions } from './editor/backgroundMarkdownStructure';
+import type { MarkdownParser } from '@lezer/markdown';
 import { prepareSourceSyntax, sourceSyntax, sourceSyntaxPreparation } from './helpers/sourceSyntax';
 import { prepareLiveSyntax, refreshLiveSyntax } from './editor/liveSyntaxPreparation';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
@@ -2403,6 +2405,8 @@ export function createEditor({
     doc: text,
     selection: { anchor: initialCursorPos },
     extensions: [
+      backgroundMarkdownStructureExtensions(document.body.dataset.meoMarkdownWorkerSrc,
+        (editorMarkdownLanguage.language.parser as MarkdownParser).nodeSet),
       markdownSyntaxPublication,
       EditorState.tabSize.of(4),
       indentUnit.of('  '),
