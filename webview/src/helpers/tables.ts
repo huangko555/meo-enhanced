@@ -2561,8 +2561,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     });
   }
 
-  eq(other: WidgetType): boolean {
-    const equivalent = (
+  private canReuseTableDom(other: WidgetType): other is HtmlTableWidget {
+    return (
       other instanceof HtmlTableWidget &&
       this.hasSameUiLanguageEpoch(other) &&
       other.tableData.indent === this.tableData.indent &&
@@ -2574,7 +2574,10 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       other.tableData.alignments.every((alignment, index) => alignment === this.tableData.alignments[index]) &&
       other.stickyHeaderAdapterFactory === this.stickyHeaderAdapterFactory
     );
-    if (equivalent && other instanceof HtmlTableWidget) {
+  }
+
+  eq(other: WidgetType): boolean {
+    if (this.canReuseTableDom(other)) {
       const mounted = this.domRefs ? this : other.domRefs ? other : null;
       // CodeMirror keeps the mounted DOM but adopts the new decoration's widget.
       // Keep its last measurement until the observer publishes the next row layout.
@@ -2582,11 +2585,24 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         this.measuredHeight >= other.measuredHeight ? this.measuredHeightCache : other.measuredHeightCache
       );
       this.measuredHeightCache = other.measuredHeightCache = cache;
-      const projected = mounted === this ? other : this;
-      mounted?.adoptEquivalentTableData(projected.tableData);
-      if (mounted) mounted.positionDocument = projected.positionDocument;
+      // Comparing decorations also happens outside DOM reconciliation. Never
+      // project source data here: the adopted value may own no mounted DOM.
+      return this.tableData.signature === other.tableData.signature
+        && this.tableData.from === other.tableData.from && this.tableData.to === other.tableData.to
+        && this.tableData.startLine === other.tableData.startLine && this.tableData.endLine === other.tableData.endLine;
     }
-    return equivalent;
+    return false;
+  }
+
+  updateDOM(dom: HTMLElement, view: EditorView, _previous: WidgetType): boolean {
+    const owner = tableDomOwners.get(dom);
+    if (!owner || owner.destroyed || owner.view !== view || !owner.canReuseTableDom(this)) return false;
+    // CodeMirror retains this DOM but adopts the new immutable widget value.
+    // Reconcile through the instance that owns its inputs, images and listeners.
+    owner.adoptEquivalentTableData(this.tableData);
+    owner.positionDocument = new WeakRef(view.state.doc);
+    this.measuredHeightCache = owner.measuredHeightCache;
+    return true;
   }
 
   projectPosition(state: EditorState, changes: ChangeDesc): void {
@@ -2659,7 +2675,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   ): void {
     if (!view || !this.domRefs?.shell.isConnected) return;
     const pos = view.posAtDOM(this.domRefs.wrap, 0);
-    let node: SyntaxNode | null = syntaxTree(view.state).resolveInner(pos, -1);
+    // Offset zero of the retained block DOM is the table's opening boundary.
+    // Looking left can resolve Document/the preceding block and skip refresh.
+    let node: SyntaxNode | null = syntaxTree(view.state).resolveInner(pos, 1);
     while (node && node.name !== 'Table') node = node.parent;
     if (!node) {
       this.resolveCurrentTableRange(view, this.domRefs.wrap);

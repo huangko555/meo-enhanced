@@ -326,9 +326,15 @@ async function main(): Promise<void> {
       };
 
       const lateModeTable = '| Media |\n| --- |\n| ![table](late-mode-table.png) |';
+      const retainedTable = document.querySelector('.meo-md-html-table-shell');
       editor.setText(lateModeTable);
       editor.view.dispatch({ selection: { anchor: lateModeTable.indexOf('![table]') } });
       await settle();
+      const currentTable = document.querySelector<HTMLElement>('.meo-md-html-table');
+      if (document.querySelector('.meo-md-html-table-shell') !== retainedTable
+        || currentTable?.dataset.tableFrom !== '0' || currentTable.dataset.tableTo !== String(lateModeTable.length)) {
+        throw new Error('same-shape table replacement must retain its DOM and publish current source bounds');
+      }
       const detachedTableImage = document.querySelector<HTMLElement>(
         '.meo-md-html-table-cell-preview .meo-md-image'
       );

@@ -395,6 +395,11 @@ export class ViewportController {
   private readonly getMode: () => 'live' | 'source';
   private readonly previewSurface: PreviewViewportSurface | null;
   private readonly anchorTokens = new WeakMap<ViewportAnchorToken, ViewportAnchorTokenRecord>();
+  private pendingDocumentPresentation: {
+    readonly record: ViewportAnchorTokenRecord;
+    readonly document: WeakRef<EditorView['state']['doc']>;
+    readonly generation: number;
+  } | null = null;
   private modeTransitionChain: ModeTransitionChain | null = null;
   private anchorTransactionScope: AnchorTransactionScope = IDLE_ANCHOR_TRANSACTION_SCOPE;
   private anchorMutationDepth = 0;
@@ -1880,6 +1885,7 @@ export class ViewportController {
     let stableFrames = 0;
     const finish = () => {
       if (this.anchorStabilizationGeneration === generation) {
+        if (this.pendingDocumentPresentation?.generation === generation) this.pendingDocumentPresentation = null;
         this.anchorStabilizationGeneration = null;
       }
       if (options.onSettled) requestAnimationFrame(() => {
@@ -2518,17 +2524,22 @@ export class ViewportController {
   /** Capture background document presentation without superseding native reading. */
   captureDocumentPresentationAnchorToken(owner: ViewportAnchorOwner): ViewportAnchorToken | null {
     if (owner === 'editor' && this.isUserScrolling()) return null;
-    return this.captureAnchorToken(owner);
+    const pending = this.pendingDocumentPresentation;
+    const entryAnchor = owner === 'editor' && pending
+      && this.hasActiveDocumentAnchorStabilization() && pending.generation === this.generation
+      && this.isAnchorTokenCurrent(pending.record) && pending.document.deref() === this.view.state.doc
+      ? pending.record.anchor : undefined;
+    return this.captureAnchorToken(owner, entryAnchor);
   }
 
-  captureAnchorToken(owner: ViewportAnchorOwner): ViewportAnchorToken | null {
+  captureAnchorToken(owner: ViewportAnchorOwner, entryAnchor?: ViewportDocumentAnchor): ViewportAnchorToken | null {
     if (this.destroyed) return null;
     const navigationAnchor = owner === 'editor'
       ? this.consumeVisibleNavigationTargetAnchor()
       : null;
     this.markInteraction(owner);
     const anchor = owner === 'editor'
-      ? navigationAnchor ?? this.captureDocumentAnchor()
+      ? navigationAnchor ?? entryAnchor ?? this.captureDocumentAnchor()
       : this.capturePreviewDocumentAnchor();
     if (!anchor) return null;
     const handle = Object.freeze({}) as ViewportAnchorToken;
@@ -2759,6 +2770,13 @@ export class ViewportController {
     if (!anchor) return;
     this.projectAnchorRecord(scope.record, scope.target, anchor);
     scope.record.anchor = anchor;
+    if (scope.documentChangeObserved && scope.target === 'editor' && this.hasActiveDocumentAnchorStabilization()) {
+      // A following ordered revision inherits the desired reading position,
+      // rather than the intermediate viewport before the scheduled correction.
+      this.pendingDocumentPresentation = {
+        record: scope.record, document: new WeakRef(this.view.state.doc), generation: this.generation
+      };
+    }
   }
 
   private invalidateConflictingAnchorTransactionScopes(scope: ActiveAnchorTransactionScope): void {

@@ -339,7 +339,14 @@ async function main(): Promise<void> {
     });
     const beforeEqualExternal = await page.evaluate(() => {
       (window as any).__equalTextEditorDom = document.querySelector('.cm-editor');
+      const viewport = document.querySelector('.cm-scroller')!.getBoundingClientRect();
+      const readingLine = [...document.querySelectorAll<HTMLElement>('.cm-line')].find(line => {
+        const rect = line.getBoundingClientRect();
+        return rect.top >= viewport.top && rect.bottom <= viewport.bottom;
+      })!;
+      (window as any).__equalTextReadingLine = readingLine.textContent;
       return {
+        readingLineTop: readingLine.getBoundingClientRect().top,
         snapshot: (window as any).__documentSessionCandidate.snapshot(),
         liveMode: document.querySelector('.cm-editor')?.classList.contains('meo-mode-live') ?? false,
         focusInEditor: document.activeElement?.closest('.cm-editor') === document.querySelector('.cm-editor'),
@@ -401,7 +408,10 @@ async function main(): Promise<void> {
     await page.waitForSelector('svg[data-marker="current-external"]');
     await page.evaluate(() => (window as any).__documentSessionCandidate.whenIdle());
     const afterEqualExternal = await page.evaluate(() => {
+      const readingLine = [...document.querySelectorAll<HTMLElement>('.cm-line')]
+        .find(line => line.textContent === (window as any).__equalTextReadingLine)!;
       return {
+        readingLineTop: readingLine.getBoundingClientRect().top,
         snapshot: (window as any).__documentSessionCandidate.snapshot(),
         sameEditorDom: (window as any).__equalTextEditorDom === document.querySelector('.cm-editor'),
         liveMode: document.querySelector('.cm-editor')?.classList.contains('meo-mode-live') ?? false,
@@ -428,6 +438,8 @@ async function main(): Promise<void> {
       'equal-text external presentation must complete its replacement Mermaid generation'
     );
     assert.equal(afterEqualExternal.snapshot.viewport.line, beforeEqualExternal.snapshot.viewport.line);
+    assert.ok(Math.abs(afterEqualExternal.readingLineTop - beforeEqualExternal.readingLineTop) < 1,
+      'consecutive equal-text updates must preserve the visible reading line before paint');
     assert.ok(
       Math.abs(
         afterEqualExternal.snapshot.viewport.lineOffset

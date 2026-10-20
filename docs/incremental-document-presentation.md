@@ -1124,3 +1124,46 @@ still reports line 51 versus 54 after its equal-text Mermaid replacement on both
 the modified build and an otherwise unchanged `1b5f5c21` control. That retained
 viewport assertion needs separate diagnosis; no assertion or legacy baseline is
 weakened. No new native latency number is attributed to snapshot sharing yet.
+
+### Retained table ownership and consecutive presentation anchors
+
+The unchanged V56 control reproduces the image-production failure: after
+multiple same-shaped table replacements, CodeMirror retains the DOM but the
+new widget values no longer own it. Equality comparison therefore cannot
+reconcile the mounted table. The widget now uses `updateDOM` and the existing
+DOM-owner registry to publish source bounds, contents and image lifetimes.
+Equality no longer changes the mounted table. Its current-position lookup also
+resolves to the right of the opening DOM boundary, so row diff facts refresh
+instead of resolving the preceding syntax node. Image production, table cell
+editing, table commands and the complete table stability suite pass, including
+retained DOM/source-bound assertions. A separate column-resize visual test
+still reports a 44.78 px active-cell movement on both this build and unchanged
+V56; its original assertion remains intact.
+
+The equal-text Mermaid cutover failure is a second independent ownership issue:
+two ordered updates could capture the viewport between layout and its scheduled
+correction. The next update now inherits the current desired document anchor
+only for the same persistent document and current stabilization generation.
+The record is bounded, uses a weak document reference and cannot override a
+new user interaction. No additional synchronous layout flush is added. The
+complete cutover test passes its retained line/offset/focus/selection checks
+plus a new sub-pixel visible-reading-line assertion. Viewport-controller,
+Source-side Preview, isolated viewport-anchor production and type checks pass.
+
+V56 (`e4da2086`, archive SHA-256
+`b568b1c2f5a7b8ade5d75f2ebd227a3fab155e9327ddb571897373471c0bfb4c`)
+passes the complete native ordinary/rich flow, sixteen distributed clicks,
+exact source/undo/save and protocol composition. Warm rich Source input
+median/P95/maximum is 41/59/168 ms; Live is 85/214/292 ms. First Preview is
+4.09 s (3.29 s response). Cold Source is 41/135/141 ms with a 509 ms frame gap;
+cold Live is 99/206/332 ms with a 344 ms gap. Cold runs remain partial
+diagnostics, and the old 500 ms input gate is not the smoothness target.
+
+A separate V56 Source profile is mapped against a frozen `e4da2086` source
+build whose normalized executable bytes match the archive. It identifies a
+224 ms worker-response task, including about 120 ms receiving the syntax tree,
+and a different 442 ms task containing a 299 ms browser layout (252 ms thread
+CPU, 796 dirty layout objects). Merge-conflict rescanning also consumes about
+30 ms of a state update. These are remaining costs, not evidence that snapshot
+sharing caused a latency improvement. The retained-DOM/anchor fixes above are
+not included in the frozen V56 native package.
