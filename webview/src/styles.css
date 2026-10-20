@@ -4773,20 +4773,6 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   font-family: inherit;
 }
 
-.cm-editor .cm-tooltip-autocomplete {
-  color: var(--meo-ui-text);
-  background: var(--meo-ui-surface-raised);
-  border: 1px solid var(--meo-ui-border-float);
-  border-radius: 6px;
-  box-shadow: var(--meo-ui-shadow);
-  font-family: var(--meo-font-source);
-}
-
-.cm-editor .cm-tooltip-autocomplete > ul > li[aria-selected] {
-  color: var(--meo-ui-text);
-  background: var(--meo-ui-surface-selected);
-}
-
 .cm-editor .meo-md-html-inline .meo-md-html-strong,
 .cm-editor .meo-md-html-inline strong {
   font-weight: 700;

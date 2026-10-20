@@ -1,7 +1,6 @@
-import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
-import { htmlCompletionSource, htmlLanguage } from '@codemirror/lang-html';
+import { htmlLanguage } from '@codemirror/lang-html';
 import { Prec, type EditorState } from '@codemirror/state';
-import { EditorView, keymap } from '@codemirror/view';
+import { EditorView } from '@codemirror/view';
 import { scanHtmlTags, splitHtmlBlockFragments } from '../../../src/foundation/htmlSyntax';
 
 /** HTML assistance shares the main editor's document, selection and history. */
@@ -43,16 +42,6 @@ export function createHtmlSourceEditing(
         return true;
       }
       return false;
-    })),
-    autocompletion({
-      defaultKeymap: false,
-      override: [context => htmlLanguage.isActiveAt(context.state, context.pos, -1)
-        ? htmlCompletionSource(context) : null]
-    }),
-    Prec.highest(keymap.of(completionKeymap.map(binding => ({
-      ...binding,
-      run: (view: EditorView) => htmlLanguage.isActiveAt(view.state, view.state.selection.main.head, -1)
-        ? binding.run?.(view) ?? false : false
-    }))))
+    }))
   ];
 }

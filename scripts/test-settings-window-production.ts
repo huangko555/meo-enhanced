@@ -233,12 +233,16 @@ try {
   await page.click('[data-setting="lineHeight"] .appearance-typography-reset');
   assert.equal(await page.$eval(lineSpacing + ' output', el => el.textContent), '1.5 倍');
   await page.click('.settings-tab[data-tab="typing"]');
-  assert.equal(await page.$$eval('.settings-item', elements => elements.length), 15);
+  assert.equal(await page.$$eval('.settings-item', elements => elements.length), 16);
   const slashSwitch = '[data-setting="slash"] [role="switch"]';
   const slashAboveSwitch = '[data-setting="slashPreferAbove"] [role="switch"]';
   assert.equal(await page.$eval(slashAboveSwitch, e => e.getAttribute('aria-label')), '候选菜单优先在上方显示');
-  assert.equal(await page.$eval('[data-setting="slashPreferAbove"] .settings-description', e => e.textContent), '斜杠、路径、表情和公式菜单优先显示在输入行上方，推荐输入法用户开启。');
-  assert.deepEqual(await page.$$eval('.settings-item[data-setting]', items => items.map(item => (item as HTMLElement).dataset.setting).filter(key => ['documentSuggestions', 'slash', 'emoji', 'math', 'slashPreferAbove'].includes(key!))), ['documentSuggestions', 'slash', 'emoji', 'math', 'slashPreferAbove'], 'shared placement follows all menu enable switches');
+  assert.equal(await page.$eval('[data-setting="slashPreferAbove"] .settings-description', e => e.textContent), '斜杠、路径、表情、公式和 HTML 菜单优先显示在输入行上方，推荐输入法用户开启。');
+  assert.deepEqual(await page.$$eval('.settings-item[data-setting]', items => items.map(item => (item as HTMLElement).dataset.setting).filter(key => ['documentSuggestions', 'slash', 'emoji', 'math', 'html', 'slashPreferAbove'].includes(key!))), ['documentSuggestions', 'slash', 'emoji', 'math', 'html', 'slashPreferAbove'], 'shared placement follows all menu enable switches');
+  const htmlSwitch = '[data-setting="html"] [role="switch"]';
+  assert.equal(await page.$eval(htmlSwitch, e => e.getAttribute('aria-checked')), 'true');
+  await page.click(htmlSwitch); await page.waitForFunction(() => (window as any).__preferences.input.html === false);
+  await page.click(htmlSwitch); await page.waitForFunction(() => (window as any).__preferences.input.html === true);
   const mathSwitch = '[data-setting="math"] [role="switch"]';
   assert.equal(await page.$eval(mathSwitch, e => e.getAttribute('aria-checked')), 'true');
   await page.click(mathSwitch); await page.waitForFunction(() => (window as any).__preferences.input.math === false);
@@ -723,7 +727,7 @@ try {
         query: element.querySelector('.settings-item-title')!.textContent!,
         values: [...element.querySelectorAll('.settings-key, .image-location-mode-title, .image-location-field-label, .image-location-picker, .image-location-token')].map(control => control.getAttribute('aria-label') ?? control.textContent!)
       })));
-      assert.equal(items.length, tab === 'general' ? 9 : tab === 'appearance' ? 11 : tab === 'typing' ? 15 : editorCommandIds.length, 'search inventory includes every setting and command');
+      assert.equal(items.length, tab === 'general' ? 9 : tab === 'appearance' ? 11 : tab === 'typing' ? 16 : editorCommandIds.length, 'search inventory includes every setting and command');
       searchCases.push(...items.flatMap(item => [item.query, ...item.values].map(query => ({tab, id: item.id, query}))));
     }
     await page.click('.settings-close');
@@ -739,6 +743,7 @@ try {
     ['typing', 'deleteMode', '一起删除', 'paired deletion'], ['typing', 'lists', '清单', 'list continuation'],
     ['typing', 'convertTables', '制表符', 'TSV'], ['typing', 'pasteUrl', '地址栏', 'web address'],
     ['typing', 'pasteHtml', '富文本', 'rich text'], ['typing', 'documentSuggestions', '锚点', 'backlink'],
+    ['typing', 'html', '闭合标签', 'attribute'],
     ['typing', 'slash', '命令面板', 'command palette'], ['typing', 'emoji', '小黄脸', 'smiley'],
     ['typing', 'imageStorage', '自定义路径', 'image storage'],
     ['shortcuts', 'save', '存盘', 'persist'], ['shortcuts', 'undo', '回退', 'rollback'],

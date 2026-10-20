@@ -838,11 +838,8 @@ async function main(): Promise<void> {
     await select(page, '<p id="center"', 2);
     await page.keyboard.type(' ti');
     await page.keyboard.down('Control'); await page.keyboard.press('Space'); await page.keyboard.up('Control');
-    await page.waitForFunction(() => document.querySelector('.cm-tooltip-autocomplete')?.textContent?.includes('title'), { timeout: 3000 });
+    await page.waitForFunction(() => document.querySelector('.meo-html-suggestions:not([hidden])')?.textContent?.includes('title'), { timeout: 3000 });
     await frames(page);
-    // Completion acceptance has a 75ms interaction guard. A frame count does
-    // not guarantee that duration, including when a newer result reopens it.
-    await new Promise(resolve => setTimeout(resolve, 100));
     await page.keyboard.press('Enter'); await frames(page);
     const completed = await page.evaluate(() => (window as any).__htmlEditor.view.state.doc.toString());
     assert.ok(completed.includes('<p title id="center"'), `HTML attribute completion edits the main document: ${completed.slice(htmlFrom, htmlFrom + 60)}`);

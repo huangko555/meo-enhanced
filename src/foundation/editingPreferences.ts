@@ -28,6 +28,7 @@ export type InputAssistance = {
   readonly slashPreferAbove: boolean;
   readonly emoji: boolean;
   readonly math: boolean;
+  readonly html: boolean;
 };
 /** Missing commands use platform defaults; an explicit empty array removes a binding. */
 export type ShortcutOverrides = Partial<Record<EditorCommandId, readonly string[]>>;
@@ -42,7 +43,7 @@ export type EditingPreferencesChange =
 
 export const defaultInputAssistance: InputAssistance = {
   selectionToolbar: true, wrapSelection: true, pairMode: 'smart', skipMode: 'smart', deleteMode: 'smart', lists: true,
-  convertTables: true, pasteUrl: true, pasteHtml: false, documentSuggestions: true, slash: true, slashPreferAbove: false, emoji: false, math: true
+  convertTables: true, pasteUrl: true, pasteHtml: false, documentSuggestions: true, slash: true, slashPreferAbove: false, emoji: false, math: true, html: true
 };
 
 export function isEditorCommandId(value: unknown): value is EditorCommandId {

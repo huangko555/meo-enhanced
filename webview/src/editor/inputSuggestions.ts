@@ -1,6 +1,8 @@
 import { createRequestPrefix } from '../adapters/requestIdentity';
 import { EditorSelection, Transaction, StateEffect, type Extension, type TransactionSpec, type EditorState } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import { CompletionContext, type Completion } from '@codemirror/autocomplete';
+import { htmlCompletionSource, htmlLanguage } from '@codemirror/lang-html';
 import { parser } from '@lezer/markdown';
 import { isolateHistory } from '@codemirror/commands';
 import type { LinkCandidate } from '../../../src/protocol/editorServices';
@@ -15,14 +17,15 @@ import { addAutomaticSymbolPair } from './typingAssistance';
 import { sourceTableAt } from './sourceTableCommands';
 import { blockInsertion, type MarkdownInputContext } from './blockInsertion';
 import { encodeMarkdownPath } from '../../../src/foundation/linkDestination';
-import { candidateMatchPositions } from '../../../src/foundation/candidateText';
+import { candidateMatchPositions, candidateTextMatch } from '../../../src/foundation/candidateText';
 import { createTooltip } from '../adapters/tooltip';
 import { detectMathCompletion, mathCompletionSuggestions, planMathCompletion, type MathCompletion, type MathCompletionContext, type MathCompletionBody } from './mathCompletion';
 
 export const refreshInputSuggestions = StateEffect.define<null>();
 
 type Suggestion = LinkCandidate & { readonly caret?: number; readonly slash?: SlashCommand; readonly math?: MathCompletion };
-type InputSuggestionContext = SuggestionContext | MathCompletionContext;
+type HtmlCompletionContext = { readonly type: 'html'; readonly from: number; readonly to: number; readonly query: string; readonly options: readonly Completion[] };
+type InputSuggestionContext = SuggestionContext | MathCompletionContext | HtmlCompletionContext;
 export function createInputSuggestions(options: {
   readonly inputContext: (state: EditorState, position: number) => MarkdownInputContext;
   readonly mathContext: (state: EditorState, position: number) => MathCompletionBody | null;
@@ -40,6 +43,7 @@ export function createInputSuggestions(options: {
     timer: ReturnType<typeof setTimeout> | null = null;
     generation = 0; disposed = false; index = 0;
     slashFrom: number | null = null;
+    htmlActivation: 'typing' | 'explicit' | null = null;
     cellFrom: number | null = null; cellInput: HTMLTextAreaElement | null = null;
     fieldInput: HTMLTextAreaElement | null = null; fieldValue = '';
     selectedCommand = ''; resolvedQuery = '';
@@ -49,7 +53,7 @@ export function createInputSuggestions(options: {
     dismissed = false;
     selectedCandidate = '';
     candidateKey(item: Suggestion) { return this.context?.type === 'documents' || this.context?.type === 'paths' ? item.detail || item.insert : item.detail + '#' + (item.anchor ?? item.insert); }
-    readonly windowBlur = () => { this.dismissed = true; this.clear(); };
+    readonly windowBlur = () => { this.dismissed = true; this.htmlActivation = null; this.clear(); };
     readonly nativeEvent = (event: Event) => {
       const input = event.target;
       if (!(input instanceof HTMLTextAreaElement) || !input.closest('.meo-md-html-table-wrap') || !this.view.dom.contains(input)) return;
@@ -119,7 +123,9 @@ export function createInputSuggestions(options: {
           templateEnd: update.changes.mapPos(parent.templateEnd, 1) }));
       }
       for (const transaction of update.transactions) {
-        if (transaction.isUserEvent('input.complete')) { this.slashFrom = null; this.clear(); return; }
+        if (transaction.isUserEvent('input.complete')) { this.htmlActivation = null; this.slashFrom = null; this.clear(); return; }
+        if (transaction.isUserEvent('input.type')) this.htmlActivation ??= 'typing';
+        if (transaction.isUserEvent('undo') || transaction.isUserEvent('redo') || transaction.reconfigured) this.htmlActivation = null;
         if (transaction.isUserEvent('undo') || transaction.isUserEvent('redo') || transaction.reconfigured) { this.slashFrom = null; this.resetFields(); }
         if (transaction.reconfigured && this.context?.type === 'math') { this.dismissed = true; this.clear(); return; }
         if (transaction.isUserEvent('input.type')) transaction.changes.iterChanges((_from, _to, from, to, inserted) => {
@@ -127,6 +133,7 @@ export function createInputSuggestions(options: {
         });
       }
       if (update.selectionSet && !update.docChanged && !this.composing) this.slashFrom = null;
+      if (update.selectionSet && !update.docChanged && !this.composing) this.htmlActivation = null;
       if (!this.fieldInput && this.fields.length && update.selectionSet) {
         const selection = update.state.selection.main, field = this.fields[this.fieldIndex];
         if (!field || selection.from < field.from || selection.to > field.to || update.state.selection.ranges.length !== 1) this.resetFields();
@@ -163,6 +170,17 @@ export function createInputSuggestions(options: {
         this.slashFrom = null; return null;
       }
       const range = selection.main, line = this.view.state.doc.lineAt(this.composing ? range.to : range.head), preferences = this.view.state.facet(inputAssistanceFacet);
+      const position = this.composing ? range.to : range.head;
+      if (preferences.html && this.htmlActivation && (this.composing || this.view.compositionStarted) && this.context?.type === 'html') return this.context;
+      if (htmlLanguage.isActiveAt(this.view.state, position, -1)) {
+        this.slashFrom = null;
+        if (!preferences.html || !this.htmlActivation) return null;
+        // Composition updates retain the last query; preedit text never changes candidates or accepts an item.
+        if (this.composing || this.view.compositionStarted) return this.context?.type === 'html' ? this.context : null;
+        const result = htmlCompletionSource(new CompletionContext(this.view.state, position, this.htmlActivation === 'explicit'));
+        return result ? { type: 'html' as const, from: result.from, to: result.to ?? position,
+          query: this.view.state.sliceDoc(result.from, position), options: result.options } : null;
+      }
       if (preferences.math) {
         const position = this.composing ? range.to : range.head;
         const math = detectMathCompletion(this.view.state, position, () => options.mathContext(this.view.state, position));
@@ -209,6 +227,15 @@ export function createInputSuggestions(options: {
       const language = this.view.state.facet(uiLanguageFacet);
       let items: readonly Suggestion[];
       if (context.type === 'math') items = mathCompletionSuggestions(context).map(math => ({ label: math.label, insert: math.insert, detail: language === 'zh-CN' ? math.zh : math.en, math }));
+      else if (context.type === 'html') items = context.options
+        .flatMap(option => {
+          const match = candidateTextMatch(option.label, context.query);
+          return match && (option.apply === undefined || typeof option.apply === 'string')
+            ? [{ option, rank: match.rank - (option.boost ?? 0) }] : [];
+        }).sort((a, b) => a.rank - b.rank || a.option.label.localeCompare(b.option.label))
+        .slice(0, 100).map(({ option }) => ({ label: option.label, insert: typeof option.apply === 'string' ? option.apply : option.label,
+          detail: option.type === 'property' ? (language === 'zh-CN' ? '属性' : 'Attribute')
+            : option.type === 'constant' ? (language === 'zh-CN' ? '属性值' : 'Value') : (language === 'zh-CN' ? '标签' : 'Tag') }));
       else if (context.type === 'emoji') items = emojiSuggestions.filter(item => item.name.startsWith(context.query.toLowerCase())).map(item => ({ label: ':' + item.name + ':', insert: item.value, detail: item.value }));
       else if (context.type === 'slash') {
         const scope = this.cellFrom !== null ? 'inline' : options.inputContext(this.view.state, this.slashFrom! + 1);
@@ -241,6 +268,7 @@ export function createInputSuggestions(options: {
       this.popup.classList.toggle('meo-math-suggestions', this.context?.type === 'math');
       this.popup.classList.toggle('meo-link-suggestions', documents);
       this.popup.classList.toggle('meo-path-suggestions', paths);
+      this.popup.classList.toggle('meo-html-suggestions', this.context?.type === 'html');
       this.popup.classList.toggle('meo-narrow-suggestions', this.context?.type === 'emoji');
       this.popup.style.removeProperty('--meo-suggestion-max-height'); this.popup.style.removeProperty('max-width');
       const list = document.createElement('div'); list.className = 'meo-suggestion-list';
@@ -307,7 +335,7 @@ export function createInputSuggestions(options: {
           row.append(preview);
         } else if (!paths && (documents || (detailValue && (item.slash || detailValue !== item.label)))) {
           const detail = document.createElement('span'); detail.className = 'meo-input-suggestion-detail';
-          if (item.slash) detail.textContent = detailValue;
+          if (item.slash || this.context?.type === 'html') detail.textContent = detailValue;
           else { appendMatched(detail, detailValue, this.context?.query ?? ''); detail.dataset.tooltip = [item.detail, detailValue].filter((value, index, values) => value && values.indexOf(value) === index).join(' · '); detail.dataset.tooltipKind = 'fulltext'; }
           row.append(detail);
         }
@@ -454,6 +482,13 @@ export function createInputSuggestions(options: {
       const context = this.context, item = this.items[index];
       if (item?.slash?.disabled) return;
       if (!context || !item || this.head !== (this.cellInput ? this.cellInput.selectionStart : this.view.state.selection.main.head) || JSON.stringify(context) !== JSON.stringify(this.getContext())) { this.clear(); return; }
+      if (context.type === 'html') {
+        this.clear(); this.htmlActivation = null; this.dismissed = true;
+        this.view.dispatch({ changes: { from: context.from, to: context.to, insert: item.insert },
+          selection: EditorSelection.cursor(context.from + item.insert.length),
+          annotations: [Transaction.userEvent.of('input.complete'), isolateHistory.of('full')] });
+        this.view.focus(); return;
+      }
       if (context.type === 'math' && item.math) {
         const plan = planMathCompletion(this.view.state, context, item.math);
         const active = this.fields[this.fieldIndex];
@@ -539,8 +574,15 @@ export function createInputSuggestions(options: {
       if (command?.id === 'table') options.focusTable?.();
     }
     keydown(event: KeyboardEvent) {
-      if (event.isComposing || this.composing || this.view.compositionStarted || event.keyCode === 229 || event.ctrlKey || event.metaKey || event.altKey) return false;
+      if (event.isComposing || this.composing || this.view.compositionStarted || event.keyCode === 229) return false;
       if (this.view.state.readOnly) { this.resetFields(); this.clear(); return false; }
+      const manualHtml = !event.shiftKey && !event.metaKey && (event.ctrlKey && !event.altKey && event.code === 'Space'
+        || !event.ctrlKey && event.altKey && /Mac/.test(navigator.platform) && ['Backquote', 'KeyI'].includes(event.code));
+      if (manualHtml && !this.cellInput && this.view.state.facet(inputAssistanceFacet).html
+        && htmlLanguage.isActiveAt(this.view.state, this.view.state.selection.main.head, -1)) {
+        event.preventDefault(); this.dismissed = false; this.htmlActivation = 'explicit'; this.schedule(); return true;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey) return false;
       if (event.key === 'Tab' && this.fields.length && this.popup.hidden) {
         event.preventDefault();
         const index = this.fieldIndex + (event.shiftKey ? -1 : 1), field = this.fields[index];
@@ -566,7 +608,7 @@ export function createInputSuggestions(options: {
         }
         return true;
       }
-      if (event.key === 'Escape' && (this.slashFrom !== null || this.cellFrom !== null || !this.popup.hidden || this.fields.length)) { event.preventDefault(); this.dismissed = true; this.slashFrom = null; this.cellFrom = null; this.cellInput = null; this.resetFields(); this.clear(); return true; }
+      if (event.key === 'Escape' && (this.slashFrom !== null || this.cellFrom !== null || !this.popup.hidden || this.fields.length)) { event.preventDefault(); this.dismissed = true; this.htmlActivation = null; this.slashFrom = null; this.cellFrom = null; this.cellInput = null; this.resetFields(); this.clear(); return true; }
       if (this.popup.hidden) return false;
       if (event.key === 'Escape') { event.preventDefault(); this.dismissed = true; this.slashFrom = null; this.cellFrom = null; this.cellInput = null; this.fields = []; this.clear(); return true; }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -591,7 +633,7 @@ export function createInputSuggestions(options: {
     }
   }, { eventHandlers: {
     keydown(event) { return this.keydown(event); },
-    blur() { this.dismissed = true; this.slashFrom = null; this.resetFields(); this.clear(); return false; },
+    blur() { this.dismissed = true; this.htmlActivation = null; this.slashFrom = null; this.resetFields(); this.clear(); return false; },
     compositionstart() { this.composing = true; return false; },
     compositionend(event) {
       this.composing = false;

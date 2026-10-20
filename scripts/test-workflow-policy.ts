@@ -314,6 +314,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-editing-preferences.ts'),
           script('scripts/test-math-completion.ts'),
           script('scripts/test-math-completion-production.ts'),
+          script('scripts/test-html-completion-production.ts'),
           script('scripts/test-editor-services.ts'),
           script('scripts/test-link-candidates.ts'),
           script('scripts/test-input-assistance-production.ts'),

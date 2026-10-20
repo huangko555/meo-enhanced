@@ -36,6 +36,14 @@ const { math: _math, ...beforeMath } = defaultInputAssistance;
 assert.equal(normalizeEditingPreferences({ input: beforeMath }).input.math, true, 'older preferences enable math completion');
 assert.equal(normalizeEditingPreferences({ input: { math: false } }).input.math, false);
 assert.equal(normalizeEditingPreferences({ input: { math: 'off' } }).input.math, true);
+assert.equal(normalizeEditingPreferences({ input: { math: false } }).input.html, true, 'older preferences retain HTML completion');
+assert.equal(normalizeEditingPreferences({ input: { html: false } }).input.html, false);
+assert.equal(normalizeEditingPreferences({ input: { html: 'off' } }).input.html, true);
+for (const value of [true, false]) {
+  const change = { type: 'input' as const, key: 'html' as const, value };
+  assert.ok(decodeWebviewToHostMessage({ type: 'updateEditingPreferences', requestId: 'html', change }));
+  assert.equal(changeEditingPreferences(defaults, change, 'other').input.html, value);
+}
 for (const value of [true, false]) {
   const change = { type: 'input' as const, key: 'math' as const, value };
   assert.ok(decodeWebviewToHostMessage({ type: 'updateEditingPreferences', requestId: 'math', change }));

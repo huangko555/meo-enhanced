@@ -44,6 +44,12 @@ HTML/PDF/DOCX output, adjacent and nested fragments, CommonMark boundaries, imag
 dimensions, and Live source-above-result editing. Its browser checks preserve
 native text selection, disclosure/link actions, undo and mode continuity,
 tag/attribute completion, closing tags, literal paste and IME input. They
+use the shared input candidate menu. `scripts/test-html-completion-production.ts`
+covers its Live/Source tag, attribute and value insertion, single-step undo/redo,
+manual activation, disabled and reconfigured settings, Escape caret retention,
+IME ownership, shared placement and bilingual light/dark/narrow screenshots under
+`.local/html-completion-acceptance/`; it belongs to quick and browser/release gates.
+The HTML content checks
 verify pasted HTML opens source without reformatting or moving the native caret,
 including trailing blank lines, hidden fragments, sibling blocks and history.
 Source/Live transitions continue to respect the caret; inline HTML and code keep
