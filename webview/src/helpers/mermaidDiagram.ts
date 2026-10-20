@@ -14,6 +14,7 @@ import type {
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 import { mountMermaidPreviewControls } from './renderedBlockModeControls';
 import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
+import { usesLargeDocumentDerivedWorkBudget } from '../editor/liveInputDerivedWork';
 
 declare global {
   interface Window {
@@ -632,6 +633,8 @@ export class MermaidDiagramWidget extends WidgetType {
   uiLanguage: UiLanguage;
   embeddedInteractionCleanup: () => void;
   embeddedControlsCleanup: () => void;
+  private visibilityObserver: IntersectionObserver | null = null;
+  private requestCurrentPresentation: (refresh?: boolean) => void = () => {};
 
   constructor(
     diagramText: string,
@@ -734,12 +737,14 @@ export class MermaidDiagramWidget extends WidgetType {
     if (!sourceChanged && this.themeSignature === identity.themeKey) return;
     this.themeSignature = identity.themeKey;
     if (this.container) this.container.dataset.meoMermaidRendering = 'true';
-    this.presentationHandle?.present(diagramText, identity.themeKey, identity.configKey);
+    this.requestCurrentPresentation(true);
   }
 
   toDOM(view?: EditorView) {
     const container = document.createElement('div');
     this.container = container;
+    const gated = !!view && usesLargeDocumentDerivedWorkBudget(view.state) && typeof IntersectionObserver !== 'undefined';
+    let nearScreen = !gated;
     let presentationGeneration = 0;
     let releaseBusyAfterLayout = false;
     const finishPresentation = () => {
@@ -761,7 +766,7 @@ export class MermaidDiagramWidget extends WidgetType {
     };
     container.className = 'meo-mermaid-block';
     const initialHeight = this.estimatedHeight;
-    if (initialHeight > 0 && !this.staleSvg) {
+    if (initialHeight > 0 && (!this.staleSvg || gated)) {
       container.style.minHeight = `${initialHeight}px`;
     }
     container.addEventListener('pointerdown', (event: PointerEvent) => {
@@ -781,7 +786,7 @@ export class MermaidDiagramWidget extends WidgetType {
     if (this.isDisplayMath) {
       container.classList.add('meo-mermaid-math-block');
     }
-    if (this.staleSvg) this.renderSvg(container, this.staleSvg, view, false);
+    if (this.staleSvg && !gated) this.renderSvg(container, this.staleSvg, view, false);
     if (this.cachePreviewHeight && view && typeof ResizeObserver !== 'undefined') {
       this.previewResizeObserver = new ResizeObserver(() => {
         const height = container.getBoundingClientRect().height;
@@ -926,8 +931,30 @@ export class MermaidDiagramWidget extends WidgetType {
         });
       }
     });
-    const identity = getMermaidEditorPresentationIdentity();
-    this.presentationHandle.present(this.diagramText, identity.themeKey, identity.configKey);
+    let needsPresentation = true;
+    this.requestCurrentPresentation = (refresh = false) => {
+      if (refresh) needsPresentation = true;
+      if (!needsPresentation || (!nearScreen && !this.fullscreenSession) || this.container !== container || !this.presentationHandle) return;
+      if (this.staleSvg && !container.querySelector('.meo-mermaid-svg-wrapper')) {
+        this.renderSvg(container, this.staleSvg, view, false);
+        container.style.removeProperty('min-height');
+      }
+      const identity = getMermaidEditorPresentationIdentity();
+      needsPresentation = false;
+      this.presentationHandle.present(this.diagramText, identity.themeKey, identity.configKey);
+    };
+    this.visibilityObserver?.disconnect();
+    this.visibilityObserver = null;
+    if (gated) {
+      // CodeMirror mounts DOM beyond the screen. Retain its height, but keep
+      // Mermaid's synchronous layout and cached SVG DOM out of that overscan.
+      this.visibilityObserver = new IntersectionObserver(entries => {
+        if (this.container !== container || !container.isConnected) return;
+        nearScreen = entries.some(entry => entry.target === container && entry.isIntersecting);
+        if (nearScreen) this.requestCurrentPresentation();
+      }, { root: view!.scrollDOM, rootMargin: '80px 0px' });
+      this.visibilityObserver.observe(container);
+    } else this.requestCurrentPresentation();
     this.unsubscribeThemeRefresh();
     this.unsubscribeThemeRefresh = this.presentationFactory.subscribeThemeRefresh(() => {
       if (!container.isConnected || !this.presentationHandle) return;
@@ -939,11 +966,7 @@ export class MermaidDiagramWidget extends WidgetType {
       }
       const refreshedIdentity = getMermaidEditorPresentationIdentity();
       this.themeSignature = refreshedIdentity.themeKey;
-      this.presentationHandle.present(
-        this.diagramText,
-        refreshedIdentity.themeKey,
-        refreshedIdentity.configKey
-      );
+      this.requestCurrentPresentation(true);
     });
 
     return container;
@@ -1730,6 +1753,9 @@ export class MermaidDiagramWidget extends WidgetType {
 
   destroy() {
     this.container = null;
+    this.visibilityObserver?.disconnect();
+    this.visibilityObserver = null;
+    this.requestCurrentPresentation = () => {};
     this.embeddedControlsCleanup();
     const errors: unknown[] = [];
     try {

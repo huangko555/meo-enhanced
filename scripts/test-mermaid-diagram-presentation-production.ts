@@ -242,6 +242,97 @@ async function main(): Promise<void> {
     assert.equal(result.afterMode.marker, 'theme');
     assert.equal(result.editorDomAfterDestroy, 0);
     assert.equal(result.mermaidDomAfterDestroy, 0);
+
+    await page.setViewport({ width: 1000, height: 380, deviceScaleFactor: 1 });
+    await page.evaluate(() => {
+      const scope = window as any, render = scope.mermaid.render.bind(scope.mermaid);
+      scope.__visibilityCalls = [];
+      scope.__activeDiagramObservers = new Set();
+      const NativeIntersectionObserver = window.IntersectionObserver;
+      window.IntersectionObserver = class extends NativeIntersectionObserver {
+        constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+          super(callback, options);
+          if (options?.root) scope.__notifyDiagramVisibility = (target: Element, isIntersecting: boolean) =>
+            callback([{ target, isIntersecting } as IntersectionObserverEntry], this);
+        }
+        observe(target: Element) {
+          if (target.matches('.meo-mermaid-block')) scope.__activeDiagramObservers.add(this);
+          super.observe(target);
+        }
+        disconnect() { scope.__activeDiagramObservers.delete(this); super.disconnect(); }
+      };
+      scope.mermaid.render = (id: string, source: string, ...args: unknown[]) => {
+        if (source.includes('OFFSCREEN')) scope.__visibilityCalls.push(source);
+        return render(id, source, ...args);
+      };
+      scope.__visibilityText = Array.from({ length: 28 }, (_, index) => `Spacer ${index}.`).join('\n')
+        + '\n\n```mermaid\ngraph TD\nOFFSCREEN_OLD-->B\n```\n\n'
+        + 'Tail ordinary paragraph with enough source to use the bounded editor.\n'.repeat(6_000);
+      scope.__visibilityEditor = scope.MermaidEditingHarness.createEditor({ parent: document.getElementById('app'),
+        text: scope.__visibilityText, initialMode: 'live', onApplyChanges() {} });
+    });
+    const settleVisibility = () => page.evaluate(async () => {
+      for (let frame = 0; frame < 12; frame++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    });
+    await settleVisibility();
+    const hidden = await page.evaluate(() => {
+      const scope = window as any, bounds = scope.__visibilityEditor.view.scrollDOM.getBoundingClientRect();
+      const widget = document.querySelector('.meo-mermaid-block')!;
+      return { mounted: !!widget, beyond: widget?.getBoundingClientRect().top - bounds.bottom, height: widget?.getBoundingClientRect().height,
+        calls: scope.__visibilityCalls.length };
+    });
+    assert.ok(hidden.mounted && hidden.beyond > 80, 'the real CodeMirror overscan must mount a diagram outside the physical screen');
+    assert.ok(hidden.height > 0, 'a gated diagram must reserve its estimated document height');
+    assert.equal(hidden.calls, 0, 'an offscreen overscan diagram must not start Mermaid layout');
+    const reveal = () => page.evaluate(() => {
+      const editor = (window as any).__visibilityEditor, widget = document.querySelector('.meo-mermaid-block')!;
+      editor.view.scrollDOM.scrollTop += widget.getBoundingClientRect().top - editor.view.scrollDOM.getBoundingClientRect().top - 60;
+    });
+    await reveal();
+    await page.waitForFunction(() => (window as any).__visibilityCalls.length === 1 && !!document.querySelector('.meo-mermaid-svg-wrapper'));
+    await settleVisibility();
+    await page.evaluate(() => { (window as any).__visibleDiagramSvg = document.querySelector('.meo-mermaid-svg-wrapper'); });
+    await page.evaluate(() => {
+      const scope = window as any, widget = document.querySelector('.meo-mermaid-block')!;
+      scope.__notifyDiagramVisibility(widget, false); scope.__notifyDiagramVisibility(widget, true);
+    });
+    await settleVisibility();
+    assert.equal(await page.evaluate(() => document.querySelector('.meo-mermaid-svg-wrapper') === (window as any).__visibleDiagramSvg), true,
+      'visibility notifications on retained DOM must preserve an unchanged SVG and camera');
+    await page.evaluate(() => { (window as any).__visibilityEditor.view.scrollDOM.scrollTop = 0; });
+    await settleVisibility();
+    await page.evaluate(() => {
+      const scope = window as any;
+      scope.__visibilityEditor.setText(scope.__visibilityText.replace('OFFSCREEN_OLD', 'OFFSCREEN_NEW'));
+    });
+    await settleVisibility();
+    assert.equal(await page.evaluate(() => (window as any).__visibilityCalls.length), 1,
+      'offscreen source replacement must wait for visibility and retain the newest request');
+    await reveal();
+    await page.waitForFunction(() => (window as any).__visibilityCalls.some((source: string) => source.includes('OFFSCREEN_NEW')));
+    await page.waitForSelector('.meo-mermaid-svg-wrapper');
+    const cachedHidden = await page.evaluate(async () => {
+      const scope = window as any, editor = scope.__visibilityEditor, before = editor.getText();
+      await editor.setMode('source'); editor.view.scrollDOM.scrollTop = 0;
+      await editor.setMode('live');
+      for (let frame = 0; frame < 8; frame++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      const widget = document.querySelector('.meo-mermaid-block')!;
+      return { exact: editor.getText() === before, height: widget.getBoundingClientRect().height,
+        svg: !!widget.querySelector('.meo-mermaid-svg-wrapper') };
+    });
+    assert.deepEqual({ exact: cachedHidden.exact, svg: cachedHidden.svg }, { exact: true, svg: false },
+      'mode reentry must preserve exact source and defer cached offscreen SVG DOM too');
+    assert.ok(cachedHidden.height > 0);
+    await reveal(); await page.waitForSelector('.meo-mermaid-svg-wrapper');
+    await page.evaluate(() => {
+      const scope = window as any;
+      scope.__visibilityEditor.destroy(); scope.MermaidEditingHarness.refreshMermaidTheme();
+    });
+    await settleVisibility();
+    assert.equal(await page.evaluate(() => (window as any).__visibilityCalls.length), 2,
+      'disposing a visibility-gated diagram must retire its observer and queued presentation');
+    assert.equal(await page.evaluate(() => (window as any).__activeDiagramObservers.size), 0,
+      'mode changes and disposal must release observers owned by retained diagram DOM');
     console.log('Mermaid diagram presentation production characterization passed');
   } finally {
     await browser.close();

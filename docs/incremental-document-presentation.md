@@ -1276,3 +1276,27 @@ comparisons for 547 inputs in eager/windowed modes under both presets, including
 the complete 1 MiB fixture. HTML export, footnote scope reuse, type checks and
 the actual Preview viewport work-budget browser suite pass. Host timing samples
 are noisy; no stable end-to-end latency gain is claimed before native testing.
+
+### Keep Live graph layout out of offscreen DOM overscan
+
+The byte-checked V57 cold-Live profile also includes Mermaid SVG preparation
+and measurement while typing, and a 541 ms task combining a derived refresh
+with Editor layout. Large Live previously started diagrams as soon as their
+CodeMirror buffer DOM mounted. A physical IntersectionObserver now admits
+Mermaid layout and cached SVG DOM only within 80 px of the scroll surface.
+Estimated height remains reserved. Source/theme changes while offscreen retain
+the newest desired request; fullscreen updates remain eligible. Ordinary
+documents retain their immediate behavior.
+
+Visibility alone does not create another presentation generation: an unchanged
+mounted SVG and its camera survive repeated observer notifications. The real
+browser regression is red before admission gating (one offscreen render instead
+of zero). A separate negative control without notification deduplication is
+red on SVG identity; both assertions are green with the implementation. The
+test checks first reveal, an offscreen source replacement, cached mode reentry,
+nonzero reserved height, exact source and zero retained diagram observers after
+mode changes/disposal. Existing small-document presentation, visible controls,
+split refresh, foreground edits, partial-line viewport, actual CSP module/ELK
+and Source-side Preview checks pass. The surrounding Preview shell and split
+controller already own the mounted diagram's destruction; no second disposal
+registry is introduced. Native remeasurement remains required.
