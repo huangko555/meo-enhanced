@@ -11,6 +11,7 @@ import { certifyMarkdownStructure, isCompleteMarkdownStructure, markdownStructur
 import { markdownMixedLanguages } from '../webview/src/editor/markdownMixedLanguages';
 import { liveInputDerivedWorkExtensions } from '../webview/src/editor/liveInputDerivedWork';
 import { resolvedSyntaxTree } from '../webview/src/helpers/markdownSyntax';
+import { encodeMarkdownLanguageHosts, validateMarkdownLanguageHosts } from '../webview/src/editor/markdownLanguageHosts';
 
 const text = '# Heading\n\n```javascript\nconst one = 1;\n```\n\n'
   + 'Paragraph with **formatting**.\n\n'.repeat(600)
@@ -67,6 +68,22 @@ assert.ok(syntaxTreeAvailable(plain, plain.doc.length), 'ordinary documents reta
 const parser = (markdownLanguage.parser as MarkdownParser).configure(certifyMarkdownStructure);
 const full = parser.parse(text);
 assert.ok(isCompleteMarkdownStructure(full, text.length));
+const hostNames = new Set(['FencedCode', 'CodeBlock', 'HTMLBlock', 'HTMLTag', 'CommentBlock']);
+for (const fixture of [text, '', '# Hosts\n\nInline <em>text</em>.\n\n<!-- comment -->\n\n    indented code\n\n- nested:\n\n  ```js\n  const x = 1;\n  ```\n\n<div>block</div>\n']) {
+  const tree = parser.parse(fixture), expected: number[] = [];
+  tree.iterate({ enter(node) {
+    if (hostNames.has(node.name)) { expected.push(node.from, node.to); return false; }
+  } });
+  const packed = encodeMarkdownLanguageHosts(tree);
+  validateMarkdownLanguageHosts(packed, fixture.length);
+  assert.deepEqual([...packed], expected, 'packed worker hosts match complete outer syntax, including nested containers');
+  assert.equal(packed.byteLength, expected.length * Float64Array.BYTES_PER_ELEMENT);
+}
+for (const malformed of [[], new Uint32Array([0, 1]), Float64Array.of(0), Float64Array.of(-1, 2),
+  Float64Array.of(0, 0), Float64Array.of(0, 11), Float64Array.of(1.5, 2), Float64Array.of(0, NaN),
+  Float64Array.of(0, 4, 3, 5), Float64Array.of(5, 7, 1, 2)]) {
+  assert.throws(() => validateMarkdownLanguageHosts(malformed, 10), /Invalid Markdown language hosts/);
+}
 const unknown = new Tree(full.type, full.children.slice(0, 1), full.positions.slice(0, 1), full.length);
 assert.equal(isCompleteMarkdownStructure(unknown, text.length), false, 'a same-length tree with missing late content cannot claim completeness');
 const partial = parser.startParse(text); partial.stopAt(30);

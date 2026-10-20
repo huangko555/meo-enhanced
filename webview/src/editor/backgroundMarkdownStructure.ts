@@ -5,12 +5,13 @@ import { TreeFragment, type NodeSet, type ParseWrapper, type Tree } from '@lezer
 import { readDocumentTextProjection } from '../application/documentTextProjection';
 import { liveInputDerivedWorkReadiness, usesLargeDocumentDerivedWorkBudget } from './liveInputDerivedWork';
 import { acceptCompletedMarkdownStructure, clipMarkdownMixedFragments, isCompleteMarkdownStructure,
-  type MarkdownLanguageViewport } from './markdownStructure';
+  markdownStructureIdentity, type MarkdownLanguageViewport } from './markdownStructure';
 import { createMarkdownTreeReceiver } from './markdownTreeTransfer';
 import type { MarkdownParseRequest, MarkdownParseResponse } from './markdownParseProtocol';
 import { createClassicWorkerTransport } from '../adapters/classicWorkerTransport';
 import type { MarkdownContextPart } from '../../../src/foundation/markdownDocumentContext';
 import { mapUnchangedMarkdownDocumentContext, type MarkdownSourceContext } from './markdownSourceContext';
+import { validateMarkdownLanguageHosts } from './markdownLanguageHosts';
 
 type DocumentContextAdapter = {
   enabled(): boolean;
@@ -19,6 +20,7 @@ type DocumentContextAdapter = {
 
 type Result = { readonly doc: Text; readonly ready: Promise<void>; resolve(): void;
   status: 'pending' | 'ready' | 'superseded'; tree?: Tree;
+  languageHosts?: Float64Array;
   footnotesTab?: number; blocksTab?: number; blocksRequested?: true };
 
 function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet, context: DocumentContextAdapter) {
@@ -85,6 +87,7 @@ function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet, contex
             if (data.tabSize !== flight.tabSize) throw new Error('Markdown parser context settings mismatch');
             if (data.kind === 'syntax') {
               if (flight.syntaxReceived || data.grammar !== grammar || data.length !== accepted.doc.length) throw new Error('Markdown parser response grammar/document mismatch');
+              validateMarkdownLanguageHosts(data.languageHosts, accepted.doc.length);
               const received = receiver.receive(data.tree);
               const tree = accepted.tree ?? acceptCompletedMarkdownStructure(received, data.length);
               let value: MarkdownSourceContext;
@@ -105,7 +108,7 @@ function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet, contex
               context.receive(accepted.doc, tree, flight.tabSize, { kind: 'footnotes', value: value.footnotes });
               context.receive(accepted.doc, tree, flight.tabSize, { kind: 'code', value: value.code });
               sourceContext = { revision: data.id, value };
-              accepted.tree = tree; accepted.footnotesTab = flight.tabSize;
+              accepted.tree = tree; accepted.languageHosts = data.languageHosts; accepted.footnotesTab = flight.tabSize;
               accepted.status = 'ready'; accepted.resolve(); waiting.delete(accepted);
               flight.syntaxReceived = true;
               // Publish syntax promptly. Only Live needs the later rich index;
@@ -252,6 +255,13 @@ export function isBackgroundMarkdownPreparationPending(state: EditorState): bool
 export function completedBackgroundMarkdownStructure(state: EditorState): Tree | undefined {
   const backend = state.facet(runtime);
   return backend && usesLargeDocumentDerivedWorkBudget(state) ? backend.read(state.doc).tree : undefined;
+}
+
+/** The index is accepted with the same revision and immutable outer tree. */
+export function backgroundMarkdownLanguageHosts(state: EditorState, tree: Tree): Readonly<Float64Array> | undefined {
+  const result = state.facet(runtime)?.read(state.doc);
+  return result?.tree && markdownStructureIdentity(result.tree) === markdownStructureIdentity(tree)
+    ? result.languageHosts : undefined;
 }
 
 export function markdownMixedFragments(state: EditorState, fallback: readonly TreeFragment[]): readonly TreeFragment[] {

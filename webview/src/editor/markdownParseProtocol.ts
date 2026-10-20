@@ -14,6 +14,7 @@ type PresentationContextReceipt =
 
 export type MarkdownParseResponse = { readonly id: number } & (
   | { readonly kind: 'syntax'; readonly grammar: string; readonly length: number; readonly tree: MarkdownTreeTransfer;
+      readonly languageHosts: Float64Array;
       readonly tabSize: number; readonly error?: never } & SourceContextReceipt
   | { readonly kind: 'blocks'; readonly tabSize: number; readonly error?: never } & PresentationContextReceipt
   | { readonly error: string; readonly tree?: never }

@@ -55,6 +55,13 @@ const build = await Bun.build({ entrypoints: ['scripts/test-live-decoration-hist
       return { loader: 'ts', contents: source.replace(marker,
         '  if (!result.tree || !backend.canPublish(context.state.doc)) { (globalThis as any).__backgroundWaiterStarts = ((globalThis as any).__backgroundWaiterStarts ?? 0) + 1; return ParseContext.getSkippingParser(result.ready).startParse(input, fragments, ranges); }') };
     });
+    builder.onLoad({ filter: /webview[\\/]src[\\/]editor[\\/]markdownLanguageHosts\.ts$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text();
+      const marker = '  const cached = hostRanges.get(tree);';
+      assert.equal(source.split(marker).length, 2);
+      return { loader: 'ts', contents: source.replace(marker,
+        '  if (tree.length > 100000) (globalThis as any).__foregroundLanguageHostScans = ((globalThis as any).__foregroundLanguageHostScans ?? 0) + 1;\n' + marker) };
+    });
     builder.onLoad({ filter: /node_modules[\\/]@lezer[\\/]markdown[\\/]dist[\\/]index\.js$/ }, async ({ path }) => {
       const source = await Bun.file(path).text(), marker = '    advance() {';
       assert.equal(source.split(marker).length, 2);
@@ -120,6 +127,10 @@ try {
             contextBytes: JSON.stringify([event.data.footnotes, event.data.code, event.data.value]).length });
           if (scope.__corruptProjection === event.data.kind && typeof event.data.projectedFrom === 'number') {
             scope.__corruptProjection = undefined; event.data.projectedFrom = -1;
+          }
+          if (scope.__corruptLanguageHosts && event.data.kind === 'syntax') {
+            scope.__corruptLanguageHosts = false;
+            event.data.languageHosts = Float64Array.of(0, event.data.length + 1);
           }
           if (!scope.__holdParseReplies && !(scope.__holdBlockReplies && event.data.kind === 'blocks')) return;
           event.stopImmediatePropagation();
@@ -308,6 +319,8 @@ try {
   assert.ok(await page.evaluate(() => (window as any).__editor.getText() === (window as any).__beforeDelayed), 'paced input retains exact single-group undo after worker publication');
   assert.equal(await page.evaluate(() => (window as any).__foregroundLargeMarkdownAdvances ?? 0), 0,
     'Source, Live, input and undo must never parse the entire Markdown on the foreground thread');
+  assert.equal(await page.evaluate(() => (window as any).__foregroundLanguageHostScans ?? 0), 0,
+    'worker-backed Source/Live must never rediscover global mixed-language hosts on the foreground thread');
   stage = 'syntax publishes before rich block context';
   await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
   await page.evaluate(() => {
@@ -422,6 +435,21 @@ try {
     assert.match(invalid.error, /Invalid Markdown (source projection base|block context)/);
   }
 
+  stage = 'reject invalid mixed-language hosts';
+  const invalidHosts = await page.evaluate(async () => {
+    const scope = window as any;
+    scope.__corruptLanguageHosts = true;
+    const editor = scope.__liveHistory.create({ parent: document.getElementById('editor'), text: scope.__original, initialMode: 'source' });
+    let error = '';
+    try { await editor.prepareLiveSyntax(() => true); } catch (reason) { error = String(reason); }
+    scope.__liveHistory.input(editor, 4, 'safe');
+    const exact = editor.getText() === 'EDITsafe' + scope.__original.slice(4);
+    editor.destroy();
+    return { error, exact, consumed: scope.__corruptLanguageHosts === false };
+  });
+  assert.ok(invalidHosts.consumed && invalidHosts.exact, 'a rejected host index retains exact editable Source');
+  assert.match(invalidHosts.error, /Invalid Markdown language hosts/);
+
   const failure = await page.evaluate(async () => {
     const scope = window as any;
     document.body.dataset.meoMarkdownWorkerSrc = '/bad-worker.js';
@@ -436,6 +464,8 @@ try {
   assert.match(failure.error, /deliberate parser fixture failure/);
   assert.ok(failure.textIntact, 'worker failure retains editable Source and exact text');
   assert.equal(await page.evaluate(() => (window as any).__foregroundLargeMarkdownAdvances ?? 0), 0, 'failure cannot fall back to a blocking full parse');
+  assert.equal(await page.evaluate(() => (window as any).__foregroundLanguageHostScans ?? 0), 0,
+    'distant language demand, changed hosts and invalid packets cannot fall back to foreground global host discovery');
   assert.deepEqual(errors, []);
   console.log(`Background Markdown: CSP worker, no foreground full parse, ${requests.length} jobs/one snapshot, receipt-only prose updates, strict projection bases, CJK input, undo, modes, distant code palette, ${incrementalCodeSteps} incremental code LR steps, disposal and failure passed`);
 } catch (error) {

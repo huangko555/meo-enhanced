@@ -9,6 +9,7 @@ import type { MarkdownParseRequest, MarkdownParseResponse } from './editor/markd
 import { prepareMarkdownDocumentContext } from './markdownDocumentContext';
 import { projectMarkdownDocumentContext } from './markdownContextProjection';
 import type { MarkdownSourceContext } from './editor/markdownSourceContext';
+import { encodeMarkdownLanguageHosts } from './editor/markdownLanguageHosts';
 
 // Bootstrap the existing shared grammar exactly as the editing surface does.
 // Node IDs are verified on receipt; palette props remain surface-owned.
@@ -65,9 +66,11 @@ self.onmessage = async ({ data: request }: MessageEvent<MarkdownParseRequest>) =
     const prepared = projected ? undefined : prepareMarkdownDocumentContext(doc, tree, request.tabSize);
     const context: MarkdownSourceContext = projected ?? { doc, tree, tabSize: request.tabSize, footnotes: prepared!.footnotes, code: prepared!.code };
     const encoded = encoder.encode(tree);
+    const languageHosts = encodeMarkdownLanguageHosts(tree);
     self.postMessage({ id: request.id, kind: 'syntax', grammar: markdownStructureGrammarIdentity, length: doc.length,
-      tree: encoded.value, tabSize: request.tabSize, ...(projected ? { projectedFrom: request.base }
-        : { footnotes: context.footnotes, code: context.code }) } satisfies MarkdownParseResponse, { transfer: encoded.transfers });
+      tree: encoded.value, languageHosts, tabSize: request.tabSize, ...(projected ? { projectedFrom: request.base }
+        : { footnotes: context.footnotes, code: context.code }) } satisfies MarkdownParseResponse,
+      { transfer: [...encoded.transfers, languageHosts.buffer] });
     if (request.blocks) {
       const projectedBlocks = !!projected?.blocks;
       context.blocks ??= (prepared ?? prepareMarkdownDocumentContext(doc, tree, request.tabSize, context)).blocks();

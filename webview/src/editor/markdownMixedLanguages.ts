@@ -1,32 +1,9 @@
 import { ParseContext, type Language } from '@codemirror/language';
-import { parseMixed, TreeBuffer, TreeFragment, type PartialParse, type Parser, type ParseWrapper, type Tree } from '@lezer/common';
+import { parseMixed, TreeFragment, type PartialParse, type Parser, type ParseWrapper } from '@lezer/common';
 import { clipMarkdownMixedFragments, isCompleteMarkdownStructure, markdownLanguageViewport,
   skipOffscreenMarkdownLanguage, type MarkdownLanguageViewport } from './markdownStructure';
-import { markdownMixedFragments, rememberMarkdownMixedTree } from './backgroundMarkdownStructure';
-
-const hostNames = new Set(['FencedCode', 'CodeBlock', 'HTMLBlock', 'HTMLTag', 'CommentBlock']);
-const hostRanges = new WeakMap<Tree | TreeBuffer, readonly MarkdownLanguageViewport[]>();
-/** Read packed immutable structure once per new branch, without allocating a
- * SyntaxNode/cursor for every Markdown token. Shared branches retain the index. */
-function mixedLanguageHosts(tree: Tree | TreeBuffer): readonly MarkdownLanguageViewport[] {
-  const cached = hostRanges.get(tree);
-  if (cached) return cached;
-  const ranges: MarkdownLanguageViewport[] = [];
-  if (tree instanceof TreeBuffer) {
-    for (let index = 0; index < tree.buffer.length;) {
-      if (hostNames.has(tree.set.types[tree.buffer[index]!]!.name)) {
-        ranges.push({ from: tree.buffer[index + 1]!, to: tree.buffer[index + 2]! });
-        index = tree.buffer[index + 3]!;
-      } else index += 4;
-    }
-  } else if (hostNames.has(tree.type.name)) ranges.push({ from: 0, to: tree.length });
-  else for (let index = 0; index < tree.children.length; index++) {
-    const offset = tree.positions[index]!;
-    for (const range of mixedLanguageHosts(tree.children[index]!)) ranges.push({ from: range.from + offset, to: range.to + offset });
-  }
-  hostRanges.set(tree, ranges);
-  return ranges;
-}
+import { backgroundMarkdownLanguageHosts, markdownMixedFragments, rememberMarkdownMixedTree } from './backgroundMarkdownStructure';
+import { markdownLanguageHostRanges } from './markdownLanguageHosts';
 
 /** Match Lezer Markdown's public parseCode semantics, declining offscreen hosts
  * before parseMixed materializes packed nodes and allocates inner parser jobs. */
@@ -76,11 +53,14 @@ export function markdownMixedLanguages(options: {
               // inside a giant code/HTML block would discard its LR reuse.
               const visible = viewport;
               let from = viewport.from, to = viewport.to;
-              for (const host of mixedLanguageHosts(outer)) {
-                if (host.to > visible.from && host.from < visible.to) {
-                  from = Math.min(from, host.from); to = Math.max(to, host.to);
-                } else current.skipUntilInView(host.from, host.to);
-              }
+              const includeHost = (hostFrom: number, hostTo: number) => {
+                if (hostTo > visible.from && hostFrom < visible.to) {
+                  from = Math.min(from, hostFrom); to = Math.max(to, hostTo);
+                } else current.skipUntilInView(hostFrom, hostTo);
+              };
+              const packed = backgroundMarkdownLanguageHosts(state, outer);
+              if (packed) for (let index = 0; index < packed.length; index += 2) includeHost(packed[index]!, packed[index + 1]!);
+              else for (const host of markdownLanguageHostRanges(outer)) includeHost(host.from, host.to);
               viewport = { from, to };
               reusable = clipMarkdownMixedFragments(reusable, viewport);
               // parseMixed's public fragment contract skips identical subtrees.

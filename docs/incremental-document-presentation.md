@@ -998,3 +998,22 @@ mixed-language preparation, including a global host index, plus an unparented
 173 ms browser layout. The latter is not attributed to a product function without
 evidence. Moving global host discovery into the existing worker is the next
 bounded architectural change; native remeasurement remains necessary.
+
+### Worker-owned embedded-language host index
+
+The incremental parser worker now sends a packed index of code, HTML and comment
+host ranges with each completed outer tree. The same immutable-branch cache is
+retained for incremental edits, but global discovery runs in the worker. The
+two existing tree buffers retain their format; one additional small Float64
+buffer carries host pairs. The receiver validates type, pair count, safe source
+coordinates, bounds and ordering before accepting it. Main-thread mixed parsing
+uses this index only for the matching outer-tree identity and revision. Ordinary
+synchronous documents retain their original local index path.
+
+Fresh syntax-iteration parity covers fenced/indented code, inline HTML, blocks,
+comments and nested containers. The real CSP-worker suite requires zero global
+host-index scans on the foreground thread, retains distant/return language demand
+and 1,637-step incremental code reuse, and rejects a corrupted index while Source
+remains editable with exact text. A deliberate fallback control records 33 global
+main-thread scans and fails that same assertion. No native latency improvement
+is claimed before the new installation package is measured.
