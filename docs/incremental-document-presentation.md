@@ -1167,3 +1167,21 @@ CPU, 796 dirty layout objects). Merge-conflict rescanning also consumes about
 30 ms of a state update. These are remaining costs, not evidence that snapshot
 sharing caused a latency improvement. The retained-DOM/anchor fixes above are
 not included in the frozen V56 native package.
+
+### Reuse conflict-free analysis across ordinary edits
+
+Conflict analysis now carries an empty-result proof across an edit only when
+every complete affected old and new line lacks all four conflict marker kinds.
+This catches marker deletion and joins/splits that could complete an older
+unfinished conflict; editing any candidate marker retains the full parser.
+Disjoint changes inspect their own line intervals. Live registers this field
+before presentation consumers, including deferred input, so readers share the
+same immutable revision proof instead of racing to perform a global scan.
+
+The real Source state-update regression fails before the change and passes
+afterwards: 24 edits at opposite ends of 30,001 lines request 96 lines total.
+Live input also retains the exact shared empty result. Another 2,646 fresh-scan
+comparisons cover incomplete/nested conflicts, every marker kind, removals,
+line joins and inserted newlines. Existing Live scan-budget and deferred-input
+tests and type checking pass. Actual conflict documents retain conservative
+whole-document parsing; this is not a claim that their updates are incremental.

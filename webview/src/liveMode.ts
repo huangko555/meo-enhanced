@@ -4536,6 +4536,8 @@ export const editorMarkdownLanguage = new LanguageSupport(new Language(markdownL
 export function liveModeExtensions(options: { readonly largeDocument?: boolean } = {}): Extension[] {
   return [
     ...liveInputDerivedWorkExtensions(options),
+    // Seed changed-line conflict proofs before any Live presentation reader.
+    ...mergeConflictSourceExtensions(),
     ...(options.largeDocument ? liveViewportPresentationExtensions() : []),
     editorMarkdownLanguage,
     options.largeDocument ? viewportSyntaxHighlighting(liveHighlightStyle) : syntaxHighlighting(liveHighlightStyle),
@@ -4553,7 +4555,6 @@ export function liveModeExtensions(options: { readonly largeDocument?: boolean }
     ...blockStickyHeaderExtension(),
     liveLineNumberMarkerField,
     styledLineNumberMarkerField,
-    ...mergeConflictSourceExtensions(),
     ...detailsBlockLiveExtensions()
   ];
 }

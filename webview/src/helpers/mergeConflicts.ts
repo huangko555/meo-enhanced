@@ -1,6 +1,6 @@
 import { readDocumentTextProjection } from '../application/documentTextProjection';
 import { documentLines } from './documentLines';
-import { RangeSetBuilder, StateField, EditorState } from '@codemirror/state';
+import { RangeSetBuilder, StateField, EditorState, type Transaction } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import {
   isLiveInputDerivedWorkRefresh,
@@ -55,6 +55,27 @@ function markerLabel(text: string, marker: string): string {
 }
 
 const conflictCache = new WeakMap<EditorState['doc'], readonly MergeConflict[]>();
+
+function changedLinesContainMarker(doc: EditorState['doc'], from: number, to: number): boolean {
+  for (const line of documentLines(doc, doc.lineAt(from).number, doc.lineAt(to).number)) {
+    if (/^(?:<<<<<<<|\|\|\|\|\|\|\||=======|>>>>>>>)/.test(line.text)) return true;
+  }
+  return false;
+}
+
+function reuseEmptyConflictAnalysis(tr: Transaction): void {
+  if (!tr.docChanged || conflictCache.has(tr.newDoc)) return;
+  const previous = conflictCache.get(tr.startState.doc);
+  if (!previous || previous.length) return;
+  let markerTouched = false;
+  tr.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+    if (!markerTouched) markerTouched = changedLinesContainMarker(tr.startState.doc, fromA, toA)
+      || changedLinesContainMarker(tr.newDoc, fromB, toB);
+  });
+  // Check complete old AND new lines: deleting a marker or joining two partial
+  // markers can complete an existing unfinished conflict elsewhere in the doc.
+  if (!markerTouched) conflictCache.set(tr.newDoc, previous);
+}
 
 export function parseMergeConflicts(state: EditorState): readonly MergeConflict[] {
   const cached = conflictCache.get(state.doc);
@@ -267,7 +288,8 @@ const mergeConflictField = StateField.define<MergeConflictState>({
   create(state: EditorState) {
     return buildMergeConflictState(state);
   },
-  update(value: MergeConflictState, tr: any): MergeConflictState {
+  update(value: MergeConflictState, tr: Transaction): MergeConflictState {
+    reuseEmptyConflictAnalysis(tr);
     if (shouldDeferLiveInputDerivedWork(tr)) {
       return tr.docChanged
         ? { ...value, decorations: mapLiveInputDerivedDecorations(value.decorations, tr) }

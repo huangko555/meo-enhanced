@@ -17,7 +17,7 @@ import { hasMappedLiveInputPresentation, supersedeLiveInputDerivedWork } from '.
 import { getLiveRenderedBlocks } from '../webview/src/helpers/liveRenderedBlocks';
 import { setLatexMathBlockModeEffect } from '../webview/src/helpers/latexMathEditing';
 import { setHtmlEditingRangeEffect } from '../webview/src/helpers/htmlContent';
-import { parseMergeConflicts } from '../webview/src/helpers/mergeConflicts';
+import { mergeConflictSourceExtensions, parseMergeConflicts } from '../webview/src/helpers/mergeConflicts';
 import { markdownTagField } from '../webview/src/helpers/tags';
 import { getLivePresentationBand, liveViewportPresentationExtensions } from '../webview/src/helpers/liveViewportPresentation';
 
@@ -82,6 +82,55 @@ import { getLivePresentationBand, liveViewportPresentationExtensions } from '../
     'Source/Live readers of an immutable revision must share conflict analysis');
   const changed = state.update({ changes: { from: text.indexOf('One'), to: text.indexOf('One') + 3, insert: 'Updated' } }).state;
   assert.equal(parseMergeConflicts(changed)[0]!.currentText, 'Updated\n', 'a new revision must invalidate the shared conflict result');
+}
+
+{
+  let state = EditorState.create({ doc: 'Ordinary line.\n'.repeat(30_000), extensions: mergeConflictSourceExtensions() });
+  const empty = parseMergeConflicts(state), iterLines = Text.prototype.iterLines;
+  let requestedLines = 0;
+  Text.prototype.iterLines = function(from = 1, to = this.lines + 1) {
+    requestedLines += to - from;
+    return iterLines.call(this, from, to);
+  };
+  try {
+    for (let index = 0; index < 24; index++) {
+      state = state.update({ changes: [{ from: 5, insert: 'x' }, { from: state.doc.length - 5, insert: 'y' }] }).state;
+      assert.equal(parseMergeConflicts(state), empty, 'ordinary disjoint edits must reuse proven empty conflict analysis');
+    }
+  } finally { Text.prototype.iterLines = iterLines; }
+  assert.ok(requestedLines <= 100, `conflict analysis must inspect changed lines rather than the span between edits (${requestedLines} lines)`);
+
+  let live = EditorState.create({ doc: 'Ordinary paragraph.\n\n'.repeat(1_000), extensions: liveModeExtensions({ largeDocument: true }) });
+  const liveEmpty = parseMergeConflicts(live);
+  for (let index = 0; index < 4; index++) {
+    live = live.update({ changes: { from: 5, insert: 'x' }, annotations: Transaction.userEvent.of('input.type') }).state;
+    assert.equal(parseMergeConflicts(live), liveEmpty, 'Live readers must see the proof before building or deferring presentation');
+  }
+  console.log(`Conflict analysis: 24 disjoint edits in 30,001 lines request ${requestedLines} changed lines`);
+}
+
+{
+  // Editing any of the four marker kinds, or joining fragments into a marker,
+  // can complete an old conflict even if there were no complete conflicts yet.
+  const samples = ['', 'ordinary\ntext\n', '<<<<<<< current\none\n=======\ntwo\n>>>>>>> incoming\n',
+    '<<<<<<< current\none\n======\ntwo\n>>>>>>> incoming\n',
+    '<<<<<<< current\none\n||||||| base\nold\n=======\ntwo\n>>>>>> incoming\n',
+    '<<<<\n<<< current\none\n=======\ntwo\n>>>>>>> incoming\n',
+    '<<<<<<< outer\n<<<<<<< inner\none\n=======\ntwo\n>>>>>>> incoming\n'];
+  const inserts = ['', 'x', '\n', '<<<<<<< new\n', '||||||| base\n', '=======\n', '>>>>>>> end\n', '>>>', '==='];
+  let comparisons = 0;
+  for (const text of samples) {
+    const base = EditorState.create({ doc: text, extensions: mergeConflictSourceExtensions() });
+    for (let from = 0; from <= text.length; from += 1) {
+      for (const insert of inserts) {
+        const next = base.update({ changes: { from, to: Math.min(text.length, from + 1), insert } }).state;
+        assert.deepEqual(parseMergeConflicts(next), parseMergeConflicts(EditorState.create({ doc: next.doc.toString() })),
+          `incremental conflict analysis must match a fresh scan at ${from}, ${JSON.stringify(insert)}`);
+        comparisons++;
+      }
+    }
+  }
+  console.log(`Conflict analysis: ${comparisons} fresh-scan comparisons cover incomplete/nested markers, joins and every marker kind`);
 }
 
 {
