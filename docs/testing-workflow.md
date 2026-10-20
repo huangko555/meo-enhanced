@@ -499,6 +499,12 @@ preview and HTML export, including PDF/Word formula fitting, with both themes
 and narrow/wide panes. Live zoom,
 reset and fullscreen are checked through their controls. This contract runs in
 the targeted rendered and full browser gates.
+It also checks automatic wrapping of continuous and nested fractions: adjacent
+rows must retain visible clearance and fit their container in Live, Preview,
+Source's side preview, HTML export and print preparation. Inline math, equation
+numbers and fraction/matrix internals retain their native spacing. The matrix
+covers Chinese/English, light/dark and narrow/wide panes; `--capture` saves narrow
+Live/Preview screenshots under `.local/test-artifacts/math-reflow/`.
 
 `scripts/test-live-input-path-production.ts` observes inserted text's computed
 styles in the first four input frames, including IME preedit and commit. It covers
