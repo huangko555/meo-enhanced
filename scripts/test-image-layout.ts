@@ -18,6 +18,13 @@ async function main() {
   if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 
   const browser = await launchTestBrowser();
+  let releaseImage!: () => void;
+  const heldImage = new Promise<void>(resolve => { releaseImage = resolve; });
+  const imageServer = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch() {
+    await heldImage;
+    return new Response('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#73c"/></svg>',
+      { headers: { 'content-type': 'image/svg+xml' } });
+  } });
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 1200, height: 900, deviceScaleFactor: 1 });
@@ -27,6 +34,49 @@ async function main() {
       content: ':root { --meo-background:#24292e; --meo-foreground:#e6edf3; --meo-caret:#e6edf3; --meo-semantic-imageBackground:#2a3a52; --meo-semantic-imageBorder:#474b50; --meo-semantic-imageFallbackForeground:#e6edf3; }'
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+
+    // A cached resource is cloned into display DOM. Its replacement URL is
+    // deliberately held so decoding cannot supply geometry before this check.
+    await page.evaluate(url => {
+      const harness = (window as any).TableStabilityHarness;
+      const source = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#73c" id="held-clone-fixture"/></svg>');
+      harness.setImageSrcResolver(() => source);
+      const clone = HTMLImageElement.prototype.cloneNode;
+      (window as any).__restoreImageClone = () => { HTMLImageElement.prototype.cloneNode = clone; };
+      HTMLImageElement.prototype.cloneNode = function(deep?: boolean) {
+        const result = clone.call(this, deep) as HTMLImageElement;
+        if (this.src.includes('held-clone-fixture')) result.src = url;
+        return result;
+      };
+      (window as any).__coldImageEditor = harness.createEditor({ parent: document.getElementById('app'),
+        text: 'Before image\n\n![Held image](held-clone.png)\n\nAfter image target', initialMode: 'live', onApplyChanges() {} });
+    }, new URL('/held.svg', imageServer.url).href);
+    await page.waitForSelector('.meo-md-image-img');
+    const beforeDecode = await page.evaluate(async () => {
+      for (let index = 0; index < 4; index++) await new Promise(requestAnimationFrame);
+      const image = document.querySelector<HTMLImageElement>('.meo-md-image-img')!;
+      const line = [...document.querySelectorAll<HTMLElement>('.cm-line')].find(line => line.textContent === 'After image target')!;
+      const bounds = image.getBoundingClientRect();
+      return { width: bounds.width, height: bounds.height, lineTop: line.getBoundingClientRect().top, naturalWidth: image.naturalWidth };
+    });
+    assert.equal(beforeDecode.naturalWidth, 0, 'the display clone must still be undecoded in this fixture');
+    assert.ok(beforeDecode.height > 0, 'known resource dimensions must reserve the display clone before its load event');
+    releaseImage();
+    await page.waitForFunction(() => (document.querySelector('.meo-md-image-img') as HTMLImageElement)?.naturalWidth > 0);
+    const afterDecode = await page.evaluate(async () => {
+      for (let index = 0; index < 4; index++) await new Promise(requestAnimationFrame);
+      const image = document.querySelector<HTMLImageElement>('.meo-md-image-img')!;
+      const line = [...document.querySelectorAll<HTMLElement>('.cm-line')].find(line => line.textContent === 'After image target')!;
+      const bounds = image.getBoundingClientRect();
+      const lineTop = line.getBoundingClientRect().top;
+      (window as any).__restoreImageClone();
+      (window as any).__coldImageEditor.destroy();
+      return { width: bounds.width, height: bounds.height, lineTop };
+    });
+    assert.ok(Math.abs(beforeDecode.height - afterDecode.height) <= 1 && Math.abs(beforeDecode.width - afterDecode.width) <= 1,
+      'decoding a resource clone must not resize an already projected image');
+    assert.ok(Math.abs(beforeDecode.lineTop - afterDecode.lineTop) <= 1,
+      `late clone decoding must not move the next editable line: ${JSON.stringify({ beforeDecode, afterDecode })}`);
 
     const initial = await page.evaluate(async () => {
       const harness = (window as any).TableStabilityHarness;
@@ -210,6 +260,8 @@ async function main() {
     assert.equal(await page.evaluate(() => (window as any).__imageLayoutEditor.view.state.doc.toString()), beforeViewer);
     console.log('image layout checks passed');
   } finally {
+    releaseImage();
+    imageServer.stop(true);
     await browser.close();
   }
 }

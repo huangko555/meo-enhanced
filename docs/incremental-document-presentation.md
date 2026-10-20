@@ -595,3 +595,35 @@ the same table/input nodes and committing to the exact current row. Production
 cell editing, table history, detached-focus history shortcuts, transient save
 (including IME/math/Mermaid), and rendered-block scroll/layout checks pass.
 Native latency acceptance for the table coordinate change remains required.
+
+V45 (`5822f06a`, archive SHA-256
+`bf28d271cca69228b3b15599dc70fda6d82499b27fdd834f8be8e3cfb394350a`)
+fresh-window, no-traversal diagnostics retain exact source, undo and clock checks.
+Source typing P95/maximum is 73/89 ms; Live is 450/520 ms with a 456 ms frame gap.
+Cold sampled clicks are Source 178 ms and Live 157 ms. First Live takes 1.32 s,
+and Live save 209 ms. These are narrow diagnostic samples, not full acceptance;
+cross-run percentages would confound code and runtime variation.
+
+The strict full V45 run again stops at a Live clicked-text witness. Additional
+capture proves a real pre-click target change: the expected portrait-caption
+line has moved, while pointerdown and source selection both reach an empty
+line. The original result and screenshot are retained. The V44 diagnostic
+repeat did not reproduce the mismatch, and was explicitly marked diagnostic-only.
+
+A deterministic delayed-image test exposes a second geometry change even after
+the resource has loaded: `cloneNode` retains its URL but not its decoded intrinsic
+box. The display clone can briefly collapse, then grow after insertion outside
+the image presentation's controlled mutation. Resource projection now carries
+decoded dimensions, and ImageWidget reserves the same constrained aspect ratio
+before decode. Authored Wiki dimensions still take precedence. The held-clone
+test requires an undecoded image, unchanged image bounds and an unmoved following
+editable line across decode. Existing image/Wiki/resource lifecycle checks pass.
+Unknown-size first arrival can still legitimately change geometry; the new test
+does not establish that every native target-instability case is fixed.
+
+An exact V44 Preview-worker diagnostic measures module initialization at 550 ms,
+first preparation 1.71 s, warm preparation 1.22 s, and complete formatted copy
+6.48 s (4,938,176 HTML code units). It runs the packaged worker in guest Node
+24.21 with a diagnostic parent port; it is not a native viewport measurement.
+Safe HTML filtering remains enabled. Those preparation costs and Live's cold
+input tail remain open optimization targets.

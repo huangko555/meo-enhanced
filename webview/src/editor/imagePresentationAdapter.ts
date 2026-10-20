@@ -458,6 +458,10 @@ export function createCodeMirrorDomImagePresentationAdapter(
     const loaded = options.resources.getLoaded(options.resourceContextKey, resolvedSrc);
     if (!loaded) return projectionCompletion(effect, 'projectionFailed');
     const image = loaded.cloneNode(false) as HTMLImageElement;
+    // Decoded dimensions are not copied by cloneNode. Carry the resource facts
+    // with the projection even if its bounded intrinsic-size cache is evicted.
+    const width = loaded.naturalWidth || loaded.width, height = loaded.naturalHeight || loaded.height;
+    if (width > 0 && height > 0) { image.width = width; image.height = height; }
     return project(effect, context, () => options.view.showImage(image));
   };
 

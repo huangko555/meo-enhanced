@@ -463,6 +463,16 @@ export class ImageWidget extends WidgetType {
     img.className = 'meo-md-image-img';
     img.alt = this.altText;
     img.loading = 'eager';
+    const width = cachedImage.naturalWidth || cachedImage.width, height = cachedImage.naturalHeight || cachedImage.height;
+    const intrinsic = this.presentationFactory.getIntrinsicSize(this.url) ?? (width > 0 && height > 0 ? { width, height } : null);
+    if (intrinsic) {
+      // cloneNode retains src, but not the decoded resource's intrinsic box.
+      // Reserve the same constrained geometry before the clone's load event.
+      img.width = intrinsic.width;
+      img.height = intrinsic.height;
+      img.style.aspectRatio = `${intrinsic.width} / ${intrinsic.height}`;
+      if (!this.width && !this.height) img.style.width = `${intrinsic.width * Math.min(1, 240 / intrinsic.height)}px`;
+    }
     if (this.width) { img.width = this.width; img.style.width = `${this.width}px`; }
     if (this.height) { img.height = this.height; img.style.height = `${this.height}px`; }
     return img;
