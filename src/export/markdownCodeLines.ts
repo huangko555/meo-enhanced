@@ -4,6 +4,11 @@ import MarkdownIt from 'markdown-it';
 // inline phase would parse every paragraph again for each preprocessing pass.
 const structureParser = new MarkdownIt().disable('inline');
 
+export type MarkdownCodeLineInspection = {
+  readonly codeLines: ReadonlySet<number>;
+  canInsertInlineHtmlAt(line: number, column: number, end: number, html: string): boolean;
+};
+
 /** Code is opaque to table/list normalization and footnote substitution, including
  * fences and indented code inside lists and quotes. Line indexes are zero based. */
 export function collectMarkdownCodeLines(markdownText: string, onFenceInfo?: (info: string) => void): Set<number> {
@@ -17,8 +22,10 @@ export function inspectMarkdownCodeLines(markdownText: string) {
   const sourceLines = markdownText.split(/\r?\n/);
   const inlineStarts = new Map<number, number>();
   const tableRows = new Set<number>();
+  const roots: [number, number][] = [];
   const codeLines = scanCodeLines(markdownText, undefined, node => {
     if (!node.map) return;
+    if (node.level === 0) roots.push(node.map);
     if (node.type === 'tr_open') {
       for (let line = node.map[0]; line < node.map[1]; line++) tableRows.add(line);
     }
@@ -32,6 +39,56 @@ export function inspectMarkdownCodeLines(markdownText: string) {
       if (start >= 0) inlineStarts.set(line, start);
     }
   });
+  const inspection = createCodeLineInspection(sourceLines, codeLines, inlineStarts, tableRows);
+  return { ...inspection,
+    /** Reuse only independent whole-root removals. A retained blank before each
+     * cut and unindented content after it prevent list/code continuation joins.
+     * Ambiguous boundaries retain the caller's fresh-parse fallback. */
+    withoutLines(removed: ReadonlySet<number>): MarkdownCodeLineInspection | null {
+      if (removed.size === 0) return inspection;
+      const cuts: [number, number][] = [];
+      for (let line = 0; line < sourceLines.length; line++) {
+        if (!removed.has(line)) continue;
+        const from = line;
+        while (line < sourceLines.length && removed.has(line)) line++;
+        if (from > 0 && sourceLines[from - 1]!.trim()) return null;
+        cuts.push([from, line]);
+      }
+      let root = 0;
+      for (const [from, to] of cuts) {
+        while (root < roots.length && roots[root]![1] <= from) root++;
+        while (root < roots.length && roots[root]![0] < to) {
+          if (roots[root]![0] < from || roots[root]![1] > to) return null;
+          root++;
+        }
+      }
+      const nextContent = new Int32Array(sourceLines.length + 1);
+      let following = sourceLines.length;
+      for (let line = sourceLines.length; line >= 0; line--) {
+        if (line < sourceLines.length && !removed.has(line) && sourceLines[line]!.trim()) following = line;
+        nextContent[line] = following;
+      }
+      for (const [, to] of cuts) {
+        const line = nextContent[to]!;
+        if (line < sourceLines.length && /^[ \t]/.test(sourceLines[line]!)) return null;
+      }
+      const lines: string[] = [];
+      const mappedCode = new Set<number>(), mappedInline = new Map<number, number>(), mappedRows = new Set<number>();
+      for (let line = 0; line < sourceLines.length; line++) if (!removed.has(line)) {
+        const position = lines.length;
+        lines.push(sourceLines[line]!);
+        if (codeLines.has(line)) mappedCode.add(position);
+        const start = inlineStarts.get(line);
+        if (start !== undefined) mappedInline.set(position, start);
+        if (tableRows.has(line)) mappedRows.add(position);
+      }
+      return createCodeLineInspection(lines, mappedCode, mappedInline, mappedRows);
+    }
+  };
+}
+
+function createCodeLineInspection(sourceLines: readonly string[], codeLines: ReadonlySet<number>,
+  inlineStarts: ReadonlyMap<number, number>, tableRows: ReadonlySet<number>): MarkdownCodeLineInspection {
   return {
     codeLines,
     canInsertInlineHtmlAt(line: number, column: number, end: number, html: string) {

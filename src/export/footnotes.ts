@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { SourceMappedMarkdown } from './sourceMappedMarkdown';
-import { collectMarkdownCodeLines, inspectMarkdownCodeLines } from './markdownCodeLines';
+import { collectMarkdownCodeLines, inspectMarkdownCodeLines, type MarkdownCodeLineInspection } from './markdownCodeLines';
 
 export type PrepareMarkdownWithFootnotesOptions = {
   target: 'html' | 'pdf' | 'docx';
@@ -80,7 +80,7 @@ export function prepareMarkdownWithFootnotes(
     ].join('');
   };
   const rewriteReferences = (markdown: string, definition = false) => {
-    const inspection = definition ? null : inspectMarkdownCodeLines(markdown);
+    const inspection = definition ? null : extracted.bodyInspection ?? inspectMarkdownCodeLines(markdown);
     const codeLines = inspection?.codeLines ?? collectMarkdownCodeLines(markdown,
       definition && !markdown.includes('<') ? options.onFenceInfo : undefined);
     let preservesCodeLines = inspection !== null;
@@ -93,6 +93,9 @@ export function prepareMarkdownWithFootnotes(
     return { markdown: rewritten, codeLines: preservesCodeLines ? codeLines : undefined };
   };
   const body = rewriteReferences(extracted.bodyLines.join('\n'));
+  // Only the proven code-line set survives. Lazy definition renderers must not
+  // retain the temporary line/inline projection through the extraction context.
+  extracted.bodyInspection = null;
   // References inside a definition use the same rules as body text. Each
   // reachable definition is visited once, including cycles and newly cited notes.
   for (let index = 0; index < pendingDefinitions.length; index += 1) {
@@ -142,12 +145,14 @@ function extractExportFootnotes(source: SourceMappedMarkdown): {
   bodySourceLines: number[];
   definitions: ExportFootnoteDefinition[];
   definitionByLabel: Map<string, ExportFootnoteDefinition>;
+  bodyInspection: MarkdownCodeLineInspection | null;
 } {
   const lines = String(source.markdown ?? '').split(/\r?\n/);
   const consumedLineNumbers = new Set<number>();
   const definitions: ExportFootnoteDefinition[] = [];
   const definitionByLabel = new Map<string, ExportFootnoteDefinition>();
-  const codeLines = collectMarkdownCodeLines(source.markdown);
+  const inspection = inspectMarkdownCodeLines(source.markdown);
+  const codeLines = inspection.codeLines;
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? '';
@@ -210,7 +215,8 @@ function extractExportFootnotes(source: SourceMappedMarkdown): {
     bodyLines: lines.filter((_, index) => !consumedLineNumbers.has(index)),
     bodySourceLines: source.sourceLines.filter((_, index) => !consumedLineNumbers.has(index)),
     definitions,
-    definitionByLabel
+    definitionByLabel,
+    bodyInspection: inspection.withoutLines(consumedLineNumbers)
   };
 }
 

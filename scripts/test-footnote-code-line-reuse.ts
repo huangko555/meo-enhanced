@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import MarkdownIt from 'markdown-it';
 import { prepareMarkdownWithFootnotes } from '../src/export/footnotes';
-import { collectMarkdownCodeLines } from '../src/export/markdownCodeLines';
+import { collectMarkdownCodeLines, inspectMarkdownCodeLines } from '../src/export/markdownCodeLines';
 import { preparePreviewDocument } from '../src/export/runtime';
 
 const large = Array.from({ length: 120 }, (_, index) => `Paragraph ${index} before reference[^n].\n\n| Header | Value |\n| --- | --- |\n| Cell[^n] | two |\n\n`).join('')
@@ -14,7 +14,7 @@ MarkdownIt.prototype.parse = function(source, environment) {
 };
 try {
   preparePreviewDocument({ markdownText: large, sourceDocumentPath: '/fixture/notes.md', uiLanguage: 'en' }, true);
-  assert.equal(wholeScans, 2, 'footnote extraction and reference rewriting must not cause a third global code scan during normalization');
+  assert.equal(wholeScans, 1, 'independent footnote removal and inline-only rewriting must share one global code scan');
 } finally { MarkdownIt.prototype.parse = parse; }
 
 const prepare = (markdown: string) => prepareMarkdownWithFootnotes({ markdown,
@@ -60,4 +60,48 @@ for (const prefix of prefixes) for (const reference of references) for (const fo
   } else fallback++;
 }
 assert.ok(reused > 0 && fallback > 0, 'the corpus must exercise both proven reuse and conservative fallback');
-console.log('footnote code-line reuse and structural fallback checks passed', { reused, fallback });
+
+// Removing a complete paragraph between indented blocks can merge their blank
+// lines into code. Root alignment alone is insufficient proof of safe reuse.
+const joiningCode = '    first\n\nParagraph.\n\n    second';
+assert.equal(inspectMarkdownCodeLines(joiningCode).withoutLines(new Set([2])), null);
+assert.equal(inspectMarkdownCodeLines('Paragraph before.\nNot independent.').withoutLines(new Set([1])), null);
+
+const blocks = ['Paragraph\ncontinued.', '```js\ncode\n```', '    indented\n    code', '> quote\n> next',
+  '- one\n  two\n\n- three', '| A | B |\n| - | - |\n| x | y |', '<div>\nhtml\n</div>', '[ref]: /somewhere',
+  '[^n]: note\n\n    continued', 'Title\n---', '~~~\nliteral\n~~~', '<script>\nraw\n</script>',
+  '<span>\n\ncontent\n\n</span>'];
+let removalChecks = 0, removalFallbacks = 0;
+for (const left of blocks) for (const middle of blocks) for (const right of ['After.', '```\ncode\n```', '    after', '- after', '---', '[ref]: /new']) {
+  const markdown = `${left}\n\n${middle}\n\n${right}`, lines = markdown.split('\n');
+  const inspection = inspectMarkdownCodeLines(markdown);
+  for (let from = 0; from < lines.length; from++) for (let to = from + 1; to <= lines.length; to++) {
+    const removed = new Set(Array.from({ length: to - from }, (_, offset) => from + offset));
+    const projected = inspection.withoutLines(removed);
+    if (!projected) { removalFallbacks++; continue; }
+    const body = lines.filter((_, index) => !removed.has(index)).join('\n');
+    assert.deepEqual([...projected.codeLines], [...collectMarkdownCodeLines(body)], JSON.stringify({ left, middle, right, from, to }));
+    removalChecks++;
+  }
+}
+assert.ok(removalChecks > 1_000 && removalFallbacks > removalChecks);
+let multipleCuts = 0;
+for (const newline of ['\n', '\r\n']) for (const first of blocks) for (const second of blocks) {
+  const parts = [first, 'Paragraph to remove.', second, '[^n]: Note.'];
+  const lines = parts.flatMap((part, index) => [...part.split('\n'), ...(index + 1 < parts.length ? ['', ''] : [])]);
+  const starts: number[] = [];
+  for (let index = 0, line = 0; index < parts.length; index++) { starts.push(line); line += parts[index]!.split('\n').length + 2; }
+  const inspection = inspectMarkdownCodeLines(lines.join(newline));
+  for (let mask = 1; mask < 16; mask++) {
+    const removed = new Set<number>();
+    for (let part = 0; part < parts.length; part++) if (mask & 1 << part) {
+      for (let line = starts[part]!; line < starts[part]! + parts[part]!.split('\n').length; line++) removed.add(line);
+    }
+    const projected = inspection.withoutLines(removed);
+    if (!projected) continue;
+    assert.deepEqual([...projected.codeLines], [...collectMarkdownCodeLines(lines.filter((_, index) => !removed.has(index)).join('\n'))]);
+    multipleCuts++;
+  }
+}
+assert.ok(multipleCuts > 1_000, 'multiple cuts must account for all removed lines and both line endings');
+console.log('footnote code-line reuse and structural fallback checks passed', { reused, fallback, removalChecks, removalFallbacks, multipleCuts });

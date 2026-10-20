@@ -1382,3 +1382,28 @@ well as Host responsiveness, rejected-request recovery, offscreen search and
 owner release. HTML export checks pass. This packaging refinement is after
 V59; the byte reduction is measured, but an end-to-end latency gain is not
 claimed from bundle size alone.
+
+### Reuse code scopes across independent footnote removals
+
+The original block inspection now carries code rows, inline-content starts,
+table rows and top-level root ranges through footnote extraction. Removing
+whole roots can reuse these facts only when every cut retains a preceding
+blank and the next retained content is unindented. Cuts through a root or
+indented continuations retain the complete fresh inspection. Inline reference
+substitution still needs its existing separate proof. This removes one global
+block scan from the comprehensive fixture (two to one), without changing the
+Markdown-it renderer or adopting another document cache. Temporary inline/line
+projection data is released after its proof; only the code-line set survives.
+
+A root-boundary-only prototype is rejected by a real counterexample: deleting
+the paragraph between two indented code blocks merges their blank lines into
+code. The production regression requires fallback for that boundary. The scan
+budget is red at two global scans and green at one. The same test compares
+10,925 accepted removals with fresh parsing, rejects 34,720 ambiguous cuts, and
+checks 4,562 accepted multiple removals across LF/CRLF. Existing reference
+substitution comparisons exercise 436 proven and 68 fallback cases. An
+independent unchanged-HEAD build matches 3,724 complete HTML/heading/block
+manifest comparisons across 931 inputs, both presets and eager/windowed modes,
+including the complete 1 MiB fixture. Preview rendering, lazy inline work,
+installed Node behavior, HTML export, code-line budgets, viewport work budgets
+and extension type checks pass. Native first-Preview timing remains separate.
