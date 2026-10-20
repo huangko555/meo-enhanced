@@ -1,5 +1,10 @@
 {
   "separate": {
+    "scripts/test-mermaid-elk-layout.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-mermaid-elk-layout.ts",
+      "reason": "ELK worker layout projection preserves Mermaid renderer aliases; checks bounded serialization, queue admission, errors/retry, stale replies, timeout, idle retirement and late disposal. Actual CSP and geometry use test-mermaid-module-runtime."
+    },
     "scripts/test-mermaid-module-runtime.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-mermaid-module-runtime.ts",

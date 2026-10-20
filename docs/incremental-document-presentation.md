@@ -710,3 +710,45 @@ boundary witnesses and four real scrollbar drags. First Preview takes 4.18 s
 old 500 ms severe-stall gate still does not establish 16–33 ms scrolling or a
 one-second first viewport. These cold Preview observations supersede any claim
 that warmed 100 ms-range drag samples describe the entire experience.
+
+V48 (`cef7dd37`, archive SHA-256
+`ea6e6279b11dbd6fe83570acb07cb4ae04c898e374795276e536a2524c3ec297`)
+completes strict native functional acceptance on ordinary and 1 MiB rich files,
+including source-exact typing, undo/save, multiple clicked-text witnesses, mode
+round trips, four scrollbar drags, visible boundaries and whole formatted copy.
+The Preview screenshot is visually checked. Warm Source/Live input P95 is
+70/139 ms on the rich case; sampled Live clicks are 85–247 ms. First Live/Preview
+take 2.66/3.14 s; drag frame gaps are 78/91/175/101 ms, and complete formatted
+copy takes 6.31 s. Ordinary Source/Live typing P95 is 78/81 ms.
+
+A separate no-traversal V48 diagnostic still has Live typing P95/maximum
+562/574 ms and a 538 ms frame gap. Source cold P95/maximum is 74/111 ms. Both
+retain exact source and undo. The full run passing the old 500 ms gate therefore
+does not close cold Live acceptance. Image first-arrival instability also cannot
+be ruled out by one successful full run.
+
+The exact V46 cold Preview CPU/trace diagnostic identifies a 717 ms main-thread
+ELK timer task. Mermaid 12.0.0 now uses ELK by default for several diagram types,
+and its `new ELK()` uses an in-thread simulated worker. ELK's documented browser
+worker support supplies a stronger execution boundary
+([ELK worker API](https://github.com/kieler/elkjs#usage),
+[Mermaid layout defaults](https://github.com/mermaid-js/mermaid/blob/develop/packages/mermaid/src/docs/config/layouts.md)).
+The reading module build now replaces that ELK constructor with a shared client
+of the official, packaged `elk-worker.min.js`, loaded under the existing blob
+worker CSP. Labels and SVG painting still use Mermaid's original renderer.
+Standalone HTML/PDF/Word continue to use the unchanged classic distribution.
+
+The worker receives plain layout data rather than renderer functions or DOM
+handles. Returned coordinates merge into the original graph/arrays so Mermaid's
+nodeDb aliases, labels and renderer-only sidecars remain valid. One worker serves
+Live and Preview, with one layout in flight, bounded queued work, a 15 s deadline,
+and 30 s idle retirement. Worker failure/timeout rejects work and allows a later
+fresh worker; there is no synchronous layout fallback. The direct elkjs dependency
+pins the same 0.9.3 version already used by Mermaid.
+
+Actual CSP checks require one real shared worker and compare twelve graph
+geometries/node structures with the stock classic runtime, including nested
+groups, cycles, states and math labels. Queue/clone/alias, failure/retry, stale
+reply, timeout and disposal checks pass. Native input/scroll acceptance of this
+ELK boundary remains required. The trace also contains other layout costs; this
+change is not a claim that all rendering is off the main thread.

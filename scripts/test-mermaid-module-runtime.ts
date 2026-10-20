@@ -21,12 +21,23 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
     + '<link rel="modulepreload" href="/module/mermaidRuntime.js"><style>body{font:16px Arial}</style></head>'
     + '<body data-meo-mermaid-src="/classic.js" data-meo-mermaid-module-src="/module/mermaidRuntime.js">'
     + '<div id="source"></div><script src="/entry.js"></script></body></html>', { headers: {
-    'content-type': 'text/html', 'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; font-src 'self' data:; img-src data:"
+    'content-type': 'text/html', 'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; font-src 'self' data:; img-src data:; worker-src blob:"
   } });
 } });
 const browser = await launchTestBrowser().catch(error => { server.stop(true); throw error; });
 try {
   const page = await browser.newPage();
+  await page.evaluateOnNewDocument(() => {
+    const scope = window as any, Native = Worker;
+    scope.__layoutWorkers = 0; scope.__layoutJobs = 0;
+    window.Worker = class extends Native {
+      constructor(url: string | URL, options?: WorkerOptions) { super(url, options); scope.__layoutWorkers++; }
+      postMessage(message: any, ...rest: any[]) {
+        if (message.graph?.id) scope.__layoutJobs++;
+        super.postMessage(message, ...rest);
+      }
+    };
+  });
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(String(error)));
   await page.goto(server.url.href);
@@ -54,7 +65,10 @@ try {
     '---\nconfig:\n  layout: elk\n---\nflowchart LR\n  A[One]-->B[Two]',
     'stateDiagram-v2\n  [*] --> Ready\n  Ready --> Done',
     'erDiagram\n  READER ||--o{ DOCUMENT : reads', 'pie title Shares\n  "One" : 30\n  "Two" : 70',
-    'flowchart LR\n  A["$$x^2 + 1$$"] --> B[Result]'];
+    'flowchart LR\n  A["$$x^2 + 1$$"] --> B[Result]',
+    'flowchart TB\n  subgraph Outer[Outer title]\n    subgraph Inner[Inner title]\n      A[Start] --> B[Next]\n    end\n    C[Outside] --> A\n  end\n  B --> D[Finish]',
+    'flowchart LR\n  A[Start] -->|First label| B[Middle]\n  B -->|Second label| C[Finish]\n  C --> A',
+    'stateDiagram-v2\n  state Outer {\n    [*] --> Ready\n    Ready --> Done\n  }\n  Outer --> Finished'];
   const render = async (target: typeof page) => target.evaluate(async samples => {
     const runtime = (window as any).mermaid;
     runtime.initialize({ startOnLoad: false, securityLevel: 'strict', deterministicIds: true, theme: 'default' });
@@ -68,6 +82,10 @@ try {
     return result;
   }, samples);
   const modular = await render(page);
+  const layoutWork = await page.evaluate(() => ({ workers: (window as any).__layoutWorkers,
+    jobs: (window as any).__layoutJobs, fetched: performance.getEntriesByType('resource').some(entry => entry.name.endsWith('/elk-layout-worker.js')) }));
+  assert.equal(layoutWork.workers, 1, 'Live/Preview diagram layouts share one real worker instead of creating one engine per graph');
+  assert.ok(layoutWork.jobs >= 8 && layoutWork.fetched, 'the default ELK paths must execute through the packaged worker under the production CSP');
   const classic = await browser.newPage();
   await classic.goto(server.url.href);
   await classic.addScriptTag({ url: new URL('classic.js', server.url).href });

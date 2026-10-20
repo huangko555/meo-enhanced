@@ -1,5 +1,15 @@
 # Third-Party Notices
 
+## elkjs 0.9.3
+
+- Source: https://github.com/kieler/elkjs/tree/v0.9.3
+- License: Eclipse Public License 2.0 (EPL-2.0).
+- Bundled asset: The unchanged official `elk-worker.min.js` is distributed as
+  `webview/dist/mermaid/elk-layout-worker.js` for background Mermaid layout.
+- License text: `webview/dist/mermaid/elk-LICENSE.md` in the extension package.
+- Source availability: The corresponding source is available from the linked
+  upstream release. The worker itself is not modified.
+
 ## VS Code Codicons
 
 - Author: Microsoft
