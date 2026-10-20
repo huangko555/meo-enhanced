@@ -1043,7 +1043,7 @@ exportControl.addEventListener('pointerleave', () => {
   exportMenuCloseTimer = window.setTimeout(() => {
     if (exportControl.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
     setExportMenuExpanded(false);
-  }, 300);
+  }, 200);
 });
 exportControl.addEventListener('focusin', () => {
   previewOptionsMenu.close();

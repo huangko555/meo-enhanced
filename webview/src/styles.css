@@ -1273,10 +1273,7 @@ html[data-editor-appearance='dark'] .preview-preset-dropdown-panel {
   border-radius: 8px;
   color: var(--meo-ui-text);
   background: var(--meo-ui-surface);
-  transition:
-    opacity 80ms ease,
-    transform 80ms ease,
-    visibility 0s linear 80ms;
+  transition: none;
 }
 
 .preview-export-menu::before {
@@ -1293,7 +1290,7 @@ html[data-editor-appearance='dark'] .preview-preset-dropdown-panel {
   visibility: visible;
   pointer-events: auto;
   transform: translateY(0);
-  transition-delay: 0s;
+  transition: opacity 80ms ease, transform 80ms ease;
 }
 
 .preview-export-control.is-dismissed .preview-export-menu {
