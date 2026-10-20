@@ -653,3 +653,33 @@ cold-history test still reports its previously reproduced two presentation
 rebuilds instead of zero; this remains an open baseline failure. Worker facts
 are still sent in full, so this change does not establish reduced wire size or
 native cold-input latency; those require separate measurements.
+
+V46 (`90374149`, archive SHA-256
+`72e2607e6a43f7db79d4cc123c969bbaff82353f931788c9a58c4e5520c90cba`)
+fresh-window Live diagnostic has input median/P95/maximum 78/186/262 ms across
+23 characters, a 392 ms frame gap through asynchronous diff publication, and
+exact source/undo/save results. This is a narrow sample. A separate Source cold
+sample has a 41 ms median but 289/376 ms P95/maximum, concentrated in initial
+keys; neither the warmed numbers nor Live's improvement establish smoothness.
+The strict full run still stops at a Live clicked-text mismatch. In a diagnostic
+repeat that continues mismatches, four native Preview drags finish and the old
+severe-stall gate passes, but first Preview takes 5.85 s (render response 4.39 s).
+That repeat is explicitly not a complete functional pass.
+
+A separate deterministic image-click reproduction finds a real interaction
+ordering bug in both ordinary and large documents. Live's `pointerdown` hides
+the previously active source before CodeMirror's subsequent `mousedown` hit
+test; the intended glyph moves 18 px and the caret reaches a blank line. The
+pointer state now retains the existing active-line/range presentation until the
+initial selection transaction resolves the hit, then enters the existing drag
+phase. Release/cancellation still retire that state through the existing owner.
+The regression checks glyph geometry at `mousedown`, real browser click/input,
+and exact undo for ordinary and budgeted documents. Image layout/clone decode,
+toolbar activation/focus, Live scan budgets and production three-mode checks
+pass. The previously reproduced nested-marker IME caret and overlapping table
+reveal failures remain open; this change does not claim to repair them.
+
+Native V46 diagnostics also show image growth can move a target before the OS
+pointer event arrives. The click-order repair addresses the reproducible
+in-handler movement, not this separate first-arrival case. Unknown intrinsic
+image geometry and final native interaction acceptance remain open.

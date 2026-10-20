@@ -2572,7 +2572,9 @@ export function createEditor({
             liveSelectionGeneration += 1;
             liveSelectionPointerId = event.pointerId;
             view.dispatch({
-              effects: setLivePointerSelectionActiveEffect.of({ active: true, preservedLine })
+              // pointerdown precedes CodeMirror's mousedown hit test. Hiding
+              // the old source line here can move the glyph being clicked.
+              effects: setLivePointerSelectionActiveEffect.of({ active: true, preservedLine, awaitingSelection: true })
             });
           }
 

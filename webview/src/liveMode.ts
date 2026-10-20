@@ -393,6 +393,8 @@ type ActiveImageGroup = { line: ReturnType<EditorState['doc']['line']>; items: I
 type LivePointerSelectionState = {
   active: boolean;
   preservedLine: number | null;
+  /** Keep the existing layout until CodeMirror has resolved the initial hit. */
+  awaitingSelection?: true;
 };
 
 export const setLivePointerSelectionActiveEffect = StateEffect.define<LivePointerSelectionState>();
@@ -409,6 +411,9 @@ const livePointerSelectionActiveField = StateField.define<LivePointerSelectionSt
       if (effect.is(setLivePointerSelectionActiveEffect)) {
         return effect.value;
       }
+    }
+    if (value.awaitingSelection && transaction.selection) {
+      return { active: value.active, preservedLine: value.preservedLine };
     }
     return value;
   }
@@ -1545,7 +1550,7 @@ function collectActiveLines(state: EditorState): Set<number> {
   if (state.field(liveDocumentIdleField)) {
     return new Set();
   }
-  if (pointerSelection.active) {
+  if (pointerSelection.active && !pointerSelection.awaitingSelection) {
     return pointerSelection.preservedLine === null
       ? new Set()
       : new Set([pointerSelection.preservedLine]);
@@ -4433,7 +4438,8 @@ function rangesOverlap(fromA: number, toA: number, fromB: number, toB: number): 
 }
 
 function overlapsSelection(state: EditorState, from: number, to: number): boolean {
-  if (state.field(livePointerSelectionActiveField).active || state.field(liveDocumentIdleField)) {
+  const pointer = state.field(livePointerSelectionActiveField);
+  if ((pointer.active && !pointer.awaitingSelection) || state.field(liveDocumentIdleField)) {
     return false;
   }
 

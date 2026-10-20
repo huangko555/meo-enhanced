@@ -78,6 +78,55 @@ async function main() {
     assert.ok(Math.abs(beforeDecode.lineTop - afterDecode.lineTop) <= 1,
       `late clone decoding must not move the next editable line: ${JSON.stringify({ beforeDecode, afterDecode })}`);
 
+    // pointerdown runs before CodeMirror's mousedown hit test. Replacing the
+    // previously active image source at that point moves the clicked glyph.
+    for (const large of [false, true]) {
+      const point = await page.evaluate(async large => {
+        const harness = (window as any).TableStabilityHarness;
+        harness.setImageSrcResolver(() => 'data:image/svg+xml,' + encodeURIComponent(
+          '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#73c"/></svg>'));
+        const source = 'Intro\n\n![Active](wide.png)\n\nTarget below picture\n\nTail\n' + (large ? '\nOrdinary line.\n'.repeat(22_000) : '');
+        const editor = harness.createEditor({ parent: document.getElementById('app'), text: source, initialMode: 'live', onApplyChanges() {} });
+        (window as any).__pointerImageEditor = editor;
+        editor.view.dispatch({ selection: { anchor: source.indexOf('Active') + 1 } });
+        editor.view.focus();
+        for (let frame = 0; frame < 15; frame++) await new Promise(requestAnimationFrame);
+        const locate = () => {
+          const line = [...document.querySelectorAll('.cm-line')].find(line => line.textContent === 'Target below picture')!;
+          const range = document.createRange();
+          range.setStart(line.firstChild!, 3); range.setEnd(line.firstChild!, 4);
+          const rect = range.getBoundingClientRect();
+          return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        };
+        const before = locate();
+        (window as any).__pointerImageGeometry = { before, source };
+        document.addEventListener('mousedown', () => { (window as any).__pointerImageGeometry.atHit = locate(); }, { capture: true, once: true });
+        return before;
+      }, large);
+      await page.mouse.click(point.x, point.y);
+      const after = await page.evaluate(async () => {
+        for (let frame = 0; frame < 6; frame++) await new Promise(requestAnimationFrame);
+        const editor = (window as any).__pointerImageEditor;
+        const geometry = (window as any).__pointerImageGeometry;
+        return { before: geometry.before, atHit: geometry.atHit,
+          line: editor.view.state.doc.lineAt(editor.view.state.selection.main.head).text };
+      });
+      assert.ok(after.atHit && Math.abs(after.atHit.y - after.before.y) <= 1,
+        `${large ? 'large' : 'ordinary'} Live pointerdown moved text before the initial hit: ${JSON.stringify(after.atHit)}`);
+      assert.equal(after.line, 'Target below picture', 'the initial click must reach its glyph beside an active image');
+      await page.keyboard.type('Q');
+      const typed = await page.evaluate(async () => {
+        const editor = (window as any).__pointerImageEditor;
+        const line = editor.view.state.doc.lineAt(editor.view.state.selection.main.head).text;
+        await editor.undo();
+        const restored = editor.getText() === (window as any).__pointerImageGeometry.source;
+        editor.destroy();
+        return { line, restored };
+      });
+      assert.equal(typed.line.replace('Q', ''), 'Target below picture', 'typing after the click must edit the clicked line');
+      assert.ok(typed.restored, 'undo after an image-adjacent click must restore exact source');
+    }
+
     const initial = await page.evaluate(async () => {
       const harness = (window as any).TableStabilityHarness;
       const svg = (color: string, width: number, height: number) => (
