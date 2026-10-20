@@ -1,6 +1,6 @@
 import { ParseContext, language, syntaxTree, syntaxTreeAvailable } from '@codemirror/language';
 import type { EditorState, Text } from '@codemirror/state';
-import { NodeProp, Tree, type Parser, type ParseWrapper } from '@lezer/common';
+import { NodeProp, Tree, TreeFragment, type Parser, type ParseWrapper } from '@lezer/common';
 import { usesLargeDocumentDerivedWorkBudget } from './liveInputDerivedWork';
 
 const completeOuterMarkdown = new NodeProp<number>({ perNode: true });
@@ -61,7 +61,8 @@ export function hasPreparedMarkdownStructure(state: EditorState): boolean {
   return !!parser && preparedDocuments.get(state.doc) === parser;
 }
 
-type Bounds = { readonly from: number; readonly to: number };
+export type MarkdownLanguageViewport = { readonly from: number; readonly to: number };
+type Bounds = MarkdownLanguageViewport;
 const preparationViewports = new WeakMap<Text, Bounds>();
 
 /** ensureSyntaxTree temporarily widens ParseContext.viewport to its requested
@@ -79,9 +80,25 @@ export function withMarkdownPreparationViewport<T>(state: EditorState, viewport:
 /** Decline before mixed parsing materializes a packed node or creates a nested
  * job. Registering the whole host makes entering its source restart the parser. */
 export function skipOffscreenMarkdownLanguage(context: ParseContext | null, from: number, to: number): boolean {
-  if (!context || !usesLargeDocumentDerivedWorkBudget(context.state)) return false;
-  const viewport = preparationViewports.get(context.state.doc) ?? context.viewport;
+  const viewport = markdownLanguageViewport(context);
+  if (!context || !viewport) return false;
   if (to > viewport.from && from < viewport.to) return false;
   context.skipUntilInView(from, to);
   return true;
+}
+
+export function markdownLanguageViewport(context: ParseContext | null): MarkdownLanguageViewport | undefined {
+  if (!context || !usesLargeDocumentDerivedWorkBudget(context.state)) return undefined;
+  const viewport = preparationViewports.get(context.state.doc) ?? context.viewport;
+  return { from: Math.max(0, viewport.from), to: Math.min(context.state.doc.length, viewport.to) };
+}
+
+/** Reuse proves embedded parsing only inside the previously processed viewport.
+ * The complete outer tree is a separate proof, not proof of nested languages. */
+export function clipMarkdownMixedFragments(fragments: readonly TreeFragment[], viewport: MarkdownLanguageViewport): TreeFragment[] {
+  return fragments.flatMap(fragment => {
+    const from = Math.max(fragment.from, viewport.from), to = Math.min(fragment.to, viewport.to);
+    return from < to ? [new TreeFragment(from, to, fragment.tree, fragment.offset,
+      fragment.openStart || from > fragment.from, fragment.openEnd || to < fragment.to)] : [];
+  });
 }

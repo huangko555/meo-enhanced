@@ -4,7 +4,8 @@ import { ViewPlugin } from '@codemirror/view';
 import { TreeFragment, type NodeSet, type ParseWrapper, type Tree } from '@lezer/common';
 import { readDocumentTextProjection } from '../application/documentTextProjection';
 import { liveInputDerivedWorkReadiness, usesLargeDocumentDerivedWorkBudget } from './liveInputDerivedWork';
-import { acceptCompletedMarkdownStructure, isCompleteMarkdownStructure } from './markdownStructure';
+import { acceptCompletedMarkdownStructure, clipMarkdownMixedFragments, isCompleteMarkdownStructure,
+  type MarkdownLanguageViewport } from './markdownStructure';
 import { createMarkdownTreeReceiver } from './markdownTreeTransfer';
 import type { MarkdownParseRequest, MarkdownParseResponse } from './markdownParseProtocol';
 import { createClassicWorkerTransport } from '../adapters/classicWorkerTransport';
@@ -24,7 +25,11 @@ function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet, contex
   const receiver = createMarkdownTreeReceiver(nodeSet), cache = new WeakMap<Text, Result>(), waiting = new Set<Result>();
   const grammar = nodeSet.types.map(type => type.name).join('\0');
   let mixedFragments: readonly TreeFragment[] = [];
-  const pendingMixed = new WeakMap<Text, { tree: Tree; partial: boolean }>();
+  const pendingMixed = new WeakMap<Text, { tree: Tree; partial: boolean; viewport?: MarkdownLanguageViewport }>();
+  const retainMixed = (tree: Tree, partial: boolean, viewport?: MarkdownLanguageViewport) => {
+    const next = TreeFragment.addTree(tree, mixedFragments, partial);
+    mixedFragments = viewport ? clipMarkdownMixedFragments(next, viewport) : next;
+  };
   let latest: Text | undefined, posted: Text | undefined, requested: Text | undefined;
   let tabSize = 4;
   let changes: ChangeSet | null = null, sequence = 0, postedRevision = 0;
@@ -160,21 +165,21 @@ function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet, contex
       update.iterChangedRanges((fromA, toA, fromB, toB) => ranges.push({ fromA, toA, fromB, toB }));
       mixedFragments = TreeFragment.applyChanges(mixedFragments, ranges);
       const completed = pendingMixed.get(after);
-      if (completed) { mixedFragments = TreeFragment.addTree(completed.tree, mixedFragments, completed.partial); pendingMixed.delete(after); }
+      if (completed) { retainMixed(completed.tree, completed.partial, completed.viewport); pendingMixed.delete(after); }
       if (posted) changes = changes ? changes.compose(update) : update;
     },
     attach(doc: Text) {
       latest = doc; attached = true;
       const completed = pendingMixed.get(doc);
-      if (completed) { mixedFragments = TreeFragment.addTree(completed.tree, mixedFragments, completed.partial); pendingMixed.delete(doc); }
+      if (completed) { retainMixed(completed.tree, completed.partial, completed.viewport); pendingMixed.delete(doc); }
       schedule();
     },
     canPublish(doc: Text) { return attached && latest === doc; },
     mixed(doc: Text, fallback: readonly TreeFragment[]) { return latest === doc && mixedFragments.length ? mixedFragments : fallback; },
-    remember(doc: Text, tree: Tree, partial: boolean) {
+    remember(doc: Text, tree: Tree, partial: boolean, viewport?: MarkdownLanguageViewport) {
       if (disposed || failure || tree.length !== doc.length || tree.type.name !== 'Document') return;
-      if (latest === doc) mixedFragments = TreeFragment.addTree(tree, mixedFragments, partial);
-      else pendingMixed.set(doc, { tree, partial });
+      if (latest === doc) retainMixed(tree, partial, viewport);
+      else pendingMixed.set(doc, { tree, partial, viewport });
     },
     get error() { return failure; },
     dispose() { disposed = true; attached = false; stop(); latest = requested = undefined; }
@@ -246,6 +251,6 @@ export function markdownMixedFragments(state: EditorState, fallback: readonly Tr
   return state.facet(runtime)?.mixed(state.doc, fallback) ?? fallback;
 }
 
-export function rememberMarkdownMixedTree(state: EditorState, tree: Tree, partial: boolean): void {
-  state.facet(runtime)?.remember(state.doc, tree, partial);
+export function rememberMarkdownMixedTree(state: EditorState, tree: Tree, partial: boolean, viewport?: MarkdownLanguageViewport): void {
+  state.facet(runtime)?.remember(state.doc, tree, partial, viewport);
 }

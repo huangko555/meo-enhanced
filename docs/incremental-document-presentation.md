@@ -752,3 +752,44 @@ groups, cycles, states and math labels. Queue/clone/alias, failure/retry, stale
 reply, timeout and disposal checks pass. Native input/scroll acceptance of this
 ELK boundary remains required. The trace also contains other layout costs; this
 change is not a claim that all rendering is off the main thread.
+
+V49 (`5f4ec037`, archive SHA-256
+`9c99be46dafead897d4b1ed014ce44075ddb555580fa064f94585052f5b500bc`)
+has a fresh-window Live input median/P95/maximum of 44/147/210 ms, a 185 ms
+frame gap and a 152 ms cold click. Exact source, undo/save and clock checks pass.
+The independent Source cold sample is 37/288/364 ms; cross-run variation remains
+substantial, so these samples do not establish P95 acceptance. A strict full run
+stops at a rich Live clicked-text mismatch near image captions. A separate
+instrumented repeat has no mismatches, but is diagnostic-only by design; the
+strict failure remains open.
+
+The independent Preview-only V49 run passes native boundary, source, clock and
+whole formatted-copy checks. First Preview takes 3.78 s (response 3.28 s), with
+four drag frame gaps of 166/224/140/183 ms. Complete formatted copy takes 7.71 s
+and preserves 5,538,400 HTML units, 567,075 text units and the complete end marker.
+Passing the historical 500 ms gate still does not mean fluid scrolling.
+
+V49's cold Source CPU diagnostic attributes 117 ms aggregate to mixed-language
+advancement and 135 ms to worker-message delivery over 4.90 s. The maps are
+checked against the packaged executable using the same fixed-width digest-only
+normalization as V46. These totals are not one-event latency. Lezer's mixed
+parser was still visiting distant Markdown nodes merely to reject their code
+languages. Budgeted parsing now uses public TreeFragment reuse to skip outer
+subtrees outside the viewport. A weak index reads packed immutable branches
+once, reusing unchanged branches, and registers only actual code/HTML hosts for
+later grammar demand. Ordinary Markdown must not be marked skipped.
+
+Reuse boundaries include each intersecting code/HTML host in full, preserving
+inner LR fragments for giant blocks. Published outer completeness and nested
+language completeness remain separate proofs. A precompleted 2,000-block fixture
+previously needed 39,154 cursor visits; the scoped test requires fewer than 2,000,
+including distant/return demand. Real-worker checks preserve remote code colors,
+18 revision jobs with one snapshot, exact CJK/undo, and 1,637 LR steps for a
+9,000-line code edit. Live work budgets and production three-mode content,
+history, parse reuse and reading positions pass. Native latency still needs
+remeasurement after this change.
+
+The standalone Source-force fixture also fails on unchanged V49 at its historical
+requirement for exactly one synchronous force call (zero observed). The baseline
+is reproduced by substituting unchanged committed sources; it is not counted
+as passing. Existing IME, table-reveal and no-worker history failures remain open.
