@@ -4,6 +4,7 @@ import { getPreviewPreset, resolvePresetAppearance, type PreviewPresetId, type P
 import { getGithubMarkdownStyles } from './presets/github-readme/styles.js';
 import { getReadingPresetStyles } from './presets/reading/styles.js';
 import { normalizePreviewFontFamily } from '../protocol/editorStyleEnvironment';
+import { readingMathReflowCss } from '../shared/mathStyles';
 
 export function buildPresetPreviewStyles(
   preset: PreviewPresetId,
@@ -102,6 +103,7 @@ body { margin: 0; background: ${background}; color: ${foreground}; }
 .markdown-body .meo-export-mermaid-svg svg { display: block; max-width: 100%; height: auto; margin-inline: auto; }
 .markdown-body .meo-export-math-display { display: block; text-align: center; margin-bottom: 16px; }
 .markdown-body .meo-export-math-display .meo-export-math-canvas { margin-left: auto; margin-right: auto; }
+${readingMathReflowCss}
 .markdown-body .footnotes p { margin-top: 16px; }
 .markdown-body .footnote-backref { text-decoration: underline; }
 html[data-meo-export-target='pdf'] .markdown-body .meo-table-scroll { overflow: visible; }

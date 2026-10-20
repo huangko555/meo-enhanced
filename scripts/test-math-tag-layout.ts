@@ -5,8 +5,19 @@ import { launchTestBrowser } from './browser-test-helpers';
 import exportRuntime from '../src/export/runtime';
 import { fitBlockMathForPdf, preparePdfPagination } from '../src/export/pdfRenderer';
 import { decodeHostToWebviewMessage, decodeWebviewToHostMessage } from '../src/protocol/messages';
+import { createCustomPreviewPreset, decodeCustomPreviewPresets, parseCustomPreviewPresetManifest } from '../src/foundation/customPreviewPreset';
 
 const root = path.resolve(import.meta.dir, '..');
+const customGithubPreset = createCustomPreviewPreset(parseCustomPreviewPresetManifest({
+  schemaVersion: 1, id: 'math-reflow', name: 'Math reflow', description: 'Inherited GitHub formula layout',
+  base: 'github-readme', themes: { light: { css: 'light.css' }, dark: { css: 'dark.css' } }
+}), { light: '', dark: '', common: '.meo-export-doc { --math-reflow-fixture: 1; }' }, 'a'.repeat(64));
+assert.ok(decodeCustomPreviewPresets([customGithubPreset]), 'The custom preset fixture must follow Protocol');
+const presetCases = (['github-readme', customGithubPreset.id, 'default'] as const).flatMap(preset => ([
+  ['light', 'en'], ['dark', 'en'], ['light', 'zh-CN'], ['dark', 'zh-CN']
+] as const).map(([appearance, uiLanguage]) => ({ preset, appearance, uiLanguage })));
+const surfaces = process.argv.includes('--preview-only')
+  ? ['preview'] as const : ['live', 'preview', 'source', 'html'] as const;
 const reportedFormula = String.raw`f_C = \sqrt{A_d^2 - 1} \cdot f_H \approx A_d \cdot f_H\tag{1.2}`;
 const formulas = [
   reportedFormula,
@@ -131,11 +142,11 @@ if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 const bundle = await build.outputs[0]!.text();
 const browser = await launchTestBrowser();
 try {
-  for (const [appearance, uiLanguage] of [
-    ['light', 'en'], ['dark', 'en'], ['light', 'zh-CN'], ['dark', 'zh-CN']
-  ] as const) {
+  for (const { preset, appearance, uiLanguage } of presetCases) {
     for (const width of [420, 1280]) {
-      for (const surface of ['live', 'preview', 'source', 'html'] as const) {
+      for (const surface of surfaces) {
+        // Live has no reading preset; exercise it once alongside Default.
+        if (surface === 'live' && preset !== 'default') continue;
         const page = await browser.newPage();
         try {
           const errors: string[] = [];
@@ -147,11 +158,12 @@ try {
           if (surface === 'html') {
             const rendered = await exportRuntime.renderExportHtmlDocument({
               readingSnapshot: {
-                snapshotId: 'tag-layout', text: markdown, appearance, uiLanguage,
+                snapshotId: 'tag-layout', text: markdown, appearance, uiLanguage, preset,
                 environment: { previewFontFamily: '' }
               },
               sourceDocumentPath: 'C:/tmp/math-tag-layout.md', outputFilePath: 'C:/tmp/math-tag-layout.html',
-              target: 'html', katexStylesHref: katexHref, title: 'Equation tag layout'
+              target: 'html', katexStylesHref: katexHref, title: 'Equation tag layout',
+              presetDefinition: preset === customGithubPreset.id ? customGithubPreset : undefined
             });
             await page.setContent(rendered.htmlDocument);
             await page.waitForFunction(() => (window as any).__MEO_EXPORT_READY__ === true);
@@ -164,7 +176,8 @@ try {
                 type: 'previewRenderResult', requestId: message.requestId,
                 result: { ok: true, value: exportRuntime.renderPreviewDocument({
                   markdownText: message.text, sourceDocumentPath: 'C:/tmp/math-tag-layout.md',
-                  uiLanguage: message.uiLanguage, styleEnvironment: message.environment
+                  uiLanguage: message.uiLanguage, styleEnvironment: message.environment, preset: message.preset,
+                  presetDefinition: message.preset === customGithubPreset.id ? customGithubPreset : undefined
                 }) }
               });
             });
@@ -174,12 +187,14 @@ try {
             await page.evaluate(href => { document.body.dataset.meoKatexSrc = href; }, katexHref);
             await page.addScriptTag({ content: `window.acquireVsCodeApi=()=>({getState(){},setState(){},postMessage(message){window.__renderMathTagPreview(message).then(response=>{if(response)window.dispatchEvent(new MessageEvent('message',{data:response}));});}});` });
             await page.addScriptTag({ content: bundle });
-            await page.evaluate(({ text, mode, appearance, uiLanguage }) => {
+            await page.evaluate(({ text, mode, appearance, uiLanguage, preset, customPreset }) => {
               window.dispatchEvent(new MessageEvent('message', { data: {
                 type: 'init', documentId: 'file:///math-tag-layout.md', text, version: 1,
                 savedRevision: { version: 1, text }, diagnostics: [], mode, uiLanguage,
                 uiLanguagePreference: 'auto', automaticUiLanguage: uiLanguage, sourceLineNumbers: 'on',
                 previewAppearance: appearance, previewFontFamily: '', previewSourceColoring: true,
+                previewPreset: preset, customPreviewPresets: [customPreset],
+                previewPresetPreferences: { [preset]: { appearance, contentWidth: 'responsive' } },
                 editorAppearance: appearance, gitChangesGutter: false, gitDiffLineHighlights: false,
                 gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false,
                 fixedBaselineActive: false, contentMaxWidthEnabled: false,
@@ -187,7 +202,7 @@ try {
                 outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
                 restoreReadingPositionOnOpen: false, vscodeTheme: null
               } }));
-            }, { text: markdown, mode: surface, appearance, uiLanguage });
+            }, { text: markdown, mode: surface, appearance, uiLanguage, preset, customPreset: customGithubPreset });
             if (surface === 'live') {
               await page.waitForSelector('.meo-md-math-fenced-display .katex-html .tag');
             } else {
@@ -196,12 +211,16 @@ try {
                 await page.click('.source-preview-button');
                 await page.setViewport({ width, height: 2400, deviceScaleFactor: 1 });
               }
-              await page.waitForFunction(count => document.querySelector<HTMLIFrameElement>('.preview-frame')
-                ?.contentDocument?.querySelectorAll('.katex-html > .tag').length === count, {}, expectedTagCount);
+              await page.waitForFunction(({ count, preset }) => {
+                const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+                return doc?.documentElement.dataset.meoPreviewPreset === preset
+                  && doc.querySelectorAll('.katex-html > .tag').length === count;
+              }, {}, { count: expectedTagCount, preset });
+              await page.waitForSelector('.preview-host:not([hidden]):not([inert]) .preview-frame', { visible: true });
               await page.evaluate(async () => { for (let i = 0; i < 3; i++) await new Promise(requestAnimationFrame); });
             }
           }
-          const context = `${surface}, ${appearance}, ${uiLanguage}, ${width}px`;
+          const context = `${preset}, ${surface}, ${appearance}, ${uiLanguage}, ${width}px`;
           const layout = await page.evaluate(readTagLayout, { surface });
           assertTagLayout(layout, expectedTagCount, context);
           assert.ok(layout.every(item => item.fitsContainer), JSON.stringify({ context, layout }));
@@ -209,7 +228,7 @@ try {
           if (process.argv.includes('--capture') && width === 420 && (surface === 'live' || surface === 'preview')) {
             const directory = path.join(root, '.local/test-artifacts/math-reflow');
             fs.mkdirSync(directory, { recursive: true });
-            await page.screenshot({ path: path.join(directory, `${surface}-${appearance}-${uiLanguage}.png`), fullPage: true });
+            await page.screenshot({ path: path.join(directory, `${preset.replace(':', '-')}-${surface}-${appearance}-${uiLanguage}.png`), fullPage: true });
           }
           if (surface === 'html') {
             // PDF and Word's capture preparation refit the same numbered canvases.

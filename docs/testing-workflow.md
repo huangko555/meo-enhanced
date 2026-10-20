@@ -503,8 +503,14 @@ It also checks automatic wrapping of continuous and nested fractions: adjacent
 rows must retain visible clearance and fit their container in Live, Preview,
 Source's side preview, HTML export and print preparation. Inline math, equation
 numbers and fraction/matrix internals retain their native spacing. The matrix
-covers Chinese/English, light/dark and narrow/wide panes; `--capture` saves narrow
-Live/Preview screenshots under `.local/test-artifacts/math-reflow/`.
+covers Default, GitHub and a GitHub-based custom preset in Chinese/English,
+light/dark and narrow/wide panes. Live is checked once per language/theme/width
+because reading presets do not affect its layout. The Preview and side-preview
+checks confirm the requested preset actually rendered. `--capture` saves narrow
+Live/Preview screenshots under `.local/test-artifacts/math-reflow/`, named by
+preset, surface, theme and language.
+Use `--preview-only` for the focused preset display/visibility loop while
+retaining the full surface matrix in the registered regression run.
 
 `scripts/test-live-input-path-production.ts` observes inserted text's computed
 styles in the first four input frames, including IME preedit and commit. It covers

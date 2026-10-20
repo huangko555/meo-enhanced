@@ -1,5 +1,5 @@
 import { buildMarkdownInlineStyleCss, darkDefaultStrongForeground } from '../shared/markdownInlineStyles';
-import { mathReflowBaseStyle } from '../shared/mathStyles';
+import { readingMathReflowCss } from '../shared/mathStyles';
 import {
   defaultThemeColors,
   getBuiltInVisuals,
@@ -882,14 +882,7 @@ kbd {
   overflow: visible;
 }
 
-.meo-export-math-display .katex-display > .katex { white-space: normal; }
-.meo-export-math-display:not(.meo-math-nowrap) .katex-display > .katex > .katex-html > .base {
-  margin-block: ${mathReflowBaseStyle.marginBlock};
-}
-.meo-export-math-display .katex-html > .tag { white-space: nowrap; }
-.meo-export-math-display.meo-math-nowrap .katex-display > .katex { white-space: nowrap; }
-.meo-export-math-display.meo-math-nowrap > .meo-export-math-canvas,
-.meo-export-math-display.meo-math-nowrap > .meo-export-math-canvas > .katex-display { width: max-content; }
+${readingMathReflowCss}
 
 .meo-export-math-display.meo-export-math-fenced-display {
   display: flex;
