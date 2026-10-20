@@ -1062,3 +1062,42 @@ trips pass. The broader image-presentation production suite still fails its
 pending-table-image setup on both the modified build and otherwise unchanged
 `5707bd62` control; its assertion is retained, with no legacy-baseline exception.
 Native remeasurement remains required before declaring the caption issue fixed.
+
+V55 (`5e525915`, archive SHA-256
+`5f8f63ceffbf8aa52315d44ff1547f42df833f8344839bf40f9e6f60990afbf2`)
+passes the complete ordinary/rich native flow, including all sixteen distributed
+rich-document clicks and the previously failing image region. This is one full
+pass, not proof that the intermittent symptom can never recur. Rich warm Source
+input median/P95/maximum is 45/71/177 ms; Live is 67/231/311 ms. Seven generic Live
+caret paint witnesses are 154–199 ms; the additional footnote witness keeps its
+separate strict target check. First Preview is 3.87 s (3.09 s response), cached
+Preview 648 ms, drag frame gaps 71/128/155/89 ms and whole formatted copy 6.28 s.
+Exact source, undo/save, protocol composition and timing clocks pass; the final
+Preview screenshot is visually checked. Cold Source is 34/81/245 ms with 360 ms
+gap and 30 ms click. Cold Live is 69/178/285 ms with 243 ms gap and 107 ms click.
+The cold runs are deliberately partial diagnostics, not full-flow acceptance.
+These results still miss the tighter Live/scrolling/first-Preview targets.
+
+### Reuse proven code scopes across footnote rewriting
+
+Preview preprocessing previously performed three whole-document structural
+scans: extraction, reference rewriting and later table/list normalization. The
+rewriting pass now retains its code-line index only when each actual generated
+reference is proven to stay in inline paragraph/heading content or a parsed
+table row. Container prefixes and link definitions are not treated as inline
+content. Table cell tokens have no source map, so their enclosing parsed row
+supplies the range. A pipe in a replaced label or generated tag, a line boundary,
+or an unproven position retains fresh parsing. This also protects a malformed
+table header that could become a table after a label's pipe disappears.
+Lines without a footnote opener bypass the per-character reference scanner.
+
+The real preparation work-count regression is red at three global scans and
+green at two, including table references. Fresh code-mask parity covers 504
+container/HTML/code combinations plus table/escaped-pipe cases. An independent
+unchanged-HEAD control compares 517 inputs under both default/GitHub presets and
+both eager/windowed rendering: all 2,068 HTML, heading and block-manifest
+comparisons match, including the complete 1 MiB fixture. Type checking and HTML
+export contracts pass. Alternating warm Node v24.15.0 measurements of preparation
+plus the first twelve blocks have median 290 ms before versus 255 ms after
+(six measured runs per version, about 12% less). This is a host diagnostic with
+explicit GC between runs, not a native first-Preview latency claim.

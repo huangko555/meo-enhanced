@@ -1,5 +1,10 @@
 {
   "separate": {
+    "scripts/test-footnote-code-line-reuse.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-footnote-code-line-reuse.ts",
+      "reason": "Proven inline-only footnote substitutions reuse the code-line index; block-start references and link definitions retain fresh structural parsing. Compares 504 container/HTML/code cases to fresh masks and counts whole-document scans in real Preview preparation."
+    },
     "scripts/test-preview-image-layout.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-preview-image-layout.ts",

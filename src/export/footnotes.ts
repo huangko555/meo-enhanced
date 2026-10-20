@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { SourceMappedMarkdown } from './sourceMappedMarkdown';
-import { collectMarkdownCodeLines } from './markdownCodeLines';
+import { collectMarkdownCodeLines, inspectMarkdownCodeLines } from './markdownCodeLines';
 
 export type PrepareMarkdownWithFootnotesOptions = {
   target: 'html' | 'pdf' | 'docx';
@@ -22,6 +22,8 @@ export type PrepareMarkdownWithFootnotesOptions = {
 
 export type PreparedMarkdownWithFootnotes = {
   body: SourceMappedMarkdown;
+  /** Valid only for this exact rewritten body's line coordinates. */
+  bodyCodeLines?: ReadonlySet<number>;
   footnotesHtml: string;
   footnotes: readonly Readonly<{ sourceLine: number; sourceEndLine: number; sourceCharacters: number; render(): string }>[];
 };
@@ -77,19 +79,25 @@ export function prepareMarkdownWithFootnotes(
       '</sup>'
     ].join('');
   };
-  const rewriteReferences = (markdown: string, definition = false): string => {
-    const codeLines = collectMarkdownCodeLines(markdown,
+  const rewriteReferences = (markdown: string, definition = false) => {
+    const inspection = definition ? null : inspectMarkdownCodeLines(markdown);
+    const codeLines = inspection?.codeLines ?? collectMarkdownCodeLines(markdown,
       definition && !markdown.includes('<') ? options.onFenceInfo : undefined);
-    return markdown.split('\n').map((line, index) => (
-      codeLines.has(index) ? line : replaceFootnoteReferencesInLine(line, renderReference)
-    )).join('\n');
+    let preservesCodeLines = inspection !== null;
+    const rewritten = markdown.split('\n').map((line, index) => {
+      if (codeLines.has(index)) return line;
+      return replaceFootnoteReferencesInLine(line, renderReference, (from, to, html) => {
+        if (preservesCodeLines) preservesCodeLines = inspection!.canInsertInlineHtmlAt(index, from, to, html);
+      });
+    }).join('\n');
+    return { markdown: rewritten, codeLines: preservesCodeLines ? codeLines : undefined };
   };
-  const bodyLines = rewriteReferences(extracted.bodyLines.join('\n')).split('\n');
+  const body = rewriteReferences(extracted.bodyLines.join('\n'));
   // References inside a definition use the same rules as body text. Each
   // reachable definition is visited once, including cycles and newly cited notes.
   for (let index = 0; index < pendingDefinitions.length; index += 1) {
     const definition = pendingDefinitions[index];
-    definition.contentMarkdown = rewriteReferences(definition.contentMarkdown, true);
+    definition.contentMarkdown = rewriteReferences(definition.contentMarkdown, true).markdown;
   }
 
   const footnotes = extracted.definitions
@@ -111,9 +119,10 @@ export function prepareMarkdownWithFootnotes(
 
   return {
     body: {
-      markdown: bodyLines.join('\n'),
+      markdown: body.markdown,
       sourceLines: extracted.bodySourceLines
     },
+    bodyCodeLines: body.codeLines,
     footnotes: prepared,
     get footnotesHtml() { return renderFootnotesHtml(prepared, options); }
   };
@@ -207,9 +216,10 @@ function extractExportFootnotes(source: SourceMappedMarkdown): {
 
 function replaceFootnoteReferencesInLine(
   line: string,
-  renderReference: (label: string) => string | null
+  renderReference: (label: string) => string | null,
+  onReplaced?: (from: number, to: number, html: string) => void
 ): string {
-  if (!line) {
+  if (!line.includes('[^')) {
     return line;
   }
 
@@ -251,6 +261,7 @@ function replaceFootnoteReferencesInLine(
       if (closeIndex > index + 2) {
         const rendered = renderReference(line.slice(index + 2, closeIndex));
         if (rendered) {
+          onReplaced?.(index, closeIndex + 1, rendered);
           out += rendered;
           index = closeIndex + 1;
           continue;

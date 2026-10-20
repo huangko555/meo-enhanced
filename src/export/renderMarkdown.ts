@@ -294,7 +294,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
   // continuation indent and accidentally detach subsequent blocks.
   const normalizedBody = github
     ? { markdown: preparedMarkdown.body.markdown, sourceLines: preparedMarkdown.body.markdown.split(/\r?\n/).map((_, index) => index + 1) }
-    : normalizeMarkdownForExportWithSourceMap(preparedMarkdown.body.markdown);
+    : normalizeMarkdownForExportWithSourceMap(preparedMarkdown.body.markdown, preparedMarkdown.bodyCodeLines);
   bodySourceLines = normalizedBody.sourceLines.map(line => preparedMarkdown.body.sourceLines[line - 1] ?? line);
   headings.length = 0;
   const environment = {};
@@ -964,8 +964,8 @@ function normalizeMarkdownForExport(markdownText: string): string {
   return normalizeMarkdownForExportWithSourceMap(markdownText).markdown;
 }
 
-function normalizeMarkdownForExportWithSourceMap(markdownText: string): SourceMappedMarkdown {
-  const codeLines = collectMarkdownCodeLines(markdownText);
+function normalizeMarkdownForExportWithSourceMap(markdownText: string, knownCodeLines?: ReadonlySet<number>): SourceMappedMarkdown {
+  const codeLines = knownCodeLines ?? collectMarkdownCodeLines(markdownText);
   const normalized = normalizeLooseTableDelimiters(markdownText, codeLines);
   const expandedLists = expandBreakSeparatedBodyLists(normalized, codeLines);
   return ensureBlankLinesAroundTableBlocks(expandedLists.markdown, expandedLists.sourceLines, codeLines);
