@@ -522,3 +522,20 @@ math; settled undo also checks the visible footnote number. Formula fences/editi
 Live layout, long-code and production three-mode regressions pass. The broader
 cursor-navigation test still reproduces a stale table-reveal/layout-compensation
 oscillation identically on unchanged V42; it is recorded as an open check.
+
+The Webview now loads Mermaid through its official module API and split diagram
+loaders. A fence hint issues modulepreload for core resources without executing
+the 5,575,485-byte classic bundle before the editor mounts. Pending loads belong
+to an inert document marker, retaining the stateless resource-helper contract;
+Live/Preview share one promise and runtime. Standalone/classic hosts and exported
+documents retain their nonce/script API. Module failures keep Mermaid's existing
+transient-error classification.
+
+The real CSP regression prefetches 679,339 core bytes, verifies Source does not
+initialize the runtime, compares nine module/classic graph geometries including
+ELK and math, and exercises concurrent loading and failure recovery to a valid URL.
+Classic lifecycle, shared-consumer retirement and HTML/PDF/Word light/dark layout
+checks pass. A preliminary host browser comparison measured library load at
+216 ms classic versus 46 ms split; that probe is directional, not native acceptance.
+Mode-loading diagnostics now use the production module path, distinguish resource
+prefetch from execution and hash nested runtime assets.

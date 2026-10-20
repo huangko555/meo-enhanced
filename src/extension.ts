@@ -1015,6 +1015,9 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     const mermaidRuntimeUri = webview
       .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'mermaid.min.js'))
       .toString();
+    const mermaidModuleUri = webview
+      .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'mermaid', 'mermaidRuntime.js'))
+      .toString();
     const gitDiffWorkerUri = webview
       .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'git-diff-worker.js'))
       .toString();
@@ -1048,12 +1051,12 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         <style>${getWebviewPreloadShellCss()}</style>
         <link href="${katexStyleUri}" rel="stylesheet" />
         <link href="${styleUri}" rel="stylesheet" />
+        ${preloadMermaid ? `<link rel="modulepreload" href="${mermaidModuleUri}" />` : ''}
       </head>
-      <body data-meo-katex-src="${katexStyleUri}" data-meo-mermaid-src="${mermaidRuntimeUri}" data-meo-git-diff-worker-src="${gitDiffWorkerUri}" data-meo-shiki-worker-src="${shikiWorkerUri}" data-meo-markdown-worker-src="${markdownWorkerUri}" data-meo-script-nonce="${nonce}">
+      <body data-meo-katex-src="${katexStyleUri}" data-meo-mermaid-src="${mermaidRuntimeUri}" data-meo-mermaid-module-src="${mermaidModuleUri}" data-meo-git-diff-worker-src="${gitDiffWorkerUri}" data-meo-shiki-worker-src="${shikiWorkerUri}" data-meo-markdown-worker-src="${markdownWorkerUri}" data-meo-script-nonce="${nonce}">
         <div id="app" class="editor-root">
           ${getWebviewPreloadShellMarkup()}
         </div>
-        ${preloadMermaid ? `<script nonce="${nonce}" src="${mermaidRuntimeUri}"></script>` : ''}
         <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
       </body>
     </html>`;

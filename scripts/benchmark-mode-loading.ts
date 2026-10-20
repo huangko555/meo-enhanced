@@ -25,14 +25,17 @@ const selectedFixtures = process.argv.includes('--fixture')
 assert.ok(selectedFixtures.length > 0, 'Unknown fixture');
 const samples: unknown[] = [];
 const preloadMermaid = process.argv.includes('--preload-mermaid');
-const assets = fs.readdirSync(dist).filter(name => /\.(js|css)$/.test(name)).concat('katex/katex-embedded.css').sort();
+const assets = fs.readdirSync(dist, { recursive: true }).map(String).map(name => name.replaceAll(path.sep, '/'))
+  .filter(name => /\.(js|css)$/.test(name)).sort();
 const buildHash = createHash('sha256');
 for (const name of assets) buildHash.update(name).update(fs.readFileSync(path.join(dist, name)));
 const server = Bun.serve({
   hostname: '127.0.0.1', port: 0,
   fetch(request) {
     const pathname = new URL(request.url).pathname;
-    if (pathname === '/') return new Response('<!doctype html><link rel="stylesheet" href="/index.css"><link rel="stylesheet" href="/katex/katex-embedded.css"><style>html,body,#app{height:100%;margin:0}</style><body class="vscode-dark" data-meo-mermaid-src="/mermaid.min.js" data-meo-katex-src="/katex/katex-embedded.css"><div id="app"></div>' + (new URL(request.url).searchParams.has('preload') ? '<script src="/mermaid.min.js"></script>' : '') + '<script type="module" src="/index.js"></script>', { headers: { 'Content-Type': 'text/html' } });
+    if (pathname === '/') return new Response('<!doctype html><link rel="stylesheet" href="/index.css"><link rel="stylesheet" href="/katex/katex-embedded.css">'
+      + (new URL(request.url).searchParams.has('preload') ? '<link rel="modulepreload" href="/mermaid/mermaidRuntime.js">' : '')
+      + '<style>html,body,#app{height:100%;margin:0}</style><body class="vscode-dark" data-meo-mermaid-src="/mermaid.min.js" data-meo-mermaid-module-src="/mermaid/mermaidRuntime.js" data-meo-katex-src="/katex/katex-embedded.css"><div id="app"></div><script type="module" src="/index.js"></script>', { headers: { 'Content-Type': 'text/html' } });
     const file = path.resolve(dist, '.' + decodeURIComponent(pathname));
     if (!file.startsWith(dist + path.sep) || !fs.existsSync(file)) return new Response('Not found', { status: 404 });
     return new Response(Bun.file(file));
@@ -48,7 +51,7 @@ try {
     const page = await context.newPage();
     const errors: string[] = [];
     let mermaidRequests = 0;
-    page.on('request', request => { if (request.url().endsWith('/mermaid.min.js')) mermaidRequests += 1; });
+    page.on('request', request => { if (request.url().endsWith('/mermaid.min.js') || new URL(request.url()).pathname.startsWith('/mermaid/')) mermaidRequests += 1; });
     page.on('pageerror', error => errors.push(String(error)));
     try {
       await page.setViewport(viewport);
@@ -116,6 +119,7 @@ try {
       assert.equal(startup.mode, initialMode, 'Startup must settle in the requested mode');
       await new Promise(resolve => setTimeout(resolve, 300));
       const startupMermaidRequests = mermaidRequests;
+      const startupMermaidExecuted = await page.evaluate(() => Boolean((window as any).mermaid));
       if (initialMode === 'source' && !preload) {
         assert.equal(startupMermaidRequests, 0, 'Source must not load the unused Mermaid runtime');
       }
@@ -150,7 +154,7 @@ try {
         }, { timeout: 30000 });
       }
       assert.deepEqual(errors, []);
-      samples.push({ round, fixture: fixture.kind, initialMode, startup, startupMermaidRequests, switches });
+      samples.push({ round, fixture: fixture.kind, initialMode, startup, startupMermaidRequests, startupMermaidExecuted, switches });
       console.log(`${label} ${round + 1}/${rounds} ${fixture.kind} ${initialMode}: ${Math.round(startup.content)} ms`);
     } finally { await context.close(); }
   }

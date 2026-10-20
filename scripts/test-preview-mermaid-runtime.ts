@@ -111,8 +111,9 @@ try {
   const extensionSource = fs.readFileSync(path.join(repoRoot, 'src', 'extension.ts'), 'utf8');
   if (!extensionSource.includes('data-meo-mermaid-src="${mermaidRuntimeUri}"')
     || !extensionSource.includes('data-meo-script-nonce="${nonce}"')
-    || !extensionSource.includes('${preloadMermaid ? `<script nonce="${nonce}" src="${mermaidRuntimeUri}"></script>` : \'\'}')) {
-    throw new Error('Mermaid must support on-demand loading and preserve preloading for existing diagrams');
+    || !extensionSource.includes('data-meo-mermaid-module-src="${mermaidModuleUri}"')
+    || !extensionSource.includes('${preloadMermaid ? `<link rel="modulepreload" href="${mermaidModuleUri}" />` : \'\'}')) {
+    throw new Error('Mermaid must load diagram modules on demand and keep resource hints for existing diagrams');
   }
 
   const build = await Bun.build({

@@ -1,5 +1,10 @@
 {
   "separate": {
+    "scripts/test-mermaid-module-runtime.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-mermaid-module-runtime.ts",
+      "reason": "Actual CSP module loading, lazy Source prefetch, shared runtime, bounded core payload, classic/module geometry including ELK/math and failure retry; run after build:webview."
+    },
     "scripts/test-markdown-mixed-languages.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-markdown-mixed-languages.ts",

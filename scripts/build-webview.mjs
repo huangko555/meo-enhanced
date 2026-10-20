@@ -46,6 +46,11 @@ const markdownWorkerBuild = spawnSync(process.execPath, [
   '--minify', '--outfile=webview/dist/markdown-parse-worker.js'
 ], { cwd: root, stdio: 'inherit' });
 if (markdownWorkerBuild.status !== 0) process.exit(markdownWorkerBuild.status ?? 1);
+const mermaidModuleBuild = spawnSync(process.execPath, [
+  'build', 'webview/src/mermaidRuntime.ts', '--target=browser', '--format=esm',
+  '--splitting', '--minify', '--outdir=webview/dist/mermaid'
+], { cwd: root, stdio: 'inherit' });
+if (mermaidModuleBuild.status !== 0) process.exit(mermaidModuleBuild.status ?? 1);
 
 const buildMetadata = JSON.parse(readFileSync(buildMetadataPath, 'utf8'));
 const languageModules = new Map();

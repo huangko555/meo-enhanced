@@ -385,6 +385,7 @@ function getMermaidRuntime() {
 }
 
 type MermaidRuntimeScript = HTMLScriptElement & { runtimePromise?: Promise<MermaidRuntime> };
+type MermaidRuntimeModule = HTMLMetaElement & { runtimePromise?: Promise<MermaidRuntime> };
 
 export function loadMermaidRuntime(): Promise<MermaidRuntime> {
   const existing = getMermaidRuntime();
@@ -392,13 +393,36 @@ export function loadMermaidRuntime(): Promise<MermaidRuntime> {
     return Promise.resolve(existing);
   }
 
+  const moduleSrc = document.body.dataset.meoMermaidModuleSrc;
+  if (moduleSrc) {
+    const pending = document.querySelector<MermaidRuntimeModule>('meta[data-meo-mermaid-module-loader]');
+    if (pending?.content === moduleSrc && pending.runtimePromise) return pending.runtimePromise;
+    // The document owns pending resource loading, as with the classic script.
+    // An inert marker shares that promise without mutable module-wide state.
+    const marker: MermaidRuntimeModule = document.createElement('meta');
+    marker.dataset.meoMermaidModuleLoader = '';
+    marker.content = moduleSrc;
+    const promise: Promise<MermaidRuntime> = import(moduleSrc).then(module => {
+      const runtime: MermaidRuntime | undefined = module.default;
+      if (!runtime || typeof runtime.render !== 'function' || typeof runtime.initialize !== 'function') {
+        throw new Error('Loaded Mermaid runtime unavailable');
+      }
+      window.mermaid = runtime;
+      return runtime;
+    }).catch(error => {
+      throw new Error('Mermaid runtime failed to load', { cause: error });
+    }).finally(() => marker.remove());
+    marker.runtimePromise = promise;
+    document.head.appendChild(marker);
+    return promise;
+  }
+
   const pending = document.querySelector<MermaidRuntimeScript>('script[data-meo-mermaid-runtime-loader]');
   if (pending?.runtimePromise) return pending.runtimePromise;
   const src = document.body.dataset.meoMermaidSrc;
   if (!src) return Promise.reject(new Error('Mermaid runtime URL unavailable'));
 
-  // Keep the bundled classic runtime and CSP nonce used by Live and Preview.
-  // Only its first request is deferred; concurrent consumers share the load.
+  // Standalone/classic hosts retain their nonce-based script contract.
   const script: MermaidRuntimeScript = document.createElement('script');
   script.dataset.meoMermaidRuntimeLoader = '';
   script.runtimePromise = new Promise<MermaidRuntime>((resolve, reject) => {
