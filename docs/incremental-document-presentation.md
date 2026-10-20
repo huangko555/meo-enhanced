@@ -1212,3 +1212,41 @@ reception yields, injects exact input while a half-received tree is held, and
 closes another editor mid-receipt. No partial syntax is published and the latest
 input remains exact. Existing ordered projection, undo, modes and failure checks
 pass; the inner-language incremental case remains 1,637 LR steps.
+
+V57 (`9fd0465b`, archive SHA-256
+`ea309e2be5938ddebf7774548d2d87b6e2fe81cda676f0e676c5ce2a308c2593`)
+passes the complete native ordinary/rich flow and sixteen distributed rich
+clicks. Warm rich Source input median/P95/maximum is 44/70/84 ms; Live is
+70/99/155 ms. The seven generic Live clicks still range from 138 to 243 ms.
+First Preview is 4.77 s (3.50 s response), drag frame gaps 91/91/136/107 ms and
+whole formatted copy 6.73 s. Exact source/undo/save, timing clocks and protocol
+composition pass; the final Preview screenshot is visually checked. Cold
+Source is 43/92/98 ms, 428 ms frame gap and 55 ms click. Cold Live is
+176/327/342 ms, 341 ms gap and 205 ms click. These partial cold diagnostics show
+that the better warm pass is not a cold-input improvement claim.
+
+### Limit palette DOM updates to the physical viewport
+
+A frozen, byte-checked V57 Source profile identifies a 332 ms syntax-publication
+task, including 277 ms Editor update and 116 ms native DOM insertion. A separate
+178 ms task includes 126 ms layout. CodeMirror's `visibleRanges` describe its
+rendered DOM buffer, so coloring every such range also repaints offscreen rows.
+The bounded palette now measures a physical screen band plus 80 px on each side
+through `requestMeasure`, intersects the existing visible ranges and retains
+the complete ancestor/mounted-language grammar. Native DOM overscan is unchanged.
+
+Scroll observers also update the band within the same CodeMirror viewport.
+After measurement, a microtask repaints the plugin's decorations through an
+empty View update, without a document transaction or a derived-consumer refresh.
+Accepted input/composition maps the existing palette until its current input
+generation settles. Disposal invalidates queued work. Small documents keep
+their existing stock highlighter.
+
+The actual Editor browser regression is red with 34 colored far-buffer rows,
+then green with zero while every physical visible row remains colored. It
+checks intra-buffer scrolling in both directions, arriving syntax during pending
+input (zero palette builds), resize, Source/Live round trips and disposal.
+The 128 exact ancestor/mixed-language comparisons and deep-code work bound pass.
+Source-side Preview LF/CRLF, viewport-anchor production, complete document
+cutover and type checks also pass. Native remeasurement of this palette change
+is still required; the V57 numbers above do not include it.

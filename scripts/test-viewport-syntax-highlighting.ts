@@ -6,6 +6,7 @@ import { NodeProp, Tree } from '@lezer/common';
 import { editorMarkdownLanguage } from '../webview/src/liveMode';
 import { liveHighlightStyle, sourceHighlightStyle } from '../webview/src/theme';
 import { syntaxHighlightWindow } from '../webview/src/editor/viewportSyntaxHighlighting';
+import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 
 const fixture = '# Heading **bold**\n\n> Quote *emphasis* with [link](https://example.test)\n>\n> - nested `code`\n\n'
   + '| Header | Value |\n| --- | --- |\n| ~~deleted~~ | **strong** |\n\n'
@@ -61,3 +62,84 @@ try { spans(syntaxHighlightWindow(codeTree, codeFrom, codeTo), sourceHighlightSt
 finally { prototype.nextSibling = next; }
 assert.ok(steps < 1_000, `a long mounted code language must also skip preceding rows: ${steps}`);
 console.log(`Deep code viewport sibling work: ${steps}`);
+
+const build = await Bun.build({ entrypoints: ['scripts/test-live-decoration-history-entry.ts'], target: 'browser', format: 'iife',
+  plugins: [{ name: 'observe-real-palette-work', setup(builder) {
+    builder.onLoad({ filter: /webview[\\/]src[\\/]editor[\\/]viewportSyntaxHighlighting\.ts$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text(), marker = '    private build(view: EditorView): DecorationSet {';
+      assert.equal(source.split(marker).length, 2);
+      return { loader: 'ts', contents: source.replace(marker, marker
+        + '\n      (globalThis as any).__paletteBuilds = ((globalThis as any).__paletteBuilds ?? 0) + 1;') };
+    });
+  } }] });
+assert.ok(build.success, build.logs.map(String).join('\n'));
+const bundle = await build.outputs[0]!.text();
+const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+  const pathname = new URL(request.url).pathname;
+  if (pathname === '/bundle.js') return new Response(bundle, { headers: { 'content-type': 'text/javascript; charset=utf-8' } });
+  if (pathname === '/style.css') return new Response(Bun.file('webview/src/styles.css'), { headers: { 'content-type': 'text/css; charset=utf-8' } });
+  return new Response('<!doctype html><link rel="stylesheet" href="/style.css"><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div><script src="/bundle.js"></script>', { headers: { 'content-type': 'text/html; charset=utf-8' } });
+} });
+const browser = await launchTestBrowser().catch(error => { server.stop(true); throw error; });
+let primaryError: unknown;
+try {
+  const page = await browser.newPage(); await page.setViewport({ width: 920, height: 380 });
+  const errors: string[] = []; page.on('pageerror', error => errors.push(String(error)));
+  await page.goto(server.url.href);
+  assert.deepEqual(errors, [], 'the production Editor fixture must load');
+  await page.evaluate(() => {
+    const scope = window as any;
+    scope.__paletteSource = '## Heading **strong** *emphasis* [link](https://example.test/) `code` words.\n'.repeat(6_000);
+    scope.__paletteEditor = scope.__liveHistory.create({ parent: document.getElementById('app'), text: scope.__paletteSource, initialMode: 'source' });
+    scope.__liveHistory.parse(scope.__paletteEditor);
+    scope.__paletteEditor.scrollToLine(3_000, 'center');
+  });
+  const settle = () => page.evaluate(async () => {
+    for (let frame = 0; frame < 12; frame++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+  });
+  const verifyBand = async () => {
+    await settle();
+    const result = await page.evaluate(() => {
+      const view = (window as any).__paletteEditor.view, bounds = view.scrollDOM.getBoundingClientRect();
+      const lines = [...view.contentDOM.querySelectorAll<HTMLElement>('.cm-line')];
+      const visible = lines.filter(line => { const r = line.getBoundingClientRect(); return r.top >= bounds.top && r.bottom <= bounds.bottom && line.textContent; });
+      const far = lines.filter(line => { const r = line.getBoundingClientRect(); return r.top > bounds.bottom + 160 || r.bottom < bounds.top - 160; });
+      return { visible: visible.length, visibleColored: visible.filter(line => line.querySelector('span[class]')).length,
+        buffered: far.length, bufferedColored: far.filter(line => line.querySelector('span[class]')).length };
+    });
+    assert.ok(result.visible > 3 && result.buffered > 3, 'keep the real CodeMirror DOM overscan and physical viewport in the fixture');
+    assert.equal(result.visibleColored, result.visible, 'every physically visible line retains its complete palette');
+    assert.equal(result.bufferedColored, 0, 'offscreen DOM overscan must not force a large palette repaint');
+  };
+  await verifyBand();
+  for (const pixels of [90, -160, 240]) {
+    await page.evaluate(pixels => { (window as any).__paletteEditor.view.scrollDOM.scrollTop += pixels; }, pixels);
+    await verifyBand();
+  }
+  const pending = await page.evaluate(() => {
+    const scope = window as any, editor = scope.__paletteEditor;
+    scope.__paletteBuilds = 0;
+    scope.__liveHistory.input(editor, editor.view.state.doc.line(3_000).to, 'x');
+    scope.__liveHistory.parse(editor);
+    return { pending: scope.__liveHistory.pending(editor), builds: scope.__paletteBuilds };
+  });
+  assert.equal(pending.pending, true);
+  assert.equal(pending.builds, 0, 'accepted input and arriving syntax must map the existing palette until the input generation settles');
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__paletteEditor));
+  await verifyBand();
+  await page.setViewport({ width: 620, height: 480 }); await verifyBand();
+  const exact = await page.evaluate(async () => {
+    const scope = window as any, editor = scope.__paletteEditor, before = editor.getText();
+    await editor.setMode('live'); await editor.setMode('source');
+    return editor.getText() === before;
+  });
+  assert.ok(exact, 'palette work must preserve exact text across mode reconfiguration');
+  await verifyBand();
+  await page.evaluate(() => (window as any).__paletteEditor.destroy()); await settle();
+  assert.deepEqual(errors, [], 'scrolling, input, resize, modes and disposal must not dispatch during a view update');
+  console.log('Physical palette: visible colors, unchanged DOM overscan, intra-buffer scrolling, deferred input, resize, modes and disposal passed');
+} catch (error) { primaryError = error; throw error; }
+finally {
+  try { if (primaryError === undefined) await closeTestBrowser(browser); else await closeTestBrowser(browser, primaryError); }
+  finally { server.stop(true); }
+}
