@@ -737,7 +737,7 @@ try {
     ['general', 'width', '版心', 'reading width'], ['general', 'strongColor', '加粗颜色', 'bold color'],
     ['general', 'boldHeadings', '标题字重', 'heading weight'], ['general', 'stickyHeader', '冻结表头', 'freeze header'],
     ['general', 'restorePosition', '上次位置', 'remember position'], ['general', 'largeDocument', '启动速度', 'large file'],
-    ['appearance', 'mode', '夜间', 'night'], ['appearance', 'surface', '底色', 'surface'], ['appearance', 'documentBackground', '画布', 'canvas'], ['appearance', 'textEmphasis', '脚注', 'footnote'], ['general', 'language', '本地化', 'locale'], ['appearance', 'fontSize', '文字大小', 'zoom'], ['appearance', 'lineHeight', '行高', 'leading'], ['appearance', 'mouseWheelZoom', '鼠标 滚轮', 'mouse wheel'],
+    ['appearance', 'mode', '夜间', 'night'], ['appearance', 'surface', '底色', 'surface'], ['appearance', 'documentBackground', '画布', 'canvas'], ['appearance', 'textEmphasis', '脚注', 'footnote'], ['general', 'language', '本地化', 'locale'], ['appearance', 'fontSize', '文字大小', 'zoom'], ['appearance', 'lineHeight', '行高', 'leading'], ['appearance', 'lineHeight', '未完善', 'Beta'], ['appearance', 'mouseWheelZoom', '鼠标 滚轮', 'mouse wheel'],
     ['typing', 'selectionToolbar', '浮动工具栏', 'floating toolbar'], ['typing', 'wrapSelection', '环绕选区', 'surround selection'],
     ['typing', 'pairMode', '自动闭合', 'auto close'], ['typing', 'skipMode', '跳出符号', 'overtype'],
     ['typing', 'deleteMode', '一起删除', 'paired deletion'], ['typing', 'lists', '清单', 'list continuation'],
@@ -761,7 +761,40 @@ try {
   const searchChecks = searchCases.length * 4;
   for (const language of ['en', 'zh-CN']) for (const appearance of ['light', 'dark']) {
     await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button');
-    await page.click('.settings-tab[data-tab="general"]'); await page.click(`[data-setting="language"] [data-value="${language}"]`); await page.click('.settings-tab[data-tab="appearance"]'); await page.click(`[data-appearance-mode="${appearance}"]`); await page.click('.settings-close');
+    await page.click('.settings-tab[data-tab="general"]'); await page.click(`[data-setting="language"] [data-value="${language}"]`); await page.click('.settings-tab[data-tab="appearance"]'); await page.click(`[data-appearance-mode="${appearance}"]`);
+    const beta = '[data-setting="lineHeight"] .meo-beta-badge';
+    const betaDescription = language === 'en'
+      ? 'This feature is still being refined and may have interaction or display issues.'
+      : '此功能仍在完善中，可能存在交互或显示问题。';
+    for (const width of [1100, 430]) {
+      await page.setViewport({ width, height: 780 });
+      await page.$eval(beta, element => element.scrollIntoView({ block: 'center' }));
+      await page.hover(beta);
+      const waitForBetaHint = () => page.waitForFunction(({ beta, betaDescription }) => {
+        const badge = document.querySelector(beta)!;
+        const hint = document.getElementById(badge.getAttribute('aria-describedby')!);
+        return hint?.textContent === betaDescription && getComputedStyle(hint).visibility === 'visible' && getComputedStyle(hint).opacity === '1';
+      }, {}, { beta, betaDescription });
+      await waitForBetaHint();
+      assert.ok(await page.$eval(beta, element => {
+        const badge = element.getBoundingClientRect(), heading = element.parentElement!.getBoundingClientRect();
+        const hint = document.getElementById(element.getAttribute('aria-describedby')!)!.getBoundingClientRect();
+        return element.textContent === 'Beta' && !element.hasAttribute('title')
+          && badge.right <= heading.right && badge.top >= heading.top && badge.bottom <= heading.bottom
+          && hint.left >= 8 && hint.right <= innerWidth - 8 && hint.top >= 8 && hint.bottom <= innerHeight - 8;
+      }), `${language}/${appearance}/${width}: Beta and its description fit without clipping`);
+      if (process.env.MEO_SETTINGS_SCREENSHOTS) {
+        const directory = path.resolve(process.env.MEO_SETTINGS_SCREENSHOTS); await fs.mkdir(directory, { recursive: true });
+        await page.screenshot({ path: path.join(directory, `beta-${language}-${appearance}-${width}.png`) });
+      }
+      await page.mouse.move(0, 0);
+      await page.focus('.settings-search'); await page.keyboard.press('Tab'); await page.focus(beta);
+      await waitForBetaHint();
+      assert.equal(await page.$eval(beta, element => element.matches(':focus-visible') && getComputedStyle(element).boxShadow !== 'none'), true, 'keyboard focus reveals the Beta hint with a visible focus ring');
+      await page.keyboard.press('Tab');
+    }
+    await page.setViewport({ width: 1100, height: 780 });
+    await page.click('.settings-close');
     await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button');
     for (const tab of ['general', 'appearance', 'typing', 'shortcuts'] as const) {
       await page.click(`.settings-tab[data-tab="${tab}"]`);

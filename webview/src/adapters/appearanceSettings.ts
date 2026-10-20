@@ -8,6 +8,7 @@ import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 import { appearanceCatalog, sectionTitles, settingsSearchMatches, settingsText } from '../application/settingsCatalog';
 import { createSegmentedControl } from './segmentedControl';
 import { createMenuSwitch } from './menuSwitch';
+import { createBetaBadge } from './betaBadge';
 
 export type AppearanceSettingsOptions = {
   getColors(): UiColors;
@@ -142,7 +143,7 @@ export function createAppearanceSettings(options: AppearanceSettingsOptions) {
 
   const typography = ['fontSize', 'mouseWheelZoom', 'lineHeight'];
   const sectionFor = (item: typeof appearanceCatalog[number]) => item.id === 'mode' ? 'appearanceMode' : typography.includes(item.id) ? 'appearanceTypography' : item.advanced ? 'appearanceAdvanced' : 'appearanceColors';
-  const items = (query: string) => appearanceCatalog.filter(item => settingsSearchMatches(query, '外观 Appearance', ...sectionTitles[sectionFor(item)], ...item.title, ...item.description, ...item.keywords, '跟随 VS Code 主题 Follow VS Code theme', item.id === 'mode' || typography.includes(item.id) ? '' : '默认配色 默认浅色配色 默认深色配色 内置预设 Default light palette Default dark palette built-in preset', item.id));
+  const items = (query: string) => appearanceCatalog.filter(item => settingsSearchMatches(query, '外观 Appearance', ...sectionTitles[sectionFor(item)], ...item.title, ...item.description, ...item.keywords, 'beta' in item && item.beta ? 'Beta 测试 试用 未完善 experimental' : '', '跟随 VS Code 主题 Follow VS Code theme', item.id === 'mode' || typography.includes(item.id) ? '' : '默认配色 默认浅色配色 默认深色配色 内置预设 Default light palette Default dark palette built-in preset', item.id));
   function render(nextLanguage: UiLanguage, query: string) {
     for (const unregister of inputRegistrations) unregister(); inputRegistrations = [];
     language = nextLanguage; scheme = options.getScheme(); presenters = []; invalid.clear();
@@ -171,7 +172,12 @@ export function createAppearanceSettings(options: AppearanceSettingsOptions) {
     for (const item of visible) {
       const row = node('div', 'settings-item appearance-item'); row.dataset.setting = item.id;
       const title = item.id === 'mouseWheelZoom' ? t(`${options.mac ? 'Cmd' : 'Ctrl'} + 滚轮调整字号`, `${options.mac ? 'Cmd' : 'Ctrl'} + wheel font size`) : t(item.title[0], item.title[1]);
-      const text = node('div', 'settings-item-text'); text.append(node('div', 'settings-item-title', title), node('p', 'settings-description', t(item.description[0], item.description[1]))); row.append(text);
+      const heading = node('div', 'settings-item-title', title);
+      if ('beta' in item && item.beta) {
+        heading.classList.add('settings-item-title-with-badge');
+        heading.append(' ', createBetaBadge(language));
+      }
+      const text = node('div', 'settings-item-text'); text.append(heading, node('p', 'settings-description', t(item.description[0], item.description[1]))); row.append(text);
       if (item.id === 'documentBackground') {
         const warning = node('p', 'appearance-background-warning');
         const icon = createElement(TriangleAlert, { width: 16, height: 16 });

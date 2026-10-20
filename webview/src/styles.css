@@ -8139,6 +8139,9 @@ html[data-meo-ui-contrast='high'] .cm-editor :is(.meo-md-html-table-context-trig
 .settings-item:last-child { border-bottom: 0; }
 .settings-item-text { flex: 1 1 180px; min-width: 0; }
 .settings-item-title { font-size: 13px; font-weight: 400; line-height: 1.5; }
+.settings-item-title-with-badge { display: flex; align-items: center; gap: 6px; }
+.meo-beta-badge { display: inline-flex; flex: 0 0 auto; align-items: center; box-sizing: border-box; padding: 1px 5px; border: 1px solid var(--meo-ui-border-float); border-radius: 4px; background: var(--meo-ui-surface-field); color: var(--meo-ui-accent-text); font: 600 10px/14px var(--meo-ui-font-family, sans-serif); letter-spacing: .02em; white-space: nowrap; vertical-align: middle; cursor: help; }
+.meo-beta-badge:focus-visible { border-color: var(--meo-ui-focus); box-shadow: 0 0 0 1px var(--meo-ui-focus); }
 .appearance-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .appearance-section-heading .settings-section-title { margin: 0; }
 .appearance-scheme { flex: 0 0 auto; padding: 3px 7px; border-radius: 4px; color: var(--meo-ui-text-muted); background: var(--meo-ui-surface-field); font-size: 11px; line-height: 16px; white-space: nowrap; }
