@@ -7,6 +7,7 @@ import { inlineMarkdownExtensions } from './helpers/inlineMarkdownParser';
 import { createMarkdownTreeEncoder } from './editor/markdownTreeTransfer';
 import type { MarkdownParseRequest, MarkdownParseResponse } from './editor/markdownParseProtocol';
 import { prepareMarkdownDocumentContext } from './markdownDocumentContext';
+import { projectMarkdownDocumentContext, type MarkdownSourceContext } from './markdownContextProjection';
 
 // Bootstrap the existing shared grammar exactly as the editing surface does.
 // Node IDs are verified on receipt; palette props remain surface-owned.
@@ -17,6 +18,7 @@ const markdownStructureGrammarIdentity = markdownStructureGrammar.nodeSet.types.
 
 let doc: Text | undefined, revision = 0, busy = false;
 let completed: Tree | undefined;
+let sourceContext: MarkdownSourceContext | undefined;
 let fragments: readonly TreeFragment[] = [];
 const encoder = createMarkdownTreeEncoder();
 
@@ -27,6 +29,7 @@ self.onmessage = async ({ data: request }: MessageEvent<MarkdownParseRequest>) =
   }
   busy = true;
   try {
+    let update: ChangeSet | undefined;
     if (!Number.isSafeInteger(request.id) || request.id <= revision || request.base !== revision) throw new Error('Markdown parser revision mismatch');
     if (!Number.isSafeInteger(request.tabSize) || request.tabSize <= 0 || typeof request.blocks !== 'boolean') throw new Error('Invalid Markdown context request');
     if (request.text !== undefined) {
@@ -36,6 +39,7 @@ self.onmessage = async ({ data: request }: MessageEvent<MarkdownParseRequest>) =
     } else {
       if (!doc) throw new Error('Markdown parser needs its initial document');
       const changes = ChangeSet.fromJSON(request.changes), ranges: Array<{ fromA: number; toA: number; fromB: number; toB: number }> = [];
+      update = changes;
       changes.iterChangedRanges((fromA, toA, fromB, toB) => ranges.push({ fromA, toA, fromB, toB }));
       if (!changes.empty) {
         doc = changes.apply(doc); completed = undefined;
@@ -56,13 +60,19 @@ self.onmessage = async ({ data: request }: MessageEvent<MarkdownParseRequest>) =
     const tree = completed;
     if (tree.length !== doc.length || tree.type.name !== 'Document') throw new Error('Markdown parser produced incomplete structure');
     fragments = TreeFragment.addTree(tree, fragments); revision = request.id;
-    const context = prepareMarkdownDocumentContext(doc, tree, request.tabSize);
+    const projected = sourceContext && update && projectMarkdownDocumentContext(sourceContext, doc, tree, request.tabSize, update);
+    const prepared = projected ? undefined : prepareMarkdownDocumentContext(doc, tree, request.tabSize);
+    const context: MarkdownSourceContext = projected ?? { doc, tree, tabSize: request.tabSize, footnotes: prepared!.footnotes, code: prepared!.code };
     const encoded = encoder.encode(tree);
     self.postMessage({ id: request.id, kind: 'syntax', grammar: markdownStructureGrammarIdentity, length: doc.length,
       tree: encoded.value, tabSize: request.tabSize, footnotes: context.footnotes, code: context.code } satisfies MarkdownParseResponse, { transfer: encoded.transfers });
-    if (request.blocks) self.postMessage({ id: request.id, kind: 'blocks', tabSize: request.tabSize,
-      value: context.blocks() } satisfies MarkdownParseResponse);
+    if (request.blocks) {
+      context.blocks ??= (prepared ?? prepareMarkdownDocumentContext(doc, tree, request.tabSize, context)).blocks();
+      self.postMessage({ id: request.id, kind: 'blocks', tabSize: request.tabSize, value: context.blocks } satisfies MarkdownParseResponse);
+    }
+    sourceContext = context;
   } catch (error) {
+    sourceContext = undefined;
     encoder.clear();
     self.postMessage({ id: request.id, error: error instanceof Error ? error.message : String(error) } satisfies MarkdownParseResponse);
   } finally { busy = false; }

@@ -4017,7 +4017,10 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
   let crossesScope = false;
   mapped.decorations.between(from, to, (start, end) => { if (start < from || end > to) crossesScope = true; });
   if (crossesScope) return;
-  if (!projectUnchangedFootnotes(before, state, transaction.changes, lineChanged ? definition : undefined)) return;
+  const oldParagraph = !lineChanged && plainPresentationParagraph(before, oldTree, change.to, true);
+  const newParagraph = !lineChanged && plainPresentationParagraph(state, newTree, change.nextTo, true);
+  if (!projectUnchangedFootnotes(before, state, transaction.changes, { editedDefinition: lineChanged ? definition : undefined,
+    container: oldParagraph && newParagraph ? { before: oldParagraph, after: newParagraph } : undefined })) return;
   const previousConflicts = mergeConflictRangeCache.get(before.doc);
   if (previousConflicts) mergeConflictRangeCache.set(state.doc, previousConflicts.map(range => ({
     from: transaction.changes.mapPos(range.from, 1), to: transaction.changes.mapPos(range.to, -1)
@@ -4035,8 +4038,6 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
   // Rebuilding a closed code/image/formula block proves canonical correctness,
   // not that every other structure consumer has already accepted its contents.
   // A later plain key must also retain any earlier unrefreshed structural edit.
-  const oldParagraph = !lineChanged && plainPresentationParagraph(before, oldTree, change.to, true);
-  const newParagraph = !lineChanged && plainPresentationParagraph(state, newTree, change.nextTo, true);
   if ((!isLiveInputDerivedWorkPending(before) || hasMappedLiveInputPresentation(before))
     && oldParagraph && newParagraph && oldParagraph.from === newParagraph.from
     && transaction.changes.mapPos(oldParagraph.to, 1) === newParagraph.to) {

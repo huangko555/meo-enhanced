@@ -39,8 +39,12 @@ export function hasSameLiveMarkdownOutsideBlock(left: Tree, right: Tree, changes
   for (let nodes = 0; nodes < 131_072; nodes++) {
     const moreFirst = advance(first, before, enter), moreSecond = advance(second, after, enter);
     if (!moreFirst || !moreSecond) return moreFirst === moreSecond;
-    if (first.type !== second.type || changes.mapPos(first.from, 1) !== second.from
-      || changes.mapPos(first.to, -1) !== second.to) return false;
+    // An enclosing list/quote owns text inserted at the paragraph's boundary.
+    // Unrelated siblings instead keep their outside-edge association.
+    const ancestor = first.from <= before.from && first.to >= before.to;
+    if (ancestor !== (second.from <= after.from && second.to >= after.to)
+      || first.type !== second.type || changes.mapPos(first.from, ancestor ? -1 : 1) !== second.from
+      || changes.mapPos(first.to, ancestor ? 1 : -1) !== second.to) return false;
     // A shared tree outside the edit maps by one constant displacement. Do not
     // skip a tree that spans another change, even if its endpoints still match.
     enter = !first.tree || first.tree !== second.tree || !!changes.touchesRange(first.from, first.to);

@@ -20,7 +20,7 @@ const footnoteCache = new WeakMap<object, { tree: ReturnType<typeof resolvedSynt
   tabSize: number; verified?: { parser: Parser | null } }>();
 
 export function adoptFootnoteContext(doc: EditorState['doc'], tree: Tree, tabSize: number,
-  parsed: ParsedFootnotes, parser: Parser): void {
+  parsed: ParsedFootnotes, parser: Parser | null): void {
   footnoteCache.set(doc, { tree, tabSize, parsed, verified: { parser } });
 }
 const definitionMarkerPattern = /^[ \t]{0,3}\[\^([^\]\r\n]+)\]:(?:[ \t]|$)/;
@@ -160,12 +160,12 @@ export function parseFootnotes(state: EditorState): ParsedFootnotes {
   return parsed;
 }
 
-/** Only after proving unchanged labels, references and protected membership.
- * Numbering stays global. A changed continuation gets fresh local line metadata. */
-export function projectUnchangedFootnotes(before: EditorState, state: EditorState, changes: ChangeDesc,
-  editedDefinition?: FootnoteDefinition): boolean {
-  if (before.tabSize !== state.tabSize || before.facet(language)?.parser !== state.facet(language)?.parser) return false;
-  const previous = parseFootnotes(before);
+/** Pure coordinate mapping after a caller proves unchanged semantic membership.
+ * Both worker projection and surface-local edits retain reference identities. */
+type FootnoteContainerProjection = { before: { from: number; to: number }; after: { from: number; to: number } };
+
+export function mapFootnoteSourcePositions(previous: ParsedFootnotes, changes: ChangeDesc,
+  container?: FootnoteContainerProjection): ParsedFootnotes {
   const position = (value: number) => changes.mapPos(value, 1);
   const end = (value: number) => changes.mapPos(value, -1);
   const definitions = previous.definitions.map(definition => ({ ...definition,
@@ -178,19 +178,11 @@ export function projectUnchangedFootnotes(before: EditorState, state: EditorStat
       hideIndentFrom: line.hideIndentFrom === null ? null : position(line.hideIndentFrom),
       hideIndentTo: line.hideIndentTo === null ? null : end(line.hideIndentTo) }))
   }));
-  if (editedDefinition) {
-    const index = previous.definitions.indexOf(editedDefinition);
-    if (index < 0) return false;
-    const mapped = definitions[index];
-    const line = state.doc.lineAt(mapped.lineFrom).number;
-    const rebuilt = collectDefinitions(state, parseFrontmatter(state), [], { fromLine: line, toLine: line })[0];
-    if (!rebuilt || rebuilt.normalizedLabel !== mapped.normalizedLabel || rebuilt.lineTo !== mapped.lineTo) return false;
-    definitions[index] = { ...rebuilt, number: mapped.number, firstReferenceFrom: mapped.firstReferenceFrom,
-      isPrimary: mapped.isPrimary };
-  }
   const definitionMap = new Map(previous.definitions.map((definition, index) => [definition, definitions[index]]));
   const references = previous.references.map(reference => ({ ...reference,
     from: position(reference.from), to: end(reference.to), containerFrom: position(reference.containerFrom), containerTo: end(reference.containerTo),
+    ...(container && reference.containerFrom === container.before.from && reference.containerTo === container.before.to
+      ? { containerFrom: container.after.from, containerTo: container.after.to } : {}),
     definition: reference.definition ? definitionMap.get(reference.definition)! : null
   }));
   const referencesByContainerKey = new Map<string, FootnoteReference[]>();
@@ -199,10 +191,29 @@ export function projectUnchangedFootnotes(before: EditorState, state: EditorStat
     const container = referencesByContainerKey.get(key) ?? [];
     container.push(reference); referencesByContainerKey.set(key, container);
   }
+  return { definitions, references, referencesByContainerKey, numberByLabel: previous.numberByLabel };
+}
+
+/** Only after proving unchanged labels, references and protected membership.
+ * Numbering stays global. A changed continuation gets fresh local line metadata. */
+export function projectUnchangedFootnotes(before: EditorState, state: EditorState, changes: ChangeDesc,
+  options: { editedDefinition?: FootnoteDefinition; container?: FootnoteContainerProjection } = {}): boolean {
+  if (before.tabSize !== state.tabSize || before.facet(language)?.parser !== state.facet(language)?.parser) return false;
+  const previous = parseFootnotes(before), parsed = mapFootnoteSourcePositions(previous, changes, options.container);
+  const { editedDefinition } = options;
+  if (editedDefinition) {
+    const index = previous.definitions.indexOf(editedDefinition);
+    if (index < 0) return false;
+    const mapped = parsed.definitions[index];
+    const line = state.doc.lineAt(mapped.lineFrom).number;
+    const rebuilt = collectDefinitions(state, parseFrontmatter(state), [], { fromLine: line, toLine: line })[0];
+    if (!rebuilt || rebuilt.normalizedLabel !== mapped.normalizedLabel || rebuilt.lineTo !== mapped.lineTo) return false;
+    const replacement = { ...rebuilt, number: mapped.number, firstReferenceFrom: mapped.firstReferenceFrom, isPrimary: mapped.isPrimary };
+    parsed.definitions[index] = replacement;
+    for (const reference of parsed.references) if (reference.definition === mapped) reference.definition = replacement;
+  }
   footnoteCache.set(state.doc, { tree: currentSyntaxTree(state), tabSize: state.tabSize,
-    verified: { parser: state.facet(language)?.parser ?? null }, parsed: {
-    definitions, references, referencesByContainerKey, numberByLabel: previous.numberByLabel
-  } });
+    verified: { parser: state.facet(language)?.parser ?? null }, parsed });
   return true;
 }
 

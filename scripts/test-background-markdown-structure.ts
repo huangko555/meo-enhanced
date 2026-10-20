@@ -64,10 +64,30 @@ const build = await Bun.build({ entrypoints: ['scripts/test-live-decoration-hist
   } }] });
 assert.ok(build.success, build.logs.map(String).join('\n'));
 const bundle = await build.outputs[0]!.text();
+const workerBuild = await Bun.build({ entrypoints: ['webview/src/markdownParseWorker.ts'], target: 'browser', format: 'iife',
+  plugins: [{ name: 'observe-worker-context-preparation', setup(builder) {
+    builder.onLoad({ filter: /webview[\\/]src[\\/]markdownDocumentContext\.ts$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text(), marker = '  const state = EditorState.create({ doc, extensions: EditorState.tabSize.of(tabSize) });';
+      assert.equal(source.split(marker).length, 2);
+      return { loader: 'ts', contents: source.replace(marker,
+        '  (globalThis as any).__contextPreparations = ((globalThis as any).__contextPreparations ?? 0) + 1;\n' + marker) };
+    });
+    builder.onLoad({ filter: /webview[\\/]src[\\/]markdownParseWorker\.ts$/ }, async ({ path }) => {
+      let source = await Bun.file(path).text();
+      for (const kind of ['syntax', 'blocks']) {
+        const marker = `self.postMessage({ id: request.id, kind: '${kind}',`;
+        assert.equal(source.split(marker).length, 2);
+        source = source.replace(marker, marker + ' __contextPreparations: (globalThis as any).__contextPreparations,');
+      }
+      return { loader: 'ts', contents: source };
+    });
+  } }] });
+assert.ok(workerBuild.success, workerBuild.logs.map(String).join('\n'));
+const workerBundle = await workerBuild.outputs[0]!.text();
 const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
   const path = new URL(request.url).pathname;
   if (path === '/bundle.js') return new Response(bundle, { headers: { 'content-type': 'text/javascript; charset=utf-8' } });
-  if (path === '/worker.js') return new Response(Bun.file('webview/dist/markdown-parse-worker.js'), { headers: { 'content-type': 'text/javascript' } });
+  if (path === '/worker.js') return new Response(workerBundle, { headers: { 'content-type': 'text/javascript' } });
   if (path === '/bad-worker.js') return new Response('throw new Error("deliberate parser fixture failure")', { headers: { 'content-type': 'text/javascript' } });
   if (path === '/styles.css') return new Response(Bun.file('webview/src/styles.css'), { headers: { 'content-type': 'text/css' } });
   return new Response('<link rel="stylesheet" href="/styles.css"><style>html,body,#editor{height:100%;margin:0}</style>'
@@ -93,6 +113,8 @@ try {
       constructor(url: string | URL, options?: WorkerOptions) {
         super(url, options); scope.__workerCreates++;
         this.addEventListener('message', event => {
+          if (['syntax', 'blocks'].includes(event.data.kind)) (scope.__workerContextReceipts ??= []).push({ id: event.data.id,
+            kind: event.data.kind, prepares: event.data.__contextPreparations });
           if (!scope.__holdParseReplies && !(scope.__holdBlockReplies && event.data.kind === 'blocks')) return;
           event.stopImmediatePropagation();
           (scope.__heldParseReplies ??= []).push({ worker: this, data: event.data });
@@ -137,6 +159,9 @@ try {
   stage = 'initial structure'; await ready();
   assert.ok(await page.evaluate(() => (window as any).__parseRequests.every((request: any) => !request.blocks)),
     'Source-only revisions prepare global notes without preparing Live block presentation');
+  assert.ok(await page.evaluate(() => (window as any).__workerContextReceipts.length >= 2));
+  assert.equal(await page.evaluate(() => (window as any).__workerContextReceipts.at(-1).prepares), 1,
+    'ordinary prose input during initial parsing must project unchanged source facts instead of rediscovering the entire worker context');
   await page.evaluate(async () => { await (window as any).__editor.prepareLiveSyntax(() => true); });
   assert.ok(await page.evaluate(() => (window as any).__backgroundWaiterStarts < 100), 'background preparation cannot busy-poll the placeholder parser');
   assert.ok(await page.evaluate(() => (window as any).__editedDuringInitial
@@ -157,7 +182,8 @@ try {
       const keywords = () => [...document.querySelectorAll('.cm-line span')].filter(node => node.textContent === 'const').length;
       const keywordBefore = keywords(), rowsBefore = document.querySelectorAll('.cm-line.meo-src-code-block').length;
       for (const character of 'background中文') scope.__liveHistory.input(scope.__editor, scope.__editor.view.state.selection.main.head, character);
-      return { keywordBefore, keywordAfter: keywords(), rowsBefore, rowsAfter: document.querySelectorAll('.cm-line.meo-src-code-block').length };
+      return { keywordBefore, keywordAfter: keywords(), rowsBefore, rowsAfter: document.querySelectorAll('.cm-line.meo-src-code-block').length,
+        prepares: scope.__workerContextReceipts.at(-1).prepares };
     }, mode);
     if (mode === 'source') {
       assert.ok(continuity.keywordBefore > 0 && continuity.rowsBefore > 0);
@@ -165,6 +191,8 @@ try {
       assert.equal(continuity.rowsAfter, continuity.rowsBefore, 'pending background revisions must not clear Source code row presentation');
     }
     await ready();
+    assert.equal(await page.evaluate(() => (window as any).__workerContextReceipts.at(-1).prepares), continuity.prepares,
+      'Source and Live plain typing must retain global source facts in the worker');
     assert.ok(await page.evaluate(() => (window as any).__editor.getText().startsWith('EDITbackground中文')));
     const note = await page.evaluate(() => {
       const scope = window as any, text = scope.__editor.getText();
@@ -181,6 +209,23 @@ try {
     await ready();
     assert.ok(await page.evaluate(() => (window as any).__editor.getText() === (window as any).__before), 'native browser undo restores exact source');
   }
+  stage = 'formatted paragraph projection';
+  const formatted = await page.evaluate(() => {
+    const scope = window as any;
+    scope.__beforeFormatted = scope.__editor.getText();
+    const prepares = scope.__workerContextReceipts.at(-1).prepares;
+    scope.__liveHistory.input(scope.__editor, scope.__beforeFormatted.indexOf('Paragraph') + 3, '格式');
+    return prepares;
+  });
+  await ready();
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
+  assert.equal(await page.evaluate(() => (window as any).__workerContextReceipts.at(-1).prepares), formatted,
+    'words inside inline formatting retain the worker source indexes');
+  await page.evaluate(async () => { await (window as any).__editor.undo(); });
+  await ready();
+  assert.equal(await page.evaluate(() => (window as any).__workerContextReceipts.at(-1).prepares), formatted,
+    'formatted prose undo also maps the unchanged source indexes');
+  assert.equal(await page.evaluate(() => (window as any).__editor.getText() === (window as any).__beforeFormatted), true);
   stage = 'published revision gates derived refresh';
   await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
   await page.evaluate(() => {

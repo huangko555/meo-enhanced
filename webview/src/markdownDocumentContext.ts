@@ -1,6 +1,6 @@
 import { EditorState, type Text } from '@codemirror/state';
 import type { Parser, Tree } from '@lezer/common';
-import type { MarkdownContextPart } from '../../src/foundation/markdownDocumentContext';
+import type { MarkdownCodeFence, MarkdownContextPart, ParsedFootnotes } from '../../src/foundation/markdownDocumentContext';
 import { adoptFootnoteContext, parseFootnotes } from './helpers/footnotes';
 import { adoptLiveBlockContext, prepareLiveBlockContext } from './helpers/liveRenderedBlocks';
 import { withMarkdownSyntaxSnapshot } from './helpers/markdownSyntax';
@@ -11,8 +11,13 @@ import { adoptCodeFenceSource, readCodeFenceSource } from './helpers/codeFenceSo
 
 /** A read-only worker context uses the completed outer tree. No View, history,
  * mounted language or DOM is constructed, and no EditorState crosses the wire. */
-export function prepareMarkdownDocumentContext(doc: Text, tree: Tree, tabSize: number) {
+export function prepareMarkdownDocumentContext(doc: Text, tree: Tree, tabSize: number,
+  known?: { footnotes: ParsedFootnotes; code: readonly MarkdownCodeFence[] }) {
   const state = EditorState.create({ doc, extensions: EditorState.tabSize.of(tabSize) });
+  if (known) {
+    adoptFootnoteContext(doc, tree, tabSize, known.footnotes, null);
+    adoptCodeFenceSource(doc, tree, tabSize, known.code);
+  }
   const primary = withMarkdownSyntaxSnapshot(state, tree, () => ({ footnotes: parseFootnotes(state), code: readCodeFenceSource(state, tree) }));
   return {
     ...primary,

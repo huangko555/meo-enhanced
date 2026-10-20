@@ -627,3 +627,29 @@ first preparation 1.71 s, warm preparation 1.22 s, and complete formatted copy
 24.21 with a diagnostic parent port; it is not a native viewport measurement.
 Safe HTML filtering remains enabled. Those preparation costs and Live's cold
 input tail remain open optimization targets.
+
+The Markdown worker now retains the last completed source context. Previously,
+even an ordinary word edit discovered global footnotes, code fences and rich
+block facts again. It now projects their coordinates when all changes remain in
+one bounded paragraph and the completed outer trees prove unchanged structure
+outside that paragraph. Local literal discovery must also match. Newlines,
+syntax characters, definitions, math, HTML-sensitive paragraphs and inconclusive
+proofs retain full discovery. Source-only work does not eagerly discover rich
+presentation; a later Live request can reuse its primary facts.
+
+The actual CSP worker regression first observed two global preparations for
+initial entry plus ordinary input. It now requires one, including formatted
+prose and undo, while retaining the existing one-flight/revision contract and
+zero foreground global scans. Pure projection tests compare every accepted
+result with independent complete discovery, across nested lists/quotes,
+definitions, literals, tabs 2/4/8, coalesced changes, inverse undo and physical
+CRLF offsets. Paragraph-edge footnote container coordinates are explicitly
+preserved when the surface certifies an enclosing list/quote after insertion.
+
+Type checks, architecture checks, actual-worker/CSP lifecycle, Live scan budgets,
+input scheduling, production inline input, layout stability and production
+three-mode text/history/reading-position checks pass. The separate no-Worker
+cold-history test still reports its previously reproduced two presentation
+rebuilds instead of zero; this remains an open baseline failure. Worker facts
+are still sent in full, so this change does not establish reduced wire size or
+native cold-input latency; those require separate measurements.
