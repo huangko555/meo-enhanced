@@ -57,6 +57,15 @@ try {
     scope.__windowErrors = [];
     scope.__windowViewport = scope.__createPreviewViewport(doc.querySelector('main'), opened.document, {
       request: async (id: string, operation: any) => {
+        if (operation.kind === 'blocks' && scope.__windowBlockRequests) {
+          scope.__windowBlockRequests.push([...operation.indices]);
+          scope.__windowBlockFlight = (scope.__windowBlockFlight ?? 0) + 1;
+          scope.__windowBlockPeak = Math.max(scope.__windowBlockPeak ?? 0, scope.__windowBlockFlight);
+          try {
+            if (scope.__windowBlockPause) await new Promise(resolve => (scope.__windowBlockReleases ??= []).push(resolve));
+            return await scope.__windowOperation(id, operation);
+          } finally { scope.__windowBlockFlight -= 1; }
+        }
         const gate = scope.__windowDelay;
         if (gate && (gate.kind === 'locate' && operation.kind === 'locate'
           || gate.kind === 'blocks' && operation.kind === 'blocks' && operation.indices.includes(gate.block))) {
@@ -72,6 +81,36 @@ try {
       writeClipboard: async (value: Promise<unknown>) => { scope.__windowCopied = await value; }
     });
   }, openedWindow);
+  stage = 'fast scrolling coalesces background demand';
+  const burst = await page.evaluate(async () => {
+    const scope = window as any, viewport = scope.__windowViewport, doc = scope.__windowFrame.contentDocument;
+    await viewport.whenReady();
+    scope.__windowBlockRequests = []; scope.__windowBlockPause = true;
+    for (let index = 1; index <= 30; index++) {
+      doc.scrollingElement.scrollTop = index / 30 * (doc.scrollingElement.scrollHeight - doc.scrollingElement.clientHeight);
+      doc.dispatchEvent(new Event('scroll'));
+      await new Promise(resolve => requestAnimationFrame(resolve));
+    }
+    const result = { peak: scope.__windowBlockPeak, requests: scope.__windowBlockRequests.length };
+    scope.__windowBlockPause = false;
+    for (const release of scope.__windowBlockReleases ?? []) release();
+    await viewport.whenReady();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    result.requests = scope.__windowBlockRequests.length;
+    const anchor = viewport.readAnchor(100);
+    return { ...result, anchor, mounted: anchor && viewport.containsLine(anchor.line), errors: scope.__windowErrors };
+  });
+  assert.equal(burst.peak, 1, 'one reading viewport must not flood the shared renderer while an earlier window is pending');
+  assert.ok(burst.requests <= 3, `obsolete scroll windows must coalesce into the final demand, got ${burst.requests} batches`);
+  assert.ok(burst.mounted, 'backpressure must still materialize the final reading window');
+  assert.deepEqual(burst.errors, []);
+  await page.evaluate(() => { delete (window as any).__windowBlockRequests; });
+  await page.evaluate(async () => {
+    const viewport = (window as any).__windowViewport;
+    await viewport.ensure({ block: 0 });
+    viewport.rebind({ ...viewport.manifest, chunks: [] });
+    await viewport.whenReady();
+  });
   stage = 'window keyboard navigation supersession';
   await page.evaluate(() => {
     const scope = window as any, doc = scope.__windowFrame.contentDocument;

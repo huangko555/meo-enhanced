@@ -461,3 +461,28 @@ The history test's injected completeness observer now checks certified outer
 Markdown instead of an obsolete, unbound `syntaxTreeAvailable` reference; its
 strict zero-rebuild assertion remains. Neither issue is counted as a pass.
 Native latency acceptance for the new context pipeline is still required.
+
+V41 (`ac6307b0`, archive SHA-256
+`9e969463670cbf3c2891a182dff2591a58f4990a42feeeada1454d996c6bf068`)
+improves the traversed comprehensive sample: Source/Live typing P95 about
+63/84 ms, Live save 474 ms, first Live/Preview 3.46/3.20 s. Live sampled clicks
+range 96–247 ms. These input samples follow viewport traversal and are not cold
+input guarantees. A separate no-traversal diagnostic still observed a 620 ms
+Live input peak, and a repeat traversal missed one clicked-text witness.
+Native acceptance remains incomplete.
+
+The first full run and a separate diagnostic failed after a native Preview drag:
+`Preview renderer queue is full`. A Preview-only run completed navigation/copy
+correctly but had a 1.11 s first-drag frame gap. The viewport was submitting every
+intermediate window while previous responses were pending. A deterministic slow
+backend regression reproduced 29 overlapping block batches for 30 window changes.
+
+Each reading viewport now owns one block batch in flight. Waiting consumers
+recheck current visible/pinned demand after completion and discard obsolete
+intermediate windows; requests remain bounded to 128 blocks. Navigation retains
+its own cancellation check, and document rebinding retains the old flight until
+it retires, without adopting its stale results. The same regression requires one
+in-flight batch, at most three total batches and a mounted final reading window.
+Complete Preview navigation, formatted copy, hidden surface, geometry, source
+index and scrollbar boundary regressions pass. The host queue limit is unchanged.
+New native validation is required before claiming this fixes the observed drag.

@@ -59,7 +59,7 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
   const mounted = new Map<number, MountedBlock>();
   const gaps = new Set<HTMLElement>();
   const cache = new Map<number, PreviewDocumentChunk>();
-  const loading = new Map<number, Promise<void>>();
+  let chunkFlight: Promise<void> | null = null;
   const forced = new Map<number, number>();
   const pin = (index: number) => forced.set(index, (forced.get(index) ?? 0) + 1);
   const unpin = (index: number) => {
@@ -132,7 +132,7 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
   };
   const trimCache = () => {
     while (cacheBytes > 2 * 1024 * 1024 && cache.size) {
-      const oldest = [...cache.keys()].find(index => mounted.has(index) || !loading.has(index) && !forced.has(index));
+      const oldest = [...cache.keys()].find(index => mounted.has(index) || !forced.has(index));
       if (oldest === undefined) break;
       cacheBytes -= cache.get(oldest)!.html.length * 2; cache.delete(oldest);
     }
@@ -235,20 +235,30 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
       }
     }
   };
-  const ensureChunks = async (indices: readonly number[]): Promise<void> => {
+  const ensureChunks = async (indices: readonly number[], isCurrent: () => boolean = () => true): Promise<void> => {
     const revision = documentGeneration;
-    const missing = indices.filter(index => !cache.has(index) && !mounted.has(index) && !loading.has(index));
-    for (let from = 0; from < missing.length; from += 128) {
-      const batch = missing.slice(from, from + 128);
+    while (!disposed && revision === documentGeneration && isCurrent()) {
+      // Native thumb dragging can cross dozens of windows before one reply.
+      // Keep one batch in flight, then recheck current viewport/pinned demand;
+      // obsolete intermediate windows must never fill the shared host queue.
+      const wanted = new Set(desired());
+      const batch = indices.filter(index => wanted.has(index) && !cache.has(index) && !mounted.has(index)).slice(0, 128);
+      if (!batch.length) return;
+      if (chunkFlight) {
+        // Another window owns that failure. This caller rechecks its own demand
+        // afterwards, rather than failing a newer window for obsolete work.
+        await chunkFlight.catch(() => {});
+        continue;
+      }
       const operation = dependencies.request(manifest.id, { kind: 'blocks', indices: batch }).then(result => {
         if (disposed || revision !== documentGeneration) return;
         if (result.kind !== 'blocks') throw new Error('Preview returned a different block window');
         for (const chunk of result.chunks) remember(chunk);
       }).catch(error => { if (!disposed && revision === documentGeneration) throw error; })
-        .finally(() => { for (const index of batch) if (loading.get(index) === operation) loading.delete(index); });
-      for (const index of batch) loading.set(index, operation);
+        .finally(() => { if (chunkFlight === operation) chunkFlight = null; });
+      chunkFlight = operation;
+      await operation;
     }
-    await Promise.all(indices.map(index => loading.get(index)));
   };
   const refresh = () => {
     if (disposed || !active || frame !== null) return;
@@ -288,7 +298,7 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
     if (index < 0 || index >= manifest.blocks.length || disposed) return null;
     pin(index);
     try {
-      await ensureChunks([index]);
+      await ensureChunks([index], () => target.isCurrent?.() !== false);
       if (disposed || revision !== documentGeneration || target.isCurrent?.() === false) return null;
       commit();
       const block = mounted.get(index);
@@ -444,7 +454,7 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
       })) return false;
       documentGeneration += 1; manifest = next;
       root.dataset.meoPreviewDocument = next.id;
-      loading.clear(); cache.clear(); cacheBytes = 0;
+      cache.clear(); cacheBytes = 0;
       for (const chunk of next.chunks) remember(chunk);
       refresh();
       return true;
