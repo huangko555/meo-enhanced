@@ -864,7 +864,6 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
     const height = this[renderedBlockPreviewHeight].height;
     if (height > 0) {
       this.diagramWidget.measuredHeight = height;
-      this.diagramWidget.initialHeightSeed = height;
     }
     const content = this.diagramWidget.toDOM(view) as HTMLElement;
     delete content.dataset.meoRenderedBlockStartLine;

@@ -15,6 +15,10 @@ function applyCodeTheme(appearance: 'light' | 'dark'): void {
   setShikiTheme(theme, 'source');
 }
 
+function refreshPresentation(editor: ReturnType<typeof createEditor>): void {
+  editor.view.dispatch({ effects: StateEffect.define<true>().of(true) });
+}
+
 function createMermaidDerivedPointerProbe(parent: HTMLElement) {
   const editor = createEditor({
     parent, text: '```mermaid\nflowchart LR\nA --> B\n```\n\nplain',
@@ -65,6 +69,7 @@ function createMermaidDerivedPointerProbe(parent: HTMLElement) {
 (globalThis as typeof globalThis & {
   MermaidEditingHarness?: {
     createEditor: typeof createEditor;
+    refreshPresentation: typeof refreshPresentation;
       createMermaidDerivedPointerProbe: typeof createMermaidDerivedPointerProbe;
     refreshMermaidTheme: typeof refreshMermaidTheme;
     applyCodeTheme: typeof applyCodeTheme;
@@ -72,4 +77,4 @@ function createMermaidDerivedPointerProbe(parent: HTMLElement) {
     applyUiTheme: typeof applyUiTheme;
     createMermaidToolbarWidget: typeof createMermaidToolbarWidget;
   };
-}).MermaidEditingHarness = { createEditor, createMermaidDerivedPointerProbe, refreshMermaidTheme, applyCodeTheme, editorViewportBounds, applyUiTheme, createMermaidToolbarWidget };
+}).MermaidEditingHarness = { createEditor, refreshPresentation, createMermaidDerivedPointerProbe, refreshMermaidTheme, applyCodeTheme, editorViewportBounds, applyUiTheme, createMermaidToolbarWidget };

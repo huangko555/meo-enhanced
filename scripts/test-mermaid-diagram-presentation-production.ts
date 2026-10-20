@@ -293,6 +293,13 @@ async function main(): Promise<void> {
     await settleVisibility();
     await page.evaluate(() => { (window as any).__visibleDiagramSvg = document.querySelector('.meo-mermaid-svg-wrapper'); });
     await page.evaluate(() => {
+      const scope = window as any;
+      scope.MermaidEditingHarness.refreshPresentation(scope.__visibilityEditor);
+    });
+    await settleVisibility();
+    assert.equal(await page.evaluate(() => document.querySelector('.meo-mermaid-svg-wrapper') === (window as any).__visibleDiagramSvg), true,
+      'a presentation refresh must retain a current SVG after its actual height has been measured');
+    await page.evaluate(() => {
       const scope = window as any, widget = document.querySelector('.meo-mermaid-block')!;
       scope.__notifyDiagramVisibility(widget, false); scope.__notifyDiagramVisibility(widget, true);
     });

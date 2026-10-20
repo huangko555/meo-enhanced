@@ -1300,3 +1300,31 @@ split refresh, foreground edits, partial-line viewport, actual CSP module/ELK
 and Source-side Preview checks pass. The surrounding Preview shell and split
 controller already own the mounted diagram's destruction; no second disposal
 registry is introduced. Native remeasurement remains required.
+
+V58 (`fe96f1d1`, archive SHA-256
+`1ee10bc82f516f3263d0b3d8ceee7a1381f7133a8e47dfecd10a1b3bd155b3c2`)
+passes the complete native ordinary/rich flow and sixteen strict rich clicks.
+Warm rich Source input median/P95/maximum is 35/78/141 ms, Live is 64/156/201 ms;
+their maximum frame gaps are 106/201 ms. Rich Live clicks range 128–168 ms in
+this run. First Preview is 3.65 s (2.74 s response), cached Preview 664 ms,
+drag gaps 60/107/139/101 ms and complete formatted copy 6.85 s. Exact source,
+undo/save, timing clocks and protocol composition pass; the final Preview
+screenshot is visually checked. This single run is not a universal caret P95 or
+proof that cold input is solved. Cold verification is still separate.
+
+### Preserve a measured diagram across unrelated presentation refreshes
+
+A second real Editor regression shows that measuring a new diagram's actual
+height changes its initial estimate. Widget equality previously treated that
+cache refinement as different content, rebuilding the SVG and controls during
+an unrelated presentation refresh. Equality now depends on source, source
+bounds, indentation, language, theme and camera ownership. Mounted layout and
+its observer continue to own actual height. The obsolete initial-height seed
+field is removed; no per-history layout cache is added.
+
+The production regression is red on SVG identity before this change and green
+after a full presentation refresh following measurement. Existing real Mermaid
+viewport persistence passes typing, undo/redo, both block/document mode cycles,
+theme/fullscreen, source recovery, independent camera state, resets and layout
+shrink. Type checks pass. This refinement is not in frozen V58; it still needs
+native verification.

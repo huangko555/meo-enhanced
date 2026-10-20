@@ -623,7 +623,6 @@ export class MermaidDiagramWidget extends WidgetType {
   previewResizeObserver: ResizeObserver | null;
   measuredHeight: number;
   measuredContentWidth: number;
-  initialHeightSeed: number;
   intrinsicSvg: string | null;
   staleSvg: string | null;
   indentColumns: number;
@@ -683,7 +682,6 @@ export class MermaidDiagramWidget extends WidgetType {
           mermaidEstimatedHeightKey(JSON.stringify(request), contentWidth)
         ) ?? estimateCachedMermaidHeight(cached?.ok === true ? cached.svg : undefined, contentWidth);
     this.measuredContentWidth = contentWidth;
-    this.initialHeightSeed = this.measuredHeight;
   }
 
   get zoom(): number { return this.viewportState.zoom; }
@@ -716,8 +714,10 @@ export class MermaidDiagramWidget extends WidgetType {
       other.indentColumns === this.indentColumns &&
       other.uiLanguage === this.uiLanguage &&
       other.themeSignature === this.themeSignature &&
-      other.blockViewportState === this.blockViewportState &&
-      Math.abs(other.initialHeightSeed - this.initialHeightSeed) < 1
+      // A refined height estimate changes neither the diagram nor its camera.
+      // The mounted SVG and its observer already own actual layout; replacing
+      // it here reparses SVG and rebuilds controls after an unrelated refresh.
+      other.blockViewportState === this.blockViewportState
     );
   }
 
