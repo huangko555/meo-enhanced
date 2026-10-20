@@ -10,7 +10,8 @@ import { hasSameLiveMarkdownSyntax } from '../webview/src/helpers/livePresentati
 import { collectDocumentMathRanges } from '../webview/src/helpers/displayMathBlocks';
 import { collectMarkdownLiteralRanges } from '../webview/src/helpers/markdownLiteralRanges';
 import { readCodeFenceSource } from '../webview/src/helpers/codeFenceSource';
-import { projectMarkdownDocumentContext, type MarkdownSourceContext } from '../webview/src/markdownContextProjection';
+import { projectMarkdownDocumentContext } from '../webview/src/markdownContextProjection';
+import type { MarkdownSourceContext } from '../webview/src/editor/markdownSourceContext';
 
 const ensure = language.ensureSyntaxTree;
 let ensureCalls = 0;

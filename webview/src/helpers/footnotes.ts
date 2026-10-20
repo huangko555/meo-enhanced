@@ -9,7 +9,9 @@ import { language } from '@codemirror/language';
 import type { Parser, Tree } from '@lezer/common';
 import type { FootnoteReference, FootnoteDefinition, FootnoteContinuationLine, ParsedFootnotes } from '../../../src/foundation/markdownDocumentContext';
 import { readDocumentTextProjection } from '../application/documentTextProjection';
+import { footnoteReferenceKey, mapFootnoteSourcePositions, type FootnoteContainerProjection } from '../../../src/foundation/markdownContextCoordinates';
 export type { FootnoteReference, FootnoteDefinition, FootnoteContinuationLine, ParsedFootnotes } from '../../../src/foundation/markdownDocumentContext';
+export { footnoteReferenceKey } from '../../../src/foundation/markdownContextCoordinates';
 
 interface ProtectedRange {
   from: number;
@@ -160,40 +162,6 @@ export function parseFootnotes(state: EditorState): ParsedFootnotes {
   return parsed;
 }
 
-/** Pure coordinate mapping after a caller proves unchanged semantic membership.
- * Both worker projection and surface-local edits retain reference identities. */
-type FootnoteContainerProjection = { before: { from: number; to: number }; after: { from: number; to: number } };
-
-export function mapFootnoteSourcePositions(previous: ParsedFootnotes, changes: ChangeDesc,
-  container?: FootnoteContainerProjection): ParsedFootnotes {
-  const position = (value: number) => changes.mapPos(value, 1);
-  const end = (value: number) => changes.mapPos(value, -1);
-  const definitions = previous.definitions.map(definition => ({ ...definition,
-    markerFrom: position(definition.markerFrom), markerTo: end(definition.markerTo),
-    colonFrom: position(definition.colonFrom), colonTo: end(definition.colonTo),
-    contentFrom: changes.mapPos(definition.contentFrom, -1), contentTo: position(definition.contentTo),
-    lineFrom: position(definition.lineFrom), lineTo: position(definition.lineTo),
-    firstReferenceFrom: definition.firstReferenceFrom === null ? null : position(definition.firstReferenceFrom),
-    continuationLines: definition.continuationLines.map(line => ({ ...line, from: position(line.from), to: position(line.to),
-      hideIndentFrom: line.hideIndentFrom === null ? null : position(line.hideIndentFrom),
-      hideIndentTo: line.hideIndentTo === null ? null : end(line.hideIndentTo) }))
-  }));
-  const definitionMap = new Map(previous.definitions.map((definition, index) => [definition, definitions[index]]));
-  const references = previous.references.map(reference => ({ ...reference,
-    from: position(reference.from), to: end(reference.to), containerFrom: position(reference.containerFrom), containerTo: end(reference.containerTo),
-    ...(container && reference.containerFrom === container.before.from && reference.containerTo === container.before.to
-      ? { containerFrom: container.after.from, containerTo: container.after.to } : {}),
-    definition: reference.definition ? definitionMap.get(reference.definition)! : null
-  }));
-  const referencesByContainerKey = new Map<string, FootnoteReference[]>();
-  for (const reference of references) {
-    const key = footnoteReferenceKey(reference.containerFrom, reference.containerTo);
-    const container = referencesByContainerKey.get(key) ?? [];
-    container.push(reference); referencesByContainerKey.set(key, container);
-  }
-  return { definitions, references, referencesByContainerKey, numberByLabel: previous.numberByLabel };
-}
-
 /** Only after proving unchanged labels, references and protected membership.
  * Numbering stays global. A changed continuation gets fresh local line metadata. */
 export function projectUnchangedFootnotes(before: EditorState, state: EditorState, changes: ChangeDesc,
@@ -215,10 +183,6 @@ export function projectUnchangedFootnotes(before: EditorState, state: EditorStat
   footnoteCache.set(state.doc, { tree: currentSyntaxTree(state), tabSize: state.tabSize,
     verified: { parser: state.facet(language)?.parser ?? null }, parsed });
   return true;
-}
-
-export function footnoteReferenceKey(from: number, to: number): string {
-  return `${from}:${to}`;
 }
 
 function collectProtectedRanges(state: EditorState, tree: any): ProtectedRange[] {

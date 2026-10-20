@@ -683,3 +683,30 @@ Native V46 diagnostics also show image growth can move a target before the OS
 pointer event arrives. The click-order repair addresses the reproducible
 in-handler movement, not this separate first-arrival case. Unknown intrinsic
 image geometry and final native interaction acceptance remain open.
+
+The V46 cold Live CPU diagnostic attributes 146 ms aggregate to Markdown worker
+message delivery, including 112 ms self time, over a 7.78 s instrumented input
+interval. Those are aggregate samples, not one-key latency. Its source maps are
+checked against the exact archive's executable text, normalizing only fixed-width
+Bun chunk-digest metadata so generated line/column positions remain identical.
+The remaining full context replies are now replaced by a base-revision receipt
+when the worker certifies an unchanged context. The receiver owns one previous
+context and maps it through the exact composed ChangeSet it sent. Initial or
+structurally changed contexts still transfer complete facts. Syntax and rich
+receipts preserve the existing separate readiness stages, including Source-only
+revisions followed by a later Live request.
+
+The actual-worker test requires no full fact arrays/formula strings on ordinary
+prose and formatted-word replies, including undo and coalesced input. Both syntax
+and rich receipt bases are checked; deliberately mismatched bases reject the
+operation while retaining exact Source text and never start a foreground full
+parse. Disposal clears the retained context. Independent full-discovery parity
+continues to validate the shared coordinate mapper. Native acceptance of receipt
+delivery and the pointer-order repair remains required.
+
+An independent V46 Preview-only native run passes source preservation, visible
+boundary witnesses and four real scrollbar drags. First Preview takes 4.18 s
+(render response 3.56 s); maximum frame gaps are 285/434/174/254 ms. Passing the
+old 500 ms severe-stall gate still does not establish 16–33 ms scrolling or a
+one-second first viewport. These cold Preview observations supersede any claim
+that warmed 100 ms-range drag samples describe the entire experience.

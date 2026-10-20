@@ -114,7 +114,12 @@ try {
         super(url, options); scope.__workerCreates++;
         this.addEventListener('message', event => {
           if (['syntax', 'blocks'].includes(event.data.kind)) (scope.__workerContextReceipts ??= []).push({ id: event.data.id,
-            kind: event.data.kind, prepares: event.data.__contextPreparations });
+            kind: event.data.kind, prepares: event.data.__contextPreparations, projectedFrom: event.data.projectedFrom,
+            hasPayload: event.data.footnotes !== undefined || event.data.code !== undefined || event.data.value !== undefined,
+            contextBytes: JSON.stringify([event.data.footnotes, event.data.code, event.data.value]).length });
+          if (scope.__corruptProjection === event.data.kind && typeof event.data.projectedFrom === 'number') {
+            scope.__corruptProjection = undefined; event.data.projectedFrom = -1;
+          }
           if (!scope.__holdParseReplies && !(scope.__holdBlockReplies && event.data.kind === 'blocks')) return;
           event.stopImmediatePropagation();
           (scope.__heldParseReplies ??= []).push({ worker: this, data: event.data });
@@ -156,12 +161,30 @@ try {
     scope.__editor = scope.__liveHistory.create({ parent: document.getElementById('editor'), text, initialMode: 'source' });
   });
   const ready = () => page.waitForFunction(() => (window as any).__liveHistory.markdownReady((window as any).__editor));
+  const projectedReceipt = async () => {
+    await page.waitForFunction(() => {
+      const scope = window as any, request = scope.__parseRequests.at(-1);
+      return scope.__workerContextReceipts.some((receipt: any) => receipt.id === request.id
+        && receipt.kind === (request.blocks ? 'blocks' : 'syntax'));
+    });
+    const wire = await page.evaluate(() => {
+      const scope = window as any, request = scope.__parseRequests.at(-1);
+      return { request, receipts: scope.__workerContextReceipts.filter((receipt: any) => receipt.id === request.id) };
+    });
+    assert.ok(wire.receipts.length > 0);
+    for (const receipt of wire.receipts) {
+      assert.equal(receipt.projectedFrom, wire.request.base, 'projection must name the exact worker base revision');
+      assert.equal(receipt.hasPayload, false, 'unchanged source facts must not be cloned across the worker boundary again');
+      assert.ok(receipt.contextBytes < 32, 'projection receipt has no full fact arrays or formula strings');
+    }
+  };
   stage = 'initial structure'; await ready();
   assert.ok(await page.evaluate(() => (window as any).__parseRequests.every((request: any) => !request.blocks)),
     'Source-only revisions prepare global notes without preparing Live block presentation');
   assert.ok(await page.evaluate(() => (window as any).__workerContextReceipts.length >= 2));
   assert.equal(await page.evaluate(() => (window as any).__workerContextReceipts.at(-1).prepares), 1,
     'ordinary prose input during initial parsing must project unchanged source facts instead of rediscovering the entire worker context');
+  await projectedReceipt();
   await page.evaluate(async () => { await (window as any).__editor.prepareLiveSyntax(() => true); });
   assert.ok(await page.evaluate(() => (window as any).__backgroundWaiterStarts < 100), 'background preparation cannot busy-poll the placeholder parser');
   assert.ok(await page.evaluate(() => (window as any).__editedDuringInitial
@@ -193,6 +216,7 @@ try {
     await ready();
     assert.equal(await page.evaluate(() => (window as any).__workerContextReceipts.at(-1).prepares), continuity.prepares,
       'Source and Live plain typing must retain global source facts in the worker');
+    await projectedReceipt();
     assert.ok(await page.evaluate(() => (window as any).__editor.getText().startsWith('EDITbackground中文')));
     const note = await page.evaluate(() => {
       const scope = window as any, text = scope.__editor.getText();
@@ -221,10 +245,12 @@ try {
   await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
   assert.equal(await page.evaluate(() => (window as any).__workerContextReceipts.at(-1).prepares), formatted,
     'words inside inline formatting retain the worker source indexes');
+  await projectedReceipt();
   await page.evaluate(async () => { await (window as any).__editor.undo(); });
   await ready();
   assert.equal(await page.evaluate(() => (window as any).__workerContextReceipts.at(-1).prepares), formatted,
     'formatted prose undo also maps the unchanged source indexes');
+  await projectedReceipt();
   assert.equal(await page.evaluate(() => (window as any).__editor.getText() === (window as any).__beforeFormatted), true);
   stage = 'published revision gates derived refresh';
   await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
@@ -351,6 +377,24 @@ try {
   assert.ok(incrementalCodeSteps < 5_000, `a code edit must reuse existing inner-language fragments: ${incrementalCodeSteps} LR steps`);
   await page.evaluate(() => (window as any).__codeEditor.destroy());
 
+  for (const part of ['syntax', 'blocks']) {
+    stage = 'reject mismatched ' + part + ' projection base';
+    const invalid = await page.evaluate(async part => {
+      const scope = window as any;
+      const editor = scope.__liveHistory.create({ parent: document.getElementById('editor'), text: scope.__original, initialMode: 'source' });
+      await editor.prepareLiveSyntax(() => true); await editor.setMode('live');
+      scope.__corruptProjection = part;
+      scope.__liveHistory.input(editor, 4, 'safe');
+      let error = '';
+      try { await editor.prepareLiveSyntax(() => true); } catch (reason) { error = String(reason); }
+      await editor.setMode('source');
+      const exact = editor.getText() === 'EDITsafe' + scope.__original.slice(4);
+      editor.destroy(); return { error, exact, consumed: scope.__corruptProjection === undefined };
+    }, part);
+    assert.ok(invalid.consumed && invalid.exact, 'a rejected receipt must retain the exact editable source');
+    assert.match(invalid.error, /Invalid Markdown (source projection base|block context)/);
+  }
+
   const failure = await page.evaluate(async () => {
     const scope = window as any;
     document.body.dataset.meoMarkdownWorkerSrc = '/bad-worker.js';
@@ -366,7 +410,7 @@ try {
   assert.ok(failure.textIntact, 'worker failure retains editable Source and exact text');
   assert.equal(await page.evaluate(() => (window as any).__foregroundLargeMarkdownAdvances ?? 0), 0, 'failure cannot fall back to a blocking full parse');
   assert.deepEqual(errors, []);
-  console.log(`Background Markdown: CSP worker, no foreground full parse, ${requests.length} jobs/one snapshot, CJK input, undo, modes, distant code palette, ${incrementalCodeSteps} incremental code LR steps, disposal and failure passed`);
+  console.log(`Background Markdown: CSP worker, no foreground full parse, ${requests.length} jobs/one snapshot, receipt-only prose updates, strict projection bases, CJK input, undo, modes, distant code palette, ${incrementalCodeSteps} incremental code LR steps, disposal and failure passed`);
 } catch (error) {
   console.error(JSON.stringify({ stage, browserErrors, details: await activePage?.evaluate(() => {
     const scope = window as any;

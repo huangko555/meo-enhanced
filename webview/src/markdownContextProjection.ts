@@ -1,16 +1,8 @@
 import { EditorState, type ChangeSet, type Text } from '@codemirror/state';
 import { IterMode, type SyntaxNode, type Tree } from '@lezer/common';
-import type { MarkdownCodeFence, MarkdownDetailsBlock, MarkdownPresentationContext, ParsedFootnotes } from '../../src/foundation/markdownDocumentContext';
 import { hasSameLiveMarkdownOutsideBlock } from './helpers/livePresentationSyntax';
-import { mapFootnoteSourcePositions } from './helpers/footnotes';
+import { mapUnchangedMarkdownDocumentContext, type MarkdownSourceContext } from './editor/markdownSourceContext';
 import { collectMarkdownLiteralRanges } from './helpers/markdownLiteralRanges';
-
-/** One completed outer-grammar revision owned by the parser worker. */
-export type MarkdownSourceContext = {
-  readonly doc: Text; readonly tree: Tree; readonly tabSize: number;
-  readonly footnotes: ParsedFootnotes; readonly code: readonly MarkdownCodeFence[];
-  blocks?: MarkdownPresentationContext;
-};
 
 const plainCharacters = /^[\p{L}\p{N} ,.!?，。！？；：、…-]*$/u;
 const globalParagraphSyntax = /[<$]|\[\^|\^\[/;
@@ -62,20 +54,5 @@ export function projectMarkdownDocumentContext(before: MarkdownSourceContext, do
         || !!range.htmlCode !== !!next.htmlCode || range.htmlCode && (changes.mapPos(range.htmlCode.from, 1) !== next.htmlCode!.from
           || changes.mapPos(range.htmlCode.to, -1) !== next.htmlCode!.to);
     })) return;
-  const from = (position: number) => changes.mapPos(position, 1), to = (position: number) => changes.mapPos(position, -1);
-  const mapDetails = (block: MarkdownDetailsBlock): MarkdownDetailsBlock => ({ ...block,
-    anchorFrom: from(block.anchorFrom), anchorTo: to(block.anchorTo), summaryFrom: from(block.summaryFrom), summaryTo: to(block.summaryTo),
-    lineFrom: from(block.lineFrom), lineTo: to(block.lineTo), sectionFrom: from(block.sectionFrom), sectionTo: to(block.sectionTo),
-    bodyFrom: from(block.bodyFrom), bodyTo: to(block.bodyTo), closingFrom: from(block.closingFrom), closingTo: to(block.closingTo) });
-  return { doc, tree, tabSize, footnotes: mapFootnoteSourcePositions(before.footnotes, changes),
-    code: before.code.map(fence => ({ ...fence, anchor: from(fence.anchor), start: from(fence.start), end: to(fence.end),
-      endLineFrom: from(fence.endLineFrom), contentFrom: from(fence.contentFrom), contentTo: to(fence.contentTo) })),
-    blocks: before.blocks && {
-      blocks: before.blocks.blocks.map(item => item.htmlFrom === undefined ? item : ({ ...item, htmlFrom: from(item.htmlFrom) })),
-      literals: before.blocks.literals.map(range => ({ ...range, from: from(range.from), to: to(range.to),
-        ...(range.htmlCode ? { htmlCode: { from: from(range.htmlCode.from), to: to(range.htmlCode.to) } } : {}) })),
-      math: before.blocks.math.map(range => ({ ...range, from: from(range.from), to: to(range.to),
-        ...(range.fenceSource ? { fenceSource: { ...range.fenceSource, from: from(range.fenceSource.from) } } : {}) })),
-      details: before.blocks.details.map(mapDetails)
-    } };
+  return mapUnchangedMarkdownDocumentContext(before, doc, tree, changes);
 }

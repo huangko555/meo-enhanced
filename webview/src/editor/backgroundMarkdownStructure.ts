@@ -9,6 +9,7 @@ import { createMarkdownTreeReceiver } from './markdownTreeTransfer';
 import type { MarkdownParseRequest, MarkdownParseResponse } from './markdownParseProtocol';
 import { createClassicWorkerTransport } from '../adapters/classicWorkerTransport';
 import type { MarkdownContextPart } from '../../../src/foundation/markdownDocumentContext';
+import { mapUnchangedMarkdownDocumentContext, type MarkdownSourceContext } from './markdownSourceContext';
 
 type DocumentContextAdapter = {
   enabled(): boolean;
@@ -29,13 +30,15 @@ function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet, contex
   let changes: ChangeSet | null = null, sequence = 0, postedRevision = 0;
   let worker: Awaited<ReturnType<typeof createClassicWorkerTransport<MarkdownParseRequest, MarkdownParseResponse>>> | undefined;
   let loading = false, disposed = false, queued = false, attached = false;
-  let failure: Error | undefined, flight: { id: number; result: Result; tabSize: number; blocks: boolean; syntaxReceived: boolean } | undefined;
+  let sourceContext: { revision: number; value: MarkdownSourceContext } | undefined;
+  let failure: Error | undefined, flight: { id: number; base: number; before?: Text; update?: ChangeSet;
+    result: Result; tabSize: number; blocks: boolean; syntaxReceived: boolean; projected?: true } | undefined;
   let timeout: ReturnType<typeof setTimeout> | undefined;
 
   const stop = () => {
     if (timeout !== undefined) clearTimeout(timeout);
     timeout = undefined; worker?.dispose(); worker = undefined;
-    receiver.clear(); flight = undefined; posted = undefined; changes = null; mixedFragments = [];
+    receiver.clear(); flight = undefined; posted = undefined; changes = null; mixedFragments = []; sourceContext = undefined;
     for (const result of waiting) { result.status = 'superseded'; result.resolve(); }
     waiting.clear();
   };
@@ -79,11 +82,24 @@ function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet, contex
               if (flight.syntaxReceived || data.grammar !== grammar || data.length !== accepted.doc.length) throw new Error('Markdown parser response grammar/document mismatch');
               const received = receiver.receive(data.tree);
               const tree = accepted.tree ?? acceptCompletedMarkdownStructure(received, data.length);
-              if (!Array.isArray(data.footnotes.references) || !Array.isArray(data.footnotes.definitions)
-                || !(data.footnotes.numberByLabel instanceof Map) || !(data.footnotes.referencesByContainerKey instanceof Map)
-                || !Array.isArray(data.code)) throw new Error('Invalid Markdown source context');
-              context.receive(accepted.doc, tree, flight.tabSize, { kind: 'footnotes', value: data.footnotes });
-              context.receive(accepted.doc, tree, flight.tabSize, { kind: 'code', value: data.code });
+              let value: MarkdownSourceContext;
+              if (data.projectedFrom !== undefined) {
+                const previous = sourceContext;
+                if (!previous || !flight.update || previous.revision !== flight.base || data.projectedFrom !== flight.base
+                  || previous.value.doc !== flight.before || previous.value.tabSize !== flight.tabSize
+                  || flight.update.length !== previous.value.doc.length || flight.update.newLength !== accepted.doc.length
+                  || data.footnotes !== undefined || data.code !== undefined) throw new Error('Invalid Markdown source projection base');
+                value = mapUnchangedMarkdownDocumentContext(previous.value, accepted.doc, tree, flight.update);
+                flight.projected = true;
+              } else {
+                if (!data.footnotes || !Array.isArray(data.footnotes.references) || !Array.isArray(data.footnotes.definitions)
+                  || !(data.footnotes.numberByLabel instanceof Map) || !(data.footnotes.referencesByContainerKey instanceof Map)
+                  || !Array.isArray(data.code)) throw new Error('Invalid Markdown source context');
+                value = { doc: accepted.doc, tree, tabSize: flight.tabSize, footnotes: data.footnotes, code: data.code };
+              }
+              context.receive(accepted.doc, tree, flight.tabSize, { kind: 'footnotes', value: value.footnotes });
+              context.receive(accepted.doc, tree, flight.tabSize, { kind: 'code', value: value.code });
+              sourceContext = { revision: data.id, value };
               accepted.tree = tree; accepted.footnotesTab = flight.tabSize;
               accepted.status = 'ready'; accepted.resolve(); waiting.delete(accepted);
               flight.syntaxReceived = true;
@@ -91,9 +107,14 @@ function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet, contex
               // its presentation scheduler keeps waiting for that second stage.
               if (flight.blocks) return;
             } else {
-              if (!flight.syntaxReceived || !flight.blocks || !accepted.tree || !Array.isArray(data.value.blocks)
-                || !Array.isArray(data.value.math) || !Array.isArray(data.value.literals) || !Array.isArray(data.value.details)) throw new Error('Invalid Markdown block context order');
-              context.receive(accepted.doc, accepted.tree, flight.tabSize, { kind: 'blocks', value: data.value });
+              if (!flight.syntaxReceived || !flight.blocks || !accepted.tree || sourceContext?.revision !== data.id
+                || sourceContext.value.doc !== accepted.doc) throw new Error('Invalid Markdown block context order');
+              const value = data.projectedFrom === undefined ? data.value : sourceContext.value.blocks;
+              if (data.projectedFrom !== undefined && (!flight.projected || data.projectedFrom !== flight.base || data.value !== undefined)
+                || !value || !Array.isArray(value.blocks) || !Array.isArray(value.math)
+                || !Array.isArray(value.literals) || !Array.isArray(value.details)) throw new Error('Invalid Markdown block context');
+              sourceContext.value.blocks = value;
+              context.receive(accepted.doc, accepted.tree, flight.tabSize, { kind: 'blocks', value });
               accepted.blocksTab = flight.tabSize;
             }
             if (timeout !== undefined) clearTimeout(timeout);
@@ -109,13 +130,15 @@ function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet, contex
     try {
       const id = ++sequence;
       let request: MarkdownParseRequest;
+      let update: ChangeSet | undefined;
       if (!posted) request = { id, base: 0, text: readDocumentTextProjection(doc), tabSize, blocks };
       else {
-        const update = changes ?? (posted === doc ? ChangeSet.empty(posted.length) : null);
+        update = changes ?? (posted === doc ? ChangeSet.empty(posted.length) : undefined);
         if (!update || update.length !== posted.length || update.newLength !== doc.length) throw new Error('Missing incremental Markdown parser changes');
         request = { id, base: postedRevision, changes: update.toJSON(), tabSize, blocks };
       }
-      flight = { id, result, tabSize, blocks, syntaxReceived: false }; posted = doc; postedRevision = id; changes = null;
+      flight = { id, base: request.base, before: posted, update, result, tabSize, blocks, syntaxReceived: false };
+      posted = doc; postedRevision = id; changes = null;
       timeout = setTimeout(() => fail(new Error('Markdown parser worker timed out')), 20_000);
       worker.send(request);
     } catch (error) { fail(error); }

@@ -57,6 +57,12 @@ export type MarkdownPresentationContext = {
   blocks: DiscoveredMarkdownBlock[]; literals: MarkdownLiteralRange[]; math: MarkdownMathRange[]; details: MarkdownDetailsBlock[];
 };
 
+export type MarkdownSourceFacts = {
+  readonly footnotes: ParsedFootnotes;
+  readonly code: readonly MarkdownCodeFence[];
+  blocks?: MarkdownPresentationContext;
+};
+
 export type MarkdownContextPart =
   | { readonly kind: 'footnotes'; readonly value: ParsedFootnotes }
   | { readonly kind: 'code'; readonly value: readonly MarkdownCodeFence[] }
