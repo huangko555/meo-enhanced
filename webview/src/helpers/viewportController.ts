@@ -369,6 +369,7 @@ export class ViewportController {
   private scrollLockGeneration = 0;
   private activeScrollLockGeneration: number | null = null;
   private activeScrollLockCorrection: (() => void) | null = null;
+  private windowReturnCorrection: (() => void) | null = null;
   private elementRetentionGeneration = 0;
   private activeElementRetentionObserver: MutationObserver | null = null;
   private activeElementRetentionCorrection: (() => void) | null = null;
@@ -398,6 +399,7 @@ export class ViewportController {
   private pendingAsyncAnchorTransactions = 0;
   private readonly onWheel = (event: WheelEvent) => this.handleWheel(event);
   private readonly onScroll = () => {
+    this.windowReturnCorrection?.();
     // Adopt the reading line after native scrolling, using the same layout
     // stabilizer as block updates. A newer interaction invalidates this anchor.
     if (this.getMode() === 'live' && this.isUserScrolling() &&
@@ -482,6 +484,7 @@ export class ViewportController {
   }
 
   private invalidateViewportWork(preserveInteractionGeneration = false): void {
+    this.windowReturnCorrection = null;
     const scope = this.anchorTransactionScope;
     const programmaticCurrentTransaction = scope.kind === 'current'
       && this.isAnchorTokenCurrent(scope.record)
@@ -679,6 +682,21 @@ export class ViewportController {
   retainScrollTop(targetTop: number, isCurrent: () => boolean = () => true): void {
     if (this.destroyed || !isCurrent()) return;
     this.startScrollTopLock(targetTop, isCurrent);
+  }
+
+  /** Ignore native focus scrolling during activation; new interactions keep their viewport. */
+  retainViewportOnWindowReturn(isCurrent: () => boolean): () => void {
+    const position = this.readScrollPosition();
+    const generation = this.interactionGeneration;
+    const correct = () => {
+      if (!this.destroyed && generation === this.interactionGeneration && isCurrent()) {
+        this.writeScrollPosition(position);
+      }
+    };
+    this.windowReturnCorrection = correct;
+    return () => {
+      if (this.windowReturnCorrection === correct) this.windowReturnCorrection = null;
+    };
   }
 
   /** Retains one presentation element across a replacement without superseding its navigation intent. */
@@ -1826,6 +1844,7 @@ export class ViewportController {
 
   destroy(): void {
     this.destroyed = true;
+    this.windowReturnCorrection = null;
     this.activeNavigationReveals.clear();
     this.cancelElementRetention();
     this.modeTransitionChain = null;

@@ -31,7 +31,8 @@ try {
       getEditor: () => ({
         view: {dom: target},
         hasFocus: () => document.hasFocus() && document.activeElement === target,
-        focus: () => {state.calls++; target.focus();}
+        focus: () => {state.calls++; target.focus();},
+        retainViewportOnWindowReturn: () => () => {}
       }),
       isEditableMode: () => state.editable
     });

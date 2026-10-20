@@ -3603,6 +3603,9 @@ export function createEditor({
     setLinkedPreviewEnabled(enabled: boolean, activationOwner?: LinkedPreviewActivationOwner): void {
       viewportController.setLinkedPreviewEnabled(enabled, activationOwner);
     },
+    retainViewportOnWindowReturn(isCurrent: () => boolean) {
+      return viewportController.retainViewportOnWindowReturn(isCurrent);
+    },
     focus() {
       const target = lastFocusedEditorTarget;
       // A modal can move the browser selection away from the document. CodeMirror

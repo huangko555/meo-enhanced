@@ -1384,6 +1384,16 @@ only in the current segment. Pointer-return checks resume an existing directory 
 Source/Live and native table editing after dismissal and external focus.
 Existing tooltip checks retain
 the ordinary hover delay and continuous-hover handoff contracts.
+Window-return checks in `scripts/test-input-focus-return-production.ts` cover
+offscreen native table cells and Live/Source document carets above and below the
+reading viewport. They sample every animation frame through window activation,
+late native element focus and duplicate Host recovery, preserving collapsed and
+backward selections. New wheel gestures, document clicks and the first typed
+character supersede the activation guard; typing still reveals the caret.
+These browser checks model native activation ordering; an actual desktop click
+outside and back into VS Code remains a separate native acceptance boundary.
+The contract belongs to the quick, search and release suites.
+
 Settings-return checks cover the close button, backdrop and Escape in Live/Source,
 scrolled documents, native table cells, and Mermaid/math Source/Split editors.
 They require preserved caret/selection direction and the first typed character

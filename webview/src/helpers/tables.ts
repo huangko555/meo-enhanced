@@ -5201,6 +5201,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       }
     });
     input.addEventListener('focus', () => {
+      const { selectionStart, selectionEnd, selectionDirection } = input;
       const view = this.view;
       const wrap = this.domRefs?.wrap;
       if (view && wrap) this.resolveCurrentTableRange(view, wrap);
@@ -5236,6 +5237,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       }
       this.setTableInteractionActive(container, true);
       this.setSingleCellSelection({ row: rowIndex, col: colIndex }, 'focus');
+      // Clearing the former document selection also resets Chromium's native
+      // textarea range. A focus return must retain the cell's caret/selection.
+      input.setSelectionRange(selectionStart, selectionEnd, selectionDirection);
       notifySelectionChange();
     });
     input.addEventListener('blur', (event) => {
