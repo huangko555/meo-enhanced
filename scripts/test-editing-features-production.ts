@@ -459,7 +459,20 @@ try {
     await page.evaluate(() => { (window as any).editor.view.dispatch({ scrollIntoView: true }); });
     await settleSuggestions();
     const placeCaret = async (top: number) => {
-      await page.evaluate(top => { const view = (window as any).editor.view, coords = view.coordsAtPos(view.state.selection.main.head); view.scrollDOM.scrollTop += coords.top - top; }, top);
+      await page.evaluate(top => {
+        const editor = (window as any).editor, view = editor.view;
+        // This fixture owns a new reading position, just like a user scroll.
+        // Retire the preceding input's deferred caret reveal before placing it.
+        editor.markViewportInteraction();
+        view.dispatch({ effects: (window as any).EditingFeaturesHarness.EditorView.scrollIntoView(view.state.selection.main.head, {
+          y: 'start', yMargin: top - view.scrollDOM.getBoundingClientRect().top
+        }) });
+      }, top);
+      await settleSuggestions();
+      await page.waitForFunction(top => {
+        const view = (window as any).editor.view, coords = view.coordsAtPos(view.state.selection.main.head);
+        return coords && Math.abs(coords.top - top) <= 1;
+      }, { timeout: 2000 }, top);
       await settleSuggestions();
     };
     await placeCaret(360); await page.keyboard.type(query); await openSuggestions(); await settleSuggestions();
@@ -509,7 +522,7 @@ try {
     await settleSuggestions(); await placeCaret(360); await page.keyboard.type(query); await openSuggestions();
     await placeCaret(slashPreferAbove ? 22 : 675);
     const fallback = await geometry();
-    assert.ok(slashPreferAbove ? fallback.top >= fallback.caretBottom + 3 : fallback.bottom <= fallback.caretTop - 3, label + ': falls back when the preferred side has no room');
+    assert.ok(slashPreferAbove ? fallback.top >= fallback.caretBottom + 3 : fallback.bottom <= fallback.caretTop - 3, label + ': falls back when the preferred side has no room: ' + JSON.stringify(fallback));
     assert.deepEqual(fallback.order, initial.order, label + ': fallback does not reverse the list');
     await page.keyboard.press('Escape');
     assert.equal(await text(), imePrefix + query + imeTail, label + ': dismissal leaves literal input intact');
