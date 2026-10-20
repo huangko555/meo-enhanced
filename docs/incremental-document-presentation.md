@@ -1434,3 +1434,63 @@ An exact V59/V60 archive comparison finds only `package.json`,
 `dist/export-runtime.js` and `dist/preview-render-worker.js` changed. All
 Webview assets and the main extension are byte-identical, so no additional
 editor-side behavioral change is hidden in the newer Preview measurements.
+
+### Follow-up: numeric footnote input and pending Preview alignment
+
+The reported numeric input problem is independent of IME. A 49-character
+document with a referenced footnote and an ordered continuation reproduces it:
+click before `1.`, then press the physical `0` key. The accepted selection is
+28, but the native DOM caret maps to 31. The list marker replacement remains
+`contenteditable=false` even after the selection enters its source range.
+Further keys can consequently appear after the caret or in the wrong order.
+List prefixes now use editable source while a caret/selection enters them;
+the normal rendered marker remains for body editing. The production browser
+regression checks every digit in footnote prose, footnote list bodies and
+markers, ordinary list markers, and both Live/Source. The original 1 MiB
+marker case changes from state/DOM 24325/24328 to 24325/24325. Sibling automatic
+renumbering remains intentional and is not mistaken for input corruption.
+
+Manual Source-to-Preview alignment had two paths into empty space: the measured
+linked map wrote an estimated pixel position directly, and the semantic path
+also projected an unloaded gap before its block response arrived. Rendering
+only that target block then exposed an isolated paragraph until another reply.
+Explicit alignment now checks whether the source destination is rendered,
+prepares a bounded destination band, keeps the current window painted during
+the request, and then restores its source position. The existing measured map
+still handles already rendered destinations and reverse alignment. Ordinary
+scroll gestures retain their existing window/backpressure behavior.
+
+A delayed alignment followed by hiding Preview also exposes an actual freeze:
+the inactive viewport cannot commit its cached target, while the old restore
+recursively retries through resolved promises. The controlled regression stalls
+the browser until its protocol timeout before the fix. Hiding now cancels the
+position ticket; callbacks check visibility and do not retry a missing target.
+This is a concrete matching risk for Source+Preview-to-Live transitions, not
+proof that it caused the user's single unreproduced occurrence.
+
+The asynchronous preparation also retains the originating restore's cancellation
+predicate. A controlled supersession previously moved scrollTop from 48 to
+88,082 after its owner had been cancelled; the regression now keeps 48. Frame
+and gesture generations alone cannot represent a mode/sync owner's lifetime.
+
+The production viewport regression separately delays the destination and its
+surrounding blocks, verifies that the old scroll position/content survive,
+requires a filled destination reading band, and checks hiding/reopening.
+The actual Webview button regression also exercises a measured map with an
+unmounted destination, then switches to Live before a second response arrives.
+It checks source integrity and late-result cancellation. The controller unit
+test preserves measured-map behavior for mounted destinations and checks
+supersession of pending one-shot navigation.
+
+With the complete 1 MiB fixture and real split Webview/Worker build, six sampled
+alignments contain zero empty frames across 145 animation-frame samples; the
+compositor filmstrip is also visually checked. Twelve Source+side-Preview to
+Live transitions complete. A separate protocol-ACK run checks 24 footnote
+body batches (480 physical digit keys), exact source and DOM/state carets,
+plus twelve transitions: no text differences or caret mismatches occur.
+These are browser correctness regressions, not new native performance timings
+or a claim that first Preview and long-tail interaction targets are complete.
+
+Webview type checking also found swapped pre-existing type declarations:
+search queries are strings, while initial editor documents can be persistent
+CodeMirror Text. Their declarations now match the existing runtime contracts.

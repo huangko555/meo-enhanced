@@ -1422,7 +1422,8 @@ export function createPreviewController({
         restore.line,
         restore.lineOffset,
         restore.viewportOffset,
-        restore.sourceRange
+        restore.sourceRange,
+        restore.isCurrent
       );
       retainViewportProjection(restore);
     };
@@ -1476,7 +1477,8 @@ export function createPreviewController({
           restore.line,
           restore.lineOffset,
           restore.viewportOffset,
-          restore.sourceRange
+          restore.sourceRange,
+          restore.isCurrent
         );
         retainViewportProjection(restore);
       }
@@ -2098,7 +2100,8 @@ export function createPreviewController({
             viewportRestore.line,
             viewportRestore.lineOffset,
             viewportRestore.viewportOffset,
-            viewportRestore.sourceRange
+            viewportRestore.sourceRange,
+            viewportRestore.isCurrent
           );
           retainViewportProjection(viewportRestore);
         }
@@ -2982,13 +2985,16 @@ export function createPreviewController({
     return revealed;
   };
   let pendingWindowPosition: { line: number; generation: number; interaction: number;
-    lineOffset: number; viewportOffset: number; sourceRange?: { startLine: number; endLine: number; progress: number } } | null = null;
+    lineOffset: number; viewportOffset: number; sourceRange?: { startLine: number; endLine: number; progress: number };
+    ownerIsCurrent?: () => boolean } | null = null;
   const restoreTopLine = (
     line: number,
     lineOffset = 0,
     viewportOffset = 0,
-    sourceRange?: { startLine: number; endLine: number; progress: number }
+    sourceRange?: { startLine: number; endLine: number; progress: number },
+    ownerIsCurrent?: () => boolean
   ): void => {
+    if (ownerIsCurrent?.() === false) return;
     retainedViewportProjection = null;
     const scrollElement = getFrameDocument()?.scrollingElement;
     if (!scrollElement) {
@@ -3004,21 +3010,27 @@ export function createPreviewController({
     }
     const currentWindow = previewViewport;
     if (currentWindow && !currentWindow.containsLine(line)) {
-      currentWindow.projectLine(sourceRange?.startLine ?? line, lineOffset, viewportOffset, sourceRange?.progress);
+      if (host.hidden) return;
+      // Keep the current reading window painted until the destination exists.
+      // Projecting into an unloaded gap first exposes an empty frame to the user.
       const generation = frameGeneration, interaction = viewportInteractionGeneration;
       if (pendingWindowPosition?.line !== line || pendingWindowPosition.generation !== generation
-        || pendingWindowPosition.interaction !== interaction) {
-        const ticket = { line, generation, interaction, lineOffset, viewportOffset, sourceRange };
+        || pendingWindowPosition.interaction !== interaction || pendingWindowPosition.ownerIsCurrent?.() === false) {
+        const ticket = { line, generation, interaction, lineOffset, viewportOffset, sourceRange, ownerIsCurrent };
         pendingWindowPosition = ticket;
-        const isCurrent = () => !disposed && previewViewport === currentWindow && frameGeneration === generation
-          && viewportInteractionGeneration === interaction && pendingWindowPosition === ticket;
-        void currentWindow.ensure({ line, scroll: false, isCurrent }).then(() => {
-          if (!isCurrent()) return;
+        const isCurrent = () => !disposed && !host.hidden && previewViewport === currentWindow && frameGeneration === generation
+          && viewportInteractionGeneration === interaction && pendingWindowPosition === ticket && ticket.ownerIsCurrent?.() !== false;
+        void currentWindow.ensure({ line, scroll: false, isCurrent }).then(element => {
+          if (!isCurrent()) { if (pendingWindowPosition === ticket) pendingWindowPosition = null; return; }
           pendingWindowPosition = null;
-          restoreTopLine(ticket.line, ticket.lineOffset, ticket.viewportOffset, ticket.sourceRange);
-        }, error => { if (isCurrent()) { pendingWindowPosition = null; handleWindowError(error); } });
+          if (element) restoreTopLine(ticket.line, ticket.lineOffset, ticket.viewportOffset, ticket.sourceRange, ticket.ownerIsCurrent);
+        }, error => {
+          const current = isCurrent();
+          if (pendingWindowPosition === ticket) pendingWindowPosition = null;
+          if (current) handleWindowError(error);
+        });
       } else {
-        Object.assign(pendingWindowPosition, { lineOffset, viewportOffset, sourceRange });
+        Object.assign(pendingWindowPosition, { lineOffset, viewportOffset, sourceRange, ownerIsCurrent });
       }
       return;
     }
@@ -3173,7 +3185,8 @@ export function createPreviewController({
         restore.line,
         restore.lineOffset,
         restore.viewportOffset,
-        restore.sourceRange
+        restore.sourceRange,
+        restore.isCurrent
       );
       retainViewportProjection(restore);
     }
@@ -3381,6 +3394,9 @@ export function createPreviewController({
       previewViewport?.refresh({ active: visible });
       updateViewportAlignment();
       if (!visible) {
+        // A hidden window cannot commit a destination. Retrying its restore
+        // from an already cached block would otherwise spin in microtasks.
+        pendingWindowPosition = null;
         previewScrollRange?.cancel();
         cancelHighlightFrame();
         cancelElementReveal();
@@ -3413,6 +3429,7 @@ export function createPreviewController({
     ),
     restoreTopLine,
     restoreTopVisiblePosition,
+    isSourceLineRendered: (line: number) => !previewViewport || previewViewport.containsLine(line),
     captureLinkedGeometry: () => {
       const frameDocument = getFrameDocument();
       const scrollElement = frameDocument?.scrollingElement;

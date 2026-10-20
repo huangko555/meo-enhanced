@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import assert from 'node:assert/strict';
 import { launchTestBrowser } from './browser-test-helpers';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
@@ -12,6 +13,51 @@ async function waitForFrames(page: import('puppeteer-core').Page, count = 10): P
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     }
   }, count);
+}
+
+async function assertNumericFootnoteCaret(page: import('puppeteer-core').Page): Promise<void> {
+  const footnote = 'Ref[^n].\n\n[^n]: note.\n\n    1. First.\n    2. Next.';
+  for (const scenario of [
+    { text: footnote, target: '1.', mode: 'live' },
+    { text: footnote, target: 'note.', mode: 'live' },
+    { text: footnote, target: 'First.', mode: 'live' },
+    { text: '1. First.\n2. Next.', target: '1.', mode: 'live' },
+    { text: footnote, target: '1.', mode: 'source' },
+    { text: footnote, target: 'note.', mode: 'source' }
+  ]) {
+    const position = await page.evaluate(({ text, target, mode }) => {
+      const editor = (window as any).__numericFootnoteEditor = (window as any).__createInputCursorEditor({
+        parent: document.getElementById('app'), text, initialMode: mode, onApplyChanges() {}
+      });
+      const position = text.indexOf(target);
+      editor.view.dispatch({ selection: { anchor: position } }); editor.focus();
+      return position;
+    }, scenario);
+    await waitForFrames(page, 2);
+    const point = await page.evaluate(position => {
+      const rect = (window as any).__numericFootnoteEditor.view.coordsAtPos(position);
+      return { x: rect.left, y: (rect.top + rect.bottom) / 2 };
+    }, position);
+    await page.mouse.click(point.x, point.y);
+    let typed = '';
+    for (const digit of '0123456789') {
+      typed += digit;
+      await page.keyboard.type(digit);
+      await waitForFrames(page, 2);
+      const accepted = await page.evaluate(() => {
+        const view = (window as any).__numericFootnoteEditor.view, selection = document.getSelection()!;
+        return { text: view.state.doc.toString(), head: view.state.selection.main.head,
+          nativeHead: view.posAtDOM(selection.anchorNode, selection.anchorOffset) };
+      });
+      assert.equal(accepted.head, position + typed.length, JSON.stringify(scenario));
+      assert.equal(accepted.nativeHead, accepted.head, 'a numeric key in a footnote marker must leave the native caret at the accepted insertion point');
+      assert.equal(accepted.text.slice(position, position + typed.length), typed, 'digits must remain in their typed order before the caret');
+      if (scenario.target !== '1.') {
+        assert.equal(accepted.text, scenario.text.slice(0, position) + typed + scenario.text.slice(position));
+      }
+    }
+    await page.evaluate(() => (window as any).__numericFootnoteEditor.destroy());
+  }
 }
 
 async function main(): Promise<void> {
@@ -34,6 +80,8 @@ async function main(): Promise<void> {
       content: ':root{--meo-background:#fff;--meo-foreground:#111;--meo-code-background:#f4f4f4;--meo-surface-background:#fff;--meo-font-live:Arial;--meo-font-live-weight:400;--meo-font-live-size:16px;--meo-font-source:monospace;--meo-font-source-weight:400;--meo-font-source-size:14px;--meo-line-height-live:1.6;--meo-line-height-source:1.5}'
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+
+    await assertNumericFootnoteCaret(page);
 
     const text = Array.from({ length: 320 }, (_, index) => {
       if (index === 159) return `line 160 ${'wrapped-segment '.repeat(280)}`;

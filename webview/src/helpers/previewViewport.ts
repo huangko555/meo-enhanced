@@ -296,9 +296,14 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
       index = result.block;
     }
     if (index < 0 || index >= manifest.blocks.length || disposed) return null;
-    pin(index);
+    // Navigation keeps the old window until a bounded destination band is ready.
+    // A lone destination block otherwise paints above an unloaded viewport gap.
+    const band = layout.window(layout.top(index), window.innerHeight);
+    const indices = Array.from({ length: band.to - band.from }, (_, offset) => band.from + offset);
+    if (!indices.includes(index)) indices.push(index);
+    for (const requested of indices) pin(requested);
     try {
-      await ensureChunks([index], () => target.isCurrent?.() !== false);
+      await ensureChunks(indices, () => target.isCurrent?.() !== false);
       if (disposed || revision !== documentGeneration || target.isCurrent?.() === false) return null;
       commit();
       const block = mounted.get(index);
@@ -315,7 +320,7 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
     } catch (error) {
       if (disposed || revision !== documentGeneration || target.isCurrent?.() === false) return null;
       throw error;
-    } finally { unpin(index); refresh(); }
+    } finally { for (const requested of indices) unpin(requested); refresh(); }
   };
 
   document.addEventListener('selectionchange', refresh, { signal: events.signal });
@@ -467,14 +472,6 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
       const progress = Math.max(0, Math.min(1, (offset - layout.top(index)) / Math.max(1, layout.height(index))));
       return { line: block.sourceLine + Math.floor((block.sourceEndLine - block.sourceLine) * progress),
         rendered: mounted.has(index), sourceRange: { startLine: block.sourceLine, endLine: block.sourceEndLine, progress } };
-    },
-    projectLine(line: number, lineOffset = 0, viewportOffset = 0, progress?: number) {
-      if (!manifest.blocks.length) return;
-      const index = atLine(line), block = manifest.blocks[index]!;
-      const ratio = progress ?? (line - block.sourceLine) / Math.max(1, block.sourceEndLine - block.sourceLine + 1);
-      scroll.scrollTop = origin() + layout.top(index) + layout.height(index) * Math.max(0, Math.min(1, ratio))
-        + Math.max(0, lineOffset) - Math.max(0, viewportOffset);
-      refresh();
     },
     refresh(options: { active?: boolean; invalidateGeometry?: boolean } = {}) {
       if (options.active !== undefined) active = options.active;

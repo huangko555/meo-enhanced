@@ -17,7 +17,7 @@ const text = '# Viewport budget\n\nEarly reference[^early].\n\n[^early]: Footnot
 const browser = await launchTestBrowser({
   createUserDataDir: () => fs.promises.mkdtemp(path.join(os.tmpdir(), 'meo-preview-scrollbar-test-')),
   launch: ({ userDataDir }) => puppeteer.launch({
-    executablePath: findBrowserExecutable(), headless: true, userDataDir,
+    executablePath: findBrowserExecutable(), headless: true, userDataDir, protocolTimeout: 30_000,
     ignoreDefaultArgs: ['--hide-scrollbars'], args: ['--no-sandbox', '--edge-skip-compat-layer-relaunch']
   }),
   cleanupUserDataDir: async directory => {
@@ -232,8 +232,15 @@ try {
     const scope = window as any, controller = scope.__previewController;
     scope.__previewBridgeErrors = [];
     scope.__previewHostMessage = (message: any) => {
-      void scope.__previewControllerHost(message).then((response: any) => {
-        if (response?.type === 'previewRenderResult') controller.acceptRenderResponse(response);
+      const pending = scope.__projectionGate;
+      const gate = pending && message.type === 'requestPreviewDocument' && message.operation.kind === 'blocks'
+        && message.operation.indices.some((index: number) => index >= pending.from && index <= pending.to) ? pending : null;
+      const ready = gate ? new Promise<void>(resolve => { gate.started = true; gate.release = resolve; }) : Promise.resolve();
+      void ready.then(() => scope.__previewControllerHost(message)).then((response: any) => {
+        if (response?.type === 'previewRenderResult') {
+          scope.__previewManifest = response.result.value.document;
+          controller.acceptRenderResponse(response);
+        }
         else if (response?.type === 'previewDocumentResult') controller.acceptDocumentResponse(response);
       }).catch((error: unknown) => scope.__previewBridgeErrors.push(String(error)));
     };
@@ -247,6 +254,83 @@ try {
   });
   assert.ok(await page.evaluate(() => (window as any).__previewMessages.some((message: any) => message.type === 'requestPreviewRender' && message.window)),
     'large production Preview must request a reading window');
+  stage = 'source alignment retains painted content until the destination is ready';
+  const pendingProjection = await page.evaluate(async () => {
+    const scope = window as any, controller = scope.__previewController;
+    const doc = controller.host.querySelector('iframe').contentDocument, scroll = doc.scrollingElement;
+    // Let initial overscan finish before delaying the distant source alignment.
+    for (let frame = 0; frame < 4; frame++) await new Promise(resolve => requestAnimationFrame(resolve));
+    const block = scope.__previewManifest.blocks.find((block: any) => block.sourceLine === 6003).index;
+    scope.__projectionGate = { from: block, to: block };
+    const before = scroll.scrollTop;
+    controller.restoreTopLine(6003);
+    for (let frame = 0; frame < 4; frame++) await new Promise(resolve => requestAnimationFrame(resolve));
+    const visible = [...doc.querySelectorAll('[data-meo-preview-block]')].some((element: any) => {
+      const rect = element.getBoundingClientRect();
+      return rect.bottom > 0 && rect.top < doc.defaultView.innerHeight;
+    });
+    return { before, after: scroll.scrollTop, visible, started: scope.__projectionGate.started };
+  });
+  assert.ok(pendingProjection.started, 'the alignment must request a genuinely unmounted destination');
+  assert.equal(pendingProjection.after, pendingProjection.before, 'alignment must not scroll into an unloaded gap');
+  assert.ok(pendingProjection.visible, 'the existing reading window must remain painted while alignment waits');
+  await page.evaluate(() => {
+    const scope = window as any, gate = scope.__projectionGate;
+    scope.__projectionGate = { from: gate.from - 64, to: gate.to + 64 }; gate.release();
+  });
+  stage = 'destination alignment after prepared blocks';
+  await page.waitForFunction(() => {
+    const controller = (window as any).__previewController;
+    const doc = controller.host.querySelector('iframe').contentDocument;
+    const target = doc.querySelector('[data-source-line="6003"]:not([data-meo-preview-gap])')?.getBoundingClientRect();
+    return target && target.top < doc.defaultView.innerHeight && target.bottom > 0;
+  });
+  const destinationPaint = await page.evaluate(() => {
+    const scope = window as any, doc = scope.__previewController.host.querySelector('iframe').contentDocument;
+    const bottoms = [...doc.querySelectorAll('[data-meo-preview-block]')].map((element: any) => element.getBoundingClientRect().bottom);
+    const gate = scope.__projectionGate; scope.__projectionGate = null; gate.release?.();
+    return Math.max(...bottoms);
+  });
+  assert.ok(destinationPaint >= 500, `alignment must prepare the destination reading window, not one isolated paragraph: ${destinationPaint}`);
+  stage = 'return from destination alignment';
+  await page.evaluate(() => (window as any).__previewController.restoreTopLine(1));
+  await page.waitForFunction(() => (window as any).__previewController.readScrollTop() < 100);
+  stage = 'superseded source alignment releases its owner';
+  await page.evaluate(() => {
+    const scope = window as any;
+    const block = scope.__previewManifest.blocks.find((block: any) => block.sourceLine === 4003).index;
+    scope.__projectionGate = { from: block, to: block };
+    scope.__projectionOwner = true;
+    scope.__previewController.restoreTopVisiblePosition({ line: 4003, lineOffset: 0 }, () => scope.__projectionOwner);
+  });
+  await page.waitForFunction(() => (window as any).__projectionGate.started);
+  const cancelledProjection = await page.evaluate(async () => {
+    const scope = window as any, controller = scope.__previewController, before = controller.readScrollTop();
+    scope.__projectionOwner = false;
+    const gate = scope.__projectionGate; scope.__projectionGate = null; gate.release();
+    for (let frame = 0; frame < 4; frame++) await new Promise(resolve => requestAnimationFrame(resolve));
+    return { before, after: controller.readScrollTop() };
+  });
+  assert.equal(cancelledProjection.after, cancelledProjection.before, 'an async destination must respect the originating alignment owner cancellation');
+  stage = 'hiding Preview cancels a pending source alignment';
+  await page.evaluate(() => {
+    const scope = window as any;
+    const block = scope.__previewManifest.blocks.find((block: any) => block.sourceLine === 8003).index;
+    scope.__projectionGate = { from: block, to: block };
+    scope.__previewController.restoreTopLine(8003);
+  });
+  await page.waitForFunction(() => (window as any).__projectionGate.started);
+  const hiddenProjection = await page.evaluate(async () => {
+    const scope = window as any, controller = scope.__previewController;
+    const before = controller.readScrollTop(), gate = scope.__projectionGate;
+    controller.setVisible(false);
+    scope.__projectionGate = null; gate.release();
+    for (let frame = 0; frame < 4; frame++) await new Promise(resolve => requestAnimationFrame(resolve));
+    controller.setVisible(true);
+    for (let frame = 0; frame < 4; frame++) await new Promise(resolve => requestAnimationFrame(resolve));
+    return { before, after: controller.readScrollTop() };
+  });
+  assert.equal(hiddenProjection.after, hiddenProjection.before, 'a late alignment must not move a Preview after switching away and back');
   stage = 'reading window preserves leading whitespace';
   const leadingWhitespace = await page.evaluate(() => {
     const controller = (window as any).__previewController;

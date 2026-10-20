@@ -1,6 +1,121 @@
 import assert from 'node:assert/strict';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 import exportRuntime from '../src/export/runtime';
+import { createPreviewDocument } from '../src/export/previewDocument';
+
+async function assertWindowedAlignment(page: import('puppeteer-core').Page, bundle: string): Promise<void> {
+  const text = '# Windowed alignment\n\n' + Array.from({ length: 5000 }, (_, index) => `Paragraph ${index} with **formatting** and enough source context for a large reading window.\n\n`).join('');
+  const documents = new Map<string, ReturnType<typeof createPreviewDocument>>();
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(String(error)));
+  try {
+    await page.setViewport({ width: 1200, height: 760 });
+    await page.bringToFront();
+    await page.exposeFunction('__windowedAlignmentHost', async (message: any) => {
+      if (message.type === 'requestPreviewRender') {
+        assert.ok(message.window, 'the real Webview must request a windowed document for this fixture');
+        const parsed = createPreviewDocument(message.requestId, {
+          markdownText: message.text, sourceDocumentPath: '/fixture/alignment.md', uiLanguage: 'en'
+        });
+        documents.set(message.requestId, parsed);
+        return { type: 'previewRenderResult', requestId: message.requestId, result: { ok: true, value: parsed.open(message.window.anchorLine) } };
+      }
+      if (message.type === 'requestPreviewDocument') {
+        return { type: 'previewDocumentResult', requestId: message.requestId, documentId: message.documentId,
+          result: { ok: true, value: await documents.get(message.documentId)!.run(message.operation) } };
+      }
+      return null;
+    });
+    await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
+    await page.addStyleTag({ path: 'webview/src/styles.css' });
+    await page.addScriptTag({ content: `window.__alignmentMessages=[];window.__alignmentState={sourcePreviewScrollSyncEnabled:false};window.acquireVsCodeApi=()=>({getState(){return window.__alignmentState},setState(state){window.__alignmentState=state},postMessage(message){
+      window.__alignmentMessages.push({type:message.type,window:message.window});
+      const gate=window.__alignmentPause&&message.type==='requestPreviewDocument'&&message.operation.kind==='blocks'&&message.operation.indices.some(index=>index>1000);
+      const ready=gate?new Promise(resolve=>{window.__alignmentStarted=true;window.__alignmentRelease=resolve}):Promise.resolve();
+      ready.then(()=>window.__windowedAlignmentHost(message)).then(response=>{if(response)window.dispatchEvent(new MessageEvent('message',{data:response}))});
+    }});` });
+    await page.addScriptTag({ content: bundle });
+    await page.evaluate(text => window.dispatchEvent(new MessageEvent('message', { data: {
+      type: 'init', documentId: 'file:///windowed-alignment.md', text, version: 1, savedRevision: { version: 1, text },
+      diagnostics: [], mode: 'source', uiLanguage: 'en', sourceLineNumbers: 'on', previewAppearance: 'dark',
+      previewFontFamily: '', previewSourceColoring: false, editorAppearance: 'dark', editorFontSizeMode: 'auto', editorFontSize: 14,
+      gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit',
+      fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, largeDocumentOptimizationEnabled: true,
+      findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
+      restoreReadingPositionOnOpen: false, vscodeTheme: null
+    } })), text);
+    await page.waitForSelector('.editor-host > .cm-editor');
+    await page.waitForFunction(() => !document.querySelector('.meo-preload-toolbar')
+      && !document.querySelector<HTMLButtonElement>('.source-preview-button')?.disabled
+      && !document.querySelector('.mode-group [aria-busy="true"]') && !document.querySelector('.editor-host')?.hasAttribute('inert'));
+    await page.click('.source-preview-button');
+    await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('[data-meo-preview-block]'));
+    if (await page.$eval('.source-preview-scroll-sync-button', button => button.getAttribute('aria-pressed') === 'true')) {
+      await page.click('.source-preview-scroll-sync-button');
+    }
+    await page.waitForFunction(() => document.querySelector('.source-preview-scroll-sync-button')?.getAttribute('aria-pressed') === 'false');
+    await page.evaluate(() => {
+      const scope = window as any, scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
+      scroller.scrollTop = (scroller.scrollHeight - scroller.clientHeight) * 0.5;
+      scope.__alignmentPause = true; scope.__alignmentFrames = [];
+      scope.__alignmentSampling = true;
+      const sample = () => {
+        if (!scope.__alignmentSampling) return;
+        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+        scope.__alignmentFrames.push([...doc.querySelectorAll('[data-meo-preview-block]')].some(element => {
+          const rect = element.getBoundingClientRect(); return rect.bottom > 0 && rect.top < doc.defaultView!.innerHeight;
+        }));
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    await page.locator('[data-meo-align-viewport="preview"]').click();
+    await page.waitForFunction(() => (window as any).__alignmentStarted);
+    const waitingTop = await page.evaluate(async () => {
+      for (let frame = 0; frame < 4; frame++) await new Promise(resolve => requestAnimationFrame(resolve));
+      return document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop;
+    });
+    assert.equal(waitingTop, 0, 'the real alignment arrow must not use estimated geometry to jump into an unloaded gap');
+    await page.evaluate(() => { const scope = window as any; scope.__alignmentPause = false; scope.__alignmentRelease(); });
+    await page.waitForFunction(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      return doc.scrollingElement!.scrollTop > 1000 && [...doc.querySelectorAll('[data-meo-preview-block]')].some(element => {
+        const rect = element.getBoundingClientRect(); return rect.bottom > 0 && rect.top < doc.defaultView!.innerHeight;
+      });
+    });
+    assert.ok(await page.evaluate(() => { const scope = window as any; scope.__alignmentSampling = false; return scope.__alignmentFrames.every(Boolean); }),
+      'the real split-preview alignment must keep content painted in every sampled frame');
+    await page.evaluate(() => {
+      const scope = window as any, scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
+      scroller.scrollTop = (scroller.scrollHeight - scroller.clientHeight) * 0.8;
+      scope.__alignmentPause = true; scope.__alignmentStarted = false;
+    });
+    await page.locator('[data-meo-align-viewport="preview"]').click();
+    await page.waitForFunction(() => (window as any).__alignmentStarted);
+    await page.click('.mode-group [data-mode="live"]');
+    await page.waitForFunction(() => document.querySelector('.editor-host > .cm-editor')?.classList.contains('meo-mode-live')
+      && !document.querySelector('.editor-host')?.hasAttribute('inert'));
+    await page.evaluate(async () => {
+      const scope = window as any; scope.__alignmentPause = false; scope.__alignmentRelease();
+      for (let frame = 0; frame < 4; frame++) await new Promise(resolve => requestAnimationFrame(resolve));
+    });
+    assert.ok(await page.$eval('.preview-host', element => (element as HTMLElement).hidden), 'the late alignment must leave Live active');
+    assert.equal(await page.$eval('.editor-host > .cm-editor .cm-content', element => (element as any).cmTile.root.view.state.doc.toString()), text);
+    assert.deepEqual(errors, [], 'the complete button/transition path must not throw browser errors');
+  } catch (error) {
+    console.error('Windowed alignment failed', JSON.stringify({ errors, documents: documents.size, state: await page.evaluate(() => ({
+      messages: (window as any).__alignmentMessages, hidden: document.querySelector<HTMLElement>('.preview-host')?.hidden,
+      pressed: document.querySelector('.source-preview-button')?.getAttribute('aria-pressed'),
+      notice: document.querySelector('.meo-editor-notice')?.textContent,
+      sync: document.querySelector('.source-preview-scroll-sync-button')?.getAttribute('aria-pressed'),
+      alignment: document.querySelector('[data-meo-align-viewport="preview"]')?.outerHTML
+    })) }));
+    throw error;
+  } finally {
+    for (const parsed of documents.values()) parsed.dispose();
+    await page.close();
+  }
+}
 
 const build = await Bun.build({
   entrypoints: ['scripts/test-preview-reading-surface-production-entry.ts'],
@@ -13,6 +128,7 @@ const browser = await launchTestBrowser();
 let primaryError: unknown;
 try {
   const page = await browser.newPage();
+  if (!process.argv.includes('--windowed-only')) {
   await page.setViewport({ width: 1200, height: 760 });
   let previewRenderCount = 0;
   let nextPreviewRenderDelayMs = 0;
@@ -1975,6 +2091,8 @@ try {
   await page.keyboard.press('Escape');
   assert.equal(await page.$eval('.source-preview-more-panel', panel => (panel as HTMLElement).hidden), true);
   await page.waitForFunction(() => document.activeElement === document.querySelector('.source-preview-more-button'));
+  }
+  await assertWindowedAlignment(await browser.newPage(), await build.outputs[0]!.text());
 } catch (error) {
   primaryError = error;
 } finally {

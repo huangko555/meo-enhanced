@@ -3015,6 +3015,9 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
       restoreTopVisiblePosition(position, isCurrent) {
         previewController.restoreTopVisiblePosition(position, isCurrent);
       },
+      isSourceLineRendered(line) {
+        return previewController.isSourceLineRendered(line);
+      },
       captureLinkedGeometry() {
         return previewController.captureLinkedGeometry();
       },

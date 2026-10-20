@@ -2956,18 +2956,23 @@ for (const interpolatedWhitespace of [undefined, true]) {
   let previewTop = 1800;
   let geometryShift = 0;
   let measurements = 0;
+  let sourceLineRendered = true;
+  const deferredAlignments: Array<{ line: number; isCurrent: () => boolean }> = [];
   const view = {
     dom: {}, scrollDOM, state: { doc, selection },
     dispatch: () => { throw new Error('View alignment must not dispatch a selection or document change'); },
     lineBlockAt: (position: number) => {
       const line = doc.lineAt(position);
       return { from: line.from, to: line.to, top: (line.number - 1) * 20, bottom: line.number * 20 };
-    }
+    },
+    lineBlockAtHeight: () => ({ from: doc.line(16).from, top: 300 })
   };
   const controller = new ViewportController(view as any, {
     attachInteractions: false, getMode: () => 'source',
     previewSurface: {
-      captureTopVisiblePosition: () => null, restoreTopVisiblePosition: () => { throw new Error('Measured map should own alignment'); },
+      captureTopVisiblePosition: () => null,
+      isSourceLineRendered: () => sourceLineRendered,
+      restoreTopVisiblePosition(position, isCurrent) { deferredAlignments.push({ line: position.line, isCurrent }); },
       readScrollTop: () => previewTop, writeScrollTop: top => { previewTop = top; },
       captureLinkedGeometry: () => {
         measurements++;
@@ -2989,7 +2994,12 @@ for (const interpolatedWhitespace of [undefined, true]) {
     controller.previewViewportChanged();
     controller.linkedPreviewReady();
     if (previewTop !== 670 || measurements !== 3) throw new Error('One-shot alignment enabled continuous sync or background measurements');
+    sourceLineRendered = false;
+    controller.alignLinkedViewport('editor');
+    if (deferredAlignments.length !== 1 || deferredAlignments[0].line !== 16 || !deferredAlignments[0].isCurrent()
+      || previewTop !== 670 || measurements !== 3) throw new Error('An unloaded Preview destination must prepare its window before a pixel-map jump');
     controller.setLinkedPreviewEnabled(true, 'last-interaction');
+    if (deferredAlignments[0].isCurrent()) throw new Error('A newer sync intent must cancel the pending one-shot alignment');
     if (controller.alignLinkedViewport('editor')) throw new Error('Automatic sync must own linked alignment');
     controller.setLinkedPreviewEnabled(false);
   } finally { controller.destroy(); }

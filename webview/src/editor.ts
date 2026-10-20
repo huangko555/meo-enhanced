@@ -198,7 +198,7 @@ type SearchOptions = {
 };
 
 type SearchQueryState = {
-  text: string | Text;
+  text: string;
   wholeWord: boolean;
   caseSensitive: boolean;
 };
@@ -237,7 +237,7 @@ type SourcePositionChange = {
 
 type CreateEditorOptions = {
   parent: HTMLElement;
-  text: string;
+  text: string | Text;
   onApplyTransaction: (edit: DocumentTextEdit) => void;
   onOpenLink?: (href: string) => void;
   onCommentBlocked?: () => void;

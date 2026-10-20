@@ -94,6 +94,8 @@ export interface PreviewViewportSurface {
   } | null;
   readScrollTop?(): number;
   writeScrollTop?(scrollTop: number): void;
+  /** An estimated gap has geometry, but cannot paint an explicit alignment. */
+  isSourceLineRendered?(line: number): boolean;
   /** Native gestures own their scroll position until pointer/momentum settles. */
   isInteracting?(): boolean;
 }
@@ -853,6 +855,16 @@ export class ViewportController {
   alignLinkedViewport(owner: ViewportAnchorOwner): boolean {
     if (this.destroyed || this.linkedPreviewEnabled || !this.previewSurface) return false;
     this.markInteraction(owner);
+    const generation = this.navigationGeneration;
+    const isCurrent = () => !this.destroyed && generation === this.navigationGeneration
+      && !this.linkedPreviewEnabled;
+    if (owner === 'editor' && this.previewSurface.isSourceLineRendered) {
+      const position = this.getTopVisiblePosition();
+      if (!this.previewSurface.isSourceLineRendered(position.line)) {
+        this.previewSurface.restoreTopVisiblePosition(position, isCurrent);
+        return true;
+      }
+    }
     const linkedMap = this.measureLinkedViewportMap();
     if (linkedMap && this.previewSurface.readScrollTop && this.previewSurface.writeScrollTop) {
       if (owner === 'editor') {
@@ -865,9 +877,6 @@ export class ViewportController {
       }
       return true;
     }
-    const generation = this.navigationGeneration;
-    const isCurrent = () => !this.destroyed && generation === this.navigationGeneration
-      && !this.linkedPreviewEnabled;
     if (owner === 'editor') {
       this.previewSurface.restoreTopVisiblePosition(this.getTopVisiblePosition(), isCurrent);
     } else {
