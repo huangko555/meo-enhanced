@@ -1407,3 +1407,30 @@ manifest comparisons across 931 inputs, both presets and eager/windowed modes,
 including the complete 1 MiB fixture. Preview rendering, lazy inline work,
 installed Node behavior, HTML export, code-line budgets, viewport work budgets
 and extension type checks pass. Native first-Preview timing remains separate.
+
+V60 (`c2e7252af6901c44d60dcbf35fc42a34c7787a92`, archive SHA-256
+`aefb0167e2f962c0a3be25db8c8e5e5efd2c031b2e745f6fe594fd87957891ba`,
+driver SHA-256
+`ed66a4b9951f174aae8e81e0545cca4ffa7ba51255d27d89e8c5a200c57ae1fc`)
+passes the complete fixed native ordinary/rich flow and its unchanged 500 ms
+severe-stall gate. Archive CRC, all 451 packaged files and 392 text privacy
+surfaces pass. The comprehensive fixture SHA remains unchanged. Exact source,
+undo/save, protocol composition, timing clocks, formatted copy and sixteen
+strict rich clicks pass. The final Preview screenshot is visually checked;
+test applications exit and the VM is saved after collection.
+
+Ordinary Source input median/sample-P95/maximum is 38/97/157 ms, Live
+53/81/87 ms. Rich Source is 34/89/100 ms, Live 66/181/241 ms, with maximum
+frame gaps of 93/173 ms. These input statistics each contain 23 keys. The eight
+rich Live clicks range 132–218 ms. Four rich Preview thumb drags have maximum
+frame gaps of 81/67/71/149 ms; the previous ten-second freeze does not recur in
+these samples. First Live is 2.83 s, first Preview 3.89 s (2.84 s response),
+cached Live/Source/Preview 1.26/0.70/0.71 s, and complete formatted copy 6.98 s.
+This remains one run, not stable causal before/after evidence or universal
+P95 acceptance. First Preview and the long-tail interaction/scrolling targets
+remain open; the unchanged 500 ms gate is not a smoothness target.
+
+An exact V59/V60 archive comparison finds only `package.json`,
+`dist/export-runtime.js` and `dist/preview-render-worker.js` changed. All
+Webview assets and the main extension are byte-identical, so no additional
+editor-side behavioral change is hidden in the newer Preview measurements.
