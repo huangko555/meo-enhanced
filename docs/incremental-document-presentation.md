@@ -486,3 +486,39 @@ in-flight batch, at most three total batches and a mounted final reading window.
 Complete Preview navigation, formatted copy, hidden surface, geometry, source
 index and scrollbar boundary regressions pass. The host queue limit is unchanged.
 New native validation is required before claiming this fixes the observed drag.
+
+V42 (`7c204bc3`, archive SHA-256
+`3f108d5e664e901250e3ab7edf5f50a1c245ba3bfe319d07a55031787b8e5a37`)
+completed the full native functional run: actual clicked-text witnesses, exact
+source/undo/save/mode round trips, four Preview drags and formatted whole-document
+copy. No queue-full error recurred. Comprehensive drag frame gaps were
+132/129/198/310 ms, with correct boundaries and visible content. Performance
+remains a failure: a Live click reached 806 ms, typing P95 296 ms and frame gap
+557 ms; first Live/Preview took 4.89/5.85 s. This run was broadly slower than V41,
+so cross-run percentages would be misleading.
+
+A separate exact-package V42 CPU diagnostic identified remaining foreground
+global math scanning (175 ms), details extraction (122 ms), literal discovery
+(78 ms) and code descriptors (62 ms). First Live also spends substantial time in
+table width/layout and Mermaid. The 48 mapped webview bundles were checked byte
+for byte against shipped code before attribution. Instrumented timings are not
+acceptance measurements.
+
+The rich worker context now includes full formula ranges, literal exclusions and
+details source blocks. Receivers seed the existing bounded/weak caches before
+refresh. Worker computations share one complete outer syntax snapshot, including
+footnote-contained TeX fences. Details discovery ignores embedded language mounts;
+literal `<details>` inside a Markdown code fence cannot become an editable fold.
+Source does not initialize Live-only details records. A pending Live selection
+keeps its mapped last-valid formula results until the corresponding context is
+ready. Long-code descriptors use canonical outer identity across inner-language
+publication and mode-only reconfiguration, preserving interaction reduction.
+
+The actual-worker regression observes zero foreground global formula, literal,
+details, footnote and rich-block discovery across preparation, input, caret,
+reference changes and undo. Distant code coloring adds no descriptor scan. DTO
+parity covers tab sizes 2/4/8, HTML editing, literal details and footnote-contained
+math; settled undo also checks the visible footnote number. Formula fences/editing,
+Live layout, long-code and production three-mode regressions pass. The broader
+cursor-navigation test still reproduces a stale table-reveal/layout-compensation
+oscillation identically on unchanged V42; it is recorded as an open check.

@@ -3,6 +3,16 @@ import { launchTestBrowser, closeTestBrowser } from './browser-test-helpers';
 
 const build = await Bun.build({ entrypoints: ['scripts/test-live-decoration-history-entry.ts'], target: 'browser', format: 'iife',
   plugins: [{ name: 'observe-foreground-outer-parse', setup(builder) {
+    for (const [file, marker, guard] of [
+      ['displayMathBlocks', '  const literalRanges = collectMarkdownLiteralRanges(state, tree, scope);', '!scope && excludedRanges.length === 0'],
+      ['markdownLiteralRanges', '  const ranges: SourceRange[] = [];', '!scope'],
+      ['markdownSyntax', '  const detailsBlocks: DetailsBlockInfo[] = [];', 'tree.length > 100000']
+    ]) builder.onLoad({ filter: new RegExp(`webview[\\\\/]src[\\\\/]helpers[\\\\/]${file}\\.ts$`) }, async ({ path }) => {
+      const source = await Bun.file(path).text();
+      assert.equal(source.split(marker).length, 2);
+      return { loader: 'ts', contents: source.replace(marker,
+        `  if (state.doc.length > 100000 && (${guard})) ((globalThis as any).__foregroundContextScans ??= []).push('${file}');\n${marker}`) };
+    });
     builder.onLoad({ filter: /webview[\\/]src[\\/]helpers[\\/]footnotes\.ts$/ }, async ({ path }) => {
       const source = await Bun.file(path).text();
       const marker = /\): FootnoteDefinition\[\] \{\r?\n  const definitions/;
@@ -16,6 +26,13 @@ const build = await Bun.build({ entrypoints: ['scripts/test-live-decoration-hist
       assert.equal(source.split(marker).length, 2);
       return { loader: 'ts', contents: source.replace(marker, marker
         + '\n  if (state.doc.length > 100000) (globalThis as any).__foregroundBlockScans = ((globalThis as any).__foregroundBlockScans ?? 0) + 1;') };
+    });
+    builder.onLoad({ filter: /webview[\\/]src[\\/]helpers[\\/]longCodeBlocks\.ts$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text();
+      const marker = 'function collectLongCodeBlockDescriptors(state: EditorState): LongCodeBlockDescriptor[] {';
+      assert.equal(source.split(marker).length, 2);
+      return { loader: 'ts', contents: source.replace(marker,
+        marker + '\n  (globalThis as any).__codeDescriptorScans = ((globalThis as any).__codeDescriptorScans ?? 0) + 1;') };
     });
     builder.onLoad({ filter: /node_modules[\\/]@lezer[\\/]lr[\\/]dist[\\/]index\.js$/ }, async ({ path }) => {
       const source = await Bun.file(path).text(), marker = '    advanceStack(stack, stacks, split) {';
@@ -195,6 +212,7 @@ try {
   });
   await ready();
   await page.waitForFunction(() => (window as any).__heldParseReplies?.length);
+  await page.evaluate(() => (window as any).__editor.view.dispatch({ selection: { anchor: 8 } }));
   await new Promise(resolve => setTimeout(resolve, 650));
   assert.ok(await page.evaluate(() => {
     const scope = window as any;
@@ -218,10 +236,15 @@ try {
     [['other', 1], ['global', 2]], 'adding a reference updates global numbering beyond the viewport');
   await page.evaluate(async () => { await (window as any).__editor.undo(); });
   await ready();
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
   assert.ok(await page.evaluate(() => (window as any).__editor.getText() === (window as any).__beforeNewReference));
+  assert.ok(await page.evaluate(() => document.querySelector('.meo-md-footnote-ref')?.getAttribute('aria-label') === 'Jump to footnote 1'),
+    'settled undo must restore the visible global reference number as well as source bytes');
   assert.deepEqual(await page.evaluate(() => ({ notes: (window as any).__foregroundFootnoteScans ?? 0,
     blocks: (window as any).__foregroundBlockScans ?? 0 })), { notes: 0, blocks: 0 },
   'entry, input, undo and syntax publication must reuse worker context without foreground global discovery');
+  assert.deepEqual(await page.evaluate(() => (window as any).__foregroundContextScans ?? []), [],
+    'global formula, literal and details source facts must also come from the worker');
   stage = 'near code palette';
   await page.evaluate(async () => {
     const scope = window as any;
@@ -234,6 +257,7 @@ try {
     const keyword = [...document.querySelectorAll('.cm-line span')].find(node => node.textContent === 'const')!;
     scope.__keywordColor = getComputedStyle(keyword).color;
     scope.__outerIdentity = scope.__liveHistory.markdownIdentity(scope.__editor);
+    scope.__codeScansBefore = scope.__codeDescriptorScans;
     scope.__editor.scrollToLine(scope.__editor.view.state.doc.lineAt(scope.__editor.getText().indexOf('const distantValue')).number, 'center');
   });
   stage = 'distant code palette';
@@ -245,6 +269,8 @@ try {
   const requests = await page.evaluate(() => (window as any).__parseRequests);
   assert.ok(await page.evaluate(() => (window as any).__outerIdentity === (window as any).__liveHistory.markdownIdentity((window as any).__editor)),
     'real mixed-language publication must retain the outer Markdown identity');
+  assert.ok(await page.evaluate(() => (window as any).__codeScansBefore === (window as any).__codeDescriptorScans),
+    'distant code-language publication must not rediscover all code descriptors');
   assert.equal(requests.filter((request: any) => request.initial).length, 1, 'send one initial full snapshot');
   assert.ok(requests.some((request: any) => request.blocks && JSON.stringify(request.changes) === `[${requests[0].units}]`),
     'same-document Live preparation reuses the worker replica and syntax with an empty edit');

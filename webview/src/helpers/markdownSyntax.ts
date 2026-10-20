@@ -1,8 +1,9 @@
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { EditorState, type Transaction } from '@codemirror/state';
-import type { SyntaxNode, Tree } from '@lezer/common';
+import { IterMode, type SyntaxNode, type Tree } from '@lezer/common';
 import { isInsideFrontmatter, parseFrontmatter } from './frontmatter';
-import { isCompleteMarkdownStructure } from '../editor/markdownStructure';
+import { isCompleteMarkdownStructure, markdownStructureIdentity } from '../editor/markdownStructure';
+import type { MarkdownDetailsBlock } from '../../../src/foundation/markdownDocumentContext';
 
 /** Returns CodeMirror's published, possibly partial tree without extending the parse synchronously. */
 export function currentSyntaxTree(state: EditorState): ReturnType<typeof syntaxTree> {
@@ -80,22 +81,11 @@ export interface HeadingInlineSegment {
   highlight: boolean;
 }
 
-export interface DetailsBlockInfo {
-  kind: 'details';
-  anchorFrom: number;
-  anchorTo: number;
-  summaryFrom: number;
-  summaryTo: number;
-  lineFrom: number;
-  lineTo: number;
-  sectionFrom: number;
-  sectionTo: number;
-  bodyFrom: number;
-  bodyTo: number;
-  closingFrom: number;
-  closingTo: number;
-  summaryText: string;
-  defaultCollapsed: boolean;
+export type DetailsBlockInfo = MarkdownDetailsBlock;
+const detailsSourceCache = new WeakMap<EditorState['doc'], { tree: Tree; tabSize: number; blocks: DetailsBlockInfo[] }>();
+
+export function adoptDetailsBlockContext(doc: EditorState['doc'], tree: Tree, tabSize: number, blocks: DetailsBlockInfo[]): void {
+  detailsSourceCache.set(doc, { tree: markdownStructureIdentity(tree), tabSize, blocks: blocks.map(block => ({ ...block })) });
 }
 
 const detailsOpenTagPattern = /<details\b[^>]*>/i;
@@ -200,6 +190,8 @@ export function extractDetailsBlocks(
   state: EditorState,
   tree: Tree = resolvedSyntaxTree(state)
 ): DetailsBlockInfo[] {
+  const cached = detailsSourceCache.get(state.doc);
+  if (cached?.tree === markdownStructureIdentity(tree) && cached.tabSize === state.tabSize) return cached.blocks.map(block => ({ ...block }));
   const detailsBlocks: DetailsBlockInfo[] = [];
   const pendingBlocks: Array<{
     anchorFrom: number;
@@ -212,6 +204,7 @@ export function extractDetailsBlocks(
     defaultCollapsed: boolean;
   }> = [];
   tree.iterate({
+    mode: IterMode.IgnoreMounts,
     enter(node: any) {
       if (node.name !== 'HTMLBlock') {
         return;
@@ -277,5 +270,6 @@ export function extractDetailsBlocks(
   });
 
   detailsBlocks.sort((a, b) => a.anchorFrom - b.anchorFrom);
+  adoptDetailsBlockContext(state.doc, tree, state.tabSize, detailsBlocks);
   return detailsBlocks;
 }

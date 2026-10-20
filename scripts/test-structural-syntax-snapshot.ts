@@ -22,6 +22,7 @@ const { parseFootnotes } = await import('../webview/src/helpers/footnotes');
 const { prepareMarkdownDocumentContext, adoptMarkdownDocumentContext } = await import('../webview/src/markdownDocumentContext');
 const { inlineMarkdownExtensions } = await import('../webview/src/helpers/inlineMarkdownParser');
 const { htmlEditingRangeField, setHtmlEditingRangeEffect } = await import('../webview/src/helpers/htmlContent');
+const { extractDetailsBlocks } = await import('../webview/src/helpers/markdownSyntax');
 
 const text = 'Reference[^note].\n\n[^note]: Definition\n\n' + Array.from({ length: 80 }, (_, i) =>
   `## Block ${i}\n\n\u0060\u0060\u0060javascript\nconst value = ${i};\n\u0060\u0060\u0060\n\n| A | B |\n| --- | --- |\n| one | two |\n\n`).join('');
@@ -56,7 +57,9 @@ try {
 const outerParser = (markdownLanguage.parser as MarkdownParser).configure([...inlineMarkdownExtensions, { remove: ['Emoji'] }]);
 for (const sample of [
   'Reference[^n], literal `[^unused]`.\n\n[^n]: **Definition**\n\n    continued\n\n    ```\n    literal[^unused]\n    ```\n\n[^unused]: Unused\n',
+  'Formula[^n].\n\n[^n]: Definition\n\n    ```math\n    x^2\n    ```\n\n    $$\n    y^2\n    $$\n',
   '> | A | B |\n> | --- | --- |\n> | one | two |\n\n```mermaid\ngraph TD; A-->B\n```\n\n$$\nx^2\n$$\n\n<div>HTML</div>\n',
+  '<details>\n<summary>Section</summary>\n\n**Body** and $x^2$.\n\n</details>\n\n```markdown\n<details>\n<summary>Literal</summary>\n\nLiteral body\n\n</details>\n```\n',
   '---\ntitle: "[^hidden]"\n---\n\n# Heading\n\n- item[^n]\n\n[^n]: definition\n\n\tcontinued\n\n    | A | B |\n    | --- | --- |\n    | one | two |\n'
 ]) for (const tabSize of [2, 4, 8]) {
   let surface = EditorState.create({ doc: sample, selection: { anchor: sample.indexOf('x^2') < 0 ? 0 : sample.indexOf('x^2') },
@@ -65,13 +68,21 @@ for (const sample of [
   surface = surface.update({}).state;
   const expectedNotes = parseFootnotes(surface);
   const expectedBlocks = getLiveRenderedBlocks(surface);
+  const expectedMath = collectDocumentMathRanges(surface);
+  const expectedLiterals = collectMarkdownLiteralRanges(surface, language.syntaxTree(surface));
+  const expectedDetails = extractDetailsBlocks(surface);
+  if (sample.includes('<summary>Literal')) assert.deepEqual(expectedDetails.map(block => block.summaryText), ['Section'],
+    'a literal details element inside Markdown code is never an editable document fold');
   const workerDoc = EditorState.create({ doc: sample }).doc;
   const outer = outerParser.parse(sample);
   const prepared = prepareMarkdownDocumentContext(workerDoc, outer, tabSize);
-  const notes = structuredClone(prepared.footnotes), discovered = structuredClone(prepared.blocks());
+  const notes = structuredClone(prepared.footnotes), presentation = structuredClone(prepared.blocks()), discovered = presentation.blocks;
   assert.deepEqual(notes, expectedNotes, 'worker outer syntax must preserve mixed-parser global footnotes');
+  assert.deepEqual(presentation.math, expectedMath, 'formula source facts match the surface parser');
+  assert.deepEqual(presentation.literals, expectedLiterals, 'literal exclusions remain identical after embedded language publication');
+  assert.deepEqual(presentation.details, expectedDetails, 'details remain outer source context, including literal Markdown fences');
   adoptMarkdownDocumentContext(surface.doc, language.syntaxTree(surface), tabSize, { kind: 'footnotes', value: notes }, editorMarkdownLanguage.language.parser);
-  adoptMarkdownDocumentContext(surface.doc, language.syntaxTree(surface), tabSize, { kind: 'blocks', value: discovered }, editorMarkdownLanguage.language.parser);
+  adoptMarkdownDocumentContext(surface.doc, language.syntaxTree(surface), tabSize, { kind: 'blocks', value: presentation }, editorMarkdownLanguage.language.parser);
   assert.equal(parseFootnotes(surface), notes, 'a transferred verified context must be reused directly');
   assert.deepEqual(getLiveRenderedBlocks(surface.update({}).state), expectedBlocks,
     'worker facts retain surface selection filtering for math and nested tables');

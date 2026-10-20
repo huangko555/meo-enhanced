@@ -33,7 +33,7 @@ const longCodeModule = read('webview/src/helpers/longCodeBlocks.ts');
 assert.doesNotMatch(longCodeModule, /setLongCodeBlockFoldingEnabledEffect/);
 assert.deepEqual(
   Array.from(longCodeModule.matchAll(/export\s+(?:const|function|class|type)\s+(\w+)/g), (match) => match[1]),
-  ['longCodeBlockEnabledFacet', 'longCodeBlockSessionUiExtension'],
+  ['isLongCodeBlockInteractionEffect', 'longCodeBlockEnabledFacet', 'longCodeBlockSessionUiExtension'],
   'CodeMirror effects, fields, records and DOM widgets must stay behind the session UI Interface'
 );
 const directConsumers = [

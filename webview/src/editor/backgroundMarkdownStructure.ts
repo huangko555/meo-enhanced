@@ -89,7 +89,8 @@ function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet, contex
               // its presentation scheduler keeps waiting for that second stage.
               if (flight.blocks) return;
             } else {
-              if (!flight.syntaxReceived || !flight.blocks || !accepted.tree || !Array.isArray(data.value)) throw new Error('Invalid Markdown block context order');
+              if (!flight.syntaxReceived || !flight.blocks || !accepted.tree || !Array.isArray(data.value.blocks)
+                || !Array.isArray(data.value.math) || !Array.isArray(data.value.literals) || !Array.isArray(data.value.details)) throw new Error('Invalid Markdown block context order');
               context.receive(accepted.doc, accepted.tree, flight.tabSize, { kind: 'blocks', value: data.value });
               accepted.blocksTab = flight.tabSize;
             }

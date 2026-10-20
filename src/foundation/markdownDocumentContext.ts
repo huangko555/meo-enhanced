@@ -31,6 +31,20 @@ export interface MarkdownBlock {
 }
 export type DiscoveredMarkdownBlock = { block: MarkdownBlock; htmlFrom?: number };
 
+export type MarkdownLiteralRange = { from: number; to: number; script?: boolean; htmlCode?: { from: number; to: number } };
+export type MarkdownMathRange = {
+  from: number; to: number; mode: 'inline' | 'display'; content: string; raw: string; fencedDisplay?: boolean;
+  fenceSource?: { text: string; from: number; prefix: string };
+};
+export interface MarkdownDetailsBlock {
+  kind: 'details'; anchorFrom: number; anchorTo: number; summaryFrom: number; summaryTo: number;
+  lineFrom: number; lineTo: number; sectionFrom: number; sectionTo: number; bodyFrom: number; bodyTo: number;
+  closingFrom: number; closingTo: number; summaryText: string; defaultCollapsed: boolean;
+}
+export type MarkdownPresentationContext = {
+  blocks: DiscoveredMarkdownBlock[]; literals: MarkdownLiteralRange[]; math: MarkdownMathRange[]; details: MarkdownDetailsBlock[];
+};
+
 export type MarkdownContextPart =
   | { readonly kind: 'footnotes'; readonly value: ParsedFootnotes }
-  | { readonly kind: 'blocks'; readonly value: DiscoveredMarkdownBlock[] };
+  | { readonly kind: 'blocks'; readonly value: MarkdownPresentationContext };

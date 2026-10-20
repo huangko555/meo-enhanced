@@ -20,6 +20,7 @@ import { isExternalDocumentPresentation } from '../editor/externalDocumentPresen
 import { getUiStrings } from '../application/uiLanguage';
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
+import { markdownStructureIdentity } from '../editor/markdownStructure';
 import { getViewportController } from './viewportController';
 
 const LONG_CODE_LINE_THRESHOLD = 18;
@@ -451,7 +452,7 @@ function buildLongCodeState(
     blocks: reduced.blocks,
     decorations: buildLongCodeDecorations(reduced.blocks, state.facet(longCodeBlockEnabledFacet)),
     descriptorDocument: state.doc,
-    descriptorTree: syntaxTree(state),
+    descriptorTree: markdownStructureIdentity(syntaxTree(state)),
     descriptorTabSize: state.tabSize
   };
 }
@@ -594,9 +595,9 @@ const longCodeBlockStateField = StateField.define<LongCodeBlockState>({
     // effects. Reuse the current owner's descriptors, but still reduce search,
     // selection and manual folding intent. Deferred edits deliberately carry
     // no proof, so their settlement reparses the changed source as before.
-    if (!transaction.docChanged && !transaction.reconfigured
+    if (!transaction.docChanged
       && value.descriptorDocument === transaction.state.doc
-      && value.descriptorTree === syntaxTree(transaction.state)
+      && value.descriptorTree === markdownStructureIdentity(syntaxTree(transaction.state))
       && value.descriptorTabSize === transaction.state.tabSize) {
       if (!transaction.selection && !hasLongCodeImmediateEffect(transaction)
         && !transaction.isUserEvent('select.search')) return value;

@@ -3,18 +3,31 @@ import type { EditorState } from '@codemirror/state';
 import type { Tree } from '@lezer/common';
 import { isMathFenceLanguage, mathFenceBodyRange, mathFenceContent } from '../../../src/shared/mathFence';
 import { getCodeBlockSourceLines, parseBlockLinePrefix } from './blockIndent';
-import { collectLatexMathRanges, type LatexMathRange } from './math';
+import { collectLatexMathRanges } from './math';
 import { collectMarkdownLiteralRanges } from './markdownLiteralRanges';
 import { getFencedCodeInfo, resolvedSyntaxTree } from './markdownSyntax';
 import { markdownStructureIdentity } from '../editor/markdownStructure';
+import type { MarkdownMathRange } from '../../../src/foundation/markdownDocumentContext';
 
-export type DocumentMathRange = LatexMathRange & {
-  fenceSource?: { text: string; from: number; prefix: string };
-};
+export type DocumentMathRange = MarkdownMathRange;
 const fullRangeCache = new Map<EditorState['doc'], { tree: Tree; tabSize: number; ranges: readonly DocumentMathRange[]; bytes: number }>();
 let fullRangeBytes = 0;
 const copyRanges = (ranges: readonly DocumentMathRange[]) => ranges.map(range => ({ ...range,
   ...(range.fenceSource ? { fenceSource: { ...range.fenceSource } } : {}) }));
+
+export function adoptDocumentMathRanges(doc: EditorState['doc'], tree: Tree, tabSize: number,
+  ranges: readonly DocumentMathRange[]): void {
+  const old = fullRangeCache.get(doc);
+  if (old) fullRangeBytes -= old.bytes;
+  fullRangeCache.delete(doc);
+  const bytes = doc.length * 2 + ranges.reduce((sum, range) => sum
+    + (range.content.length + range.raw.length + (range.fenceSource?.text.length ?? 0)) * 2 + 128, 0);
+  fullRangeCache.set(doc, { tree, tabSize, ranges: copyRanges(ranges), bytes }); fullRangeBytes += bytes;
+  while ((fullRangeBytes > 4 * 1024 * 1024 || fullRangeCache.size > 4) && fullRangeCache.size > 1) {
+    const oldest = fullRangeCache.keys().next().value!;
+    fullRangeBytes -= fullRangeCache.get(oldest)!.bytes; fullRangeCache.delete(oldest);
+  }
+}
 
 /** Delimiter scanning and parsed TeX fences feed the same display component.
  * Ordinary code remains literal, and an unclosed fence stays editable source. */
@@ -62,18 +75,7 @@ export function collectDocumentMathRanges(
     return false;
   } });
   ranges.sort((left, right) => left.from - right.from);
-  if (cacheable) {
-    const old = fullRangeCache.get(state.doc);
-    if (old) fullRangeBytes -= old.bytes;
-    fullRangeCache.delete(state.doc);
-    const bytes = state.doc.length * 2 + ranges.reduce((sum, range) => sum
-      + (range.content.length + range.raw.length + (range.fenceSource?.text.length ?? 0)) * 2 + 128, 0);
-    fullRangeCache.set(state.doc, { tree, tabSize: state.tabSize, ranges: copyRanges(ranges), bytes }); fullRangeBytes += bytes;
-    while ((fullRangeBytes > 4 * 1024 * 1024 || fullRangeCache.size > 4) && fullRangeCache.size > 1) {
-      const oldest = fullRangeCache.keys().next().value!;
-      fullRangeBytes -= fullRangeCache.get(oldest)!.bytes; fullRangeCache.delete(oldest);
-    }
-  }
+  if (cacheable) adoptDocumentMathRanges(state.doc, tree, state.tabSize, ranges);
   return ranges;
 }
 

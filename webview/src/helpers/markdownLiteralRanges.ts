@@ -1,10 +1,15 @@
 import type { EditorState } from '@codemirror/state';
 import type { Tree } from '@lezer/common';
 import { markdownStructureIdentity } from '../editor/markdownStructure';
+import type { MarkdownLiteralRange } from '../../../src/foundation/markdownDocumentContext';
 
-type SourceRange = { from: number; to: number; script?: boolean; htmlCode?: { from: number; to: number } };
+type SourceRange = MarkdownLiteralRange;
 const literalNodes = new Set(['InlineCode', 'FencedCode', 'CodeBlock', 'CodeText', 'InlineMathExcluded', 'Autolink', 'URL', 'LinkTitle', 'LinkLabel', 'Comment', 'CommentBlock', 'HTMLBlock', 'Subscript', 'Superscript']);
 const cache = new WeakMap<Tree, SourceRange[]>();
+
+export function adoptMarkdownLiteralRanges(tree: Tree, ranges: SourceRange[]): void {
+  cache.set(markdownStructureIdentity(tree), ranges);
+}
 
 /** Prose transforms share the parser's literal containers, while link labels remain prose. */
 export function collectMarkdownLiteralRanges(state: EditorState, tree: Tree, scope?: { from: number; to: number }): readonly SourceRange[] {

@@ -56,6 +56,7 @@ export const displayMathResultField = StateField.define<readonly ValidResult[]>(
   create: state => collectValidResults(state, []),
   update(value, transaction) {
     const largeDocument = usesLargeDocumentDerivedWorkBudget(transaction.state);
+    if (largeDocument && !transaction.docChanged && shouldDeferLiveInputDerivedWork(transaction)) return value;
     if (largeDocument && isMappedLiveInputRefresh(transaction)) return value;
     if (largeDocument && isLiveInputDerivedWorkRefresh(transaction)) return collectValidResults(transaction.state, value);
     if (!transaction.docChanged) return largeDocument && (livePresentationBandChanged(transaction) || transaction.selection)

@@ -87,7 +87,7 @@ function applyDetailsToggleEffects(
 }
 
 const detailsBlockStateField = StateField.define<DetailsBlockRecord[]>({
-  create: (state) => rebuildDetailsBlocks(state, [], null),
+  create: (state) => state.field(detailsBlockLiveActiveField, false) ? rebuildDetailsBlocks(state, [], null) : [],
   update(previous, transaction) {
     const toggleEffects = transaction.effects.filter((effect) => effect.is(toggleDetailsBlockEffect));
     if (isMappedLiveInputRefresh(transaction) || shouldDeferLiveInputDerivedWork(transaction)) {
