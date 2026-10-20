@@ -264,13 +264,13 @@ export const handleImagePaste = async (
         if (!savedImage) {
           const extension = imageExtensionFromMimeType(parseDataUrlMimeType(imageData)) ||
             imageExtensionFromMimeType(mimeType) || 'png';
-          const fileName = `${Date.now()}.${extension}`;
-          const result = await clipboardImageSaveTransport.save({ imageData, fileName });
+          const result = await clipboardImageSaveTransport.save({ imageData, extension });
           if (result.ok === false) throw new Error(result.error.message);
-          savedImage = { fileName, path: result.value.path };
+          savedImage = result.value;
         }
         const markdownPath = encodeMarkdownPath(savedImage.path);
-        const imageMarkdown = `![${savedImage.fileName}](${markdownPath})`;
+        const altText = savedImage.fileName.replace(/[\\`*_[\]<>&]/g, '\\$&');
+        const imageMarkdown = `![${altText}](${markdownPath})`;
         if (tableInput && tableSelection && tableInput.isConnected) {
           const start = tableInput.value === tableTextAtPaste
             ? tableSelection.start : tableInput.selectionStart;
@@ -888,9 +888,9 @@ export function getImageData(state: any, node: any): { url: string; altText: str
 
   let altText = '';
   const imageText = state.doc.sliceString(node.from, node.to);
-  const altMatch = /!\[([^\]]*)\]/.exec(imageText);
+  const altMatch = /!\[((?:\\.|[^\]\\])*)\]/.exec(imageText);
   if (altMatch) {
-    altText = altMatch[1];
+    altText = altMatch[1].replace(/\\([\\`*_[\]<>&])/g, '$1');
   }
 
   let linkUrl = '';

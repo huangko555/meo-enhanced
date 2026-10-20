@@ -8,10 +8,49 @@ import { createImageStorageHost, type ImageStorageContext } from '../src/host/im
 import { decodeHostToWebviewMessage, decodeWebviewToHostMessage } from '../src/protocol/messages';
 import type { ImageLocationRequest, ImageLocationResponse } from '../src/protocol/imageStorage';
 import { createImageStorageTransport } from '../webview/src/adapters/imageStorageTransport';
+import { imageFileNameCandidates } from '../src/application/imageStorage';
+import { decodeImageStorage } from '../src/foundation/imageStorage';
+import { encodeMarkdownPath } from '../src/foundation/linkDestination';
 
 await mkdir(path.join(process.cwd(), '.local'), { recursive: true });
 const root = await mkdtemp(path.join(process.cwd(), '.local', 'image-storage-test-'));
 try {
+  const namingContext = { documentName: '中文 方案[甲]', extension: 'png', timestamp: new Date(2026, 9, 20, 14, 30, 25).getTime(), existingNames: [] };
+  const firstName = (naming: NonNullable<ImageStoragePreferences['naming']>, existingNames: string[] = []) =>
+    imageFileNameCandidates({ ...namingContext, naming, existingNames }).next().value;
+  assert.equal(firstName('documentSequence'), '中文 方案[甲]-1.png');
+  assert.equal(firstName('imageSequence', ['image-2.jpg', 'image-7.PNG', 'unrelated-99.png']), 'image-8.png');
+  assert.equal(firstName('dateTime'), '2026-10-20-143025.png');
+  assert.equal(firstName('timestamp'), namingContext.timestamp + '.png');
+  const dated = imageFileNameCandidates({...namingContext, naming: 'dateTime'});
+  assert.equal(dated.next().value, '2026-10-20-143025.png');
+  assert.equal(dated.next().value, '2026-10-20-143025-1.png', 'same-second collisions have a safe next candidate');
+  assert.equal(imageFileNameCandidates({...namingContext, naming: 'documentSequence', documentName: '中文:方案?'}).next().value, '中文-方案--1.png');
+  assert.equal(decodeImageStorage({mode: 'default', folder: 'assets', rule: 'assets'})?.naming, 'documentSequence');
+  assert.equal(decodeImageStorage({...defaultImageStorage, naming: 'unknown'}), null);
+  const chineseDirectory = path.join(root, '中文资料 空格');
+  await mkdir(chineseDirectory);
+  const chineseDocument = path.join(chineseDirectory, '中文 方案[甲].md');
+  const chinesePreferences = {...defaultImageStorage, folder: '图片 资源(一)#50%'};
+  const saveChinese = (extension = 'png', documentFsPath = chineseDocument) => saveClipboardImageFile({
+    documentFsPath, imageStorage: chinesePreferences, extension, contents: Buffer.from('中文图片')
+  });
+  const chineseFirst = await saveChinese();
+  assert.equal(chineseFirst.fileName, '中文 方案[甲]-1.png');
+  assert.equal(chineseFirst.relativePath, '图片 资源(一)#50%/中文 方案[甲]-1.png');
+  assert.equal(await readFile(path.join(chineseDirectory, chineseFirst.relativePath), 'utf8'), '中文图片');
+  assert.equal(encodeMarkdownPath(chineseFirst.relativePath), '图片%20资源%28一%29%2350%25/中文%20方案%5B甲%5D-1.png');
+  const chineseSecond = await saveChinese('jpg');
+  assert.equal(chineseSecond.fileName, '中文 方案[甲]-2.jpg', 'sequence survives a new call and spans image formats');
+  const concurrent = await Promise.all([saveChinese(), saveChinese(), saveChinese()]);
+  assert.deepEqual(concurrent.map(value => value.fileName).sort(), ['中文 方案[甲]-3.png', '中文 方案[甲]-4.png', '中文 方案[甲]-5.png']);
+  const renamedImage = await saveChinese('png', path.join(chineseDirectory, '新文档.md'));
+  assert.equal(renamedImage.fileName, '新文档-1.png');
+  assert.equal(await readFile(path.join(chineseDirectory, chineseFirst.relativePath), 'utf8'), '中文图片', 'renaming a document leaves older files intact');
+  const chineseHost = createImageStorageHost({ read: () => ({documentFsPath: chineseDocument, imageStorage: chinesePreferences}), write: async () => {}, selectFolder: async () => null });
+  const chinesePreview = await chineseHost.handle({type: 'imageLocation', action: 'read', requestId: 'chinese-preview'}, 'chinese');
+  assert.ok(chinesePreview.result.ok);
+  assert.equal(chinesePreview.result.value.state.examplePath, path.join(chineseDirectory, chinesePreferences.folder, '中文 方案[甲]-6.png'));
   const documentDirectory = path.join(root, 'notes with spaces');
   const documentFsPath = path.join(documentDirectory, 'draft.v2.md');
   await mkdir(documentDirectory); await writeFile(documentFsPath, '# Draft');
@@ -27,11 +66,11 @@ try {
     const resolved = resolveClipboardImageDirectory({ ...context, imageStorage: preferences });
     assert.equal(resolved.targetDirectory, directory);
     await assert.rejects(access(directory), 'preview resolution must not create directories');
-    const saved = await saveClipboardImageFile({ ...context, imageStorage: preferences, requestedFileName: 'shot.png', contents: Buffer.from('image') });
-    assert.equal(saved.relativePath, path.relative(documentDirectory, path.join(directory, 'shot.png')).replace(/\\/g, '/'));
-    assert.equal(await readFile(path.join(directory, 'shot.png'), 'utf8'), 'image');
+    const saved = await saveClipboardImageFile({ ...context, imageStorage: preferences, extension: 'png', contents: Buffer.from('image') });
+    assert.equal(saved.relativePath, path.relative(documentDirectory, path.join(directory, 'draft.v2-1.png')).replace(/\\/g, '/'));
+    assert.equal(await readFile(path.join(directory, 'draft.v2-1.png'), 'utf8'), 'image');
   }
-  await assert.rejects(saveClipboardImageFile({ ...context, imageStorage: storage('advanced', 'images', documentFsPath), requestedFileName: 'file.png', contents: Buffer.from('image') }), /directories/);
+  await assert.rejects(saveClipboardImageFile({ ...context, imageStorage: storage('advanced', 'images', documentFsPath), extension: 'png', contents: Buffer.from('image') }), /directories/);
   const standalone = resolveClipboardImageDirectory({ documentFsPath, imageStorage: storage('perDocument') });
   assert.equal(standalone.targetDirectory, path.join(documentDirectory, 'images', 'draft.v2'));
   const renamed = resolveClipboardImageDirectory({ documentFsPath: path.join(documentDirectory, 'next.md'), imageStorage: storage('perDocument') });
@@ -42,14 +81,14 @@ try {
   assert.equal(resolveClipboardImageDirectory({ documentFsPath: path.join(root, '$notes', 'd.md'), imageStorage: storage('advanced', 'images', '${fileDirname}/images') }).targetDirectory, path.join(root, '$notes', 'images'));
   const external = path.join(root, 'external'); await mkdir(external);
   const link = path.join(documentDirectory, 'linked'); await symlink(external, link, process.platform === 'win32' ? 'junction' : 'dir');
-  await assert.rejects(saveClipboardImageFile({ ...context, imageStorage: storage('advanced', 'images', link + '/new/sub'), requestedFileName: 'unsafe.png', contents: Buffer.from('unsafe') }), /symbolic link|junction/);
+  await assert.rejects(saveClipboardImageFile({ ...context, imageStorage: storage('advanced', 'images', link + '/new/sub'), extension: 'png', contents: Buffer.from('unsafe') }), /symbolic link|junction/);
   await assert.rejects(access(path.join(external, 'new')));
   if (process.platform === 'win32') {
-    for (const requestedFileName of ['image.png:stream', 'NUL.png', 'trailing.png.', 'bad?.png']) {
-      await assert.rejects(saveClipboardImageFile({ ...context, imageStorage: storage('default'), requestedFileName, contents: Buffer.from('unsafe') }), /safe path segment/);
+    for (const extension of ['png:stream', '../png', 'png/', 'bad?png']) {
+      await assert.rejects(saveClipboardImageFile({ ...context, imageStorage: storage('default'), extension, contents: Buffer.from('unsafe') }), /extension/);
     }
   }
-  const same = await Promise.all([1, 2, 3].map(value => saveClipboardImageFile({ ...context, imageStorage: storage('perDocument'), requestedFileName: 'same.png', contents: Buffer.from(String(value)) })));
+  const same = await Promise.all([1, 2, 3].map(value => saveClipboardImageFile({ ...context, imageStorage: storage('perDocument'), extension: 'png', contents: Buffer.from(String(value)) })));
   assert.equal(new Set(same.map(value => value.relativePath)).size, 3);
 
   let current: ImageStorageContext = { ...context, configuredFolder: 'legacy' };

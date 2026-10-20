@@ -443,12 +443,17 @@ assert.equal(localTransport.accept({
   type: 'resolvedLocalLinks', requestId: 'local-link-1', result: { ok: true, value: { results: [] } }
 }), false);
 assert.deepEqual(decodeSaveImageFromClipboardRequest({
-  type: 'saveImageFromClipboard', requestId: 'save-1', imageData: 'data:image/png;base64,AA==', fileName: 'a.png'
-}), { type: 'saveImageFromClipboard', requestId: 'save-1', imageData: 'data:image/png;base64,AA==', fileName: 'a.png' });
+  type: 'saveImageFromClipboard', requestId: 'save-1', imageData: 'data:image/png;base64,AA==', extension: 'png'
+}), { type: 'saveImageFromClipboard', requestId: 'save-1', imageData: 'data:image/png;base64,AA==', extension: 'png' });
+for (const extension of ['../png', 'png/evil', 'png:stream', '', null]) {
+  assert.equal(decodeSaveImageFromClipboardRequest({type: 'saveImageFromClipboard', requestId: 'save-1', imageData: 'data:image/png;base64,AA==', extension}), null);
+}
+assert.equal(decodeSavedImagePathResponse({type: 'savedImagePath', requestId: 'save-1', result: {ok: true, value: {path: 'assets/a.png'}}}), null,
+  'success must include the final Host file name');
 assert.deepEqual(decodeSavedImagePathResponse({
-  type: 'savedImagePath', requestId: 'save-1', result: { ok: true, value: { path: 'assets/a.png' } }
+  type: 'savedImagePath', requestId: 'save-1', result: { ok: true, value: { path: 'assets/a.png', fileName: 'a.png' } }
 }), {
-  type: 'savedImagePath', requestId: 'save-1', result: { ok: true, value: { path: 'assets/a.png' } }
+  type: 'savedImagePath', requestId: 'save-1', result: { ok: true, value: { path: 'assets/a.png', fileName: 'a.png' } }
 });
 assert.deepEqual(decodeSavedImagePathResponse({
   type: 'savedImagePath', requestId: 'save-1',
@@ -478,19 +483,19 @@ const saveTransport = createClipboardImageSaveTransport((message) => { postedSav
   }
 });
 const savedImage = saveTransport.save({
-  imageData: 'data:image/png;base64,AA==', fileName: 'b.png'
+  imageData: 'data:image/png;base64,AA==', extension: 'png'
 });
 assert.deepEqual(postedSaveRequest, {
-  type: 'saveImageFromClipboard', requestId: 'img-save-0', imageData: 'data:image/png;base64,AA==', fileName: 'b.png'
+  type: 'saveImageFromClipboard', requestId: 'img-save-0', imageData: 'data:image/png;base64,AA==', extension: 'png'
 });
 assert.equal(saveTransport.accept({
-  type: 'savedImagePath', requestId: 'img-save-0', result: { ok: true, value: { path: 'assets/b.png' } }
+  type: 'savedImagePath', requestId: 'img-save-0', result: { ok: true, value: { path: 'assets/b.png', fileName: 'b.png' } }
 }), true);
-assert.deepEqual(await savedImage, { ok: true, value: { path: 'assets/b.png' } });
+assert.deepEqual(await savedImage, { ok: true, value: { path: 'assets/b.png', fileName: 'b.png' } });
 assert.equal(canceledSaveTimeouts, 1);
 
 const timedOutImage = saveTransport.save({
-  imageData: 'data:image/png;base64,AA==', fileName: 'c.png'
+  imageData: 'data:image/png;base64,AA==', extension: 'png'
 });
 const triggerSaveTimeout = scheduledSaveTimeout as (() => void) | null;
 assert.notEqual(triggerSaveTimeout, null);
@@ -500,7 +505,7 @@ assert.deepEqual(await timedOutImage, {
   error: { code: 'timeout', message: 'Timed out while saving pasted image' }
 });
 assert.equal(saveTransport.accept({
-  type: 'savedImagePath', requestId: 'img-save-1', result: { ok: true, value: { path: 'assets/c.png' } }
+  type: 'savedImagePath', requestId: 'img-save-1', result: { ok: true, value: { path: 'assets/c.png', fileName: 'c.png' } }
 }), false);
 
 assert.deepEqual(decodePreviewRenderRequest({

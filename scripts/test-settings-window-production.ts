@@ -30,15 +30,23 @@ try {
   const openFixture = async (text = 'hello\n\n# Heading\n\ntext', mode: 'source' | 'live' = 'source', stubMermaid = false, outline: 'left' | 'right' | 'hidden' = 'hidden') => {
     if (!imagePages.has(page)) {
       await page.exposeFunction('__imageLocationHost', (request: ImageLocationRequest) => imageHost.handle(request, 'settings-document'));
-      await page.exposeFunction('__imageSaveHost', async (request: {requestId: string; imageData: string; fileName: string}) => {
+      await page.exposeFunction('__imageSaveHost', async (request: {requestId: string; imageData: string; extension: string}) => {
         try {
           if (!imageContext.documentFsPath) throw new Error('Save the document as a local Markdown file before pasting images.');
           const saved = await saveClipboardImageFile({
             ...imageContext, documentFsPath: imageContext.documentFsPath,
-            requestedFileName: request.fileName, contents: Buffer.from(request.imageData.replace(/^data:image\/[^;]+;base64,/, ''), 'base64')
+            extension: request.extension, contents: Buffer.from(request.imageData.replace(/^data:image\/[^;]+;base64,/, ''), 'base64')
           });
-          return {type: 'savedImagePath', requestId: request.requestId, result: {ok: true, value: {path: saved.relativePath}}};
+          return {type: 'savedImagePath', requestId: request.requestId, result: {ok: true, value: {path: saved.relativePath, fileName: saved.fileName}}};
         } catch (error) { return {type: 'savedImagePath', requestId: request.requestId, result: {ok: false, error: {code: 'operation-failed', message: String(error)}}}; }
+      });
+      await page.exposeFunction('__imageResolutionHost', async (request: {requestId: string; url: string}) => {
+        let resolvedUrl = '';
+        if (imageContext.documentFsPath) {
+          const bytes = await fs.readFile(path.resolve(path.dirname(imageContext.documentFsPath), decodeURIComponent(request.url))).catch(() => null);
+          if (bytes) resolvedUrl = 'data:image/png;base64,' + bytes.toString('base64');
+        }
+        return {type: 'resolvedImageSrc', requestId: request.requestId, result: {ok: true, value: {resolvedUrl}}};
       });
       imagePages.add(page);
     }
@@ -66,6 +74,9 @@ try {
         }
         if(message.type==='saveImageFromClipboard') {
           window.__imageSaveHost(message).then(response => window.dispatchEvent(new MessageEvent('message', {data: response})));
+        }
+        if(message.type==='resolveImageSrc') {
+          window.__imageResolutionHost(message).then(response => window.dispatchEvent(new MessageEvent('message', {data: response})));
         }
         if(message.type==='imageLocation') {
           window.__imageLocationHost(message).then(response => {
@@ -376,6 +387,12 @@ try {
     }, value);
   };
   const waitImageSaved = async () => { await page.waitForFunction(() => document.querySelector('.image-location-feedback')?.textContent === '已自动保存'); };
+  assert.equal(await page.$eval('.image-naming-modes input:checked', element => (element as HTMLInputElement).value), 'documentSequence');
+  for (const naming of ['dateTime', 'imageSequence', 'timestamp', 'documentSequence']) {
+    await page.click('.image-naming-modes input[value="' + naming + '"]'); await waitImageSaved();
+    assert.equal(imageContext.imageStorage?.naming, naming);
+    if (naming === 'documentSequence') assert.ok((await page.$eval('.image-naming-preview dd', element => element.textContent))?.endsWith('draft-1.png'));
+  }
   await page.click('.image-location-modes input[value="perDocument"]'); await waitImageSaved();
   assert.equal(await page.$eval('.image-location-suffix', element => element.textContent), '/draft');
   await page.focus('#meo-image-folder');
@@ -460,9 +477,9 @@ try {
   await page.click('button[data-mode="source"]');
   await fs.mkdir(path.join(process.cwd(), '.local'), {recursive: true});
   imagePasteRoot = await fs.mkdtemp(path.join(process.cwd(), '.local', 'image-paste-test-'));
-  imageContext = { documentFsPath: path.join(imagePasteRoot, 'draft.md'), imageStorage: {mode: 'default', folder: 'images with spaces (v1) #100%', rule: '${fileDirname}/assets'} };
+  imageContext = { documentFsPath: path.join(imagePasteRoot, '中文 方案[甲].md'), imageStorage: {mode: 'default', folder: '中文图片 with spaces (v1) #100%', rule: '${fileDirname}/assets'} };
   await fs.writeFile(imageContext.documentFsPath!, '# Draft');
-  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6Nf8AAAAASUVORK5CYII=';
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNwaPj/HwAFggK/465+UQAAAABJRU5ErkJggg==';
   const pasteImage = async () => {
     await page.evaluate(png => {
       const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
@@ -474,9 +491,11 @@ try {
   };
   console.log('Image settings autosave, validation, IME, stale replies, picker and close persistence passed');
   await pasteImage();
-  await page.waitForFunction(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor')).state.doc.toString().includes('images%20with%20spaces%20%28v1%29%20%23100%25/'));
+  await page.waitForFunction(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor')).state.doc.toString().includes('中文图片%20with%20spaces%20%28v1%29%20%23100%25/中文%20方案%5B甲%5D-1.png'));
   const images = await fs.readdir(path.join(imagePasteRoot, imageContext.imageStorage!.folder));
   assert.equal(images.length, 1);
+  assert.equal(images[0], '中文 方案[甲]-1.png');
+  assert.ok((await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor')).state.doc.toString())).includes('![中文 方案\\[甲\\]-1.png]('));
   console.log('Image paste created a file and inserted an escaped Markdown path');
   assert.equal((await fs.readFile(path.join(imagePasteRoot, imageContext.imageStorage!.folder, images[0]))).toString('base64'), png);
   const beforeUntitledPaste = await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor')).state.doc.toString());
@@ -484,11 +503,23 @@ try {
   await pasteImage();
   await page.waitForFunction(() => document.querySelector('.editor-notice')?.textContent?.includes('Save the document'));
   assert.equal(await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor')).state.doc.toString()), beforeUntitledPaste);
-  imageContext = {...imageContext, documentFsPath: path.join(imagePasteRoot, 'draft.md')};
+  imageContext = {...imageContext, documentFsPath: path.join(imagePasteRoot, '中文 方案[甲].md')};
   console.log('Untitled image paste retained the document and displayed an actionable failure');
   await pasteImage();
   await page.waitForFunction(before => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor')).state.doc.toString() !== before, {}, beforeUntitledPaste);
   assert.equal((await fs.readdir(path.join(imagePasteRoot, imageContext.imageStorage!.folder))).length, 2);
+  assert.ok((await fs.readdir(path.join(imagePasteRoot, imageContext.imageStorage!.folder))).includes('中文 方案[甲]-2.png'));
+  await page.click('button[data-mode="live"]');
+  await page.evaluate(() => {
+    const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+    view.dispatch({selection: {anchor: view.state.doc.length}});
+  });
+  await page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('.meo-md-image-img')].filter(image => image.complete && image.naturalWidth > 0 && image.alt === '中文 方案[甲]-1.png').length > 0);
+  if (process.env.MEO_SETTINGS_SCREENSHOTS) {
+    await fs.mkdir(path.resolve(process.env.MEO_SETTINGS_SCREENSHOTS), {recursive: true});
+    await page.screenshot({path: path.resolve(process.env.MEO_SETTINGS_SCREENSHOTS, 'chinese-pasted-image-live.png')});
+  }
+  await page.click('button[data-mode="source"]');
   await page.evaluate(text => {
     const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
     view.dispatch({changes: {from: 0, to: view.state.doc.length, insert: text}, selection: {anchor: 0}});
@@ -725,7 +756,7 @@ try {
       const items = await page.$$eval('.settings-item', elements => elements.map(element => ({
         id: (element as HTMLElement).dataset.setting ?? (element as HTMLElement).dataset.input ?? (element as HTMLElement).dataset.command!,
         query: element.querySelector('.settings-item-title')!.textContent!,
-        values: [...element.querySelectorAll('.settings-key, .image-location-mode-title, .image-location-field-label, .image-location-picker, .image-location-token')].map(control => control.getAttribute('aria-label') ?? control.textContent!)
+        values: [...element.querySelectorAll('.settings-key, .image-location-mode-title, .image-naming-title, .image-location-field-label, .image-location-picker, .image-location-token')].map(control => control.getAttribute('aria-label') ?? control.textContent!)
       })));
       assert.equal(items.length, tab === 'general' ? 9 : tab === 'appearance' ? 12 : tab === 'typing' ? 16 : editorCommandIds.length, 'search inventory includes every setting and command');
       searchCases.push(...items.flatMap(item => [item.query, ...item.values].map(query => ({tab, id: item.id, query}))));
@@ -860,11 +891,14 @@ try {
             : ['当前文档目录', '文档名，含扩展名', '文档名，不含扩展名', '扩展名，含点号'];
           for (const [index, description] of descriptions.entries()) {
             const selector = '.image-location-variables > button:nth-child(' + (index + 1) + ')';
+            await page.$eval(selector, element => element.scrollIntoView({block: 'center'}));
+            await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+            await page.mouse.move(0, 0);
             await page.hover(selector);
             await page.waitForFunction(selector => {
               const id = document.querySelector(selector)?.getAttribute('aria-describedby');
               return !!id && document.getElementById(id)?.classList.contains('is-visible');
-            }, {}, selector);
+            }, {}, selector).catch(error => { throw new Error(`${language}/${appearance}/${width}: variable ${index + 1} hover hint did not open`, {cause: error}); });
             const hint = await page.$eval(selector, element => {
               const tooltip = document.getElementById(element.getAttribute('aria-describedby')!)!, style = getComputedStyle(tooltip);
               const arrow = getComputedStyle(tooltip, '::before');
@@ -1065,6 +1099,7 @@ try {
     const directory = path.resolve(process.env.MEO_SETTINGS_SCREENSHOTS); await fs.mkdir(directory, { recursive: true });
     await page.setViewport({ width: 1100, height: 780 });
     await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button');
+    if (await page.$('.settings-search-clear:not([hidden])')) await page.click('.settings-search-clear');
     for (const [language, appearance] of [['zh-CN', 'dark'], ['zh-CN', 'light'], ['en', 'dark'], ['en', 'light']]) {
       await page.setViewport({ width: 1100, height: 780 });
       await page.click('.settings-tab[data-tab="general"]'); await page.click(`[data-setting="language"] [data-value="${language}"]`); await page.click('.settings-tab[data-tab="appearance"]'); await page.click(`[data-appearance-mode="${appearance}"]`);
@@ -1076,6 +1111,11 @@ try {
       await page.setViewport({ width: 1100, height: 780 });
       await page.click('.settings-jump[data-section="paste"]');
       await page.screenshot({ path: path.join(directory, `settings-paste-${language}-${appearance}.png`) });
+      await page.$eval('.image-naming-modes', element => element.scrollIntoView({block: 'center'}));
+      await page.screenshot({ path: path.join(directory, `image-naming-${language}-${appearance}.png`) });
+      await page.setViewport({ width: 430, height: 740 });
+      await page.$eval('.image-naming-modes', element => element.scrollIntoView({block: 'center'}));
+      await page.screenshot({ path: path.join(directory, `image-naming-narrow-${language}-${appearance}.png`) });
     }
     await page.click('.settings-close'); await page.click('.more-tools-wrapper > .format-button');
     await page.screenshot({ path: path.join(directory, 'settings-menu-en-light.png') });

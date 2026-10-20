@@ -34,6 +34,13 @@ need native platform verification before release; unavailable queries use fallba
 
 The user-facing inventory is in [testing-feature-coverage.md](testing-feature-coverage.md).
 
+Pasted-image naming is covered by `test:image-storage` and the production settings
+and link-destination contracts. They verify the document-name default, all naming
+presets, continuing numbers across image formats, concurrent exclusive creation,
+Chinese folders/document names, escaped Markdown targets and final-file-name alt
+text. Settings coverage includes persisted selection, bilingual search and narrow
+light/dark layouts; `MEO_SETTINGS_SCREENSHOTS` captures the naming controls.
+
 `scripts/test-link-candidates-production.ts` initializes the standalone fixture's
 host font variables and measures native textarea text through Chromium's debugging
 protocol. Its real mouse-click checks cover both single-line and wrapped paths in

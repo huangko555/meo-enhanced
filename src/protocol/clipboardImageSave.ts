@@ -6,11 +6,12 @@ export type SaveImageFromClipboardRequest = {
   readonly type: 'saveImageFromClipboard';
   readonly requestId: string;
   readonly imageData: string;
-  readonly fileName: string;
+  readonly extension: string;
 };
 
 export type SavedImagePath = {
   readonly path: string;
+  readonly fileName: string;
 };
 
 export type ClipboardImageSaveResult = RequestResult<SavedImagePath>;
@@ -34,7 +35,7 @@ export function decodeSaveImageFromClipboardRequest(value: unknown): SaveImageFr
     || value.type !== 'saveImageFromClipboard'
     || !isNonEmptyString(value.requestId)
     || !isNonEmptyString(value.imageData)
-    || !isNonEmptyString(value.fileName)) {
+    || typeof value.extension !== 'string' || !/^[a-z0-9][a-z0-9.+-]{0,31}$/i.test(value.extension)) {
     return null;
   }
   return value as SaveImageFromClipboardRequest;
@@ -43,7 +44,8 @@ export function decodeSaveImageFromClipboardRequest(value: unknown): SaveImageFr
 export function decodeSavedImagePathResponse(value: unknown): SavedImagePathResponse | null {
   const result = isRecord(value)
     ? decodeRequestResult(value.result, (candidate): SavedImagePath | null => (
-        isRecord(candidate) && isNonEmptyString(candidate.path) ? { path: candidate.path } : null
+        isRecord(candidate) && isNonEmptyString(candidate.path) && isNonEmptyString(candidate.fileName)
+          ? { path: candidate.path, fileName: candidate.fileName } : null
       ))
     : null;
   if (!isRecord(value)

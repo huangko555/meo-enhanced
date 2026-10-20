@@ -1,4 +1,4 @@
-import { defaultImageStorage, type ImageLocationState, type ImageStoragePreferences } from '../../../src/foundation/imageStorage';
+import { defaultImageStorage, imageNamingModes, type ImageLocationState, type ImageStoragePreferences } from '../../../src/foundation/imageStorage';
 import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 import type { ImageLocationRequest, ImageLocationResponse } from '../../../src/protocol/imageStorage';
 import { createTooltip } from './tooltip';
@@ -93,11 +93,27 @@ export function createImageLocationSettings(options: {
 
   const advanced = node('div', 'image-location-advanced'); advanced.append(ruleLabel, ruleBox, advancedHint, variables);
   modeControls[2].details.append(advanced);
+  const namingTitle = node('div', 'image-location-field-label'); namingTitle.id = 'meo-image-naming-title';
+  const naming = node('div', 'settings-radio-group image-naming-modes');
+  naming.setAttribute('role', 'radiogroup'); naming.setAttribute('aria-labelledby', namingTitle.id);
+  const namingControls = imageNamingModes.map(mode => {
+    const label = node('label', 'settings-radio');
+    const input = node('input', 'settings-radio-input'); input.type = 'radio'; input.name = 'meo-image-naming'; input.value = mode;
+    const text = node('span', 'image-naming-title'); label.append(input, text); naming.append(label);
+    input.addEventListener('change', () => {
+      if (!input.checked) return;
+      preferences = { ...preferences, naming: mode }; edit(true);
+    });
+    return { mode, input, text };
+  });
+  const example = node('dl', 'image-location-preview image-naming-preview');
+  const exampleLabel = node('dt', ''); const exampleValue = node('dd', '');
+  example.append(exampleLabel, exampleValue);
   const legacy = node('p', 'settings-description image-location-legacy');
   const notice = node('p', 'settings-description image-location-note');
   const feedback = node('p', 'image-location-feedback'); feedback.setAttribute('role', 'status');
   const retry = node('button', 'settings-button image-location-retry'); retry.type = 'button'; retry.hidden = true;
-  element.append(heading, preview, modes, legacy, notice, feedback, retry);
+  element.append(heading, preview, modes, namingTitle, naming, example, legacy, notice, feedback, retry);
   folder.maxLength = rule.maxLength = 4096;
   basicHint.id = 'meo-image-folder-hint'; folder.setAttribute('aria-describedby', basicHint.id);
   advancedHint.id = 'meo-image-rule-hint'; rule.setAttribute('aria-describedby', advancedHint.id);
@@ -118,6 +134,10 @@ export function createImageLocationSettings(options: {
       item.details.hidden = preferences.mode !== item.mode;
     }
     folder.disabled = rule.disabled = !loaded;
+    for (const item of namingControls) {
+      item.input.checked = (preferences.naming ?? defaultImageStorage.naming) === item.mode;
+      item.input.disabled = !loaded;
+    }
   }
   function errorText(message: string) {
     if (language !== 'zh-CN') return message;
@@ -160,10 +180,20 @@ export function createImageLocationSettings(options: {
     advancedHint.textContent = t('支持绝对路径、相对当前文档的路径及下方变量。点击变量可插入。', 'Use an absolute path, a path relative to the document, or the variables below. Click a variable to insert it.');
     picker.textContent = t('选择文件夹…', 'Choose folder…');
     picker.disabled = !loaded || selecting;
+    namingTitle.textContent = t('图片命名', 'Image naming');
+    const namingLabels = {
+      dateTime: t('日期时间', 'Date and time'),
+      imageSequence: t('图片序号', 'Image number'),
+      documentSequence: t('文档名＋序号（默认）', 'Document name + number (default)'),
+      timestamp: t('毫秒时间戳', 'Timestamp in milliseconds')
+    };
+    for (const item of namingControls) item.text.textContent = namingLabels[item.mode];
+    exampleLabel.textContent = t('保存示例', 'Save example');
+    exampleValue.textContent = previewPending ? t('正在计算…', 'Calculating…') : state?.examplePath ?? '—';
     for (const token of tokens) token.tooltip.setContent({ text: t(token.zh, token.en) });
     legacy.hidden = !state?.legacy || dirty;
     legacy.textContent = t('沿用原有目录配置；主动修改后使用这里的新规则。', 'Your previous folder configuration is preserved until you change it here.');
-    notice.textContent = t('有效修改自动保存，既有图片不会移动。', 'Valid changes save automatically. Existing images stay where they are.');
+    notice.textContent = t('有效修改自动保存，仅影响新粘贴的图片。示例使用 .png，实际后缀跟随图片格式。', 'Valid changes save automatically and apply to newly pasted images. The example uses .png; the actual extension follows the image format.');
     feedback.textContent = status === 'failed' ? t('未保存：', 'Not saved: ') + errorText(failure)
       : state?.error ? t('路径无效：', 'Invalid path: ') + errorText(state.error)
       : status === 'saving' ? t('正在保存…', 'Saving…')

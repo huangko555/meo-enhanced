@@ -121,8 +121,8 @@ export const typingSearchKeywords: Readonly<Record<keyof InputAssistance, Search
   emoji: ['表情符号 颜文字 小黄脸 图标 笑脸 冒号', 'emoji emoticon smiley face colon shortcode suggestions']
 };
 export const imageLocationSearchKeywords: SearchKeywords = [
-  '图片保存位置 图片存储 截图保存 自动保存图片 文档旁的文件夹（默认） 文档旁，按文档名分开 自定义路径（高级） 文件夹名称 图片目录或路径规则 选择文件夹… 图片目录 图片文件夹 自定义路径 高级路径 相对路径 绝对路径 文档旁 文档名 扩展名 路径变量 ${fileDirname} ${fileBasename} ${fileBasenameNoExtension} ${fileExtname} assets images',
-  'Image save location Beside document (default) Beside document, by name Custom path (advanced) Folder name Image folder or path rule Choose folder… storage pasted screenshot save folder directory custom advanced path relative absolute beside document file name extension variables assets images'
+  '图片命名 自动重命名 文件名 日期时间 图片序号 文档名＋序号（默认） 文档名＋序号 文档名加序号 毫秒时间戳 保存示例 图片保存位置 图片存储 截图保存 自动保存图片 文档旁的文件夹（默认） 文档旁，按文档名分开 自定义路径（高级） 文件夹名称 图片目录或路径规则 选择文件夹… 图片目录 图片文件夹 自定义路径 高级路径 相对路径 绝对路径 文档旁 文档名 扩展名 路径变量 ${fileDirname} ${fileBasename} ${fileBasenameNoExtension} ${fileExtname} assets images',
+  'Image naming Date and time Image number Document name + number (default) Timestamp in milliseconds Save example rename filename sequence Image save location Beside document (default) Beside document, by name Custom path (advanced) Folder name Image folder or path rule Choose folder… storage pasted screenshot save folder directory custom advanced path relative absolute beside document file name extension variables assets images'
 ];
 export const shortcutSearchKeywords: Readonly<Record<EditorCommandId, SearchKeywords>> = {
   formatHtml: ['整理代码 排版 缩进 换行 HTML片段 块状公式 数学 LaTeX 源码 美化', 'format HTML fragment formula math LaTeX source code pretty print indentation line breaks'],

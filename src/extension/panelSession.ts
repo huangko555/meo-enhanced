@@ -1367,7 +1367,7 @@ async function handleSaveImageFromClipboard(
     const saved = await saveClipboardImageFile({
       ...storage,
       documentFsPath: storage.documentFsPath,
-      requestedFileName: message.fileName,
+      extension: message.extension,
       contents: imageBuffer
     });
 
@@ -1376,7 +1376,7 @@ async function handleSaveImageFromClipboard(
       requestId: message.requestId,
       result: {
         ok: true,
-        value: { path: saved.relativePath }
+        value: { path: saved.relativePath, fileName: saved.fileName }
       }
     };
   } catch (error) {

@@ -14,7 +14,8 @@ try {
   const paths = [
     { raw: 'MDassets/设计资料/截图🖼️.png', destination: 'MDassets/设计资料/截图🖼️.png' },
     { raw: '设计 资料/截图(1)#50%&copy;.png', destination: '设计%20资料/截图%281%29%2350%25%26copy;.png' },
-    { raw: '设计资料/字面%E8%AE%BE.png', destination: '设计资料/字面%25E8%25AE%25BE.png' }
+    { raw: '设计资料/字面%E8%AE%BE.png', destination: '设计资料/字面%25E8%25AE%25BE.png' },
+    { raw: '中文资料/方案[甲]&copy;-1.png', destination: '中文资料/方案%5B甲%5D%26copy;-1.png' }
   ];
   for (const mode of ['live', 'source']) {
     for (const { raw, destination } of paths) {
@@ -22,7 +23,7 @@ try {
         const harness = (window as any).TableStabilityHarness;
         harness.initializeImageHandling({ postMessage(message: any) {
           if (message.type === 'saveImageFromClipboard') queueMicrotask(() => harness.handleSavedImagePath({
-            type: 'savedImagePath', requestId: message.requestId, result: { ok: true, value: { path: raw } }
+            type: 'savedImagePath', requestId: message.requestId, result: { ok: true, value: { path: raw, fileName: raw.split('/').at(-1) } }
           }));
         } });
         const editor = harness.createEditor({ parent: document.getElementById('app')!, text: '', initialMode: mode, onApplyChanges() {} });
@@ -34,7 +35,7 @@ try {
         editor.destroy();
         return text;
       }, { mode, raw });
-      assert.match(pasted, /^!\[\d+\.png\]\(/);
+      assert.ok(pasted.startsWith('![' + raw.split('/').at(-1)!.replace(/[\\`*_[\]<>&]/g, '\\$&') + ']('), 'alt text uses the final Host file name with Markdown escaping');
       assert.ok(pasted.endsWith(`](${destination})`), `${mode} image paste: ${pasted}`);
 
       for (const prefix of ['![image](', '[link](']) {
@@ -59,7 +60,7 @@ try {
     const harness = (window as any).TableStabilityHarness;
     harness.initializeImageHandling({ postMessage(message: any) {
       if (message.type === 'saveImageFromClipboard') queueMicrotask(() => harness.handleSavedImagePath({
-        type: 'savedImagePath', requestId: message.requestId, result: { ok: true, value: { path: '表格图片/截图(1).png' } }
+        type: 'savedImagePath', requestId: message.requestId, result: { ok: true, value: { path: '表格图片/截图(1).png', fileName: '截图(1).png' } }
       }));
     } });
     const editor = harness.createEditor({ parent: document.getElementById('app')!, text: '| A | B |\n| --- | --- |\n|  | x |', initialMode: 'live', onApplyChanges() {} });

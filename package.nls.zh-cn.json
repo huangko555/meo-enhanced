@@ -44,7 +44,7 @@
   "config.lineHighlights": "在源码模式中以淡色标示修改过的行。",
   "config.imageFolder": "保存粘贴图片的文件夹名称（相对于工作区根目录）。",
   "config.editing.preferences": "输入辅助与编辑器快捷键偏好。可在编辑器的“更多设置”窗口中调整。",
-  "config.imageStorage": "粘贴图片的保存方式。推荐在编辑器“设置 → 输入 → 粘贴”中设置；支持文档旁、按文档分开及高级路径规则。",
+  "config.imageStorage": "粘贴图片的保存与命名方式。在编辑器“设置 → 输入 → 粘贴”中选择目录和命名预设，默认使用文档名＋序号。",
   "config.imageFolderDeprecated": "旧目录配置会保留原有位置；请在编辑器设置中选择新的图片保存方式。",
   "config.preview.codeFontFamily": "Preview 与 HTML/PDF 导出的默认代码字体系列，同时用于行内代码与代码块；留空时使用默认字体。"
 }

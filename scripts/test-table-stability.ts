@@ -1138,7 +1138,7 @@ async function main() {
               requestId: message.requestId,
               result: fail
                 ? { ok: false, error: { code: 'operation-failed', message: 'temporary write failure' } }
-                : { ok: true, value: { path: 'images/pasted.png' } }
+                : { ok: true, value: { path: 'images/pasted.png', fileName: 'pasted.png' } }
             }));
           }
         }
@@ -1646,14 +1646,14 @@ async function main() {
     if (result.pastedImageMessageCount !== 4) {
       failures.push(`table image paste sent ${result.pastedImageMessageCount} save requests`);
     }
-    if (!/^ri!\[\d+\.png\]\(images\/pasted\.png\)ght$/.test(result.tablePasteValue)) {
+    if (!/^ri!\[pasted\.png\]\(images\/pasted\.png\)ght$/.test(result.tablePasteValue)) {
       failures.push(`table image paste inserted outside the focused cell: ${JSON.stringify({ value: result.tablePasteValue, source: result.tablePasteSource })}`);
     }
-    if (!result.bodyPasteHandled || !/^before !\[\d+\.png\]\(images\/pasted\.png\)after$/.test(result.bodyPasteSource)) {
+    if (!result.bodyPasteHandled || !/^before !\[pasted\.png\]\(images\/pasted\.png\)after$/.test(result.bodyPasteSource)) {
       failures.push(`file-only body image paste was ignored: ${JSON.stringify({ handled: result.bodyPasteHandled, source: result.bodyPasteSource })}`);
     }
     if (result.failedPasteSource !== 'retry here' ||
-      !/^retry !\[\d+\.png\]\(images\/pasted\.png\)here$/.test(result.retriedPasteSource)) {
+      !/^retry !\[pasted\.png\]\(images\/pasted\.png\)here$/.test(result.retriedPasteSource)) {
       failures.push(`failed image paste did not retry from its captured data: ${JSON.stringify({
         failed: result.failedPasteSource, retried: result.retriedPasteSource
       })}`);

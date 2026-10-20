@@ -1,13 +1,13 @@
 import path from 'node:path';
 import { defaultImageStorage, type ImageLocationState, type ImageStoragePreferences } from '../foundation/imageStorage';
-import { resolveClipboardImageDirectory, type ClipboardImageDirectoryRequest } from './clipboardImageSave';
+import { previewClipboardImagePath, resolveClipboardImageDirectory, type ClipboardImageDirectoryRequest } from './clipboardImageSave';
 import type { ImageLocationRequest, ImageLocationResponse } from '../protocol/imageStorage';
 
 export type ImageStorageContext = Omit<ClipboardImageDirectoryRequest, 'documentFsPath'> & {
   readonly documentFsPath: string | null;
 };
 
-function stateFor(context: ImageStorageContext, draft?: ImageStoragePreferences): ImageLocationState {
+async function stateFor(context: ImageStorageContext, draft?: ImageStoragePreferences): Promise<ImageLocationState> {
   const legacy = !draft && !context.imageStorage && !!context.configuredFolder?.trim();
   const preferences = draft ?? context.imageStorage ?? (legacy ? {
     ...defaultImageStorage, mode: 'advanced' as const,
@@ -16,16 +16,21 @@ function stateFor(context: ImageStorageContext, draft?: ImageStoragePreferences)
   } : defaultImageStorage);
   let targetDirectory: string | null = null;
   let error: string | null = null;
+  let examplePath: string | null = null;
   try {
-    const resolved = resolveClipboardImageDirectory({
+    const request = {
       ...context, documentFsPath: context.documentFsPath ?? path.resolve('document.md'),
       ...(draft ? { imageStorage: draft } : {})
-    });
-    if (context.documentFsPath) targetDirectory = resolved.targetDirectory;
+    };
+    const resolved = resolveClipboardImageDirectory(request);
+    if (context.documentFsPath) {
+      targetDirectory = resolved.targetDirectory;
+      examplePath = await previewClipboardImagePath(request);
+    }
   } catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
   return { preferences, documentPath: context.documentFsPath,
     documentName: context.documentFsPath ? path.parse(context.documentFsPath).name : '',
-    targetDirectory, error, legacy };
+    targetDirectory, examplePath, error, legacy };
 }
 
 /** One owner serializes configuration writes across panels and reuses duplicate results. */
@@ -44,14 +49,14 @@ export function createImageStorageHost(options: {
     try {
       if (request.action === 'save') {
         const operation = tail.then(async () => {
-          const state = stateFor(options.read(resource), request.preferences);
+          const state = await stateFor(options.read(resource), request.preferences);
           if (state.error) throw new Error(state.error);
           await options.write(resource, request.preferences);
         });
         tail = operation.catch(() => undefined);
         await operation;
       }
-      const state = stateFor(options.read(resource), request.action === 'preview' ? request.preferences : undefined);
+      const state = await stateFor(options.read(resource), request.action === 'preview' ? request.preferences : undefined);
       const selectedFolder = request.action === 'selectFolder'
         ? await options.selectFolder(resource, state.targetDirectory) : null;
       return { type: 'imageLocationResult', requestId: request.requestId, result: { ok: true, value: { state, selectedFolder } } };

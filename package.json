@@ -598,6 +598,11 @@
               "type": "string",
               "default": "${fileDirname}/assets",
               "maxLength": 4096
+            },
+            "naming": {
+              "type": "string",
+              "enum": ["dateTime", "imageSequence", "documentSequence", "timestamp"],
+              "default": "documentSequence"
             }
           }
         }

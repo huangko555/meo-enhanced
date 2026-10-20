@@ -24,38 +24,38 @@ try {
     documentFsPath: markdownPath,
     workspaceFsPath: workspacePath,
     configuredFolder: undefined,
-    requestedFileName: 'pasted.png',
+    extension: 'png',
     contents: Buffer.from('first')
   });
-  if (first.relativePath !== 'assets/pasted.png') {
+  if (first.relativePath !== 'assets/draft-1.png') {
     throw new Error(`default image path was ${JSON.stringify(first.relativePath)}`);
   }
 
-  await writeFile(path.join(documentDirectory, 'assets', 'pasted-1.png'), 'existing');
+  await writeFile(path.join(documentDirectory, 'assets', 'draft-4.png'), 'existing');
   const [second, third] = await Promise.all([
     saveClipboardImageFile({
       documentFsPath: markdownPath,
       workspaceFsPath: workspacePath,
       configuredFolder: undefined,
-      requestedFileName: 'pasted.png',
+      extension: 'png',
       contents: Buffer.from('second')
     }),
     saveClipboardImageFile({
       documentFsPath: markdownPath,
       workspaceFsPath: workspacePath,
       configuredFolder: undefined,
-      requestedFileName: 'pasted.png',
+      extension: 'png',
       contents: Buffer.from('third')
     })
   ]);
   const collisionPaths = [second.relativePath, third.relativePath].sort();
-  if (JSON.stringify(collisionPaths) !== JSON.stringify(['assets/pasted-2.png', 'assets/pasted-3.png'])) {
+  if (JSON.stringify(collisionPaths) !== JSON.stringify(['assets/draft-5.png', 'assets/draft-6.png'])) {
     throw new Error(`collision paths were ${JSON.stringify(collisionPaths)}`);
   }
-  if ((await readFile(path.join(documentDirectory, 'assets', 'pasted.png'), 'utf8')) !== 'first') {
+  if ((await readFile(path.join(documentDirectory, 'assets', 'draft-1.png'), 'utf8')) !== 'first') {
     throw new Error('the first image was overwritten');
   }
-  if ((await readFile(path.join(documentDirectory, 'assets', 'pasted-1.png'), 'utf8')) !== 'existing') {
+  if ((await readFile(path.join(documentDirectory, 'assets', 'draft-4.png'), 'utf8')) !== 'existing') {
     throw new Error('an existing collision was overwritten');
   }
 
@@ -63,10 +63,10 @@ try {
     documentFsPath: markdownPath,
     workspaceFsPath: workspacePath,
     configuredFolder: 'media/images',
-    requestedFileName: 'configured.png',
+    extension: 'png',
     contents: Buffer.from('configured')
   });
-  if (configured.relativePath !== '../media/images/configured.png') {
+  if (configured.relativePath !== '../media/images/draft-1.png') {
     throw new Error(`workspace-relative configured path was ${JSON.stringify(configured.relativePath)}`);
   }
 
@@ -77,7 +77,7 @@ try {
         documentFsPath: markdownPath,
         workspaceFsPath: workspacePath,
         configuredFolder: unsafe,
-        requestedFileName: 'unsafe.png',
+        extension: 'png',
         contents: Buffer.from('unsafe')
       });
     } catch {
@@ -95,7 +95,7 @@ try {
         documentFsPath: markdownPath,
         workspaceFsPath: workspacePath,
         configuredFolder: undefined,
-        requestedFileName: unsafeName,
+        extension: unsafeName,
         contents: Buffer.from('unsafe')
       });
     } catch {
@@ -116,7 +116,7 @@ try {
       documentFsPath: markdownPath,
       workspaceFsPath: workspacePath,
       configuredFolder: 'notes/linked-assets/new/subdir',
-      requestedFileName: 'escaped.png',
+      extension: 'png',
       contents: Buffer.from('escaped')
     });
   } catch {
