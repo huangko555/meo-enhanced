@@ -7,11 +7,15 @@ import { DEFAULT_EDITOR_LINE_HEIGHT, EDITOR_LINE_HEIGHT_MIN, EDITOR_LINE_HEIGHT_
 import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 import { appearanceCatalog, sectionTitles, settingsSearchMatches, settingsText } from '../application/settingsCatalog';
 import { createSegmentedControl } from './segmentedControl';
+import { createMenuSwitch } from './menuSwitch';
 
 export type AppearanceSettingsOptions = {
   getColors(): UiColors;
   getFontSize(): EditorFontSizePreference;
   setFontSize(value: EditorFontSizePreference): void;
+  readonly mac?: boolean;
+  getMouseWheelZoom(): boolean;
+  setMouseWheelZoom(enabled: boolean): void;
   getLineHeight(): number;
   setLineHeight(value: number): void;
   reportSaveError(message: string): void;
@@ -136,13 +140,14 @@ export function createAppearanceSettings(options: AppearanceSettingsOptions) {
   });
   retry.addEventListener('click', () => { void save(); });
 
-  const sectionFor = (item: typeof appearanceCatalog[number]) => item.id === 'mode' ? 'appearanceMode' : item.id === 'fontSize' || item.id === 'lineHeight' ? 'appearanceTypography' : item.advanced ? 'appearanceAdvanced' : 'appearanceColors';
-  const items = (query: string) => appearanceCatalog.filter(item => settingsSearchMatches(query, '外观 Appearance', ...sectionTitles[sectionFor(item)], ...item.title, ...item.description, ...item.keywords, '跟随 VS Code 主题 Follow VS Code theme', ['mode', 'fontSize', 'lineHeight'].includes(item.id) ? '' : '默认配色 默认浅色配色 默认深色配色 内置预设 Default light palette Default dark palette built-in preset', item.id));
+  const typography = ['fontSize', 'mouseWheelZoom', 'lineHeight'];
+  const sectionFor = (item: typeof appearanceCatalog[number]) => item.id === 'mode' ? 'appearanceMode' : typography.includes(item.id) ? 'appearanceTypography' : item.advanced ? 'appearanceAdvanced' : 'appearanceColors';
+  const items = (query: string) => appearanceCatalog.filter(item => settingsSearchMatches(query, '外观 Appearance', ...sectionTitles[sectionFor(item)], ...item.title, ...item.description, ...item.keywords, '跟随 VS Code 主题 Follow VS Code theme', item.id === 'mode' || typography.includes(item.id) ? '' : '默认配色 默认浅色配色 默认深色配色 内置预设 Default light palette Default dark palette built-in preset', item.id));
   function render(nextLanguage: UiLanguage, query: string) {
     for (const unregister of inputRegistrations) unregister(); inputRegistrations = [];
     language = nextLanguage; scheme = options.getScheme(); presenters = []; invalid.clear();
     const visible = items(query); const container = node('div', 'appearance-settings');
-    reset.hidden = !visible.some(item => !['mode', 'fontSize', 'lineHeight'].includes(item.id));
+    reset.hidden = !visible.some(item => item.id !== 'mode' && !typography.includes(item.id));
     const sections = new Map<string, HTMLElement>();
     for (const id of ['appearanceMode', 'appearanceTypography', 'appearanceColors', 'appearanceAdvanced'] as const) {
       if (!visible.some(item => sectionFor(item) === id)) continue;
@@ -165,7 +170,8 @@ export function createAppearanceSettings(options: AppearanceSettingsOptions) {
     if (!common) container.prepend(status);
     for (const item of visible) {
       const row = node('div', 'settings-item appearance-item'); row.dataset.setting = item.id;
-      const text = node('div', 'settings-item-text'); text.append(node('div', 'settings-item-title', t(item.title[0], item.title[1])), node('p', 'settings-description', t(item.description[0], item.description[1]))); row.append(text);
+      const title = item.id === 'mouseWheelZoom' ? t(`${options.mac ? 'Cmd' : 'Ctrl'} + 滚轮调整字号`, `${options.mac ? 'Cmd' : 'Ctrl'} + wheel font size`) : t(item.title[0], item.title[1]);
+      const text = node('div', 'settings-item-text'); text.append(node('div', 'settings-item-title', title), node('p', 'settings-description', t(item.description[0], item.description[1]))); row.append(text);
       if (item.id === 'documentBackground') {
         const warning = node('p', 'appearance-background-warning');
         const icon = createElement(TriangleAlert, { width: 16, height: 16 });
@@ -224,6 +230,12 @@ export function createAppearanceSettings(options: AppearanceSettingsOptions) {
         restore.setAttribute('aria-label', t(isFont ? '恢复自动字号' : '恢复默认行间距（1.5 倍）', isFont ? 'Restore automatic font size' : 'Reset line spacing (1.5×)'));
         restore.addEventListener('click', () => { if (isFont) options.setFontSize({ ...options.getFontSize(), mode: 'auto' }); else options.setLineHeight(DEFAULT_EDITOR_LINE_HEIGHT); present(); });
         controls.append(restore); row.append(controls);
+      } else if (item.id === 'mouseWheelZoom') {
+        const toggle = button('', 'settings-switch');
+        toggle.setAttribute('role', 'switch'); toggle.setAttribute('aria-label', title); toggle.append(createMenuSwitch());
+        presenters.push(() => toggle.setAttribute('aria-checked', String(options.getMouseWheelZoom())));
+        toggle.addEventListener('click', () => { options.setMouseWheelZoom(!options.getMouseWheelZoom()); present(); });
+        row.append(toggle);
       } else if (item.id === 'mode') {
         row.classList.add('appearance-mode');
         const modeControl = createSegmentedControl<EditorAppearance>({ ariaLabel: t(...item.title), className: 'editor-appearance-control appearance-mode-control', buttonClassName: 'editor-appearance-button', datasetKey: 'appearanceMode', role: 'group', width: '240px', buttonTitles: false, options: [

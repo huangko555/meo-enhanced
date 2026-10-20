@@ -513,6 +513,9 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
   }
 
   async handleConfigurationChanged(event: vscode.ConfigurationChangeEvent): Promise<void> {
+    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.appearance.mouseWheelZoom`)) {
+      this.broadcast({ type: 'editorMouseWheelZoomChanged', enabled: this.appearanceSettings.getEditorMouseWheelZoom() });
+    }
     if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.appearance.lineHeight`)) {
       this.broadcast({ type: 'editorLineHeightChanged', value: this.appearanceSettings.getEditorLineHeight() });
     }
@@ -713,6 +716,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       setEditorLineHeight: this.appearanceSettings.setEditorLineHeight,
       getEditorFontSizePreference: this.appearanceSettings.getEditorFontSizePreference,
       setEditorFontSizePreference: this.appearanceSettings.setEditorFontSizePreference,
+      getEditorMouseWheelZoom: this.appearanceSettings.getEditorMouseWheelZoom,
+      setEditorMouseWheelZoom: this.appearanceSettings.setEditorMouseWheelZoom,
       setOutlineVisible: (visible) => this.setOutlineVisible(visible),
       onPanelActivated: (activePanel) => {
         this.lastActivePanel = activePanel;

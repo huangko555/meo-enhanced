@@ -3,6 +3,14 @@
 This repository separates fast feedback from release confidence. The normal
 repair loop stays narrow; broad and endurance runs are intentional events.
 
+`scripts/test-editor-font-wheel.ts` covers the default-enabled independent wheel
+setting, Auto-to-Custom adjustment from the displayed size, persistence/reopening,
+coalesced saves, ordinary scrolling, Live/Source/Preview input, fine trackpad
+deltas, Ctrl/Cmd modifiers, font bounds, and bilingual light/dark settings at
+normal and narrow widths. It runs in quick, targeted appearance and browser gates;
+visual evidence is saved under `.local/font-wheel-acceptance/`. The existing
+font-size viewport contract covers reading-anchor continuity during layout changes.
+
 Preview preset memory is covered by `scripts/test-preview-preset-preferences.ts`
 and `scripts/test-preview-preset-preferences-browser.ts` in quick, appearance and
 release gates. They verify built-in/custom initial Auto behavior, independent

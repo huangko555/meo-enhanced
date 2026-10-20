@@ -61,6 +61,7 @@ type PreviewControllerOptions = {
   onPaletteChanged?: () => void;
   /** Return true for a handled global command; other command keys continue to VS Code. */
   onShortcut?: (event: KeyboardEvent) => boolean;
+  onFontSizeWheel?: (event: WheelEvent) => boolean;
   onSearchResultsChanged?: () => void;
   onNavigateToTop?: () => boolean;
   onAlignViewport?: (owner: 'source' | 'preview') => void;
@@ -692,6 +693,7 @@ export function createPreviewController({
   onPaintReady,
   onPaletteChanged,
   onShortcut,
+  onFontSizeWheel,
   onSearchResultsChanged,
   onNavigateToTop,
   onAlignViewport,
@@ -1726,7 +1728,7 @@ export function createPreviewController({
         }));
       }, { capture: true, signal });
       bindPreviewLinks(frameDocument, vscode, notifyViewportInteraction, signal);
-      bindPreviewWheelFallback(frameDocument, signal);
+      bindPreviewWheelFallback(frameDocument, signal, onFontSizeWheel);
       bindPreviewShortcuts(frame, onShortcut, signal);
       const keepPosition = () => {
         if (
@@ -3117,8 +3119,9 @@ function isPreviewHostShortcut(event: KeyboardEvent): boolean {
   return event.ctrlKey || event.metaKey || event.altKey || /^F(?:[1-9]|1\d|2[0-4])$/.test(event.key);
 }
 
-function bindPreviewWheelFallback(frameDocument: Document, signal: AbortSignal): void {
+function bindPreviewWheelFallback(frameDocument: Document, signal: AbortSignal, onFontSizeWheel?: (event: WheelEvent) => boolean): void {
   frameDocument.addEventListener('wheel', (event) => {
+    if (event.defaultPrevented || onFontSizeWheel?.(event)) return;
     if (event.ctrlKey) {
       return;
     }

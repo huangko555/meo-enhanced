@@ -186,6 +186,8 @@ type PanelSessionControllerParams = {
   setEditorLineHeight?: (value: number) => Promise<void>;
   getEditorFontSizePreference: () => EditorFontSizePreference;
   setEditorFontSizePreference: (preference: EditorFontSizePreference) => Promise<void>;
+  getEditorMouseWheelZoom?: () => boolean;
+  setEditorMouseWheelZoom?: (enabled: boolean) => Promise<void>;
   setOutlineVisible: (visible: boolean) => Promise<void>;
   onPanelActivated: (panel: vscode.WebviewPanel) => void;
   onPanelViewStateChanged: () => void;
@@ -503,6 +505,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       editorFontSizeMode: editorFontSizePreference.mode,
       editorLineHeight: params.getEditorLineHeight?.() ?? DEFAULT_EDITOR_LINE_HEIGHT,
       editorFontSize: editorFontSizePreference.value,
+      editorMouseWheelZoom: params.getEditorMouseWheelZoom?.() ?? true,
       gitChangesGutter: getGitChangesGutterEnabled(context),
       gitDiffLineHighlights: getGitDiffLineHighlightsEnabled(),
       gitDiffDetailsVisible: getGitDiffDetailsVisible(),
@@ -865,7 +868,19 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         }
         return;
       case 'setEditorFontSize':
-        await setEditorFontSizePreference({ mode: raw.mode, value: raw.value });
+        try {
+          await setEditorFontSizePreference({ mode: raw.mode, value: raw.value });
+        } catch (error) {
+          void vscode.window.showErrorMessage((getUiLanguage() === 'zh-CN' ? '字号保存失败：' : 'Unable to save font size: ') + (error instanceof Error ? error.message : String(error)));
+        }
+        return;
+      case 'setEditorMouseWheelZoom':
+        try {
+          await params.setEditorMouseWheelZoom?.(raw.enabled);
+        } catch (error) {
+          await postToWebview({ type: 'editorMouseWheelZoomChanged', enabled: params.getEditorMouseWheelZoom?.() ?? true });
+          void vscode.window.showErrorMessage((getUiLanguage() === 'zh-CN' ? '滚轮字号设置保存失败：' : 'Unable to save mouse wheel zoom: ') + (error instanceof Error ? error.message : String(error)));
+        }
         return;
       case 'setUiLanguagePreference':
         await vscode.workspace

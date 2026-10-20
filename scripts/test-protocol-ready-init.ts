@@ -107,6 +107,12 @@ assert.equal(decodeInitMessage({ ...completeInit, boldHeadingsEnabled: 'yes' }),
 assert.equal(decodeInitMessage({ ...completeInit, previewShowComments: undefined })?.previewShowComments, false);
 assert.equal(decodeInitMessage({ ...completeInit, previewShowComments: 'yes' }), null);
 assert.equal(decodeInitMessage({ ...completeInit, editorFontSizeMode: 'invalid' }), null);
+assert.equal(decodeInitMessage({ ...completeInit, editorMouseWheelZoom: 'yes' }), null);
+assert.equal(decodeInitMessage({ ...completeInit, editorMouseWheelZoom: false })?.editorMouseWheelZoom, false);
+assert.deepEqual(decodeEditorCommand({ type: 'setEditorMouseWheelZoom', enabled: false }), { type: 'setEditorMouseWheelZoom', enabled: false });
+assert.equal(decodeEditorCommand({ type: 'setEditorMouseWheelZoom', enabled: 1 }), null);
+assert.deepEqual(decodeHostConfigurationEvent({ type: 'editorMouseWheelZoomChanged', enabled: false }), { type: 'editorMouseWheelZoomChanged', enabled: false });
+assert.equal(decodeHostConfigurationEvent({ type: 'editorMouseWheelZoomChanged', enabled: 'false' }), null);
 assert.equal(decodeInitMessage({ ...completeInit, editorFontSize: 9 }), null);
 assert.equal(decodeInitMessage({ ...completeInit, editorFontSize: 14.5 }), null);
 assert.equal(decodeInitMessage({ ...completeInit, gitDiffDetailsVisible: 'yes' }), null);

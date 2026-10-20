@@ -38,6 +38,7 @@ export const LIVE_STRONG_COLORING_SETTING_KEY = 'appearance.strongColoring';
 export const EDITOR_FONT_SIZE_MODE_SETTING_KEY = 'appearance.fontSizeMode';
 export const EDITOR_FONT_SIZE_SETTING_KEY = 'appearance.fontSize';
 export const EDITOR_LINE_HEIGHT_SETTING_KEY = 'appearance.lineHeight';
+export const EDITOR_MOUSE_WHEEL_ZOOM_SETTING_KEY = 'appearance.mouseWheelZoom';
 export const APPEARANCE_SETTINGS_MIGRATION_STATE_KEY = 'appearanceSettingsMigration';
 
 export type AppearanceSettings = {
@@ -83,6 +84,8 @@ export type AppearanceSettingsOwner = {
   setLiveStrongColoring: (enabled: boolean) => Promise<void>;
   getEditorFontSizePreference: () => EditorFontSizePreference;
   setEditorFontSizePreference: (preference: EditorFontSizePreference) => Promise<void>;
+  getEditorMouseWheelZoom: () => boolean;
+  setEditorMouseWheelZoom: (enabled: boolean) => Promise<void>;
 };
 
 type Descriptor = {
@@ -339,8 +342,11 @@ export async function createAppearanceSettingsOwner(
     if (fallback) fallback = { ...fallback, [key]: value };
   };
 
+  let fontSizeSave = Promise.resolve();
   return {
     getEditorLineHeight: () => normalizeEditorLineHeight(store.readConfiguration(EDITOR_LINE_HEIGHT_SETTING_KEY).value),
+    getEditorMouseWheelZoom: () => store.readConfiguration(EDITOR_MOUSE_WHEEL_ZOOM_SETTING_KEY).value !== false,
+    setEditorMouseWheelZoom: enabled => store.updateConfiguration(EDITOR_MOUSE_WHEEL_ZOOM_SETTING_KEY, enabled),
     setEditorLineHeight: async value => {
       const normalized = normalizeEditorLineHeight(value);
       if (normalizeEditorLineHeight(store.readConfiguration(EDITOR_LINE_HEIGHT_SETTING_KEY).value) !== normalized) {
@@ -394,11 +400,15 @@ export async function createAppearanceSettingsOwner(
       mode: readSettings().editorFontSizeMode,
       value: readSettings().editorFontSize
     }),
-    setEditorFontSizePreference: async (preference) => {
+    setEditorFontSizePreference: (preference) => {
       const mode = normalizeEditorFontSizeMode(preference.mode);
       const value = normalizeEditorFontSize(preference.value);
-      await write('editorFontSize', EDITOR_FONT_SIZE_SETTING_KEY, value);
-      await write('editorFontSizeMode', EDITOR_FONT_SIZE_MODE_SETTING_KEY, mode);
+      const save = fontSizeSave.then(async () => {
+        await write('editorFontSize', EDITOR_FONT_SIZE_SETTING_KEY, value);
+        await write('editorFontSizeMode', EDITOR_FONT_SIZE_MODE_SETTING_KEY, mode);
+      });
+      fontSizeSave = save.catch(() => {});
+      return save;
     }
   };
 }

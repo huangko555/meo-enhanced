@@ -1,4 +1,5 @@
 import { effectiveShortcuts } from '../../src/application/editingPreferences';
+import { createEditorFontWheel } from './adapters/editorFontWheel';
 import { createImageLocationSettings } from './adapters/imageLocationSettings';
 import { createImageStorageTransport } from './adapters/imageStorageTransport';
 import { createSettingsWindow, type GeneralSetting } from './adapters/settingsWindow';
@@ -1739,6 +1740,7 @@ const waitForInitialPreviewPaint = (): Promise<void> => {
 let previewViewportInteractionGeneration = 0;
 const previewFontsTransport = createPreviewFontsTransport(request => vscode.postMessage(request));
 const previewController = createPreviewController({
+  onFontSizeWheel: event => editorFontWheel.handleWheel(event),
   requestFonts: previewFontsTransport.request,
   vscode,
   optionsMenu: previewOptionsPanel,
@@ -2110,6 +2112,7 @@ let pendingRevealDocumentFragment: string | null = null;
 let pendingEditorSurfaceRecoveryRaf: number | null = null;
 let createEditorFactoryPromise: Promise<CreateEditorFactory> | null = null;
 let editorFontSizePreference: EditorFontSizePreference = { mode: 'auto', value: 14 };
+let editorMouseWheelZoom = true;
 let editorLineHeight = DEFAULT_EDITOR_LINE_HEIGHT;
 const INITIAL_EDITOR_MOUNT_FALLBACK_MS = 120;
 const LIVE_PRESENTATION_REVEAL_WAIT_MS = 500;
@@ -2184,6 +2187,7 @@ const applyEditorFontSizePreference = (
   preference: EditorFontSizePreference,
   { post = false, refreshPreview = true }: { readonly post?: boolean; readonly refreshPreview?: boolean } = {}
 ): void => {
+  if (post) editorFontWheel.flush();
   editorFontSizePreference = {
     mode: preference.mode === 'custom' ? 'custom' : 'auto',
     value: normalizeEditorFontSize(preference.value)
@@ -2212,6 +2216,23 @@ const applyEditorFontSizePreference = (
     });
   }
 };
+
+const editorFontWheel = createEditorFontWheel({
+  mac: /Mac|iPhone|iPad|iPod/.test(navigator.platform),
+  enabled: () => editorMouseWheelZoom && !settingsWindow?.isOpen(),
+  getPreference: () => editorFontSizePreference,
+  getAutomaticSize: () => {
+    const content = document.querySelector('.editor-host .cm-editor');
+    const size = content ? getComputedStyle(content).fontSize : getComputedStyle(document.documentElement).getPropertyValue('--vscode-editor-font-size');
+    return Number.parseFloat(size) || 14;
+  },
+  apply: preference => applyEditorFontSizePreference(preference),
+  save: () => vscode.postMessage({ type: 'setEditorFontSize', ...editorFontSizePreference })
+});
+const fontWheelAbort = new AbortController();
+document.addEventListener('wheel', event => {
+  if (event.target instanceof Element && event.target.closest('.editor-host')) editorFontWheel.handleWheel(event);
+}, { capture: true, passive: false, signal: fontWheelAbort.signal });
 
 editorAppearanceControl.element.addEventListener('click', (event) => {
   const button = event.target instanceof Element
@@ -3281,6 +3302,8 @@ editorModeRuntime = createEditorModeRuntime(
 );
 
 const handleInit = (message: InitMessage) => {
+  editorFontWheel.flush();
+  editorMouseWheelZoom = message.editorMouseWheelZoom ?? true;
   applyEditorLineHeight(message.editorLineHeight ?? DEFAULT_EDITOR_LINE_HEIGHT, { refreshPreview: false });
   acceptEditingPreferences(message.editingPreferences, message.editingPreferencesRevision ?? 0);
   activeUiLanguagePreference = message.uiLanguagePreference;
@@ -3453,6 +3476,13 @@ settingsWindow = createSettingsWindow({
   appearance: {
     getColors: () => uiColors, getMode: () => themeAdapter.getPreference(), getScheme: () => themeAdapter.getAppearance(),
     getFontSize: () => editorFontSizePreference,
+    mac: /Mac|iPhone|iPad|iPod/.test(navigator.platform),
+    getMouseWheelZoom: () => editorMouseWheelZoom,
+    setMouseWheelZoom: enabled => {
+      editorFontWheel.flush();
+      editorMouseWheelZoom = enabled;
+      vscode.postMessage({ type: 'setEditorMouseWheelZoom', enabled });
+    },
     setFontSize: value => applyEditorFontSizePreference(value, { post: true }),
     getLineHeight: () => editorLineHeight,
     setLineHeight: value => applyEditorLineHeight(value, { post: true }),
@@ -3512,6 +3542,7 @@ window.addEventListener('message', (event) => {
   if (message.type === 'webviewVisibilityResult') { readingLayout.accept(message); return; }
   if (message.type === 'webviewVisibilityChanged') { readingLayout.refresh(); return; }
   if (message.type === 'editorLineHeightChanged') { applyEditorLineHeight(message.value); return; }
+  if (message.type === 'editorMouseWheelZoomChanged') { editorFontWheel.flush(); editorMouseWheelZoom = message.enabled; return; }
   if (message.type === 'uiColorsResult') { uiColorsTransport.accept(message); return; }
   if (message.type === 'uiColorsChanged') { uiColors = message.colors; refreshUiColors(); return; }
   if (message.type === 'openPreviewPresetSettings') { setMoreToolsVisible(false); settingsWindow?.open('presets'); return; }
@@ -3879,6 +3910,8 @@ window.addEventListener('focus', () => {
 window.addEventListener('beforeunload', () => {
   readingLayout.dispose();
   previewFontsTransport.dispose();
+  fontWheelAbort.abort();
+  editorFontWheel.dispose();
   settingsWindow?.dispose();
   largeDocumentTooltip?.dispose();
   tooltipBinding.dispose();
