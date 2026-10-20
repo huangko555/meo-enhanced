@@ -26,6 +26,11 @@ assert.deepEqual(
 
 const english = getUiStrings('en');
 const chinese = getUiStrings('zh-CN');
+const mermaidParseFailure = "Parse error on line 3:\nA[Label --> B\n------------^\nExpecting 'SQE', got 'EOF'";
+assert.equal(english.mermaidError(mermaidParseFailure), `Mermaid error: ${mermaidParseFailure}`);
+assert.equal(chinese.mermaidError(mermaidParseFailure), "Mermaid 错误：第 3 行存在语法错误：\nA[Label --> B\n------------^\n期望 'SQE'，实际为 'EOF'");
+assert.equal(chinese.mermaidError('Mermaid runtime failed to load'), 'Mermaid 错误：图表运行资源加载失败。');
+assert.equal(chinese.mermaidError('Unknown renderer failure'), 'Mermaid 错误：暂时无法渲染图表。\n原始错误：Unknown renderer failure');
 assert.equal(english.properties, 'Properties');
 assert.equal(chinese.properties, 'Properties');
 assert.equal(getReadingUiStrings('en').properties, 'Properties');

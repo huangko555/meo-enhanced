@@ -729,7 +729,22 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     loading: '正在加载…', zoomIn: '放大', zoomOut: '缩小', resetZoom: '重置缩放',
     morePreviewControls: '更多预览操作',
     fullscreen: '全屏查看', exitFullscreen: '退出全屏',
-    mermaidError: (message: string) => `Mermaid 错误：${message}`,
+    mermaidError: (message: string) => {
+      const translated = message
+        .replace(/^Parse error on line (\d+):/m, '第 $1 行存在语法错误：')
+        .replace(/^Lexical error on line (\d+)\.\s*Unrecognized text\./m, '第 $1 行包含无法识别的文本。')
+        .replace(/^Expecting (.+), got (.+)$/m, '期望 $1，实际为 $2')
+        .replace(/^No diagram type detected matching given configuration for text:/m, '无法识别图表类型，请检查开头的图表声明：')
+        .replace(/^Syntax error in text\.?/m, '图表源码存在语法错误。');
+      if (translated !== message) return `Mermaid 错误：${translated}`;
+      const runtimeMessages: Record<string, string> = {
+        'Mermaid runtime URL unavailable': '图表运行资源地址不可用。',
+        'Loaded Mermaid runtime unavailable': '图表运行资源加载后不可用。',
+        'Mermaid runtime failed to load': '图表运行资源加载失败。',
+        'Unsupported Mermaid editor config': '不支持当前图表配置。'
+      };
+      return `Mermaid 错误：${runtimeMessages[message] ?? `暂时无法渲染图表。\n原始错误：${message}`}`;
+    },
     openWithSystemApp: '使用系统应用打开', fullscreenImage: '全屏查看图片', refreshImage: '刷新图片',
     colorLabel: (value: string) => `颜色 ${value}`,
     adjustColor: (value: string) => `调整颜色 ${value}`,
