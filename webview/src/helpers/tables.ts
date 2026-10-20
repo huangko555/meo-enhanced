@@ -442,21 +442,14 @@ export function focusTableHistoryChange(
 
   const changedLine = view.state.doc.lineAt(Math.min(changed.from, view.state.doc.length)).number;
   const refreshCurrentInputRange = (input: HTMLTextAreaElement): boolean => {
-    const sourceLine = Number.parseInt(input.closest('tr')?.dataset.sourceLineNumber ?? '', 10);
-    const column = Number.parseInt(input.dataset.tableCol ?? '', 10);
-    if (!Number.isInteger(sourceLine) || !Number.isInteger(column)) return false;
-    const currentLine = view.state.doc.line(sourceLine);
-    const currentSegment = parseTableRowCells(currentLine.text, currentLine.from).segments[column];
-    const from = currentSegment?.from ?? Number.parseInt(input.dataset.tableCellFrom ?? '', 10);
-    const to = currentSegment?.to ?? Number.parseInt(input.dataset.tableCellTo ?? '', 10);
-    if (!Number.isFinite(from) || !Number.isFinite(to)) return false;
+    const range = tableCellSourceRangeForInput(view, input);
+    if (!range) return false;
+    const { from, to } = range;
     // A history transaction updates the document before Live's derived table
     // presentation is replaced. Never focus that stale textarea: it would be
     // detached on the next frame and the restored focus would immediately vanish.
     const currentSource = view.state.doc.sliceString(from, to).trim();
     if (tableCellEditorValueToSource(input.value).trim() !== currentSource) return false;
-    input.dataset.tableCellFrom = String(from);
-    input.dataset.tableCellTo = String(to);
     return true;
   };
   const findInput = () => {
@@ -474,13 +467,12 @@ export function focusTableHistoryChange(
     let closest: { input: HTMLTextAreaElement; distance: number; viewportDistance: number } | null = null;
     const viewport = view.scrollDOM.getBoundingClientRect();
     for (const input of view.dom.querySelectorAll<HTMLTextAreaElement>(
-      '.meo-md-html-table-wrap textarea[data-table-cell-from][data-table-cell-to]'
+      '.meo-md-html-table-wrap textarea[data-table-row][data-table-col]'
     )) {
       const sourceLine = Number.parseInt(input.closest('tr')?.dataset.sourceLineNumber ?? '', 10);
       if (sourceLine !== changedLine) continue;
       if (!refreshCurrentInputRange(input)) continue;
-      const from = Number.parseInt(input.dataset.tableCellFrom ?? '', 10);
-      const to = Number.parseInt(input.dataset.tableCellTo ?? '', 10);
+      const { from, to } = tableCellSourceRangeForInput(view, input)!;
       const distance = changed.to < from
         ? from - changed.to
         : changed.from > to
@@ -508,8 +500,9 @@ export function focusTableHistoryChange(
     if (!isCurrent()) return 'not-rendered' as const;
     const input = findInput();
     if (!input) return 'not-rendered' as const;
-    const cellFrom = Number.parseInt(input.dataset.tableCellFrom ?? '', 10);
-    const cellTo = Number.parseInt(input.dataset.tableCellTo ?? '', 10);
+    const range = tableCellSourceRangeForInput(view, input);
+    if (!range) return 'not-rendered' as const;
+    const { from: cellFrom, to: cellTo } = range;
     const sourceCaret = Math.min(Math.max((targetPosition ?? changed.to) - cellFrom, 0), cellTo - cellFrom);
     const caret = semanticTarget
       ? Math.min(Math.max(semanticTarget.caret, 0), input.value.length)
@@ -940,17 +933,25 @@ export function tableCellSourceOffsetToEditorOffset(value: string, offset: numbe
   return tableCellSourceToEditorValue(source.slice(0, Math.max(0, offset))).length;
 }
 
-/** Resolve against the committed row; a textarea's dataset can lag a pending cell edit. */
+/** Source coordinates belong to the committed row, not every cell DOM node.
+ * Row/column identity survives position-only edits without per-cell mutations. */
 export function tableCellSourceRangeForInput(
   view: EditorView,
   input: HTMLTextAreaElement
 ): { from: number; to: number } | null {
+  if (!view.contentDOM.contains(input)) return null;
   const lineNumber = Number.parseInt(input.closest('tr')?.dataset.sourceLineNumber ?? '', 10);
   const column = Number.parseInt(input.dataset.tableCol ?? '', 10);
   if (!Number.isInteger(lineNumber) || lineNumber < 1 || lineNumber > view.state.doc.lines ||
     !Number.isInteger(column) || column < 0) return null;
   const line = view.state.doc.line(lineNumber);
-  return parseTableRowCells(line.text, line.from).segments[column] ?? null;
+  const segment = parseTableRowCells(line.text, line.from).segments[column];
+  if (segment) return { from: segment.from, to: segment.to };
+  // Short source rows still render normalized empty cells. Their source owner
+  // uses a zero-width range at the row start until a structural edit adds it.
+  const shell = input.closest<HTMLElement>('.meo-md-html-table-shell');
+  const row = Number.parseInt(input.dataset.tableRow ?? '', 10);
+  return shell && tableDomOwners.get(shell)?.cellSourceRange(row, column) ? { from: line.from, to: line.from } : null;
 }
 
 function withTableCellVisualLineProbe<T>(
@@ -2614,6 +2615,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     // does not change cell text, diagnostics or footnote presentation.
     const contentChanged = this.tableData.signature !== tableData.signature
       && cellPreviewSignature(this.tableData) !== cellPreviewSignature(tableData);
+    const previousStartLine = this.tableData.startLine;
     this.tableData = tableData;
     if (!this.domRefs) return;
     const { shell, table, rowEntries, allRowInputs } = this.domRefs;
@@ -2628,18 +2630,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     setSourceData(table, 'tableFrom', String(tableData.from));
     setSourceData(table, 'tableTo', String(tableData.to));
     setSourceData(table, 'tableSignature', tableWidthIdentity(tableData));
-    rowEntries.forEach(({ row }, index) => {
+    if (previousStartLine !== tableData.startLine) rowEntries.forEach(({ row }, index) => {
       setSourceData(row, 'sourceLineNumber', String(tableData.startLine + (index === 0 ? 0 : index + 1)));
     });
-    for (let row = 0; row < allRowInputs.length; row += 1) {
-      for (let col = 0; col < allRowInputs[row].length; col += 1) {
-        const input = allRowInputs[row][col];
-        const range = tableData.sourceRanges?.[row]?.[col];
-        if (!range) continue;
-        setSourceData(input, 'tableCellFrom', String(range.from));
-        setSourceData(input, 'tableCellTo', String(range.to));
-      }
-    }
     if (contentChanged) {
       const values = [tableData.headerCells, ...tableData.rows];
       for (let row = 0; row < allRowInputs.length; row += 1) {
@@ -4378,8 +4371,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         const input = inputs[index];
         const insert = tableCellEditorValueToSource(input.value).trim();
         if ((originalCells[index] ?? '') === insert) continue;
-        const from = Number.parseInt(input.dataset.tableCellFrom ?? '', 10);
-        const to = Number.parseInt(input.dataset.tableCellTo ?? '', 10);
+        const range = tableCellSourceRangeForInput(view, input);
+        if (!range) { requiresRowReplacement = true; continue; }
+        const { from, to } = range;
         if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from || to > view.state.doc.length) {
           requiresRowReplacement = true;
           continue;
@@ -5653,11 +5647,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     input.value = tableCellSourceToEditorValue(value);
     input.dataset.tableRow = String(rowIndex);
     input.dataset.tableCol = String(colIndex);
-    const sourceRange = this.cellSourceRange(rowIndex, colIndex);
-    if (sourceRange) {
-      input.dataset.tableCellFrom = String(sourceRange.from);
-      input.dataset.tableCellTo = String(sourceRange.to);
-    }
     return input;
   }
 

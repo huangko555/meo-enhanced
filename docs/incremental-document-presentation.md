@@ -569,3 +569,29 @@ preparation. Transfer parity covers nested tasks, quotes, lists, footnotes, tab
 sizes 2/4/8, empty/unclosed fences and Mermaid; Source/Live interaction checks and
 production three-mode source/history preservation remain required. Native
 acceptance for this additional index change has not yet run.
+
+V44 (`35291a0d`, archive SHA-256
+`4f37207db996278e533e4e0a53f8da5e052c5b7b114c646f5f253c2791285e5c`)
+passed the ordinary native case and comprehensive Source editing. Its full run
+stopped at a late Live clicked-text witness, despite a painted caret. The
+original result and screenshot are retained; this is not a full functional pass.
+A separate fresh-window diagnostic enters Live directly, without prior Source
+editing or viewport traversal. Its click takes 195 ms, typing P95/maximum is
+529/589 ms, Enter 235 ms and save 397 ms; exact source/undo and monotonic clock
+checks hold. Warm traversal results clearly cannot substitute for this path.
+
+An exact-bundle cold-input CPU diagnostic identifies table position projection
+spending 135 ms in equivalent-data adoption, including 101 ms in per-cell DOM
+coordinate assignments. The table already owns row/column identities and exposes
+`tableCellSourceRangeForInput`, which resolves the committed row. Search/selection,
+history focus and cell commits now use that same interface. Cell DOM no longer
+duplicates absolute source bounds, and row-line attributes update only when the
+source line changes. Folding, cell identity, pending native edits and relative
+inline caret mappings retain their existing owners.
+
+The embedded-editor regression first observed 300 cell-coordinate attribute
+writes for edits before a six-cell table; it now requires zero while retaining
+the same table/input nodes and committing to the exact current row. Production
+cell editing, table history, detached-focus history shortcuts, transient save
+(including IME/math/Mermaid), and rendered-block scroll/layout checks pass.
+Native latency acceptance for the table coordinate change remains required.

@@ -14,6 +14,7 @@ import { parseFootnotes } from '../webview/src/helpers/footnotes';
 import { editorScrollIntoView } from '../webview/src/editor/scrollEffects';
 import { isCompleteMarkdownStructure, markdownStructureIdentity } from '../webview/src/editor/markdownStructure';
 import { assertBackgroundMarkdownPreparation } from '../webview/src/editor/backgroundMarkdownStructure';
+import { tableCellSourceRangeForInput } from '../webview/src/helpers/tables';
 
 function footnoteSnapshot(state: EditorState) {
   const parsed = parseFootnotes(state);
@@ -23,6 +24,7 @@ function footnoteSnapshot(state: EditorState) {
 
 (window as any).__liveHistory = {
   create: createEditor,
+  tableCellSourceRange: tableCellSourceRangeForInput,
   beginComposition: (editor: ReturnType<typeof createEditor>) => beginLiveInputComposition(editor.view),
   completeComposition: (editor: ReturnType<typeof createEditor>) => completeLiveInputComposition(editor.view),
   largeBudget: (editor: ReturnType<typeof createEditor>) => usesLargeDocumentDerivedWorkBudget(editor.view.state),

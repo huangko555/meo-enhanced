@@ -327,19 +327,19 @@ try {
     const mappings = previews.flatMap(preview => [...preview.querySelectorAll('[data-meo-source-from][data-meo-source-to]')])
       .map(element => ({ element, from: Number(element.getAttribute('data-meo-source-from')), to: Number(element.getAttribute('data-meo-source-to')) }));
     if (!previews.length || !mappings.length) throw Error('The table projection fixture must contain real mapped cell previews');
-    const inputs = [...editor.view.dom.querySelectorAll('textarea[data-table-cell-from]')].map((input: HTMLTextAreaElement) => ({
-      input, from: Number(input.dataset.tableCellFrom), to: Number(input.dataset.tableCellTo)
+    const inputs = [...editor.view.dom.querySelectorAll('textarea[data-table-row][data-table-col]')].map((input: HTMLTextAreaElement) => ({
+      input, ...api.tableCellSourceRange(editor.view, input)
     }));
     scope.__tableProjection = { editor, previews, nodes, mappings, inputs };
     api.input(editor, 4, 'x');
   });
   await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__tableProjection.editor));
   const wordTableProjection = await page.evaluate(() => {
-    const { previews, nodes, mappings, inputs } = (window as any).__tableProjection;
+    const { editor, previews, nodes, mappings, inputs } = (window as any).__tableProjection;
     return { retained: previews.every((preview: HTMLElement, index: number) => preview.firstChild === nodes[index]),
       mapped: mappings.every(({ element, from, to }: any) => Number(element.getAttribute('data-meo-source-from')) === from
         && Number(element.getAttribute('data-meo-source-to')) === to)
-        && inputs.every(({ input, from, to }: any) => Number(input.dataset.tableCellFrom) === from + 1 && Number(input.dataset.tableCellTo) === to + 1) };
+        && inputs.every(({ input, from, to }: any) => { const range = (window as any).__liveHistory.tableCellSourceRange(editor.view, input); return range?.from === from + 1 && range?.to === to + 1; }) };
   });
   assert.deepEqual(wordTableProjection, { retained: true, mapped: true },
     'unchanged table cells must retain relative inline caret mappings while updating absolute cell bounds after earlier prose input');
@@ -349,11 +349,11 @@ try {
   });
   await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__tableProjection.editor));
   const newlineTableProjection = await page.evaluate(() => {
-    const { previews, nodes, mappings, inputs } = (window as any).__tableProjection;
+    const { editor, previews, nodes, mappings, inputs } = (window as any).__tableProjection;
     const result = { retained: previews.every((preview: HTMLElement, index: number) => preview.firstChild === nodes[index]),
       mapped: mappings.every(({ element, from, to }: any) => Number(element.getAttribute('data-meo-source-from')) === from
         && Number(element.getAttribute('data-meo-source-to')) === to)
-        && inputs.every(({ input, from, to }: any) => Number(input.dataset.tableCellFrom) === from + 2 && Number(input.dataset.tableCellTo) === to + 2) };
+        && inputs.every(({ input, from, to }: any) => { const range = (window as any).__liveHistory.tableCellSourceRange(editor.view, input); return range?.from === from + 2 && range?.to === to + 2; }) };
     return result;
   });
   assert.deepEqual(newlineTableProjection, { retained: true, mapped: true },
@@ -361,7 +361,7 @@ try {
   await page.evaluate(() => {
     const scope = window as any, { editor } = scope.__tableProjection;
     const input = editor.view.dom.querySelector('textarea[data-table-row="1"][data-table-col="0"]');
-    scope.__liveHistory.input(editor, Number(input.dataset.tableCellFrom) + 1, 'Z');
+    scope.__liveHistory.input(editor, scope.__liveHistory.tableCellSourceRange(editor.view, input).from + 1, 'Z');
   });
   await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__tableProjection.editor));
   assert.equal(await page.evaluate(() => {

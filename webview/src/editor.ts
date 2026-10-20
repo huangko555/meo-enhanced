@@ -1185,12 +1185,7 @@ export function createEditor({
   };
 
   const getTableInputSourceRange = (input: HTMLTextAreaElement): { from: number; to: number } | null => {
-    const from = Number.parseInt(input.dataset.tableCellFrom ?? '', 10);
-    const to = Number.parseInt(input.dataset.tableCellTo ?? '', 10);
-    if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to < from) {
-      return null;
-    }
-    return { from, to };
+    return view ? tableCellSourceRangeForInput(view, input) : null;
   };
 
   const getTableInputDocumentSelection = (

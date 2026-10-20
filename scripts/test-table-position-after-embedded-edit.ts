@@ -87,6 +87,10 @@ async function main(): Promise<void> {
       scope.__tablePositionShell = document.querySelector('.meo-md-html-table-shell');
       scope.__tablePositionReady = [...document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table textarea')].find(input => input.value === 'Ready');
       scope.__tablePositionEmbeddedInput = document.activeElement;
+      scope.__cellOffsetWrites = 0;
+      scope.__cellOffsetObserver = new MutationObserver(records => { scope.__cellOffsetWrites += records.length; });
+      scope.__cellOffsetObserver.observe(scope.__tablePositionShell, { attributes: true, subtree: true,
+        attributeFilter: ['data-table-cell-from', 'data-table-cell-to'] });
     });
     await page.keyboard.press('Enter');
     await page.keyboard.type('%% INSERTED_BEFORE_TABLE');
@@ -113,16 +117,18 @@ async function main(): Promise<void> {
       const sameEmbeddedInput = document.activeElement === (window as any).__tablePositionEmbeddedInput;
       const sameShell = input.closest('.meo-md-html-table-shell') === (window as any).__tablePositionShell;
       const sameTableInput = input === (window as any).__tablePositionReady;
+      (window as any).__cellOffsetObserver.disconnect();
+      const cellOffsetWrites = (window as any).__cellOffsetWrites;
       const sourceRangesCurrent = [...table!.querySelectorAll<HTMLTextAreaElement>('textarea')].every(cell => {
-        const from = Number(cell.dataset.tableCellFrom), to = Number(cell.dataset.tableCellTo);
-        return Number.isFinite(from) && Number.isFinite(to) && editor.view.state.doc.sliceString(from, to).trim() === cell.value;
+        const range = (window as any).EmbeddedInputViewportHarness.tableCellSourceRangeForInput(editor.view, cell);
+        return range && editor.view.state.doc.sliceString(range.from, range.to).trim() === cell.value;
       });
       input.focus({ preventScroll: true });
       input.setSelectionRange(input.value.length, input.value.length);
       return {
         actualLine,
         renderedLineBeforeFocus,
-        sameEmbeddedInput, sameShell, sameTableInput, sourceRangesCurrent,
+        sameEmbeddedInput, sameShell, sameTableInput, sourceRangesCurrent, cellOffsetWrites,
         renderedLine: Number(row?.dataset.sourceLineNumber),
         domLine: domPosition >= 0 ? editor.view.state.doc.lineAt(domPosition).number : null,
         tableFromLine: Number.isFinite(tableFrom) ? editor.view.state.doc.lineAt(tableFrom).number : null,
@@ -154,7 +160,7 @@ async function main(): Promise<void> {
     if (
       before.renderedLineBeforeFocus !== before.actualLine ||
       before.tableFromLine !== before.actualLine - 2 || before.shellStart !== before.actualLine - 2 ||
-      !before.sameEmbeddedInput || !before.sameShell || !before.sameTableInput || !before.sourceRangesCurrent ||
+      !before.sameEmbeddedInput || !before.sameShell || !before.sameTableInput || !before.sourceRangesCurrent || before.cellOffsetWrites !== 0 ||
       before.renderedLine !== before.actualLine ||
       after.tableLine !== '| 1 | Ready__TABLE_EDIT__ |' ||
       after.mermaidMarkerLine?.trim() !== '%% INSERTED_BEFORE_TABLE' ||
