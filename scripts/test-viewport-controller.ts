@@ -3079,4 +3079,25 @@ for (const interpolatedWhitespace of [undefined, true]) {
   } finally { controller.destroy(); }
 }
 
+// Edits above a Preview reading range retain its fractional point. A line
+// insertion/deletion moves its source lines, without snapping to their start.
+for (const [insert, removed, expectedLine] of [['x', 0, 3], ['x\n', 0, 4], ['', 2, 2]] as const) {
+  const previousText = 'a\n\nb\n\nc\n', nextText = insert + previousText.slice(removed);
+  let restored: any;
+  const view = { ...anchorView, state: { doc: Text.of(nextText.split('\n')) } };
+  const controller = new ViewportController(view as any, { attachInteractions: false, previewSurface: {
+    readScrollTop: () => 300, writeScrollTop: () => {},
+    captureTopVisiblePosition: () => ({ line: 3, lineOffset: 10, viewportOffset: 0,
+      sourceRange: { startLine: 3, endLine: 3, progress: 0.5 } }),
+    restoreTopVisiblePosition: position => { restored = position; }
+  } });
+  try {
+    controller.runPreviewPresentationTransaction(() => {}, { previousText, nextText });
+    if (restored?.line !== expectedLine || restored.sourceRange?.startLine !== expectedLine
+      || restored.sourceRange?.endLine !== expectedLine || restored.sourceRange?.progress !== 0.5) {
+      throw new Error(`An upstream edit lost the Preview paragraph fraction: ${JSON.stringify(restored)}`);
+    }
+  } finally { controller.destroy(); }
+}
+
 console.log('viewport controller checks passed');

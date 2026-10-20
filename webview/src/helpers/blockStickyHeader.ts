@@ -113,6 +113,8 @@ class BlockStickyHeader {
   private readonly fullscreenObserver: MutationObserver;
   private destroyed = false;
   private measurePending = false;
+  private stale = false;
+  private pendingRange: { from: number; to: number } | null = null;
 
   constructor(readonly view: EditorView) {
     this.header.className = 'meo-block-sticky-header';
@@ -120,6 +122,12 @@ class BlockStickyHeader {
     view.dom.append(this.header);
     // The bar is passive document chrome. It must not move the caret below it.
     for (const type of ['pointerdown', 'click', 'dblclick', 'contextmenu']) {
+      this.header.addEventListener(type, (event) => {
+        if (!this.stale) return;
+        // Retain paint across input, but never execute a toolbar callback with
+        // source coordinates from the previous revision.
+        event.preventDefault(); event.stopImmediatePropagation();
+      }, true);
       this.header.addEventListener(type, (event) => {
         const target = event.target instanceof Element ? event.target : null;
         if (type === 'pointerdown' || !target?.closest('button, [role="button"], summary')) event.preventDefault();
@@ -141,8 +149,13 @@ class BlockStickyHeader {
   }
 
   update(update: ViewUpdate): void {
-    // Do not leave old document offsets clickable before the next geometry read.
-    if (update.docChanged) this.clear();
+    if (update.docChanged) {
+      this.stale = true;
+      if (this.pendingRange) this.pendingRange = {
+        from: update.changes.mapPos(this.pendingRange.from, -1),
+        to: update.changes.mapPos(this.pendingRange.to, 1)
+      };
+    }
     if (update.transactions.length > 0) {
       this.requestMeasure();
     } else if (!this.measurePending) {
@@ -161,12 +174,11 @@ class BlockStickyHeader {
     this.view.requestMeasure({ key: this, read: () => this.measure(), write: (value) => this.render(value) });
   };
 
-  private measure(): Measurement | 'fullscreen' | null {
+  private measure(): Measurement | 'fullscreen' | 'pending' | null {
     const view = this.view;
     if (this.destroyed) return null;
     // Header geometry must not rediscover every rich block between keystrokes.
     // The accepted presentation refresh schedules another measurement.
-    if (usesLargeDocumentDerivedWorkBudget(view.state) && isLiveInputDerivedWorkPending(view.state)) return null;
     if (view.dom.ownerDocument.querySelector('.meo-mermaid-fullscreen-scrim, .meo-latex-math-fullscreen-scrim')) return 'fullscreen';
     const scroller = view.scrollDOM.getBoundingClientRect();
     if (scroller.height < HEADER_HEIGHT * 2) return null;
@@ -179,6 +191,9 @@ class BlockStickyHeader {
       .map(element => mountedLine(view, element)).find(line => line !== null);
     const position = paintedLine ? view.posAtDOM(paintedLine, 0)
       : view.lineBlockAtHeight(Math.max(0, (scroller.top - view.documentTop + 1) / view.scaleY)).from;
+    if (usesLargeDocumentDerivedWorkBudget(view.state) && isLiveInputDerivedWorkPending(view.state)) {
+      return this.pendingRange && position >= this.pendingRange.from && position <= this.pendingRange.to ? 'pending' : null;
+    }
     const block = blockHeaderAt(view, position);
     if (!block) return null;
     const shell = Array.from(view.contentDOM.querySelectorAll<HTMLElement>(shellSelector)).find((candidate) => (
@@ -220,8 +235,9 @@ class BlockStickyHeader {
     return { block, rect: projection.geometry.rect, previewOwner: shell ? getRenderedBlockPreviewControlsOwner(shell) : null };
   }
 
-  private render(value: Measurement | 'fullscreen' | null): void {
+  private render(value: Measurement | 'fullscreen' | 'pending' | null): void {
     if (this.destroyed) return;
+    if (value === 'pending') return;
     if (value === 'fullscreen') {
       // Keep the originating button attached so fullscreen exit can restore focus.
       this.header.hidden = true;
@@ -230,6 +246,7 @@ class BlockStickyHeader {
     }
     if (!value) { this.clear(); return; }
     const { block, rect } = value;
+    this.pendingRange = { from: block.from, to: block.to };
     Object.assign(this.header.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
     const identity = `${block.kind}:${block.from}:${this.view.state.doc.lineAt(block.from).number}:${this.view.state.facet(uiLanguageFacet)}`;
     if (identity !== this.identity || !this.toolbar || !this.widget ||
@@ -249,6 +266,7 @@ class BlockStickyHeader {
     label.className = `meo-code-block-pill meo-block-sticky-language ${block.languageClass}`;
     label.setAttribute('aria-hidden', 'true');
     this.widget = block.widget;
+    this.stale = false;
     this.header.dataset.meoBlockFrom = String(block.from);
     this.header.dataset.meoBlockTo = String(block.to);
     this.header.hidden = false;
@@ -262,6 +280,7 @@ class BlockStickyHeader {
   }
 
   private clear(): void {
+    this.pendingRange = null; this.stale = false;
     this.header.hidden = true;
     delete this.view.scrollDOM.dataset.meoBlockHeaderInset;
     this.previewCleanup(); this.previewCleanup = () => undefined;

@@ -178,9 +178,6 @@ import {
 const markerDeco = Decoration.mark({ class: 'meo-md-marker' });
 const quoteMarkerDeco = Decoration.mark({ class: 'meo-md-marker meo-md-quote-marker' });
 
-// The benchmark viewport exposes at most ~70 CodeMirror lines. Retaining 80
-// lines on either side keeps the current surface live without mapping the file.
-const largeDocumentInputLineRadius = 80;
 const activeLineMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active' });
 const activeQuoteMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active meo-md-quote-marker-active' });
 const frontmatterBoundaryMarkerDeco = Decoration.mark({ class: 'meo-md-frontmatter-boundary-marker' });
@@ -3337,38 +3334,6 @@ function addColorSwatchDecorations(
   }
 }
 
-function retainLargeDocumentInputDecorations(
-  decorations: DecorationSet,
-  transaction: Transaction
-): DecorationSet {
-  const document = transaction.startState.doc;
-  let from = document.length;
-  let to = 0;
-  const retainLineRange = (startLine: number, endLine: number) => {
-    from = Math.min(from, document.line(Math.max(1, startLine - largeDocumentInputLineRadius)).from);
-    to = Math.max(to, document.line(Math.min(document.lines, endLine + largeDocumentInputLineRadius)).to);
-  };
-  for (const selection of transaction.startState.selection.ranges) {
-    const startLine = document.lineAt(Math.min(selection.from, document.length)).number;
-    const endLine = document.lineAt(Math.min(selection.to, document.length)).number;
-    retainLineRange(startLine, endLine);
-  }
-  // Embedded Mermaid/math editors can own focus while the outer CodeMirror
-  // selection remains elsewhere. Retain presentation around the actual edit as
-  // well, otherwise the live widget is discarded before it can project input.
-  transaction.changes.iterChangedRanges((fromA, toA) => {
-    retainLineRange(
-      document.lineAt(Math.min(fromA, document.length)).number,
-      document.lineAt(Math.min(toA, document.length)).number
-    );
-  });
-  const retained: DecorationCollector = [];
-  decorations.between(from, to, (rangeFrom, rangeTo, value) => {
-    retained.push(value.range(rangeFrom, rangeTo));
-  });
-  return Decoration.set(retained, true);
-}
-
 function codeBlockAtInputPosition(tree: Tree, position: number): SyntaxNode | null {
   for (const side of [-1, 1] as const) {
     let node: SyntaxNode | null = tree.resolveInner(position, side);
@@ -4203,9 +4168,6 @@ const liveDecorationField = StateField.define<DecorationSet>({
       if (usesLargeDocumentDerivedWorkBudget(transaction.state)) {
         liveDecorationMetadata.set(transaction.state, { ...liveDecorationMetadata.get(transaction.state), complete: false });
       }
-      const inputDecorations = usesLargeDocumentDerivedWorkBudget(transaction.state)
-        ? retainLargeDocumentInputDecorations(decorations, transaction)
-        : decorations;
       return transaction.docChanged
         ? isLiveInputNestedProjection(transaction)
           ? transaction.effects
@@ -4218,15 +4180,16 @@ const liveDecorationField = StateField.define<DecorationSet>({
                 filter: (_rangeFrom, _rangeTo, value) => !value.spec.widget,
                 add: [decoration.range(from, to)]
               });
-            }, inputDecorations.map(transaction.changes))
+            }, mapStableLiveDecorations(decorations, transaction.changes, transaction.state)?.decorations
+              ?? decorations.map(transaction.changes))
           : projectInputCodeBlockLines(
             projectInputBlockquoteLines(
-              mapLiveInputDerivedDecorations(inputDecorations, transaction),
+              mapLiveInputDerivedDecorations(decorations, transaction),
               transaction
             ),
             transaction
           )
-        : inputDecorations;
+        : decorations;
     }
     if (!transaction.docChanged && isLiveInputDerivedWorkRefresh(transaction)
       && liveDecorationMetadata.get(transaction.startState)?.complete

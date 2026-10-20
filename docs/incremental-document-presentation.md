@@ -1494,3 +1494,90 @@ or a claim that first Preview and long-tail interaction targets are complete.
 Webview type checking also found swapped pre-existing type declarations:
 search queries are strings, while initial editor documents can be persistent
 CodeMirror Text. Their declarations now match the existing runtime contracts.
+
+### Follow-up: input paint and independent Preview stability
+
+Input checks now use the actual split Webview build, real Markdown/Shiki
+workers, versioned host acknowledgements, passive post-frame geometry sampling
+and Chromium compositor frames. A painted witness arms capture before input;
+every subsequently delivered frame is compared in unchanged content regions.
+The decoder uses each encoded frame's pixel scale, including 125% DPI. This
+also observes the quiet-time refresh, rather than ending at the first text frame.
+
+The regressions reproduce several distinct causes:
+
+- Cold Preview preload can capture the body's 16px font before the editor
+  exists, then capture 13px after the first edit. The environment now resolves
+  the document font variable during both phases, retaining explicit user and
+  VS Code font-size priorities.
+- Mapping an upstream source edit discarded the continuous point inside an
+  unchanged Preview paragraph. That moves an independent reading position by
+  about 10px even with synchronized scrolling disabled. Unchanged ranges now
+  retain their fraction and shift source lines through inserted/deleted newlines;
+  the renderer still requires an exact new range before reusing that fraction.
+- A new windowed Preview initially contains only a small chunk seed. Morphing
+  it immediately can leave the current reading viewport blank until another
+  response arrives. The current DOM remains accepted while a complete bounded
+  replacement band is prepared. Generation, current text and current reading
+  destination are checked before the handoff, including a destination that
+  changes while the response is in flight.
+- Deferred Live input discarded distant replacement geometry. One offscreen
+  table alone reproduces a 78,208 to 78,186.5px height oscillation. The provisional
+  path now maps the accepted bounded presentation and embedded source offsets,
+  removing only widgets covering the actual edit. This does not certify stale
+  semantics; the matching background revision still owns authoritative refresh.
+- Large-document Backspace/Delete/cut transactions were outside the deferred
+  input phase. They could rebuild against an incomplete worker tree and briefly
+  show source syntax for headings, code and other visible content. These delete
+  events now have the same asynchronous presentation ownership as insertion.
+- Table row reflow waited for a later CodeMirror measurement to restore the
+  active cell. Dragging a column could paint that cell about 45px away. Row
+  resizing now retains its DOM position within the mutation and through the
+  following measurements. Keyboard/pointer layout retention also uses a real
+  DOM witness, so a height-map-only correction cannot scroll unchanged content
+  by 2px on Backspace.
+- Deep windowed Preview updates can preserve the semantic paragraph yet shift
+  all its glyphs by less than one pixel when native scrollTop rounds a newly
+  estimated prefix. The virtual leading gap now absorbs that residual during
+  fractional reading-anchor restoration. Whole physical pixels are transferred
+  back to scrollTop so the residual cannot accumulate. Ordinary navigation and
+  scrollbar boundary ownership keep their existing paths.
+- Floating code chrome cleared itself on every document change, and large
+  pending input also returned an empty header measurement. It now retains its
+  accepted paint while remapping the visible source range. Capture handlers
+  reject actions using stale coordinates until fresh measurements update the
+  toolbar. Scrolling outside the retained range still releases the header.
+
+`bun run build:webview` followed by `bun run test:input-presentation` exercises
+ordinary and megabyte rich documents, independent reading deep in Preview,
+sync on/off, deliberately delayed replacement chunks, numbers/Latin text,
+Chinese/emoji insertion, browser composition, Backspace/Delete, paste, selected
+replacement, undo/redo, visible images, tables, code, math, notes and HTML.
+It also checks normal/narrow columns and actual floating table/code headers.
+This gate is registered in quick, targeted viewport and release preflight.
+Screenshots with `--capture` are local diagnostic artifacts; failures retain
+the offending compositor paint and passive geometry trace.
+The final matrix passes with 203 delivered compositor paints, alongside the
+post-frame geometry and exact-source/native-selection checks. The original
+1 MiB comprehensive fixture replay also keeps one document height and unchanged
+visible table/code-header coordinates for its sampled key. These are finite
+correctness samples, not native latency percentiles.
+Windowed per-key checks also wait for each delayed replacement to commit;
+the rich matrix separately covers rapid input and superseded responses.
+
+The older Source-side test used a fixed 120px tolerance around the viewport
+center even though the cached synchronization map projects scroll origins.
+Stable 13px typography exposes that mismatch. It now checks that the real
+source range remains rendered and visible, excludes virtual gaps, and retains
+the existing independent scrolling, monotonic progression, manual-arrow,
+reload and mode-transition checks. Automatic synchronization behavior is unchanged.
+
+The wider audit separately found three failures reproduced in a clean snapshot
+of `078b7672`: the gated distant destination in
+`test-preview-viewport-work-budget.ts`, distant resource reveal in
+`test-large-document-work-budget.ts`, and a complete-decoration identity
+assertion in `test-live-widget-positions.ts` without the production worker.
+They are recorded as unresolved baseline checks, not counted as passing gates
+or evidence that all large-document performance goals are complete. This round
+uses isolated browser validation; it adds no native VS Code timings or operating
+system IME candidate-window acceptance.

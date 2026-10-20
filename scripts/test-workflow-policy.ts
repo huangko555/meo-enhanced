@@ -196,6 +196,7 @@ function targetedCommands(
         script('scripts/test-line-number-rendered-block-stability.ts'),
         script('scripts/test-line-number-layout-contract.ts'),
         script('scripts/test-display-math-gutter-paint.ts'),
+        packageScript('test:input-presentation'),
         script('scripts/test-source-empty-line-caret.ts'),
         { args: ['scripts/test-source-diff-long-caret.ts', '--sampled', '--hidpi'] },
         script('scripts/test-fenced-block-enter-stability.ts'),
@@ -345,6 +346,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-line-number-rendered-block-stability.ts'),
           script('scripts/test-line-number-layout-contract.ts'),
           script('scripts/test-display-math-gutter-paint.ts'),
+          packageScript('test:input-presentation'),
           { args: ['scripts/test-source-diff-long-caret.ts', '--sampled', '--hidpi'] },
           script('scripts/test-fenced-block-enter-stability.ts'),
           script('scripts/test-html-enter-gutter-stability.ts'),
@@ -395,6 +397,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
             ]
           },
           serialStage('High-risk browser regression preflight', [
+            packageScript('test:input-presentation'),
             packageScript('test:large-document-budget'),
             script('scripts/test-editor-startup-load.ts'),
             script('scripts/test-mode-roundtrip-reveal.ts'),

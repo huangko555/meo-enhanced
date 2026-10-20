@@ -129,6 +129,8 @@ export interface ViewportHistorySnapshot {
 interface LayoutAnchor {
   position: number;
   viewportOffset: number;
+  /** Input/pointer retention follows painted DOM, independent of height-map estimates. */
+  visualViewportOffset?: number;
   readingDocumentTop?: number;
   readingScrollTop?: number;
   readingHeightMapTop?: number;
@@ -577,6 +579,7 @@ export class ViewportController {
             ? {
                 position: activeAnchor.position,
                 viewportOffset: activeAnchor.viewportOffset,
+                visualViewportOffset: activeAnchor.visualViewportOffset,
                 readingDocumentTop: activeAnchor.readingDocumentTop,
                 readingScrollTop: activeAnchor.readingScrollTop,
                 readingHeightMapTop: activeAnchor.readingHeightMapTop,
@@ -2902,15 +2905,28 @@ export class ViewportController {
     try {
       const change = findChangedDocumentRange(previousText, nextText);
       if (!change) return anchor;
+      let sourceRange: ViewportDocumentAnchor['sourceRange'];
+      if (anchor.sourceRange) {
+        const from = positionAtDocumentLine(previousText, anchor.sourceRange.startLine);
+        const to = positionAtDocumentLine(previousText, anchor.sourceRange.endLine + 1);
+        if (change.previousTo <= from && change.from < from) {
+          let lineDelta = 0;
+          for (let index = 0; index < change.insertedText.length; index++) if (change.insertedText.charCodeAt(index) === 10) lineDelta++;
+          for (let index = change.from; index < change.previousTo; index++) if (previousText.charCodeAt(index) === 10) lineDelta--;
+          sourceRange = { ...anchor.sourceRange, startLine: anchor.sourceRange.startLine + lineDelta,
+            endLine: anchor.sourceRange.endLine + lineDelta };
+        } else if (change.from > to) sourceRange = anchor.sourceRange;
+      }
       return {
         ...anchor,
         position: Math.min(
           Math.max(0, mapPositionThroughDocumentChange(anchor.position, previousText, nextText, change)),
           nextText.length
         ),
-        // A text change may split, merge, or move the captured structure. Keep
-        // the mapped source position, but do not reuse the old range identity.
-        sourceRange: undefined
+        // An edit inside the reading structure invalidates its fractional point.
+        // Upstream edits retain that point with shifted source lines; Preview
+        // uses it only if the new renderer still exposes that exact range.
+        sourceRange
       };
     } catch {
       return null;
@@ -3154,6 +3170,7 @@ export class ViewportController {
     return {
       position: anchor.position,
       viewportOffset: this.view.lineBlockAt(anchor.position).top - this.view.scrollDOM.scrollTop,
+      visualViewportOffset: this.isUserScrolling() ? undefined : anchor.top - scrollerRect.top,
       readingDocumentTop: this.isUserScrolling()
         ? anchor.top + this.view.scrollDOM.scrollTop - scrollerRect.top
         : undefined,
@@ -3273,6 +3290,12 @@ export class ViewportController {
         }, current),
         readingDocumentTop
       };
+    }
+    if (anchor.visualViewportOffset !== undefined) {
+      const documentTop = this.readLayoutAnchorDocumentTop(anchor.position);
+      return { target: documentTop === null ? current : this.resolveScrollTarget({
+        top: documentTop - anchor.visualViewportOffset
+      }, current) };
     }
     return { target: this.resolveScrollTarget({
       top: this.view.lineBlockAt(anchor.position).top - anchor.viewportOffset

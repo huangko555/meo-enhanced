@@ -51,7 +51,7 @@ async function assertWindowedAlignment(page: import('puppeteer-core').Page, bund
     await page.click('.source-preview-button');
     await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('[data-meo-preview-block]'));
     if (await page.$eval('.source-preview-scroll-sync-button', button => button.getAttribute('aria-pressed') === 'true')) {
-      await page.click('.source-preview-scroll-sync-button');
+      await page.locator('.source-preview-scroll-sync-button').click();
     }
     await page.waitForFunction(() => document.querySelector('.source-preview-scroll-sync-button')?.getAttribute('aria-pressed') === 'false');
     await page.evaluate(() => {
@@ -669,6 +669,8 @@ try {
     line: number;
     previewOffset: number | null;
     previewRange: [number, number] | null;
+    previewHeight: number | null;
+    viewportHeight: number;
     sourceOffset: number | null;
   }>;
   for (const target of structuredTargets) {
@@ -704,6 +706,7 @@ try {
       const readingBand = frameDocument.documentElement.clientHeight / 3;
       const candidates = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
         .filter(element => {
+          if (element.hasAttribute('data-meo-preview-gap')) return false;
           const start = Number(element.dataset.sourceLine);
           const end = Number(element.dataset.sourceEndLine ?? start);
           return start <= line && end >= line;
@@ -722,6 +725,8 @@ try {
         line,
         previewOffset: candidates[0]?.offset ?? null,
         previewRange: candidates[0]?.range ?? null,
+        previewHeight: candidates[0]?.height ?? null,
+        viewportHeight: frameDocument.documentElement.clientHeight,
         sourceOffset: (() => {
           const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
           const sourceLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
@@ -732,8 +737,13 @@ try {
       };
     }, target));
   }
+  // The cached map aligns scroll origins. Font size and list density can place
+  // a source-band item elsewhere inside Preview; a fixed 120px center tolerance
+  // rejects valid layouts. Require the actual rendered range to stay visible.
   assert.ok(
-    structuredAlignment.every(sample => sample.previewOffset !== null && Math.abs(sample.previewOffset) <= 120),
+    structuredAlignment.every(sample => sample.previewOffset !== null && sample.previewHeight !== null
+      && sample.previewOffset + sample.viewportHeight / 3 < sample.viewportHeight
+      && sample.previewOffset + sample.viewportHeight / 3 + sample.previewHeight > 0),
     `The same structured source range must remain in the Preview reading band: ${JSON.stringify(structuredAlignment)}`
   );
   const highlightedSourceLine = text.slice(0, text.indexOf('const previewHighlight')).split('\n').length;

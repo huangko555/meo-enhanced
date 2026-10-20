@@ -53,6 +53,8 @@ assert.ok(viewportCommands.some((command) => (
 assert.ok(viewportCommands.some(command => command.args.includes('scripts/test-long-document-scroll.ts')));
 
 for (const commands of [quickCommands, viewportCommands]) {
+  assert.ok(commands.some(command => command.args.join(' ') === 'run test:input-presentation'),
+    'Input stability must exercise the production split build and compositor frames');
   for (const contract of ['test-line-number-rendered-block-stability.ts', 'test-line-number-layout-contract.ts',
     'test-display-math-gutter-paint.ts', 'test-source-diff-long-caret.ts']) {
     assert.ok(commands.some(command => command.args.includes('scripts/' + contract)), `Missing line layout contract ${contract}`);
@@ -139,6 +141,7 @@ assert.equal(release.longRunning, true);
 assert.deepEqual(release.stages[0]?.commands, [{ args: ['run', 'build'] }]);
 assert.equal(release.stages[1]?.maxConcurrency, 3);
 assert.deepEqual(release.stages[2]?.commands, [
+  { args: ['run', 'test:input-presentation'] },
   { args: ['run', 'test:large-document-budget'] },
   { args: ['scripts/test-editor-startup-load.ts'] },
   { args: ['scripts/test-mode-roundtrip-reveal.ts'] },

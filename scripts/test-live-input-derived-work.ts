@@ -91,6 +91,11 @@ for (const userEvent of ['undo', 'redo']) {
   assert.equal(shouldDeferLiveInputDerivedWork(replay), true,
     'large-document history accepts text while waiting for the matching presentation revision');
 }
+for (const userEvent of ['delete.backward', 'delete.forward', 'delete.cut']) {
+  const deletion = budgetedHistory.update({ changes: { from: 2, to: 4 }, annotations: Transaction.userEvent.of(userEvent) });
+  assert.equal(shouldDeferLiveInputDerivedWork(deletion), true,
+    `${userEvent}: deletion must wait for its matching background presentation`);
+}
 const inputBeforeEqualReload = historyReplay.state.update({
   changes: { from: historyReplay.state.doc.length, insert: '#' },
   annotations: Transaction.userEvent.of('input.type')

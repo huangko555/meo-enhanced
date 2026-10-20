@@ -1,6 +1,6 @@
 import morphdom from 'morphdom';
 import { createPreviewSearchController, previewSearchStyles } from './previewSearch';
-import { createPreviewViewport, previewWindowProjection } from './previewViewport';
+import { createPreviewViewport, preparePreviewWindow, previewWindowProjection } from './previewViewport';
 import { createPreviewDocumentSearch } from './previewDocumentSearch';
 import { createPreviewDocumentTransport } from '../adapters/previewDocumentTransport';
 import type { PreviewDocumentResponse } from '../../../src/protocol/previewDocument';
@@ -2469,7 +2469,7 @@ export function createPreviewController({
       ...(!document.body.classList.contains('vscode-using-screen-reader') && assessLargeDocument(text).preferSource
         ? { window: { anchorLine: getCurrentPendingExternalViewportRestore()?.line
           ?? getTopVisiblePosition()?.topLine ?? sourcePositionMarkerState.line } } : {})
-    }).then((result) => {
+    }).then(async (result) => {
       if (generation !== requestGeneration) return;
       hasPendingRequest = false;
       // A render may finish after typing or an external update has already
@@ -2485,10 +2485,27 @@ export function createPreviewController({
         schedulePaintReady();
         return;
       }
+      let value = result.value;
+      const root = activeFrameDocument?.querySelector<HTMLElement>('main.meo-export-doc');
+      if (value.document && root && (!preserveFrame || frameRenderedText !== requestText)) {
+        // Keep the current reading DOM and its owners intact until all chunks
+        // for the replacement band are ready. A thumb/wheel gesture may move
+        // that band while the worker responds; prepare its latest destination.
+        const manifest = value.document;
+        while (true) {
+          const line = getCurrentPendingExternalViewportRestore()?.line ?? getTopVisiblePosition()?.topLine ?? manifest.anchorLine;
+          const prepared = await preparePreviewWindow(root, manifest, line, requestPreviewDocument);
+          if (disposed || generation !== requestGeneration || isCurrentText?.(requestText) === false) return;
+          const currentLine = getCurrentPendingExternalViewportRestore()?.line ?? getTopVisiblePosition()?.topLine ?? manifest.anchorLine;
+          if (line !== currentLine) continue;
+          value = { ...value, document: prepared };
+          break;
+        }
+      }
       latestAcceptedRequestGeneration = generation;
       presetRenderErrors.delete(presetPreference);
       updatePresetInfo();
-      latestPayload = result.value;
+      latestPayload = value;
       latestAcceptedText = requestText;
       setStatus(null);
       // An appearance-only refresh must not strand source still waiting on tokens.
@@ -2496,8 +2513,8 @@ export function createPreviewController({
         preserveFrame && activeFrameDocument && frameRenderedText === requestText
         && !commitPendingCodeHighlight
       ) {
-        if (previewViewport && result.value.document) {
-          if (!previewViewport.rebind(result.value.document)) { renderFrame(requestText, preserveViewport); return; }
+        if (previewViewport && value.document) {
+          if (!previewViewport.rebind(value.document)) { renderFrame(requestText, preserveViewport); return; }
           connectDocumentSearch();
         }
         applyAppearanceToFrame(preserveViewport);
@@ -3003,8 +3020,11 @@ export function createPreviewController({
     if (sourceRange) {
       const range = findVisualRangeProjection(sourceRange, scrollElement.scrollTop + Math.max(0, viewportOffset));
       if (range) {
-        scrollElement.scrollTop = range.top + (range.bottom - range.top) * Math.max(0, Math.min(1, sourceRange.progress))
+        const top = range.top + (range.bottom - range.top) * Math.max(0, Math.min(1, sourceRange.progress))
           - Math.max(0, viewportOffset);
+        if (previewViewport) {
+          if (previewViewport.restoreReadingScrollTop(top)) { sourceMapDirty = true; localGeometryViewport = null; }
+        } else scrollElement.scrollTop = top;
         return;
       }
     }

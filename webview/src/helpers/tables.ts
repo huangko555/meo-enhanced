@@ -5405,13 +5405,14 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       active instanceof HTMLTextAreaElement && table.contains(active) && controller &&
       !this.domRefs.shell.classList.contains('is-context-menu-open')
     ) {
-      // Column redistribution can unwrap an earlier row. Preserve the active
-      // input at the row measurement boundary, after content projection settles.
-      controller.preserveElementPositionWhileMutation(
+      // Intrinsic sizing can shrink rows before CodeMirror's next measurement.
+      // Correct within this mutation and retain through that measurement, rather
+      // than paint the shifted input while waiting for a scheduled scroll write.
+      controller.retainElementTopWhileMutation(
         active,
         () => table.ownerDocument.activeElement === active ? active : null,
         resize,
-        'immediate'
+        () => table.ownerDocument.activeElement === active && !controller.isUserScrolling()
       );
     } else {
       resize();

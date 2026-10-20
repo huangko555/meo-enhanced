@@ -390,6 +390,14 @@ async function main(): Promise<void> {
       content: ':root{--meo-background:#24292e;--meo-foreground:#e6edf3;--meo-code-background:#1b1f23;--meo-surface-background:#24292e;--meo-semantic-mutedForeground:#8b949e;--meo-font-live:Arial;--meo-font-live-weight:400;--meo-font-live-size:16px;--meo-font-source:monospace;--meo-font-source-weight:400;--meo-font-source-size:14px;--vscode-editor-font-family:monospace;--vscode-editor-font-size:14px;--vscode-editor-line-height:20px}'
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+    if (process.argv.includes('--column-reflow-only')) {
+      await page.evaluate(() => {
+        (window as any).__tableVisualEditor = { destroy() {} };
+      });
+      await assertColumnReflowKeepsActiveCell(page);
+      console.log('table column reflow visual stability passed');
+      return;
+    }
     await page.evaluate(() => {
       const text = [
         '# Long table',

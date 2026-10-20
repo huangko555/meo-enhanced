@@ -7,6 +7,28 @@ type MountedBlock = { start: Comment; end: Comment };
 type CopyValue = { text: string; html: string };
 const ignoredText = 'script,style,noscript,svg,.meo-preview-code-actions,.meo-preview-search-overview-ruler';
 
+/** Prepare a complete bounded reading band before replacing an accepted frame.
+ * The renderer's small seed alone may leave the current viewport inside a gap. */
+export async function preparePreviewWindow(root: HTMLElement, manifest: PreviewDocumentManifest, anchorLine: number,
+  request: (id: string, operation: PreviewDocumentOperation) => Promise<PreviewDocumentResult>): Promise<PreviewDocumentManifest> {
+  const window = root.ownerDocument.defaultView!;
+  const style = window.getComputedStyle(root), fontSize = Number.parseFloat(style.fontSize) || 16;
+  const layout = createPreviewBlockLayout(manifest.blocks, { width: root.clientWidth || window.innerWidth,
+    fontSize, lineHeight: Number.parseFloat(style.lineHeight) || fontSize * 1.6 });
+  const anchor = previewBlockAtLine(manifest.blocks, anchorLine) ?? 0;
+  const band = layout.window(layout.top(anchor), window.innerHeight);
+  const chunks = new Map(manifest.chunks.map(chunk => [chunk.index, chunk]));
+  const indices = Array.from({ length: band.to - band.from }, (_, offset) => band.from + offset);
+  const missing = indices.filter(index => !chunks.has(index));
+  if (missing.length) {
+    const result = await request(manifest.id, { kind: 'blocks', indices: missing });
+    if (result.kind !== 'blocks') throw new Error('Preview returned a different block window');
+    for (const chunk of result.chunks) chunks.set(chunk.index, chunk);
+  }
+  if (indices.some(index => !chunks.has(index))) throw new Error('Preview reading window is incomplete');
+  return { ...manifest, anchorLine, chunks: indices.map(index => chunks.get(index)!) };
+}
+
 function gapRanges(blocks: readonly PreviewDocumentBlock[], from: number, to: number) {
   if (to <= from) return [];
   let footer = blocks.length;
@@ -72,6 +94,7 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
   let geometryDirty = true;
   let documentGeneration = 0;
   let navigationGeneration = 0;
+  let leadingGapOffset = 0;
   let layout = createLayout();
 
   function createLayout() {
@@ -155,7 +178,7 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
     gap.setAttribute('aria-hidden', 'true');
     const next = before?.nextSibling instanceof window.HTMLElement ? before.nextSibling : null;
     const margin = next ? Number.parseFloat(window.getComputedStyle(next).marginTop) || 0 : 0;
-    gap.style.cssText = `height:${Math.max(0, layout.top(range.to) - layout.top(range.from) - margin)}px;margin:0;padding:0;overflow-anchor:none;pointer-events:none`;
+    gap.style.cssText = `height:${Math.max(0, layout.top(range.to) - layout.top(range.from) - margin + (range.from === 0 ? leadingGapOffset : 0))}px;margin:0;padding:0;overflow-anchor:none;pointer-events:none`;
     root.insertBefore(gap, before); gaps.add(gap);
     }
   };
@@ -438,6 +461,24 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
   return {
     get manifest() { return manifest; },
     ensure,
+    restoreReadingScrollTop(top: number): boolean {
+      scroll.scrollTop = top;
+      const gap = root.firstElementChild as HTMLElement | null;
+      const error = scroll.scrollTop - top;
+      if (!gap || !gaps.has(gap) || !Number.isFinite(error) || Math.abs(error) > 1
+        || top <= 1 || top >= scroll.scrollHeight - scroll.clientHeight - 1 || Math.abs(error) < 0.001) return false;
+      // Native scrolling rounds to physical pixels. A rebuilt estimated prefix
+      // can leave otherwise unchanged text half a pixel away, repainting every
+      // glyph. Keep that residual in the virtual gap, not in the reading DOM.
+      const quantum = 1 / window.devicePixelRatio;
+      const total = leadingGapOffset + error;
+      const whole = Math.round(total / quantum) * quantum;
+      const next = total - whole;
+      gap.style.height = `${Math.max(0, Number.parseFloat(gap.style.height) + next - leadingGapOffset)}px`;
+      leadingGapOffset = next;
+      if (whole) scroll.scrollTop -= whole;
+      return true;
+    },
     async whenReady() {
       while (!disposed && active) {
         const indices = desired();

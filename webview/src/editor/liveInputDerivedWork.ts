@@ -1,6 +1,7 @@
 import { Annotation, EditorState, Facet, StateEffect, StateField, Transaction, type Extension } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, type DecorationSet } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
+import { mapStableLiveDecorations } from './liveWidgetPositions';
 
 export type LiveInputDerivedWorkScheduler = {
   documentChanged(): void;
@@ -297,7 +298,14 @@ export function mapLiveInputDerivedDecorations(
   decorations: DecorationSet,
   transaction: Transaction
 ): DecorationSet {
-  let mapped = decorations.map(transaction.changes);
+  // An asynchronous Markdown result is not available in the input transaction.
+  // Keep the accepted, bounded presentation provisionally, including distant
+  // block heights. Rebase embedded source positions without certifying the old
+  // semantics; the authoritative refresh still owns changed syntax/references.
+  let mapped = usesLargeDocumentDerivedWorkBudget(transaction.state)
+    ? mapStableLiveDecorations(decorations, transaction.changes, transaction.state)?.decorations
+      ?? decorations.map(transaction.changes)
+    : decorations.map(transaction.changes);
   const affected: Array<{ from: number; to: number }> = [];
   transaction.changes.iterChangedRanges((_fromA, _toA, fromB, toB) => {
     affected.push({ from: fromB, to: toB });
@@ -838,10 +846,11 @@ export function liveInputDerivedWorkExtensions(options: { readonly largeDocument
       if (transaction.effects.some((effect) => effect.is(supersedeLiveInputDerivedWorkEffect))) {
         return null;
       }
-      // History accepts text immediately, just like typing. The replacement
-      // revision's background source facts must arrive before rebuilding Live.
-      // Starting a new generation retires the input generation it supersedes.
-      if (isHistoryTransaction(transaction) && usesLargeDocumentDerivedWorkBudget(transaction.startState)) {
+      // Deletion and history accept text immediately, just like insertion. The
+      // replacement revision's background facts must arrive before rebuilding
+      // Live; an empty pending parse must never become a source-only frame.
+      if ((isHistoryTransaction(transaction) || transaction.isUserEvent('delete'))
+        && usesLargeDocumentDerivedWorkBudget(transaction.startState)) {
         return { effects: deferLiveInputDerivedWorkEffect.of(true) };
       }
       if (isHistoryTransaction(transaction) && phase !== 'idle') {

@@ -56,7 +56,10 @@ export const getExportStyleEnvironment = (code: {
 
   const customEditorFontSizeRaw = rootStyles.getPropertyValue('--meo-user-editor-font-size').trim();
   const editorFontSizeRaw = customEditorFontSizeRaw || rootStyles.getPropertyValue('--vscode-editor-font-size').trim();
-  const fontSizeRaw = editorFontSizeRaw || (editorStyles?.fontSize || bodyStyles.fontSize || '').trim();
+  // Preview can preload before CodeMirror mounts. Use the document typography
+  // in that state too, so the first edit does not switch from body to editor size.
+  const documentFontSizeRaw = rootStyles.getPropertyValue('--meo-font-live-size').trim();
+  const fontSizeRaw = editorFontSizeRaw || documentFontSizeRaw || (editorStyles?.fontSize || bodyStyles.fontSize || '').trim();
   const parsedFontSize = Number.parseFloat(fontSizeRaw);
   const editorFontFamilyRaw = rootStyles.getPropertyValue('--vscode-editor-font-family').trim();
   const capturedEditorFontFamily = /^var\(/i.test(editorFontFamilyRaw)
