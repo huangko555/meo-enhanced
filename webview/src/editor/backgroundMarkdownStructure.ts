@@ -80,8 +80,10 @@ function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet, contex
               const received = receiver.receive(data.tree);
               const tree = accepted.tree ?? acceptCompletedMarkdownStructure(received, data.length);
               if (!Array.isArray(data.footnotes.references) || !Array.isArray(data.footnotes.definitions)
-                || !(data.footnotes.numberByLabel instanceof Map) || !(data.footnotes.referencesByContainerKey instanceof Map)) throw new Error('Invalid Markdown footnote context');
+                || !(data.footnotes.numberByLabel instanceof Map) || !(data.footnotes.referencesByContainerKey instanceof Map)
+                || !Array.isArray(data.code)) throw new Error('Invalid Markdown source context');
               context.receive(accepted.doc, tree, flight.tabSize, { kind: 'footnotes', value: data.footnotes });
+              context.receive(accepted.doc, tree, flight.tabSize, { kind: 'code', value: data.code });
               accepted.tree = tree; accepted.footnotesTab = flight.tabSize;
               accepted.status = 'ready'; accepted.resolve(); waiting.delete(accepted);
               flight.syntaxReceived = true;

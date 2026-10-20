@@ -539,3 +539,33 @@ checks pass. A preliminary host browser comparison measured library load at
 216 ms classic versus 46 ms split; that probe is directional, not native acceptance.
 Mode-loading diagnostics now use the production module path, distinguish resource
 prefetch from execution and hash nested runtime assets.
+
+V43 (`4e805057`, archive SHA-256
+`5c1de3dce4e59825455dcd10a311327f56f01f6429b7adb7e187ad5c995b1b57`)
+completed native functional acceptance and the existing 500 ms severe-stall gate.
+The same 1 MiB rich fixture has Source/Live typing P95 113/185 ms, with a 256 ms
+Live input maximum and a 410 ms frame gap. Live clicked-text witnesses range
+152–450 ms. Preview's four native thumb drags have frame gaps 104/99/120/128 ms,
+correct boundaries and visible content. First Live/Preview remain 3.57/5.26 s;
+cached Live/Source/Preview switches take 1.79/0.92/0.76 s. Whole formatted copy
+takes 9.80 s. Ordinary Source/Live typing P95 is 164/114 ms. These measurements
+follow viewport traversal; they do not establish cold-input or 100 ms P95 goals.
+The production module is fetched for rich Live; the classic bundle is never
+loaded. The final Preview boundary screenshot was visually checked. Full
+smoothness acceptance remains open despite passing the old severe-stall gate.
+
+The remaining full code-fence discovery now also runs in the Markdown worker's
+primary stage, since both Source and Live need source bounds. A separate pure
+source-index helper owns the weak Text/outer-tree/tab-size cache and cloneable
+geometry; private long-code folding effects, UI records and thresholds stay in
+their existing owner. The receiver adopts the index before syntax publication.
+Mixed-language publications reuse canonical outer identity. Reconfiguration
+still rebuilds presentation from cached facts so locale-sensitive widgets cannot
+retain old labels. No folding UI internals cross the worker boundary.
+
+The actual-worker work-budget regression first failed with seven foreground
+code-fence discoveries. It now requires zero across entry, input, undo and mode
+preparation. Transfer parity covers nested tasks, quotes, lists, footnotes, tab
+sizes 2/4/8, empty/unclosed fences and Mermaid; Source/Live interaction checks and
+production three-mode source/history preservation remain required. Native
+acceptance for this additional index change has not yet run.

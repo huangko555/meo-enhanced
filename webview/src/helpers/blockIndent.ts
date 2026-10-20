@@ -2,10 +2,11 @@ import { countColumn, type EditorState } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import type { SyntaxNode } from '@lezer/common';
 import { parseFootnotes } from './footnotes';
+import type { MarkdownBlockIndent, MarkdownTaskIndent } from '../../../src/foundation/markdownDocumentContext';
 
 export const liveBlockIndentProperty = '--meo-live-block-indent';
 
-export type TaskListIndent = { checkboxes: number; sourceColumns: number };
+export type TaskListIndent = MarkdownTaskIndent;
 
 /** A checkbox replaces the list marker as well as [ ]. Descendants must use
  * that same visual width without changing Markdown's source indentation. */
@@ -35,13 +36,7 @@ export function liveTaskListIndentCssValue(indent: TaskListIndent): string {
     ? 'calc(' + indent.checkboxes + ' * var(--meo-task-checkbox-size) - ' + indent.sourceColumns + ' * var(--meo-live-container-ch))' : '0px';
 }
 
-export type LiveBlockIndent = {
-  columns: number;
-  footnoteNumber: number | null;
-  quoteColumns?: readonly number[];
-  taskIndent?: TaskListIndent;
-  quoteTaskIndents?: readonly TaskListIndent[];
-};
+export type LiveBlockIndent = MarkdownBlockIndent;
 
 export type LiveBlockIndentValue = number | LiveBlockIndent;
 

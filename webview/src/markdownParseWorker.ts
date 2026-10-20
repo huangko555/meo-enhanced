@@ -59,7 +59,7 @@ self.onmessage = async ({ data: request }: MessageEvent<MarkdownParseRequest>) =
     const context = prepareMarkdownDocumentContext(doc, tree, request.tabSize);
     const encoded = encoder.encode(tree);
     self.postMessage({ id: request.id, kind: 'syntax', grammar: markdownStructureGrammarIdentity, length: doc.length,
-      tree: encoded.value, tabSize: request.tabSize, footnotes: context.footnotes } satisfies MarkdownParseResponse, { transfer: encoded.transfers });
+      tree: encoded.value, tabSize: request.tabSize, footnotes: context.footnotes, code: context.code } satisfies MarkdownParseResponse, { transfer: encoded.transfers });
     if (request.blocks) self.postMessage({ id: request.id, kind: 'blocks', tabSize: request.tabSize,
       value: context.blocks() } satisfies MarkdownParseResponse);
   } catch (error) {

@@ -7,13 +7,15 @@ import { withMarkdownSyntaxSnapshot } from './helpers/markdownSyntax';
 import { adoptDetailsBlockContext, extractDetailsBlocks } from './helpers/markdownSyntax';
 import { adoptDocumentMathRanges, collectDocumentMathRanges } from './helpers/displayMathBlocks';
 import { adoptMarkdownLiteralRanges, collectMarkdownLiteralRanges } from './helpers/markdownLiteralRanges';
+import { adoptCodeFenceSource, readCodeFenceSource } from './helpers/codeFenceSource';
 
 /** A read-only worker context uses the completed outer tree. No View, history,
  * mounted language or DOM is constructed, and no EditorState crosses the wire. */
 export function prepareMarkdownDocumentContext(doc: Text, tree: Tree, tabSize: number) {
   const state = EditorState.create({ doc, extensions: EditorState.tabSize.of(tabSize) });
+  const primary = withMarkdownSyntaxSnapshot(state, tree, () => ({ footnotes: parseFootnotes(state), code: readCodeFenceSource(state, tree) }));
   return {
-    footnotes: withMarkdownSyntaxSnapshot(state, tree, () => parseFootnotes(state)),
+    ...primary,
     blocks: () => withMarkdownSyntaxSnapshot(state, tree, () => ({ blocks: prepareLiveBlockContext(state, tree),
       literals: [...collectMarkdownLiteralRanges(state, tree)], math: collectDocumentMathRanges(state, tree),
       details: extractDetailsBlocks(state, tree) }))
@@ -25,6 +27,7 @@ export function prepareMarkdownDocumentContext(doc: Text, tree: Tree, tabSize: n
 export function adoptMarkdownDocumentContext(doc: Text, tree: Tree, tabSize: number,
   part: MarkdownContextPart, parser: Parser): void {
   if (part.kind === 'footnotes') adoptFootnoteContext(doc, tree, tabSize, part.value, parser);
+  else if (part.kind === 'code') adoptCodeFenceSource(doc, tree, tabSize, part.value);
   else {
     adoptLiveBlockContext(doc, tree, tabSize, part.value.blocks);
     adoptMarkdownLiteralRanges(tree, part.value.literals);

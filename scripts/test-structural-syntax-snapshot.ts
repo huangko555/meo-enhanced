@@ -9,6 +9,7 @@ import { markdownStructureIdentity } from '../webview/src/editor/markdownStructu
 import { hasSameLiveMarkdownSyntax } from '../webview/src/helpers/livePresentationSyntax';
 import { collectDocumentMathRanges } from '../webview/src/helpers/displayMathBlocks';
 import { collectMarkdownLiteralRanges } from '../webview/src/helpers/markdownLiteralRanges';
+import { readCodeFenceSource } from '../webview/src/helpers/codeFenceSource';
 
 const ensure = language.ensureSyntaxTree;
 let ensureCalls = 0;
@@ -44,6 +45,7 @@ assert.equal(markdownStructureIdentity(republished), markdownStructureIdentity(t
 assert.ok(hasSameLiveMarkdownSyntax(tree, republished));
 const math = collectDocumentMathRanges(state, tree);
 const literals = collectMarkdownLiteralRanges(state, tree);
+const fences = readCodeFenceSource(state, tree);
 const iterate = Tree.prototype.iterate;
 let traversals = 0;
 Tree.prototype.iterate = function (...args) { traversals++; return iterate.apply(this, args); };
@@ -51,6 +53,7 @@ try {
   assert.deepEqual(getLiveRenderedBlocks(state, { tree: republished }), blocks);
   assert.deepEqual(collectDocumentMathRanges(state, republished), math);
   assert.equal(collectMarkdownLiteralRanges(state, republished), literals);
+  assert.equal(readCodeFenceSource(state, republished), fences);
   assert.equal(traversals, 0, 'publishing code tokens must reuse structural discovery, math and literal indexes');
 } finally { Tree.prototype.iterate = iterate; }
 
@@ -60,7 +63,9 @@ for (const sample of [
   'Formula[^n].\n\n[^n]: Definition\n\n    ```math\n    x^2\n    ```\n\n    $$\n    y^2\n    $$\n',
   '> | A | B |\n> | --- | --- |\n> | one | two |\n\n```mermaid\ngraph TD; A-->B\n```\n\n$$\nx^2\n$$\n\n<div>HTML</div>\n',
   '<details>\n<summary>Section</summary>\n\n**Body** and $x^2$.\n\n</details>\n\n```markdown\n<details>\n<summary>Literal</summary>\n\nLiteral body\n\n</details>\n```\n',
-  '---\ntitle: "[^hidden]"\n---\n\n# Heading\n\n- item[^n]\n\n[^n]: definition\n\n\tcontinued\n\n    | A | B |\n    | --- | --- |\n    | one | two |\n'
+  '---\ntitle: "[^hidden]"\n---\n\n# Heading\n\n- item[^n]\n\n[^n]: definition\n\n\tcontinued\n\n    | A | B |\n    | --- | --- |\n    | one | two |\n',
+  '> - [x] task\n>\n>   ```JavaScript\n>   const nested = 1;\n>   ```\n\n- item\n\n\t```\n\tcode\n\t```\n\n```mermaid\ngraph TD; A-->B\n```\n',
+  '```empty\n```\n\n```\n\n```\n\n~~~unclosed\nfirst\nsecond\n'
 ]) for (const tabSize of [2, 4, 8]) {
   let surface = EditorState.create({ doc: sample, selection: { anchor: sample.indexOf('x^2') < 0 ? 0 : sample.indexOf('x^2') },
     extensions: [editorMarkdownLanguage, EditorState.tabSize.of(tabSize), htmlEditingRangeField] });
@@ -71,18 +76,27 @@ for (const sample of [
   const expectedMath = collectDocumentMathRanges(surface);
   const expectedLiterals = collectMarkdownLiteralRanges(surface, language.syntaxTree(surface));
   const expectedDetails = extractDetailsBlocks(surface);
+  const expectedCode = readCodeFenceSource(surface);
   if (sample.includes('<summary>Literal')) assert.deepEqual(expectedDetails.map(block => block.summaryText), ['Section'],
     'a literal details element inside Markdown code is never an editable document fold');
   const workerDoc = EditorState.create({ doc: sample }).doc;
   const outer = outerParser.parse(sample);
   const prepared = prepareMarkdownDocumentContext(workerDoc, outer, tabSize);
-  const notes = structuredClone(prepared.footnotes), presentation = structuredClone(prepared.blocks()), discovered = presentation.blocks;
+  const notes = structuredClone(prepared.footnotes), code = structuredClone(prepared.code),
+    presentation = structuredClone(prepared.blocks()), discovered = presentation.blocks;
   assert.deepEqual(notes, expectedNotes, 'worker outer syntax must preserve mixed-parser global footnotes');
   assert.deepEqual(presentation.math, expectedMath, 'formula source facts match the surface parser');
   assert.deepEqual(presentation.literals, expectedLiterals, 'literal exclusions remain identical after embedded language publication');
   assert.deepEqual(presentation.details, expectedDetails, 'details remain outer source context, including literal Markdown fences');
+  assert.deepEqual(code, expectedCode, 'code bounds, container indentation and normalized languages survive worker transfer');
   adoptMarkdownDocumentContext(surface.doc, language.syntaxTree(surface), tabSize, { kind: 'footnotes', value: notes }, editorMarkdownLanguage.language.parser);
   adoptMarkdownDocumentContext(surface.doc, language.syntaxTree(surface), tabSize, { kind: 'blocks', value: presentation }, editorMarkdownLanguage.language.parser);
+  adoptMarkdownDocumentContext(surface.doc, language.syntaxTree(surface), tabSize, { kind: 'code', value: code }, editorMarkdownLanguage.language.parser);
+  assert.equal(readCodeFenceSource(surface), code, 'surface code folding consumes the transferred index directly');
+  for (const fence of code) {
+    assert.equal(surface.doc.line(fence.contentStartLine).from, fence.contentFrom);
+    assert.equal(surface.doc.line(fence.contentStartLine + fence.lineCount - 1).to, fence.contentTo);
+  }
   assert.equal(parseFootnotes(surface), notes, 'a transferred verified context must be reused directly');
   assert.deepEqual(getLiveRenderedBlocks(surface.update({}).state), expectedBlocks,
     'worker facts retain surface selection filtering for math and nested tables');

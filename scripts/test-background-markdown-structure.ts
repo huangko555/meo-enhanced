@@ -34,6 +34,13 @@ const build = await Bun.build({ entrypoints: ['scripts/test-live-decoration-hist
       return { loader: 'ts', contents: source.replace(marker,
         marker + '\n  (globalThis as any).__codeDescriptorScans = ((globalThis as any).__codeDescriptorScans ?? 0) + 1;') };
     });
+    builder.onLoad({ filter: /webview[\\/]src[\\/]helpers[\\/]codeFenceSource\.ts$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text();
+      const marker = 'function discoverCodeFences(state: EditorState, tree: Tree): MarkdownCodeFence[] {';
+      assert.equal(source.split(marker).length, 2);
+      return { loader: 'ts', contents: source.replace(marker, marker
+        + '\n  if (state.doc.length > 100000 && tree.children.length) (globalThis as any).__codeSourceScans = ((globalThis as any).__codeSourceScans ?? 0) + 1;') };
+    });
     builder.onLoad({ filter: /node_modules[\\/]@lezer[\\/]lr[\\/]dist[\\/]index\.js$/ }, async ({ path }) => {
       const source = await Bun.file(path).text(), marker = '    advanceStack(stack, stacks, split) {';
       assert.equal(source.split(marker).length, 2);
@@ -245,6 +252,8 @@ try {
   'entry, input, undo and syntax publication must reuse worker context without foreground global discovery');
   assert.deepEqual(await page.evaluate(() => (window as any).__foregroundContextScans ?? []), [],
     'global formula, literal and details source facts must also come from the worker');
+  assert.equal(await page.evaluate(() => (window as any).__codeSourceScans ?? 0), 0,
+    'Source and Live must not walk the entire published tree to rediscover code fences');
   stage = 'near code palette';
   await page.evaluate(async () => {
     const scope = window as any;

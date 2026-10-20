@@ -3,11 +3,9 @@ import { EditorState, Facet, StateEffect, StateField, Transaction } from '@codem
 import { sourceLinePositionAtTarget } from '../editor/domSourceLine';
 import { Decoration, EditorView, WidgetType, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import { IterMode } from '@lezer/common';
-import { getFencedCodeInfo, withMarkdownSyntaxSnapshot } from './markdownSyntax';
+import { readCodeFenceSource } from './codeFenceSource';
 import {
   applyLiveBlockIndent,
-  getLiveBlockIndent,
   liveBlockIndentKey,
   type LiveBlockIndentValue
 } from './blockIndent';
@@ -75,60 +73,14 @@ function isMermaidLanguage(info: string | null): boolean {
 
 function collectLongCodeBlockDescriptors(state: EditorState): LongCodeBlockDescriptor[] {
   const descriptors: LongCodeBlockDescriptor[] = [];
-  const tree = syntaxTree(state);
-  // Nested indent/footnote readers must use this same published structure.
-  // Advancing an embedded language per fence both repeats work and mixes trees
-  // in one descriptor collection. A later parser publication refreshes it.
-  withMarkdownSyntaxSnapshot(state, tree, () => tree.iterate({
-    mode: IterMode.IgnoreMounts,
-    enter(node) {
-      if (node.name !== 'FencedCode') {
-        return;
-      }
-
-      const info = getFencedCodeInfo(state, node);
-      if (isMermaidLanguage(info)) {
-        return false;
-      }
-
-      const startLine = state.doc.lineAt(node.from);
-      const endLine = state.doc.lineAt(Math.max(node.to - 1, node.from));
-      if (startLine.number >= state.doc.lines) {
-        return false;
-      }
-      const contentStartLine = state.doc.line(startLine.number + 1);
-      const lastChild = node.node.lastChild;
-      const hasClosingFence = lastChild?.name === 'CodeMark' &&
-        state.doc.lineAt(lastChild.from).number === endLine.number;
-      const contentEndLineNumber = endLine.number - (hasClosingFence ? 1 : 0);
-
-      if (contentStartLine.number > contentEndLineNumber) {
-        return false;
-      }
-
-      const contentEndLine = state.doc.line(contentEndLineNumber);
-      const lineCount = contentEndLine.number - contentStartLine.number + 1;
-      const isLong = lineCount > LONG_CODE_LINE_THRESHOLD;
-      const collapsedFrom = isLong
-        ? state.doc.line(contentStartLine.number + LONG_CODE_VISIBLE_LINES).from
-        : contentEndLine.to;
-      descriptors.push({
-        anchor: node.from,
-        start: startLine.from,
-        end: endLine.to,
-        endLineFrom: endLine.from,
-        indentColumns: getLiveBlockIndent(state, node.from, node.node),
-        language: info || 'Plain text',
-        contentFrom: contentStartLine.from,
-        contentTo: contentEndLine.to,
-        collapsedFrom,
-        lineCount,
-        hiddenLineCount: Math.max(0, lineCount - LONG_CODE_VISIBLE_LINES),
-        isLong
-      });
-      return false;
-    }
-  }));
+  for (const fence of readCodeFenceSource(state)) {
+    if (isMermaidLanguage(fence.language)) continue;
+    const { contentStartLine, ...source } = fence;
+    const isLong = source.lineCount > LONG_CODE_LINE_THRESHOLD;
+    descriptors.push({ ...source, language: source.language || 'Plain text',
+      collapsedFrom: isLong ? state.doc.line(contentStartLine + LONG_CODE_VISIBLE_LINES).from : source.contentTo,
+      hiddenLineCount: Math.max(0, source.lineCount - LONG_CODE_VISIBLE_LINES), isLong });
+  }
   return descriptors;
 }
 
@@ -595,7 +547,7 @@ const longCodeBlockStateField = StateField.define<LongCodeBlockState>({
     // effects. Reuse the current owner's descriptors, but still reduce search,
     // selection and manual folding intent. Deferred edits deliberately carry
     // no proof, so their settlement reparses the changed source as before.
-    if (!transaction.docChanged
+    if (!transaction.docChanged && !transaction.reconfigured
       && value.descriptorDocument === transaction.state.doc
       && value.descriptorTree === markdownStructureIdentity(syntaxTree(transaction.state))
       && value.descriptorTabSize === transaction.state.tabSize) {

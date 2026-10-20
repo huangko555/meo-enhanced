@@ -31,6 +31,18 @@ export interface MarkdownBlock {
 }
 export type DiscoveredMarkdownBlock = { block: MarkdownBlock; htmlFrom?: number };
 
+export type MarkdownTaskIndent = { checkboxes: number; sourceColumns: number };
+export type MarkdownBlockIndent = {
+  columns: number; footnoteNumber: number | null; quoteColumns?: readonly number[];
+  taskIndent?: MarkdownTaskIndent; quoteTaskIndents?: readonly MarkdownTaskIndent[];
+};
+/** Source geometry only. Folding thresholds and interaction remain surface-owned. */
+export interface MarkdownCodeFence {
+  anchor: number; start: number; end: number; endLineFrom: number;
+  indentColumns: number | MarkdownBlockIndent; language: string;
+  contentFrom: number; contentTo: number; contentStartLine: number; lineCount: number;
+}
+
 export type MarkdownLiteralRange = { from: number; to: number; script?: boolean; htmlCode?: { from: number; to: number } };
 export type MarkdownMathRange = {
   from: number; to: number; mode: 'inline' | 'display'; content: string; raw: string; fencedDisplay?: boolean;
@@ -47,4 +59,5 @@ export type MarkdownPresentationContext = {
 
 export type MarkdownContextPart =
   | { readonly kind: 'footnotes'; readonly value: ParsedFootnotes }
+  | { readonly kind: 'code'; readonly value: readonly MarkdownCodeFence[] }
   | { readonly kind: 'blocks'; readonly value: MarkdownPresentationContext };
