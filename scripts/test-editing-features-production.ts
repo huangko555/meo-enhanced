@@ -323,7 +323,9 @@ try {
   assert.equal(await page.evaluate(() => { const g = window as any; return g.EditingFeaturesHarness.findDocumentFragmentPosition(g.editor.view.state, '#hello-world-2'); }), headingDocument.indexOf('# Hello **world**', 1), 'the chosen canonical anchor navigates to the second heading');
   const setextDocument = 'Setext heading\n============\n\n[Go](#Se';
   await prepare('source', setextDocument, setextDocument.length, setextDocument.length, { pairMode: 'off' });
-  await page.waitForSelector('.meo-input-suggestions:not([hidden])', { timeout: 5000 }); await page.keyboard.press('Enter');
+  await page.waitForSelector('.meo-input-suggestions:not([hidden])', { timeout: 5000 });
+  assert.equal(await page.$eval('.meo-input-suggestion-detail', node => node.textContent), '#setext-heading', 'unique headings retain the same anchor column as duplicate headings');
+  await page.keyboard.press('Enter');
   assert.ok((await text()).endsWith('[Go](#setext-heading'));
   assert.equal(await page.evaluate(() => { const g = window as any; return g.EditingFeaturesHarness.findDocumentFragmentPosition(g.editor.view.state, '#setext-heading'); }), 0);
 
@@ -395,7 +397,7 @@ try {
       const documents = kind === 'documents';
       assert.deepEqual(sharedSurface, slashSurface, [mode, appearance, language, kind].join(':') + ': shares slash shell and editor font');
       const expectedWidth = kind === 'emoji' ? 14.15 * 17 : kind === 'paths' ? 300
-        : kind === 'headings' ? (language === 'en' ? 22.15 : 20.92) * 17 : 416;
+        : kind === 'headings' ? (language === 'en' ? 27.69 : 20.92) * 17 : 416;
       assert.ok(Math.abs(parseFloat(width) - expectedWidth) < 0.1, kind + ': width follows the candidate content and editor font');
       assert.equal(rowPadding, documents ? '5px 8px' : slashPadding);
       if (documents) assert.ok(rowHeight > slashHeight * 1.5, 'Wiki document rows reserve two full text lines');

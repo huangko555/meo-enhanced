@@ -265,8 +265,6 @@ export function createInputSuggestions(options: {
       this.popup.dataset.suggestionKind = this.context?.type;
       this.popup.dataset.htmlKind = this.context?.type === 'html' ? this.context.options[0]?.type ?? 'type' : '';
       const slash = this.context?.type === 'slash', documents = this.context?.type === 'documents', paths = this.context?.type === 'paths';
-      const headingCounts = new Map<string, number>();
-      if (this.context?.type === 'headings') for (const item of this.items) headingCounts.set(item.label, (headingCounts.get(item.label) ?? 0) + 1);
       this.popup.classList.toggle('meo-slash-suggestions', slash || this.context?.type === 'math');
       this.popup.classList.toggle('meo-math-suggestions', this.context?.type === 'math');
       this.popup.classList.toggle('meo-link-suggestions', documents);
@@ -329,16 +327,14 @@ export function createInputSuggestions(options: {
           label.dataset.tooltip = item.label; label.dataset.tooltipKind = 'fulltext';
         }
         row.append(label);
-        const detailValue = this.context?.type === 'headings' && item.anchor
-          ? (headingCounts.get(item.label) ?? 0) > 1 ? '#' + item.anchor : '' : documents ? item.detail || item.insert : item.detail;
+        const detailValue = this.context?.type === 'headings' && item.anchor ? '#' + item.anchor : documents ? item.detail || item.insert : item.detail;
         if (item.math) {
           const preview = document.createElement('span'); preview.className = 'meo-math-completion-preview'; preview.setAttribute('aria-hidden', 'true');
           const html = options.renderMathPreview(item.math.preview);
           if (html) preview.innerHTML = html;
           else preview.textContent = item.math.label;
           row.append(preview);
-        } else if (!paths && (documents || (detailValue && (item.slash
-          ? label.textContent?.slice(1).toLowerCase() !== detailValue.toLowerCase() : detailValue !== item.label)))) {
+        } else if (!paths && (documents || detailValue)) {
           const detail = document.createElement('span'); detail.className = 'meo-input-suggestion-detail';
           if (item.slash || this.context?.type === 'html') detail.textContent = detailValue;
           else { appendMatched(detail, detailValue, this.context?.query ?? ''); detail.dataset.tooltip = [item.detail, detailValue].filter((value, index, values) => value && values.indexOf(value) === index).join(' · '); detail.dataset.tooltipKind = 'fulltext'; }

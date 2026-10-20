@@ -1396,8 +1396,8 @@ the path; default-size width is 248px, larger fonts stop at 300px, selection and
 directory chaining retain width, and narrow viewports constrain the menu. Wiki
 document results retain the wider two-line layout at 320px for the default size.
 Candidate widths are fixed by family and UI language, with font scaling and viewport
-constraints. HTML omits redundant type labels, unique headings omit derived anchors,
-and slash descriptions are retained when they add information. Math catalog checks
+constraints. Each menu family uses a uniform row structure: HTML omits type labels,
+all headings show anchors, and all slash commands retain descriptions. Math catalog checks
 assert that complete templates fit beside the rendered example. Focused visual smoke
 covers every family in Chinese/English, light/dark, large fonts and narrow windows.
 Browser checks include Source/Live,

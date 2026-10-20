@@ -8325,7 +8325,7 @@ html[data-editor-appearance='dark'] :is(.settings-warning, .settings-shortcut-co
 .meo-input-suggestions[data-suggestion-kind='slash'] { width: min(max(288px, 22.15em), calc(100vw - 16px)); }
 .meo-input-suggestions[data-suggestion-kind='slash']:lang(en) { width: min(max(336px, 25.85em), calc(100vw - 16px)); }
 .meo-input-suggestions[data-suggestion-kind='headings'] { width: min(max(272px, 20.92em), calc(100vw - 16px)); }
-.meo-input-suggestions[data-suggestion-kind='headings']:lang(en) { width: min(max(288px, 22.15em), calc(100vw - 16px)); }
+.meo-input-suggestions[data-suggestion-kind='headings']:lang(en) { width: min(max(360px, 27.69em), calc(100vw - 16px)); }
 .meo-narrow-suggestions { width: min(max(184px, 14.15em), calc(100vw - 16px)); }
 .meo-html-suggestions { width: min(max(208px, 16em), calc(100vw - 16px)); }
 .meo-html-suggestions[data-html-kind='property'] { width: min(max(224px, 17.23em), calc(100vw - 16px)); }

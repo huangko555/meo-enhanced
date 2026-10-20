@@ -127,7 +127,10 @@ try {
     }
     for (const language of ['en', 'zh-CN']) {
       await prepare(mode); await page.evaluate(language => (window as any).editor.setUiLanguage(language), language);
-      await page.keyboard.type('/table3*4'); await open();
+      await page.keyboard.type('/'); await open();
+      assert.equal(await page.$$eval('.meo-slash-suggestion', rows => rows.every(row => row.querySelector('.meo-input-suggestion-detail')?.textContent?.trim())), true, 'every slash command retains its description');
+      assert.equal(await page.$eval('[data-command="bold"] .meo-input-suggestion-detail', row => row.textContent), language === 'en' ? 'Bold' : '粗体');
+      await page.keyboard.type('table3*4'); await open();
       assert.equal(await page.$eval('.meo-suggestion-command', row => row.textContent), '/table3*4');
       assert.equal(await page.$eval('.meo-input-suggestion-detail', row => row.textContent), language === 'en' ? '3 data rows × 4 cols' : '3 数据行 × 4 列');
       await page.keyboard.press('Enter'); await waitText(emptyMarkdownTable(4, 3)!);
