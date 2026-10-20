@@ -41,7 +41,8 @@ type PreviewMermaidPalette = {
 
 export function createPreviewMermaidRenderer(
   resources: MermaidDiagramRenderResources,
-  reportError: (error: unknown) => void = () => undefined
+  reportError: (error: unknown) => void = () => undefined,
+  isInteracting: () => boolean = () => false
 ) {
   let activeGroup: ReturnType<MermaidDiagramRenderResources['acquireGroup']> | null = null;
   let latestRenderGeneration = 0;
@@ -73,7 +74,7 @@ export function createPreviewMermaidRenderer(
     if (!hasPendingBlocks) return Promise.resolve();
     const scheduled = renderTail.catch(() => undefined).then(async () => {
       const requestIsCurrent = () => renderGeneration === latestRenderGeneration && isCurrent();
-      if (!requestIsCurrent()) return;
+      if (!await waitForPreviewGesture(frameDocument, requestIsCurrent, isInteracting)) return;
       const group = resources.acquireGroup();
       activeGroup = group;
       try {
@@ -85,7 +86,8 @@ export function createPreviewMermaidRenderer(
               appearance,
               onDiagramRendered,
               requestIsCurrent,
-              commit
+              commit,
+              isInteracting
             );
           } finally {
             await restoreMermaidEditorTheme();
@@ -112,12 +114,21 @@ export function createPreviewMermaidRenderer(
   };
 }
 
+/** A queued or in-flight batch can outlive the gesture check that scheduled it.
+ * Retire obsolete work promptly, and leave the UI thread to native dragging. */
+async function waitForPreviewGesture(document: Document, isCurrent: () => boolean, isInteracting: () => boolean): Promise<boolean> {
+  while (isCurrent() && document.documentElement.dataset.meoPreviewLargeDocument === 'true' && isInteracting())
+    await new Promise<void>(resolve => setTimeout(resolve, 50));
+  return isCurrent();
+}
+
 async function renderMermaidBlocks(
   frameDocument: Document,
   appearance: PreviewAppearance,
   onDiagramRendered: (() => void) | undefined,
   isCurrent: () => boolean,
-  commit: (mutate: () => void) => void
+  commit: (mutate: () => void) => void,
+  isInteracting: () => boolean
 ): Promise<void> {
   if (!isCurrent()) return;
   const preset = frameDocument.documentElement.dataset.meoPreviewPreset ?? 'default';
@@ -141,7 +152,7 @@ async function renderMermaidBlocks(
   if (blocks.length === 0) return;
 
   const mermaid = await loadMermaidRuntime();
-  if (!isCurrent()) return;
+  if (!await waitForPreviewGesture(frameDocument, isCurrent, isInteracting)) return;
   const github = frameDocument.documentElement.dataset.meoPreviewRenderer === 'github-readme' || preset === 'github-readme';
   mermaid.initialize(github ? getGithubMermaidConfig(appearance === 'dark') : {
     startOnLoad: false,
@@ -197,7 +208,7 @@ async function renderMermaidBlocks(
     // Mermaid's promises can resolve in one task. Let input and paint run
     // between diagrams while retaining the exclusive theme lease.
     await new Promise<void>(resolve => setTimeout(resolve, 0));
-    if (!isCurrent()) return;
+    if (!await waitForPreviewGesture(frameDocument, isCurrent, isInteracting)) return;
     if (!isNearPreviewViewport(block, frameDocument)) continue;
     const source = decodeBase64Utf8(block.dataset.sourceB64 ?? '');
     if (!source) continue;
@@ -241,7 +252,7 @@ async function renderMermaidBlocks(
       failed.push(block);
     }
   }
-  if (!isCurrent() || (prepared.length === 0 && failed.length === 0)) return;
+  if (prepared.length === 0 && failed.length === 0 || !await waitForPreviewGesture(frameDocument, isCurrent, isInteracting)) return;
   commit(() => {
     if (!isCurrent()) return;
     for (const { block, source, svg } of prepared) {

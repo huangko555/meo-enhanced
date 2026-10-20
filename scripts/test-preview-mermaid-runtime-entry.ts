@@ -14,6 +14,7 @@ import { createMermaidDiagramPresentationApplication } from '../webview/src/appl
 import { createMermaidDiagramPresentationRuntime } from '../webview/src/adapters/mermaidDiagramPresentationRuntime';
 import { createMermaidDiagramPresentationEffectAdapter } from '../webview/src/editor/mermaidDiagramPresentationAdapter';
 import { createMermaidDiagramPresentationFactory } from '../webview/src/editor/mermaidDiagramPresentation';
+import { createPreviewMermaidRenderer } from '../webview/src/helpers/previewMermaid';
 
 (window as typeof window & { __loadMermaidRuntime: typeof loadMermaidRuntime }).__loadMermaidRuntime = loadMermaidRuntime;
 
@@ -21,6 +22,44 @@ const mermaidResources = createMermaidDiagramRenderPool({
   initialize: initializeMermaidEditorRuntime,
   render: renderMermaidRuntime
 });
+(window as any).__probePreviewGestureBatch = async () => {
+  const runtime = await loadMermaidRuntime(), original = runtime.render;
+  const frame = document.createElement('iframe'); frame.style.height = '400px'; document.body.append(frame);
+  const doc = frame.contentDocument!; doc.documentElement.dataset.meoPreviewLargeDocument = 'true';
+  doc.body.innerHTML = [0, 1].map(index => `<div class="meo-export-mermaid" style="height:100px" data-source-b64="${btoa(`flowchart LR; A[Gesture-${Date.now()}-${index}]-->B`)}"></div>`).join('');
+  let interacting = false, started = 0, completed = 0, notices = 0;
+  const releases: Array<() => void> = [];
+  const gates = [0, 1].map(() => new Promise<void>(resolve => releases.push(resolve)));
+  runtime.render = (async (id: string) => {
+    const index = started++; await gates[index]; completed++;
+    return { svg: `<svg xmlns="http://www.w3.org/2000/svg" id="${id}" viewBox="0 0 100 60"><rect width="100" height="60"/></svg>` };
+  }) as typeof runtime.render;
+  const renderer = createPreviewMermaidRenderer(mermaidResources, error => { throw error; }, () => interacting);
+  const operation = renderer.render(doc, 'dark', () => notices++);
+  const wait = async (predicate: () => boolean) => {
+    const deadline = performance.now() + 5_000;
+    while (!predicate()) {
+      if (performance.now() > deadline) throw Error('Gesture batch did not reach its boundary');
+      await new Promise(requestAnimationFrame);
+    }
+  };
+  const painted = () => doc.querySelectorAll('.meo-export-mermaid.is-rendered svg').length;
+  try {
+    await wait(() => started === 1);
+    interacting = true; releases[0]!(); await wait(() => completed === 1);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const between = { started, painted: painted() };
+    interacting = false; await wait(() => started === 2);
+    interacting = true; releases[1]!(); await wait(() => completed === 2);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const beforeCommit = { painted: painted(), notices };
+    interacting = false; await operation;
+    return { between, beforeCommit, after: { painted: painted(), notices } };
+  } finally {
+    interacting = false; for (const release of releases) release(); renderer.dispose();
+    await operation.catch(() => {}); runtime.render = original; frame.remove();
+  }
+};
 const mermaidPresentationFactory = createMermaidDiagramPresentationFactory({
   resources: mermaidResources,
   createHandle(view, consumer) {

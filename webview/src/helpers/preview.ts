@@ -1254,10 +1254,6 @@ export function createPreviewController({
   let previewDocumentSearch: ReturnType<typeof createPreviewDocumentSearch> | null = null;
   let searchQuery = '', searchOptions: { wholeWord?: boolean; caseSensitive?: boolean } = {};
   let searchAnchor: SearchMatchAnchor | null = null;
-  const previewMermaidRenderer = createPreviewMermaidRenderer(
-    mermaidRenderResources,
-    (error) => logWebviewRenderError('preview.mermaid', error)
-  );
   const notifyViewportInteraction = (owner: 'source' | 'preview' = 'preview') => {
     cancelElementReveal();
     previewScrollRange?.interrupt();
@@ -1337,6 +1333,11 @@ export function createPreviewController({
   let previewScrollRange: ReturnType<typeof createPreviewScrollRange> | null = null;
   let previewGestureUntil = 0;
   const isViewportInteracting = () => !host.hidden && (activePreviewPointers.size > 0 || performance.now() < previewGestureUntil);
+  const previewMermaidRenderer = createPreviewMermaidRenderer(
+    mermaidRenderResources,
+    (error) => logWebviewRenderError('preview.mermaid', error),
+    isViewportInteracting
+  );
   let disposeDeferredImages = () => {};
   let frameEvents: AbortController | null = null;
   let cancelFrameWrite: (() => void) | null = null;

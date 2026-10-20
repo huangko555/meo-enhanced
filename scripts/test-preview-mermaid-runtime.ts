@@ -105,6 +105,30 @@ await viewportRenderer.render(largeFrame, 'dark');
 assert.equal(viewportRequests, 1, 'a diagram entering the viewport must become eligible');
 viewportRenderer.dispose();
 
+let interacting = true, interactionRequests = 0;
+const interactionRenderer = createPreviewMermaidRenderer({ acquireGroup: () => ({
+  runExclusive: async () => { interactionRequests++; }, end() {}
+}) } as MermaidDiagramRenderResources, () => {}, () => interacting);
+const deferredInteraction = interactionRenderer.render(largeFrame, 'dark');
+await new Promise(resolve => setTimeout(resolve, 70));
+assert.equal(interactionRequests, 0, 'active large-preview gestures must not acquire the rich renderer');
+interacting = false;
+await deferredInteraction;
+assert.equal(interactionRequests, 1, 'visible enrichment resumes after the gesture');
+interacting = true;
+const cancelledInteraction = interactionRenderer.render(largeFrame, 'light');
+await new Promise(resolve => setTimeout(resolve, 0));
+interactionRenderer.dispose();
+await cancelledInteraction;
+assert.equal(interactionRequests, 1, 'mode retirement cancels a deferred rich operation before it acquires resources');
+let ordinaryInteractionRequests = 0;
+const ordinaryInteractionRenderer = createPreviewMermaidRenderer({ acquireGroup: () => ({
+  runExclusive: async () => { ordinaryInteractionRequests++; }, end() {}
+}) } as MermaidDiagramRenderResources, () => {}, () => true);
+await ordinaryInteractionRenderer.render(pendingFrame, 'dark');
+assert.equal(ordinaryInteractionRequests, 1, 'ordinary documents keep immediate diagram enrichment');
+ordinaryInteractionRenderer.dispose();
+
 const browser = await launchTestBrowser();
 
 try {
@@ -162,6 +186,9 @@ try {
     return first === second && typeof first.render === 'function';
   });
   if (!sharedRuntime || runtimeRequests !== 2) throw new Error('Retry must load one CSP-authorized runtime shared by concurrent callers');
+  const gestureBatch = await page.evaluate(() => (window as any).__probePreviewGestureBatch());
+  assert.deepEqual(gestureBatch, { between: { started: 1, painted: 0 }, beforeCommit: { painted: 0, notices: 0 },
+    after: { painted: 2, notices: 1 } }, 'an in-flight batch must yield between diagrams and before SVG projection, then resume exactly once');
   const invalidMermaidLeaked = await page.evaluate(() => (
     (window as typeof window & { __probeInvalidMermaidCleanup?: () => Promise<boolean> })
       .__probeInvalidMermaidCleanup?.()

@@ -844,3 +844,27 @@ edits/undo with unchanged global preparation count, and verifies numbering and
 zero foreground global discovery across 31 jobs. The mode test follows the
 product's explicit Live-preparation seam before activating that surface. Native
 latency after the expanded footnote proof remains to be measured.
+
+Preview's existing gesture gate covers newly scheduled enrichment, but a batch
+already queued or awaiting a diagram can pass it. Large Preview Mermaid work now
+rechecks that same activity owner before acquiring its exclusive lease, between
+diagrams, after runtime loading and before projecting the final SVG batch. A
+retired frame/mode cancels the wait through the existing generation predicate;
+ordinary documents retain immediate enrichment. The reading window still
+mounts text/HTML during native dragging. No new user setting is introduced.
+
+The resource test verifies no lease is acquired while a large-document gesture
+is active, resume after it ends, and cancellation before acquisition. A browser
+test pauses the first in-flight diagram, starts a gesture and releases it: the
+second diagram stays deferred. It repeats the gesture before the second result,
+requiring zero SVG projections/notifications until release, then two diagrams
+and one notification. Existing appearance switches, shared Live/Preview runtime,
+late hidden-frame results and disposal checks pass. Native scroll remeasurement
+is still required.
+
+Final production Preview window/boundary, resource-budget and cross-mode
+Mermaid/formula update/copy checks pass. One three-mode run during concurrent
+verification duplicates a committed CJK composition at the Live tail; an isolated
+repeat passes the exact-source assertion. The failure is retained and is not
+explained away as a timing artifact. IME/mode-transition stability still needs
+further diagnosis alongside native acceptance.
