@@ -198,7 +198,7 @@ type SearchOptions = {
 };
 
 type SearchQueryState = {
-  text: string;
+  text: string | Text;
   wholeWord: boolean;
   caseSensitive: boolean;
 };
@@ -393,7 +393,7 @@ function lineNumberExtensions(
 
 export function createEditor({
   parent,
-  text,
+  text: initialDocument,
   onApplyTransaction,
   onOpenLink,
   onCommentBlocked,
@@ -416,6 +416,7 @@ export function createEditor({
   uiLanguage = 'en',
   sourceLineNumbers = 'on'
 }: CreateEditorOptions) {
+  const text = typeof initialDocument === 'string' ? initialDocument : readDocumentTextProjection(initialDocument);
   // VS Code webviews can hit cross-origin window access issues in the EditContext path.
   // Disable it explicitly for stability in embedded Chromium.
   const editorViewConstructor: typeof EditorView & { EDIT_CONTEXT?: boolean } = EditorView;
@@ -2410,7 +2411,7 @@ export function createEditor({
   const historyCompartment = new Compartment();
   const inputAssistanceCompartment = new Compartment();
   const state = EditorState.create({
-    doc: text,
+    doc: initialDocument,
     selection: { anchor: initialCursorPos },
     extensions: [
       backgroundMarkdownStructureExtensions(document.body.dataset.meoMarkdownWorkerSrc,

@@ -1,5 +1,10 @@
 {
   "separate": {
+    "scripts/test-initial-document-sharing.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-initial-document-sharing.ts",
+      "reason": "Actual Webview bootstrap and snapshot producer must share the initial persistent Text with Editor and saved text; first large-document edit, undo and hidden Preview startup budget remain correct."
+    },
     "scripts/test-footnote-code-line-reuse.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-footnote-code-line-reuse.ts",

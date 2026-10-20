@@ -1101,3 +1101,26 @@ export contracts pass. Alternating warm Node v24.15.0 measurements of preparatio
 plus the first twelve blocks have median 290 ms before versus 255 ms after
 (six measured runs per version, about 12% less). This is a host diagnostic with
 explicit GC between runs, not a native first-Preview latency claim.
+
+### Share the initial persistent document across session and editor
+
+The Source profile's first-input task also contains about 28 ms comparing
+independently built, equal initial text trees. The Document Session now exposes
+its immutable current text through its existing ordered adapter. Initial Editor
+mount waits for queued session inputs, then consumes that native persistent Text
+directly. Identical current/saved Init text is constructed once. String-based
+Editor callers remain supported by the same single text input; no global text
+interning cache is introduced. The producer seeds the existing 8 MiB projection
+cache with its already-known normalized string, avoiding another flattening.
+
+An actual Bootstrap regression observes the real snapshot producer: before the
+change the session and Editor own different initial Text objects, afterwards
+they share one tree, including equal saved text. A first edit still emits exactly
+one inserted character, undo restores the complete large source, and Source
+startup issues no hidden Preview request. Domain/application/protocol, ordered
+adapter, bounded replacement (LF/CRLF/Unicode/stale revisions), actions and
+Source-side Preview round trips pass. The broader candidate cutover browser test
+still reports line 51 versus 54 after its equal-text Mermaid replacement on both
+the modified build and an otherwise unchanged `1b5f5c21` control. That retained
+viewport assertion needs separate diagnosis; no assertion or legacy baseline is
+weakened. No new native latency number is attributed to snapshot sharing yet.

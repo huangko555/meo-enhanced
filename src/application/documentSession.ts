@@ -62,6 +62,7 @@ export type DocumentSessionAction =
 
 export type DocumentSessionCoordinator = {
   readonly handle: (input: DocumentSessionInput) => readonly DocumentSessionAction[];
+  readonly currentText: () => DocumentText;
   /** Latest recovery effect receipt emitted by this ordered Interface. */
   readonly draftRecoveryReceiptVersion: () => number;
 };
@@ -118,6 +119,7 @@ export function createDocumentSessionCoordinator(input: {
       }
       return actions;
     },
+    currentText: () => state.draft?.text ?? state.revision.text,
     draftRecoveryReceiptVersion: () => latestDraftRecoveryReceiptVersion
   };
 }

@@ -54,6 +54,7 @@ import { createMenuSwitch } from './adapters/menuSwitch';
 import { createCodePaletteWebviewAdapter } from './adapters/codePaletteWebviewAdapter';
 import { createExportWebviewAdapter } from './adapters/exportWebviewAdapter';
 import { createDocumentSessionWebviewAdapter } from './adapters/documentSessionWebviewAdapter';
+import { codeMirrorDocumentText } from './adapters/documentSnapshot';
 import { createDocumentSaveFlushWebviewAdapter } from './adapters/documentSaveFlushWebviewAdapter';
 import { createPreviewWebviewAdapter } from './adapters/previewWebviewAdapter';
 import { createAppearanceWebviewAdapter } from './adapters/appearanceWebviewAdapter';
@@ -2944,12 +2945,16 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
   if (editor) return;
   const createEditor = await loadCreateEditorFactory();
   if (signal.aborted) return;
+  await documentSessionAdapter.whenIdle();
+  if (signal.aborted) return;
   const initialText = pendingInitialText;
   if (signal.aborted || editor || initialText === null) return;
+  const initialDocument = documentSessionAdapter.readCurrentText();
+  if (initialDocument === null) throw new Error('Document Session is not initialized');
 
   editor = createEditor({
     parent: editorHost,
-    text: initialText,
+    text: codeMirrorDocumentText(initialDocument),
     initialMode: mode,
     initialInputAssistance: editingPreferences.input,
     requestLinkCandidates: async input => { const result = await editorServicesTransport.request({ action: 'links', ...input }); return result && 'candidates' in result ? result.candidates : []; },

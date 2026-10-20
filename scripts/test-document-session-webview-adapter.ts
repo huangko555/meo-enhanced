@@ -31,6 +31,7 @@ adapter.start(init);
 adapter.start({ ...init, version: 9, text: 'must-not-restart' });
 adapter.localDraftChanged('one local');
 await adapter.whenIdle();
+assert.equal(adapter.readCurrentText()?.toString(), 'one local', 'the immutable read surface follows the latest draft');
 assert.deepEqual(posted.slice(0, 2), [
   { type: 'draftChanged', text: 'one local', receiptVersion: 1 },
   {
@@ -45,6 +46,7 @@ assert.equal(adapter.accept({ type: 'docChanged', version: 3, text: 'remote' }),
 assert.equal(adapter.accept({ type: 'themeChanged' } as HostToWebviewMessage), false);
 await adapter.whenIdle();
 assert.deepEqual(presented.at(-1), { text: 'remote', source: 'revision' });
+assert.equal(adapter.readCurrentText()?.toString(), 'remote', 'accepted Host revisions replace the shared read surface');
 
 adapter.requestReloadFromDisk({ topLine: 7, topLineOffset: 2 });
 await adapter.whenIdle();
@@ -104,6 +106,7 @@ for (let attempt = 0; attempt < 10 && posted.at(-1)?.type !== 'saveDocumentRevis
 const saveRequest = posted.at(-1);
 assert.equal(saveRequest?.type, 'saveDocumentRevision');
 adapter.dispose();
+assert.equal(adapter.readCurrentText(), null, 'disposed sessions expose no mountable text');
 await adapter.whenIdle();
 if (saveRequest?.type === 'saveDocumentRevision') {
   assert.equal(adapter.accept({

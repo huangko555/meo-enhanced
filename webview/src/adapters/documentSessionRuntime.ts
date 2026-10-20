@@ -14,6 +14,7 @@ import {
 } from './documentSessionActions';
 import { createDocumentSessionCoordinatorFromInit } from './documentSessionTransport';
 import { documentSnapshotFromString } from './documentSnapshot';
+import type { DocumentText } from '../../../src/foundation/documentSnapshot';
 
 type RemoteDocumentSessionAction = Extract<
   DocumentSessionAction,
@@ -21,6 +22,7 @@ type RemoteDocumentSessionAction = Extract<
 >;
 
 export type DocumentSessionRuntime = {
+  currentText(): DocumentText | null;
   initialize(message: InitMessage): Promise<void>;
   handle(input: DocumentSessionInput): Promise<readonly DocumentPresentationCompletion[]>;
   retryPresentation(): Promise<boolean>;
@@ -64,6 +66,7 @@ export function createDocumentSessionRuntime(
   };
 
   return {
+    currentText: () => coordinator?.currentText() ?? null,
     initialize(message) {
       if (coordinator !== null) return operation;
       coordinator = createDocumentSessionCoordinatorFromInit(message, documentSnapshotFromString);

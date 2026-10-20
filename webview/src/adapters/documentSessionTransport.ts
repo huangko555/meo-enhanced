@@ -28,15 +28,19 @@ export type DocumentSessionTransport = {
 };
 
 export function createDocumentSessionCoordinatorFromInit(message: InitMessage, createTextSnapshot?: (text: string) => DocumentTextSnapshot) {
+  const initialText = createTextSnapshot?.(message.text) ?? message.text;
+  const savedText = message.savedRevision === null ? null
+    : message.savedRevision.text === message.text ? initialText
+    : createTextSnapshot?.(message.savedRevision.text) ?? message.savedRevision.text;
   return createDocumentSessionCoordinator({
     ...(createTextSnapshot ? { createTextSnapshot } : {}),
     documentId: message.documentId,
-    revision: { number: message.version, text: message.text },
+    revision: { number: message.version, text: initialText },
     savedRevision: message.savedRevision === null
       ? null
       : {
           revisionNumber: message.savedRevision.version,
-          text: message.savedRevision.text
+          text: savedText!
         }
   });
 }

@@ -5,7 +5,7 @@ import type { InitMessage } from '../../../src/protocol/readyInit';
 import { createDocumentSessionRuntime } from './documentSessionRuntime';
 import { createDocumentSessionTransport } from './documentSessionTransport';
 import type { DocumentSessionNotice } from './documentSessionActions';
-import type { DocumentTextEdit } from '../../../src/foundation/documentSnapshot';
+import type { DocumentText, DocumentTextEdit } from '../../../src/foundation/documentSnapshot';
 
 export type DocumentSessionViewPosition = {
   readonly topLine: number;
@@ -13,6 +13,7 @@ export type DocumentSessionViewPosition = {
 };
 
 export type DocumentSessionWebviewAdapter = {
+  readCurrentText(): DocumentText | null;
   start(message: InitMessage): void;
   accept(message: HostToWebviewMessage): boolean;
   localDraftChanged(change: string | DocumentTextEdit): void;
@@ -123,6 +124,7 @@ export function createDocumentSessionWebviewAdapter(
   };
 
   return {
+    readCurrentText: () => disposed ? null : runtime.currentText(),
     start(message) {
       if (started || disposed) return;
       started = true;

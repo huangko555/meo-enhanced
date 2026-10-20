@@ -1,7 +1,7 @@
 import { ChangeSet, Text } from '@codemirror/state';
-import { readDocumentTextProjection } from '../application/documentTextProjection';
+import { readDocumentTextProjection, rememberDocumentTextProjection } from '../application/documentTextProjection';
 import { normalizeDocumentText } from '../../../src/foundation/documentText';
-import type { DocumentTextEdit, DocumentTextSnapshot } from '../../../src/foundation/documentSnapshot';
+import type { DocumentText, DocumentTextEdit, DocumentTextSnapshot } from '../../../src/foundation/documentSnapshot';
 
 const snapshots = new WeakMap<Text, CodeMirrorDocumentSnapshot>();
 
@@ -26,7 +26,15 @@ export function documentSnapshot(text: Text): DocumentTextSnapshot {
 }
 
 export function documentSnapshotFromString(text: string): DocumentTextSnapshot {
-  return documentSnapshot(Text.of(normalizeDocumentText(text).split('\n')));
+  const normalized = normalizeDocumentText(text);
+  const value = Text.of(normalized.split('\n'));
+  rememberDocumentTextProjection(value, normalized);
+  return documentSnapshot(value);
+}
+
+/** Preserve the native persistent tree at the Editor/session boundary. */
+export function codeMirrorDocumentText(text: DocumentText): Text | string {
+  return text instanceof CodeMirrorDocumentSnapshot ? text.value : typeof text === 'string' ? text : text.toString();
 }
 
 class CodeMirrorDocumentEdit implements DocumentTextEdit {
