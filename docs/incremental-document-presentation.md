@@ -917,3 +917,53 @@ Its real trusted-click and exact-source assertions remain intact. A separate
 four-times-CPU-throttled diagnostic passes sixteen CDP compositions over eight
 Source/Live cycles. This does not explain every earlier transient composition
 failure and is not a Windows candidate-window measurement.
+
+### Native V52 follow-up and structural reads (2026-10-20)
+
+V52 (`63023c66`, archive SHA-256
+`8019ac841c450e9da3e9715eb5f6655476bb95f5afd994f9ab91229164228f70`)
+passes all sixteen distributed Source/Live clicks in its full rich-document run.
+Warm Source input median/P95/maximum is 40/66/86 ms and Live is 62/207/265 ms.
+The run stops after Preview has rendered, while waiting for Back to top to stay
+at the document boundary. Preview entry is 4.41 s, including a 3.10 s render
+response. No full acceptance is claimed. An independent instrumented Preview-only
+run passes its four drags, which does not explain the preceding mode/edit sequence.
+
+Independent cold input remains slow: Source median/P95/maximum is 34/234/330 ms,
+with a 344 ms frame gap and 46 ms click; Live is 73/425/543 ms, with a 440 ms gap
+and 153 ms click. Both retain exact source, undo/save and clock checks. CPU
+profiling is a separate diagnostic, not another latency acceptance sample.
+The matching source maps require executable byte/column equivalence against
+the extracted V52 package, normalizing only fixed-width Bun chunk references.
+
+A deterministic Preview round trip reproduces leading whitespace loss: at
+scrollTop 0 or 8, a passive layout preservation moves to 48. Source mapping now
+retains the leading reading margin just as it retains whitespace between mapped
+blocks. The unchanged window/search/navigation suite passes the new assertion.
+This is a confirmed boundary error; the entire native Back to top timeout still
+requires a full-sequence recheck.
+
+The cold Live profile also identifies repeated synchronous syntax advancement in
+the HTML input guard. Markdown structure can already be complete while embedded
+grammars remain pending; a new worker revision cannot arrive during a synchronous
+parse call. Structural consumers now read the exact completed worker tree before
+requesting foreground parser work, and retain the published projection while the
+worker is pending. The HTML guard uses this shared seam with its original caret
+endpoint on ordinary synchronous documents. It does not widen normal-document
+input parsing to the document end.
+
+The real CSP-worker regression now instruments synchronous parser requests while
+holding replies during ten paced native characters. Before the fix it observes
+multiple 50 ms requests; after the fix it requires none above the existing 8 ms
+slice while preserving immediate text, queued presentation, exact grouped undo,
+global facts and disposal/error handling. All 31 existing worker jobs pass.
+
+Type checks, production build and eleven targeted suites pass, covering shared
+structure, input scheduling/budgets, HTML, IME, cursor navigation, parser reuse,
+three-mode unsaved source, reading-position persistence and Preview preset
+position. The separate Preview viewport suite also passes its new leading-margin
+assertions and existing scrolling/search/resource checks. Source-side Preview's
+complex table transition still fails its absolute anchor assertion, at about
+-91 px. An otherwise unchanged `63023c66` build reproduces that same assertion
+with these structural-read and leading-margin changes removed. The regression
+is retained as an open mode-coordination issue; no test assertion is relaxed.

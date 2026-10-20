@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { launchTestBrowser, closeTestBrowser } from './browser-test-helpers';
+import { syntaxParsingBuildPlugin } from './test-editor-syntax-parsing-build';
 
 const build = await Bun.build({ entrypoints: ['scripts/test-live-decoration-history-entry.ts'], target: 'browser', format: 'iife',
   plugins: [{ name: 'observe-foreground-outer-parse', setup(builder) {
@@ -61,7 +62,7 @@ const build = await Bun.build({ entrypoints: ['scripts/test-live-decoration-hist
         + 'if(this.input.length>100000&&this.ranges[0].from===0&&this.ranges.at(-1).to===this.input.length)'
         + 'globalThis.__foregroundLargeMarkdownAdvances=(globalThis.__foregroundLargeMarkdownAdvances??0)+1;') };
     });
-  } }] });
+  } }, syntaxParsingBuildPlugin()] });
 assert.ok(build.success, build.logs.map(String).join('\n'));
 const bundle = await build.outputs[0]!.text();
 const workerBuild = await Bun.build({ entrypoints: ['webview/src/markdownParseWorker.ts'], target: 'browser', format: 'iife',
@@ -282,15 +283,18 @@ try {
     scope.__beforeDelayed = scope.__editor.getText();
     scope.__editor.view.dispatch({ selection: { anchor: 4 } });
     scope.__editor.view.focus(); scope.__holdParseReplies = true;
+    scope.__meoSyntaxParseCalls = [];
   });
   await page.keyboard.type('nativepace', { delay: 40 });
   await new Promise(resolve => setTimeout(resolve, 650));
   const held = await page.evaluate(() => {
     const scope = window as any;
     return { replies: scope.__heldParseReplies?.length ?? 0, pending: scope.__liveHistory.pending(scope.__editor),
-      published: scope.__liveHistory.markdownReady(scope.__editor), exact: scope.__editor.getText() === 'EDITnativepace' + scope.__beforeDelayed.slice(4) };
+      published: scope.__liveHistory.markdownReady(scope.__editor), exact: scope.__editor.getText() === 'EDITnativepace' + scope.__beforeDelayed.slice(4),
+      blockingParses: scope.__meoSyntaxParseCalls.filter((call: any) => call.timeout > 8) };
   });
   assert.ok(held.replies > 0 && held.exact && !held.published);
+  assert.deepEqual(held.blockingParses, [], 'native input must not synchronously wait for pending background Markdown or unrelated embedded grammars');
   assert.ok(held.pending, 'Live must not commit a full presentation refresh against the pending outer placeholder');
   await page.evaluate(() => {
     const scope = window as any; scope.__holdParseReplies = false;

@@ -247,6 +247,13 @@ export function isBackgroundMarkdownPreparationPending(state: EditorState): bool
   return !!backend && usesLargeDocumentDerivedWorkBudget(state) && !backend.read(state.doc).tree;
 }
 
+/** Markdown semantics do not depend on publishing every embedded language.
+ * The receiver already validated this tree against the exact document revision. */
+export function completedBackgroundMarkdownStructure(state: EditorState): Tree | undefined {
+  const backend = state.facet(runtime);
+  return backend && usesLargeDocumentDerivedWorkBudget(state) ? backend.read(state.doc).tree : undefined;
+}
+
 export function markdownMixedFragments(state: EditorState, fallback: readonly TreeFragment[]): readonly TreeFragment[] {
   return state.facet(runtime)?.mixed(state.doc, fallback) ?? fallback;
 }

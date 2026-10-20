@@ -247,6 +247,25 @@ try {
   });
   assert.ok(await page.evaluate(() => (window as any).__previewMessages.some((message: any) => message.type === 'requestPreviewRender' && message.window)),
     'large production Preview must request a reading window');
+  stage = 'reading window preserves leading whitespace';
+  const leadingWhitespace = await page.evaluate(() => {
+    const controller = (window as any).__previewController;
+    const doc = controller.host.querySelector('iframe').contentDocument;
+    const scroll = doc.scrollingElement;
+    scroll.scrollTop = 0;
+    const first = doc.querySelector('[data-source-line]');
+    const padding = first.getBoundingClientRect().top;
+    const positions = [0, Math.min(8, padding / 2)].map(top => {
+      scroll.scrollTop = top;
+      const before = scroll.scrollTop;
+      controller.getOutlineAdapter().preserveViewportLayout(() => {});
+      return { before, after: scroll.scrollTop };
+    });
+    return { padding, positions };
+  });
+  assert.ok(leadingWhitespace.padding > 2, 'the production fixture must expose its leading reading margin');
+  for (const position of leadingWhitespace.positions) assert.ok(Math.abs(position.after - position.before) <= 1,
+    `a passive layout round trip must preserve document-top whitespace: ${JSON.stringify(leadingWhitespace)}`);
   const productionHeadings = await page.evaluate(() => (window as any).__previewController.getOutlineAdapter().getHeadings());
   assert.equal(productionHeadings.at(-1).text, 'Complete tail', 'outline must include unmounted headings');
   await page.evaluate(() => (window as any).__previewController.getOutlineAdapter().scrollToLine(10003));

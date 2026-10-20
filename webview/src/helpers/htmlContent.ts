@@ -11,7 +11,6 @@ import {
   type DecorationSet
 } from '@codemirror/view';
 import type { SyntaxNodeRef, Tree } from '@lezer/common';
-import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { parseDocument } from 'htmlparser2';
 import type { ChildNode } from 'domhandler';
 import { createElement, AlertTriangle, Code2, Eye } from 'lucide';
@@ -27,7 +26,7 @@ import {
 } from '../../../src/shared/htmlPolicy';
 import { createOpenLinkButton } from './linkOpenButton';
 import { isPrimaryModifierPointerClick } from './linkNavigation';
-import { resolvedSyntaxTree } from './markdownSyntax';
+import { resolvedSyntaxTree, resolvedSyntaxTreeAt } from './markdownSyntax';
 import { indexSourceRanges } from './sourceRangeIndex';
 import { getViewportController } from './viewportController';
 import { ImageWidget } from './images';
@@ -818,7 +817,7 @@ function revealHtmlSourceForInput(view: EditorView, target: EventTarget | null):
   const selection = view.state.selection.main;
   // Native key/beforeinput guards only need the block containing this caret.
   // Do not parse or discover unrelated suffix blocks on each input state.
-  const tree = ensureSyntaxTree(view.state, selection.to, 50) ?? syntaxTree(view.state);
+  const tree = resolvedSyntaxTreeAt(view.state, selection.to);
   const block = collectRenderableHtmlBlocks(view.state, tree, selection).find((block) => (
     selection.from >= block.from && selection.to <= block.to
   ));

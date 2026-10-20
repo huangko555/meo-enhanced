@@ -3071,6 +3071,17 @@ export function createPreviewController({
     }
     const viewportTop = scrollElement?.scrollTop ?? 0;
     const viewportAnchor = viewportTop + boundedViewportOffset;
+    const first = entries[0];
+    if (boundedViewportOffset === 0 && viewportAnchor < first.top) {
+      // The leading page margin is part of the current reading position. A
+      // passive layout update must not align the first heading to the frame top.
+      return {
+        topLine: first.start,
+        topLineOffset: 0,
+        editorLineOffset: 0,
+        viewportOffset: first.top - viewportTop
+      };
+    }
     let low = 0;
     let high = entries.length - 1;
     while (low <= high) {
