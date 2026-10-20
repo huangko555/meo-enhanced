@@ -6,6 +6,7 @@ import { createMermaidDiagramRenderPool } from '../webview/src/editor/mermaidDia
 import { initializeMermaidEditorRuntime, renderMermaidRuntime } from '../webview/src/helpers/mermaidDiagram';
 import { createPreviewScrollRange } from '../webview/src/helpers/previewScrollRange';
 import { createPreviewViewport } from '../webview/src/helpers/previewViewport';
+import { initializeImageHandling, settleImageSrcRequest } from '../webview/src/helpers/images';
 
 // Resolving both export palettes must not change the active Preview theme.
 const palette = createCodePaletteWebviewAdapter({ setShikiTheme() {} });
@@ -14,6 +15,7 @@ const controller = createPreviewController({
   vscode: { postMessage(message) { messages.push(message); scope.__previewHostMessage?.(message); } },
   uiLanguage: 'en',
   getEditorAppearance: () => 'dark',
+  getImageIntrinsicSize: src => (window as any).__previewImageSizes?.[src] ?? null,
   getCodePalette: appearance => palette.resolve(undefined, appearance).preview,
   applyCodeTheme: appearance => setShikiTheme(palette.resolve(undefined, appearance).sourceTheme, 'preview'),
   mermaidRenderResources: createMermaidDiagramRenderPool({
@@ -33,10 +35,14 @@ const scope = window as typeof window & {
   __previewInteractionCount?: number;
   __createPreviewScrollRange: typeof createPreviewScrollRange;
   __createPreviewViewport: typeof createPreviewViewport;
+  __initializeImageHandling: typeof initializeImageHandling;
+  __settleImageSrcRequest: typeof settleImageSrcRequest;
 };
 scope.__previewController = controller;
 scope.__previewMessages = messages;
 scope.__writePreviewFrame = writePreviewFrame;
 scope.__createPreviewScrollRange = createPreviewScrollRange;
 scope.__createPreviewViewport = createPreviewViewport;
+scope.__initializeImageHandling = initializeImageHandling;
+scope.__settleImageSrcRequest = settleImageSrcRequest;
 document.body.append(controller.host);

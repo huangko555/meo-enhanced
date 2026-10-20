@@ -20,6 +20,7 @@ export type ImagePresentationFactory = {
   acquire(): () => void;
   preload(rawSrc: string): Promise<void>;
   getIntrinsicSize(rawSrc: string): { width: number; height: number } | null;
+  seedIntrinsicSizes(entries: readonly import('../../../src/foundation/imageDimensions').ImageIntrinsicSize[]): void;
   create(view: ImagePresentationView): ImagePresentationHandle;
   whenVisiblePresentationsSettle(signal?: AbortSignal): Promise<void>;
   externalDocumentPresented(): void;

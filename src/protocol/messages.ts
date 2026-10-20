@@ -1,4 +1,5 @@
 import { decodePreviewFontsRequest, decodePreviewFontsResponse, type PreviewFontsRequest, type PreviewFontsResponse } from './previewFonts';
+import { decodeImageIntrinsicSizesEvent, type ImageIntrinsicSizesEvent } from './imageDimensions';
 import { decodeEditorServiceRequest, decodeEditorServiceResponse, type EditorServiceRequest, type EditorServiceResponse } from './editorServices';
 import { decodeSaveDocumentCopyRequest, decodeDocumentCopyResponse, type SaveDocumentCopyRequest, type DocumentCopyResponse } from './documentCopy';
 import { decodeSaveDocumentAsRequest, decodeDocumentSaveAsResponse, type SaveDocumentAsRequest, type DocumentSaveAsResponse } from './documentSaveAs';
@@ -52,6 +53,7 @@ export type WebviewToHostMessage =
   | ExportSnapshotResponse;
 
 export type HostToWebviewMessage =
+  | ImageIntrinsicSizesEvent
   | PreviewFontsResponse
   | WebviewVisibilityResponse
   | UiColorsResult
@@ -109,6 +111,8 @@ export function decodeWebviewToHostMessage(value: unknown): WebviewToHostMessage
 }
 
 export function decodeHostToWebviewMessage(value: unknown): HostToWebviewMessage | null {
+  const imageDimensions = decodeImageIntrinsicSizesEvent(value);
+  if (imageDimensions) return imageDimensions;
   if (value && typeof value === 'object' && 'type' in value && value.type === 'openPreviewPresetSettings') return { type: 'openPreviewPresetSettings' };
   return decodePreviewFontsResponse(value)
     ?? decodeWebviewVisibilityResponse(value)

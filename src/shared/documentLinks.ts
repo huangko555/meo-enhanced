@@ -253,8 +253,12 @@ export async function resolveWebviewImageSrc(
   return readImageAsDataUri(imageUri);
 }
 
-export function collectWebviewImageResourceRoots(documentText: string, documentUri: vscode.Uri): vscode.Uri[] {
+export function collectWebviewImageResources(documentText: string, documentUri: vscode.Uri): {
+  roots: vscode.Uri[];
+  localImages: { src: string; filePath: string }[];
+} {
   const roots = new Map<string, vscode.Uri>();
+  const localImages: { src: string; filePath: string }[] = [];
   markdownParser.parse(documentText).iterate({
     enter(node) {
       if (node.name !== 'Image') {
@@ -264,8 +268,10 @@ export function collectWebviewImageResourceRoots(documentText: string, documentU
       if (!urlNode) {
         return false;
       }
-      const imageUri = resolveLocalImageUri(documentText.slice(urlNode.from, urlNode.to), documentUri);
+      const src = documentText.slice(urlNode.from, urlNode.to);
+      const imageUri = resolveLocalImageUri(src, documentUri);
       if (imageUri) {
+        if (imageUri.scheme === 'file') localImages.push({ src, filePath: imageUri.fsPath });
         const resourceRoot = imageUri.scheme === 'file'
           ? vscode.Uri.file(path.dirname(imageUri.fsPath))
           : imageUri.with({ path: path.posix.dirname(imageUri.path), query: '', fragment: '' });
@@ -274,7 +280,11 @@ export function collectWebviewImageResourceRoots(documentText: string, documentU
       return false;
     }
   });
-  return Array.from(roots.values());
+  return { roots: Array.from(roots.values()), localImages };
+}
+
+export function collectWebviewImageResourceRoots(documentText: string, documentUri: vscode.Uri): vscode.Uri[] {
+  return collectWebviewImageResources(documentText, documentUri).roots;
 }
 
 function resolveLocalImageUri(rawUrl: string, documentUri: vscode.Uri): vscode.Uri | null {

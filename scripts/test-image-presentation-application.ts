@@ -262,4 +262,17 @@ for (const projectedPhase of ['none', 'fallback', 'ready', 'error'] as const) {
   assert.equal(failure.getState().projection, null);
 }
 
+const metadata = createImagePresentationApplication();
+const first = metadata.dispatch({ type: 'present', sourceKey: 'picture', rawSrc: './picture.png' });
+acknowledgeAll(metadata);
+const beforeMetadata = metadata.getState().current;
+const geometry = metadata.dispatch({ type: 'intrinsicSizeChanged' });
+assert.equal(geometry.length, 1);
+assert.equal(geometry[0]?.type, 'showFallback', 'late dimensions must update the existing placeholder');
+assert.deepEqual(metadata.getState().current, beforeMetadata, 'metadata must not restart in-flight resource work');
+assert.equal(first.filter(effect => effect.type === 'resolveSource').length, 1);
+loadCurrent(metadata, 'resolved:picture');
+acknowledgeAll(metadata);
+assert.deepEqual(metadata.dispatch({ type: 'intrinsicSizeChanged' }), [], 'metadata cannot replace a decoded image');
+
 console.log('image presentation application command/ack state matrix passed');

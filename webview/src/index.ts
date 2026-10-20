@@ -44,6 +44,7 @@ import { createEditorNoticeController } from './helpers/notices';
 import { createDocumentCopyTransport } from './adapters/documentCopyTransport';
 import { createDocumentSaveAsTransport } from './adapters/documentSaveAsTransport';
 import { createPreviewController } from './helpers/preview';
+import { IMAGE_INTRINSIC_SIZE_LIMIT, imageDimensionSourceKey, type ImageIntrinsicSize } from '../../src/foundation/imageDimensions';
 import type { ViewportAnchorToken } from './helpers/viewportController';
 import { createDocumentScrollToTopController } from './helpers/scrollToTop';
 import { createSegmentedControl } from './adapters/segmentedControl';
@@ -1748,7 +1749,19 @@ const waitForInitialPreviewPaint = (): Promise<void> => {
 };
 let previewViewportInteractionGeneration = 0;
 const previewFontsTransport = createPreviewFontsTransport(request => vscode.postMessage(request));
+let imageDimensionDocumentId: string | null = null;
+const imageIntrinsicSizes = new Map<string, ImageIntrinsicSize>();
+const acceptImageIntrinsicSizes = (entries: readonly ImageIntrinsicSize[]) => {
+  for (const entry of entries) {
+    const key = imageDimensionSourceKey(entry.src);
+    imageIntrinsicSizes.delete(key);
+    imageIntrinsicSizes.set(key, entry);
+    if (imageIntrinsicSizes.size > IMAGE_INTRINSIC_SIZE_LIMIT) imageIntrinsicSizes.delete(imageIntrinsicSizes.keys().next().value!);
+  }
+  editor?.setImageIntrinsicSizes(entries);
+};
 const previewController = createPreviewController({
+  getImageIntrinsicSize: src => imageIntrinsicSizes.get(imageDimensionSourceKey(src)) ?? null,
   requestFonts: previewFontsTransport.request,
   vscode,
   optionsMenu: previewOptionsPanel,
@@ -2944,6 +2957,7 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     initialLongCodeBlockFolding: longCodeBlockFoldingEnabled,
     initialTableStickyHeaderEnabled: tableStickyHeaderEnabled,
     initialDiagnostics: pendingDiagnostics,
+    initialImageIntrinsicSizes: [...imageIntrinsicSizes.values()],
     onApplyTransaction: handleLocalEditorChange,
     onOpenLink: (href: string) => vscode.postMessage({ type: 'openLink', href }),
     onCommentBlocked: () => editorNotice.setEditorNotice(activeUiStrings.commentSelectionBlocked),
@@ -3291,6 +3305,8 @@ editorModeRuntime = createEditorModeRuntime(
 );
 
 const handleInit = (message: InitMessage) => {
+  imageDimensionDocumentId = message.documentId;
+  acceptImageIntrinsicSizes(message.imageIntrinsicSizes ?? []);
   acceptEditingPreferences(message.editingPreferences, message.editingPreferencesRevision ?? 0);
   activeUiLanguagePreference = message.uiLanguagePreference;
   automaticUiLanguage = message.automaticUiLanguage;
@@ -3536,6 +3552,10 @@ window.addEventListener('message', (event) => {
     return;
   }
 
+  if (message.type === 'imageIntrinsicSizes') {
+    if (message.documentId === imageDimensionDocumentId) acceptImageIntrinsicSizes(message.entries);
+    return;
+  }
   if (message.type === 'init') {
     // Host retries must not reset a mode change or an in-flight Preview render.
     if (initReceived) return;

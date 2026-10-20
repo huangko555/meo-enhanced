@@ -5428,7 +5428,8 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   line-height: normal;
 }
 
-.cm-editor .meo-md-image-img {
+.cm-editor .meo-md-image-img,
+.cm-editor .meo-md-image-size-placeholder {
   display: block;
   width: auto;
   max-width: 100%;

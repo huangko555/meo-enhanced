@@ -55,6 +55,7 @@ export type ImagePresentationInput =
       readonly commandId: number;
     }
   | { readonly type: 'externalDocumentPresented' }
+  | { readonly type: 'intrinsicSizeChanged' }
   | { readonly type: 'dispose' };
 
 export type ImagePresentationEffect =
@@ -271,6 +272,12 @@ export function createImagePresentationApplication(): ImagePresentationApplicati
     if (lifecycle === 'disposed') return [];
 
     switch (input.type) {
+      case 'intrinsicSizeChanged':
+        if (!current || current.phase === 'ready' || projected.phase === 'ready') return [];
+        // Reproject geometry without restarting URL resolution or decoding.
+        projected = { phase: 'none' };
+        projection = null;
+        return requestRequiredProjection();
       case 'present':
         return beginPresentation(input.sourceKey, input.rawSrc);
       case 'sourceResolved': {

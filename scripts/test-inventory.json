@@ -1,5 +1,15 @@
 {
   "separate": {
+    "scripts/test-preview-image-layout.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-preview-image-layout.ts",
+      "reason": "Actual Preview iframe reserves known natural image geometry before delayed decoding, preserves authored HTML dimensions and keeps following text stable."
+    },
+    "scripts/test-image-dimensions.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-image-dimensions.ts",
+      "reason": "Bounded asynchronous local image header catalog, aliases, invalid files, disposal and dimension metadata protocol validation. First-arrival DOM geometry uses test-image-layout."
+    },
     "scripts/test-mermaid-elk-layout.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-mermaid-elk-layout.ts",

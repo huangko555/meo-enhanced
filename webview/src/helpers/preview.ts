@@ -59,6 +59,7 @@ type PreviewControllerOptions = {
   getEditorAppearance: () => 'light' | 'dark';
   /** Compares LF-normalized presentation text with the current Draft. */
   isCurrentText?: (text: string) => boolean;
+  getImageIntrinsicSize?: (src: string) => { width: number; height: number } | null;
   getCodePalette: (appearance: 'light' | 'dark') => PreviewCodePalette;
   applyCodeTheme: (appearance: 'light' | 'dark') => void;
   onPresetPreferencesChanged?: () => void;
@@ -764,6 +765,7 @@ export function createPreviewController({
   uiLanguage: initialUiLanguage,
   getEditorAppearance,
   isCurrentText,
+  getImageIntrinsicSize,
   getCodePalette,
   applyCodeTheme,
   onPresetPreferencesChanged,
@@ -1539,6 +1541,21 @@ export function createPreviewController({
     const images = Array.from(frameDocument.querySelectorAll<HTMLImageElement>(
       'img[data-meo-deferred-image-src]'
     ));
+    const headerGeometry = new WeakMap<HTMLImageElement, { width: number; height: number; aspectRatio: string; seededDimensions: boolean }>();
+    for (const image of images) {
+      // Keep authored HTML/Wiki dimensions and styles. A known natural ratio
+      // can also stabilize HTML's width/height under the preview's height:auto.
+      if (image.hasAttribute('style')) continue;
+      const size = getImageIntrinsicSize?.(image.getAttribute('data-meo-deferred-image-src') ?? '');
+      if (size) {
+        const seededDimensions = !image.hasAttribute('width') && !image.hasAttribute('height');
+        if (seededDimensions) { image.width = size.width; image.height = size.height; }
+        // Preview initially uses a transparent 1px source, whose intrinsic
+        // ratio would otherwise override width/height's automatic ratio.
+        image.style.aspectRatio = `${size.width} / ${size.height}`;
+        headerGeometry.set(image, { width: image.width, height: image.height, aspectRatio: image.style.aspectRatio, seededDimensions });
+      }
+    }
     const loadImage = async (image: HTMLImageElement) => {
       const rawSrc = image.getAttribute('data-meo-deferred-image-src') ?? '';
       image.removeAttribute('data-meo-deferred-image-src');
@@ -1586,6 +1603,13 @@ export function createPreviewController({
       }
       for (const attribute of Array.from(image.attributes)) {
         if (attribute.name !== 'src') prepared.setAttribute(attribute.name, attribute.value);
+      }
+      const header = headerGeometry.get(image);
+      if (header && prepared.naturalWidth > 0 && prepared.naturalHeight > 0
+        && image.width === header.width && image.height === header.height
+        && image.style.aspectRatio === header.aspectRatio) {
+        if (header.seededDimensions) { prepared.width = prepared.naturalWidth; prepared.height = prepared.naturalHeight; }
+        prepared.style.removeProperty('aspect-ratio');
       }
       enqueueCommit(() => {
         image.replaceWith(prepared);

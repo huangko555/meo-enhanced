@@ -2,6 +2,7 @@ import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as vscode from 'vscode';
 import { createBackgroundPreviewRenderer } from './host/previewRenderWorker';
+import { createImageDimensionCatalog } from './host/imageDimensions';
 import { assessLargeDocument } from './foundation/largeDocument';
 import { disposeWikiResources, resolveDocumentWikiResources } from './host/wikiResources';
 import type { ResolvedWikiResources } from './foundation/wikiReference';
@@ -77,7 +78,7 @@ import {
   type AppearanceSettingsStore
 } from './host/appearanceSettings';
 import {
-  collectWebviewImageResourceRoots,
+  collectWebviewImageResources,
   getDocumentFragmentHref,
   resolveImageSearchRoots,
   resolveLocalLinkTargetUri
@@ -618,10 +619,12 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     const documentUri = resolveWorktreeUri(document);
     const distRoot = vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist');
     const developmentStylesRoot = vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'src');
+    const imageResources = collectWebviewImageResources(document.getText(), documentUri);
+    const imageDimensions = createImageDimensionCatalog(imageResources.localImages);
     panel.webview.options = {
       enableScripts: true,
       localResourceRoots: [
-        ...collectLocalResourceRoots(distRoot, documentUri, document.getText()),
+        ...collectLocalResourceRoots(distRoot, documentUri, imageResources.roots),
         ...(this.context.extensionMode === vscode.ExtensionMode.Development ? [developmentStylesRoot] : [])
       ]
     };
@@ -630,6 +633,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       panel,
       document,
       documentUri,
+      imageDimensions,
       context: this.context,
       editingPreferences: this.editingPreferences,
       imageStorage: this.imageStorage,
@@ -1154,7 +1158,7 @@ function unwrapExportRuntimeModule(mod: unknown): ExportRuntimeModule {
   throw new Error('Loaded export runtime does not expose the expected export functions.');
 }
 
-function collectLocalResourceRoots(distRoot: vscode.Uri, documentUri: vscode.Uri, documentText: string): vscode.Uri[] {
+function collectLocalResourceRoots(distRoot: vscode.Uri, documentUri: vscode.Uri, imageRoots: readonly vscode.Uri[]): vscode.Uri[] {
   const roots = new Map<string, vscode.Uri>();
   roots.set(distRoot.toString(), distRoot);
 
@@ -1165,7 +1169,7 @@ function collectLocalResourceRoots(distRoot: vscode.Uri, documentUri: vscode.Uri
     roots.set(folder.uri.toString(), folder.uri);
   }
 
-  for (const imageUri of collectWebviewImageResourceRoots(documentText, documentUri)) {
+  for (const imageUri of imageRoots) {
     roots.set(imageUri.toString(), imageUri);
   }
 

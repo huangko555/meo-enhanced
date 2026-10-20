@@ -27,6 +27,10 @@ let colors: UiColors = { light: {}, dark: { accent: '#2277CC' } };
 let failColors = false;
 let concurrentColors: UiColors | undefined;
 let releaseDiskRead: (() => void) | undefined;
+let releaseImageHeaders!: () => void;
+const imageHeaders = new Promise<void>(resolve => { releaseImageHeaders = resolve; });
+let imageHeadersDisposed = false;
+const dimensions = [{ src: 'picture.png', width: 640, height: 360 }];
 const diskRead = new Promise<void>((resolve) => { releaseDiskRead = resolve; });
 const panel = {
   active: true,
@@ -49,6 +53,7 @@ const controller = createPanelSessionController(createPanelSessionControllerPara
   }),
   readDiskText: () => document.text,
   overrides: {
+    imageDimensions: { snapshot: () => dimensions, ready: imageHeaders, dispose: () => { imageHeadersDisposed = true; } },
     getUiColors: () => colors,
     setUiColors: async (next: UiColors) => {
       if (failColors) throw new Error('fixture color write failure');
@@ -82,6 +87,11 @@ await controller.handleMessage({ type: 'ready' });
 const initMessages = messages.filter((message) => message.type === 'init');
 assert.equal(initMessages.length, 2, 'a later ready must retry an init lost during Webview startup');
 assert.equal(initMessages[0]?.mode, 'preview');
+assert.deepEqual(initMessages[0]?.imageIntrinsicSizes, dimensions, 'available headers travel with Init without waiting for the catalog');
+releaseImageHeaders();
+await Bun.sleep(0);
+assert.ok(messages.some(message => message.type === 'imageIntrinsicSizes' && message.documentId === document.uri.toString()),
+  'completed headers must publish after Init with document correlation');
 assert.deepEqual(initMessages[0]?.uiColors, colors, 'initial handshake includes saved UI color profiles');
 assert.equal(initMessages[0]?.text, '# Preview startup\n\nBody', 'initial Markdown must use the Webview editor line endings');
 for (const message of initMessages) {
@@ -104,6 +114,7 @@ failColors = false; concurrentColors = { light: {}, dark: { accent: '#5588CC' } 
 await controller.handleMessage({ type: 'updateUiColors', requestId: 'color-concurrent', colors: requestedColors });
 assert.deepEqual(messages.at(-2), { type: 'uiColorsChanged', colors: concurrentColors }, 'delivery reads the latest owner snapshot instead of an earlier save result');
 controller.dispose();
+assert.equal(imageHeadersDisposed, true, 'disposing the panel must retire pending header reads');
 
 const refreshedMessages: Array<Record<string, unknown>> = [];
 let refresh: (() => void) | undefined;

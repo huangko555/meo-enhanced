@@ -1017,3 +1017,48 @@ and 1,637-step incremental code reuse, and rejects a corrupted index while Sourc
 remains editable with exact text. A deliberate fallback control records 33 global
 main-thread scans and fails that same assertion. No native latency improvement
 is claimed before the new installation package is measured.
+
+V54 (`5707bd62`, archive SHA-256
+`a98374bbd2a4eabb8ccb6afe070150c98e03df0cbda2066b3d3ac0ae140ebb1a`)
+records cold Source input median/P95/maximum 38/96/125 ms, click 34 ms and
+270 ms maximum frame gap. Cold Live is 70/213/252 ms, click 136 ms and 222 ms
+maximum gap. These samples still miss the tighter Live and scrolling goals.
+The full native flow fails a strict image-caption click: the selected portrait
+caption is followed by a caret in the AVIF caption. Its sixteen-click diagnostic
+repeat passes, so that repeat is not functional or latency acceptance. Passive
+frames retain approximately 20 px text fallbacks while their real images need
+larger boxes. This establishes an avoidable layout risk, not proof that every
+intermittent caption mismatch has the same cause.
+
+### Reserve known image geometry before first decoding
+
+The extension reuses its initial local-image resource traversal to start a
+bounded header catalog while webview assets load. At most 512 source aliases,
+four concurrent local reads and 64 KiB per header are admitted. No pixels or
+remote resources are decoded in the host, and Init does not wait for the catalog.
+Available dimensions travel with Init; one document-correlated completion batch
+can seed later hints. Disposal retires queued work and late publications.
+Unsupported, missing, oversized and incomplete headers keep ordinary loading.
+This initial catalog covers direct local Markdown image destinations; remote,
+Wiki-only, HTML-only and later-inserted resources still use the existing loading
+path unless their dimensions are already known from decoding.
+
+The editor pool retains bounded raw-source hints across mode round trips, with
+decoded browser dimensions taking priority and explicit resource invalidation
+retiring hints. Late metadata reprojects loading placeholders without restarting
+resolution or decoding. Live placeholders and real image clones share one sizing
+function, including Wiki authored width/height and the existing 240 px constraint.
+Preview reserves the known natural ratio while its transparent 1px source is
+visible, preserves authored attributes/styles, and hands sizing back to decoded
+natural dimensions when ready.
+
+The first-arrival regression is red before this change (16 px placeholder versus
+240 px required height), then verifies <=1 px image/following-text movement across
+decoding. Additional cases cover late metadata, one shared in-flight resolution,
+Wiki width and width/height, and actual Preview iframe decoding with authored
+HTML dimensions. Header bounds/disposal, protocol validation, pool invalidation,
+presentation correlation, Source image lifecycle and Source-side Preview round
+trips pass. The broader image-presentation production suite still fails its
+pending-table-image setup on both the modified build and otherwise unchanged
+`5707bd62` control; its assertion is retained, with no legacy-baseline exception.
+Native remeasurement remains required before declaring the caption issue fixed.

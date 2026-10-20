@@ -1,4 +1,5 @@
 import { runEditorService } from '../host/editorServices';
+import type { createImageDimensionCatalog } from '../host/imageDimensions';
 import { onDidChangeWikiResources } from '../host/wikiResources';
 import { collectWikiReferences } from '../foundation/wikiReference';
 import * as path from 'node:path';
@@ -133,6 +134,7 @@ type PanelSessionControllerParams = {
   panel: vscode.WebviewPanel;
   document: vscode.TextDocument;
   documentUri: vscode.Uri;
+  imageDimensions?: ReturnType<typeof createImageDimensionCatalog>;
   context: vscode.ExtensionContext;
   imageStorage?: ReturnType<typeof createImageStorageHost>;
   editingPreferences?: ReturnType<typeof createEditingPreferencesHost>;
@@ -485,6 +487,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       previewPresetDiagnostics: params.getPreviewPresetDiagnostics?.() ?? [],
       disabledPreviewPresets: params.getDisabledPreviewPresets?.() ?? [],
       documentId: documentKey,
+      imageIntrinsicSizes: params.imageDimensions?.snapshot() ?? [],
       text: initialText,
       version: document.version,
       savedRevision,
@@ -528,7 +531,13 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       outlineWidth: getOutlineWidth(context),
       vscodeTheme: getCurrentVscodeCodeTheme(),
     };
-    return postToWebview(message);
+    const posted = await postToWebview(message);
+    if (posted && params.imageDimensions) {
+      void params.imageDimensions.ready.then(() => {
+        if (!disposed) return postToWebview({ type: 'imageIntrinsicSizes', documentId: documentKey, entries: params.imageDimensions!.snapshot() });
+      });
+    }
+    return posted;
   };
 
   const sendDiagnosticsChanged = async (): Promise<boolean> => {
@@ -1223,6 +1232,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       return;
     }
     disposed = true;
+    params.imageDimensions?.dispose();
     wikiResourcesSubscription.dispose();
     viewNavigation.dispose();
     diffBaselineSelection.dispose();

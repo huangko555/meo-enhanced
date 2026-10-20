@@ -190,4 +190,23 @@ assert.equal(changedPool.getLoaded('document', 'new.png')?.src, 'new bytes');
 releaseChanged();
 changedPool.dispose();
 
+const hinted = createImagePresentationResourcePool({
+  resolveSource: async () => 'resolved:picture',
+  loadImage: async () => ({ naturalWidth: 800, naturalHeight: 400 } as HTMLImageElement)
+});
+hinted.seedIntrinsicSizes('document', [{ src: './a b.png', width: 640, height: 360 }]);
+assert.deepEqual(hinted.getIntrinsicSize('document', './a%20b.png'), { width: 640, height: 360 }, 'headers must work before URL resolution');
+assert.equal(hinted.getIntrinsicSize('other-document', './a b.png'), null, 'header hints must be document-scoped');
+const releaseHinted = hinted.acquire();
+await hinted.resolve('document', './a%20b.png');
+await hinted.load('document', 'resolved:picture');
+assert.deepEqual(hinted.getIntrinsicSize('document', './a%20b.png'), { width: 800, height: 400 }, 'decoded dimensions override header hints');
+releaseHinted();
+const releaseAgain = hinted.acquire();
+assert.deepEqual(hinted.getIntrinsicSize('document', './a b.png'), { width: 640, height: 360 }, 'mode round-trips retain bounded header hints');
+hinted.invalidateResource('document', './a b.png', null);
+assert.equal(hinted.getIntrinsicSize('document', './a b.png'), null, 'resource changes must retire old header hints');
+releaseAgain();
+hinted.dispose();
+
 console.log('image presentation resource pool contracts passed');

@@ -5,6 +5,7 @@ import type {
   ImagePresentationEffectExecutor,
   ImagePresentationInput
 } from '../application/imagePresentation';
+import { IMAGE_INTRINSIC_SIZE_LIMIT, imageDimensionSourceKey, type ImageIntrinsicSize } from '../../../src/foundation/imageDimensions';
 import { createImagePresentationApplication } from '../application/imagePresentation';
 import { createImagePresentationRuntime } from '../adapters/imagePresentationRuntime';
 import type {
@@ -38,6 +39,7 @@ export type ImagePresentationResourcePool = {
   load(contextKey: string, resolvedSrc: string): Promise<HTMLImageElement | null>;
   getLoaded(contextKey: string, resolvedSrc: string): HTMLImageElement | null;
   getIntrinsicSize(contextKey: string, rawSrc: string): { width: number; height: number } | null;
+  seedIntrinsicSizes(contextKey: string, entries: readonly ImageIntrinsicSize[]): void;
   dispose(): void;
 };
 
@@ -119,6 +121,7 @@ export function createImagePresentationResourcePool(
   const warmResolvedCache = new Map<string, string>();
   const warmLoadedCache = new Map<string, HTMLImageElement>();
   const intrinsicSizeCache = new Map<string, { width: number; height: number }>();
+  const headerSizeCache = new Map<string, { width: number; height: number }>();
 
   const createGeneration = (
     leases: readonly ImageResourceLease[] = []
@@ -342,6 +345,7 @@ export function createImagePresentationResourcePool(
       warmResolvedCache.clear();
       warmLoadedCache.clear();
       intrinsicSizeCache.clear();
+      headerSizeCache.clear();
       if (!generation) return;
       const activeLeases = [...generation.leases];
       releaseGeneration(generation, false);
@@ -351,6 +355,7 @@ export function createImagePresentationResourcePool(
       const generation = currentGeneration;
       if (disposed || !generation || generation.released) return;
       const resolutionKey = cacheKey(contextKey, rawSrc);
+      headerSizeCache.delete(cacheKey(contextKey, imageDimensionSourceKey(rawSrc)));
       const warmResolved = warmResolvedCache.get(resolutionKey);
       generation.resolvedCache.delete(resolutionKey);
       generation.resolutionInFlight.delete(resolutionKey);
@@ -387,11 +392,18 @@ export function createImagePresentationResourcePool(
       const resolutionKey = cacheKey(contextKey, rawSrc);
       const resolvedSrc = currentGeneration?.resolvedCache.get(resolutionKey)
         ?? warmResolvedCache.get(resolutionKey);
-      if (!resolvedSrc) return null;
-      const sizeKey = cacheKey(contextKey, resolvedSrc);
-      const size = intrinsicSizeCache.get(sizeKey) ?? null;
-      if (size) touch(intrinsicSizeCache, sizeKey, size);
-      return size;
+      if (resolvedSrc) {
+        const sizeKey = cacheKey(contextKey, resolvedSrc);
+        const size = intrinsicSizeCache.get(sizeKey);
+        if (size) { touch(intrinsicSizeCache, sizeKey, size); return size; }
+      }
+      return headerSizeCache.get(cacheKey(contextKey, imageDimensionSourceKey(rawSrc))) ?? null;
+    },
+    seedIntrinsicSizes(contextKey, entries) {
+      if (disposed) return;
+      for (const { src, width, height } of entries) {
+        setBounded(headerSizeCache, cacheKey(contextKey, imageDimensionSourceKey(src)), { width, height }, IMAGE_INTRINSIC_SIZE_LIMIT);
+      }
     },
     dispose() {
       if (disposed) return;
@@ -401,6 +413,7 @@ export function createImagePresentationResourcePool(
       warmResolvedCache.clear();
       warmLoadedCache.clear();
       intrinsicSizeCache.clear();
+      headerSizeCache.clear();
     }
   };
 }
@@ -548,6 +561,7 @@ export function createImagePresentationFactory(
   const handles = new Map<ImagePresentationHandle, {
     readonly view: ImagePresentationView;
     readonly runtime: ReturnType<typeof createImagePresentationRuntime>;
+    readonly application: ReturnType<typeof createImagePresentationApplication>;
   }>();
   const releaseResourceLeases = new Set<() => void>();
   const changedResources = new Set<string>();
@@ -615,7 +629,7 @@ export function createImagePresentationFactory(
         runtime.dispose();
       }
     };
-    handles.set(handle, { view, runtime });
+    handles.set(handle, { view, runtime, application });
     return handle;
   };
 
@@ -641,6 +655,20 @@ export function createImagePresentationFactory(
     },
     getIntrinsicSize(rawSrc) {
       return options.resources.getIntrinsicSize(options.resourceContextKey, rawSrc);
+    },
+    seedIntrinsicSizes(entries) {
+      if (disposed) return;
+      const changed = entries.filter(entry => {
+        const before = options.resources.getIntrinsicSize(options.resourceContextKey, entry.src);
+        return !before || before.width !== entry.width || before.height !== entry.height;
+      });
+      if (!changed.length) return;
+      options.resources.seedIntrinsicSizes(options.resourceContextKey, changed);
+      const sources = new Set(changed.map(entry => imageDimensionSourceKey(entry.src)));
+      for (const { application, runtime } of handles.values()) {
+        const current = application.getState().current;
+        if (current && sources.has(imageDimensionSourceKey(current.rawSrc))) runtime.dispatch({ type: 'intrinsicSizeChanged' });
+      }
     },
     create,
     async whenVisiblePresentationsSettle(signal) {

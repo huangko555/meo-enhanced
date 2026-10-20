@@ -256,6 +256,7 @@ type CreateEditorOptions = {
   initialInputAssistance?: InputAssistance;
   requestLinkCandidates?: (input: { kind: 'documents' | 'paths' | 'headings'; query: string; target: string; wiki?: boolean }) => Promise<readonly LinkCandidate[]>;
   initialDiagnostics?: readonly EditorDiagnostic[];
+  initialImageIntrinsicSizes?: readonly import('../../src/foundation/imageDimensions').ImageIntrinsicSize[];
   mermaidDiagramPresentationFactory: MermaidDiagramPresentationFactory;
   previewViewportSurface?: PreviewViewportSurface;
   uiLanguage?: UiLanguage;
@@ -409,6 +410,7 @@ export function createEditor({
   initialInputAssistance = defaultInputAssistance,
   requestLinkCandidates,
   initialDiagnostics = [],
+  initialImageIntrinsicSizes = [],
   mermaidDiagramPresentationFactory,
   previewViewportSurface,
   uiLanguage = 'en',
@@ -2398,6 +2400,7 @@ export function createEditor({
     resources: imagePresentationResourcePool,
     resourceContextKey: 'editor-document'
   });
+  imagePresentationFactory.seedIntrinsicSizes(initialImageIntrinsicSizes);
   let releaseImagePresentationResources = startMode === 'live'
     ? imagePresentationFactory.acquire()
     : null;
@@ -3464,6 +3467,7 @@ export function createEditor({
   return {
     view,
     state: view.state,
+    setImageIntrinsicSizes: imagePresentationFactory.seedIntrinsicSizes,
     prepareSourceSyntax(isCurrent: () => boolean) {
       commitActiveTableInput();
       if (lightweightSourceSyntax) return Promise.resolve(!editorDestroyed && isCurrent());

@@ -35,6 +35,74 @@ async function main() {
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
+    // Header dimensions must reserve the first presentation, even while URL
+    // resolution itself is pending (no previously decoded image in the pool).
+    await page.evaluate(() => {
+      const harness = (window as any).TableStabilityHarness;
+      harness.setImageSrcResolver(() => new Promise<string>(resolve => {
+        (window as any).__releaseFirstImage = () => resolve('data:image/svg+xml,' + encodeURIComponent(
+          '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#73c"/></svg>'));
+      }));
+      (window as any).__firstImageEditor = harness.createEditor({ parent: document.getElementById('app'),
+        text: 'Before first image\n\n![First image](first-arrival.png)\n\nFirst image target', initialMode: 'live',
+        initialImageIntrinsicSizes: [{ src: 'first-arrival.png', width: 640, height: 360 }], onApplyChanges() {} });
+    });
+    await page.waitForSelector('.meo-md-image-fallback');
+    const firstBefore = await page.evaluate(() => {
+      const image = document.querySelector('.meo-md-image')!.getBoundingClientRect();
+      const line = [...document.querySelectorAll('.cm-line')].find(line => line.textContent === 'First image target')!;
+      return { width: image.width, height: image.height, lineTop: line.getBoundingClientRect().top };
+    });
+    assert.ok(Math.abs(firstBefore.height - 240) <= 1,
+      `first arrival must reserve its constrained image box before URL resolution: ${JSON.stringify(firstBefore)}`);
+    await page.evaluate(() => (window as any).__releaseFirstImage());
+    await page.waitForSelector('.meo-md-image-img');
+    const firstAfter = await page.evaluate(async () => {
+      for (let index = 0; index < 4; index++) await new Promise(requestAnimationFrame);
+      const image = document.querySelector('.meo-md-image')!.getBoundingClientRect();
+      const line = [...document.querySelectorAll('.cm-line')].find(line => line.textContent === 'First image target')!;
+      const result = { width: image.width, height: image.height, lineTop: line.getBoundingClientRect().top };
+      (window as any).__firstImageEditor.destroy();
+      return result;
+    });
+    for (const key of ['width', 'height', 'lineTop'] as const) assert.ok(Math.abs(firstBefore[key] - firstAfter[key]) <= 1,
+      `first decoding changed ${key}: ${JSON.stringify({ firstBefore, firstAfter })}`);
+
+    for (const authored of ['', '|120', '|120x80']) {
+      const reserved = await page.evaluate(async authored => {
+        const harness = (window as any).TableStabilityHarness;
+        let resolveCalls = 0;
+        harness.setImageSrcResolver(() => {
+          resolveCalls++;
+          return new Promise<string>(resolve => { (window as any).__releaseSizedImage = () => resolve('data:image/svg+xml,' + encodeURIComponent(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"/>')); });
+        });
+        const editor = (window as any).__sizedImageEditor = harness.createEditor({ parent: document.getElementById('app'),
+          text: `Before\n\n![[sized.png${authored}]]\n\nSized target`, initialMode: 'live', onApplyChanges() {} });
+        for (let index = 0; index < 4; index++) await new Promise(requestAnimationFrame);
+        editor.setImageIntrinsicSizes([{ src: 'meo-wiki-image:sized.png', width: 640, height: 360 }]);
+        for (let index = 0; index < 4; index++) await new Promise(requestAnimationFrame);
+        const image = document.querySelector('.meo-md-image')!.getBoundingClientRect();
+        const line = [...document.querySelectorAll('.cm-line')].find(line => line.textContent === 'Sized target')!;
+        return { width: image.width, height: image.height, lineTop: line.getBoundingClientRect().top, resolveCalls };
+      }, authored);
+      assert.equal(reserved.resolveCalls, 1, 'late metadata must not restart URL resolution');
+      assert.ok(Math.abs(reserved.height - (authored === '|120x80' ? 80 : authored === '|120' ? 67.5 : 240)) <= 1,
+        `late dimensions must respect authored Wiki size ${authored}: ${JSON.stringify(reserved)}`);
+      await page.evaluate(() => (window as any).__releaseSizedImage());
+      await page.waitForSelector('.meo-md-image-img');
+      const loaded = await page.evaluate(async () => {
+        for (let index = 0; index < 4; index++) await new Promise(requestAnimationFrame);
+        const image = document.querySelector('.meo-md-image')!.getBoundingClientRect();
+        const line = [...document.querySelectorAll('.cm-line')].find(line => line.textContent === 'Sized target')!;
+        const result = { width: image.width, height: image.height, lineTop: line.getBoundingClientRect().top };
+        (window as any).__sizedImageEditor.destroy();
+        return result;
+      });
+      for (const key of ['width', 'height', 'lineTop'] as const) assert.ok(Math.abs(reserved[key] - loaded[key]) <= 1,
+        `Wiki image decoding changed ${key}: ${JSON.stringify({ authored, reserved, loaded })}`);
+    }
+
     // A cached resource is cloned into display DOM. Its replacement URL is
     // deliberately held so decoding cannot supply geometry before this check.
     await page.evaluate(url => {

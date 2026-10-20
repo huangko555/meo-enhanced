@@ -465,6 +465,11 @@ export class ImageWidget extends WidgetType {
     img.loading = 'eager';
     const width = cachedImage.naturalWidth || cachedImage.width, height = cachedImage.naturalHeight || cachedImage.height;
     const intrinsic = this.presentationFactory.getIntrinsicSize(this.url) ?? (width > 0 && height > 0 ? { width, height } : null);
+    this.applyDisplayImageSize(img, intrinsic);
+    return img;
+  }
+
+  private applyDisplayImageSize(img: HTMLImageElement, intrinsic: { width: number; height: number } | null): void {
     if (intrinsic) {
       // cloneNode retains src, but not the decoded resource's intrinsic box.
       // Reserve the same constrained geometry before the clone's load event.
@@ -475,7 +480,6 @@ export class ImageWidget extends WidgetType {
     }
     if (this.width) { img.width = this.width; img.style.width = `${this.width}px`; }
     if (this.height) { img.height = this.height; img.style.height = `${this.height}px`; }
-    return img;
   }
 
   attachImagePointerInteractions(container: HTMLElement): void {
@@ -776,12 +780,13 @@ export class ImageWidget extends WidgetType {
     const issue = wikiImageIssues.get(this.url);
     if (issue) container.dataset.tooltip = issue;
     const intrinsicSize = this.url ? this.presentationFactory.getIntrinsicSize(this.url) : null;
-    if (intrinsicSize) {
-      const heightScale = Math.min(1, 240 / intrinsicSize.height);
-      const placeholder = document.createElement('span');
+    if (intrinsicSize || (this.width && this.height)) {
+      const placeholder = document.createElement('img');
       placeholder.className = 'meo-md-image-size-placeholder';
-      placeholder.style.width = `${intrinsicSize.width * heightScale}px`;
-      placeholder.style.aspectRatio = `${intrinsicSize.width} / ${intrinsicSize.height}`;
+      placeholder.alt = this.fallbackText();
+      placeholder.title = this.fallbackText();
+      placeholder.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>';
+      this.applyDisplayImageSize(placeholder, intrinsicSize);
       container.replaceChildren(placeholder);
       return;
     }

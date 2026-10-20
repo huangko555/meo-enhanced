@@ -1,4 +1,6 @@
 import { decodeDiagnosticsChangedEvent, type SerializedDiagnostic } from './diagnostics';
+import { decodeImageIntrinsicSizes } from './imageDimensions';
+import type { ImageIntrinsicSize } from '../foundation/imageDimensions';
 import {
   decodeCodeTheme,
   type CodeThemeDto
@@ -45,6 +47,7 @@ export type InitMessage = {
   readonly previewPresetPreferences?: PreviewPresetPreferences;
   readonly type: 'init';
   readonly documentId: string;
+  readonly imageIntrinsicSizes?: readonly ImageIntrinsicSize[];
   readonly text: string;
   readonly version: number;
   readonly savedRevision: SavedRevisionDto | null;
@@ -104,6 +107,7 @@ export function decodeReadyMessage(value: unknown): ReadyMessage | null {
 }
 
 export function decodeInitMessage(value: unknown): InitMessage | null {
+  if (isRecord(value) && value.imageIntrinsicSizes !== undefined && decodeImageIntrinsicSizes(value.imageIntrinsicSizes) === null) return null;
   if (isRecord(value) && value.saveAsViewState !== undefined && !decodeDocumentViewState(value.saveAsViewState)) return null;
   if (isRecord(value) && value.previewPreset !== undefined && !isPreviewPresetId(value.previewPreset)) return null;
   if (isRecord(value) && value.previewPresetPreferences !== undefined && decodePreviewPresetPreferences(value.previewPresetPreferences) === null) return null;
