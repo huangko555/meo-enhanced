@@ -45,8 +45,14 @@ try {
   const failure = await request(2, { markdownText: '', sourceDocumentPath: '/fixture/sample.md', uiLanguage: 'en',
     preset: 'default', presetDefinition: { id: 'github-readme' } });
   assert.match(failure.error, /preset/);
-  const resumed = await request(3, { markdownText: '**after failure**', sourceDocumentPath: '/fixture/sample.md', uiLanguage: 'en' });
+  const alertTypes = ['NOTE', 'TIP', 'IMPORTANT', 'WARNING', 'CAUTION'];
+  const resumed = await request(3, { markdownText: '**after failure**\n\n'
+    + alertTypes.map(type => `> [!${type}]\n> Alert content.\n\n`).join(''),
+    sourceDocumentPath: '/fixture/sample.md', uiLanguage: 'en' });
   assert.ok(resumed.value.html.includes('<strong>after failure</strong>'));
+  for (const type of alertTypes) assert.ok(resumed.value.html.includes(`meo-export-alert-${type.toLowerCase()}`));
+  assert.equal((resumed.value.html.match(/<svg\b/g) ?? []).length, alertTypes.length,
+    'all five alert icons must survive the installed Node bundle');
   const opened = await request(4, { markdownText: '# Window\n\n' + '```js\nconst value = 42;\n```\n\n'.repeat(1000),
     sourceDocumentPath: '/fixture/window.md', uiLanguage: 'en' }, { kind: 'open', owner: 'panel-a', documentId: 'window-1', anchorLine: 1 });
   assert.equal(opened.value.html, '');

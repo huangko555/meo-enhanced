@@ -1326,5 +1326,59 @@ The production regression is red on SVG identity before this change and green
 after a full presentation refresh following measurement. Existing real Mermaid
 viewport persistence passes typing, undo/redo, both block/document mode cycles,
 theme/fullscreen, source recovery, independent camera state, resets and layout
-shrink. Type checks pass. This refinement is not in frozen V58; it still needs
-native verification.
+shrink. Type checks pass. This refinement is not in frozen V58; the V59 native
+verification below includes it.
+
+### Final native verification of the retained presentation changes
+
+V59 (`3536fbc8dae943edf36eb0afd4fbeee96d3f7d37`, archive SHA-256
+`d6366b8c0da9c4214348a892b1253a6268007ab8b8ba100f5a1bdac0a2d79150`)
+passes the complete ordinary/rich native flow, sixteen strict rich clicks,
+exact text, undo/save, timing clocks and protocol composition. The final
+Preview screenshot is visually checked. The VM retains the same 6 GiB/four-CPU
+configuration, and is saved after collecting the evidence.
+
+Warm rich Source input median/P95/maximum is 44/119/142 ms; Live is
+88/284/341 ms. Maximum frame gaps are 103/219 ms. Eight rich Live clicks range
+106–279 ms. Separate cold Source input is 32/172/257 ms, with a 271 ms maximum
+frame gap and a 28 ms first click. Separate cold Live input is 62/214/229 ms,
+with a 176 ms maximum frame gap and a 170 ms first click. These are individual
+runs of the fixed fixture, not a universal P95 or a refutation of the user's
+previous one-second clicks. The cold diagnostic flows deliberately do not claim
+the complete functional/performance gate; their exact text, undo/save,
+composition and clock checks pass.
+
+First Live is 3.37 s, first Preview 4.88 s (3.75 s Host response), cached
+Live/Source/Preview transitions 2.00/0.79/0.71 s. Four native Preview thumb drags
+have maximum frame gaps of 105/164/86/158 ms. Complete formatted copy is 8.88 s,
+preserving bold and the end marker. No ten-second UI freeze recurs in these
+representative drag samples; the 16–33 ms scrolling target and roughly one-second
+first-Preview target are still not met. V58 and V59 have byte-identical Preview
+workers, so their differing first-Preview timings do not establish a gain or
+regression caused by the diagram-height refinement.
+
+A further real CSP-worker diagnostic checks the proposed syntax-tree identity
+fallback: fourteen sampled refreshes have no mapped-input proof and unchanged
+syntax-tree identity. It does not support relaxing that correctness guard; the
+existing identity check is retained.
+
+### Remove unused icon catalogue initialization from the Node runtimes
+
+The Node-target build selected Lucide's CommonJS entry and retained 412,601
+bytes of its catalogue despite using five icons. The export build now resolves
+only this package to its published ESM entry, allowing named imports to be
+tree-shaken. The installed artifacts remain single, self-contained CommonJS
+files; renderer source, icon definitions and other dependency resolution are
+unchanged. This uses Bun's documented
+[resolution hook](https://bun.com/docs/bundler/plugins#onresolve).
+
+The Preview worker decreases from 2,568,638 to 2,153,368 bytes (16.2%); the
+export runtime from 3,406,615 to 2,991,085 bytes (12.2%). Independent installed
+Node comparisons match twenty complete HTML/manifest/heading/block results
+across both presets, ordinary alert-rich text and the complete 1 MiB fixture.
+Worker complete rendering, windowed opening and a requested tail block also
+match. The existing installed-Node test now exercises all five alert icons as
+well as Host responsiveness, rejected-request recovery, offscreen search and
+owner release. HTML export checks pass. This packaging refinement is after
+V59; the byte reduction is measured, but an end-to-end latency gain is not
+claimed from bundle size alone.

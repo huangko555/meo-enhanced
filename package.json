@@ -645,7 +645,7 @@
     "build:extension": "bun run build:extension:main && bun run build:extension:export-runtime && bun run build:extension:docx-runtime && bun run build:extension:puppeteer-runtime",
     "build:extension:main": "bun build src/extension.ts --target=node --format=cjs --minify --outfile=dist/extension.js -e vscode",
     "build:extension:main:debug": "bun build src/extension.ts --target=node --format=cjs --minify --outfile=dist/extension.js -e vscode --sourcemap=inline",
-    "build:extension:export-runtime": "bun build src/export/runtime.ts --target=node --format=cjs --minify --outfile=dist/export-runtime.js && bun build src/export/previewRenderWorker.ts --target=node --format=cjs --minify --outfile=dist/preview-render-worker.js",
+    "build:extension:export-runtime": "bun scripts/build-export-runtime.mjs",
     "build:extension:docx-runtime": "bun build src/export/docxRuntime.mts --target=node --format=cjs --minify --outfile=dist/docx-runtime.js -e playwright -e sharp",
     "build:extension:puppeteer-runtime": "bun scripts/build-puppeteer-runtime.mjs",
     "architecture:check": "bun scripts/check-architecture.ts",
