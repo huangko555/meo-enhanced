@@ -1,10 +1,11 @@
 import { IterMode, type Tree } from '@lezer/common';
 import type { ChangeDesc } from '@codemirror/state';
+import { markdownStructureIdentity } from '../editor/markdownStructure';
 
 /** Compare trees for the same immutable Markdown text. Embedded language parsing
  * does not change Live's Markdown presentation. False also means inconclusive. */
 export function hasSameLiveMarkdownSyntax(left: Tree, right: Tree): boolean {
-  if (left === right) return true;
+  if (markdownStructureIdentity(left) === markdownStructureIdentity(right)) return true;
   if (left.length !== right.length) return false;
   const first = left.cursor(IterMode.IgnoreMounts), second = right.cursor(IterMode.IgnoreMounts);
   // A cold completeness check must not become another unbounded input scan.

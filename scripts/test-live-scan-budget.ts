@@ -18,6 +18,30 @@ import { getLiveRenderedBlocks } from '../webview/src/helpers/liveRenderedBlocks
 import { setLatexMathBlockModeEffect } from '../webview/src/helpers/latexMathEditing';
 import { setHtmlEditingRangeEffect } from '../webview/src/helpers/htmlContent';
 import { parseMergeConflicts } from '../webview/src/helpers/mergeConflicts';
+import { markdownTagField } from '../webview/src/helpers/tags';
+import { getLivePresentationBand, liveViewportPresentationExtensions } from '../webview/src/helpers/liveViewportPresentation';
+
+{
+  const text = 'Ordinary #sample words.\n'.repeat(9_000);
+  let state = EditorState.create({ doc: text, selection: { anchor: text.indexOf('Ordinary', text.length / 2) }, extensions: editorMarkdownLanguage });
+  ensureSyntaxTree(state, state.doc.length, 10_000);
+  const iterLines = Text.prototype.iterLines;
+  let requestedLines = 0;
+  Text.prototype.iterLines = function (from = 1, to = this.lines + 1) {
+    requestedLines += to - from;
+    return iterLines.call(this, from, to);
+  };
+  try {
+    state = state.update({ effects: StateEffect.appendConfig.of([liveViewportPresentationExtensions(), markdownTagField]) }).state;
+  } finally { Text.prototype.iterLines = iterLines; }
+  assert.ok(requestedLines <= 200, `windowed tags must not read every document row: ${requestedLines}`);
+  const band = getLivePresentationBand(state)!;
+  let tags = 0;
+  for (let cursor = state.field(markdownTagField).iter(); cursor.value; cursor.next()) {
+    assert.ok(cursor.from >= band.from && cursor.to <= band.to); tags++;
+  }
+  assert.ok(tags > 100, 'the presentation band retains its visible tag styles');
+}
 
 {
   const left = markdownLanguage.parser.parse('edit\n\n' + '**Shared content** and _style_.\n'.repeat(6_000));

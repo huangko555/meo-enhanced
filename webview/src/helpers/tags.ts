@@ -4,6 +4,8 @@ import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import { collectHexColorRangesFromText, isHexColorLikeLiteral } from '../../../src/shared/hexColorSwatches';
 import { currentSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
+import { getLivePresentationBand, livePresentationBandChanged } from './liveViewportPresentation';
+import { hasSameLiveMarkdownSyntax } from './livePresentationSyntax';
 import {
   isLiveInputDerivedWorkRefresh,
   isMappedLiveInputRefresh,
@@ -60,7 +62,9 @@ function isInsideMarkdownLinkDestination(text: string, position: number): boolea
 
 function buildMarkdownTagDecorations(state: any): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
-  for (const line of documentLines(state.doc)) {
+  const band = getLivePresentationBand(state);
+  for (const line of documentLines(state.doc, band ? state.doc.lineAt(band.from).number : undefined,
+    band ? state.doc.lineAt(band.to).number : undefined)) {
     const text = line.text;
     if (!text.includes('#')) continue;
     const colorRanges = collectHexColorRangesFromText(text, line.from);
@@ -89,11 +93,12 @@ function buildMarkdownTagDecorations(state: any): DecorationSet {
   return builder.finish();
 }
 
-export const markdownTagField = StateField.define<DecorationSet>({
+export const markdownTagField: StateField<DecorationSet> = StateField.define<DecorationSet>({
   create(state) {
     return buildMarkdownTagDecorations(state);
   },
   update(value, transaction) {
+    if (transaction.reconfigured && !transaction.startState.field(markdownTagField, false)) return value;
     if (isMappedLiveInputRefresh(transaction) || shouldDeferLiveInputDerivedWork(transaction)) {
       return transaction.docChanged
         ? mapLiveInputDerivedDecorations(value, transaction)
@@ -101,7 +106,9 @@ export const markdownTagField = StateField.define<DecorationSet>({
     }
     if (!transaction.docChanged
       && !isLiveInputDerivedWorkRefresh(transaction)
-      && !syntaxTreeChanged(transaction)) {
+      && !livePresentationBandChanged(transaction)
+      && (!syntaxTreeChanged(transaction)
+        || hasSameLiveMarkdownSyntax(currentSyntaxTree(transaction.startState), currentSyntaxTree(transaction.state)))) {
       return value;
     }
     return buildMarkdownTagDecorations(transaction.state);

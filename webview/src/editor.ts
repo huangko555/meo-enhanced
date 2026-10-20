@@ -675,7 +675,12 @@ export function createEditor({
       return;
     }
 
-    const position = editorView.posAtCoords({ x: event.clientX, y: event.clientY });
+    // Hover only needs the owning source block. A mounted outer line already
+    // supplies that position without forcing layout before the next pointerdown.
+    const sourceLine = targetElement?.closest('.cm-line');
+    const position = sourceLine && sourceLine.closest('.cm-editor') === editorView.dom
+      ? editorView.posAtDOM(sourceLine, sourceLine.childNodes.length)
+      : editorView.posAtCoords({ x: event.clientX, y: event.clientY });
     if (position === null) {
       setHoveredBlockActionToolbar(null);
       return;

@@ -6,6 +6,7 @@ import { getCodeBlockSourceLines, parseBlockLinePrefix } from './blockIndent';
 import { collectLatexMathRanges, type LatexMathRange } from './math';
 import { collectMarkdownLiteralRanges } from './markdownLiteralRanges';
 import { getFencedCodeInfo, resolvedSyntaxTree } from './markdownSyntax';
+import { markdownStructureIdentity } from '../editor/markdownStructure';
 
 export type DocumentMathRange = LatexMathRange & {
   fenceSource?: { text: string; from: number; prefix: string };
@@ -25,7 +26,7 @@ export function collectDocumentMathRanges(
 ): DocumentMathRange[] {
   const cacheable = !scope && excludedRanges.length === 0;
   const cached = cacheable ? fullRangeCache.get(state.doc) : undefined;
-  if (cached?.tree === tree && cached.tabSize === state.tabSize) {
+  if (cached && markdownStructureIdentity(cached.tree) === markdownStructureIdentity(tree) && cached.tabSize === state.tabSize) {
     fullRangeCache.delete(state.doc); fullRangeCache.set(state.doc, cached);
     return copyRanges(cached.ranges);
   }

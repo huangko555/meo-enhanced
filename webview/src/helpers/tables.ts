@@ -1036,7 +1036,11 @@ function tableCellCaretViewportBounds(input: HTMLTextAreaElement): { top: number
     const measuredTop = inputRect.top + lineTopAt(caret) - input.scrollTop;
     const latestVisibleTop = Math.max(inputRect.top, inputRect.bottom - lineHeight);
     const top = Math.min(Math.max(measuredTop, inputRect.top), latestVisibleTop);
-    return { top, bottom: Math.min(inputRect.bottom, top + lineHeight) };
+    // At the final character, include the textarea's bottom padding and one
+    // border pixel. A glyph-only bound can preserve a fractional scroll offset
+    // that clips the editor/cell edge after the row wraps.
+    const atEnd = input.selectionStart === input.selectionEnd && caret === input.value.length;
+    return { top, bottom: atEnd ? inputRect.bottom + 1 : Math.min(inputRect.bottom, top + lineHeight) };
   });
 }
 

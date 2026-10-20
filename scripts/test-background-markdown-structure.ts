@@ -52,7 +52,14 @@ try {
     const scope = window as any, Native = Worker;
     scope.__parseRequests = []; scope.__workerCreates = 0; scope.__workerStops = 0;
     window.Worker = class extends Native {
-      constructor(url: string | URL, options?: WorkerOptions) { super(url, options); scope.__workerCreates++; }
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options); scope.__workerCreates++;
+        this.addEventListener('message', event => {
+          if (!scope.__holdParseReplies) return;
+          event.stopImmediatePropagation();
+          (scope.__heldParseReplies ??= []).push({ worker: this, data: event.data });
+        });
+      }
       postMessage(message: any, ...rest: any[]) {
         scope.__parseRequests.push({ initial: typeof message.text === 'string', units: message.text?.length,
           changesBytes: JSON.stringify(message.changes ?? null).length, base: message.base, id: message.id });
@@ -123,6 +130,33 @@ try {
     await ready();
     assert.ok(await page.evaluate(() => (window as any).__editor.getText() === (window as any).__before), 'native browser undo restores exact source');
   }
+  stage = 'published revision gates derived refresh';
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
+  await page.evaluate(() => {
+    const scope = window as any;
+    scope.__beforeDelayed = scope.__editor.getText();
+    scope.__editor.view.dispatch({ selection: { anchor: 4 } });
+    scope.__editor.view.focus(); scope.__holdParseReplies = true;
+  });
+  await page.keyboard.type('nativepace', { delay: 40 });
+  await new Promise(resolve => setTimeout(resolve, 650));
+  const held = await page.evaluate(() => {
+    const scope = window as any;
+    return { replies: scope.__heldParseReplies?.length ?? 0, pending: scope.__liveHistory.pending(scope.__editor),
+      published: scope.__liveHistory.markdownReady(scope.__editor), exact: scope.__editor.getText() === 'EDITnativepace' + scope.__beforeDelayed.slice(4) };
+  });
+  assert.ok(held.replies > 0 && held.exact && !held.published);
+  assert.ok(held.pending, 'Live must not commit a full presentation refresh against the pending outer placeholder');
+  await page.evaluate(() => {
+    const scope = window as any; scope.__holdParseReplies = false;
+    for (const { worker, data } of scope.__heldParseReplies.splice(0)) worker.dispatchEvent(new MessageEvent('message', { data }));
+  });
+  await ready();
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
+  await page.keyboard.down('Control');
+  try { await page.keyboard.press('z'); } finally { await page.keyboard.up('Control'); }
+  await ready();
+  assert.ok(await page.evaluate(() => (window as any).__editor.getText() === (window as any).__beforeDelayed), 'paced input retains exact single-group undo after worker publication');
   assert.equal(await page.evaluate(() => (window as any).__foregroundLargeMarkdownAdvances ?? 0), 0,
     'Source, Live, input and undo must never parse the entire Markdown on the foreground thread');
   stage = 'near code palette';
@@ -136,6 +170,7 @@ try {
     const scope = window as any;
     const keyword = [...document.querySelectorAll('.cm-line span')].find(node => node.textContent === 'const')!;
     scope.__keywordColor = getComputedStyle(keyword).color;
+    scope.__outerIdentity = scope.__liveHistory.markdownIdentity(scope.__editor);
     scope.__editor.scrollToLine(scope.__editor.view.state.doc.lineAt(scope.__editor.getText().indexOf('const distantValue')).number, 'center');
   });
   stage = 'distant code palette';
@@ -145,6 +180,8 @@ try {
     return keyword && getComputedStyle(keyword).color === (window as any).__keywordColor;
   });
   const requests = await page.evaluate(() => (window as any).__parseRequests);
+  assert.ok(await page.evaluate(() => (window as any).__outerIdentity === (window as any).__liveHistory.markdownIdentity((window as any).__editor)),
+    'real mixed-language publication must retain the outer Markdown identity');
   assert.equal(requests.filter((request: any) => request.initial).length, 1, 'send one initial full snapshot');
   assert.ok(requests.length >= 5 && requests.filter((request: any) => !request.initial).every((request: any) => request.changesBytes < 2_000),
     `following jobs transfer composed edits only: ${JSON.stringify(requests)}`);

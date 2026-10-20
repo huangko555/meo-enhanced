@@ -169,6 +169,10 @@ const liveInputDerivedWorkLargeDocumentFacet = Facet.define<boolean, boolean>({
   combine: (values) => values.some(Boolean)
 });
 
+/** Async producers keep their ownership outside the input scheduler. A refresh
+ * can consume their result only after it belongs to the published revision. */
+export const liveInputDerivedWorkReadiness = Facet.define<(state: EditorState) => boolean>();
+
 export function usesLargeDocumentDerivedWorkBudget(state: EditorState): boolean {
   return state.facet(liveInputDerivedWorkLargeDocumentFacet);
 }
@@ -672,7 +676,9 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     cancelFrame: (frameId: number) => window.cancelAnimationFrame(frameId),
     // Mermaid yields internally while measuring SVG labels. A full-document
     // rebuild in those gaps can turn a tiny split edit into a second-long wait.
-    shouldWaitForPresentation: () => activePointers.size > 0 || Boolean(view.dom.querySelector(
+    shouldWaitForPresentation: () => activePointers.size > 0
+      || view.state.facet(liveInputDerivedWorkReadiness).some(ready => !ready(view.state))
+      || Boolean(view.dom.querySelector(
       '.meo-mermaid-editing-block[data-meo-mermaid-rendering="true"], '
         + '.meo-mermaid-editing-block [data-meo-mermaid-rendering="true"]'
     )),

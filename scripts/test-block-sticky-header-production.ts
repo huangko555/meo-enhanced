@@ -78,6 +78,23 @@ try {
     await pin();
     await assertLanguageLayout(normal, context);
   };
+  await mount('Plain hover target.\n\n```javascript\nconst hoverValue = 1;\n```\n');
+  const hover = await page.evaluate(() => {
+    const view = (window as any).__editor.view;
+    const lookup = view.posAtCoords;
+    let measurements = 0;
+    view.posAtCoords = function (...args: any[]) { measurements++; return lookup.apply(this, args); };
+    try {
+      const lines = [...view.contentDOM.querySelectorAll('.cm-line')] as HTMLElement[];
+      const plain = lines.find(line => line.textContent?.includes('Plain hover target'))!;
+      const code = lines.find(line => line.textContent?.includes('const hoverValue'))!;
+      for (const line of [plain, code]) line.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 1 }));
+      const codeHovered = !!view.dom.querySelector('.meo-code-block-actions.is-block-hovered');
+      plain.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 1 }));
+      return { measurements, codeHovered, plainCleared: !view.dom.querySelector('.meo-code-block-actions.is-block-hovered') };
+    } finally { view.posAtCoords = lookup; }
+  });
+  assert.deepEqual(hover, { measurements: 0, codeHovered: true, plainCleared: true }, 'source hover retains toolbar ownership without synchronous coordinate measurement');
   const code = ['```typescript', ...Array.from({ length: 180 }, (_, i) => `const value${i} = ${i};`), '```'].join('\n');
   const after = '\n\n' + Array.from({ length: 30 }, (_, i) => `Paragraph ${i}`).join('\n\n');
   await mount(code + after);

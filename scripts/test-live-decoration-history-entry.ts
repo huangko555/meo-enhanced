@@ -12,7 +12,7 @@ import { getGitDiffSummary, getGitDiffOriginalBlocks } from '../webview/src/help
 import { editorMarkdownLanguage, getLivePresentationDecorations } from '../webview/src/liveMode';
 import { parseFootnotes } from '../webview/src/helpers/footnotes';
 import { editorScrollIntoView } from '../webview/src/editor/scrollEffects';
-import { isCompleteMarkdownStructure } from '../webview/src/editor/markdownStructure';
+import { isCompleteMarkdownStructure, markdownStructureIdentity } from '../webview/src/editor/markdownStructure';
 import { assertBackgroundMarkdownPreparation } from '../webview/src/editor/backgroundMarkdownStructure';
 
 function footnoteSnapshot(state: EditorState) {
@@ -45,6 +45,7 @@ function footnoteSnapshot(state: EditorState) {
   syntaxInfo: (editor: ReturnType<typeof createEditor>) => ({ published: syntaxTree(editor.view.state).length,
     length: editor.view.state.doc.length, available: syntaxTreeAvailable(editor.view.state, editor.view.state.doc.length) }),
   markdownReady: (editor: ReturnType<typeof createEditor>) => isCompleteMarkdownStructure(syntaxTree(editor.view.state), editor.view.state.doc.length),
+  markdownIdentity: (editor: ReturnType<typeof createEditor>) => markdownStructureIdentity(syntaxTree(editor.view.state)),
   parseFailure(editor: ReturnType<typeof createEditor>) {
     try { assertBackgroundMarkdownPreparation(editor.view.state); return null; }
     catch (error) { return String(error); }

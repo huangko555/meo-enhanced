@@ -8,6 +8,7 @@ import { resolveFencedDisplayMathInnerLineRange } from './math';
 import { collectDocumentMathRanges } from './displayMathBlocks';
 import { isTableDelimiterLine, getTableSourceBounds } from './tables';
 import { collectRenderableHtmlBlocks, getHtmlEditingRange } from './htmlContent';
+import { markdownStructureIdentity } from '../editor/markdownStructure';
 
 type LineFlagLike = {
   added?: boolean;
@@ -41,7 +42,7 @@ const renderedBlockCache = new WeakMap<EditorState, { tree: any; blocks: LiveRen
 type DiscoveredBlock = { block: LiveRenderedBlock; htmlFrom?: number };
 // Discovery depends on text and the resolved parse. Selection and HTML editing
 // only filter that discovery; they must not invalidate its whole-document scans.
-const discoveredBlockCache = new WeakMap<EditorState['doc'], { tree: Tree; blocks: DiscoveredBlock[] }>();
+const discoveredBlockCache = new WeakMap<EditorState['doc'], { tree: Tree; tabSize: number; blocks: DiscoveredBlock[] }>();
 
 /** The caller proves a complete plain-prose projection with unchanged rich
  * membership. Map line coordinates and HTML editing anchors without discovering
@@ -54,7 +55,7 @@ export function projectUnchangedLiveRenderedBlocks(
   newTree: Tree
 ): void {
   const previous = discoveredBlockCache.get(before.doc);
-  if (!previous || previous.tree !== oldTree || oldTree.length !== before.doc.length
+  if (!previous || markdownStructureIdentity(previous.tree) !== markdownStructureIdentity(oldTree) || oldTree.length !== before.doc.length
     || newTree.length !== state.doc.length || before.tabSize !== state.tabSize) return;
   let unchangedLines = true;
   changes.iterChangedRanges((from, to, nextFrom, nextTo) => {
@@ -86,7 +87,7 @@ export function projectUnchangedLiveRenderedBlocks(
     }
     return { block: mapped, htmlFrom: htmlFrom === undefined ? undefined : changes.mapPos(htmlFrom, 1) };
   });
-  discoveredBlockCache.set(state.doc, { tree: newTree, blocks });
+  discoveredBlockCache.set(state.doc, { tree: newTree, tabSize: state.tabSize, blocks });
 }
 const collapsedBlockCache = new WeakMap<EditorState, {
   lineFlags: readonly LineFlagLike[];
@@ -227,13 +228,13 @@ export function getLiveRenderedBlocks(
 ): LiveRenderedBlock[] {
   const tree = options.tree ?? resolvedSyntaxTree(state);
   const cached = renderedBlockCache.get(state);
-  if (!options.includeSelectedMath && cached && cached.tree === tree) {
+  if (!options.includeSelectedMath && cached && markdownStructureIdentity(cached.tree) === markdownStructureIdentity(tree)) {
     return cached.blocks;
   }
 
   let discovered = discoveredBlockCache.get(state.doc);
-  if (!discovered || discovered.tree !== tree) {
-    discovered = { tree, blocks: withMarkdownSyntaxSnapshot(state, tree, () => discoverRenderedBlocks(state, tree)) };
+  if (!discovered || markdownStructureIdentity(discovered.tree) !== markdownStructureIdentity(tree) || discovered.tabSize !== state.tabSize) {
+    discovered = { tree, tabSize: state.tabSize, blocks: withMarkdownSyntaxSnapshot(state, tree, () => discoverRenderedBlocks(state, tree)) };
     discoveredBlockCache.set(state.doc, discovered);
   }
   const htmlEditingRange = getHtmlEditingRange(state);

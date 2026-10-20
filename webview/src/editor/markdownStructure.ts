@@ -4,6 +4,7 @@ import { NodeProp, Tree, type Parser, type ParseWrapper } from '@lezer/common';
 import { usesLargeDocumentDerivedWorkBudget } from './liveInputDerivedWork';
 
 const completeOuterMarkdown = new NodeProp<number>({ perNode: true });
+const outerMarkdownIdentity = new NodeProp<Tree>({ perNode: true });
 const preparedDocuments = new WeakMap<Text, Parser>();
 
 /** Installed before mixed-code parsing. A full-length partial tree alone is
@@ -26,7 +27,7 @@ export const certifyMarkdownStructure: { wrap: ParseWrapper } = { wrap(inner, in
       if (context && parser) preparedDocuments.set(context.state.doc, parser);
       if (complete) return tree;
       return new Tree(tree.type, tree.children, tree.positions, tree.length,
-        [...tree.propValues, [completeOuterMarkdown, input.length]]);
+        [...tree.propValues, [completeOuterMarkdown, input.length], [outerMarkdownIdentity, tree]]);
     }
   };
 } };
@@ -35,11 +36,18 @@ export function isCompleteMarkdownStructure(tree: Tree, length: number): boolean
   return tree.length === length && tree.prop(completeOuterMarkdown) === length;
 }
 
+/** Mixed language publication preserves root props. Structural caches can use
+ * the immutable outer identity without treating new code tokens as new Markdown. */
+export function markdownStructureIdentity(tree: Tree): Tree {
+  return tree.prop(outerMarkdownIdentity) ?? tree;
+}
+
 /** The background parser has completed this exact document revision. Wire
  * revision/grammar checks are owned by the receiver before calling this. */
 export function acceptCompletedMarkdownStructure(tree: Tree, length: number): Tree {
   if (tree.length !== length || tree.type.name !== 'Document' || !tree.type.isTop) throw new Error('Incomplete background Markdown structure');
-  return new Tree(tree.type, tree.children, tree.positions, length, [...tree.propValues, [completeOuterMarkdown, length]]);
+  return new Tree(tree.type, tree.children, tree.positions, length,
+    [...tree.propValues, [completeOuterMarkdown, length], [outerMarkdownIdentity, tree]]);
 }
 
 export function markdownStructureAvailable(state: EditorState, tree: Tree = syntaxTree(state)): boolean {

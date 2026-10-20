@@ -356,3 +356,37 @@ They do not replace native latency acceptance. A cold comprehensive browser
 sample still spends about 0.65 seconds entering Live, with presentation and mixed
 parsing remaining visible costs. Preview's first-response pipeline is separate
 and still requires further measurement.
+
+V39 (`68c2f8a7`, archive SHA-256
+`fc32b88fa72e1d084ba67cedb89febafec6adbe0fb3b87ab28e4d5622b9a03d2`)
+did not complete native acceptance: a late Live click failed its clicked-text
+witness while layout changed, with a 538 ms long task. A separate diagnostic
+captured Live input spending 1,825 ms inside a derived refresh, including repeated
+global rich-block, math and HTML discovery; tag styling used another 198 ms.
+Instrumented timings are diagnostic only. All 48 relevant mapped bundles were
+verified against exact packaged code before attributing the CPU samples.
+
+Derived refresh now waits for the current outer Markdown revision to be published,
+using a producer readiness facet rather than teaching the scheduler about its
+worker. A delayed real-worker response test holds publication beyond the old
+refresh deadline, verifies exact paced keyboard input, then requires complete
+presentation and single-group undo. Certified roots also retain an immutable
+outer identity through mixed-language publication. Rich-block discovery, math,
+literals and structural comparison reuse that identity; tab-size changes still
+invalidate indentation-sensitive discovery. Tag styling uses the Live presentation
+band and avoids duplicate work when its field is first installed. The scan-budget
+test checks fewer than 200 requested rows in a 9,000-row document. These changes
+still need a new complete native acceptance, including the previously failed
+location and first Preview entry.
+
+The same diagnostic found synchronous coordinate measurement in ordinary toolbar
+hover. Outer source lines now supply their owning position through CodeMirror's
+DOM mapping; nested editors and non-line surfaces retain coordinate lookup.
+Hover checks require the original code toolbar ownership and zero geometry
+lookups over plain/code source lines.
+
+The publication gate's negative control fails when that gate is removed, while
+the same delayed-response keyboard test passes with it enabled. Layout regression
+also reproduced a fractional end-of-cell crop against unchanged V39 production
+code. End-caret reveal now includes the textarea padding and a border pixel;
+the original full table layout/row-shrink checks pass without relaxed tolerances.

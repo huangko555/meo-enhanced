@@ -1,5 +1,6 @@
 import type { EditorState } from '@codemirror/state';
 import type { Tree } from '@lezer/common';
+import { markdownStructureIdentity } from '../editor/markdownStructure';
 
 type SourceRange = { from: number; to: number; script?: boolean; htmlCode?: { from: number; to: number } };
 const literalNodes = new Set(['InlineCode', 'FencedCode', 'CodeBlock', 'CodeText', 'InlineMathExcluded', 'Autolink', 'URL', 'LinkTitle', 'LinkLabel', 'Comment', 'CommentBlock', 'HTMLBlock', 'Subscript', 'Superscript']);
@@ -7,7 +8,8 @@ const cache = new WeakMap<Tree, SourceRange[]>();
 
 /** Prose transforms share the parser's literal containers, while link labels remain prose. */
 export function collectMarkdownLiteralRanges(state: EditorState, tree: Tree, scope?: { from: number; to: number }): readonly SourceRange[] {
-  const cached = !scope && cache.get(tree);
+  const identity = markdownStructureIdentity(tree);
+  const cached = !scope && cache.get(identity);
   if (cached) return cached;
   const ranges: SourceRange[] = [];
   const codeTags: Array<{ from: number; to: number; name: string }> = [];
@@ -37,6 +39,6 @@ export function collectMarkdownLiteralRanges(state: EditorState, tree: Tree, sco
     }
   } });
   ranges.sort((left, right) => left.from - right.from || left.to - right.to);
-  if (!scope) cache.set(tree, ranges);
+  if (!scope) cache.set(identity, ranges);
   return ranges;
 }

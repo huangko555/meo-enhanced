@@ -1,10 +1,10 @@
-import { ParseContext } from '@codemirror/language';
+import { ParseContext, syntaxTree } from '@codemirror/language';
 import { ChangeSet, Facet, type EditorState, type Extension, type Text } from '@codemirror/state';
 import { ViewPlugin } from '@codemirror/view';
 import { TreeFragment, type NodeSet, type ParseWrapper, type Tree } from '@lezer/common';
 import { readDocumentTextProjection } from '../application/documentTextProjection';
-import { usesLargeDocumentDerivedWorkBudget } from './liveInputDerivedWork';
-import { acceptCompletedMarkdownStructure } from './markdownStructure';
+import { liveInputDerivedWorkReadiness, usesLargeDocumentDerivedWorkBudget } from './liveInputDerivedWork';
+import { acceptCompletedMarkdownStructure, isCompleteMarkdownStructure } from './markdownStructure';
 import { createMarkdownTreeReceiver } from './markdownTreeTransfer';
 import type { MarkdownParseRequest, MarkdownParseResponse } from './markdownParseProtocol';
 import { createClassicWorkerTransport } from '../adapters/classicWorkerTransport';
@@ -144,7 +144,8 @@ export const backgroundMarkdownParser: { wrap: ParseWrapper } = { wrap(inner, in
 export function backgroundMarkdownStructureExtensions(uri: string | undefined, nodeSet: NodeSet): Extension {
   if (!uri) return [];
   const backend = createBackgroundMarkdownStructure(uri, nodeSet);
-  return [runtime.of(backend), ViewPlugin.define(view => {
+  return [runtime.of(backend), liveInputDerivedWorkReadiness.of(state => !!backend.error
+    || !usesLargeDocumentDerivedWorkBudget(state) || isCompleteMarkdownStructure(syntaxTree(state), state.doc.length)), ViewPlugin.define(view => {
     backend.attach(view.state.doc);
     if (usesLargeDocumentDerivedWorkBudget(view.state)) backend.read(view.state.doc);
     return {
