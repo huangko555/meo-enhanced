@@ -1185,3 +1185,30 @@ comparisons cover incomplete/nested conflicts, every marker kind, removals,
 line joins and inserted newlines. Existing Live scan-budget and deferred-input
 tests and type checking pass. Actual conflict documents retain conservative
 whole-document parsing; this is not a claim that their updates are incremental.
+
+### Cooperative syntax reception and retirement
+
+The binary syntax protocol still reconstructs thousands of property-bearing
+Lezer trees. Packing these nodes into TreeBuffers would discard their per-node
+context hashes, so this change preserves the representation and parser reuse.
+Reception now yields browser tasks at an 8 ms time check or 2,048-record work
+cap, with checkpoints every 128 records. Old-graph retirement is iterative and
+uses the same checkpoints. An individual record or garbage collection may
+exceed that soft budget; this is not a hard frame-time guarantee. Small patches
+do not wait for a task. Ordinary synchronous parser behavior is unchanged.
+
+Worker syntax and rich-context replies enter one ordered promise chain. Only a
+complete validated tree becomes ready; later block replies cannot overtake a
+yielded syntax receipt. Clearing/disposal invalidates the current generation
+before resumption. Syntax preparation and reception share a browser-task yield
+helper, using user-visible scheduler tasks with a timer fallback.
+
+The transfer regression is red without cooperative reception, then green with
+multiple task opportunities for both the initial 16,560-object tree and its
+retirement. Exact structure/positions, incremental patches, independent byte
+ownership, malformed packets, cancellation and a fresh post-cancellation
+revision pass. The actual CSP worker browser test also observes multiple
+reception yields, injects exact input while a half-received tree is held, and
+closes another editor mid-receipt. No partial syntax is published and the latest
+input remains exact. Existing ordered projection, undo, modes and failure checks
+pass; the inner-language incremental case remains 1,637 LR steps.

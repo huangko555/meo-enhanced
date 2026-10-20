@@ -12,6 +12,7 @@ import { createClassicWorkerTransport } from '../adapters/classicWorkerTransport
 import type { MarkdownContextPart } from '../../../src/foundation/markdownDocumentContext';
 import { mapUnchangedMarkdownDocumentContext, type MarkdownSourceContext } from './markdownSourceContext';
 import { validateMarkdownLanguageHosts } from './markdownLanguageHosts';
+import { yieldForPresentation } from './presentationTask';
 
 type DocumentContextAdapter = {
   enabled(): boolean;
@@ -41,6 +42,9 @@ function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet, contex
   let failure: Error | undefined, flight: { id: number; base: number; before?: Text; update?: ChangeSet;
     result: Result; tabSize: number; blocks: boolean; syntaxReceived: boolean; projected?: true } | undefined;
   let timeout: ReturnType<typeof setTimeout> | undefined;
+  // Syntax reception can yield while the worker posts its block context. Keep
+  // both stages in wire order; only the complete tree becomes publishable.
+  let responses: Promise<void> = Promise.resolve();
 
   const stop = () => {
     if (timeout !== undefined) clearTimeout(timeout);
@@ -80,54 +84,58 @@ function createBackgroundMarkdownStructure(uri: string, nodeSet: NodeSet, contex
       loading = true;
       try {
         const loaded = await createClassicWorkerTransport<MarkdownParseRequest, MarkdownParseResponse>(uri, data => {
-          try {
-            if (!flight || data.id !== flight.id) throw new Error('Markdown parser response revision mismatch');
-            if (data.error !== undefined) throw new Error(data.error);
-            const accepted = flight.result;
-            if (data.tabSize !== flight.tabSize) throw new Error('Markdown parser context settings mismatch');
-            if (data.kind === 'syntax') {
-              if (flight.syntaxReceived || data.grammar !== grammar || data.length !== accepted.doc.length) throw new Error('Markdown parser response grammar/document mismatch');
-              validateMarkdownLanguageHosts(data.languageHosts, accepted.doc.length);
-              const received = receiver.receive(data.tree);
-              const tree = accepted.tree ?? acceptCompletedMarkdownStructure(received, data.length);
-              let value: MarkdownSourceContext;
-              if (data.projectedFrom !== undefined) {
-                const previous = sourceContext;
-                if (!previous || !flight.update || previous.revision !== flight.base || data.projectedFrom !== flight.base
-                  || previous.value.doc !== flight.before || previous.value.tabSize !== flight.tabSize
-                  || flight.update.length !== previous.value.doc.length || flight.update.newLength !== accepted.doc.length
-                  || data.footnotes !== undefined || data.code !== undefined) throw new Error('Invalid Markdown source projection base');
-                value = mapUnchangedMarkdownDocumentContext(previous.value, accepted.doc, tree, flight.update);
-                flight.projected = true;
+          responses = responses.then(async () => {
+            if (disposed || failure) return;
+            try {
+              if (!flight || data.id !== flight.id) throw new Error('Markdown parser response revision mismatch');
+              if (data.error !== undefined) throw new Error(data.error);
+              const accepted = flight.result;
+              if (data.tabSize !== flight.tabSize) throw new Error('Markdown parser context settings mismatch');
+              if (data.kind === 'syntax') {
+                if (flight.syntaxReceived || data.grammar !== grammar || data.length !== accepted.doc.length) throw new Error('Markdown parser response grammar/document mismatch');
+                validateMarkdownLanguageHosts(data.languageHosts, accepted.doc.length);
+                const received = await receiver.receiveAsync(data.tree, yieldForPresentation);
+                if (disposed || failure) return;
+                const tree = accepted.tree ?? acceptCompletedMarkdownStructure(received, data.length);
+                let value: MarkdownSourceContext;
+                if (data.projectedFrom !== undefined) {
+                  const previous = sourceContext;
+                  if (!previous || !flight.update || previous.revision !== flight.base || data.projectedFrom !== flight.base
+                    || previous.value.doc !== flight.before || previous.value.tabSize !== flight.tabSize
+                    || flight.update.length !== previous.value.doc.length || flight.update.newLength !== accepted.doc.length
+                    || data.footnotes !== undefined || data.code !== undefined) throw new Error('Invalid Markdown source projection base');
+                  value = mapUnchangedMarkdownDocumentContext(previous.value, accepted.doc, tree, flight.update);
+                  flight.projected = true;
+                } else {
+                  if (!data.footnotes || !Array.isArray(data.footnotes.references) || !Array.isArray(data.footnotes.definitions)
+                    || !(data.footnotes.numberByLabel instanceof Map) || !(data.footnotes.referencesByContainerKey instanceof Map)
+                    || !Array.isArray(data.code)) throw new Error('Invalid Markdown source context');
+                  value = { doc: accepted.doc, tree, tabSize: flight.tabSize, footnotes: data.footnotes, code: data.code };
+                }
+                context.receive(accepted.doc, tree, flight.tabSize, { kind: 'footnotes', value: value.footnotes });
+                context.receive(accepted.doc, tree, flight.tabSize, { kind: 'code', value: value.code });
+                sourceContext = { revision: data.id, value };
+                accepted.tree = tree; accepted.languageHosts = data.languageHosts; accepted.footnotesTab = flight.tabSize;
+                accepted.status = 'ready'; accepted.resolve(); waiting.delete(accepted);
+                flight.syntaxReceived = true;
+                // Publish syntax promptly. Only Live needs the later rich index;
+                // its presentation scheduler keeps waiting for that second stage.
+                if (flight.blocks) return;
               } else {
-                if (!data.footnotes || !Array.isArray(data.footnotes.references) || !Array.isArray(data.footnotes.definitions)
-                  || !(data.footnotes.numberByLabel instanceof Map) || !(data.footnotes.referencesByContainerKey instanceof Map)
-                  || !Array.isArray(data.code)) throw new Error('Invalid Markdown source context');
-                value = { doc: accepted.doc, tree, tabSize: flight.tabSize, footnotes: data.footnotes, code: data.code };
+                if (!flight.syntaxReceived || !flight.blocks || !accepted.tree || sourceContext?.revision !== data.id
+                  || sourceContext.value.doc !== accepted.doc) throw new Error('Invalid Markdown block context order');
+                const value = data.projectedFrom === undefined ? data.value : sourceContext.value.blocks;
+                if (data.projectedFrom !== undefined && (!flight.projected || data.projectedFrom !== flight.base || data.value !== undefined)
+                  || !value || !Array.isArray(value.blocks) || !Array.isArray(value.math)
+                  || !Array.isArray(value.literals) || !Array.isArray(value.details)) throw new Error('Invalid Markdown block context');
+                sourceContext.value.blocks = value;
+                context.receive(accepted.doc, accepted.tree, flight.tabSize, { kind: 'blocks', value });
+                accepted.blocksTab = flight.tabSize;
               }
-              context.receive(accepted.doc, tree, flight.tabSize, { kind: 'footnotes', value: value.footnotes });
-              context.receive(accepted.doc, tree, flight.tabSize, { kind: 'code', value: value.code });
-              sourceContext = { revision: data.id, value };
-              accepted.tree = tree; accepted.languageHosts = data.languageHosts; accepted.footnotesTab = flight.tabSize;
-              accepted.status = 'ready'; accepted.resolve(); waiting.delete(accepted);
-              flight.syntaxReceived = true;
-              // Publish syntax promptly. Only Live needs the later rich index;
-              // its presentation scheduler keeps waiting for that second stage.
-              if (flight.blocks) return;
-            } else {
-              if (!flight.syntaxReceived || !flight.blocks || !accepted.tree || sourceContext?.revision !== data.id
-                || sourceContext.value.doc !== accepted.doc) throw new Error('Invalid Markdown block context order');
-              const value = data.projectedFrom === undefined ? data.value : sourceContext.value.blocks;
-              if (data.projectedFrom !== undefined && (!flight.projected || data.projectedFrom !== flight.base || data.value !== undefined)
-                || !value || !Array.isArray(value.blocks) || !Array.isArray(value.math)
-                || !Array.isArray(value.literals) || !Array.isArray(value.details)) throw new Error('Invalid Markdown block context');
-              sourceContext.value.blocks = value;
-              context.receive(accepted.doc, accepted.tree, flight.tabSize, { kind: 'blocks', value });
-              accepted.blocksTab = flight.tabSize;
-            }
-            if (timeout !== undefined) clearTimeout(timeout);
-            timeout = undefined; flight = undefined; schedule();
-          } catch (error) { fail(error); }
+              if (timeout !== undefined) clearTimeout(timeout);
+              timeout = undefined; flight = undefined; schedule();
+            } catch (error) { if (!disposed && !failure) fail(error); }
+          });
         }, fail);
         if (disposed || failure) { loaded.dispose(); return; }
         worker = loaded;

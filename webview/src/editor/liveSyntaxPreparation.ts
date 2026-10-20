@@ -2,6 +2,7 @@ import { ensureSyntaxTree, forceParsing, syntaxTree } from '@codemirror/language
 import type { EditorView } from '@codemirror/view';
 import { assertBackgroundMarkdownPreparation, isBackgroundMarkdownPreparationPending, prepareBackgroundMarkdownPresentation } from './backgroundMarkdownStructure';
 import { hasPreparedMarkdownStructure, isCompleteMarkdownStructure, markdownStructureAvailable, withMarkdownPreparationViewport } from './markdownStructure';
+import { yieldForPresentation } from './presentationTask';
 
 const PARSE_SLICE_MS = 8;
 const PREPARATION_DEADLINE_MS = 10_000;
@@ -12,16 +13,6 @@ export function refreshLiveSyntax(view: EditorView, bounded: boolean): void {
   if (!bounded) { forceParsing(view, view.state.doc.length, 500); return; }
   if (markdownStructureAvailable(view.state)) return;
   withMarkdownPreparationViewport(view.state, view.viewport, () => forceParsing(view, view.state.doc.length, PARSE_SLICE_MS));
-}
-
-function yieldForPresentation(): Promise<void> {
-  const scheduler = (globalThis as typeof globalThis & {
-    scheduler?: { postTask(callback: () => void, options: { priority: 'user-visible' }): Promise<void> }
-  }).scheduler;
-  if (scheduler?.postTask) return scheduler.postTask(() => {}, { priority: 'user-visible' });
-  // Each slice yields a task, allowing input and paint without tying parser
-  // progress to two display refreshes. Older runtimes use the ordinary task queue.
-  return new Promise(resolve => setTimeout(resolve, 0));
 }
 
 /** Finish the shared parser while the old surface remains mounted. Installing

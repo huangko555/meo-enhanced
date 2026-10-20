@@ -16,6 +16,27 @@ const initial = encoder.encode(tree), copy = structuredClone(initial.value, { tr
 assert.ok(initial.transfers.length <= 2, 'initial syntax must use bounded binary transfers rather than one handle per packed node');
 const receivedInitial = receiver.receive(copy);
 assert.equal(receivedInitial.toString(), tree.toString());
+const cooperative = createMarkdownTreeReceiver(parser.nodeSet);
+const cooperativeEncoder = createMarkdownTreeEncoder();
+let opportunities = 0;
+const cooperativelyReceived = await cooperative.receiveAsync(cooperativeEncoder.encode(tree).value, async () => {
+  opportunities++;
+  await new Promise<void>(resolve => setTimeout(resolve, 0));
+});
+assert.equal(cooperativelyReceived.toString(), tree.toString(), 'cooperative reception preserves every node and position');
+assert.ok(opportunities > 1, 'a large response must give input/paint multiple task opportunities before publication');
+assert.equal(cooperative.retainedNodes, receiver.retainedNodes);
+const tinyPacket = cooperativeEncoder.encode(parser.parse('tiny'));
+opportunities = 0;
+await cooperative.receiveAsync(tinyPacket.value, async () => { opportunities++; });
+assert.ok(opportunities > 1, 'retiring a large previous revision must also yield');
+assert.ok(cooperative.retainedNodes < 10);
+const cancelled = createMarkdownTreeReceiver(parser.nodeSet);
+await assert.rejects(cancelled.receiveAsync(copy, async () => { cancelled.clear(); }), /cancelled/);
+assert.equal(cancelled.retainedNodes, 0, 'disposal during reception must not recreate retired graph entries');
+const afterCancel = createMarkdownTreeEncoder().encode(parser.parse('after cancellation'));
+assert.equal((await cancelled.receiveAsync(afterCancel.value, async () => {})).toString(), parser.parse('after cancellation').toString());
+cooperative.clear(); cancelled.clear();
 copy.buffers.fill(0);
 assert.equal(receivedInitial.toString(), tree.toString(), 'retained branches own their bytes independently of the aggregate wire buffer');
 const count = encoder.retainedNodes;
@@ -74,6 +95,8 @@ for (const corrupt of [
   const invalid = createMarkdownTreeReceiver(parser.nodeSet);
   assert.throws(() => invalid.receive(corrupt(cleanPacket())), /Markdown syntax/);
   assert.equal(invalid.retainedNodes, 0, 'malformed binary packets retire every partially received branch');
+  await assert.rejects(invalid.receiveAsync(corrupt(cleanPacket()), async () => {}), /Markdown syntax/);
+  assert.equal(invalid.retainedNodes, 0, 'cooperative reception retains the same malformed-packet validation');
 }
 const invalidProps = { ...sparse, root: sparseRoot, records: sparse.records.slice() };
 invalidProps.records[4] = Infinity;

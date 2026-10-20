@@ -4,6 +4,14 @@ import { syntaxParsingBuildPlugin } from './test-editor-syntax-parsing-build';
 
 const build = await Bun.build({ entrypoints: ['scripts/test-live-decoration-history-entry.ts'], target: 'browser', format: 'iife',
   plugins: [{ name: 'observe-foreground-outer-parse', setup(builder) {
+    builder.onLoad({ filter: /webview[\\/]src[\\/]editor[\\/]markdownTreeTransfer\.ts$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text(), marker = '            await yieldToHost();';
+      assert.equal(source.split(marker).length, 2);
+      return { loader: 'ts', contents: source.replace(marker,
+        '            (globalThis as any).__syntaxReceiveYields = ((globalThis as any).__syntaxReceiveYields ?? 0) + 1;\n'
+        + '            if ((globalThis as any).__pauseSyntaxReceive) { (globalThis as any).__pauseSyntaxReceive = false; await new Promise<void>(resolve => { (globalThis as any).__releaseSyntaxReceive = resolve; }); }\n'
+        + marker) };
+    });
     for (const [file, marker, guard] of [
       ['displayMathBlocks', '  const literalRanges = collectMarkdownLiteralRanges(state, tree, scope);', '!scope && excludedRanges.length === 0'],
       ['markdownLiteralRanges', '  const ranges: SourceRange[] = [];', '!scope'],
@@ -417,6 +425,35 @@ try {
   assert.ok(incrementalCodeSteps < 5_000, `a code edit must reuse existing inner-language fragments: ${incrementalCodeSteps} LR steps`);
   await page.evaluate(() => (window as any).__codeEditor.destroy());
 
+  for (const dispose of [false, true]) {
+    stage = dispose ? 'dispose during syntax reception' : 'input during syntax reception';
+    await page.evaluate(() => {
+      const scope = window as any;
+      scope.__pauseSyntaxReceive = true; scope.__releaseSyntaxReceive = undefined;
+      scope.__receivingEditor = scope.__liveHistory.create({ parent: document.getElementById('editor'), text: scope.__original, initialMode: 'source' });
+    });
+    await page.waitForFunction(() => typeof (window as any).__releaseSyntaxReceive === 'function');
+    const during = await page.evaluate(dispose => {
+      const scope = window as any, editor = scope.__receivingEditor;
+      scope.__liveHistory.input(editor, 4, 'DURING');
+      const exact = editor.getText() === 'EDITDURING' + scope.__original.slice(4);
+      const partialPublished = scope.__liveHistory.markdownReady(editor);
+      if (dispose) editor.destroy();
+      scope.__releaseSyntaxReceive(); scope.__releaseSyntaxReceive = undefined;
+      return { exact, partialPublished };
+    }, dispose);
+    assert.deepEqual(during, { exact: true, partialPublished: false },
+      'input stays exact and partially received syntax must never be published');
+    if (!dispose) {
+      await page.waitForFunction(() => (window as any).__liveHistory.markdownReady((window as any).__receivingEditor));
+      assert.equal(await page.evaluate(() => {
+        const scope = window as any;
+        return scope.__receivingEditor.getText() === 'EDITDURING' + scope.__original.slice(4);
+      }), true, 'only the latest exact revision may finish after reception resumes');
+      await page.evaluate(() => (window as any).__receivingEditor.destroy());
+    }
+  }
+
   for (const part of ['syntax', 'blocks']) {
     stage = 'reject mismatched ' + part + ' projection base';
     const invalid = await page.evaluate(async part => {
@@ -467,6 +504,8 @@ try {
   assert.equal(await page.evaluate(() => (window as any).__foregroundLanguageHostScans ?? 0), 0,
     'distant language demand, changed hosts and invalid packets cannot fall back to foreground global host discovery');
   assert.deepEqual(errors, []);
+  assert.ok(await page.evaluate(() => (window as any).__syntaxReceiveYields > 1),
+    'production worker reception must give input/paint multiple task opportunities');
   console.log(`Background Markdown: CSP worker, no foreground full parse, ${requests.length} jobs/one snapshot, receipt-only prose updates, strict projection bases, CJK input, undo, modes, distant code palette, ${incrementalCodeSteps} incremental code LR steps, disposal and failure passed`);
 } catch (error) {
   console.error(JSON.stringify({ stage, browserErrors, details: await activePage?.evaluate(() => {

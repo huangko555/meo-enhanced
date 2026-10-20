@@ -52,20 +52,31 @@ class RetainedNodes {
     this.entries.set(id, { node, children, references: 0 });
   }
 
-  select(id: number): Tree {
+  *selectSteps(id: number): Generator<void, Tree> {
     const entry = this.entries.get(id);
     if (!(entry?.node instanceof Tree)) throw new Error('Unknown Markdown syntax root');
     entry.references++;
     const previous = this.root; this.root = id;
-    if (previous) this.release(previous);
+    if (previous) yield* this.releaseSteps(previous);
     return entry.node;
   }
 
-  private release(id: number) {
-    const entry = this.entries.get(id)!;
-    if (--entry.references) return;
-    this.entries.delete(id); this.retire(entry.node);
-    for (const child of entry.children) this.release(child);
+  select(id: number): Tree {
+    const steps = this.selectSteps(id);
+    for (;;) { const next = steps.next(); if (next.done) return next.value; }
+  }
+
+  private *releaseSteps(id: number): Generator<void> {
+    const pending = [id];
+    let work = 0;
+    while (pending.length) {
+      const current = pending.pop()!, entry = this.entries.get(current)!;
+      if (!--entry.references) {
+        this.entries.delete(current); this.retire(entry.node);
+        for (const child of entry.children) pending.push(child);
+      }
+      if (++work % 128 === 0) yield;
+    }
   }
 
   clear() {
@@ -116,54 +127,85 @@ export function createMarkdownTreeEncoder() {
  * obsolete: a later patch can refer to its shared branches. */
 export function createMarkdownTreeReceiver(nodeSet: NodeSet) {
   const retained = new RetainedNodes();
+  let generation = 0, receiving = false;
+  const clear = () => { generation++; retained.clear(); };
+  function* receiveSteps(value: MarkdownTreeTransfer): Generator<void, Tree> {
+    try {
+      if (!(value.records instanceof Float64Array) || !(value.buffers instanceof Uint16Array)
+        || !Number.isSafeInteger(value.count) || value.count < 0
+        || !Number.isSafeInteger(value.root) || value.root <= 0) throw new Error('Invalid Markdown syntax packet');
+      let cursor = 0, count = 0, bufferOffset = 0;
+      const fields = value.records;
+      while (cursor < fields.length) {
+        if (fields.length - cursor < 5) throw new Error('Truncated Markdown syntax record');
+        const id = fields[cursor++]!, length = fields[cursor++]!, kind = fields[cursor++]!;
+        if (!Number.isSafeInteger(id) || id <= 0 || !Number.isSafeInteger(length) || length < 0) {
+          throw new Error('Invalid Markdown syntax record');
+        }
+        count++;
+        if (kind === -1) {
+          const offset = fields[cursor++]!, units = fields[cursor++]!;
+          if (offset !== bufferOffset || !Number.isSafeInteger(units) || units < 0 || units % 4
+            || units > value.buffers.length - offset) throw new Error('Invalid Markdown syntax buffer');
+          // Each retained branch owns its bytes. A tiny surviving branch must
+          // not pin an obsolete document's entire aggregate transfer buffer.
+          retained.add(id, new TreeBuffer(value.buffers.slice(offset, offset + units), length, nodeSet), []);
+          bufferOffset += units;
+        } else {
+          const type = nodeSet.types[kind], childCount = fields[cursor++]!;
+          if (!Number.isInteger(kind) || !type || !Number.isSafeInteger(childCount) || childCount < 0
+            || fields.length - cursor < 2 || childCount > (fields.length - cursor - 2) / 2) throw new Error('Invalid Markdown syntax children');
+          const contextHash = fields[cursor++]!, lookAhead = fields[cursor++]!;
+          if (!Number.isNaN(contextHash) && !Number.isSafeInteger(contextHash)
+            || !Number.isNaN(lookAhead) && (!Number.isSafeInteger(lookAhead) || lookAhead < 0)) throw new Error('Invalid Markdown syntax properties');
+          const children: SyntaxObject[] = [], ids: number[] = [], positions: number[] = [];
+          for (let index = 0; index < childCount; index++) {
+            const childId = fields[cursor++]!, position = fields[cursor++]!, node = retained.entries.get(childId)?.node;
+            if (!Number.isSafeInteger(childId) || !node || !Number.isSafeInteger(position) || position < 0
+              || position + node.length > length || index > 0 && position < positions[index - 1]!) throw new Error('Invalid Markdown syntax position');
+            children.push(node); ids.push(childId); positions.push(position);
+          }
+          const props: NonNullable<ConstructorParameters<typeof Tree>[4]>[number][] = [];
+          if (!Number.isNaN(contextHash)) props.push([NodeProp.contextHash, contextHash]);
+          if (!Number.isNaN(lookAhead)) props.push([NodeProp.lookAhead, lookAhead]);
+          retained.add(id, new Tree(type, children, positions, length, props), ids);
+        }
+        if (count % 128 === 0) yield;
+      }
+      if (count !== value.count || bufferOffset !== value.buffers.length) throw new Error('Invalid Markdown syntax packet length');
+      return yield* retained.selectSteps(value.root);
+    } catch (error) { clear(); throw error; }
+  }
   return {
     receive(value: MarkdownTreeTransfer): Tree {
+      if (receiving) throw new Error('Concurrent Markdown syntax reception');
+      receiving = true;
       try {
-        if (!(value.records instanceof Float64Array) || !(value.buffers instanceof Uint16Array)
-          || !Number.isSafeInteger(value.count) || value.count < 0
-          || !Number.isSafeInteger(value.root) || value.root <= 0) throw new Error('Invalid Markdown syntax packet');
-        let cursor = 0, count = 0, bufferOffset = 0;
-        const fields = value.records;
-        while (cursor < fields.length) {
-          if (fields.length - cursor < 5) throw new Error('Truncated Markdown syntax record');
-          const id = fields[cursor++]!, length = fields[cursor++]!, kind = fields[cursor++]!;
-          if (!Number.isSafeInteger(id) || id <= 0 || !Number.isSafeInteger(length) || length < 0) {
-            throw new Error('Invalid Markdown syntax record');
-          }
-          count++;
-          if (kind === -1) {
-            const offset = fields[cursor++]!, units = fields[cursor++]!;
-            if (offset !== bufferOffset || !Number.isSafeInteger(units) || units < 0 || units % 4
-              || units > value.buffers.length - offset) throw new Error('Invalid Markdown syntax buffer');
-            // Each retained branch owns its bytes. A tiny surviving branch must
-            // not pin an obsolete document's entire aggregate transfer buffer.
-            retained.add(id, new TreeBuffer(value.buffers.slice(offset, offset + units), length, nodeSet), []);
-            bufferOffset += units;
-          } else {
-            const type = nodeSet.types[kind], childCount = fields[cursor++]!;
-            if (!Number.isInteger(kind) || !type || !Number.isSafeInteger(childCount) || childCount < 0
-              || fields.length - cursor < 2 || childCount > (fields.length - cursor - 2) / 2) throw new Error('Invalid Markdown syntax children');
-            const contextHash = fields[cursor++]!, lookAhead = fields[cursor++]!;
-            if (!Number.isNaN(contextHash) && !Number.isSafeInteger(contextHash)
-              || !Number.isNaN(lookAhead) && (!Number.isSafeInteger(lookAhead) || lookAhead < 0)) throw new Error('Invalid Markdown syntax properties');
-            const children: SyntaxObject[] = [], ids: number[] = [], positions: number[] = [];
-            for (let index = 0; index < childCount; index++) {
-              const childId = fields[cursor++]!, position = fields[cursor++]!, node = retained.entries.get(childId)?.node;
-              if (!Number.isSafeInteger(childId) || !node || !Number.isSafeInteger(position) || position < 0
-                || position + node.length > length || index > 0 && position < positions[index - 1]!) throw new Error('Invalid Markdown syntax position');
-              children.push(node); ids.push(childId); positions.push(position);
-            }
-            const props: NonNullable<ConstructorParameters<typeof Tree>[4]>[number][] = [];
-            if (!Number.isNaN(contextHash)) props.push([NodeProp.contextHash, contextHash]);
-            if (!Number.isNaN(lookAhead)) props.push([NodeProp.lookAhead, lookAhead]);
-            retained.add(id, new Tree(type, children, positions, length, props), ids);
+        const steps = receiveSteps(value);
+        for (;;) { const next = steps.next(); if (next.done) return next.value; }
+      } finally { receiving = false; }
+    },
+    async receiveAsync(value: MarkdownTreeTransfer, yieldToHost: () => Promise<void>): Promise<Tree> {
+      if (receiving) throw new Error('Concurrent Markdown syntax reception');
+      receiving = true;
+      const current = generation, steps = receiveSteps(value);
+      let deadline = performance.now() + 8, checkpoints = 0;
+      try {
+        for (;;) {
+          if (current !== generation) throw new Error('Markdown syntax reception cancelled');
+          const next = steps.next();
+          if (next.done) return next.value;
+          // Check time in small batches, with a deterministic object-work cap
+          // as well. The caller yields a browser task, never just a microtask.
+          if (++checkpoints >= 16 || performance.now() >= deadline) {
+            await yieldToHost();
+            deadline = performance.now() + 8; checkpoints = 0;
           }
         }
-        if (count !== value.count || bufferOffset !== value.buffers.length) throw new Error('Invalid Markdown syntax packet length');
-        return retained.select(value.root);
-      } catch (error) { retained.clear(); throw error; }
+      } catch (error) { clear(); throw error; }
+      finally { steps.return(Tree.empty); receiving = false; }
     },
     get retainedNodes() { return retained.entries.size; },
-    clear: () => retained.clear()
+    clear
   };
 }
