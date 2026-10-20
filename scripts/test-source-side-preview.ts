@@ -1492,9 +1492,18 @@ try {
     const rect = element.getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   });
+  await startPreviewAnchorSampling(transitionTableAnchorLine);
+  const beforePreviewOwnership = (await stopPreviewAnchorSampling()).at(-1)?.offset;
+  assert.ok(typeof beforePreviewOwnership === 'number', 'the complex Preview anchor must be measurable before its gesture');
   await page.mouse.move(splitPreviewBounds.x, splitPreviewBounds.y);
-  await page.mouse.wheel({ deltaY: 1 });
+  // This transition is owned by Preview. Align its actual rendered range;
+  // aligning Source first does not put a differently sized table at that band.
+  await page.mouse.wheel({ deltaY: Math.abs(beforePreviewOwnership) > 0.5 ? beforePreviewOwnership : 1 });
   await new Promise(resolve => setTimeout(resolve, 80));
+  await startPreviewAnchorSampling(transitionTableAnchorLine);
+  const alignedPreviewOwnership = (await stopPreviewAnchorSampling()).at(-1)?.offset;
+  assert.ok(typeof alignedPreviewOwnership === 'number' && Math.abs(alignedPreviewOwnership) <= 2,
+    `Preview must actually own the complex anchor at its reading band before switching: ${alignedPreviewOwnership}`);
   const sourceToFullReadingAnchor = await page.evaluate(() => {
     const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
     const viewportTop = frameDocument.scrollingElement?.scrollTop ?? 0;

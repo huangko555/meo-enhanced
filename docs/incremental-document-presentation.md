@@ -967,3 +967,34 @@ complex table transition still fails its absolute anchor assertion, at about
 -91 px. An otherwise unchanged `63023c66` build reproduces that same assertion
 with these structural-read and leading-margin changes removed. The regression
 is retained as an open mode-coordination issue; no test assertion is relaxed.
+
+That complex-transition failure is subsequently isolated to its setup. The
+scenario gives Preview scroll ownership after aligning Source, but assumes the
+same row/range must already be centered in the differently sized Preview table.
+The captured pre-transition Preview offset is already about -90 px; the mode
+switch preserves it within a pixel. The fixture now uses its real Preview wheel
+gesture to align the measured rendered range and requires a <=2 px precondition
+before switching. All original <=20 px absolute, semantic-range and <=1 px
+paint-stability assertions remain. The full Source-side Preview suite then
+passes, including repeated round trips, independent scrolling and LF/CRLF reload.
+No product mode-switch change is needed for this failure.
+
+V53 (`6fa4c775`, archive SHA-256
+`9da6a0ec9a34df3db2a225a86b4d20514c41dd6deb1361cd0f2f99aaa90ef7d2`)
+passes the full ordinary/rich native flow: sixteen distributed rich-document
+clicks, typing, exact undo/save, composition, four Preview drags, whole formatted
+copy and mode round trips. Rich warm Source input median/P95/maximum is
+39/112/161 ms and Live is 84/197/260 ms. Preview entry is 5.18 s (3.76 s response),
+cached Preview 717 ms; drag frame gaps are 80/204/96/98 ms. Full formatted copy
+is 8.26 s, with 5,538,400 HTML and 567,075 text units, bold and the end marker.
+The final Preview screenshot is visually checked at the frontmatter boundary.
+This passes the historical 500 ms gate, not the tighter responsiveness goals.
+
+Cold Source still records a 535 ms maximum and 561 ms frame gap, and cold Live
+a 371 ms maximum and 333 ms gap; these retained failures take precedence over
+the warmer full run. A separate Source profile has a faster input sample, so it
+cannot explain away the cold tail. It does identify roughly 99 ms main-thread
+mixed-language preparation, including a global host index, plus an unparented
+173 ms browser layout. The latter is not attributed to a product function without
+evidence. Moving global host discovery into the existing worker is the next
+bounded architectural change; native remeasurement remains necessary.
