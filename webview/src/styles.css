@@ -8320,8 +8320,17 @@ html[data-editor-appearance='dark'] :is(.settings-warning, .settings-shortcut-co
   font-family: var(--meo-suggestion-font, var(--meo-active-editor-font));
   font-size: var(--meo-suggestion-font-size, 13px);
 }
-.meo-path-suggestions { width: min(clamp(260px, 20em, 300px), calc(100vw - 16px)); }
-.meo-narrow-suggestions { width: min(240px, calc(100vw - 16px)); }
+.meo-link-suggestions { width: min(max(320px, calc(24em + 8px)), calc(100vw - 16px)); }
+.meo-path-suggestions { width: min(clamp(248px, calc(19em + 1px), 300px), calc(100vw - 16px)); }
+.meo-input-suggestions[data-suggestion-kind='slash'] { width: min(max(288px, 22.15em), calc(100vw - 16px)); }
+.meo-input-suggestions[data-suggestion-kind='slash']:lang(en) { width: min(max(336px, 25.85em), calc(100vw - 16px)); }
+.meo-input-suggestions[data-suggestion-kind='headings'] { width: min(max(272px, 20.92em), calc(100vw - 16px)); }
+.meo-input-suggestions[data-suggestion-kind='headings']:lang(en) { width: min(max(288px, 22.15em), calc(100vw - 16px)); }
+.meo-narrow-suggestions { width: min(max(184px, 14.15em), calc(100vw - 16px)); }
+.meo-html-suggestions { width: min(max(208px, 16em), calc(100vw - 16px)); }
+.meo-html-suggestions[data-html-kind='property'] { width: min(max(224px, 17.23em), calc(100vw - 16px)); }
+.meo-html-suggestions[data-html-kind='constant'] { width: min(max(304px, 23.38em), calc(100vw - 16px)); }
+.meo-math-suggestions { width: min(max(336px, 25.85em), calc(100vw - 16px)); }
 .meo-input-suggestions[hidden] { display: none; }
 html[data-editor-appearance='dark'] .meo-input-suggestions {
   --meo-suggestion-match-color: var(--meo-ui-text-emphasis);
@@ -8388,7 +8397,7 @@ html[data-meo-ui-contrast='normal'] .meo-input-suggestions:not(.meo-narrow-sugge
 .meo-input-suggestion-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--meo-ui-text-muted); font: inherit; text-align: right; white-space: nowrap; overflow-wrap: normal; }
 
 .meo-math-suggestions .meo-input-suggestion {
-  grid-template-columns: 16px minmax(0, 1fr) minmax(48px, 25%);
+  grid-template-columns: 16px minmax(0, 1fr) 4em;
   height: max(28px, calc(1.45em + 6px));
   min-height: 0;
   overflow: hidden;

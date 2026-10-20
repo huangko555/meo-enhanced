@@ -65,7 +65,7 @@ export function slashCommandSuggestions(query: string, context: 'block' | 'inlin
     const fits = isMarkdownTableSize(complete ? cols : 1, rows);
     // Keep a valid size prefix visible without allowing it to insert the default table.
     return [{ ...table, command, insert: '', caret: 0, disabled: true, parameters: complete ? undefined : dimensions[2] === undefined ? 'xN' : 'N',
-      zh: fits ? '继续输入列数' : positive ? '表格尺寸过大' : '行列数需为正整数', en: fits ? 'Enter column count' : positive ? 'Table size is too large' : 'Use positive row/column counts' }];
+      zh: fits ? '继续输入列数' : positive ? '表格尺寸过大' : '行列数需为正整数', en: fits ? 'Enter column count' : positive ? 'Table too large' : 'Use positive rows/cols' }];
   }
   if (/^(?:table)?[0-9]/.test(q) || /^(?:table)?[x×*]/.test(q)) return [];
   const language = languages.find(([id, , aliases]) => [id, ...aliases].includes(q));

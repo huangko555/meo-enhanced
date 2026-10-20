@@ -127,7 +127,7 @@ try {
     assert.ok(geometry.top >= 0 && geometry.bottom <= geometry.caretTop, 'HTML obeys the shared above preference');
     assert.equal(geometry.radius, '10px');
     assert.equal(geometry.rowHeight, 28);
-    assert.equal(geometry.detail, language === 'zh-CN' ? '属性' : 'Attribute');
+    assert.equal(geometry.detail, undefined, 'HTML candidates do not repeat their type in a second column');
     const selected = () => page.$eval(menu + ' [aria-selected="true"]', node => Number((node as HTMLElement).dataset.suggestionIndex));
     await page.keyboard.press('ArrowUp'); assert.equal(await selected(), 1, 'above-menu arrows follow the visible order');
     await page.keyboard.press('ArrowDown'); assert.equal(await selected(), 0);

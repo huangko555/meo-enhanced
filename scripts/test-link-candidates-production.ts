@@ -86,13 +86,13 @@ try {
     phase = mode + '/' + appearance + '/' + language;
     await prepare('[File](/)', 8, mode, appearance, language);
     await visible(); assert.equal(await page.$('.meo-tooltip.is-visible'), null, 'unclipped directory has no hint');
-    assert.equal(await menuWidth(), 260, 'normal-size directory menu is compact');
+    assert.equal(await menuWidth(), 248, 'normal-size directory menu is compact');
     assert.equal(await page.$('.meo-input-suggestions .meo-input-suggestion-detail'), null, 'directory candidates do not repeat their path');
     await page.keyboard.press('Tab'); await visible();
     await page.waitForFunction(() => (window as any).requests.some((request: any) => request.query === '/docs/'));
     await tooltip();
     assert.equal(await tooltipText(), longName, 'path hint reveals only the clipped filename without hover');
-    assert.equal(await menuWidth(), 260, 'directory chaining does not change width');
+    assert.equal(await menuWidth(), 248, 'directory chaining does not change width');
     assert.equal(await page.$('.meo-slash-suggestions:not([hidden])'), null, 'directory slash does not become a command');
     assert.equal(await page.evaluate(() => document.activeElement === (window as any).editor.view.contentDOM), true, 'hint retains editing focus');
     const geometry = await page.evaluate(() => {
@@ -104,14 +104,14 @@ try {
     assert.ok(['left', 'right'].includes(geometry.side!));
     await page.keyboard.press('ArrowDown');
     await page.waitForFunction(() => !document.querySelector('.meo-tooltip.is-visible'));
-    assert.equal(await menuWidth(), 260, 'short selection does not shrink the menu');
+    assert.equal(await menuWidth(), 248, 'short selection does not shrink the menu');
     await page.keyboard.press('ArrowUp'); await tooltip();
     await page.keyboard.press('Enter'); await closed();
     assert.equal(await text(), '[File](/docs/' + encodeMarkdownPath(longName) + ')');
     await page.keyboard.type('#'); await visible(); await page.keyboard.press('Tab'); await closed();
     assert.ok((await text()).endsWith('#overview)'));
     await prepare('[[pp]]', 4, mode, appearance, language); await visible(); await tooltip();
-    assert.equal(await menuWidth(), 360, 'Wiki search keeps the wider two-line menu');
+    assert.equal(await menuWidth(), 320, 'Wiki search keeps the wider two-line menu');
     assert.equal(await tooltipText(), longName + '\n' + longPath, 'Wiki search retains full name and path');
     await page.keyboard.press('Enter'); await closed();
     assert.equal(await text(), '[[project-plan|项目规划]]');
@@ -249,7 +249,7 @@ try {
   const narrowPath = await page.$eval('.meo-input-suggestions:not([hidden])', element => {
     const bounds = element.getBoundingClientRect(); return { width: bounds.width, left: bounds.left, right: bounds.right };
   });
-  assert.ok(narrowPath.width < 260 && narrowPath.left >= 8 && narrowPath.right <= 212, 'narrow paths fit the viewport');
+  assert.ok(narrowPath.width < 248 && narrowPath.left >= 8 && narrowPath.right <= 212, 'narrow paths fit the viewport');
   await page.keyboard.press('Escape'); await closed();
   await page.setViewport({ width: 520, height: 720 });
   for (const source of ['/comment', ':thumbsdown', '# ' + 'Long heading '.repeat(14) + '\n\n[Go](#']) {

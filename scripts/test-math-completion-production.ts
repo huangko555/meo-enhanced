@@ -175,6 +175,7 @@ try {
             && border.top >= bounds.top + 0.5 && border.bottom <= bounds.bottom - 0.5;
         });
         return { command: row.dataset.mathCommand!, label: row.querySelector('.meo-suggestion-label')!.textContent,
+          labelFits: (row.querySelector('.meo-suggestion-label') as HTMLElement).scrollWidth <= (row.querySelector('.meo-suggestion-label') as HTMLElement).clientWidth + 1,
           height: row.getBoundingClientRect().height, expectedHeight: Math.max(28, 1.45 * fontSize + 6),
           valid: !preview.querySelector('.katex-error'), bordersFit,
           fits: math.left >= bounds.left - 1 && math.right <= bounds.right + 1 && math.top >= bounds.top - 1 && math.bottom <= bounds.bottom + 1 };
@@ -183,6 +184,7 @@ try {
         const index = catalog.findIndex(item => item.label === row.command), item = catalog[index]!;
         assert.ok(item, row.command + ': belongs to the catalog');
         assert.equal(row.label, item.insert.replace(/\s*\n\s*/g, ' '), row.command + ': fixed insertion template');
+        assert.ok(row.labelFits, row.command + ': the complete insertion template remains visible');
         assert.ok(row.valid && row.fits, row.command + ': complete, valid preview within the row');
         assert.ok(row.bordersFit, row.command + ': visible rules stay clear of clipping edges');
         assert.ok(Math.abs(row.height - row.expectedHeight) < 0.1, row.command + ': equal row height');

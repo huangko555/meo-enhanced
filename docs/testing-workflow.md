@@ -1392,9 +1392,15 @@ segment/fragment/title preservation, vault-scoped fuzzy/multiword ranking before
 limit, background aliases/titles and invalidation, shortest unambiguous Wiki targets,
 native table alias escaping, slash ownership even when suggestions are disabled, and
 selected clipped text without pointer hover. Path menus use one line and do not repeat
-the path; default-size width is 260px, larger fonts stop at 300px, selection and
+the path; default-size width is 248px, larger fonts stop at 300px, selection and
 directory chaining retain width, and narrow viewports constrain the menu. Wiki
-document results retain the wider two-line layout. Browser checks include Source/Live,
+document results retain the wider two-line layout at 320px for the default size.
+Candidate widths are fixed by family and UI language, with font scaling and viewport
+constraints. HTML omits redundant type labels, unique headings omit derived anchors,
+and slash descriptions are retained when they add information. Math catalog checks
+assert that complete templates fit beside the rendered example. Focused visual smoke
+covers every family in Chinese/English, light/dark, large fonts and narrow windows.
+Browser checks include Source/Live,
 Chinese/light and English/dark, all candidate families, narrow menus, focus,
 Escape followed by metadata refresh and owner disposal. Quoted-directory IME checks
 retain literal directory prefixes and raw preedit spans while filtering separators

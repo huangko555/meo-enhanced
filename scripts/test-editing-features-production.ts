@@ -394,7 +394,9 @@ try {
       const { width: slashWidth, rowPadding: slashPadding, rowHeight: slashHeight, ...slashSurface } = expectedSurface;
       const documents = kind === 'documents';
       assert.deepEqual(sharedSurface, slashSurface, [mode, appearance, language, kind].join(':') + ': shares slash shell and editor font');
-      assert.equal(width, kind === 'emoji' ? '240px' : kind === 'paths' ? '300px' : slashWidth, kind + ': width follows the candidate content and editor font');
+      const expectedWidth = kind === 'emoji' ? 14.15 * 17 : kind === 'paths' ? 300
+        : kind === 'headings' ? (language === 'en' ? 22.15 : 20.92) * 17 : 416;
+      assert.ok(Math.abs(parseFloat(width) - expectedWidth) < 0.1, kind + ': width follows the candidate content and editor font');
       assert.equal(rowPadding, documents ? '5px 8px' : slashPadding);
       if (documents) assert.ok(rowHeight > slashHeight * 1.5, 'Wiki document rows reserve two full text lines');
       else assert.equal(rowHeight, slashHeight);
