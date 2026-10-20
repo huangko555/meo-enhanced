@@ -233,7 +233,7 @@ class BlockStickyHeader {
     Object.assign(this.header.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
     const identity = `${block.kind}:${block.from}:${this.view.state.doc.lineAt(block.from).number}:${this.view.state.facet(uiLanguageFacet)}`;
     if (identity !== this.identity || !this.toolbar || !this.widget ||
-        (!block.widget.eq(this.widget) && !block.widget.updateDOM(this.toolbar, this.view))) {
+        (!block.widget.eq(this.widget) && !block.widget.updateDOM(this.toolbar, this.view, this.widget))) {
       this.previewCleanup(); this.previewOwner = null;
       this.toolbar = block.widget.toDOM(this.view);
       const label = document.createElement('span');

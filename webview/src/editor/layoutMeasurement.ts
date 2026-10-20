@@ -5,7 +5,7 @@ import type { EditorView } from '@codemirror/view';
  * from a size observer, never during a StateField/ViewPlugin update. Most work
  * should use requestMeasure; a resize delivered after frame callbacks needs
  * this synchronous completion to avoid one frame of stale gutter geometry.
- * Keep the pinned CodeMirror 6.36.4 implementation dependency at this one
+ * Keep the pinned CodeMirror 6.43.15 implementation dependency at this one
  * adapter; upgrades must pass the passive layout and painted-frame contracts.
  */
 export function flushEditorLayout(view: EditorView): void {

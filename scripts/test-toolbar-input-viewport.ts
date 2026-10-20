@@ -996,8 +996,8 @@ async function runWorkbenchMenuFocus(browser: Browser, mode: 'live' | 'source'):
     await content.waitForSelector('.cm-content');
     await (await content.$('.cm-line:nth-child(2)'))!.click();
     const before = await content.evaluate(() => {
-      const element = document.querySelector('.cm-content') as HTMLElement & { cmView: any };
-      return element.cmView.rootView.view.state.selection.main.head as number;
+      const element = document.querySelector('.cm-content') as HTMLElement & { cmTile: any };
+      return element.cmTile.root.view.state.selection.main.head as number;
     });
     await page.click('#host-menu');
     assert.equal(await content.evaluate(() => document.hasFocus()), false, `${mode} menu fixture stayed focused`);

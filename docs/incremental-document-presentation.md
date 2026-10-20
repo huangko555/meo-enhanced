@@ -868,3 +868,52 @@ verification duplicates a committed CJK composition at the Live tail; an isolate
 repeat passes the exact-source assertion. The failure is retained and is not
 explained away as a timing artifact. IME/mode-transition stability still needs
 further diagnosis alongside native acceptance.
+
+### Editor core and competing viewport owners (2026-10-20)
+
+The pinned CodeMirror view/state pair is updated from 6.36.4/6.5.2 to
+6.43.15/6.7.6. The upstream view changelog includes native caret coordinates,
+widget hit testing, scroll clipping/scaling and composition corrections. The
+project keeps its Markdown grammar and existing document/worker protocol.
+The sticky-header widget follows the new previous-widget updateDOM argument;
+the centralized synchronous measurement adapter retains its verified signature.
+Production test drivers follow this pinned version's content tile reference.
+
+Two local regressions need product fixes independent of that upgrade. A native
+mouse hit just after hidden inline closing markers can be mapped before those
+markers by CodeMirror; at an italic overhang even Chromium's first text endpoint
+can be ambiguous. Live now keeps the bounded DOM text hit for an unmodified,
+stationary mouse click and reconciles it after CodeMirror's document mouseup.
+The alternative hit requires collapsed intervening markers and the following
+text's leading caret within one CSS pixel. Selection drags, modifiers, document
+changes, nested editors and widget-owned clicks do not adopt this correction.
+The existing full IME regression now passes without weakening its assertions.
+
+The production table/navigation regression also reproduced on the old core.
+Scroll setter call stacks identify a still-active column-width element-retention
+callback alternating with a newer document-anchor stabilizer: one restores the
+old textarea screen Y, the other restores the requested document position.
+Element retention now captures viewport ownership as well as its own lifetime;
+a newer owner retires the old correction. Font-line/table observers use the same
+ownership check as the existing visual-block observer. The unchanged regression
+passes its synchronous-write trace and twelve passive frames, including its
+negative cleanup control, focused textarea and exact selection checks.
+
+The new core's default five-pixel cursor scroll margin also introduced an extra
+Source scroll in the visible replacement case. Source uses the public cursor
+margin facet with a one-pixel vertical margin so its existing viewport owner
+remains authoritative. This is verified by the original navigation assertions.
+These functional fixes do not by themselves establish native latency targets.
+
+Type checks and the production build pass. Fourteen targeted regressions pass,
+including viewport ownership, IME, image geometry, Mermaid block modes,
+three-mode unsaved-source work budgets, parser reuse and window-focus return.
+Font changes cover 70 steps with zero observed anomalies; line-number projection
+covers 242 passive frames. Formula gutter checks cover nine typing scenarios,
+1,186 passive input frames and 162 actual screencast pixel checks. The mode
+preparation test now waits for the initial toolbar/editor preload shells to
+release before testing cancellation; previously it clicked an aria-hidden shell.
+Its real trusted-click and exact-source assertions remain intact. A separate
+four-times-CPU-throttled diagnostic passes sixteen CDP compositions over eight
+Source/Live cycles. This does not explain every earlier transient composition
+failure and is not a Windows candidate-window measurement.

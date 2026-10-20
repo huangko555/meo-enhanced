@@ -31,7 +31,7 @@ Mermaid 内部编辑器和 HTML 语义行需要源码映射，投射位置取自
 
 每个新增用例先确认能检测已知错误，再收敛相关实现。有限的用例集合不等于所有文档均已覆盖。
 
-`layoutMeasurement.ts` 集中封装当前固定版本 CodeMirror 6.36.4 的同步测量依赖。
+`layoutMeasurement.ts` 集中封装当前固定版本 CodeMirror 6.43.15 的同步测量依赖。
 常规投射使用 `requestMeasure` 的读写阶段；挂载或尺寸观察在下一次绘制前合并完成测量。
 升级 CodeMirror 时必须运行以上布局与实际绘制检查，不能只依赖类型检查。
 

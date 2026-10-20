@@ -263,7 +263,8 @@ type CreateEditorOptions = {
 };
 
 type PointerClickState = { pointerId: number };
-type InlineCodeClickState = PointerClickState & { inInlineCode: boolean };
+type NativePointerCaretHit = { doc: Text; position: number; x: number; y: number };
+type InlineCodeClickState = PointerClickState & { inInlineCode: boolean; nativeHit?: NativePointerCaretHit };
 type FrontmatterBoundaryClickState = PointerClickState & { cursorEnd: number };
 type PointerPosition = { x: number; y: number };
 type TableTextTransform = (value: string, start: number, end: number) => boolean;
@@ -451,6 +452,7 @@ export function createEditor({
   let gitDiffSelectionPointerId: number | null = null;
   let liveSelectionGeneration = 0;
   let inlineCodeClick: InlineCodeClickState | null = null;
+  let pendingNativeCaretHit: NativePointerCaretHit | null = null;
   let checkboxClick: PointerClickState | null = null;
   let frontmatterBoundaryClick: FrontmatterBoundaryClickState | null = null;
   let quoteContentClick: { pointerId: number; position: number; x: number; y: number } | null = null;
@@ -476,6 +478,7 @@ export function createEditor({
   let interactionContinuity: EditorInteractionContinuity | null = null;
   let onWindowPointerUp: ((event: PointerEvent) => void) | null = null;
   let onWindowPointerCancel: ((event: PointerEvent) => void) | null = null;
+  let onWindowMouseUp: ((event: MouseEvent) => void) | null = null;
   let onWindowBlur: (() => void) | null = null;
   let onDocumentSelectionChange: (() => void) | null = null;
   let onHtmlContentPointerDown: ((event: PointerEvent) => void) | null = null;
@@ -2512,6 +2515,7 @@ export function createEditor({
           return false;
         },
         pointerdown(event, view) {
+          pendingNativeCaretHit = null;
           if (event.button !== 0) {
             frontmatterBoundaryClick = null;
             return false;
@@ -2555,6 +2559,7 @@ export function createEditor({
 
           inlineCodeClick = {
             pointerId: event.pointerId,
+            ...(currentMode === 'live' ? { nativeHit: nativePointerCaretHit(view, event) } : {}),
             inInlineCode: Boolean(
               currentMode === 'live' &&
               targetElement?.closest('.meo-md-inline-code')
@@ -3327,6 +3332,10 @@ export function createEditor({
   };
   document.addEventListener('selectionchange', onDocumentSelectionChange);
   onWindowPointerUp = (event) => {
+    const nativeHit = inlineCodeClick?.nativeHit;
+    if (inlineCodeClick?.pointerId === event.pointerId && nativeHit
+      && Math.abs(nativeHit.x - event.clientX) <= 3 && Math.abs(nativeHit.y - event.clientY) <= 3)
+      pendingNativeCaretHit = nativeHit;
     const completedSelection = selectionMenuPointerId === event.pointerId;
     const quoteClick = quoteContentClick;
     if (gitDiffSelectionPointerId === event.pointerId) gitDiffSelectionPointerId = null;
@@ -3373,17 +3382,38 @@ export function createEditor({
     });
   };
   onWindowPointerCancel = (event) => {
+    inlineCodeClick = null;
+    pendingNativeCaretHit = null;
     if (gitDiffSelectionPointerId === event.pointerId) gitDiffSelectionPointerId = null;
     clearPointerSelection();
     onSelectionChange?.({ visible: false });
   };
   onWindowBlur = () => {
+    inlineCodeClick = null;
+    pendingNativeCaretHit = null;
     onLinkPointerLeave();
     clearPointerSelection();
     onSelectionChange?.({ visible: false });
   };
   window.addEventListener('pointerup', onWindowPointerUp, true);
   window.addEventListener('pointercancel', onWindowPointerCancel, true);
+  onWindowMouseUp = event => {
+    const hit = pendingNativeCaretHit;
+    pendingNativeCaretHit = null;
+    inlineCodeClick = null;
+    if (!hit || editorDestroyed || event.button !== 0 || !isLiveMode(view) || !view.hasFocus
+      || hit.doc !== view.state.doc || !(event.target instanceof Node) || !view.dom.contains(event.target)
+      || Math.abs(hit.x - event.clientX) > 3 || Math.abs(hit.y - event.clientY) > 3) return;
+    const selection = view.state.selection;
+    if (selection.ranges.length !== 1 || !selection.main.empty || hit.position <= selection.main.head
+      || hit.position - selection.main.head > 16 || !/^[*~`_^=]+$/.test(view.state.doc.sliceString(selection.main.head, hit.position))) return;
+    // Window bubbling follows CodeMirror's document mouseup selection. A
+    // collapsed closing marker must not displace the painted-text hit.
+    view.dispatch({ selection: { anchor: hit.position }, annotations: [
+      Transaction.userEvent.of('select.pointer'), Transaction.addToHistory.of(false)
+    ] });
+  };
+  window.addEventListener('mouseup', onWindowMouseUp);
   window.addEventListener('blur', onWindowBlur);
   onScroll = () => {
     emitSelectionChange();
@@ -3721,6 +3751,11 @@ export function createEditor({
     },
     destroy() {
       editorDestroyed = true;
+      pendingNativeCaretHit = null;
+      if (onWindowMouseUp) {
+        window.removeEventListener('mouseup', onWindowMouseUp);
+        onWindowMouseUp = null;
+      }
       if (onEditorFocusIn) view.dom.removeEventListener('focusin', onEditorFocusIn, true);
       if (onEditorFocusOut) view.dom.removeEventListener('focusout', onEditorFocusOut, true);
       if (onEditorPointerDown) view.dom.removeEventListener('pointerdown', onEditorPointerDown, true);
@@ -5046,6 +5081,9 @@ function insertWikiLink(
 
 function sourceMode(boundedEditorWork: boolean, lightweightSourceSyntax: boolean): Extension[] {
   return [
+    // The viewport owner already reveals the requested source line. Keep a
+    // visible native caret from adding a second five-pixel vertical scroll.
+    EditorView.cursorScrollMargin.of({ x: 5, y: 1 }),
     ...(boundedEditorWork ? liveInputDerivedWorkExtensions({ largeDocument: boundedEditorWork }) : []),
     // Block display choices belong to the editing session, including Source.
     mermaidEditingStateField,
@@ -5059,6 +5097,45 @@ function sourceMode(boundedEditorWork: boolean, lightweightSourceSyntax: boolean
     ...gitDiffDetailsExtensions(),
     ...mergeConflictSourceExtensions()
   ];
+}
+
+function nativePointerCaretHit(view: EditorView, event: PointerEvent): NativePointerCaretHit | undefined {
+  if (event.pointerType !== 'mouse' || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
+  const range = view.dom.ownerDocument.caretRangeFromPoint?.(event.clientX, event.clientY);
+  if (!range || range.startContainer.nodeType !== 3 || !view.contentDOM.contains(range.startContainer)
+    || range.startContainer.parentElement?.closest('.cm-editor') !== view.dom) return;
+  try {
+    const position = view.posAtDOM(range.startContainer, range.startOffset);
+    if (position > 0 && /[*~`_^=]/.test(view.state.doc.sliceString(position - 1, position)))
+      return { doc: view.state.doc, position, x: event.clientX, y: event.clientY };
+    // At an italic overhang Chromium can prefer the preceding text endpoint.
+    // A collapsed marker run and the following glyph's leading caret disambiguate it.
+    const marker = /^[*~`_^=]+/.exec(view.state.doc.sliceString(position, Math.min(view.state.doc.length, position + 16)));
+    const line = range.startContainer.parentElement?.closest('.cm-line');
+    if (!marker || !line) return;
+    const after = position + marker[0].length;
+    const document = view.dom.ownerDocument;
+    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+    walker.currentNode = range.startContainer;
+    for (let steps = 0; steps < 32; steps++) {
+      const node = walker.nextNode();
+      if (!node) return;
+      const from = view.posAtDOM(node, 0);
+      if (from > after) return;
+      if (from !== after || !node.textContent) continue;
+      const caret = document.createRange();
+      caret.setStart(node, 0);
+      caret.collapse(true);
+      const rect = caret.getBoundingClientRect();
+      if (rect.height < 1 || Math.abs(event.clientX - rect.left) > 1
+        || event.clientY < rect.top || event.clientY > rect.bottom) continue;
+      const hidden = document.createRange();
+      hidden.setStart(range.startContainer, range.startOffset);
+      hidden.setEnd(node, 0);
+      if ([...hidden.getClientRects()].every(rect => rect.width < 0.5 || rect.height < 1))
+        return { doc: view.state.doc, position: after, x: event.clientX, y: event.clientY };
+    }
+  } catch { /* A non-source widget keeps its own pointer owner. */ }
 }
 
 const blockedInlineSelectionAncestors = new Set([

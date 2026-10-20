@@ -85,6 +85,10 @@ try {
   });
   await page.goto(server.url.href);
   await page.waitForSelector('.editor-host > .cm-editor.meo-mode-source');
+  // Mounting the editor precedes the initial presentation reveal. Do not start
+  // cancellation while the real toolbar is still an aria-hidden preload shell.
+  await page.waitForFunction(() => !document.querySelector('.meo-preload-toolbar')
+    && !document.querySelector('.meo-preload-editor-shell'));
   await page.evaluate(() => {
     const scope = window as any;
     scope.__modeTestClicks = [];
@@ -130,7 +134,7 @@ try {
   stage = 'retry';
   await page.waitForFunction(() => !!document.querySelector('.editor-host > .cm-editor.meo-mode-live')
     && !document.querySelector('.mode-group [aria-busy="true"]'));
-  const finalText = await page.$eval('.editor-host .cm-content', element => (element as any).cmView.view.state.doc.toString());
+  const finalText = await page.$eval('.editor-host .cm-content', element => (element as any).cmTile.root.view.state.doc.toString());
   assert.equal(finalText, text, 'cancellation and retry must retain the exact document');
   assert.deepEqual(errors, []);
   console.log('Production mode preparation, cancellation and real-surface readiness passed');

@@ -699,12 +699,16 @@ export class ViewportController {
     }
     this.cancelElementRetention();
     const retentionGeneration = ++this.elementRetentionGeneration;
+    // A later document anchor or measured navigation owns scrolling. A still
+    // focused table cell does not let its old width correction compete with it.
+    const ownerGeneration = this.generation;
     // Rendered source/preview shells can commit one frame after the ordinary
     // CodeMirror settlement window. Keep this low-frequency transition bounded
     // while still covering that second layout phase.
     let remainingFrames = MAX_SETTLE_FRAMES * 2;
     const isRetentionCurrent = () => (
       !this.destroyed &&
+      ownerGeneration === this.generation &&
       retentionGeneration === this.elementRetentionGeneration &&
       isCurrent()
     );
@@ -1469,8 +1473,9 @@ export class ViewportController {
       });
     }
     if (tableRow && blockTop !== undefined && !this.isUserScrolling()) {
+      const ownerGeneration = this.generation + 1;
       const correctTableRow = () => {
-        if (this.destroyed || this.isUserScrolling()) return;
+        if (this.destroyed || this.generation !== ownerGeneration || this.isUserScrolling()) return;
         const row = resolveTableRow();
         if (row) this.writeScrollPosition({
           top: scroller.scrollTop + row.getBoundingClientRect().top - blockTop,
@@ -1484,7 +1489,7 @@ export class ViewportController {
       scroller.addEventListener('scroll', correctTableRow, { passive: true });
       let remainingFrames = 15;
       const release = () => {
-        if (--remainingFrames <= 0 || this.destroyed) {
+        if (--remainingFrames <= 0 || this.destroyed || this.generation !== ownerGeneration) {
           observer?.disconnect();
           mutations.disconnect();
           scroller.removeEventListener('scroll', correctTableRow);
@@ -1498,6 +1503,7 @@ export class ViewportController {
       return;
     }
     if (!visualAnchor && anchorLineTop !== null && currentBlock?.isConnected && !this.isUserScrolling()) {
+      const ownerGeneration = this.generation + 1;
       const trackedLineTarget = () => {
         const line = resolveTrackedAnchorLine();
         if (line) return scroller.scrollTop + line.getBoundingClientRect().top - anchorLineTop;
@@ -1506,7 +1512,7 @@ export class ViewportController {
           : null;
       };
       const correctAnchorLine = () => {
-        if (this.destroyed || this.isUserScrolling()) return;
+        if (this.destroyed || this.generation !== ownerGeneration || this.isUserScrolling()) return;
         const top = trackedLineTarget();
         if (top !== null) this.writeScrollPosition({ top, left: scroller.scrollLeft });
       };
@@ -1520,7 +1526,7 @@ export class ViewportController {
         observer.observe(this.view.contentDOM);
         let remainingFrames = 15;
         const release = () => {
-          if (--remainingFrames <= 0 || this.destroyed) {
+          if (--remainingFrames <= 0 || this.destroyed || this.generation !== ownerGeneration) {
             observer.disconnect();
             mutations.disconnect();
             scroller.removeEventListener('scroll', correctAnchorLine);
