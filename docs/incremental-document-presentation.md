@@ -1250,3 +1250,29 @@ The 128 exact ancestor/mixed-language comparisons and deep-code work bound pass.
 Source-side Preview LF/CRLF, viewport-anchor production, complete document
 cutover and type checks also pass. Native remeasurement of this palette change
 is still required; the V57 numbers above do not include it.
+
+### Defer inline-only table breaks until the table is requested
+
+The exact V57 packaged Preview worker, executed diagnostically in the guest's
+Node v24.21.0 with an in-memory parent port, takes 572 ms to load and 2,037 ms
+to open the rich fixture. A byte-checked source map attributes about 813 ms to
+deferred-inline setup, including 492 ms preparing supposedly lazy groups.
+This diagnostic excludes the real host transport/wiki-resolution path and is
+not a native first-Preview measurement.
+
+Only roots that can affect cross-root HTML container state need early inline
+children. Bare `<br>`, `<br/>` and `<BR />` neither own a container nor implicitly
+close one in the pinned HTML parser, so their presence no longer forces early
+table/paragraph inline work. Other angle-bracket content, attributed breaks and
+closing tags remain conservative. Heading preparation and eager exports keep
+their existing behavior and complete context.
+
+The real Preview work-count test fails at 801 initial inline parses for 200
+offscreen tables, then passes at one heading parse; requesting one table adds
+four parses. It compares 144 eager/lazy complete HTML, heading and partition
+cases across both presets, including open containers and escaped/code breaks.
+An independent unchanged-HEAD build matches all 2,188 HTML/heading/block-manifest
+comparisons for 547 inputs in eager/windowed modes under both presets, including
+the complete 1 MiB fixture. HTML export, footnote scope reuse, type checks and
+the actual Preview viewport work-budget browser suite pass. Host timing samples
+are noisy; no stable end-to-end latency gain is claimed before native testing.

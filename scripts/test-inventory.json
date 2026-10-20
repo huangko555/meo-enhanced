@@ -1,5 +1,10 @@
 {
   "separate": {
+    "scripts/test-deferred-markdown-inline.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-deferred-markdown-inline.ts",
+      "reason": "Real Preview inline-parse work count for offscreen tables with void breaks; complete eager/lazy HTML, heading and cross-root container partition parity."
+    },
     "scripts/test-initial-document-sharing.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-initial-document-sharing.ts",

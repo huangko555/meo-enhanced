@@ -5,8 +5,8 @@ type CoreRule = (state: CoreState) => void;
 
 /** Keep the document's block/reference context, while preparing inline content
  * only for requested roots. Each root retains the original inline rule order.
- * Headings need global IDs; HTML-bearing roots need early children so containers
- * spanning Markdown roots can be partitioned without changing their semantics. */
+ * Headings need global IDs; contextual HTML roots need early children so
+ * containers spanning roots can be partitioned without changing semantics. */
 export function prepareDeferredMarkdownInline(md: MarkdownIt, source: string, environment: object,
   documentAnchors: CoreRule
 ) {
@@ -55,7 +55,9 @@ export function prepareDeferredMarkdownInline(md: MarkdownIt, source: string, en
   for (let index = 0; index < groups.length; index++) {
     const group = groups[index]!;
     if (tokens.slice(group.from, group.to).some(node => node.type === 'heading_open'
-      || node.type === 'inline' && node.content.includes('<'))) prepare(index);
+      // A bare void break neither owns a container nor implicitly closes one.
+      // Keep other HTML (including attributes/closing tags) conservative.
+      || node.type === 'inline' && /<(?!br[ \t]*\/?>)/i.test(node.content))) prepare(index);
   }
   documentAnchors(state);
   anchorsApplied = true;
