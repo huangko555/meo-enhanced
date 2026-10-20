@@ -390,3 +390,36 @@ the same delayed-response keyboard test passes with it enabled. Layout regressio
 also reproduced a fractional end-of-cell crop against unchanged V39 production
 code. End-caret reveal now includes the textarea padding and a border pixel;
 the original full table layout/row-shrink checks pass without relaxed tolerances.
+
+V40 (`1e5d4a43`, archive SHA-256
+`050265bca3392c44fb729defb054b8793c7ca40c73daec5ae802326b465d5f81`)
+passed all sampled Source/Live click targets and exact typed/undo source checks.
+It did not complete native acceptance: a save-flush timeout notification overlapped
+Preview's return-to-top control, and its top-position check timed out. Live still had a 698 ms derived-refresh long
+task. Rich Source clicks were 37–81 ms; valid Live clicks were 110–287 ms.
+First Live took 5.93 s and first Preview 4.82 s (renderer response 3.86 s).
+These are incomplete-run observations, not final P95 claims or a smoothness pass.
+
+A separate guest Node 24.21.0 diagnostic used the exact packaged Preview worker:
+module load 932 ms, cold open 3,690 ms, warm open 2,234 ms. Its CPU map was checked
+against exact shipped code. Global footnote preprocessing and block/inline
+preparation dominate, rather than visible chunk formatting or IPC alone.
+
+Windowed Preview now separates global block/reference context from per-root inline
+preparation using MarkdownIt's existing core rules. Headings and HTML-bearing
+roots prepare early so global IDs and cross-root HTML containers retain their
+semantics. Other roots run the original inline/postprocessing chain once when
+requested. A token-to-root index avoids searching all preceding roots per request;
+source attributes retain eager output order. Exports keep the eager path.
+Endnote normalization/parsing is also deferred, conservatively keeping HTML-bearing
+definitions in their original preparation order. Documents without footnote
+markers bypass footnote preprocessing. Ordinary single-line table cells avoid a
+redundant inline token walk.
+
+The work-bound regression prepares zero of 2,000 offscreen prose roots, prepares
+only requested roots once, and retains forward references. Exact eager/deferred
+HTML parity covers 209 compatibility probes in both presets, out-of-order roots,
+task state, heading stability, endnotes and the full comprehensive 1 MiB sample.
+Host Node single-sample opens changed from 454/297 ms cold/warm to 365/245 ms
+before the footnote-free fast path. These are directional probes only; native
+Preview acceptance and the Live/save-flush stall remain open.

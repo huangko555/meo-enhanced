@@ -6,10 +6,11 @@ const structureParser = new MarkdownIt().disable('inline');
 
 /** Code is opaque to table/list normalization and footnote substitution, including
  * fences and indented code inside lists and quotes. Line indexes are zero based. */
-export function collectMarkdownCodeLines(markdownText: string): Set<number> {
+export function collectMarkdownCodeLines(markdownText: string, onFenceInfo?: (info: string) => void): Set<number> {
   const lines = new Set<number>();
   for (const token of structureParser.parse(markdownText, {})) {
     if ((token.type !== 'fence' && token.type !== 'code_block') || !token.map) continue;
+    if (token.type === 'fence') onFenceInfo?.(token.info);
     // Live accepts standalone indented tables. Preserve that extension while
     // keeping actual code payloads (including table-looking fenced code) opaque.
     if (token.type === 'code_block') {

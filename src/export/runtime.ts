@@ -133,7 +133,7 @@ export function preparePreviewDocument(options: PreviewDocumentOptions, windowed
     showComments: environment.previewShowComments === true,
     deferImages: true,
     deferDisplayMath: assessLargeDocument(options.markdownText).preferSource,
-    windowedFootnotes: windowed,
+    windowedPresentation: windowed,
     deferLocalLinks: true,
     allowLocalLinks: true,
     preset,

@@ -29,6 +29,7 @@ import type { UiLanguage } from '../foundation/uiLanguage';
 import { getReadingUiStrings } from './readingUiLanguage';
 import { normalizeFenceLanguage } from './fenceLanguage';
 import { markdownPresentationBlocks, type MarkdownPresentationBlock } from './markdownPresentationBlocks';
+import { prepareDeferredMarkdownInline } from './deferredMarkdownInline';
 import type { PreviewDocumentHeading } from '../foundation/previewDocument';
 import { getPreviewPreset, type PreviewPresetId, type PreviewPresetDefinition } from '../foundation/previewPresets';
 import { load as loadYaml } from 'js-yaml';
@@ -73,8 +74,8 @@ export type RenderMarkdownOptions = {
   deferLocalLinks?: boolean;
   /** Large Preview generates display formulas in its existing viewport observer. */
   deferDisplayMath?: boolean;
-  /** Prepared Preview contexts expose individual endnotes as reading blocks. */
-  windowedFootnotes?: boolean;
+  /** Prepared Preview contexts defer inline roots and expose individual endnotes. */
+  windowedPresentation?: boolean;
   /** Permit local file destinations alongside the preset's safe URL schemes. */
   allowLocalLinks?: boolean;
   showComments?: boolean;
@@ -173,7 +174,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
     installInlineScriptTransform(md);
     installPunctuationInlineTransform(md);
   }
-  installSourcePositionAndHeadingAnchorTransform(md, (startIndex, endIndex) => ({
+  const documentAnchors = installSourcePositionAndHeadingAnchorTransform(md, (startIndex, endIndex) => ({
     start: bodySourceLines?.[startIndex] ?? 0,
     end: bodySourceLines?.[Math.max(startIndex, endIndex - 1)] ?? 0
   }), (heading) => headings.push(heading), github);
@@ -272,12 +273,14 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
   md.renderer.rules.code_block = renderCodeBlock;
   const preparedMarkdown = prepareMarkdownWithFootnotes(extractedFrontmatter.body, {
     githubStyle: github,
+    deferDefinitionPreparation: options.windowedPresentation === true,
+    onFenceInfo: info => { hasMermaid ||= (github ? info.trim().split(/\s+/)[0] : normalizeFenceLanguage(info)) === 'mermaid'; },
     ...(github ? { onReferenceTags: (tags: readonly string[]) => tags.forEach(tag => generatedFootnoteTags.add(tag)) } : {}),
     target: options.target,
     outputFilePath: options.outputFilePath,
     renderMarkdown: (markdownText) => md.render(markdownText, github ? { meoGithubFootnote: true } : undefined),
     prepareMarkdown: markdownText => {
-      const context = github ? { meoGithubFootnote: true } : {};
+      const context = { meoFootnote: true, ...(github ? { meoGithubFootnote: true } : {}) };
       const nodes = md.parse(markdownText, context);
       if (!github) hasMermaid ||= nodes.some(node => node.type === 'fence' && normalizeFenceLanguage(node.info) === 'mermaid');
       return () => md.renderer.render(nodes, md.options, context);
@@ -295,7 +298,9 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
   bodySourceLines = normalizedBody.sourceLines.map(line => preparedMarkdown.body.sourceLines[line - 1] ?? line);
   headings.length = 0;
   const environment = {};
-  const bodyTokens = md.parse(normalizedBody.markdown, environment);
+  const deferredInline = options.windowedPresentation
+    ? prepareDeferredMarkdownInline(md, normalizedBody.markdown, environment, documentAnchors) : undefined;
+  const bodyTokens = deferredInline?.tokens ?? md.parse(normalizedBody.markdown, environment);
   hasMermaid ||= bodyTokens.some(node => node.type === 'fence'
     && (github ? node.info.trim().split(/\s+/)[0] : normalizeFenceLanguage(node.info)) === 'mermaid');
   const tokenBlocks = markdownPresentationBlocks(bodyTokens, bodySourceLines);
@@ -482,7 +487,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
     ...block, index: block.index + prefixBlocks.length
   }))];
   const footnotes = preparedMarkdown.footnotes;
-  const splitFootnotes = options.windowedFootnotes === true && footnotes.length > 1;
+  const splitFootnotes = options.windowedPresentation === true && footnotes.length > 1;
   if (splitFootnotes) for (const footnote of footnotes) {
     blocks.push({ index: blocks.length, sourceLine: footnote.sourceLine, sourceEndLine: footnote.sourceEndLine,
       kind: 'footnotes', sourceCharacters: footnote.sourceCharacters,
@@ -501,6 +506,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
       if (!Number.isInteger(index) || index < 0 || index >= blocks.length) throw new RangeError('Unknown Markdown presentation block');
       if (prefixBlocks.length && index === 0) return sanitize(prefix);
       const block = tokenBlocks[index - prefixBlocks.length];
+      if (block) deferredInline?.prepareRange(block.from, block.to);
       const footerIndex = index - prefixBlocks.length - tokenBlocks.length;
       if (!block && splitFootnotes) {
         const note = footnotes[footerIndex]!;
@@ -511,7 +517,10 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
         ? md.renderer.render(bodyTokens.slice(block.from, block.to), md.options, environment)
         : preparedMarkdown.footnotesHtml);
     },
-    renderAll: () => sanitize(prefix + md.renderer.render(bodyTokens, md.options, environment) + preparedMarkdown.footnotesHtml)
+    renderAll: () => {
+      deferredInline?.prepareAll();
+      return sanitize(prefix + md.renderer.render(bodyTokens, md.options, environment) + preparedMarkdown.footnotesHtml);
+    }
   };
 }
 
@@ -729,8 +738,8 @@ function installSourcePositionAndHeadingAnchorTransform(
   resolveSourceRange: (startIndex: number, endIndex: number) => { start: number; end: number },
   onHeading?: (heading: ExportHeading) => void,
   github = false
-): void {
-  md.core.ruler.after('inline', 'meo-heading-anchors', (state: any) => {
+): (state: Parameters<MarkdownIt['core']['process']>[0]) => void {
+  const assignAnchors = (state: any) => {
     if (state.env?.meoTableCell) return;
     const slugCounts = new Map<string, number>();
     const tokens = state.tokens as any[];
@@ -746,7 +755,7 @@ function installSourcePositionAndHeadingAnchorTransform(
 
     for (let index = 0; index < tokens.length; index += 1) {
       const headingOpen = tokens[index];
-      const sourceRange = Array.isArray(headingOpen.map)
+      const sourceRange = !state.env?.meoFootnote && Array.isArray(headingOpen.map)
         ? resolveSourceRange(Number(headingOpen.map[0]), Number(headingOpen.map[1]))
         : null;
       const sourceLine = sourceRange?.start ?? 0;
@@ -758,7 +767,7 @@ function installSourcePositionAndHeadingAnchorTransform(
           new Parser({ ontext: part => { text += part; } }).end(match[2]);
           const id = githubId(text);
           ids.push(id);
-          onHeading?.({ level: Number(match[1]), id, text, line: sourceLine });
+          if (!state.env?.meoFootnote) onHeading?.({ level: Number(match[1]), id, text, line: sourceLine });
         }
         if (ids.length) headingOpen.meta = { ...headingOpen.meta, meoGithubHeadingIds: ids };
       }
@@ -786,7 +795,7 @@ function installSourcePositionAndHeadingAnchorTransform(
         id = occurrence === 1 ? baseSlug : `${baseSlug}-${occurrence}`;
       }
       headingOpen.attrSet('id', id);
-      onHeading?.({
+      if (!state.env?.meoFootnote) onHeading?.({
         level: Number.parseInt(String(headingOpen.tag).slice(1), 10),
         id,
         text: extractHeadingText(inlineContent),
@@ -794,7 +803,9 @@ function installSourcePositionAndHeadingAnchorTransform(
       });
 
     }
-  });
+  };
+  md.core.ruler.after('inline', 'meo-heading-anchors', assignAnchors);
+  return assignAnchors;
 }
 
 function installTableContainerTransform(md: MarkdownIt, resolveIndent: (sourceLine: number) => number): void {
@@ -863,6 +874,10 @@ function installTableCellListTransform(md: MarkdownIt): void {
 }
 
 function renderBreakSeparatedCellList(content: string, md: MarkdownIt): string | null {
+  // A single ordinary cell cannot contain a block list. Keep the parser-owned
+  // splitter for actual breaks and leading list/quote candidates, including
+  // literal break text inside code or links.
+  if (!/[\r\n]|<br\b/i.test(content) && !/^[ \t]*(?:>|[-+*]\s|\d+[.)]\s)/.test(content)) return null;
   const lines = splitCellLogicalLines(content, md);
   if (!lines.some((line) => /^[ \t]*(?:>|[-+*]\s|\d+[.)]\s)/.test(line))) return null;
   // Use the document parser so quotes, nested lists, task states and inline

@@ -8,6 +8,9 @@ export type PrepareMarkdownWithFootnotesOptions = {
   renderMarkdown: (markdownText: string) => string;
   /** Capture parsing context now, while formatting the definition only on demand. */
   prepareMarkdown?: (markdownText: string) => () => string;
+  /** Windowed reading formats a definition only when its block is requested. */
+  deferDefinitionPreparation?: boolean;
+  onFenceInfo?: (info: string) => void;
   normalizeMarkdown: (markdownText: string) => string;
   backToReference: string;
   backToNumberedReference: (number: number) => string;
@@ -38,6 +41,7 @@ export function prepareMarkdownWithFootnotes(
   source: SourceMappedMarkdown,
   options: PrepareMarkdownWithFootnotesOptions
 ): PreparedMarkdownWithFootnotes {
+  if (!source.markdown.includes('[^')) return { body: source, footnotes: [], footnotesHtml: '' };
   const extracted = extractExportFootnotes(source);
   const numberByLabel = new Map<string, number>();
   const referenceCountsByLabel = new Map<string, number>();
@@ -73,8 +77,9 @@ export function prepareMarkdownWithFootnotes(
       '</sup>'
     ].join('');
   };
-  const rewriteReferences = (markdown: string): string => {
-    const codeLines = collectMarkdownCodeLines(markdown);
+  const rewriteReferences = (markdown: string, definition = false): string => {
+    const codeLines = collectMarkdownCodeLines(markdown,
+      definition && !markdown.includes('<') ? options.onFenceInfo : undefined);
     return markdown.split('\n').map((line, index) => (
       codeLines.has(index) ? line : replaceFootnoteReferencesInLine(line, renderReference)
     )).join('\n');
@@ -84,18 +89,24 @@ export function prepareMarkdownWithFootnotes(
   // reachable definition is visited once, including cycles and newly cited notes.
   for (let index = 0; index < pendingDefinitions.length; index += 1) {
     const definition = pendingDefinitions[index];
-    definition.contentMarkdown = rewriteReferences(definition.contentMarkdown);
+    definition.contentMarkdown = rewriteReferences(definition.contentMarkdown, true);
   }
 
   const footnotes = extracted.definitions
     .filter((definition) => definition.number !== null)
     .sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
   const prepared = footnotes.map(footnote => {
-    const source = options.normalizeMarkdown(footnote.contentMarkdown);
-    const render = options.prepareMarkdown?.(source) ?? (() => options.renderMarkdown(source));
+    const prepare = () => {
+      const source = options.normalizeMarkdown(footnote.contentMarkdown);
+      return options.prepareMarkdown?.(source) ?? (() => options.renderMarkdown(source));
+    };
+    // HTML participates in the global anchor registry and literal scopes.
+    // Keep its original preparation order, including rewritten nested references.
+    const globalTargets = footnote.contentMarkdown.includes('<');
+    let render = options.deferDefinitionPreparation && !globalTargets ? undefined : prepare();
     return { sourceLine: footnote.sourceLine, sourceEndLine: footnote.sourceEndLine,
       sourceCharacters: footnote.contentMarkdown.length,
-      render: () => renderFootnoteItemHtml(footnote, hrefPrefix, options, render().trim()) };
+      render: () => renderFootnoteItemHtml(footnote, hrefPrefix, options, (render ??= prepare())().trim()) };
   });
 
   return {

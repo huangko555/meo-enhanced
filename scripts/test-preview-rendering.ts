@@ -7,6 +7,73 @@ import { buildExportStyles, buildPreviewStyles } from '../src/export/exportStyle
 import exportRuntime from '../src/export/runtime';
 import { DomUtils, parseDocument } from 'htmlparser2';
 import { getBuiltInVisuals } from '../src/shared/builtInVisualBaseline';
+import { prepareMarkdownWithFootnotes } from '../src/export/footnotes';
+import MarkdownIt from 'markdown-it';
+import { readFileSync } from 'node:fs';
+
+{
+  const prototype = Object.getPrototypeOf(new MarkdownIt().inline);
+  const parse = prototype.parse;
+  let parsed = 0;
+  prototype.parse = function (source: string, ...args: unknown[]) {
+    if (source.includes('DEFER-PARAGRAPH')) parsed++;
+    return parse.call(this, source, ...args);
+  };
+  try {
+    const markdownText = '# Global heading\n\n' + Array.from({ length: 2_000 }, (_, index) => `DEFER-PARAGRAPH ${index}: **bold** and [link][ref].\n\n`).join('')
+      + '[ref]: https://example.com\n';
+    const options = { markdownText, markdownFilePath: '/fixture/deferred.md', target: 'html' as const, windowedPresentation: true };
+    const prepared = prepareMarkdownPresentation(options);
+    assert.equal(parsed, 0, 'global block context must not parse offscreen prose');
+    const first = prepared.renderBlock(1).html;
+    assert.match(first, /<strong>bold<\/strong>/); assert.match(first, /href="https:\/\/example.com"/);
+    prepared.renderBlock(1); assert.equal(parsed, 1, 'a requested root prepares once');
+    prepared.renderBlock(1_000); assert.equal(parsed, 2, 'distant roots retain global reference definitions');
+    const complete = prepared.renderAll().html;
+    assert.equal(parsed, 2_000);
+    assert.equal(complete, renderMarkdownToHtml({ ...options, windowedPresentation: false }).html);
+  } finally { prototype.parse = parse; }
+}
+
+const compatibility = JSON.parse(readFileSync('scripts/fixtures/github-readme/compatibility.json', 'utf8'));
+for (const preset of ['default', 'github-readme'] as const) for (const probe of compatibility.probes) {
+  if (probe.pending) continue;
+  const options = { markdownText: probe.markdown, markdownFilePath: '/fixture/compatibility.md', target: 'html' as const,
+    preset, deferImages: true, deferDisplayMath: true };
+  const complete = renderMarkdownToHtml(options).html;
+  const deferred = prepareMarkdownPresentation({ ...options, windowedPresentation: true });
+  for (const block of [...deferred.blocks].reverse()) deferred.renderBlock(block.index);
+  assert.equal(deferred.renderAll().html, complete, `${preset} deferred ${probe.id} preserves complete output`);
+}
+
+for (const preset of ['default', 'github-readme'] as const) {
+  const markdownText = '[Earlier target](#later) and reference[^note].\n\n[^note]: <a title=">" id="later">Target</a>\n\n    ## Note heading\n';
+  const options = { markdownText, markdownFilePath: '/fixture/anchors.md', target: 'html' as const, preset };
+  const complete = renderMarkdownToHtml(options).html;
+  const deferred = prepareMarkdownPresentation({ ...options, windowedPresentation: true });
+  const first = deferred.renderBlock(0).html;
+  assert.equal(first, prepareMarkdownPresentation(options).renderBlock(0).html,
+    'an earlier reading block retains the existing HTML-anchor presentation');
+  assert.equal(deferred.renderAll().html, complete);
+}
+
+{
+  let normalizations = 0, preparations = 0;
+  const fences: string[] = [];
+  const markdown = 'Reference[^note].\n\n[^note]: ## Definition\n\n    ```mermaid\n    flowchart LR; A --> B\n    ```\n';
+  const prepared = prepareMarkdownWithFootnotes({ markdown, sourceLines: markdown.split('\n').map((_, index) => index + 1) }, {
+    target: 'html', deferDefinitionPreparation: true,
+    normalizeMarkdown: source => { normalizations++; return source; },
+    prepareMarkdown: source => { preparations++; return () => `<p>${source}</p>`; },
+    renderMarkdown: source => source, onFenceInfo: info => fences.push(info),
+    backToReference: 'Back', backToNumberedReference: () => 'Back', backToReferenceOccurrence: () => 'Back'
+  });
+  assert.deepEqual([normalizations, preparations], [0, 0], 'window preparation must not normalize or parse any offscreen definition');
+  assert.ok(fences.includes('mermaid'), 'opaque fence discovery must retain the offscreen diagram resource hint');
+  const html = prepared.footnotes[0]!.render();
+  assert.equal(prepared.footnotes[0]!.render(), html);
+  assert.deepEqual([normalizations, preparations], [1, 1], 'a requested definition prepares exactly once');
+}
 
 for (const preset of ['default', 'github-readme'] as const) {
   let formats = 0;
@@ -14,14 +81,16 @@ for (const preset of ['default', 'github-readme'] as const) {
     + '[^a]: ## Same\n\n    ```js\n    const a = 1;\n    ```\n\n    ![image](image.gif)\n\n'
     + '[^b]: ## Same\n\n    ```js\n    const b = 2;\n    ```\n';
   const prepared = prepareMarkdownPresentation({ markdownText, markdownFilePath: 'C:/tmp/windowed-notes.md', target: 'html',
-    preset, windowedFootnotes: true, deferImages: true, highlightCode: source => { formats += 1; return source; } });
+    preset, windowedPresentation: true, deferImages: true, highlightCode: source => { formats += 1; return source; } });
   assert.equal(formats, 0, 'preparing footnote context must not format its offscreen code');
   const footers = prepared.blocks.filter(block => block.kind === 'footnotes');
   assert.equal(footers.length, 2);
+  const headings = JSON.stringify(prepared.headings);
   const last = prepared.renderBlock(footers[1]!.index).html;
   assert.equal(formats, 1, 'requesting one endnote must not format the other definition');
   assert.equal(prepared.renderBlock(footers[1]!.index).html, last, 'endnotes must render idempotently out of order');
   const complete = parseDocument(prepared.renderAll().html);
+  assert.equal(JSON.stringify(prepared.headings), headings, 'lazy endnote headings must not mutate the document outline');
   const items = DomUtils.findAll(element => element.name === 'li' && (element.attribs.class ?? '').includes('footnote-item'), complete.children);
   for (const footer of footers) {
     const fragment = parseDocument(prepared.renderBlock(footer.index).html);
@@ -101,9 +170,10 @@ for (const preset of ['default', 'github-readme'] as const) {
     + '$x^2$\n\n$$\nx+1\n$$\n\n![image](image.png)\n\n'
     + '[target]: https://example.com\n[^note]: **Note**\n';
   const options = { markdownText, markdownFilePath: 'C:/tmp/blocks.md', target: 'html' as const,
-    preset, deferImages: true, deferDisplayMath: true, deferLocalLinks: true };
+    preset, deferImages: true, deferDisplayMath: true, deferLocalLinks: true, windowedPresentation: true };
   const prepared = prepareMarkdownPresentation(options);
   const complete = prepared.renderAll().html;
+  assert.equal(complete, renderMarkdownToHtml({ ...options, windowedPresentation: false }).html);
   const chunks = prepared.blocks.map(block => prepared.renderBlock(block.index).html).join('');
   assert.equal(chunks, complete, `${preset} block rendering must preserve complete render semantics`);
   assert.ok(prepared.blocks.length > 8);
