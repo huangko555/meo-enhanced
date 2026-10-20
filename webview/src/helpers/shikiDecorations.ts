@@ -26,6 +26,7 @@ import {
   shouldDeferLiveInputDerivedWork
 } from '../editor/liveInputDerivedWork';
 import { getFencedCodeBodyRange, getFencedCodeInfo, syntaxTreeChanged } from './markdownSyntax';
+import { getCodeBlockSourceLines } from './blockIndent';
 import { getViewportController } from './viewportController';
 import { collectDocumentMathRanges, getDisplayMathCopySource, getDisplayMathSource, getMathCompletionBody } from './displayMathBlocks';
 
@@ -348,6 +349,13 @@ function addBlockDecorations(
     return;
   }
 
+  if (lang === 'mermaid') {
+    const lines = getCodeBlockSourceLines(state, node.node).filter(line => !line.isFence);
+    const code = lines.map(line => state.doc.sliceString(line.prefixTo, line.to)).join('\n');
+    addTokenDecorations(builder, markCache, lang, code, contentFrom, contentTo, previous, allowUnseen, isNeeded,
+      lines.map(line => ({ from: line.prefixTo, to: line.to })));
+    return;
+  }
   const code = state.doc.sliceString(contentFrom, contentTo);
   addTokenDecorations(builder, markCache, lang, code, contentFrom, contentTo, previous, allowUnseen, isNeeded);
 }

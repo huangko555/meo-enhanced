@@ -1,6 +1,7 @@
 import type { HighlighterCore } from 'shiki/core';
 import { bundledLanguages, bundledLanguagesInfo } from 'shiki/langs';
 import { mathSyntaxGrammar, withMarkdownSyntax } from '../adapters/markdownSyntaxGrammar';
+import { withMermaidBodySyntax } from '../adapters/mermaidSyntaxGrammar';
 
 export type RawVscodeTheme = {
   name: string;
@@ -344,7 +345,9 @@ async function ensureLang(
   }
   const grammar = (await loader()).default;
   record.grammarVersion += 1;
-  await highlighter.loadLanguage(lang === 'markdown' ? withMarkdownSyntax(grammar as any) : grammar as any);
+  const adapted = lang === 'markdown' ? withMarkdownSyntax(grammar as any)
+    : lang === 'mermaid' ? withMermaidBodySyntax(grammar as any) : grammar;
+  await highlighter.loadLanguage(adapted as any);
   record.loadedLangs.add(lang);
   return true;
 }
