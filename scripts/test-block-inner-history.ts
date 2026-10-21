@@ -1,3 +1,4 @@
+import { enterMermaidSource } from './history-mermaid-chromium';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -68,119 +69,41 @@ async function main() {
     });
     await waitForFrames(page);
 
-    const assertImmediateModeSwitchAfterProjectedInput = async (
-      modeButton: string,
-      editingBlock: string,
-      controllerProperty: string,
-      marker: string
-    ) => {
-      await page.click(modeButton);
-      await waitForFrames(page);
-      const immediateMode = await page.evaluate(
-        ({ buttonSelector, blockSelector, property, insertedText }) => {
-          const block = document.querySelector<HTMLElement>(blockSelector) as any;
-          const controller = block?.[property];
-          if (!controller) throw new Error(`Missing embedded controller for ${blockSelector}`);
-          const innerView = controller.innerView;
-          innerView.dispatch({
-            changes: { from: innerView.state.doc.length, insert: insertedText }
-          });
-          document.querySelector<HTMLButtonElement>(buttonSelector)!.click();
-          return document.querySelector<HTMLElement>(blockSelector)?.dataset.meoRenderedBlockMode ?? null;
-        },
-        {
-          buttonSelector: modeButton,
-          blockSelector: editingBlock,
-          property: controllerProperty,
-          insertedText: marker
-        }
-      );
-      if (immediateMode !== 'source') {
-        throw new Error(`${modeButton} deferred an explicit mode switch behind projected input: ${immediateMode}`);
-      }
-      await page.click(modeButton);
-      await waitForFrames(page);
-    };
+    const source = await enterMermaidSource(page, '__blockHistoryEditor', 1, 'end');
+    const immediateMode = await page.evaluate(({ to }) => {
+      const view = (window as any).__blockHistoryEditor.view;
+      const insert = '\nB --> IMMEDIATE_MODE_PROBE';
+      view.dispatch({ changes: { from: to, insert }, selection: { anchor: to + insert.length } });
+      view.dom.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')!.click();
+      return view.dom.querySelector<HTMLElement>('.meo-mermaid-toolbar')?.dataset.meoMermaidMode;
+    }, source);
+    if (immediateMode !== 'preview') throw new Error(`Finish deferred behind document input: ${immediateMode}`);
+    await waitForFrames(page);
 
-    await assertImmediateModeSwitchAfterProjectedInput(
-      '.meo-mermaid-mode-btn',
-      '.meo-mermaid-editing-block',
-      '__meoMermaidEditingController',
-      '\nB --> IMMEDIATE_MODE_PROBE'
-    );
-
-    const assertCanExitSplitAfterInput = async (
-      modeButton: string,
-      editingBlock: string,
-      controllerProperty: string,
-      marker: string
-    ) => {
-      await page.click(modeButton);
-      await waitForFrames(page);
-      await page.$eval(modeButton, (button) => {
-        button.setAttribute('data-meo-input-mode-switch-probe', 'retained');
-      });
-      await page.evaluate(({ blockSelector, property }) => {
-        const block = document.querySelector<HTMLElement>(blockSelector) as any;
-        const controller = block?.[property];
-        if (!controller) throw new Error(`Missing embedded controller for ${blockSelector}`);
-        controller.focusOffset(controller.innerView.state.doc.length);
-      }, { blockSelector: editingBlock, property: controllerProperty });
-      await page.keyboard.type(marker);
-      const retainedButton = await page.$eval(modeButton, (button) => (
-        button.getAttribute('data-meo-input-mode-switch-probe') === 'retained'
-      ));
-      if (!retainedButton) {
-        throw new Error(`${modeButton} was replaced while embedded input was settling`);
-      }
-      await page.evaluate(({ buttonSelector, blockSelector, property }) => {
-        const trace: string[] = [];
-        (window as any).__renderedBlockModePointerTrace = trace;
-        const button = document.querySelector<HTMLButtonElement>(buttonSelector)!;
-        const block = document.querySelector<HTMLElement>(blockSelector) as any;
-        const content = block?.[property]?.innerView?.contentDOM as HTMLElement | undefined;
-        button.addEventListener('pointerdown', () => trace.push('pointerdown'));
-        button.addEventListener('click', () => trace.push('click'));
-        content?.addEventListener('blur', () => trace.push('blur'));
-      }, {
-        buttonSelector: modeButton,
-        blockSelector: editingBlock,
-        property: controllerProperty
-      });
-      await page.click(modeButton);
-      const pointerTrace = await page.evaluate(() => (
-        (window as any).__renderedBlockModePointerTrace as string[]
-      ));
-      const clickIndex = pointerTrace.indexOf('click');
-      const blurIndex = pointerTrace.indexOf('blur');
-      if (blurIndex >= 0 && (clickIndex < 0 || blurIndex < clickIndex)) {
-        throw new Error(`${modeButton} blurred its source editor before mode switching: ${JSON.stringify(pointerTrace)}`);
-      }
-      const immediateMode = await page.$eval(
-        editingBlock,
-        (block) => block.dataset.meoRenderedBlockMode
-      );
-      if (immediateMode !== 'source') {
-        throw new Error(`${modeButton} deferred an explicit mode switch behind pending input: ${immediateMode}`);
-      }
-      await waitForFrames(page);
-      const switchedToSource = await page.$eval(editingBlock, (block) => block.classList.contains('is-source'));
-      if (!switchedToSource) {
-        throw new Error(`${editingBlock} could not leave split mode after input`);
-      }
-      await page.click(modeButton);
-      await waitForFrames(page);
-      if (await page.$(editingBlock)) {
-        throw new Error(`${editingBlock} could not return to preview after input`);
-      }
-    };
-
-    await assertCanExitSplitAfterInput(
-      '.meo-mermaid-mode-btn',
-      '.meo-mermaid-editing-block',
-      '__meoMermaidEditingController',
-      '\nB --> C'
-    );
+    await enterMermaidSource(page, '__blockHistoryEditor', 1, 'end');
+    await page.$eval('.meo-mermaid-mode-btn', button => button.setAttribute('data-meo-input-mode-switch-probe', 'retained'));
+    await page.keyboard.type('\nB --> C');
+    const retained = await page.$eval('.meo-mermaid-mode-btn', button => button.getAttribute('data-meo-input-mode-switch-probe'));
+    if (retained !== 'retained') throw new Error('Finish button was replaced while input was settling');
+    await page.evaluate(() => {
+      const trace: string[] = [];
+      (window as any).__renderedBlockModePointerTrace = trace;
+      const view = (window as any).__blockHistoryEditor.view;
+      const button = view.dom.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')!;
+      button.addEventListener('pointerdown', () => trace.push('pointerdown'));
+      button.addEventListener('click', () => trace.push('click'));
+      view.contentDOM.addEventListener('blur', () => trace.push('blur'));
+    });
+    await page.click('.meo-mermaid-mode-btn');
+    const finish = await page.evaluate(() => ({
+      trace: (window as any).__renderedBlockModePointerTrace as string[],
+      mode: document.querySelector<HTMLElement>('.meo-mermaid-toolbar')?.dataset.meoMermaidMode
+    }));
+    const clickIndex = finish.trace.indexOf('click'), blurIndex = finish.trace.indexOf('blur');
+    if (clickIndex < 0 || (blurIndex >= 0 && blurIndex < clickIndex)) throw new Error(`Finish blurred before click: ${JSON.stringify(finish)}`);
+    if (finish.mode !== 'preview') throw new Error(`Finish deferred behind pending input: ${JSON.stringify(finish)}`);
+    await waitForFrames(page);
+    if (await page.$('.meo-mermaid-editing-preview')) throw new Error('Finish did not collapse the document source');
 
     await page.evaluate(() => {
       const editor = (window as any).__blockHistoryEditor;
@@ -214,13 +137,7 @@ async function main() {
     });
     await waitForFrames(page);
 
-    await page.click('.meo-mermaid-mode-btn');
-    await waitForFrames(page);
-    await page.evaluate(() => {
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')! as any;
-      const innerView = block.__meoMermaidEditingController.innerView;
-      block.__meoMermaidEditingController.focusOffset(innerView.state.doc.length);
-    });
+    await enterMermaidSource(page, '__blockHistoryEditor', 1, 'end');
     await page.keyboard.type('MERMAID_ONE');
     await roundTripLatestHistory(page);
     await page.keyboard.type('_TWO');
@@ -237,8 +154,7 @@ async function main() {
     await pressShortcut(page, 'z');
     const mermaidFirstUndo = await page.evaluate(() => {
       const editor = (window as any).__blockHistoryEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block');
-      const innerView = (block as any)?.__meoMermaidEditingController?.innerView;
+      const innerView = editor.view;
       return {
         text: editor.view.state.doc.toString(),
         focused: Boolean(innerView?.hasFocus),
@@ -252,8 +168,7 @@ async function main() {
     await pressShortcut(page, 'z');
     const mermaidSecondUndo = await page.evaluate(() => {
       const editor = (window as any).__blockHistoryEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block');
-      const innerView = (block as any)?.__meoMermaidEditingController?.innerView;
+      const innerView = editor.view;
       return {
         text: editor.view.state.doc.toString(),
         focused: Boolean(innerView?.hasFocus),
@@ -267,8 +182,7 @@ async function main() {
     await pressShortcut(page, 'z');
     const mermaidThirdUndo = await page.evaluate(() => {
       const editor = (window as any).__blockHistoryEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block');
-      const innerView = (block as any)?.__meoMermaidEditingController?.innerView;
+      const innerView = editor.view;
       return {
         text: editor.view.state.doc.toString(),
         focused: Boolean(innerView?.hasFocus),
@@ -284,8 +198,7 @@ async function main() {
     }
     const mermaidRedo = await page.evaluate(() => {
       const editor = (window as any).__blockHistoryEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block');
-      const innerView = (block as any)?.__meoMermaidEditingController?.innerView;
+      const innerView = editor.view;
       return {
         text: editor.view.state.doc.toString(),
         focused: Boolean(innerView?.hasFocus),
@@ -368,10 +281,10 @@ async function main() {
         publish: null as (() => void) | null
       };
       const publish = () => {
-        receipt.currentBlock = app.querySelector<HTMLElement>('.meo-mermaid-editing-block');
-        receipt.currentSource = receipt.currentBlock?.querySelector<HTMLElement>('.meo-mermaid-source-editor') ?? null;
+        receipt.currentBlock = app.querySelector<HTMLElement>(':scope > .cm-editor');
+        receipt.currentSource = receipt.currentBlock;
         receipt.currentModeButton = app.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn');
-        if (receipt.currentSource?.isConnected && !receipt.modeAccepted) receipt.modeAccepted = true;
+        if (app.querySelector('.meo-mermaid-toolbar[data-meo-mermaid-mode="edit"]') && !receipt.modeAccepted) receipt.modeAccepted = true;
       };
       receipt.observer = new MutationObserver(publish);
       receipt.observer.observe(app, { childList: true, subtree: true });
@@ -401,64 +314,26 @@ async function main() {
       });
       publish();
     }, { text: tallMermaidText, settlementSource: causalFrameSettlementSource });
-    const sourceModeAction = await page.evaluate(() => (
-      (window as any).__mermaidBlockReceipt.currentModeButton?.getAttribute('aria-label') ?? null
-    ));
-    if (sourceModeAction === 'Preview, Switch to split view') {
-      await page.evaluate(() => {
-        const receipt = (window as any).__mermaidBlockReceipt;
-        receipt.publish();
-        const button = receipt.currentModeButton as HTMLButtonElement | null;
-        if (!button?.isConnected) throw new Error('Current Mermaid mode button was not connected');
-        button.click();
-        receipt.publish();
-        if (receipt.currentModeButton?.getAttribute('aria-label') === 'Preview, Switch to split view') {
-          throw new Error('Current Mermaid mode button did not publish source mode');
-        }
-      });
-    } else if (sourceModeAction !== 'Split, Switch to source' && sourceModeAction !== 'Source, Switch to preview') {
-      throw new Error(`Unexpected Mermaid mode receipt: ${JSON.stringify(sourceModeAction)}`);
-    }
-    await page.evaluate(async () => {
-      const editor = (window as any).__blockHistoryEditor;
-      const receipt = (window as any).__mermaidBlockReceipt;
-      await editor.scrollToLine(2, 'center');
-      receipt.publish();
-      const content = receipt.currentSource?.querySelector<HTMLElement>('.cm-content') ?? null;
-      if (!content?.isConnected) {
-        const modeLabel = document.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')?.getAttribute('aria-label');
-        throw new Error(`Public scroll receipt did not mount the current Mermaid source: ${JSON.stringify({ modeLabel })}`);
-      }
-      content.focus({ preventScroll: true });
-      if (!receipt.currentSource.contains(document.activeElement)) {
-        throw new Error('Current Mermaid source did not retain focus after public scroll receipt');
-      }
-    });
-    await page.keyboard.down('Control');
-    await page.keyboard.press('End');
-    await page.keyboard.up('Control');
-    await page.evaluate(() => new Promise<void>((resolve) => (
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-    )));
+    await enterMermaidSource(page, '__blockHistoryEditor', 2, 'end');
     const sourceInputStart = await page.evaluate(() => {
-      const source = document.querySelector<HTMLElement>('.meo-mermaid-source-editor');
-      const block = source?.closest<HTMLElement>('.meo-mermaid-editing-block');
+      const source = (window as any).__blockHistoryEditor.view.dom as HTMLElement;
+      const block = source.querySelector<HTMLElement>('.meo-mermaid-toolbar');
       return {
         scrollTop: document.querySelector<HTMLElement>('#app > .cm-editor .cm-scroller')!.scrollTop,
         focused: Boolean(source?.contains(document.activeElement)),
-        mode: block?.dataset.meoRenderedBlockMode ?? null
+        mode: block?.dataset.meoMermaidMode ?? 'edit'
       };
     });
     await page.keyboard.type('STALE_MEASURE');
     const sourceInputProjection = await page.evaluate((marker) => {
       const editor = (window as any).__blockHistoryEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block');
-      const sourceEditor = block?.querySelector<HTMLElement>('.meo-mermaid-source-editor') ?? null;
+      const block = editor.view.dom as HTMLElement;
+      const sourceEditor = editor.view.contentDOM as HTMLElement;
       const scroller = document.querySelector<HTMLElement>('#app > .cm-editor .cm-scroller')!;
       return {
         markerProjected: editor.getText().includes(marker),
         textSuffix: editor.getText().slice(-80),
-        mode: block?.dataset.meoRenderedBlockMode ?? null,
+        mode: block?.dataset.meoMermaidMode ?? 'edit',
         sourceConnected: Boolean(block?.isConnected && sourceEditor?.isConnected),
         sourceFocused: Boolean(sourceEditor?.contains(document.activeElement)),
         scrollTop: scroller.scrollTop
@@ -578,49 +453,13 @@ async function main() {
       });
     }, tallMermaidText);
 
-    await page.evaluate(() => (window as any).__multiMermaidFirst.scrollToLine(2, 'center'));
-    await page.click('#multi-mermaid-first .meo-mermaid-mode-btn');
-    await page.evaluate(() => (window as any).__multiMermaidFirst.scrollToLine(2, 'center'));
-    await page.evaluate(() => {
-      document.querySelector<HTMLElement>(
-        '#multi-mermaid-first .meo-mermaid-source-editor .cm-content'
-      )!.focus({ preventScroll: true });
-    });
-    const firstMultiFocused = await page.evaluate(() => (
-      document.querySelector<HTMLElement>('#multi-mermaid-first .meo-mermaid-source-editor')
-        ?.contains(document.activeElement) ?? false
-    ));
-    if (!firstMultiFocused) throw new Error('First concurrent Mermaid source did not receive focus');
-    await page.keyboard.down('Control');
-    await page.keyboard.press('End');
-    await page.keyboard.up('Control');
-    await page.evaluate(() => new Promise<void>((resolve) => (
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-    )));
+    await enterMermaidSource(page, '__multiMermaidFirst', 2, 'end');
     const firstMultiScrollTop = await page.evaluate(() => (
       document.querySelector<HTMLElement>('#multi-mermaid-first > .cm-editor .cm-scroller')!.scrollTop
     ));
     await page.keyboard.type('MULTI_FIRST');
 
-    await page.evaluate(() => (window as any).__multiMermaidSecond.scrollToLine(2, 'center'));
-    await page.click('#multi-mermaid-second .meo-mermaid-mode-btn');
-    await page.evaluate(() => (window as any).__multiMermaidSecond.scrollToLine(2, 'center'));
-    await page.evaluate(() => {
-      document.querySelector<HTMLElement>(
-        '#multi-mermaid-second .meo-mermaid-source-editor .cm-content'
-      )!.focus({ preventScroll: true });
-    });
-    const secondMultiFocused = await page.evaluate(() => (
-      document.querySelector<HTMLElement>('#multi-mermaid-second .meo-mermaid-source-editor')
-        ?.contains(document.activeElement) ?? false
-    ));
-    if (!secondMultiFocused) throw new Error('Second concurrent Mermaid source did not receive focus');
-    await page.keyboard.down('Control');
-    await page.keyboard.press('End');
-    await page.keyboard.up('Control');
-    await page.evaluate(() => new Promise<void>((resolve) => (
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-    )));
+    await enterMermaidSource(page, '__multiMermaidSecond', 2, 'end');
     const secondMultiScrollTop = await page.evaluate(() => (
       document.querySelector<HTMLElement>('#multi-mermaid-second > .cm-editor .cm-scroller')!.scrollTop
     ));
@@ -633,14 +472,14 @@ async function main() {
       const secondHost = document.getElementById('multi-mermaid-second')!;
       const firstScroller = firstHost.querySelector<HTMLElement>(':scope > .cm-editor .cm-scroller')!;
       const secondScroller = secondHost.querySelector<HTMLElement>(':scope > .cm-editor .cm-scroller')!;
-      const secondSource = secondHost.querySelector<HTMLElement>('.meo-mermaid-source-editor');
+      const secondSource = second.view.dom as HTMLElement;
       return {
         firstMarker: first.getText().includes('MULTI_FIRST'),
         firstSuffix: first.getText().slice(-80),
         firstIsolated: !first.getText().includes('MULTI_SECOND'),
         secondMarker: second.getText().includes('MULTI_SECOND'),
         secondSuffix: second.getText().slice(-80),
-        secondMode: secondHost.querySelector<HTMLElement>('.meo-mermaid-editing-block')?.dataset.meoRenderedBlockMode ?? null,
+        secondMode: secondHost.querySelector<HTMLElement>('.meo-mermaid-toolbar')?.dataset.meoMermaidMode ?? null,
         secondIsolated: !second.getText().includes('MULTI_FIRST'),
         firstTop,
         firstActualTop: firstScroller.scrollTop,
@@ -671,10 +510,10 @@ async function main() {
       const second = (window as any).__multiMermaidSecond;
       const secondHost = document.getElementById('multi-mermaid-second')!;
       const secondScroller = secondHost.querySelector<HTMLElement>(':scope > .cm-editor .cm-scroller')!;
-      const secondSource = secondHost.querySelector<HTMLElement>('.meo-mermaid-source-editor');
+      const secondSource = second.view.dom as HTMLElement;
       return {
         marker: second.getText().includes('MULTI_SECOND'),
-        connected: Boolean(secondHost.querySelector('.meo-mermaid-editing-block')?.isConnected),
+        connected: Boolean(second.view.dom.isConnected),
         focused: Boolean(secondSource?.contains(document.activeElement)),
         scrollStable: Math.abs(secondScroller.scrollTop - secondTop) <= 1,
         expectedTop: secondTop,
@@ -690,9 +529,9 @@ async function main() {
     await waitForFrames(page);
     const multiAfterInput = await page.evaluate(() => {
       const host = document.getElementById('multi-mermaid-second')!;
-      const source = host.querySelector<HTMLElement>('.meo-mermaid-source-editor');
-      const block = host.querySelector('.meo-mermaid-editing-block') as any;
-      const inner = block?.__meoMermaidEditingController?.innerView;
+      const inner = (window as any).__multiMermaidSecond.view;
+      const source = inner.contentDOM as HTMLElement;
+      const block = inner.dom as HTMLElement;
       const caret = inner?.coordsAtPos(inner.state.selection.main.head);
       const bounds = host.querySelector<HTMLElement>(':scope > .cm-editor .cm-scroller')!.getBoundingClientRect();
       return {

@@ -1,3 +1,4 @@
+import { enterMermaidSource, setMermaidLayout } from './history-mermaid-chromium';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,16 +15,15 @@ async function waitForFrames(page: any, count = 8): Promise<void> {
   }, count);
 }
 
-async function assertPreviewModeSurvivesHistory(
+async function assertLayoutSurvivesHistory(
   page: any,
   fixture: {
     readonly kind: 'mermaid' | 'formula';
     readonly text: string;
     readonly button: string;
     readonly block: string;
-    readonly controller: string;
     readonly marker: string;
-    readonly previewLabel: string;
+    readonly layout: 'stacked' | 'side-by-side';
   }
 ): Promise<void> {
   await page.evaluate((text) => {
@@ -39,22 +39,12 @@ async function assertPreviewModeSurvivesHistory(
   }, fixture.text);
   await waitForFrames(page);
 
-  await page.click(fixture.button);
-  await waitForFrames(page);
-  await page.evaluate(({ blockSelector, controllerProperty }) => {
-    const block = document.querySelector<HTMLElement>(blockSelector) as any;
-    const controller = block?.[controllerProperty];
-    if (!controller) throw new Error(`Missing rendered editor: ${blockSelector}`);
-    controller.focusOffset(controller.innerView.state.doc.length);
-  }, { blockSelector: fixture.block, controllerProperty: fixture.controller });
+  await setMermaidLayout(page, '__historyModeEditor', 2, fixture.layout);
+  await enterMermaidSource(page, '__historyModeEditor', 2, 'end');
   await page.keyboard.type(fixture.marker);
   await waitForFrames(page);
-
-  // Split -> Source -> Preview. History must not change this explicit user choice.
-  await page.click(fixture.button);
-  await waitForFrames(page);
-  await page.click(fixture.button);
-  await waitForFrames(page);
+  const edited = await page.evaluate(() => (window as any).__historyModeEditor.getText());
+  await setMermaidLayout(page, '__historyModeEditor', 2, 'preview');
 
   for (const direction of ['undo', 'redo'] as const) {
     const applied = await page.evaluate(async (historyDirection) => (
@@ -63,12 +53,15 @@ async function assertPreviewModeSurvivesHistory(
     if (!applied) throw new Error(`${fixture.kind} ${direction} did not apply`);
     await waitForFrames(page);
     const state = await page.evaluate(({ buttonSelector, blockSelector }) => ({
-      modeLabel: document.querySelector<HTMLButtonElement>(buttonSelector)?.getAttribute('aria-label') ?? null,
+      modeLabel: document.querySelector<HTMLButtonElement>(buttonSelector)?.closest<HTMLElement>('.meo-mermaid-toolbar')?.dataset.meoMermaidMode ?? null,
       editingBlockMounted: Boolean(document.querySelector(blockSelector)),
-      activeRole: document.activeElement?.getAttribute('role') ?? null
+      activeRole: document.activeElement?.getAttribute('role') ?? null,
+      side: !!document.querySelector('.meo-mermaid-inline-preview'),
+      text: (window as any).__historyModeEditor.getText(),
+      focused: (window as any).__historyModeEditor.view.hasFocus
     }), { buttonSelector: fixture.button, blockSelector: fixture.block });
-    if (state.modeLabel !== fixture.previewLabel || state.editingBlockMounted) {
-      throw new Error(`${fixture.kind} ${direction} changed Preview into an editing mode: ${JSON.stringify(state)}`);
+    if (state.modeLabel !== 'edit' || !state.editingBlockMounted || !state.focused || state.side !== (fixture.layout === 'side-by-side') || state.text !== (direction === 'undo' ? fixture.text : edited)) {
+      throw new Error(`${fixture.kind} ${direction} did not restore native source with the selected layout: ${JSON.stringify(state)}`);
     }
   }
 }
@@ -100,18 +93,17 @@ async function main(): Promise<void> {
       };
     });
 
-    await assertPreviewModeSurvivesHistory(page, {
+    for (const layout of ['stacked', 'side-by-side'] as const) await assertLayoutSurvivesHistory(page, {
       kind: 'mermaid',
       text: ['before', '```mermaid', 'flowchart LR', 'A --> B', '```', 'after'].join('\n'),
       button: '.meo-mermaid-mode-btn',
-      block: '.meo-mermaid-editing-block',
-      controller: '__meoMermaidEditingController',
+      block: '.meo-mermaid-editing-preview',
       marker: ' HISTORY',
-      previewLabel: 'Preview, Switch to split view'
+      layout
     });
     // Math presentation follows the document caret, tested in test-display-math-editing.
 
-    console.log('rendered block Preview mode survives Undo/Redo');
+    console.log('native Mermaid history restores source and preserves both layouts');
   } catch (error) {
     primaryError = error;
   } finally {

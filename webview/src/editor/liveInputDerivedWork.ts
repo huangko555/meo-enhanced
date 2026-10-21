@@ -602,8 +602,8 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     // Mermaid yields internally while measuring SVG labels. A full-document
     // rebuild in those gaps can turn a tiny split edit into a second-long wait.
     shouldWaitForPresentation: () => activePointers.size > 0 || Boolean(view.dom.querySelector(
-      '.meo-mermaid-editing-block[data-meo-mermaid-rendering="true"], '
-        + '.meo-mermaid-editing-block [data-meo-mermaid-rendering="true"]'
+      '.meo-mermaid-editing-preview[data-meo-mermaid-rendering="true"], '
+        + '.meo-mermaid-editing-preview [data-meo-mermaid-rendering="true"]'
     )),
     apply() {
       try {

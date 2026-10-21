@@ -1,3 +1,4 @@
+import { enterMermaidSource, findMermaidOpening, setMermaidLayout } from './history-mermaid-chromium';
 import assert from 'node:assert/strict';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 
@@ -66,133 +67,51 @@ try {
     const selection = view.state.selection.main;
     return { anchor: selection.anchor, head: selection.head, focused: document.activeElement === view.contentDOM };
   });
-  const placeNestedSelection = async (selector: string, anchor: number, head: number) => {
-    await page.evaluate((selector) => {
-      const content = document.querySelector<HTMLElement>(selector);
-      if (!content) throw new Error('Missing nested input ' + selector + ': ' + JSON.stringify({
-        text: (window as any).editor.view.state.doc.toString(),
-        toolbar: document.querySelector('.meo-mermaid-toolbar')?.outerHTML,
-        body: document.querySelector('.cm-content')?.textContent
-      }));
-      content.focus();
-    }, selector);
-    await page.keyboard.down('Control');
-    await page.keyboard.press('Home');
-    await page.keyboard.up('Control');
-    for (let index = 0; index < anchor; index++) await page.keyboard.press('ArrowRight');
-    await page.keyboard.down('Shift');
-    for (let index = head; index < anchor; index++) await page.keyboard.press('ArrowLeft');
-    await page.keyboard.up('Shift');
-    await frames();
-  };
-  const nestedSelection = (selector: string) => page.evaluate((selector) => {
-    const content = document.querySelector<HTMLElement>(selector);
-    if (!content) return null;
-    const selection = window.getSelection();
-    const lines = Array.from(content.querySelectorAll<HTMLElement>(':scope > .cm-line'));
-    const offset = (node: Node | null, nodeOffset: number): number => {
-      let precedingLength = 0;
-      for (const line of lines) {
-        if (node && line.contains(node)) {
-          const range = document.createRange();
-          range.selectNodeContents(line);
-          range.setEnd(node, nodeOffset);
-          return precedingLength + range.toString().length;
-        }
-        precedingLength += (line.textContent?.length ?? 0) + 1;
-      }
-      return -1;
-    };
-    return {
-      anchor: offset(selection?.anchorNode ?? null, selection?.anchorOffset ?? 0),
-      head: offset(selection?.focusNode ?? null, selection?.focusOffset ?? 0),
-      focused: document.activeElement === content,
-      mode: content.closest('.meo-rendered-block-mode-shell')?.getAttribute('data-meo-rendered-block-mode')
-    };
-  }, selector);
-
   for (const scenario of [
-    { kind: 'mermaid', mode: 'split', edited: false, blurred: false, prefix: '', range: false },
-    { kind: 'mermaid', mode: 'source', edited: true, blurred: false, prefix: '', range: true },
-    { kind: 'mermaid', mode: 'split', edited: true, blurred: true, prefix: '    ', range: true }
-  ]) {
-    const isMermaid = scenario.kind === 'mermaid';
-    const block = isMermaid
-      ? ['```mermaid', 'graph TD', 'A --> B', 'B --> C', '```'].map((line) => scenario.prefix + line)
-      : ['$$', 'x^2 + y^2 = 1', '+ z^2', '$$'];
-    const introduction = scenario.prefix ? ['intro', '', '- Parent', '', '  - Child', ''] : ['intro', ''];
-    await create([...introduction, ...block, '', 'tail'].join('\n'));
-    const button = isMermaid ? '.meo-mermaid-mode-btn' : '.meo-latex-math-mode-btn';
-    const source = isMermaid ? '.meo-mermaid-source-editor .cm-content' : '.meo-latex-math-source-editor .cm-content';
-    await click(button);
-    if (scenario.mode === 'source') await click(button);
+    { layout: 'side-by-side', edited: false, blurred: false, prefix: '', range: false },
+    { layout: 'stacked', edited: true, blurred: false, prefix: '', range: true },
+    { layout: 'side-by-side', edited: true, blurred: true, prefix: '    ', range: true }
+  ] as const) {
+    const block = ['```mermaid', 'graph TD', 'A --> B', 'B --> C', '```'].map(line => scenario.prefix + line);
+    const intro = scenario.prefix ? ['intro', '', '- Parent', '', '  - Child', ''] : ['intro', ''];
+    await create([...intro, ...block, '', 'tail'].join('\n'));
+    const opening = await findMermaidOpening(page, 'editor', 'graph TD');
+    await setMermaidLayout(page, 'editor', opening, scenario.layout);
+    const bounds = await enterMermaidSource(page, 'editor', opening);
+    const base = bounds.from + scenario.prefix.length;
     if (scenario.edited) {
-      await placeNestedSelection(source, 11, 11);
+      await page.evaluate(position => (window as any).editor.revealSelection(position, position, { focusEditor: true, align: 'none' }), base + 3);
       await page.keyboard.type(' ');
     }
-    const anchor = scenario.range ? 14 : 11;
-    const head = 11;
-    await placeNestedSelection(source, anchor, head);
-    check('Initial nested selection ' + JSON.stringify(scenario), await nestedSelection(source), {
-      anchor, head, focused: true, mode: scenario.mode
-    });
-    const expected = await page.evaluate(({ source, prefix, anchor, head }) => {
-      const doc = (window as any).editor.view.state.doc.toString();
-      const lines = Array.from(document.querySelectorAll<HTMLElement>(source + ' > .cm-line'))
-        .map((line) => line.textContent ?? '');
-      const position = (offset: number) => {
-        for (const line of lines) {
-          if (offset <= line.length) return doc.indexOf(prefix + line) + prefix.length + offset;
-          offset -= line.length + 1;
-        }
-        throw new Error('Nested selection outside source');
-      };
-      return { anchor: position(anchor), head: position(head), focused: true };
-    }, { source, prefix: scenario.prefix, anchor, head });
+    const head = base + 3, anchor = head + (scenario.range ? 3 : 0);
+    await page.evaluate(({ anchor, head }) => {
+      const v = (window as any).editor.view; v.dispatch({ selection: { anchor, head } }); v.focus();
+    }, { anchor, head });
+    const expected = { anchor, head, focused: true };
+    check('Initial native selection', await outerSelection(), expected);
     if (scenario.blurred) await page.focus('#outside');
+    await switchMode('source'); check('Source preserves document selection', await outerSelection(), expected);
+    await switchMode('live'); check('Live preserves document selection', await outerSelection(), expected);
+    check('Live restores selected layout', !!await page.$('.meo-mermaid-inline-preview'), scenario.layout === 'side-by-side');
     await switchMode('source');
-    check('Source selection ' + JSON.stringify(scenario), await outerSelection(), expected);
+    await page.evaluate(position => (window as any).editor.view.dispatch({ selection: { anchor: position } }), base + 2);
     await switchMode('live');
-    check('Restored nested selection ' + JSON.stringify(scenario), await nestedSelection(source), {
-      anchor, head, focused: true, mode: scenario.mode
-    });
-
-    await switchMode('source');
-    await page.evaluate((isMermaid) => {
-      const view = (window as any).editor.view;
-      const text = view.state.doc.toString();
-      view.dispatch({ selection: { anchor: text.indexOf(isMermaid ? 'graph TD' : 'x^2') + 3 } });
-    }, isMermaid);
-    await switchMode('live');
-    check('Source position within block wins ' + JSON.stringify(scenario), await nestedSelection(source), {
-      anchor: 3, head: 3, focused: true, mode: scenario.mode
-    });
-
+    check('Source navigation within the block wins', await outerSelection(), { anchor: base + 2, head: base + 2, focused: true });
     await switchMode('source');
     await page.evaluate(() => {
-      const view = (window as any).editor.view;
-      view.dispatch({ changes: { from: 0, insert: 'lead\n' }, selection: { anchor: view.state.selection.main.head + 5 } });
+      const v = (window as any).editor.view;
+      v.dispatch({ changes: { from: 0, insert: 'lead\n' }, selection: { anchor: v.state.selection.main.head + 5 } });
     });
     await switchMode('live');
-    check('Source edits map block mode and position ' + JSON.stringify(scenario), await nestedSelection(source), {
-      anchor: 3, head: 3, focused: true, mode: scenario.mode
-    });
-
-    // Source navigation supersedes the selection saved in the old inner editor.
+    check('Source edits map native document position', await outerSelection(), { anchor: base + 7, head: base + 7, focused: true });
     await switchMode('source');
-    const newPosition = await page.evaluate(() => {
-      const view = (window as any).editor.view;
-      const position = view.state.doc.toString().indexOf('tail') + 2;
-      view.dispatch({ selection: { anchor: position } });
-      return position;
+    const tail = await page.evaluate(() => {
+      const v = (window as any).editor.view, pos = v.state.doc.toString().indexOf('tail') + 2;
+      v.dispatch({ selection: { anchor: pos } }); return pos;
     });
     await switchMode('live');
-    check('Source navigation wins ' + JSON.stringify(scenario), await outerSelection(), {
-      anchor: newPosition, head: newPosition, focused: true
-    });
-    check('Block mode remains selected ' + JSON.stringify(scenario), await page.evaluate((source) => (
-      document.querySelector(source)?.closest('.meo-rendered-block-mode-shell')?.getAttribute('data-meo-rendered-block-mode') ?? null
-    ), source), scenario.mode);
+    check('Source navigation outside the block wins', await outerSelection(), { anchor: tail, head: tail, focused: true });
+    check('Leaving the block closes native source', await page.$('.meo-mermaid-editing-preview'), null);
   }
 
   const html = 'intro\n\n<div>\n<p>alpha beta gamma</p>\n</div>\n\ntail';

@@ -1,3 +1,4 @@
+import { enterMermaidSource } from './history-mermaid-chromium';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -584,28 +585,20 @@ async function main() {
     await page.waitForFunction(source=>(window as any).__editors.table.getText()===source,{timeout:2000},fixtures.table.slice(0,editAnchor)+' '+fixtures.table.slice(editAnchor));
     await page.keyboard.down('Control'); await page.keyboard.press('z'); await page.keyboard.up('Control');
     await page.waitForFunction(source=>(window as any).__editors.table.getText()===source,{timeout:2000},fixtures.table);
-    await page.click('#quote .meo-mermaid-mode-btn');
-    await page.evaluate(async()=>{for(let i=0;i<4;i++)await new Promise<void>(r=>requestAnimationFrame(()=>r()));});
-    const splitSelector='#quote .meo-mermaid-editing-block.is-split .cm-content';
-    if(await page.$(splitSelector)) {
-      await page.click(splitSelector);
-      await page.keyboard.down('Control');
-      await page.keyboard.press('End');
-      await page.keyboard.up('Control');
-      await page.keyboard.type('\nB --> C');
-      await page.waitForFunction(()=>(window as any).__editors.quote.getText().includes('>   B --> C'),{timeout:2000});
-      await page.keyboard.down('Control');
-      await page.keyboard.press('z');
-      await page.keyboard.up('Control');
-      await page.waitForFunction(source=>(window as any).__editors.quote.getText()===source,{timeout:2000},fixtures.quote);
-    }
+    await page.evaluate(() => { (window as any).__quoteMermaidEditor = (window as any).__editors.quote; });
+    await enterMermaidSource(page, '__quoteMermaidEditor', 5, 'end');
+    await page.keyboard.type('\nB --> C');
+    const quoteEdited = await page.evaluate(() => (window as any).__editors.quote.getText());
+    assert.match(quoteEdited, />\s+B --> C/, 'Native Enter must preserve the quotation prefix');
+    await page.keyboard.down('Control'); await page.keyboard.press('z'); await page.keyboard.up('Control');
+    await page.waitForFunction(source=>(window as any).__editors.quote.getText()===source,{timeout:2000},fixtures.quote);
     await page.click('#table tbody .meo-md-footnote-ref');
     // Table pointer release commits deferred source presentation on its next
     // frame; read the resulting activity marker after that presentation lands.
     await page.waitForFunction(() => document.querySelector('#table .cm-activeLine')?.textContent?.includes('[^cell]'));
     const after = await page.evaluate(()=>({
       footnoteNavigation:document.querySelector('#table .cm-activeLine')?.textContent?.includes('[^cell]'),
-      split:!!document.querySelector('#quote .meo-mermaid-editing-block.is-split'),
+      split:!!document.querySelector('#quote .meo-mermaid-toolbar[data-meo-mermaid-mode="edit"]'),
       sources:Object.fromEntries(Object.entries((window as any).__editors).map(([id,e]:any)=>[id,e.getText()]))
     }));
     const failures:string[]=[];

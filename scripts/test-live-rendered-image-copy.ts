@@ -145,14 +145,11 @@ try {
     assert.equal(await page.$$eval('.meo-mermaid-fullscreen-controls button', nodes => nodes.length), 4);
     await page.keyboard.press('Escape');
     await changeMode();
-    assert.ok(await page.$('.meo-mermaid-editing-block.is-split'));
+    assert.ok(await page.$('.meo-mermaid-editing-preview'));
     await copy('.meo-mermaid-toolbar', true);
-    await changeMode();
-    await page.mouse.move(1, 1);
-    await page.hover('.meo-mermaid-toolbar .meo-copy-image-btn');
-    await page.focus('.meo-mermaid-toolbar .meo-copy-image-btn');
-    assert.equal(await page.$eval('.meo-mermaid-toolbar .meo-copy-image-btn', node => node.getAttribute('aria-disabled')), 'true',
-      'Source-only mode has no current diagram to copy: ' + JSON.stringify(await page.$$eval('.meo-mermaid-toolbar, .meo-mermaid-editing-block', nodes => nodes.map(node => ({ data: { ...(node as HTMLElement).dataset }, classes: node.className })))));
+    await page.$eval('.meo-mermaid-layout-btn',b=>(b as HTMLElement).click()); await settle();
+    await copy('.meo-mermaid-toolbar', true);
+    await changeMode(); await copy('.meo-mermaid-toolbar');
   }
   await create(`Before\n\n\`\`\`mermaid\n${diagram}\n\`\`\`\n\nAfter`);
   await page.waitForSelector('.meo-mermaid-block svg');

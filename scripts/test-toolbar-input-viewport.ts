@@ -499,9 +499,9 @@ async function runComponentFocusReturn(browser: Browser): Promise<void> {
     { kind: 'html', text: 'intro\n\n<div>\n<p>alpha beta</p>\n</div>\n\ntail',
       selector: '.cm-content',
       line: '<p>alpha beta</p>', from: '<p>alpha beta</p>', to: '<p>alpha beta</p>R' },
-    ...[1, 2].map((clicks) => ({ kind: `mermaid-${clicks === 1 ? 'split' : 'source'}`,
+    ...[1, 2].map((clicks) => ({ kind: `mermaid-${clicks === 1 ? 'stacked' : 'side'}`,
       text: 'intro\n\n```mermaid\ngraph TD\nA --> B\n```\n\ntail',
-      selector: '.meo-mermaid-source-editor .cm-content', button: '.meo-mermaid-mode-btn', clicks,
+      selector: '.cm-editor > .cm-scroller > .cm-content', button: '.meo-mermaid-mode-btn', clicks, line: 'A --> B',
       from: 'A --> B', to: 'A --> BR' })),
     ...(['live', 'source'] as const).map((mode) => ({ kind: `math-${mode}`, mode,
       text: 'intro\n\n$$\nx^2 + y^2 = 1\n$$\n\ntail',
@@ -514,7 +514,7 @@ async function runComponentFocusReturn(browser: Browser): Promise<void> {
       if (fixture.kind === 'html') await page.click('.meo-md-html-content');
       if ('button' in fixture) {
         for (let step = 0; step < fixture.clicks; step += 1) {
-          await page.evaluate((selector) => document.querySelector<HTMLButtonElement>(selector)!.click(), fixture.button);
+          await page.evaluate((selector) => document.querySelector<HTMLButtonElement>(selector)!.click(), step===0?fixture.button:'.meo-mermaid-layout-btn');
           await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
         }
       }
@@ -522,7 +522,7 @@ async function runComponentFocusReturn(browser: Browser): Promise<void> {
       if ('line' in fixture) {
         const point = await page.evaluate((lineText) => {
           const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-            .find((element) => element.textContent === lineText)!;
+            .find((element) => element.textContent?.endsWith(lineText))!;
           const rect = line.getBoundingClientRect();
           return { x: rect.left + 12, y: rect.top + rect.height / 2 };
         }, fixture.line);

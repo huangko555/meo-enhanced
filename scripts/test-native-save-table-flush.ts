@@ -177,14 +177,17 @@ async function main(): Promise<void> {
       await page.evaluate(text => (window as any).__nativeSaveTableFlush.initialize(text), block.text);
       const math = block.kind === 'latex-math';
       if (math) await page.click('.meo-md-math-fenced-display .katex');
-      else await page.click('.meo-mermaid-mode-btn');
-      const selector = math ? '#editor > .cm-editor .cm-content' : '.meo-mermaid-source-editor .cm-content';
+      else {
+        await page.waitForSelector('.meo-mermaid-toolbar');
+        if (await page.$eval('.meo-mermaid-toolbar', node => node.getAttribute('data-meo-mermaid-mode') === 'preview')) await page.click('.meo-mermaid-mode-btn');
+      }
+      const selector = '#editor > .cm-editor .cm-content';
       await page.waitForSelector(math ? '.meo-math-source-line' : selector);
       if (!math) {
-        await page.click(selector);
-        await page.keyboard.down('Control');
+        await page.waitForFunction(() => Array.from(document.querySelectorAll('#editor .cm-line')).some(node => node.textContent === 'A --> B'));
+        const target = await page.evaluateHandle(() => Array.from(document.querySelectorAll<HTMLElement>('#editor .cm-line')).find(node => node.textContent === 'A --> B'));
+        await target.asElement()!.click(); await target.dispose();
         await page.keyboard.press('End');
-        await page.keyboard.up('Control');
       } else {
         const lines = await page.$$('.meo-math-source-line');
         const bodyLine = (await Promise.all(lines.map(async line => ({ line, text: await line.evaluate(node => node.textContent) })))).find(candidate => candidate.text === 'x = 1');

@@ -1,5 +1,5 @@
 import { EditorState } from '@codemirror/state';
-import type { SyntaxNode, SyntaxNodeRef, Tree } from '@lezer/common';
+import type { SyntaxNodeRef, Tree } from '@lezer/common';
 import { isThematicBreakLine } from './frontmatter';
 import { parseBlockLinePrefix } from './blockIndent';
 import { getFencedCodeInfo, resolvedSyntaxTree } from './markdownSyntax';
@@ -7,7 +7,6 @@ import { resolveFencedDisplayMathInnerLineRange } from './math';
 import { collectDocumentMathRanges } from './displayMathBlocks';
 import { isTableDelimiterLine, parseTableInfo } from './tables';
 import { collectRenderableHtmlBlocks, getHtmlEditingRange } from './htmlContent';
-import { isUnfinishedMermaidSourceActive } from './mermaidEditing';
 
 type LineFlagLike = {
   added?: boolean;
@@ -38,7 +37,7 @@ export interface LiveCollapsedGitBlock {
 }
 
 const renderedBlockCache = new WeakMap<EditorState, { tree: any; blocks: LiveRenderedBlock[] }>();
-type DiscoveredBlock = { block: LiveRenderedBlock; htmlFrom?: number; mermaidNode?: SyntaxNode };
+type DiscoveredBlock = { block: LiveRenderedBlock; htmlFrom?: number };
 // Discovery depends on text and the resolved parse. Selection and HTML editing
 // only filter that discovery; they must not invalidate its whole-document scans.
 const discoveredBlockCache = new WeakMap<EditorState['doc'], { tree: Tree; blocks: DiscoveredBlock[] }>();
@@ -191,9 +190,8 @@ export function getLiveRenderedBlocks(
     discoveredBlockCache.set(state.doc, discovered);
   }
   const htmlEditingRange = getHtmlEditingRange(state);
-  const blocks = discovered.blocks.filter(({ block, htmlFrom, mermaidNode }) => {
+  const blocks = discovered.blocks.filter(({ block, htmlFrom }) => {
     if (block.kind === 'html' && htmlEditingRange?.from === htmlFrom) return false;
-    if (mermaidNode && isUnfinishedMermaidSourceActive(state, mermaidNode)) return false;
     return block.kind !== 'math' || options.includeSelectedMath
       || block.lineNumberHiddenTo < block.lineNumberHiddenFrom
       || !selectionTouchesLineRange(state, block.startLine, block.endLine);
@@ -205,7 +203,6 @@ export function getLiveRenderedBlocks(
 function discoverRenderedBlocks(state: EditorState, tree: Tree): DiscoveredBlock[] {
   const blocks: LiveRenderedBlock[] = [];
   const htmlFromByBlock = new Map<LiveRenderedBlock, number>();
-  const mermaidNodeByBlock = new Map<LiveRenderedBlock, SyntaxNode>();
   const parsedTableRanges: Array<{ from: number; to: number }> = [];
 
   tree.iterate({
@@ -237,7 +234,6 @@ function discoverRenderedBlocks(state: EditorState, tree: Tree): DiscoveredBlock
       const endLine = state.doc.lineAt(Math.max(node.to - 1, node.from)).number;
       const block = createRenderedBlock('mermaid', startLine, endLine, null);
       if (block) {
-        mermaidNodeByBlock.set(block, node.node);
         blocks.push(block);
       }
     }
@@ -282,7 +278,7 @@ function discoverRenderedBlocks(state: EditorState, tree: Tree): DiscoveredBlock
     left.startLine - right.startLine ||
     left.endLine - right.endLine
   ));
-  return blocks.map(block => ({ block, htmlFrom: htmlFromByBlock.get(block), mermaidNode: mermaidNodeByBlock.get(block) }));
+  return blocks.map(block => ({ block, htmlFrom: htmlFromByBlock.get(block) }));
 }
 
 function createCollapsedBlock(

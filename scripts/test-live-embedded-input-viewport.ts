@@ -85,7 +85,7 @@ async function main(): Promise<void> {
 
     await page.evaluate(async () => {
       const editor = (window as any).__embeddedEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block, .meo-mermaid-block')!;
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-preview, .meo-mermaid-block')!;
       const viewport = editor.view.scrollDOM.getBoundingClientRect();
       editor.view.scrollDOM.scrollTop += block.getBoundingClientRect().top - viewport.top - 96;
       for (let index = 0; index < 4; index += 1) {
@@ -125,15 +125,13 @@ async function main(): Promise<void> {
     await page.evaluate(async () => {
       const editor = (window as any).__embeddedEditor;
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        const currentBlock = document.querySelector<HTMLElement>('.meo-mermaid-editing-block');
-        if (currentBlock?.classList.contains('is-split')) break;
+        if(document.querySelector<HTMLElement>('.meo-mermaid-toolbar')?.dataset.meoMermaidMode==='edit') break;
         document.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')!.click();
         for (let frame = 0; frame < 3; frame += 1) {
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         }
       }
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
-      const innerView = (block as any).__meoMermaidEditingController.innerView;
+      const innerView = editor.view;
       const target = innerView.state.doc.toString().indexOf('Restore edit') + 'Restore edit'.length;
       innerView.dispatch({ selection: { anchor: target } });
       innerView.focus();
@@ -155,8 +153,7 @@ async function main(): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 500));
     const mermaidInput = await page.evaluate(() => {
       const editor = (window as any).__embeddedEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')!;
-      const innerView = (block as any).__meoMermaidEditingController.innerView;
+      const innerView = editor.view;
       const trace = (window as any).__mermaidInputScrollTrace as number[];
       return {
         trace,
@@ -171,12 +168,11 @@ async function main(): Promise<void> {
 
     const mermaidTopBefore = await page.evaluate(async () => {
       const editor = (window as any).__embeddedEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')!;
-      const innerView = (block as any).__meoMermaidEditingController.innerView;
-      innerView.dispatch({ selection: { anchor: 0 } });
+      const innerView = editor.view;
+      innerView.dispatch({ selection: { anchor: innerView.state.doc.line(253).from } });
       innerView.focus();
       const viewport = (window as any).__embeddedHarness.editorViewportBounds(editor.view);
-      const caret = innerView.coordsAtPos(0);
+      const caret = innerView.coordsAtPos(innerView.state.doc.line(253).from);
       if (!caret) throw new Error('Could not measure Mermaid top caret');
       editor.view.scrollDOM.dispatchEvent(new WheelEvent('wheel', { deltaY: 60, bubbles: true }));
       editor.view.scrollDOM.scrollTop += caret.top - viewport.top + 3;
@@ -186,7 +182,7 @@ async function main(): Promise<void> {
       const settledViewport = (window as any).__embeddedHarness.editorViewportBounds(editor.view);
       return {
         scrollTop: editor.view.scrollDOM.scrollTop,
-        caretTop: innerView.coordsAtPos(0)?.top ?? null,
+        caretTop: innerView.coordsAtPos(innerView.state.doc.line(253).from)?.top ?? null,
         viewportTop: settledViewport.top,
         lineHeight: editor.view.defaultLineHeight
       };
@@ -199,8 +195,7 @@ async function main(): Promise<void> {
     });
     const mermaidTopAfter = await page.evaluate(() => {
       const editor = (window as any).__embeddedEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')!;
-      const innerView = (block as any).__meoMermaidEditingController.innerView;
+      const innerView = editor.view;
       const caret = innerView.coordsAtPos(innerView.state.selection.main.head);
       const viewport = (window as any).__embeddedHarness.editorViewportBounds(editor.view);
       return {

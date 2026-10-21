@@ -14,7 +14,7 @@ async function waitForFrames(page: import('puppeteer-core').Page, count = 8): Pr
   }, count);
 }
 
-async function runMode(page: import('puppeteer-core').Page, mode: 'split' | 'source'): Promise<void> {
+async function runMode(page: import('puppeteer-core').Page, mode: 'stacked' | 'side-by-side'): Promise<void> {
   await page.evaluate(() => {
     (window as any).__mermaidPartialLineEditor?.destroy();
     document.getElementById('app')!.replaceChildren();
@@ -43,21 +43,16 @@ async function runMode(page: import('puppeteer-core').Page, mode: 'split' | 'sou
   // the test exercises partial-line input, not a detached bootstrap button.
   await waitForFrames(page, 8);
   await page.click('.meo-mermaid-mode-btn');
-  await page.waitForSelector('.meo-mermaid-editing-block.is-split');
-  if (mode === 'source') {
-    await page.click('.meo-mermaid-mode-btn');
-    await page.waitForSelector('.meo-mermaid-editing-block.is-source');
-  }
+  await page.evaluate(mode=>{if(Boolean(document.querySelector('.meo-mermaid-inline-preview')) !== (mode==='side-by-side')) document.querySelector<HTMLButtonElement>('.meo-mermaid-layout-btn')!.click();},mode);
   await waitForFrames(page, 10);
 
   const initial = await page.evaluate(() => {
     const editor = (window as any).__mermaidPartialLineEditor;
-    const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')!;
-    const controller = (block as any).__meoMermaidEditingController;
-    const innerView = controller.innerView;
-    const line = innerView.state.doc.line(7);
+    const block = editor.view.contentDOM;
+    const innerView = editor.view;
+    const line = innerView.state.doc.line(49);
     innerView.dispatch({ selection: { anchor: line.to } });
-    innerView.contentDOM.focus({ preventScroll: true });
+    innerView.focus();
     const lineElement = Array.from(block.querySelectorAll<HTMLElement>('.cm-line'))
       .find((candidate) => candidate.textContent === line.text)!;
     const viewport = editor.view.scrollDOM.getBoundingClientRect();
@@ -94,8 +89,8 @@ async function runMode(page: import('puppeteer-core').Page, mode: 'split' | 'sou
     (window as any).__mermaidPartialLineTrace = trace;
     let frames = 0;
     const sample = () => {
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block');
-      const innerView = (block as any)?.__meoMermaidEditingController?.innerView;
+      const block = editor.view.contentDOM;
+      const innerView = editor.view;
       const caret = innerView?.coordsAtPos(innerView.state.selection.main.head);
       trace.push({
         scrollTop: editor.view.scrollDOM.scrollTop,
@@ -114,8 +109,8 @@ async function runMode(page: import('puppeteer-core').Page, mode: 'split' | 'sou
 
   const result = await page.evaluate(() => {
     const editor = (window as any).__mermaidPartialLineEditor;
-    const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')!;
-    const innerView = (block as any).__meoMermaidEditingController.innerView;
+    const block = editor.view.contentDOM;
+    const innerView = editor.view;
     const trace = (window as any).__mermaidPartialLineTrace as Array<{
       scrollTop: number;
       caretTop: number | null;
@@ -131,7 +126,7 @@ async function runMode(page: import('puppeteer-core').Page, mode: 'split' | 'sou
     const viewport = editor.view.scrollDOM.getBoundingClientRect();
     const caret = innerView.coordsAtPos(innerView.state.selection.main.head);
     return {
-      text: innerView.state.doc.line(7).text,
+      text: innerView.state.doc.line(49).text,
       focused: innerView.hasFocus,
       sameBlock: trace.every((sample) => sample.sameBlock),
       focusStable: trace.every((sample) => sample.focused),
@@ -188,8 +183,8 @@ async function main(): Promise<void> {
         }
       };
     });
-    await runMode(page, 'source');
-    await runMode(page, 'split');
+    await runMode(page, 'side-by-side');
+    await runMode(page, 'stacked');
     console.log('Mermaid partial-line typing viewport regression passed');
   } catch (error) {
     primaryError = error;

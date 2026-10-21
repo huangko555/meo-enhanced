@@ -1026,7 +1026,7 @@ try {
     }
   }
   for (const fixture of [
-    { kind: 'mermaid', text: 'intro\n\n```mermaid\ngraph TD\nA --> B\n```\n\ntail', selector: '.meo-mermaid-source-editor .cm-content', button: '.meo-mermaid-mode-btn' },
+    { kind: 'mermaid', text: 'intro\n\n```mermaid\ngraph TD\nA --> B\n```\n\ntail', selector: '.editor-host > .cm-editor .cm-content', button: '.meo-mermaid-mode-btn' },
     { kind: 'math', text: 'intro\n\n$$\nx^2 + y^2 = 1\n$$\n\ntail', selector: '.editor-host > .cm-editor .cm-content', button: null }
   ]) for (const clicks of [1, 2]) {
     await page.close(); page = await browser.newPage(); page.on('pageerror', error => errors.push(String(error)));
@@ -1034,7 +1034,7 @@ try {
     await page.waitForFunction(() => !document.querySelector('.mode-toolbar')?.classList.contains('meo-preload-toolbar'));
     if (fixture.button) {
       for (let count = 0; count < clicks; count++) {
-        await page.$eval(fixture.button, element => (element as HTMLButtonElement).click());
+        await page.$eval(count===0?fixture.button:'.meo-mermaid-layout-btn', element => (element as HTMLButtonElement).click());
         await settleSelection();
       }
     } else if (clicks === 1) {
@@ -1049,7 +1049,7 @@ try {
     for (const method of ['button', 'backdrop', 'escape'] as const) {
       const original = await page.evaluate(({ selector, kind }) => {
         const g = window as any, editor = g.EditingSettingsHarness.EditorView.findFromDOM(document.querySelector(selector));
-        const source = editor.state.doc.toString(), from = kind === 'math' ? source.indexOf('x^2') : 0;
+        const source = editor.state.doc.toString(), from = kind === 'math' ? source.indexOf('x^2') : source.indexOf('graph TD');
         const anchor = from + 4, head = from + 2;
         editor.dispatch({ selection: { anchor, head } }); editor.focus(); return { source, anchor, head };
       }, fixture);

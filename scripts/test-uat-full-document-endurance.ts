@@ -1,3 +1,4 @@
+import { enterMermaidSource, setMermaidLayout } from './history-mermaid-chromium';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -268,16 +269,11 @@ async function startMonitor(
         const controls = document.querySelector<HTMLElement>(
           `[role="group"][aria-label="${blockName} block controls at line ${rendered.openingLine}"]`
         );
-        const editingRegion = document.querySelector<HTMLElement>(
-          `[role="region"][aria-label="${blockName} editor at line ${rendered.openingLine}"]`
-        );
-        if (editingRegion?.contains(document.activeElement)) {
-          const activeLine = editingRegion.querySelector<HTMLElement>('.cm-activeLine')
-            ?? editingRegion.querySelector<HTMLElement>('.cm-line');
-          if (activeLine) {
-            lastTarget = { key: 'embedded-editor', top: activeLine.getBoundingClientRect().top };
-            return lastTarget;
-          }
+        if (editor.view.hasFocus) {
+          // Multiline input moves the caret to another source row. Track the
+          // block boundary so that movement is not mistaken for layout drift.
+          const coords = editor.view.coordsAtPos(editor.view.state.doc.line(rendered.openingLine).from);
+          if (coords) { lastTarget = { key: 'document-block', top: coords.top }; return lastTarget; }
         }
         if (controls) {
           lastTarget = { key: 'block-controls', top: controls.getBoundingClientRect().top };
@@ -624,101 +620,28 @@ async function editTable(page: import('puppeteer-core').Page, operation: Operati
   }
 }
 
-async function ensureRenderedSplit(
-  page: import('puppeteer-core').Page,
-  openingLine: number
-): Promise<string> {
-  const blockName = 'Mermaid';
-  const controlsLabel = `${blockName} block controls at line ${openingLine}`;
-  const regionLabel = `${blockName} editor at line ${openingLine}`;
-  await page.waitForFunction((label) => Boolean(document.querySelector(`[role="group"][aria-label="${label}"]`)), {}, controlsLabel);
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const state = await page.evaluate(({ label, regionLabel }) => {
-      const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${label}"]`);
-      const button = group?.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn');
-      if (!button) throw new Error(`Missing rendered mode button: ${label}`);
-      const mode = group?.dataset.meoMermaidMode;
-      if (mode === 'split') {
-        const region = document.querySelector<HTMLElement>(`[role="region"][aria-label="${regionLabel}"]`);
-        const content = region?.querySelector<HTMLElement>('.cm-content');
-        return region?.dataset.meoRenderedBlockMode === 'split' && content
-          && content.getBoundingClientRect().height > 0 ? 'split' : 'pending';
-      }
-      button.click();
-      return 'changed';
-    }, { label: controlsLabel, regionLabel });
-    if (state === 'split') return controlsLabel;
-    await waitForFrames(page, 12);
-  }
-  throw new Error(`Could not enter split mode: ${controlsLabel}`);
-}
-
 async function editRendered(
   page: import('puppeteer-core').Page,
   operation: Operation,
   openingLine: number
 ): Promise<void> {
-  const controlsLabel = await ensureRenderedSplit(page, openingLine);
-  const blockName = 'Mermaid';
-  const regionLabel = `${blockName} editor at line ${openingLine}`;
-  await page.waitForFunction((label) => Boolean(document.querySelector(`[role="region"][aria-label="${label}"] .cm-content`)), {}, regionLabel);
-  await page.evaluate((label) => {
-    const content = document.querySelector<HTMLElement>(`[role="region"][aria-label="${label}"] .cm-content`);
-    if (!content) throw new Error(`Missing embedded source content: ${label}`);
-    const range = document.createRange();
-    range.selectNodeContents(content);
-    range.collapse(true);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-    content.focus({ preventScroll: true });
-  }, regionLabel);
-  await page.keyboard.press('Enter');
-  await page.keyboard.press('ArrowUp');
-  await page.keyboard.type(`%% ${operation.marker}`);
-  try {
-    await page.waitForFunction(
-      (marker) => (window as any).__fullUatEditor.getText().includes(marker),
-      { timeout: 30_000 },
-      operation.marker
-    );
-  } catch (error) {
-    const diagnostics = await page.evaluate(({ label, marker }) => {
-      const region = document.querySelector<HTMLElement>(`[role="region"][aria-label="${label}"]`);
-      const content = region?.querySelector<HTMLElement>('.cm-content') ?? null;
-      return {
-        activeClass: document.activeElement?.className ?? null,
-        activeTag: document.activeElement?.tagName ?? null,
-        contentText: content?.textContent ?? null,
-        documentContainsMarker: (window as any).__fullUatEditor.getText().includes(marker),
-        focusInsideRegion: Boolean(region?.contains(document.activeElement)),
-        regionConnected: Boolean(region?.isConnected)
-      };
-    }, { label: regionLabel, marker: operation.marker });
-    throw new Error(`Rendered edit did not reach the document: ${JSON.stringify({ operation, openingLine, diagnostics })}`, {
-      cause: error
-    });
-  }
-  await waitForFrames(page, 10);
-  // Large-document input deliberately defers derived widgets beyond a fixed
-  // frame count. Check final controls after the editor's readiness boundary;
-  // the running monitor still observes transient focus and viewport failures.
-  await page.evaluate(async () => {
-    await (window as any).__fullUatEditor.whenVisiblePresentationReady(1_200);
+  // One native paste keeps this operation one history event, just like the
+  // other drivers' single edits. Enter and subsequent typing are separate
+  // native history groups and must not be treated as one projected edit.
+  await page.evaluate(marker => {
+    const content = (window as any).__fullUatEditor.view.contentDOM;
+    const clipboardData = new DataTransfer();
+    clipboardData.setData('text/plain', `%% ${marker}\n`);
+    content.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
+  }, operation.marker);
+  await page.waitForFunction(marker => (window as any).__fullUatEditor.getText().includes(marker), { timeout: 30_000 }, operation.marker);
+  await page.evaluate(async () => { await (window as any).__fullUatEditor.whenVisiblePresentationReady(1_200); });
+  const state = await page.evaluate(() => {
+    const view = (window as any).__fullUatEditor.view;
+    return { focused: view.hasFocus && document.activeElement === view.contentDOM,
+      controlsPresent: !!view.dom.querySelector('.meo-mermaid-toolbar[data-meo-mermaid-mode="edit"]') };
   });
-  const currentLocation = await locateOperation(page, operation);
-  const currentRegionLabel = `${blockName} editor at line ${currentLocation.openingLine}`;
-  const currentControlsLabel = `${blockName} block controls at line ${currentLocation.openingLine}`;
-  const focus = await page.evaluate(({ label, controls }) => {
-    const region = document.querySelector<HTMLElement>(`[role="region"][aria-label="${label}"]`);
-    return {
-      focused: Boolean(region?.contains(document.activeElement)),
-      controlsPresent: Boolean(document.querySelector(`[role="group"][aria-label="${controls}"]`))
-    };
-  }, { label: currentRegionLabel, controls: currentControlsLabel });
-  if (!focus.focused || !focus.controlsPresent) {
-    throw new Error(`Rendered edit focus drift: ${JSON.stringify({ operation, openingLine, focus })}`);
-  }
+  if (!state.focused || !state.controlsPresent) throw new Error(`Rendered edit focus drift: ${JSON.stringify({ operation, state })}`);
 }
 
 async function editDisplayMath(page: import('puppeteer-core').Page, operation: Operation, lineNumber: number, openingLine: number): Promise<void> {
@@ -756,6 +679,11 @@ async function applyOperation(page: import('puppeteer-core').Page, operation: Op
   }
   if (operation.kind === 'table') {
     await prepareTableInput(page, operation, location.lineNumber);
+  }
+  if (operation.kind === 'mermaid') {
+    await setMermaidLayout(page, '__fullUatEditor', location.openingLine, 'side-by-side');
+    await enterMermaidSource(page, '__fullUatEditor', location.openingLine);
+    await waitForScrollStability(page);
   }
   // Explicit caret navigation belongs to preparation, before the input
   // monitor starts. HTML edits use the same boundary as ordinary source text.
@@ -827,10 +755,16 @@ async function targetState(page: import('puppeteer-core').Page, operation: Opera
   return page.evaluate(({ operationKind, lineNumber, openingLine, marker, tableCell }) => {
     const editor = (window as any).__fullUatEditor;
     const viewport = editor.view.scrollDOM.getBoundingClientRect();
-    const blockName = operationKind === 'mermaid' ? 'Mermaid' : null;
-    const region = blockName
-      ? document.querySelector<HTMLElement>(`[role="region"][aria-label="${blockName} editor at line ${openingLine}"]`)
-      : null;
+    const view = editor.view;
+    let mermaidEnd = null as number | null;
+    if (operationKind === 'mermaid') {
+      for (let number = openingLine + 1; number <= view.state.doc.lines; number++) {
+        if (view.state.doc.line(number).text.trim() === '```') { mermaidEnd = view.state.doc.line(number).to; break; }
+      }
+    }
+    const head = view.state.selection.main.head;
+    const nativeMermaidFocused = mermaidEnd !== null && view.hasFocus && document.activeElement === view.contentDOM
+      && head >= view.state.doc.line(openingLine).from && head <= mermaidEnd;
     const mathTarget = operationKind === 'math'
       ? (window as any).__fullUatMathTarget(lineNumber, openingLine) : null;
     let tableInput: HTMLTextAreaElement | null = null;
@@ -841,7 +775,7 @@ async function targetState(page: import('puppeteer-core').Page, operation: Opera
       tableInput = Array.from(row?.querySelectorAll<HTMLTextAreaElement>('textarea') ?? [])
         .find((input) => input.value.includes(marker) || input.value === tableCell) ?? null;
     }
-    const sourceLine = editor.view.state.doc.line(lineNumber);
+    const sourceLine = nativeMermaidFocused ? view.state.doc.lineAt(head) : view.state.doc.line(lineNumber);
     // Live decorations can replace syntax at the start of a line (for example
     // heading markers), making coordsAtPos(line.from) legitimately unavailable
     // even while the editable line content is painted and focused.
@@ -851,25 +785,17 @@ async function targetState(page: import('puppeteer-core').Page, operation: Opera
       top: viewport.top + lineBlock.top - editor.view.scrollDOM.scrollTop,
       bottom: viewport.top + lineBlock.bottom - editor.view.scrollDOM.scrollTop
     };
-    const target = region ?? tableInput;
-    const regionRect = target?.getBoundingClientRect();
-    // A diagram can exceed the outer viewport. Its edited source line is the
-    // visible-history target; requiring the entire diagram to fit is impossible.
-    const editedLine = region && regionRect && regionRect.height > viewport.height
-      ? region.querySelector<HTMLElement>('.meo-rendered-block-source-pane .cm-line')
-      : null;
-    const rect = mathTarget?.source?.getBoundingClientRect() ?? editedLine?.getBoundingClientRect() ?? regionRect ?? sourceRect;
+    const rect = mathTarget?.source?.getBoundingClientRect() ?? tableInput?.getBoundingClientRect() ?? sourceRect;
     const active = document.activeElement;
-    const activeLineRect = region?.querySelector<HTMLElement>('.cm-activeLine')?.getBoundingClientRect() ?? null;
-    const cursorRect = region?.querySelector<HTMLElement>('.cm-cursor-primary')?.getBoundingClientRect() ?? null;
+    const activeLineRect = view.contentDOM.querySelector<HTMLElement>('.cm-activeLine')?.getBoundingClientRect() ?? null;
+    const cursorRect = view.dom.querySelector<HTMLElement>('.cm-cursor-primary')?.getBoundingClientRect() ?? null;
     const focused = operationKind === 'table'
       ? Boolean(tableInput && active === tableInput)
       : operationKind === 'math'
         ? mathTarget.paired && editor.view.hasFocus
           && editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number === lineNumber
-      : blockName
-        ? Boolean(region?.contains(active))
-        : editor.view.hasFocus && editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number === lineNumber;
+      : operationKind === 'mermaid' ? nativeMermaidFocused
+      : editor.view.hasFocus && editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number === lineNumber;
     return {
       visible: Boolean(rect && rect.bottom > viewport.top && rect.top < viewport.bottom),
       focused,
@@ -889,7 +815,7 @@ async function targetState(page: import('puppeteer-core').Page, operation: Opera
       visibleToLine: editor.view.state.doc.lineAt(editor.view.viewport.to).number,
       activeClass: active instanceof HTMLElement ? active.className : null,
       activeAriaLabel: active instanceof HTMLElement ? active.getAttribute('aria-label') : null,
-      regionClass: region?.className ?? null,
+      regionClass: nativeMermaidFocused ? view.contentDOM.className : null,
       mathSource: mathTarget ? Boolean(mathTarget.source) : null,
       mathResult: mathTarget ? Boolean(mathTarget.result) : null,
       mathPaired: mathTarget?.paired ?? null
@@ -1055,7 +981,7 @@ async function runFastHistoryCycle(
               activeClass: active?.className ?? null,
               history: editor.getHistoryDepth(),
               renderedEditors: Array.from(document.querySelectorAll<HTMLElement>(
-                '.meo-mermaid-editing-block, .meo-math-source-line, .meo-math-live-result'
+                '.meo-mermaid-editing-preview, .meo-math-source-line, .meo-math-live-result'
               )).map((root) => ({
                 ariaLabel: root.getAttribute('aria-label'),
                 className: root.className,

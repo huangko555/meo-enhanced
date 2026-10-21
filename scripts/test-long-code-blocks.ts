@@ -1416,11 +1416,12 @@ async function main() {
     }
 
     await page.click('.meo-mermaid-mode-btn');
+    await waitForFrames(page, 8);
+    const mermaidEditingRect = await page.$eval('.meo-mermaid-editing-preview', node => { const r = node.getBoundingClientRect(); return { left: r.left, right: r.right }; });
     await page.click('.meo-md-math-fenced-display .katex');
     await waitForFrames(page, 12);
-    const editingBlockLayout = await page.evaluate(() => {
+    const editingBlockLayout = await page.evaluate((mermaid) => {
       const top = document.querySelector<HTMLElement>('.cm-line.meo-md-code-block-start')?.getBoundingClientRect();
-      const mermaid = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')?.getBoundingClientRect();
       const math = document.querySelector<HTMLElement>('.meo-math-source-line')?.getBoundingClientRect();
       return {
         topLeft: top?.left ?? 0,
@@ -1430,7 +1431,7 @@ async function main() {
         mathLeft: math?.left ?? 0,
         mathRight: math?.right ?? 0
       };
-    });
+    }, mermaidEditingRect);
     if (
       editingBlockLayout.mermaidLeft <= editingBlockLayout.topLeft ||
       editingBlockLayout.mathLeft <= editingBlockLayout.topLeft ||

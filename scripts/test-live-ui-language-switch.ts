@@ -55,7 +55,7 @@ function expectedLabels(language: UiLanguage, mermaidLine: number, formulaLine: 
       strings.tablePreviousActions
     ],
     mermaidControls: strings.mermaidBlockControls(mermaidLine),
-    mermaidMode: `${strings.preview}, ${strings.editMermaidSplit}`,
+    mermaidMode: strings.editMermaidSource,
     formulaControls: strings.copyCode,
     formulaMode: null,
     color: strings.adjustColor('#ff0000')

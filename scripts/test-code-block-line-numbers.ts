@@ -1,3 +1,4 @@
+import { enterMermaidSource, setMermaidLayout } from './history-mermaid-chromium';
 import { enterDisplayMathSource } from './history-display-math-chromium';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -297,240 +298,25 @@ async function main() {
       document.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')?.click();
     });
     await waitForFrames(page, 8);
-    const splitLineNumbers = await page.evaluate(() => {
-      const editor = (window as any).__codeBlockLineNumbersEditor;
-      const readInner = (selector: string, startLine: number) => {
-        const root = document.querySelector<HTMLElement>(selector);
-        const gutters = Array.from(root?.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement') ?? [])
-          .filter((element) => getComputedStyle(element).visibility !== 'hidden')
-          .map((element) => element.textContent?.trim() ?? '')
-          .filter(Boolean);
-        const content = Array.from(root?.querySelectorAll<HTMLElement>('.cm-content .cm-line') ?? [])
-          .map((element) => element.textContent ?? '');
-        const firstGutter = Array.from(root?.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement') ?? [])
-          .find((element) => element.textContent?.trim() === '1');
-        const firstLine = root?.querySelector<HTMLElement>('.cm-content .cm-line') ?? null;
-        const textTop = (node: Node | null): number | null => {
-          if (!node) return null;
-          const range = document.createRange();
-          range.selectNodeContents(node);
-          return range.getBoundingClientRect().top;
-        };
-        return {
-          gutters,
-          content,
-          startLine,
-          firstLineTextOffset: firstGutter && firstLine
-            ? (textTop(firstGutter) ?? 0) - (textTop(firstLine) ?? 0)
-            : null
-        };
-      };
-      const outerGutter = editor.view.scrollDOM.querySelector<HTMLElement>(':scope > .cm-gutters');
-      const outerNumbers = Array.from(
-        outerGutter?.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement') ?? []
-      ).map((element) => element.textContent?.trim() ?? '').filter(Boolean);
-      const readOuterContentLines = (selector: string, contentStartLine: number) => {
-        const innerMarkers = Array.from(
-          document.querySelector<HTMLElement>(selector)
-            ?.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement') ?? []
-        ).filter((element) => (
-          getComputedStyle(element).visibility !== 'hidden'
-          && element.getBoundingClientRect().height > 0
-          && Boolean(element.textContent?.trim())
-        ));
-        const outerMarkers = Array.from(
-          outerGutter?.querySelectorAll<HTMLElement>('.meo-rendered-block-document-line-number') ?? []
-        ).filter((element) => (
-          getComputedStyle(element).visibility !== 'hidden'
-          && element.getBoundingClientRect().height > 0
-        ));
-        return innerMarkers.map((innerMarker, index) => {
-          const lineNumber = contentStartLine + index;
-          const outerMarker = outerMarkers.find((candidate) => (
-            candidate.textContent?.trim() === String(lineNumber)
-          ));
-          return {
-            lineNumber,
-            offset: outerMarker
-              ? outerMarker.getBoundingClientRect().top - innerMarker.getBoundingClientRect().top
-              : null
-          };
-        });
-      };
-      const readOuterStartLine = (startLine: number, blockSelector: string) => {
-        const candidates = Array.from(
-          outerGutter?.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement') ?? []
-        ).filter((element) => (
-          element.textContent?.trim() === String(startLine)
-          && getComputedStyle(element).visibility !== 'hidden'
-          && element.getBoundingClientRect().height > 0
-        ));
-        const marker = candidates[0] ?? null;
-        const coords = editor.view.coordsAtPos(editor.view.state.doc.line(startLine).from);
-        if (!marker || !coords) return null;
-        const markerRect = marker.getBoundingClientRect();
-        return {
-          candidateCount: candidates.length,
-          height: markerRect.height,
-          markerClass: marker.className,
-          sourceTopOffset: markerRect.top - coords.top,
-          blockTopOffset: markerRect.top - coords.top
-        };
-      };
-      return {
-        outerNumbers,
-        mermaid: readInner('.meo-mermaid-source-editor', 20),
-        mermaidDocumentLines: readOuterContentLines('.meo-mermaid-source-editor', 21),
-        outerMermaidStart: readOuterStartLine(20, '.meo-mermaid-editing-block')
-      };
-    });
-    if (
-      !splitLineNumbers.outerNumbers.includes('20') ||
-      !splitLineNumbers.outerNumbers.includes('25') ||
-      JSON.stringify(splitLineNumbers.mermaid.gutters) !== JSON.stringify(['1', '2']) ||
-      splitLineNumbers.mermaidDocumentLines.some((line) => line.offset === null || Math.abs(line.offset) > 1) ||
-      splitLineNumbers.outerMermaidStart === null ||
-      splitLineNumbers.outerMermaidStart.candidateCount !== 1 ||
-      splitLineNumbers.outerMermaidStart.height < 1 ||
-      splitLineNumbers.outerMermaidStart.sourceTopOffset === null
-    ) {
-      renderedBlockFailures.push(`split line numbers: ${JSON.stringify(splitLineNumbers)}`);
-    }
-    const splitOuterAlignment = await readOuterLineNumberAlignment(page, [23, 24, 28]);
-    if (splitOuterAlignment.some((item) => item.offset === null || Math.abs(item.offset) > 1)) {
-      throw new Error(`Split rendered-block outer line numbers were misaligned: ${JSON.stringify(splitOuterAlignment)}`);
-    }
-
-    const focusedInnerOutlines: Array<{
-      selector: string;
-      focused: boolean;
-      outlineStyle: string;
-      outlineWidth: string;
-    }> = [];
-    for (const selector of ['.meo-mermaid-source-editor']) {
-      await page.click(`${selector} .cm-content`);
-      focusedInnerOutlines.push(await page.$eval(`${selector} > .cm-editor`, (editor, sourceSelector) => {
-        const style = getComputedStyle(editor);
-        return {
-          selector: sourceSelector,
-          focused: editor.classList.contains('cm-focused'),
-          outlineStyle: style.outlineStyle,
-          outlineWidth: style.outlineWidth
-        };
-      }, selector));
-    }
-    if (focusedInnerOutlines.some((item) => (
-      !item.focused || (item.outlineStyle !== 'none' && item.outlineWidth !== '0px')
-    ))) {
-      throw new Error(`Focused rendered-block source showed an outline: ${JSON.stringify(focusedInnerOutlines)}`);
-    }
-
-    await page.evaluate(() => {
-      document.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')?.click();
-    });
-    await waitForFrames(page, 8);
-    const sourceBlockLineNumbers = await page.evaluate(() => {
-      const editor = (window as any).__codeBlockLineNumbersEditor;
-      const outerGutter = editor.view.scrollDOM.querySelector<HTMLElement>(':scope > .cm-gutters');
-      const readOuterContentLines = (selector: string, contentStartLine: number) => {
-        const innerMarkers = Array.from(document.querySelectorAll<HTMLElement>(
-          `${selector} .cm-lineNumbers > .cm-gutterElement`
-        )).filter((element) => (
-          getComputedStyle(element).visibility !== 'hidden'
-          && element.getBoundingClientRect().height > 0
-          && Boolean(element.textContent?.trim())
-        ));
-        const outerMarkers = Array.from(
-          outerGutter?.querySelectorAll<HTMLElement>('.meo-rendered-block-document-line-number') ?? []
-        ).filter((element) => (
-          getComputedStyle(element).visibility !== 'hidden'
-          && element.getBoundingClientRect().height > 0
-        ));
-        return innerMarkers.map((innerMarker, index) => {
-          const lineNumber = contentStartLine + index;
-          const outerMarker = outerMarkers.find((candidate) => (
-            candidate.textContent?.trim() === String(lineNumber)
-          ));
-          return {
-            lineNumber,
-            offset: outerMarker
-              ? outerMarker.getBoundingClientRect().top - innerMarker.getBoundingClientRect().top
-              : null
-          };
-        });
-      };
-      return {
-        mermaid: Array.from(document.querySelectorAll<HTMLElement>(
-        '.meo-mermaid-source-editor .cm-lineNumbers > .cm-gutterElement'
-      )).filter((element) => getComputedStyle(element).visibility !== 'hidden')
-        .map((element) => element.textContent?.trim() ?? '').filter(Boolean),
-        mermaidDocumentLines: readOuterContentLines('.meo-mermaid-source-editor', 21)
-      };
-    });
-    const sourceGeometry = await page.evaluate(() => (
-      ['.meo-mermaid-source-editor'].map((selector) => {
-        const root = document.querySelector<HTMLElement>(selector)!;
-        const rows = Array.from(root.querySelectorAll<HTMLElement>('.cm-content .cm-line'));
-        const gutter = root.querySelector<HTMLElement>('.cm-lineNumbers')!;
-        const number = gutter.querySelector<HTMLElement>('.cm-gutterElement')!;
-        const probe = document.createElement('span');
-        probe.style.font = getComputedStyle(number).font;
-        probe.textContent = '99';
-        root.appendChild(probe);
-        const numberStyle = getComputedStyle(number);
-        const compactGutterWidth = probe.getBoundingClientRect().width
-          + Number.parseFloat(numberStyle.paddingLeft) + Number.parseFloat(numberStyle.paddingRight);
-        probe.remove();
-        return {
-          selector,
-          gutterWidth: gutter.getBoundingClientRect().width,
-          compactGutterWidth,
-          extraHeight: root.getBoundingClientRect().height
-            - (rows.at(-1)!.getBoundingClientRect().bottom - rows[0]!.getBoundingClientRect().top)
-        };
-      })
-    ));
-    if (sourceGeometry.some((item) => item.gutterWidth > item.compactGutterWidth + 1 || Math.abs(item.extraHeight) > 1)) {
-      throw new Error(`Rendered-block source added oversized gutters or blank rows: ${JSON.stringify(sourceGeometry)}`);
-    }
-    if (
-      JSON.stringify(sourceBlockLineNumbers.mermaid) !== JSON.stringify(['1', '2']) ||
-      sourceBlockLineNumbers.mermaidDocumentLines.some((line) => line.offset === null || Math.abs(line.offset) > 1)
-    ) {
-      renderedBlockFailures.push(`source inner line numbers: ${JSON.stringify(sourceBlockLineNumbers)}`);
-    }
-    const sourceOuterStarts = await page.evaluate(() => {
-      const editor = (window as any).__codeBlockLineNumbersEditor;
-      const outerGutter = editor.view.scrollDOM.querySelector<HTMLElement>(':scope > .cm-gutters');
-      const read = (lineNumber: number, _selector: string) => {
-        const marker = Array.from(
-          outerGutter?.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement') ?? []
-        ).find((element) => (
-          element.textContent?.trim() === String(lineNumber)
-          && getComputedStyle(element).visibility !== 'hidden'
-          && element.getBoundingClientRect().height > 0
-        ));
-        const coords = editor.view.coordsAtPos(editor.view.state.doc.line(lineNumber).from);
-        if (!marker || !coords) return null;
-        const markerRect = marker.getBoundingClientRect();
-        return { lineNumber, blockTopOffset: markerRect.top - coords.top };
-      };
-      return {
-        mermaid: read(20, '.meo-mermaid-editing-block')
-      };
-    });
-    if (
-      sourceOuterStarts.mermaid === null ||
-      Math.abs(sourceOuterStarts.mermaid.blockTopOffset) > 4
-    ) {
-      renderedBlockFailures.push(`source outer line numbers: ${JSON.stringify(sourceOuterStarts)}`);
-    }
-    const sourceOuterAlignment = await readOuterLineNumberAlignment(page, [23, 24, 28]);
-    if (sourceOuterAlignment.some((item) => item.offset === null || Math.abs(item.offset) > 1)) {
-      throw new Error(`Source rendered-block outer line numbers were misaligned: ${JSON.stringify(sourceOuterAlignment)}`);
+    await page.setViewport({ width: 920, height: 900, deviceScaleFactor: 1 });
+    for (const layout of ['stacked', 'side-by-side'] as const) {
+      await setMermaidLayout(page, '__codeBlockLineNumbersEditor', 20, layout);
+      await enterMermaidSource(page, '__codeBlockLineNumbersEditor', 20);
+      await waitForFrames(page, 8);
+      const alignment = await readOuterLineNumberAlignment(page, [20, 21, 22, 23, 24, 28]);
+      if (alignment.some(item => item.offset === null || Math.abs(item.offset) > 1))
+        throw new Error(`${layout} native Mermaid gutters misaligned: ${JSON.stringify(alignment)}`);
+      const inputs = await page.evaluate(() => ({
+        count: document.querySelectorAll('#app .cm-content[contenteditable="true"]').length,
+        localNumbers: document.querySelectorAll('.meo-mermaid-editing-preview .cm-gutterElement').length,
+        focused: (window as any).__codeBlockLineNumbersEditor.view.hasFocus
+      }));
+      if (inputs.count !== 1 || inputs.localNumbers !== 0 || !inputs.focused)
+        throw new Error(`Mermaid must share the document input/gutter: ${JSON.stringify(inputs)}`);
     }
 
     await enterDisplayMathSource(page, '__codeBlockLineNumbersEditor', 25);
+    await page.setViewport({ width: 520, height: 900, deviceScaleFactor: 1 });
     // Formula source belongs to the main Live document; it uses the source
     // font and code surface without acquiring an embedded syntax editor.
     const nativeFormulaStyle = await page.evaluate(() => {
@@ -1128,65 +914,23 @@ async function main() {
       const plainFirstFrame = await insertBlankLine('alpha');
       const textFirstFrame = await insertBlankLine('gamma');
 
-      const openSource = async (buttonSelector: string, sourceSelector: string) => {
-        for (let attempt = 0; attempt < 3 && !document.querySelector(sourceSelector); attempt += 1) {
-          document.querySelector<HTMLButtonElement>(buttonSelector)?.click();
-          await frames(2);
-        }
-      };
-      await openSource('.meo-mermaid-mode-btn', '.meo-mermaid-source-editor');
-
-
-      const readRenderedBlock = async (
-        rootSelector: string,
-        controllerKey: '__meoMermaidEditingController' | '__meoLatexMathEditingController',
-        insertedText: string
-      ) => {
-        const root = document.querySelector<HTMLElement>(rootSelector) as (HTMLElement & Record<string, any>) | null;
-        const innerView = root?.[controllerKey]?.innerView;
-        if (!root || !innerView) return { innerFirstFrame: false, outerFirstFrame: false };
-        const insertionAt = innerView.state.doc.line(1).to;
-        innerView.dispatch({
-          changes: { from: insertionAt, insert: `\n${insertedText}` },
-          selection: { anchor: insertionAt + insertedText.length + 1 }
-        });
-        await frames(1);
-        const read = () => {
-          const currentRoot = document.querySelector<HTMLElement>(rootSelector) as (HTMLElement & Record<string, any>) | null;
-          const currentInnerView = currentRoot?.[controllerKey]?.innerView;
-          if (!currentRoot || !currentInnerView) return null;
-          const innerNumbers = Array.from(currentRoot.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement'))
-            .filter((marker) => (
-              getComputedStyle(marker).visibility !== 'hidden'
-              && marker.getBoundingClientRect().height > 0
-            ))
-            .map((marker) => marker.textContent?.trim() ?? '')
-            .filter(Boolean);
-          const outerNumbers = Array.from(
-            editor.view.scrollDOM.querySelectorAll<HTMLElement>('.meo-rendered-block-document-line-number')
-          ).filter((marker) => currentRoot.getBoundingClientRect().top <= marker.getBoundingClientRect().top
-            && marker.getBoundingClientRect().top < currentRoot.getBoundingClientRect().bottom);
-          return { innerNumbers, outerCount: outerNumbers.length, lines: currentInnerView.state.doc.lines };
-        };
-        const firstFrame = read();
-        await frames(2);
-        const settled = read();
-        return {
-          innerFirstFrame: firstFrame?.innerNumbers.length === firstFrame?.lines,
-          outerFirstFrame: firstFrame?.outerCount === firstFrame?.lines,
-          firstFrame,
-          settled
-        };
-      };
-
       return {
         plainFirstFrame,
         textFirstFrame,
-        mermaid: await readRenderedBlock(
-          '.meo-mermaid-editing-block',
-          '__meoMermaidEditingController',
-          'B-->C'
-        ),
+        mermaid: await (async () => {
+          const view = editor.view;
+          let lineNumber = 1;
+          while (view.state.doc.line(lineNumber).text !== 'graph TD') lineNumber++;
+          const line = view.state.doc.line(lineNumber);
+          editor.revealSelection(line.to, line.to, { align: 'none' });
+          view.dispatch({ changes: { from: line.to, insert: '\nB-->C' }, selection: { anchor: line.to + 6 } });
+          await frames(1);
+          const labels = Array.from(view.scrollDOM.querySelectorAll<HTMLElement>(':scope > .cm-gutters .cm-lineNumbers .cm-gutterElement'))
+            .filter(marker => getComputedStyle(marker).visibility !== 'hidden' && marker.getBoundingClientRect().height > 0)
+            .map(marker => marker.textContent?.trim());
+          const source = Array.from(view.contentDOM.querySelectorAll<HTMLElement>('.cm-line')).find(node => node.textContent === 'B-->C');
+          return { documentFirstFrame: !!source && labels.filter(label => label === String(lineNumber + 1)).length === 1, labels, lineNumber };
+        })(),
         math: await (async () => {
           const doc = editor.view.state.doc;
           let lineNumber = 1;
@@ -1206,8 +950,7 @@ async function main() {
     if (
       !firstFrameInputLineNumbers.plainFirstFrame ||
       !firstFrameInputLineNumbers.textFirstFrame ||
-      !firstFrameInputLineNumbers.mermaid.innerFirstFrame ||
-      !firstFrameInputLineNumbers.mermaid.outerFirstFrame ||
+      !firstFrameInputLineNumbers.mermaid.documentFirstFrame ||
       !firstFrameInputLineNumbers.math.documentFirstFrame
     ) {
       throw new Error(`New block lines did not have line numbers in the first visible frame: ${JSON.stringify(firstFrameInputLineNumbers)}`);

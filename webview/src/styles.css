@@ -4245,6 +4245,7 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 }
 
 .meo-mermaid-mode-btn,
+.meo-mermaid-layout-btn,
 .meo-latex-math-mode-btn {
   display: inline-flex;
   align-items: center;
@@ -4261,6 +4262,8 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 
 .meo-mermaid-mode-btn:hover,
 .meo-mermaid-mode-btn:focus-visible,
+.meo-mermaid-layout-btn:hover,
+.meo-mermaid-layout-btn:focus-visible,
 .meo-latex-math-mode-btn:hover,
 .meo-latex-math-mode-btn:focus-visible {
   color: var(--meo-code-action-hover-foreground);
@@ -4329,8 +4332,13 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   z-index: 20;
 }
 
+.cm-editor .meo-rendered-block-preview > .meo-mermaid-toolbar {
+  background: var(--meo-code-background);
+  border-radius: 6px;
+}
+
 .cm-editor :is(.meo-code-block-actions, .meo-mermaid-toolbar, .meo-latex-math-toolbar)
-  > :is(.meo-code-block-pill, .meo-mermaid-mode-btn, .meo-latex-math-mode-btn) {
+  > :is(.meo-code-block-pill, .meo-mermaid-mode-btn, .meo-mermaid-layout-btn, .meo-latex-math-mode-btn) {
   border: 0;
   border-radius: 6px;
   background-color: transparent;
@@ -4339,7 +4347,7 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 
 /* The same controls also appear on source fence rows and floating headers. */
 .cm-editor :is(.meo-code-block-actions, .meo-mermaid-toolbar, .meo-latex-math-toolbar)
-  > :is(.meo-code-block-pill, .meo-mermaid-mode-btn, .meo-latex-math-mode-btn):is(:hover, :focus-visible) {
+  > :is(.meo-code-block-pill, .meo-mermaid-mode-btn, .meo-mermaid-layout-btn, .meo-latex-math-mode-btn):is(:hover, :focus-visible) {
   color: var(--meo-code-action-hover-foreground);
   background-color: var(--meo-semantic-codeCopyHoverBackground);
 }
@@ -4672,12 +4680,12 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 }
 
 .cm-editor :is(.meo-copy-code-btn, .meo-copy-image-btn, .meo-select-all-code-btn, .meo-mermaid-mode-btn,
-  .meo-latex-math-mode-btn, .meo-long-code-action):active {
+  .meo-mermaid-layout-btn, .meo-latex-math-mode-btn, .meo-long-code-action):active {
   background: var(--meo-document-block-pressed);
 }
 
 .cm-editor :is(.meo-copy-code-btn, .meo-copy-image-btn, .meo-select-all-code-btn, .meo-mermaid-mode-btn,
-  .meo-latex-math-mode-btn, .meo-long-code-action):focus-visible:not([data-meo-pointer-focus]) {
+  .meo-mermaid-layout-btn, .meo-latex-math-mode-btn, .meo-long-code-action):focus-visible:not([data-meo-pointer-focus]) {
   box-shadow: inset 0 0 0 1px var(--meo-document-focus);
 }
 
@@ -5275,16 +5283,163 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   );
 }
 
-.cm-editor .meo-mermaid-mode-btn {
-  width: 76px;
-  gap: 4px;
-  padding: 0 4px;
-  font: 12px/20px var(--meo-font-live, sans-serif);
+.cm-editor .meo-mermaid-toolbar [hidden] { display: none; }
+
+.cm-editor.meo-mode-live .cm-line.meo-mermaid-source-join {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.cm-editor .meo-mermaid-editing-preview {
+  position: relative;
+  background: var(--meo-code-background);
+  border-radius: 0 0 6px 6px;
+  overflow: clip;
+}
+
+.cm-editor .meo-native-source-preview-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px;
+  padding: 4px 0;
+  position: relative;
+  z-index: 1;
+  background: var(--meo-code-background);
+  color: var(--meo-code-action-foreground);
+  font: 11px/20px var(--meo-font-live, sans-serif);
+  user-select: none;
+}
+
+.cm-editor .meo-native-source-preview-label::before,
+.cm-editor .meo-native-source-preview-label::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: var(--meo-semantic-tableBorder, var(--meo-content-panel-border));
+}
+
+.cm-editor .meo-native-source-preview-label .meo-mermaid-layout-btn {
+  flex: 0 0 auto;
+  width: auto;
+  height: 20px;
+  gap: 5px;
+  padding: 0 6px;
+  border: 0;
+  font: inherit;
   white-space: nowrap;
 }
 
-.cm-editor .meo-mermaid-toolbar[data-meo-ui-language='zh-CN'] .meo-mermaid-mode-btn {
-  width: 60px;
+.cm-editor .meo-mermaid-editing-preview > .meo-mermaid-block {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  margin: 0;
+  min-height: clamp(200px, 36vh, 360px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Keep the full block surface; only native text wraps before its local canvas. */
+.cm-editor.meo-mode-live .cm-line.meo-md-code-block.meo-mermaid-inline-source {
+  padding-right: calc((100% - var(--meo-live-block-indent, 0px)) * var(--meo-mermaid-preview-share, 0.6) + 2ch);
+}
+
+.cm-editor .meo-mermaid-side-space {
+  background: var(--meo-code-background);
+  border-radius: 0 0 6px 6px;
+}
+
+.cm-editor > .cm-scroller > .meo-mermaid-inline-preview {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  border-radius: 0 6px 6px 0;
+  overflow: clip;
+  user-select: none;
+  background: var(--meo-code-background);
+}
+
+.cm-editor .meo-mermaid-inline-preview .meo-native-source-preview-label {
+  flex: 0 0 auto;
+  justify-content: flex-start;
+  box-sizing: border-box;
+  height: 30px;
+  padding: 5px calc(var(--meo-mermaid-actions-width, 100px) + 8px) 5px 0;
+  white-space: nowrap;
+}
+
+.cm-editor .meo-mermaid-inline-preview .meo-native-source-preview-label > span,
+.cm-editor .meo-block-sticky-header .meo-native-source-preview-label > span {
+  flex: none;
+}
+
+.cm-editor .meo-mermaid-inline-preview .meo-native-source-preview-label::before,
+.cm-editor .meo-mermaid-inline-preview .meo-native-source-preview-label::after,
+.cm-editor .meo-block-sticky-header .meo-native-source-preview-label::before,
+.cm-editor .meo-block-sticky-header .meo-native-source-preview-label::after {
+  display: none;
+}
+
+.cm-editor .meo-mermaid-inline-preview.has-sticky-header .meo-native-source-preview-label {
+  visibility: hidden;
+}
+
+.cm-editor .meo-mermaid-inline-preview > .meo-mermaid-editing-preview {
+  position: sticky;
+  top: 0;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cm-editor .meo-mermaid-inline-preview .meo-mermaid-block {
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-height: 0 !important;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8px 12px;
+  margin: 0;
+}
+
+.cm-editor .meo-mermaid-inline-preview .meo-mermaid-svg-wrapper {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+}
+
+.cm-editor .meo-mermaid-inline-preview .meo-mermaid-svg-wrapper > svg { width: 100%; height: 100%; }
+
+.cm-editor .meo-mermaid-inline-separator {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 6px;
+  cursor: col-resize;
+  border-left: 1px solid var(--meo-semantic-tableBorder, var(--meo-content-panel-border));
+}
+
+.cm-editor .meo-mermaid-inline-separator:is(:hover, :focus-visible) {
+  background: var(--meo-ui-accent);
+  outline: none;
+}
+
+.meo-mermaid-layout-btn:disabled { opacity: 0.45; cursor: default; }
+
+.cm-editor .meo-mermaid-editing-preview .meo-mermaid-fallback {
+  display: none;
+}
+
+.cm-editor .meo-mermaid-editing-preview .meo-mermaid-error-badge {
+  white-space: pre-wrap;
+  text-align: left;
+  overflow-wrap: anywhere;
 }
 
 /* Fixed chrome never contributes height or line-number geometry to the document. */
@@ -5315,6 +5470,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
 }
 
 .cm-editor .meo-mermaid-block:hover .meo-mermaid-preview-controls,
+.cm-editor .meo-mermaid-editing-preview .meo-mermaid-preview-controls,
 .cm-editor .meo-mermaid-preview-controls:has(:focus-visible:not([data-meo-pointer-focus])) {
   opacity: 1;
   pointer-events: auto;
@@ -6497,10 +6653,6 @@ body.outline-resizing .preview-frame {
   overflow: clip;
 }
 
-/* Fence rows own the outer corners; the Mermaid middle joins must stay square. */
-.cm-editor .meo-mermaid-editing-block {
-  border-radius: 0;
-}
 
 .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="source-only"] {
   grid-template-columns: minmax(0, 1fr);
@@ -6516,15 +6668,13 @@ body.outline-resizing .preview-frame {
   border-left: 1px solid var(--meo-semantic-tableBorder, var(--meo-content-panel-border));
 }
 
-.cm-editor .meo-mermaid-source-sticky,
-.cm-editor .meo-mermaid-preview-sticky,
+
 .cm-editor .meo-latex-math-source-sticky,
 .cm-editor .meo-latex-math-preview-sticky {
   width: 100%;
 }
 
-.cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-mermaid-source-sticky,
-.cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-mermaid-preview-sticky,
+
 .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-latex-math-source-sticky,
 .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-latex-math-preview-sticky {
   position: relative;
@@ -6532,12 +6682,6 @@ body.outline-resizing .preview-frame {
   align-self: stretch;
 }
 
-.cm-editor .meo-mermaid-preview-sticky {
-  display: flex;
-  align-items: stretch;
-  min-height: var(--meo-mermaid-preview-preferred-height, 0px);
-  overflow: hidden;
-}
 
 .cm-editor .meo-latex-math-preview-sticky {
   display: flex;
@@ -6559,35 +6703,11 @@ body.outline-resizing .preview-frame {
   white-space: pre-wrap;
 }
 
-.cm-editor .meo-mermaid-preview-sticky > .meo-mermaid-block {
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  min-height: 0;
-}
 
-.cm-editor .meo-mermaid-preview-sticky > .meo-mermaid-block .meo-mermaid-svg-wrapper {
-  flex: 1 1 auto;
-  width: 100%;
-  min-height: 0;
-}
 
-.cm-editor .meo-mermaid-preview-sticky > .meo-mermaid-block .meo-mermaid-svg-wrapper svg {
-  width: 100%;
-  height: 100%;
-  max-height: 100%;
-}
 
-@media (min-width: 761px) {
-  .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-mermaid-preview-sticky {
-    height: 100%;
-  }
-}
 
-.cm-editor .meo-mermaid-source-editor > .cm-editor,
+
 .cm-editor .meo-latex-math-source-editor > .cm-editor {
   height: auto;
   outline: none;
@@ -6600,7 +6720,6 @@ body.outline-resizing .preview-frame {
   text-rendering: auto;
 }
 
-.cm-editor .meo-mermaid-source-editor .cm-scroller,
 .cm-editor .meo-latex-math-source-editor .cm-scroller {
   overflow: visible !important;
   padding-right: 0;
@@ -6608,7 +6727,6 @@ body.outline-resizing .preview-frame {
   background: var(--meo-code-background);
 }
 
-.cm-editor .meo-mermaid-source-editor .cm-gutters,
 .cm-editor .meo-latex-math-source-editor .cm-gutters {
   min-width: 0;
   max-width: none;
@@ -6621,7 +6739,7 @@ body.outline-resizing .preview-frame {
   font-weight: var(--meo-font-source-weight);
 }
 
-.cm-editor :is(.meo-mermaid-source-editor, .meo-latex-math-source-editor)
+.cm-editor .meo-latex-math-source-editor
   :is(.cm-gutter.cm-lineNumbers, .cm-lineNumbers .cm-gutterElement) {
   /* Local line counts must not inherit the document gutter's fixed width. */
   width: auto;
@@ -6629,7 +6747,6 @@ body.outline-resizing .preview-frame {
   max-width: none;
 }
 
-.cm-editor .meo-mermaid-source-editor .cm-content,
 .cm-editor .meo-latex-math-source-editor .cm-content {
   min-width: 0;
   padding: 0 12px 0 4px;
@@ -6637,7 +6754,6 @@ body.outline-resizing .preview-frame {
   caret-color: var(--meo-caret);
 }
 
-.cm-editor .meo-mermaid-source-editor .cm-line,
 .cm-editor .meo-latex-math-source-editor .cm-line {
   padding-left: 8px;
   background: var(--meo-code-background);
@@ -6645,7 +6761,6 @@ body.outline-resizing .preview-frame {
   font-weight: var(--meo-font-source-weight);
 }
 
-.cm-editor .meo-mermaid-source-editor .cm-line.cm-activeLine,
 .cm-editor .meo-latex-math-source-editor .cm-line.cm-activeLine {
   background: var(--meo-code-block-active-line-bg);
 }
@@ -6660,8 +6775,7 @@ body.outline-resizing .preview-frame {
     border-left: 0;
   }
 
-  .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-mermaid-source-sticky,
-  .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-mermaid-preview-sticky,
+
   .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-latex-math-source-sticky,
   .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-latex-math-preview-sticky {
     position: relative;
@@ -8475,6 +8589,30 @@ html[data-meo-ui-contrast='normal'] .meo-input-suggestions:not(.meo-narrow-sugge
   user-select: none;
 }
 .cm-editor .meo-block-sticky-header[hidden] { display: none; }
+.cm-editor .meo-block-sticky-header.is-mermaid-side {
+  pointer-events: none;
+}
+.cm-editor .meo-block-sticky-header.is-mermaid-side::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--meo-mermaid-source-width);
+  border-right: 1px solid var(--meo-semantic-tableBorder, var(--meo-content-panel-border));
+  pointer-events: auto;
+}
+.cm-editor .meo-block-sticky-header .meo-native-source-preview-label {
+  position: absolute;
+  inset: 0 0 0 calc(var(--meo-mermaid-source-width) + 6px);
+  box-sizing: border-box;
+  height: 30px;
+  margin: 0;
+  padding: 5px 6px;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+.cm-editor .meo-block-sticky-header.is-mermaid-side > .meo-mermaid-toolbar {
+  z-index: 1;
+}
 .cm-editor .meo-block-sticky-header .meo-block-sticky-language {
   position: static;
   margin-left: 2ch;

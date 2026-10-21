@@ -56,7 +56,7 @@ try {
       const coldRenderCalls = renders.length;
       const splitStart = performance.now();
       document.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')!.click();
-      await ready('.meo-mermaid-editing-block svg');
+      await ready('.meo-mermaid-editing-preview svg');
       return { coldReadyMs, renderMs: renders, coldRenderCalls, splitReadyMs: performance.now() - splitStart, splitRenderCalls: renders.length - coldRenderCalls, longTasks: tasks, userAgent: navigator.userAgent };
     } finally { observer.disconnect(); editor.destroy(); }
   }, source);

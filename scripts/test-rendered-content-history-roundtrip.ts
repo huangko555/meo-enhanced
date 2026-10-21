@@ -1,3 +1,4 @@
+import { enterMermaidSource, setMermaidLayout } from './history-mermaid-chromium';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -64,13 +65,7 @@ async function main(): Promise<void> {
 
     await page.evaluate(() => (window as any).__historyEditor.scrollToLine(121, 'center'));
     await waitForFrames(page);
-    await page.click('.meo-mermaid-mode-btn');
-    await waitForFrames(page);
-    await page.evaluate(() => {
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')! as any;
-      const innerView = block.__meoMermaidEditingController.innerView;
-      block.__meoMermaidEditingController.focusOffset(innerView.state.doc.length);
-    });
+    await enterMermaidSource(page, '__historyEditor', 121, 'end');
     await page.keyboard.type(' MERMAID_EDIT');
     await waitForFrames(page);
     const afterMermaid = await page.evaluate(() => (window as any).__historyEditor.getText());
@@ -111,14 +106,7 @@ async function main(): Promise<void> {
     await page.waitForFunction((expectedText) => (
       (window as any).__historyEditor.getText() === expectedText
     ), {}, afterMermaid);
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const modeLabel = await page.$eval('.meo-mermaid-mode-btn', (button) => button.getAttribute('aria-label'));
-      if (modeLabel === 'Preview, Switch to split view') break;
-      await page.click('.meo-mermaid-mode-btn');
-      await waitForFrames(page, 3);
-    }
-    await page.waitForSelector('.meo-mermaid-block');
-    await page.waitForFunction(() => document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label') === 'Preview, Switch to split view');
+    await setMermaidLayout(page, '__historyEditor', 121, 'preview');
     const clippedBeforeMermaidUndo = await page.evaluate(() => {
       const editor = (window as any).__historyEditor;
       const block = document.querySelector<HTMLElement>('.meo-mermaid-block');

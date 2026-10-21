@@ -8,8 +8,9 @@ const build = await Bun.build({ entrypoints: ['scripts/test-highlight-entry.ts']
 assert.ok(build.success, build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
 let step = 'initial';
+let page:import('puppeteer-core').Page;
 try {
-  const page = await browser.newPage();
+  page = await browser.newPage();
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(String(error)));
   await page.setViewport({ width: 1020, height: 720 });
@@ -99,18 +100,14 @@ try {
       await page.waitForSelector('.meo-mermaid-mode-btn', { timeout: 4000 });
       // Preview -> Split, through the same control used by a reader.
       await page.$eval('.meo-mermaid-mode-btn', (button: HTMLButtonElement) => button.click());
-      await page.waitForSelector('.meo-mermaid-source-editor .cm-content', { timeout: 4000 });
-      const source = '.meo-mermaid-source-editor .cm-content';
-      assert.equal(await page.$$eval(source + ' .cm-line', lines => lines.map(line => line.textContent).join('\n')),
-        'flowchart LR\nA --> B', step + ': all payload lines belong to the nested editor');
-      const visibleOuterLines = await page.$$eval('#app > .cm-editor > .cm-scroller > .cm-content > .cm-line', lines => lines.map(line => line.textContent));
-      await page.click(source);
-      await control('End');
+      await page.waitForSelector('#app > .cm-editor > .cm-scroller > .cm-content', { timeout: 4000 });
+      const source = '#app > .cm-editor > .cm-scroller > .cm-content';
+      assert.equal(await page.$$eval(source, nodes=>nodes.length),1,step+': one native document input');
+      await page.evaluate(()=>{const e=(window as any).editor;const pos=e.getText().indexOf('A --> B')+7;e.view.dispatch({selection:{anchor:pos}});e.view.focus();});
       await page.keyboard.press('Enter');
       await page.keyboard.type('C --> D');
       const expected = original.replace('A --> B', 'A --> B\n' + context.prefix + 'C --> D');
       assert.equal(await text(), expected, step + ': source edits write exactly once and preserve the surrounding container');
-      assert.ok(!visibleOuterLines.some(line => line?.includes('A --> B')), step + ': payload is not repeated outside the source pane');
       await control('z');
       await control('z');
       assert.equal(await text(), original, step + ': undo restores the original document');
@@ -119,10 +116,15 @@ try {
       assert.equal(await text(), expected, step + ': undo/redo preserves the complete payload');
       if (context.name === 'root' && !closed && marker === '```') {
         await page.waitForFunction(() => {
-          const labels = [...document.querySelectorAll('.meo-mermaid-editing-block svg .nodeLabel')].map(node => node.textContent);
+          const labels = [...document.querySelectorAll('.meo-mermaid-block svg .nodeLabel')].map(node => node.textContent);
           return labels.includes('C') && labels.includes('D');
         }, { timeout: 4000 });
         await page.screenshot({ path: `${artifacts}/${theme.type}-mermaid-unfinished.png`, clip: { x: 0, y: 0, width: 1020, height: 270 } });
+        await page.$eval('.meo-mermaid-mode-btn', (button: HTMLElement) => button.click());
+        await page.waitForFunction(() => document.querySelector<HTMLElement>('.meo-mermaid-toolbar')?.dataset.meoMermaidMode === 'preview');
+        assert.equal(await text(), expected, 'Hiding unfinished source preserves the entire payload');
+        await page.$eval('.meo-mermaid-mode-btn', (button: HTMLElement) => button.click());
+        await page.waitForFunction(() => document.querySelector<HTMLElement>('.meo-mermaid-toolbar')?.dataset.meoMermaidMode === 'edit');
       }
       checked++;
     }
@@ -133,15 +135,14 @@ try {
       await prepare(initial, theme);
       await page.waitForSelector('.meo-mermaid-mode-btn');
       await page.$eval('.meo-mermaid-mode-btn', (button: HTMLButtonElement) => button.click());
-      const source = '.meo-mermaid-source-editor .cm-content';
+      const source = '#app > .cm-editor > .cm-scroller > .cm-content';
       await page.waitForSelector(source);
       let original = initial;
       if (initial.endsWith('```')) {
         original = initial.slice(0, -4);
         await page.evaluate(from => (window as any).editor.view.dispatch({ changes: { from, to: (window as any).editor.getText().length } }), original.length);
       }
-      await page.click(source);
-      await control('End');
+      await page.evaluate(()=>{const e=(window as any).editor;e.view.dispatch({selection:{anchor:e.getText().length}});e.view.focus();});
       await page.keyboard.press('Enter');
       await page.keyboard.type('C --> D');
       assert.equal(await text(), original + '\nC --> D', step + ': final payload stays inside the editing range');

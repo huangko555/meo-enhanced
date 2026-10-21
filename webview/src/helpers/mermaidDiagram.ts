@@ -456,7 +456,9 @@ export async function renderMermaidSvgInDocument(
   const renderDocument = document;
   const renderHost = renderDocument.createElement('div');
   renderHost.setAttribute('aria-hidden', 'true');
-  renderHost.style.cssText = 'position:fixed;left:-100000px;top:0;visibility:hidden;pointer-events:none;';
+  // Gantt and other width-dependent renderers measure this offscreen parent.
+  // A stable layout width also keeps cached SVGs independent of the mounting pane.
+  renderHost.style.cssText = 'position:fixed;left:-100000px;top:0;width:1200px;visibility:hidden;pointer-events:none;';
   renderDocument.body.appendChild(renderHost);
   try {
     const result = await runtime.render(renderId, source, renderHost);

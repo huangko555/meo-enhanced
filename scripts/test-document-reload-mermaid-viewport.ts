@@ -120,10 +120,10 @@ async function main(): Promise<void> {
     );
 
     await page.click('.meo-mermaid-mode-btn');
-    await page.waitForSelector('.meo-mermaid-editing-block.is-split');
+    await page.waitForSelector('.meo-mermaid-editing-preview');
     await page.evaluate(() => {
       const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-preview')!;
       const viewport = scroller.getBoundingClientRect();
       scroller.scrollTop += block.getBoundingClientRect().top - viewport.top + 60;
       scroller.dispatchEvent(new Event('scroll'));

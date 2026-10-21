@@ -2257,7 +2257,7 @@ export class ViewportController {
     if (
       event.target instanceof Element &&
       event.target.closest(
-        '.meo-mermaid-editing-block, .meo-latex-math-editing-block, .meo-mermaid-toolbar, .meo-latex-math-toolbar, .meo-md-html-block, .meo-md-html-table-context-trigger, .meo-md-html-table-context-menu, .meo-md-code-block-start, .meo-md-code-block-end'
+        '.meo-mermaid-editing-preview, .meo-mermaid-inline-preview, .meo-mermaid-inline-separator, .meo-latex-math-editing-block, .meo-mermaid-toolbar, .meo-latex-math-toolbar, .meo-md-html-block, .meo-md-html-table-context-trigger, .meo-md-html-table-context-menu, .meo-md-code-block-start, .meo-md-code-block-end'
       )
     ) return;
     const pointerPosition = this.view.posAtCoords({ x: event.clientX, y: event.clientY }) ??

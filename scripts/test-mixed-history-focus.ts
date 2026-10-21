@@ -1,3 +1,4 @@
+import { enterMermaidSource, findMermaidOpening } from './history-mermaid-chromium';
 import { enterDisplayMathSource, findDisplayMathOpening, readDisplayMathHistoryTarget } from './history-display-math-chromium';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -171,30 +172,20 @@ async function main() {
       }
     });
     await waitForFrames(page);
-    await page.click('.meo-mermaid-mode-btn');
-    await waitForFrames(page);
-    const mermaidFocusReturn = await page.evaluate(() => {
-      const editor = (window as any).__mixedHistoryEditor;
-      const innerView = (document.querySelector<HTMLElement>('.meo-mermaid-editing-block') as any)
-        .__meoMermaidEditingController.innerView;
-      innerView.dispatch({ selection: { anchor: 4 } });
-      innerView.focus();
-      document.getElementById('outside')!.focus();
-      editor.focus();
-      return { focused: innerView.hasFocus, offset: innerView.state.selection.main.head };
-    });
+    const mermaidOpening = await findMermaidOpening(page, '__mixedHistoryEditor', 'graph TD');
+    const mermaidBounds = await enterMermaidSource(page, '__mixedHistoryEditor', mermaidOpening);
+    const mermaidFocusReturn = await page.evaluate(({ from }) => {
+      const editor = (window as any).__mixedHistoryEditor, view = editor.view;
+      view.dispatch({ selection: { anchor: from + 4 } }); view.focus();
+      document.getElementById('outside')!.focus(); editor.focus();
+      return { focused: view.hasFocus, offset: view.state.selection.main.head - from };
+    }, mermaidBounds);
     if (!mermaidFocusReturn.focused || mermaidFocusReturn.offset !== 4) {
       throw new Error(`Mermaid editing focus was not restored: ${JSON.stringify(mermaidFocusReturn)}`);
     }
-    await page.evaluate(() => {
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')! as any;
-      const innerView = block.__meoMermaidEditingController.innerView;
-      const from = innerView.state.doc.length;
-      innerView.dispatch({ changes: { from, insert: '\nC --> D' }, selection: { anchor: from + 8 } });
-    });
+    await enterMermaidSource(page, '__mixedHistoryEditor', mermaidOpening, 'end');
+    await page.keyboard.type('\nC --> D');
     await waitForFrames(page);
-    await page.click('.meo-mermaid-mode-btn');
-    await waitForFrames(page, 2);
     await page.click('.meo-mermaid-mode-btn');
     await waitForFrames(page);
 
@@ -260,11 +251,11 @@ async function main() {
     });
     if (
       afterThirdUndo.text.includes('C --> D') ||
-      afterThirdUndo.mode !== 'Preview, Switch to split view' ||
+      afterThirdUndo.mode !== 'Finish editing' ||
       !afterThirdUndo.outerFocused ||
       !afterThirdUndo.mermaidVisible
     ) {
-      throw new Error(`Third mixed undo did not restore the Mermaid Preview target: ${JSON.stringify(afterThirdUndo)}`);
+      throw new Error(`Third mixed undo did not restore the Mermaid native source target: ${JSON.stringify(afterThirdUndo)}`);
     }
 
     const readOuterLineFocus = (needle: string) => page.evaluate((lineNeedle) => {
@@ -356,10 +347,10 @@ async function main() {
     });
     if (
       !afterMermaidRedo.text.includes('C --> D') ||
-      afterMermaidRedo.mode !== 'Preview, Switch to split view' ||
+      afterMermaidRedo.mode !== 'Finish editing' ||
       !afterMermaidRedo.outerFocused || !afterMermaidRedo.targetVisible
     ) {
-      throw new Error(`Mixed redo did not restore the Mermaid Preview target: ${JSON.stringify(afterMermaidRedo)}`);
+      throw new Error(`Mixed redo did not restore the Mermaid native source target: ${JSON.stringify(afterMermaidRedo)}`);
     }
 
     await pressHistoryShortcut(page, 'y');

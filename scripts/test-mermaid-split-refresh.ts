@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { launchTestBrowser } from './browser-test-helpers';
 
-// Exercise nested source edits through the production editor. A held renderer
+// Exercise main-document source edits through the production editor. A held renderer
 // makes the old-diagram/loading transition observable without timing a CPU.
 const build = await Bun.build({
   entrypoints: ['scripts/test-mermaid-editing-entry.ts'], target: 'browser', format: 'iife'
@@ -31,22 +31,22 @@ try {
     const waitFor = async (predicate: () => boolean) => {
       const deadline = performance.now() + 3000;
       while (!predicate()) {
-        if (performance.now() > deadline) throw new Error('Mermaid split refresh did not settle');
+        if (performance.now() > deadline) throw new Error('Mermaid preview refresh did not settle');
         await new Promise(resolve => setTimeout(resolve, 10));
       }
     };
     const editor = (window as any).MermaidEditingHarness.createEditor({
       parent: document.getElementById('app'),
-      text: '```mermaid\ngraph TD\nA[Old] --> B[End]\n```\n\nafter',
+      // Begin outside the fence so the button still exercises reading-to-edit entry.
+      text: 'before\n\n```mermaid\ngraph TD\nA[Old] --> B[End]\n```\n\nafter',
       initialMode: 'live', onApplyChanges() {}
     });
     try {
       await waitFor(() => Boolean(document.querySelector('.meo-mermaid-svg-wrapper svg')));
       document.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')!.click();
-      await waitFor(() => Boolean(document.querySelector('.meo-mermaid-editing-block svg')));
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')!;
-      const controller = (block as any).__meoMermaidEditingController;
-      const inner = controller.innerView;
+      await waitFor(() => Boolean(document.querySelector('.meo-mermaid-editing-preview svg')));
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-preview')!;
+      const inner = editor.view;
       const label = (text: string) => {
         const source = inner.state.doc.toString();
         const from = source.indexOf('A[') + 2;
@@ -138,10 +138,10 @@ try {
       release = null;
       label('Disposed');
       await waitFor(() => release !== null);
-      document.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')!.click();
+      editor.setMode('source');
       release!();
       await new Promise(resolve => setTimeout(resolve, 150));
-      const sourceMode = { previews: block.querySelectorAll('.meo-mermaid-block').length };
+      const sourceMode = { previews: document.querySelectorAll('.meo-mermaid-editing-preview').length };
       return { pending, burst, unchanged, cached, superseded, error, recoveryPending, recovered, themePending, sourceMode };
     } finally { editor.destroy(); }
   });
@@ -191,15 +191,15 @@ try {
     };
     const editor = (window as any).MermaidEditingHarness.createEditor({
       parent: document.getElementById('app'), initialMode: 'live', onApplyChanges() {},
-      text: '```mermaid\ngraph TD\nA[Foreground] --> B[End]\n```\n\n'
+      text: 'before\n\n```mermaid\ngraph TD\nA[Foreground] --> B[End]\n```\n\n'
         + 'Ordinary paragraph\n\n'.repeat(100) + '```mermaid\nBACKGROUND\n```'
     });
     try {
       await waitFor(() => Boolean(document.querySelector('.meo-mermaid-block svg')));
       document.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')!.click();
-      await waitFor(() => Boolean(document.querySelector('.meo-mermaid-editing-block svg')) && backgroundCalls > 0);
-      const block = document.querySelector('.meo-mermaid-editing-block') as any;
-      const inner = block.__meoMermaidEditingController.innerView;
+      await waitFor(() => Boolean(document.querySelector('.meo-mermaid-editing-preview svg')) && backgroundCalls > 0);
+      const block = document.querySelector('.meo-mermaid-editing-preview') as any;
+      const inner = editor.view;
       const from = inner.state.doc.toString().indexOf('Foreground') + 'Foreground'.length;
       editStart = performance.now();
       inner.dispatch({ changes: { from, insert: '1' } });

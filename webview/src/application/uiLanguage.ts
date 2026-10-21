@@ -201,6 +201,15 @@ export type UiStrings = Readonly<{
   fullscreen: string;
   exitFullscreen: string;
   mermaidError: (message: string) => string;
+  editMermaidSource: string;
+  hideMermaidSource: string;
+  mermaidSideBySide: string;
+  mermaidStacked: string;
+  mermaidSideBySideAction: string;
+  mermaidStackedAction: string;
+  mermaidCurrentPreview: string;
+  mermaidResizePreview: string;
+  mermaidNarrowLayout: string;
   openWithSystemApp: string;
   fullscreenImage: string;
   refreshImage: string;
@@ -488,6 +497,11 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     morePreviewControls: 'More preview controls',
     fullscreen: 'View fullscreen', exitFullscreen: 'Exit fullscreen',
     mermaidError: (message: string) => `Mermaid error: ${message}`,
+    editMermaidSource: 'Edit', hideMermaidSource: 'Finish editing',
+    mermaidSideBySide: 'Switch to side-by-side layout', mermaidStacked: 'Switch to stacked layout',
+    mermaidSideBySideAction: 'Switch to columns', mermaidStackedAction: 'Switch to rows',
+    mermaidCurrentPreview: 'Current diagram', mermaidResizePreview: 'Resize source and preview',
+    mermaidNarrowLayout: 'Stacked layout is used in a narrow editor',
     openWithSystemApp: 'Open with system app', fullscreenImage: 'Fullscreen image', refreshImage: 'Refresh image',
     colorLabel: (value: string) => `Color ${value}`,
     adjustColor: (value: string) => `Adjust color ${value}`,
@@ -729,6 +743,11 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     loading: '正在加载…', zoomIn: '放大', zoomOut: '缩小', resetZoom: '重置缩放',
     morePreviewControls: '更多预览操作',
     fullscreen: '全屏查看', exitFullscreen: '退出全屏',
+    editMermaidSource: '编辑', hideMermaidSource: '完成编辑',
+    mermaidSideBySide: '切换为左右布局', mermaidStacked: '切换为上下布局',
+    mermaidSideBySideAction: '切换为左右', mermaidStackedAction: '切换为上下',
+    mermaidCurrentPreview: '当前图表', mermaidResizePreview: '调整源码与预览宽度',
+    mermaidNarrowLayout: '编辑区较窄，使用上下布局',
     mermaidError: (message: string) => {
       const translated = message
         .replace(/^Parse error on line (\d+):/m, '第 $1 行存在语法错误：')

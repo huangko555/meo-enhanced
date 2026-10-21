@@ -103,7 +103,7 @@ async function runPublicFailureEvidenceCase() {
       </div>
     `);
     await page.evaluate(() => {
-      (window as any).__historyMatrixEditor = { scrollToLine() {} };
+      (window as any).__historyMatrixEditor = { async whenVisiblePresentationReady() {}, scrollToLine() {} };
       const button = document.querySelector<HTMLButtonElement>('button')!;
       button.addEventListener('pointerdown', () => {
         throw new Error('synthetic public page error');
@@ -201,6 +201,7 @@ async function runMaterializationFailureEvidenceCase() {
     `);
     await page.evaluate(() => {
       (window as any).__historyMatrixEditor = {
+        async whenVisiblePresentationReady() {},
         scrollToLine() {
           queueMicrotask(() => { throw new Error('synthetic materialization page error'); });
         }
@@ -262,6 +263,7 @@ async function runMaterializationHandoffEvidenceCase() {
     `);
     await page.evaluate(() => {
       (window as any).__historyMatrixEditor = {
+        async whenVisiblePresentationReady() {},
         scrollToLine() {
           const scroller = document.querySelector('.cm-scroller')!;
           const group = document.createElement('div');
@@ -315,7 +317,7 @@ async function runMaterializationDisconnectCase() {
   try {
     const page: any = await browser.newPage();
     await page.setContent('<div class="cm-editor"><div class="cm-scroller"></div></div>');
-    await page.evaluate(() => { (window as any).__historyMatrixEditor = { scrollToLine() {} }; });
+    await page.evaluate(() => { (window as any).__historyMatrixEditor = { async whenVisiblePresentationReady() {}, scrollToLine() {} }; });
     page.waitForFunction = async (...args: any[]) => {
       if (args[2] === 'Mermaid block controls at line 131') {
         await page.close();
@@ -363,7 +365,7 @@ async function runRunnerOwnedUnsupportedCleanupCase() {
       }
       const scroller = document.querySelector('.cm-scroller')!;
       if ('onscrollend' in scroller) throw new Error('fixture could not establish unsupported scroll settlement');
-      (window as any).__historyMatrixEditor = { scrollToLine() {} };
+      (window as any).__historyMatrixEditor = { async whenVisiblePresentationReady() {}, scrollToLine() {} };
     });
     const evaluateHandle = page.evaluateHandle.bind(page);
     let retainedObserverHandle: any;
@@ -414,7 +416,7 @@ async function runMultiStepUnsupportedTerminalCase() {
       }
       const scroller = document.querySelector('.cm-scroller')!;
       if ('onscrollend' in scroller) throw new Error('fixture could not establish unsupported scroll settlement');
-      (window as any).__historyMatrixEditor = { scrollToLine() {} };
+      (window as any).__historyMatrixEditor = { async whenVisiblePresentationReady() {}, scrollToLine() {} };
     });
     const evaluateHandle = page.evaluateHandle.bind(page);
     let retainedLatestObserverHandle: any;
@@ -461,7 +463,7 @@ async function runMultiStepCompletedCase() {
       </div></div>
     `);
     await page.evaluate(() => {
-      (window as any).__historyMatrixEditor = { scrollToLine() {} };
+      (window as any).__historyMatrixEditor = { async whenVisiblePresentationReady() {}, scrollToLine() {} };
       document.querySelector('button')!.addEventListener('click', (event) => {
         const button = event.currentTarget as HTMLButtonElement;
         const label = button.getAttribute('aria-label');
@@ -512,6 +514,7 @@ async function runRunnerOwnedNoopCleanupCase() {
     `);
     await page.evaluate(() => {
       (window as any).__historyMatrixEditor = {
+        async whenVisiblePresentationReady() {},
         scrollToLine() {
           const group = document.querySelector<HTMLElement>('[role="group"]')!;
           if (group.style.marginTop === '80px') {
@@ -553,7 +556,7 @@ async function runRunnerOwnedPreOpeningFailureCase() {
         </div>
       </div></div>
     `);
-    await page.evaluate(() => { (window as any).__historyMatrixEditor = { scrollToLine() {} }; });
+    await page.evaluate(() => { (window as any).__historyMatrixEditor = { async whenVisiblePresentationReady() {}, scrollToLine() {} }; });
     const evaluateHandle = page.evaluateHandle.bind(page);
     let retainedObserverHandle: any;
     page.evaluateHandle = async (...args: any[]) => {
@@ -601,6 +604,7 @@ async function runRunnerOwnedDisconnectCleanupFailureCase() {
     `);
     await page.evaluate(() => {
       (window as any).__historyMatrixEditor = {
+        async whenVisiblePresentationReady() {},
         scrollToLine() {
           const group = document.querySelector<HTMLElement>('[role="group"]')!;
           if (group.style.marginTop === '80px') {
@@ -645,7 +649,7 @@ async function runMissingSemanticClickCase() {
         </div>
       </div>
     `);
-    await page.evaluate(() => { (window as any).__historyMatrixEditor = { scrollToLine() {} }; });
+    await page.evaluate(() => { (window as any).__historyMatrixEditor = { async whenVisiblePresentationReady() {}, scrollToLine() {} }; });
     const waitForFunction = page.waitForFunction.bind(page);
     page.waitForFunction = (...args: any[]) => {
       const known = args[2];
@@ -692,7 +696,7 @@ async function runSameLabelDifferentGroupCase() {
         </div>
       </div></div>
     `);
-    await page.evaluate(() => { (window as any).__historyMatrixEditor = { scrollToLine() {} }; });
+    await page.evaluate(() => { (window as any).__historyMatrixEditor = { async whenVisiblePresentationReady() {}, scrollToLine() {} }; });
     const waitForFunction = page.waitForFunction.bind(page);
     page.waitForFunction = (...args: any[]) => {
       const known = args[2];
@@ -737,7 +741,7 @@ async function runMoveSettlementMismatchCase() {
       </div></div>
     `);
     await page.evaluate(() => {
-      (window as any).__historyMatrixEditor = { scrollToLine() {} };
+      (window as any).__historyMatrixEditor = { async whenVisiblePresentationReady() {}, scrollToLine() {} };
       const group = document.querySelector<HTMLElement>('[role="group"]')!;
       document.addEventListener('pointermove', () => {
         if (!group.dataset.moveSettlement) {

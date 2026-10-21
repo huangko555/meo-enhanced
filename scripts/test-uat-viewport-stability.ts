@@ -106,7 +106,8 @@ async function main(): Promise<void> {
         initialMode: 'live',
         onApplyChanges() {}
       });
-      (window as any).__uatEditor.scrollToLine(273, 'center');
+      // Start the reading-to-edit button check outside the now-editable fence.
+      (window as any).__uatEditor.scrollToLine(271, 'center');
     });
     await page.waitForFunction(() => document.querySelectorAll('.meo-mermaid-mode-btn').length === 2);
     await page.waitForFunction(() => document.querySelectorAll('.meo-mermaid-block svg').length >= 1);
@@ -118,12 +119,11 @@ async function main(): Promise<void> {
       await waitForFrames(page, 5);
     };
 
-    // preview -> split -> source
-    await clickSecondMermaidMode();
+    // Explicitly expand main-document source.
     await clickSecondMermaidMode();
     await page.evaluate(() => {
       const editor = (window as any).__uatEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-source')!;
+      const block = (editor.view.domAtPos(editor.view.state.doc.line(274).from).node as Element).parentElement!.closest<HTMLElement>('.cm-line')!;
       const viewport = editor.view.scrollDOM.getBoundingClientRect();
       editor.view.scrollDOM.scrollTop += block.getBoundingClientRect().top - viewport.top - 120;
     });
@@ -134,7 +134,7 @@ async function main(): Promise<void> {
       return {
         scrollTop: editor.view.scrollDOM.scrollTop,
         buttonTop: button.getBoundingClientRect().top,
-        source: Boolean(document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-source'))
+        source: document.querySelectorAll<HTMLElement>('.meo-mermaid-toolbar')[1]?.dataset.meoMermaidMode==='edit'
       };
     });
     await page.evaluate(() => {
@@ -286,7 +286,7 @@ async function main(): Promise<void> {
       const editor = (window as any).__uatEditor = (window as any).EmbeddedInputViewportHarness.createEditor({
         parent: document.getElementById('app')!, text, initialMode: 'live', onApplyChanges() {}
       });
-      editor.scrollToLine(lineNumber, 'center');
+      editor.scrollToLine(lineNumber - 1, 'center');
       for (let frame = 0; frame < 12; frame++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
       return `.meo-mermaid-toolbar[data-meo-block-from="${editor.view.state.doc.line(lineNumber).from}"]:not([data-meo-floating]) .meo-mermaid-mode-btn`;
     }, { text: footnote.join('\n'), lineNumber: footnoteLine });
@@ -332,7 +332,7 @@ async function main(): Promise<void> {
           mode: (document.querySelector(selector)!.parentElement as HTMLElement).dataset.meoMermaidMode };
       }, selector);
       if (!result.samples.length || result.samples.some(top => Math.abs(top - before) > 1.5)
-        || Math.abs(result.top - before) > 1.5 || result.mode !== ['split', 'source', 'preview'][index % 3]) {
+        || Math.abs(result.top - before) > 1.5 || result.mode !== ['edit', 'preview'][index % 2]) {
         throw new Error(`Footnote Mermaid mode switch ${index} moved its reading position: ${JSON.stringify({ before, ...result })}`);
       }
     }

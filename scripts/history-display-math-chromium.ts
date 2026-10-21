@@ -40,6 +40,14 @@ export async function enterDisplayMathSource(page: Page, editorGlobal: string, o
   await page.evaluate(({ editorGlobal, position }) => {
     (window as any)[editorGlobal].revealSelection(position, position, { focusEditor: true, align: 'center' });
   }, { editorGlobal, position: edge === 'start' ? bounds.from : bounds.to });
+  // Source expansion can change the document height; settle navigation against
+  // the expanded source before measuring the target caret.
+  await page.evaluate(async ({ editorGlobal, position }) => {
+    const editor = (window as any)[editorGlobal];
+    await editor.whenVisiblePresentationReady(1_200);
+    editor.scrollToLine(editor.view.state.doc.lineAt(position).number, 'center');
+    editor.revealSelection(position, position, { focusEditor: true, align: 'none' });
+  }, { editorGlobal, position: edge === 'start' ? bounds.from : bounds.to });
   await page.waitForFunction(({ editorGlobal, position }) => {
     const view = (window as any)[editorGlobal].view;
     const coords = view.coordsAtPos(position), viewport = view.scrollDOM.getBoundingClientRect();

@@ -1,3 +1,4 @@
+import { setMermaidLayout } from './history-mermaid-chromium';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -35,90 +36,44 @@ try {
     (window as any).__embeddedFontEditor = (window as any).MermaidEditingHarness.createEditor({
       parent: document.getElementById('app')!,
       text: ['# Before', '```mermaid', 'flowchart TB', ...lines, '```', '# After'].join('\n'),
-      initialMode: 'live',
+      initialMode: 'live', sourceLineNumbers: 'on',
       onApplyChanges() {}
     });
   });
   await page.waitForSelector('.meo-mermaid-mode-btn');
-  const measure = async (kind: 'mermaid' | 'latex-math', size: number | null) => {
-    await page.evaluate((value) => {
+  const measure = async (size: number | null) => {
+    await page.evaluate(value => {
       if (value === null) document.documentElement.style.removeProperty('--meo-user-editor-font-size');
       else document.documentElement.style.setProperty('--meo-user-editor-font-size', `${value}px`);
+      (window as any).__embeddedFontEditor.scrollToLine(55, 'center');
     }, size);
     await page.evaluate(async () => { for (let i = 0; i < 12; i++) await new Promise(requestAnimationFrame); });
-    for (let attempt = 0; attempt < 4; attempt++) await page.evaluate(async (blockKind) => {
-      const scroller = document.querySelector<HTMLElement>('#app > .cm-editor > .cm-scroller')!;
-      const block = document.querySelector<HTMLElement>(`.meo-${blockKind}-editing-block`)!;
-      scroller.scrollTop += block.getBoundingClientRect().top - scroller.getBoundingClientRect().top
-        + block.getBoundingClientRect().height * 0.65;
-      for (let frame = 0; frame < 3; frame++) await new Promise(requestAnimationFrame);
-    }, kind);
-    return page.evaluate((blockKind) => {
-      const outer = document.querySelector<HTMLElement>('#app > .cm-editor')!;
-      const inner = document.querySelector<HTMLElement>(`.meo-${blockKind}-source-editor > .cm-editor`)!;
-      const column = outer.querySelector<HTMLElement>('.meo-rendered-block-document-line-number-column')!;
-      const labels = Array.from(column.querySelectorAll<HTMLElement>('.meo-rendered-block-document-line-number'));
-      const markers = Array.from(inner.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement'))
-        .filter((element) => /^\d+$/.test(element.textContent?.trim() ?? '') && element.getBoundingClientRect().height > 0);
-      const visible = markers.filter((element) => {
-        const rect = element.getBoundingClientRect();
-        return rect.bottom > 0 && rect.top < window.innerHeight;
-      });
-      return {
-        outerFont: getComputedStyle(outer).fontSize,
-        innerFont: getComputedStyle(inner).fontSize,
-        renderedMarkers: markers.length,
-        totalLines: 77,
-        documentNumbers: labels.map(label => Number(label.textContent)),
-        visiblePairs: visible.map((marker) => {
-          const number = Number(marker.textContent!.trim());
-          const label = labels.find(candidate => Number(candidate.textContent) === number + 2);
-          const textTop = (element: HTMLElement) => {
-            const range = document.createRange();
-            range.selectNodeContents(element);
-            return range.getBoundingClientRect().top;
-          };
-          return { number,
-            documentNumber: label ? Number(label.textContent) : null,
-            delta: label ? label.getBoundingClientRect().top - marker.getBoundingClientRect().top : null,
-            textDelta: label ? textTop(label) - textTop(marker) : null };
-        })
-      };
-    }, kind);
+    return page.evaluate(() => {
+      const v = (window as any).__embeddedFontEditor.view, viewport = v.scrollDOM.getBoundingClientRect();
+      const sourceNode = v.domAtPos(v.state.doc.line(55).from).node;
+      const line = (sourceNode instanceof Element ? sourceNode : sourceNode.parentElement)!.closest('.cm-line')!;
+      const markers = Array.from(v.scrollDOM.querySelectorAll<HTMLElement>(':scope > .cm-gutters .cm-lineNumbers > .cm-gutterElement'))
+        .filter(n => /^\d+$/.test(n.textContent?.trim() ?? '') && n.getBoundingClientRect().bottom > viewport.top && n.getBoundingClientRect().top < viewport.bottom);
+      return { outerFont: getComputedStyle(v.dom).fontSize, sourceFont: getComputedStyle(line).fontSize,
+        inputs: v.dom.querySelectorAll('.cm-content[contenteditable="true"]').length,
+        localGutters: v.dom.querySelectorAll('.meo-rendered-block-document-line-number-column').length,
+        pairs: markers.map(n => { const number = Number(n.textContent), r = v.coordsAtPos(v.state.doc.line(number).from);
+          return { number, delta: r ? n.getBoundingClientRect().top - r.top : null }; }) };
+    });
   };
-  for (const mode of ['split', 'source'] as const) {
-    if (mode === 'source') {
-      await page.evaluate(() => { document.querySelector<HTMLElement>('#app > .cm-editor > .cm-scroller')!.scrollTop = 0; });
-      await page.waitForSelector('.meo-mermaid-mode-btn');
+  for (const layout of ['stacked', 'side-by-side'] as const) {
+    await setMermaidLayout(page, '__embeddedFontEditor', 2, layout);
+    for (const size of [15, 20, 15, null]) {
+      const result = await measure(size);
+      assert.equal(result.sourceFont, `${size ?? 14}px`, `${layout}: native source uses the requested source font`);
+      assert.equal(result.inputs, 1); assert.equal(result.localGutters, 0);
+      assert.ok(result.pairs.some(p => p.number >= 50) && result.pairs.every(p => p.delta !== null && Math.abs(p.delta) <= 2),
+        `${layout}: document numbers align through deep wrapped source ${JSON.stringify(result)}`);
     }
-    await page.locator('.meo-mermaid-mode-btn').click();
-    await page.waitForSelector(`.meo-mermaid-editing-block.is-${mode}`);
-    for (const size of [15, 20, 15]) {
-      const result = await measure('mermaid', size);
-      assert.equal(result.outerFont, `${size}px`, `${mode} outer font`);
-      assert.equal(result.innerFont, `${size}px`, `${mode} embedded source font`);
-      assert.ok(result.visiblePairs.length >= 3, `${mode} should expose visible source lines: ${JSON.stringify(result)}`);
-      assert.ok(result.renderedMarkers < result.totalLines && result.visiblePairs.some((pair) => pair.number >= 50),
-        `${mode} should measure a deep virtualized part of the source: ${JSON.stringify(result)}`);
-      assert.equal(new Set(result.documentNumbers).size, result.documentNumbers.length,
-        `${mode} projected document line numbers must not duplicate`);
-      assert.ok(result.visiblePairs.every((pair) => pair.delta !== null && Math.abs(pair.delta) <= 2),
-        `${mode} outer line numbers should align with embedded source: ${JSON.stringify(result)}`);
-      assert.ok(result.visiblePairs.every((pair) => pair.documentNumber === pair.number + 2),
-        `${mode} outer line numbers should identify the matching document lines: ${JSON.stringify(result)}`);
-      assert.ok(result.visiblePairs.every((pair) => pair.textDelta !== null && Math.abs(pair.textDelta) <= 3),
-        `${mode} line number text should align with embedded source: ${JSON.stringify(result)}`);
-    }
-    const automatic = await measure('mermaid', null);
-    assert.equal(automatic.innerFont, '14px', `${mode} automatic source font`);
-    assert.ok(automatic.visiblePairs.every((pair) => pair.textDelta !== null && Math.abs(pair.textDelta) <= 3),
-      `${mode} automatic outer line numbers should align: ${JSON.stringify(automatic)}`);
   }
   await page.setViewport({ width: 700, height: 720 });
-  const narrowMermaid = await measure('mermaid', 20);
-  assert.ok(narrowMermaid.visiblePairs.some((pair) => pair.number >= 50)
-    && narrowMermaid.visiblePairs.every((pair) => pair.textDelta !== null && Math.abs(pair.textDelta) <= 3),
-  `Narrow Mermaid source line numbers should align: ${JSON.stringify(narrowMermaid)}`);
+  const narrow = await measure(20);
+  assert.ok(narrow.pairs.length > 2 && narrow.pairs.every(p => p.delta !== null && Math.abs(p.delta) <= 2));
   for (const kind of ['math', 'html'] as const) {
     for (const width of [900, 700]) {
       await page.setViewport({ width, height: 720 });

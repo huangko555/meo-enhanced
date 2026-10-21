@@ -252,7 +252,7 @@ try {
         });
         console.log(`live line ${line} nearby blocks: ${JSON.stringify(nearbyBlocks)}`);
       }
-      const scenario = mode === 'live' && line === mermaidLine ? ['preview', 'split', 'source'] : ['default'];
+      const scenario = mode === 'live' && line === mermaidLine ? ['preview', 'side-by-side', 'stacked'] : ['default'];
       for (const blockMode of scenario) {
         if (blockMode !== 'default') {
           if (process.argv.includes('--details')) console.log('mermaid probe', await page.evaluate((targetLine) => {
@@ -275,36 +275,26 @@ try {
               .some((item) => item.dataset.meoBlockFrom === anchor);
           }, { timeout: 5000 }, line);
         }
-        if (blockMode !== 'default' && blockMode !== 'preview') {
-          const modeChange = await page.evaluate((targetLine) => {
-            const anchor = String((window as any).__fontTestView().state.doc.line(targetLine).from);
-            const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.meo-mermaid-mode-btn'))
-              .find((item) => (item.closest('[role="group"]') as HTMLElement | null)?.dataset.meoBlockFrom === anchor);
-            if (!button) return 'missing';
-            button.click();
-            return button.getAttribute('aria-label');
-          }, line);
-          if (modeChange === 'missing') {
-            const visibleControls = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>('.meo-mermaid-mode-btn'))
-              .map((item) => item.closest('[role="group"]')?.getAttribute('aria-label')));
-            throw new Error(`Mermaid controls at line ${line} were not visible: ${JSON.stringify(visibleControls)}`);
-          }
-          await page.waitForFunction(({ targetLine, expectedMode }) => {
-            const anchor = String((window as any).__fontTestView().state.doc.line(targetLine).from);
-            return Array.from(document.querySelectorAll<HTMLElement>('.meo-mermaid-toolbar'))
-              .some((item) => item.dataset.meoBlockFrom === anchor && item.dataset.meoMermaidMode === expectedMode);
-          }, { timeout: 5000 }, { targetLine: line, expectedMode: blockMode });
-          if (!process.argv.includes('--rapid-mermaid')) {
-            await page.evaluate(async () => { for (let i = 0; i < 20; i++) await new Promise(requestAnimationFrame); });
-          }
-        }
         if (blockMode !== 'default') {
-          const actualMode = await page.evaluate((targetLine) => {
-            const anchor = String((window as any).__fontTestView().state.doc.line(targetLine).from);
-            return Array.from(document.querySelectorAll<HTMLElement>('.meo-mermaid-toolbar'))
-              .find((item) => item.dataset.meoBlockFrom === anchor)?.dataset.meoMermaidMode;
-          }, line);
-          if (actualMode !== blockMode) throw new Error(`Mermaid line ${line} should be ${blockMode}, got ${actualMode}`);
+          await page.evaluate(({ line, layout }) => {
+            const view = (window as any).__fontTestView();
+            const anchor = String(view.state.doc.line(line).from);
+            const toolbar = view.dom.querySelector<HTMLElement>(`.meo-mermaid-toolbar[data-meo-block-from="${anchor}"]`)!;
+            if ((toolbar.dataset.meoMermaidMode === 'edit') !== (layout !== 'preview')) toolbar.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')!.click();
+          }, { line, layout: blockMode });
+          if (blockMode !== 'preview') {
+            await page.waitForSelector('.meo-mermaid-toolbar[data-meo-mermaid-mode="edit"]');
+            await page.evaluate(({ line, layout }) => {
+              const view = (window as any).__fontTestView(), anchor = String(view.state.doc.line(line).from);
+              const side = view.dom.querySelector(`.meo-mermaid-inline-preview[data-meo-mermaid-anchor="${anchor}"]`);
+              if (!!side !== (layout === 'side-by-side')) view.dom.querySelector<HTMLButtonElement>(`[data-meo-mermaid-anchor="${anchor}"] .meo-mermaid-layout-btn:not(:disabled)`)!.click();
+            }, { line, layout: blockMode });
+            await page.waitForFunction(({ line, layout }) => {
+              const view = (window as any).__fontTestView(), anchor = String(view.state.doc.line(line).from);
+              return !!view.dom.querySelector(`.meo-mermaid-inline-preview[data-meo-mermaid-anchor="${anchor}"]`) === (layout === 'side-by-side');
+            }, {}, { line, layout: blockMode });
+          }
+          if (!process.argv.includes('--rapid-mermaid')) await page.evaluate(async () => { for (let i=0; i<20; i++) await new Promise(requestAnimationFrame); });
         }
         for (let step = 0; step < 5; step++) {
           const up = await measureStep(mode, 1);

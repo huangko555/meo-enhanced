@@ -159,7 +159,7 @@ try {
   assert.match(await page.$eval('.meo-format-math-btn', node => node.getAttribute('aria-label')!), /changed/);
   // Real Mermaid toolbar updates retain source-only visibility and keyboard order across cached DOM reuse.
   await mount('Before\n\n```mermaid\nflowchart LR\nA --> B\n```\n\nAfter');
-  for (const mode of ['preview', 'split', 'source', 'preview', 'split']) {
+  for (const mode of ['preview', 'edit', 'preview', 'edit']) {
     await page.waitForFunction(mode => document.querySelector<HTMLElement>('.meo-mermaid-toolbar')?.dataset.meoMermaidMode === mode, {}, mode);
     const info = await page.$eval('.meo-mermaid-toolbar', node => {
       const select = node.querySelector<HTMLElement>('.meo-select-all-code-btn')!;

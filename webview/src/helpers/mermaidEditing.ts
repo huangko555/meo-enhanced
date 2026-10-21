@@ -1,215 +1,146 @@
-import { editorViewportBounds } from '../editor/editorViewportBounds';
-import { getUiStrings } from '../application/uiLanguage';
-import { EditorSelection, EditorState, MapMode, StateEffect, StateField, Transaction } from '@codemirror/state';
-import { EditorView, Decoration, WidgetType, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
-import { renderedBlockSourceBoundaryKeys } from './renderedBlockSourceNavigation';
+import { EditorSelection, MapMode, StateEffect, StateField, type EditorState } from '@codemirror/state';
+import { BlockType, Decoration, EditorView, ViewPlugin, WidgetType, type ViewUpdate } from '@codemirror/view';
+import { createElement, Check, Pencil, Columns2, Rows2 } from 'lucide';
+import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 import {
-  applySourceLinePrefix as applyMermaidSourceLinePrefix,
-  outerOffsetToSourceOffset as mermaidOuterOffsetToEditorOffset,
-  sourceOffsetToOuterOffset as mermaidEditorOffsetToOuterOffset
-} from './sourceLinePrefix';
-import { defaultKeymap, indentLess, indentMore } from '@codemirror/commands';
+  chooseMermaidEditingLayout,
+  MERMAID_SIDE_MIN_WIDTH,
+  type MermaidEditingLayout
+} from '../editor/mermaidEditingLayout';
+import { getMermaidDiagramPresentationFactory } from '../editor/mermaidDiagramPresentation';
+import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
+import { sourcePresentationSelection } from '../editor/livePointerSelection';
+import { supersedeLiveInputDerivedWork } from '../editor/liveInputDerivedWork';
 import {
-  getCachedMermaidPreviewHeight,
   MermaidDiagramWidget,
   createMermaidViewportState,
   type MermaidViewportState
 } from './mermaidDiagram';
-import {
-  getMermaidDiagramPresentationFactory,
-  type MermaidDiagramPresentationConsumer
-} from '../editor/mermaidDiagramPresentation';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { createRenderedBlockImageButton } from './renderedBlockImage';
-import { getViewportController, visualLineContextMargin } from './viewportController';
-import { applyLiveBlockIndent, liveBlockIndentKey, parseBlockLinePrefix, type LiveBlockIndentValue } from './blockIndent';
-import { consumeEditorHistoryCommand } from './historyCommands';
 import {
-  markLiveInputNestedProjection,
-  replaceLiveInputNestedDecoration,
-  supersedeLiveInputDerivedWork
-} from '../editor/liveInputDerivedWork';
-import {
-  decideRenderedBlockModeShell,
-  type RenderedBlockMode,
-  type RenderedBlockModeShellDecision
-} from '../editor/renderedBlockModeShell';
-import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
-import type { UiLanguage } from '../../../src/foundation/uiLanguage';
+  applyLiveBlockIndent,
+  liveBlockIndentKey,
+  parseBlockLinePrefix,
+  type LiveBlockIndentValue
+} from './blockIndent';
+import { getViewportController } from './viewportController';
+import { mermaidSourceAt, mermaidSourceForAnchor, selectMermaidSource } from './mermaidSource';
 import {
   restoreRenderedBlockModeFocus,
   retainRenderedBlockModePointerFocus
 } from './renderedBlockModeControls';
-import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
-import {
-  createNestedEditorInteractionContinuity,
-  type EditorInteractionContinuity
-} from '../editor/interactionContinuity';
-import { shikiDocumentHighlight } from './shikiDecorations';
-import type { SyntaxNode } from '@lezer/common';
+import { focusRenderedBlockAction } from './renderedBlockActionFocus';
 
-export type MermaidBlockMode = RenderedBlockMode;
-
-type MermaidModeChange = {
-  anchor: number;
-  mode: MermaidBlockMode;
-};
-
-type MermaidSearchReveal = {
-  from: number;
-  to: number;
-} | null;
-
+export type MermaidBlockMode = 'preview' | 'edit';
+type MermaidSearchReveal = { from: number; to: number } | null;
 type MermaidEditingState = {
-  modes: Map<number, MermaidBlockMode>;
+  activeAnchor: number | null;
+  // Explicit close at a document edge has no outside caret position to move to.
+  collapsedAnchor: number | null;
+  layouts: Map<number, MermaidEditingLayout>;
   searchReveal: MermaidSearchReveal;
   viewports: Map<number, MermaidViewportState>;
+  narrow: boolean;
+  sideSpace: number;
 };
-
-type MermaidEditingBlock = {
-  anchor: number;
-  contentFrom: number;
-  contentTo: number;
-  diagramText: string;
-  sourceLinePrefix: string;
-  startLine: number;
-  endLine: number;
-  indentColumns: LiveBlockIndentValue;
-  viewportState: MermaidViewportState;
-};
-
-export const setMermaidBlockModeEffect = StateEffect.define<MermaidModeChange>();
+export const setMermaidLayoutEffect = StateEffect.define<{ anchor: number; layout: MermaidEditingLayout }>();
 export const setMermaidSearchRevealEffect = StateEffect.define<MermaidSearchReveal>();
-const setInnerMermaidSearchRangeEffect = StateEffect.define<MermaidSearchReveal>();
-
-const innerMermaidSearchMark = Decoration.mark({
-  class: 'meo-search-match meo-search-match-active'
-});
-
-const innerMermaidSearchField = StateField.define<DecorationSet>({
-  create() {
-    return Decoration.none;
-  },
-  update(decorations, transaction) {
-    let next = decorations.map(transaction.changes);
-    for (const effect of transaction.effects) {
-      if (effect.is(setInnerMermaidSearchRangeEffect)) {
-        next = effect.value
-          ? Decoration.set([innerMermaidSearchMark.range(effect.value.from, effect.value.to)])
-          : Decoration.none;
-      }
-    }
-    return next;
-  },
-  provide: (field) => EditorView.decorations.from(field)
-});
+const setMermaidNarrowEffect = StateEffect.define<boolean>();
+const collapseMermaidSourceEffect = StateEffect.define<number>();
+const setMermaidSideSpaceEffect = StateEffect.define<{ anchor: number; height: number }>();
 
 const mermaidOpeningLineRegex = /^[ \t]{0,3}(?:`{3,}|~{3,})\s*mermaid\b/i;
-// Registered anchors come from parsed fences and may share a list marker's line.
-// Keep that validation separate from classifying a standalone opening candidate.
-const mermaidAnchorLineRegex = /^[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(?:`{3,}|~{3,})\s*mermaid\b/i;
-
 export function isMermaidOpeningLine(lineText: string): boolean {
   return mermaidOpeningLineRegex.test(lineText);
 }
-
 function isMermaidAnchor(state: EditorState, anchor: number): boolean {
-  if (anchor < 0 || anchor > state.doc.length) {
-    return false;
-  }
+  if (!Number.isFinite(anchor) || anchor < 0 || anchor > state.doc.length) return false;
   const line = state.doc.lineAt(anchor);
-  return line.from === anchor && mermaidAnchorLineRegex.test(parseBlockLinePrefix(line.text, state.tabSize).content);
-}
-
-function resolveMermaidAnchorAtLine(state: EditorState, lineNumber: number): number | null {
-  if (!Number.isInteger(lineNumber) || lineNumber < 1 || lineNumber > state.doc.lines) {
-    return null;
-  }
-  const anchor = state.doc.line(lineNumber).from;
-  return isMermaidAnchor(state, anchor) ? anchor : null;
-}
-
-function resolveMermaidToolbarAnchor(
-  view: EditorView,
-  toolbar: HTMLElement,
-  fallbackLineNumber: number
-): number | null {
-  const declaredAnchor = Number.parseInt(toolbar.dataset.meoBlockFrom ?? '', 10);
-  if (Number.isFinite(declaredAnchor) && isMermaidAnchor(view.state, declaredAnchor)) {
-    return declaredAnchor;
-  }
-  try {
-    const position = view.posAtDOM(toolbar);
-    const line = view.state.doc.lineAt(Math.max(0, Math.min(position, view.state.doc.length)));
-    if (isMermaidAnchor(view.state, line.from)) return line.from;
-  } catch {
-    // A detached toolbar cannot provide a current DOM position. The line
-    // fallback still supports retained widgets whose block did not move.
-  }
-  return resolveMermaidAnchorAtLine(view.state, fallbackLineNumber);
+  return (
+    line.from === anchor &&
+    /^[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(?:`{3,}|~{3,})\s*mermaid\b/i.test(
+      parseBlockLinePrefix(line.text, state.tabSize).content
+    )
+  );
 }
 
 export const mermaidEditingStateField = StateField.define<MermaidEditingState>({
-  create() {
-    return { modes: new Map(), searchReveal: null, viewports: new Map() };
-  },
+  create: () => ({
+    activeAnchor: null,
+    collapsedAnchor: null,
+    layouts: new Map(),
+    searchReveal: null,
+    viewports: new Map(),
+    narrow: false,
+    sideSpace: 0
+  }),
   update(value, transaction) {
-    let viewports = value.viewports;
-    if (transaction.docChanged) {
-      viewports = new Map();
-      for (const [anchor, viewport] of value.viewports) {
-        const line = transaction.startState.doc.lineAt(anchor);
-        const parsed = parseBlockLinePrefix(line.text, transaction.startState.tabSize);
-        const fence = anchor + parsed.prefix.length + parsed.content.search(/`{3,}|~{3,}/);
-        const mappedFence = transaction.changes.mapPos(fence, 1, MapMode.TrackAfter);
-        // Tracking the opening fence distinguishes a moved block from a whole
-        // block replacement, even if the replacement has identical source.
-        if (mappedFence === null) continue;
-        const mappedAnchor = transaction.state.doc.lineAt(mappedFence).from;
-        if (isMermaidAnchor(transaction.state, mappedAnchor)) viewports.set(mappedAnchor, viewport);
-      }
+    const layouts = new Map<number, MermaidEditingLayout>(),
+      viewports = new Map<number, MermaidViewportState>();
+    const mapped = (anchor: number): number | null => {
+      if (!transaction.docChanged) return anchor;
+      const line = transaction.startState.doc.lineAt(anchor),
+        fence = anchor + line.text.search(/`{3,}|~{3,}/);
+      const position = transaction.changes.mapPos(fence, 1, MapMode.TrackAfter);
+      if (position === null) return null;
+      const next = transaction.state.doc.lineAt(position).from;
+      return isMermaidAnchor(transaction.state, next) ? next : null;
+    };
+    for (const [anchor, layout] of value.layouts) {
+      const next = mapped(anchor);
+      if (next !== null) layouts.set(next, layout);
     }
-    const modes = new Map<number, MermaidBlockMode>();
-    for (const [anchor, mode] of value.modes) {
-      const mappedAnchor = transaction.changes.mapPos(anchor, 1);
-      if (isMermaidAnchor(transaction.state, mappedAnchor)) {
-        modes.set(mappedAnchor, mode);
-      }
+    for (const [anchor, viewport] of value.viewports) {
+      const next = mapped(anchor);
+      if (next !== null) viewports.set(next, viewport);
     }
-
-    let searchReveal = value.searchReveal;
-    if (searchReveal && transaction.docChanged) {
+    let searchReveal = value.searchReveal,
+      narrow = value.narrow;
+    if (searchReveal && transaction.docChanged)
       searchReveal = {
         from: transaction.changes.mapPos(searchReveal.from, 1),
         to: transaction.changes.mapPos(searchReveal.to, -1)
       };
-    }
-
-    let searchRevealChanged = false;
+    let revealing = false;
     for (const effect of transaction.effects) {
-      if (effect.is(setMermaidBlockModeEffect)) {
-        searchReveal = null;
-        if (effect.value.mode === 'preview') {
-          modes.delete(effect.value.anchor);
-        } else {
-          modes.set(effect.value.anchor, effect.value.mode);
-        }
-      } else if (effect.is(setMermaidSearchRevealEffect)) {
+      if (effect.is(setMermaidLayoutEffect)) layouts.set(effect.value.anchor, effect.value.layout);
+      if (effect.is(setMermaidNarrowEffect)) narrow = effect.value;
+      if (effect.is(setMermaidSearchRevealEffect)) {
         searchReveal = effect.value;
-        searchRevealChanged = true;
+        revealing = true;
       }
     }
-
-    if (searchReveal && transaction.selection && !searchRevealChanged) {
+    if (transaction.selection && !revealing) searchReveal = null;
+    let collapsedAnchor = transaction.selection || transaction.docChanged ? null : value.collapsedAnchor;
+    for (const effect of transaction.effects) {
+      if (effect.is(collapseMermaidSourceEffect)) collapsedAnchor = effect.value;
+    }
+    let activeAnchor = value.activeAnchor === null ? null : mapped(value.activeAnchor);
+    const previousActive = activeAnchor;
+    if (transaction.selection || transaction.docChanged) {
       const selection = transaction.state.selection.main;
-      const selectionFrom = Math.min(selection.from, selection.to);
-      const selectionTo = Math.max(selection.from, selection.to);
-      if (selectionFrom !== searchReveal.from || selectionTo !== searchReveal.to) {
-        searchReveal = null;
+      const touches = (source: ReturnType<typeof mermaidSourceAt>) =>
+        source &&
+        (selection.empty
+          ? selection.head >= source.opening.from && selection.head <= source.closing.to
+          : selection.from <= source.closing.to && selection.to >= source.opening.from);
+      const active = activeAnchor === null ? null : mermaidSourceForAnchor(transaction.state, activeAnchor);
+      // A drag may cross other blocks or end outside the fence. Keep the chart
+      // that owned this edit session while its source remains in the selection.
+      if (!touches(active)) {
+        const candidate =
+          mermaidSourceAt(transaction.state, selection.head) ??
+          (!selection.empty ? mermaidSourceAt(transaction.state, selection.anchor) : null);
+        activeAnchor = touches(candidate) ? candidate!.anchor : null;
       }
     }
-
-    return { modes, searchReveal, viewports };
+    let sideSpace = activeAnchor === previousActive ? value.sideSpace : 0;
+    for (const effect of transaction.effects) {
+      if (effect.is(setMermaidSideSpaceEffect) && effect.value.anchor === activeAnchor)
+        sideSpace = effect.value.height;
+    }
+    return { activeAnchor, collapsedAnchor, layouts, viewports, searchReveal, narrow, sideSpace };
   }
 });
 
@@ -218,139 +149,136 @@ export function getMermaidBlockViewport(state: EditorState, anchor: number): Mer
   let viewport = viewports?.get(anchor);
   if (!viewport) {
     viewport = createMermaidViewportState();
-    // A session cache, not document/history state: camera gestures neither
-    // dispatch transactions nor invalidate gutters or source selections.
     viewports?.set(anchor, viewport);
   }
   return viewport;
 }
-
-/** Do not replace the native input target while its outer fence is unfinished. */
-export function isUnfinishedMermaidSourceActive(state: EditorState, node: SyntaxNode): boolean {
-  const opening = state.doc.lineAt(node.from);
-  const closing = node.lastChild;
-  if (closing?.name === 'CodeMark' && closing.from > opening.to) return false;
-  if (state.field(mermaidEditingStateField, false)?.modes.has(opening.from)) return false;
-  return state.selection.ranges.some(range => range.to > opening.to && range.from <= node.to);
-}
-
 export function getMermaidBlockMode(
   state: EditorState,
   anchor: number,
-  contentFrom: number,
-  contentTo: number
-): {
-  manual: MermaidBlockMode;
-  decision: RenderedBlockModeShellDecision;
-  searchReveal: MermaidSearchReveal;
-} {
-  const editingState = state.field(mermaidEditingStateField, false);
-  const manual = editingState?.modes.get(anchor) ?? 'preview';
-  const searchReveal = editingState?.searchReveal ?? null;
-  const searchInside = Boolean(
-    searchReveal &&
-    searchReveal.from < contentTo &&
-    searchReveal.to > contentFrom
-  );
-  const decision = decideRenderedBlockModeShell({
-    kind: 'mermaid',
-    lineNumber: state.doc.lineAt(anchor).number,
-    manualMode: manual,
-    temporaryReveal: searchInside,
-    uiLanguage: state.facet(uiLanguageFacet)
-  });
+  blockTo: number
+) {
+  const value = state.field(mermaidEditingStateField, false),
+    searchReveal = value?.searchReveal;
+  const editing = value?.collapsedAnchor !== anchor && (
+    sourcePresentationSelection(state).ranges.some((range) =>
+      range.empty
+        ? range.head >= anchor && range.head <= blockTo
+        : range.from <= blockTo && range.to >= anchor
+    ) || Boolean(searchReveal && searchReveal.from <= blockTo && searchReveal.to >= anchor));
+  const mode: MermaidBlockMode = editing ? 'edit' : 'preview';
+  const ownsSide = value?.activeAnchor === anchor;
+  const layout: MermaidEditingLayout =
+    !value?.narrow && ownsSide ? (value?.layouts.get(anchor) ?? 'stacked') : 'stacked';
   return {
-    manual,
-    decision,
-    searchReveal: searchInside ? searchReveal : null
+    manual: mode,
+    decision: { effectiveMode: mode },
+    layout,
+    searchReveal: searchReveal ?? null,
+    sideSpace: ownsSide ? (value?.sideSpace ?? 0) : 0
   };
 }
-
-const mermaidToolbarCodeContent = Symbol('mermaidToolbarCodeContent');
-type MermaidToolbarElement = HTMLSpanElement & {
-  [mermaidToolbarCodeContent]: string;
-};
-
-const mermaidToolbarDomCache = new WeakMap<EditorView, Map<string, MermaidToolbarElement>>();
-const MERMAID_TOOLBAR_DOM_CACHE_LIMIT = 300;
-
-function getMermaidToolbarDomCache(view: EditorView): Map<string, MermaidToolbarElement> {
-  let cache = mermaidToolbarDomCache.get(view);
-  if (!cache) {
-    cache = new Map();
-    mermaidToolbarDomCache.set(view, cache);
-  }
-  return cache;
+function activeMermaidSource(state: EditorState) {
+  const anchor = state.field(mermaidEditingStateField, false)?.activeAnchor;
+  return anchor == null ? null : mermaidSourceForAnchor(state, anchor);
 }
-
-function updateMermaidModeButton(
-  button: HTMLButtonElement,
-  mode: MermaidBlockMode,
-  lineNumber: number,
-  uiLanguage: UiLanguage
-): void {
-  const decision = decideRenderedBlockModeShell({
-    kind: 'mermaid',
-    lineNumber,
-    manualMode: mode,
-    temporaryReveal: false,
-    uiLanguage
-  });
-  const label = getUiStrings(uiLanguage)[mode];
-  const buttonLabel = `${label}, ${decision.modeButton.label}`;
-  // Source or measured-layout updates can arrive between pointerdown and up.
-  // Replacing an unchanged label detaches the pressed target and cancels click.
-  if (button.getAttribute('aria-label') === buttonLabel
-    && button.querySelector('.meo-mermaid-mode-label')?.textContent === label) return;
-  const text = button.ownerDocument.createElement('span');
-  text.className = 'meo-mermaid-mode-label';
-  text.textContent = label;
-  const icon = button.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  icon.setAttribute('viewBox', '0 0 24 24');
-  icon.setAttribute('width', '15');
-  icon.setAttribute('height', '15');
-  icon.setAttribute('fill', 'none');
-  icon.setAttribute('stroke', 'currentColor');
-  icon.setAttribute('stroke-width', '2');
-  icon.setAttribute('stroke-linecap', 'round');
-  icon.setAttribute('stroke-linejoin', 'round');
-  icon.setAttribute('aria-hidden', 'true');
-  icon.setAttribute('focusable', 'false');
-  const path = button.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'path');
-  // Match the adjacent Lucide icons' grid and stroke, retaining the paired return arrows.
-  path.setAttribute('d', 'M6.24 16.8a4.8 4.8 0 0 1 0-9.6h6.32M8.8 3.44l3.76 3.76-3.76 3.76M17.76 7.2a4.8 4.8 0 0 1 0 9.6h-6.32M15.2 13.04l-3.76 3.76 3.76 3.76');
-  icon.appendChild(path);
-  button.replaceChildren(icon, text);
-  button.setAttribute('aria-label', buttonLabel);
-  button.dataset.tooltip = decision.modeButton.label;
-  button.dataset.tooltipLiveUpdate = 'true';
+function blockMode(view: EditorView, anchor: number) {
+  const source = mermaidSourceForAnchor(view.state, anchor);
+  return source ? getMermaidBlockMode(view.state, anchor, source.closing.to) : null;
 }
-
-function dispatchModeWhileRetainingViewport(
-  view: EditorView,
-  effects: StateEffect<unknown> | readonly StateEffect<unknown>[],
-  isCurrent: () => boolean,
-  toolbar: HTMLElement
-): void {
-  const controller = getViewportController(view);
-  if (!controller) {
-    view.dispatch({ effects });
-    return;
-  }
-  const resolveToolbar = () => view.dom.querySelector<HTMLElement>(
-    `.meo-mermaid-toolbar[data-meo-block-from="${toolbar.dataset.meoBlockFrom}"]:not([data-meo-floating])`
+function chartFor(view: EditorView, anchor: number): HTMLElement | null {
+  const line = view.state.doc.lineAt(anchor).number;
+  return view.dom.querySelector<HTMLElement>(
+    `.meo-rendered-block-preview[data-meo-rendered-block-start-line="${line}"] .meo-mermaid-block, ` +
+      `.meo-mermaid-editing-preview[data-meo-mermaid-anchor="${anchor}"] .meo-mermaid-block`
   );
-  const sourceToolbar = resolveToolbar();
-  if (sourceToolbar) {
-    // A fixed scrollTop cannot absorb late height-map changes above this block.
-    // Keep the clicked block's header at its screen Y through all three modes.
-    controller.retainElementTopWhileMutation(sourceToolbar, resolveToolbar,
-      () => view.dispatch({ effects }), isCurrent);
-  } else {
-    const scrollTop = view.scrollDOM.scrollTop;
-    view.dispatch({ effects });
-    controller.retainScrollTop(scrollTop, isCurrent);
+}
+function initialLayout(view: EditorView, anchor: number): MermaidEditingLayout {
+  const source = mermaidSourceForAnchor(view.state, anchor);
+  if (!source) return 'stacked';
+  const width = view.dom.clientWidth,
+    height = view.scrollDOM.clientHeight;
+  const box = chartFor(view, anchor)?.querySelector<SVGSVGElement>('svg')?.viewBox.baseVal;
+  const diagram = box && box.width > 0 && box.height > 0 ? { width: box.width, height: box.height } : null;
+  const lineHeight = parseFloat(getComputedStyle(view.contentDOM).lineHeight) || 22;
+  const columns = Math.max(20, Math.floor((width - 80) / (lineHeight * 0.45)));
+  const sourceRows = source.source
+    .split('\n')
+    .reduce((rows, line) => rows + Math.max(1, Math.ceil(line.length / columns)), 0);
+  return chooseMermaidEditingLayout({ width, height, diagram, sourceRows, lineHeight });
+}
+export function focusMermaidEditingOffset(
+  view: EditorView,
+  anchor: number,
+  offset: number,
+  isCurrent = () => true
+): boolean {
+  if (!isCurrent()) return false;
+  const source = mermaidSourceForAnchor(view.state, anchor);
+  if (!source) return false;
+  const layouts = view.state.field(mermaidEditingStateField).layouts;
+  const effects = layouts.has(anchor)
+    ? []
+    : [setMermaidLayoutEffect.of({ anchor, layout: initialLayout(view, anchor) })];
+  const position = Math.max(source.opening.from, Math.min(source.closing.to, source.lines[0]!.from + offset));
+  view.dispatch({
+    selection: EditorSelection.cursor(position),
+    effects: [...effects, supersedeLiveInputDerivedWork()]
+  });
+  view.focus();
+  return true;
+}
+function closeMermaidEditing(view: EditorView, anchor: number): void {
+  const source = mermaidSourceForAnchor(view.state, anchor);
+  if (!source) return;
+  const position = !source.closed
+    ? source.opening.from
+    : source.closing.number < view.state.doc.lines
+      ? view.state.doc.line(source.closing.number + 1).from
+      : source.to;
+  view.dispatch({
+    selection: { anchor: position },
+    effects: [collapseMermaidSourceEffect.of(anchor), setMermaidSearchRevealEffect.of(null), supersedeLiveInputDerivedWork()]
+  });
+}
+export function finishMermaidEditing(view: EditorView): boolean {
+  if (!view.dom.classList.contains('meo-mode-live')) return false;
+  const source = activeMermaidSource(view.state) ?? mermaidSourceAt(view.state);
+  if (!source || blockMode(view, source.anchor)?.manual !== 'edit') return false;
+  closeMermaidEditing(view, source.anchor);
+  return true;
+}
+function toggleLayout(view: EditorView, anchor: number): void {
+  const current = blockMode(view, anchor);
+  if (!current) return;
+  const controller = getViewportController(view);
+  const mutate = () =>
+    view.dispatch({
+      effects: setMermaidLayoutEffect.of({
+        anchor,
+        layout: current.layout === 'stacked' ? 'side-by-side' : 'stacked'
+      })
+    });
+  if (controller) controller.preservePositionWhileMutation(anchor, mutate);
+  else mutate();
+}
+
+function updateMermaidLayoutButton(button: HTMLButtonElement, view: EditorView, narrow: boolean): void {
+  const anchor = Number(button.closest<HTMLElement>('[data-meo-mermaid-anchor]')?.dataset.meoMermaidAnchor);
+  const strings = getUiStrings(view.state.facet(uiLanguageFacet));
+  const side = blockMode(view, anchor)?.layout === 'side-by-side';
+  const caption = side ? strings.mermaidStackedAction : strings.mermaidSideBySideAction;
+  if (button.textContent !== caption) {
+    button.replaceChildren(
+      createElement(side ? Rows2 : Columns2, { width: 15, height: 15, 'aria-hidden': 'true' }),
+      button.ownerDocument.createTextNode(caption)
+    );
   }
+  const label = narrow ? strings.mermaidNarrowLayout : side ? strings.mermaidStacked : strings.mermaidSideBySide;
+  button.disabled = narrow;
+  button.setAttribute('aria-label', label);
+  button.dataset.tooltip = label;
+  button.dataset.tooltipLiveUpdate = 'true';
 }
 
 class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
@@ -360,999 +288,527 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
     readonly mode: MermaidBlockMode,
     readonly codeContent: string,
     readonly blockTo: number,
-    readonly floating = false
+    readonly floating = false,
+    readonly language: UiLanguage = 'en'
   ) {
     super();
   }
-
   eq(other: WidgetType): boolean {
-    return other instanceof MermaidToolbarWidget &&
+    return (
+      other instanceof MermaidToolbarWidget &&
       this.hasSameUiLanguageEpoch(other) &&
       other.anchor === this.anchor &&
-      other.lineNumber === this.lineNumber &&
       other.mode === this.mode &&
+      other.language === this.language &&
       other.codeContent === this.codeContent &&
-      other.blockTo === this.blockTo;
+      other.blockTo === this.blockTo
+    );
   }
-
   toDOM(view: EditorView): HTMLElement {
-    const uiLanguage = view.state.facet(uiLanguageFacet);
-    const cache = getMermaidToolbarDomCache(view);
-    const cacheKey = `${this.anchor}:${this.lineNumber}:${uiLanguage}`;
-    const cachedToolbar = cache.get(cacheKey);
-    if (!this.floating && cachedToolbar && this.updateDOM(cachedToolbar, view)) {
-      cache.delete(cacheKey);
-      cache.set(cacheKey, cachedToolbar);
-      return cachedToolbar;
-    }
-    const decision = decideRenderedBlockModeShell({
-      kind: 'mermaid',
-      lineNumber: this.lineNumber,
-      manualMode: this.mode,
-      temporaryReveal: false,
-      uiLanguage
-    });
-    const toolbar = document.createElement('span') as MermaidToolbarElement;
+    const toolbar = view.dom.ownerDocument.createElement('span');
     toolbar.className = 'meo-mermaid-toolbar';
+    toolbar.dataset.meoBlockFrom = String(this.anchor);
     if (this.floating) toolbar.dataset.meoFloating = 'true';
     toolbar.setAttribute('role', 'group');
-    toolbar.setAttribute('aria-label', decision.controlsLabel);
+    toolbar.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    const anchor = () => {
+      const current = Number(toolbar.dataset.meoBlockFrom);
+      return isMermaidAnchor(view.state, current) ? current : null;
+    };
+    const language = view.state.facet(uiLanguageFacet);
+    const mode = document.createElement('button');
+    mode.type = 'button';
+    mode.className = 'meo-mermaid-mode-btn';
+    retainRenderedBlockModePointerFocus(mode);
+    mode.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const current = anchor();
+      if (current === null) return;
+      const isCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
+      const resolve = () =>
+        view.dom.querySelector<HTMLElement>(
+          `.meo-mermaid-toolbar[data-meo-block-from="${current}"]:not([data-meo-floating])`
+        );
+      const currentToolbar = resolve(),
+        closing = blockMode(view, current)?.manual === 'edit';
+      const mutate = () =>
+        closing ? closeMermaidEditing(view, current) : focusMermaidEditingOffset(view, current, 0, isCurrent);
+      const controller = getViewportController(view);
+      if (controller && currentToolbar)
+        controller.retainElementTopWhileMutation(currentToolbar, resolve, mutate, isCurrent);
+      else mutate();
+      if (closing)
+        requestAnimationFrame(() => {
+          if (isCurrent())
+            restoreRenderedBlockModeFocus(
+              view.dom.querySelector(
+                `.meo-mermaid-toolbar[data-meo-block-from="${current}"] .meo-mermaid-mode-btn`
+              ),
+              event.detail > 0
+            );
+        });
+    });
+    const select = createSelectAllCodeButton(() => {
+      const current = anchor();
+      if (current !== null) selectMermaidSource(view, current);
+    }, language);
+    const image = createRenderedBlockImageButton(
+      () => {
+        const current = anchor();
+        if (current === null) return null;
+        const chart = chartFor(view, current);
+        return chart &&
+          !chart.closest('[data-meo-mermaid-rendering="true"]') &&
+          !chart.querySelector('.meo-mermaid-error-badge') &&
+          chart.querySelector('svg')
+          ? chart
+          : null;
+      },
+      language,
+      toolbar.ownerDocument
+    );
+    image.classList.add('meo-code-block-pill');
+    const copy = createCopyCodeButton(() => {
+      const current = anchor();
+      return current === null ? '' : (mermaidSourceForAnchor(view.state, current)?.source ?? '');
+    }, language);
+    toolbar.append(mode, select, image, copy);
+    this.updateDOM(toolbar, view);
+    return toolbar;
+  }
+  updateDOM(toolbar: HTMLElement, view: EditorView): boolean {
+    if (toolbar.dataset.meoUiLanguage && toolbar.dataset.meoUiLanguage !== view.state.facet(uiLanguageFacet))
+      return false;
+    const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     toolbar.dataset.meoBlockFrom = String(this.anchor);
     toolbar.dataset.meoBlockTo = String(this.blockTo);
     toolbar.dataset.meoMermaidMode = this.mode;
-    toolbar.dataset.meoUiLanguage = uiLanguage;
-    toolbar[mermaidToolbarCodeContent] = this.codeContent;
-    toolbar.addEventListener('pointerdown', (event: PointerEvent) => {
-      if (event.button !== 0) return;
-      event.preventDefault();
-      event.stopPropagation();
-    });
-
-    const modeButton = document.createElement('button');
-    modeButton.type = 'button';
-    modeButton.className = 'meo-mermaid-mode-btn';
-    retainRenderedBlockModePointerFocus(modeButton);
-    updateMermaidModeButton(modeButton, this.mode, this.lineNumber, uiLanguage);
-
-    const changeMode = (event: MouseEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const currentAnchor = resolveMermaidToolbarAnchor(view, toolbar, this.lineNumber);
-      if (currentAnchor === null) return;
-      const currentMode = toolbar.dataset.meoMermaidMode as MermaidBlockMode;
-      const nextMode = decideRenderedBlockModeShell({
-        kind: 'mermaid',
-        lineNumber: this.lineNumber,
-        manualMode: currentMode,
-        temporaryReveal: false,
-        uiLanguage
-      }).nextManualMode;
-      const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
-      dispatchModeWhileRetainingViewport(
-        view,
-        [
-          supersedeLiveInputDerivedWork(),
-          setMermaidBlockModeEffect.of({ anchor: currentAnchor, mode: nextMode })
-        ],
-        isRevealCurrent,
-        toolbar
-      );
-      requestAnimationFrame(() => {
-        if (!isRevealCurrent()) return;
-        if (nextMode === 'preview') {
-          // The opening line owns the toolbar in every mode. Restore focus
-          // without asking the unrelated outer selection to reveal itself.
-          const currentModeButton = this.floating && toolbar.isConnected
-            ? modeButton
-            : view.dom.querySelector<HTMLButtonElement>(
-              `.meo-mermaid-toolbar[data-meo-block-from="${currentAnchor}"] .meo-mermaid-mode-btn`
-            );
-          restoreRenderedBlockModeFocus(currentModeButton, event.detail > 0);
-          return;
-        }
-        const editingBlock = view.dom.querySelector<HTMLElement>(
-          `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${currentAnchor}"]`
-        );
-        (editingBlock as MermaidEditingBlockElement | null)?.__meoMermaidEditingController?.focus();
-      });
-    };
-    modeButton.addEventListener('click', changeMode);
-
-    const selectAllButton = createSelectAllCodeButton(() => {
-      const currentAnchor = resolveMermaidToolbarAnchor(view, toolbar, this.lineNumber);
-      if (currentAnchor === null) return;
-      const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
-      const scrollTop = view.scrollDOM.scrollTop;
-      dispatchModeWhileRetainingViewport(
-        view,
-        [
-          supersedeLiveInputDerivedWork(),
-          setMermaidBlockModeEffect.of({ anchor: currentAnchor, mode: 'source' })
-        ],
-        isRevealCurrent,
-        toolbar
-      );
-      requestAnimationFrame(() => {
-        if (!isRevealCurrent()) return;
-        const editingBlock = view.dom.querySelector<HTMLElement>(
-          `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${currentAnchor}"]`
-        );
-        (editingBlock as MermaidEditingBlockElement | null)?.__meoMermaidEditingController?.selectAll();
-        getViewportController(view)?.lockScrollTop(scrollTop, isRevealCurrent);
-      });
-    }, uiLanguage);
-    const copyButton = createCopyCodeButton(() => toolbar[mermaidToolbarCodeContent] ?? '', uiLanguage);
-    const imageButton = createRenderedBlockImageButton(() => {
-      const anchor = resolveMermaidToolbarAnchor(view, toolbar, this.lineNumber);
-      if (anchor === null || toolbar.dataset.meoMermaidMode === 'source') return null;
-      const line = view.state.doc.lineAt(anchor).number;
-      const block = view.dom.querySelector<HTMLElement>(
-        `.meo-rendered-block-preview[data-meo-rendered-block-start-line="${line}"] .meo-mermaid-block, `
-        + `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${anchor}"] .meo-mermaid-block`
-      );
-      if (!block || block.closest('[data-meo-mermaid-rendering="true"]') || block.querySelector('.meo-mermaid-error-badge')) return null;
-      return block.querySelector('.meo-mermaid-svg-wrapper > svg') ? block : null;
-    }, uiLanguage, toolbar.ownerDocument);
-    imageButton.classList.add('meo-code-block-pill');
-
-    selectAllButton.hidden = this.mode === 'preview';
-    toolbar.append(selectAllButton, modeButton, imageButton, copyButton);
-    if (!this.floating) cache.set(cacheKey, toolbar);
-    if (cache.size > MERMAID_TOOLBAR_DOM_CACHE_LIMIT) {
-      const oldestKey = cache.keys().next().value;
-      if (oldestKey !== undefined) cache.delete(oldestKey);
+    toolbar.dataset.meoUiLanguage = view.state.facet(uiLanguageFacet);
+    toolbar.setAttribute('aria-label', strings.mermaidBlockControls(this.lineNumber));
+    const editing = this.mode === 'edit',
+      mode = toolbar.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')!;
+    const label = editing ? strings.hideMermaidSource : strings.editMermaidSource;
+    if (mode.getAttribute('aria-label') !== label) {
+      mode.replaceChildren(createElement(editing ? Check : Pencil, { width: 15, height: 15, 'aria-hidden': 'true' }));
+      mode.setAttribute('aria-label', label);
+      mode.dataset.tooltip = label;
+      mode.dataset.tooltipLiveUpdate = 'true';
     }
-    return toolbar;
-  }
-
-  updateDOM(dom: HTMLElement, view: EditorView): boolean {
-    const toolbar = dom as MermaidToolbarElement;
-    const uiLanguage = view.state.facet(uiLanguageFacet);
-    if (
-      !toolbar.classList.contains('meo-mermaid-toolbar') ||
-      toolbar.dataset.meoBlockFrom !== String(this.anchor) ||
-      toolbar.dataset.meoUiLanguage !== uiLanguage
-    ) return false;
-    const modeButton = toolbar.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn');
-    if (!modeButton) return false;
-    // Equal-length edits can change line identity without changing the anchor.
-    toolbar.setAttribute('aria-label', decideRenderedBlockModeShell({
-      kind: 'mermaid', lineNumber: this.lineNumber, manualMode: this.mode,
-      temporaryReveal: false, uiLanguage
-    }).controlsLabel);
-    toolbar.dataset.meoBlockTo = String(this.blockTo);
-    toolbar.dataset.meoMermaidMode = this.mode;
-    toolbar.dataset.meoUiLanguage = uiLanguage;
-    toolbar[mermaidToolbarCodeContent] = this.codeContent;
-    const selectAllButton = toolbar.querySelector<HTMLElement>('.meo-select-all-code-btn');
-    if (selectAllButton) selectAllButton.hidden = this.mode === 'preview';
-    updateMermaidModeButton(
-      modeButton,
-      this.mode,
-      this.lineNumber,
-      uiLanguage
-    );
+    toolbar.querySelector<HTMLElement>('.meo-select-all-code-btn')!.hidden = !editing;
     return true;
   }
-
   ignoreEvent(): boolean {
     return true;
   }
 }
-
-export function addMermaidToolbar(
-  builder: any[],
-  position: number,
-  anchor: number,
-  lineNumber: number,
-  mode: MermaidBlockMode,
-  codeContent: string,
-  blockTo: number,
-  side = 1
-): void {
-  builder.push(
-    Decoration.widget({
-      widget: createMermaidToolbarWidget(anchor, lineNumber, mode, codeContent, blockTo),
-      side
-    }).range(position)
-  );
-}
-
-/** A separate control surface sharing the block's existing action handlers. */
-export function createFloatingMermaidToolbarWidget(
-  anchor: number,
-  lineNumber: number,
-  mode: MermaidBlockMode,
-  codeContent: string,
-  blockTo: number
-): WidgetType {
-  return new MermaidToolbarWidget(anchor, lineNumber, mode, codeContent, blockTo, true);
-}
-
 export function createMermaidToolbarWidget(
   anchor: number,
   lineNumber: number,
   mode: MermaidBlockMode,
   codeContent: string,
-  blockTo: number
+  blockTo: number,
+  language: UiLanguage = 'en'
 ): WidgetType {
-  return new MermaidToolbarWidget(anchor, lineNumber, mode, codeContent, blockTo);
+  return new MermaidToolbarWidget(anchor, lineNumber, mode, codeContent, blockTo, false, language);
 }
-
-type MermaidEditingBlockElement = HTMLElement & {
-  __meoMermaidEditingController?: MermaidEditingController;
-};
-
-export function focusMermaidEditingOffset(
-  view: EditorView,
+export function createFloatingMermaidToolbarWidget(
   anchor: number,
-  offset: number,
-  isCurrent: () => boolean = () => true
-): boolean {
-  if (!isCurrent()) return false;
-  const editingBlock = view.dom.querySelector<HTMLElement>(
-    `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${anchor}"]`
-  ) as MermaidEditingBlockElement | null;
-  if (!editingBlock?.__meoMermaidEditingController) {
-    return false;
-  }
-  return editingBlock.__meoMermaidEditingController.focusOuterOffset(offset, isCurrent);
+  lineNumber: number,
+  mode: MermaidBlockMode,
+  codeContent: string,
+  blockTo: number,
+  language: UiLanguage = 'en'
+): WidgetType {
+  return new MermaidToolbarWidget(anchor, lineNumber, mode, codeContent, blockTo, true, language);
 }
-
-// Mode changes replace the inner editor. Transfer its selection once and retire
-// projection locks before their deferred blur restoration can overwrite it.
-export function takeMermaidModeSelection(
-  view: EditorView,
-  target: HTMLElement | null
-): { anchor: number; head: number } | null {
-  const block = target && view.contentDOM.contains(target)
-    ? target.closest<MermaidEditingBlockElement>('.meo-mermaid-editing-block') : null;
-  const selection = block?.__meoMermaidEditingController?.getModeSelection() ?? null;
-  for (const [anchor, lock] of mermaidSourceProjectionLocks.get(view) ?? []) {
-    lock.pinnedSelection = null;
-    releaseMermaidSourceProjectionLock(view, anchor, lock);
-  }
-  return selection;
-}
-
-export function restoreMermaidModeSelection(
-  view: EditorView,
-  selection: { anchor: number; head: number },
-  restoreFocus: boolean
-): HTMLElement | null {
-  for (const block of view.dom.querySelectorAll<MermaidEditingBlockElement>('.meo-mermaid-editing-block')) {
-    const target = block.__meoMermaidEditingController?.restoreModeSelection(selection, restoreFocus);
-    if (target) return target;
-  }
-  return null;
-}
-
-function resolveMermaidSourceProjection(
-  contentFrom: number,
-  currentText: string,
-  nextText: string
-): { from: number; to: number; insert: string } {
-  let unchangedPrefix = 0;
-  const prefixLimit = Math.min(currentText.length, nextText.length);
-  while (
-    unchangedPrefix < prefixLimit &&
-    currentText.charCodeAt(unchangedPrefix) === nextText.charCodeAt(unchangedPrefix)
-  ) {
-    unchangedPrefix += 1;
-  }
-
-  let unchangedSuffix = 0;
-  const suffixLimit = prefixLimit - unchangedPrefix;
-  while (
-    unchangedSuffix < suffixLimit &&
-    currentText.charCodeAt(currentText.length - unchangedSuffix - 1) ===
-      nextText.charCodeAt(nextText.length - unchangedSuffix - 1)
-  ) {
-    unchangedSuffix += 1;
-  }
-
-  // A zero-width change exactly on the inclusive boundary of the replacing
-  // decoration makes CodeMirror replace the widget that owns this editor.
-  // Carry one unchanged code unit through the projection so the transaction
-  // stays inside the current source range and preserves its lifecycle.
-  if (unchangedPrefix + unchangedSuffix === currentText.length) {
-    if (unchangedPrefix > 0) {
-      unchangedPrefix -= 1;
-    } else if (unchangedSuffix > 0) {
-      unchangedSuffix -= 1;
-    }
-  }
-
-  return {
-    from: contentFrom + unchangedPrefix,
-    to: contentFrom + currentText.length - unchangedSuffix,
-    insert: nextText.slice(unchangedPrefix, nextText.length - unchangedSuffix)
-  };
-}
-
-type MermaidSourceProjectionLock = {
-  scrollTop: number;
-  preserveScroll: boolean;
-  releaseFrame: number | null;
-  releaseOnInteraction: () => void;
-  previousSelection: EditorSelection;
-  pinnedSelection: EditorSelection | null;
-  isExplicitNavigationCurrent: () => boolean;
-};
-
-const mermaidSourceProjectionLocks = new WeakMap<
-  EditorView,
-  Map<number, MermaidSourceProjectionLock>
->();
-
-function releaseMermaidSourceProjectionLock(
-  outerView: EditorView,
+export function addMermaidToolbar(
+  builder: any[],
+  position: number,
   anchor: number,
-  lock: MermaidSourceProjectionLock,
-  preserveScroll = false
+  line: number,
+  mode: MermaidBlockMode,
+  source: string,
+  to: number,
+  language: UiLanguage
 ): void {
-  const locks = mermaidSourceProjectionLocks.get(outerView);
-  if (locks?.get(anchor) !== lock) return;
-  if (lock.releaseFrame !== null) {
-    window.cancelAnimationFrame(lock.releaseFrame);
-    lock.releaseFrame = null;
-  }
-  outerView.scrollDOM.removeEventListener('pointerdown', lock.releaseOnInteraction);
-  outerView.scrollDOM.removeEventListener('touchstart', lock.releaseOnInteraction);
-  outerView.scrollDOM.removeEventListener('wheel', lock.releaseOnInteraction);
-  locks.delete(anchor);
-  if (locks.size === 0) mermaidSourceProjectionLocks.delete(outerView);
-  if (
-    outerView.dom.isConnected &&
-    lock.pinnedSelection &&
-    outerView.state.selection.eq(lock.pinnedSelection)
-  ) {
-    outerView.dispatch({
-      selection: lock.previousSelection,
-      annotations: Transaction.addToHistory.of(false)
-    });
-  }
-  if (preserveScroll && lock.preserveScroll && outerView.dom.isConnected) {
-    getViewportController(outerView)?.lockScrollTop(
-      lock.scrollTop,
-      lock.isExplicitNavigationCurrent
-    );
-  }
+  builder.push(
+    Decoration.widget({
+      widget: createMermaidToolbarWidget(anchor, line, mode, source, to, language),
+      side: 1
+    }).range(position)
+  );
 }
 
-function acquireMermaidSourceProjectionLock(
-  outerView: EditorView,
-  anchor: number,
-  preserveScroll?: boolean
-): MermaidSourceProjectionLock {
-  let locks = mermaidSourceProjectionLocks.get(outerView);
-  if (!locks) {
-    locks = new Map();
-    mermaidSourceProjectionLocks.set(outerView, locks);
-  }
-  let lock = locks.get(anchor);
-  if (!lock) {
-    const releaseOnInteraction = () => {
-      const currentLocks = mermaidSourceProjectionLocks.get(outerView);
-      const currentLock = currentLocks?.get(anchor);
-      if (!currentLock) return;
-      releaseMermaidSourceProjectionLock(outerView, anchor, currentLock);
-    };
-    lock = {
-      scrollTop: outerView.scrollDOM.scrollTop,
-      preserveScroll: preserveScroll ?? true,
-      releaseFrame: null,
-      releaseOnInteraction,
-      previousSelection: outerView.state.selection,
-      pinnedSelection: null,
-      isExplicitNavigationCurrent: getViewportController(outerView)
-        ?.captureExplicitNavigationCurrentness() ?? (() => true)
-    };
-    locks.set(anchor, lock);
-    outerView.scrollDOM.addEventListener('pointerdown', releaseOnInteraction, { passive: true });
-    outerView.scrollDOM.addEventListener('touchstart', releaseOnInteraction, { passive: true });
-    outerView.scrollDOM.addEventListener('wheel', releaseOnInteraction, { passive: true });
-  }
-  if (lock.releaseFrame !== null) {
-    window.cancelAnimationFrame(lock.releaseFrame);
-    lock.releaseFrame = null;
-  }
-  return lock;
-}
-
-function releaseMermaidSourceProjectionLockAfterFrame(
-  outerView: EditorView,
-  anchor: number,
-  lock: MermaidSourceProjectionLock
-): void {
-  lock.releaseFrame = window.requestAnimationFrame(() => {
-    lock.releaseFrame = null;
-    const locks = mermaidSourceProjectionLocks.get(outerView);
-    if (locks?.get(anchor) !== lock) return;
-    releaseMermaidSourceProjectionLock(outerView, anchor, lock, true);
+type PreviewElement = HTMLElement & {
+  mermaidPreview?: { widget: MermaidDiagramWidget; timer?: number; source: string; viewport: MermaidViewportState };
+};
+/** The same preview action is used in document flow and opaque floating chrome. */
+export function createMermaidPreviewHeading(view: EditorView, anchor: number): HTMLElement {
+  const label = document.createElement('div');
+  label.className = 'meo-native-source-preview-label';
+  label.dataset.meoMermaidAnchor = String(anchor);
+  const title = document.createElement('span');
+  title.textContent = getUiStrings(view.state.facet(uiLanguageFacet)).preview;
+  const layout = document.createElement('button');
+  layout.type = 'button';
+  layout.className = 'meo-mermaid-layout-btn';
+  layout.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
   });
-}
-
-class MermaidEditingController {
-  private outerView: EditorView;
-  private block: MermaidEditingBlock;
-  private mode: Exclude<MermaidBlockMode, 'preview'>;
-  private root: MermaidEditingBlockElement;
-  private sourcePane: HTMLElement;
-  private sourceSticky: HTMLElement;
-  private sourceHost: HTMLElement;
-  private innerView: EditorView;
-  private previewShell: HTMLElement | null = null;
-  private previewSticky: HTMLElement | null = null;
-  private previewWidget: MermaidDiagramWidget | null = null;
-  private previewTimer: number | null = null;
-  private scheduledPreviewSource: string | null = null;
-  private presentationFactory: MermaidDiagramPresentationConsumer;
-  private syncingFromOuter = false;
-  private searchReveal: MermaidSearchReveal;
-  private innerInteractionContinuity: EditorInteractionContinuity | null = null;
-
-  constructor(
-    outerView: EditorView,
-    block: MermaidEditingBlock,
-    mode: Exclude<MermaidBlockMode, 'preview'>,
-    searchReveal: MermaidSearchReveal
-  ) {
-    this.outerView = outerView;
-    this.block = block;
-    if (mermaidSourceProjectionLocks.get(outerView)?.has(block.anchor)) {
-      acquireMermaidSourceProjectionLock(outerView, block.anchor);
-    }
-    this.presentationFactory = getMermaidDiagramPresentationFactory(outerView.state);
-    this.mode = mode;
-    this.searchReveal = searchReveal;
-    this.root = document.createElement('div') as MermaidEditingBlockElement;
-    this.root.className = 'meo-mermaid-editing-block meo-rendered-block-mode-shell';
-    this.root.setAttribute('role', 'region');
-    this.root.setAttribute('aria-label', decideRenderedBlockModeShell({
-      kind: 'mermaid',
-      lineNumber: block.startLine,
-      manualMode: mode,
-      temporaryReveal: false,
-      uiLanguage: outerView.state.facet(uiLanguageFacet)
-    }).editorLabel);
-    this.root.dataset.meoMermaidAnchor = String(block.anchor);
-    this.sourcePane = document.createElement('div');
-    this.sourcePane.className = 'meo-mermaid-source-pane meo-rendered-block-source-pane';
-    this.sourceSticky = document.createElement('div');
-    this.sourceSticky.className = 'meo-mermaid-source-sticky';
-    this.sourceHost = document.createElement('div');
-    this.sourceHost.className = 'meo-mermaid-source-editor';
-    this.sourceSticky.appendChild(this.sourceHost);
-    this.sourcePane.appendChild(this.sourceSticky);
-    this.root.appendChild(this.sourcePane);
-
-    this.innerView = new EditorView({
-      state: EditorState.create({
-        doc: block.diagramText,
-        extensions: [
-          lineNumbers(),
-          shikiDocumentHighlight('mermaid'),
-          innerMermaidSearchField,
-          EditorView.lineWrapping,
-          EditorView.domEventHandlers({
-            beforeinput: () => {
-              const caret = this.innerView.coordsAtPos(this.innerView.state.selection.main.head);
-              const viewport = this.outerView.scrollDOM.getBoundingClientRect();
-              // A clipped caret belongs to nested-input continuity, which will
-              // reveal it once at the nearest edge. Letting the projection lock
-              // own that same input makes the two viewport intents visibly race.
-              acquireMermaidSourceProjectionLock(
-                this.outerView,
-                this.block.anchor,
-                Boolean(caret && caret.top >= viewport.top && caret.bottom <= viewport.bottom)
-              );
-              return false;
-            },
-            blur: () => {
-              const projectionLock = mermaidSourceProjectionLocks
-                .get(this.outerView)
-                ?.get(this.block.anchor);
-              if (projectionLock) {
-                releaseMermaidSourceProjectionLockAfterFrame(
-                  this.outerView,
-                  this.block.anchor,
-                  projectionLock
-                );
-              }
-              return false;
-            }
-          }),
-          keymap.of([
-            ...renderedBlockSourceBoundaryKeys({
-              outerView,
-              bounds: () => this.block,
-              selection: () => this.getModeSelection(),
-              releaseProjection: () => { takeMermaidModeSelection(this.outerView, this.innerView.contentDOM); }
-            }),
-            { key: 'Mod-z', run: () => consumeEditorHistoryCommand(this.outerView, 'undo') },
-            { key: 'Mod-y', run: () => consumeEditorHistoryCommand(this.outerView, 'redo') },
-            { key: 'Mod-Shift-z', run: () => consumeEditorHistoryCommand(this.outerView, 'redo') },
-            { key: 'Tab', run: indentMore, shift: indentLess },
-            ...defaultKeymap
-          ]),
-          EditorView.updateListener.of((update) => {
-            this.innerInteractionContinuity?.observe(update);
-            if (!update.docChanged || this.syncingFromOuter) {
-              return;
-            }
-            const nextText = update.state.doc.toString();
-            const { contentFrom, contentTo } = this.block;
-            const outerSourceText = applyMermaidSourceLinePrefix(nextText, this.block.sourceLinePrefix);
-            const currentOuterSourceText = this.outerView.state.doc.sliceString(contentFrom, contentTo);
-            if (currentOuterSourceText === outerSourceText) {
-              return;
-            }
-            const userEvent = update.transactions.reduce<string | undefined>(
-              (current, transaction) => transaction.annotation(Transaction.userEvent) ?? current,
-              undefined
-            ) ?? 'input';
-            const change = resolveMermaidSourceProjection(
-              contentFrom,
-              currentOuterSourceText,
-              outerSourceText
-            );
-            const nextBlock = {
-              ...this.block,
-              contentTo: contentFrom + outerSourceText.length,
-              diagramText: nextText
-            };
-            this.block = nextBlock;
-            const viewportController = getViewportController(this.outerView);
-            const projectionLock = acquireMermaidSourceProjectionLock(
-              this.outerView,
-              this.block.anchor
-            );
-            const scrollTop = projectionLock.scrollTop;
-            viewportController?.markInteraction();
-            const retainInnerFocus = this.root.contains(document.activeElement);
-            const innerSelection = update.state.selection.main;
-            // The replacement widget must remain in CodeMirror's rendered
-            // viewport while its nested editor owns focus. The projection lock
-            // restores the unrelated outer selection after focus leaves.
-            const needsOuterSelectionKeepAlive = (
-              retainInnerFocus ||
-              this.root.getBoundingClientRect().height > this.outerView.scrollDOM.clientHeight
-            );
-            const projection = this.outerView.state.update({
-              changes: change,
-              selection: needsOuterSelectionKeepAlive
-                ? {
-                    anchor: nextBlock.contentFrom + mermaidEditorOffsetToOuterOffset(
-                      nextText,
-                      nextBlock.sourceLinePrefix,
-                      update.state.selection.main.head
-                    )
-                  }
-                : undefined,
-              effects: replaceLiveInputNestedDecoration(
-                nextBlock.contentFrom,
-                nextBlock.contentTo,
-                Decoration.replace({
-                  widget: new MermaidEditingWidget(nextBlock, this.mode, this.searchReveal),
-                  block: true,
-                  inclusive: true
-                })
-              ),
-              annotations: [
-                Transaction.userEvent.of(userEvent),
-                markLiveInputNestedProjection()
-              ]
-            });
-            projectionLock.previousSelection = projectionLock.previousSelection.map(projection.changes);
-            projectionLock.pinnedSelection = projection.newSelection;
-            this.outerView.dispatch(projection);
-            // Mapping the replaced outer range can briefly transfer DOM focus
-            // back to CodeMirror even when updateDOM retains this controller.
-            // Keep rapid key sequences owned by the embedded source editor.
-            if (retainInnerFocus) {
-              const currentBlock = this.outerView.dom.querySelector<MermaidEditingBlockElement>(
-                `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${nextBlock.anchor}"]`
-              );
-              const currentController = currentBlock?.__meoMermaidEditingController;
-              if (currentController && !currentController.innerView.hasFocus) {
-                const head = Math.min(innerSelection.head, currentController.innerView.state.doc.length);
-                currentController.innerView.dispatch({ selection: { anchor: head } });
-                currentController.innerView.contentDOM.focus({ preventScroll: true });
-              }
-            }
-            if (projectionLock.preserveScroll) {
-              viewportController?.lockScrollTop(scrollTop, projectionLock.isExplicitNavigationCurrent);
-            }
-            const outerView = this.outerView;
-            queueMicrotask(() => {
-              const lockIsCurrent = mermaidSourceProjectionLocks
-                .get(outerView)
-                ?.get(this.block.anchor) === projectionLock;
-              if (outerView.dom.isConnected && lockIsCurrent && projectionLock.preserveScroll) {
-                viewportController?.lockScrollTop(scrollTop, projectionLock.isExplicitNavigationCurrent);
-              }
-            });
-          })
-        ]
-      }),
-      parent: this.sourceHost
-    });
-
-    this.innerInteractionContinuity = createNestedEditorInteractionContinuity({
-      view: this.innerView,
-      isActive: () => this.root.isConnected,
-      interactionTarget: this.outerView.scrollDOM,
-      viewport: {
-        readBounds: () => editorViewportBounds(this.outerView),
-        readScrollTop: () => this.outerView.scrollDOM.scrollTop,
-        revealCaret: (position, isCurrent, originScrollTop) => {
-          if (!isCurrent()) return;
-          const margin = visualLineContextMargin(this.outerView, 1);
-          getViewportController(this.outerView)?.revealVerticalBounds(
-            () => {
-              const caret = this.innerView.coordsAtPos(
-                Math.max(0, Math.min(position, this.innerView.state.doc.length))
-              );
-              return caret ? { top: caret.top, bottom: caret.bottom } : null;
-            },
-            isCurrent,
-            { yMargin: margin, originScrollTop }
-          );
-        }
-      }
-    });
-
-    this.setMode(mode, true);
-    this.setSearchReveal(searchReveal);
-    this.root.__meoMermaidEditingController = this;
-  }
-
-  get dom(): HTMLElement {
-    return this.root;
-  }
-
-  focus(): void {
-    this.innerView.contentDOM.focus({ preventScroll: true });
-  }
-
-  selectAll(): void {
-    this.innerView.dispatch({
-      selection: { anchor: 0, head: this.innerView.state.doc.length }
-    });
-    this.innerView.contentDOM.focus({ preventScroll: true });
-  }
-
-  focusOffset(offset: number, isCurrent: () => boolean = () => true): boolean {
-    if (!isCurrent()) return false;
-    const position = Math.max(0, Math.min(offset, this.innerView.state.doc.length));
-    this.innerView.dispatch({
-      selection: { anchor: position }
-    });
-    if (!isCurrent()) return false;
-    this.innerView.contentDOM.focus({ preventScroll: true });
-    if (!isCurrent()) return false;
-    // History must account for the passive header before handing keyboard
-    // ownership back. Otherwise the first input reveals a partly covered caret.
-    const viewportController = getViewportController(this.outerView);
-    const caret = this.innerView.coordsAtPos(position);
-    const visibleBounds = editorViewportBounds(this.outerView);
-    if (caret && (caret.top < visibleBounds.top || caret.bottom > visibleBounds.bottom)) {
-      const margin = visualLineContextMargin(this.outerView, 1);
-      viewportController?.navigateBy({ top: caret.top < visibleBounds.top
-        ? caret.top - visibleBounds.top - margin
-        : caret.bottom - visibleBounds.bottom + margin });
-    }
-    // Let the outer replacement finish measuring before reading inner caret
-    // coordinates; its transient geometry must not override history placement.
-    const isNavigationCurrent = getViewportController(this.outerView)?.captureNavigationCurrentness() ?? (() => true);
-    requestAnimationFrame(() => {
-      if (!isCurrent() || !isNavigationCurrent() || !this.root.isConnected) return;
-      this.innerView.requestMeasure({
-        read: (innerView) => {
-          if (!isCurrent() || !isNavigationCurrent()) return null;
-          const coords = innerView.coordsAtPos(position);
-          const viewport = editorViewportBounds(this.outerView);
-          if (!coords || (coords.top >= viewport.top && coords.bottom <= viewport.bottom)) {
-            return null;
-          }
-          return coords.top - viewport.top - viewport.height * 0.3;
-        },
-        write: (delta) => {
-          if (isCurrent() && isNavigationCurrent() && delta !== null) {
-            getViewportController(this.outerView)?.navigateBy({ top: delta });
-          }
+  layout.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const current = Number(label.dataset.meoMermaidAnchor);
+    if (!isMermaidAnchor(view.state, current) || layout.disabled) return;
+    toggleLayout(view, current);
+    if (event.detail === 0) {
+      const focusNext = () => {
+        const floating = blockMode(view, current)?.layout === 'side-by-side'
+          ? view.dom.querySelector<HTMLButtonElement>('.meo-block-sticky-header:not([hidden]) .meo-mermaid-layout-btn') : null;
+        const next = floating ?? view.dom.querySelector<HTMLButtonElement>(
+          `.meo-mermaid-editing-preview[data-meo-mermaid-anchor="${current}"] .meo-mermaid-layout-btn`
+        );
+        if (next) focusRenderedBlockAction(next, false);
+        return !!next;
+      };
+      requestAnimationFrame(() => {
+        if (focusNext() || blockMode(view, current)?.manual !== 'edit') return;
+        // Long stacked source can leave its new preview virtualized below the viewport.
+        const source = mermaidSourceForAnchor(view.state, current);
+        if (!source) return;
+        const controller = getViewportController(view);
+        if (controller) {
+          const isCurrent = controller.beginNavigationReveal();
+          controller.revealPosition(source.closing.from, { y: 'start', yMargin: 40 }, isCurrent);
+          void controller.whenPresentationSettled(1000, isCurrent).then(() => {
+            if (isCurrent()) focusNext();
+          });
+        } else {
+          view.dispatch({ effects: EditorView.scrollIntoView(source.closing.from, { y: 'start', yMargin: 40 }) });
+          requestAnimationFrame(focusNext);
         }
       });
-    });
-    return true;
-  }
-
-  getModeSelection(): { anchor: number; head: number } {
-    const selection = this.innerView.state.selection.main;
-    const position = (offset: number) => this.block.contentFrom + mermaidEditorOffsetToOuterOffset(
-      this.block.diagramText, this.block.sourceLinePrefix, offset
-    );
-    return { anchor: position(selection.anchor), head: position(selection.head) };
-  }
-
-  restoreModeSelection(
-    selection: { anchor: number; head: number },
-    restoreFocus: boolean
-  ): HTMLElement | null {
-    if (
-      Math.min(selection.anchor, selection.head) < this.block.contentFrom ||
-      Math.max(selection.anchor, selection.head) > this.block.contentTo
-    ) return null;
-    const position = (offset: number) => mermaidOuterOffsetToEditorOffset(
-      this.block.diagramText, this.block.sourceLinePrefix, offset - this.block.contentFrom
-    );
-    this.innerView.dispatch({
-      selection: { anchor: position(selection.anchor), head: position(selection.head) }
-    });
-    if (restoreFocus) this.innerView.contentDOM.focus({ preventScroll: true });
-    return this.innerView.contentDOM;
-  }
-
-  focusOuterOffset(offset: number, isCurrent: () => boolean = () => true): boolean {
-    return this.focusOffset(mermaidOuterOffsetToEditorOffset(
-      this.block.diagramText,
-      this.block.sourceLinePrefix,
-      offset
-    ), isCurrent);
-  }
-
-  update(
-    outerView: EditorView,
-    block: MermaidEditingBlock,
-    mode: Exclude<MermaidBlockMode, 'preview'>,
-    searchReveal: MermaidSearchReveal
-  ): boolean {
-    if (block.anchor !== this.block.anchor || block.viewportState !== this.block.viewportState) {
-      return false;
     }
-    this.outerView = outerView;
-    this.block = block;
-    const currentText = this.innerView.state.doc.toString();
-    if (currentText !== block.diagramText) {
-      this.syncingFromOuter = true;
-      this.innerView.dispatch({
-        changes: { from: 0, to: currentText.length, insert: block.diagramText }
-      });
-      this.syncingFromOuter = false;
-    }
-    this.setMode(mode, false);
-    this.setSearchReveal(searchReveal);
-    if (mode === 'split') {
-      if (this.previewWidget?.diagramText !== block.diagramText) {
-        this.schedulePreviewRender();
-      } else {
-        this.previewWidget.updateSource(block.diagramText, block.startLine, block.endLine);
-      }
-    }
-    return true;
-  }
-
-  private setMode(mode: Exclude<MermaidBlockMode, 'preview'>, initial: boolean): void {
-    if (!initial && mode === this.mode) {
-      return;
-    }
-    this.mode = mode;
-    const decision = decideRenderedBlockModeShell({
-      kind: 'mermaid',
-      lineNumber: this.block.startLine,
-      manualMode: mode,
-      temporaryReveal: false,
-      uiLanguage: this.outerView.state.facet(uiLanguageFacet)
-    });
-    this.root.className = `meo-mermaid-editing-block meo-rendered-block-mode-shell ${decision.modeClass}`;
-    this.root.dataset.meoRenderedBlockMode = decision.effectiveMode;
-    this.root.dataset.meoRenderedBlockLayout = decision.wideLayout;
-    if (decision.previewLifecycle === 'deferred') {
-      const preferredHeight = getCachedMermaidPreviewHeight(
-        this.presentationFactory,
-        this.outerView,
-        this.block.diagramText,
-        this.block.startLine
-      );
-      if (preferredHeight) {
-        this.root.style.setProperty('--meo-mermaid-preview-preferred-height', `${preferredHeight}px`);
-      }
-      if (!this.previewShell) {
-        this.previewShell = document.createElement('div');
-        this.previewShell.className = 'meo-mermaid-preview-shell meo-rendered-block-preview-pane';
-        this.previewSticky = document.createElement('div');
-        this.previewSticky.className = 'meo-mermaid-preview-sticky';
-        this.previewShell.appendChild(this.previewSticky);
-        this.root.appendChild(this.previewShell);
-      }
-      this.renderPreview();
-    } else if (decision.previewLifecycle === 'destroyed' && this.previewShell) {
-      this.root.style.removeProperty('--meo-mermaid-preview-preferred-height');
-      this.destroyPreview();
-      this.previewShell.remove();
-      this.previewShell = null;
-      this.previewSticky = null;
-    }
-  }
-
-  private setSearchReveal(searchReveal: MermaidSearchReveal): void {
-    this.searchReveal = searchReveal;
-    if (!searchReveal) {
-      this.innerView.dispatch({ effects: setInnerMermaidSearchRangeEffect.of(null) });
-      return;
-    }
-    const anchor = Math.max(0, Math.min(
-      this.innerView.state.doc.length,
-      searchReveal.from - this.block.contentFrom
-    ));
-    const head = Math.max(anchor, Math.min(
-      this.innerView.state.doc.length,
-      searchReveal.to - this.block.contentFrom
-    ));
-    const selection = this.innerView.state.selection.main;
-    const selectionSpec = selection.anchor !== anchor || selection.head !== head
-      ? { anchor, head }
-      : undefined;
-    this.innerView.dispatch({
-      selection: selectionSpec,
-      effects: setInnerMermaidSearchRangeEffect.of({ from: anchor, to: head })
-    });
-  }
-
-  private schedulePreviewRender(): void {
-    // Decoration/preload refreshes for the same source must not restart the
-    // typing delay, otherwise a ready cached diagram still waits again.
-    if (this.previewTimer !== null && this.scheduledPreviewSource === this.block.diagramText) return;
-    // Protect the preview's input-coalescing window as well as its render.
-    // Otherwise a deferred full-document rebuild can occupy this timer turn.
-    this.root.dataset.meoMermaidRendering = 'true';
-    if (this.previewTimer !== null) {
-      window.clearTimeout(this.previewTimer);
-    }
-    this.scheduledPreviewSource = this.block.diagramText;
-    this.previewTimer = window.setTimeout(() => {
-      this.previewTimer = null;
-      this.scheduledPreviewSource = null;
-      this.renderPreview();
-    }, 80);
-  }
-
-  private renderPreview(): void {
-    delete this.root.dataset.meoMermaidRendering;
-    if (!this.previewSticky) {
-      return;
-    }
-    if (this.previewWidget) {
-      // Reuse the presentation handle: it retains the old SVG while rendering,
-      // reuses cached results, and rejects superseded completions.
-      this.previewWidget.updateSource(this.block.diagramText, this.block.startLine, this.block.endLine);
-      return;
-    }
-    const apply = () => {
-      this.previewWidget = new MermaidDiagramWidget(
-        this.block.diagramText,
-        this.block.startLine,
-        this.block.endLine,
-        {
-          presentationFactory: this.presentationFactory,
-          viewportState: this.block.viewportState,
-          cachePreviewHeight: false,
-          uiLanguage: this.outerView.state.facet(uiLanguageFacet)
-        }
-      );
-      // The split preview is outside CodeMirror's own document measurement.
-      // Pass the outer view so both the immediate loading shell and the later
-      // diagram presentation participate in the shared viewport settlement.
-      this.previewSticky?.replaceChildren(this.previewWidget.toDOM(this.outerView));
-    };
-    const viewportController = getViewportController(this.outerView);
-    if (!viewportController || !this.root.isConnected) {
-      apply();
-      return;
-    }
-    const startLine = this.outerView.state.doc.line(Math.min(
-      this.block.startLine,
-      this.outerView.state.doc.lines
-    ));
-    const endLine = this.outerView.state.doc.line(Math.min(
-      this.block.endLine,
-      this.outerView.state.doc.lines
-    ));
-    viewportController.preserveLayoutChange({
-      element: this.root,
-      from: startLine.from,
-      to: endLine.to
-    }, apply);
-  }
-
-  private destroyPreview(): void {
-    delete this.root.dataset.meoMermaidRendering;
-    this.previewWidget?.destroy();
-    this.previewWidget = null;
-    this.previewSticky?.replaceChildren();
-  }
-
-  destroy(): void {
-    this.innerInteractionContinuity?.dispose();
-    this.innerInteractionContinuity = null;
-    const projectionLock = mermaidSourceProjectionLocks.get(this.outerView)?.get(this.block.anchor);
-    if (projectionLock) {
-      releaseMermaidSourceProjectionLockAfterFrame(
-        this.outerView,
-        this.block.anchor,
-        projectionLock
-      );
-    }
-    if (this.previewTimer !== null) {
-      window.clearTimeout(this.previewTimer);
-      this.previewTimer = null;
-    }
-    this.destroyPreview();
-    this.innerView.destroy();
-    delete this.root.__meoMermaidEditingController;
-  }
+  });
+  label.append(title, layout);
+  updateMermaidLayoutButton(layout, view,
+    view.state.field(mermaidEditingStateField).narrow || view.dom.clientWidth < MERMAID_SIDE_MIN_WIDTH);
+  return label;
 }
 
-export class MermaidEditingWidget extends UiLanguageSensitiveWidget {
+export class MermaidSourcePreviewWidget extends UiLanguageSensitiveWidget {
   constructor(
-    readonly block: MermaidEditingBlock,
-    readonly mode: Exclude<MermaidBlockMode, 'preview'>,
-    readonly searchReveal: MermaidSearchReveal
+    readonly anchor: number,
+    readonly source: string,
+    readonly startLine: number,
+    readonly endLine: number,
+    readonly indent: LiveBlockIndentValue,
+    readonly language: UiLanguage,
+    readonly viewport: MermaidViewportState
   ) {
     super();
   }
-
-  get estimatedHeight(): number {
-    return estimateBlockWidgetHeight({
-      kind: 'rendered-block-editor',
-      renderer: 'mermaid',
-      mode: this.mode,
-      source: this.block.diagramText
-    });
-  }
-
   eq(other: WidgetType): boolean {
-    return other instanceof MermaidEditingWidget &&
+    return (
+      other instanceof MermaidSourcePreviewWidget &&
       this.hasSameUiLanguageEpoch(other) &&
-      other.block.anchor === this.block.anchor &&
-      other.block.viewportState === this.block.viewportState &&
-      other.block.startLine === this.block.startLine &&
-      other.block.diagramText === this.block.diagramText &&
-      other.block.sourceLinePrefix === this.block.sourceLinePrefix &&
-      liveBlockIndentKey(other.block.indentColumns) === liveBlockIndentKey(this.block.indentColumns) &&
-      other.mode === this.mode &&
-      other.searchReveal?.from === this.searchReveal?.from &&
-      other.searchReveal?.to === this.searchReveal?.to;
+      this.anchor === other.anchor &&
+      this.source === other.source &&
+      this.viewport === other.viewport &&
+      this.language === other.language &&
+      liveBlockIndentKey(this.indent) === liveBlockIndentKey(other.indent)
+    );
   }
-
   toDOM(view: EditorView): HTMLElement {
-    const dom = new MermaidEditingController(view, this.block, this.mode, this.searchReveal).dom;
-    applyLiveBlockIndent(dom, this.block.indentColumns);
-    return dom;
+    const root = document.createElement('div') as PreviewElement;
+    root.className = 'meo-mermaid-editing-preview';
+    root.contentEditable = 'false';
+    root.dataset.meoMermaidAnchor = String(this.anchor);
+    root.dataset.meoUiLanguage = view.state.facet(uiLanguageFacet);
+    applyLiveBlockIndent(root, this.indent);
+    const label = createMermaidPreviewHeading(view, this.anchor);
+    const widget = new MermaidDiagramWidget(this.source, this.startLine, this.endLine, {
+      presentationFactory: getMermaidDiagramPresentationFactory(view.state),
+      viewportState: this.viewport,
+      cachePreviewHeight: false,
+      uiLanguage: view.state.facet(uiLanguageFacet)
+    });
+    root.append(label, widget.toDOM(view));
+    root.mermaidPreview = { widget, source: this.source, viewport: this.viewport };
+    return root;
   }
-
-  updateDOM(dom: HTMLElement, view: EditorView): boolean {
-    const controller = (dom as MermaidEditingBlockElement).__meoMermaidEditingController;
-    const updated = controller?.update(view, this.block, this.mode, this.searchReveal) ?? false;
-    if (updated) {
-      dom.setAttribute('aria-label', decideRenderedBlockModeShell({
-        kind: 'mermaid',
-        lineNumber: this.block.startLine,
-        manualMode: this.mode,
-        temporaryReveal: false,
-        uiLanguage: view.state.facet(uiLanguageFacet)
-      }).editorLabel);
-      applyLiveBlockIndent(dom, this.block.indentColumns);
-    }
-    return updated;
+  updateDOM(root: PreviewElement, view: EditorView): boolean {
+    if (root.dataset.meoUiLanguage !== view.state.facet(uiLanguageFacet)) return false;
+    const preview = root.mermaidPreview;
+    // Replacing the entire fenced block creates a new camera, even at the same position.
+    if (!preview || preview.viewport !== this.viewport) return false;
+    root.dataset.meoMermaidAnchor = String(this.anchor);
+    root.querySelector<HTMLElement>('.meo-native-source-preview-label')!.dataset.meoMermaidAnchor = String(this.anchor);
+    updateMermaidLayoutButton(root.querySelector<HTMLButtonElement>('.meo-mermaid-layout-btn')!, view,
+      view.state.field(mermaidEditingStateField).narrow || view.dom.clientWidth < MERMAID_SIDE_MIN_WIDTH);
+    if (preview.source === this.source) return true;
+    preview.source = this.source;
+    root.dataset.meoMermaidRendering = 'true';
+    clearTimeout(preview.timer);
+    preview.timer = window.setTimeout(() => {
+      preview.timer = undefined;
+      preview.widget.updateSource(preview.source, this.startLine, this.endLine);
+      delete root.dataset.meoMermaidRendering;
+    }, 80);
+    return true;
   }
-
+  destroy(root: PreviewElement): void {
+    clearTimeout(root.mermaidPreview?.timer);
+    root.mermaidPreview?.widget.destroy();
+  }
   ignoreEvent(): boolean {
     return true;
   }
+}
 
-  destroy(dom: HTMLElement): void {
-    (dom as MermaidEditingBlockElement).__meoMermaidEditingController?.destroy();
+/** Only reserves the height missing below short source; it never owns input. */
+export class MermaidSideSpaceWidget extends WidgetType {
+  constructor(
+    readonly height: number,
+    readonly indent: LiveBlockIndentValue
+  ) {
+    super();
+  }
+  eq(other: WidgetType): boolean {
+    return (
+      other instanceof MermaidSideSpaceWidget &&
+      other.height === this.height &&
+      liveBlockIndentKey(other.indent) === liveBlockIndentKey(this.indent)
+    );
+  }
+  get estimatedHeight(): number {
+    return this.height;
+  }
+  toDOM(): HTMLElement {
+    const root = document.createElement('div');
+    root.className = 'meo-mermaid-side-space';
+    root.style.height = this.height + 'px';
+    root.contentEditable = 'false';
+    applyLiveBlockIndent(root, this.indent);
+    return root;
+  }
+  ignoreEvent(): boolean {
+    return true;
   }
 }
+
+function mermaidTextBlockAt(view: EditorView, position: number) {
+  const line = view.lineBlockAt(position),
+    parts = line.type;
+  return typeof parts === 'number'
+    ? line
+    : (parts.find((part) => part.type === BlockType.Text && part.from <= position && part.to >= position) ??
+        line);
+}
+
+/** The native source stays in document flow. Only its derived canvas is placed beside it. */
+class MermaidInlinePreview {
+  private panel: HTMLElement | null = null;
+  private preview: PreviewElement | null = null;
+  private presenter: MermaidSourcePreviewWidget | null = null;
+  private sourceShare = 40;
+  private minimumPreviewWidth = 280;
+  private bounds = { left: 0, width: 1, minShare: 30, maxShare: 65 };
+  private disposed = false;
+  constructor(private readonly view: EditorView) {
+    this.schedule();
+  }
+  update(update: ViewUpdate): void {
+    if (
+      update.docChanged ||
+      update.selectionSet ||
+      update.viewportChanged ||
+      update.geometryChanged ||
+      update.transactions.some((transaction) => transaction.effects.length)
+    )
+      this.schedule();
+  }
+  private schedule(): void {
+    if (this.disposed) return;
+    this.view.requestMeasure({
+      key: this,
+      read: () => this.measure(),
+      write: (result) => {
+        if (!this.disposed) this.draw(result);
+      }
+    });
+  }
+  private measure() {
+    const view = this.view;
+    const source = activeMermaidSource(view.state),
+      mode = source && blockMode(view, source.anchor);
+    const position = source && Math.max(source.opening.from, Math.min(source.closing.to, view.state.selection.main.head));
+    const node = position == null ? null : view.domAtPos(position).node;
+    const row = view.dom.querySelector<HTMLElement>('.meo-mermaid-inline-source,.meo-mermaid-side-space')
+      ?? (node instanceof Element ? node : node?.parentElement)?.closest<HTMLElement>('.cm-line');
+    const block = row?.getBoundingClientRect();
+    const blockWidth = block ? block.width / view.scaleX : 0;
+    const heading = source && view.dom.querySelector<HTMLElement>(
+      `.meo-mermaid-editing-preview[data-meo-mermaid-anchor="${source.anchor}"] .meo-native-source-preview-label`
+    );
+    const toolbar = source && view.dom.querySelector<HTMLElement>(`.meo-mermaid-toolbar[data-meo-block-from="${source.anchor}"]`);
+    const actionsWidth = toolbar ? toolbar.getBoundingClientRect().width / view.scaleX : 100;
+    if (heading) {
+      const [title, action] = Array.from(heading.children);
+      if (title && action) this.minimumPreviewWidth = Math.ceil(
+        (title.getBoundingClientRect().width + action.getBoundingClientRect().width) / view.scaleX
+        + actionsWidth + 40
+      );
+    }
+    const narrow = view.dom.clientWidth < MERMAID_SIDE_MIN_WIDTH
+      || !!blockWidth && blockWidth < this.minimumPreviewWidth + 200;
+    if (!source || mode?.manual !== 'edit' || mode.layout !== 'side-by-side' || narrow)
+      return { narrow, source: null, geometry: null };
+    if (!block) return { narrow, source, geometry: null };
+    const minShare = Math.max(30, 200 / blockWidth * 100);
+    const maxShare = Math.min(65, (1 - this.minimumPreviewWidth / blockWidth) * 100);
+    const sourceShare = Math.max(minShare, Math.min(maxShare, this.sourceShare));
+    const first = mermaidTextBlockAt(view, source.opening.from);
+    const last = mermaidTextBlockAt(view, source.closing.from);
+    const sourceHeight = Math.max(view.defaultLineHeight, last.bottom - first.top);
+    const viewportHeight = Math.max(160, view.scrollDOM.clientHeight - 40);
+    const space = Math.ceil(Math.max(0, Math.min(480, viewportHeight) - sourceHeight));
+    const scroller = view.scrollDOM.getBoundingClientRect();
+    // DOM rectangles include CSS scaling; CodeMirror block heights use editor pixels.
+    const width = blockWidth * (1 - sourceShare / 100);
+    return {
+      narrow,
+      source,
+      geometry: {
+        top: (view.documentTop - scroller.top) / view.scaleY + first.top + view.scrollDOM.scrollTop,
+        left: (block.right - scroller.left) / view.scaleX + view.scrollDOM.scrollLeft - width,
+        width,
+        height: sourceHeight + space,
+        canvasHeight: Math.min(sourceHeight + space, viewportHeight),
+        space,
+        blockLeft: block.left,
+        blockWidth: block.width,
+        minShare, maxShare, sourceShare, actionsWidth
+      }
+    };
+  }
+  private draw({ narrow, source, geometry }: ReturnType<MermaidInlinePreview['measure']>): void {
+    const view = this.view,
+      strings = getUiStrings(view.state.facet(uiLanguageFacet));
+    for (const button of view.dom.querySelectorAll<HTMLButtonElement>('.meo-mermaid-layout-btn')) {
+      updateMermaidLayoutButton(button, view, narrow);
+    }
+    if (narrow !== view.state.field(mermaidEditingStateField).narrow) {
+      queueMicrotask(() => {
+        if (!this.disposed) view.dispatch({ effects: setMermaidNarrowEffect.of(narrow) });
+      });
+      return;
+    }
+    if (!source) {
+      this.clear();
+      return;
+    }
+    if (!geometry) {
+      if (this.panel) this.panel.hidden = true;
+      return;
+    }
+    const next = new MermaidSourcePreviewWidget(
+      source.anchor,
+      source.source,
+      source.opening.number,
+      source.closing.number,
+      0,
+      view.state.facet(uiLanguageFacet),
+      getMermaidBlockViewport(view.state, source.anchor)
+    );
+    let replacing = false;
+    if (
+      !this.panel ||
+      this.panel.dataset.meoMermaidAnchor !== String(source.anchor) ||
+      !this.preview ||
+      !next.updateDOM(this.preview, view)
+    ) {
+      replacing = true;
+      this.clear();
+      this.panel = document.createElement('aside');
+      this.panel.className = 'meo-mermaid-inline-preview';
+      this.panel.setAttribute('aria-label', strings.mermaidCurrentPreview);
+      this.panel.dataset.meoMermaidAnchor = String(source.anchor);
+      this.preview = next.toDOM(view) as PreviewElement;
+      const separator = document.createElement('div');
+      separator.className = 'meo-mermaid-inline-separator';
+      separator.tabIndex = 0;
+      separator.setAttribute('role', 'separator');
+      separator.setAttribute('aria-orientation', 'vertical');
+      separator.setAttribute('aria-label', strings.mermaidResizePreview);
+      separator.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        separator.setPointerCapture(event.pointerId);
+      });
+      separator.addEventListener('pointermove', (event) => {
+        if (separator.hasPointerCapture(event.pointerId))
+          this.setShare(((event.clientX - this.bounds.left) / this.bounds.width) * 100);
+      });
+      separator.addEventListener('pointerup', (event) => {
+        if (separator.hasPointerCapture(event.pointerId)) separator.releasePointerCapture(event.pointerId);
+      });
+      separator.addEventListener('keydown', (event) => {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+        event.preventDefault();
+        event.stopPropagation();
+        const visibleShare = Math.max(this.bounds.minShare, Math.min(this.bounds.maxShare, this.sourceShare));
+        this.setShare(visibleShare + (event.key === 'ArrowLeft' ? -5 : 5));
+      });
+      this.panel.append(this.preview, separator);
+      view.scrollDOM.append(this.panel);
+    }
+    this.presenter = next;
+    this.panel.hidden = false;
+    this.bounds = { left: geometry.blockLeft, width: geometry.blockWidth, minShare: geometry.minShare, maxShare: geometry.maxShare };
+    const separator = this.panel.querySelector('[role="separator"]')!;
+    separator.setAttribute('aria-valuemin', String(Math.round(geometry.minShare)));
+    separator.setAttribute('aria-valuemax', String(Math.round(geometry.maxShare)));
+    separator.setAttribute('aria-valuenow', String(Math.round(geometry.sourceShare)));
+    view.dom.style.setProperty('--meo-mermaid-preview-share', String(1 - geometry.sourceShare / 100));
+    this.panel.style.setProperty('--meo-mermaid-actions-width', geometry.actionsWidth + 'px');
+    const { top, left, width, height, canvasHeight, space } = geometry;
+    Object.assign(this.panel.style, {
+      top: top + 'px',
+      left: left + 'px',
+      width: width + 'px',
+      height: height + 'px'
+    });
+    this.preview!.style.height = canvasHeight + 'px';
+    if (replacing) this.schedule();
+    if (view.state.field(mermaidEditingStateField).sideSpace !== space)
+      queueMicrotask(() => {
+        if (!this.disposed)
+          view.dispatch({
+            effects: setMermaidSideSpaceEffect.of({ anchor: source.anchor, height: space })
+          });
+      });
+  }
+  private setShare(share: number): void {
+    this.sourceShare = Math.max(this.bounds.minShare, Math.min(this.bounds.maxShare, share));
+    this.schedule();
+  }
+  private clear(): void {
+    if (!this.panel) return;
+    if (this.preview) this.presenter?.destroy(this.preview);
+    this.panel.remove();
+    this.panel = this.preview = null;
+    this.presenter = null;
+    this.view.requestMeasure();
+  }
+  destroy(): void {
+    this.disposed = true;
+    this.clear();
+    this.view.dom.style.removeProperty('--meo-mermaid-preview-share');
+  }
+}
+export const mermaidInlinePreviewExtension = ViewPlugin.fromClass(MermaidInlinePreview);

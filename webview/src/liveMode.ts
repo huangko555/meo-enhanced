@@ -87,12 +87,13 @@ import { gitDiffLineFlagsField } from './helpers/gitDiffGutter';
 import { markdownTagField } from './helpers/tags';
 import {
   getMermaidBlockMode,
-  MermaidEditingWidget,
   mermaidEditingStateField,
-  setMermaidBlockModeEffect,
+  mermaidInlinePreviewExtension,
+  setMermaidLayoutEffect,
   setMermaidSearchRevealEffect
 } from './helpers/mermaidEditing';
 import { collectMarkdownLiteralRanges } from './helpers/markdownLiteralRanges';
+import { mermaidSourceForAnchor } from './helpers/mermaidSource';
 import { collectHexColorRangesFromText } from '../../src/shared/hexColorSwatches';
 import { shikiRefreshEffect } from './helpers/shikiDecorations';
 import { addColorSwatchDecoration, hexColorAdjustmentExtension } from './helpers/colorSwatches';
@@ -248,7 +249,7 @@ const headingGutterLineClassMarkers = Array.from({ length: 6 }, (_, index) => ne
 const renderedBlockPreviewAnchorGutterMarker = new (class extends GutterMarker {
   elementClass = 'meo-rendered-block-preview-anchor-gutter';
 })();
-type RenderedBlockDocumentLineNumberKind = 'mermaid' | 'math';
+type RenderedBlockDocumentLineNumberKind = 'math';
 
 class RenderedBlockPreviewLineNumberMarker extends GutterMarker {
   elementClass = 'meo-rendered-block-preview-line-number';
@@ -295,10 +296,8 @@ class RenderedBlockDocumentLineNumbersMarker extends GutterMarker {
   toDOM(view: EditorView): Node {
     const column = document.createElement('div') as RenderedBlockDocumentLineNumberColumn;
     column.className = 'meo-rendered-block-document-line-number-column';
-    const rootSelector = this.kind === 'mermaid'
-      ? `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${this.anchor}"]`
-      : `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${this.anchor}"]`;
-    const sourceSelector = this.kind === 'mermaid' ? '.meo-mermaid-source-editor' : '.meo-latex-math-source-editor';
+    const rootSelector = `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${this.anchor}"]`;
+    const sourceSelector = '.meo-latex-math-source-editor';
     column.__meoRenderedBlockLineNumberCleanup = mountProjectedLineNumbers(view, column,
       'meo-rendered-block-document-line-number', () => {
         const source = view.dom.querySelector<HTMLElement>(`${rootSelector} ${sourceSelector}`);
@@ -334,15 +333,6 @@ const renderedBlockLineNumberMarker = lineNumberWidgetMarker.of((view, widget, b
   const previewStartLine = getRenderedBlockPreviewStartLine(widget);
   if (previewStartLine !== null) {
     return new RenderedBlockPreviewLineNumberMarker(formatSourceLineNumber(previewStartLine, view.state));
-  }
-  if (widget instanceof MermaidEditingWidget) {
-    return new RenderedBlockDocumentLineNumbersMarker(
-      'mermaid',
-      widget.block.anchor,
-      widget.block.startLine + 1,
-      widget.block.diagramText.split('\n').map((_, index) =>
-        formatSourceLineNumber(widget.block.startLine + 1 + index, view.state))
-    );
   }
   if (widget instanceof LatexMathEditingWidget) {
     return new RenderedBlockDocumentLineNumbersMarker(
@@ -1995,20 +1985,23 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
         ranges.push(lineStyleDecos.codeBlockStart.range(state.doc.lineAt(node.from).from));
         ranges.push(lineStyleDecos.codeBlockEnd.range(state.doc.lineAt(Math.max(node.to - 1, node.from)).from));
         if (node.name === 'FencedCode') {
+          const codeInfo = getFencedCodeInfo(state, node);
+          const mermaidEditing = codeInfo === 'mermaid' && getMermaidBlockMode(
+            state, state.doc.lineAt(node.from).from, state.doc.lineAt(Math.max(node.to - 1, node.from)).to
+          ).manual === 'edit';
           addFenceOpeningLineMarker(
             ranges,
             state,
             node.from,
-            activeLines,
+            mermaidEditing ? new Set([...activeLines, state.doc.lineAt(node.from).number]) : activeLines,
             addRange,
             activeLineMarkerDeco,
             fenceMarkerDeco
           );
 
-          const codeInfo = getFencedCodeInfo(state, node);
           if (codeInfo === 'mermaid') {
             const sourceDecorationEnd = ranges.length;
-            if (addMermaidDiagram(ranges, state, node, activeLines)) {
+            if (addMermaidDiagram(ranges, state, node)) {
               ranges.splice(sourceDecorationStart, sourceDecorationEnd - sourceDecorationStart);
             }
             return;
@@ -2203,8 +2196,11 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
       }
       if (node.name === 'HeaderMark' && node.node.parent?.name.startsWith('SetextHeading')) return;
       if (isFenceMarker(state, node.from, node.to)) {
-        // Show fence markers on all lines (not just active)
-        addLineAwareRange(ranges, activeLines, line.number, node.from, node.to, fenceMarkerDeco, activeLineMarkerDeco);
+        const parent = node.node.parent;
+        const mermaidEditing = parent?.name === 'FencedCode' && getFencedCodeInfo(state, { node: parent }) === 'mermaid'
+          && getMermaidBlockMode(state, state.doc.lineAt(parent.from).from, state.doc.lineAt(Math.max(parent.from, parent.to - 1)).to).manual === 'edit';
+        if (mermaidEditing) addRange(ranges, node.from, node.to, activeLineMarkerDeco);
+        else addLineAwareRange(ranges, activeLines, line.number, node.from, node.to, fenceMarkerDeco, activeLineMarkerDeco);
       } else if (node.name === 'EmphasisMark') {
         const parentName = node.node.parent?.name;
         const inactiveDeco = parentName === 'StrongEmphasis' ? strongMarkerDeco : emMarkerDeco;
@@ -3310,6 +3306,9 @@ function projectInputCodeBlockLines(
       && lastChild?.name === 'CodeMark'
       && startDocument.lineAt(lastChild.from).number === endLine.number;
     const info = node.getChild('CodeInfo');
+    const language = info ? startDocument.sliceString(info.from, info.to).trim().toLowerCase() : null;
+    // Mermaid uses only the document gutter, including the first input frame.
+    if (language === 'mermaid') return;
     // Formula source owns its layout. Projecting ordinary code's inner line
     // numbers changes wrap width until the deferred formula refresh removes them.
     if (hasClosingFence && isMathFenceLanguage(info ? startDocument.sliceString(info.from, info.to) : null)) return;
@@ -3460,12 +3459,11 @@ const liveDecorationField = StateField.define<DecorationSet>({
 function isRenderedBlockPreview(state: EditorState, block: LiveRenderedBlock): boolean {
   if (block.kind === 'mermaid' && block.endLine > block.startLine + 1) {
     const anchor = state.doc.line(block.startLine).from;
-    const contentFrom = state.doc.line(block.startLine + 1).from;
-    const contentTo = state.doc.line(block.endLine - 1).to;
-    if (contentFrom >= contentTo || !state.doc.sliceString(contentFrom, contentTo).trim()) {
+    const source = mermaidSourceForAnchor(state, anchor);
+    if (!source?.source.trim()) {
       return false;
     }
-    return getMermaidBlockMode(state, anchor, contentFrom, contentTo).decision.effectiveMode === 'preview';
+    return getMermaidBlockMode(state, anchor, source.closing.to).decision.effectiveMode === 'preview';
   }
   if (block.kind === 'math') {
     return !isDisplayMathEditing(state, block.startLine, block.endLine);
@@ -3483,6 +3481,7 @@ function buildLiveLineNumberMarkers(state: EditorState): RangeSet<GutterMarker> 
   }
   for (const block of getLiveRenderedBlocks(state, { includeSelectedMath: true })) {
     if (block.kind === 'math' && isDisplayMathEditing(state, block.startLine, block.endLine)) continue;
+    if (block.kind === 'mermaid' && !isRenderedBlockPreview(state, block)) continue;
     if (isRenderedBlockPreview(state, block)) {
       const anchorLine = state.doc.line(block.startLine);
       builder.add(anchorLine.from, anchorLine.from, renderedBlockPreviewAnchorGutterMarker);
@@ -3639,7 +3638,7 @@ const liveLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
       return transaction.docChanged ? markers.map(transaction.changes) : markers;
     }
     const renderedBlockPresentationChanged = transaction.effects.some((effect) => (
-      effect.is(setMermaidBlockModeEffect)
+      effect.is(setMermaidLayoutEffect)
       || effect.is(setMermaidSearchRevealEffect)
       || effect.is(setLatexMathBlockModeEffect)
       || effect.is(setLatexMathSearchRevealEffect)
@@ -3702,6 +3701,7 @@ export function liveModeExtensions(options: { readonly largeDocument?: boolean }
     livePointerSelectionActiveField,
     liveDocumentIdleField,
     mermaidEditingStateField,
+    mermaidInlinePreviewExtension,
     latexMathEditingStateField,
     displayMathResultField,
     hexColorAdjustmentExtension(),

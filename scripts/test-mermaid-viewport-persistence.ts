@@ -53,19 +53,18 @@ try {
   };
   await waitForSource('flowchart LR\nA[original] --> B');
   await cycle();
-  await page.waitForSelector('.meo-mermaid-source-pane .cm-content');
+  await page.waitForSelector('.meo-mermaid-editing-preview');
   await page.waitForSelector(dock);
   await page.$eval(dock + ' button:first-child', node => (node as HTMLElement).click());
-  const rect = await page.$eval('.meo-rendered-block-preview-pane', node => node.getBoundingClientRect().toJSON());
+  const rect = await page.$eval('.meo-mermaid-block', node => node.getBoundingClientRect().toJSON());
   await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
   await page.mouse.down();
   await page.mouse.move(rect.x + rect.width / 2 + 36, rect.y + rect.height / 2 + 24, { steps: 4 });
   await page.mouse.up();
   const before = await camera();
   assert.deepEqual(before, { zoom: 1.5, panX: 36, panY: 24 });
-  await page.click('.meo-mermaid-source-pane .cm-content');
-  await page.keyboard.down('Control'); await page.keyboard.press('End'); await page.keyboard.up('Control');
-  await page.keyboard.type('\nC[changed]', { delay: 60 });
+  await page.evaluate(()=>{const e=(window as any).viewportEditor;const pos=e.getText().indexOf('\n```',e.getText().indexOf('```mermaid')+10);e.view.dispatch({selection:{anchor:pos}});e.view.focus();});
+  await page.evaluate(()=>{const e=(window as any).viewportEditor;e.pastePlainText('\nC[changed]');});
   await waitForSource('flowchart LR\nA[original] --> B\nC[changed]');
   assert.deepEqual(await camera(), before, 'Editing the split source preserves zoom and pan');
   stage = 'undo';
@@ -75,14 +74,11 @@ try {
   await page.evaluate(() => (window as any).viewportEditor.redo());
   await waitForSource('flowchart LR\nA[original] --> B\nC[changed]');
   assert.deepEqual(await camera(), before, 'Redo preserves the camera');
-  for (const mode of ['source', 'preview', 'split']) {
-    stage = `mode ${mode}`;
-    await cycle();
-    assert.equal(await page.$eval('.meo-mermaid-toolbar', node => (node as HTMLElement).dataset.meoMermaidMode), mode);
-    if (mode !== 'source') {
-      await waitForSource('flowchart LR\nA[original] --> B\nC[changed]');
-      assert.deepEqual(await camera(), before, `${mode} preserves the camera`);
-    }
+  for (const action of ['side','stacked','close','open']) {
+    stage = 'layout '+action;
+    if(action==='side'||action==='stacked') await page.$eval('.meo-mermaid-layout-btn',b=>(b as HTMLElement).click()); else await cycle();
+    await settle(); await waitForSource('flowchart LR\nA[original] --> B\nC[changed]');
+    assert.deepEqual(await camera(), before, action+' preserves the camera');
   }
   const replaceSource = async (source: string) => {
     await page.evaluate(source => {
@@ -168,10 +164,11 @@ try {
     const node = document.querySelector('.meo-mermaid-svg-wrapper');
     return node && new DOMMatrix(getComputedStyle(node).transform).a === 1;
   }, { timeout: 4000 });
+  await settle();
   assert.deepEqual(await camera(), { zoom: 1, panX: 0, panY: 0 }, 'Replacing the entire block creates a fresh camera even with identical source');
   stage = 'offscreen content correction';
   await page.$eval(dock + ' button:first-child', node => (node as HTMLElement).click());
-  const nextRect = await page.$eval('.meo-rendered-block-preview-pane', node => node.getBoundingClientRect().toJSON());
+  const nextRect = await page.$eval('.meo-mermaid-block', node => node.getBoundingClientRect().toJSON());
   await page.mouse.move(nextRect.x + 30, nextRect.y + nextRect.height / 2);
   await page.mouse.down();
   await page.mouse.move(nextRect.x + 530, nextRect.y + nextRect.height / 2, { steps: 5 });
@@ -206,19 +203,18 @@ try {
   });
   await page.waitForSelector('.meo-mermaid-svg-wrapper svg', { timeout: 15000 });
   await settle(); await cycle();
-  await page.waitForSelector('.meo-mermaid-preview-sticky svg'); await settle();
+  await page.waitForSelector('.meo-mermaid-editing-preview .meo-mermaid-svg-wrapper > svg'); await settle();
   await page.$eval(dock + ' button:first-child', node => (node as HTMLElement).click());
-  const realRect = await page.$eval('.meo-rendered-block-preview-pane', node => node.getBoundingClientRect().toJSON());
+  const realRect = await page.$eval('.meo-mermaid-block', node => node.getBoundingClientRect().toJSON());
   await page.mouse.move(realRect.x + realRect.width / 2, realRect.y + realRect.height / 2);
   await page.mouse.down();
   await page.mouse.move(realRect.x + realRect.width / 2 + 36, realRect.y + realRect.height / 2 + 24, { steps: 4 });
   await page.mouse.up();
   const realCamera = await camera();
   assert.deepEqual(realCamera, before);
-  await page.click('.meo-mermaid-source-pane .cm-content');
-  await page.keyboard.down('Control'); await page.keyboard.press('End'); await page.keyboard.up('Control');
+  await page.evaluate(()=>{const e=(window as any).viewportEditor;const pos=e.getText().indexOf('\n```',e.getText().indexOf('```mermaid')+10);e.view.dispatch({selection:{anchor:pos}});e.view.focus();});
   await page.keyboard.type('\nC --> E[Added node]', { delay: 60 });
-  await page.waitForFunction(() => document.querySelector('.meo-mermaid-preview-sticky .meo-mermaid-svg-wrapper')?.textContent?.includes('Added node'), { timeout: 15000 });
+  await page.waitForFunction(() => document.querySelector('.meo-mermaid-editing-preview .meo-mermaid-svg-wrapper')?.textContent?.includes('Added node'), { timeout: 15000 });
   await settle();
   assert.deepEqual(await camera(), realCamera, 'Actual Mermaid/ELK rendering retains the camera while typing');
   await replaceSource('pie title Real runtime\n"First": 40\n"Second": 60');

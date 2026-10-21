@@ -47,33 +47,34 @@ try {
       }, light);
       await page.waitForSelector('.meo-mermaid-block svg');
       await settle();
-      for (const mode of ['preview', 'split', 'source'] as const) {
+      for (const mode of ['preview', 'stacked', 'side-by-side'] as const) {
         if (mode !== 'preview') {
           await page.evaluate(() => {
-            document.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')!.click();
+            document.querySelector<HTMLButtonElement>(document.querySelector('.meo-mermaid-toolbar')?.getAttribute('data-meo-mermaid-mode')==='edit'?'.meo-mermaid-layout-btn':'.meo-mermaid-mode-btn')!.click();
           });
           await settle(12);
         }
         await page.mouse.move(0, 0);
+        await page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
+        await settle(12);
         const geometry = await page.evaluate(() => {
           const rect = (element: Element) => element.getBoundingClientRect();
           const controls = Array.from(document.querySelectorAll<HTMLElement>(':is(.meo-code-block-actions,.meo-mermaid-toolbar,.meo-latex-math-toolbar) :is([role="button"],button)')).filter(el => rect(el).width > 0);
-          const sources = Array.from(document.querySelectorAll<HTMLElement>(':is(.meo-mermaid-source-editor,.meo-latex-math-source-editor)')).map(source => {
-            const content = source.querySelector<HTMLElement>('.cm-content')!;
-            const gutter = source.querySelector<HTMLElement>('.cm-gutters')!;
-            const first = content.querySelector<HTMLElement>('.cm-line')!;
-            const style = getComputedStyle(content);
-            return { leftInset: rect(first).left - rect(source).left, gutterWidth: rect(gutter).width,
-              paddingTop: style.paddingTop, paddingBottom: style.paddingBottom,
-              height: rect(source).height, rowHeight: Array.from(content.children).reduce((sum, row) => sum + rect(row).height, 0) };
+          const sources=Array.from(document.querySelectorAll<HTMLElement>('.cm-content > .cm-line.meo-md-code-block')).map(line=>({width:rect(line).width, font:getComputedStyle(line).fontFamily}));
+          const joins = Array.from(document.querySelectorAll<HTMLElement>('.meo-mermaid-source-join')).map(line => {
+            const preview = line.nextElementSibling!;
+            return { radius: getComputedStyle(line).borderBottomLeftRadius,
+              gap: rect(preview).top - rect(line).bottom,
+              left: rect(preview).left - rect(line).left, right: rect(preview).right - rect(line).right,
+              background: getComputedStyle(line).backgroundColor === getComputedStyle(preview).backgroundColor };
           });
-          const previews = Array.from(document.querySelectorAll<HTMLElement>(':is(.meo-rendered-block-preview,.meo-rendered-block-preview-pane)')).map(pane => {
+          const previews = Array.from(document.querySelectorAll<HTMLElement>(':is(.meo-rendered-block-preview,.meo-mermaid-editing-preview)')).map(pane => {
             const root = pane.querySelector('.meo-mermaid-block,.meo-md-math-fenced-display')!;
             const canvas = root.querySelector('svg,.meo-latex-math-canvas')!;
             const blockRect = rect(root), canvasRect = rect(canvas);
             return { height: rect(pane).height, verticalOffset: (canvasRect.top + canvasRect.bottom - blockRect.top - blockRect.bottom) / 2 };
           });
-          return { sources, previews, buttons: controls.map(control => {
+          return { sources, joins, previews, buttons: controls.map(control => {
             const style = getComputedStyle(control);
             return { modeControl: control.matches('.meo-mermaid-mode-btn'), background: style.backgroundColor,
               width: rect(control).width, height: rect(control).height };
@@ -81,19 +82,31 @@ try {
         });
         assert.ok(geometry.buttons.length >= 3, `${profile}/${mode}: controls missing`);
         assert.equal(geometry.buttons.filter(button => button.modeControl).length, 1, `${profile}/${mode}: one cycle control must remain visible`);
-        assert.ok(geometry.buttons.every(button => button.background === 'rgba(0, 0, 0, 0)' && button.width === (button.modeControl ? 76 : 22) && button.height === 20), `${profile}/${mode}: inconsistent idle controls ${JSON.stringify(geometry.buttons)}`);
+        assert.ok(geometry.buttons.every(button => button.background === 'rgba(0, 0, 0, 0)' && button.width === 22 && button.height === 20), `${profile}/${mode}: inconsistent idle controls ${JSON.stringify(geometry.buttons)}`);
+        if (mode !== 'preview') {
+          const action = await page.$eval('.meo-native-source-preview-label .meo-mermaid-layout-btn', node => ({
+            border: getComputedStyle(node).borderTopWidth, width: node.getBoundingClientRect().width,
+            text: node.textContent, icon: node.querySelector('svg')!.getBoundingClientRect().toJSON()
+          }));
+          assert.ok(action.border === '0px' && action.width > 22 && action.text?.trim(),
+            `${profile}/${mode}: compact layout action keeps its action caption without a permanent border`);
+          assert.ok(Math.abs(action.icon.width - 15) < 1 && Math.abs(action.icon.height - 15) < 1,
+            `${profile}/${mode}: layout icon keeps its toolbar size`);
+        }
         assert.ok(geometry.previews.every(preview => Math.abs(preview.verticalOffset) <= 1), `${profile}/${mode}: content is not centered ${JSON.stringify(geometry.previews)}`);
-        assert.ok(geometry.sources.every(source => source.leftInset >= 20 && source.leftInset < 60 && source.gutterWidth < 40 && source.paddingTop === '0px' && source.paddingBottom === '0px'), `${profile}/${mode}: source inset or line spacing ${JSON.stringify(geometry.sources)}`);
-        if (mode === 'source') assert.ok(geometry.sources.every(source => Math.abs(source.height - source.rowHeight) <= 1), `${profile}: source mode adds blank height`);
-        if (mode === 'split') {
-          assert.ok(geometry.previews.every(preview => preview.height < (narrow ? 240 : 180)), `${profile}: short source forces a tall split pane`);
+        assert.ok(geometry.sources.every(source=>source.width>100),profile+'/'+mode+': native source retains usable width');
+        if (mode !== 'preview' && (mode === 'stacked' || narrow)) {
+          assert.equal(geometry.joins.length, 1, `${profile}/${mode}: inline source has one joined edge`);
+          assert.ok(geometry.joins.every(join => join.radius === '0px' && join.background &&
+            [join.gap, join.left, join.right].every(distance => Math.abs(distance) <= 1)),
+            `${profile}/${mode}: source and preview form a continuous surface ${JSON.stringify(geometry.joins)}`);
         }
         await page.keyboard.press('Tab');
         const focusPaint = await page.evaluate(async () => {
           const controls = Array.from(document.querySelectorAll<HTMLElement>(':is(.meo-code-block-actions,.meo-mermaid-toolbar,.meo-latex-math-toolbar) :is([role="button"],button)')).filter(el => el.getBoundingClientRect().width > 0);
           const paint: string[] = [];
           for (const control of controls) {
-            if (!control.isConnected) continue;
+            if (!control.isConnected || control.matches(':disabled')) continue;
             control.focus();
             await new Promise(resolve => setTimeout(resolve, 220));
             if (!control.isConnected) continue;
