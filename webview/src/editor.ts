@@ -949,7 +949,12 @@ export function createEditor({
     if (vertical && !inside && editorView.moveToLineBoundary(selection, forward).head !== (forward ? line.to : line.from)) return false;
     const fence = forward ? opening : closing;
     const offset = fence.from - first.from + (vertical ? Math.min(column, fence.length) : forward ? 0 : fence.length);
-    return focusMermaidEditingOffset(editorView, opening.from, offset);
+    const isCurrent = viewportController.beginNavigationReveal();
+    if (!focusMermaidEditingOffset(editorView, opening.from, offset, isCurrent)) return false;
+    // Expanding a tall preview can move either fence outside the viewport.
+    // Natural entry follows the caret with the smallest necessary scroll.
+    viewportController.revealPositionUntilStable(editorView.state.selection.main.head, { y: 'nearest', yMargin: 8 }, isCurrent);
+    return true;
   };
 
   const finishDisplayMathEditing = (editorView: EditorView) => {

@@ -297,8 +297,49 @@ try {
       console.log(`Mermaid explicit/natural navigation passed (${width})`);
     }
   };
-  await assertNavigation();
-  if (process.argv.includes('--navigation-only')) {
+  const assertKeyboardEntry = async () => {
+    fs.mkdirSync('.local/mermaid-navigation-acceptance', {recursive:true});
+    const text = Array.from({length:35}, (_, i) => 'Before ' + i + '\n').join('\n') +
+      '\n```mermaid\nflowchart TD\nA-->B-->C-->D-->E-->F-->G-->H-->I-->J-->K-->L-->M-->N-->O\n```\n\n' +
+      Array.from({length:35}, (_, i) => 'After ' + i + '\n').join('\n');
+    const opening = text.indexOf('```mermaid'), closing = text.lastIndexOf('```');
+    for (const {width,height} of [{width:520,height:800},{width:1200,height:800},{width:1200,height:360}])
+    for (const key of ['ArrowUp','ArrowLeft','ArrowDown','ArrowRight']) {
+      const forward = key === 'ArrowDown' || key === 'ArrowRight';
+      await mount(text, width, width === 520 ? 'zh-CN' : 'en', width === 520 ? 'light' : 'dark', false);
+      await page.setViewport({width,height,deviceScaleFactor:1});
+      await page.evaluate(({position,height}) => {
+        const view = (window as any).nativeEditor.view;
+        view.dispatch({selection:{anchor:position}});
+        view.scrollDOM.scrollTop = view.lineBlockAt(position).top - Math.min(400,height-100);
+        view.focus();
+      }, {position:forward ? opening - 1 : closing + 4,height});
+      await frames(24);
+      assert.equal(await page.$('.meo-mermaid-editing-preview'),null, 'Keyboard entry starts in reading mode');
+      const before = await page.evaluate(() => (window as any).nativeEditor.view.scrollDOM.scrollTop);
+      await page.keyboard.press(key);
+      await frames(24);
+      const entered = await page.evaluate(() => {
+        const view = (window as any).nativeEditor.view;
+        const bounds = (window as any).MermaidEditingHarness.editorViewportBounds(view);
+        const caret = view.coordsAtPos(view.state.selection.main.head);
+        return {head:view.state.selection.main.head, caretTop:caret?.top, caretBottom:caret?.bottom,
+          top:bounds.top,bottom:bounds.bottom,scroll:view.scrollDOM.scrollTop};
+      });
+      assert.equal(entered.head, forward ? opening : closing + (key === 'ArrowLeft' ? 3 : 0),
+        key + ' enters the corresponding fence');
+      assert.ok(await page.$('.meo-mermaid-editing-preview'), key + ' expands the Mermaid source');
+      assert.ok(entered.caretTop! >= entered.top && entered.caretBottom! <= entered.bottom,
+        `Entering a tall diagram must keep the final caret visible (${width}x${height}/${key}): ${JSON.stringify(entered)}`);
+      if (forward) assert.ok(Math.abs(entered.scroll-before) <= 1, 'An already visible entry caret needs no scroll');
+      assert.equal((await read()).text,text,'Natural entry does not change Markdown');
+      if (key === 'ArrowUp') await page.screenshot({path:`.local/mermaid-navigation-acceptance/keyboard-entry-${width}-${height}.png`});
+      console.log(`Tall Mermaid keyboard entry passed (${width}x${height}/${key})`);
+    }
+  };
+  if (!process.argv.includes('--keyboard-navigation-only')) await assertNavigation();
+  await assertKeyboardEntry();
+  if (process.argv.includes('--navigation-only') || process.argv.includes('--keyboard-navigation-only')) {
     assert.deepEqual(errors, []);
     console.log('Mermaid navigation contract passed');
     process.exitCode = 0;
