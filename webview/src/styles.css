@@ -5442,8 +5442,8 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   overflow-wrap: anywhere;
 }
 
-/* Fixed chrome never contributes height or line-number geometry to the document. */
-.cm-editor .meo-mermaid-preview-controls {
+/* Inline controls stay flat above shared light-mode floating toolbar styles. */
+.cm-editor .meo-visual-controls.meo-mermaid-preview-controls {
   position: fixed;
   inset: auto;
   display: grid;
@@ -5452,7 +5452,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   padding: 4px;
   z-index: 25;
   border-radius: 7px;
-  background: color-mix(in srgb, var(--meo-code-background) 94%, transparent);
+  background: var(--meo-code-background);
   box-shadow: none;
   backdrop-filter: none;
   opacity: 0;
