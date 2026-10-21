@@ -1886,11 +1886,46 @@ IME, mode selection, Source-side Preview, Mermaid retirement, atomic code
 updates and Preview table layout pass. Types, staged architecture and test
 inventory pass.
 
-One older check is not counted as green: `test-live-widget-positions.ts` asserts
-the exact DecorationSet object survives settlement and fails at ordinary or
+At the end of this round, one older check was not counted as green:
+`test-live-widget-positions.ts` asserts
+the exact DecorationSet object survives settlement and still failed at ordinary or
 frontmatter input. A read-only build substituting the unchanged `27bfaf6e` Live
-widget/HTML/table modules fails the same assertion. Forcing canonical parse and
-presentation before input does not remove it. This existing internal allocation
-check remains recorded separately from the passing DOM identity, rendered
+widget/HTML/table modules failed the same assertion. Forcing canonical parse and
+presentation before input did not remove it. This existing internal allocation
+check was recorded separately from the passing DOM identity, rendered
 markup, exact-source, interaction and compositor checks; no claim is made that
 all unchanged presentation computation has been eliminated.
+
+### Preserve certified Live presentation through parser publication (2026-10-21)
+
+The remaining widget-position failure exposed real redundant work. CodeMirror's
+background parser publishes through its own state effect. Live treated that
+effect as an unknown presentation change, retiring a complete local projection
+and rebuilding the document on settlement. Cold Source-to-Live entry exposed the
+same problem when mixed-language parsing published a shorter intermediate tree
+after an already completed Markdown presentation.
+
+The syntax-publication adapter now identifies that exact effect. Its internal
+CodeMirror dependency is isolated and fails closed if unavailable. A certified
+presentation for the unchanged source revision and language configuration
+survives a parser receipt, including a partial intermediate tree. Unrecognized
+coeffects, selection changes, reconfiguration and provisional structural edits
+retain their existing invalidation paths. Other deferred consumers still refresh
+when their input proof requires it.
+
+The widget-position regression explicitly publishes the real parser result
+between input and settlement. It fails against the prior Live implementation
+and passes with this handoff, comparing all projected widget positions against
+a complete build. It also checks unknown coeffects and an edited footnote label;
+the latter must still rebuild and match freshly computed global references.
+The cold-entry/history budget check now passes with zero full Live builds for
+the first prose input. Its parse counter was updated to follow the existing
+`resolvedSyntaxTreeAt` call boundary, preserving the original assertion.
+
+The final frozen production entry has SHA-256
+`52c60273e2167eeb3fd8e6dea1931737a222da16d61004c3ad4615afb4e2dc45`.
+The complete input-presentation gate passes: ordinary, complex, unchanged-content
+and native-session checks inspect 173/118/135/300 compositor paints respectively;
+cold linked Preview and fractional input layout also pass. Parser reuse, mode
+selection, Source-side Preview (including LF/CRLF reload) and HTML editing pass,
+as do extension/Webview types, staged architecture, test inventory and privacy.

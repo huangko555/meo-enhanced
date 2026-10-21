@@ -52,7 +52,7 @@ const build = await Bun.build({ entrypoints: [path.join(root, 'scripts/test-live
     });
     builder.onLoad({ filter: /webview[\\/]src[\\/]helpers[\\/]markdownSyntax\.ts$/ }, async ({ path }) => {
       const source = await Bun.file(path).text();
-      const boundary = 'return ensureSyntaxTree(state, state.doc.length, timeout) ?? syntaxTree(state);';
+      const boundary = 'return ensureSyntaxTree(state, upto, timeout) ?? syntaxTree(state);';
       assert.equal(source.split(boundary).length, 2);
       return { loader: 'ts', contents: source.replace(boundary,
         `const stack = new Error().stack ?? ''; if (stack.includes('buildDecorationRanges')) { ((globalThis as any).__localParseRequests ??= 0); (globalThis as any).__localParseRequests++; } if (stack.includes('projectLiveLocalInput') && stack.includes('parseFootnotes')) { ((globalThis as any).__projectedFootnoteParseRequests ??= 0); (globalThis as any).__projectedFootnoteParseRequests++; } ${boundary}`) };

@@ -1,4 +1,5 @@
 import { editorScrollIntoView, isEditorScrollEffect } from './editor/scrollEffects';
+import { isCodeMirrorSyntaxPublicationEffect } from './adapters/codeMirrorSyntaxPublication';
 import { viewportSyntaxHighlighting } from './editor/viewportSyntaxHighlighting';
 import { backgroundMarkdownParser } from './editor/backgroundMarkdownStructure';
 import { markdownMixedLanguages } from './editor/markdownMixedLanguages';
@@ -4084,14 +4085,17 @@ const liveDecorationField = StateField.define<DecorationSet>({
       }
       return decorations;
     }
-    // Publishing completed syntax changes neither the source nor its selection.
-    // Preserve the full presentation, including an active search range and its
-    // focused widgets, when the complete outer Markdown is identical.
+    // Parser publication cannot invalidate an already certified presentation
+    // for this exact source revision and language configuration. Its next tree
+    // may even be a shorter prefix while embedded parsing advances. Keep the
+    // accepted result until source or presentation context actually changes.
     if (!transaction.docChanged && !transaction.selection && !transaction.reconfigured
-      && (transaction.effects.every(effect => isLiveInputDerivedWorkBookkeeping(effect) || isEditorScrollEffect(effect))
+      && (transaction.effects.every(effect => isLiveInputDerivedWorkBookkeeping(effect) || isEditorScrollEffect(effect)
+        || isCodeMirrorSyntaxPublicationEffect(effect))
         || isGitOnlyPresentationUpdate(transaction))
       && liveDecorationMetadata.get(transaction.startState)?.complete
-      && (!syntaxTreeChanged(transaction) || markdownStructureAvailable(transaction.startState)
+      && (transaction.effects.some(isCodeMirrorSyntaxPublicationEffect)
+        || !syntaxTreeChanged(transaction) || markdownStructureAvailable(transaction.startState)
         && markdownStructureAvailable(transaction.state)
         && hasSameLiveMarkdownSyntax(resolvedSyntaxTree(transaction.startState, 0), resolvedSyntaxTree(transaction.state, 0)))) {
       liveDecorationMetadata.set(transaction.state, liveDecorationMetadata.get(transaction.startState)!);

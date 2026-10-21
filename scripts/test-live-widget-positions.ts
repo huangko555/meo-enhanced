@@ -1,7 +1,19 @@
 import assert from 'node:assert/strict';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 
-const build = await Bun.build({ entrypoints: ['scripts/test-live-decoration-history-entry.ts'], target: 'browser', format: 'iife' });
+const build = await Bun.build({ entrypoints: ['scripts/test-live-decoration-history-entry.ts'], target: 'browser', format: 'iife',
+  plugins: [{ name: 'explicit-background-syntax-publication', setup(builder) {
+    builder.onLoad({ filter: /@codemirror[\\/]language[\\/]dist[\\/]index\.js$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text();
+      const boundary = 'Language.setState = /*@__PURE__*/StateEffect.define();';
+      assert.equal(source.split(boundary).length, 2, 'the fixture must use the real parser publication effect');
+      return { loader: 'js', contents: source.replace(boundary, boundary + `
+        globalThis.__publishWidgetSyntax = (view, unknown = false) => view.dispatch({ effects: [
+          Language.setState.of(new LanguageState(view.state.field(Language.state).context)),
+          ...(unknown ? [StateEffect.define().of(true)] : [])
+        ] });`) };
+    });
+  } }] });
 assert.ok(build.success, build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
 let primaryError: unknown;
@@ -35,6 +47,7 @@ try {
     api.input(editor, editor.view.state.selection.main.head, 'x');
     scope.__mapped = api.decorations(editor);
     scope.__mappedPositions = structuredClone(api.positionSnapshot(editor));
+    scope.__publishWidgetSyntax(editor.view);
   });
   await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
   assert.equal(await page.evaluate(() => {
@@ -59,6 +72,9 @@ try {
       api.input(editor, position, 'x');
       scope.__inlineSet = api.decorations(editor);
       scope.__inlinePositions = structuredClone(api.positionSnapshot(editor));
+      // Publish the actual parser result now as well as allowing its normal
+      // idle callback. This makes the input/parse handoff independent of timing.
+      scope.__publishWidgetSyntax(editor.view);
     }, target);
     await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
     assert.equal(await page.evaluate(() => {
@@ -72,6 +88,15 @@ try {
     }), await page.evaluate(() => (window as any).__inlinePositions),
     `${target}: dirty-block presentation and all distant widget positions must match a full build`);
   }
+  const unknownPublication = await page.evaluate(() => {
+    const scope = window as any, editor = scope.__editor, api = scope.__liveHistory;
+    const before = api.decorations(editor), positions = api.positionSnapshot(editor);
+    scope.__publishWidgetSyntax(editor.view, true);
+    return { invalidated: api.decorations(editor) !== before, positions, after: api.positionSnapshot(editor) };
+  });
+  assert.ok(unknownPublication.invalidated, 'an unknown effect alongside parser publication must still invalidate presentation');
+  assert.deepEqual(unknownPublication.after, unknownPublication.positions,
+    'conservative rebuilding must retain the exact canonical widget positions');
   await page.evaluate(() => {
     const editor = (window as any).__editor;
     editor.view.dispatch({ selection: { anchor: editor.getText().indexOf('EDITx') }, scrollIntoView: true });
@@ -143,6 +168,28 @@ try {
       (_from: number, _to: number, value: any) => { if (value.spec.widget?.constructor.name === 'ViewportWidgetPlaceholder') placeholders++; });
     return placeholders === 0;
   });
+  await page.evaluate(() => {
+    const scope = window as any, editor = scope.__editor, api = scope.__liveHistory;
+    const from = editor.getText().indexOf('[^n] reference') + 3;
+    editor.view.dispatch({ selection: { anchor: from } });
+    api.input(editor, from, 'new');
+    scope.__unproven = api.decorations(editor);
+    scope.__publishWidgetSyntax(editor.view);
+  });
+  await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
+  const changedReference = await page.evaluate(() => {
+    const scope = window as any, editor = scope.__editor, api = scope.__liveHistory;
+    const rebuilt = api.decorations(editor) !== scope.__unproven;
+    const projected = api.positionSnapshot(editor);
+    const notes = api.footnotes(editor), freshNotes = api.freshFootnotes(editor);
+    editor.refreshDecorations();
+    return { rebuilt, projected, fresh: api.positionSnapshot(editor), notes, freshNotes,
+      exact: editor.getText().includes('[^nnew] reference') };
+  });
+  assert.ok(changedReference.rebuilt && changedReference.exact,
+    'parser publication must not certify a provisional presentation after a reference-label edit');
+  assert.deepEqual(changedReference.projected, changedReference.fresh);
+  assert.deepEqual(changedReference.notes, changedReference.freshNotes, 'global footnote dependencies must still refresh');
   assert.deepEqual(errors, []);
   await page.evaluate(() => (window as any).__editor.destroy());
   console.log('Projected images, math, Mermaid, HTML, code, checkboxes, footnotes and mounted tables preserve source positions');
