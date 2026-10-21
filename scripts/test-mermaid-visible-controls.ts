@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { assertReadableMermaidTasks } from './mermaid-contrast-helpers';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 
 const build = await Bun.build({ entrypoints: ['scripts/test-block-sticky-header-production-entry.ts'], target: 'browser', format: 'iife' });
@@ -320,11 +321,17 @@ try {
         return { chartWidth: chart.clientWidth - 24, svgWidth: svg.getBoundingClientRect().width,
           intrinsicWidth: svg.viewBox.baseVal.width, background: getComputedStyle(toolbar).backgroundColor,
           surface: getComputedStyle(chart).backgroundColor,
+          tasks: Array.from(svg.querySelectorAll<SVGElement>('rect.task')).map(bar => {
+            const label = svg.querySelector<SVGElement>(`[id="${bar.id}-text"]`)!;
+            return { background: getComputedStyle(bar).fill, foreground: getComputedStyle(label).fill,
+              outside: /taskTextOutside/.test(label.getAttribute('class') ?? '') };
+          }),
           overlappingTicks: ticks.filter((r, i) => i > 0 && r.left < ticks[i - 1]!.right - 1).length };
       });
       assert.equal(reading.background, reading.surface, `${name}/${width}/${light}: reading actions mask panned diagram content`);
       assert.notEqual(reading.background, 'rgba(0, 0, 0, 0)');
       if (name === 'gantt') {
+        assertReadableMermaidTasks(reading.tasks, `Live Gantt/${width}/${light}`);
         assert.ok(reading.intrinsicWidth >= 1000, 'Gantt has a usable logical layout width before being scaled');
         assert.ok(reading.svgWidth >= reading.chartWidth * 0.9, 'Gantt uses the available block width');
         assert.equal(reading.overlappingTicks, 0, 'Gantt date labels remain separated');
