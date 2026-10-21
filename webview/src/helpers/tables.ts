@@ -5435,9 +5435,32 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     }
   }
 
+  tableRowsForGutter() {
+    const entries = this.domRefs?.rowEntries ?? [];
+    if (entries.length < 256 || !this.view) return entries.map(({ row }, rowIndex) => ({ row, rowIndex }));
+    // Table rows stay in source order even when a cell wraps. Locate a reading
+    // band by geometry without measuring every offscreen row on focus/scroll.
+    const viewport = this.view.scrollDOM.getBoundingClientRect();
+    const top = viewport.top - viewport.height, bottom = viewport.bottom + viewport.height;
+    let low = 0, high = entries.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (entries[middle]!.row.getBoundingClientRect().bottom < top) low = middle + 1;
+      else high = middle;
+    }
+    const first = low;
+    high = entries.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (entries[middle]!.row.getBoundingClientRect().top <= bottom) low = middle + 1;
+      else high = middle;
+    }
+    return entries.slice(first, low).map(({ row }, index) => ({ row, rowIndex: first + index }));
+  }
+
   syncTableLineNumbers() {
     if (this.destroyed || !this.domRefs?.shell.isConnected) return;
-    const { table, lineNumberLayer } = this.domRefs;
+    const { lineNumberLayer } = this.domRefs;
     const gutter = this.view?.dom.querySelector('.cm-lineNumbers');
     if (!(gutter instanceof HTMLElement)) return;
     if (lineNumberLayer.parentElement !== gutter) {
@@ -5445,8 +5468,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     }
 
     const gutterRect = gutter.getBoundingClientRect();
-    const rows = Array.from(table.querySelectorAll<HTMLTableRowElement>('thead tr, tbody tr'))
-      .map((row, rowIndex) => ({ row, rowIndex, lineNumber: row.dataset.sourceLineNumber }))
+    const rows = this.tableRowsForGutter()
+      .map(({ row, rowIndex }) => ({ row, rowIndex, lineNumber: row.dataset.sourceLineNumber }))
       .filter(({ lineNumber }) => Boolean(lineNumber))
       .map(({ row, rowIndex, lineNumber }) => ({
         rowIndex, lineNumber: lineNumber!, top: row.getBoundingClientRect().top - gutterRect.top
@@ -5491,14 +5514,14 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
   syncTableDiffMarkers() {
     if (this.destroyed || !this.domRefs?.shell.isConnected) return;
-    const { table, diffMarkerLayer } = this.domRefs;
+    const { diffMarkerLayer } = this.domRefs;
     const gutter = this.view?.dom.querySelector('.meo-git-gutter');
     if (!(gutter instanceof HTMLElement)) return;
     if (diffMarkerLayer.parentElement !== gutter) gutter.appendChild(diffMarkerLayer);
 
     const gutterRect = gutter.getBoundingClientRect();
-    const rows = Array.from(table.querySelectorAll<HTMLTableRowElement>('thead tr, tbody tr'))
-      .flatMap((row) => {
+    const rows = this.tableRowsForGutter()
+      .flatMap(({ row }) => {
         const lineNumber = Number.parseInt(row.dataset.sourceLineNumber ?? '', 10);
         const flags = this.tableData.diffFlagsByLine?.[lineNumber];
         if (!flags || (!flags.added && !flags.modified && !flags.deleted)) return [];
@@ -6384,7 +6407,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     };
     const cancelCaretReveal = () => { this.tableCaretRevealGeneration += 1; };
     const updateActiveContextControls = () => {
-      if (!this.domRefs?.shell.matches(':focus-within, .is-interacting, .is-context-menu-open')) return;
+      if (!this.domRefs || (this.domRefs.rowEntries.length < 256 &&
+        !this.domRefs.shell.matches(':focus-within, .is-interacting, .is-context-menu-open'))) return;
       this.scheduleLayout();
     };
     view.scrollDOM.addEventListener('wheel', cancelCaretReveal, { passive: true });

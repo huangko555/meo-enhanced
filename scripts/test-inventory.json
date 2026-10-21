@@ -1,5 +1,10 @@
 {
   "separate": {
+    "scripts/test-large-table-gutter-budget.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-large-table-gutter-budget.ts",
+      "reason": "Production 1600-row table bounds gutter geometry work to its reading band, preserves complete aligned visible line numbers and DOM identity, and checks resize, line-number remount and source-line changes."
+    },
     "scripts/test-deferred-markdown-inline.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-deferred-markdown-inline.ts",

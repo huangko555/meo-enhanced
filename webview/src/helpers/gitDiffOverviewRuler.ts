@@ -70,7 +70,7 @@ export interface LineGeometry {
   bottom: number;
 }
 
-export function getLiveTableRowGeometry(view: EditorView): Map<number, LineGeometry> {
+export function getLiveTableRowGeometry(view: EditorView, lineNumbers: ReadonlySet<number>): Map<number, LineGeometry> {
   const rows = new Map<number, LineGeometry>();
   const scrollRect = view.scrollDOM.getBoundingClientRect();
   const scrollTop = view.scrollDOM.scrollTop;
@@ -78,7 +78,7 @@ export function getLiveTableRowGeometry(view: EditorView): Map<number, LineGeome
     '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tr[data-source-line-number]'
   )) {
     const lineNumber = Number.parseInt(row.dataset.sourceLineNumber ?? '', 10);
-    if (!Number.isInteger(lineNumber) || lineNumber < 1) {
+    if (!lineNumbers.has(lineNumber)) {
       continue;
     }
     const rowRect = row.getBoundingClientRect();
@@ -206,7 +206,6 @@ export function createGitDiffOverviewRulerController({
 
     const totalLines = Math.max(1, view.state.doc.lines);
     const segments = getGitDiffOverviewSegments(view.state);
-    const tableRows = getLiveTableRowGeometry(view);
     if (!segments.length) {
       const renderKey = `track-only:${mode}:no-segments:${totalLines}:${trackHeight}:${trackMetrics.fileEndY}:${trackMetrics.showFileEndLine ? 1 : 0}`;
       if (renderKey === lastRenderKey) {
@@ -224,6 +223,9 @@ export function createGitDiffOverviewRulerController({
       return;
     }
 
+    // Only segment endpoints are used below. Unchanged rows, and a document
+    // without changes, must not trigger a whole-table geometry pass on scroll.
+    const tableRows = getLiveTableRowGeometry(view, new Set(segments.flatMap(segment => [segment.fromLine, segment.toLine])));
     const pixelSegments: PixelSegment[] = [];
     for (const segment of segments) {
       let topRatio = (segment.fromLine - 1) / totalLines;

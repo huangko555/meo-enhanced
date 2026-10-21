@@ -65,7 +65,7 @@ export function createSearchOverviewRulerController({
     }
 
     const trackMetrics = getTrackMetrics(view, trackHeight);
-    const tableRows = getLiveTableRowGeometry(view);
+    const tableRows = getLiveTableRowGeometry(view, new Set(matches.map(match => view.state.doc.lineAt(match.from).number)));
     const totalLines = Math.max(1, view.state.doc.lines);
     const activeByTop = new Map<number, boolean>();
     for (const match of matches) {

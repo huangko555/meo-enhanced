@@ -147,6 +147,12 @@ class CompletedOuter extends Parser {
 }
 let visits = 0;
 const firstChild = TreeCursor.prototype.firstChild;
+const skipUntilInView = ParseContext.prototype.skipUntilInView;
+let skipRegistrations = 0;
+ParseContext.prototype.skipUntilInView = function (from, to) {
+  skipRegistrations++;
+  return skipUntilInView.call(this, from, to);
+};
 TreeCursor.prototype.firstChild = function () { visits++; return firstChild.call(this); };
 try {
   const completedLanguage = new Language(markdownLanguage.data, new CompletedOuter());
@@ -157,9 +163,14 @@ try {
   assert.ok(isCompleteMarkdownStructure(syntaxTree(scoped), corpus.length));
   assert.ok(boundedCalls.length > 0 && boundedCalls.every(from => from < 3_000));
   assert.ok(visits < 2_000, `mixed discovery must skip distant subtrees: ${visits} visits`);
+  assert.ok(skipRegistrations <= 16,
+    `Offscreen language registrations must not grow with the number of hosts: ${skipRegistrations}`);
   const initialVisits = visits;
-  for (const position of [corpus.lastIndexOf('const bounded'), corpus.indexOf('const bounded')]) {
+  const initialSkipRegistrations = skipRegistrations;
+  const positions = [corpus.lastIndexOf('const bounded'), corpus.indexOf('const bounded'), corpus.indexOf('const bounded', corpus.length >>> 1)];
+  for (const position of Array.from({ length: 12 }, (_, index) => positions[index % positions.length]!)) {
     visits = 0;
+    skipRegistrations = 0;
     const before = boundedCalls.length;
     withMarkdownPreparationViewport(scoped, { from: position, to: position + 20 },
       () => ensureSyntaxTree(scoped, corpus.length, 10_000));
@@ -167,8 +178,12 @@ try {
     assert.ok(boundedCalls.slice(before).some(from => Math.abs(from - position) < 200),
       'each newly demanded viewport must run the real embedded parser');
     assert.ok(visits < 2_000, `viewport return must also skip distant subtrees: ${visits} visits`);
+    assert.ok(skipRegistrations <= 16, `Each viewport demand must register bounded offscreen regions: ${skipRegistrations}`);
     assert.ok(isCompleteMarkdownStructure(syntaxTree(scoped), corpus.length));
   }
-  console.log(`Completed outer tree: ${initialVisits} initial mixed-discovery visits; distant/return grammar demand preserved`);
-} finally { TreeCursor.prototype.firstChild = firstChild; }
+  console.log(`Completed outer tree: ${initialVisits} initial mixed-discovery visits, ${initialSkipRegistrations} offscreen registrations; 12 distant/return grammar demands preserved`);
+} finally {
+  TreeCursor.prototype.firstChild = firstChild;
+  ParseContext.prototype.skipUntilInView = skipUntilInView;
+}
 console.log('Markdown structure: full proof, partial rejection, skipped-code demand, suspended languages and normal parsing passed');

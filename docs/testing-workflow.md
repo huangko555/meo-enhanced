@@ -45,6 +45,14 @@ palette refreshes that remove/reapply reading-root styles, and checks real color
 changes still propagate. Both belong to the browser release gate. The fence reuse
 contract also retains full export highlighting and fallback-only languages.
 
+`scripts/test-markdown-structure.ts` also caps real ParseContext offscreen
+registrations for a 2,000-host corpus through twelve first/middle/last viewport
+demands. `scripts/test-large-table-gutter-budget.ts` measures real row-geometry
+reads in a 1,600-row editor, checks complete visible line-number alignment and
+DOM retention, and preserves distant overview endpoints, search, resize and
+line-number remounts. It is a targeted browser check; the normal table, search
+and diff ruler tests retain their existing gates.
+
 The Mermaid/formula inner-source matrix and findings are in
 [testing-rendered-block-source.md](testing-rendered-block-source.md). Run
 `bun run test:rendered-source` for its dedicated input, boundary and appearance

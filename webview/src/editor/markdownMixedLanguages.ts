@@ -56,7 +56,7 @@ export function markdownMixedLanguages(options: {
               const includeHost = (hostFrom: number, hostTo: number) => {
                 if (hostTo > visible.from && hostFrom < visible.to) {
                   from = Math.min(from, hostFrom); to = Math.max(to, hostTo);
-                } else current.skipUntilInView(hostFrom, hostTo);
+                }
               };
               const packed = backgroundMarkdownLanguageHosts(state, outer);
               if (packed) for (let index = 0; index < packed.length; index += 2) includeHost(packed[index]!, packed[index + 1]!);
@@ -66,10 +66,14 @@ export function markdownMixedLanguages(options: {
               // parseMixed's public fragment contract skips identical subtrees.
               // Outside this viewport only the outer Markdown is required; mark
               // it skipped so entering that source requests its real grammar.
+              // Register two ranges rather than every host: CodeMirror retains
+              // these until entry and cuts fragments for each registration.
               if (viewport.from > 0) {
+                current.skipUntilInView(0, viewport.from);
                 reusable = [new TreeFragment(0, viewport.from, outer, 0), ...reusable];
               }
               if (viewport.to < input.length) {
+                current.skipUntilInView(viewport.to, input.length);
                 reusable = [...reusable, new TreeFragment(viewport.to, input.length, outer, 0)];
               }
             }

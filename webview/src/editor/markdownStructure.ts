@@ -78,12 +78,12 @@ export function withMarkdownPreparationViewport<T>(state: EditorState, viewport:
 }
 
 /** Decline before mixed parsing materializes a packed node or creates a nested
- * job. Registering the whole host makes entering its source restart the parser. */
+ * job. The mixed wrapper registers the two offscreen regions once per pass;
+ * per-host registrations accumulate in CodeMirror across viewport updates. */
 export function skipOffscreenMarkdownLanguage(context: ParseContext | null, from: number, to: number): boolean {
   const viewport = markdownLanguageViewport(context);
   if (!context || !viewport) return false;
   if (to > viewport.from && from < viewport.to) return false;
-  context.skipUntilInView(from, to);
   return true;
 }
 
