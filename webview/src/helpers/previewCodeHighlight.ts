@@ -12,6 +12,26 @@ const FONT_STYLE_ITALIC = 1;
 const FONT_STYLE_BOLD = 2;
 const FONT_STYLE_UNDERLINE = 4;
 
+/** Read geometry before token writes; wrapped rows need their actual heights. */
+export function previewCodeReadingBand(lines: readonly HTMLElement[], height: number): readonly [number, number] {
+  // Keep ordinary fences atomic, including a short fence straddling the band.
+  if (lines.length <= 240) return [0, lines.length];
+  let low = 0, high = lines.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (lines[middle]!.getBoundingClientRect().bottom < -height) low = middle + 1;
+    else high = middle;
+  }
+  const from = low;
+  high = lines.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (lines[middle]!.getBoundingClientRect().top <= height * 2) low = middle + 1;
+    else high = middle;
+  }
+  return [from, low];
+}
+
 function applyTokenStyle(element: HTMLElement, run: ShikiPresentationRun): void {
   // Shiki has already resolved the active VS Code TextMate theme at token
   // scope precision. Reclassifying it here loses theme-specific distinctions.
@@ -51,14 +71,14 @@ export function isPreviewCodeHighlightReady(root: ParentNode, isCurrent: () => b
   return ready;
 }
 
-/** Whether a currently visible block has already received its Shiki token DOM. */
+/** Whether a block has themed reading rows to preserve during an atomic update. */
 export function hasAppliedPreviewCodeHighlight(root: ParentNode): boolean {
   const requests = Array.from(root.querySelectorAll<HTMLElement>('code.hljs'))
     .map(getHighlightRequest)
     .filter((request): request is NonNullable<ReturnType<typeof getHighlightRequest>> => request !== null);
   if (requests.length === 0) return false;
   const themeVersion = String(getShikiThemeVersion('preview'));
-  return requests.every(request => request.sources.every(source => source.dataset.meoShiki === themeVersion));
+  return requests.every(request => request.sources.some(source => source.dataset.meoShiki === themeVersion));
 }
 
 /** Projects the exact Shiki tokens used by Live mode onto an already-rendered Preview code block. */
@@ -73,22 +93,30 @@ export function applyPreviewCodeHighlight(frameDocument: Document, nearViewportO
     const bounds = code.getBoundingClientRect();
     return bounds.bottom >= -height && bounds.top <= height * 2;
   }) : codes;
-  for (const code of candidates) {
+  const requests = candidates.flatMap(code => {
     const request = getHighlightRequest(code);
-    if (!request) continue;
-    const { language, source, sources } = request;
-    if (sources.every((sourceElement) => sourceElement.dataset.meoShiki === themeVersion)) continue;
+    if (!request) return [];
+    const [from, to] = nearViewportOnly ? previewCodeReadingBand(request.sources, height) : [0, request.sources.length];
+    return [{ ...request, from, to }];
+  });
+  for (const { language, source, sources, from, to } of requests) {
+    if (sources.slice(from, to).every((sourceElement) => sourceElement.dataset.meoShiki === themeVersion)) continue;
     const lines = getShikiTokens(language, source, 'preview');
     if (!lines) {
       requestShikiTokens(language, source, 'preview', isCurrent);
       continue;
     }
 
+    // Retain the preceding bracket context, but allocate presentation runs only
+    // for the reading band. A cached full-fence projection duplicates large
+    // token arrays and erases much of the DOM reduction's memory benefit.
     const projectedLines = frameDocument.documentElement.dataset.meoPreviewBracketColoring === 'false'
-      ? lines : projectShikiTokenLines(lines, getShikiThemeMeta('preview'));
-    for (const [lineIndex, sourceElement] of sources.entries()) {
+      ? lines.slice(from, to) : projectShikiTokenLines(lines, getShikiThemeMeta('preview'), { from, to });
+    for (let lineIndex = from; lineIndex < to; lineIndex++) {
+      const sourceElement = sources[lineIndex]!;
+      if (sourceElement.dataset.meoShiki === themeVersion) continue;
       const fragment = frameDocument.createDocumentFragment();
-      for (const run of projectedLines[lineIndex] ?? []) {
+      for (const run of projectedLines[lineIndex - from] ?? []) {
         const span = frameDocument.createElement('span');
         applyTokenStyle(span, run);
         span.textContent = run.content;

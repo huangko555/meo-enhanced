@@ -139,6 +139,72 @@ VS Code 1.138.0，同一 1 MiB 综合样本，792 × 786 Webview，DPI 1。每�
 
 本轮可以验收打开偏好与自动准入策略，但不能据此宣布整项性能工程结束。后续更值得处理巨型代码块和长表内部的呈现/布局成本，保留完整文本、选区、复制、查找和阅读锚点；继续微调文件大小常数无法消除这类单块阻塞。原生滚动条拖动仍需完成独立验收。
 
+## 后续修复：代码块内部高亮与配色失效（2026-10-21）
+
+18,000 行单代码块的实际高亮投影曾在只有 37 行可见时写入全部
+18,000 行，单次约 661ms。回归脚本 `test-preview-giant-code-highlight.ts`
+现在限制真实 DOM 写入量：首屏写入 78 行，后续滚动只补齐阅读带；
+已完成的行不重建。前缀仍参与括号深度计算，完整语法 token 仍包含
+跨行注释上下文，但只为目标行分配显示数据，避免保留第二份全文投影。
+测试覆盖深处滚动、主题、窄宽换行、完整可选择文本和屏外起始的括号/注释。
+首屏截图已复核，位于 `.local/input-presentation/giant-preview-code.png`。
+
+这里保留完整代码行 DOM，并未实现代码块内部的真正 DOM 窗口。
+超过 240 行时才在块内挑选阅读带，较短的代码块继续整体更新。
+windowed Preview 的单围栏达到 64,000 个源字符、且语言支持 Shiki 时，
+Host 不再先构建一整份备用高亮 token 树；普通短代码、仅有备用语法支持的
+语言及独立 HTML/PDF/Word 导出保留完整高亮。这两个数值是局部工作量保护，
+不是新增文档压力分级，也不改变打开偏好。语言能力使用依赖提供的纯数据
+名称/别名表，不把整个语法包带入同步 Preview worker。
+
+未插入其他性能任务的同脚本单轮对照（Edge 155，1280×900）：
+首次 Preview 加确认首个可信 wheel 滚动，从约 7.01s 降为约 2.79s。
+原始结果分别在 `.local/strategy-comparison-giant-code-before/result.json`
+与 `.local/strategy-comparison-giant-code-after/result.json`。这是两个单轮
+诊断样本，不是稳定 p95，更不是原生 VS Code 滚动条拖动耗时。
+剩余主线程长任务仍约一秒，主要在完整代码行的布局/窗口测量。
+
+双轮完整流程覆盖小而简单、小而复杂、混合大文档、巨型代码块和
+1,600 行表格，全部通过精确源文本、点击位置、逐字输入和模式阅读位置断言。
+结果在 `.local/strategy-comparison-bounded-code-final/result.json`。
+最终取消全文投影缓存后的代码块复测在
+`.local/strategy-comparison-bounded-code-final-memory/result.json`：
+两个新上下文的外部确认首次 Preview 为 2.13–2.63s，renderer 节点约
+95,354 个，三次 GC 后 JS heap 约 80–81MiB。上一轮约 345,587 个节点、
+80MiB heap 的结果来自另一批运行；节点下降明显，JS heap 未呈现稳定下降，
+不能宣传为整体内存已经优化完成。这些不是应用总内存。
+
+另外，生产 Preview 在配色未变化时仍会清除并重新写回根变量，
+复制按钮变量又被两个计算入口反复覆盖。现在变量单一归属、按值更新。
+`test-preview-palette-stability.ts` 从三次刷新产生 30 次根样式修改变为 0 次，
+实际颜色变化仍正确传播；代码复制和独立导出保真检查也通过。
+
+### 仍需处理的长表与原生验收
+
+1,600 行表格仍有秒级模式切换，不能作为已修复交付。
+CPU profile 见 `.local/strategy-comparison-giant-table-profile/`，用于定位，
+不作为普通时间对照。热点出现在 focus、模式按钮的几何读取及
+CodeMirror/表格几何测量；这些是浏览器整表布局的触发入口。
+尝试以百分比动画移除按钮几何读取后，内部计数确实从 4 次变为 0 次，
+但两轮实际切换没有稳定收益，故完整撤回该实验。
+`.local/strategy-comparison-table-no-toolbar-layout/result.json` 和撤回后的
+`.local/strategy-comparison-table-final-control/result.json` 都仍有 3–4 秒级
+切换；较早同类运行约 2–2.6 秒。批次变化明显，不能据此断言动画本身
+导致或消除了卡顿。后续应围绕整表 DOM、不可见单元格编辑层和尺寸所有权
+建立块内部窗口，保留列宽、选区、搜索、复制、键盘导航与活动单元格锚点；
+继续改动外围按钮不足以解决它。
+
+原生输入/拖动仍未验收通过：三个独立 profile 的尝试分别出现失效
+Webview 调试上下文、180 秒驱动超时、以及首屏 ready 等待失败。
+原始目录为 `.local/probes/native-modes-ff819e1dc21c402d8c49589f6a72b475/`、
+`.local/probes/native-modes-7171b355a8ba4e3288fcd649f2265c9d/` 和
+`.local/probes/native-modes-64b5d7ac8e8a46a9a3f40b91494c57b7/`。
+失败现场的外层工作台可读取，内部 Runtime.callFunctionOn 超时；
+目前不能确定是调试上下文生命周期还是实际 Webview 故障。
+未验证的驱动改动没有提交，诊断副本仅保留在 `.local/native-input-diagnostic/`。
+用户原始 1MiB 文件 SHA-256 仍为本报告前述值。
+生产浏览器的输入/合成画面门禁通过，不等于这项原生验收完成。
+
 ## 成熟编辑器的一手依据
 
 VS Code 的 TextModel 以缓冲区字符长度和行数静态分类：大于 20 × 1024 × 1024 个字符或 300000 行，且启用 largeFileOptimizations 时，禁用昂贵的 tokenization；该分类在模型构造时锁定。另有默认 20000 字符的单行 tokenization 限制。这里的长度不是 UTF-8 文件字节，不应把其常数照搬到 Markdown Live。

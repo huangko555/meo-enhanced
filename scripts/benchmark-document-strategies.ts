@@ -66,6 +66,7 @@ const fixtures = [
 ].filter(fixture => option('--fixtures', '').split(',').filter(Boolean).length === 0 || option('--fixtures', '').split(',').includes(fixture.kind));
 assert.ok(fixtures.length > 0);
 const report: any = { commit: Bun.spawnSync(['git', 'rev-parse', 'HEAD']).stdout.toString().trim(), rounds, phase,
+  cpuProfile: process.argv.includes('--cpu-profile'),
   driverSha256: createHash('sha256').update(fs.readFileSync(import.meta.filename)).digest('hex'),
   policySha256: createHash('sha256').update(fs.readFileSync(path.join(root, 'src/foundation/largeDocument.ts'))).digest('hex'),
   compiledSha256: createHash('sha256').update(fs.readFileSync(path.join(compiled, 'index.js'))).digest('hex'),
@@ -99,6 +100,8 @@ try {
       if (fs.existsSync(path.join(output, 'STOP'))) { report.stopped = true; break campaign; }
       (globalThis as any).__strategyComparison = strategy;
       const context = await browser.createBrowserContext(), page = await context.newPage();
+      const profiler = process.argv.includes('--cpu-profile') ? await page.createCDPSession() : undefined;
+      if (profiler) { await profiler.send('Profiler.enable'); await profiler.send('Profiler.start'); }
       page.setDefaultTimeout(20_000);
       await page.setViewport(report.viewport); await page.setCacheEnabled(false);
       const sample: any = { round, fixture: fixture.kind, strategy, initialMode, errors: [], hostRenders: [] };
@@ -343,6 +346,11 @@ try {
         assert.deepEqual(sample.errors, [], 'editing and switching must not produce browser exceptions');
       } catch (error) { sample.failure = error instanceof Error ? error.stack : String(error); }
       finally {
+        if (profiler) {
+          const { profile } = await profiler.send('Profiler.stop');
+          fs.writeFileSync(path.join(output, `${fixture.kind}-${strategy}-${initialMode}-${round}.cpuprofile`), JSON.stringify(profile));
+          await profiler.detach();
+        }
         report.samples.push(sample); fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify(report, null, 2));
         console.log(JSON.stringify({ round, fixture: fixture.kind, strategy, initialMode, startup: sample.startup, failure: sample.failure }));
         for (const document of documents.values()) document.dispose(); await context.close();

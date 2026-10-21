@@ -34,6 +34,16 @@ Performance strategy comparisons are opt-in through
 `scripts/benchmark-document-strategies.ts --confirm-long-run`; see
 [the policy evidence](large-document-policy-evidence.md) for fixture dimensions,
 cold/warm definitions, input/heap measurements and native-test limitations.
+`--cpu-profile` saves a separate Chromium profile for each case; those instrumented
+runs diagnose call stacks and must not be compared as ordinary timing samples.
+
+`scripts/test-preview-giant-code-highlight.ts` bounds actual token DOM writes for
+an 18,000-line fence across scrolling, wrapping and theme changes. It verifies
+full selectable text, multi-line grammar and bracket depth from preceding,
+offscreen rows. `scripts/test-preview-palette-stability.ts` rejects unchanged
+palette refreshes that remove/reapply reading-root styles, and checks real color
+changes still propagate. Both belong to the browser release gate. The fence reuse
+contract also retains full export highlighting and fallback-only languages.
 
 The Mermaid/formula inner-source matrix and findings are in
 [testing-rendered-block-source.md](testing-rendered-block-source.md). Run

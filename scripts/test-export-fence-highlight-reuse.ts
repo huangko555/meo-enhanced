@@ -119,6 +119,17 @@ try {
     global.gc();
     assert.ok(process.memoryUsage().heapUsed - beforeLargeDocuments < 8 * 1024 * 1024,
       'Small cached highlights must not retain their large parent documents');
+    const giant = fence('javascript', 'const viewportOnly = 123;\\n'.repeat(3000));
+    before = calls();
+    const deferred = render(giant, { windowedPresentation: true });
+    assert.equal(calls(), before, 'Windowed Preview must avoid building a second whole-fence token tree');
+    assert.ok(deferred.html.includes('const viewportOnly = 123;') && !deferred.html.includes('hljs-keyword'));
+    assert.match(render(giant).html, /hljs-keyword/, 'Complete standalone rendering must retain code highlighting');
+    assert.match(render(giant, { windowedPresentation: true, highlightCode: () => '<span style="color:#123456">injected</span>' }).html,
+      /color:#123456/, 'An explicitly supplied highlighter remains authoritative');
+    const fallbackOnly = fence('accesslog', '127.0.0.1 - - [01/Jan/2026:00:00:00 +0000] "GET / HTTP/1.1" 200 12\\n'.repeat(1200));
+    before = calls(); render(fallbackOnly, { windowedPresentation: true });
+    assert.equal(calls(), before + 1, 'Languages without viewport Shiki support must keep the existing fallback');
     console.log('Fallback fence reuse, invalidation, retry, and capacity checks passed in Node');
   `);
   console.log(execFileSync('node', ['--expose-gc', runner], { encoding: 'utf8', timeout: 60_000 }).trim());

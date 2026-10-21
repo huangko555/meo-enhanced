@@ -53,6 +53,13 @@ const FENCE_HIGHLIGHT_CACHE_BYTES = 8 * 1024 * 1024;
 const FENCE_HIGHLIGHT_ENTRY_BYTES = 256 * 1024;
 const fenceHighlightCache = new Map<string, string>();
 let fenceHighlightCacheBytes = 0;
+// The Host is emitted as CommonJS. Its build retains only this synchronous,
+// data-only registry; grammar loading remains in the existing Shiki worker.
+const { languageNames, languageAliasNames } = require('@shikijs/langs') as {
+  languageNames: readonly string[];
+  languageAliasNames: readonly string[];
+};
+const viewportCodeLanguages = new Set([...languageNames, ...languageAliasNames]);
 
 registerExportLanguages();
 
@@ -257,7 +264,12 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
       ].join('');
     }
 
-    const highlighted = options.highlightCode?.(source, language) ?? highlightFence(source, language);
+    // Windowed Preview owns viewport Shiki projection. Building a second,
+    // whole-fence fallback token tree first defeats that bounded presentation.
+    // Standalone HTML/PDF/Word continue to render their complete token HTML.
+    const highlighted = options.windowedPresentation && source.length >= 64_000 && viewportCodeLanguages.has(language) && !options.highlightCode
+      ? escapeHtml(source)
+      : options.highlightCode?.(source, language) ?? highlightFence(source, language);
     const className = language ? ` class="hljs language-${escapeHtmlAttr(language)}"` : ' class="hljs"';
     const languageLabel = language
       ? `<div class="meo-export-code-language-label">${escapeHtml(language)}</div>`

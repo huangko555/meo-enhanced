@@ -39,7 +39,8 @@ import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 import {
   applyPreviewCodeHighlight,
   hasAppliedPreviewCodeHighlight,
-  isPreviewCodeHighlightReady
+  isPreviewCodeHighlightReady,
+  previewCodeReadingBand
 } from './previewCodeHighlight';
 import { activateShikiCodeHighlighting, subscribeShikiRefresh, setShikiTheme, type RawVscodeTheme } from './shikiHighlighter';
 import { createToolbarDropdown } from './toolbarDropdown';
@@ -282,6 +283,12 @@ function preserveLoadedPreviewImage(fromImage: HTMLImageElement, toImage: HTMLIm
 
 // These reading controls are added only to the iframe DOM, never to shared export HTML.
 const previewCopyBlockSelector = '.meo-export-code-block-wrap, .meo-export-mermaid, .meo-export-math-display';
+
+function setPreviewStyle(element: HTMLElement, property: string, value: string): void {
+  if (element.style.getPropertyValue(property) === value) return;
+  if (value) element.style.setProperty(property, value);
+  else element.style.removeProperty(property);
+}
 
 function addPreviewCodeCopyControls(root: ParentNode, language: UiLanguage): void {
   const strings = getUiStrings(language);
@@ -1772,14 +1779,17 @@ export function createPreviewController({
   const syncDocumentBackground = (frameDocument: Document): void => {
     // Default follows the document carrier; independent presets and an opposite
     // preview appearance retain their own paired colors. No render is needed.
-    frameDocument.documentElement.style.removeProperty('--meo-bg');
-    for (const property of Object.keys(documentSurfaceVariables)) frameDocument.documentElement.style.removeProperty(property);
-    if (presetPreference === 'default' && appearance === getEditorAppearance()) {
-      frameDocument.documentElement.style.setProperty('--meo-bg', getComputedStyle(document.body).backgroundColor);
-      const rootStyles = getComputedStyle(document.documentElement);
-      for (const [property, role] of Object.entries(documentSurfaceVariables)) {
-        frameDocument.documentElement.style.setProperty(property, rootStyles.getPropertyValue('--meo-document-' + role).trim());
-      }
+    const followsCarrier = presetPreference === 'default' && appearance === getEditorAppearance();
+    const rootStyles = followsCarrier ? getComputedStyle(document.documentElement) : null;
+    const background = followsCarrier ? getComputedStyle(document.body).backgroundColor : '';
+    // Copy controls have their own palette resolver below. Clearing their
+    // variables here and immediately restoring them invalidates the full tree.
+    const variables = Object.entries(documentSurfaceVariables)
+      .filter(([property]) => !property.startsWith('--meo-preview-code-copy-'))
+      .map(([property, role]) => [property, rootStyles?.getPropertyValue('--meo-document-' + role).trim() ?? ''] as const);
+    setPreviewStyle(frameDocument.documentElement, '--meo-bg', background);
+    for (const [property, value] of variables) {
+      setPreviewStyle(frameDocument.documentElement, property, value);
     }
     syncPreviewCopyPalette(frameDocument);
     const content = frameDocument.querySelector<HTMLElement>('.meo-export-doc');
@@ -1797,8 +1807,8 @@ export function createPreviewController({
         control.panel.style.setProperty('--meo-preview-background', background);
       }
       // Source position and hover overlays share the resolved document palette, even with custom CSS.
-      frameDocument.documentElement.style.setProperty('--meo-preview-foreground', foreground);
-      frameDocument.documentElement.style.setProperty('--meo-preview-background', background);
+      setPreviewStyle(frameDocument.documentElement, '--meo-preview-foreground', foreground);
+      setPreviewStyle(frameDocument.documentElement, '--meo-preview-background', background);
       host.style.colorScheme = appearance;
       onPaletteChanged?.();
     }
@@ -1828,7 +1838,13 @@ export function createPreviewController({
     const codes = nearby ? [...new Set([...nearby.filter(code => code.matches('pre.meo-export-code-block code')),
       ...(getPreviewViewportResources(frameDocument, 'copy') ?? []).flatMap(block => [...block.querySelectorAll<HTMLElement>('pre.meo-export-code-block code')])])]
       : [...content.querySelectorAll<HTMLElement>('pre.meo-export-code-block code')];
-    const pending = codes.filter(code => !checkedCodeTypography.has(code) || checkedCodeTypography.get(code) !== code.firstChild);
+    const height = frameDocument.documentElement.clientHeight;
+    const pending = codes.flatMap(code => {
+      const lines = Array.from(code.querySelectorAll<HTMLElement>('.meo-export-code-line'));
+      const [from, to] = previewCodeReadingBand(lines, height);
+      return (lines.length ? lines.slice(from, to) : [code])
+        .filter(line => !checkedCodeTypography.has(line) || checkedCodeTypography.get(line) !== line.firstChild);
+    });
     const publishFallbacks = () => {
       const previous = presetCodeFallbacks.has(presetPreference);
       if (typographyFallbackLines.size) presetCodeFallbacks.add(presetPreference);
@@ -1841,17 +1857,14 @@ export function createPreviewController({
     }
     const bodySize = Number.parseFloat(frameWindow.getComputedStyle(content).fontSize);
     const invalid: HTMLElement[] = [];
-    for (const code of pending) {
-      const lines = code.querySelectorAll<HTMLElement>('.meo-export-code-line');
-      for (const line of lines.length ? lines : [code]) {
-        const styles = frameWindow.getComputedStyle(line);
-        const size = Number.parseFloat(styles.fontSize);
-        const height = Number.parseFloat(styles.lineHeight);
-        if (!Number.isFinite(size) || size <= 0 || styles.lineHeight !== 'normal' && (!Number.isFinite(height) || height <= 0)) {
-          invalid.push(line);
-        }
+    for (const line of pending) {
+      const styles = frameWindow.getComputedStyle(line);
+      const size = Number.parseFloat(styles.fontSize);
+      const height = Number.parseFloat(styles.lineHeight);
+      if (!Number.isFinite(size) || size <= 0 || styles.lineHeight !== 'normal' && (!Number.isFinite(height) || height <= 0)) {
+        invalid.push(line);
       }
-      checkedCodeTypography.set(code, code.firstChild);
+      checkedCodeTypography.set(line, line.firstChild);
     }
     // Keep style reads separate from repairs: one invalid line must not force
     // the next line to synchronously lay out the document again.
@@ -1883,12 +1896,12 @@ export function createPreviewController({
     ] as const) {
       // Independent preview palettes resolve their controls inside the iframe.
       if (presetPreference !== 'default' || appearance !== getEditorAppearance()) {
-        frameDocument.documentElement.style.removeProperty(property);
+        setPreviewStyle(frameDocument.documentElement, property, '');
         continue;
       }
       probe.style[cssProperty] = `var(${variable})`;
       document.body.appendChild(probe);
-      frameDocument.documentElement.style.setProperty(property, window.getComputedStyle(probe)[cssProperty]);
+      setPreviewStyle(frameDocument.documentElement, property, window.getComputedStyle(probe)[cssProperty]);
       probe.remove();
     }
   };
