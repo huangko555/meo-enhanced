@@ -3,7 +3,7 @@ import { createElement, ZoomIn, ZoomOut, RotateCcw, Maximize2 } from 'lucide';
 import type { EditorState } from '@codemirror/state';
 import type { SyntaxNodeRef } from '@lezer/common';
 import type { MermaidConfig } from 'mermaid';
-import { getMermaidPalette } from '../../../src/shared/mermaidPalette';
+import { getMermaidColorVariables, getMermaidPalette } from '../../../src/shared/mermaidPalette';
 import { getViewportController } from './viewportController';
 import { applyLiveBlockIndent, getCodeBlockSourceLines } from './blockIndent';
 import { getFencedCodeBodyRange } from './markdownSyntax';
@@ -303,41 +303,10 @@ function getMermaidThemeConfig(): { signature: string; config: MermaidRuntimeCon
       look: 'classic',
       fontFamily,
       themeVariables: {
-        background,
-        mainBkg: nodeBackground,
-        secondBkg: palette.secondaryBackground,
-        secondaryColor: palette.secondaryBackground,
-        tertiaryColor: palette.tertiaryBackground,
-        primaryColor: nodeBackground,
-        primaryTextColor: foreground,
-        secondaryTextColor: foreground,
-        tertiaryTextColor: foreground,
-        primaryBorderColor: border,
-        secondaryBorderColor: border,
-        tertiaryBorderColor: border,
-        nodeBorder: border,
-        lineColor: palette.line,
-        signalColor: palette.line,
+        ...getMermaidColorVariables({ ...palette, background }),
         sequenceNumberColor: darkMode ? palette.chartTextColor : '#ffffff',
-        textColor: foreground,
-        nodeTextColor: foreground,
-        edgeLabelBackground: background,
-        clusterBkg: palette.clusterBackground,
-        clusterBorder: border,
-        titleColor: foreground,
-        noteBkgColor: palette.secondaryBackground,
-        noteTextColor: foreground,
-        noteBorderColor: border,
-        doneTaskBkgColor: palette.secondaryBackground,
-        activeTaskBkgColor: palette.tertiaryBackground,
-        taskTextDarkColor: foreground,
         ...Object.fromEntries(palette.chartColors.map((color, index) => [`pie${index + 1}`, color])),
-        pieSectionTextColor: palette.chartTextColor,
-        pieLegendTextColor: foreground,
-        pieTitleTextColor: foreground,
         pieOpacity: 1,
-        pieStrokeColor: border,
-        pieOuterStrokeColor: border,
         fontFamily,
         darkMode
       },

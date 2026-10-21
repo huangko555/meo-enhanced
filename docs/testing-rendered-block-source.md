@@ -194,3 +194,5 @@ Mermaid 源码工具栏依次为完成编辑、全选、复制为图片、复制
 ## 甘特任务文字对比
 
 `test-mermaid-visible-controls` 使用真实 Mermaid 渲染，在深浅色、宽窄 Live 图块中检查甘特任务的实际 SVG 填充色，条内文字对比至少为 4.5:1。`test-mermaid-layout-export` 对 HTML、PDF 和 Word 输出做同样检查，并验证作者指定的任务背景和文字色保持原样。测试同时保留条外标签、日期不重叠和逻辑渲染宽度检查；修复复用既有主题变量，不依赖逐个 SVG 元素覆盖颜色。
+
+Live／导出检查不能代表实际 Preview。`test-preview-mermaid-runtime` 另用完整 Preview Controller 创建 iframe，验证甘特任务在深色→浅色→深色切换后仍至少为 4.5:1、三种任务状态保留不同背景，并保留作者颜色。`bun scripts/test-preview-mermaid-runtime.ts --gantt-only` 是该问题的最小复现：修复前深色 Preview 的完成任务使用浅灰条与浅色文字，对比仅为 1.27:1。该用例与资源／KaTeX 首次加载用例使用独立页面，完整调用仍保留原有生命周期检查。三处渲染共享同一颜色对应表，导出只嵌入这份数据。

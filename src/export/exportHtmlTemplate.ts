@@ -1,3 +1,4 @@
+import { mermaidThemeColorRoles } from '../shared/mermaidPalette';
 import { getGithubMermaidConfig } from '../preview/githubMermaid';
 
 export type BuildExportHtmlDocumentOptions = {
@@ -597,47 +598,18 @@ function buildRuntimeScript(hasMermaid: boolean, githubStyle = false): string {
     const clusterBackground = getExportThemeColor('--meo-mermaid-cluster-background', background);
     const chartColors = Array.from({ length: 12 }, (_, index) => getExportThemeColor('--meo-mermaid-chart-' + (index + 1), nodeBackground));
     const chartTextColor = getExportThemeColor('--meo-mermaid-chart-text', foreground, 'color');
+    const palette = { background, nodeBackground, secondaryBackground, tertiaryBackground, clusterBackground,
+      foreground, border, line, chartTextColor };
     return {
       startOnLoad: false,
       securityLevel: 'strict',
       theme: 'base',
       look: 'classic',
       themeVariables: {
-        background,
-        mainBkg: nodeBackground,
-        secondBkg: secondaryBackground,
-        secondaryColor: secondaryBackground,
-        tertiaryColor: tertiaryBackground,
-        primaryColor: nodeBackground,
-        primaryTextColor: foreground,
-        secondaryTextColor: foreground,
-        tertiaryTextColor: foreground,
-        primaryBorderColor: border,
-        secondaryBorderColor: border,
-        tertiaryBorderColor: border,
-        nodeBorder: border,
-        lineColor: line,
-        signalColor: line,
+        ...Object.fromEntries(Object.entries(${JSON.stringify(mermaidThemeColorRoles)}).map(([variable, role]) => [variable, palette[role]])),
         sequenceNumberColor: darkMode ? chartTextColor : '#ffffff',
-        textColor: foreground,
-        nodeTextColor: foreground,
-        edgeLabelBackground: background,
-        clusterBkg: clusterBackground,
-        clusterBorder: border,
-        titleColor: foreground,
-        noteBkgColor: secondaryBackground,
-        noteTextColor: foreground,
-        noteBorderColor: border,
-        doneTaskBkgColor: secondaryBackground,
-        activeTaskBkgColor: tertiaryBackground,
-        taskTextDarkColor: foreground,
         ...Object.fromEntries(chartColors.map((color, index) => ['pie' + (index + 1), color])),
-        pieSectionTextColor: chartTextColor,
-        pieLegendTextColor: foreground,
-        pieTitleTextColor: foreground,
         pieOpacity: 1,
-        pieStrokeColor: border,
-        pieOuterStrokeColor: border,
         darkMode
       },
       htmlLabels: true,

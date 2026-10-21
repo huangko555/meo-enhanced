@@ -1,7 +1,7 @@
 import { syncPreviewRenderedActions } from './previewBlockActions';
 import type { EditorAppearance } from '../../../src/protocol/editorCommands';
 import { getGithubMermaidConfig } from '../../../src/preview/githubMermaid';
-import { getMermaidPalette } from '../../../src/shared/mermaidPalette';
+import { getMermaidColorVariables, getMermaidPalette } from '../../../src/shared/mermaidPalette';
 
 type PreviewAppearance = Exclude<EditorAppearance, 'auto'>;
 import {
@@ -143,38 +143,10 @@ async function renderMermaidBlocks(
     theme: 'base',
     look: 'classic',
     themeVariables: {
-      background: palette.background,
-      mainBkg: palette.nodeBackground,
-      secondBkg: palette.secondaryBackground,
-      secondaryColor: palette.secondaryBackground,
-      tertiaryColor: palette.tertiaryBackground,
-      primaryColor: palette.nodeBackground,
-      primaryTextColor: palette.foreground,
-      secondaryTextColor: palette.foreground,
-      tertiaryTextColor: palette.foreground,
-      primaryBorderColor: palette.border,
-      secondaryBorderColor: palette.border,
-      tertiaryBorderColor: palette.border,
-      nodeBorder: palette.border,
-      lineColor: palette.line,
-      signalColor: palette.line,
+      ...getMermaidColorVariables(palette),
       sequenceNumberColor: appearance === 'dark' ? palette.chartTextColor : '#ffffff',
-      textColor: palette.foreground,
-      nodeTextColor: palette.foreground,
-      edgeLabelBackground: palette.background,
-      clusterBkg: palette.clusterBackground,
-      clusterBorder: palette.border,
-      titleColor: palette.foreground,
-      noteBkgColor: palette.secondaryBackground,
-      noteTextColor: palette.foreground,
-      noteBorderColor: palette.border,
       ...Object.fromEntries(palette.chartColors.map((color, index) => [`pie${index + 1}`, color])),
-      pieSectionTextColor: palette.chartTextColor,
-      pieLegendTextColor: palette.foreground,
-      pieTitleTextColor: palette.foreground,
       pieOpacity: 1,
-      pieStrokeColor: palette.border,
-      pieOuterStrokeColor: palette.border,
       darkMode: appearance === 'dark'
     },
     htmlLabels: true,

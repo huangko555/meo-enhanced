@@ -30,3 +30,44 @@ export function getMermaidPalette(darkMode: boolean) {
     chartTextColor: '#24292f'
   };
 }
+
+// One color-role table is consumed by Live, Preview and the standalone export
+// script. Keep it as data so export can embed it without serializing functions.
+export const mermaidThemeColorRoles = {
+  background: 'background',
+  mainBkg: 'nodeBackground',
+  secondBkg: 'secondaryBackground',
+  secondaryColor: 'secondaryBackground',
+  tertiaryColor: 'tertiaryBackground',
+  primaryColor: 'nodeBackground',
+  primaryTextColor: 'foreground',
+  secondaryTextColor: 'foreground',
+  tertiaryTextColor: 'foreground',
+  primaryBorderColor: 'border',
+  secondaryBorderColor: 'border',
+  tertiaryBorderColor: 'border',
+  nodeBorder: 'border',
+  lineColor: 'line',
+  signalColor: 'line',
+  textColor: 'foreground',
+  nodeTextColor: 'foreground',
+  edgeLabelBackground: 'background',
+  clusterBkg: 'clusterBackground',
+  clusterBorder: 'border',
+  titleColor: 'foreground',
+  noteBkgColor: 'secondaryBackground',
+  noteTextColor: 'foreground',
+  noteBorderColor: 'border',
+  doneTaskBkgColor: 'secondaryBackground',
+  activeTaskBkgColor: 'tertiaryBackground',
+  taskTextDarkColor: 'foreground',
+  pieSectionTextColor: 'chartTextColor',
+  pieLegendTextColor: 'foreground',
+  pieTitleTextColor: 'foreground',
+  pieStrokeColor: 'border',
+  pieOuterStrokeColor: 'border'
+} as const;
+
+export function getMermaidColorVariables(palette: ReturnType<typeof getMermaidPalette> & { background: string }) {
+  return Object.fromEntries(Object.entries(mermaidThemeColorRoles).map(([variable, role]) => [variable, palette[role]]));
+}
