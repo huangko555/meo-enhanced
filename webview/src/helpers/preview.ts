@@ -2523,12 +2523,18 @@ export function createPreviewController({
         // for the replacement band are ready. A thumb/wheel gesture may move
         // that band while the worker responds; prepare its latest destination.
         const manifest = value.document;
+        const destination = () => {
+          const external = getCurrentPendingExternalViewportRestore();
+          return { line: external?.line ?? getTopVisiblePosition()?.topLine ?? manifest.anchorLine,
+            range: external ? external.sourceRange : previewViewport?.readAnchor()?.sourceRange };
+        };
         while (true) {
-          const line = getCurrentPendingExternalViewportRestore()?.line ?? getTopVisiblePosition()?.topLine ?? manifest.anchorLine;
-          const prepared = await preparePreviewWindow(root, manifest, line, requestPreviewDocument);
+          const target = destination();
+          const prepared = await preparePreviewWindow(root, manifest, target.line, requestPreviewDocument, target.range);
           if (disposed || generation !== requestGeneration || isCurrentText?.(requestText) === false) return;
-          const currentLine = getCurrentPendingExternalViewportRestore()?.line ?? getTopVisiblePosition()?.topLine ?? manifest.anchorLine;
-          if (line !== currentLine) continue;
+          const current = destination();
+          if (target.line !== current.line || target.range?.startLine !== current.range?.startLine
+            || target.range?.endLine !== current.range?.endLine || target.range?.progress !== current.range?.progress) continue;
           value = { ...value, document: prepared };
           break;
         }

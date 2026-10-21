@@ -10,13 +10,17 @@ const ignoredText = 'script,style,noscript,svg,.meo-preview-code-actions,.meo-pr
 /** Prepare a complete bounded reading band before replacing an accepted frame.
  * The renderer's small seed alone may leave the current viewport inside a gap. */
 export async function preparePreviewWindow(root: HTMLElement, manifest: PreviewDocumentManifest, anchorLine: number,
-  request: (id: string, operation: PreviewDocumentOperation) => Promise<PreviewDocumentResult>): Promise<PreviewDocumentManifest> {
+  request: (id: string, operation: PreviewDocumentOperation) => Promise<PreviewDocumentResult>,
+  readingRange?: { startLine: number; endLine: number; progress: number }): Promise<PreviewDocumentManifest> {
   const window = root.ownerDocument.defaultView!;
   const style = window.getComputedStyle(root), fontSize = Number.parseFloat(style.fontSize) || 16;
   const layout = createPreviewBlockLayout(manifest.blocks, { width: root.clientWidth || window.innerWidth,
     fontSize, lineHeight: Number.parseFloat(style.lineHeight) || fontSize * 1.6 });
   const anchor = previewBlockAtLine(manifest.blocks, anchorLine) ?? 0;
-  const band = layout.window(layout.top(anchor), window.innerHeight);
+  const block = manifest.blocks[anchor];
+  const progress = block ? readingRange?.startLine === block.sourceLine && readingRange.endLine === block.sourceEndLine
+    ? readingRange.progress : (anchorLine - block.sourceLine) / Math.max(1, block.sourceEndLine - block.sourceLine + 1) : 0;
+  const band = layout.window(layout.top(anchor) + layout.height(anchor) * Math.max(0, Math.min(1, progress)), window.innerHeight);
   const chunks = new Map(manifest.chunks.map(chunk => [chunk.index, chunk]));
   const indices = Array.from({ length: band.to - band.from }, (_, offset) => band.from + offset);
   const missing = indices.filter(index => !chunks.has(index));
@@ -461,6 +465,10 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
   root.dataset.meoPreviewDocument = manifest.id;
   for (const chunk of manifest.chunks) remember(chunk);
   const initial = atLine(manifest.anchorLine);
+  // Prepared chunks describe the accepted reading band, including content
+  // below the tail of a tall block. Keep them until the outer transaction
+  // restores its actual witness; the old numerical scrollTop is not a window.
+  for (const chunk of manifest.chunks) pin(chunk.index);
   if (manifest.blocks.length) pin(initial);
   commit();
   if (manifest.anchorLine > 1) scroll.scrollTop = origin() + layout.top(initial);

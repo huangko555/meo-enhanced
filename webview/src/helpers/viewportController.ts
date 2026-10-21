@@ -911,7 +911,7 @@ export class ViewportController {
     } else {
       const position = this.previewSurface.captureTopVisiblePosition();
       if (!position) return false;
-      this.restoreLinkedEditorPosition(position.line, position.editorLineOffset ?? position.lineOffset, isCurrent);
+      this.restoreLinkedEditorPosition(position.line, position.editorLineOffset ?? position.lineOffset, isCurrent, position.sourceRange);
     }
     return true;
   }
@@ -1109,7 +1109,8 @@ export class ViewportController {
       () => (
         !this.destroyed && this.linkedPreviewEnabled &&
         semanticGeneration === this.linkedProjectionGeneration && this.linkedViewportDriver === 'preview'
-      )
+      ),
+      previewPosition.sourceRange
     );
   }
 
@@ -1211,7 +1212,8 @@ export class ViewportController {
   private restoreLinkedEditorPosition(
     lineNumber: number,
     lineOffset: number,
-    isCurrent: () => boolean
+    isCurrent: () => boolean,
+    sourceRange?: ViewportDocumentAnchor['sourceRange']
   ): void {
     // A linked follower tracks the current gesture, not an asynchronous layout
     // mutation. One measured write avoids the generic multi-frame stabilizer
@@ -1221,11 +1223,20 @@ export class ViewportController {
       Math.max(1, Math.floor(Number.isFinite(lineNumber) ? lineNumber : 1)),
       this.view.state.doc.lines
     );
-    const line = this.view.state.doc.line(normalizedLine);
+    let line = this.view.state.doc.line(normalizedLine);
+    let offset = Number.isFinite(lineOffset) ? Math.max(0, lineOffset) : 0;
+    if (sourceRange && this.getMode() === 'source') {
+      const start = Math.min(this.view.state.doc.lines, Math.max(1, Math.floor(sourceRange.startLine)));
+      const end = Math.min(this.view.state.doc.lines, Math.max(start, Math.floor(sourceRange.endLine)));
+      const progress = Math.max(0, Math.min(1, sourceRange.progress));
+      const span = end - start + 1, position = span * progress;
+      const index = Math.min(span - 1, Math.floor(position));
+      line = this.view.state.doc.line(start + index);
+      const block = this.view.lineBlockAt(line.from);
+      offset = (block.bottom - block.top) * (progress >= 1 ? 1 : position - index);
+    }
     const target = this.resolveScrollTarget({
-      top: this.view.lineBlockAt(line.from).top + (
-        Number.isFinite(lineOffset) ? Math.max(0, lineOffset) : 0
-      )
+      top: this.view.lineBlockAt(line.from).top + offset
     }, this.readScrollPosition());
     if (isCurrent()) this.writeScrollPosition(target);
   }

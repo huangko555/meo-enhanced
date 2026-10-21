@@ -1777,3 +1777,23 @@ component test fails on `fa408df2` and checks 100%/125% DPR, CSS zoom and releas
 user scrolling. The full production compositor matrix remains the integration
 gate. Screencast acknowledgements are drained before detaching their session so
 late protocol replies cannot fail an already completed paint check.
+
+Native replay of `59881b2a` catches a separate edit-handoff defect near the tail
+of a long table. Source stays at line 24,532, but editing the following wide-table
+header disconnects the visible unchanged paragraph and moves Preview by more
+than 7,000px. Preparing around the logical block's start omits content visible
+after its tail; the new viewport's first commit can then discard even prepared
+chunks using the old numerical scrollTop against its new estimated prefix.
+
+Preparation now uses the accepted reading block's fractional progress, with a
+source-line fallback when its range changed. All prepared chunks survive the
+synchronous first commit until the outer viewport transaction restores its
+reading witness. The next normal window update resumes bounded mounting; no
+extra observer, grace timer or second scroll owner is introduced. The generated
+table-boundary regression in `test-linked-preview-cold-scroll.ts` observes both
+sync settings through eight quiet seconds, retains the same visible paragraph,
+compares its compositor paints and verifies exact edited source and Undo.
+The `59881b2a` production snapshot fails with 6,762 changed pixels; the new
+handoff passes. Reverse Preview-to-Source projection also retains fractional
+source-range progress inside wrapped lines and tall blocks, with single-write
+controller regressions rather than delayed correction loops.

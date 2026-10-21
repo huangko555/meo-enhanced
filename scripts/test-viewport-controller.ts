@@ -2759,7 +2759,8 @@ for (const settledShift of [0, 40]) {
     const line = doc.line(number);
     return { from: line.from, to: line.to, top: (number - 1) * 20, bottom: number * 20 };
   };
-  let previewPosition = { line: 1, lineOffset: 0, editorLineOffset: 0 };
+  let previewPosition: { line: number; lineOffset: number; editorLineOffset: number;
+    sourceRange?: { startLine: number; endLine: number; progress: number } } = { line: 1, lineOffset: 0, editorLineOffset: 0 };
   const previewWrites: Array<{ line: number; lineOffset: number }> = [];
   const controller = new ViewportController({
     dom: {},
@@ -2801,6 +2802,15 @@ for (const settledShift of [0, 40]) {
     controller.editorViewportChanged();
     await flushLinkedFrames();
     if (previewWrites.length !== 1) throw new Error('Follower scroll echoed back into Preview');
+
+    previewPosition = { line: 25, lineOffset: 0, editorLineOffset: 0,
+      sourceRange: { startLine: 25, endLine: 25, progress: .75 } };
+    controller.previewViewportChanged();
+    if (Number(scrollDOM.scrollTop) !== 495) throw new Error(`Preview lost progress inside a wrapped source line: ${scrollDOM.scrollTop}`);
+    previewPosition = { line: 25, lineOffset: 0, editorLineOffset: 0,
+      sourceRange: { startLine: 25, endLine: 28, progress: .625 } };
+    controller.previewViewportChanged();
+    if (Number(scrollDOM.scrollTop) !== 530) throw new Error(`Preview lost progress through a tall source block: ${scrollDOM.scrollTop}`);
 
     controller.markInteraction();
     scrollDOM.scrollTop = 600;
