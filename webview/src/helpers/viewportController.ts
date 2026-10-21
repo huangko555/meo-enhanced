@@ -58,6 +58,8 @@ export function visualLineContextMargin(
 }
 
 export interface PreviewViewportSurface {
+  /** A mounted unchanged glyph is more precise than an estimated source range. */
+  captureVisualReadingAnchor?(viewportRatio?: number): (() => boolean) | null;
   captureTopVisiblePosition(viewportOffset?: number): {
     line: number;
     lineOffset: number;
@@ -938,6 +940,7 @@ export class ViewportController {
       }
       const linkedPreviewEnabled = this.linkedPreviewEnabled;
       const heldPreviewTop = this.previewSurface.readScrollTop();
+      const restoreVisualAnchor = this.previewSurface.captureVisualReadingAnchor?.(documentChange ? 0 : 1 / 3);
       const interactionGeneration = this.interactionGeneration;
       const projectionGeneration = this.linkedProjectionGeneration;
       const projectionDriver = this.linkedViewportDriver;
@@ -976,7 +979,10 @@ export class ViewportController {
       // presentation-only commits retain its exact rendered-range progress. During
       // a scroll gesture, preserve the physical follower position so layout cannot
       // fight the user's input.
-      if (readingAnchor) {
+      // The reading DOM can survive a morph or resource update. Its exact
+      // painted point takes priority over interpolated source-range geometry.
+      const visualRestored = restoreVisualAnchor?.() === true;
+      if (!visualRestored && readingAnchor) {
         const projectedAnchor = documentChange
           ? this.mapAnchorThroughDocumentChange(
               readingAnchor,
@@ -1003,7 +1009,7 @@ export class ViewportController {
           projectionGeneration === this.linkedProjectionGeneration &&
           (!linkedPreviewEnabled || this.linkedViewportDriver === projectionDriver)
         ));
-      } else {
+      } else if (!visualRestored) {
         this.previewSurface.writeScrollTop(heldPreviewTop);
       }
       // Pin the refreshed hot-path map to the exact post-commit position so the
@@ -2240,6 +2246,11 @@ export class ViewportController {
     }
     this.markInteraction();
     if (!this.canChangeLiveLayout(event)) return;
+    // Native table inputs already retain/reveal their own caret during row
+    // reflow. A second document anchor uses the outer editor's selection and
+    // can scroll to a different row while the textarea still owns focus.
+    if (event.target instanceof Element && event.target.matches('textarea')
+      && event.target.closest('.meo-md-html-table-shell')) return;
     const insideRenderedBlock = event.target instanceof Element && Boolean(event.target.closest(
       '[data-meo-rendered-block-start-line][data-meo-rendered-block-end-line]'
     ));
@@ -2261,7 +2272,7 @@ export class ViewportController {
     if (
       event.target instanceof Element &&
       event.target.closest(
-        '.meo-mermaid-editing-block, .meo-latex-math-editing-block, .meo-mermaid-toolbar, .meo-latex-math-toolbar, .meo-md-html-block, .meo-md-html-source-control, .meo-md-html-table-context-trigger, .meo-md-html-table-context-menu, .meo-md-code-block-start, .meo-md-code-block-end'
+        '.meo-mermaid-editing-block, .meo-latex-math-editing-block, .meo-mermaid-toolbar, .meo-latex-math-toolbar, .meo-md-html-block, .meo-md-html-source-control, .meo-md-html-table-context-trigger, .meo-md-html-table-context-menu, .meo-md-html-table-column-resize-handle, .meo-md-code-block-start, .meo-md-code-block-end'
       )
     ) return;
     const pointerPosition = sourceLinePositionAtTarget(this.view, event.target) ??

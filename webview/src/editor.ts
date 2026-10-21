@@ -2,6 +2,7 @@ import { readDocumentTextProjection } from './application/documentTextProjection
 import { editorScrollIntoView } from './editor/scrollEffects';
 import { markdownSyntaxPublication } from './editor/markdownSyntaxPublication';
 import { editorViewportBounds } from './editor/editorViewportBounds';
+import { applyPrimaryEditorTransactions } from './editor/nativeSelectionRetention';
 import { sourceLinePositionAtTarget } from './editor/domSourceLine';
 import { currentHeadingSuggestions } from './editor/headingSuggestions';
 import { markdownSyntaxContext, type MarkdownInputContext } from './editor/blockInsertion';
@@ -2811,6 +2812,7 @@ export function createEditor({
   });
 
   view = new EditorView({
+    dispatchTransactions: applyPrimaryEditorTransactions,
     state,
     parent
   });
@@ -4289,6 +4291,9 @@ export function createEditor({
         return;
       }
       if (align === 'top') {
+        // An explicit line-top jump supersedes an older document's queued
+        // reading correction, even when this target already starts at the top.
+        viewportController.markInteraction();
         // Let CodeMirror choose the first atomic landing for content and
         // gutters, then retain that exact on-screen Y while late height-map
         // measurements settle. A second forced line-top restore would expose

@@ -1581,3 +1581,76 @@ They are recorded as unresolved baseline checks, not counted as passing gates
 or evidence that all large-document performance goals are complete. This round
 uses isolated browser validation; it adds no native VS Code timings or operating
 system IME candidate-window acceptance.
+
+### Follow-up: complex input, native caret and competing viewport owners (2026-10-21)
+
+The next audit reproduced failures that the preceding top-of-document checks
+missed. In a clean `42d3d3d4` build, editing a note definition repaints unchanged
+table references and line numbers; the reduced large-note case changes 2,958
+gutter pixels. The complex independent Preview case changes 145,966 unchanged
+pixels. These are negative controls for the added regression cases, not timing
+measurements. The rapid long-table numeric case alone also passes that baseline;
+it is coverage for the reported intermittent symptom, not a claimed exact repro.
+
+- Table reference paint no longer depends on the absolute offset of its note
+  definition. Navigation resolves the current target by label. Tables seed their
+  accepted measured height before CodeMirror compares replacement decorations,
+  through the same height protocol used by rendered math and diagrams. Waiting
+  for `eq` or `updateDOM` let the gutter use an estimate beside unchanged DOM.
+- A table textarea and its column-resize interaction retain their own active
+  cell. The outer document controller no longer captures a competing selection
+  anchor for those interactions. The existing column-reflow regression fails
+  on the baseline with about 45px of active-cell movement and passes with this
+  ownership change.
+- Windowed Preview uses logical body blocks for linked source geometry. Virtual
+  gaps and relocated footnotes are not continuous source intervals. Its bounded
+  mounted band no longer also uses CSS content skipping or native overflow
+  anchoring. Ordinary full-DOM accessibility presentation retains its CSS path.
+- Window roots have stable morph keys, and fitted table tracks travel together
+  with their fitted table box. Mounted window tables are fitted before paint.
+  Existing table matches use source ownership rather than window-local ordinal.
+- Presentation transactions retain an actual unchanged text node and offset,
+  reconstructing its Range after DOM moves. Unchanged block boxes retain precise
+  fractional position; genuinely reflowed content uses its text point. Layout
+  updates sample the reading band, leaving images without nearby text to the
+  semantic fallback. Document edits sample the top of the reading surface.
+  The leading virtual gap can absorb a positive subpixel residual even when
+  the mounted window starts at block zero; the residual stays below one physical
+  pixel. New user interaction invalidates the witness. A further original-fixture
+  replay exposed CSSOM rounding when a roughly 200,000px prefix's `style.height`
+  was read back as an integer. Fractional correction now reads the actual gap
+  layout box. A deep-prefix regression changes 20,034 unchanged pixels on the
+  preceding candidate build and is included in the permanent complex matrix.
+- A production HTML-comment input sequence exposed native caret loss after an
+  asynchronous decoration-only update: the accepted model stayed at offset 4,
+  while the native caret moved to 0 and the next Enter inserted before the
+  comment. Public `focus()` reused CodeMirror's cached selection. A narrowly
+  gated primary dispatch adapter now refreshes that cache and restores only a
+  previously matching selection. Document edits, explicit selections, mode
+  reconfiguration, composition and embedded textarea focus are excluded.
+- Explicit line-top navigation cancels pending reading corrections from an
+  older document, including when the requested target is already at the top.
+  The unchanged Source syntax regression fails on the baseline when a late
+  correction moves its edited token outside the viewport, and passes after
+  the navigation change. Selection-only reservations keep their existing policy.
+
+`test:input-presentation` now includes the production complex-input matrix.
+The shared browser harness keeps actual split assets, Workers, versioned host
+acknowledgements and delayed window handoffs. It checks every delivered
+compositor paint in unchanged regions as well as passive DOM geometry, retained
+node identity and exact accepted source. The matrix covers ordinary/windowed
+documents, sync on/off, Source/Live and Source with side Preview, note edits at 100%/125%,
+multi-line formatted paste and history, plus physical browser clicks and 100
+rapid digits in both the header and first data row of a 200-row table.
+The observation generations are isolated so starting a later phase cannot revive
+an earlier sampler. Pixel crops exclude actual edited glyphs using their measured
+block instead of an assumed fixed Y. They still include unchanged rich content.
+
+The broader audit includes table row reflow and sticky chrome, HTML input and
+comments, math editing and selection, Mermaid, image loading, Source syntax,
+IME, mode/selection continuity, native scrolling and bounded input work. An older
+Preview font-control test assumed an expanded dropdown used the collapsed field
+surface; it now separately asserts the existing collapsed and expanded shared
+theme contracts, without changing product styling. Browser composition coverage
+does not certify a Windows IME candidate window. Isolated instance startup is
+recorded separately from browser input acceptance and from package/release tests.

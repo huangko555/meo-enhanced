@@ -205,6 +205,9 @@ export function createPreviewTableLayoutController(
   const frameWindow = frameDocument.defaultView;
   const deferOffscreen = root === frameDocument
     && frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true'
+    // A logical document window already bounds these tables. Fit the mounted
+    // band before paint instead of replacing its widths in a later callback.
+    && frameDocument.documentElement.dataset.meoPreviewWindowed !== 'true'
     && !!frameWindow?.IntersectionObserver;
   const nearbyTables = new Set<HTMLTableElement>();
   const refresh = () => {

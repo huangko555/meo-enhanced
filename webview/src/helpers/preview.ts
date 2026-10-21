@@ -16,6 +16,7 @@ import { normalizeDocumentText } from '../../../src/foundation/documentText';
 import { assessLargeDocument } from '../../../src/foundation/largeDocument';
 import { getPreviewViewportResources, observePreviewViewportResources } from './previewViewportResources';
 import { createPreviewSourceGeometry } from './previewSourceGeometry';
+import { capturePreviewReadingAnchor } from './previewReadingAnchor';
 import { createPreviewScrollRange } from './previewScrollRange';
 import { writePreviewFrame } from './previewFrameWriter';
 import { renderDeferredPreviewMath } from './previewMath';
@@ -361,10 +362,27 @@ function morphPreviewMain(
     const nearbyControls = frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true';
     if (!nearbyControls) addPreviewCodeCopyControls(nextMain, frameDocument.documentElement.lang as UiLanguage);
     const currentTables = retainTableColumns ? Array.from(currentMain.querySelectorAll<HTMLTableElement>('table')) : [];
-    Array.from(nextMain.querySelectorAll<HTMLTableElement>('table')).forEach((table, index) => {
-      const columns = currentTables[index]
+    const tableSource = (table: HTMLTableElement) => table.closest<HTMLElement>('[data-source-line]')?.dataset.sourceLine;
+    const availableTables = new Set(currentTables);
+    Array.from(nextMain.querySelectorAll<HTMLTableElement>('table')).forEach(table => {
+      // The replacement window can start before/after the accepted window.
+      // Its first table is not necessarily the same source table.
+      const current = currentTables.find(candidate => availableTables.has(candidate)
+        && tableSource(candidate) === tableSource(table));
+      if (current) availableTables.delete(current);
+      const columns = current
         ?.querySelector<HTMLTableColElement>(':scope > colgroup[data-meo-preview-columns]');
-      if (columns) table.prepend(columns.cloneNode(true));
+      if (columns && current) {
+        table.prepend(columns.cloneNode(true));
+        // Column tracks and their fitted table box form one layout. Keeping
+        // only the tracks briefly restores an automatic-width table until the
+        // next visibility callback, moving narrow columns on every input.
+        for (const property of ['width', 'min-width', 'max-width', 'table-layout', '--meo-preview-table-cell-inline-padding']) {
+          const value = current.style.getPropertyValue(property);
+          if (value) table.style.setProperty(property, value, current.style.getPropertyPriority(property));
+        }
+        table.classList.toggle('meo-preview-table-compressed', current.classList.contains('meo-preview-table-compressed'));
+      }
     });
     clearPresentationMorphKeys = preparePreviewPresentationMorphKeys(currentMain, nextMain);
     updates.push({ current: currentMain, next: nextMain });
@@ -382,7 +400,15 @@ function morphPreviewMain(
           const overlay = ['meo-preview-source-position-marker']
             .find(className => element.classList.contains(className));
           if (overlay) return overlay;
-          return element.getAttribute(previewPresentationMorphKeyAttribute) ?? (element.id || undefined);
+          const presentation = element.getAttribute(previewPresentationMorphKeyAttribute);
+          if (presentation) return presentation;
+          if (element.id) return element.id;
+          // Window bands can grow on either side across an edit. Positional
+          // morphing would repurpose the visible rows as newly prefetched rows,
+          // destroying their paint and the reading witness even when unchanged.
+          const block = element.getAttribute('data-meo-preview-block');
+          const line = element.getAttribute('data-source-line');
+          return block !== null ? `preview-block:${block}:${element.tagName}:${line ?? ''}` : undefined;
         },
         onBeforeElUpdated(fromElement, toElement) {
           if (frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true'
@@ -482,15 +508,15 @@ function morphPreviewMain(
 }
 
 const previewScrollbarStyles = `
-html[data-meo-preview-large-document="true"],
-html[data-meo-preview-large-document="true"] body {
+html[data-meo-preview-large-document="true"]:not([data-meo-preview-windowed="true"]),
+html[data-meo-preview-large-document="true"]:not([data-meo-preview-windowed="true"]) body {
   overflow-anchor: auto;
 }
-html[data-meo-preview-large-document="true"] main.meo-export-doc > * {
+html[data-meo-preview-large-document="true"]:not([data-meo-preview-windowed="true"]) main.meo-export-doc > * {
   content-visibility: auto;
   contain-intrinsic-block-size: auto 120px;
 }
-html[data-meo-preview-large-document="true"] main.meo-export-doc li {
+html[data-meo-preview-large-document="true"]:not([data-meo-preview-windowed="true"]) main.meo-export-doc li {
   content-visibility: auto;
   contain-intrinsic-block-size: auto 90px;
 }
@@ -1942,6 +1968,10 @@ export function createPreviewController({
       const signal = frameEvents.signal;
       frameRenderedText = renderedText;
       frameDocument.documentElement.dataset.meoPreviewLargeDocument = String(assessLargeDocument(renderedText).preferSource);
+      // A logical window already bounds mounted DOM. CSS skipping inside that
+      // window would measure 90/120px placeholders during an input handoff,
+      // then repeatedly move the reading position as the real rows reappear.
+      frameDocument.documentElement.dataset.meoPreviewWindowed = String(!!payload.document);
       if (payload.document) {
         let constructing = true;
         previewViewport = createPreviewViewport(mappedRoot, payload.document, {
@@ -2146,6 +2176,7 @@ export function createPreviewController({
       frame.onload = null;
       const commit = (viewportSlot: PreviewViewportProjectionSlot | null) => {
         reusableDocument.documentElement.lang = uiLanguage;
+        reusableDocument.documentElement.dataset.meoPreviewWindowed = String(!!payload.document);
         const deferredCodeBlocks = morphPreviewMain(
           reusableDocument,
           reusableMain,
@@ -3447,6 +3478,21 @@ export function createPreviewController({
       Math.max(0, frame.contentWindow?.innerHeight ?? host.clientHeight)
         * Math.max(0, Math.min(1, viewportRatio))
     ),
+    captureVisualReadingAnchor: (viewportRatio = 0) => {
+      const document = getFrameDocument();
+      if (!document) return null;
+      const fresh = capturePreviewReadingAnchor(document, top => {
+        retainedViewportProjection = null;
+        if (previewViewport) {
+          if (previewViewport.restoreReadingScrollTop(top)) { sourceMapDirty = true; localGeometryViewport = null; }
+        } else if (document.scrollingElement) document.scrollingElement.scrollTop = top;
+      }, viewportRatio);
+      const interaction = viewportInteractionGeneration;
+      return () => {
+        if (interaction !== viewportInteractionGeneration) return false;
+        return fresh?.() === true;
+      };
+    },
     restoreTopLine,
     restoreTopVisiblePosition,
     isSourceLineRendered: (line: number) => !previewViewport || previewViewport.containsLine(line),
@@ -3455,7 +3501,7 @@ export function createPreviewController({
       const scrollElement = frameDocument?.scrollingElement;
       if (!frameDocument || !scrollElement) return null;
       return {
-        regions: localSourceGeometry ? localSourceGeometry.linkedRegions() : getSourceMap().map(entry => ({
+        regions: previewViewport ? previewViewport.linkedRegions() : localSourceGeometry ? localSourceGeometry.linkedRegions() : getSourceMap().map(entry => ({
           startLine: entry.start,
           endLine: entry.end,
           top: entry.top,
@@ -3472,7 +3518,9 @@ export function createPreviewController({
         Number.isFinite(scrollTop) ? scrollTop : 0,
         scrollElement.scrollHeight - scrollElement.clientHeight
       ));
-      if (Math.abs(scrollElement.scrollTop - next) > 0.1) scrollElement.scrollTop = next;
+      if (Math.abs(scrollElement.scrollTop - next) > 0.1) {
+        scrollElement.scrollTop = next;
+      }
     },
     refreshLayout: () => {
       previewTableLayout?.refresh();

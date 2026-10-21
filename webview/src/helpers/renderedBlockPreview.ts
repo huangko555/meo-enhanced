@@ -18,6 +18,10 @@ export class RenderedBlockPreviewHeight {
     return this.measurement.height;
   }
 
+  set height(value: number) {
+    if (Number.isFinite(value) && value > 0) this.measurement.height = value;
+  }
+
   seed(previous: RenderedBlockPreviewHeight): void {
     if (this.identity === previous.identity) this.measurement = previous.measurement;
   }

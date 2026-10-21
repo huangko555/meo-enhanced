@@ -1186,6 +1186,10 @@ async function main(): Promise<void> {
       datalistCount: 0
     }, 'Preview font control must expose one custom non-editable dropdown backed by one hidden select');
     await page.click('.preview-options-trigger');
+    const collapsedFontStyle = await page.$eval('.preview-font-family-dropdown', element => ({
+      background: getComputedStyle(element).backgroundColor,
+      shadow: getComputedStyle(element).boxShadow
+    }));
     await page.click('.preview-font-family-dropdown');
     const dropdownThemeContract = await page.evaluate(() => {
       const control = document.querySelector<HTMLElement>('.preview-font-family-control')!;
@@ -1210,6 +1214,14 @@ async function main(): Promise<void> {
           probe.remove();
           return value;
         })(),
+        selectedBackground: (() => {
+          const probe = document.createElement('span');
+          probe.style.backgroundColor = 'var(--meo-ui-surface-selected)';
+          document.body.append(probe);
+          const value = getComputedStyle(probe).backgroundColor;
+          probe.remove();
+          return value;
+        })(),
         floatingShadow: (() => {
           const probe = document.createElement('span');
           probe.style.boxShadow = 'var(--meo-ui-shadow)';
@@ -1228,8 +1240,10 @@ async function main(): Promise<void> {
       'Preview font dropdown must use the export menu surface');
     assert.equal(dropdownThemeContract.panelScrollHeight, dropdownThemeContract.panelClientHeight,
       'Font options and their gaps fit without a scrollbar when the viewport has enough space');
-    assert.equal(dropdownThemeContract.triggerBackground, dropdownThemeContract.fieldBackground,
-      'Preview font trigger must use the shared field surface');
+    assert.equal(collapsedFontStyle.background, dropdownThemeContract.fieldBackground,
+      'Collapsed Preview font trigger must use the shared field surface');
+    assert.equal(dropdownThemeContract.triggerBackground, dropdownThemeContract.selectedBackground,
+      'Expanded Preview font trigger must use the shared selected surface');
     assert.equal(dropdownThemeContract.panelShadow, dropdownThemeContract.floatingShadow,
       'Preview font popup must share the floating surface shadow');
     assert.deepEqual({
@@ -1237,7 +1251,7 @@ async function main(): Promise<void> {
       panelAppearance: dropdownThemeContract.panelAppearance,
       panelHidden: dropdownThemeContract.panelHidden,
       panelRadius: dropdownThemeContract.panelRadius,
-      triggerShadow: dropdownThemeContract.triggerShadow
+      triggerShadow: collapsedFontStyle.shadow
     }, {
       controlAppearance: 'light',
       panelAppearance: 'light',

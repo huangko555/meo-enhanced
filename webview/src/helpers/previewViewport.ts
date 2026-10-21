@@ -50,6 +50,7 @@ export function previewWindowProjection(root: HTMLElement, manifest: PreviewDocu
     fontSize, lineHeight: Number.parseFloat(style.lineHeight) || fontSize * 1.6 });
   const parts: string[] = [];
   const gap = (from: number, to: number) => {
+    if (from === 0 && to === 0) parts.push('<div class="meo-preview-viewport-gap" data-meo-preview-gap="true" aria-hidden="true" style="height:0px;margin:0;padding:0;overflow-anchor:none;pointer-events:none"></div>');
     for (const range of gapRanges(manifest.blocks, from, to)) parts.push(
       `<div class="meo-preview-viewport-gap" data-meo-preview-gap="true" data-source-line="${range.start}" data-source-end-line="${range.end}" aria-hidden="true" style="height:${layout.top(range.to) - layout.top(range.from)}px;margin:0;padding:0;overflow-anchor:none;pointer-events:none"></div>`);
   };
@@ -169,6 +170,13 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
     return [...indices].filter(index => index >= 0 && index < manifest.blocks.length).sort((left, right) => left - right);
   };
   const addGap = (from: number, to: number, before: Node | null) => {
+    if (from === 0 && to === 0) {
+      const gap = document.createElement('div');
+      gap.className = 'meo-preview-viewport-gap'; gap.dataset.meoPreviewGap = 'true';
+      gap.setAttribute('aria-hidden', 'true');
+      gap.style.cssText = `height:${leadingGapOffset}px;margin:0;padding:0;overflow-anchor:none;pointer-events:none`;
+      root.insertBefore(gap, before); gaps.add(gap);
+    }
     for (const range of gapRanges(manifest.blocks, from, to)) {
     const gap = document.createElement('div');
     gap.className = 'meo-preview-viewport-gap';
@@ -472,9 +480,14 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
       // glyph. Keep that residual in the virtual gap, not in the reading DOM.
       const quantum = 1 / window.devicePixelRatio;
       const total = leadingGapOffset + error;
-      const whole = Math.round(total / quantum) * quantum;
+      // Keep the residual nonnegative: a window beginning at block zero has
+      // no omitted prefix whose height could absorb a negative remainder.
+      const whole = Math.floor(total / quantum) * quantum;
       const next = total - whole;
-      gap.style.height = `${Math.max(0, Number.parseFloat(gap.style.height) + next - leadingGapOffset)}px`;
+      // CSSOM serializes large pixel values with limited precision: a 200,000px
+      // prefix can lose its fraction when read back through style.height.
+      // Correct the actual layout box so repeated restoration cannot drift.
+      gap.style.height = `${Math.max(0, gap.getBoundingClientRect().height + next - leadingGapOffset)}px`;
       leadingGapOffset = next;
       if (whole) scroll.scrollTop -= whole;
       return true;
@@ -521,6 +534,17 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
     },
     position: (index: number, ratio = 0) => layout.top(index) + layout.height(index) * ratio,
     totalHeight: () => layout.total(),
+    linkedRegions() {
+      // Gaps describe physical space, not a continuous source interval:
+      // definitions interspersed through the source render in a separate footer.
+      // Project from the logical body blocks, including unmounted blocks, so
+      // mounting a different band cannot change the meaning of a scroll point.
+      const start = origin() + leadingGapOffset;
+      return manifest.blocks.filter(block => block.kind !== 'footnotes').map(block => ({
+        startLine: block.sourceLine, endLine: block.sourceEndLine,
+        top: start + layout.top(block.index), bottom: start + layout.top(block.index + 1)
+      }));
+    },
     selectedText: () => {
       const selected = selection();
       if (logicalAll) return '';

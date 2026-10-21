@@ -1,6 +1,7 @@
 import { editorScrollIntoView } from '../editor/scrollEffects';
 import { blockInsertion, type MarkdownInputContext } from '../editor/blockInsertion';
 import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
+import { renderedBlockPreviewHeight, RenderedBlockPreviewHeight } from './renderedBlockPreview';
 import { matchInlineScript } from '../../../src/foundation/inlineScript';
 import { markdownTableSeparatorPipes } from '../../../src/foundation/markdownTableRow';
 import { matchInlineHtmlCode } from '../../../src/shared/htmlPolicy';
@@ -2373,7 +2374,9 @@ function buildWidgetTableData(
       diffFlagsByLine,
       footnoteReferences: parseFootnotes(state).references
         .filter(reference => reference.from >= from && reference.to <= to)
-        .map(reference => [reference.from - from, reference.number, reference.definition?.lineFrom])
+        // Click handlers resolve the current definition by label. Its absolute
+        // position is not table content and must not invalidate measured DOM.
+        .map(reference => [reference.from - from, reference.number])
     }),
     startLine,
     endLine,
@@ -2438,6 +2441,7 @@ export function flushMountedTableLayouts(view: EditorView): boolean {
 
 class HtmlTableWidget extends UiLanguageSensitiveWidget {
   private positionDocument: WeakRef<EditorState['doc']> | null = null;
+  get [renderedBlockPreviewHeight](): RenderedBlockPreviewHeight { return this.measuredHeightCache; }
 
   [mapLiveWidgetPositions](changes: ChangeDesc, state: EditorState): WidgetType {
     const previous = this.tableData;
@@ -2449,8 +2453,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const diffFlagsByLine = previous.diffFlagsByLine && Object.fromEntries(Object.entries(previous.diffFlagsByLine)
       .map(([line, flags]) => [Number(line) + delta, flags]));
     const signature = JSON.parse(previous.signature);
-    signature.footnoteReferences = signature.footnoteReferences.map(([offset, number, target]: [number, number, number | null]) =>
-      [offset, number, target === null ? null : changes.mapPos(target, 1)]);
     signature.diffFlagsByLine = diffFlagsByLine;
     const nextSignature = JSON.stringify(signature);
     if (from === previous.from && to === previous.to && startLine === previous.startLine && endLine === previous.endLine && nextSignature === previous.signature) return this;
@@ -2484,7 +2486,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   tableCommandTargetId: string;
   tableCommandTargetRegistration: TableCommandTargetRegistration | null;
   selectionDomAnchor: { node: Node; offset: number } | null;
-  measuredHeightCache: { height: number };
+  measuredHeightCache: RenderedBlockPreviewHeight;
   pendingContextMenuRestore: boolean;
   contextPage: TableContextPage;
   deleteTableConfirmationTimer: number | null = null;
@@ -2513,7 +2515,12 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     this.tableCommandTargetId = '';
     this.tableCommandTargetRegistration = null;
     this.selectionDomAnchor = null;
-    this.measuredHeightCache = { height: -1 };
+    // Seed the current table geometry before CodeMirror compares height points,
+    // rather than sharing it later in eq/updateDOM after its gutter has updated.
+    this.measuredHeightCache = new RenderedBlockPreviewHeight(JSON.stringify([
+      'table', tableData.indent, liveBlockIndentKey(tableData.visualIndent), tableData.colCount,
+      tableData.headerCells.length, tableData.rows.map(row => row.length), tableData.alignments
+    ]));
     this.pendingContextMenuRestore = false;
     this.contextPage = 'structure';
     this.tableCaretRevealGeneration = 0;

@@ -30,7 +30,9 @@ try {
     });
   }, true));
   const session = await page.createCDPSession();
+  let currentMode = '', scenario = 0;
   const prepare = async (mode: string, text = '', anchor = text.length, head = anchor, input = {}) => {
+    currentMode = mode; scenario++;
     await page.evaluate(({ mode, text, anchor, head, input }) => {
       const g = window as any; g.editor?.destroy(); g.blocked = 0; g.shortcutOverrides = null;
       g.editor = g.EditingFeaturesHarness.createEditor({ parent: document.getElementById('app')!, text, initialMode: mode,
@@ -43,7 +45,11 @@ try {
   const command = (id: string) => page.evaluate(id => (window as any).editor.executeCommand(id), id);
   const waitText = async (expected: string) => {
     try { await page.waitForFunction(expected => (window as any).editor.getText() === expected, { timeout: 5000 }, expected); }
-    catch { throw new Error(JSON.stringify({ expected, actual: await text(), selection: await selection() })); }
+    catch { throw new Error(JSON.stringify({ mode: currentMode, scenario, expected, actual: await text(), selection: await selection(),
+      nativeSelection: await page.evaluate(() => {
+        const view = (window as any).editor.view, native = getSelection()!;
+        return native.anchorNode && view.contentDOM.contains(native.anchorNode) ? view.posAtDOM(native.anchorNode, native.anchorOffset) : null;
+      }) })); }
   };
   const caret = (at: number) => page.evaluate(at => (window as any).editor.view.dispatch({ selection: { anchor: at } }), at);
   for (const mode of ['source', 'live']) {
