@@ -615,6 +615,11 @@ const htmlBlockLineNumberMarker = lineNumberWidgetMarker.of((view, widget, block
 });
 
 class HtmlSourceControlWidget extends UiLanguageSensitiveWidget {
+  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
+    const from = changes.mapPos(this.range.from, 1), to = changes.mapPos(this.range.to, -1);
+    return from === this.range.from && to === this.range.to ? this : new HtmlSourceControlWidget({ from, to });
+  }
+
   constructor(readonly range: HtmlEditingRange) {
     super();
   }

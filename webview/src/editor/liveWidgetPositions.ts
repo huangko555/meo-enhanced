@@ -26,6 +26,11 @@ type ProjectionParts = {
 };
 const mappableSets = new WeakMap<DecorationSet, ProjectionParts | false>();
 
+function supportsWidgetProjection(from: number, to: number, decoration: Decoration): boolean {
+  const widget = decoration.spec.widget as (WidgetType & Partial<LiveWidgetPositions>) | undefined;
+  return !widget || typeof widget[mapLiveWidgetPositions] === 'function' && (from !== to || 'side' in decoration.spec);
+}
+
 /** Keep pure marks out of CodeMirror's height-point comparison. Joining them
  * into one RangeSet propagates the point summary through all mark layers. */
 export function liveWidgetPresentationLayers(decorations: DecorationSet): readonly DecorationSet[] {
@@ -41,8 +46,8 @@ function projectionParts(decorations: DecorationSet): ProjectionParts | false {
   let count = 0;
   for (const cursor = decorations.iter(); cursor.value; cursor.next()) {
     const widget = cursor.value.spec.widget as (WidgetType & Partial<LiveWidgetPositions>) | undefined;
-    if (widget && ((!widget[liveWidgetPositionsIndependent] && ++count > maxProjectionWidgets) || typeof widget[mapLiveWidgetPositions] !== 'function'
-      || (cursor.from === cursor.to && !('side' in cursor.value.spec)))) {
+    if (widget && ((!widget[liveWidgetPositionsIndependent] && ++count > maxProjectionWidgets)
+      || !supportsWidgetProjection(cursor.from, cursor.to, cursor.value))) {
       mappableSets.set(decorations, false);
       return false;
     }
@@ -79,6 +84,13 @@ export function replaceLivePresentationRanges(decorations: DecorationSet, from: 
   const accepted: Range<Decoration>[] = [];
   for (const cursor = Decoration.set(add, true).iter(); cursor.value; cursor.next()) {
     accepted.push(cursor.value.range(cursor.from, cursor.to));
+  }
+  // A scoped rebuild can introduce a control absent from the prepared set.
+  // It must satisfy the same contract as a complete build before being cached.
+  if (accepted.some(range => !supportsWidgetProjection(range.from, range.to, range.value))) {
+    const result = decorations.update({ filterFrom: from, filterTo: to, filter, add: accepted, sort: true });
+    mappableSets.set(result, false);
+    return result;
   }
   const nextParts = {
     stable: parts.stable.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => !range.value.point), sort: true }),

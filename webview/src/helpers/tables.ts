@@ -2,6 +2,7 @@ import { editorScrollIntoView } from '../editor/scrollEffects';
 import { tableHeaderFitsStickyViewport } from '../editor/tableStickyHeaderPolicy';
 import { blockInsertion, type MarkdownInputContext } from '../editor/blockInsertion';
 import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
+import { markLiveInputNestedProjection, usesLargeDocumentDerivedWorkBudget } from '../editor/liveInputDerivedWork';
 import { renderedBlockPreviewHeight, RenderedBlockPreviewHeight } from './renderedBlockPreview';
 import { matchInlineScript } from '../../../src/foundation/inlineScript';
 import { markdownTableSeparatorPipes } from '../../../src/foundation/markdownTableRow';
@@ -4074,18 +4075,22 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
             if (tableStartLine === null) return null;
             const change = this.pendingCellSourceChange(state, edit, tableStartLine);
             if (!change) return null;
-            const next = state.update({ changes: change }).state;
-            const line = next.doc.line(tableStartLine + (edit.row === 0 ? 0 : edit.row + 1));
+            // Only the next line's coordinates are needed here. Constructing a
+            // speculative EditorState also runs every presentation field before
+            // the real native-input transaction below can defer its parsing.
+            const next = state.changes(change).apply(state.doc);
+            const line = next.line(tableStartLine + (edit.row === 0 ? 0 : edit.row + 1));
             const segment = parseTableRowCells(line.text, line.from).segments[edit.col];
             const origins = this.cellSymbolSnapshots.get(edit.sequence) ?? [];
             this.cellSymbolSnapshots.delete(edit.sequence);
             const source = tableCellEditorValueToSource(edit.value);
             const sourcePadding = source.length - source.trimStart().length;
-            const content = segment ? next.doc.sliceString(segment.from, segment.to) : '';
+            const content = segment ? next.sliceString(segment.from, segment.to) : '';
             const start = segment ? segment.from + content.length - content.trimStart().length : 0;
             const pairs = origins.map(pair => ({ ...pair, from: start + tableCellEditorOffsetToSourceOffset(edit.value, pair.from) - sourcePadding, to: start + tableCellEditorOffsetToSourceOffset(edit.value, pair.to) - sourcePadding }))
               .filter(pair => !!segment && pair.from >= segment.from && pair.to <= segment.to);
-            return state.update({ changes: change, effects: segment ? replaceAutomaticSymbolPairArea(segment.from, segment.to, pairs) : [], annotations: isolateHistory.of('full') });
+            return state.update({ changes: change, effects: segment ? replaceAutomaticSymbolPairArea(segment.from, segment.to, pairs) : [],
+              annotations: [isolateHistory.of('full'), ...(usesLargeDocumentDerivedWorkBudget(state) ? [markLiveInputNestedProjection()] : [])] });
           }
         }))
       };
@@ -4097,7 +4102,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       builders: changes.length ? [{
         sequence: ++nextTableCellEditSequence,
         confirmation,
-        build: (state) => state.update({ changes, annotations: isolateHistory.of('full') })
+        build: (state) => state.update({ changes, annotations: [isolateHistory.of('full'), ...(usesLargeDocumentDerivedWorkBudget(state) ? [markLiveInputNestedProjection()] : [])] })
       }] : []
     };
   }

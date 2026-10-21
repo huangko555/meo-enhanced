@@ -195,6 +195,10 @@ async function open(page: Page, text: string, coldPreview = false) {
   await page.waitForFunction(() => document.querySelector('.editor-host > .cm-editor') && !document.querySelector('.meo-preload-toolbar')
     && !document.querySelector('.editor-host')?.hasAttribute('inert') && !document.querySelector('.mode-group [aria-busy="true"]'));
   return { renders, errors, readHost: () => hostText, readPresentation: () => ({ text: renderedText, id: renderedDocumentId }),
+    async replaceHostText(text: string) {
+      hostText = text; version++;
+      await page.evaluate(data => window.dispatchEvent(new MessageEvent('message', { data })), { type: 'docChanged', text: hostText, version });
+    },
     dispose() { for (const doc of documents.values()) doc.dispose(); } };
 }
 

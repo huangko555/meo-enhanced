@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { EditorState, Transaction } from '@codemirror/state';
 import { markdown } from '@codemirror/lang-markdown';
+import { Decoration, WidgetType } from '@codemirror/view';
+import { mapStableLiveDecorations, prepareLiveWidgetPositions, replaceLivePresentationRanges } from '../webview/src/editor/liveWidgetPositions';
 import { displayMathResultField } from '../webview/src/helpers/displayMathEditing';
 import {
   createLiveInputDerivedWorkScheduler,
@@ -11,6 +13,17 @@ import {
   shouldDeferLiveInputDerivedWork,
   supersedeLiveInputDerivedWork
 } from '../webview/src/editor/liveInputDerivedWork';
+
+class UnknownPositionWidget extends WidgetType {
+  toDOM(): HTMLElement { throw new Error('This projection contract does not mount DOM'); }
+}
+const widgetState = EditorState.create({ doc: 'unchanged' });
+const preparedMarks = prepareLiveWidgetPositions(Decoration.set([Decoration.mark({ class: 'stable' }).range(0, 1)]));
+const withUnknownControl = replaceLivePresentationRanges(preparedMarks, 2, 3,
+  [Decoration.widget({ widget: new UnknownPositionWidget(), side: 1 }).range(2)]);
+const controlInput = widgetState.update({ changes: { from: 0, insert: 'X' } });
+assert.equal(mapStableLiveDecorations(withUnknownControl, controlInput.changes, controlInput.state), undefined,
+  'a locally added unmappable control must use the existing rebuild path, not enter a certified widget cache');
 
 const unrelatedState = EditorState.create({ doc: 'source-mode' });
 assert.equal(

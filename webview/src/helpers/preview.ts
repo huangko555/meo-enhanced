@@ -1,6 +1,7 @@
 import morphdom from 'morphdom';
 import { createPreviewSearchController, previewSearchStyles } from './previewSearch';
 import { createPreviewViewport, preparePreviewWindow, previewWindowProjection } from './previewViewport';
+import { previewSourceMorphKeys } from './previewSourceIdentity';
 import { createPreviewDocumentSearch } from './previewDocumentSearch';
 import { createPreviewDocumentTransport } from '../adapters/previewDocumentTransport';
 import type { PreviewDocumentResponse } from '../../../src/protocol/previewDocument';
@@ -120,7 +121,8 @@ type PreviewSourcePositionMarkerState = {
 const previewMutableStateAttributes = new Set([
   'open',
   'data-source-line',
-  'data-source-end-line'
+  'data-source-end-line',
+  'data-meo-preview-block'
 ]);
 
 const previewPresentationSelector = [
@@ -128,7 +130,6 @@ const previewPresentationSelector = [
   '.meo-export-math-display',
   '.meo-export-math-inline'
 ].join(', ');
-const previewPresentationMorphKeyAttribute = 'data-meo-preview-morph-key';
 
 function isPreviewMathElement(element: Element): boolean {
   return element.classList.contains('meo-export-math-display')
@@ -148,39 +149,52 @@ function getPreviewPresentationSignature(element: Element): string | null {
   return `math:${layout}${fenced}:${source ?? canvas?.innerHTML ?? element.innerHTML}`;
 }
 
+function previewRootSourceKey(element: Element, main: HTMLElement, sourceKeys: WeakMap<Node, string>): string | undefined {
+  for (let root: Element | null = element; root && root !== main; root = root.parentElement) {
+    const key = sourceKeys.get(root);
+    if (key) return key;
+  }
+  return undefined;
+}
+
 function preparePreviewPresentationMorphKeys(
   currentMain: HTMLElement,
-  nextMain: HTMLElement
-): () => void {
+  nextMain: HTMLElement,
+  sourceKeys: WeakMap<Node, string>
+): WeakMap<Node, string> {
   const available = new Map<string, HTMLElement[]>();
+  const unscoped = new Map<string, HTMLElement[]>();
   for (const element of Array.from(currentMain.querySelectorAll<HTMLElement>(previewPresentationSelector))) {
     const signature = getPreviewPresentationSignature(element);
     if (!signature) continue;
-    const matches = available.get(signature);
+    const scope = previewRootSourceKey(element, currentMain, sourceKeys);
+    const pool = scope ? available : unscoped, key = scope ? `${scope}:${signature}` : signature;
+    const matches = pool.get(key);
     if (matches) matches.push(element);
-    else available.set(signature, [element]);
+    else pool.set(key, [element]);
   }
 
-  const keyedCurrent: HTMLElement[] = [];
+  const keys = new WeakMap<Node, string>();
   let pairIndex = 0;
   for (const element of Array.from(nextMain.querySelectorAll<HTMLElement>(previewPresentationSelector))) {
     const signature = getPreviewPresentationSignature(element);
-    const current = signature ? available.get(signature)?.shift() : undefined;
+    const scope = previewRootSourceKey(element, nextMain, sourceKeys);
+    // A new duplicate must not steal a formula/diagram owned by an unchanged
+    // source root. Unknown/changed roots can still reuse matching presentations.
+    const current = signature ? (scope ? available.get(`${scope}:${signature}`)?.shift() : undefined)
+      ?? unscoped.get(signature)?.shift() : undefined;
     if (!current) continue;
     const key = `meo-preview-presentation-${pairIndex += 1}`;
-    current.setAttribute(previewPresentationMorphKeyAttribute, key);
-    element.setAttribute(previewPresentationMorphKeyAttribute, key);
-    keyedCurrent.push(current);
+    keys.set(current, key); keys.set(element, key);
   }
 
-  return () => {
-    for (const element of keyedCurrent) element.removeAttribute(previewPresentationMorphKeyAttribute);
-  };
+  return keys;
 }
 
 function syncSourceMappingAttributes(fromElement: Element, toElement: Element): void {
-  for (const attribute of ['data-source-line', 'data-source-end-line']) {
+  for (const attribute of ['data-source-line', 'data-source-end-line', 'data-meo-preview-block']) {
     const value = toElement.getAttribute(attribute);
+    if (fromElement.getAttribute(attribute) === value) continue;
     if (value === null) fromElement.removeAttribute(attribute);
     else fromElement.setAttribute(attribute, value);
   }
@@ -351,18 +365,26 @@ function morphPreviewMain(
   deferUnreadyCodeBlock: boolean,
   pendingCodeBlocks: readonly PreviewCodeBlockUpdate[] | undefined,
   isCurrent: () => boolean,
-  retainTableColumns = true
+  retainTableColumns = true,
+  sourceRevision?: { before: string | null; after: string }
 ): PreviewCodeBlockUpdate[] {
   const updates: PreviewCodeBlockUpdate[] = pendingCodeBlocks ? [...pendingCodeBlocks] : [];
-  let clearPresentationMorphKeys = () => {};
+  let presentationKeys = new WeakMap<Node, string>();
+  let sourceKeys = new WeakMap<Node, string>();
   if (!pendingCodeBlocks) {
     const nextMain = frameDocument.createElement('main');
     nextMain.className = 'meo-export-doc';
     nextMain.innerHTML = html;
+    if (sourceRevision) sourceKeys = previewSourceMorphKeys(currentMain, nextMain, sourceRevision.before, sourceRevision.after);
     const nearbyControls = frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true';
     if (!nearbyControls) addPreviewCodeCopyControls(nextMain, frameDocument.documentElement.lang as UiLanguage);
     const currentTables = retainTableColumns ? Array.from(currentMain.querySelectorAll<HTMLTableElement>('table')) : [];
-    const tableSource = (table: HTMLTableElement) => table.closest<HTMLElement>('[data-source-line]')?.dataset.sourceLine;
+    const tableSource = (table: HTMLTableElement) => {
+      // Fitted columns belong to the same mapped root as the table DOM. Raw
+      // line numbers change when text is inserted above an untouched table.
+      return previewRootSourceKey(table, currentMain.contains(table) ? currentMain : nextMain, sourceKeys)
+        ?? table.closest<HTMLElement>('[data-source-line]')?.dataset.sourceLine;
+    };
     const availableTables = new Set(currentTables);
     Array.from(nextMain.querySelectorAll<HTMLTableElement>('table')).forEach(table => {
       // The replacement window can start before/after the accepted window.
@@ -384,123 +406,119 @@ function morphPreviewMain(
         table.classList.toggle('meo-preview-table-compressed', current.classList.contains('meo-preview-table-compressed'));
       }
     });
-    clearPresentationMorphKeys = preparePreviewPresentationMorphKeys(currentMain, nextMain);
+    presentationKeys = preparePreviewPresentationMorphKeys(currentMain, nextMain, sourceKeys);
     updates.push({ current: currentMain, next: nextMain });
   }
   const deferredCodeBlocks: PreviewCodeBlockUpdate[] = [];
-  try {
-    for (const { current, next } of updates) {
-      if (!currentMain.contains(current)) continue;
-      morphdom(current, next, {
-        childrenOnly: !pendingCodeBlocks,
-        getNodeKey(node) {
-          if (node.nodeType !== 1) return undefined;
-          const element = node as Element;
-          // Cached overlay references must never be repurposed as document blocks.
-          const overlay = ['meo-preview-source-position-marker']
-            .find(className => element.classList.contains(className));
-          if (overlay) return overlay;
-          const presentation = element.getAttribute(previewPresentationMorphKeyAttribute);
-          if (presentation) return presentation;
-          if (element.id) return element.id;
-          // Window bands can grow on either side across an edit. Positional
-          // morphing would repurpose the visible rows as newly prefetched rows,
-          // destroying their paint and the reading witness even when unchanged.
-          const block = element.getAttribute('data-meo-preview-block');
-          const line = element.getAttribute('data-source-line');
-          return block !== null ? `preview-block:${block}:${element.tagName}:${line ?? ''}` : undefined;
-        },
-        onBeforeElUpdated(fromElement, toElement) {
-          if (frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true'
-            && fromElement.matches(previewCopyBlockSelector) && toElement.matches(previewCopyBlockSelector)) {
-            // Match only controls that already exist. Populating the entire
-            // detached replacement would undo viewport-scoped initialization.
-            for (const selector of [':scope > .meo-preview-code-actions', ':scope > .meo-export-code-language-label']) {
-              const control = fromElement.querySelector(selector);
-              if (control && !toElement.querySelector(selector)) toElement.append(control.cloneNode(true));
-            }
+  for (const { current, next } of updates) {
+    if (!currentMain.contains(current)) continue;
+    morphdom(current, next, {
+      childrenOnly: !pendingCodeBlocks,
+      getNodeKey(node) {
+        if (node.nodeType !== 1) return undefined;
+        const element = node as Element;
+        // Cached overlay references must never be repurposed as document blocks.
+        const overlay = ['meo-preview-source-position-marker']
+          .find(className => element.classList.contains(className));
+        if (overlay) return overlay;
+        const presentation = presentationKeys.get(node);
+        if (presentation) return presentation;
+        if (element.id) return element.id;
+        const source = sourceKeys.get(node);
+        if (source) return source;
+        // Non-source window roots keep their existing positional fallback.
+        const block = element.getAttribute('data-meo-preview-block');
+        const line = element.getAttribute('data-source-line');
+        return block !== null ? `preview-block:${block}:${element.tagName}:${line ?? ''}` : undefined;
+      },
+      onBeforeElUpdated(fromElement, toElement) {
+        if (frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true'
+          && fromElement.matches(previewCopyBlockSelector) && toElement.matches(previewCopyBlockSelector)) {
+          // Match only controls that already exist. Populating the entire
+          // detached replacement would undo viewport-scoped initialization.
+          for (const selector of [':scope > .meo-preview-code-actions', ':scope > .meo-export-code-language-label']) {
+            const control = fromElement.querySelector(selector);
+            if (control && !toElement.querySelector(selector)) toElement.append(control.cloneNode(true));
           }
-          if (
-            fromElement.classList.contains('meo-preview-code-actions')
-            && toElement.classList.contains('meo-preview-code-actions')
-          ) return false;
-          if (
-            fromElement.tagName === 'IMG'
-            && toElement.tagName === 'IMG'
-            && preserveLoadedPreviewImage(
-              fromElement as HTMLImageElement,
-              toElement as HTMLImageElement
-            )
-          ) {
-            return false;
-          }
-          const mermaidSource = fromElement.dataset.sourceB64;
-          if (
-            mermaidSource
-            && fromElement.classList.contains('meo-export-mermaid')
-            && toElement.classList.contains('meo-export-mermaid')
-          ) {
-            const nextSource = toElement.dataset.sourceB64;
-            if (
-              nextSource
-              && nextSource !== mermaidSource
-              && fromElement.classList.contains('is-rendered')
-              && fromElement.querySelector('svg')
-            ) {
-              // Keep the last successful diagram on screen while the replacement is
-              // rendered off-layout. The renderer commits the new SVG atomically.
-              fromElement.dataset.sourceB64 = nextSource;
-              fromElement.dataset.meoPreviewMermaidPending = 'true';
-              delete fromElement.dataset.meoPreviewMermaidAppearance;
-              syncSourceMappingAttributes(fromElement, toElement);
-              return false;
-            }
-            if (mermaidSource !== nextSource) return true;
-            syncSourceMappingAttributes(fromElement, toElement);
-            return false;
-          }
-          const fromPresentation = getPreviewPresentationSignature(fromElement);
-          if (
-            fromPresentation?.startsWith('math:')
-            && fromPresentation === getPreviewPresentationSignature(toElement)
-          ) {
-            syncSourceMappingAttributes(fromElement, toElement);
-            return false;
-          }
-          // A previously generated formula must update atomically. Deferral is
-          // for unseen content, not a reason to replace a readable result with
-          // raw TeX until the next intersection delivery.
-          if (fromPresentation?.startsWith('math:') && fromElement.querySelector('.katex')) {
-            renderDeferredPreviewMath(toElement as HTMLElement);
-          }
-          if (
-            deferUnreadyCodeBlock
-            && fromElement.classList.contains('meo-export-code-block-wrap')
-            && toElement.classList.contains('meo-export-code-block-wrap')
-            && fromElement.textContent !== toElement.textContent
-            && hasAppliedPreviewCodeHighlight(fromElement)
-            && !isPreviewCodeHighlightReady(toElement, isCurrent)
-          ) {
-            // Keep the last fully themed block until the replacement tokens exist.
-            // The Shiki refresh callback revisits only this block and commits the
-            // new source and token DOM together before the next visible frame.
-            syncSourceMappingAttributes(fromElement, toElement);
-            deferredCodeBlocks.push({ current: fromElement, next: toElement });
-            return false;
-          }
-          if (fromElement.tagName === 'DETAILS') {
-            toElement.toggleAttribute('open', (fromElement as HTMLDetailsElement).open);
-          }
-          if (areEquivalentPreviewElements(fromElement, toElement)) {
-            syncDescendantSourceMappings(fromElement, toElement);
-            return false;
-          }
-          return true;
         }
-      });
-    }
-  } finally {
-    clearPresentationMorphKeys();
+        if (
+          fromElement.classList.contains('meo-preview-code-actions')
+          && toElement.classList.contains('meo-preview-code-actions')
+        ) return false;
+        if (
+          fromElement.tagName === 'IMG'
+          && toElement.tagName === 'IMG'
+          && preserveLoadedPreviewImage(
+            fromElement as HTMLImageElement,
+            toElement as HTMLImageElement
+          )
+        ) {
+          return false;
+        }
+        const mermaidSource = fromElement.dataset.sourceB64;
+        if (
+          mermaidSource
+          && fromElement.classList.contains('meo-export-mermaid')
+          && toElement.classList.contains('meo-export-mermaid')
+        ) {
+          const nextSource = toElement.dataset.sourceB64;
+          if (
+            nextSource
+            && nextSource !== mermaidSource
+            && fromElement.classList.contains('is-rendered')
+            && fromElement.querySelector('svg')
+          ) {
+            // Keep the last successful diagram on screen while the replacement is
+            // rendered off-layout. The renderer commits the new SVG atomically.
+            fromElement.dataset.sourceB64 = nextSource;
+            fromElement.dataset.meoPreviewMermaidPending = 'true';
+            delete fromElement.dataset.meoPreviewMermaidAppearance;
+            syncSourceMappingAttributes(fromElement, toElement);
+            return false;
+          }
+          if (mermaidSource !== nextSource) return true;
+          syncSourceMappingAttributes(fromElement, toElement);
+          return false;
+        }
+        const fromPresentation = getPreviewPresentationSignature(fromElement);
+        if (
+          fromPresentation?.startsWith('math:')
+          && fromPresentation === getPreviewPresentationSignature(toElement)
+        ) {
+          syncSourceMappingAttributes(fromElement, toElement);
+          return false;
+        }
+        // A previously generated formula must update atomically. Deferral is
+        // for unseen content, not a reason to replace a readable result with
+        // raw TeX until the next intersection delivery.
+        if (fromPresentation?.startsWith('math:') && fromElement.querySelector('.katex')) {
+          renderDeferredPreviewMath(toElement as HTMLElement);
+        }
+        if (
+          deferUnreadyCodeBlock
+          && fromElement.classList.contains('meo-export-code-block-wrap')
+          && toElement.classList.contains('meo-export-code-block-wrap')
+          && fromElement.textContent !== toElement.textContent
+          && hasAppliedPreviewCodeHighlight(fromElement)
+          && !isPreviewCodeHighlightReady(toElement, isCurrent)
+        ) {
+          // Keep the last fully themed block until the replacement tokens exist.
+          // The Shiki refresh callback revisits only this block and commits the
+          // new source and token DOM together before the next visible frame.
+          syncSourceMappingAttributes(fromElement, toElement);
+          deferredCodeBlocks.push({ current: fromElement, next: toElement });
+          return false;
+        }
+        if (fromElement.tagName === 'DETAILS') {
+          toElement.toggleAttribute('open', (fromElement as HTMLDetailsElement).open);
+        }
+        if (areEquivalentPreviewElements(fromElement, toElement)) {
+          syncDescendantSourceMappings(fromElement, toElement);
+          return false;
+        }
+        return true;
+      }
+    });
   }
   // A pending block must not retain the rest of the detached document tree.
   for (const { next } of deferredCodeBlocks) next.remove();
@@ -2184,7 +2202,8 @@ export function createPreviewController({
           isSourceColoringEnabled(),
           pendingCodeBlocks,
           () => !disposed && isSourceColoringEnabled() && loadGeneration === frameGeneration,
-          (reusableDocument.documentElement.dataset.meoPreviewPreset ?? 'default') === (payload.preset ?? 'default')
+          (reusableDocument.documentElement.dataset.meoPreviewPreset ?? 'default') === (payload.preset ?? 'default'),
+          { before: previousRenderedText, after: renderedText }
         );
         if (deferredCodeBlocks.length > 0) {
           commitPendingCodeHighlight = () => {

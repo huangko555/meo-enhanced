@@ -1822,3 +1822,75 @@ test needs to exercise. Replacement, Backspace, Delete, inserted text and a long
 body-cell edit exercise the same boundary. Production session tests add held
 digits at the beginning and middle of existing cells, including a first-character
 commit, per-frame caret/content assertions and eight seconds of settlement.
+
+### Retain unchanged reading content across input revisions (2026-10-21)
+
+The production browser reproduction catches two different causes of unrelated
+content changing during input. A native table source commit is not a CodeMirror
+typing transaction. It previously rebuilt Live against an incomplete background
+parse, removing the heading, emphasis and footnote presentation above the table.
+Large-document native commits now use the existing nested-input provenance and
+retain their accepted presentation until the replacement context is ready. Small
+documents keep synchronous adoption, including immediate Undo. Preparing symbol
+pair offsets now applies the change to persistent Text instead of constructing a
+second, unused EditorState and running its presentation fields.
+
+Preview previously used revision-local block indices and source line numbers as
+DOM identity, or positional morphing for the full-document path. Inserting a
+paragraph before unchanged reading content could therefore replace its formulas,
+HTML, code, images and footnotes. The morph now maps mounted source roots into
+the replacement revision, retaining their DOM while comparing the actual new
+rendered output. Deleting a whole leading block excludes that removed root from
+matching and retains the successor exactly at the exclusive edit boundary.
+Fitted table columns use the same mapped ownership as their table root.
+Only matched roots receive identity keys: unmatched changed code roots retain
+ordinary morphing, so their existing highlighted content can wait atomically for
+replacement language tokens instead of being replaced by unready new nodes.
+
+Identical formulas introduce another independently reproduced case: globally
+matching by source text lets an inserted duplicate take a later, unchanged
+paragraph's formula node. Presentation matching now prefers its mapped source
+root, with the existing content fallback limited to unscoped changed roots.
+Temporary formula/diagram keys live in WeakMaps instead of being written to and
+removed from the connected DOM. Unchanged source mapping attributes are not
+written again. This indexes mounted roots without whole-DOM serialization,
+content hashes or another document-history cache; actual semantic dependencies
+such as changed footnote numbering still update.
+
+The greater-than-one-MiB HTML source case also catches a pre-existing cache
+contract defect. A local rebuild could insert an unmappable control into a
+previously certified widget-position partition; the next input then called an
+absent mapping method. Local replacements now validate the same widget contract
+as complete builds and use the existing rebuild fallback for unknown controls.
+The HTML source control explicitly maps its editing range. A deterministic
+state/decoration regression fails on the missing method before this guard; the
+real production HTML input case checks the complete interaction and paint path.
+
+`test-unchanged-input-content.ts` exercises the real split production build and
+Workers. Its protected nodes include descendant identity and rendered markup;
+Live checks also inspect compositor frames. Ordinary and greater-than-one-MiB
+documents cover prose, headings, lists, quotes, footnotes, code, HTML, dollar and
+fenced formulas, Mermaid and native tables. Source-side and standalone Preview
+cover character input, paragraph insertion, whole-block removal, Undo/external
+replacement, repeated formulas and updated global footnote references. These
+checks supplement the existing input/session/viewport gate; they do not require
+unrelated blocks to remain at the same Y when edited content legitimately grows.
+
+The frozen final Webview entry has SHA-256
+`24d886cca00dcc353a2d97afa18b1f5ac456325e0439f2ea4a68d98dc9e6ffff`.
+All 28 new scenarios pass, including 133 protected Live compositor paints. The
+existing production/complex/native-session suites pass 150/115/201 compositor
+paints respectively; cold linked scrolling and fractional input layout also
+pass. HTML content, table visual stability/editing/history/external provenance,
+IME, mode selection, Source-side Preview, Mermaid retirement, atomic code
+updates and Preview table layout pass. Types, staged architecture and test
+inventory pass.
+
+One older check is not counted as green: `test-live-widget-positions.ts` asserts
+the exact DecorationSet object survives settlement and fails at ordinary or
+frontmatter input. A read-only build substituting the unchanged `27bfaf6e` Live
+widget/HTML/table modules fails the same assertion. Forcing canonical parse and
+presentation before input does not remove it. This existing internal allocation
+check remains recorded separately from the passing DOM identity, rendered
+markup, exact-source, interaction and compositor checks; no claim is made that
+all unchanged presentation computation has been eliminated.
