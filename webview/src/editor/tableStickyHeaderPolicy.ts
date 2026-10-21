@@ -28,6 +28,7 @@ export type TableStickyHeaderLayout =
     readonly visible: false;
     readonly reason:
       | 'before-threshold'
+      | 'oversized-header'
       | 'insufficient-content'
       | 'outside-horizontal-viewport';
   }
@@ -47,9 +48,17 @@ export type TableStickyHeaderPolicy = {
   layout(input: TableStickyHeaderLayoutInput): TableStickyHeaderLayout;
 };
 
+/** Floating context must leave at least half the viewport for document input. */
+export function tableHeaderFitsStickyViewport(viewportHeight: number, headerHeight: number, controlsHeight = 0): boolean {
+  return headerHeight + Math.max(0, controlsHeight) <= Math.max(0, viewportHeight) / 2;
+}
+
 export const tableStickyHeaderPolicy: TableStickyHeaderPolicy = {
   layout(input) {
     const controlsHeight = Math.max(0, input.controlsHeight);
+    if (!tableHeaderFitsStickyViewport(input.scroller.height, input.header.height, controlsHeight)) {
+      return { visible: false, reason: 'oversized-header' };
+    }
     const stickyHeaderTop = input.scroller.top + controlsHeight;
     if (input.header.top > stickyHeaderTop) {
       return { visible: false, reason: 'before-threshold' };

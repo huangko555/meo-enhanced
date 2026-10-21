@@ -1654,3 +1654,72 @@ surface; it now separately asserts the existing collapsed and expanded shared
 theme contracts, without changing product styling. Browser composition coverage
 does not certify a Windows IME candidate window. Isolated instance startup is
 recorded separately from browser input acceptance and from package/release tests.
+
+### Follow-up: native editing sessions through late presentation (2026-10-21)
+
+The next report concerns movement **after** rapid table input stops. Its screenshot
+belongs to the retained `42d3d3d4` instance, but a replay of the original 1 MiB
+fixture on `598f9851` also reproduces the late table failure. The former window
+contains unsaved edits and must be preserved. An old window is not evidence that
+the new symptom is absent from the current build.
+
+The original section 024 header loses its focused textarea after roughly two to
+three seconds and moves more than 1,000px. Instrumentation shows that `updateDOM`
+first reuses the table successfully. A later height-map estimate shifts the
+logical viewport band; band publication then replaces the still-focused table
+with a placeholder. Holding that band alone preserves focus but still permits
+large visible movement. Removing the auto-commit scroll lock alone also fails.
+The shorter table typing tests ended before this sequence completed.
+
+`NativeInputViewport` now records the painted Y of the focused rendered-block
+textarea. It schedules no timers, observers or polling. The viewport controller
+owns this record, prioritizes it when CodeMirror reports measurements and at its
+shared scroll-write boundary, and exposes the same ownership to the Live band
+publisher. A background source confirmation cannot both displace the cell and
+evict its interaction surface. Table auto-commit does not start a navigation or
+rewrite a surviving native caret. Actual scrolling, pointer navigation, history,
+mode changes and explicit reveals retire the ownership. A necessary caret reveal
+adopts its newly accepted Y. Destroyed or unfocused inputs cannot retain it.
+
+The permanent production regression uses a generated document larger than 1 MB,
+real split assets and Workers, versioned host acknowledgements, physical browser
+clicks, and 100 rapid digits in both a header and the first body row. It observes
+eight seconds after typing, checking focus, DOM connectivity, painted position,
+the exact accepted document and final caret, late settlement, unchanged header
+pixels, and subsequent real wheel scrolling. The preceding build fails with
+283 changed unchanged-region pixels. The original comprehensive fixture's
+late-header replay also passes; it is separate evidence from the generated case.
+
+The original wide-header replay also exposes competing caret reveals when a
+narrow cell grows taller than the viewport. Its passive floating clone can cover
+the usable area and make successive reveals alternate direction. Floating headers
+now leave at least half the viewport available, including their controls. A focused
+primary header uses the actual viewport and suspends its passive clone while
+that primary editor remains visible. Scrolling it away retains the normal passive
+header navigation. The same
+height budget gates inferred sticky bounds before the adapter's next layout.
+The production session gate includes a narrow header taller than the viewport:
+caret-driven scrolling is allowed while it grows, but cannot reverse direction,
+cover the active input with a clone, or continue moving after input. The old build
+loses that editing surface; the fixed original-fixture replay remains within one
+pixel after typing, with focus and DOM retained.
+
+An additional full-DOM Preview replay exposed a smaller rounding defect: inserting
+a rendered line break above the reading band needs a fractional scroll correction.
+Chromium rounds that scroll to a physical pixel. With fractional paragraph metrics,
+the remainder repaints unchanged text. The small-document test previously allowed
+Backspace to coalesce away the intermediate line break. It now waits for that
+actual rendered break; `598f9851` fails with 1,544 changed pixels. Full-DOM Preview
+absorbs the residual in the frame-owned document root's otherwise zero top padding,
+bounded below one physical pixel. Windowed Preview retains its virtual-gap path.
+Neither path changes the reading root's formatting or containing block. Visible
+reading content must stay fixed; absolute scrollTop may legitimately change when
+an edit above it changes document height.
+
+These checks extend `test:input-presentation` in quick, targeted viewport and
+release preflight. They accompany the existing audit of table chrome and reflow,
+HTML, math, diagrams, images, Source-side Preview, mode/selection continuity and
+scrolling, plus table history, detached-focus Undo/Redo, commands and diff refresh.
+Compositor samples are finite correctness observations, not latency percentiles
+or certification of the operating system's IME candidate window. The original
+fixture is a read-only local replay and is not a dependency of the permanent gate.

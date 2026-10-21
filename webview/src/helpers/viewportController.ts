@@ -2,6 +2,7 @@ import { readDocumentTextProjection } from '../application/documentTextProjectio
 import { editorScrollIntoView } from '../editor/scrollEffects';
 import { editorViewportBounds } from '../editor/editorViewportBounds';
 import { sourceLinePositionAtTarget } from '../editor/domSourceLine';
+import { NativeInputViewport } from '../editor/nativeInputViewport';
 import { EditorView } from '@codemirror/view';
 import { createLinkedViewportMap, type LinkedViewportMap, type LinkedViewportPoint } from './linkedViewportMap';
 
@@ -441,10 +442,22 @@ export class ViewportController {
     this.projectLinkedViewport('editor');
   };
   private readonly onPointerDown = (event: PointerEvent) => this.handlePotentialLayoutInteraction(event);
-  private readonly onPointerUp = () => this.finishScrollbarDrag();
+  private readonly nativeInputViewport: NativeInputViewport;
+  private readonly onPointerUp = (event: PointerEvent) => {
+    this.finishScrollbarDrag();
+    if (event.type === 'pointerup') this.nativeInputViewport.capture(event.target);
+  };
   private readonly onKeyDown = (event: KeyboardEvent) => this.handleKeyDown(event);
   private readonly onKeyUp = (event: KeyboardEvent) => this.handleKeyUp(event);
-  private readonly onBeforeInput = () => {
+  private readonly onNativeInput = (event: Event) => {
+    const type = (event as InputEvent).inputType;
+    if (type === 'historyUndo' || type === 'historyRedo') {
+      this.nativeInputViewport.release();
+      return;
+    }
+    if (!this.nativeInputViewport.hasOwner()) this.nativeInputViewport.capture(event.target);
+  };
+  private readonly onBeforeInput = (event: InputEvent) => {
     // Composition input need not have a preceding keydown. It must still retire
     // a wheel reading anchor before the edit can change the visible layout.
     if (this.activeLayoutAnchor?.readingDocumentTop !== undefined) this.activeLayoutAnchor = null;
@@ -453,6 +466,8 @@ export class ViewportController {
     this.lastNativeScrollAt = Number.NEGATIVE_INFINITY;
     this.claimLinkedViewport('editor');
     this.navigationGeneration += 1;
+    if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') this.nativeInputViewport.release();
+    else this.nativeInputViewport.capture(event.target);
   };
   private readonly onTouchStart = (event: TouchEvent) => this.handleTouchStart(event);
   private readonly onTouchMove = (event: TouchEvent) => this.handleTouchMove(event);
@@ -462,6 +477,7 @@ export class ViewportController {
     private readonly view: EditorView,
     options: ViewportControllerOptions = {}
   ) {
+    this.nativeInputViewport = new NativeInputViewport(view);
     this.getMode = options.getMode ?? (() => 'live');
     this.previewSurface = options.previewSurface ?? null;
     controllerByDom.set(view.dom, this);
@@ -481,6 +497,7 @@ export class ViewportController {
       view.dom.addEventListener('keydown', this.onKeyDown, true);
       view.dom.addEventListener('keyup', this.onKeyUp, true);
       view.dom.addEventListener('beforeinput', this.onBeforeInput, true);
+      view.dom.addEventListener('input', this.onNativeInput);
       this.interactionsAttached = true;
     }
   }
@@ -497,6 +514,7 @@ export class ViewportController {
   }
 
   private invalidateViewportWork(preserveInteractionGeneration = false): void {
+    this.nativeInputViewport.release();
     const scope = this.anchorTransactionScope;
     const programmaticCurrentTransaction = scope.kind === 'current'
       && this.isAnchorTokenCurrent(scope.record)
@@ -631,7 +649,6 @@ export class ViewportController {
     // View updates emitted from CodeMirror's measurement pass run after its
     // internal height-map anchoring and before the browser paints. Reconcile an
     // active history lock here so no intermediate anchored position is visible.
-    this.activeScrollLockCorrection?.();
     // External revisions collapse their text diff into one replacement, so
     // anchors inside it still need content-based relocation at scope completion.
     if (mapPosition && !externalDocumentPresentation && this.anchorTransactionScope.kind !== 'idle') {
@@ -649,6 +666,12 @@ export class ViewportController {
         scope = scope.parent;
       }
     }
+    const nativeTop = this.nativeInputViewport.scrollTop();
+    if (nativeTop !== null) {
+      this.writeScrollPosition({ top: nativeTop, left: this.view.scrollDOM.scrollLeft });
+      return;
+    }
+    this.activeScrollLockCorrection?.();
     const activeAnchor = this.activeLayoutAnchor;
     if (activeAnchor) {
       if (mapPosition) activeAnchor.position = mapPosition(activeAnchor.position);
@@ -796,7 +819,7 @@ export class ViewportController {
       }
     };
     const correctScrollTop = () => {
-      if (!lockIsCurrent()) return;
+      if (!lockIsCurrent() || this.nativeInputViewport.hasOwner()) return;
       const nextScrollTop = Math.max(0, Math.min(
         targetTop,
         this.view.scrollDOM.scrollHeight - this.view.scrollDOM.clientHeight
@@ -1858,6 +1881,7 @@ export class ViewportController {
 
   destroy(): void {
     this.destroyed = true;
+    this.nativeInputViewport.release();
     this.activeNavigationReveals.clear();
     this.cancelElementRetention();
     this.modeTransitionChain = null;
@@ -1888,6 +1912,7 @@ export class ViewportController {
       this.view.dom.removeEventListener('keydown', this.onKeyDown, true);
       this.view.dom.removeEventListener('keyup', this.onKeyUp, true);
       this.view.dom.removeEventListener('beforeinput', this.onBeforeInput, true);
+      this.view.dom.removeEventListener('input', this.onNativeInput);
       this.interactionsAttached = false;
     }
   }
@@ -2126,7 +2151,11 @@ export class ViewportController {
             if (this.isActiveScrollTargetValid(activeTarget)) {
               activeTarget.position = target;
             }
+            // A real caret reveal adopts a new Y for the native editing owner.
+            const nativeOwner = this.nativeInputViewport.hasOwner();
+            if (nativeOwner) this.nativeInputViewport.release();
             const changed = this.writeScrollPosition(target);
+            if (nativeOwner) this.nativeInputViewport.capture(this.view.dom.ownerDocument.activeElement);
             if (this.isActiveScrollTargetValid(activeTarget)) {
               activeTarget.changedSinceFrame ||= changed;
               this.scheduleActiveScrollFrame();
@@ -2245,6 +2274,7 @@ export class ViewportController {
       this.pendingHistoryShortcutViewport = null;
     }
     this.markInteraction();
+    if (!isModifierKey && !isHistoryShortcut && this.nativeInputViewport.capture(event.target)) return;
     if (!this.canChangeLiveLayout(event)) return;
     // Native table inputs already retain/reveal their own caret during row
     // reflow. A second document anchor uses the outer editor's selection and
@@ -2375,6 +2405,7 @@ export class ViewportController {
 
   /** Reserves currentness for one navigation intent without disturbing the active viewport owner. */
   beginNavigationReveal(): () => boolean {
+    this.nativeInputViewport.release();
     this.modeTransitionChain = null;
     // An explicit newer navigation supersedes an absolute scroll lock left by
     // transient-edit settlement and any previous gesture's idle window.
@@ -2393,6 +2424,9 @@ export class ViewportController {
     this.pendingNavigationTarget = null;
     return () => !this.destroyed && navigationGeneration === this.navigationGeneration;
   }
+
+  /** Background viewport estimates cannot evict the current native edit. */
+  hasNativeInputViewportOwner(): boolean { return this.nativeInputViewport.hasOwner(); }
 
   /** Reveals a document position; viewport ownership changes only when measurement requires a scroll. */
   revealPosition(
@@ -3323,10 +3357,13 @@ export class ViewportController {
   }
 
   private writeScrollPosition(target: ScrollPosition): boolean {
+    // Background anchors and linked projection share this write boundary. A
+    // live native edit keeps priority until actual navigation releases it.
+    const top = this.nativeInputViewport.scrollTop() ?? target.top;
     const current = this.readScrollPosition();
-    const topChanged = Math.abs(current.top - target.top) > POSITION_EPSILON;
+    const topChanged = Math.abs(current.top - top) > POSITION_EPSILON;
     const leftChanged = Math.abs(current.left - target.left) > POSITION_EPSILON;
-    if (topChanged) this.view.scrollDOM.scrollTop = target.top;
+    if (topChanged) this.view.scrollDOM.scrollTop = top;
     if (leftChanged) this.view.scrollDOM.scrollLeft = target.left;
     return topChanged || leftChanged;
   }

@@ -16,7 +16,7 @@ import { normalizeDocumentText } from '../../../src/foundation/documentText';
 import { assessLargeDocument } from '../../../src/foundation/largeDocument';
 import { getPreviewViewportResources, observePreviewViewportResources } from './previewViewportResources';
 import { createPreviewSourceGeometry } from './previewSourceGeometry';
-import { capturePreviewReadingAnchor } from './previewReadingAnchor';
+import { capturePreviewReadingAnchor, restoreFullPreviewReadingScrollTop } from './previewReadingAnchor';
 import { createPreviewScrollRange } from './previewScrollRange';
 import { writePreviewFrame } from './previewFrameWriter';
 import { renderDeferredPreviewMath } from './previewMath';
@@ -3055,7 +3055,7 @@ export function createPreviewController({
           - Math.max(0, viewportOffset);
         if (previewViewport) {
           if (previewViewport.restoreReadingScrollTop(top)) { sourceMapDirty = true; localGeometryViewport = null; }
-        } else scrollElement.scrollTop = top;
+        } else if (restoreFullPreviewReadingScrollTop(getFrameDocument()!, top)) sourceMapDirty = true;
         return;
       }
     }
@@ -3485,7 +3485,7 @@ export function createPreviewController({
         retainedViewportProjection = null;
         if (previewViewport) {
           if (previewViewport.restoreReadingScrollTop(top)) { sourceMapDirty = true; localGeometryViewport = null; }
-        } else if (document.scrollingElement) document.scrollingElement.scrollTop = top;
+        } else if (restoreFullPreviewReadingScrollTop(document, top)) sourceMapDirty = true;
       }, viewportRatio);
       const interaction = viewportInteractionGeneration;
       return () => {

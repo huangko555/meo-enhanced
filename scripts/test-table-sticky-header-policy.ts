@@ -43,6 +43,16 @@ assert.deepEqual(tableStickyHeaderPolicy.layout(common), {
 });
 
 assert.deepEqual(tableStickyHeaderPolicy.layout({
+  ...common, header: { top: 0, height: 301 }
+}), { visible: false, reason: 'oversized-header' }, 'a growing header must not cover the editing viewport');
+assert.equal(tableStickyHeaderPolicy.layout({
+  ...common, header: { top: 0, height: 150 }
+}).visible, true, 'a header may use half the viewport');
+assert.deepEqual(tableStickyHeaderPolicy.layout({
+  ...common, header: { top: 0, height: 140 }, controlsHeight: 20
+}), { visible: false, reason: 'oversized-header' }, 'floating controls share the same height budget');
+
+assert.deepEqual(tableStickyHeaderPolicy.layout({
   ...common,
   header: { ...common.header, top: 34 },
   controlsHeight: 31

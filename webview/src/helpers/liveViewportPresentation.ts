@@ -3,6 +3,7 @@ import { Decoration, ViewPlugin, WidgetType } from '@codemirror/view';
 import { mapLiveWidgetPositions, liveWidgetPositionsIndependent } from '../editor/liveWidgetPositions';
 import { renderedBlockPreviewHeight, renderedBlockPreview } from './renderedBlockPreview';
 import { isLiveInputDerivedWorkPending } from '../editor/liveInputDerivedWork';
+import { getViewportController } from './viewportController';
 
 type Band = { from: number; to: number };
 const overscanLines = 80;
@@ -97,6 +98,9 @@ export function liveViewportPresentationExtensions() {
           return;
         }
         if (isLiveInputDerivedWorkPending(view.state)) return;
+        // The active input is an interaction surface, not a disposable cache.
+        // Its owner releases this hold on actual scrolling or navigation.
+        if (getViewportController(view)?.hasNativeInputViewportOwner()) return;
         const band = getLivePresentationBand(view.state)!;
         const { from, to } = view.viewport;
         const first = view.state.doc.lineAt(from).number, last = view.state.doc.lineAt(to).number;

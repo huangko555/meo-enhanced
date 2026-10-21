@@ -1,3 +1,21 @@
+/** The frame owns its otherwise unpadded document root. Keep the fractional
+ * remainder there when a full-DOM preview has no virtual gap to absorb it.
+ * This changes neither the reading root's formatting nor its containing block. */
+export function restoreFullPreviewReadingScrollTop(document: Document, top: number): boolean {
+  const scroll = document.scrollingElement, window = document.defaultView;
+  if (!scroll || !window) return false;
+  scroll.scrollTop = top;
+  const error = scroll.scrollTop - top;
+  if (!Number.isFinite(error) || Math.abs(error) > 1 || Math.abs(error) < 0.001
+    || top <= 1 || top >= scroll.scrollHeight - scroll.clientHeight - 1) return false;
+  const root = document.documentElement, previous = parseFloat(root.style.paddingTop) || 0;
+  const quantum = 1 / window.devicePixelRatio, total = previous + error;
+  const whole = Math.floor(total / quantum) * quantum;
+  root.style.paddingTop = `${total - whole}px`;
+  if (whole) scroll.scrollTop -= whole;
+  return true;
+}
+
 /** Retain an actual painted text position across a synchronous presentation
  * mutation. Estimated blocks and relocated footnotes cannot serve as witnesses. */
 export function capturePreviewReadingAnchor(document: Document, restore: (top: number) => void, viewportRatio = 0): (() => boolean) | null {

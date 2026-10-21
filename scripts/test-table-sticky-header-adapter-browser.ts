@@ -32,7 +32,8 @@ async function main(): Promise<void> {
       <style>
         .shell { position: relative; margin: 8px; }
         .outer { height: 260px; overflow-y: auto; }
-        .scroller { position: relative; width: 320px; height: 210px; overflow-x: hidden; overflow-y: auto; }
+        /* Keep this rich passive-header fixture within the floating height budget. */
+        .scroller { position: relative; width: 320px; height: 640px; overflow-x: hidden; overflow-y: auto; }
         .content { width: 320px; }
         .horizontal { width: 320px; overflow-x: auto; }
         .spacer { height: 64px; }
@@ -51,7 +52,7 @@ async function main(): Promise<void> {
               <span role="button" tabindex="0">role command</span><span class="meo-md-html-table-column-resize-handle" aria-hidden="true"></span>
             </th><th>Value<span class="meo-md-html-table-column-resize-handle" aria-hidden="true"></span></th></tr></thead>
             <tbody>${Array.from({ length: 12 }, (_, row) => `<tr><td>${id}-${row}</td><td>row</td></tr>`).join('')}</tbody>
-          </table></div><div style="height:220px"></div>
+          </table></div><div style="height:440px"></div>
         </div></div>
         <div class="sticky" id="sticky-${id}"><button class="sticky-toolbar-button">Toolbar</button><div class="sticky-viewport" id="viewport-${id}">
           <table id="sticky-table-${id}"><thead><tr id="sticky-row-${id}"></tr></thead></table>

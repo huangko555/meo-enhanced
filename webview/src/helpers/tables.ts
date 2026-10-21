@@ -1,4 +1,5 @@
 import { editorScrollIntoView } from '../editor/scrollEffects';
+import { tableHeaderFitsStickyViewport } from '../editor/tableStickyHeaderPolicy';
 import { blockInsertion, type MarkdownInputContext } from '../editor/blockInsertion';
 import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
 import { renderedBlockPreviewHeight, RenderedBlockPreviewHeight } from './renderedBlockPreview';
@@ -402,6 +403,8 @@ function stabilizeHistoryScrollTop(
 
 export function tableUsableViewportBounds(view: EditorView, element: Element) {
   const viewport = view.scrollDOM.getBoundingClientRect();
+  // Editing the primary header must never compete with its passive clone.
+  if (element.closest('thead')) return { top: viewport.top, bottom: viewport.bottom };
   const shell = element.closest('.meo-md-html-table-shell');
   const stickyChrome = shell?.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome.is-visible')
     ?? view.dom.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome.is-visible');
@@ -416,7 +419,8 @@ export function tableUsableViewportBounds(view: EditorView, element: Element) {
     headerRect && element.closest('tbody')
     && elementRect.top < viewport.top + headerRect.height
   );
-  const inferredStickyBottom = tableRect && headerRect
+  const headerFits = !headerRect || tableHeaderFitsStickyViewport(viewport.height, headerRect.height);
+  const inferredStickyBottom = headerFits && tableRect && headerRect
     && tableRect.bottom > viewport.top
     && (headerRect.bottom <= viewport.top || bodyOverlapsStickyBand)
     ? viewport.top + headerRect.height
@@ -424,7 +428,7 @@ export function tableUsableViewportBounds(view: EditorView, element: Element) {
   return {
     top: Math.max(
       viewport.top,
-      stickyChrome?.getBoundingClientRect().bottom ?? viewport.top,
+      headerFits ? stickyChrome?.getBoundingClientRect().bottom ?? viewport.top : viewport.top,
       inferredStickyBottom
     ),
     bottom: viewport.bottom
@@ -4317,14 +4321,11 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       const tableStartLine = this.resolveCurrentTableStartLine(view, row, currentRange);
       if (tableStartLine === null) return;
       const focusTarget = { row, col, caret: input.selectionStart ?? 0 };
-      const scrollTop = view.scrollDOM.scrollTop;
       if (commitPendingTableEdits(view)) {
-        // A cell edit has already resized its row before the source transaction.
-        // Re-anchoring to the document here interprets the widget replacement as
-        // fresh layout and shifts the viewport by one source line. Keep the owned
-        // scroller absolute and restore focus without treating the autosave as
-        // navigation: typing must not make the document chase the caret.
-        getViewportController(view)?.lockScrollTop(scrollTop);
+        // Source confirmation stays within the native editing session. Its
+        // painted anchor survives later parser and layout updates; no absolute
+        // scroll lock, new navigation or caret rewrite is needed for this DOM.
+        if (input.isConnected && document.activeElement === input) return;
         this.scheduleFocusCellAfterCommit(
           view,
           tableStartLine,
@@ -4485,7 +4486,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const { revealCaret = true } = options;
     const viewport = getViewportController(view);
     const restoreContextMenu = this.pendingContextMenuRestore;
-    const isRevealCurrent = restoreContextMenu
+    const isRevealCurrent = restoreContextMenu || !revealCaret
       ? viewport?.captureNavigationCurrentness() ?? (() => true)
       : viewport?.beginNavigationReveal() ?? (() => true);
     let observer: MutationObserver | null = null;

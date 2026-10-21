@@ -152,7 +152,8 @@ try {
         const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
         const reading = [...doc.querySelectorAll<HTMLElement>('p[data-source-line]')].find(element => element.getBoundingClientRect().top > 150)!;
         (window as any).__stablePreviewText = reading.textContent;
-        return { scroll: doc.scrollingElement!.scrollTop, top: reading.getBoundingClientRect().top, font: doc.defaultView!.getComputedStyle(reading).fontSize };
+        return { scroll: doc.scrollingElement!.scrollTop, top: reading.getBoundingClientRect().top,
+          font: doc.defaultView!.getComputedStyle(reading).fontSize, height: doc.body.getBoundingClientRect().height };
       });
       await page.evaluate(() => {
         const scope = window as any; scope.__presentationFrames = []; scope.__samplePresentation = true;
@@ -177,6 +178,12 @@ try {
           if (key.length === 1) await page.keyboard.type(key); else await page.keyboard.press(key);
           // Allow each windowed update to commit even with the delayed chunk
           // response; the rich-input matrix separately exercises rapid bursts.
+          if (!windowed && key === 'Enter') {
+            // Observe the intermediate rendered line break. A fast Backspace
+            // used to coalesce it away and miss fractional reading drift.
+            await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('.preview-frame')!
+              .contentDocument!.querySelector('p br'));
+          }
           await new Promise(resolve => setTimeout(resolve, windowed ? 320 : 170));
         }
       }, `Source-Preview-windowed-${windowed}-sync-${sync}`);
@@ -189,7 +196,8 @@ try {
         assert.ok(Math.abs(frame.top - baseline.top) <= 1, `${stage}: untouched reading content moved: ${JSON.stringify({ baseline, frame })}`);
         // Estimated gaps can change their absolute height when a new window
         // accepts measurements. Its visible reading content must stay fixed.
-        if (!windowed) assert.ok(Math.abs(frame.scroll - baseline.scroll) <= 1, `${stage}: input scrolled the follower: ${JSON.stringify({ baseline, frame })}`);
+        if (!windowed && frame.height === baseline.height) assert.ok(Math.abs(frame.scroll - baseline.scroll) <= 1,
+          `${stage}: unchanged layout scrolled the follower: ${JSON.stringify({ baseline, frame })}`);
       }
       assert.equal(host.readHost(), text.slice(0, 8) + '1' + text.slice(8));
       assert.equal(host.readPresentation().text, host.readHost(), 'the final preview request must include the latest source');

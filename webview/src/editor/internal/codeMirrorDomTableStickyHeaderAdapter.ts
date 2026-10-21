@@ -194,6 +194,12 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
       const scrollerRect = elements.scroller.getBoundingClientRect();
       const tableRect = elements.table.getBoundingClientRect();
       const headerRect = header.getBoundingClientRect();
+      const active = header.ownerDocument.activeElement;
+      if (active?.tagName === 'TEXTAREA' && header.contains(active)
+        && headerRect.bottom > scrollerRect.top && headerRect.top < scrollerRect.bottom) {
+        hide(elements);
+        return;
+      }
       applyLayout(elements, options.policy.layout({
         scroller: {
           top: scrollerRect.top, left: scrollerRect.left,
