@@ -699,14 +699,15 @@ export class ViewportController {
     };
   }
 
-  /** Retains one presentation element across a replacement without superseding its navigation intent. */
+  /** Retains one presentation element, or aligns it at a requested viewport Y, across a replacement. */
   retainElementTopWhileMutation(
-    element: HTMLElement,
+    element: HTMLElement | null,
     resolveCurrentElement: () => HTMLElement | null,
     mutate: () => void,
-    isCurrent: () => boolean = () => true
+    isCurrent: () => boolean = () => true,
+    target?: { position: number; top: number }
   ): void {
-    const beforeTop = element.isConnected ? element.getBoundingClientRect().top : null;
+    const beforeTop = target?.top ?? (element?.isConnected ? element.getBoundingClientRect().top : null);
     if (this.destroyed || beforeTop === null || !isCurrent()) {
       mutate();
       return;
@@ -734,12 +735,17 @@ export class ViewportController {
         return;
       }
       const currentElement = resolveCurrentElement();
-      if (currentElement?.isConnected) {
+      // A long source may have virtualized its original header. Its document
+      // position brings it back into the DOM; subsequent correction uses the
+      // actual header, including its inset, before painting.
+      const currentTop = currentElement?.isConnected ? currentElement.getBoundingClientRect().top
+        : target ? this.view.documentTop + this.view.lineBlockAt(target.position).top : null;
+      if (currentTop !== null) {
         const current = this.readScrollPosition();
-        const target = this.resolveScrollTarget({
-          top: current.top + currentElement.getBoundingClientRect().top - beforeTop
+        const scrollTarget = this.resolveScrollTarget({
+          top: current.top + currentTop - beforeTop
         }, current);
-        this.writeScrollPosition(target);
+        this.writeScrollPosition(scrollTarget);
       }
     };
     const settleFrame = () => {
@@ -753,7 +759,7 @@ export class ViewportController {
     // They correct geometry immediately without consuming the frame budget or
     // starting parallel settlement loops. Editor measurements use this owner too.
     this.activeElementRetentionCorrection = reconcile;
-    const MutationObserverConstructor = element.ownerDocument.defaultView?.MutationObserver;
+    const MutationObserverConstructor = (element?.ownerDocument ?? this.view.dom.ownerDocument).defaultView?.MutationObserver;
     if (MutationObserverConstructor) {
       this.activeElementRetentionObserver = new MutationObserverConstructor(() => reconcile());
       this.activeElementRetentionObserver.observe(this.view.dom, {

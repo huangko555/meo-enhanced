@@ -80,6 +80,10 @@ try {
       },
       { text, language, appearance }
     );
+    if (!editing) await page.evaluate(() => {
+      const e = (window as any).nativeEditor;
+      e.scrollToLine(e.view.state.doc.lineAt(e.getText().indexOf('```mermaid')).number - 1, 'start');
+    });
     await page.waitForSelector('.meo-mermaid-block svg');
     await frames();
     if (!editing) return;
@@ -97,7 +101,7 @@ try {
   };
   const assertNavigation = async () => {
     fs.mkdirSync('.local/mermaid-navigation-acceptance', {recursive:true});
-    const text = 'Before\n\n```mermaid\nflowchart TD\n' +
+    const text = Array.from({ length: 45 }, (_, i) => 'Before paragraph ' + i + '\n').join('\n') + '\n```mermaid\nflowchart TD\n' +
       Array.from({ length: 35 }, (_, i) => `N${i}[Stage ${i}] --> N${i + 1}[Stage ${i + 1}]`).join('\n') + '\n' +
       Array.from({ length: 65 }, (_, i) => '%% comment ' + i).join('\n') + '\n```\n\n' +
       Array.from({ length: 30 }, (_, i) => 'After paragraph ' + i + '\n').join('\n');
@@ -107,10 +111,28 @@ try {
       const bounds = (window as any).MermaidEditingHarness.editorViewportBounds(view);
       const caret = view.coordsAtPos(view.state.selection.main.head);
       const block = view.lineBlockAt(opening);
+      const toolbar = view.dom.querySelector(`.meo-mermaid-toolbar[data-meo-block-from="${opening}"]:not([data-meo-floating])`);
+      const header = toolbar?.getBoundingClientRect();
       const blockTop = view.documentTop + block.top;
       return {top:bounds.top, bottom:bounds.bottom, caretTop:caret?.top, caretBottom:caret?.bottom,
-        blockTop, scroll:view.scrollDOM.scrollTop, head:view.state.selection.main.head, focused:view.hasFocus};
+        blockTop, headerTop:header?.top, headerBottom:header?.bottom, viewportTop:view.scrollDOM.getBoundingClientRect().top,
+        scroll:view.scrollDOM.scrollTop, head:view.state.selection.main.head, focused:view.hasFocus};
     }, {opening});
+    const observeSwitch = (event: 'click' | 'keydown') => page.evaluate(({opening,event}) => {
+      const samples: (number | null)[] = [];
+      (window as any).__mermaidNavigationFrames = samples;
+      const sample = () => {
+        const toolbar = document.querySelector(`.meo-mermaid-toolbar[data-meo-block-from="${opening}"]:not([data-meo-floating])`);
+        samples.push(toolbar?.getBoundingClientRect().top ?? null);
+        if (samples.length < 20) requestAnimationFrame(sample);
+      };
+      window.addEventListener(event, () => requestAnimationFrame(sample), {capture:true,once:true});
+    }, {opening,event});
+    const assertFrames = async (top: number, message: string) => {
+      const samples = await page.evaluate(() => (window as any).__mermaidNavigationFrames as (number|null)[]);
+      assert.ok(samples.length === 20 && samples.every(value => value !== null && Math.abs(value - top) <= 1.5),
+        message + ': ' + JSON.stringify(samples));
+    };
     for (const width of [520, 1200]) {
       await mount(text, width, width === 520 ? 'zh-CN' : 'en', width === 520 ? 'light' : 'dark', false);
       await page.evaluate(opening => {
@@ -120,11 +142,15 @@ try {
       await frames(12);
       const sticky = '.meo-block-sticky-header:not([hidden]) .meo-mermaid-mode-btn';
       await page.waitForSelector(sticky, {visible:true});
+      await observeSwitch('click');
       await page.click(sticky);
-      await frames(20);
+      await frames(24);
       const entered = await geometry();
       assert.equal(entered.head, first, 'Explicit edit starts on the first Mermaid source line');
-      assert.ok(entered.focused && entered.caretTop! >= entered.top + 30 && entered.caretBottom! <= entered.bottom,
+      assert.ok(Math.abs(entered.headerTop! - entered.viewportTop - 8) <= 1,
+        `Sticky edit aligns the block header 8px below the viewport top (${width}): ${JSON.stringify(entered)}`);
+      await assertFrames(entered.viewportTop + 8, 'Sticky edit must align before its first painted frame');
+      assert.ok(entered.focused && entered.caretTop! >= Math.max(entered.top, entered.headerBottom!) && entered.caretBottom! <= entered.bottom,
         `Sticky edit must reveal the source caret below its header (${width}): ${JSON.stringify(entered)}`);
       assert.equal(Boolean(await page.$('.meo-mermaid-inline-preview')), width === 1200,
         'Navigation covers stacked and side-by-side layouts');
@@ -139,16 +165,20 @@ try {
           view.dispatch({selection:{anchor:position}, scrollIntoView:true}); view.focus();
         }, text.indexOf('%% comment 55'));
         await frames(16);
+        await observeSwitch(exit === 'button' ? 'click' : 'keydown');
         if (exit === 'button') { await page.waitForSelector(sticky,{visible:true}); await page.click(sticky); }
         else await page.keyboard.press('Escape');
         await frames(24);
         const finished = await geometry();
-        assert.ok(finished.blockTop >= finished.top && finished.blockTop < finished.top + 100,
-          `Explicit ${exit} reveals the diagram beginning (${width}): ${JSON.stringify(finished)}`);
+        assert.ok(Math.abs(finished.headerTop! - finished.viewportTop - 8) <= 1,
+          `Explicit ${exit} aligns the block header (${width}): ${JSON.stringify(finished)}`);
+        await assertFrames(finished.viewportTop + 8, `Explicit ${exit} must not flash through other positions`);
         assert.equal((await read()).text,text,'Navigation never changes Markdown');
         assert.equal(await page.$('.meo-mermaid-editing-preview'),null,'Explicit exit folds source');
         await page.screenshot({path:`.local/mermaid-navigation-acceptance/${exit}-${width}.png`});
       }
+      await page.evaluate(() => { (window as any).nativeEditor.view.scrollDOM.scrollTop -= 12; });
+      await frames(12);
       const visible = await geometry();
       await page.$eval('.meo-mermaid-toolbar:not([data-meo-floating]) .meo-mermaid-mode-btn', b=>(b as HTMLButtonElement).click());
       await frames(16);
@@ -159,6 +189,40 @@ try {
       await frames(20);
       assert.ok(Math.abs((await geometry()).scroll - visible.scroll) <= 1,
         'Finishing beside an already visible diagram does not scroll');
+      // A fully visible header is the only witness, even when its first source
+      // line would fall outside the viewport after expanding.
+      await page.evaluate(opening => {
+        const view = (window as any).nativeEditor.view;
+        const toolbar = view.dom.querySelector(`.meo-mermaid-toolbar[data-meo-block-from="${opening}"]:not([data-meo-floating])`)!;
+        const rect = toolbar.getBoundingClientRect();
+        view.scrollDOM.scrollTop += rect.bottom - view.scrollDOM.getBoundingClientRect().bottom + 2;
+      }, opening);
+      await frames(12);
+      const bottomHeader = await geometry();
+      await observeSwitch('click');
+      await page.$eval('.meo-mermaid-toolbar:not([data-meo-floating]) .meo-mermaid-mode-btn', b=>(b as HTMLButtonElement).click());
+      await frames(24);
+      const bottomEntered = await geometry();
+      assert.ok(Math.abs(bottomEntered.headerTop! - bottomHeader.headerTop!) <= 1,
+        `A fully visible bottom header stays in place on entry (${width}): ${JSON.stringify({bottomHeader,bottomEntered})}`);
+      await assertFrames(bottomHeader.headerTop!, 'Entering beside a visible bottom header must not flicker');
+      await observeSwitch('keydown');
+      await page.keyboard.press('Escape');
+      await frames(24);
+      assert.ok(Math.abs((await geometry()).headerTop! - bottomHeader.headerTop!) <= 1,
+        'A fully visible bottom header stays in place on exit');
+      await assertFrames(bottomHeader.headerTop!, 'Finishing beside a visible bottom header must not flicker');
+      await page.evaluate(() => { (window as any).nativeEditor.view.scrollDOM.scrollTop -= 14; });
+      await frames(12);
+      const clipped = await geometry();
+      assert.ok(clipped.headerTop! < clipped.bottom && clipped.headerBottom! > clipped.bottom,
+        'Fixture exposes only part of the original header');
+      await observeSwitch('click');
+      await page.$eval('.meo-mermaid-toolbar:not([data-meo-floating]) .meo-mermaid-mode-btn', b=>(b as HTMLButtonElement).click());
+      await frames(24);
+      await assertFrames(clipped.viewportTop + 8, 'A partially clipped header aligns to the top on entry');
+      await page.keyboard.press('Escape');
+      await frames(24);
       await page.$eval('.meo-mermaid-toolbar:not([data-meo-floating]) .meo-mermaid-mode-btn', b=>(b as HTMLButtonElement).click());
       await frames(12);
       await page.evaluate(position => {
@@ -173,7 +237,7 @@ try {
         `Natural keyboard exit follows the outside caret (${width}): ${JSON.stringify(left)}`);
       assert.equal(await page.$('.meo-mermaid-editing-preview'),null);
       await page.$eval('.meo-mermaid-toolbar:not([data-meo-floating]) .meo-mermaid-mode-btn', b=>(b as HTMLButtonElement).click());
-      await frames(12);
+      await frames(24);
       const after = text.indexOf('After paragraph 8');
       const point = await page.evaluate(async position => {
         const view = (window as any).nativeEditor.view;
@@ -182,6 +246,7 @@ try {
         const caret = view.coordsAtPos(position)!;
         return {x:caret.left+3,y:(caret.top+caret.bottom)/2};
       },after);
+      assert.ok(await page.$('.meo-mermaid-editing-preview'), 'Preparing the prose click must keep source open');
       await page.mouse.click(point.x,point.y);
       await frames(24);
       const clicked = await geometry();
@@ -207,6 +272,28 @@ try {
       await frames(24);
       assert.ok(Math.abs((await geometry()).scroll-wheeled.scroll) <= 2,
         'Settling a reveal must not pull back a later wheel gesture');
+      const tail = text.slice(0, opening) + '```mermaid\nflowchart LR\nA --> B\n' +
+        Array.from({length:65}, (_, i) => '%% tail comment ' + i).join('\n') + '\n```';
+      await mount(tail, width, width === 520 ? 'zh-CN' : 'en', width === 520 ? 'light' : 'dark', false);
+      await page.$eval('.meo-mermaid-toolbar:not([data-meo-floating]) .meo-mermaid-mode-btn', b=>(b as HTMLButtonElement).click());
+      await frames(24);
+      await page.evaluate(position => {
+        const view = (window as any).nativeEditor.view;
+        view.dispatch({selection:{anchor:position},scrollIntoView:true}); view.focus();
+      }, tail.indexOf('%% tail comment 55'));
+      await frames(16);
+      await observeSwitch('keydown');
+      await page.keyboard.press('Escape');
+      await frames(24);
+      const boundary = await geometry();
+      const atEnd = await page.evaluate(() => {
+        const view = (window as any).nativeEditor.view;
+        return Math.abs(view.scrollDOM.scrollTop - (view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight)) <= 1;
+      });
+      assert.ok(boundary.headerTop! >= boundary.viewportTop && boundary.headerBottom! <= boundary.bottom && atEnd,
+        'Document-end clamping keeps the original header visible: ' + JSON.stringify(boundary));
+      await assertFrames(boundary.headerTop!, 'Document-end exit must not flicker while clamping');
+      assert.equal((await read()).text, tail, 'Exiting at the document end never inserts a line');
       console.log(`Mermaid explicit/natural navigation passed (${width})`);
     }
   };

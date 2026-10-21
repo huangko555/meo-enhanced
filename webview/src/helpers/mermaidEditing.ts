@@ -11,7 +11,6 @@ import { getMermaidDiagramPresentationFactory } from '../editor/mermaidDiagramPr
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import { sourcePresentationSelection } from '../editor/livePointerSelection';
 import { supersedeLiveInputDerivedWork } from '../editor/liveInputDerivedWork';
-import { editorViewportBounds } from '../editor/editorViewportBounds';
 import {
   MermaidDiagramWidget,
   createMermaidViewportState,
@@ -237,25 +236,23 @@ function setMermaidEditingMode(view: EditorView, anchor: number, editing: boolea
     `.meo-mermaid-toolbar[data-meo-block-from="${anchor}"]:not([data-meo-floating])`
   );
   const toolbar = resolveToolbar(), rect = toolbar?.getBoundingClientRect();
-  const bounds = editorViewportBounds(view);
+  // Caret scroll margins reserve room for a future sticky header even while
+  // this original header is visible. Block-head visibility uses painted bounds.
+  const bounds = view.scrollDOM.getBoundingClientRect();
   const mutate = () => editing
     ? focusMermaidEditingOffset(view, anchor, 0, isCurrent)
     : closeMermaidEditing(view, anchor);
-  // Keep an already-visible target steady through late container reflow. An
-  // offscreen regular header must yield to revealing the actual editing target.
-  if (controller && toolbar && rect && rect.height > 0 &&
-    rect.top >= bounds.top && rect.bottom + 40 <= bounds.bottom) {
-    controller.retainElementTopWhileMutation(toolbar, resolveToolbar, mutate, isCurrent);
+  // Both directions use the original header, never the caret or sticky copy.
+  // Fix the target before changing mode so layout settlement cannot re-decide it.
+  const visible = rect && rect.height > 0 && rect.top >= bounds.top && rect.bottom <= bounds.bottom;
+  const top = visible ? rect.top : bounds.top + 8;
+  if (controller) {
+    controller.retainElementTopWhileMutation(toolbar, resolveToolbar, mutate, isCurrent, { position: anchor, top });
     return;
   }
   mutate();
-  const position = editing ? source.lines[0]!.from : anchor;
-  if (controller) {
-    controller.revealPositionUntilStable(position, {
-      y: 'nearest', yMargin: 40
-    }, isCurrent);
-  } else if (isCurrent()) {
-    view.dispatch({ effects: EditorView.scrollIntoView(position, { y: 'nearest', yMargin: 40 }) });
+  if (!visible && isCurrent()) {
+    view.dispatch({ effects: EditorView.scrollIntoView(anchor, { y: 'start', yMargin: 8 }) });
   }
 }
 function closeMermaidEditing(view: EditorView, anchor: number): void {

@@ -263,9 +263,9 @@ try {
   assert.equal(await page.$eval('.meo-tooltip.is-visible .meo-tooltip-label', el => el.textContent),
     await page.$eval(header + ' .meo-mermaid-mode-btn', el => (el as HTMLElement).dataset.tooltip),
     'Icon-only edit control exposes its action');
-  await page.click(header + ' .meo-mermaid-mode-btn'); await frames(15);
+  await page.click(header + ' .meo-mermaid-mode-btn'); await frames(24);
   await page.waitForFunction(()=>document.querySelector('.meo-mermaid-toolbar')?.getAttribute('data-meo-mermaid-mode')==='edit');
-  // Explicit editing reveals source first; scroll again to exercise its floating header.
+  // Explicit editing reveals the block head; scroll again to exercise its floating header.
   await pin();
   assert.ok(await page.$(header + ' .meo-native-source-preview-label .meo-mermaid-layout-btn'), 'The opaque split header includes the preview layout action');
   await page.hover(header + ' .meo-mermaid-layout-btn');
@@ -283,7 +283,7 @@ try {
   await page.click('.meo-native-source-preview-label .meo-mermaid-layout-btn'); await frames(15);
   assert.equal(await page.$$eval('.cm-content[contenteditable="true"]',nodes=>nodes.length),1, 'Both layouts use the same main input');
   await assertMermaidSourceHeaderLayout('Mermaid source');
-  await page.click(header + ' .meo-mermaid-mode-btn'); await frames(15); await pin();
+  await page.click(header + ' .meo-mermaid-mode-btn'); await frames(24); await pin();
   await page.click(previewControls + ' .meo-visual-control-btn:nth-child(4)');
   await page.waitForSelector('.meo-mermaid-fullscreen-scrim'); await frames();
   assert.equal(await page.$(header), null, 'fullscreen hides floating header');
