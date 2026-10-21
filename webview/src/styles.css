@@ -2539,6 +2539,10 @@ html[data-editor-appearance='dark'] .cm-editor.meo-mode-live {
   padding-right: calc(10px + max(0px, (100% - var(--meo-content-max-width)) / 2));
 }
 
+.editor-host > .cm-editor > .cm-scroller {
+  padding-top: var(--meo-native-input-scroll-offset, 0px);
+}
+
 .cm-editor .cm-scroller::-webkit-scrollbar {
   -webkit-appearance: none;
   width: 10px !important;

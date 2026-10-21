@@ -3377,13 +3377,14 @@ export class ViewportController {
   private writeScrollPosition(target: ScrollPosition): boolean {
     // Background anchors and linked projection share this write boundary. A
     // live native edit keeps priority until actual navigation releases it.
-    const top = this.nativeInputViewport.scrollTop() ?? target.top;
+    const nativeTop = this.nativeInputViewport.scrollTop(), top = nativeTop ?? target.top;
     const current = this.readScrollPosition();
     const topChanged = Math.abs(current.top - top) > POSITION_EPSILON;
     const leftChanged = Math.abs(current.left - target.left) > POSITION_EPSILON;
     if (topChanged) this.view.scrollDOM.scrollTop = top;
     if (leftChanged) this.view.scrollDOM.scrollLeft = target.left;
-    return topChanged || leftChanged;
+    const rounded = nativeTop !== null && this.nativeInputViewport.absorbScrollRounding(top);
+    return topChanged || leftChanged || rounded;
   }
 
   /** Includes native momentum so background rendering can wait beyond the last wheel event. */

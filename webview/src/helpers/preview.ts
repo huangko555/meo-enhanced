@@ -3221,11 +3221,15 @@ export function createPreviewController({
     position: PreviewViewportPosition,
     isCurrent: () => boolean
   ): void => {
+    if (!isCurrent()) return;
     const restore = { ...position, isCurrent };
     if (acceptingViewportProjection) {
       acceptingViewportProjection.restore = restore;
       return;
     }
+    // An external scroll intent supersedes appearance's old reading witness.
+    // Resource transactions use the slot above and retain their own anchor.
+    appearanceRetention?.release();
     const hasUsableFrame = frameRenderedText !== null && getSourceMap(false).length > 0;
     pendingExternalViewportRestore = hasPendingRequest || !hasUsableFrame
       ? { restore, requestGeneration }
@@ -3493,7 +3497,11 @@ export function createPreviewController({
         return fresh?.() === true;
       };
     },
-    restoreTopLine,
+    restoreTopLine: (...args: Parameters<typeof restoreTopLine>) => {
+      if (args[4]?.() === false) return;
+      if (!acceptingViewportProjection) appearanceRetention?.release();
+      restoreTopLine(...args);
+    },
     restoreTopVisiblePosition,
     isSourceLineRendered: (line: number) => !previewViewport || previewViewport.containsLine(line),
     captureLinkedGeometry: () => {
@@ -3522,6 +3530,7 @@ export function createPreviewController({
         scrollElement.scrollHeight - scrollElement.clientHeight
       ));
       if (Math.abs(scrollElement.scrollTop - next) > 0.1) {
+        if (!acceptingViewportProjection) appearanceRetention?.release();
         scrollElement.scrollTop = next;
       }
     },

@@ -1754,3 +1754,26 @@ snapshot fails the continuously painted handoff assertion, and the new path
 passes. The viewport-controller regression separately checks that typing and idle
 geometry retain a pending cold target while a later scroll or Preview ownership
 cancels it. These cases join the production input-presentation gate.
+
+Native replay of `fa408df2` finds a remaining 55px offset near nested math after
+the destination's resources settle. Repeating a one-shot Source alignment restores
+the expected formula. External semantic and pixel navigation now retires the old
+appearance-retention witness at the Preview boundary. Internal presentation-slot
+restorations preserve their active appearance transaction. This prevents later
+resources from resurrecting a reading point captured before the new scroll.
+The existing prepared-destination budget previously timed out after its first
+gate was released; it now completes, together with the remaining viewport budget.
+A separate existing Ctrl+Home budget assertion rejects
+a heading at -0.171875px despite reaching the correct first heading. It now permits
+one physical pixel of native scroll rounding while retaining the obsolete-End
+supersession check.
+
+The native table compositor gate also catches a 0.1875px rounding remainder in
+an estimated prefix update. A bounded primary-scroller padding remainder keeps
+both content and gutters at their accepted Y. It runs only for the native input
+owner and schedules no work. The accepted scroll step is observed synchronously;
+DPR alone does not specify scrollTop quantization. A deterministic real-browser
+component test fails on `fa408df2` and checks 100%/125% DPR, CSS zoom and release to
+user scrolling. The full production compositor matrix remains the integration
+gate. Screencast acknowledgements are drained before detaching their session so
+late protocol replies cannot fail an already completed paint check.

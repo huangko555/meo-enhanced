@@ -76,11 +76,14 @@ async function assertStablePaint(page: Page, clip: PaintClip | readonly PaintCli
   };
   const client = await page.createCDPSession();
   let armed = false, delivered = 0, changed = 0;
+  const pendingAcks = new Set<Promise<unknown>>();
   let firstFailure: Buffer | undefined, decodeError: unknown, resolveReady!: () => void, rejectReady!: (error: unknown) => void;
   const ready = new Promise<void>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
   let decoding = Promise.resolve();
   client.on('Page.screencastFrame', event => {
-    void client.send('Page.screencastFrameAck', { sessionId: event.sessionId });
+    const ack = client.send('Page.screencastFrameAck', { sessionId: event.sessionId });
+    pendingAcks.add(ack);
+    void ack.catch(error => { decodeError ??= error; }).finally(() => { pendingAcks.delete(ack); });
     decoding = decoding.then(async () => {
       const png = Buffer.from(event.data, 'base64'), value = await pixels(png);
       // Chromium can initially deliver its previous cached paint. Arm against
@@ -107,6 +110,7 @@ async function assertStablePaint(page: Page, clip: PaintClip | readonly PaintCli
     await frames(page, 8);
     await client.send('Page.stopScreencast');
     await decoding;
+    await Promise.allSettled(pendingAcks);
     if (decodeError) throw decodeError;
     observedPaints += delivered;
     assert.ok(delivered >= 2, `${label}: insufficient compositor frames (${delivered})`);
@@ -119,7 +123,7 @@ async function assertStablePaint(page: Page, clip: PaintClip | readonly PaintCli
       })));
     }
     assert.ok(changed <= 4, `${label}: unchanged content flashed or moved in a painted frame (${changed} pixels)`);
-  } finally { clearTimeout(timeout); await decoding; await client.detach();
+  } finally { clearTimeout(timeout); await decoding; await Promise.allSettled(pendingAcks); await client.detach();
     await page.evaluate(() => document.getElementById('presentation-paint-witness')?.remove()); }
 }
 

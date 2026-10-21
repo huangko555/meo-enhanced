@@ -125,7 +125,9 @@ try {
     scope.__windowDelay.reject(new Error('Obsolete block request')); scope.__windowDelay = null;
     for (let index = 0; index < 4; index += 1) await new Promise(resolve => requestAnimationFrame(resolve));
     const rect = scope.__windowFrame.contentDocument.querySelector('h1').getBoundingClientRect();
-    return rect.top >= 0 && rect.top < innerHeight;
+    // scrollIntoView rounds to physical pixels; a fractional negative edge
+    // still means Home reached the first heading, not the obsolete End target.
+    return rect.top >= -1 / devicePixelRatio && rect.top < innerHeight;
   });
   assert.ok(supersededNavigation, 'a late Ctrl+End result must not override a newer Ctrl+Home intent');
   assert.deepEqual(await page.evaluate(() => (window as any).__windowErrors), [], 'superseded block failures must not fail the current reading window');
