@@ -125,6 +125,9 @@ try {
       // HTML/PDF preserve the reading appearance; Word keeps its fixed light format.
       const palette = getMermaidPalette(target !== 'docx' && appearance === 'dark');
       const rgb = (hex: string) => `rgb(${[1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16)).join(', ')})`;
+      assert.deepEqual(result.ganttTasks.slice(0, 3).map(task => task.background),
+        [palette.doneTaskBackground, palette.activeTaskBackground, palette.taskBackground].map(rgb),
+        'Every export target uses the shared low-saturation Gantt state colors');
       assert.equal(result.nodeFill, rgb(palette.nodeBackground), 'Export must use the shared diagram palette');
       assert.equal(result.customFill, 'rgb(255, 218, 185)', 'Author classDef colors must remain effective');
       assert.equal(result.noteFill, rgb(palette.secondaryBackground), 'Sequence notes must use a neutral surface');

@@ -19,18 +19,7 @@ import {
 const PREVIEW_MERMAID_CACHE_LIMIT = 100;
 const previewMermaidSvgCache = new Map<string, string>();
 
-type PreviewMermaidPalette = {
-  background: string;
-  nodeBackground: string;
-  secondaryBackground: string;
-  tertiaryBackground: string;
-  clusterBackground: string;
-  foreground: string;
-  border: string;
-  line: string;
-  chartColors: string[];
-  chartTextColor: string;
-};
+type PreviewMermaidPalette = ReturnType<typeof getMermaidPalette> & { background: string };
 
 export function createPreviewMermaidRenderer(
   resources: MermaidDiagramRenderResources,
@@ -250,6 +239,7 @@ function readPreviewMermaidPalette(
   };
 
   return {
+    ...palette,
     background: readColor('--meo-mermaid-background', appearance === 'dark' ? '#20252b' : '#ffffff'),
     nodeBackground: readColor('--meo-mermaid-node-background', palette.nodeBackground),
     secondaryBackground: readColor('--meo-mermaid-secondary-background', palette.secondaryBackground),

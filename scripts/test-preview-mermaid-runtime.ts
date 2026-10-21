@@ -71,6 +71,11 @@ async function assertGanttPreviewContrast(browser: Awaited<ReturnType<typeof lau
       assertReadableMermaidTasks(result.tasks, `Actual Preview Gantt/${appearance}`);
       assert.ok(new Set(result.tasks.filter(task => !task.outside).map(task => task.background)).size >= 3,
         'Completed, active and upcoming tasks keep distinct backgrounds');
+      const palette = getMermaidPalette(appearance === 'dark');
+      const rgb = (hex: string) => `rgb(${[1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16)).join(', ')})`;
+      assert.deepEqual(result.tasks.slice(0, 4).map(task => task.background),
+        [palette.doneTaskBackground, palette.doneTaskBackground, palette.activeTaskBackground, palette.taskBackground].map(rgb),
+        'Actual Preview uses the shared low-saturation Gantt state colors');
       assert.equal(result.customBackground, 'rgb(255, 218, 185)');
       assert.equal(result.customForeground, 'rgb(36, 18, 8)');
       fs.mkdirSync(path.join(repoRoot, '.local/mermaid-preview-contrast'), { recursive: true });

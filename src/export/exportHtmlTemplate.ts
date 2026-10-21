@@ -1,4 +1,4 @@
-import { mermaidThemeColorRoles } from '../shared/mermaidPalette';
+import { getMermaidPalette, mermaidThemeColorRoles } from '../shared/mermaidPalette';
 import { getGithubMermaidConfig } from '../preview/githubMermaid';
 
 export type BuildExportHtmlDocumentOptions = {
@@ -598,7 +598,8 @@ function buildRuntimeScript(hasMermaid: boolean, githubStyle = false): string {
     const clusterBackground = getExportThemeColor('--meo-mermaid-cluster-background', background);
     const chartColors = Array.from({ length: 12 }, (_, index) => getExportThemeColor('--meo-mermaid-chart-' + (index + 1), nodeBackground));
     const chartTextColor = getExportThemeColor('--meo-mermaid-chart-text', foreground, 'color');
-    const palette = { background, nodeBackground, secondaryBackground, tertiaryBackground, clusterBackground,
+    const palette = { ...(darkMode ? ${JSON.stringify(getMermaidPalette(true))} : ${JSON.stringify(getMermaidPalette(false))}),
+      background, nodeBackground, secondaryBackground, tertiaryBackground, clusterBackground,
       foreground, border, line, chartTextColor };
     return {
       startOnLoad: false,
