@@ -11,6 +11,8 @@ try {
   for (let attempt = 0; attempt < 5; attempt++) {
     const coldPage = await browser.newPage(), coldHost = await open(coldPage, coldText, false, 'live');
     try {
+      assert.ok(await coldPage.$('.editor-host .cm-line.meo-md-h1'),
+        `the first editable Live surface must already have its heading geometry (attempt ${attempt})`);
       const target = coldText.indexOf('BENCH_EDIT_TARGET') + 17;
       const point = await coldPage.evaluate(target => {
         const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;

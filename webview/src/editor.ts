@@ -40,7 +40,7 @@ import { formatSourceLineNumber, sourceLineNumberModeFacet } from './editor/sour
 import { flushEditorLayout } from './editor/layoutMeasurement';
 import { assessLargeDocument } from '../../src/foundation/largeDocument';
 import { uiLanguageFacet } from './editor/uiLanguage';
-import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
+import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, publishPreparedLivePresentation, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
 import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
 import { insertMountedTableCellBreak } from './helpers/tables';
 import { insertCodeBlock, sourceCodeBlockLines } from './helpers/codeBlocks';
@@ -3476,9 +3476,13 @@ export function createEditor({
       if (lightweightSourceSyntax) return Promise.resolve(!editorDestroyed && isCurrent());
       return prepareSourceSyntax(view, isCurrent);
     },
-    prepareLiveSyntax(isCurrent: () => boolean) {
-      if (!boundedEditorWork) return Promise.resolve(!editorDestroyed && isCurrent());
-      return prepareLiveSyntax(view, () => !editorDestroyed && isCurrent());
+    async prepareLiveSyntax(isCurrent: () => boolean) {
+      const current = () => !editorDestroyed && isCurrent();
+      if (!boundedEditorWork) return current();
+      const prepared = await prepareLiveSyntax(view, current);
+      if (!prepared || !current()) return false;
+      if (currentMode === 'live') publishPreparedLivePresentation(view);
+      return true;
     },
     async whenVisiblePresentationReady(timeoutMs: number) {
       if (editorDestroyed) return;

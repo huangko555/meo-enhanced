@@ -9,7 +9,7 @@ import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemir
 import { liveWidgetPositionsIndependent, liveWidgetPresentationLayers, mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions } from '../webview/src/editor/liveWidgetPositions';
 import { hasSameLiveMarkdownSyntax, hasSameLiveMarkdownOutsideBlock } from '../webview/src/helpers/livePresentationSyntax';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { IterMode, parseMixed, Tree } from '@lezer/common';
+import { IterMode, NodeType, parseMixed, Tree } from '@lezer/common';
 import { javascriptLanguage } from '@codemirror/lang-javascript';
 import { imagePresentationFactoryFacet, type ImagePresentationFactory } from '../webview/src/editor/imagePresentation';
 import { longCodeBlockSessionUiExtension } from '../webview/src/helpers/longCodeBlocks';
@@ -20,6 +20,16 @@ import { setHtmlEditingRangeEffect } from '../webview/src/helpers/htmlContent';
 import { mergeConflictSourceExtensions, parseMergeConflicts } from '../webview/src/helpers/mergeConflicts';
 import { markdownTagField } from '../webview/src/helpers/tags';
 import { getLivePresentationBand, liveViewportPresentationExtensions } from '../webview/src/helpers/liveViewportPresentation';
+import { livePresentationWindow } from '../webview/src/helpers/livePresentationWindow';
+
+{
+  const text = '# Pending Live\n\n' + 'Ordinary **formatted** paragraph.\n\n'.repeat(8_000);
+  const state = EditorState.create({ doc: text, extensions: liveViewportPresentationExtensions() });
+  const placeholder = new Tree(NodeType.none, [], [], text.length);
+  const window = livePresentationWindow(state, placeholder)!;
+  assert.ok(window.scope.toLine <= 100,
+    `A full-length anonymous parser placeholder expanded the first presentation to the whole document: ${window.scope.toLine}`);
+}
 
 {
   const text = 'Ordinary #sample words.\n'.repeat(9_000);
@@ -151,8 +161,12 @@ import { getLivePresentationBand, liveViewportPresentationExtensions } from '../
 }
 
 {
-  const state = EditorState.create({ doc: 'EDIT\n\n' + '**Distant paragraph**.\n\n'.repeat(4_100),
+  let state = EditorState.create({ doc: 'EDIT\n\n' + '**Distant paragraph**.\n\n'.repeat(4_100),
     selection: { anchor: 4 }, extensions: liveModeExtensions({ largeDocument: true }) });
+  // Model the ready editing surface. Startup is no longer allowed to finish
+  // the whole grammar accidentally while expanding an anonymous placeholder.
+  ensureSyntaxTree(state, state.doc.length, 10_000);
+  state = state.update({ effects: refreshLiveDecorationsAfterSearchEffect.of(true) }).state;
   const input = state.update({ changes: { from: 4, insert: 'x' }, selection: { anchor: 5 },
     annotations: Transaction.userEvent.of('input.type') }).state;
   assert.ok(hasMappedLiveInputPresentation(input), 'accepted prose input must carry a complete mapped presentation');

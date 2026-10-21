@@ -4,6 +4,13 @@ import { syntaxParsingBuildPlugin } from './test-editor-syntax-parsing-build';
 
 const build = await Bun.build({ entrypoints: ['scripts/test-live-decoration-history-entry.ts'], target: 'browser', format: 'iife',
   plugins: [{ name: 'observe-foreground-outer-parse', setup(builder) {
+    builder.onLoad({ filter: /webview[\\/]src[\\/]editor[\\/]blockWidgetHeight\.ts$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text();
+      const marker = 'export function estimateBlockWidgetHeight(request: BlockWidgetHeightRequest): number {';
+      assert.equal(source.split(marker).length, 2);
+      return { loader: 'ts', contents: source.replace(marker, marker
+        + '\n  if ((globalThis as any).__countColdHeights) (globalThis as any).__coldHeights = ((globalThis as any).__coldHeights ?? 0) + 1;') };
+    });
     builder.onLoad({ filter: /webview[\\/]src[\\/]editor[\\/]markdownTreeTransfer\.ts$/ }, async ({ path }) => {
       const source = await Bun.file(path).text(), marker = '            await yieldToHost();';
       assert.equal(source.split(marker).length, 2);
@@ -506,7 +513,41 @@ try {
   assert.deepEqual(errors, []);
   assert.ok(await page.evaluate(() => (window as any).__syntaxReceiveYields > 1),
     'production worker reception must give input/paint multiple task opportunities');
-  console.log(`Background Markdown: CSP worker, no foreground full parse, ${requests.length} jobs/one snapshot, receipt-only prose updates, strict projection bases, CJK input, undo, modes, distant code palette, ${incrementalCodeSteps} incremental code LR steps, disposal and failure passed`);
+  stage = 'cold Live waits for authoritative presentation';
+  const cold = await page.evaluate(() => {
+    const scope = window as any;
+    document.body.dataset.meoMarkdownWorkerSrc = '/worker.js';
+    scope.__holdParseReplies = true; scope.__heldParseReplies = [];
+    scope.__countColdHeights = true; scope.__coldHeights = 0;
+    scope.__coldText = '# Cold Live\n\nReference[^global].\n\n' + Array.from({ length: 320 }, (_, index) =>
+      `| Name | Value |\n| --- | --- |\n| Item ${index} | **value** |\n\nParagraph ${index}. ${'ordinary text '.repeat(25)}\n\n`).join('')
+      + '[^global]: A global definition.\n';
+    scope.__coldEditor = scope.__liveHistory.create({ parent: document.getElementById('editor'), text: scope.__coldText, initialMode: 'live' });
+    return { heights: scope.__coldHeights, exact: scope.__coldEditor.getText() === scope.__coldText };
+  });
+  assert.ok(cold.exact);
+  assert.equal(cold.heights, 0, 'cold Live must not create provisional rich widgets before the matching worker context exists');
+  await page.waitForFunction(() => (window as any).__heldParseReplies?.length > 0);
+  await page.evaluate(() => {
+    const scope = window as any; scope.__countColdHeights = false; scope.__holdParseReplies = false;
+    for (const { worker, data } of scope.__heldParseReplies.splice(0)) worker.dispatchEvent(new MessageEvent('message', { data }));
+  });
+  await page.evaluate(async () => {
+    const scope = window as any; await scope.__coldEditor.prepareLiveSyntax(() => true);
+    await scope.__coldEditor.whenVisiblePresentationReady(500);
+  });
+  await page.waitForSelector('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
+  assert.equal(await page.$eval('.meo-md-footnote-ref', element => element.getAttribute('aria-label')), 'Jump to footnote 1',
+    'cold Live must resolve a visible reference using the authoritative distant definition');
+  assert.equal(await page.evaluate(() => (window as any).__foregroundLargeMarkdownAdvances ?? 0), 0,
+    'cold Live cannot compensate for delayed worker facts by parsing the document on the foreground thread');
+  assert.ok(await page.evaluate(() => {
+    const scope = window as any;
+    const exact = scope.__coldEditor.getText() === scope.__coldText;
+    scope.__coldEditor.destroy();
+    return exact;
+  }), 'authoritative cold Live publication retains exact source');
+  console.log(`Background Markdown: CSP worker, no foreground full parse, ${requests.length} jobs/one snapshot, receipt-only prose updates, strict projection bases, CJK input, undo, modes, distant code palette, ${incrementalCodeSteps} incremental code LR steps, disposal, failure and authoritative cold Live passed`);
 } catch (error) {
   console.error(JSON.stringify({ stage, browserErrors, details: await activePage?.evaluate(() => {
     const scope = window as any;

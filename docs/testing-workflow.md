@@ -129,6 +129,18 @@ exact undo/redo, pending-input mode changes and widget-position checks remain re
 (`minPointSize=0`): shared offscreen widgets must not pull ordinary marks into that
 comparison. Preserve point semantics and the combined height summary when mapping
 partitioned ranges, including edits with no widget offset changes.
+An anonymous full-length parser placeholder must not expand a Live presentation
+band to the whole document. Cold Live must wait for matching Worker presentation
+facts before creating rich widgets. Syntax readiness alone is insufficient: publish
+the final Live decoration value before uncovering the initial editable surface.
+The delayed-Worker regression in `test-background-markdown-structure.ts` checks
+this without a foreground full parse; `test-mode-wrapped-line-position.ts` checks
+the first visible heading geometry and immediate trusted click/first-digit input.
+Do not add a post-reveal settling delay to make that first input pass.
+Paint tests explicitly activate their own page and require visible document state.
+Frame waits have a deadline and report whether the page still executes JavaScript,
+its visibility and mode, so a stopped compositor and a blocked renderer are not
+both reduced to an opaque three-minute protocol timeout.
 The nested Markdown fixture must use the actual View decoration providers, since
 single-layer synthetic ranges do not catch height-summary propagation through
 joined layers. Shifting one control must retain unchanged line-point chunks.

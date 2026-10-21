@@ -43,7 +43,9 @@ export function livePresentationWindow(state: EditorState, tree: Tree) {
   const includeRoot = (position: number, side: -1 | 1) => {
     let node = tree.resolveInner(position, side);
     while (node.parent && node.parent.name !== 'Document') node = node.parent;
-    if (node.name !== 'Document') { from = Math.min(from, node.from); to = Math.max(to, node.to); }
+    // A pending background parse is one anonymous, full-length placeholder.
+    // Only actual Document children prove a semantic root to expand around.
+    if (node.parent?.name === 'Document') { from = Math.min(from, node.from); to = Math.max(to, node.to); }
   };
   const details = getDetailsBlocks(state, tree);
   for (let attempt = 0; attempt < 8; attempt += 1) {

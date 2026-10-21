@@ -25,9 +25,27 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
   }) : new Response('Missing', { status: 404 });
 } });
 const browser = await launchTestBrowser().catch(error => { server.stop(true); throw error; });
-const frames = async (page: Page, count = 4) => page.evaluate(async count => {
-  for (let index = 0; index < count; index++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
-}, count);
+const frames = async (page: Page, count = 4) => {
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      page.evaluate(async count => {
+        for (let index = 0; index < count; index++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      }, count),
+      new Promise<never>((_, reject) => { deadline = setTimeout(() => reject(new Error('Animation frame deadline exceeded')), 15_000); })
+    ]);
+  } catch (error) {
+    let diagnosticDeadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const state = await Promise.race([
+        page.evaluate(() => ({ responsive: true, visibility: document.visibilityState, focused: document.hasFocus(),
+          mode: document.querySelector('#app')?.getAttribute('data-mode') })).catch(() => ({ responsive: false })),
+        new Promise(resolve => { diagnosticDeadline = setTimeout(() => resolve({ responsive: false }), 2_000); })
+      ]);
+      throw new Error(`Could not observe ${count} compositor frames: ${JSON.stringify(state)}`, { cause: error });
+    } finally { if (diagnosticDeadline !== undefined) clearTimeout(diagnosticDeadline); }
+  } finally { if (deadline !== undefined) clearTimeout(deadline); }
+};
 async function captureResult(page: Page, label: string) {
   if (!process.argv.includes('--capture')) return;
   const directory = path.resolve('.local/input-presentation'); fs.mkdirSync(directory, { recursive: true });
@@ -192,6 +210,8 @@ async function open(page: Page, text: string, coldPreview = false, initialMode: 
       postMessage(message: unknown) { scope.__presentationHost(message).then((data: unknown) => { if (data) window.dispatchEvent(new MessageEvent('message', { data })); }); } });
   });
   await page.goto(server.url.href, { waitUntil: 'domcontentloaded' });
+  await page.bringToFront();
+  await page.waitForFunction(() => document.visibilityState === 'visible');
   await page.waitForFunction(() => document.querySelector('.editor-host > .cm-editor') && !document.querySelector('.meo-preload-toolbar')
     && !document.querySelector('.editor-host')?.hasAttribute('inert') && !document.querySelector('.mode-group [aria-busy="true"]'));
   return { renders, errors, readHost: () => hostText, readPresentation: () => ({ text: renderedText, id: renderedDocumentId }),

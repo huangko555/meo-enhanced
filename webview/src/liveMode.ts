@@ -1,7 +1,7 @@
 import { editorScrollIntoView, isEditorScrollEffect } from './editor/scrollEffects';
 import { isCodeMirrorSyntaxPublicationEffect } from './adapters/codeMirrorSyntaxPublication';
 import { viewportSyntaxHighlighting } from './editor/viewportSyntaxHighlighting';
-import { backgroundMarkdownParser } from './editor/backgroundMarkdownStructure';
+import { backgroundMarkdownParser, prepareBackgroundMarkdownPresentation } from './editor/backgroundMarkdownStructure';
 import { markdownMixedLanguages } from './editor/markdownMixedLanguages';
 import { documentLines } from './helpers/documentLines';
 import { isAutomaticSymbolPairHistoryEffect } from './editor/typingAssistance';
@@ -2599,6 +2599,15 @@ function buildDecorationRanges(state: EditorState, previous?: DecorationSet, cha
 }
 
 function buildDecorations(state: EditorState, previous?: DecorationSet, changes?: ChangeDesc): DecorationSet {
+  // The initial surface stays covered until Live preparation completes. A
+  // placeholder tree cannot certify global references or rich block bounds;
+  // constructing widgets here only repeats work before the worker publishes.
+  if (usesLargeDocumentDerivedWorkBudget(state)
+    && (!previous || isEmptyDecorationSet(previous))
+    && !prepareBackgroundMarkdownPresentation(state)) {
+    liveDecorationMetadata.set(state, { ...liveDecorationMetadata.get(state), complete: false });
+    return Decoration.none;
+  }
   const initialTree = resolvedSyntaxTree(state);
   const window = withMarkdownSyntaxSnapshot(state, initialTree, () => livePresentationWindow(state, initialTree));
   const { ranges, tree } = window
@@ -4237,6 +4246,18 @@ const liveDecorationField = StateField.define<DecorationSet>({
  * point and mark layers separately. */
 export function getLivePresentationDecorations(state: EditorState): DecorationSet {
   return state.field(liveDecorationField);
+}
+
+const publishPreparedLivePresentationEffect = StateEffect.define<true>();
+
+/** Worker facts can finish after CodeMirror publishes its outer tree. Commit
+ * the matching initial presentation before the covered surface becomes editable,
+ * rather than waiting for the first pointer/selection transaction to build it. */
+export function publishPreparedLivePresentation(view: EditorView): void {
+  if (view.state.field(liveDecorationField, false) === undefined
+    || !usesLargeDocumentDerivedWorkBudget(view.state)
+    || liveDecorationMetadata.get(view.state)?.complete) return;
+  view.dispatch({ effects: publishPreparedLivePresentationEffect.of(true) });
 }
 
 function isRenderedBlockPreview(state: EditorState, block: LiveRenderedBlock): boolean {
