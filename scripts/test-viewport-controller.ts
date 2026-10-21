@@ -3100,4 +3100,39 @@ for (const [insert, removed, expectedLine] of [['x', 0, 3], ['x\n', 0, 4], ['', 
   } finally { controller.destroy(); }
 }
 
+// A cold linked target survives typing in the same owner while idle geometry
+// cannot turn each input into navigation. A newer scroll still supersedes it.
+{
+  const doc = Text.of(Array.from({ length: 80 }, () => 'line'));
+  const scroller = { scrollTop: 200, scrollLeft: 0, scrollHeight: 2000, clientHeight: 400 };
+  const requests: Array<{ line: number; isCurrent: () => boolean }> = [];
+  const controller = new ViewportController({
+    dom: {}, scrollDOM: scroller, state: { doc },
+    lineBlockAtHeight: (height: number) => { const line = doc.line(Math.floor(height / 20) + 1);
+      return { from: line.from, top: Math.floor(height / 20) * 20 }; }
+  } as any, { attachInteractions: false, getMode: () => 'source', previewSurface: {
+    captureTopVisiblePosition: () => null,
+    captureLinkedGeometry: () => null,
+    readScrollTop: () => 0, writeScrollTop() {},
+    restoreTopVisiblePosition: (position, isCurrent) => { requests.push({ line: position.line, isCurrent }); }
+  } });
+  try {
+    controller.setLinkedPreviewEnabled(true);
+    controller.markInteraction('editor');
+    controller.editorViewportChanged();
+    controller.linkedPreviewReady();
+    await new Promise(resolve => setTimeout(resolve, 400));
+    if (requests.length !== 1 || requests[0].line !== 11 || !requests[0].isCurrent()) {
+      throw new Error('Typing and idle geometry must retain the pending cold Source target');
+    }
+    scroller.scrollTop = 600;
+    controller.editorViewportChanged();
+    if (requests.length !== 2 || requests[1].line !== 31 || requests[0].isCurrent() || !requests[1].isCurrent()) {
+      throw new Error('A later position in the same drag must supersede the first cold target');
+    }
+    controller.markPreviewInteraction();
+    if (requests[1].isCurrent()) throw new Error('Preview ownership must cancel a pending Source target');
+  } finally { controller.destroy(); }
+}
+
 console.log('viewport controller checks passed');

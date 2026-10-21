@@ -850,6 +850,7 @@ export class ViewportController {
     this.linkedPreviewEnabled = enabled;
     if (!enabled) this.linkedPreviewAttentionHeld = false;
     if (enabled) {
+      this.linkedViewportPosition = null;
       this.linkedViewportDriver = activationOwner === 'last-interaction'
         ? this.lastViewportInteractionOwner
         : activationOwner;
@@ -1079,30 +1080,46 @@ export class ViewportController {
       };
       return;
     }
+    const position = { source: this.view.scrollDOM.scrollTop, preview: this.previewSurface.readScrollTop?.() ?? 0 };
+    const previous = this.linkedViewportPosition;
+    if (previous && (owner === 'editor' || this.previewSurface.readScrollTop)
+      && Math.abs(owner === 'editor' ? position.source - previous.source : position.preview - previous.preview) <= POSITION_EPSILON) return;
+    this.linkedViewportPosition = position;
+    // A later scroll in the same drag supersedes an earlier cold destination,
+    // even when the new destination is already mounted. Idle geometry does not
+    // repeat this request and cannot turn input into semantic navigation.
+    const semanticGeneration = ++this.linkedProjectionGeneration;
     if (owner === 'editor') {
-      const position = this.getTopVisiblePosition();
-      this.previewSurface.restoreTopVisiblePosition(position, () => (
+      if (position.source <= POSITION_EPSILON && this.previewSurface.writeScrollTop) {
+        this.previewSurface.writeScrollTop(0);
+        return;
+      }
+      const sourcePosition = this.getTopVisiblePosition();
+      this.previewSurface.restoreTopVisiblePosition(sourcePosition, () => (
         !this.destroyed && this.linkedPreviewEnabled &&
-        generation === this.linkedProjectionGeneration && this.linkedViewportDriver === 'editor'
+        semanticGeneration === this.linkedProjectionGeneration && this.linkedViewportDriver === 'editor'
       ));
       return;
     }
-    const position = this.previewSurface.captureTopVisiblePosition();
-    if (!position) return;
+    const previewPosition = this.previewSurface.captureTopVisiblePosition();
+    if (!previewPosition) return;
     this.restoreLinkedEditorPosition(
-      position.line,
-      position.editorLineOffset ?? position.lineOffset,
+      previewPosition.line,
+      previewPosition.editorLineOffset ?? previewPosition.lineOffset,
       () => (
         !this.destroyed && this.linkedPreviewEnabled &&
-        generation === this.linkedProjectionGeneration && this.linkedViewportDriver === 'preview'
+        semanticGeneration === this.linkedProjectionGeneration && this.linkedViewportDriver === 'preview'
       )
     );
   }
 
   private claimLinkedViewport(owner: ViewportAnchorOwner): void {
     if (!this.linkedPreviewEnabled) return;
+    if (this.linkedViewportDriver !== owner) {
+      this.linkedViewportPosition = null;
+      this.linkedProjectionGeneration += 1;
+    }
     this.linkedViewportDriver = owner;
-    this.linkedProjectionGeneration += 1;
     this.linkedInteractionUntil = this.readClock() + WHEEL_GESTURE_IDLE_MS;
   }
 
@@ -1185,6 +1202,7 @@ export class ViewportController {
       ? currentPosition ?? undefined
       : undefined;
     const linkedMap = this.measureLinkedViewportMap(pinnedPoint);
+    if (this.linkedViewportMap && !linkedMap) this.linkedViewportPosition = null;
     this.linkedViewportMap = linkedMap;
     this.linkedViewportMapDirty = false;
     if (project) this.projectLinkedViewport(this.linkedViewportDriver);

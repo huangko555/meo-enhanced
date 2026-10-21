@@ -3497,11 +3497,14 @@ export function createPreviewController({
     restoreTopVisiblePosition,
     isSourceLineRendered: (line: number) => !previewViewport || previewViewport.containsLine(line),
     captureLinkedGeometry: () => {
+      // Unmounted block heights are estimates. They cannot define a global
+      // pixel-to-pixel map; the controller must use versioned source anchors.
+      if (previewViewport) return null;
       const frameDocument = getFrameDocument();
       const scrollElement = frameDocument?.scrollingElement;
       if (!frameDocument || !scrollElement) return null;
       return {
-        regions: previewViewport ? previewViewport.linkedRegions() : localSourceGeometry ? localSourceGeometry.linkedRegions() : getSourceMap().map(entry => ({
+        regions: localSourceGeometry ? localSourceGeometry.linkedRegions() : getSourceMap().map(entry => ({
           startLine: entry.start,
           endLine: entry.end,
           top: entry.top,

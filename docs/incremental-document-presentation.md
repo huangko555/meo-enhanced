@@ -1723,3 +1723,34 @@ scrolling, plus table history, detached-focus Undo/Redo, commands and diff refre
 Compositor samples are finite correctness observations, not latency percentiles
 or certification of the operating system's IME candidate window. The original
 fixture is a read-only local replay and is not a dependency of the permanent gate.
+
+### Follow-up: cold linked scrolling uses source positions (2026-10-21)
+
+Native-window acceptance of `3ff2b7e5` reproduces the reported split mismatch:
+after an actual Source scrollbar drag, Source reads line 10,320 while visible
+Preview starts around line 10,365. This happens despite passing ordinary linked
+scroll checks. The preceding logical-body projection excludes relocated footnotes,
+but its unmounted blocks still have estimated heights. Those heights cannot
+define an exact global pixel correspondence with CodeMirror's separately estimated
+Source height map. Pinning the resulting pair during idle layout preserves the
+wrong correspondence.
+
+Windowed Preview therefore no longer exports that estimated global geometry.
+It uses the existing source-position projection and prepares the destination
+before replacing the accepted reading band. Full-DOM Preview keeps the measured
+pixel map. A different Source scroll position creates a new projection generation,
+including during one continuous drag, and supersedes an older asynchronous cold
+target. Idle geometry at the same driver position does not repeat semantic
+navigation. Typing in the same pane retains its pending scroll intent; an actual
+scroll or change of pane supersedes it. Re-enabling synchronization and retiring
+a previously measured map reset the remembered pair.
+
+`test-linked-preview-cold-scroll.ts` uses a generated document larger than 1 MB
+with differing paragraph wrapping, tables, code, quotes and math. It checks three
+distant scroll destinations, continuously painted handoffs, reverse wheel
+ownership and unchanged source. It applies thumb-equivalent scroll positions;
+actual scrollbar dragging remains a separate native-window check. The preceding
+snapshot fails the continuously painted handoff assertion, and the new path
+passes. The viewport-controller regression separately checks that typing and idle
+geometry retain a pending cold target while a later scroll or Preview ownership
+cancels it. These cases join the production input-presentation gate.

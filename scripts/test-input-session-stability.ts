@@ -28,6 +28,7 @@ try {
     const page = await browser.newPage(), host = await open(page, source);
     try {
       await page.setViewport({ width: 780, height: 570 });
+      await page.bringToFront();
       await page.evaluate(from => {
         const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
         view.dispatch({ selection: { anchor: from }, scrollIntoView: true }); view.focus();
@@ -58,6 +59,7 @@ try {
         const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
         scope.__sessionSamples = []; scope.__presentationFrames = scope.__sessionSamples; scope.__sessionSampling = true;
         const start = performance.now();
+        scope.__sessionStartedAt = start;
         const read = () => ({ t: performance.now() - start, connected: input.isConnected,
           active: document.activeElement === input, top: input.getBoundingClientRect().top,
           bottom: input.getBoundingClientRect().bottom, height: input.getBoundingClientRect().height,
@@ -79,7 +81,7 @@ try {
       let typingEndedAt = 0;
       const typeAndSettle = async () => {
         await page.keyboard.type(digits, { delay: 3 });
-        typingEndedAt = await page.evaluate(() => (window as any).__sessionSamples.at(-1).t);
+        typingEndedAt = await page.evaluate(() => performance.now() - (window as any).__sessionStartedAt);
         await delay(8000); // Include auto-commit, worker acceptance and later band/height updates.
       };
       if (tall) await typeAndSettle();

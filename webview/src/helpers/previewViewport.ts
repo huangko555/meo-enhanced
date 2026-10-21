@@ -534,17 +534,6 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
     },
     position: (index: number, ratio = 0) => layout.top(index) + layout.height(index) * ratio,
     totalHeight: () => layout.total(),
-    linkedRegions() {
-      // Gaps describe physical space, not a continuous source interval:
-      // definitions interspersed through the source render in a separate footer.
-      // Project from the logical body blocks, including unmounted blocks, so
-      // mounting a different band cannot change the meaning of a scroll point.
-      const start = origin() + leadingGapOffset;
-      return manifest.blocks.filter(block => block.kind !== 'footnotes').map(block => ({
-        startLine: block.sourceLine, endLine: block.sourceEndLine,
-        top: start + layout.top(block.index), bottom: start + layout.top(block.index + 1)
-      }));
-    },
     selectedText: () => {
       const selected = selection();
       if (logicalAll) return '';
