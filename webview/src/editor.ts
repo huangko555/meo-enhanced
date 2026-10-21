@@ -917,7 +917,24 @@ export function createEditor({
     return false;
   };
 
-  const tryEnterRenderedBlockSource = (editorView: EditorView, forward: boolean, vertical: boolean) => {
+  const moveAcrossMermaidBoundary = (editorView: EditorView, forward: boolean, outside: number | null,
+    mutate: (isCurrent: () => boolean) => boolean) => {
+    const caret = editorView.coordsAtPos(editorView.state.selection.main.head);
+    const top = caret ? caret.top + (forward ? 1 : -1) * editorView.defaultLineHeight : null;
+    const reference = outside === null ? null : editorView.coordsAtPos(outside);
+    const bounds = editorViewportBounds(editorView);
+    const visibleReference = reference && reference.top >= bounds.top && reference.bottom <= bounds.bottom
+      ? { position: outside!, top: reference.top } : undefined;
+    const isCurrent = viewportController.beginNavigationReveal();
+    if (!mutate(isCurrent)) return false;
+    const position = editorView.state.selection.main.head;
+    if (top === null) viewportController.revealPositionUntilStable(position, { y: 'nearest', yMargin: 8 }, isCurrent);
+    else viewportController.retainPositionTop(position, top, isCurrent, false,
+      { keepVisible: true, reference: visibleReference });
+    return true;
+  };
+
+  const tryMoveAcrossRenderedBlockSource = (editorView: EditorView, forward: boolean, vertical: boolean) => {
     if (currentMode !== 'live') return false;
     const selection = editorView.state.selection.main;
     if (!selection.empty) return false;
@@ -928,8 +945,8 @@ export function createEditor({
         ? forward ? line.number === block.startLine || line.number === block.startLine - 1
           : line.number === block.endLine || line.number === block.endLine + 1
         : block.kind === 'mermaid' && (
-          forward ? line.number === block.startLine - 1 || line.number === block.startLine
-            : line.number === block.endLine + 1 || line.number === block.endLine));
+          line.number === block.startLine || line.number === block.endLine ||
+          line.number === (forward ? block.startLine - 1 : block.endLine + 1)));
     if (!block || block.endLine <= block.startLine + 1) return false;
     const opening = editorView.state.doc.line(block.startLine);
     const first = editorView.state.doc.line(block.startLine + 1);
@@ -944,17 +961,24 @@ export function createEditor({
     }
     const closing = editorView.state.doc.line(block.endLine);
     const inside = line.number >= block.startLine && line.number <= block.endLine;
-    if (inside && getMermaidBlockMode(editorView.state, opening.from, closing.to).manual === 'edit') return false;
+    const before = opening.number > 1 ? editorView.state.doc.line(opening.number - 1).to : null;
+    const after = closing.number < editorView.state.doc.lines ? editorView.state.doc.line(closing.number + 1).from : null;
+    if (inside && getMermaidBlockMode(editorView.state, opening.from, closing.to).manual === 'edit') {
+      if (editorView.state.selection.ranges.length !== 1 || line.number !== (forward ? closing.number : opening.number)) return false;
+      const next = vertical ? editorView.moveVertically(selection, forward) : editorView.moveByChar(selection, forward);
+      if (next.head >= opening.from && next.head <= closing.to) return false;
+      return moveAcrossMermaidBoundary(editorView, forward, forward ? after : before, () => {
+        editorView.dispatch({ selection: EditorSelection.create([next]), userEvent: 'select' });
+        return true;
+      });
+    }
+    if (inside && line.number !== (forward ? opening.number : closing.number)) return false;
     // A wrapped prose line must finish moving within itself before entering the block.
     if (vertical && !inside && editorView.moveToLineBoundary(selection, forward).head !== (forward ? line.to : line.from)) return false;
     const fence = forward ? opening : closing;
     const offset = fence.from - first.from + (vertical ? Math.min(column, fence.length) : forward ? 0 : fence.length);
-    const isCurrent = viewportController.beginNavigationReveal();
-    if (!focusMermaidEditingOffset(editorView, opening.from, offset, isCurrent)) return false;
-    // Expanding a tall preview can move either fence outside the viewport.
-    // Natural entry follows the caret with the smallest necessary scroll.
-    viewportController.revealPositionUntilStable(editorView.state.selection.main.head, { y: 'nearest', yMargin: 8 }, isCurrent);
-    return true;
+    return moveAcrossMermaidBoundary(editorView, forward, forward ? before : after,
+      isCurrent => focusMermaidEditingOffset(editorView, opening.from, offset, isCurrent));
   };
 
   const finishDisplayMathEditing = (editorView: EditorView) => {
@@ -2275,8 +2299,8 @@ export function createEditor({
         { key: 'Alt-]', run: indentListByTwoSpaces },
         { key: 'Alt-[', run: outdentListByTwoSpaces },
         { key: 'Backspace', run: deleteBackwardSmart },
-        { key: 'ArrowLeft', run: (view) => tryEnterRenderedBlockSource(view, false, false) || isLiveMode(view) && handleArrowLeftAtListContentStart(view) },
-        { key: 'ArrowRight', run: (view) => tryEnterRenderedBlockSource(view, true, false) || isLiveMode(view) && handleArrowRightAtListLineStart(view) },
+        { key: 'ArrowLeft', run: (view) => tryMoveAcrossRenderedBlockSource(view, false, false) || isLiveMode(view) && handleArrowLeftAtListContentStart(view) },
+        { key: 'ArrowRight', run: (view) => tryMoveAcrossRenderedBlockSource(view, true, false) || isLiveMode(view) && handleArrowRightAtListLineStart(view) },
         {
           key: 'Enter',
           run: (view) =>
@@ -2290,8 +2314,8 @@ export function createEditor({
         },
         { key: 'Shift-Enter', run: insertTableCellLineBreak },
         { key: 'Ctrl-Enter', run: (view) => finishDisplayMathEditing(view) || insertTableCellLineBreak(view) },
-        { key: 'ArrowUp', run: (view) => tryEnterAdjacentTable(view, 'up') || tryEnterRenderedBlockSource(view, false, true) },
-        { key: 'ArrowDown', run: (view) => tryEnterAdjacentTable(view, 'down') || tryEnterRenderedBlockSource(view, true, true) },
+        { key: 'ArrowUp', run: (view) => tryEnterAdjacentTable(view, 'up') || tryMoveAcrossRenderedBlockSource(view, false, true) },
+        { key: 'ArrowDown', run: (view) => tryEnterAdjacentTable(view, 'down') || tryMoveAcrossRenderedBlockSource(view, true, true) },
         ...markdownKeymap.map(binding => ({ ...binding, run: (view: EditorView) =>
           (binding.key === 'Backspace' && selectedDisplayMathBody(view.state))
           || (binding.key === 'Enter' && !view.state.facet(inputAssistanceFacet).lists)

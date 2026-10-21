@@ -337,9 +337,59 @@ try {
       console.log(`Tall Mermaid keyboard entry passed (${width}x${height}/${key})`);
     }
   };
-  if (!process.argv.includes('--keyboard-navigation-only')) await assertNavigation();
-  await assertKeyboardEntry();
-  if (process.argv.includes('--navigation-only') || process.argv.includes('--keyboard-navigation-only')) {
+  const assertKeyboardBoundaryStability = async () => {
+    fs.mkdirSync('.local/mermaid-navigation-acceptance', {recursive:true});
+    const text = Array.from({length:35}, (_, i) => 'Before ' + i + '\n').join('\n') +
+      '\n```mermaid\nflowchart TD\n' + Array.from({length:70}, (_, i) => `N${i}[Stage ${i}] --> N${i+1}[Stage ${i+1}]`).join('\n') +
+      '\n```\n\n' + Array.from({length:35}, (_, i) => 'After ' + i + '\n').join('\n');
+    const opening = text.indexOf('```mermaid'), closing = text.lastIndexOf('```');
+    for (const width of [520,1200]) for (const fromAbove of [false,true]) for (const vertical of [true,false])
+    for (const screenTop of width===1200 && !fromAbove && vertical ? [650,45] : [fromAbove?160:650]) {
+      const outside = fromAbove ? opening-1 : closing+4;
+      await mount(text,width,width===520?'zh-CN':'en',width===520?'light':'dark',false);
+      await page.evaluate(({outside,screenTop}) => {
+        const view = (window as any).nativeEditor.view;
+        view.dispatch({selection:{anchor:outside}});
+        view.scrollDOM.scrollTop = view.lineBlockAt(outside).top - screenTop;
+        view.focus();
+      },{outside,screenTop});
+      await frames(24);
+      const boundary = () => page.evaluate(outside => {
+        const view = (window as any).nativeEditor.view;
+        const caret = view.coordsAtPos(view.state.selection.main.head);
+        const bounds = (window as any).MermaidEditingHarness.editorViewportBounds(view);
+        return {top:view.coordsAtPos(outside)?.top,caretTop:caret?.top,caretBottom:caret?.bottom,
+          viewportTop:bounds.top,viewportBottom:bounds.bottom,head:view.state.selection.main.head,lineHeight:view.defaultLineHeight};
+      },outside);
+      const before = await boundary();
+      for (let cycle=0;cycle<3;cycle++) for (const entering of [true,false]) {
+        const backward = entering !== fromAbove;
+        await page.keyboard.press(vertical ? backward ? 'ArrowUp':'ArrowDown' : backward ? 'ArrowLeft':'ArrowRight');
+        await frames(24);
+        const after = await boundary();
+        assert.ok(after.caretTop!>=after.viewportTop && after.caretBottom!<=after.viewportBottom,
+          'Boundary retention must preserve the existing visible-caret baseline: '+JSON.stringify(after));
+        if (entering && !fromAbove && width===520) {
+          assert.ok(Math.abs(after.caretTop!-(before.caretTop!-before.lineHeight))<=1.5,
+            'A stacked preview between the fence and prose must preserve the natural caret row: '+JSON.stringify({before,after}));
+        } else assert.ok(after.top!==undefined && Math.abs(after.top-before.top!)<=(screenTop<80?before.lineHeight+1.5:1.5),
+          `Keyboard boundary stays at its original screen Y (${width}/${fromAbove}/${cycle}/${entering}): ${JSON.stringify({before,after})}`);
+        const editing = await page.$$eval(`.meo-mermaid-toolbar[data-meo-block-from="${opening}"]`,
+          nodes => nodes.some(node => (node as HTMLElement).dataset.meoMermaidMode==='edit'));
+        assert.equal(editing,entering,'The visible toolbar follows the natural boundary transition');
+        if (cycle===0 && vertical && !fromAbove && screenTop>80) await page.screenshot({
+          path:`.local/mermaid-navigation-acceptance/boundary-${width}-${entering?'edit':'read'}.png`
+        });
+      }
+      assert.equal((await read()).text,text);
+      console.log(`Mermaid keyboard boundary roundtrip passed (${width}/${fromAbove?'above':'below'}/${vertical?'vertical':'horizontal'}/${screenTop})`);
+    }
+  };
+  const boundaryOnly = process.argv.includes('--boundary-navigation-only');
+  if (!boundaryOnly && !process.argv.includes('--keyboard-navigation-only')) await assertNavigation();
+  if (!boundaryOnly) await assertKeyboardEntry();
+  await assertKeyboardBoundaryStability();
+  if (process.argv.includes('--navigation-only') || process.argv.includes('--keyboard-navigation-only') || boundaryOnly) {
     assert.deepEqual(errors, []);
     console.log('Mermaid navigation contract passed');
     process.exitCode = 0;

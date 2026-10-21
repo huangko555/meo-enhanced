@@ -2407,13 +2407,33 @@ export class ViewportController {
     position: number,
     viewportTop: number,
     isCurrent: () => boolean = () => true,
-    measuredLayout = false
+    measuredLayout = false,
+    options: { keepVisible?: boolean; reference?: { position: number; top: number } } = {}
   ): void {
     const targetPosition = Math.max(0, Math.min(position, this.view.state.doc.length));
     this.runNavigationReveal(() => {
       const coords = this.view.coordsAtPos(targetPosition);
-      if (!coords) return { kind: 'unavailable' };
-      const delta = coords.top - viewportTop;
+      if (!coords && !options.keepVisible) return { kind: 'unavailable' };
+      let top = viewportTop;
+      if (options.keepVisible) {
+        const bounds = editorViewportBounds(this.view);
+        const height = coords ? coords.bottom - coords.top : this.view.defaultLineHeight;
+        const margin = Math.min(8, Math.max(0, (bounds.height - height) / 2));
+        top = Math.max(bounds.top + margin, Math.min(bounds.bottom - height - margin, top));
+        const reference = options.reference;
+        const referenceCoords = reference && this.view.coordsAtPos(reference.position);
+        if (coords && reference && referenceCoords) {
+          const retainedTop = coords.top - (referenceCoords.top - reference.top);
+          // Prefer the unchanged document boundary when it and the caret can
+          // remain visible together. A stacked preview can separate them.
+          if (retainedTop >= bounds.top + margin && retainedTop + height <= bounds.bottom - margin)
+            top = retainedTop;
+        }
+      }
+      // A mode change can leave its new caret outside the mounted DOM. Seed
+      // from the height map, then retain its actual painted Y as it mounts.
+      const currentTop = coords?.top ?? this.view.documentTop + this.view.lineBlockAt(targetPosition).top;
+      const delta = currentTop - top;
       if (Math.abs(delta) <= POSITION_EPSILON) return { kind: 'stable' };
       return {
         kind: 'target',
