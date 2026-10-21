@@ -182,6 +182,7 @@ export type UiStrings = Readonly<{
   showMoreCode: (count: number) => string;
   showMoreLines: (count: number) => string;
   showLessCode: string;
+  blockReadingArea: string;
   showLess: string;
   mermaidBlockControls: (line: number) => string;
   mermaidEditor: (line: number) => string;
@@ -484,6 +485,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     copyCode: 'Copy source', copyImage: 'Copy as image', copyingImage: 'Copying image…', copiedImage: 'Image copied', copyImageFailed: 'Could not copy image. Try again.', copied: 'copied', copy: 'copy', selectAllCode: 'Select all code', all: 'all',
     codeLines: (count: number) => `${count} lines`,
     showMoreCode: (count: number) => `Show ${count} more lines of code`,
+    blockReadingArea: 'Block reading area. Enter to edit, arrow keys to leave.',
     showMoreLines: (count: number) => `Show ${count} more lines`, showLessCode: 'Show less code', showLess: 'Show less',
     mermaidBlockControls: (line: number) => `Mermaid block controls at line ${line}`,
     mermaidEditor: (line: number) => `Mermaid editor at line ${line}`,
@@ -731,6 +733,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     copyCode: '复制源码', copyImage: '复制为图片', copyingImage: '正在复制图片…', copiedImage: '已复制图片', copyImageFailed: '无法复制图片，请重试。', copied: '已复制', copy: '复制', selectAllCode: '全选代码', all: '全选',
     codeLines: (count: number) => `${count} 行`,
     showMoreCode: (count: number) => `显示其余 ${count} 行代码`,
+    blockReadingArea: '块阅读区域，按 Enter 编辑，方向键离开',
     showMoreLines: (count: number) => `显示其余 ${count} 行`, showLessCode: '收起代码', showLess: '收起',
     mermaidBlockControls: (line: number) => `第 ${line} 行 Mermaid 块控件`,
     mermaidEditor: (line: number) => `第 ${line} 行 Mermaid 编辑器`,

@@ -2416,6 +2416,12 @@ html[data-meo-ui-contrast='high'] :is(.format-button, .preview-toolbar-action, .
   background-color: var(--meo-semantic-codeCopyBackground);
 }
 
+.cm-editor .meo-block-reading-target:focus {
+  opacity: 1;
+  box-shadow: inset 0 0 0 1px var(--meo-document-focus);
+}
+.cm-editor.meo-block-reading .cm-cursorLayer { visibility: hidden; }
+
 .meo-select-all-code-btn:hover,
 .meo-select-all-code-btn:focus-visible {
   color: var(--meo-code-action-hover-foreground);

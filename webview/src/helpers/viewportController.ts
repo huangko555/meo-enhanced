@@ -1,4 +1,5 @@
 import { editorViewportBounds } from '../editor/editorViewportBounds';
+import type { CaretRetentionReference } from '../editor/blockInteraction';
 import { EditorView } from '@codemirror/view';
 import { createLinkedViewportMap, type LinkedViewportMap, type LinkedViewportPoint } from './linkedViewportMap';
 
@@ -2016,7 +2017,9 @@ export class ViewportController {
         finish();
         return;
       }
-      state.phase = 'settling';
+      // A no-op first measurement has not adopted scrolling yet. Keep its
+      // reservation through the same finite stability window as a real write.
+      if (state.phase !== 'measured') state.phase = 'settling';
       scheduleNextMeasure(measure);
     };
     const measure = (measuredLayout = false): void => {
@@ -2045,9 +2048,8 @@ export class ViewportController {
             finish();
             return;
           }
-          if (initialMeasurement.kind === 'stable') {
-            if (state.phase === 'measured') finish();
-            else completeFrame(measure, false);
+          if (initialMeasurement.kind === 'stable' && !options.settle) {
+            finish();
             return;
           }
           // CodeMirror can redraw and re-anchor after the read phase. Adopt only
@@ -2073,8 +2075,7 @@ export class ViewportController {
               return;
             }
             if (measurement.kind === 'stable') {
-              if (state.phase === 'measured') finish();
-              else completeFrame(measure, false);
+              completeFrame(measure, false);
               return;
             }
 
@@ -2085,8 +2086,7 @@ export class ViewportController {
               Math.abs(target.left - current.left) > POSITION_EPSILON
             );
             if (!differs) {
-              if (state.phase === 'measured') finish();
-              else completeFrame(measure, false);
+              completeFrame(measure, false);
               return;
             }
 
@@ -2408,9 +2408,18 @@ export class ViewportController {
     viewportTop: number,
     isCurrent: () => boolean = () => true,
     measuredLayout = false,
-    options: { keepVisible?: boolean; reference?: { position: number; top: number } } = {}
+    options: { keepVisible?: boolean; reference?: CaretRetentionReference } = {}
   ): void {
+    if (this.destroyed || !isCurrent()) return;
     const targetPosition = Math.max(0, Math.min(position, this.view.state.doc.length));
+    if (options.keepVisible) {
+      const bounds = editorViewportBounds(this.view);
+      const top = Math.max(bounds.top + 8, Math.min(bounds.bottom - this.view.defaultLineHeight - 8, viewportTop));
+      // Include the destination in CodeMirror's rendered viewport before the
+      // height change is painted. A later scroll write alone leaves a gap.
+      this.view.dispatch({ effects: EditorView.scrollIntoView(targetPosition,
+        { y: 'start', yMargin: Math.max(0, top - bounds.top) }) });
+    }
     this.runNavigationReveal(() => {
       const coords = this.view.coordsAtPos(targetPosition);
       if (!coords && !options.keepVisible) return { kind: 'unavailable' };
@@ -2421,9 +2430,10 @@ export class ViewportController {
         const margin = Math.min(8, Math.max(0, (bounds.height - height) / 2));
         top = Math.max(bounds.top + margin, Math.min(bounds.bottom - height - margin, top));
         const reference = options.reference;
-        const referenceCoords = reference && this.view.coordsAtPos(reference.position);
-        if (coords && reference && referenceCoords) {
-          const retainedTop = coords.top - (referenceCoords.top - reference.top);
+        const referenceTop = reference && (reference.geometry === 'line-block'
+          ? this.view.documentTop + this.view.lineBlockAt(reference.position).top : this.view.coordsAtPos(reference.position)?.top);
+        if (coords && reference && referenceTop !== undefined) {
+          const retainedTop = coords.top - (referenceTop - reference.top);
           // Prefer the unchanged document boundary when it and the caret can
           // remain visible together. A stacked preview can separate them.
           if (retainedTop >= bounds.top + margin && retainedTop + height <= bounds.bottom - margin)

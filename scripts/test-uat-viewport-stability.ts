@@ -163,11 +163,13 @@ async function main(): Promise<void> {
     const sourcePreviewButtonSpan = Math.max(...sourcePreviewButtonTops) - Math.min(...sourcePreviewButtonTops);
     const sourcePreviewFocus = await page.evaluate(() => {
       const button = document.querySelectorAll<HTMLButtonElement>('.meo-mermaid-mode-btn')[1]!;
-      return { activeSecondModeButton: document.activeElement === button, activeTag: document.activeElement?.tagName ?? null };
+      const reading = button.closest('.meo-mermaid-toolbar');
+      return { activeReadingBlock: document.activeElement === reading && reading.classList.contains('meo-block-reading-target'),
+        activeTag: document.activeElement?.tagName ?? null };
     });
     if (
       !sourceSettled.source || sourcePreviewScrollSpan > 0.5 || sourcePreviewButtonSpan > 0.5 ||
-      !sourcePreviewFocus.activeSecondModeButton
+      !sourcePreviewFocus.activeReadingBlock
     ) {
       throw new Error(`Second Mermaid source-to-preview moved the viewport: ${JSON.stringify({
         sourceSettled,

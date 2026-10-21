@@ -146,7 +146,8 @@ async function checkSourceExpansionAnchor(page: Page): Promise<void> {
       const probe = (window as any).__htmlExpansionProbe;
       return Math.max(...probe.samples.map((top: number) => Math.abs(top - probe.baseline)));
     });
-    assert.ok(movement <= 1, `${kind}: opening source after trusted wheel input moved preceding content by ${movement}px`);
+    assert.ok(movement <= 1, `${kind}: opening source after trusted wheel input moved preceding content by ${movement}px: ` +
+      JSON.stringify(await page.evaluate(() => (window as any).__htmlExpansionProbe)));
   }
 }
 
@@ -637,6 +638,10 @@ async function main(): Promise<void> {
     }, source);
     await frames(page, 12);
     assert.deepEqual(errors, [], 'Editor initialization');
+    if (process.argv.includes('--expansion-only')) {
+      await checkSourceExpansionAnchor(page);
+      assert.deepEqual(errors, []); console.log('HTML/math source expansion preserves preceding content through every frame.'); return;
+    }
     if (process.argv.includes('--format-only')) {
       await checkHtmlEditingTools(page);
       assert.deepEqual(errors, []); console.log('HTML icon-only formatting, feedback, undo and customized shortcuts passed.'); return;

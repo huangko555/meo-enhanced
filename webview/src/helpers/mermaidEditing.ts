@@ -26,18 +26,14 @@ import {
 } from './blockIndent';
 import { getViewportController } from './viewportController';
 import { mermaidSourceAt, mermaidSourceForAnchor, selectMermaidSource } from './mermaidSource';
-import {
-  restoreRenderedBlockModeFocus,
-  retainRenderedBlockModePointerFocus
-} from './renderedBlockModeControls';
+import { retainRenderedBlockModePointerFocus } from './renderedBlockModeControls';
 import { focusRenderedBlockAction } from './renderedBlockActionFocus';
+import { focusBlockReading, isBlockReading } from '../editor/blockInteraction';
 
 export type MermaidBlockMode = 'preview' | 'edit';
 type MermaidSearchReveal = { from: number; to: number } | null;
 type MermaidEditingState = {
   activeAnchor: number | null;
-  // Explicit close at a document edge has no outside caret position to move to.
-  collapsedAnchor: number | null;
   layouts: Map<number, MermaidEditingLayout>;
   searchReveal: MermaidSearchReveal;
   viewports: Map<number, MermaidViewportState>;
@@ -47,7 +43,6 @@ type MermaidEditingState = {
 export const setMermaidLayoutEffect = StateEffect.define<{ anchor: number; layout: MermaidEditingLayout }>();
 export const setMermaidSearchRevealEffect = StateEffect.define<MermaidSearchReveal>();
 const setMermaidNarrowEffect = StateEffect.define<boolean>();
-const collapseMermaidSourceEffect = StateEffect.define<number>();
 const setMermaidSideSpaceEffect = StateEffect.define<{ anchor: number; height: number }>();
 
 const mermaidOpeningLineRegex = /^[ \t]{0,3}(?:`{3,}|~{3,})\s*mermaid\b/i;
@@ -68,7 +63,6 @@ function isMermaidAnchor(state: EditorState, anchor: number): boolean {
 export const mermaidEditingStateField = StateField.define<MermaidEditingState>({
   create: () => ({
     activeAnchor: null,
-    collapsedAnchor: null,
     layouts: new Map(),
     searchReveal: null,
     viewports: new Map(),
@@ -112,10 +106,6 @@ export const mermaidEditingStateField = StateField.define<MermaidEditingState>({
       }
     }
     if (transaction.selection && !revealing) searchReveal = null;
-    let collapsedAnchor = transaction.selection || transaction.docChanged ? null : value.collapsedAnchor;
-    for (const effect of transaction.effects) {
-      if (effect.is(collapseMermaidSourceEffect)) collapsedAnchor = effect.value;
-    }
     let activeAnchor = value.activeAnchor === null ? null : mapped(value.activeAnchor);
     const previousActive = activeAnchor;
     if (transaction.selection || transaction.docChanged) {
@@ -140,7 +130,7 @@ export const mermaidEditingStateField = StateField.define<MermaidEditingState>({
       if (effect.is(setMermaidSideSpaceEffect) && effect.value.anchor === activeAnchor)
         sideSpace = effect.value.height;
     }
-    return { activeAnchor, collapsedAnchor, layouts, viewports, searchReveal, narrow, sideSpace };
+    return { activeAnchor, layouts, viewports, searchReveal, narrow, sideSpace };
   }
 });
 
@@ -160,7 +150,7 @@ export function getMermaidBlockMode(
 ) {
   const value = state.field(mermaidEditingStateField, false),
     searchReveal = value?.searchReveal;
-  const editing = value?.collapsedAnchor !== anchor && (
+  const editing = !isBlockReading(state, anchor, blockTo) && (
     sourcePresentationSelection(state).ranges.some((range) =>
       range.empty
         ? range.head >= anchor && range.head <= blockTo
@@ -231,6 +221,11 @@ export function focusMermaidEditingOffset(
 function setMermaidEditingMode(view: EditorView, anchor: number, editing: boolean, isCurrent: () => boolean): void {
   const source = mermaidSourceForAnchor(view.state, anchor);
   if (!source || !isCurrent()) return;
+  if (!editing) {
+    focusBlockReading(view, { kind: 'mermaid', from: source.opening.from, to: source.closing.to },
+      [setMermaidSearchRevealEffect.of(null), supersedeLiveInputDerivedWork()]);
+    return;
+  }
   const controller = getViewportController(view);
   const resolveToolbar = () => view.dom.querySelector<HTMLElement>(
     `.meo-mermaid-toolbar[data-meo-block-from="${anchor}"]:not([data-meo-floating])`
@@ -239,9 +234,7 @@ function setMermaidEditingMode(view: EditorView, anchor: number, editing: boolea
   // Caret scroll margins reserve room for a future sticky header even while
   // this original header is visible. Block-head visibility uses painted bounds.
   const bounds = view.scrollDOM.getBoundingClientRect();
-  const mutate = () => editing
-    ? focusMermaidEditingOffset(view, anchor, 0, isCurrent)
-    : closeMermaidEditing(view, anchor);
+  const mutate = () => focusMermaidEditingOffset(view, anchor, 0, isCurrent);
   // Both directions use the original header, never the caret or sticky copy.
   // Fix the target before changing mode so layout settlement cannot re-decide it.
   const visible = rect && rect.height > 0 && rect.top >= bounds.top && rect.bottom <= bounds.bottom;
@@ -255,23 +248,12 @@ function setMermaidEditingMode(view: EditorView, anchor: number, editing: boolea
     view.dispatch({ effects: EditorView.scrollIntoView(anchor, { y: 'start', yMargin: 8 }) });
   }
 }
-function closeMermaidEditing(view: EditorView, anchor: number): void {
-  const source = mermaidSourceForAnchor(view.state, anchor);
-  if (!source) return;
-  const position = !source.closed
-    ? source.opening.from
-    : source.closing.number < view.state.doc.lines
-      ? view.state.doc.line(source.closing.number + 1).from
-      : source.to;
-  view.dispatch({
-    selection: { anchor: position },
-    effects: [collapseMermaidSourceEffect.of(anchor), setMermaidSearchRevealEffect.of(null), supersedeLiveInputDerivedWork()]
-  });
-}
 export function finishMermaidEditing(view: EditorView): boolean {
-  if (!view.dom.classList.contains('meo-mode-live')) return false;
+  if (!view.dom.classList.contains('meo-mode-live') || view.composing || view.state.selection.ranges.length !== 1) return false;
   const source = activeMermaidSource(view.state) ?? mermaidSourceAt(view.state);
   if (!source || blockMode(view, source.anchor)?.manual !== 'edit') return false;
+  const selection = view.state.selection.main;
+  if (selection.from < source.opening.from || selection.to > source.closing.to) return false;
   const isCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
   setMermaidEditingMode(view, source.anchor, false, isCurrent);
   return true;
@@ -359,16 +341,6 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
       const isCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
       const closing = blockMode(view, current)?.manual === 'edit';
       setMermaidEditingMode(view, current, !closing, isCurrent);
-      if (closing)
-        requestAnimationFrame(() => {
-          if (isCurrent())
-            restoreRenderedBlockModeFocus(
-              view.dom.querySelector(
-                `.meo-mermaid-toolbar[data-meo-block-from="${current}"] .meo-mermaid-mode-btn`
-              ),
-              event.detail > 0
-            );
-        });
     });
     const select = createSelectAllCodeButton(() => {
       const current = anchor();

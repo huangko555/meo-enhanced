@@ -118,8 +118,9 @@ try {
       await page.keyboard.down('Control'); await page.keyboard.press('Enter'); await page.keyboard.up('Control');
       await settle();
       assert.equal(await page.$('.meo-math-live-result'), null);
-      assert.equal(await page.evaluate(() => (window as any).mathEditor.view.hasFocus), true);
-      assert.equal(await page.evaluate(() => (window as any).mathEditor.view.state.doc.lineAt((window as any).mathEditor.view.state.selection.main.head).text), '', 'Finish editing returns to the following document line');
+      assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('meo-block-reading-target')), true);
+      assert.equal(await page.evaluate(() => (window as any).mathEditor.view.state.doc.toString()), docBeforeCopy,
+        'Finishing returns to block reading focus without changing document text');
       const positions = await page.evaluate(() => {
         const view = (window as any).mathEditor.view;
         const lines = Array.from({ length: view.state.doc.lines }, (_, index) => view.state.doc.line(index + 1));

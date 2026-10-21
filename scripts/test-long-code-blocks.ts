@@ -380,6 +380,11 @@ async function main() {
       oldMeasureFrame.run();
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const afterLateCallbacks = editor.getTopVisiblePosition();
+      // The fresh fold is above the rendered viewport. Mount it without moving
+      // the text selection, after checking that old work kept the prose anchor.
+      editor.restoreTopLine(1, 0, { syncCursor: false, force: true });
+      for (let frame = 0; frame < 8; frame += 1)
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       return {
         oldMeasureFrames: oldMeasureFrame.count,
         beforeLateCallbacks,
@@ -455,15 +460,14 @@ async function main() {
       editor.setText(content, true);
       const target = editor.getText().indexOf('rafNew trailing prose 70');
       editor.revealSelection(target, target, { focusEditor: true, align: 'nearest' });
-      for (let attempt = 0; attempt < 100
-        && !document.querySelector('.meo-md-long-code-placeholder'); attempt += 1) {
-        await new Promise<void>((resolve) => setTimeout(resolve, 10));
-      }
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const beforeLateRaf = editor.getTopVisiblePosition();
       lateAnimationFrame.run();
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const afterLateRaf = editor.getTopVisiblePosition();
+      editor.restoreTopLine(1, 0, { syncCursor: false, force: true });
+      for (let frame = 0; frame < 8; frame += 1)
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       return {
         scrollJumpCaptured,
         lateAnimationFrames,
@@ -686,8 +690,8 @@ async function main() {
       placeholders: document.querySelectorAll('.meo-md-long-code-placeholder').length,
       footers: document.querySelectorAll('.meo-md-long-code-footer').length
     }));
-    if (clickExpanded.placeholders !== 1 || clickExpanded.footers !== 1) {
-      throw new Error(`Clicking visible code did not expand the block: ${JSON.stringify(clickExpanded)}`);
+    if (clickExpanded.placeholders !== 2 || clickExpanded.footers !== 0) {
+      throw new Error(`Clicking visible code changed its folded presentation: ${JSON.stringify(clickExpanded)}`);
     }
 
     await page.evaluate(() => {
@@ -891,11 +895,9 @@ async function main() {
       (window as any).__longCodeBlocksEditor.view.dispatch({ selection: { anchor: 0 } });
     });
     await waitForFrames(page);
-    if (await page.$$eval('.meo-md-long-code-placeholder', (elements) => elements.length) !== 1) {
-      throw new Error('Clicking temporarily revealed code did not promote the block to user-kept expansion');
+    if (await page.$$eval('.meo-md-long-code-placeholder', (elements) => elements.length) !== 2) {
+      throw new Error('Clicking temporarily revealed code changed its manual fold preference');
     }
-    await page.click('.meo-md-long-code-footer .meo-long-code-action');
-    await waitForFrames(page);
     await page.evaluate(() => {
       const editor = (window as any).__longCodeBlocksEditor;
       const position = editor.view.state.doc.toString().indexOf('unknown 15');
@@ -1009,11 +1011,12 @@ async function main() {
     });
     await page.mouse.click(tallFirstLine.x, tallFirstLine.y);
     await waitForFrames(page);
+    await page.click('.meo-md-long-code-placeholder .meo-long-code-action');
+    await waitForFrames(page);
     await page.evaluate(() => {
       const editor = (window as any).__longCodeBlocksEditor;
       const position = editor.view.state.doc.toString().indexOf('const tall5');
-      const block = editor.view.lineBlockAt(position);
-      editor.view.scrollDOM.scrollTop = Math.max(0, block.top - 20);
+      editor.scrollToLine(editor.view.state.doc.lineAt(position).number, 'top');
     });
     await waitForFrames(page);
     const visibleCollapseScrollTop = await page.$eval('.cm-scroller', (element) => element.scrollTop);
@@ -1028,8 +1031,7 @@ async function main() {
     await page.evaluate(() => {
       const editor = (window as any).__longCodeBlocksEditor;
       const position = editor.view.state.doc.toString().indexOf('const tall100');
-      const block = editor.view.lineBlockAt(position);
-      editor.view.scrollDOM.scrollTop = block.top - editor.view.scrollDOM.clientHeight + 80;
+      editor.scrollToLine(editor.view.state.doc.lineAt(position).number, 'center');
     });
     await waitForFrames(page);
     const fixedFooterState = await page.evaluate(() => {
@@ -1047,8 +1049,7 @@ async function main() {
     await page.evaluate(() => {
       const editor = (window as any).__longCodeBlocksEditor;
       const position = editor.view.state.doc.toString().indexOf('const tall50');
-      const block = editor.view.lineBlockAt(position);
-      editor.view.scrollDOM.scrollTop = block.top - editor.view.scrollDOM.clientHeight / 2;
+      editor.scrollToLine(editor.view.state.doc.lineAt(position).number, 'center');
     });
     await waitForFrames(page);
     const floatingInsideBlock = await page.$eval('.meo-long-code-floating-action', (button: HTMLButtonElement) => !button.hidden);
@@ -1688,17 +1689,20 @@ async function main() {
     await waitForFrames(page, 8);
     const hiddenSelectionCollapse = await page.evaluate(() => {
       const editor = (window as any).__longCodeBlocksEditor;
+      const focus = document.activeElement as HTMLElement;
+      const rect = focus?.getBoundingClientRect(), viewport = editor.view.scrollDOM.getBoundingClientRect();
       return {
-        selectionLine: editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number,
+        readingFocus: focus?.classList.contains('meo-md-long-code-placeholder') && focus.classList.contains('meo-block-reading-target'),
+        focusVisible: rect && rect.bottom >= viewport.top && rect.top < viewport.bottom,
         selectionEmpty: editor.view.state.selection.main.empty,
         placeholderCount: document.querySelectorAll('.meo-md-long-code-placeholder').length
       };
     });
     if (
-      hiddenSelectionCollapse.selectionLine !== 87 ||
+      !hiddenSelectionCollapse.readingFocus || !hiddenSelectionCollapse.focusVisible ||
       !hiddenSelectionCollapse.selectionEmpty || hiddenSelectionCollapse.placeholderCount !== 1
     ) {
-      throw new Error(`Collapsing a hidden selection did not move it to the last visible code line: ${JSON.stringify(hiddenSelectionCollapse)}`);
+      throw new Error(`Collapsing a hidden selection did not return to the visible fold summary: ${JSON.stringify(hiddenSelectionCollapse)}`);
     }
 
     console.log('long code block checks passed');

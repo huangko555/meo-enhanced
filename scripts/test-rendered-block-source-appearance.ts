@@ -57,6 +57,12 @@ try {
         await page.mouse.move(0, 0);
         await page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
         await settle(12);
+        // Frames can run faster than the hover transition on high-refresh
+        // displays. Inspect the idle palette only after that transition ends.
+        await page.waitForFunction(() => Array.from(document.querySelectorAll<HTMLElement>(
+          ':is(.meo-code-block-actions,.meo-mermaid-toolbar,.meo-latex-math-toolbar) :is([role="button"],button)'
+        )).filter(control => control.getBoundingClientRect().width > 0)
+          .every(control => getComputedStyle(control).backgroundColor === 'rgba(0, 0, 0, 0)'));
         const geometry = await page.evaluate(() => {
           const rect = (element: Element) => element.getBoundingClientRect();
           const controls = Array.from(document.querySelectorAll<HTMLElement>(':is(.meo-code-block-actions,.meo-mermaid-toolbar,.meo-latex-math-toolbar) :is([role="button"],button)')).filter(el => rect(el).width > 0);

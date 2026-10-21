@@ -44,6 +44,7 @@ import { createPreviewTableLayoutController, type PreviewTableLayoutController }
 import { formatHtmlFragment } from '../editor/htmlFormatting';
 import { createSourceFormatButton, type SourceFormatOutcome } from '../editor/sourceFormatButton';
 import { isLivePointerSelectionActive, setLivePointerSelectionActiveEffect, sourcePresentationSelection } from '../editor/livePointerSelection';
+import { blockReadingFocusAt, enterBlockSource, focusBlockReading } from '../editor/blockInteraction';
 
 export interface RenderableHtmlBlock {
   from: number;
@@ -139,6 +140,7 @@ function htmlHasVisibleContent(source: string): boolean {
 }
 
 function selectedHtmlBlock(state: EditorState): HtmlEditingRange | undefined {
+  if (blockReadingFocusAt(state)?.kind === 'html') return undefined;
   const { head } = sourcePresentationSelection(state).main;
   const block = collectRenderableHtmlBlocks(state).find(block => head >= block.from && head < block.to);
   if (block) return block;
@@ -180,6 +182,7 @@ export const htmlEditingRangeField = StateField.define<HtmlEditingRange | null>(
 });
 
 export function getHtmlEditingRange(state: EditorState): HtmlEditingRange | null {
+  if (blockReadingFocusAt(state)?.kind === 'html') return null;
   return state.field(htmlEditingRangeField, false) ?? selectedHtmlBlock(state) ?? null;
 }
 
@@ -628,12 +631,13 @@ function preserveHtmlPosition(view: EditorView, from: number, mutate: () => void
   else mutate();
 }
 
-export function enterHtmlSource(view: EditorView, block: HtmlEditingRange, anchor?: number): void {
+export function enterHtmlSource(view: EditorView, block: HtmlEditingRange, anchor?: number, viewportTop?: number): void {
   const currentSelection = view.state.selection;
   const selection = anchor === undefined && currentSelection.ranges.every((range) => (
     range.from >= block.from && range.to <= block.to
   )) ? currentSelection : { anchor: anchor ?? block.from };
-  preserveHtmlPosition(view, block.from, () => {
+  enterBlockSource(view, { kind: 'html', ...block }, viewportTop === undefined
+    ? view.coordsAtPos(view.state.selection.main.head)?.top ?? null : viewportTop - view.defaultLineHeight / 2, () => {
     view.dispatch({
       selection,
       effects: setHtmlEditingRangeEffect.of({ from: block.from, to: block.to }),
@@ -748,7 +752,7 @@ class HtmlBlockWidget extends UiLanguageSensitiveWidget {
       const anchor = Number.isInteger(line) && line > 0 && line <= view.state.doc.lines
         ? Math.max(currentBlock.from, Math.min(currentBlock.to, view.state.doc.line(line).from)) : undefined;
       event.preventDefault();
-      enterHtmlSource(view, currentBlock, anchor);
+      enterHtmlSource(view, currentBlock, anchor, event.clientY);
     });
     this.height.observe(root, view);
     if (contentRoot.querySelector('table')) {
@@ -1037,7 +1041,9 @@ const htmlEscapeKeymap = keymap.of([{
   run(view) {
     const range = getHtmlEditingRange(view.state);
     if (!range) return false;
-    preserveHtmlPosition(view, range.from, () => view.dispatch({ selection: { anchor: range.to }, effects: setHtmlEditingRangeEffect.of(null) }));
+    if (view.composing || view.state.selection.ranges.length !== 1
+      || !view.state.selection.main.empty && (view.state.selection.main.from < range.from || view.state.selection.main.to > range.to)) return false;
+    focusBlockReading(view, { kind: 'html', ...range }, [setHtmlEditingRangeEffect.of(null)]);
     return true;
   }
 }]);
@@ -1055,22 +1061,6 @@ function revealHtmlSourceForInput(view: EditorView, target: EventTarget | null):
 // replacement cannot express the saved DOM caret and would redirect native typing.
 const htmlSourceInputHandlers = Prec.highest(EditorView.domEventHandlers({
   keydown(event, view) {
-    const selection = view.state.selection.main;
-    if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && selection.empty
-      && event.key.startsWith('Arrow') && !getHtmlEditingRange(view.state)) {
-      const line = view.state.doc.lineAt(selection.head);
-      const block = collectRenderableHtmlBlocks(view.state).find(block => block.visible && (
-        event.key === 'ArrowDown' && block.startLine === line.number + 1
-        || event.key === 'ArrowUp' && block.endLine === line.number - 1
-        || event.key === 'ArrowLeft' && block.to === selection.head
-        || event.key === 'ArrowRight' && block.from === selection.head + 1
-      ));
-      if (block) {
-        view.dispatch({ selection: { anchor: ['ArrowUp', 'ArrowLeft'].includes(event.key) ? block.to - 1 : block.from },
-          effects: setHtmlEditingRangeEffect.of({ from: block.from, to: block.to }), scrollIntoView: true });
-        return true;
-      }
-    }
     const shortcut = (event.ctrlKey || event.metaKey) && !event.altKey && /^[vx]$/i.test(event.key);
     const editingKey = ['Enter', 'Backspace', 'Delete'].includes(event.key) || (
       !event.ctrlKey && !event.metaKey && !event.altKey &&

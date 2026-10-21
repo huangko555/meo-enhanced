@@ -105,6 +105,13 @@ transparent/zero-size text, closed details and visible child overrides. Inspect
 the final Word document in Word as well: its HTML converter retains editable
 text but approximates browser typography, repeated spaces, ruby and custom list
 numbering. Deliberately unclosed tags can still affect following HTML content.
+`scripts/test-block-editing-transitions.ts` adds a shared production-editor contract
+for formulas, HTML, short/folded code and both Mermaid layouts: four directional
+boundaries, pointer release, Escape/Enter, reverse Tab, document selection, visible
+reading focus and document-end completion without text mutation. It distinguishes temporary hidden-target reveals from explicit long-code
+expansion and samples every frame of a tall Mermaid roundtrip, rather than checking
+only coordinates after a fixed settlement delay. It belongs to `test:rendered-source`.
+
 The Mermaid/formula inner-source matrix and findings are in
 [testing-rendered-block-source.md](testing-rendered-block-source.md). Run
 `bun run test:rendered-source` for its dedicated input, boundary and appearance

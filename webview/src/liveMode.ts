@@ -1,5 +1,6 @@
 import { blockStickyHeaderExtension } from './helpers/blockStickyHeader';
 import { livePointerSelectionActiveField } from './editor/livePointerSelection';
+import { enterBlockSource } from './editor/blockInteraction';
 import { countColumn, RangeSetBuilder, StateEffect, StateField, EditorState, type ChangeDesc, type Range, type RangeSet, type Extension, type EditorSelection, type Transaction } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting } from '@codemirror/language';
@@ -2726,7 +2727,9 @@ class LatexMathWidget extends UiLanguageSensitiveWidget {
           const range = collectDocumentMathRanges(view.state).find(range => range.fencedDisplay
             && view.state.doc.lineAt(range.from).from === widget.anchor);
           const source = range && getDisplayMathSource(view.state, range);
-          view.dispatch({ selection: { anchor: source?.from ?? line.from }, scrollIntoView: true });
+          enterBlockSource(view, { kind: 'math', from: widget.anchor, to: widget.blockTo }, event.clientY - view.defaultLineHeight / 2, () => {
+            view.dispatch({ selection: { anchor: source?.from ?? line.from } });
+          });
         }
         view.focus();
       });

@@ -11,6 +11,7 @@ import { formatLatexSource } from '../editor/latexFormatting';
 import { createSourceFormatButton, type SourceFormatOutcome } from '../editor/sourceFormatButton';
 import { getUiStrings } from '../application/uiLanguage';
 import { getViewportController } from './viewportController';
+import { isBlockReading } from '../editor/blockInteraction';
 
 function activeMathSource(state: EditorState) {
   if (state.readOnly || state.selection.ranges.length !== 1) return null;
@@ -57,6 +58,7 @@ export async function formatActiveDisplayMathSource(view: EditorView, isCurrent:
 
 /** Formula editing belongs to the document selection, including both delimiters. */
 export function isDisplayMathEditing(state: EditorState, startLine: number, endLine: number): boolean {
+  if (isBlockReading(state, state.doc.line(startLine).from, state.doc.line(endLine).to)) return false;
   return sourcePresentationSelection(state).ranges.some(range => {
     const first = state.doc.lineAt(range.from).number;
     const last = state.doc.lineAt(range.empty ? range.to : range.to - 1).number;

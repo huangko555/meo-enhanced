@@ -164,7 +164,7 @@ try {
     const info = await page.$eval('.meo-mermaid-toolbar', node => {
       const select = node.querySelector<HTMLElement>('.meo-select-all-code-btn')!;
       return { hidden: select.hidden, display: getComputedStyle(select).display,
-        first: node.firstElementChild === select, second: select.nextElementSibling?.classList.contains('meo-mermaid-mode-btn') };
+        first: node.firstElementChild?.classList.contains('meo-mermaid-mode-btn'), second: node.firstElementChild?.nextElementSibling === select };
     });
     assert.equal(info.hidden, mode === 'preview'); assert.equal(info.display === 'none', mode === 'preview');
     assert.ok(info.first && info.second); assert.equal(await page.$('.meo-mermaid-toolbar .meo-source-format-btn'), null);

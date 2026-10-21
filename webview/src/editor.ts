@@ -21,7 +21,8 @@ import { indentUnit, syntaxTree, forceParsing } from '@codemirror/language';
 import { prepareSourceSyntax, sourceSyntax, sourceSyntaxPreparation } from './helpers/sourceSyntax';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
 import type { UiLanguage } from '../../src/foundation/uiLanguage';
-import { longCodeBlockEnabledFacet } from './helpers/longCodeBlocks';
+import { codeEditingBlockAt, longCodeBlockEnabledFacet } from './helpers/longCodeBlocks';
+import { blockInteractionExtensions, blockReadingFocusAt, clearBlockReadingFocus, focusBlockReading, moveAcrossBlockBoundary, retainBlockCaret } from './editor/blockInteraction';
 import type { SourceLineNumberMode } from '../../src/protocol/readyInit';
 import { formatSourceLineNumber, sourceLineNumberModeFacet } from './editor/sourceLineNumbers';
 import { flushEditorLayout } from './editor/layoutMeasurement';
@@ -124,7 +125,7 @@ import {
 } from './helpers/latexMathEditing';
 import { getLiveRenderedBlocks } from './helpers/liveRenderedBlocks';
 import { parseBlockLinePrefix } from './helpers/blockIndent';
-import { canFormatDisplayMathSource, formatActiveDisplayMathSource, displayMathPasteText, indentDisplayMathSource, insertDisplayMathNewline, selectedDisplayMathBody } from './helpers/displayMathEditing';
+import { canFormatDisplayMathSource, formatActiveDisplayMathSource, displayMathPasteText, indentDisplayMathSource, insertDisplayMathNewline, selectedDisplayMathBody, isDisplayMathEditing } from './helpers/displayMathEditing';
 import { createHtmlSourceEditing } from './editor/htmlSource';
 import { formatActiveHtmlSource, getHtmlEditingRange } from './helpers/htmlContent';
 import { supportedHtmlTags } from '../../src/shared/htmlPolicy';
@@ -917,57 +918,44 @@ export function createEditor({
     return false;
   };
 
-  const moveAcrossMermaidBoundary = (editorView: EditorView, forward: boolean, outside: number | null,
-    mutate: (isCurrent: () => boolean) => boolean) => {
-    const caret = editorView.coordsAtPos(editorView.state.selection.main.head);
-    const top = caret ? caret.top + (forward ? 1 : -1) * editorView.defaultLineHeight : null;
-    const reference = outside === null ? null : editorView.coordsAtPos(outside);
-    const bounds = editorViewportBounds(editorView);
-    const visibleReference = reference && reference.top >= bounds.top && reference.bottom <= bounds.bottom
-      ? { position: outside!, top: reference.top } : undefined;
-    const isCurrent = viewportController.beginNavigationReveal();
-    if (!mutate(isCurrent)) return false;
-    const position = editorView.state.selection.main.head;
-    if (top === null) viewportController.revealPositionUntilStable(position, { y: 'nearest', yMargin: 8 }, isCurrent);
-    else viewportController.retainPositionTop(position, top, isCurrent, false,
-      { keepVisible: true, reference: visibleReference });
-    return true;
-  };
-
   const tryMoveAcrossRenderedBlockSource = (editorView: EditorView, forward: boolean, vertical: boolean) => {
     if (currentMode !== 'live') return false;
     const selection = editorView.state.selection.main;
-    if (!selection.empty) return false;
+    if (!selection.empty || editorView.state.selection.ranges.length !== 1) return false;
     const line = editorView.state.doc.lineAt(selection.head);
     if (!vertical && selection.head !== (forward ? line.to : line.from)) return false;
-    const block = getLiveRenderedBlocks(editorView.state, { includeSelectedMath: true }).find(block =>
-      block.kind === 'math'
-        ? forward ? line.number === block.startLine || line.number === block.startLine - 1
-          : line.number === block.endLine || line.number === block.endLine + 1
-        : block.kind === 'mermaid' && (
-          line.number === block.startLine || line.number === block.endLine ||
-          line.number === (forward ? block.startLine - 1 : block.endLine + 1)));
-    if (!block || block.endLine <= block.startLine + 1) return false;
-    const opening = editorView.state.doc.line(block.startLine);
-    const first = editorView.state.doc.line(block.startLine + 1);
-    const last = editorView.state.doc.line(block.endLine - 1);
-    const target = forward ? first : last;
-    const column = selection.head - line.from;
-    if (block.kind === 'math') {
-      const prefix = parseBlockLinePrefix(editorView.state.doc.line(block.endLine).text, editorView.state.tabSize).prefix.length;
-      const targetColumn = vertical ? Math.min(target.length, Math.max(prefix, column)) : forward ? Math.min(prefix, target.length) : target.length;
-      editorView.dispatch({ selection: { anchor: target.from + targetColumn }, scrollIntoView: true });
-      return true;
+    const adjacent = (block: { startLine: number; endLine: number }) => line.number === block.startLine || line.number === block.endLine ||
+      line.number === (forward ? block.startLine - 1 : block.endLine + 1);
+    const html = collectRenderableHtmlBlocks(editorView.state).find(block => block.visible && adjacent(block));
+    const code = codeEditingBlockAt(editorView.state, selection.head)
+      ?? (line.number + (forward ? 1 : -1) > 0 && line.number + (forward ? 1 : -1) <= editorView.state.doc.lines
+        ? codeEditingBlockAt(editorView.state, editorView.state.doc.line(line.number + (forward ? 1 : -1)).from) : null);
+    if (code && code.hiddenFrom !== null && forward
+      && editorView.state.doc.lineAt(code.hiddenFrom).number === line.number + 1
+      && (!vertical || editorView.moveToLineBoundary(selection, true).head === line.to)) {
+      const target = editorView.state.doc.lineAt(code.hiddenFrom);
+      return moveAcrossBlockBoundary(editorView, true, null, () => {
+        editorView.dispatch({ selection: { anchor: target.from + (vertical ? Math.min(selection.head - line.from, target.length) : 0) }, userEvent: 'select' });
+      });
     }
+    const block = html ? { ...html, kind: 'html' as const } : getLiveRenderedBlocks(editorView.state, { includeSelectedMath: true })
+      .find(block => (block.kind === 'math' || block.kind === 'mermaid') && adjacent(block)) ?? (code && adjacent(code) ? code : null);
+    if (!block) return false;
+    const opening = editorView.state.doc.line(block.startLine);
+    const first = editorView.state.doc.line(Math.min(block.startLine + 1, editorView.state.doc.lines));
+    const column = selection.head - line.from;
     const closing = editorView.state.doc.line(block.endLine);
     const inside = line.number >= block.startLine && line.number <= block.endLine;
     const before = opening.number > 1 ? editorView.state.doc.line(opening.number - 1).to : null;
     const after = closing.number < editorView.state.doc.lines ? editorView.state.doc.line(closing.number + 1).from : null;
-    if (inside && getMermaidBlockMode(editorView.state, opening.from, closing.to).manual === 'edit') {
+    const editing = block.kind === 'mermaid' ? getMermaidBlockMode(editorView.state, opening.from, closing.to).manual === 'edit'
+      : block.kind === 'math' ? isDisplayMathEditing(editorView.state, opening.number, closing.number)
+        : block.kind === 'html' ? !!getHtmlEditingRange(editorView.state) : true;
+    if (inside && editing) {
       if (editorView.state.selection.ranges.length !== 1 || line.number !== (forward ? closing.number : opening.number)) return false;
       const next = vertical ? editorView.moveVertically(selection, forward) : editorView.moveByChar(selection, forward);
       if (next.head >= opening.from && next.head <= closing.to) return false;
-      return moveAcrossMermaidBoundary(editorView, forward, forward ? after : before, () => {
+      return moveAcrossBlockBoundary(editorView, forward, forward ? after : before, () => {
         editorView.dispatch({ selection: EditorSelection.create([next]), userEvent: 'select' });
         return true;
       });
@@ -977,22 +965,27 @@ export function createEditor({
     if (vertical && !inside && editorView.moveToLineBoundary(selection, forward).head !== (forward ? line.to : line.from)) return false;
     const fence = forward ? opening : closing;
     const offset = fence.from - first.from + (vertical ? Math.min(column, fence.length) : forward ? 0 : fence.length);
-    return moveAcrossMermaidBoundary(editorView, forward, forward ? before : after,
-      isCurrent => focusMermaidEditingOffset(editorView, opening.from, offset, isCurrent));
+    return moveAcrossBlockBoundary(editorView, forward, forward ? before : after, isCurrent => {
+      if (block.kind === 'mermaid') focusMermaidEditingOffset(editorView, opening.from, offset, isCurrent);
+      else {
+        editorView.dispatch({ selection: { anchor: first.from + offset }, userEvent: 'select', effects: [
+          supersedeLiveInputDerivedWork(), ...(block.kind === 'html' ? [setHtmlEditingRangeEffect.of({ from: html!.from, to: html!.to })] : [])
+        ] });
+        editorView.focus();
+      }
+    });
   };
 
   const finishDisplayMathEditing = (editorView: EditorView) => {
-    if (currentMode !== 'live') return false;
+    if (currentMode !== 'live' || editorView.composing || editorView.state.selection.ranges.length !== 1) return false;
     const lineNo = editorView.state.doc.lineAt(editorView.state.selection.main.head).number;
     const block = getLiveRenderedBlocks(editorView.state, { includeSelectedMath: true })
       .find(block => block.kind === 'math' && block.startLine <= lineNo && block.endLine >= lineNo);
     if (!block) return false;
-    if (block.endLine < editorView.state.doc.lines) {
-      editorView.dispatch({ selection: { anchor: editorView.state.doc.line(block.endLine + 1).from }, scrollIntoView: true });
-    } else {
-      editorView.dispatch({ changes: { from: editorView.state.doc.length, insert: '\n' },
-        selection: { anchor: editorView.state.doc.length + 1 }, scrollIntoView: true });
-    }
+    const selection = editorView.state.selection.main;
+    if (selection.from < editorView.state.doc.line(block.startLine).from || selection.to > editorView.state.doc.line(block.endLine).to) return false;
+    focusBlockReading(editorView, { kind: 'math', from: editorView.state.doc.line(block.startLine).from,
+      to: editorView.state.doc.line(block.endLine).to });
     return true;
   };
 
@@ -1058,9 +1051,10 @@ export function createEditor({
     }
     liveSelectionPointerId = null;
     if (view && currentMode === 'live') {
-      view.dispatch({
-        effects: setLivePointerSelectionActiveEffect.of({ active: false, preservedLine: null })
-      });
+      const mutate = () => view.dispatch({ effects: setLivePointerSelectionActiveEffect.of({ active: false, preservedLine: null }) });
+      const top = view.hasFocus && view.state.selection.main.empty ? view.coordsAtPos(view.state.selection.main.head)?.top : undefined;
+      if (top !== undefined) retainBlockCaret(view, top, mutate);
+      else mutate();
     }
   };
 
@@ -2293,7 +2287,14 @@ export function createEditor({
       keymap.of([
         { key: 'Mod-/', run: () => runCommentCommand(true) },
         { key: 'Alt-A', run: () => runCommentCommand(false) },
-        { key: 'Escape', run: finishMermaidEditing },
+        { key: 'Escape', run: editorView => {
+          if (currentMode !== 'live' || editorView.composing || blockReadingFocusAt(editorView.state)) return false;
+          if (finishMermaidEditing(editorView) || finishDisplayMathEditing(editorView)) return true;
+          const block = codeEditingBlockAt(editorView.state, editorView.state.selection.main.head);
+          if (!block || editorView.state.selection.ranges.length !== 1
+            || editorView.state.selection.main.from < block.from || editorView.state.selection.main.to > block.to) return false;
+          focusBlockReading(editorView, block); return true;
+        } },
         { key: 'Tab', run: (view) => indentMermaidSource(view, false) || indentDisplayMathSource(view, false) || indentListByTwoSpaces(view) || indentMore(view) },
         { key: 'Shift-Tab', run: (view) => indentMermaidSource(view, true) || indentDisplayMathSource(view, true) || outdentListByTwoSpaces(view) || indentLess(view) },
         { key: 'Alt-]', run: indentListByTwoSpaces },
@@ -2324,6 +2325,19 @@ export function createEditor({
         ...editorHistoryKeymap
       ]),
       historyCompartment.of(history()),
+      ...blockInteractionExtensions((editorView, block) => {
+        const top = editorView.coordsAtPos(block.from)?.top ?? null;
+        retainBlockCaret(editorView, top === null ? null : top + editorView.defaultLineHeight, isCurrent => {
+          if (block.kind === 'mermaid') focusMermaidEditingOffset(editorView, block.from, 0, isCurrent);
+          else {
+            const line = editorView.state.doc.lineAt(block.from);
+            const position = block.kind === 'html' ? block.from : editorView.state.doc.line(Math.min(line.number + 1, editorView.state.doc.lines)).from;
+            editorView.dispatch({ selection: { anchor: position }, effects: block.kind === 'html'
+              ? [setHtmlEditingRangeEffect.of({ from: block.from, to: block.to })] : [] });
+            editorView.focus();
+          }
+        });
+      }, () => viewportController),
       lineNumberCompartment.of(lineNumberExtensions(startMode, currentSourceLineNumbers)),
       longCodeBlockPreferenceCompartment.of(longCodeBlockEnabledFacet.of(initialLongCodeBlockFolding)),
       tableTransactionProvenanceAdapter.extension,
@@ -3732,6 +3746,7 @@ export function createEditor({
       { deferViewportRestore = false }: { deferViewportRestore?: boolean } = {}
     ) {
       const applyMode = (isTransactionCurrent: () => boolean): void => {
+        clearBlockReadingFocus(view);
         interactionContinuity?.cancel();
         const tableInput = currentMode === 'live' ? getActiveTableInput() ?? (
           lastFocusedEditorTarget instanceof HTMLTextAreaElement &&
