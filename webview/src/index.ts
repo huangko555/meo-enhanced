@@ -26,7 +26,6 @@ import { setShikiTheme } from './helpers/shikiHighlighter';
 import { createFailureNoticeManager, getErrorMessage, isTransientMermaidRuntimeError, shouldAutoFallbackToSourceForLiveError, logWebviewRenderError, type EditorNoticeAction, type FailureNoticeManager } from './helpers/errors';
 import { isPrimaryModifier, isShortcutKey, handleEditorShortcut, type ShortcutHandlerContext } from './helpers/shortcuts';
 import { normalizeDocumentText } from '../../src/foundation/documentText';
-import { assessLargeDocument } from '../../src/foundation/largeDocument';
 import { createFindPanel, createFindPanelController, type FindPanelController } from './helpers/findPanel';
 import { createSelectionMenu, createSelectionMenuController, type SelectionMenuController } from './helpers/selectionMenu';
 import {
@@ -269,7 +268,7 @@ let changesReviewMode: 'live' | 'source' | 'preview' = 'live';
 let contentMaxWidthEnabled = false;
 let liveStrongColoring = false;
 let boldHeadingsEnabled = true;
-let largeDocumentOptimizationEnabled = true;
+let largeDocumentOptimizationEnabled = false;
 let tableStickyHeaderEnabled = true;
 let restoreReadingPositionOnOpen = true;
 let outlineUiState: { mode: 'floating' | 'fixed'; width: number } = { mode: 'fixed', width: 260 };
@@ -372,10 +371,10 @@ appendMoreToolsOptionContent(longCodeBlockFoldingBtn, Code, activeUiStrings.fold
 
 const largeDocumentOptimizationBtn = document.createElement('button');
 largeDocumentOptimizationBtn.type = 'button';
-largeDocumentOptimizationBtn.className = 'more-tools-option more-tools-toggle-option is-active';
+largeDocumentOptimizationBtn.className = 'more-tools-option more-tools-toggle-option';
 largeDocumentOptimizationBtn.dataset.action = 'largeDocumentOptimization';
 largeDocumentOptimizationBtn.setAttribute('role', 'menuitemcheckbox');
-largeDocumentOptimizationBtn.setAttribute('aria-checked', 'true');
+largeDocumentOptimizationBtn.setAttribute('aria-checked', 'false');
 const largeDocumentTooltip = appendMoreToolsOptionContent(
   largeDocumentOptimizationBtn,
   FileCode2,
@@ -3613,9 +3612,26 @@ window.addEventListener('message', (event) => {
 
       void editorModeRuntime.dispatch({
         type: 'initialize', hostMode: message.mode,
-        ...(assessLargeDocument(message.text).preferSource ? { backgroundMode: 'source' as const } : {})
+        // Preview needs text/history ownership, not an invisible rich surface.
+        // Keep the remembered editable mode independently of this carrier.
+        backgroundMode: 'source'
       })
         .then(async () => {
+          const initialState = editorModeApplication.getState();
+          if (initialState.mode === 'live' && editor) {
+            const preparingEditor = editor;
+            // The first visible Live surface needs the same structural
+            // preparation as a later Source-to-Live transition. Otherwise a
+            // late parser publication moves text between hit testing and input.
+            await preparingEditor.prepareLiveSyntax(() => editor === preparingEditor
+              && editorModeApplication.getState().lifecycle === 'ready'
+              && editorModeApplication.getState().intentId === initialState.intentId);
+            // A Host command can supersede initialization while the toolbar is
+            // still covered. Reveal its actual surface after its mode effects.
+            if (editorModeApplication.getState().intentId !== initialState.intentId) {
+              await editorModeRuntime.whenIdle();
+            }
+          }
           const initializedMode = editorModeApplication.getState().mode;
           if (message.saveAsViewState && editor) {
             const { anchor, head } = message.saveAsViewState.selection;

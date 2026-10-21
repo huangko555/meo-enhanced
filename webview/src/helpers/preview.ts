@@ -1985,7 +1985,7 @@ export function createPreviewController({
       frameEvents = new AbortController();
       const signal = frameEvents.signal;
       frameRenderedText = renderedText;
-      frameDocument.documentElement.dataset.meoPreviewLargeDocument = String(assessLargeDocument(renderedText).preferSource);
+      frameDocument.documentElement.dataset.meoPreviewLargeDocument = String(assessLargeDocument(renderedText).windowedPreview);
       // A logical window already bounds mounted DOM. CSS skipping inside that
       // window would measure 90/120px placeholders during an input handoff,
       // then repeatedly move the reading position as the real rows reappear.
@@ -2248,7 +2248,7 @@ export function createPreviewController({
     previewTableLayout?.dispose();
     previewTableLayout = null;
     loadingFrameText = renderedText;
-    const large = assessLargeDocument(renderedText).preferSource;
+    const large = assessLargeDocument(renderedText).windowedPreview;
     const header = `<!DOCTYPE html><html lang="${uiLanguage}" data-meo-preview-large-document="${large}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewCodeCopyStyles}${previewLatexMathViewportStyles}${previewSourcePositionMarkerStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}${previewSearchStyles}</style></head><body><div class="meo-export-page"><main class="meo-export-doc markdown-body">`;
     const footer = '</main></div></body></html>';
     frame.onload = null;
@@ -2516,7 +2516,7 @@ export function createPreviewController({
       preset: presetPreference,
       ...(getPreviewPreset(presetPreference).custom ? { presetRevision: getPreviewPreset(presetPreference).custom!.revision } : {}),
       contentWidth: contentWidthPreference,
-      ...(!document.body.classList.contains('vscode-using-screen-reader') && assessLargeDocument(text).preferSource
+      ...(!document.body.classList.contains('vscode-using-screen-reader') && assessLargeDocument(text).windowedPreview
         ? { window: { anchorLine: getCurrentPendingExternalViewportRestore()?.line
           ?? getTopVisiblePosition()?.topLine ?? sourcePositionMarkerState.line } } : {})
     }).then(async (result) => {

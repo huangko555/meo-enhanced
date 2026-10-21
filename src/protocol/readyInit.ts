@@ -139,7 +139,7 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
       ? value.boldHeadingsEnabled
       : null;
   const largeDocumentOptimizationEnabled = isRecord(value) && value.largeDocumentOptimizationEnabled === undefined
-    ? true
+    ? false
     : isRecord(value) && typeof value.largeDocumentOptimizationEnabled === 'boolean'
       ? value.largeDocumentOptimizationEnabled
       : null;

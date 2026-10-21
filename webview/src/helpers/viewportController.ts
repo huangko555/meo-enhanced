@@ -13,6 +13,8 @@ export interface ViewportDocumentAnchor {
   editorLineOffset?: number;
   viewportOffset?: number;
   renderedBlock?: boolean;
+  /** The position identifies a measured visual text row, not a block boundary. */
+  preciseTextPosition?: true;
   /** Continuous semantic position inside a rendered source range. */
   sourceRange?: {
     startLine: number;
@@ -1310,7 +1312,7 @@ export class ViewportController {
       ? Math.max(0, anchor.viewportOffset ?? 0)
       : null;
     this.stabilize(() => {
-      if (anchor.sourceRange && viewportOffset !== null) {
+      if (anchor.sourceRange && viewportOffset !== null && !anchor.preciseTextPosition) {
         const startLine = Math.min(
           Math.max(1, Math.floor(anchor.sourceRange.startLine)),
           this.view.state.doc.lines
@@ -1418,6 +1420,10 @@ export class ViewportController {
       }
       // Offscreen lines do not have DOM coordinates yet. Preserve the same
       // reading band using the height map until the line is rendered.
+      if (anchor.preciseTextPosition && viewportOffset !== null) {
+        const block = this.view.lineBlockAt(position), line = this.view.state.doc.lineAt(position);
+        return { top: Math.max(0, block.top + block.height * (position - line.from) / Math.max(1, line.length) - viewportOffset) };
+      }
       return {
         top: Math.max(0, this.view.lineBlockAt(position).top + (
           viewportOffset === null ? lineOffset : -viewportOffset
@@ -3083,6 +3089,25 @@ export class ViewportController {
       }
     }
     const block = this.view.lineBlockAtHeight(sampleHeight);
+    // A wrapped source line can cover thousands of visual rows. Its start is
+    // not the text currently being read. Preserve the measured visual row's
+    // source position; the normalized range also projects it into Preview.
+    if (block.height > this.view.defaultLineHeight * 1.5
+      && typeof this.view.posAtCoords === 'function') {
+      const bounds = scroller.getBoundingClientRect(), content = this.view.contentDOM.getBoundingClientRect();
+      const gutter = scroller.querySelector('.cm-gutters')?.getBoundingClientRect();
+      const position = this.view.posAtCoords({ x: Math.min(bounds.right - 2,
+        Math.max(bounds.left + 2, content.left + 2, (gutter?.right ?? bounds.left) + 2)),
+        y: bounds.top + boundedViewportOffset });
+      const coords = position === null ? null : this.view.coordsAtPos(position);
+      if (position !== null && coords && position >= block.from && position <= block.to) {
+        const line = this.view.state.doc.lineAt(position).number;
+        return { position, lineOffset: 0, preciseTextPosition: true, viewportOffset: Math.max(0, coords.top - bounds.top),
+          sourceRange: { startLine: line, endLine: line,
+            progress: Math.max(0, Math.min(1,
+              (scroller.scrollTop + coords.top - bounds.top - block.top) / block.height)) } };
+      }
+    }
     return {
       position: block.from,
       lineOffset: 0,

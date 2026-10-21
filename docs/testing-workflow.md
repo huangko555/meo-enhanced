@@ -25,6 +25,16 @@ Windows is smoke checked against the installed font collection. Mac/Linux adapte
 need native platform verification before release; unavailable queries use fallback fonts.
 
 The user-facing inventory is in [testing-feature-coverage.md](testing-feature-coverage.md).
+`scripts/test-mode-wrapped-line-position.ts`, included in `test:input-presentation`,
+checks immediate trusted clicks and the first digit on a cold Live surface five
+times, plus actual reading text inside a giant wrapped paragraph through Source,
+Live and Preview. `scripts/test-editor-mode-preparation-production.ts` also gates
+cold Live preparation and checks that a newer mode intent reveals its own surface.
+Performance strategy comparisons are opt-in through
+`scripts/benchmark-document-strategies.ts --confirm-long-run`; see
+[the policy evidence](large-document-policy-evidence.md) for fixture dimensions,
+cold/warm definitions, input/heap measurements and native-test limitations.
+
 The Mermaid/formula inner-source matrix and findings are in
 [testing-rendered-block-source.md](testing-rendered-block-source.md). Run
 `bun run test:rendered-source` for its dedicated input, boundary and appearance

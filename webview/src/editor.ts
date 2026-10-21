@@ -437,7 +437,7 @@ export function createEditor({
   const startMode = initialMode === 'live' ? 'live' : 'source';
   let documentAssessment = assessLargeDocument(text);
   let boundedEditorWork = documentAssessment.boundedEditorWork;
-  let lightweightSourceSyntax = documentAssessment.preferSource;
+  let lightweightSourceSyntax = documentAssessment.lightweightSourceSyntax;
   let unassessedCharacters = 0;
   let assessedLines = documentAssessment.dimensions.lines;
   let assessmentTimer: ReturnType<typeof setTimeout> | null = null;
@@ -550,7 +550,7 @@ export function createEditor({
         unassessedCharacters = 0;
         assessedLines = current.lines;
         const nextBoundedEditorWork = boundedEditorWork || documentAssessment.boundedEditorWork;
-        const nextLightweightSource = lightweightSourceSyntax || documentAssessment.preferSource;
+        const nextLightweightSource = lightweightSourceSyntax || documentAssessment.lightweightSourceSyntax;
         if (nextBoundedEditorWork === boundedEditorWork && nextLightweightSource === lightweightSourceSyntax) return;
         // Latch for this session. Shrinking or crossing a nearby threshold must
         // not repeatedly rebuild the presentation or change the user's mode.

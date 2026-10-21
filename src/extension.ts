@@ -692,7 +692,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         };
         if (!this.activePanels.has(panel)) throw new Error('Preview was closed');
         if (options.window) return this.previewRenderer.open(previewOwner, options.window.documentId, request, options.window.anchorLine);
-        if (assessLargeDocument(options.markdownText).preferSource) return this.previewRenderer.render(request);
+        if (assessLargeDocument(options.markdownText).windowedPreview) return this.previewRenderer.render(request);
         const exportRuntime = await loadExportRuntimeModule(this.context.extensionUri);
         return exportRuntime.renderPreviewDocument(request);
       },

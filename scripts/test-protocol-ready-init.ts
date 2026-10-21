@@ -112,7 +112,7 @@ assert.deepEqual(
 );
 assert.equal(
   decodeInitMessage({ ...completeInit, largeDocumentOptimizationEnabled: undefined })?.largeDocumentOptimizationEnabled,
-  true
+  false
 );
 assert.equal(decodeInitMessage({ ...completeInit, largeDocumentOptimizationEnabled: 'yes' }), null);
 assert.equal(

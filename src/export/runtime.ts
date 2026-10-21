@@ -132,7 +132,7 @@ export function preparePreviewDocument(options: PreviewDocumentOptions, windowed
     uiLanguage: options.uiLanguage,
     showComments: environment.previewShowComments === true,
     deferImages: true,
-    deferDisplayMath: assessLargeDocument(options.markdownText).preferSource,
+    deferDisplayMath: assessLargeDocument(options.markdownText).windowedPreview,
     windowedPresentation: windowed,
     deferLocalLinks: true,
     allowLocalLinks: true,

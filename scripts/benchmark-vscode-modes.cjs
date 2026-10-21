@@ -37,6 +37,7 @@ exports.run = async () => {
     const ready = async (frame, mode) => frame.waitForFunction(({mode, empty}) => {
       const app = document.getElementById('app');
       if (!app || (mode && app.dataset.mode !== mode)) return false;
+      if (document.querySelector('.meo-preload-toolbar, .meo-preload-editor-shell')) return false;
       const selected = app.dataset.mode;
       if (document.querySelector(`button[data-mode="${selected}"]`)?.getAttribute('aria-selected') !== 'true') return false;
       const host = document.querySelector('.editor-host');
@@ -55,6 +56,9 @@ exports.run = async () => {
         : [...document.querySelectorAll('.cm-lineNumbers .cm-gutterElement')];
       const top = mode === 'preview' ? 0 : scroller.getBoundingClientRect().top;
       const first = candidates.find(element => element.getBoundingClientRect().bottom > top + 2);
+      const content = document.querySelector('.editor-host .cm-content');
+      const view = content?.cmTile?.root?.view;
+      const block = mode !== 'preview' && view ? view.lineBlockAtHeight(scroller.scrollTop) : null;
       return {
         mode, width: innerWidth, height: innerHeight, scale: devicePixelRatio,
         foreground: document.hasFocus(), visibility: document.visibilityState,
@@ -62,6 +66,7 @@ exports.run = async () => {
         scrollTop: scroller?.scrollTop, scrollHeight: scroller?.scrollHeight, clientHeight: scroller?.clientHeight,
         firstContentTop: preview?.querySelector('[data-source-line]')?.getBoundingClientRect().top,
         approximateTopLine: Number(mode === 'preview' ? first?.getAttribute('data-source-line') : first?.textContent) || null,
+        sourceRangeAtTop: block ? { from: view.state.doc.lineAt(block.from).number, to: view.state.doc.lineAt(block.to).number } : null,
         split: document.querySelector('.source-preview-button')?.getAttribute('aria-pressed') === 'true',
         liveSvgCount: document.querySelectorAll('.meo-mermaid-block svg').length,
         previewSvgCount: preview?.querySelectorAll('.meo-export-mermaid svg').length ?? 0
@@ -109,8 +114,15 @@ exports.run = async () => {
       }
       await wait(600);
       const settled = await snapshot(frame);
+      result.opens.push({ kind, expected, openToReadyMs, readingPositionReadyMs, launchToReadyMs: kind === 'process-open' ? launchToReadyMs : undefined, initial, settled });
       if (minimumRestoreScrollTop !== null) {
         assert.ok(settled.scrollTop > minimumRestoreScrollTop, 'Restored position must survive the settled snapshot');
+        const seed = JSON.parse(fs.readFileSync(path.join(output, 'seed.json'), 'utf8'));
+        if (settled.mode !== 'preview') {
+          const range = settled.sourceRangeAtTop;
+          assert.ok(range && seed.persistedPosition.line >= range.from - 2 && seed.persistedPosition.line <= range.to + 2,
+            `Restoration must retain the actual source range: ${JSON.stringify({ target: seed.persistedPosition, range, kind })}`);
+        }
       }
       // Preview may align the first block by removing page-top whitespace.
       // Require the first content to remain fully visible, not an exact margin.
@@ -118,10 +130,9 @@ exports.run = async () => {
         || (settled.mode === 'preview' && settled.firstContentTop >= -2);
       if (!config.restore && !atStart) result.failedOpen = { initial, settled };
       if (!config.restore) assert.ok(atStart, 'Restore disabled must keep the first content visible');
-      result.opens.push({ kind, expected, openToReadyMs, readingPositionReadyMs, launchToReadyMs: kind === 'process-open' ? launchToReadyMs : undefined, initial, settled,
-        resources: await frame.evaluate(() => performance.getEntriesByType('resource').filter(entry => /\.(js|css)(\?|$)/.test(entry.name)).map(entry => ({
+      result.opens[result.opens.length - 1].resources = await frame.evaluate(() => performance.getEntriesByType('resource').filter(entry => /\.(js|css)(\?|$)/.test(entry.name)).map(entry => ({
           name: entry.name.split('/').pop(), startTime: entry.startTime, duration: entry.duration, transferSize: entry.transferSize
-        }))) });
+        })));
       lastFrame = frame;
       return frame;
     };

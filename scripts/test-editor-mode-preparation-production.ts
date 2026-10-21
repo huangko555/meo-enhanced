@@ -30,7 +30,7 @@ function withPreparationGate(file: string): string | undefined {
   // Pause only this async boundary, without perturbing the parser's budgets
   // or unrelated production timers through a replacement of Date.now.
   const result = source.slice(0, position)
-    + 'if(globalThis.__modePreparationGate)await globalThis.__modePreparationGate;'
+    + 'if(globalThis.__modePreparationGate){globalThis.__modePreparationEntered=true;await globalThis.__modePreparationGate;}'
     + source.slice(position);
   preparedModules.set(file, result);
   return result;
@@ -65,9 +65,10 @@ try {
       value instanceof Error ? value.stack : String(value)).catch(() => '<unavailable>')));
     consoleErrors.push(parts.join(' '));
   });
+  let initialMode: 'live' | 'source' = 'source';
   await page.exposeFunction('__modeHost', (message: any) => message.type === 'ready' ? {
     type: 'init', documentId: 'file:///mode-preparation.md', text, version: 1,
-    savedRevision: { version: 1, text }, diagnostics: [], mode: 'source', uiLanguage: 'en',
+    savedRevision: { version: 1, text }, diagnostics: [], mode: initialMode, uiLanguage: 'en',
     sourceLineNumbers: 'on', previewAppearance: 'dark', previewFontFamily: '', previewSourceColoring: true,
     editorAppearance: 'dark', editorFontSizeMode: 'auto', editorFontSize: 14,
     gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false,
@@ -136,6 +137,31 @@ try {
     && !document.querySelector('.mode-group [aria-busy="true"]'));
   const finalText = await page.$eval('.editor-host .cm-content', element => (element as any).cmTile.root.view.state.doc.toString());
   assert.equal(finalText, text, 'cancellation and retry must retain the exact document');
+  stage = 'cold Live cancellation';
+  initialMode = 'live';
+  await page.evaluateOnNewDocument(() => {
+    const scope = window as any;
+    scope.__modePreparationGate = new Promise<void>(resolve => { scope.__releaseModePreparation = resolve; });
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => (window as any).__modePreparationEntered === true
+    && !!document.querySelector('.meo-preload-editor-shell'));
+  await page.evaluate(() => {
+    const scope = window as any, wrapper = document.querySelector('.editor-wrapper')!;
+    const observer = new MutationObserver(() => {
+      if (wrapper.classList.contains('meo-preload-editor-shell')) return;
+      scope.__coldReveal = { requested: document.querySelector('#app')?.getAttribute('data-mode'),
+        actual: document.querySelector('.editor-host > .cm-editor')?.classList.contains('meo-mode-source') };
+      observer.disconnect();
+    });
+    observer.observe(wrapper, { attributes: true, attributeFilter: ['class'] });
+    (document.querySelector('button[data-mode="source"]') as HTMLButtonElement).click();
+    scope.__releaseModePreparation();
+  });
+  await page.waitForFunction(() => !!(window as any).__coldReveal);
+  assert.deepEqual(await page.evaluate(() => (window as any).__coldReveal), { requested: 'source', actual: true },
+    'a newer mode intent during cold preparation must reveal that actual surface');
+  assert.equal(await page.$eval('.editor-host .cm-content', element => (element as any).cmTile.root.view.state.doc.toString()), text);
   assert.deepEqual(errors, []);
   console.log('Production mode preparation, cancellation and real-surface readiness passed');
 } catch (error) {

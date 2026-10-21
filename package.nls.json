@@ -32,7 +32,7 @@
   "config.contentMaxWidth": "Constrain the editor content to a centered 800px column.",
   "config.table.stickyHeader": "Keep a table header visible at the top of the editor while its body remains in view.",
   "config.readingPosition.restoreOnOpen": "Resume from the last reading position when reopening a document.",
-  "config.performance.largeDocumentOptimization": "Detect large documents from file size, line count, images, tables, math and diagrams. When enabled, prefer Source mode on the next open; you can still switch modes. Automatic performance optimizations remain active when this is off.",
+  "config.performance.largeDocumentOptimization": "Large document opening: when enabled, prefer Source mode; when disabled, use your last mode. You can always switch modes. This setting does not disable automatic performance optimizations.",
   "config.gitChanges": "Show change indicators in the editor.",
   "config.baseline.currentEdit": "diff: Latest Disk Version",
   "config.baseline.recentSave": "diff: Previous Saved Version",

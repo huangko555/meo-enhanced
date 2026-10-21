@@ -98,7 +98,7 @@ export function getRestoreReadingPositionOnOpen(): boolean {
 export function getLargeDocumentOptimizationEnabled(): boolean {
   return vscode.workspace
     .getConfiguration(EXTENSION_CONFIG_SECTION)
-    .get<boolean>(LARGE_DOCUMENT_OPTIMIZATION_SETTING_KEY, true);
+    .get<boolean>(LARGE_DOCUMENT_OPTIMIZATION_SETTING_KEY, false);
 }
 
 export function getExportEditorFontEnvironment(): { editorFontFamily?: string; editorFontWeight?: string; editorFontSizePx?: number } {

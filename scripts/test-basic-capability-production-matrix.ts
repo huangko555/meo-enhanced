@@ -506,7 +506,7 @@ async function largeDocumentStartupPreference(browser: Browser): Promise<void> {
   try {
     await openPreferences();
     assert.equal(await page.$eval(option + ' .settings-item-title', element => element.textContent),
-      'Open large documents faster');
+      'Large document opening: prefer Source');
     assert.equal(await page.$eval(toggle, element => element.getAttribute('aria-checked')), 'true');
     const description = option + ' .settings-description';
     await page.$eval(description, element => element.scrollIntoView({ block: 'center' }));
@@ -516,11 +516,13 @@ async function largeDocumentStartupPreference(browser: Browser): Promise<void> {
         bottom: rect.bottom, left: rect.left, visible: getComputedStyle(element).visibility };
     });
     assert.match(descriptionState.text, /Source mode/);
-    assert.match(descriptionState.text, /next time/);
+    assert.match(descriptionState.text, /last mode/);
+    assert.match(descriptionState.text, /automatic performance optimizations remain active/);
     assert.equal(descriptionState.visible, 'visible');
     assert.ok(descriptionState.top >= 8 && descriptionState.right <= 992
       && descriptionState.bottom <= 692 && descriptionState.left >= 8,
       `Large-document description was clipped by the viewport: ${JSON.stringify(descriptionState)}`);
+    if (process.env.MEO_TEST_SCREENSHOT) await page.screenshot({ path: process.env.MEO_TEST_SCREENSHOT });
     await page.click(toggle);
     assert.equal(await page.$eval(toggle, element => element.getAttribute('aria-checked')), 'false');
     const posted = await page.evaluate(() => (window as any).__hostMessages.filter(

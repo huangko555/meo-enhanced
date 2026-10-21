@@ -20,7 +20,10 @@ assert.deepEqual(assessLargeDocument('').dimensions, {
   images: 0,
   math: 0,
   richBlocks: 0,
-  codeFences: 0
+  codeFences: 0,
+  maxLineLength: 0,
+  maxCodeBlockLength: 0,
+  maxTableRows: 0
 });
 assert.equal(assessLargeDocument('你好').dimensions.bytes, 6, 'byte pressure must use UTF-8');
 assert.equal(ordinary.preferSource, false, 'ordinary documents must retain the Live default');
@@ -37,6 +40,25 @@ const shortCode = assessLargeDocument(('```javascript\nconst x = 1;\n```\n\n').r
 assert.equal(shortCode.preferSource, false);
 assert.equal(shortCode.dimensions.codeFences, 50);
 assert.equal(shortCode.boundedEditorWork, true, 'many short fences also require a bounded editing budget');
+const unlabeledCode = assessLargeDocument(('~~~\nplain code\n~~~\n\n').repeat(60));
+assert.equal(unlabeledCode.dimensions.codeFences, 60, 'unlabeled tilde fences must count as code blocks');
+const literalExample = assessLargeDocument('````markdown\n```mermaid\nA-->B\n```\n| A | B |\n| --- | --- |\n![literal](image.png)\n$$\nx\n$$\n````');
+assert.equal(literalExample.dimensions.codeFences, 1);
+assert.equal(literalExample.dimensions.richBlocks, 0, 'literal examples must not count as rendered resources');
+assert.equal(assessLargeDocument('> ~~~mermaid\n> A-->B\n> ~~~').dimensions.mermaid, 1);
+assert.equal(assessLargeDocument('```latex\nx^2\n```').dimensions.math, 1);
+assert.equal(assessLargeDocument('abc\r\n12345\r\n').dimensions.maxLineLength, 5);
+assert.equal(assessLargeDocument('```\n' + 'x'.repeat(40_000)).dimensions.maxCodeBlockLength, 40_004);
+assert.equal(assessLargeDocument('| A | B |\n| --- | --- |\n| a | b |\n| c | d |\n\nTail').dimensions.maxTableRows, 2);
+assert.equal(literalExample.dimensions.maxTableRows, 0);
+assert.equal(assessLargeDocument('| A | B |\n| --- | --- |\n' + '| --- | --- |\n'.repeat(4_096)).dimensions.maxTableRows, 4_096,
+  'delimiter-shaped cell contents must remain rows of one long table');
+const singleLongTable = assessLargeDocument('| A | B |\n| --- | --- |\n' + '| a | b |\n'.repeat(1_200));
+assert.ok(singleLongTable.pressure < 1 && singleLongTable.preferSource,
+  'the optional fast-opening preference must recognize one costly table in a short file');
+assert.equal(singleLongTable.boundedEditorWork, true, 'one large editable block needs a work budget regardless of byte density');
+assert.equal(singleLongTable.lightweightSourceSyntax, false, 'opening preferences must not change normal Source coloring');
+assert.equal(singleLongTable.windowedPreview, false, 'the table opening guard must not force an unproven Preview strategy');
 
 const combinedSubthresholdText = [
   ...Array.from({ length: 3_900 }, (_, index) => `line-${index} ${'x'.repeat(28)}`),
