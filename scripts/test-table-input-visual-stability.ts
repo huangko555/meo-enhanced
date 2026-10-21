@@ -25,6 +25,85 @@ async function focusCell(page: import('puppeteer-core').Page, value: string): Pr
   await waitForFrames(page, 8);
 }
 
+async function assertPendingCellSurvivesPresentation(page: import('puppeteer-core').Page): Promise<void> {
+  await page.evaluate(() => {
+    (window as any).__tableVisualEditor?.destroy();
+    document.getElementById('app')!.replaceChildren();
+    (window as any).__tableVisualEditor = (window as any).EmbeddedInputViewportHarness.createEditor({
+      parent: document.getElementById('app')!, initialMode: 'live', onApplyChanges() {},
+      text: '# Pending native edit\n\n| Kind | Content |\n| --- | --- |\n| Row | Value |\n\nAfter table.'
+    });
+  });
+  await waitForFrames(page, 12);
+  const selector = '.meo-md-html-table:not(.meo-md-html-table-sticky-table) textarea[data-table-row="0"][data-table-col="1"]';
+  await page.$eval(selector, (input: HTMLTextAreaElement) => { input.focus({ preventScroll: true }); input.setSelectionRange(0, 0); });
+  await page.keyboard.type('4');
+  await page.evaluate(() => (window as any).__tableVisualEditor.commitTransientEdits());
+  await waitForFrames(page, 8);
+  await page.keyboard.type('4');
+  // The frame refresh reads the accepted document while the native textarea
+  // already owns the next edit. getText() would flush that edit and hide this race.
+  await page.evaluate(() => {
+    const editor = (window as any).__tableVisualEditor, from = editor.view.state.doc.toString().indexOf('4Content');
+    editor.setDiagnostics([{ from, to: from + 1, severity: 1, message: 'Late presentation fixture' }]);
+  });
+  await waitForFrames(page, 4);
+  const value = await page.$eval(selector, (input: HTMLTextAreaElement) => ({ value: input.value, start: input.selectionStart,
+    end: input.selectionEnd, active: document.activeElement === input }));
+  if (value.value !== '44Content' || value.start !== 2 || value.end !== 2 || !value.active) {
+    throw new Error(`Late table presentation overwrote a newer native edit: ${JSON.stringify(value)}`);
+  }
+  await page.evaluate(() => (window as any).__tableVisualEditor.commitTransientEdits());
+  if (!(await page.evaluate(() => (window as any).__tableVisualEditor.getText())).includes('44Content')) {
+    throw new Error('The surviving native edit did not reach the document');
+  }
+  for (const scene of [
+    { row: 0, col: 1, start: 3, end: 6, insert: '75', key: '' },
+    { row: 0, col: 1, start: 2, end: 2, insert: '', key: 'Backspace' },
+    { row: 0, col: 1, start: 1, end: 1, insert: '', key: 'Delete' },
+    { row: 1, col: 0, start: 1, end: 1, insert: '4'.repeat(70), key: '' },
+    { row: 0, col: 1, start: 1, end: 4, insert: '**paste**', key: '' }
+  ]) {
+    const target = `.meo-md-html-table:not(.meo-md-html-table-sticky-table) textarea[data-table-row="${scene.row}"][data-table-col="${scene.col}"]`;
+    const before = await page.$eval(target, (input: HTMLTextAreaElement, scene) => {
+      input.focus({ preventScroll: true }); input.setSelectionRange(scene.start, scene.end); return input.value;
+    }, scene);
+    const from = scene.key === 'Backspace' ? scene.start - 1 : scene.start;
+    const to = scene.key === 'Delete' ? scene.end + 1 : scene.end;
+    const expected = before.slice(0, from) + scene.insert + before.slice(to), caret = from + scene.insert.length;
+    if (scene.key) await page.keyboard.press(scene.key);
+    else await page.keyboard.sendCharacter(scene.insert);
+    const baseline = await page.$eval(target, (input: HTMLTextAreaElement) => input.getBoundingClientRect().top);
+    await page.evaluate(before => {
+      const editor = (window as any).__tableVisualEditor, from = editor.view.state.doc.toString().indexOf(before);
+      if (from < 0) throw new Error('Pending edit fixture lost its accepted source');
+      editor.setDiagnostics([{ from, to: from + 1, severity: 1, message: `Late presentation ${from}` }]);
+    }, before);
+    await waitForFrames(page, 4);
+    const result = await page.$eval(target, (input: HTMLTextAreaElement) => ({ value: input.value,
+      start: input.selectionStart, end: input.selectionEnd, top: input.getBoundingClientRect().top,
+      active: document.activeElement === input }));
+    if (result.value !== expected || result.start !== caret || result.end !== caret || !result.active
+      || Math.abs(result.top - baseline) > 1) throw new Error(`Late presentation damaged ${JSON.stringify(scene)}: ${JSON.stringify(result)}`);
+    await page.evaluate(() => (window as any).__tableVisualEditor.commitTransientEdits());
+    if (!(await page.evaluate(() => (window as any).__tableVisualEditor.view.state.doc.toString())).includes(expected)) {
+      throw new Error('Replacement, deletion or inserted text was not committed');
+    }
+  }
+  const accepted = await page.$eval(selector, (input: HTMLTextAreaElement) => { input.focus({ preventScroll: true }); input.setSelectionRange(0, 0); return input.value; });
+  const external = await page.evaluate(accepted => (window as any).__tableVisualEditor.view.state.doc.toString().replace(accepted, 'External'), accepted);
+  await page.keyboard.type('X');
+  await page.evaluate(external => (window as any).__tableVisualEditor.setText(external), external);
+  await waitForFrames(page, 6);
+  const externalValue = await page.$eval(selector, (input: HTMLTextAreaElement) => input.value);
+  if (externalValue !== 'External') throw new Error(`Explicit external replacement retained an obsolete native edit: ${externalValue}`);
+  await page.evaluate(() => (window as any).__tableVisualEditor.commitTransientEdits());
+  if (await page.evaluate(() => (window as any).__tableVisualEditor.view.state.doc.toString()) !== external) {
+    throw new Error('A discarded native edit resurfaced after external replacement');
+  }
+  await page.evaluate(() => { (window as any).__tableVisualEditor.destroy(); document.getElementById('app')!.replaceChildren(); });
+}
+
 async function assertColumnReflowKeepsActiveCell(page: import('puppeteer-core').Page): Promise<void> {
   await page.setViewport({ width: 1280, height: 760, deviceScaleFactor: 1 });
   const resizeFirstColumn = async (delta: number) => {
@@ -390,6 +469,12 @@ async function main(): Promise<void> {
       content: ':root{--meo-background:#24292e;--meo-foreground:#e6edf3;--meo-code-background:#1b1f23;--meo-surface-background:#24292e;--meo-semantic-mutedForeground:#8b949e;--meo-font-live:Arial;--meo-font-live-weight:400;--meo-font-live-size:16px;--meo-font-source:monospace;--meo-font-source-weight:400;--meo-font-source-size:14px;--vscode-editor-font-family:monospace;--vscode-editor-font-size:14px;--vscode-editor-line-height:20px}'
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+    if (process.argv.includes('--pending-presentation-only')) {
+      await assertPendingCellSurvivesPresentation(page);
+      console.log('pending table input presentation passed');
+      return;
+    }
+    await assertPendingCellSurvivesPresentation(page);
     if (process.argv.includes('--column-reflow-only')) {
       await page.evaluate(() => {
         (window as any).__tableVisualEditor = { destroy() {} };

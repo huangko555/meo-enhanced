@@ -19,12 +19,13 @@ assert.ok(Buffer.byteLength(text) > 1_000_000, 'exercise the real large-document
 let primary: unknown, stage = 'startup';
 try {
   const only = process.argv.find(argument => argument.startsWith('--only='))?.slice(7);
-  for (const scene of [0, 1, 2]) {
-    const tall = scene === 2, row = tall ? 0 : scene, column = tall ? 0 : 1;
+  for (const scene of [0, 1, 2, 3, 4]) {
+    const tall = scene === 2, held = scene >= 3;
+    const row = tall || scene === 3 ? 0 : scene === 4 ? 1 : scene, column = tall ? 0 : scene === 4 ? 0 : 1;
     if (only && only !== String(scene) && !(tall && only === 'tall')) continue;
     const source = tall ? wideText : text, activeHeader = tall ? wideHeader : header;
     const headerFrom = source.indexOf(activeHeader), headerLine = source.slice(0, headerFrom).split('\n').length;
-    stage = tall ? 'overgrown narrow table header' : `native table editing session row ${row}`;
+    stage = tall ? 'overgrown narrow table header' : held ? `held input before existing cell content, row ${row}` : `native table editing session row ${row}`;
     const page = await browser.newPage(), host = await open(page, source);
     try {
       await page.setViewport({ width: 780, height: 570 });
@@ -53,7 +54,11 @@ try {
         }, selector); await delay(250);
       }
       const point = await page.$eval(selector, input => { const r = input.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + 10 }; });
-      await page.mouse.click(point.x, point.y); await page.keyboard.press('End'); await frames(page, 8);
+      await page.mouse.click(point.x, point.y); await frames(page, 8);
+      if (held) {
+        await page.keyboard.down('Control'); await page.keyboard.press('Home'); await page.keyboard.up('Control');
+        if (scene === 4) for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
+      } else await page.keyboard.press('End');
       const baseline = await page.evaluate(selector => {
         const scope = window as any, input = document.querySelector<HTMLTextAreaElement>(selector)!;
         const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
@@ -77,10 +82,14 @@ try {
         const rect = range.getBoundingClientRect();
         return { left: Math.floor(rect.left), top: Math.floor(rect.top), width: Math.ceil(rect.width), height: Math.ceil(rect.height) };
       });
-      const digits = '1234567890'.repeat(10);
+      const digits = held ? '4'.repeat(100) : '1234567890'.repeat(10);
       let typingEndedAt = 0;
       const typeAndSettle = async () => {
-        await page.keyboard.type(digits, { delay: 3 });
+        if (held) {
+          await page.keyboard.down('4'); await delay(400);
+          for (let i = 1; i < digits.length; i++) { await page.keyboard.down('4'); await delay(3); }
+          await page.keyboard.up('4');
+        } else await page.keyboard.type(digits, { delay: 3 });
         typingEndedAt = await page.evaluate(() => performance.now() - (window as any).__sessionStartedAt);
         await delay(8000); // Include auto-commit, worker acceptance and later band/height updates.
       };
@@ -92,9 +101,17 @@ try {
         assert.ok(sample.connected && sample.active, `${stage}: background presentation removed the editing surface`);
         if (!tall) assert.ok(Math.abs(sample.top - baseline.top) <= 1, `${stage}: active cell moved: ${JSON.stringify(sample)}`);
         assert.equal(sample.start, sample.end, `${stage}: native selection changed`);
+        if (held) {
+          const inserted = sample.value.length - baseline.value.length;
+          assert.ok(inserted >= 0 && inserted <= digits.length);
+          assert.equal(sample.value, baseline.value.slice(0, baseline.start) + digits.slice(0, inserted) + baseline.value.slice(baseline.start),
+            `${stage}: a late presentation overwrote pending characters`);
+          assert.equal(sample.start, baseline.start + inserted, `${stage}: caret jumped past the original content`);
+        }
       }
-      assert.equal(samples.at(-1)!.value, baseline.value + digits);
-      assert.equal(samples.at(-1)!.start, baseline.value.length + digits.length, `${stage}: retain the final caret`);
+      const expectedValue = baseline.value.slice(0, baseline.start) + digits + baseline.value.slice(baseline.end);
+      assert.equal(samples.at(-1)!.value, expectedValue);
+      assert.equal(samples.at(-1)!.start, baseline.start + digits.length, `${stage}: retain the final caret`);
       if (tall) {
         const final = samples.at(-1)!;
         assert.ok(final.height > final.viewportBottom - final.viewportTop, `${stage}: exercise a header taller than its viewport`);
@@ -107,7 +124,7 @@ try {
           `${stage}: continued moving after input`);
       }
       const expectedLines = source.split('\n'), editedLine = headerLine - 1 + (row === 0 ? 0 : 2);
-      expectedLines[editedLine] = expectedLines[editedLine]!.replace(`| ${baseline.value} |`, `| ${baseline.value + digits} |`);
+      expectedLines[editedLine] = expectedLines[editedLine]!.replace(`| ${baseline.value} |`, `| ${expectedValue} |`);
       assert.equal(host.readHost(), expectedLines.join('\n'), `${stage}: commit exact accepted source`);
       const tail = samples.filter(sample => sample.t > samples.at(-1)!.t - 2000).map(sample => sample.scroll);
       assert.ok(Math.max(...tail) - Math.min(...tail) <= 1, `${stage}: continued scrolling after settlement`);

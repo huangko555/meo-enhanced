@@ -2662,13 +2662,15 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     });
     if (contentChanged) {
       const values = [tableData.headerCells, ...tableData.rows];
+      const pending = this.cellInteraction.snapshot().pending;
       for (let row = 0; row < allRowInputs.length; row += 1) {
         for (let col = 0; col < allRowInputs[row].length; col += 1) {
           const input = allRowInputs[row][col];
           const value = tableCellSourceToEditorValue(values[row]?.[col] ?? '');
-          // A confirmed edit can reach the document while the same textarea
-          // already holds the next IME candidate. Preserve that native input.
-          if (input !== this.composingInput && input.value !== value) input.value = value;
+          // A late parse or diagnostic still describes the accepted source.
+          // The native textarea may already own a newer, uncommitted edit.
+          const ownsPending = pending.some(edit => edit.row === row && edit.col === col);
+          if (input !== this.composingInput && !ownsPending && input.value !== value) input.value = value;
           this.refreshCellPreviewFromInput(input);
         }
       }
@@ -3992,6 +3994,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     document.addEventListener('pointercancel', onDocumentPointerEnd, true);
     const onExternalPresentation = (event: Event) => {
       if (!(event instanceof CustomEvent) || event.detail?.owner !== this.view?.dom) return;
+      this.discardPendingCellEdits();
       this.exitTableInteraction(getWrap(), 'external');
     };
     document.addEventListener('meo-table-selection-external-presentation', onExternalPresentation);

@@ -1797,3 +1797,28 @@ The `59881b2a` production snapshot fails with 6,762 changed pixels; the new
 handoff passes. Reverse Preview-to-Source projection also retains fractional
 source-range progress inside wrapped lines and tall blocks, with single-write
 controller regressions rather than delayed correction loops.
+
+### Native edits ahead of accepted table source (2026-10-21)
+
+Native replay of `dc362ef9` at the early rich table catches a separate correctness
+race. Holding a digit at the beginning of an existing cell produces newer native
+text while the first character's source commit is still being presented. A late
+`HtmlTableWidget.updateDOM` calls `adoptEquivalentTableData`, assigns the accepted
+older source value to that same textarea, drops pending characters and moves its
+caret to the end. Captured host traffic contains version-only `applied` messages,
+not an old full-document echo; the actual value setter stack identifies the table
+presentation boundary.
+
+Table adoption now respects each cell's existing pending-edit owner as well as
+its composition owner. Other cells still accept source changes; committing and
+history keep their existing boundaries. Explicit external presentation discards
+the old pending edits before ending the native session, so they cannot mask or
+later overwrite the replacement. The small
+`test-table-input-visual-stability.ts --pending-presentation-only` regression
+reproduces `44Content` becoming `4Content` with caret 8 on the old code, through a
+late diagnostic presentation. It deliberately reads `view.state.doc` rather than
+`getText()`: the latter commits transient edits and would erase the overlap the
+test needs to exercise. Replacement, Backspace, Delete, inserted text and a long
+body-cell edit exercise the same boundary. Production session tests add held
+digits at the beginning and middle of existing cells, including a first-character
+commit, per-frame caret/content assertions and eight seconds of settlement.
