@@ -265,6 +265,8 @@ try {
     'Icon-only edit control exposes its action');
   await page.click(header + ' .meo-mermaid-mode-btn'); await frames(15);
   await page.waitForFunction(()=>document.querySelector('.meo-mermaid-toolbar')?.getAttribute('data-meo-mermaid-mode')==='edit');
+  // Explicit editing reveals source first; scroll again to exercise its floating header.
+  await pin();
   assert.ok(await page.$(header + ' .meo-native-source-preview-label .meo-mermaid-layout-btn'), 'The opaque split header includes the preview layout action');
   await page.hover(header + ' .meo-mermaid-layout-btn');
   await page.waitForSelector('.meo-tooltip.is-visible');

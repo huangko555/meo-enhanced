@@ -11,6 +11,7 @@ import { getMermaidDiagramPresentationFactory } from '../editor/mermaidDiagramPr
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import { sourcePresentationSelection } from '../editor/livePointerSelection';
 import { supersedeLiveInputDerivedWork } from '../editor/liveInputDerivedWork';
+import { editorViewportBounds } from '../editor/editorViewportBounds';
 import {
   MermaidDiagramWidget,
   createMermaidViewportState,
@@ -228,6 +229,35 @@ export function focusMermaidEditingOffset(
   view.focus();
   return true;
 }
+function setMermaidEditingMode(view: EditorView, anchor: number, editing: boolean, isCurrent: () => boolean): void {
+  const source = mermaidSourceForAnchor(view.state, anchor);
+  if (!source || !isCurrent()) return;
+  const controller = getViewportController(view);
+  const resolveToolbar = () => view.dom.querySelector<HTMLElement>(
+    `.meo-mermaid-toolbar[data-meo-block-from="${anchor}"]:not([data-meo-floating])`
+  );
+  const toolbar = resolveToolbar(), rect = toolbar?.getBoundingClientRect();
+  const bounds = editorViewportBounds(view);
+  const mutate = () => editing
+    ? focusMermaidEditingOffset(view, anchor, 0, isCurrent)
+    : closeMermaidEditing(view, anchor);
+  // Keep an already-visible target steady through late container reflow. An
+  // offscreen regular header must yield to revealing the actual editing target.
+  if (controller && toolbar && rect && rect.height > 0 &&
+    rect.top >= bounds.top && rect.bottom + 40 <= bounds.bottom) {
+    controller.retainElementTopWhileMutation(toolbar, resolveToolbar, mutate, isCurrent);
+    return;
+  }
+  mutate();
+  const position = editing ? source.lines[0]!.from : anchor;
+  if (controller) {
+    controller.revealPositionUntilStable(position, {
+      y: 'nearest', yMargin: 40
+    }, isCurrent);
+  } else if (isCurrent()) {
+    view.dispatch({ effects: EditorView.scrollIntoView(position, { y: 'nearest', yMargin: 40 }) });
+  }
+}
 function closeMermaidEditing(view: EditorView, anchor: number): void {
   const source = mermaidSourceForAnchor(view.state, anchor);
   if (!source) return;
@@ -245,7 +275,8 @@ export function finishMermaidEditing(view: EditorView): boolean {
   if (!view.dom.classList.contains('meo-mode-live')) return false;
   const source = activeMermaidSource(view.state) ?? mermaidSourceAt(view.state);
   if (!source || blockMode(view, source.anchor)?.manual !== 'edit') return false;
-  closeMermaidEditing(view, source.anchor);
+  const isCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
+  setMermaidEditingMode(view, source.anchor, false, isCurrent);
   return true;
 }
 function toggleLayout(view: EditorView, anchor: number): void {
@@ -329,18 +360,8 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
       const current = anchor();
       if (current === null) return;
       const isCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
-      const resolve = () =>
-        view.dom.querySelector<HTMLElement>(
-          `.meo-mermaid-toolbar[data-meo-block-from="${current}"]:not([data-meo-floating])`
-        );
-      const currentToolbar = resolve(),
-        closing = blockMode(view, current)?.manual === 'edit';
-      const mutate = () =>
-        closing ? closeMermaidEditing(view, current) : focusMermaidEditingOffset(view, current, 0, isCurrent);
-      const controller = getViewportController(view);
-      if (controller && currentToolbar)
-        controller.retainElementTopWhileMutation(currentToolbar, resolve, mutate, isCurrent);
-      else mutate();
+      const closing = blockMode(view, current)?.manual === 'edit';
+      setMermaidEditingMode(view, current, !closing, isCurrent);
       if (closing)
         requestAnimationFrame(() => {
           if (isCurrent())

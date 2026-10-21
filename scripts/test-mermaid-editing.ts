@@ -60,7 +60,7 @@ try {
     }, text);
     await frames();
   };
-  const mount = async (text: string, width: number, language = 'en', appearance: 'light' | 'dark' = 'dark') => {
+  const mount = async (text: string, width: number, language = 'en', appearance: 'light' | 'dark' = 'dark', editing = true) => {
     await page.setViewport({ width, height: 800, deviceScaleFactor: 1 });
     await page.evaluate(
       ({ text, language, appearance }) => {
@@ -82,6 +82,7 @@ try {
     );
     await page.waitForSelector('.meo-mermaid-block svg');
     await frames();
+    if (!editing) return;
     await page.$eval('.meo-mermaid-mode-btn', (b) => (b as HTMLButtonElement).click());
     await frames();
     await page.waitForFunction(
@@ -94,6 +95,127 @@ try {
     );
     assert.equal(await page.$('.meo-mermaid-source-editor'), null, 'No internal source editor remains');
   };
+  const assertNavigation = async () => {
+    fs.mkdirSync('.local/mermaid-navigation-acceptance', {recursive:true});
+    const text = 'Before\n\n```mermaid\nflowchart TD\n' +
+      Array.from({ length: 35 }, (_, i) => `N${i}[Stage ${i}] --> N${i + 1}[Stage ${i + 1}]`).join('\n') + '\n' +
+      Array.from({ length: 65 }, (_, i) => '%% comment ' + i).join('\n') + '\n```\n\n' +
+      Array.from({ length: 30 }, (_, i) => 'After paragraph ' + i + '\n').join('\n');
+    const opening = text.indexOf('```mermaid'), first = text.indexOf('flowchart TD'), closing = text.lastIndexOf('```');
+    const geometry = () => page.evaluate(({opening}) => {
+      const view = (window as any).nativeEditor.view;
+      const bounds = (window as any).MermaidEditingHarness.editorViewportBounds(view);
+      const caret = view.coordsAtPos(view.state.selection.main.head);
+      const block = view.lineBlockAt(opening);
+      const blockTop = view.documentTop + block.top;
+      return {top:bounds.top, bottom:bounds.bottom, caretTop:caret?.top, caretBottom:caret?.bottom,
+        blockTop, scroll:view.scrollDOM.scrollTop, head:view.state.selection.main.head, focused:view.hasFocus};
+    }, {opening});
+    for (const width of [520, 1200]) {
+      await mount(text, width, width === 520 ? 'zh-CN' : 'en', width === 520 ? 'light' : 'dark', false);
+      await page.evaluate(opening => {
+        const view = (window as any).nativeEditor.view;
+        view.scrollDOM.scrollTop = view.lineBlockAt(opening).top + 800;
+      }, opening);
+      await frames(12);
+      const sticky = '.meo-block-sticky-header:not([hidden]) .meo-mermaid-mode-btn';
+      await page.waitForSelector(sticky, {visible:true});
+      await page.click(sticky);
+      await frames(20);
+      const entered = await geometry();
+      assert.equal(entered.head, first, 'Explicit edit starts on the first Mermaid source line');
+      assert.ok(entered.focused && entered.caretTop! >= entered.top + 30 && entered.caretBottom! <= entered.bottom,
+        `Sticky edit must reveal the source caret below its header (${width}): ${JSON.stringify(entered)}`);
+      assert.equal(Boolean(await page.$('.meo-mermaid-inline-preview')), width === 1200,
+        'Navigation covers stacked and side-by-side layouts');
+      await page.screenshot({path:`.local/mermaid-navigation-acceptance/enter-${width}.png`});
+      for (const exit of ['button', 'escape']) {
+        if (exit === 'escape') {
+          await page.$eval('.meo-mermaid-toolbar:not([data-meo-floating]) .meo-mermaid-mode-btn', b=>(b as HTMLButtonElement).click());
+          await frames(12);
+        }
+        await page.evaluate(position => {
+          const view = (window as any).nativeEditor.view;
+          view.dispatch({selection:{anchor:position}, scrollIntoView:true}); view.focus();
+        }, text.indexOf('%% comment 55'));
+        await frames(16);
+        if (exit === 'button') { await page.waitForSelector(sticky,{visible:true}); await page.click(sticky); }
+        else await page.keyboard.press('Escape');
+        await frames(24);
+        const finished = await geometry();
+        assert.ok(finished.blockTop >= finished.top && finished.blockTop < finished.top + 100,
+          `Explicit ${exit} reveals the diagram beginning (${width}): ${JSON.stringify(finished)}`);
+        assert.equal((await read()).text,text,'Navigation never changes Markdown');
+        assert.equal(await page.$('.meo-mermaid-editing-preview'),null,'Explicit exit folds source');
+        await page.screenshot({path:`.local/mermaid-navigation-acceptance/${exit}-${width}.png`});
+      }
+      const visible = await geometry();
+      await page.$eval('.meo-mermaid-toolbar:not([data-meo-floating]) .meo-mermaid-mode-btn', b=>(b as HTMLButtonElement).click());
+      await frames(16);
+      const reopened = await geometry();
+      assert.ok(Math.abs(reopened.scroll - visible.scroll) <= 1,
+        'Entering an already visible source does not scroll: ' + JSON.stringify({visible,reopened}));
+      await page.keyboard.press('Escape');
+      await frames(20);
+      assert.ok(Math.abs((await geometry()).scroll - visible.scroll) <= 1,
+        'Finishing beside an already visible diagram does not scroll');
+      await page.$eval('.meo-mermaid-toolbar:not([data-meo-floating]) .meo-mermaid-mode-btn', b=>(b as HTMLButtonElement).click());
+      await frames(12);
+      await page.evaluate(position => {
+        const view = (window as any).nativeEditor.view;
+        view.dispatch({selection:{anchor:position},scrollIntoView:true});view.focus();
+      }, closing + 3);
+      await frames(12);
+      await page.keyboard.press('ArrowDown');
+      await frames(24);
+      const left = await geometry();
+      assert.ok(left.head > closing + 3 && left.caretTop! >= left.top && left.caretBottom! <= left.bottom,
+        `Natural keyboard exit follows the outside caret (${width}): ${JSON.stringify(left)}`);
+      assert.equal(await page.$('.meo-mermaid-editing-preview'),null);
+      await page.$eval('.meo-mermaid-toolbar:not([data-meo-floating]) .meo-mermaid-mode-btn', b=>(b as HTMLButtonElement).click());
+      await frames(12);
+      const after = text.indexOf('After paragraph 8');
+      const point = await page.evaluate(async position => {
+        const view = (window as any).nativeEditor.view;
+        view.scrollDOM.scrollTop = view.lineBlockAt(position).top - 200;
+        for (let i=0;i<12;i++) await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
+        const caret = view.coordsAtPos(position)!;
+        return {x:caret.left+3,y:(caret.top+caret.bottom)/2};
+      },after);
+      await page.mouse.click(point.x,point.y);
+      await frames(24);
+      const clicked = await geometry();
+      assert.ok(clicked.head >= after && clicked.head <= after + 'After paragraph 8'.length &&
+        clicked.caretTop! >= clicked.top && clicked.caretBottom! <= clicked.bottom,
+        `Clicking prose follows its caret without returning to the diagram (${width}): ${JSON.stringify(clicked)}`);
+      assert.equal(await page.$('.meo-mermaid-editing-preview'),null);
+      assert.equal((await read()).text,text);
+      await page.evaluate(opening => {
+        const view = (window as any).nativeEditor.view;
+        view.scrollDOM.scrollTop = view.lineBlockAt(opening).top + 800;
+      },opening);
+      await frames(12);
+      await page.waitForSelector(sticky,{visible:true});
+      await page.click(sticky);
+      await frames(2);
+      const beforeWheel = await geometry();
+      await page.mouse.move(width/2,400);
+      await page.mouse.wheel({deltaY:400});
+      await frames(12);
+      const wheeled = await geometry();
+      assert.ok(wheeled.scroll > beforeWheel.scroll + 100, 'A new wheel gesture supersedes the edit reveal');
+      await frames(24);
+      assert.ok(Math.abs((await geometry()).scroll-wheeled.scroll) <= 2,
+        'Settling a reveal must not pull back a later wheel gesture');
+      console.log(`Mermaid explicit/natural navigation passed (${width})`);
+    }
+  };
+  await assertNavigation();
+  if (process.argv.includes('--navigation-only')) {
+    assert.deepEqual(errors, []);
+    console.log('Mermaid navigation contract passed');
+    process.exitCode = 0;
+  } else {
   const containers = [
     { name: 'plain', before: 'Before\n\n', prefix: '' },
     { name: 'list', before: 'Before\n\n- Parent\n\n', prefix: '  ' },
@@ -441,6 +563,7 @@ try {
   console.log(
     `Native Mermaid editing passed: ${cases} container/width cases, six long-source containers, local layout, history, IME, controls and bilingual appearances`
   );
+  }
 } catch (error) {
   failure = error;
 }
