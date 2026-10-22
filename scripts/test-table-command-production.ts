@@ -896,10 +896,12 @@ async function main() {
     assert.equal(await page.evaluate(() => (window as any).__tableCommandMatrixEditor.view.state.doc.toString()), deleteOriginal);
     assert.equal(await page.$eval(deleteButton, button => button.textContent), 'Delete table');
     assert.equal(await page.$eval(deleteButton, button => button.classList.contains('is-delete-armed')), true);
-    const middleWidth = await page.$eval(deleteButton, async button => {
-      await new Promise(resolve => setTimeout(resolve, 60));
-      return button.getBoundingClientRect().width;
-    });
+    // Wall-clock timers can run before Chromium advances its animation frame.
+    await page.waitForFunction(({ selector, startWidth }) => {
+      const button = document.querySelector(selector);
+      return button && button.getBoundingClientRect().width > startWidth;
+    }, { polling: 'raf', timeout: 1200 }, { selector: deleteButton, startWidth: deleteStart.width });
+    const middleWidth = await page.$eval(deleteButton, button => button.getBoundingClientRect().width);
     assert.ok(middleWidth > deleteStart.width, 'the confirmation expands with a width transition');
     await page.waitForFunction(selector => !document.querySelector(selector)!.classList.contains('is-delete-armed'), { timeout: 4500 }, deleteButton);
     assert.equal(await page.evaluate(() => (window as any).__tableCommandMatrixEditor.view.state.doc.toString()), deleteOriginal, 'timeout only cancels confirmation');

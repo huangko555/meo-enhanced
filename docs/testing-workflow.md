@@ -1498,6 +1498,10 @@ automatic font sizing disables the whole stepper. Toolbar checks cover localized
 HTML-comment labels and consistent indicator insets.
 Animation checks explicitly emulate both motion preferences so desktop accessibility
 settings cannot disable the ordinary-motion branch of the fixture.
+Table delete-confirmation checks wait for actual rendered width progress before
+asserting expansion. A fixed JavaScript delay does not establish that Chromium's
+animation timeline advanced; keep the bounded progress wait and the behavioral
+assertion, together with timeout cancellation, paging, deletion and history checks.
 Popup scroll-following checks use a real wheel gesture and verify its actual scroll
 distance before comparing menu coordinates; direct scroll assignment is not user input.
 Sticky-header occlusion fixtures wait for an edited tall row to shrink before using
