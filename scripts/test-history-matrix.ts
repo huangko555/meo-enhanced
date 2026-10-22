@@ -388,6 +388,9 @@ async function editRenderedBlock(
       isCurrent: async () => true,
       settleScroll: async () => {
         await settleTargetModeControl();
+        // Navigation starts another source presentation. Its visible box and
+        // scrollend can precede final layout; acquire the native target afterward.
+        await page.evaluate(async () => (window as any).__historyMatrixEditor.whenVisiblePresentationReady(1_200));
         return 'settled';
       },
       isTargetSettled: async () => false,

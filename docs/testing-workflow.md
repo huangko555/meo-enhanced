@@ -294,6 +294,12 @@ When positioning a popup after typing, use a native wheel gesture and verify the
 actual anchor position before testing its edge layout. Assigning `scrollTop`
 alone does not signal a new user scroll and can compete with input retention.
 
+For native block-action clicks, wait for `whenVisiblePresentationReady` after the
+last fixture navigation and before acquiring the final control handle. A visible
+box and `scrollend` may precede that navigation's source presentation; stale
+coordinates can turn a button click into a source selection. Preserve actual
+pointer events and the existing identity/replacement guards.
+
 Document navigation may itself open a rendered block's source. Wait for that
 presentation before operating Edit/Finish or layout controls, and locate Mermaid
 toolbars by their source position rather than a label that changes on completion.
