@@ -2,6 +2,7 @@ import { EditorView } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
 import { getGitDiffOverviewSegments } from './gitDiffGutter';
 import { getLiveRenderedBlockAtLine } from './liveRenderedBlocks';
+import { tableRowWindowFor } from '../editor/tableRowWindow';
 
 const minMarkerHeightPx = 2;
 
@@ -86,6 +87,18 @@ export function getLiveTableRowGeometry(view: EditorView, lineNumbers: ReadonlyS
     const bottom = top + rowRect.height;
     if (Number.isFinite(top) && Number.isFinite(bottom) && bottom > top) {
       rows.set(lineNumber, { top, bottom });
+    }
+  }
+  for (const body of view.dom.querySelectorAll<HTMLTableSectionElement>('table[data-meo-table-windowed] > tbody')) {
+    const window = tableRowWindowFor(body);
+    if (!window) continue;
+    const header = body.parentElement?.querySelector<HTMLElement>('thead tr[data-source-line-number]');
+    const firstLine = Number(header?.dataset.sourceLineNumber) + 2;
+    const top = scrollTop + body.getBoundingClientRect().top - scrollRect.top;
+    for (const line of lineNumbers) {
+      if (rows.has(line)) continue;
+      const bounds = window.bounds(line - firstLine);
+      if (bounds) rows.set(line, { top: top + bounds.top, bottom: top + bounds.bottom });
     }
   }
   return rows;

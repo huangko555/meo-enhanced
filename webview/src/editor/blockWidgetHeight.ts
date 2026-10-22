@@ -166,6 +166,18 @@ function estimateTableHeight(
   request: Extract<BlockWidgetHeightRequest, { kind: 'table' }>,
   metrics: BlockWidgetLayoutMetrics
 ): number {
+  return projectTableLayout(request, metrics).rowHeights.reduce((sum, height) => sum + height, 0);
+}
+
+/** Whole-source column preferences keep a row window independent of which
+ * cells happen to be mounted. Rendering later corrects its row-height estimates. */
+export function estimateTableLayout(request: Extract<BlockWidgetHeightRequest, { kind: 'table' }>) {
+  return projectTableLayout(request, readLayoutMetrics(request.contentWidth));
+}
+
+function projectTableLayout(
+  request: Extract<BlockWidgetHeightRequest, { kind: 'table' }>, metrics: BlockWidgetLayoutMetrics
+) {
   // Column sizing and row wrapping reuse the same lines and font metrics.
   // Keep measurements local so later font loads and layout changes remeasure.
   const widths = new Map<string, number>();
@@ -190,7 +202,7 @@ function estimateTableHeight(
   const contentWidths = desiredColumnWidths.map((width) => Math.max(32, width * widthScale - metrics.fontSize));
   const cellVerticalInset = metrics.fontSize * 0.5625;
 
-  return matrix.reduce((height, row) => {
+  const rowHeights = matrix.map(row => {
     const wrappedLines = row.reduce((maximum, cell, column) => {
       // The source editor is hidden outside an active cell. Reserving height for
       // Markdown punctuation or image URLs makes virtual rows taller than their
@@ -205,8 +217,10 @@ function estimateTableHeight(
       // hidden Markdown textarea, so focusing a cell never changes row height.
       return Math.max(maximum, renderedLines, sourceLines);
     }, 1);
-    return height + metrics.lineHeight * wrappedLines + cellVerticalInset;
-  }, 0);
+    return metrics.lineHeight * wrappedLines + cellVerticalInset;
+  });
+  const columnWidths = desiredColumnWidths.map(width => width * widthScale);
+  return { columnWidths, rowHeights };
 }
 
 function estimateHtmlBlockHeight(
@@ -250,7 +264,9 @@ function estimateHtmlBlockHeight(
  * block slightly early is cheaper than correcting the visible document late.
  */
 export function estimateBlockWidgetHeight(request: BlockWidgetHeightRequest): number {
-  if (finitePositive(request.measuredHeight)) return boundedHeight(request.measuredHeight);
+  // A measured block is no longer speculative. Capping a real long table makes
+  // CodeMirror's next height map discard the viewport containing its native cell.
+  if (finitePositive(request.measuredHeight)) return Math.max(MIN_ESTIMATE, request.measuredHeight);
   const metrics = readLayoutMetrics('contentWidth' in request ? request.contentWidth : undefined);
   switch (request.kind) {
     case 'long-code-control':
@@ -277,7 +293,7 @@ export function estimateBlockWidgetHeight(request: BlockWidgetHeightRequest): nu
             : Math.max(1, Math.min(6, request.html.match(/class="mtr"/g)?.length ?? 1)) * metrics.fontSize * 1.2
       );
     case 'table':
-      return boundedHeight(estimateTableHeight(request, metrics));
+      return Math.max(MIN_ESTIMATE, estimateTableHeight(request, metrics));
     case 'html-block':
       return boundedHeight(estimateHtmlBlockHeight(request, metrics));
   }

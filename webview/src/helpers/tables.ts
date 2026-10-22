@@ -1,5 +1,6 @@
 import { editorScrollIntoView } from '../editor/scrollEffects';
 import { tableHeaderFitsStickyViewport } from '../editor/tableStickyHeaderPolicy';
+import { createTableRowWindow, type TableRowWindow } from '../editor/tableRowWindow';
 import { blockInsertion, type MarkdownInputContext } from '../editor/blockInsertion';
 import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
 import { markLiveInputNestedProjection, usesLargeDocumentDerivedWorkBudget } from '../editor/liveInputDerivedWork';
@@ -104,7 +105,7 @@ import {
   parseTsvTableClipboard,
   type TableClipboardMatrix
 } from '../editor/tableClipboard';
-import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
+import { estimateBlockWidgetHeight, estimateTableLayout } from '../editor/blockWidgetHeight';
 import {
   AlignCenter,
   AlignLeft,
@@ -439,12 +440,13 @@ export function tableUsableViewportBounds(view: EditorView, element: Element) {
 export function focusTableHistoryChange(
   view: EditorView,
   changed: { from: number; to: number },
-  previousScrollTop: number,
+  previousViewport: { scrollTop: number; selection: { lineNumber: number; viewportOffset?: number } },
   targetPosition?: number,
   isCurrent: () => boolean = () => true,
   semanticTarget?: TableHistoryFocusTarget
 ): 'not-rendered' | 'restored' | 'retry' {
   if (!isCurrent()) return 'not-rendered';
+  const previousScrollTop = previousViewport.scrollTop;
 
   const changedLine = view.state.doc.lineAt(Math.min(changed.from, view.state.doc.length)).number;
   const refreshCurrentInputRange = (input: HTMLTextAreaElement): boolean => {
@@ -455,7 +457,18 @@ export function focusTableHistoryChange(
     // presentation is replaced. Never focus that stale textarea: it would be
     // detached on the next frame and the restored focus would immediately vanish.
     const currentSource = view.state.doc.sliceString(from, to).trim();
-    if (tableCellEditorValueToSource(input.value).trim() !== currentSource) return false;
+    if (tableCellEditorValueToSource(input.value).trim() !== currentSource) {
+      if (!semanticTarget?.contentOnly) return false;
+      // This history event proves the table topology is unchanged. The
+      // accepted cell source can update its retained native owner immediately,
+      // independently of the whole-document Worker presentation.
+      input.value = tableCellSourceToEditorValue(currentSource);
+      const shell = input.closest<HTMLElement>('.meo-md-html-table-shell');
+      const owner = shell ? tableDomOwners.get(shell) : undefined;
+      owner?.refreshCellPreviewFromInput(input);
+      const row = input.closest('tr');
+      if (row) owner?.resizeRow(row);
+    }
     return true;
   };
   const findInput = () => {
@@ -463,18 +476,12 @@ export function focusTableHistoryChange(
       const tableStartLine = view.state.doc.lineAt(
         Math.max(0, Math.min(semanticTarget.tableFrom, view.state.doc.length))
       ).number;
-      const input = view.dom.querySelector<HTMLTextAreaElement>(
-        `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${tableStartLine}"] ` +
-        `.meo-md-html-table:not(.meo-md-html-table-sticky-table) ` +
-        `textarea[data-table-row="${semanticTarget.row}"][data-table-col="${semanticTarget.col}"]`
-      );
+      const input = ensureMountedTableCell(view, tableStartLine, semanticTarget.row, semanticTarget.col);
       if (input && refreshCurrentInputRange(input)) return input;
     }
     let closest: { input: HTMLTextAreaElement; distance: number; viewportDistance: number } | null = null;
     const viewport = view.scrollDOM.getBoundingClientRect();
-    for (const input of view.dom.querySelectorAll<HTMLTextAreaElement>(
-      '.meo-md-html-table-wrap textarea[data-table-row][data-table-col]'
-    )) {
+    for (const input of mountedTableInputsForLine(view, changedLine)) {
       const sourceLine = Number.parseInt(input.closest('tr')?.dataset.sourceLineNumber ?? '', 10);
       if (sourceLine !== changedLine) continue;
       if (!refreshCurrentInputRange(input)) continue;
@@ -510,7 +517,7 @@ export function focusTableHistoryChange(
     if (!range) return 'not-rendered' as const;
     const { from: cellFrom, to: cellTo } = range;
     const sourceCaret = Math.min(Math.max((targetPosition ?? changed.to) - cellFrom, 0), cellTo - cellFrom);
-    const caret = semanticTarget
+    const caret = semanticTarget && !semanticTarget.contentOnly
       ? Math.min(Math.max(semanticTarget.caret, 0), input.value.length)
       : tableCellSourceOffsetToEditorOffset(input.value, sourceCaret);
     input.focus({ preventScroll: true });
@@ -519,6 +526,18 @@ export function focusTableHistoryChange(
     const cell = input.closest<HTMLElement>(tableCellSelector);
     if (!cell) return 'restored' as const;
     const scrollerRect = view.scrollDOM.getBoundingClientRect();
+    const priorOffset = previousViewport.selection.viewportOffset;
+    if (priorOffset !== undefined && previousViewport.selection.lineNumber === changedLine) {
+      // A rebuilt row window may have different estimates above this cell.
+      // Preserve its painted source row rather than an obsolete absolute offset.
+      const row = input.closest('tr')!;
+      const controller = getViewportController(view);
+      if (controller) controller.retainElementTopWhileMutation(row,
+        () => mountedTableInputsForLine(view, changedLine)[0]?.closest('tr') ?? null,
+        () => {}, () => true, scrollerRect.top + priorOffset);
+      else view.scrollDOM.scrollTop += row.getBoundingClientRect().top - scrollerRect.top - priorOffset;
+      return 'restored' as const;
+    }
     const usableViewport = tableUsableViewportBounds(view, cell);
     const caretRect = tableCellCaretViewportBounds(input);
     const caretTop = caretRect.top - scrollerRect.top + view.scrollDOM.scrollTop;
@@ -2396,6 +2415,31 @@ const mountedTableWidgets = new WeakMap<EditorView, Set<HtmlTableWidget>>();
 const tableDomOwners = new WeakMap<HTMLElement, HtmlTableWidget>();
 const cellPreviewSignatures = new WeakMap<WidgetTableData, string>();
 
+/** Navigation names a source cell; the reading projection mounts it on demand. */
+export function ensureMountedTableCell(view: EditorView, startLine: number, row: number, col: number): HTMLTextAreaElement | undefined {
+  const shell = view.dom.querySelector<HTMLElement>(`.meo-md-html-table-shell[data-meo-rendered-block-start-line="${startLine}"]`);
+  return shell ? tableDomOwners.get(shell)?.cellInput(row, col) : undefined;
+}
+
+/** Source navigation can address a row that has never had cell DOM. */
+export function mountedTableInputsForLine(view: EditorView, line: number): readonly HTMLTextAreaElement[] {
+  for (const owner of mountedTableWidgets.get(view) ?? []) {
+    const start = owner.tableData.startLine;
+    if (line < start || line > owner.tableData.endLine || line === start + 1) continue;
+    const row = line === start ? 0 : line - start - 1;
+    owner.cellInput(row, 0);
+    return owner.domRefs?.allRowInputs[row] ?? [];
+  }
+  return [];
+}
+
+export function mountedTableEntryInput(wrap: HTMLElement, direction: 'up' | 'down'): HTMLTextAreaElement | undefined {
+  const shell = wrap.closest<HTMLElement>('.meo-md-html-table-shell');
+  const owner = shell ? tableDomOwners.get(shell) : undefined;
+  return owner?.cellInput(direction === 'down' ? 0 : owner.tableData.rows.length,
+    direction === 'down' ? 0 : owner.tableData.colCount - 1);
+}
+
 function cellPreviewSignature(data: WidgetTableData): string {
   let signature = cellPreviewSignatures.get(data);
   if (signature === undefined) {
@@ -2497,6 +2541,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   deleteTableConfirmationTimer: number | null = null;
   tableCaretRevealGeneration: number;
   destroyed: boolean;
+  rowWindow: TableRowWindow | undefined;
 
   constructor(
     tableData: WidgetTableData,
@@ -2658,8 +2703,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     setSourceData(table, 'tableFrom', String(tableData.from));
     setSourceData(table, 'tableTo', String(tableData.to));
     setSourceData(table, 'tableSignature', tableWidthIdentity(tableData));
-    if (previousStartLine !== tableData.startLine) rowEntries.forEach(({ row }, index) => {
-      setSourceData(row, 'sourceLineNumber', String(tableData.startLine + (index === 0 ? 0 : index + 1)));
+    if (previousStartLine !== tableData.startLine) rowEntries.forEach(({ row }) => {
+      const bodyIndex = row.dataset.tableBodyRow;
+      setSourceData(row, 'sourceLineNumber', String(tableData.startLine + (bodyIndex === undefined ? 0 : Number(bodyIndex) + 2)));
     });
     if (contentChanged) {
       const values = [tableData.headerCells, ...tableData.rows];
@@ -2823,7 +2869,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   resolveCurrentTableStartLine(view: EditorView, row: number, fallbackRange: TableRange | null = null): number | null {
-    const renderedRow = this.domRefs?.rowEntries[row]?.row;
+    const renderedRow = this.domRefs?.allRowInputs[row]?.[0]?.closest('tr');
     const renderedLine = Number.parseInt(renderedRow?.dataset.sourceLineNumber ?? '', 10);
     const candidate = renderedLine - (row === 0 ? 0 : row + 1);
     if (
@@ -2839,19 +2885,34 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   readCellMatrix(): CellMatrix {
     if (!this.domRefs) return { headerCells: [], rows: [], alignments: [] };
     const { headerInputs, rowInputs } = this.domRefs;
+    const sourceHeader = this.sourceRow(0);
     const headerCells = normalizeRow(
-      headerInputs.map((input) => tableCellEditorValueToSource(input.value).trim()),
+      Array.from({ length: this.tableData.colCount }, (_, column) => headerInputs[column]
+        ? tableCellEditorValueToSource(headerInputs[column].value).trim() : sourceHeader[column] ?? ''),
       this.tableData.colCount,
       ''
     );
 
-    const rows = rowInputs.map((inputs) => normalizeRow(
-      inputs.map((input) => tableCellEditorValueToSource(input.value).trim()),
-      this.tableData.colCount,
-      ''
-    ));
+    const rows = this.tableData.rows.map((_source, row) => {
+      const source = this.sourceRow(row + 1);
+      return normalizeRow(
+        Array.from({ length: this.tableData.colCount }, (_, column) => rowInputs[row]?.[column]
+          ? tableCellEditorValueToSource(rowInputs[row][column].value).trim() : source[column] ?? ''),
+        this.tableData.colCount,
+        ''
+      );
+    });
 
     return { headerCells, rows, alignments: this.tableData.alignments };
+  }
+
+  sourceRow(row: number): readonly string[] {
+    const line = this.tableData.startLine + (row === 0 ? 0 : row + 1);
+    const doc = this.view?.state.doc;
+    // The accepted source may be newer than the asynchronous presentation.
+    // Evicting a row must never restore that older presentation's cell text.
+    if (doc && line >= 1 && line <= doc.lines) return parseTableRowCells(doc.line(line).text).cells;
+    return row === 0 ? this.tableData.headerCells : this.tableData.rows[row - 1] ?? [];
   }
 
   updateBodyRowDatasets(rowInputs: HTMLTextAreaElement[][], cellGrid: HTMLTableCellElement[][]) {
@@ -3148,8 +3209,13 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   focusCellInputAt(row: number, col: number, caret: number | null = null) {
-    const input = this.domRefs?.allRowInputs?.[row]?.[col];
+    const input = this.cellInput(row, col);
     return input ? this.focusTableInput(input, caret) : false;
+  }
+
+  cellInput(row: number, col: number): HTMLTextAreaElement | undefined {
+    if (row > 0) this.rowWindow?.ensure(row - 1);
+    return this.domRefs?.allRowInputs[row]?.[col];
   }
 
   moveVerticalOutOfTable(
@@ -3369,7 +3435,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         continue;
       }
       runPrimary(clearNativeTextSelection);
-      const input = this.domRefs?.allRowInputs[effect.cell.row]?.[effect.cell.col];
+      const input = this.cellInput(effect.cell.row, effect.cell.col);
       if (!(input instanceof HTMLTextAreaElement)) continue;
       runPrimary(() => this.focusTableInput(input, effect.anchorCaret, { scrollCellIntoView: false }));
       runPrimary(() => input.setSelectionRange(
@@ -3445,7 +3511,10 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
   tableCellCopyValue(row: number, col: number): TableCellCopyValue {
     const input = this.domRefs?.allRowInputs[row]?.[col];
-    const preview = this.domRefs?.cellGrid[row]?.[col]?.querySelector('.meo-md-html-table-cell-preview');
+    const source = input ? tableCellEditorValueToSource(input.value).trim()
+      : this.sourceRow(row)[col]?.trim() ?? '';
+    const mounted = this.domRefs?.cellGrid[row]?.[col]?.querySelector('.meo-md-html-table-cell-preview');
+    const preview = mounted ?? this.createCellPreview(source, this.cellDiagnostics(row, col), this.cellSourceRange(row, col));
     const readInline = (parent: Node): TableCellCopyInline[] => {
       const inline: TableCellCopyInline[] = [];
       for (const node of parent.childNodes) {
@@ -3463,10 +3532,18 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       }
       return inline;
     };
-    return {
-      plain: tableCellEditorValueToSource(input?.value ?? '').trim(),
-      inline: preview ? readInline(preview) : []
-    };
+    try { return { plain: source, inline: readInline(preview) }; }
+    finally { if (!mounted) disposeImagePresentations(preview); }
+  }
+
+  copyCellMatrix(range: TableSelectionRange): TableCellCopyValue[][] {
+    const cells: TableCellCopyValue[][] = [];
+    for (let row = range.fromRow; row <= range.toRow; row++) {
+      const values: TableCellCopyValue[] = [];
+      for (let col = range.fromCol; col <= range.toCol; col++) values[col] = this.tableCellCopyValue(row, col);
+      cells[row] = values;
+    }
+    return cells;
   }
 
   clipboardPayload(event: ClipboardEvent): TableClipboardMatrix | null {
@@ -3730,7 +3807,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const findDragCell = (event: PointerEvent): HTMLTableCellElement | null => {
       const hit = this.findCellElement(document.elementFromPoint(event.clientX, event.clientY));
       if (hit) return hit;
-      const grid = this.domRefs?.cellGrid;
+      const grid = this.rowWindow && this.domRefs
+        ? this.domRefs.rowEntries.map(({ row }) => Array.from(row.cells))
+        : this.domRefs?.cellGrid;
       if (!grid?.length || !grid[0].length) return null;
       // Project onto this table's nearest row and column, including beyond its edges.
       // Binary search uses current geometry without scanning every cell in a large table.
@@ -3751,7 +3830,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       }
       const state = this.cellSelection.snapshot();
       // Leaving a text drag in its original cell still ends the native text preview.
-      if (state.phase === 'text-candidate' && state.anchor?.row === row && state.anchor.col === col) return null;
+      if (state.phase === 'text-candidate' && state.anchor?.row === Number(cells[col].dataset.tableRow) && state.anchor.col === col) return null;
       return cells[col];
     };
 
@@ -3801,9 +3880,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
     const onCopy = (event: ClipboardEvent) => {
       if (!this.domRefs) return;
-      const values = this.domRefs.allRowInputs.map((row, rowIndex) => row.map((_input, colIndex) => (
-        this.tableCellCopyValue(rowIndex, colIndex)
-      )));
+      const { range } = this.cellSelection.snapshot();
+      if (!range || range.fromRow === range.toRow && range.fromCol === range.toCol) return;
+      const values = this.copyCellMatrix(range);
       const serialized = this.cellSelection.copy(values);
       if (!serialized) return;
       event.preventDefault();
@@ -4089,7 +4168,14 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
             const start = segment ? segment.from + content.length - content.trimStart().length : 0;
             const pairs = origins.map(pair => ({ ...pair, from: start + tableCellEditorOffsetToSourceOffset(edit.value, pair.from) - sourcePadding, to: start + tableCellEditorOffsetToSourceOffset(edit.value, pair.to) - sourcePadding }))
               .filter(pair => !!segment && pair.from >= segment.from && pair.to <= segment.to);
-            return state.update({ changes: change, effects: segment ? replaceAutomaticSymbolPairArea(segment.from, segment.to, pairs) : [],
+            const stableRow = next.lines === state.doc.lines
+              && parseTableRowCells(state.doc.line(line.number).text).cells.length === parseTableRowCells(line.text).cells.length
+              && !(edit.row === 0 && isTableDelimiterLine(line.text));
+            return state.update({ changes: change, effects: [
+              ...(segment ? [replaceAutomaticSymbolPairArea(segment.from, segment.to, pairs)] : []),
+              ...(stableRow ? [getTableHistoryFocus(state).effect({ tableFrom: next.line(tableStartLine).from,
+                row: edit.row, col: edit.col, caret: 0, contentOnly: true })] : [])
+            ],
               annotations: [isolateHistory.of('full'), ...(usesLargeDocumentDerivedWorkBudget(state) ? [markLiveInputNestedProjection()] : [])] });
           }
         }))
@@ -4274,13 +4360,15 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const values = matrix.rows.map((row, index) => {
       const input = this.domRefs?.rowInputs[index]?.[column];
       if (input && row[column] !== this.tableData.rows[index]?.[column]) this.refreshCellPreviewFromInput(input);
-      const preview = this.domRefs?.cellGrid[index + 1]?.[column]
-        ?.querySelector('.meo-md-html-table-cell-preview')?.cloneNode(true) as HTMLElement | undefined;
-      if (!preview) return row[column] ?? '';
+      const mounted = this.domRefs?.cellGrid[index + 1]?.[column]?.querySelector('.meo-md-html-table-cell-preview');
+      const preview = mounted ? mounted.cloneNode(true) as HTMLElement
+        : this.createCellPreview(row[column] ?? '', this.cellDiagnostics(index + 1, column), this.cellSourceRange(index + 1, column));
       preview.querySelectorAll('button, svg, .katex-mathml').forEach((element) => element.remove());
       preview.querySelectorAll('br').forEach((element) => element.replaceWith(' '));
       preview.querySelectorAll('img').forEach((element) => element.replaceWith(element.alt));
-      return (preview.textContent ?? '').trim();
+      const value = (preview.textContent ?? '').trim();
+      if (!mounted) disposeImagePresentations(preview);
+      return value;
     });
     const numeric = values.every((value) => !value || (
       /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(value) && Number.isFinite(Number(value))
@@ -4510,9 +4598,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         dispose();
         return false;
       }
-      const input = view.dom.querySelector(
-        `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${tableStartLine}"] textarea[data-table-row="${focusTarget.row}"][data-table-col="${focusTarget.col}"]`
-      );
+      const input = ensureMountedTableCell(view, tableStartLine, focusTarget.row, focusTarget.col);
       if (!(input instanceof HTMLTextAreaElement)) return false;
       const shell = input.closest<HTMLElement>('.meo-md-html-table-shell');
       if (replacedShell && shell === replacedShell) return false;
@@ -5245,7 +5331,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       if (keyboard?.type === 'focus-cell') {
         event.preventDefault();
         event.stopPropagation();
-        const target = this.domRefs?.allRowInputs?.[keyboard.target.row]?.[keyboard.target.col];
+        const target = this.cellInput(keyboard.target.row, keyboard.target.col);
         if (target) this.focusTableInput(target, Math.min(keyboard.caretColumn, target.value.length));
         return;
       }
@@ -5437,7 +5523,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
   tableRowsForGutter() {
     const entries = this.domRefs?.rowEntries ?? [];
-    if (entries.length < 256 || !this.view) return entries.map(({ row }, rowIndex) => ({ row, rowIndex }));
+    const entry = ({ row }: RowEntry, index: number) => ({ row, rowIndex: this.rowWindow
+      ? row.dataset.tableBodyRow === undefined ? 0 : Number(row.dataset.tableBodyRow) + 1 : index });
+    if (entries.length < 256 || !this.view) return entries.map(entry);
     // Table rows stay in source order even when a cell wraps. Locate a reading
     // band by geometry without measuring every offscreen row on focus/scroll.
     const viewport = this.view.scrollDOM.getBoundingClientRect();
@@ -5455,7 +5543,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       if (entries[middle]!.row.getBoundingClientRect().top <= bottom) low = middle + 1;
       else high = middle;
     }
-    return entries.slice(first, low).map(({ row }, index) => ({ row, rowIndex: first + index }));
+    return entries.slice(first, low).map((row, index) => entry(row, first + index));
   }
 
   syncTableLineNumbers() {
@@ -5502,8 +5590,10 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   recalcLayout() {
+    if (this.pendingResizeRows) this.rowWindow?.invalidate();
+    this.rowWindow?.update();
     if (this.pendingResizeRows) {
-      this.resizeAllRows();
+      if (!this.rowWindow) this.resizeAllRows();
       this.domRefs?.shell.style.removeProperty('min-height');
     }
     this.syncTableLineNumbers();
@@ -5867,10 +5957,10 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     // layout will position controls; measuring here or during disposal only
     // flushes unrelated document layout for geometry we cannot use.
     if (this.destroyed || !this.domRefs?.shell.isConnected) return;
-    const { shell, wrap, rowEntries, contextTrigger, contextMenu } = this.domRefs;
+    const { shell, wrap, contextTrigger, contextMenu } = this.domRefs;
     const rowIndex = this.cellSelection.snapshot().anchor?.row ?? this.activeTarget.row;
-    const row = rowEntries[Math.min(Math.max(rowIndex, 0), rowEntries.length - 1)]?.row;
-    if (!row) return;
+    const row = this.domRefs.allRowInputs[rowIndex]?.[0]?.closest('tr');
+    if (!row) { contextTrigger.hidden = true; return; }
     const shellRect = shell.getBoundingClientRect();
     const wrapRect = wrap.getBoundingClientRect();
     const viewportRect = this.view?.scrollDOM.getBoundingClientRect() ?? {
@@ -6279,6 +6369,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
+    headerRow.setAttribute('aria-rowindex', '1');
     headerRow.dataset.sourceLineNumber = String(this.tableData.startLine ?? '');
     rowEntries.push({ row: headerRow, inputs: headerInputs });
     const headerCells: HTMLTableCellElement[] = [];
@@ -6312,13 +6403,19 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     table.appendChild(thead);
 
     const tbody = document.createElement('tbody');
-    const bodyRowInputs: HTMLTextAreaElement[][] = [];
-    for (let rowIdx = 0; rowIdx < this.tableData.rows.length; rowIdx++) {
+    const bodyRowInputs: HTMLTextAreaElement[][] = Array.from({ length: this.tableData.rows.length }, () => []);
+    allRowInputs.push(...bodyRowInputs);
+    cellGrid.push(...Array.from({ length: this.tableData.rows.length }, () => [] as HTMLTableCellElement[]));
+    const renderBodyRow = (rowIdx: number) => {
+      const source = this.sourceRow(rowIdx + 1);
       const tr = document.createElement('tr');
+      tr.setAttribute('aria-rowindex', String(rowIdx + 2));
       tr.dataset.sourceLineNumber = String((this.tableData.startLine ?? 0) + rowIdx + 2);
-      const inputs: HTMLTextAreaElement[] = [];
+      tr.dataset.tableBodyRow = String(rowIdx);
+      tr.dataset.tableRowEven = String(rowIdx % 2 === 1);
+      const inputs = bodyRowInputs[rowIdx]!;
       rowEntries.push({ row: tr, inputs });
-      const bodyCells: HTMLTableCellElement[] = [];
+      const bodyCells = cellGrid[rowIdx + 1]!;
       const tableRowIndex = rowIdx + 1;
       for (let col = 0; col < this.tableData.colCount; col++) {
         const td = document.createElement('td');
@@ -6327,7 +6424,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         td.dataset.tableCol = String(col);
         td.style.textAlign = columnAlignment;
         const { content, input } = this.createCellEditor(
-          this.tableData.rows[rowIdx][col] ?? '',
+          source[col] ?? '',
           tr,
           inputs,
           wrap,
@@ -6342,11 +6439,13 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
         tr.appendChild(td);
       }
-      cellGrid.push(bodyCells);
-      allRowInputs.push(inputs);
-      bodyRowInputs.push(inputs);
-      tbody.appendChild(tr);
-    }
+      return tr;
+    };
+    // Three-round comparisons found gains at 512+ rows, while forcing a
+    // 256-row/four-column table added startup work. Keep both row/cell floors.
+    const windowRows = this.tableData.rows.length >= 512 && this.tableData.rows.length * this.tableData.colCount >= 1024
+      && !view.dom.ownerDocument.body.classList.contains('vscode-using-screen-reader');
+    if (!windowRows) for (let row = 0; row < this.tableData.rows.length; row++) tbody.append(renderBodyRow(row));
     table.appendChild(tbody);
 
     const stickyChrome = document.createElement('div');
@@ -6405,9 +6504,52 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       contextPages,
       contextButtons
     };
+    if (windowRows) {
+      table.dataset.meoTableWindowed = 'true';
+      table.setAttribute('aria-rowcount', String(this.tableData.rows.length + 1));
+      table.setAttribute('aria-colcount', String(this.tableData.colCount));
+      const layout = estimateTableLayout({ kind: 'table', headerCells: this.tableData.headerCells,
+        rows: this.tableData.rows, contentWidth: Math.max(352, view.scrollDOM.clientWidth - 24) });
+      table.style.tableLayout = 'fixed';
+      table.style.width = `${layout.columnWidths.reduce((sum, width) => sum + width, 0)}px`;
+      colgroup.forEach((col, index) => { col.style.width = `${layout.columnWidths[index]}px`; });
+      this.rowWindow = createTableRowWindow({ body: tbody, viewport: view.scrollDOM,
+        rowCount: this.tableData.rows.length, columnCount: this.tableData.colCount,
+        estimateHeight: 32, estimatedHeights: layout.rowHeights.slice(1),
+        render: renderBodyRow,
+        scrollbarDragging: () => getViewportController(view)?.isScrollbarDragging() ?? false,
+        release: (index, row) => {
+          disposeImagePresentations(row);
+          bodyRowInputs[index]!.length = 0; cellGrid[index + 1]!.length = 0;
+          const entry = rowEntries.findIndex(item => item.row === row);
+          if (entry >= 0) rowEntries.splice(entry, 1);
+        },
+        retain: () => {
+          if (view.dom.ownerDocument.body.classList.contains('vscode-using-screen-reader')) return bodyRowInputs.map((_, index) => index);
+          const interaction = this.cellInteraction.snapshot(), selection = this.cellSelection.snapshot();
+          return [interaction.editingTarget?.row, ...interaction.pending.map(edit => edit.row),
+            selection.anchor?.row, selection.range?.fromRow, selection.range?.toRow]
+            .filter((row): row is number => row !== undefined && row > 0).map(row => row - 1);
+        },
+        size: rows => this.resizeRows(rows.map(row => ({ row,
+          inputs: bodyRowInputs[Number(row.dataset.tableBodyRow)]! }))),
+        changed: () => {
+          rowEntries.sort((left, right) => Number(left.row.dataset.tableBodyRow ?? -1) - Number(right.row.dataset.tableBodyRow ?? -1));
+          view.requestMeasure();
+        }
+      });
+      this.rowWindow.update();
+      let screenReader = false;
+      const accessibility = new MutationObserver(() => {
+        const next = view.dom.ownerDocument.body.classList.contains('vscode-using-screen-reader');
+        if (next !== screenReader) { screenReader = next; this.rowWindow?.update(); }
+      });
+      accessibility.observe(view.dom.ownerDocument.body, { attributes: true, attributeFilter: ['class'] });
+      this.cleanupFns.push(() => accessibility.disconnect());
+    }
     const cancelCaretReveal = () => { this.tableCaretRevealGeneration += 1; };
     const updateActiveContextControls = () => {
-      if (!this.domRefs || (this.domRefs.rowEntries.length < 256 &&
+      if (!this.domRefs || (!this.rowWindow && this.domRefs.rowEntries.length < 256 &&
         !this.domRefs.shell.matches(':focus-within, .is-interacting, .is-context-menu-open'))) return;
       this.scheduleLayout();
     };
@@ -6488,6 +6630,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     this.tableCommandTargetRegistration = null;
     this.stickyHeaderAdapter.unmount();
     this.stickyHeaderAdapter.dispose();
+    this.rowWindow?.dispose(); this.rowWindow = undefined;
     for (const dispose of this.cleanupFns) dispose();
     this.cleanupFns = [];
     if (this.layoutFrame) {
@@ -6856,7 +6999,8 @@ export function mountedTableClipboardText(view: EditorView, format: 'markdown' |
   const owner = shell ? tableDomOwners.get(shell) : null;
   if (!owner?.domRefs) return null;
   const selection = owner.cellSelection.snapshot().range;
-  const cells = owner.domRefs.allRowInputs.map((row, rowIndex) => row.map((_input, columnIndex) => owner.tableCellCopyValue(rowIndex, columnIndex).plain));
+  const matrix = owner.readCellMatrix();
+  const cells = [matrix.headerCells, ...matrix.rows];
   const selected = selection ? cells.slice(selection.fromRow, selection.toRow + 1).map(row => row.slice(selection.fromCol, selection.toCol + 1)) : cells;
   return format === 'csv' ? serializeDelimitedTable(selected, ',') : markdownTableFromCells(selected, true);
 }

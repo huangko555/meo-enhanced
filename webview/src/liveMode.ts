@@ -156,6 +156,7 @@ import {
   renderedBlockPreview
 } from './helpers/renderedBlockPreview';
 import { getUiStrings } from './application/uiLanguage';
+import { isTableCellContentTransaction } from './adapters/tableHistoryFocus';
 import {
   getUiLanguageWidgetEpoch,
   UiLanguageSensitiveWidget,
@@ -4182,7 +4183,7 @@ const liveDecorationField = StateField.define<DecorationSet>({
         liveDecorationMetadata.set(transaction.state, { ...liveDecorationMetadata.get(transaction.state), complete: false });
       }
       return transaction.docChanged
-        ? isLiveInputNestedProjection(transaction)
+        ? isLiveInputNestedProjection(transaction) || isTableCellContentTransaction(transaction)
           ? transaction.effects
             .filter((effect) => effect.is(replaceLiveInputNestedDecorationEffect))
             .reduce((mapped, effect) => {

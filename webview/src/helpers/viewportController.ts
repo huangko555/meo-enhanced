@@ -1,6 +1,7 @@
 import { readDocumentTextProjection } from '../application/documentTextProjection';
 import { editorScrollIntoView } from '../editor/scrollEffects';
 import { editorViewportBounds } from '../editor/editorViewportBounds';
+import { tableRowWindowFor } from '../editor/tableRowWindow';
 import { sourceLinePositionAtTarget } from '../editor/domSourceLine';
 import { NativeInputViewport } from '../editor/nativeInputViewport';
 import { EditorView } from '@codemirror/view';
@@ -128,6 +129,7 @@ export interface ViewportHistorySnapshot {
     visibleFromLineNumber: number;
     visibleToLineNumber: number;
     wasVisible: boolean;
+    viewportOffset?: number;
   };
 }
 
@@ -449,6 +451,7 @@ export class ViewportController {
     this.finishScrollbarDrag();
     if (event.type === 'pointerup') this.nativeInputViewport.capture(event.target);
   };
+  private readonly onWindowBlur = () => this.finishScrollbarDrag();
   private readonly onKeyDown = (event: KeyboardEvent) => this.handleKeyDown(event);
   private readonly onKeyUp = (event: KeyboardEvent) => this.handleKeyUp(event);
   private readonly onNativeInput = (event: Event) => {
@@ -496,6 +499,9 @@ export class ViewportController {
       view.scrollDOM.addEventListener('pointerdown', this.onPointerDown, { capture: true, passive: true });
       view.scrollDOM.ownerDocument.addEventListener('pointerup', this.onPointerUp, true);
       view.scrollDOM.ownerDocument.addEventListener('pointercancel', this.onPointerUp, true);
+      // Capture would also receive the textarea blur caused by grabbing the
+      // scrollbar, ending its gesture before the native thumb starts moving.
+      view.scrollDOM.ownerDocument.defaultView?.addEventListener('blur', this.onWindowBlur);
       view.dom.addEventListener('keydown', this.onKeyDown, true);
       view.dom.addEventListener('keyup', this.onKeyUp, true);
       view.dom.addEventListener('beforeinput', this.onBeforeInput, true);
@@ -727,9 +733,10 @@ export class ViewportController {
     element: HTMLElement,
     resolveCurrentElement: () => HTMLElement | null,
     mutate: () => void,
-    isCurrent: () => boolean = () => true
+    isCurrent: () => boolean = () => true,
+    retainedTop?: number
   ): void {
-    const beforeTop = element.isConnected ? element.getBoundingClientRect().top : null;
+    const beforeTop = retainedTop ?? (element.isConnected ? element.getBoundingClientRect().top : null);
     if (this.destroyed || beforeTop === null || !isCurrent()) {
       mutate();
       return;
@@ -1459,7 +1466,9 @@ export class ViewportController {
       const rect = element.getBoundingClientRect();
       return rect.top <= scrollerRect.top + 2 && rect.bottom > scrollerRect.top + 2;
     });
-    const tableRows = visibleTable ? Array.from(visibleTable.querySelectorAll<HTMLElement>('tr')) : [];
+    const tableRows = visibleTable ? Array.from(visibleTable.querySelectorAll<HTMLElement>(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tr[data-source-line-number]'
+    )) : [];
     const tableRowIndex = scrollerRect ? (() => {
       const rowAtTop = tableRows.findIndex((element) => {
         const rect = element.getBoundingClientRect();
@@ -1476,11 +1485,18 @@ export class ViewportController {
       ));
     })() : -1;
     const tableRow = tableRows[tableRowIndex];
-    const resolveTableRow = () => tableRow?.isConnected ? tableRow : (
-      this.view.contentDOM.querySelector<HTMLElement>(
+    const bodyRow = tableRow?.dataset.tableBodyRow;
+    const resolveTableRow = () => {
+      if (tableRow?.isConnected) return tableRow;
+      const shell = this.view.contentDOM.querySelector<HTMLElement>(
         `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${visibleTable?.dataset.meoRenderedBlockStartLine}"]`
-      )?.querySelectorAll<HTMLElement>('tr')[tableRowIndex] ?? null
-    );
+      );
+      const body = shell?.querySelector<HTMLTableSectionElement>('table[data-meo-table-windowed] > tbody');
+      if (body && bodyRow !== undefined) return tableRowWindowFor(body)?.ensure(Number(bodyRow)) ?? null;
+      return shell?.querySelectorAll<HTMLElement>(
+        '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tr[data-source-line-number]'
+      )[tableRowIndex] ?? null;
+    };
     const visibleBlock = tableRow ?? (scrollerRect && Array.from(
       this.view.contentDOM.querySelectorAll<HTMLElement>('.cm-line, [data-meo-rendered-block-start-line]')
     ).find((element) => {
@@ -1944,6 +1960,7 @@ export class ViewportController {
       this.view.scrollDOM.removeEventListener('pointerdown', this.onPointerDown, true);
       this.view.scrollDOM.ownerDocument.removeEventListener('pointerup', this.onPointerUp, true);
       this.view.scrollDOM.ownerDocument.removeEventListener('pointercancel', this.onPointerUp, true);
+      this.view.scrollDOM.ownerDocument.defaultView?.removeEventListener('blur', this.onWindowBlur);
       this.view.dom.removeEventListener('keydown', this.onKeyDown, true);
       this.view.dom.removeEventListener('keyup', this.onKeyUp, true);
       this.view.dom.removeEventListener('beforeinput', this.onBeforeInput, true);
@@ -3023,6 +3040,14 @@ export class ViewportController {
     const head = this.view.state.selection.main.head;
     const coords = this.view.coordsAtPos(head);
     const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+    const active = this.view.dom.ownerDocument.activeElement;
+    const row = active instanceof HTMLTextAreaElement && this.view.contentDOM.contains(active)
+      ? active.closest<HTMLTableRowElement>('tr[data-source-line-number]') : null;
+    const rowRect = row?.getBoundingClientRect();
+    const inputRect = row ? active!.getBoundingClientRect() : null;
+    const rowLine = Number(row?.dataset.sourceLineNumber);
+    const visibleRow = rowRect && inputRect && inputRect.top >= scrollerRect.top && inputRect.bottom <= scrollerRect.bottom
+      && Number.isInteger(rowLine) && rowLine > 0 && rowLine <= this.view.state.doc.lines;
     const topBlock = this.view.lineBlockAtHeight(this.view.scrollDOM.scrollTop);
     const bottomBlock = this.view.lineBlockAtHeight(
       this.view.scrollDOM.scrollTop + this.view.scrollDOM.clientHeight
@@ -3030,7 +3055,8 @@ export class ViewportController {
     return {
       scrollTop: this.view.scrollDOM.scrollTop,
       selection: {
-        lineNumber: this.view.state.doc.lineAt(head).number,
+        lineNumber: visibleRow ? rowLine : this.view.state.doc.lineAt(head).number,
+        ...(visibleRow ? { viewportOffset: rowRect.top - scrollerRect.top } : {}),
         visibleFromLineNumber: this.view.state.doc.lineAt(topBlock.from).number,
         visibleToLineNumber: this.view.state.doc.lineAt(bottomBlock.to).number,
         wasVisible: Boolean(
@@ -3421,6 +3447,10 @@ export class ViewportController {
     if (leftChanged) this.view.scrollDOM.scrollLeft = target.left;
     const rounded = nativeTop !== null && this.nativeInputViewport.absorbScrollRounding(top);
     return topChanged || leftChanged || rounded;
+  }
+
+  isScrollbarDragging(): boolean {
+    return this.scrollbarDragActive;
   }
 
   /** Includes native momentum so background rendering can wait beyond the last wheel event. */

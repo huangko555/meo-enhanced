@@ -24,6 +24,9 @@ try {
   await page.addStyleTag({ path: path.resolve('webview/src/styles.css') });
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
   await page.evaluate(text => {
+    // Accessibility keeps the complete table DOM. Its gutter still needs a
+    // bounded reading band independently of the row-window presentation.
+    document.body.classList.add('vscode-using-screen-reader');
     const scope = window as any;
     scope.editor = scope.createBudgetEditor({ parent: document.getElementById('app'), text, initialMode: 'live', onApplyChanges() {} });
     const original = Element.prototype.getBoundingClientRect;

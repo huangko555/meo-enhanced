@@ -116,6 +116,8 @@ import {
   projectMountedTablePositions,
   refreshMountedTableUiLanguage,
   flushMountedTableLayouts,
+  mountedTableEntryInput,
+  mountedTableInputsForLine,
   tableUsableViewportBounds
 } from './helpers/tables';
 import { parseFrontmatter, parseFrontmatterCandidate } from './helpers/frontmatter';
@@ -935,14 +937,7 @@ export function createEditor({
       }
     }
 
-    if (direction === 'down') {
-      const first = wrap.querySelector('textarea');
-      return first instanceof HTMLTextAreaElement ? first : null;
-    }
-
-    const inputs = wrap.querySelectorAll('textarea');
-    const last = inputs.length ? inputs[inputs.length - 1] : null;
-    return last instanceof HTMLTextAreaElement ? last : null;
+    return mountedTableEntryInput(wrap, direction) ?? null;
   };
 
   const tryEnterAdjacentTable = (editorView: EditorView, direction: 'up' | 'down') => {
@@ -1257,10 +1252,7 @@ export function createEditor({
     refreshMountedTablePositions(view, currentDiagnostics, view.state.field(gitDiffLineFlagsField, false));
     const lineNumber = view.state.doc.lineAt(from).number;
     if (view.state.doc.lineAt(to).number !== lineNumber) return false;
-    for (const input of view.dom.querySelectorAll<HTMLTextAreaElement>(
-      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) ' +
-      `tr[data-source-line-number="${lineNumber}"] textarea[data-table-col]`
-    )) {
+    for (const input of mountedTableInputsForLine(view, lineNumber)) {
       const range = getTableInputSourceRange(input);
       if (!range || from < range.from || to > range.to) continue;
       const start = tableCellSourceOffsetToEditorOffset(input.value, from - range.from);
@@ -2987,19 +2979,20 @@ export function createEditor({
     attemptBoundaryRestore(request: EditorHistoryRestoreRequest, isCurrent) {
       if (!isCurrent()) return 'not-rendered';
       if (currentMode !== 'live') return 'not-rendered';
-      if (!isLiveInputDerivedWorkReady(view.state)) return 'retry';
-      const changedRangeIsTable = request.changedRange
+      const tableTarget = tableHistoryFocusAdapter.read(view.state);
+      if (!isLiveInputDerivedWorkReady(view.state) && !tableTarget?.contentOnly) return 'retry';
+      const changedRangeIsTable = tableTarget?.contentOnly || (request.changedRange
         ? isTableHistoryRange(view.state, request.changedRange)
-        : false;
+        : false);
       if (changedRangeIsTable) {
         if (!request.changedRange) return 'not-rendered';
         const tableAttempt = focusTableHistoryChange(
           view,
           request.changedRange,
-          request.previousViewport.scrollTop,
+          request.previousViewport,
           request.targetPosition ?? undefined,
           isCurrent,
-          tableHistoryFocusAdapter.read(view.state) ?? undefined
+          tableTarget ?? undefined
         );
         if (tableAttempt === 'retry') {
           pendingTableHistoryFocus = null;

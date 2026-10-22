@@ -11,7 +11,7 @@ const option = (name: string, fallback: string) => process.argv.includes(name) ?
 const rounds = Number(option('--rounds', '3'));
 assert.ok(Number.isInteger(rounds) && rounds > 0 && rounds <= 10);
 const strategies = option('--strategies', 'auto,synchronous,bounded,windowed').split(',');
-assert.ok(strategies.every(value => ['auto', 'synchronous', 'bounded', 'windowed', 'preview-window'].includes(value)));
+assert.ok(strategies.every(value => ['auto', 'synchronous', 'bounded', 'windowed', 'preview-window', 'table-eager', 'table-windowed'].includes(value)));
 const phase = option('--phase', 'full');
 assert.ok(['full', 'startup', 'interaction'].includes(phase));
 const modes = option('--modes', 'live,preview').split(',');
@@ -23,6 +23,12 @@ assert.ok(output.startsWith(path.join(root, '.local') + path.sep));
 fs.mkdirSync(output, { recursive: true });
 const compiled = path.join(output, 'webview');
 const policyPlugin = { name: 'benchmark-only-policy', setup(builder: any) {
+  builder.onLoad({ filter: /[\\/]helpers[\\/]tables\.ts$/ }, async ({ path: filename }: { path: string }) => {
+    const source = await Bun.file(filename).text(), target = 'const windowRows = this.tableData.rows.length';
+    assert.equal(source.split(target).length, 2);
+    return { loader: 'ts', contents: source.replace(target,
+      "const windowRows = (globalThis as any).__strategyComparison === 'table-eager' ? false : (globalThis as any).__strategyComparison === 'table-windowed' ? true : this.tableData.rows.length") };
+  });
   builder.onLoad({ filter: /[\\/]foundation[\\/]largeDocument\.ts$/ }, async ({ path: filename }: { path: string }) => {
     const source = await Bun.file(filename).text();
     const header = 'export function assessLargeDocument(text: string): LargeDocumentAssessment {';
@@ -30,7 +36,7 @@ const policyPlugin = { name: 'benchmark-only-policy', setup(builder: any) {
     return { loader: 'ts', contents: source.replace(header, 'function originalAssessment(text: string): LargeDocumentAssessment {') + `
       export function assessLargeDocument(text: string): LargeDocumentAssessment {
         const result = originalAssessment(text), strategy = (globalThis as any).__strategyComparison;
-        if (!strategy || strategy === 'auto') return result;
+        if (!strategy || strategy === 'auto' || strategy.startsWith('table-')) return result;
         return { ...result, boundedEditorWork: strategy !== 'synchronous', preferSource: strategy === 'windowed',
           lightweightSourceSyntax: strategy === 'windowed', windowedPreview: strategy === 'windowed' || strategy === 'preview-window' };
       }` };
@@ -61,8 +67,10 @@ const fixtures = [
   { kind: 'giant-line', text: prefix + 'Long single paragraph '.repeat(24_000) + suffix },
   { kind: 'giant-code', text: prefix + '```javascript\n' + 'const value = { text: "content", number: 123 };\n'.repeat(18_000) + '```' + suffix },
   { kind: 'giant-table', text: prefix + '| Name | Value |\n| --- | --- |\n' + Array.from({ length: 1600 }, (_, i) => `| Row ${i} | Long **formatted** content ${i} |\n`).join('') + suffix },
-  ...[200, 400, 800, 1200].map(rows => ({ kind: `table-${rows}`, text: prefix + '| Name | Value |\n| --- | --- |\n'
-    + Array.from({ length: rows }, (_, i) => `| Row ${i} | Long **formatted** content ${i} |\n`).join('') + suffix }))
+  ...[200, 400, 512, 800, 1200].map(rows => ({ kind: `table-${rows}`, text: prefix + '| Name | Value |\n| --- | --- |\n'
+    + Array.from({ length: rows }, (_, i) => `| Row ${i} | Long **formatted** content ${i} |\n`).join('') + suffix })),
+  { kind: 'table-wide-256', text: prefix + '| Name | Value | State | Detail |\n| --- | --- | --- | --- |\n'
+    + Array.from({ length: 256 }, (_, i) => `| Row ${i} | **formatted** ${i} | active | More **formatted** content ${i} |\n`).join('') + suffix }
 ].filter(fixture => option('--fixtures', '').split(',').filter(Boolean).length === 0 || option('--fixtures', '').split(',').includes(fixture.kind));
 assert.ok(fixtures.length > 0);
 const report: any = { commit: Bun.spawnSync(['git', 'rev-parse', 'HEAD']).stdout.toString().trim(), rounds, phase,
@@ -72,6 +80,7 @@ const report: any = { commit: Bun.spawnSync(['git', 'rev-parse', 'HEAD']).stdout
   compiledSha256: createHash('sha256').update(fs.readFileSync(path.join(compiled, 'index.js'))).digest('hex'),
   browser: '', viewport: { width: 1280, height: 900 }, assets: createHash('sha256').update(fs.readFileSync(path.join(assets, 'index.js'))).digest('hex'),
   scope: 'Fresh browser contexts and disabled HTTP cache for each direct opening; warm means revisiting a mode in the same session. OS caches are not cleared. Host rendering runs in a separate Bun process from Chromium, not the VS Code extension Host. Click/input includes CDP dispatch, source/selection confirmation and two animation frames; heap is renderer JS heap, not total RAM.',
+  initialHeapScope: 'initialHeap collects renderer garbage after startup.initMs/observedNavigationMs and before interactions; confirmedInteractiveNavigationMs includes that collection and is not pure startup time.',
   fixtures: fixtures.map(fixture => ({ kind: fixture.kind, sha256: createHash('sha256').update(fixture.text).digest('hex'),
     ...assessLargeDocument(fixture.text), maxLine: Math.max(...fixture.text.split('\n').map(line => line.length)) })), samples: [] };
 for (const fixture of fixtures) fs.writeFileSync(path.join(output, fixture.kind + '.md'), fixture.text);
@@ -169,6 +178,16 @@ try {
         sample.startup = await page.evaluate(() => ({ navigationMs: (window as any).__strategyReadyAt,
           initMs: (window as any).__strategyReadyAt - (window as any).__strategyInitAt }));
         sample.startup.observedNavigationMs = performance.now() - navigationStarted;
+        sample.initialDom = await page.evaluate(() => ({
+          nodes: document.querySelectorAll('*').length,
+          tableRows: document.querySelectorAll('.meo-md-html-table:not(.meo-md-html-table-sticky-table) tr[data-source-line-number]').length,
+          tableInputs: document.querySelectorAll('.meo-md-html-table:not(.meo-md-html-table-sticky-table) textarea').length
+        }));
+        const initialClient = await page.createCDPSession();
+        await initialClient.send('Performance.enable');
+        await initialClient.send('HeapProfiler.collectGarbage');
+        sample.initialHeap = (await initialClient.send('Performance.getMetrics')).metrics.find(entry => entry.name === 'JSHeapUsedSize')?.value;
+        await initialClient.detach();
         if (phase === 'startup') {
           if (initialMode !== 'preview') {
             const coords = await page.evaluate(() => {

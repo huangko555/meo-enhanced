@@ -6857,6 +6857,24 @@ html[data-meo-ui-contrast='high'] .cm-editor .meo-md-html-table {
   background-color: var(--meo-live-table-header-background, var(--meo-inset-background));
 }
 
+.cm-editor .meo-md-html-table[data-meo-table-windowed] tbody tr[data-table-row-even='false'] td {
+  background: transparent;
+}
+.cm-editor .meo-md-html-table[data-meo-table-windowed] tbody tr[data-table-row-even='true'] td {
+  background: var(--meo-live-table-header-background, var(--meo-inset-background));
+}
+.cm-editor .meo-md-html-table[data-meo-table-windowed] {
+  overflow-anchor: none;
+}
+.cm-editor .meo-md-html-table tr.meo-table-row-gap td {
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  font-size: 0;
+  line-height: 0;
+  pointer-events: none;
+}
+
 .cm-editor .meo-md-html-table th {
   position: relative;
   font-weight: inherit;

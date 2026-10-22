@@ -1,4 +1,4 @@
-import { Facet, type EditorState, type Extension, type StateEffect } from '@codemirror/state';
+import { Facet, type EditorState, type Extension, type StateEffect, type Transaction } from '@codemirror/state';
 
 /** Semantic table target stored with the document transaction that created its history event. */
 export type TableHistoryFocusTarget = {
@@ -7,12 +7,15 @@ export type TableHistoryFocusTarget = {
   readonly row: number;
   readonly col: number;
   readonly caret: number;
+  /** Proven native-cell text replacement; row/column structure is unchanged. */
+  readonly contentOnly?: true;
 };
 
 export type CodeMirrorTableHistoryFocus = {
   readonly extension: Extension;
   effect(target: TableHistoryFocusTarget): StateEffect<unknown>;
   read(state: EditorState): TableHistoryFocusTarget | null;
+  isContentOnly(transaction: Transaction): boolean;
 };
 
 export const tableHistoryFocusFacet = Facet.define<
@@ -29,4 +32,8 @@ export function getTableHistoryFocus(state: EditorState): CodeMirrorTableHistory
   const adapter = state.facet(tableHistoryFocusFacet);
   if (!adapter) throw new Error('CodeMirror table history focus Adapter is not installed');
   return adapter;
+}
+
+export function isTableCellContentTransaction(transaction: Transaction): boolean {
+  return transaction.startState.facet(tableHistoryFocusFacet)?.isContentOnly(transaction) ?? false;
 }

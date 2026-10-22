@@ -42,6 +42,39 @@ runs diagnose call stacks and must not be compared as ordinary timing samples.
 mixed with 1,200 literal code examples. It verifies exact table start lines and
 bounds tree-root seeks independently of noisy wall-clock measurements.
 
+`scripts/test-large-table-row-window.ts` drives the production Live editor with
+1,600 variable-height table rows. It bounds actual mounted cells, checks every
+painted native input frame and delayed commit, complete offscreen rich/Markdown
+copy, undo/redo row positions, source-cell navigation and mode round trips.
+It also covers logical gutter lines, column dragging, narrow/wide viewports,
+fractional fonts, source prefix edits, the measured-height path above 12,000px,
+and enabling/disabling screen-reader rendering in an open document. Automatic
+eligibility is checked at 200x2, 256x4 and 512x2. Run it directly after table,
+block-height, native-focus or viewport changes.
+`scripts/test-table-worker-history.ts` uses the full production bootstrap and
+actual Markdown Worker after a Preview round trip. Every sampled Ctrl+Z/Ctrl+Y
+frame must retain the original native cell, source caret positions must be exact,
+and the first digit immediately after Undo must reach that cell. This specifically
+catches a whole-document readiness wait that the standalone editor harness cannot.
+The row-window test also checks stable thumb progress while row heights are
+discovered, exact end/reading-row retention on release/cancel/blur, unchanged
+automatic and manually resized columns, and native text-copy ownership with zero
+unrelated preview allocations. Actual Win32 scrollbar tests remain the native
+geometry/interaction check; synthetic pointer intent is not reported as OS input.
+The previously focused cell must be able to blur without ending the scrollbar
+gesture. This catches capturing window blur listeners that incorrectly observe
+descendant focus changes; actual window blur still completes the gesture.
+Native scrollbar checks first calibrate both directions in an ordinary scrolling
+container. Grips must exclude native arrow buttons; the lower vertical grip uses
+`clientTop + clientHeight`, excluding any horizontal scrollbar. A track click or
+arrow press must not be reported as a thumb drag or as a table-window failure.
+`scripts/test-large-table-gutter-budget.ts` independently exercises the complete
+1,600-row accessibility DOM, so row virtualization cannot conceal unbounded
+gutter work. `benchmark-document-strategies.ts` provides benchmark-only
+`table-eager`/`table-windowed` controls without adding a user-facing performance
+switch. Initial GC heap measurements are outside `startup.initMs`; the later
+confirmed-interactive navigation timestamp includes GC and is not pure startup.
+
 `scripts/test-preview-giant-code-highlight.ts` bounds actual token DOM writes for
 an 18,000-line fence across scrolling, wrapping and theme changes. It verifies
 full selectable text, multi-line grammar and bracket depth from preceding,

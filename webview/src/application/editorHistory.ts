@@ -7,6 +7,8 @@ export type EditorHistoryViewport = {
     readonly visibleFromLineNumber: number;
     readonly visibleToLineNumber: number;
     readonly wasVisible: boolean;
+    /** Painted source-row position, when a native block editor owns focus. */
+    readonly viewportOffset?: number;
   };
 };
 

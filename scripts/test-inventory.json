@@ -1,5 +1,15 @@
 {
   "separate": {
+    "scripts/test-table-worker-history.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-table-worker-history.ts",
+      "reason": "Full production bootstrap with actual Markdown Worker; content-only Ctrl+Z/Ctrl+Y must retain the original giant-table native input during pending parse/context publication after a Preview round trip."
+    },
+    "scripts/test-large-table-row-window.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-large-table-row-window.ts",
+      "reason": "Real 1600-row Live table bounds mounted rows/editors; variable heights, gutters, logical navigation, every input frame, history/modes, widths/fonts, accessibility changes, source mapping and complete offscreen rich/Markdown clipboard with images, HTML, formulas and footnotes."
+    },
     "scripts/test-large-table-gutter-budget.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-large-table-gutter-budget.ts",
