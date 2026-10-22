@@ -524,7 +524,8 @@ const dragScrollDOM = Object.assign(new FakeEventTarget(), {
   scrollWidth: 900,
   clientHeight: 500,
   clientWidth: 900,
-  getBoundingClientRect: () => ({ top: 0, bottom: 500, height: 500 })
+  clientTop: 0, clientLeft: 0, offsetWidth: 910,
+  getBoundingClientRect: () => ({ top: 0, bottom: 500, height: 500, left: 0, right: 910 })
 });
 const dragAnchorElement = {
   isConnected: true,
@@ -564,6 +565,36 @@ await flushFrames(dragFrames);
 if (dragScrollDOM.scrollTop !== 2100) {
   throw new Error(`Layout preservation did not resume after scrollbar release: ${dragScrollDOM.scrollTop}`);
 }
+// Deferred row measurements can leave the actual thumb at the track edge while
+// scrollTop is short of the new range. Preserve that explicit navigation intent.
+dragScrollDOM.dispatch('pointerdown', { button: 0, target: dragScrollDOM, clientX: 905, clientY: 12 });
+dragScrollDOM.scrollTop = 4400;
+dragDocument.dispatch('pointerup', { type: 'pointerup', clientY: 499 });
+if (dragScrollDOM.scrollTop !== 4500) throw new Error('Thumb release lost the requested document end');
+dragScrollDOM.scrollHeight += 300;
+dragController.reconcileAfterEditorUpdate();
+if (dragScrollDOM.scrollTop !== 4800) throw new Error('Late row height publication lost the native document end');
+dragScrollDOM.dispatch('pointerdown', { button: 0, target: dragScrollDOM, clientX: 905, clientY: 480 });
+dragScrollDOM.scrollTop = 30;
+dragDocument.dispatch('pointerup', { type: 'pointerup', clientY: 1 });
+dragScrollDOM.scrollTop = 70;
+dragScrollDOM.dispatch('scroll', {});
+if (dragScrollDOM.scrollTop !== 0) throw new Error('Late browser anchoring lost the native document start');
+dragController.markInteraction();
+dragScrollDOM.scrollTop = 2000;
+dragController.reconcileAfterEditorUpdate();
+if (dragScrollDOM.scrollTop !== 2000) throw new Error('A newer navigation did not release the native boundary');
+dragScrollDOM.dispatch('pointerdown', { button: 0, target: dragScrollDOM, clientX: 905, clientY: 12 });
+dragScrollDOM.scrollTop = 3000;
+dragDocument.dispatch('pointercancel', { type: 'pointercancel', clientY: 499 });
+dragController.reconcileAfterEditorUpdate();
+if (dragScrollDOM.scrollTop !== 3000) throw new Error('A canceled thumb gesture invented a boundary');
+dragScrollDOM.dispatch('pointerdown', { button: 0, target: dragScrollDOM, clientX: 905, clientY: 499 });
+dragDocument.dispatch('pointerup', { type: 'pointerup', clientY: 499 });
+if (dragScrollDOM.scrollTop !== 3000) throw new Error('A stationary track click invented a boundary');
+dragScrollDOM.dispatch('pointerdown', { button: 0, target: dragScrollDOM, clientX: 100, clientY: 12 });
+dragDocument.dispatch('pointerup', { type: 'pointerup', clientY: 499 });
+if (dragScrollDOM.scrollTop !== 3000) throw new Error('A content-margin gesture invented a native boundary');
 dragController.destroy();
 globalThis.requestAnimationFrame = originalDragRequestAnimationFrame;
 
@@ -3020,9 +3051,10 @@ for (const interpolatedWhitespace of [undefined, true]) {
 // Resource commits must not interrupt it with semantic or pixel restoration,
 // including when Preview is standalone rather than a linked Source split.
 {
-  let interacting = true, top = 300, captures = 0, writes = 0;
+  let dragging = true, top = 300, captures = 0, writes = 0;
   const surface = {
-    isInteracting: () => interacting,
+    isInteracting: () => true,
+    isScrollbarDragging: () => dragging,
     readScrollTop: () => top,
     writeScrollTop: (next: number) => { writes++; top = next; },
     captureTopVisiblePosition: () => { captures++; return { line: 3, lineOffset: 0 }; },
@@ -3032,9 +3064,9 @@ for (const interpolatedWhitespace of [undefined, true]) {
   try {
     controller.runPreviewPresentationTransaction(() => { top = 337; });
     if (captures || writes || top !== 337) throw new Error(`Resource layout interrupted native Preview dragging: ${JSON.stringify({ captures, writes, top })}`);
-    interacting = false;
+    dragging = false;
     controller.runPreviewPresentationTransaction(() => {});
-    if (!captures || !writes) throw new Error('Idle Preview reading-anchor preservation must resume after pointer release');
+    if (!captures || !writes) throw new Error('Preview reading-anchor preservation must resume after thumb release, including an active wheel quiet window');
   } finally { controller.destroy(); }
 }
 

@@ -1,5 +1,20 @@
 {
   "separate": {
+    "scripts/test-preview-table-source-identity.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-preview-table-source-identity.ts",
+      "reason": "Actual Source split Preview preserves unchanged ordinary table DOM, column tracks, reading position and compositor pixels when new preceding paragraphs shift source lines and logical block indices; covers full and windowed Preview."
+    },
+    "scripts/test-preview-table-bands.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-preview-table-bands.ts",
+      "reason": "Source-backed giant Markdown table bands bound rendering and inline parsing; exact rich-row/export parity, complete logical copy/search, source navigation and conservative container boundaries."
+    },
+    "scripts/test-preview-table-bands-production.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-preview-table-bands-production.ts",
+      "reason": "Actual production Worker/bootstrap and Preview iframe: bounded giant-table DOM, whole-table column consistency, native wheel, first/last boundaries and compositor stability during distant Source input."
+    },
     "scripts/test-table-worker-history.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-table-worker-history.ts",

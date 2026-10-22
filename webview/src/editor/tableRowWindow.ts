@@ -128,7 +128,10 @@ export function createTableRowWindow(options: {
         dragMeasurements.clear(); dragHeight = undefined;
       }
       const localTop = Math.max(0, viewportRect.top - bodyTop);
-      const margin = Math.max(240, viewportRect.height);
+      // A thumb jumps across pages; rebuilding several invisible screens on
+      // each jump cannot prefetch its destination. Keep a small reading buffer
+      // while held, then restore the ordinary wheel/keyboard overscan on release.
+      const margin = dragging ? Math.min(240, viewportRect.height / 4) : Math.max(240, viewportRect.height);
       const first = rowHeights.indexAt(localTop - margin), last = rowHeights.indexAt(localTop + viewportRect.height + margin);
       const keep = new Set<number>();
       if (endingDrag) for (const index of rows.keys()) keep.add(index);
@@ -139,9 +142,15 @@ export function createTableRowWindow(options: {
       const wanted = [...keep].sort((a, b) => a - b);
       const anchorIndex = beforeAnchor?.index ?? rowHeights.indexAt(localTop);
       const oldOffset = rowHeights.offset(anchorIndex);
+      // Pure window movement does not change retained cells' natural sizing.
+      // Clearing every mounted row's minimum forces another whole-table layout
+      // on each scroll. Width/font/content invalidation still sizes every row.
+      const needsSize = sized ? wanted.filter(index => !rows.has(index)) : wanted;
       const changed = reconcile(wanted);
-      const attached = wanted.map(index => rows.get(index)!);
-      if (changed || !sized) { options.size(attached); sized = body.isConnected; }
+      if (changed || !sized) {
+        if (needsSize.length) options.size(needsSize.map(index => rows.get(index)!));
+        sized = body.isConnected;
+      }
       for (const index of wanted) {
         const height = rows.get(index)!.getBoundingClientRect().height;
         if (dragging) dragMeasurements.set(index, height);

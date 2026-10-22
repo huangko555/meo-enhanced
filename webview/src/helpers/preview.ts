@@ -1,7 +1,8 @@
 import morphdom from 'morphdom';
 import { createPreviewSearchController, previewSearchStyles } from './previewSearch';
 import { createPreviewViewport, preparePreviewWindow, previewWindowProjection } from './previewViewport';
-import { previewSourceMorphKeys } from './previewSourceIdentity';
+import { previewSourceMorphKeys, previewSourceLineMapper, type PreviewSourceLineMapper } from './previewSourceIdentity';
+import { createPreviewTableColumnPreferences } from './previewTableColumns';
 import { createPreviewDocumentSearch } from './previewDocumentSearch';
 import { createPreviewDocumentTransport } from '../adapters/previewDocumentTransport';
 import type { PreviewDocumentResponse } from '../../../src/protocol/previewDocument';
@@ -111,6 +112,7 @@ type PendingExternalViewportRestore = {
 
 type PreviewViewportProjectionSlot = {
   restore: PreviewViewportRestore | null;
+  readonly mapSourceLine?: PreviewSourceLineMapper;
 };
 
 type PreviewSourcePositionMarkerState = {
@@ -373,7 +375,7 @@ function morphPreviewMain(
   pendingCodeBlocks: readonly PreviewCodeBlockUpdate[] | undefined,
   isCurrent: () => boolean,
   retainTableColumns = true,
-  sourceRevision?: { before: string | null; after: string }
+  sourceRevision?: { before: string | null; after: string; mapSourceLine?: PreviewSourceLineMapper }
 ): PreviewCodeBlockUpdate[] {
   const updates: PreviewCodeBlockUpdate[] = pendingCodeBlocks ? [...pendingCodeBlocks] : [];
   let presentationKeys = new WeakMap<Node, string>();
@@ -382,7 +384,7 @@ function morphPreviewMain(
     const nextMain = frameDocument.createElement('main');
     nextMain.className = 'meo-export-doc';
     nextMain.innerHTML = html;
-    if (sourceRevision) sourceKeys = previewSourceMorphKeys(currentMain, nextMain, sourceRevision.before, sourceRevision.after);
+    if (sourceRevision) sourceKeys = previewSourceMorphKeys(currentMain, nextMain, sourceRevision.before, sourceRevision.after, sourceRevision.mapSourceLine);
     const nearbyControls = frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true';
     if (!nearbyControls) addPreviewCodeCopyControls(nextMain, frameDocument.documentElement.lang as UiLanguage);
     const currentTables = retainTableColumns ? Array.from(currentMain.querySelectorAll<HTMLTableElement>('table')) : [];
@@ -1381,8 +1383,10 @@ export function createPreviewController({
   }>();
   let previewMathObserver: IntersectionObserver | null = null;
   let previewTableLayout: PreviewTableLayoutController | null = null;
+  const tableColumnPreferences = createPreviewTableColumnPreferences();
   let previewViewportResources: ReturnType<typeof observePreviewViewportResources> = null;
   const activePreviewPointers = new Set<number>();
+  const activePreviewScrollbarPointers = new Set<number>();
   let previewScrollRange: ReturnType<typeof createPreviewScrollRange> | null = null;
   let previewGestureUntil = 0;
   const isViewportInteracting = () => !host.hidden && (activePreviewPointers.size > 0 || performance.now() < previewGestureUntil);
@@ -1516,7 +1520,8 @@ export function createPreviewController({
     mutate: (slot: PreviewViewportProjectionSlot) => void,
     documentChange?: { readonly previousText: string; readonly nextText: string }
   ): void => {
-    const slot: PreviewViewportProjectionSlot = { restore: null };
+    const slot: PreviewViewportProjectionSlot = { restore: null,
+      ...(documentChange ? { mapSourceLine: previewSourceLineMapper(documentChange.previousText, documentChange.nextText) } : {}) };
     const previousSlot = acceptingViewportProjection;
     acceptingViewportProjection = slot;
     try {
@@ -1985,6 +1990,7 @@ export function createPreviewController({
       }
       if (reusableDocument !== frameDocument) {
         activePreviewPointers.clear();
+        activePreviewScrollbarPointers.clear();
         previewGestureUntil = 0;
         previewScrollRange?.dispose();
         previewScrollRange = null;
@@ -2008,6 +2014,7 @@ export function createPreviewController({
         previewViewport = createPreviewViewport(mappedRoot, payload.document, {
           request: requestPreviewDocument,
           mutate: run => { if (constructing) run(); else withViewportTransaction(() => run()); },
+          prepare: () => previewTableLayout?.refresh(),
           changed: () => {
             if (constructing || disposed || activeFrameDocument !== frameDocument) return;
             sourceMapDirty = true; localGeometryViewport = null;
@@ -2015,7 +2022,6 @@ export function createPreviewController({
             previewViewportResources?.refresh();
             syncGithubPictures(frameDocument, appearance); preparePreviewLinks(frameDocument);
             attachDeferredImages(frameDocument); attachPreviewMathViewports(frameDocument);
-            previewTableLayout?.refresh();
             previewDocumentSearch?.windowChanged();
             scheduleViewportHighlight(frameDocument);
             refreshSourcePositionMarker(); onGeometryChanged?.();
@@ -2076,7 +2082,7 @@ export function createPreviewController({
       frameDocument.documentElement.dataset.meoPreviewRenderer = preset.renderer;
       syncGithubPictures(frameDocument, appearance);
       frameDocument.documentElement.dataset.meoPreviewBracketColoring = String(preset.id === 'default');
-      previewTableLayout = preset.renderer === 'meo' ? createPreviewTableLayoutController(frameDocument) : null;
+      previewTableLayout = preset.renderer === 'meo' ? createPreviewTableLayoutController(frameDocument, frameDocument, tableColumnPreferences) : null;
       const presentationGeneration = mermaidPresentationGeneration + 1;
       mermaidPresentationGeneration = presentationGeneration;
       const isCurrent = () => (
@@ -2106,12 +2112,16 @@ export function createPreviewController({
         }
         if (event.type === 'pointerdown' && (event as PointerEvent).button === 0) {
           activePreviewPointers.add((event as PointerEvent).pointerId);
+          const pointer = event as PointerEvent;
+          if (pointer.clientX >= frameDocument.documentElement.clientWidth
+            && pointer.clientX < (frameDocument.defaultView?.innerWidth ?? 0)) activePreviewScrollbarPointers.add(pointer.pointerId);
           previewScrollRange?.start(event as PointerEvent);
         }
         previewGestureUntil = performance.now() + 250;
         notifyViewportInteraction();
       };
       const finishPointer = (event: Event) => {
+        activePreviewScrollbarPointers.delete((event as PointerEvent).pointerId);
         if (event.type === 'pointercancel') previewScrollRange?.cancel((event as PointerEvent).pointerId);
         else previewScrollRange?.release((event as PointerEvent).pointerId,
           event.currentTarget === frameDocument.defaultView ? (event as PointerEvent).clientY : undefined);
@@ -2124,6 +2134,7 @@ export function createPreviewController({
       frameDocument.defaultView?.addEventListener('blur', () => {
         previewScrollRange?.cancel();
         activePreviewPointers.clear(); previewGestureUntil = 0;
+        activePreviewScrollbarPointers.clear();
       }, { signal });
       // Ownership follows gestures that can actually move the reading surface.
       // Selection/focus events may be browser-generated by a DOM replacement and
@@ -2208,6 +2219,8 @@ export function createPreviewController({
       const commit = (viewportSlot: PreviewViewportProjectionSlot | null) => {
         reusableDocument.documentElement.lang = uiLanguage;
         reusableDocument.documentElement.dataset.meoPreviewWindowed = String(!!payload.document);
+        const mapSourceLine = viewportSlot?.mapSourceLine ?? previewSourceLineMapper(previousRenderedText, renderedText);
+        tableColumnPreferences.revise(previousRenderedText, renderedText, mapSourceLine);
         const deferredCodeBlocks = morphPreviewMain(
           reusableDocument,
           reusableMain,
@@ -2216,7 +2229,7 @@ export function createPreviewController({
           pendingCodeBlocks,
           () => !disposed && isSourceColoringEnabled() && loadGeneration === frameGeneration,
           (reusableDocument.documentElement.dataset.meoPreviewPreset ?? 'default') === (payload.preset ?? 'default'),
-          { before: previousRenderedText, after: renderedText }
+          { before: previousRenderedText, after: renderedText, mapSourceLine }
         );
         if (deferredCodeBlocks.length > 0) {
           commitPendingCodeHighlight = () => {
@@ -2257,6 +2270,7 @@ export function createPreviewController({
     previewScrollRange?.dispose();
     previewScrollRange = null;
     activePreviewPointers.clear();
+    activePreviewScrollbarPointers.clear();
     previewGestureUntil = 0;
     previewTableLayout?.dispose();
     previewTableLayout = null;
@@ -3034,18 +3048,24 @@ export function createPreviewController({
     const scrollElement = frameDocument?.scrollingElement;
     if (!frameDocument || !scrollElement) return false;
     const marker = getSourcePositionMarker(frameDocument);
+    // The marker's coordinates belong to the accepted reading revision. A new
+    // Source line number can identify unrelated old content after Enter/Paste.
+    // Keep its last accepted line until the corresponding Preview is ready.
+    const currentRevision = frameRenderedText !== null && isCurrentText?.(frameRenderedText) !== false;
+    const line = currentRevision ? sourcePositionMarkerState.line : Number(marker.dataset.meoSourcePositionLine);
+    if (!Number.isSafeInteger(line) || line < 1) { marker.hidden = true; return false; }
     const projection = sourcePositionMarkerState.visible
-      ? projectSourcePositionMarker(sourcePositionMarkerState.line)
+      ? projectSourcePositionMarker(line)
       : null;
     marker.hidden = !projection;
     marker.classList.toggle('is-active', sourcePositionMarkerState.active);
-    marker.dataset.meoSourcePositionLine = String(sourcePositionMarkerState.line);
+    marker.dataset.meoSourcePositionLine = String(line);
     if (!projection) return false;
     marker.dataset.meoSourcePositionKind = projection.kind;
 
     const viewportHeight = scrollElement.clientHeight || frame.contentWindow?.innerHeight || 0;
     let revealed = false;
-    if (revealIfOutside && viewportHeight > 0) {
+    if (currentRevision && revealIfOutside && viewportHeight > 0) {
       const viewportTop = scrollElement.scrollTop;
       const viewportBottom = viewportTop + viewportHeight;
       const above = projection.bottom <= viewportTop;
@@ -3494,6 +3514,7 @@ export function createPreviewController({
         cancelHighlightFrame();
         cancelElementReveal();
         activePreviewPointers.clear();
+        activePreviewScrollbarPointers.clear();
         previewGestureUntil = 0;
         previewMathObserver?.disconnect();
         previewMathObserver = null;
@@ -3510,6 +3531,7 @@ export function createPreviewController({
       }
     },
     isViewportInteracting,
+    isScrollbarDragging: () => !host.hidden && activePreviewScrollbarPointers.size > 0,
     focus: () => {
       frame.focus();
       frame.contentWindow?.focus();
@@ -3528,7 +3550,7 @@ export function createPreviewController({
         if (previewViewport) {
           if (previewViewport.restoreReadingScrollTop(top)) { sourceMapDirty = true; localGeometryViewport = null; }
         } else if (restoreFullPreviewReadingScrollTop(document, top)) sourceMapDirty = true;
-      }, viewportRatio);
+      }, viewportRatio, acceptingViewportProjection?.mapSourceLine);
       const interaction = viewportInteractionGeneration;
       return () => {
         if (interaction !== viewportInteractionGeneration) return false;
@@ -3616,6 +3638,7 @@ export function createPreviewController({
       previewScrollRange?.dispose();
       previewScrollRange = null;
       activePreviewPointers.clear();
+      activePreviewScrollbarPointers.clear();
       previewGestureUntil = 0;
       codeTypographyDocument = null;
       checkedCodeTypography = new WeakMap();

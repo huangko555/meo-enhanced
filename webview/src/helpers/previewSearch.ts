@@ -29,6 +29,7 @@ export function createPreviewSearchController({
   let activeIndex = -1;
   let activeElement: HTMLElement | null = null;
   let anchor: SearchMatchAnchor | null = null;
+  let pendingReveal: { anchor: SearchMatchAnchor; isCurrent(): boolean } | null = null;
   let ready = false;
   let dirty = false;
   let disposed = false;
@@ -150,6 +151,15 @@ export function createPreviewSearchController({
       element?.classList.add('is-active');
       activeElement = element;
     }
+    if (pendingReveal) {
+      const reveal = pendingReveal;
+      if (!reveal.isCurrent() || anchor?.line !== reveal.anchor.line || anchor.occurrence !== reveal.anchor.occurrence) pendingReveal = null;
+      else if (element) {
+        pendingReveal = null;
+        if (revealElement) revealElement(element, 'center');
+        else element.scrollIntoView({ block: 'center', inline: 'nearest' });
+      }
+    }
     scheduleRuler();
   };
 
@@ -188,7 +198,7 @@ export function createPreviewSearchController({
     const lineOffsets = new Map<HTMLElement, number>();
     let pendingNode: {
       node: Text; raw: string; comparable: string; offset: number; cursor: number;
-      line: number; fragment: DocumentFragment; changed: boolean;
+      line: number; fixedLine: boolean; fragment: DocumentFragment; changed: boolean;
     } | null = null;
     const publishNode = () => {
       if (!pendingNode?.changed) return;
@@ -232,11 +242,12 @@ export function createPreviewSearchController({
           const node = nodes[nodeIndex++]!;
           const raw = node.data;
           const mapped = node.parentElement?.closest<HTMLElement>('[data-source-line]');
-          const prefixLines = mapped ? lineOffsets.get(mapped) ?? 0 : 0;
+          const prefixLines = mapped?.tagName === 'TR' ? 0 : mapped ? lineOffsets.get(mapped) ?? 0 : 0;
           if (mapped) lineOffsets.set(mapped, prefixLines + (raw.match(/\n/g)?.length ?? 0));
           pendingNode = {
             node, raw, comparable: options.caseSensitive ? raw : raw.toLocaleLowerCase(),
             offset: 0, cursor: 0, fragment: doc.createDocumentFragment(), changed: false,
+            fixedLine: mapped?.tagName === 'TR',
             line: Number(mapped?.dataset.sourceLine ?? 1) + prefixLines
               + (mapped?.tagName === 'PRE' && !mapped.classList.contains('meo-export-frontmatter-source') ? 1 : 0)
           };
@@ -253,7 +264,7 @@ export function createPreviewSearchController({
         if (options.wholeWord && (/[\p{L}\p{N}_]/u.test(node.raw[start - 1] ?? '')
           || /[\p{L}\p{N}_]/u.test(node.raw[end] ?? ''))) continue;
         const before = node.raw.slice(node.cursor, start);
-        node.line += before.match(/\n/g)?.length ?? 0;
+        if (!node.fixedLine) node.line += before.match(/\n/g)?.length ?? 0;
         node.fragment.append(doc.createTextNode(before));
         const element = doc.createElement('mark');
         element.className = 'meo-preview-search-match';
@@ -262,7 +273,7 @@ export function createPreviewSearchController({
         occurrences.set(node.line, occurrence + 1);
         matches.push({ element, anchor: { line: node.line, occurrence } });
         node.fragment.append(element);
-        node.line += element.textContent.match(/\n/g)?.length ?? 0;
+        if (!node.fixedLine) node.line += element.textContent.match(/\n/g)?.length ?? 0;
         node.cursor = end;
         node.changed = true;
       }
@@ -294,6 +305,7 @@ export function createPreviewSearchController({
     query = nextQuery;
     options = normalized;
     anchor = null;
+    pendingReveal = null;
     dirty = Boolean(query);
     if (!query) clearMatches();
     else scheduleSearch();
@@ -324,6 +336,12 @@ export function createPreviewSearchController({
   };
 
   return {
+    /** A logical block may be taller than the viewport. Reveal the exact hit
+     * after its asynchronous visible-text matching has hydrated the new band. */
+    revealAnchor(next: SearchMatchAnchor, isCurrent: () => boolean) {
+      anchor = next; pendingReveal = { anchor: next, isCurrent };
+      if (!dirty) applyAnchor();
+    },
     adapter: {
       setSearchQuery,
       isSearchReady: canRun,
@@ -350,6 +368,7 @@ export function createPreviewSearchController({
     },
     dispose: () => {
       disposed = true;
+      pendingReveal = null;
       cancelSearch();
       cancelRuler();
       clearMatches();

@@ -30,6 +30,7 @@ import { getReadingUiStrings } from './readingUiLanguage';
 import { normalizeFenceLanguage } from './fenceLanguage';
 import { markdownPresentationBlocks, type MarkdownPresentationBlock } from './markdownPresentationBlocks';
 import { prepareDeferredMarkdownInline } from './deferredMarkdownInline';
+import { splitMarkdownTableBands, renderTableBandTokens, isMarkdownTableBand } from './markdownTableBands';
 import type { PreviewDocumentHeading } from '../foundation/previewDocument';
 import { getPreviewPreset, type PreviewPresetId, type PreviewPresetDefinition } from '../foundation/previewPresets';
 import { load as loadYaml } from 'js-yaml';
@@ -315,7 +316,9 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
   const bodyTokens = deferredInline?.tokens ?? md.parse(normalizedBody.markdown, environment);
   hasMermaid ||= bodyTokens.some(node => node.type === 'fence'
     && (github ? node.info.trim().split(/\s+/)[0] : normalizeFenceLanguage(node.info)) === 'mermaid');
-  const tokenBlocks = markdownPresentationBlocks(bodyTokens, bodySourceLines);
+  const roots = markdownPresentationBlocks(bodyTokens, bodySourceLines);
+  const tokenBlocks = options.windowedPresentation && !github && !options.presetDefinition?.custom
+    ? splitMarkdownTableBands(bodyTokens, roots, bodySourceLines) : roots;
   const documentHref = options.target === 'html' && options.outputFilePath
     ? `./${encodeURIComponent(path.basename(options.outputFilePath))}`
     : '';
@@ -375,7 +378,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
       img: ['src', 'alt', 'title', 'width', 'height', 'loading', DEFERRED_IMAGE_ATTRIBUTE, ...(github ? githubHtmlAttributes.img : [])],
       ol: ['start', 'reversed', ...(github ? githubHtmlAttributes.ol : [])],
       li: ['value'],
-      '*': ['class', 'style', 'id', 'data-source-b64', 'data-meo-deferred-math', 'data-source-line', 'data-source-end-line', 'aria-hidden', ...(github ? githubHtmlAttributes['*'] : [])],
+      '*': ['class', 'style', 'id', 'data-source-b64', 'data-meo-deferred-math', 'data-source-line', 'data-source-end-line', 'data-meo-preview-table-widths', 'data-meo-preview-table-part', 'data-meo-preview-table-origin', 'aria-hidden', ...(github ? githubHtmlAttributes['*'] : [])],
       span: ['class', 'style', 'title', 'role', 'aria-label', 'aria-hidden', 'data-line-number'],
       th: ['colspan', 'rowspan', 'scope', 'style'],
       td: ['colspan', 'rowspan', 'style'],
@@ -495,8 +498,9 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
   const prefixBlocks: MarkdownPresentationBlock[] = prefix ? [{ index: 0, sourceLine: 1,
     sourceEndLine: Math.max(1, (extractedFrontmatter.body.sourceLines[0] ?? 1) - 1),
     kind: 'frontmatter', sourceCharacters: prefix.length }] : [];
-  const blocks: MarkdownPresentationBlock[] = [...prefixBlocks, ...tokenBlocks.map(({ from: _from, to: _to, ...block }) => ({
-    ...block, index: block.index + prefixBlocks.length
+  const blocks: MarkdownPresentationBlock[] = [...prefixBlocks, ...tokenBlocks.map(block => ({
+    index: block.index + prefixBlocks.length, sourceLine: block.sourceLine, sourceEndLine: block.sourceEndLine,
+    kind: block.kind, sourceCharacters: block.sourceCharacters
   }))];
   const footnotes = preparedMarkdown.footnotes;
   const splitFootnotes = options.windowedPresentation === true && footnotes.length > 1;
@@ -519,6 +523,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
       if (prefixBlocks.length && index === 0) return sanitize(prefix);
       const block = tokenBlocks[index - prefixBlocks.length];
       if (block) deferredInline?.prepareRange(block.from, block.to);
+      if (block && isMarkdownTableBand(block) && block.table.first) deferredInline?.prepareRange(block.table.open, block.table.headEnd);
       const footerIndex = index - prefixBlocks.length - tokenBlocks.length;
       if (!block && splitFootnotes) {
         const note = footnotes[footerIndex]!;
@@ -526,7 +531,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
           + `<ol class="footnotes-list" start="${footerIndex + 1}">${note.render()}</ol></section>`);
       }
       return sanitize(block
-        ? md.renderer.render(bodyTokens.slice(block.from, block.to), md.options, environment)
+        ? md.renderer.render(isMarkdownTableBand(block) ? renderTableBandTokens(bodyTokens, block) : bodyTokens.slice(block.from, block.to), md.options, environment)
         : preparedMarkdown.footnotesHtml);
     },
     renderAll: () => {
@@ -829,7 +834,9 @@ function installTableContainerTransform(md: MarkdownIt, resolveIndent: (sourceLi
     const wrapperAttributes = indent > 0
       ? ` class="meo-table-scroll meo-export-indented-table" style="--meo-table-indent:${indent}ch"`
       : ' class="meo-table-scroll"';
-    return `<div${wrapperAttributes}>${defaultTableOpen(tokens, idx, options, env, self)}`;
+    const bandSource = tokens[idx]?.attrGet('data-meo-preview-table-part')
+      ? ` data-source-line="${sourceLine}" data-source-end-line="${tokens[idx]!.attrGet('data-source-end-line')}"` : '';
+    return `<div${wrapperAttributes}${bandSource}>${defaultTableOpen(tokens, idx, options, env, self)}`;
   };
   md.renderer.rules.table_close = (tokens, idx, options, env, self) => (
     `${defaultTableClose(tokens, idx, options, env, self)}</div>`

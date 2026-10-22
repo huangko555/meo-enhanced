@@ -51,6 +51,9 @@ assert.equal(assessLargeDocument('abc\r\n12345\r\n').dimensions.maxLineLength, 5
 assert.equal(assessLargeDocument('```\n' + 'x'.repeat(40_000)).dimensions.maxCodeBlockLength, 40_004);
 assert.equal(assessLargeDocument('| A | B |\n| --- | --- |\n| a | b |\n| c | d |\n\nTail').dimensions.maxTableRows, 2);
 assert.equal(literalExample.dimensions.maxTableRows, 0);
+const indentedTable = assessLargeDocument('    | A | B |\n    | --- | --- |\n' + '    | a | b |\n'.repeat(1200));
+assert.equal(indentedTable.dimensions.maxTableRows, 0, 'Indented literal code must not trigger a rendered-table strategy');
+assert.equal(indentedTable.windowedPreview, false);
 assert.equal(assessLargeDocument('| A | B |\n| --- | --- |\n' + '| --- | --- |\n'.repeat(4_096)).dimensions.maxTableRows, 4_096,
   'delimiter-shaped cell contents must remain rows of one long table');
 const singleLongTable = assessLargeDocument('| A | B |\n| --- | --- |\n' + '| a | b |\n'.repeat(1_200));
@@ -58,7 +61,16 @@ assert.ok(singleLongTable.pressure < 1 && singleLongTable.preferSource,
   'the optional fast-opening preference must recognize one costly table in a short file');
 assert.equal(singleLongTable.boundedEditorWork, true, 'one large editable block needs a work budget regardless of byte density');
 assert.equal(singleLongTable.lightweightSourceSyntax, false, 'opening preferences must not change normal Source coloring');
-assert.equal(singleLongTable.windowedPreview, false, 'the table opening guard must not force an unproven Preview strategy');
+assert.equal(singleLongTable.windowedPreview, true, 'a giant table needs independent Preview reading bands before the byte threshold');
+for (const delimiter of ['--- | ---', ':-- | -:', '| - | - |']) {
+  const header = delimiter.startsWith('|') ? '| A | B |' : 'A | B';
+  const assessment = assessLargeDocument(`${header}\n${delimiter}\n` + 'a | b\n'.repeat(512));
+  assert.equal(assessment.dimensions.maxTableRows, 512, 'optional outer pipes and short aligned delimiters retain the same work budget');
+  assert.equal(assessment.windowedPreview, false, '512-row Preview startup gains are not stable enough to force a logical document');
+  const larger = assessLargeDocument(`${header}\n${delimiter}\n` + 'a | b\n'.repeat(1024));
+  assert.equal(larger.windowedPreview, true, '1024-row Preview uses the measured source-backed table path');
+  assert.equal(assessment.lightweightSourceSyntax, false);
+}
 
 const combinedSubthresholdText = [
   ...Array.from({ length: 3_900 }, (_, index) => `line-${index} ${'x'.repeat(28)}`),

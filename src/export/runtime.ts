@@ -144,9 +144,9 @@ export function preparePreviewDocument(options: PreviewDocumentOptions, windowed
     ...(definition.custom ? { presetRevision: definition.custom.revision } : {}),
     styles: {
       dark: buildPresetPreviewStyles(preset, environment, 'dark', options.contentWidth, definition)
-        + (windowed ? '\n.footnotes.meo-preview-footnotes-continuation{margin-top:.45em!important;padding-top:0!important;border-top:0!important}' : ''),
+        + (windowed ? windowedPreviewStyles : ''),
       light: buildPresetPreviewStyles(preset, environment, 'light', options.contentWidth, definition)
-        + (windowed ? '\n.footnotes.meo-preview-footnotes-continuation{margin-top:.45em!important;padding-top:0!important;border-top:0!important}' : '')
+        + (windowed ? windowedPreviewStyles : '')
     }
   };
   return {
@@ -161,6 +161,13 @@ export function preparePreviewDocument(options: PreviewDocumentOptions, windowed
     }
   };
 }
+
+const windowedPreviewStyles = `
+.footnotes.meo-preview-footnotes-continuation{margin-top:.45em!important;padding-top:0!important;border-top:0!important}
+.meo-table-scroll:has(>table[data-meo-preview-table-part]){margin-bottom:0}
+.meo-table-scroll:has(>table[data-meo-preview-table-part="end"]){margin-bottom:1em}
+table:is([data-meo-preview-table-part="middle"],[data-meo-preview-table-part="end"])>tbody>tr:first-child>td{border-top-width:0}
+`;
 
 async function importPresetCodeTheme(name: string): Promise<CodeThemeDto> {
   switch (name) {

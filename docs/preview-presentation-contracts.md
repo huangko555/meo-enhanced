@@ -85,3 +85,46 @@ asset geometry is covered by `scripts/test-source-preview-late-layout.ts`. The
 standalone reading-surface matrix also checks table descendants across viewport
 widths, zoom factors, and device pixel ratios. The pure projection outlier
 contract is in `scripts/test-linked-viewport-map.ts`.
+
+Giant top-level Markdown tables in built-in MEO presets use source-backed reading
+bands within the existing logical Preview document. Columns belong to the complete
+accepted table, so typing in a distant row cannot resize untouched visible cells;
+newly mounted bands use those same preferences. A changed column schema accepts
+fresh preferences, while font/viewport changes fit the existing preferences anew.
+The authored header appears once. Adjacent mounted bands retain continuous row
+borders and stripes. Search reveals the actual match after visible matching is
+ready, rather than centering a whole band taller than the viewport. Presentation
+transactions retain an explicit top/end intent while estimated gaps resolve;
+content-edit transactions retain their existing reading-position rules.
+Wheel quiet time is a resource-work budget, while only an actual held native
+scrollbar forbids viewport restoration. Delayed image geometry during a wheel
+must retain the current text witness rather than silently moving the page.
+Screen readers, raw HTML/nested containers, GitHub and custom renderers retain
+complete-table semantics. Standalone exports retain the original complete table;
+logical whole-table clipboard HTML rejoins internal bands. Internal rendering
+bands must never become missing rows in full-document search or copying.
+
+Source positions are revision-specific. When edits insert/remove preceding blocks,
+an ordinary table wrapper derives identity from its direct authored table, rather
+than a changing window index. One transaction maps source identity for retained
+roots, accepted column preferences and the exact text reading witness together.
+An unchanged glyph remains at its fractional painted position after source-line
+attributes change; a reused node for different source content is not a witness.
+The Source position marker uses only coordinates belonging to the accepted
+Preview revision. Pending Source line numbers must never briefly mark or reveal
+an unrelated row in the older Preview. Edits inside a visible paragraph may
+legitimately reflow following content; this does not require pinning that content.
+
+An editor native thumb deliberately released at the track's top/bottom owns that
+document edge through later row and CodeMirror height-map publication. The editor
+viewport controller retains this intent at its existing scroll-write boundary;
+row windows do not become a second navigation owner. A subsequent input/navigation
+releases it. Stationary arrow/track clicks, content-margin selections, cancellation
+and blur must not invent an edge intent.
+
+Live row-window movement sizes only newly mounted rows. Retained cells must not
+have their natural-height constraints cleared and reapplied just because nearby
+rows mount. Actual font/width/content invalidation still resizes mounted rows.
+A held native thumb uses a smaller offscreen buffer for page jumps; release
+restores ordinary wheel/keyboard overscan while retaining the reading row or
+explicit edge intent. This must not retire an active cell or omit logical rows.

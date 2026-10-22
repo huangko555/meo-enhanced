@@ -9,9 +9,9 @@ function lineBreaks(text: string, from: number, to: number): number {
  * mounted roots are indexed; no DOM serialization, content hash or history cache.
  * The renderer still compares actual output, including cross-block references.
  */
-export function previewSourceMorphKeys(current: HTMLElement, next: HTMLElement, before: string | null, after: string): WeakMap<Node, string> {
-  const keys = new WeakMap<Node, string>();
-  const available = new Map<string, Element>();
+export type PreviewSourceLineMapper = (line: number) => number | undefined;
+
+export function previewSourceLineMapper(before: string | null, after: string): PreviewSourceLineMapper {
   let mapLine = (line: number): number | undefined => line;
   if (before !== null && before !== after) {
     let from = 0, oldTo = before.length, newTo = after.length;
@@ -34,11 +34,23 @@ export function previewSourceMorphKeys(current: HTMLElement, next: HTMLElement, 
       return undefined;
     };
   }
+  return mapLine;
+}
+
+export function previewSourceMorphKeys(current: HTMLElement, next: HTMLElement, before: string | null, after: string,
+  mapLine = previewSourceLineMapper(before, after)): WeakMap<Node, string> {
+  const keys = new WeakMap<Node, string>();
+  const available = new Map<string, Element>();
   const index = (root: HTMLElement, map: (line: number) => number | undefined, previous: boolean) => {
     const counts = new Map<string, number>();
     for (const element of Array.from(root.children)) {
       if (element.hasAttribute('data-meo-preview-gap')) continue;
-      const source = element.getAttribute('data-source-line');
+      // Markdown's table wrapper has no authored position of its own. Its
+      // direct table owns that source identity; a window's block index changes
+      // when new paragraphs are inserted above it.
+      const source = element.getAttribute('data-source-line')
+        ?? (element.classList.contains('meo-table-scroll')
+          ? element.querySelector(':scope > table[data-source-line]')?.getAttribute('data-source-line') ?? null : null);
       if (source === null || !Number.isSafeInteger(Number(source)) || Number(source) < 1) continue;
       const line = map(Number(source));
       if (line === undefined) continue;

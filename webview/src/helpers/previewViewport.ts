@@ -74,6 +74,8 @@ export function previewWindowProjection(root: HTMLElement, manifest: PreviewDocu
 export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocumentManifest, dependencies: {
   request(documentId: string, operation: PreviewDocumentOperation): Promise<PreviewDocumentResult>;
   mutate(run: () => void): void;
+  /** Fit newly attached tables before committing their logical heights. */
+  prepare?(): void;
   changed(): void;
   error(error: unknown): void;
   reveal(element: HTMLElement, align: ScrollLogicalPosition): void;
@@ -254,6 +256,7 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
         mounted.set(index, { start, end }); before = start;
       }
       if (structureChanged) rebuildGaps();
+      if (structureChanged) dependencies.prepare?.();
       const measured = measure();
       if (structureChanged || measured) { rebuildGaps(); dependencies.changed(); }
     });

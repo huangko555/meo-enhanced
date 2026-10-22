@@ -36,6 +36,21 @@ try {
   assert.ok(first.rows <= 120 && first.inputs <= 240,
     `A 1600-row table must bound mounted editors to its reading window, got ${first.rows} rows / ${first.inputs} inputs`);
   const frames = () => page.evaluate(async () => { for (let i = 0; i < 10; i++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve())); });
+  const retainedSizing = await page.evaluate(() => {
+    const scope = window as any, scroll = scope.windowEditor.view.scrollDOM;
+    const content = document.querySelector<HTMLElement>('tbody tr[data-table-body-row="1"] .meo-md-html-table-cell-content')!;
+    const observer = new MutationObserver(() => {});
+    observer.observe(content, { attributes: true, attributeFilter: ['style'] });
+    const originalTop = scroll.scrollTop;
+    scroll.scrollTop += 250;
+    scope.windowRows(document.querySelector('table[data-meo-table-windowed] tbody')).update();
+    const result = { retained: content.isConnected, writes: observer.takeRecords().length };
+    observer.disconnect(); scroll.scrollTop = originalTop;
+    return result;
+  });
+  assert.ok(retainedSizing.retained && retainedSizing.writes === 0,
+    `Mounting nearby rows must not clear/reapply unchanged retained cell heights: ${JSON.stringify(retainedSizing)}`);
+  await frames();
   const dragSurvivesCellBlur = await page.evaluate(() => {
     const scope = window as any, view = scope.windowEditor.view;
     const input = document.querySelector<HTMLTextAreaElement>('table[data-meo-table-windowed] textarea')!;
@@ -67,6 +82,13 @@ try {
       const fraction = scroll.scrollTop / (scroll.scrollHeight - scroll.clientHeight), bounds = scroll.getBoundingClientRect();
       const row = [...document.querySelectorAll<HTMLTableRowElement>('table[data-meo-table-windowed] tr[data-table-body-row]')]
         .find(row => { const rect = row.getBoundingClientRect(); return rect.bottom > bounds.top && rect.top < bounds.bottom; });
+      if (release === 'pointerup' && fraction > .1 && fraction < .9) {
+        const readingRows = [...document.querySelectorAll<HTMLTableRowElement>('table[data-meo-table-windowed] tr[data-table-body-row]')]
+          .filter(row => Number(row.dataset.tableBodyRow) > 0);
+        const excess = readingRows.some(row => { const rect = row.getBoundingClientRect();
+          return rect.bottom < bounds.top - bounds.height / 2 || rect.top > bounds.bottom + bounds.height / 2; });
+        if (excess) throw Error('A held native thumb must not build multiple offscreen viewports on each jump');
+      }
       if (release === 'blur') window.dispatchEvent(new Event('blur'));
       else document.dispatchEvent(new PointerEvent(release, { bubbles: true, button: 0 }));
       return { fraction, row: row?.dataset.tableBodyRow, top: row?.getBoundingClientRect().top };

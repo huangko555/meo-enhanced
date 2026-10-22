@@ -75,6 +75,28 @@ gutter work. `benchmark-document-strategies.ts` provides benchmark-only
 switch. Initial GC heap measurements are outside `startup.initMs`; the later
 confirmed-interactive navigation timestamp includes GC and is not pure startup.
 
+`scripts/test-preview-table-bands.ts` checks source-backed 32-row reading bands
+for giant top-level Markdown tables. It compares every rich row and complete
+export with the original renderer, bounds inline parsing as well as HTML,
+and verifies complete search/source navigation/copy. Logical table copy joins
+internal bands back into one table. HTML containers, nested tables, GitHub and
+custom renderers retain the complete semantics. Column preferences retain a
+source-table identity across edits and prefix line changes; schema changes reset it.
+`scripts/test-preview-table-bands-production.ts` uses the actual production
+bootstrap and Worker. Run it both normally and with `--sync`: it checks bounded
+DOM, real wheel and Find navigation, top/end intent, native keyboard navigation,
+column consistency after visiting new bands, resize/DPR, screen-reader fallback
+and every delivered unchanged compositor paint during Source input. Wait for the
+split handoff's inert/visibility state before treating its reading surface as
+accepted. Internal table bands do not imply a fresh Preview document for every
+512-row file: the standalone table admission is separately measured at 1024 rows.
+`scripts/test-preview-table-source-identity.ts` inserts preceding Source paragraphs
+while split Preview independently reads an unchanged ordinary table containing
+HTML, math and footnotes. Both full-DOM and windowed paths must retain original
+row/formula DOM, column widths and every observed compositor paint. Source marker
+coordinates must belong to the accepted Preview revision, and mapped source-line
+changes must retain the exact fractional glyph witness.
+
 `scripts/test-preview-giant-code-highlight.ts` bounds actual token DOM writes for
 an 18,000-line fence across scrolling, wrapping and theme changes. It verifies
 full selectable text, multi-line grammar and bracket depth from preceding,

@@ -43,7 +43,8 @@ const policyPlugin = { name: 'benchmark-only-policy', setup(builder: any) {
   });
 } };
 const build = await Bun.build({ entrypoints: [path.join(root, 'webview/src/index.ts')], target: 'browser', format: 'esm',
-  splitting: true, minify: true, outdir: compiled, plugins: [policyPlugin] });
+  splitting: true, minify: true, sourcemap: process.argv.includes('--cpu-profile') ? 'external' : undefined,
+  outdir: compiled, plugins: [policyPlugin] });
 assert.ok(build.success, build.logs.map(String).join('\n'));
 const hostEntry = path.join(output, 'host-entry.ts');
 fs.writeFileSync(hostEntry, `export { default as runtime } from ${JSON.stringify(path.join(root, 'src/export/runtime.ts'))};
@@ -58,7 +59,9 @@ const rich = (index: number) => `## Rich ${index}\n\n| Name | Value |\n| --- | -
   + (index % 10 === 0 ? '```mermaid\nflowchart LR\nA-->B\n```\n\n' : '');
 const prefix = '# Strategy comparison\n\nBENCH_EDIT_TARGET\n\nStable **bold** content and [link](https://example.com).\n\n';
 const suffix = '\n\n## LOCATION_TAIL\n\nBENCH_DOCUMENT_END\n';
-const fixtures = [
+const documentFile = option('--document', '');
+if (documentFile) assert.equal(phase, 'startup', 'External documents are read-only startup/profile fixtures');
+const fixtures = (documentFile ? [{ kind: 'document', text: fs.readFileSync(path.resolve(documentFile), 'utf8') }] : [
   { kind: 'small-simple', text: prefix + 'A simple paragraph.\n\n'.repeat(15) + suffix },
   { kind: 'small-complex', text: prefix + Array.from({ length: 40 }, (_, i) => rich(i)).join('') + suffix },
   { kind: 'code-dense', text: prefix + '```\nplain code content\n```\n\n'.repeat(60) + suffix },
@@ -67,11 +70,11 @@ const fixtures = [
   { kind: 'giant-line', text: prefix + 'Long single paragraph '.repeat(24_000) + suffix },
   { kind: 'giant-code', text: prefix + '```javascript\n' + 'const value = { text: "content", number: 123 };\n'.repeat(18_000) + '```' + suffix },
   { kind: 'giant-table', text: prefix + '| Name | Value |\n| --- | --- |\n' + Array.from({ length: 1600 }, (_, i) => `| Row ${i} | Long **formatted** content ${i} |\n`).join('') + suffix },
-  ...[200, 400, 512, 800, 1200].map(rows => ({ kind: `table-${rows}`, text: prefix + '| Name | Value |\n| --- | --- |\n'
+  ...[200, 400, 512, 800, 1024, 1200].map(rows => ({ kind: `table-${rows}`, text: prefix + '| Name | Value |\n| --- | --- |\n'
     + Array.from({ length: rows }, (_, i) => `| Row ${i} | Long **formatted** content ${i} |\n`).join('') + suffix })),
   { kind: 'table-wide-256', text: prefix + '| Name | Value | State | Detail |\n| --- | --- | --- | --- |\n'
     + Array.from({ length: 256 }, (_, i) => `| Row ${i} | **formatted** ${i} | active | More **formatted** content ${i} |\n`).join('') + suffix }
-].filter(fixture => option('--fixtures', '').split(',').filter(Boolean).length === 0 || option('--fixtures', '').split(',').includes(fixture.kind));
+]).filter(fixture => option('--fixtures', '').split(',').filter(Boolean).length === 0 || option('--fixtures', '').split(',').includes(fixture.kind));
 assert.ok(fixtures.length > 0);
 const report: any = { commit: Bun.spawnSync(['git', 'rev-parse', 'HEAD']).stdout.toString().trim(), rounds, phase,
   cpuProfile: process.argv.includes('--cpu-profile'),
@@ -81,6 +84,7 @@ const report: any = { commit: Bun.spawnSync(['git', 'rev-parse', 'HEAD']).stdout
   browser: '', viewport: { width: 1280, height: 900 }, assets: createHash('sha256').update(fs.readFileSync(path.join(assets, 'index.js'))).digest('hex'),
   scope: 'Fresh browser contexts and disabled HTTP cache for each direct opening; warm means revisiting a mode in the same session. OS caches are not cleared. Host rendering runs in a separate Bun process from Chromium, not the VS Code extension Host. Click/input includes CDP dispatch, source/selection confirmation and two animation frames; heap is renderer JS heap, not total RAM.',
   initialHeapScope: 'initialHeap collects renderer garbage after startup.initMs/observedNavigationMs and before interactions; confirmedInteractiveNavigationMs includes that collection and is not pure startup time.',
+  ...(documentFile ? { documentScope: 'External source is copied unchanged into the ignored result folder. Image URI/dimension responses are mocked; this diagnoses the reading pipeline and does not reproduce native VS Code resource loading.' } : {}),
   fixtures: fixtures.map(fixture => ({ kind: fixture.kind, sha256: createHash('sha256').update(fixture.text).digest('hex'),
     ...assessLargeDocument(fixture.text), maxLine: Math.max(...fixture.text.split('\n').map(line => line.length)) })), samples: [] };
 for (const fixture of fixtures) fs.writeFileSync(path.join(output, fixture.kind + '.md'), fixture.text);
@@ -180,6 +184,8 @@ try {
         sample.startup.observedNavigationMs = performance.now() - navigationStarted;
         sample.initialDom = await page.evaluate(() => ({
           nodes: document.querySelectorAll('*').length,
+          previewNodes: document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelectorAll('*').length ?? 0,
+          previewRows: document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelectorAll('tr').length ?? 0,
           tableRows: document.querySelectorAll('.meo-md-html-table:not(.meo-md-html-table-sticky-table) tr[data-source-line-number]').length,
           tableInputs: document.querySelectorAll('.meo-md-html-table:not(.meo-md-html-table-sticky-table) textarea').length
         }));
@@ -189,7 +195,9 @@ try {
         sample.initialHeap = (await initialClient.send('Performance.getMetrics')).metrics.find(entry => entry.name === 'JSHeapUsedSize')?.value;
         await initialClient.detach();
         if (phase === 'startup') {
-          if (initialMode !== 'preview') {
+          if (initialMode !== 'preview' && documentFile) {
+            sample.coldInteraction = { skipped: 'An unchanged external document has no synthetic editing marker; startup geometry/heap only.' };
+          } else if (initialMode !== 'preview') {
             const coords = await page.evaluate(() => {
               const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
               const pos = view.state.doc.toString().indexOf('BENCH_EDIT_TARGET') + 17, rect = view.coordsAtPos(pos);

@@ -79,7 +79,8 @@ export function createPreviewDocumentSearch(manifest: PreviewDocumentManifest, d
         await dependencies.viewport.ensure({ block: target.block, align: 'center',
           isCurrent: () => !disposed && revision === generation && navigation === navigationGeneration && canRun() });
         if (disposed || revision !== generation || navigation !== navigationGeneration) return;
-        dependencies.visible.adapter.setSearchAnchor({ line: target.line, occurrence: target.occurrence });
+        dependencies.visible.revealAnchor({ line: target.line, occurrence: target.occurrence },
+          () => !disposed && revision === generation && navigation === navigationGeneration && canRun());
       }
     } catch (error) {
       if (!disposed && revision === generation) { dirty = false; dependencies.error(error); dependencies.onResultsChanged(); }

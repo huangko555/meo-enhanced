@@ -9,7 +9,7 @@ const build = await Bun.build({
 if (!build.success) throw Error(build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
 try {
-  for (const scenario of ['ready', 'margin', 'gap', 'multiple', 'authored-size', 'error', 'hidden', 'replaced', 'font-increase', 'font-decrease', 'font-user-scroll', 'font-superseded', 'font-hidden', 'font-replaced']) {
+  for (const scenario of ['ready', 'wheel-active', 'margin', 'gap', 'multiple', 'authored-size', 'error', 'hidden', 'replaced', 'font-increase', 'font-decrease', 'font-user-scroll', 'font-superseded', 'font-hidden', 'font-replaced']) {
     const page = await browser.newPage();
     const fontChange = scenario.startsWith('font-');
     const pageErrors: string[] = [];
@@ -196,6 +196,14 @@ try {
       assert.deepEqual(pageErrors, []);
       await page.close();
       continue;
+    }
+    if (scenario === 'wheel-active') {
+      await page.mouse.wheel({ deltaY: 1 });
+      imageBaseline = await page.evaluate(async () => {
+        for (let index = 0; index < 2; index++) await new Promise(requestAnimationFrame);
+        return document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+          .querySelector('[data-reading-anchor]')!.getBoundingClientRect().top;
+      });
     }
     await releaseImage();
     await page.waitForFunction(({failed, count}) => {

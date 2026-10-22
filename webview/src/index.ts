@@ -2991,6 +2991,7 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     previewViewportSurface: {
       captureVisualReadingAnchor: ratio => previewController.captureVisualReadingAnchor(ratio),
       isInteracting: () => previewController.isViewportInteracting(),
+      isScrollbarDragging: () => previewController.isScrollbarDragging(),
       captureTopVisiblePosition(viewportOffset) {
         const position = previewController.getTopVisiblePosition(viewportOffset);
         return position ? {

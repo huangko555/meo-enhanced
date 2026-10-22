@@ -1,4 +1,5 @@
 import { planAutomaticTableWidths, type AutomaticTableWidthPlan } from '../application/automaticTableWidths';
+import { createPreviewTableColumnPreferences } from './previewTableColumns';
 
 const DEFAULT_MINIMUM_COLUMN_WIDTH = 90;
 const preferredWidthCache = new WeakMap<HTMLTableElement, {
@@ -129,7 +130,7 @@ function visibleRightEdgeInset(table: HTMLTableElement): number {
   return Math.max(1 / devicePixelRatio, outerBorderWidth);
 }
 
-function layoutTables(tables: readonly HTMLTableElement[]): void {
+function layoutTables(tables: readonly HTMLTableElement[], preferences: ReturnType<typeof createPreviewTableColumnPreferences>): void {
   const visibleTables = tables.map(table => {
     const wrapper = table.parentElement?.closest<HTMLElement>('td, th')
       ?? table.closest<HTMLElement>('.meo-table-scroll, .meo-export-html-block, .meo-md-html-content') ?? table.parentElement;
@@ -143,6 +144,13 @@ function layoutTables(tables: readonly HTMLTableElement[]): void {
     table.style.removeProperty('--meo-preview-table-cell-inline-padding');
     return [{ table, wrapper, columns, columnCount }];
   }).map(entry => {
+    const units = preferences.read(entry.table, entry.columnCount);
+    if (units) {
+      const cell = entry.table.querySelector('th,td');
+      const style = entry.table.ownerDocument.defaultView!.getComputedStyle(cell ?? entry.table);
+      const padding = (Number.parseFloat(style.paddingInlineStart) || 0) + (Number.parseFloat(style.paddingInlineEnd) || 0) + 1;
+      return { ...entry, signature: '', preferred: units.map(unit => unit * (Number.parseFloat(style.fontSize) || 16) + padding) };
+    }
     const signature = preferredWidthSignature(entry.table, entry.columnCount);
     const cached = preferredWidthCache.get(entry.table);
     return { ...entry, signature, preferred: cached?.signature === signature && cached.widths.length === entry.columnCount
@@ -194,7 +202,8 @@ function layoutTables(tables: readonly HTMLTableElement[]): void {
 /** Mount after attachment and dispose with the reading document or rendered HTML widget. */
 export function createPreviewTableLayoutController(
   frameDocument: Document,
-  root: Document | HTMLElement = frameDocument
+  root: Document | HTMLElement = frameDocument,
+  preferences = createPreviewTableColumnPreferences()
 ): PreviewTableLayoutController {
   let disposed = false;
   let frame: number | null = null;
@@ -217,8 +226,8 @@ export function createPreviewTableLayoutController(
     if (currentTables.some(table => table.parentElement?.closest('table'))) {
       currentTables.sort((left, right) => left === right ? 0
         : left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
-      for (const table of currentTables) layoutTables([table]);
-    } else layoutTables(currentTables);
+      for (const table of currentTables) layoutTables([table], preferences);
+    } else layoutTables(currentTables, preferences);
   };
   const scheduleRefresh = () => {
     if (disposed || frame !== null) return;

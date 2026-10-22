@@ -1,4 +1,5 @@
 import type MarkdownIt from 'markdown-it';
+import { tableRowRanges } from './markdownTableBands';
 
 type CoreState = Parameters<MarkdownIt['core']['process']>[0];
 type CoreRule = (state: CoreState) => void;
@@ -25,9 +26,18 @@ export function prepareDeferredMarkdownInline(md: MarkdownIt, source: string, en
   for (let index = 0; index < tokens.length; index++) {
     depth += tokens[index]!.nesting;
     if (depth !== 0 && index + 1 !== tokens.length) continue;
-    const group = groups.length;
-    groups.push({ from, to: index + 1, ready: false });
-    groupAt.fill(group, from, index + 1); from = index + 1;
+    const add = (start: number, end: number) => {
+      if (start >= end) return;
+      groupAt.fill(groups.length, start, end);
+      groups.push({ from: start, to: end, ready: false });
+    };
+    const table = tableRowRanges(tokens, from, index + 1);
+    if (table) {
+      add(from, table.bodyOpen + 1);
+      for (const row of table.rows) add(row.from, row.to);
+      add(table.bodyClose, index + 1);
+    } else add(from, index + 1);
+    from = index + 1;
   }
   let anchorsApplied = false;
   const prepare = (index: number) => {

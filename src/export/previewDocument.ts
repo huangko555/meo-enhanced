@@ -5,12 +5,13 @@ import type { PreviewDocumentChunk, PreviewDocumentManifest, PreviewDocumentOper
   PreviewDocumentResult, PreviewDocumentMatch } from '../foundation/previewDocument';
 import { previewBlockAtLine } from '../foundation/previewDocument';
 import { getPreviewPreset } from '../foundation/previewPresets';
+import { joinPreviewTableBands } from './markdownTableBands';
 
-type TextPart = { text: string; lower: string; line: number; offset: number };
+type TextPart = { text: string; lower: string; line: number; offset: number; fixedLine?: boolean };
 
 /** Same text-node and source-line semantics as the complete-DOM Preview search. */
 function previewTextParts(html: string): TextPart[] {
-  type Mapping = { line: number; lines: number; pre: boolean };
+  type Mapping = { line: number; lines: number; pre: boolean; row?: boolean };
   const stack: { mapping: Mapping; excluded: boolean }[] = [];
   const fallback: Mapping = { line: 1, lines: 0, pre: false };
   let pending = '', offset = 0;
@@ -19,7 +20,7 @@ function previewTextParts(html: string): TextPart[] {
     if (!pending) return;
     const mapping = stack.at(-1)?.mapping ?? fallback;
     parts.push({ text: pending, lower: pending.toLocaleLowerCase(), offset,
-      line: mapping.line + mapping.lines + (mapping.pre ? 1 : 0) });
+      line: mapping.line + (mapping.row ? 0 : mapping.lines) + (mapping.pre ? 1 : 0), fixedLine: mapping.row });
     if (mapping !== fallback) mapping.lines += (pending.match(/\n/g) ?? []).length;
     offset += pending.length;
     pending = '';
@@ -30,7 +31,7 @@ function previewTextParts(html: string): TextPart[] {
       const parent = stack.at(-1);
       const line = Number(attributes['data-source-line']);
       stack.push({ mapping: Number.isFinite(line) && line > 0
-        ? { line, lines: 0, pre: name === 'pre' && !(attributes.class ?? '').includes('meo-export-frontmatter-source') }
+        ? { line, lines: 0, row: name === 'tr', pre: name === 'pre' && !(attributes.class ?? '').includes('meo-export-frontmatter-source') }
         : parent?.mapping ?? fallback,
       excluded: parent?.excluded === true || ['script', 'style', 'noscript', 'svg'].includes(name) });
     },
@@ -146,7 +147,7 @@ export function createPreviewDocument(id: string, options: PreviewDocumentOption
             : slicePreviewHtml(entry.chunk.html, start, end);
           html.push(selected.html); text.push(selected.text);
         }
-        return { kind: 'copy', html: html.join(''), text: text.join('') };
+        return { kind: 'copy', html: joinPreviewTableBands(html.join('')), text: text.join('') };
       }
       let total = 0;
       let active: PreviewDocumentMatch | null = null;
@@ -166,7 +167,7 @@ export function createPreviewDocument(id: string, options: PreviewDocumentOption
             offset = Math.max(end, start + 1);
             if (operation.wholeWord && (/[\p{L}\p{N}_]/u.test(part.text[start - 1] ?? '')
               || /[\p{L}\p{N}_]/u.test(part.text[end] ?? ''))) continue;
-            line += (part.text.slice(cursor, start).match(/\n/g) ?? []).length;
+            if (!part.fixedLine) line += (part.text.slice(cursor, start).match(/\n/g) ?? []).length;
             const occurrence = occurrences.get(line) ?? 0;
             occurrences.set(line, occurrence + 1);
             if (total === operation.selectIndex || operation.selectIndex === undefined && operation.anchor
@@ -177,7 +178,7 @@ export function createPreviewDocument(id: string, options: PreviewDocumentOption
                 active = { block: block.index, offset: part.offset + start, end: part.offset + end, line, occurrence, index: total };
               }
             }
-            line += (part.text.slice(start, end).match(/\n/g) ?? []).length;
+            if (!part.fixedLine) line += (part.text.slice(start, end).match(/\n/g) ?? []).length;
             cursor = end;
             total += 1; count += 1;
           }

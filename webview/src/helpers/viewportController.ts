@@ -104,6 +104,8 @@ export interface PreviewViewportSurface {
   isSourceLineRendered?(line: number): boolean;
   /** Native gestures own their scroll position until pointer/momentum settles. */
   isInteracting?(): boolean;
+  /** Only the native thumb forbids viewport writes; wheel reflow keeps its witness. */
+  isScrollbarDragging?(): boolean;
 }
 
 interface ViewportControllerOptions {
@@ -392,6 +394,8 @@ export class ViewportController {
   private anchorStabilizationGeneration: number | null = null;
   private lastTouchY: number | null = null;
   private scrollbarDragActive = false;
+  private scrollbarDragStartY: number | null = null;
+  private nativeScrollbarBoundary: 'top' | 'bottom' | null = null;
   private pendingHistoryShortcutViewport: ViewportHistorySnapshot | null = null;
   private linkedPreviewEnabled = false;
   private linkedViewportDriver: ViewportAnchorOwner = 'editor';
@@ -418,6 +422,10 @@ export class ViewportController {
   private pendingAsyncAnchorTransactions = 0;
   private readonly onWheel = (event: WheelEvent) => this.handleWheel(event);
   private readonly onScroll = () => {
+    if (this.restoreNativeScrollbarBoundary()) {
+      this.projectLinkedViewport('editor');
+      return;
+    }
     // Adopt the reading line after native scrolling, using the same layout
     // stabilizer as block updates. A newer interaction invalidates this anchor.
     if (this.getMode() === 'live' && this.isUserScrolling() &&
@@ -448,7 +456,7 @@ export class ViewportController {
   private readonly onPointerDown = (event: PointerEvent) => this.handlePotentialLayoutInteraction(event);
   private readonly nativeInputViewport: NativeInputViewport;
   private readonly onPointerUp = (event: PointerEvent) => {
-    this.finishScrollbarDrag();
+    this.finishScrollbarDrag(event.type === 'pointerup' ? event : undefined);
     if (event.type === 'pointerup') this.nativeInputViewport.capture(event.target);
   };
   private readonly onWindowBlur = () => this.finishScrollbarDrag();
@@ -522,6 +530,7 @@ export class ViewportController {
   }
 
   private invalidateViewportWork(preserveInteractionGeneration = false): void {
+    this.nativeScrollbarBoundary = null;
     this.nativeInputViewport.release();
     const scope = this.anchorTransactionScope;
     const programmaticCurrentTransaction = scope.kind === 'current'
@@ -679,6 +688,7 @@ export class ViewportController {
       this.writeScrollPosition({ top: nativeTop, left: this.view.scrollDOM.scrollLeft });
       return;
     }
+    if (this.restoreNativeScrollbarBoundary()) return;
     this.activeScrollLockCorrection?.();
     const activeAnchor = this.activeLayoutAnchor;
     if (activeAnchor) {
@@ -963,7 +973,7 @@ export class ViewportController {
       return;
     }
     if (this.previewSurface?.readScrollTop && this.previewSurface.writeScrollTop) {
-      if (this.previewSurface.isInteracting?.()) {
+      if (this.previewSurface.isScrollbarDragging?.() ?? this.previewSurface.isInteracting?.()) {
         // Programmatic restoration can interrupt native scrollbar dragging.
         // Let the browser finish the gesture before refreshing the linked map.
         mutate();
@@ -2348,6 +2358,9 @@ export class ViewportController {
     this.markInteraction();
     if (event.button === 0 && event.target === this.view.scrollDOM) {
       this.scrollbarDragActive = true;
+      const scroll = this.view.scrollDOM, rect = scroll.getBoundingClientRect();
+      this.scrollbarDragStartY = event.clientX >= rect.left + scroll.clientLeft + scroll.clientWidth
+        && event.clientX < rect.right && Number.isFinite(event.clientY) ? event.clientY : null;
       return;
     }
     if (this.getMode() !== 'live' || event.button !== 0) return;
@@ -3073,10 +3086,30 @@ export class ViewportController {
     };
   }
 
-  private finishScrollbarDrag(): void {
+  private finishScrollbarDrag(event?: PointerEvent): void {
     if (!this.scrollbarDragActive) return;
+    const startY = this.scrollbarDragStartY;
+    this.scrollbarDragStartY = null;
     this.scrollbarDragActive = false;
     this.markInteraction();
+    if (startY === null || !event) return;
+    const scroll = this.view.scrollDOM, rect = scroll.getBoundingClientRect();
+    const top = rect.top + scroll.clientTop;
+    const inset = Math.max(3, scroll.offsetWidth - scroll.clientWidth);
+    // A track/arrow click is not a deliberate drag to an edge. A real thumb
+    // release owns that edge even if deferred widget/height-map work has not
+    // yet published the range Chromium used during the pointer gesture.
+    this.nativeScrollbarBoundary = event.clientY < startY - 4 && event.clientY <= top + inset ? 'top'
+      : event.clientY > startY + 4 && event.clientY >= top + scroll.clientHeight - inset ? 'bottom' : null;
+    this.restoreNativeScrollbarBoundary();
+  }
+
+  private restoreNativeScrollbarBoundary(): boolean {
+    if (!this.nativeScrollbarBoundary || this.scrollbarDragActive) return false;
+    const scroll = this.view.scrollDOM;
+    this.writeScrollPosition({ top: this.nativeScrollbarBoundary === 'top' ? 0
+      : Math.max(0, scroll.scrollHeight - scroll.clientHeight), left: scroll.scrollLeft });
+    return true;
   }
 
   private captureEditorReadingAnchor(viewportOffset: number): ViewportDocumentAnchor {

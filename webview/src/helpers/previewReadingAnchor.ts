@@ -1,3 +1,5 @@
+import type { PreviewSourceLineMapper } from './previewSourceIdentity';
+
 /** The frame owns its otherwise unpadded document root. Keep the fractional
  * remainder there when a full-DOM preview has no virtual gap to absorb it.
  * This changes neither the reading root's formatting nor its containing block. */
@@ -18,10 +20,24 @@ export function restoreFullPreviewReadingScrollTop(document: Document, top: numb
 
 /** Retain an actual painted text position across a synchronous presentation
  * mutation. Estimated blocks and relocated footnotes cannot serve as witnesses. */
-export function capturePreviewReadingAnchor(document: Document, restore: (top: number) => void, viewportRatio = 0): (() => boolean) | null {
+export function capturePreviewReadingAnchor(document: Document, restore: (top: number) => void, viewportRatio = 0,
+  mapSourceLine?: PreviewSourceLineMapper): (() => boolean) | null {
   const window = document.defaultView, scroll = document.scrollingElement;
   const root = document.querySelector<HTMLElement>('main.meo-export-doc');
   if (!window || !scroll || !root) return null;
+  // Presentation-only transactions sample a reading band. At the actual end,
+  // that intent is the document boundary, even when the visible tail is still
+  // an estimated gap without a painted text witness. Content edits use ratio 0
+  // and continue preserving their existing physical/semantic reading position.
+  const atTop = scroll.scrollTop <= .5;
+  if (viewportRatio > 0 && (atTop || scroll.scrollHeight > scroll.clientHeight
+    && scroll.scrollTop >= scroll.scrollHeight - scroll.clientHeight - 1)) {
+    return () => {
+      if (!root.isConnected || root.ownerDocument !== document) return false;
+      restore(atTop ? 0 : Math.max(0, scroll.scrollHeight - scroll.clientHeight));
+      return true;
+    };
+  }
   const bounds = root.getBoundingClientRect();
   const left = Math.max(4, bounds.left + 12);
   const readingY = window.innerHeight * viewportRatio;
@@ -38,11 +54,18 @@ export function capturePreviewReadingAnchor(document: Document, restore: (top: n
       const text = node as Text, value = text.data, offset = range.startOffset;
       const element = text.parentElement!.closest<HTMLElement>('[data-source-line]');
       const sourceLine = element?.dataset.sourceLine, sourceEndLine = element?.dataset.sourceEndLine;
+      const mappedAttribute = (value: string | undefined) => {
+        if (value === undefined || !mapSourceLine) return value;
+        const mapped = mapSourceLine(Number(value));
+        return mapped === undefined ? null : String(mapped);
+      };
+      const expectedLine = mappedAttribute(sourceLine), expectedEndLine = mappedAttribute(sourceEndLine);
+      if (expectedLine === null || expectedEndLine === null) continue;
       const block = text.parentElement!.closest<HTMLElement>('p,li,td,th,pre,h1,h2,h3,h4,h5,h6,summary');
       const blockRect = block?.getBoundingClientRect();
       return () => {
         if (!text.isConnected || text.ownerDocument !== document || text.data !== value
-          || element && (element.dataset.sourceLine !== sourceLine || element.dataset.sourceEndLine !== sourceEndLine)) return false;
+          || element && (element.dataset.sourceLine !== expectedLine || element.dataset.sourceEndLine !== expectedEndLine)) return false;
         // A DOM move adjusts live Range boundaries to the old parent even when
         // morphing retains the same text node. Recreate from immutable coordinates.
         const currentRange = document.createRange();

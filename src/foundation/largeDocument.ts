@@ -82,9 +82,10 @@ export function assessLargeDocument(text: string): LargeDocumentAssessment {
     excluded.push({ from: opened.from, to: text.length });
     maxCodeBlockLength = Math.max(maxCodeBlockLength, text.length - opened.from);
   }
-  const tables = countMatches(text, /^\|\s*:?-{3,}.*\|\s*$/gmu, excluded);
+  const tableDelimiter = /^(?! {4}| {0,3}\t)[ \t]*(?=[|:-])(?=[^\r\n]*\|)\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/gmu;
+  const tables = countMatches(text, tableDelimiter, excluded);
   let maxTableRows = 0, fenceIndex = 0, tableBodyTo = 0;
-  for (const match of text.matchAll(/^\|\s*:?-{3,}.*\|\s*$/gmu)) {
+  for (const match of text.matchAll(tableDelimiter)) {
     // Delimiter-shaped cell contents are still rows of the current table.
     // Do not scan their common suffix again (quadratic for a long such table).
     if (match.index < tableBodyTo) continue;
@@ -120,9 +121,9 @@ export function assessLargeDocument(text: string): LargeDocumentAssessment {
   // Short rich documents also need bounded presentation work. Preserve their
   // ordinary opening policy and Source palette at the earlier work threshold.
   // One long table can be expensive even in a short file. The optional opening
-  // preference covers that case without lowering Source coloring or Preview's
-  // work thresholds. The table cost curve grows well before the byte threshold.
+  // preference covers that case without lowering Source coloring. Preview can
+  // now partition a giant Markdown table into independent source-backed bands.
   return { dimensions, pressure, preferSource: pressure >= 1 || maxTableRows >= 1_024,
-    lightweightSourceSyntax: pressure >= 1, windowedPreview: pressure >= 1,
+    lightweightSourceSyntax: pressure >= 1, windowedPreview: pressure >= 1 || maxTableRows >= 1024,
     boundedEditorWork: pressure >= 0.25 || codeFences >= 48 || maxTableRows >= 512 };
 }
