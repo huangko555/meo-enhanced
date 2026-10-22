@@ -2734,7 +2734,8 @@ async function main() {
     const before = await readViewport();
     const updatedText = initialText.replace('Start --> Done', 'Start --> Check --> Done');
     await page.evaluate((text) => {
-      window.dispatchEvent(new MessageEvent('message', { data: { type: 'docChanged', text, version: 2 } }));
+      // Version 2 already presented the unchanged document in the Preview case.
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'docChanged', text, version: 3 } }));
       const selection = text.indexOf('const line6');
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'revealSelection', anchor: selection, head: selection, focus: false, preserveViewport: true
@@ -2743,6 +2744,7 @@ async function main() {
       window.dispatchEvent(new Event('blur'));
       window.dispatchEvent(new Event('focus'));
     }, updatedText);
+    await page.waitForFunction(text => (window as any).__viewportTestText() === text, {}, updatedText);
     await page.keyboard.down('Control');
     await page.keyboard.press('s');
     await page.keyboard.up('Control');

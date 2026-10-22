@@ -2,6 +2,10 @@ import '../webview/src/index';
 import { EditorView } from '@codemirror/view';
 import { getViewportController } from '../webview/src/helpers/viewportController';
 
+(window as any).__viewportTestText = () => EditorView.findFromDOM(
+  document.querySelector<HTMLElement>('.editor-host > .cm-editor')!
+)!.state.doc.toString();
+
 (window as any).__viewportTestRetainReadingLine = async (text: string, top: number) => {
   const view = EditorView.findFromDOM(document.querySelector<HTMLElement>('.editor-host > .cm-editor')!)!;
   const position = view.state.doc.toString().indexOf(text);
