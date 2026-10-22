@@ -42,6 +42,25 @@ and behavioral assertions. Do not wait directly for the expected diff-row or gut
 counts. Intentional transition-frame and pending Preview checks retain their own
 observation windows.
 
+Document-update fixtures use strictly increasing Host revision numbers for changed
+content and verify the complete text was applied before starting another scenario.
+A captured `docChanged` message or a fixed frame delay does not establish that
+precondition; reusing a revision for different text can leave the old document on
+screen. Keep the later theme, trusted-wheel and painted geometry assertions.
+
+Responsive table setup waits on the visible Preview iframe's own animation-frame
+clock after outer Webview frames. Its ResizeObserver projects wrapper widths on
+that document; outer frames can still expose the preceding width. Keep the full
+theme/mode/continuous-resize matrix and the original geometry limits. A finite
+pause of the iframe clock must expose the old setup race and the owner-clock
+barrier must complete after release, without polling for the expected widths.
+
+Clipped rendered-content history verifies the exact changed native source target,
+collapsed selection, real editor focus and full caret visibility after undo.
+Retain the clipped-preview precondition and exact history snapshots. A derived
+Mermaid graph below that source need not also fit in the viewport: revealing it
+again would violate the single history-positioning intent.
+
 Pasted-image naming is covered by `test:image-storage` and the production settings
 and link-destination contracts. They verify the document-name default, all naming
 presets, continuing numbers across image formats, concurrent exclusive creation,
