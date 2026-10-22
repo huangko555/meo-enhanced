@@ -133,6 +133,12 @@ since the last release before selecting acceptance evidence. Gate membership is
 necessary, but a visible control or emitted message alone is not a successful
 operation. Report browser, Host-contract and final installed-VSIX evidence separately.
 
+`scripts/test-mermaid-editing.ts` checks that a zoomed tall diagram in side-by-side
+editing fills the document viewport to its bottom, including after window resizing,
+and stops at its block boundary. It covers English/dark and Chinese/light with fixed
+editor chrome above the document. Use `--preview-viewport-only` for the focused
+regression; the default invocation retains it in the rendered and release suites.
+
 `scripts/test-tab-switch-reading-position.ts` checks retained Webviews with both
 offscreen parking and `visibility:hidden` inside the viewport. Geometric intersection
 alone treats the latter as visible; accepting its smaller size can let the outline

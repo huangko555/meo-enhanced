@@ -669,7 +669,8 @@ class MermaidInlinePreview {
     const first = mermaidTextBlockAt(view, source.opening.from);
     const last = mermaidTextBlockAt(view, source.closing.from);
     const sourceHeight = Math.max(view.defaultLineHeight, last.bottom - first.top);
-    const viewportHeight = Math.max(160, view.scrollDOM.clientHeight - 40);
+    // The scroller already excludes editor chrome; the canvas includes its own heading.
+    const viewportHeight = Math.max(160, view.scrollDOM.clientHeight);
     const space = Math.ceil(Math.max(0, Math.min(480, viewportHeight) - sourceHeight));
     const scroller = view.scrollDOM.getBoundingClientRect();
     // DOM rectangles include CSS scaling; CodeMirror block heights use editor pixels.

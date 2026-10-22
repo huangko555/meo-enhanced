@@ -385,6 +385,60 @@ try {
       console.log(`Mermaid keyboard boundary roundtrip passed (${width}/${fromAbove?'above':'below'}/${vertical?'vertical':'horizontal'}/${screenTop})`);
     }
   };
+  const assertSidePreviewViewport = async () => {
+    const text = 'Before\n\n```mermaid\nflowchart TD\n' +
+      Array.from({ length: 65 }, (_, i) => `N${i}[Stage ${i}] --> N${i + 1}[Stage ${i + 1}]`).join('\n') +
+      '\n```\n\nAfter';
+    const geometry = () => page.evaluate(() => {
+      const v = (window as any).nativeEditor.view;
+      const pane = document.querySelector('.meo-mermaid-inline-preview')!;
+      const p = pane.getBoundingClientRect();
+      const canvas = pane.querySelector('.meo-mermaid-editing-preview')!.getBoundingClientRect();
+      const svg = pane.querySelector('.meo-mermaid-svg-wrapper > svg')!.getBoundingClientRect();
+      const viewport = v.scrollDOM.getBoundingClientRect();
+      return { paneTop: p.top, paneBottom: p.bottom, canvasTop: canvas.top, canvasBottom: canvas.bottom,
+        svgTop: svg.top, svgBottom: svg.bottom, viewportTop: viewport.top, viewportBottom: viewport.bottom };
+    });
+    fs.mkdirSync('.local/mermaid-preview-viewport-acceptance', { recursive: true });
+    for (const [width, height, language, appearance] of [
+      [1200, 800, 'en', 'dark'], [960, 620, 'zh-CN', 'light']
+    ] as const) {
+      await mount(text, width, language, appearance);
+      await page.waitForSelector('.meo-mermaid-inline-preview');
+      // Keep the document below fixed editor chrome, as in the full Webview.
+      await page.$eval('#app', app => (app as HTMLElement).style.cssText = 'margin-top:38px;height:calc(100% - 38px)');
+      await page.setViewport({ width, height });
+      await frames(12);
+      await page.$eval('.meo-mermaid-preview-controls button', button => {
+        for (let i = 0; i < 10; i++) (button as HTMLButtonElement).click();
+      });
+      await page.mouse.move(250, 400);
+      await page.mouse.wheel({ deltaY: 650 });
+      await frames(12);
+      for (const resizedHeight of [height, height - 140, height + 80]) {
+        await page.setViewport({ width, height: resizedHeight });
+        await frames(12);
+        const g = await geometry();
+        await page.screenshot({ path: `.local/mermaid-preview-viewport-acceptance/${appearance}-${resizedHeight}.png` });
+        assert.ok(g.paneTop < g.viewportTop && g.paneBottom > g.viewportBottom &&
+          g.svgTop < g.canvasTop && g.svgBottom > g.viewportBottom,
+          'The long Mermaid block and zoomed diagram span the reading viewport: ' + JSON.stringify(g));
+        assert.ok(Math.abs(g.canvasBottom - g.viewportBottom) <= 1,
+          'The sticky side preview fills the viewport down to its bottom: ' + JSON.stringify(g));
+      }
+      await page.mouse.wheel({ deltaY: 1600 });
+      await frames(12);
+      const end = await geometry();
+      assert.ok(end.paneBottom <= end.viewportBottom && Math.abs(end.canvasBottom - end.paneBottom) <= 1,
+        'The side preview stops at the Mermaid block bottom: ' + JSON.stringify(end));
+      assert.equal((await read()).text, text, 'Preview geometry never changes Markdown');
+      await page.$eval('#app', app => (app as HTMLElement).removeAttribute('style'));
+    }
+    console.log('Mermaid side preview viewport contract passed');
+  };
+  await assertSidePreviewViewport();
+  assert.deepEqual(errors, []);
+  if (!process.argv.includes('--preview-viewport-only')) {
   const boundaryOnly = process.argv.includes('--boundary-navigation-only');
   if (!boundaryOnly && !process.argv.includes('--keyboard-navigation-only')) await assertNavigation();
   if (!boundaryOnly) await assertKeyboardEntry();
@@ -741,6 +795,7 @@ try {
   console.log(
     `Native Mermaid editing passed: ${cases} container/width cases, six long-source containers, local layout, history, IME, controls and bilingual appearances`
   );
+  }
   }
 } catch (error) {
   failure = error;
