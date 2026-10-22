@@ -5445,7 +5445,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
 }
 
 .cm-editor .meo-mermaid-inline-separator:is(:hover, :focus-visible) {
-  background: var(--meo-ui-accent);
+  background: #316dca;
   outline: none;
 }
 
@@ -6094,7 +6094,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
 
 .outline-resizer:hover::before,
 body.outline-resizing .outline-resizer::before {
-  background: var(--meo-outline-focus, #316dca);
+  background: #316dca;
 }
 
 .outline-sidebar:has(.outline-resizer:hover) .outline-content {
