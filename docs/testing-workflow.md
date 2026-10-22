@@ -119,6 +119,11 @@ layout icon/caption alignment in both themes, languages, fonts and directions.
 It also belongs to `test:rendered-source` and saves visual evidence under
 `.local/block-passive-acceptance/`.
 
+`scripts/test-mermaid-viewport-persistence.ts` and `scripts/test-image-layout.ts`
+also verify proportional button/wheel zoom beyond the former 4x limit, inverse
+steps, retained minimum, reset and unchanged camera/layout behavior. The Mermaid
+contract saves a production-rendered zoom screenshot under `.local/visual-zoom-acceptance/`.
+
 The Mermaid/formula inner-source matrix and findings are in
 [testing-rendered-block-source.md](testing-rendered-block-source.md). Run
 `bun run test:rendered-source` for its dedicated input, boundary and appearance

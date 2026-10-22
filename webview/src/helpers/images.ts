@@ -12,6 +12,7 @@ import type {
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 import { encodeMarkdownPath } from '../../../src/foundation/linkDestination';
 import { isWikiImageTarget, parseWikiReference, wikiImageSrc, wikiTargetFromImageSrc, WIKI_IMAGE_SCHEME } from '../../../src/foundation/wikiReference';
+import { stepVisualZoom } from './visualZoom';
 
 const wikiImageIssues = new Map<string, string>();
 const wikiIssueRequests = new Map<string, number>();
@@ -637,8 +638,8 @@ export class ImageWidget extends WidgetType {
     const applyTransform = () => {
       image.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
     };
-    const changeZoom = (delta: number) => {
-      zoom = Math.min(4, Math.max(0.25, zoom + delta));
+    const changeZoom = (direction: 1 | -1, input: 'button' | 'wheel' = 'button') => {
+      zoom = stepVisualZoom(zoom, direction, input);
       applyTransform();
     };
 
@@ -659,8 +660,8 @@ export class ImageWidget extends WidgetType {
       controls.appendChild(button);
     };
     const strings = getUiStrings(this.uiLanguage);
-    addButton(ZoomIn, strings.zoomIn, () => changeZoom(0.5));
-    addButton(ZoomOut, strings.zoomOut, () => changeZoom(-0.5));
+    addButton(ZoomIn, strings.zoomIn, () => changeZoom(1));
+    addButton(ZoomOut, strings.zoomOut, () => changeZoom(-1));
     addButton(RotateCcw, strings.resetZoom, () => {
       zoom = 1;
       panX = 0;
@@ -713,7 +714,7 @@ export class ImageWidget extends WidgetType {
     };
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
-      changeZoom(event.deltaY > 0 ? -0.25 : 0.25);
+      changeZoom(event.deltaY > 0 ? -1 : 1, 'wheel');
     };
 
     viewer.addEventListener('pointerdown', onPointerDown);

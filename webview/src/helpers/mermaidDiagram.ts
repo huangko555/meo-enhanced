@@ -17,6 +17,7 @@ import { openMermaidFullscreen, type MermaidFullscreenViewer, type MermaidFullsc
 import { focusRenderedBlockAction } from './renderedBlockActionFocus';
 import { mountMermaidPreviewControls } from './renderedBlockModeControls';
 import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
+import { stepVisualZoom } from './visualZoom';
 
 declare global {
   interface Window {
@@ -1204,13 +1205,13 @@ export class MermaidDiagramWidget extends WidgetType {
     zoomIn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      this.setZoom(svgContainer, Math.min(4, this.zoom + 0.5));
+      this.setZoom(svgContainer, stepVisualZoom(this.zoom, 1));
     });
 
     zoomOut.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      this.setZoom(svgContainer, Math.max(0.25, this.zoom - 0.5));
+      this.setZoom(svgContainer, stepVisualZoom(this.zoom, -1));
     });
 
     reset.addEventListener('click', (e) => {

@@ -1,6 +1,7 @@
 import { createElement, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 import { suppressRenderedBlockPointerFocus } from './renderedBlockActionFocus';
+import { stepVisualZoom } from './visualZoom';
 
 export type MermaidFullscreenExitCause =
   | 'user-close' | 'escape' | 'dispose' | 'replacement' | 'mode' | 'external' | 'theme';
@@ -83,8 +84,8 @@ export function openMermaidFullscreen(options: {
     controls.append(button);
     return button;
   };
-  addButton(ZoomIn, strings.zoomIn, () => { zoom = Math.min(4, zoom + 0.5); applyTransform(); });
-  addButton(ZoomOut, strings.zoomOut, () => { zoom = Math.max(0.25, zoom - 0.5); applyTransform(); });
+  addButton(ZoomIn, strings.zoomIn, () => { zoom = stepVisualZoom(zoom, 1); applyTransform(); });
+  addButton(ZoomOut, strings.zoomOut, () => { zoom = stepVisualZoom(zoom, -1); applyTransform(); });
   addButton(RotateCcw, strings.resetZoom, fit);
   const exit = addButton(X, strings.exitFullscreen, () => viewer.close('user-close'));
   exit.classList.add('meo-mermaid-exit-btn');
@@ -141,7 +142,7 @@ export function openMermaidFullscreen(options: {
   container.addEventListener('pointercancel', release, { signal });
   container.addEventListener('wheel', event => {
     event.preventDefault();
-    const next = Math.max(0.25, Math.min(4, zoom + (event.deltaY > 0 ? -0.25 : 0.25)));
+    const next = stepVisualZoom(zoom, event.deltaY > 0 ? -1 : 1, 'wheel');
     const ratio = next / zoom;
     const rect = container.getBoundingClientRect();
     const x = event.clientX - (rect.left + rect.width / 2), y = event.clientY - (rect.top + rect.height / 2);
