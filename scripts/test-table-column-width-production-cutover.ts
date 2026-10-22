@@ -151,6 +151,21 @@ async function revealHitTestableHandle(page: any, selector: string): Promise<voi
   }, { polling: 'raf', timeout: 5000 }, selector);
 }
 
+async function scrollPastTableHeader(page: any, lineNumber: number): Promise<void> {
+  await page.evaluate(async (line: number) => {
+    (window as any).__columnWidthProduction.scrollToLine(line, 'top');
+    for (let frame = 0; frame < 2; frame++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+  }, lineNumber);
+  const viewport = await page.$eval('.cm-scroller', (node: Element) => node.getBoundingClientRect().toJSON());
+  await page.mouse.move(viewport.left + viewport.width / 2, viewport.top + viewport.height / 2);
+  // A trusted reading gesture supersedes the preceding navigation owner.
+  await page.mouse.wheel({ deltaY: 32 });
+  await page.evaluate(async () => {
+    for (let frame = 0; frame < 4; frame++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+  });
+  await page.waitForSelector('.meo-md-html-table-sticky-chrome.is-visible');
+}
+
 async function dragWithPresentationSamples(
   page: any,
   selector: string,
@@ -164,6 +179,7 @@ async function dragWithPresentationSamples(
 }>> {
   const point = await page.$eval(selector, (handle: Element) => {
     const rect = handle.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) throw new Error('Column resize requires a visible current handle');
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   });
   const samples: Array<{
@@ -915,13 +931,7 @@ async function main(): Promise<void> {
       preferredWidthsAfterResize.every((width, index) => width >= preferredWidthsBeforeResize[index] - 1),
       `automatic column widths must survive maximize and restore: ${JSON.stringify({ preferredWidthsBeforeResize, preferredWidthsAfterResize })}`
     );
-    await page.evaluate(async () => {
-      (window as any).__columnWidthProduction.scrollToLine(26, 'top');
-      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-      const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-      scroller.scrollTop += 32;
-      scroller.dispatchEvent(new Event('scroll'));
-    });
+    await scrollPastTableHeader(page, 26);
     await waitForTableLayout(page, tableSelector, 2, 3);
     await page.waitForFunction(() => {
       const chrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome.is-visible');
@@ -936,7 +946,7 @@ async function main(): Promise<void> {
     const initial = await page.evaluate((selector) => {
       const tables = Array.from(document.querySelectorAll<HTMLTableElement>(selector));
       const outside = document.getElementById('outside') as HTMLButtonElement;
-      outside.focus();
+      outside.focus({ preventScroll: true });
       return {
         owners: tables.map((table) => table.dataset.tableColumnWidthOwner),
         widths: tables.map((table) => Array.from(table.querySelectorAll<HTMLElement>('thead th'))
@@ -2217,13 +2227,7 @@ async function main(): Promise<void> {
     assert.ok(richWidthsAfterMiddle[1] < richWidthsBefore[1] - 60);
     assert.equal(await page.evaluate(() => (window as any).__columnWidthProduction.getText()), richTable);
 
-    await page.evaluate(async () => {
-      (window as any).__columnWidthProduction.scrollToLine(3, 'top');
-      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-      const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-      scroller.scrollTop += 32;
-      scroller.dispatchEvent(new Event('scroll'));
-    });
+    await scrollPastTableHeader(page, 3);
     await page.waitForSelector('.meo-md-html-table-sticky-chrome.is-visible');
     await drag(
       page,

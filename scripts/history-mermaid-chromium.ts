@@ -48,12 +48,9 @@ export async function enterMermaidSource(page: Page, editorGlobal: string, openi
   return bounds;
 }
 
-/** Drive the real edit/finish and layout actions; source positions belong to the document. */
+/** Establish source through document navigation, then drive Finish and layout actions. */
 export async function setMermaidLayout(page: Page, editorGlobal: string, openingLine: number, layout: MermaidTestLayout) {
-  const bounds = await mermaidSourceBounds(page, editorGlobal, openingLine);
-  await page.evaluate(({ editorGlobal, openingLine }) => {
-    (window as any)[editorGlobal].scrollToLine(openingLine, 'center');
-  }, { editorGlobal, openingLine });
+  const bounds = await enterMermaidSource(page, editorGlobal, openingLine);
   const args = { editorGlobal, anchor: bounds.opening };
   await page.waitForFunction(({ editorGlobal, anchor }) =>
     (window as any)[editorGlobal].view.dom.querySelector(`.meo-mermaid-toolbar[data-meo-block-from="${anchor}"]`), {}, args);

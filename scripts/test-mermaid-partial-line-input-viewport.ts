@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
+import { findMermaidOpening, setMermaidLayout } from './history-mermaid-chromium';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-mermaid-partial-line-input-'));
@@ -36,14 +37,8 @@ async function runMode(page: import('puppeteer-core').Page, mode: 'stacked' | 's
       onApplyChanges() {}
     });
   });
-  await page.evaluate(() => (window as any).__mermaidPartialLineEditor.scrollToLine(50, 'center'));
-  await page.waitForSelector('.meo-mermaid-block svg');
-  // Initial Mermaid presentation and Shiki decoration commits can replace the
-  // toolbar widget. Click only after those presentation frames have settled so
-  // the test exercises partial-line input, not a detached bootstrap button.
-  await waitForFrames(page, 8);
-  await page.click('.meo-mermaid-mode-btn');
-  await page.evaluate(mode=>{if(Boolean(document.querySelector('.meo-mermaid-inline-preview')) !== (mode==='side-by-side')) document.querySelector<HTMLButtonElement>('.meo-mermaid-layout-btn')!.click();},mode);
+  const opening = await findMermaidOpening(page, '__mermaidPartialLineEditor', 'graph TD');
+  await setMermaidLayout(page, '__mermaidPartialLineEditor', opening, mode);
   await waitForFrames(page, 10);
 
   const initial = await page.evaluate(() => {

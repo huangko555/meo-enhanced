@@ -338,6 +338,9 @@ async function editRenderedBlock(
       const rect = button.getBoundingClientRect();
       return {
         controlsLabel: labels.controls,
+        groupSelector: blockKind === 'mermaid'
+          ? `.meo-mermaid-toolbar[data-meo-block-from="${group!.dataset.meoBlockFrom}"]`
+          : `[role="group"][aria-label="${labels.controls}"]`,
         currentLabel,
         expectedLabel,
         hitPoint: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
@@ -604,8 +607,8 @@ async function editRenderedBlock(
       settleTarget: async () => {
         if (injectPreDownReplacement) return;
         try {
-          await page.waitForFunction(({ controlsLabel, expectedLabel }) => Array.from(
-            document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`)
+          await page.waitForFunction(({ groupSelector, expectedLabel }) => Array.from(
+            document.querySelector<HTMLElement>(groupSelector)
               ?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
           ).some((candidate) => candidate.getAttribute('aria-label') === expectedLabel), {}, transition);
         } catch (error) {

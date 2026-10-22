@@ -90,6 +90,10 @@ async function main(): Promise<void> {
         fs.mkdirSync(path.join(repoRoot, '.local', 'probes', 'mermaid-mode-focus'), { recursive: true });
         await (await page.$(modeButton))!.screenshot({ path: path.join(repoRoot, '.local', 'probes', 'mermaid-mode-focus', 'pointer.png') });
       }
+      assert.equal(await page.$eval('.meo-mermaid-toolbar.meo-block-reading-target', target =>
+        document.activeElement === target), true,
+      'Completion gives focus to the visible block reading target');
+      await page.$eval(modeButton, button => (button as HTMLButtonElement).focus());
       await page.keyboard.press('Tab');
       await page.keyboard.down('Shift'); await page.keyboard.press('Tab'); await page.keyboard.up('Shift');
       const keyboard = await readModeFocus();

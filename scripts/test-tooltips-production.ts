@@ -344,13 +344,29 @@ try {
     }));
     await page.hover(kind === 'mermaid' ? '.meo-mermaid-block' : '.meo-latex-math-viewport');
     await show(selector);
-    const hintId = await page.$eval(selector, element => element.getAttribute('aria-describedby'));
     for (let index = 0; index < 3; index += 1) {
+      const previousControl = await page.$(selector);
+      const previousHintId = await page.$eval(selector, element => element.getAttribute('aria-describedby'));
       const previous = await page.$eval(selector, element => (element as HTMLElement).dataset.tooltip);
       await page.mouse.down(); await page.mouse.up();
       await page.waitForFunction(({ selector, previous }) => (document.querySelector(selector) as HTMLElement)?.dataset.tooltip !== previous, {}, { selector, previous });
+      const identity = await previousControl!.evaluate((element, selector) => ({
+        connected: element.isConnected, current: element === document.querySelector(selector)
+      }), selector);
+      await previousControl!.dispose();
+      if (!identity.current) {
+        if (!identity.connected) await page.waitForFunction(id => !document.getElementById(id!), {}, previousHintId);
+        else assert.equal(await page.evaluate(id => document.getElementById(id!)?.classList.contains('is-visible') ?? false, previousHintId), false,
+          'A replaced control must release its previous hint');
+        await show(selector);
+      } else if (!await page.$eval(selector, element => element.matches(':hover') || element.matches(':focus-visible'))) {
+        assert.equal(await page.$eval(selector, element =>
+          document.getElementById(element.getAttribute('aria-describedby') ?? '')?.classList.contains('is-visible') ?? false), false,
+        'A moved control must release its hint after leaving pointer and keyboard focus');
+        await show(selector);
+      }
       await assertCurrentHint(selector);
-      assert.equal(await page.$eval(selector, element => element.getAttribute('aria-describedby')), hintId);
+      if (identity.current) assert.equal(await page.$eval(selector, element => element.getAttribute('aria-describedby')), previousHintId);
     }
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await page.mouse.move(0, 0);
@@ -385,9 +401,11 @@ try {
     await page.keyboard.press('Enter');
     await page.waitForFunction(({ selector, previous }) => {
       const button = document.querySelector(selector) as HTMLElement;
-      return button?.dataset.tooltip !== previous && button.matches(':focus-visible');
+      const reading = document.querySelector('.meo-mermaid-toolbar.meo-block-reading-target');
+      return button?.dataset.tooltip !== previous && document.activeElement === reading && reading.matches(':focus-visible');
     }, {}, { selector, previous: sourceHint });
-    assert.equal(await page.$eval(selector, (element, resting) => getComputedStyle(element).backgroundColor !== resting, restingStyle.background), true, 'keyboard return to preview retains the focused button highlight');
+    assert.equal(await page.$eval(selector, element => document.getElementById(element.getAttribute('aria-describedby') ?? '')?.classList.contains('is-visible') ?? false), false,
+      'Completion moves keyboard focus to the block and closes the former button hint');
   }
   phase = 'native formula actions';
   assert.equal(await page.$('.meo-latex-math-mode-btn'), null, 'formula editing uses the main document');

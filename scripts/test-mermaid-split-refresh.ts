@@ -44,7 +44,7 @@ try {
     try {
       await waitFor(() => Boolean(document.querySelector('.meo-mermaid-svg-wrapper svg')));
       document.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')!.click();
-      await waitFor(() => Boolean(document.querySelector('.meo-mermaid-editing-preview svg')));
+      await waitFor(() => Boolean(document.querySelector('.meo-mermaid-editing-preview .meo-mermaid-svg-wrapper > svg')));
       const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-preview')!;
       const inner = editor.view;
       const label = (text: string) => {
@@ -52,9 +52,9 @@ try {
         const from = source.indexOf('A[') + 2;
         inner.dispatch({ changes: { from, to: source.indexOf(']', from), insert: text } });
       };
-      const visibleSource = () => decodeURIComponent(block.querySelector('svg')?.getAttribute('data-source') ?? '');
+      const visibleSource = () => decodeURIComponent(block.querySelector('.meo-mermaid-svg-wrapper > svg')?.getAttribute('data-source') ?? '');
       const oldDiagram = block.querySelector('.meo-mermaid-block');
-      const oldSvg = block.querySelector('svg');
+      const oldSvg = block.querySelector('.meo-mermaid-svg-wrapper > svg');
       const start = performance.now();
       const from = inner.state.doc.toString().indexOf('Old');
       inner.dispatch({ changes: { from, to: from + 3, insert: 'New' } });
@@ -65,13 +65,13 @@ try {
       await new Promise(resolve => setTimeout(resolve, Math.max(0, 260 - (performance.now() - start))));
       const pending = {
         sameContainer: oldDiagram === block.querySelector('.meo-mermaid-block'),
-        sameSvg: oldSvg === block.querySelector('svg'),
+        sameSvg: oldSvg === block.querySelector('.meo-mermaid-svg-wrapper > svg'),
         loading: Boolean(block.querySelector('.meo-mermaid-loading')),
         renderCalls: calls.length,
         renderStartMs
       };
       release!();
-      await waitFor(() => block.querySelector('svg')?.getAttribute('data-source')?.includes('New') ?? false);
+      await waitFor(() => block.querySelector('.meo-mermaid-svg-wrapper > svg')?.getAttribute('data-source')?.includes('New') ?? false);
       heldSource = 'never-held';
       const beforeBurst = calls.length;
       const burstStart = performance.now();
@@ -82,11 +82,11 @@ try {
       }
       await waitFor(() => visibleSource().includes('Burst4'));
       const burst = { renderCalls: calls.length - beforeBurst, readyMs: Math.round(performance.now() - burstStart) };
-      const stableSvg = block.querySelector('svg');
+      const stableSvg = block.querySelector('.meo-mermaid-svg-wrapper > svg');
       const beforeNoop = calls.length;
       for (let index = 0; index < 3; index += 1) editor.refreshDecorations();
       await new Promise(resolve => setTimeout(resolve, 260));
-      const unchanged = { sameSvg: stableSvg === block.querySelector('svg'), renderCalls: calls.length - beforeNoop };
+      const unchanged = { sameSvg: stableSvg === block.querySelector('.meo-mermaid-svg-wrapper > svg'), renderCalls: calls.length - beforeNoop };
 
       const beforeCached = calls.length;
       label('Old');
@@ -121,18 +121,18 @@ try {
 
       heldSource = 'Recovered';
       release = null;
-      const beforeTheme = block.querySelector('svg');
+      const beforeTheme = block.querySelector('.meo-mermaid-svg-wrapper > svg');
       document.documentElement.style.setProperty('--meo-background', '#111111');
       document.documentElement.style.setProperty('--meo-foreground', '#eeeeee');
       (window as any).MermaidEditingHarness.refreshMermaidTheme();
       await waitFor(() => release !== null);
       const themePending = {
         sameContainer: oldDiagram === block.querySelector('.meo-mermaid-block'),
-        sameSvg: beforeTheme === block.querySelector('svg'),
+        sameSvg: beforeTheme === block.querySelector('.meo-mermaid-svg-wrapper > svg'),
         loading: Boolean(block.querySelector('.meo-mermaid-loading'))
       };
       release!();
-      await waitFor(() => block.querySelector('svg') !== beforeTheme);
+      await waitFor(() => block.querySelector('.meo-mermaid-svg-wrapper > svg') !== beforeTheme);
 
       heldSource = 'Disposed';
       release = null;
@@ -197,13 +197,13 @@ try {
     try {
       await waitFor(() => Boolean(document.querySelector('.meo-mermaid-block svg')));
       document.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')!.click();
-      await waitFor(() => Boolean(document.querySelector('.meo-mermaid-editing-preview svg')) && backgroundCalls > 0);
+      await waitFor(() => Boolean(document.querySelector('.meo-mermaid-editing-preview .meo-mermaid-svg-wrapper > svg')) && backgroundCalls > 0);
       const block = document.querySelector('.meo-mermaid-editing-preview') as any;
       const inner = editor.view;
       const from = inner.state.doc.toString().indexOf('Foreground') + 'Foreground'.length;
       editStart = performance.now();
       inner.dispatch({ changes: { from, insert: '1' } });
-      await waitFor(() => block.querySelector('svg')?.getAttribute('data-source')?.includes('Foreground1') ?? false);
+      await waitFor(() => block.querySelector('.meo-mermaid-svg-wrapper > svg')?.getAttribute('data-source')?.includes('Foreground1') ?? false);
       const readyMs = Math.round(performance.now() - editStart);
       await waitFor(() => backgroundCalls >= 2);
       return { order, readyMs };

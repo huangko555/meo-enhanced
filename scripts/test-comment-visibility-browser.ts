@@ -212,6 +212,20 @@ try {
       const editor = (window as any).__commentEditor;
       return editor.view.state.selection.main.head === editor.view.state.doc.toString().indexOf('<!-- table note');
     }), true);
+    await page.evaluate(async () => {
+      await (window as any).__commentEditor.whenVisiblePresentationReady(1200);
+      for (let frame = 0; frame < 2; frame++) await new Promise(requestAnimationFrame);
+    });
+    const sourceCommentLine = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(element => element.textContent?.includes('Inline <!-- secret --> text'))!;
+      line.scrollIntoView({ block: 'center' });
+      return line.getBoundingClientRect().toJSON();
+    });
+    await page.mouse.move(sourceCommentLine.left + 8, sourceCommentLine.top + sourceCommentLine.height / 2);
+    // A reading gesture replaces the preceding table-comment navigation owner.
+    await page.mouse.wheel({ deltaY: 8 });
+    await page.evaluate(async () => { for (let frame = 0; frame < 4; frame++) await new Promise(requestAnimationFrame); });
     const commentPoint = await page.evaluate(() => {
       const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
         .find(element => element.textContent?.includes('Inline <!-- secret --> text'))!;
@@ -224,7 +238,10 @@ try {
         range.setStart(node, index + 3);
         range.setEnd(node, index + 4);
         const rect = range.getBoundingClientRect();
-        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        const point = { x: Math.round(rect.x + rect.width / 4), y: Math.round(rect.y + rect.height / 2) };
+        if (!line.contains(document.elementFromPoint(point.x, point.y))) continue;
+        return point;
       }
       throw new Error('Editable comment text was not found');
     });

@@ -592,6 +592,14 @@ async function main() {
     assert.match(quoteEdited, />\s+B --> C/, 'Native Enter must preserve the quotation prefix');
     await page.keyboard.down('Control'); await page.keyboard.press('z'); await page.keyboard.up('Control');
     await page.waitForFunction(source=>(window as any).__editors.quote.getText()===source,{timeout:2000},fixtures.quote);
+    const reference = (await page.$('#table tbody .meo-md-footnote-ref'))!;
+    await reference.evaluate(node => node.scrollIntoView({ block: 'center' }));
+    const referenceBox = (await reference.boundingBox())!;
+    await page.mouse.move(referenceBox.x + referenceBox.width / 2, referenceBox.y + referenceBox.height / 2);
+    // Establish reading intent after leaving the other editor. Programmatic
+    // positioning alone still competes with the earlier code caret's reveal.
+    await page.mouse.wheel({ deltaY: 8 });
+    await page.evaluate(async () => { for (let frame = 0; frame < 4; frame++) await new Promise(requestAnimationFrame); });
     await page.click('#table tbody .meo-md-footnote-ref');
     // Table pointer release commits deferred source presentation on its next
     // frame; read the resulting activity marker after that presentation lands.

@@ -657,7 +657,7 @@ async function main(): Promise<void> {
       },
       renderedBlocks: {
         controls: ['第 41 行 Mermaid 块控件', '复制源码'],
-        modes: ['预览, 切换为分栏', null]
+        modes: ['编辑', null]
       }
     });
     assert.equal(result.appliedAfterCheckbox, result.afterCheckbox, 'checkbox must publish exactly its accepted text');

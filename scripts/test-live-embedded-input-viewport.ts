@@ -83,11 +83,16 @@ async function main(): Promise<void> {
     }, controlledMermaid);
     await page.waitForSelector('.meo-mermaid-block svg');
 
+    const headerPosition = await page.evaluate(async () => {
+      const editor = (window as any).__embeddedEditor;
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-toolbar:not([data-meo-floating])')!;
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      return { delta: block.getBoundingClientRect().top - viewport.top - 96, x: viewport.left + 12, y: viewport.top + viewport.height / 2 };
+    });
+    await page.mouse.move(headerPosition.x, headerPosition.y);
+    await page.mouse.wheel({ deltaY: headerPosition.delta });
     await page.evaluate(async () => {
       const editor = (window as any).__embeddedEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-preview, .meo-mermaid-block')!;
-      const viewport = editor.view.scrollDOM.getBoundingClientRect();
-      editor.view.scrollDOM.scrollTop += block.getBoundingClientRect().top - viewport.top - 96;
       for (let index = 0; index < 4; index += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }

@@ -2418,7 +2418,11 @@ async function main() {
     }
     const previewExitReadingAnchor = await capturePreviewReadingAnchor(page);
     await page.click('[data-mode="live"]');
-    await waitForFrames(page, 2);
+    await page.waitForFunction(() => {
+      const host = document.querySelector<HTMLElement>('.editor-host');
+      return document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live'
+        && host?.inert === false && !host.hidden;
+    });
     const liveEntryReadingAnchor = await captureSourceReadingAnchor(page, initialText);
     if (
       previewExitReadingAnchor.line === null ||

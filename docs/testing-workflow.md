@@ -294,6 +294,17 @@ When positioning a popup after typing, use a native wheel gesture and verify the
 actual anchor position before testing its edge layout. Assigning `scrollTop`
 alone does not signal a new user scroll and can compete with input retention.
 
+Document navigation may itself open a rendered block's source. Wait for that
+presentation before operating Edit/Finish or layout controls, and locate Mermaid
+toolbars by their source position rather than a label that changes on completion.
+After leaving Preview, wait for the editor host to become visible and non-inert
+before a separate focus/selection scenario; the active mode label precedes the
+end of the covered presentation transition.
+Inspect diagrams through `.meo-mermaid-svg-wrapper > svg`; toolbar icons are also
+SVG elements. Completion returns keyboard focus to the block's reading target.
+Assert a tooltip's retained identity only while its owning control survives;
+replaced or moved controls must close their previous hint before a fresh hover.
+
 `scripts/test-document-save-as-view-state.ts` checks one-shot view handoff before
 native replacement resolves and when the default editor needs a later MEO open.
 The first init retains mode, semantic reading position and selection with opening
