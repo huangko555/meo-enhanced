@@ -129,30 +129,38 @@ async function main(): Promise<void> {
     await waitForFrames(page, 16);
     const clippedAfterMermaidUndo = await page.evaluate(() => {
       const editor = (window as any).__historyEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-block');
       const viewport = editor.view.scrollDOM.getBoundingClientRect();
-      const rect = block?.getBoundingClientRect() ?? null;
+      const selection = editor.view.state.selection.main;
+      const changedLine = editor.view.state.doc.line(123);
+      const caret = editor.view.coordsAtPos(selection.head);
       return {
-        top: rect?.top ?? null,
-        bottom: rect?.bottom ?? null,
-        height: rect?.height ?? null,
+        text: editor.getText(),
+        changedLine: changedLine.text,
+        targetAtChangedLineEnd: selection.empty && selection.head === changedLine.to,
+        focused: editor.view.hasFocus && document.activeElement === editor.view.contentDOM,
+        sourceEditing: Boolean(document.querySelector('.meo-mermaid-toolbar[data-meo-mermaid-mode="edit"]')),
+        caretTop: caret?.top ?? null,
+        caretBottom: caret?.bottom ?? null,
         viewportTop: viewport.top,
-        viewportBottom: viewport.bottom,
-        visibleHeight: rect
-          ? Math.min(rect.bottom, viewport.bottom) - Math.max(rect.top, viewport.top)
-          : 0
+        viewportBottom: viewport.bottom
       };
     });
-    const requiredVisibleHeight = Math.min(clippedAfterMermaidUndo.height ?? 0, 96);
+    // History restores the native changed source target. The derived graph can
+    // remain below it; requiring both to fit would force a second scroll.
     if (
       clippedBeforeMermaidUndo.visibleHeight < 20 ||
       clippedBeforeMermaidUndo.visibleHeight > 32 ||
-      clippedAfterMermaidUndo.visibleHeight < requiredVisibleHeight
+      clippedAfterMermaidUndo.text !== baseline ||
+      clippedAfterMermaidUndo.changedLine !== '  A --> B' ||
+      !clippedAfterMermaidUndo.targetAtChangedLineEnd ||
+      !clippedAfterMermaidUndo.focused || !clippedAfterMermaidUndo.sourceEditing ||
+      clippedAfterMermaidUndo.caretTop === null || clippedAfterMermaidUndo.caretBottom === null ||
+      clippedAfterMermaidUndo.caretTop < clippedAfterMermaidUndo.viewportTop ||
+      clippedAfterMermaidUndo.caretBottom > clippedAfterMermaidUndo.viewportBottom
     ) {
-      throw new Error(`Clipped Mermaid history did not reveal the changed block: ${JSON.stringify({
+      throw new Error(`Clipped Mermaid history did not restore the visible native source target: ${JSON.stringify({
         clippedBeforeMermaidUndo,
-        clippedAfterMermaidUndo,
-        requiredVisibleHeight
+        clippedAfterMermaidUndo
       })}`);
     }
 
