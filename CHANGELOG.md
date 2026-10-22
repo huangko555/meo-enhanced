@@ -3,6 +3,16 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.35
+- Edit Mermaid source directly in the Live document with syntax coloring and a live preview. Switch between stacked and side-by-side layouts, resize the split, and finish editing to return to the diagram; narrow panels adapt automatically.
+- Unified block editing transitions and reading focus across Mermaid, formulas, HTML and code. Preserved caret visibility, selections and reading positions through keyboard navigation, pointer release, folding, history and delayed layout updates.
+- Improved Mermaid navigation, localized diagnostics, theme and Gantt colors, and split-preview alignment. Kept block feedback stable during unrelated updates and refined layout controls and resize indicators.
+- Expanded Mermaid and image zoom beyond the previous 4x limit, with proportional button and wheel steps while preserving reset, panning and document layout.
+- Added an independent Ctrl/Cmd + mouse wheel font-size setting, enabled by default, with saved sizes across Live, Source and Preview.
+- Added HTML tag, attribute and value completion through the shared input suggestion menu. Preserved unfinished-tag completion, improved candidate sizing and detail alignment, and added Beta feature indicators.
+- Added pasted-image naming presets with document-name numbering, date/time, image numbers and millisecond timestamps, including concurrent creation and escaped Markdown paths.
+- Kept local-link navigation and missing-file hints synchronized with filesystem changes, retained reading positions on native window return, and improved wrapped formula spacing and Preview export-menu dismissal.
+
 ## 0.3.34
 - Added in-place HTML fragment editing with syntax-colored source, live previews, visible placeholders for non-rendering fragments, and feedback for filtered content. Improved fragment rendering, inline styles, tables, images and disclosure elements.
 - Added explicit HTML and block-math source formatting with a configurable shortcut. Formatting preserves protected content, command spelling and local source structure, and remains a single undoable edit.

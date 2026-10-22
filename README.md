@@ -104,7 +104,7 @@ Supported safe inline and block HTML renders in Live and Preview. In Live, click
 
 ### Mermaid, LaTeX, and code blocks
 
-Mermaid diagrams provide **Source**, **Split**, and **Preview** display options, with zoom, fullscreen viewing, and image/source copying.
+Mermaid diagrams expand their syntax-colored source directly in the Live document for editing, with a live preview below or beside it. Switch between stacked and side-by-side layouts, resize the split, and finish editing to return to the diagram. Diagrams support zoom, fullscreen viewing, and image/source copying.
 
 Click a block LaTeX formula to edit its syntax-colored source in the main document, with a live preview below. Completion suggestions include formula previews. Select-all and layout-formatting buttons appear while the source is shown. Larger diagrams and formulas adapt to the available Preview and export area.
 
