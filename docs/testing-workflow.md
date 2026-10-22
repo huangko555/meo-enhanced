@@ -176,7 +176,9 @@ or disposing tables, while retaining focused-cell caret measurement.
 Its controlled height-map receipt isolates delayed CodeMirror anchoring from
 actual DOM movement. It also verifies that background Mermaid warming waits for
 native scrolling to settle, resumes afterward, and respects cancellation; visible
-render calls remain immediate. Full-document scroll tests load the same runtime.
+render calls remain immediate. Full-document scroll and font sweeps use delayed
+SVG adapters to control layout timing; actual Mermaid rendering is covered by
+the editing contracts and full-document UAT.
 The viewport-controller unit matrix interleaves background document presentation,
 native wheel adoption and virtual-gap contraction in both directions. Document
 presentation yields its fixed-target projection to the active native reading owner;
@@ -189,6 +191,12 @@ anchoring, browser boundary clamps, below-line growth/contraction and input whos
 native scroll has not yet been adopted, without replaying event deltas.
 Also combine range growth/contraction with continuing native motion in the same
 gesture: range changes alone must not reject actual scroll progress.
+`scripts/test-live-caret-continuity.ts` also covers input whose virtual height
+correction changes the scroll offset while the physical caret stays in place,
+with and without a separate `beforeinput` event. Compare successive measurements
+so accumulated normal typing scroll is not mistaken for a new correction.
+Retain normal wrapping context, later layout retention and cancellation by new
+navigation; supplement this contract with the original production document UAT.
 IME fixtures must hit painted text or use native caret movement, then verify the
 source boundary after Live marker reconciliation paints. A `display:none` source
 delimiter has a zero rectangle and must never become an editor click at `(0, 0)`.
@@ -1411,6 +1419,11 @@ formula shells are reported rather than edited through the outer editor. For
 rendered blocks taller than the viewport, visible history checks the edited source
 line. A document-end scroll clamp is counted separately only when the target line's
 removed height accounts for the entire scroll-limit change without oscillation.
+
+The full-document editing UAT loads the packaged Mermaid runtime and verifies
+its render entry before creating the editor. Missing renderer dependencies are
+fixture failures; an error fallback must not stand in for normal rich-document
+rendering. Keep all original input, history and painted-frame assertions.
 
 The full-document endurance runner exercises editor history and viewport
 stability; it does **not** exercise VS Code's auto-save scheduler or real disk

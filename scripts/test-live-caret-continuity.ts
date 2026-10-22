@@ -29,6 +29,66 @@ function checkPendingInputLayoutOwnership(): void {
   };
   globalThis.cancelAnimationFrame = (handle) => { frames.delete(handle); };
   try {
+    for (const captureBeforeInput of [true, false]) {
+      let caretTop = 350;
+      let pendingCorrection = false;
+      const dom = Object.assign(new EventTarget(), { ownerDocument: new EventTarget() });
+      const scroller = Object.assign(new EventTarget(), {
+        scrollTop: 1_000,
+        getBoundingClientRect: () => ({ top: 0, bottom: 500 })
+      });
+      const correctVirtualHeights = () => {
+        if (!pendingCorrection) return;
+        pendingCorrection = false;
+        // CodeMirror changes its absolute offset while the physical caret stays put.
+        scroller.scrollTop = 600;
+      };
+      const view = {
+        dom, scrollDOM: scroller, hasFocus: true, defaultLineHeight: 24,
+        state: { selection: { main: { head: 100, empty: true } },
+          doc: { length: 1_000, lineAt: () => ({ number: 10 }) } },
+        coordsAtPos: () => {
+          correctVirtualHeights();
+          return { top: caretTop, bottom: caretTop + 24 };
+        },
+        lineBlockAt: () => { correctVirtualHeights(); return { height: 24 }; },
+        requestMeasure: ({ read, write }: any) => write(read())
+      };
+      let reveals = 0;
+      let retains = 0;
+      const continuity = createEditorInteractionContinuity({
+        view: view as any, getMode: () => 'live',
+        viewport: {
+          retainCaretTop(_position, top, isCurrent) {
+            if (!isCurrent()) throw new Error('Stale physical input anchor');
+            retains += 1;
+            caretTop = top;
+          },
+          revealCaret() { reveals += 1; }
+        }
+      });
+      if (captureBeforeInput) dom.dispatchEvent(new Event('beforeinput'));
+      // A handled paste can dispatch input without a separate beforeinput event.
+      pendingCorrection = true;
+      view.state.selection.main.head += 1;
+      continuity.observe({
+        transactions: [{ docChanged: true, isUserEvent: () => true }], selectionSet: true
+      } as any);
+      if (reveals !== 0 || caretTop !== 350 || scroller.scrollTop !== 600) {
+        throw new Error(`Virtual height correction must retain the physical input anchor: ${JSON.stringify({
+          captureBeforeInput, reveals, caretTop, scrollTop: scroller.scrollTop
+        })}`);
+      }
+      caretTop = 700;
+      continuity.observe({ transactions: [], selectionSet: false, geometryChanged: true } as any);
+      if (caretTop !== 350 || retains !== 1) throw new Error('Later layout must retain the adopted physical anchor');
+      view.state.selection.main.head += 10;
+      continuity.observe({ transactions: [], selectionSet: true } as any);
+      caretTop = 700;
+      continuity.observe({ transactions: [], selectionSet: false, geometryChanged: true } as any);
+      continuity.dispose();
+      if (caretTop !== 700 || retains !== 1) throw new Error('New navigation must cancel the physical input anchor');
+    }
     for (const reflowed of [false, true]) {
       let caretTop = 350;
       let lineHeight = 24;

@@ -48,6 +48,7 @@ type ActiveMainInput = ActiveInput & {
   inputLineHeightBefore: number | null;
   inputLineNumberBefore: number | null;
   retainingCaretTop: boolean;
+  lastMeasuredScrollTop: number;
   scrollTopBeforeInput: number;
   viewportMoved: boolean;
 };
@@ -62,6 +63,7 @@ type MainInputMeasurement = {
   inputLineHeight: number;
   inputLineNumber: number;
   position: number;
+  scrollTop: number;
   visible: boolean;
   viewportMoved: boolean;
 };
@@ -146,6 +148,7 @@ export function createEditorInteractionContinuity(input: {
             inputLineHeight,
             inputLineNumber,
             position,
+            scrollTop: view.scrollDOM.scrollTop,
             visible: Boolean(coords && coords.top >= scroller.top && coords.bottom <= scroller.bottom),
             viewportMoved: candidate.viewportMoved || (
               Math.abs(view.scrollDOM.scrollTop - candidate.scrollTopBeforeInput) > 0.5
@@ -163,6 +166,9 @@ export function createEditorInteractionContinuity(input: {
             candidate.inputLineNumberBefore !== null &&
             measurement.inputLineNumber !== candidate.inputLineNumberBefore
           );
+          const largeScrollCorrection = !inputLineReflowed
+            && Math.abs(measurement.scrollTop - candidate.lastMeasuredScrollTop) > view.defaultLineHeight * 1.5;
+          candidate.lastMeasuredScrollTop = measurement.scrollTop;
           if (inputLineReflowed && measurement.caretTop !== null && measurement.visible) {
             // The caret moved because the edited line wrapped or changed lines,
             // not because an upstream layout correction displaced the viewport.
@@ -190,7 +196,11 @@ export function createEditorInteractionContinuity(input: {
           // Retaining a previous Y only makes sense when that Y was visible.
           // An offscreen edit must reveal its caret instead of preserving the
           // very position that made the edit invisible.
-          candidate.retainingCaretTop ||= largeLayoutShift && candidate.caretVisibleBeforeInput;
+          // Virtual height corrections can change scrollTop while leaving the
+          // physical caret in place. Adopt that anchor before a reveal can
+          // project through the burst's obsolete absolute scroll offset.
+          candidate.retainingCaretTop ||= (largeLayoutShift || largeScrollCorrection)
+            && candidate.caretVisibleBeforeInput;
           // Later keys must inherit an adopted physical anchor. Returning to the
           // burst's old absolute offset would alternate between two positions.
           inputSessionRetainingCaretTop = candidate.retainingCaretTop;
@@ -247,12 +257,13 @@ export function createEditorInteractionContinuity(input: {
   };
 
   const beginInputSettlement = (settleInSource = false): void => {
+    const scrollTopAtInput = pendingScrollTopBeforeInput ?? view.scrollDOM.scrollTop;
     // A burst of keyboard input is one viewport interaction. If an earlier
     // character triggered a delayed height-map correction, the next
     // `beforeinput` observes that transient scroll offset. Keep the original
     // baseline until the burst settles instead of ratcheting toward the drift.
     const scrollTopBeforeInput = (
-      inputSessionScrollTop ?? pendingScrollTopBeforeInput ?? view.scrollDOM.scrollTop
+      inputSessionScrollTop ?? scrollTopAtInput
     );
     const caretTopBeforeInput = inputSessionCaretTop
       ?? pendingCaretTopBeforeInput
@@ -287,6 +298,7 @@ export function createEditorInteractionContinuity(input: {
       inputLineHeightBefore,
       inputLineNumberBefore,
       retainingCaretTop: inputSessionRetainingCaretTop,
+      lastMeasuredScrollTop: scrollTopAtInput,
       scrollTopBeforeInput,
       viewportMoved: false,
       awaitingDerivedPresentation: getMode() === 'live',
