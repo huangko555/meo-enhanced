@@ -1,6 +1,6 @@
 import { documentLines } from './documentLines';
 import { EditorState, type ChangeDesc } from '@codemirror/state';
-import { IterMode, type SyntaxNode, type SyntaxNodeRef, type Tree } from '@lezer/common';
+import { IterMode, type SyntaxNodeRef, type Tree } from '@lezer/common';
 import { isThematicBreakLine } from './frontmatter';
 import { parseBlockLinePrefix } from './blockIndent';
 import { getFencedCodeInfo, resolvedSyntaxTree, withMarkdownSyntaxSnapshot } from './markdownSyntax';
@@ -127,30 +127,22 @@ function createRenderedBlock(
   };
 }
 
-function rangesOverlap(fromA: number, toA: number, fromB: number, toB: number): boolean {
-  return fromA < toB && toA > fromB;
-}
-
 function isTableContentLine(lineText: string): boolean {
   return lineText.includes('|');
 }
 
-function isInsideCodeBlock(tree: Tree, pos: number): boolean {
-  for (let node: SyntaxNode | null = tree.cursor(IterMode.IgnoreMounts).moveTo(pos, 1).node; node; node = node.parent) {
-    if (node.name === 'FencedCode' || node.name === 'CodeBlock') {
-      return true;
-    }
-  }
-  return false;
-}
-
 function detectFallbackTableBlocks(
   state: EditorState,
-  tree: any,
-  parsedTableRanges: Array<{ from: number; to: number }>
+  parsedTableRanges: Array<{ from: number; to: number }>,
+  codeRanges: Array<{ from: number; to: number }>
 ): LiveRenderedBlock[] {
   const blocks: LiveRenderedBlock[] = [];
 
+  // Candidates advance in source order. Reuse the existing discovery walk's
+  // ranges instead of restarting a tree seek or scanning every earlier table.
+  parsedTableRanges.sort((left, right) => left.from - right.from);
+  codeRanges.sort((left, right) => left.from - right.from);
+  let tableIndex = 0, codeIndex = 0;
   let scannedThrough = 1;
   for (const delimiterLine of documentLines(state.doc)) {
     const lineNo = delimiterLine.number;
@@ -175,11 +167,13 @@ function detectFallbackTableBlocks(
 
     const from = state.doc.line(headerLineNo).from;
     const to = state.doc.line(endLineNo).to;
-    if (parsedTableRanges.some((range) => rangesOverlap(from, to, range.from, range.to))) {
+    while (tableIndex < parsedTableRanges.length && parsedTableRanges[tableIndex]!.to <= from) tableIndex++;
+    if (tableIndex < parsedTableRanges.length && parsedTableRanges[tableIndex]!.from < to) {
       scannedThrough = endLineNo;
       continue;
     }
-    if (isInsideCodeBlock(tree, from)) {
+    while (codeIndex < codeRanges.length && codeRanges[codeIndex]!.to <= from) codeIndex++;
+    if (codeIndex < codeRanges.length && codeRanges[codeIndex]!.from <= from) {
       scannedThrough = endLineNo;
       continue;
     }
@@ -254,6 +248,7 @@ function discoverRenderedBlocks(state: EditorState, tree: Tree): DiscoveredBlock
   const blocks: LiveRenderedBlock[] = [];
   const htmlFromByBlock = new Map<LiveRenderedBlock, number>();
   const parsedTableRanges: Array<{ from: number; to: number }> = [];
+  const codeRanges: Array<{ from: number; to: number }> = [];
 
   tree.iterate({
     mode: IterMode.IgnoreMounts,
@@ -273,6 +268,7 @@ function discoverRenderedBlocks(state: EditorState, tree: Tree): DiscoveredBlock
         return;
       }
 
+      if (node.name === 'FencedCode' || node.name === 'CodeBlock') codeRanges.push({ from: node.from, to: node.to });
       if (node.name !== 'FencedCode') {
         return;
       }
@@ -323,7 +319,7 @@ function discoverRenderedBlocks(state: EditorState, tree: Tree): DiscoveredBlock
     blocks.push(block);
   }
 
-  blocks.push(...detectFallbackTableBlocks(state, tree, parsedTableRanges));
+  blocks.push(...detectFallbackTableBlocks(state, parsedTableRanges, codeRanges));
   blocks.sort((left, right) => (
     left.startLine - right.startLine ||
     left.endLine - right.endLine

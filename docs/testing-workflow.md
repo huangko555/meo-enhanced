@@ -19,6 +19,8 @@ shared label queries without preference writes, lazy default/fixed typography, a
 IME confirmation, separate body/code families, inline/block typography and split Preview.
 Short viewports also verify restored selections remain visible after popup sizing, with
 toolbar geometry and outer scroll positions unchanged through comparison, filtering and closing.
+Unopened font popups must have no comparison rows during startup or catalog arrival;
+the open popup retains all existing selection, search and keyboard contracts.
 The toolbar menu contract verifies click ownership and nested Escape ordering in
 Chinese/English, light/dark and narrow layouts. System enumeration is local-only;
 Windows is smoke checked against the installed font collection. Mac/Linux adapters
@@ -36,6 +38,9 @@ Performance strategy comparisons are opt-in through
 cold/warm definitions, input/heap measurements and native-test limitations.
 `--cpu-profile` saves a separate Chromium profile for each case; those instrumented
 runs diagnose call stacks and must not be compared as ordinary timing samples.
+`scripts/test-rendered-block-discovery.ts` additionally checks 400 actual tables
+mixed with 1,200 literal code examples. It verifies exact table start lines and
+bounds tree-root seeks independently of noisy wall-clock measurements.
 
 `scripts/test-preview-giant-code-highlight.ts` bounds actual token DOM writes for
 an 18,000-line fence across scrolling, wrapping and theme changes. It verifies

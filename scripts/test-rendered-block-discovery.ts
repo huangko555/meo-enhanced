@@ -41,5 +41,10 @@ try {
   assert.deepEqual(sample('restored-parse').kinds, sample('initial').kinds);
   assert.equal(sample('changed-document').scans, 1, 'A changed Document must be rediscovered');
   assert.notDeepEqual(sample('changed-document').kinds, sample('initial').kinds);
+  const budget = await page.evaluate(() => (globalThis as any).RenderedBlockDiscoveryHarness.fallbackBudget());
+  console.log('Fallback table discovery', JSON.stringify({ seeks: budget.seeks, tables: budget.tables }));
+  assert.equal(budget.tables, 400, 'Fenced, quoted and indented table examples stay literal');
+  assert.deepEqual(budget.starts, budget.expected, 'Only the actual tables become rich blocks');
+  assert.ok(budget.seeks <= 4, `Fallback discovery must not seek from the tree root per candidate (${budget.seeks})`);
   console.log('Rendered block discovery reuses semantic work while updating selection projection');
 } finally { await browser.close(); }

@@ -59,6 +59,7 @@ export function createPreviewFontPicker(controlClass: string, labelText: string,
     reset.disabled = select.disabled || select.value === '';
     if (select.disabled) close();
     value.textContent = selectedOption()?.textContent ?? '';
+    if (panel.hidden) return;
     for (const option of panel.querySelectorAll<HTMLButtonElement>('[role="option"]')) {
       const selected = option.dataset.value === select.value;
       option.classList.toggle('is-selected', selected); option.setAttribute('aria-selected', String(selected));
@@ -98,6 +99,9 @@ export function createPreviewFontPicker(controlClass: string, labelText: string,
     if (!panel.hidden) searchInput.focus({ preventScroll: true });
   };
   const refreshOptions = () => {
+    // Closed popups need only their trigger value. Opening always rebuilds from
+    // the current catalog, labels and preference before keyboard navigation.
+    if (panel.hidden) { syncFromSelect(); return; }
     const query = searchInput.value.trim().toLocaleLowerCase();
     clear.hidden = !searchInput.value;
     const scrollTop = results.scrollTop;

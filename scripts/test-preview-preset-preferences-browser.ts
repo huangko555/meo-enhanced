@@ -159,10 +159,14 @@ try {
     owner = createOwner();
     const fontPage = await open();
     assert.equal(fontRequests, 0, 'Opening documents never enumerates fonts');
+    assert.equal(await fontPage.$$eval('.preview-font-results button', rows => rows.length), 0,
+      'Unopened font popups must not build comparison rows during document startup');
     await fontPage.click('.preview-options-trigger');
     await fontPage.click('.preview-font-family-dropdown');
     await fontPage.waitForFunction(() => document.querySelector<HTMLSelectElement>('.preview-font-family-select')!.options.length > 200);
     assert.equal(fontRequests, 1);
+    assert.equal(await fontPage.$$eval('.preview-code-font-family-dropdown-panel .preview-font-results button', rows => rows.length), 0,
+      'Catalog arrival builds rows only for the open font popup');
     const popup = '.preview-font-family-dropdown-panel';
     const search = `${popup} input`;
     assert.equal(await fontPage.$eval(`${popup} .preview-font-reset`, el => el.textContent), 'Default');
