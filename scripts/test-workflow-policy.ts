@@ -393,6 +393,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
               packageScript('test:reading-position'),
               packageScript('test:changes-review'),
               packageScript('test:unit'),
+              script('scripts/test-large-document-opening-migration.ts'),
               script('scripts/test-panel-session-ready-init.ts')
             ]
           },

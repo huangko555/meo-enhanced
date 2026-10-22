@@ -92,6 +92,7 @@ import { resolveUiLanguage } from './foundation/uiLanguage';
 import type { ImageStorageChangedEvent } from './protocol/imageStorage';
 import { createVscodeImageStorage } from './host/vscodeImageStorage';
 import { createVscodeEditingPreferences } from './host/vscodeEditingPreferences';
+import { migrateLargeDocumentOpening } from './host/vscodeLargeDocumentOpening';
 import { EDITING_PREFERENCES_SETTING } from './host/editingPreferences';
 import type { EditingPreferencesChangedEvent } from './protocol/editingPreferences';
 import { createVscodePreviewPresets } from './host/vscodePreviewPresets';
@@ -211,6 +212,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   void agentReviewOverrides.syncNow();
 
+  await migrateLargeDocumentOpening(context);
   const editingPreferences = await createVscodeEditingPreferences(resolveUiLanguage(
     vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get('language', 'auto'), vscode.env.language
   ), context);

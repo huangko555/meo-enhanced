@@ -63,9 +63,23 @@ export function capturePreviewReadingAnchor(document: Document, restore: (top: n
       if (expectedLine === null || expectedEndLine === null) continue;
       const block = text.parentElement!.closest<HTMLElement>('p,li,td,th,pre,h1,h2,h3,h4,h5,h6,summary');
       const blockRect = block?.getBoundingClientRect();
+      const restoreEditedBoundary = (): boolean => {
+        // A changed paragraph can replace its text witness while a window also
+        // rebuilds estimated gaps above it. The same authored block boundary is
+        // still a valid physical anchor; its new height/progress is not.
+        if (!mapSourceLine || !block || block !== element || !blockRect || expectedLine === undefined
+          || !root.isConnected) return false;
+        const matches = Array.from(root.querySelectorAll<HTMLElement>(`[data-source-line="${expectedLine}"]`))
+          .filter(candidate => candidate.tagName === block.tagName);
+        if (matches.length !== 1) return false;
+        const target = matches[0]!;
+        if (!target.getClientRects().length) return false;
+        restore(scroll.scrollTop + target.getBoundingClientRect().top - blockRect.top);
+        return true;
+      };
       return () => {
         if (!text.isConnected || text.ownerDocument !== document || text.data !== value
-          || element && (element.dataset.sourceLine !== expectedLine || element.dataset.sourceEndLine !== expectedEndLine)) return false;
+          || element && (element.dataset.sourceLine !== expectedLine || element.dataset.sourceEndLine !== expectedEndLine)) return restoreEditedBoundary();
         // A DOM move adjusts live Range boundaries to the old parent even when
         // morphing retains the same text node. Recreate from immutable coordinates.
         const currentRange = document.createRange();

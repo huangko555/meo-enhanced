@@ -3715,8 +3715,11 @@ export function createEditor({
     previewViewportChanged(): void {
       viewportController.previewViewportChanged();
     },
-    linkedPreviewReady(): void {
-      viewportController.linkedPreviewReady();
+    linkedPreviewReady(project = true): void {
+      viewportController.linkedPreviewReady(project);
+    },
+    locateLinkedSourcePosition(line: number): void {
+      viewportController.locateLinkedSourcePosition(line);
     },
     runPreviewPresentationTransaction(
       mutate: () => void,

@@ -495,6 +495,7 @@
         "meoEnhanced.performance.largeDocumentOptimization": {
           "type": "boolean",
           "default": false,
+          "scope": "window",
           "order": 6,
           "description": "%config.performance.largeDocumentOptimization%"
         },

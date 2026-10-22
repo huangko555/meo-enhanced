@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { getActiveVscodeRawTheme, type RawVscodeTheme } from './vscodeTheme';
 import { DEFAULT_OUTLINE_WIDTH, normalizeOutlineWidth } from './outlineWidth';
 import { markdownFileExtensions } from '../foundation/markdownFileExtensions';
+import { LARGE_DOCUMENT_SOURCE_OPENING_SETTING_KEY } from '../host/vscodeLargeDocumentOpening';
 export { normalizeOutlineWidth } from './outlineWidth';
 
 export const EXTENSION_CONFIG_SECTION = 'meoEnhanced';
@@ -14,7 +15,7 @@ export const CONTENT_MAX_WIDTH_SETTING_KEY = 'contentMaxWidth.visible';
 export const TABLE_STICKY_HEADER_SETTING_KEY = 'table.stickyHeader';
 export const BOLD_HEADINGS_SETTING_KEY = 'appearance.boldHeadings';
 export const RESTORE_READING_POSITION_SETTING_KEY = 'readingPosition.restoreOnOpen';
-export const LARGE_DOCUMENT_OPTIMIZATION_SETTING_KEY = 'performance.largeDocumentOptimization';
+export const LARGE_DOCUMENT_OPTIMIZATION_SETTING_KEY = LARGE_DOCUMENT_SOURCE_OPENING_SETTING_KEY;
 export const GIT_CHANGES_GUTTER_LEGACY_VISIBLE_SETTING_KEY = 'gitChanges.visibility';
 export const GIT_CHANGES_GUTTER_LEGACY_VISIBILITY_SETTING_KEY = 'gitChangesGutter.visibility';
 export const GIT_CHANGES_GUTTER_LEGACY_SETTING_KEY = 'gitChangesGutter.enabled';

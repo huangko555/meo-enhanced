@@ -3177,4 +3177,69 @@ for (const [insert, removed, expectedLine] of [['x', 0, 3], ['x\n', 0, 4], ['', 
   } finally { controller.destroy(); }
 }
 
+// Source edits, stale Preview revisions and delayed clicks share one navigation
+// owner. A render completion must not manufacture or revive a scroll intention.
+{
+  const doc = Text.of(Array.from({ length: 80 }, () => 'line'));
+  const scroll = { scrollTop: 200, scrollLeft: 0, scrollHeight: 2000, clientHeight: 400 };
+  let previewTop = 0, current = true;
+  const reveals: Array<{ line: number; isCurrent: () => boolean }> = [];
+  const controller = new ViewportController({ dom: {}, scrollDOM: scroll, state: { doc },
+    lineBlockAt: (pos: number) => { const line = doc.lineAt(pos).number;
+      return { top: (line - 1) * 20, bottom: line * 20 }; }
+  } as any, { attachInteractions: false, getMode: () => 'source', previewSurface: {
+    isCurrentDocument: () => current,
+    captureTopVisiblePosition: () => null, restoreTopVisiblePosition() {},
+    readScrollTop: () => previewTop, writeScrollTop: top => { previewTop = top; },
+    revealSourcePosition: (line, isCurrent) => reveals.push({ line, isCurrent }),
+    captureLinkedGeometry: () => ({ maximumScrollTop: 3200,
+      regions: Array.from({ length: 80 }, (_, i) => ({ startLine: i + 1, endLine: i + 1, top: i * 40, bottom: (i + 1) * 40 })) })
+  } });
+  try {
+    controller.setLinkedPreviewEnabled(true);
+    const initial = previewTop;
+    controller.reconcileAfterEditorUpdate(p => p);
+    (controller as any).onWheel({ ctrlKey: true, deltaX: 0, deltaY: 100 });
+    (controller as any).onWheel({ ctrlKey: false, deltaX: 0, deltaY: 0 });
+    scroll.scrollTop = 600; controller.editorViewportChanged();
+    controller.linkedPreviewReady();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    if (previewTop !== initial) throw new Error('Source caret auto-reveal escaped its input hold');
+    current = false;
+    controller.markPreviewInteraction(); previewTop = 800; controller.previewViewportChanged();
+    if (scroll.scrollTop !== 600) throw new Error('A stale Preview gesture used old source coordinates');
+    current = true; controller.linkedPreviewReady(false);
+    await new Promise(resolve => setTimeout(resolve, 350));
+    if (scroll.scrollTop !== 400) throw new Error('The latest Preview gesture was lost after the matching revision arrived');
+    current = false;
+    controller.markInteraction('editor'); scroll.scrollTop = 700; controller.editorViewportChanged();
+    controller.reconcileAfterEditorUpdate(p => p);
+    current = true; controller.linkedPreviewReady(false);
+    await new Promise(resolve => setTimeout(resolve, 350));
+    if (previewTop !== 800) throw new Error('A later edit revived an obsolete pending Source scroll');
+    current = false;
+    controller.locateLinkedSourcePosition(12); controller.locateLinkedSourcePosition(16);
+    if (reveals.length) throw new Error('A Source click revealed a stale Preview revision');
+    current = true; controller.linkedPreviewReady(false);
+    if (reveals.length !== 1 || reveals[0].line !== 16 || !reveals[0].isCurrent()) throw new Error('Only the latest Source click may reveal once');
+    controller.reconcileAfterEditorUpdate(p => p);
+    if (reveals[0].isCurrent()) throw new Error('Typing did not cancel a cold click destination');
+    current = false; controller.locateLinkedSourcePosition(20);
+    controller.markPreviewInteraction(); current = true; controller.linkedPreviewReady(false);
+    if (reveals.length !== 1) throw new Error('A Preview gesture did not cancel a pending Source click');
+    current = false; controller.locateLinkedSourcePosition(22); current = true;
+    controller.runPreviewPresentationTransaction(() => {
+      controller.linkedPreviewReady(false);
+      if (reveals.length !== 1) throw new Error('onRendered applied a click before its presentation transaction finished');
+      previewTop = 900;
+    });
+    if (reveals.length !== 2 || reveals[1].line !== 22 || !reveals[1].isCurrent()) throw new Error('A completed presentation lost its delayed click');
+    current = false; controller.locateLinkedSourcePosition(24);
+    controller.setLinkedPreviewEnabled(false); current = true; controller.linkedPreviewReady();
+    if (reveals.length !== 2) throw new Error('Disabling sync revived a queued click');
+    controller.reconcileAfterEditorUpdate(p => p); scroll.scrollTop = 950; controller.editorViewportChanged();
+    if (previewTop !== 800) throw new Error('Independent Source input moved Preview');
+  } finally { controller.destroy(); }
+}
+
 console.log('viewport controller checks passed');

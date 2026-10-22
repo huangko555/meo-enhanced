@@ -33,6 +33,46 @@ Its 2026 scroll-sync regression also documents why a reverse-sync guard must
 remain active for the whole gesture instead of being cleared by the first
 echoed event: [microsoft/vscode#307762](https://github.com/microsoft/vscode/issues/307762).
 
+## Split-pane interaction policy
+
+The viewport controller owns cross-pane navigation. Preview owns the geometry
+of its accepted reading revision; its render completion is not a new user intent.
+
+| Action | Synchronized panes | Independent panes |
+| --- | --- | --- |
+| Click Source text | Reveal the corresponding block only if outside Preview; a visible block stays put. Wait for the current revision and a mounted reading block. | Update the locator without moving Preview. |
+| Type, compose, paste, delete, undo/redo, or accept an external edit | Preserve Preview's reading witness. Source caret auto-reveal and native height-map anchoring do not drive Preview. | Preserve Preview's reading witness. |
+| Stop typing / finish delayed rendering | Commit content and layout while retaining that witness; do not realign to the caret or replay an old scroll. | Same. |
+| Wheel, touch scroll, drag a thumb, or navigate with arrows/Page/Home/End | The surface receiving the gesture drives. Follower scroll events never take ownership. Keyboard selection changes without viewport movement do not scroll the other pane. | Each pane moves independently. |
+| Explicit Find, outline, or line navigation | A measured Source navigation releases the input hold and follows its actual viewport. | Navigate only the requested surface. |
+| Turn synchronization off/on | Off cancels queued navigation. On aligns from the last interacted reading surface, retaining the Source selection. | Manual alignment arrows move only the follower once and retain focus/selection. |
+| Zoom wheel or zero-delta wheel | Neither is a vertical reading gesture and neither releases an input hold. | Same. |
+
+A gesture while Preview still represents an older Source revision waits for
+matching coordinates. Only its latest position is applied; another edit, a new
+owner, a newer click, hiding the pane, or disabling synchronization retires stale
+destinations. A queued Source click is applied **after** the presentation's
+reading-position restoration, so the old transaction cannot overwrite it.
+
+When editing replaces the sampled paragraph's text node, a uniquely matched,
+revision-mapped paragraph boundary retains its pixel offset. This is a fallback
+for the lost text witness, not proportional progress through the paragraph's new
+height. Deleted/ambiguous source identities do not authorize that restoration.
+
+Windowed rendering can legitimately change absolute `scrollTop` as estimated
+gaps become measured. The acceptance invariant is the painted text's reading
+position and identity, not equality of scroll offsets across different layouts.
+Source and Preview have different line heights, hidden syntax and displaced
+footnotes; continuous scrolling follows monotonic reading flow rather than
+requiring every source line to share a pixel row with rendered text.
+
+`scripts/test-source-preview-edit-ownership.ts` drives production Source input
+until caret auto-scrolling actually occurs, holds render responses across native
+wheel/click gestures, and checks both complete and windowed reading surfaces.
+The viewport-controller suite locks down cancellation, reverse ownership,
+revision matching and nested presentation completion. Existing Source marker,
+side Preview, cold-scroll and compositor suites cover the companion rules.
+
 ## Atomic asynchronous presentation
 
 - A visible Mermaid diagram, decoded image, or Shiki-highlighted code block is

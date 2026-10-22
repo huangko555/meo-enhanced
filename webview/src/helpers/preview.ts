@@ -2106,6 +2106,10 @@ export function createPreviewController({
       frameDocument.addEventListener('toggle', () => scheduleViewportHighlight(frameDocument), { capture: true, signal });
       const notifyTrustedViewportInteraction = (event: Event) => {
         if (!event.isTrusted) return;
+        if (event.type === 'wheel') {
+          const wheel = event as WheelEvent;
+          if (wheel.ctrlKey || (!wheel.deltaX && !wheel.deltaY)) return;
+        }
         if (event.type === 'keydown') {
           const key = (event as KeyboardEvent).key;
           if (!['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(key)) return;
@@ -3563,6 +3567,21 @@ export function createPreviewController({
       restoreTopLine(...args);
     },
     restoreTopVisiblePosition,
+    isCurrentDocument: () => frameRenderedText !== null && isCurrentText?.(frameRenderedText) !== false,
+    revealSourcePosition: (line: number, isCurrent: () => boolean) => {
+      const current = previewViewport, generation = frameGeneration;
+      const valid = () => !disposed && !host.hidden && isCurrent() && generation === frameGeneration
+        && current === previewViewport && sourcePositionMarkerState.line === line
+        && frameRenderedText !== null && isCurrentText?.(frameRenderedText) !== false;
+      const reveal = () => { if (valid()) refreshSourcePositionMarker(true); };
+      if (current && !current.containsLine(line)) {
+        // Keep the old window painted; only the newest click may reveal the
+        // destination after its source-backed block has actually mounted.
+        void current.ensure({ line, scroll: false, isCurrent: valid }).then(reveal, error => {
+          if (valid()) handleWindowError(error);
+        });
+      } else reveal();
+    },
     isSourceLineRendered: (line: number) => !previewViewport || previewViewport.containsLine(line),
     captureLinkedGeometry: () => {
       // Unmounted block heights are estimates. They cannot define a global

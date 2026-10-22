@@ -1,5 +1,10 @@
 {
   "separate": {
+    "scripts/test-source-preview-edit-ownership.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-source-preview-edit-ownership.ts",
+      "reason": "Production Source split Preview: native caret auto-scroll during input, stale render coordinates, gesture ownership, idle publication and delayed explicit source clicks."
+    },
     "scripts/test-preview-table-source-identity.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-preview-table-source-identity.ts",

@@ -1805,9 +1805,7 @@ const previewController = createPreviewController({
     if (outlineController?.isVisible()) {
       outlineController.refresh();
     }
-    if (options?.skipLinkedViewportProjection !== true) {
-      editor?.linkedPreviewReady?.();
-    }
+    editor?.linkedPreviewReady?.(options?.skipLinkedViewportProjection !== true);
     readingPositionLifecycle?.surfaceReady();
   },
   onViewportInteraction: (owner) => {
@@ -2976,9 +2974,8 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
       const canReveal = change.revealIfOutside
         && isSidePreviewVisible()
         && sourcePreviewScrollSyncEnabled;
-      if (presentSourcePreviewPosition(canReveal)) {
-        editor?.holdLinkedPreviewAttention?.();
-      }
+      presentSourcePreviewPosition();
+      if (canReveal) editor?.locateLinkedSourcePosition(change.line);
     },
     mermaidDiagramPresentationFactory,
     uiLanguage: activeUiLanguage,
@@ -2989,6 +2986,8 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     },
     onViewportChange: () => readingPositionLifecycle?.viewportChanged(),
     previewViewportSurface: {
+      isCurrentDocument: () => previewController.isCurrentDocument(),
+      revealSourcePosition: (line, isCurrent) => previewController.revealSourcePosition(line, isCurrent),
       captureVisualReadingAnchor: ratio => previewController.captureVisualReadingAnchor(ratio),
       isInteracting: () => previewController.isViewportInteracting(),
       isScrollbarDragging: () => previewController.isScrollbarDragging(),

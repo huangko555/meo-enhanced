@@ -882,10 +882,14 @@ try {
   }, { timeout: 3000 });
   assert.equal(previewRenderCount, countBeforeTyping + 1, 'A typing burst should coalesce to one render');
 
-  await page.evaluate(() => {
-    const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-    scroller.scrollTop = 1800;
+  // Input's native caret reveal does not drive Preview. Resume linkage with
+  // an actual reading gesture, rather than a synthetic post-edit scroll write.
+  const linkedScrollPoint = await page.$eval('.cm-scroller', element => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   });
+  await page.mouse.move(linkedScrollPoint.x, linkedScrollPoint.y);
+  await page.mouse.wheel({ deltaY: 1800 });
   await page.waitForFunction(() => (
     (document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.scrollingElement?.scrollTop ?? 0) > 200
   ));

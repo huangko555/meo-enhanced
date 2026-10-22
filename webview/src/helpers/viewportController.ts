@@ -62,6 +62,10 @@ export function visualLineContextMargin(
 }
 
 export interface PreviewViewportSurface {
+  /** Cross-pane coordinates are valid only for the current Source revision. */
+  isCurrentDocument?(): boolean;
+  /** Explicit Source clicks reveal their block once, after its reading DOM is ready. */
+  revealSourcePosition?(line: number, isCurrent: () => boolean): void;
   /** A mounted unchanged glyph is more precise than an estimated source range. */
   captureVisualReadingAnchor?(viewportRatio?: number): (() => boolean) | null;
   captureTopVisiblePosition(viewportOffset?: number): {
@@ -407,6 +411,9 @@ export class ViewportController {
   private linkedViewportMapRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   private linkedInteractionUntil = Number.NEGATIVE_INFINITY;
   private linkedPreviewAttentionHeld = false;
+  private linkedProjectionPending = false;
+  private pendingLinkedSourceReveal: { line: number; isCurrent: () => boolean } | null = null;
+  private previewPresentationDepth = 0;
   private readonly getMode: () => 'live' | 'source';
   private readonly previewSurface: PreviewViewportSurface | null;
   private readonly anchorTokens = new WeakMap<ViewportAnchorToken, ViewportAnchorTokenRecord>();
@@ -471,6 +478,7 @@ export class ViewportController {
     if (!this.nativeInputViewport.hasOwner()) this.nativeInputViewport.capture(event.target);
   };
   private readonly onBeforeInput = (event: InputEvent) => {
+    this.holdLinkedPreviewAttention();
     // Composition input need not have a preceding keydown. It must still retire
     // a wheel reading anchor before the edit can change the visible layout.
     if (this.activeLayoutAnchor?.readingDocumentTop !== undefined) this.activeLayoutAnchor = null;
@@ -663,6 +671,9 @@ export class ViewportController {
     measuredLayout = true,
     externalDocumentPresentation = false
   ): void {
+    // Input, paste, history and external edits can all reveal/anchor the Source
+    // caret. Those native scroll events are not a new cross-pane navigation.
+    if (mapPosition) this.holdLinkedPreviewAttention();
     // View updates emitted from CodeMirror's measurement pass run after its
     // internal height-map anchoring and before the browser paints. Reconcile an
     // active history lock here so no intermediate anchored position is visible.
@@ -867,6 +878,8 @@ export class ViewportController {
   ): void {
     if (this.destroyed || this.linkedPreviewEnabled === enabled) return;
     this.linkedPreviewEnabled = enabled;
+    this.linkedProjectionPending = false;
+    this.pendingLinkedSourceReveal = null;
     if (!enabled) this.linkedPreviewAttentionHeld = false;
     if (enabled) {
       this.linkedViewportPosition = null;
@@ -896,12 +909,35 @@ export class ViewportController {
   holdLinkedPreviewAttention(): void {
     if (this.destroyed || !this.linkedPreviewEnabled) return;
     this.linkedPreviewAttentionHeld = true;
+    this.linkedProjectionPending = false;
+    this.pendingLinkedSourceReveal = null;
+    this.linkedViewportMapDirty = true;
     this.linkedProjectionGeneration += 1;
+  }
+
+  locateLinkedSourcePosition(line: number): void {
+    if (this.destroyed || !this.linkedPreviewEnabled || !this.previewSurface?.revealSourcePosition) return;
+    this.holdLinkedPreviewAttention();
+    const projection = this.linkedProjectionGeneration, navigation = this.navigationGeneration;
+    this.pendingLinkedSourceReveal = { line, isCurrent: () => !this.destroyed && this.linkedPreviewEnabled
+      && projection === this.linkedProjectionGeneration && navigation === this.navigationGeneration };
+    this.presentLinkedSourceReveal();
+  }
+
+  private presentLinkedSourceReveal(): void {
+    if (this.previewPresentationDepth > 0) return;
+    const reveal = this.pendingLinkedSourceReveal;
+    if (!reveal) return;
+    if (!reveal.isCurrent()) { this.pendingLinkedSourceReveal = null; return; }
+    if (this.previewSurface?.isCurrentDocument?.() === false) return;
+    this.pendingLinkedSourceReveal = null;
+    this.previewSurface?.revealSourcePosition?.(reveal.line, reveal.isCurrent);
   }
 
   /** Aligns only the follower once; independent scrolling and the Source selection remain unchanged. */
   alignLinkedViewport(owner: ViewportAnchorOwner): boolean {
-    if (this.destroyed || this.linkedPreviewEnabled || !this.previewSurface) return false;
+    if (this.destroyed || this.linkedPreviewEnabled || !this.previewSurface
+      || this.previewSurface.isCurrentDocument?.() === false) return false;
     this.markInteraction(owner);
     const generation = this.navigationGeneration;
     const isCurrent = () => !this.destroyed && generation === this.navigationGeneration
@@ -958,7 +994,9 @@ export class ViewportController {
     this.projectLinkedViewport('preview');
   }
 
-  linkedPreviewReady(): void {
+  linkedPreviewReady(project = true): void {
+    this.presentLinkedSourceReveal();
+    if (!project && !this.linkedProjectionPending) return;
     this.linkedViewportMapDirty = true;
     this.scheduleLinkedViewportMapRefresh();
   }
@@ -968,6 +1006,17 @@ export class ViewportController {
     mutate: () => void,
     documentChange?: PreviewDocumentChange
   ): void {
+    this.previewPresentationDepth += 1;
+    try { this.commitPreviewPresentation(mutate, documentChange); }
+    finally {
+      this.previewPresentationDepth -= 1;
+      // onRendered can run inside mutate(). Its explicit click must be applied
+      // after the transaction restores its old reading witness, never before.
+      this.presentLinkedSourceReveal();
+    }
+  }
+
+  private commitPreviewPresentation(mutate: () => void, documentChange?: PreviewDocumentChange): void {
     if (this.destroyed) {
       mutate();
       return;
@@ -1076,6 +1125,16 @@ export class ViewportController {
       this.linkedViewportDriver !== owner
     ) return;
     if (owner === 'editor' && this.linkedPreviewAttentionHeld) return;
+    if (this.previewSurface.isCurrentDocument?.() === false) {
+      // Remember the latest deliberate gesture, without applying new Source
+      // line numbers to the older reading DOM. A later edit retires this intent.
+      this.linkedProjectionPending = true;
+      this.linkedViewportMapDirty = true;
+      this.linkedProjectionGeneration += 1;
+      return;
+    }
+    if (this.linkedProjectionPending) this.rebuildLinkedViewportMap(false);
+    this.linkedProjectionPending = false;
     const generation = this.linkedProjectionGeneration;
     if (
       this.destroyed || !this.linkedPreviewEnabled || !this.previewSurface ||
@@ -1136,6 +1195,7 @@ export class ViewportController {
   private claimLinkedViewport(owner: ViewportAnchorOwner): void {
     if (!this.linkedPreviewEnabled) return;
     if (this.linkedViewportDriver !== owner) {
+      this.linkedProjectionPending = false;
       this.linkedViewportPosition = null;
       this.linkedProjectionGeneration += 1;
     }
@@ -1148,6 +1208,11 @@ export class ViewportController {
     this.linkedPreviewAttentionHeld = false;
     this.linkedProjectionGeneration += 1;
     this.linkedViewportMapDirty = true;
+    // Resume from the pair the user was actually reading. Releasing an input
+    // hold is not itself a new scroll and must not snap to the pre-edit map.
+    if (this.previewSurface?.readScrollTop) this.linkedViewportPosition = {
+      source: this.view.scrollDOM.scrollTop, preview: this.previewSurface.readScrollTop()
+    };
     this.rebuildLinkedViewportMap(true);
   }
 
@@ -1207,6 +1272,7 @@ export class ViewportController {
 
   private rebuildLinkedViewportMap(project: boolean): void {
     if (this.destroyed || !this.linkedPreviewEnabled || !this.linkedViewportMapDirty) return;
+    if (this.previewSurface?.isCurrentDocument?.() === false) return;
     const currentPosition = this.previewSurface?.readScrollTop ? {
       source: this.view.scrollDOM.scrollTop,
       preview: this.previewSurface.readScrollTop()
@@ -1218,7 +1284,7 @@ export class ViewportController {
     ) <= POSITION_EPSILON;
     // A timer may run before the driver's native scroll event. Pinning that
     // new position to its old follower would freeze a real scroll into the map.
-    const pinnedPoint = project && this.linkedViewportMap && driverPositionUnchanged
+    const pinnedPoint = project && !this.linkedProjectionPending && this.linkedViewportMap && driverPositionUnchanged
       ? currentPosition ?? undefined
       : undefined;
     const linkedMap = this.measureLinkedViewportMap(pinnedPoint);
@@ -2308,8 +2374,9 @@ export class ViewportController {
   }
 
   private handleWheel(event: WheelEvent): void {
+    if (event.ctrlKey || (!event.deltaX && !event.deltaY)) return;
     this.releaseLinkedPreviewAttention();
-    if (this.getMode() !== 'live' || event.ctrlKey || (!event.deltaX && !event.deltaY)) {
+    if (this.getMode() !== 'live') {
       this.markInteraction();
       return;
     }
@@ -2328,7 +2395,7 @@ export class ViewportController {
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
-    if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) {
       this.releaseLinkedPreviewAttention();
     }
     const isModifierKey = event.key === 'Control' || event.key === 'Meta';
@@ -2364,6 +2431,8 @@ export class ViewportController {
   private handlePotentialLayoutInteraction(event: PointerEvent): void {
     this.releaseLinkedPreviewAttention();
     this.markInteraction();
+    if (this.getMode() === 'source' && event.button === 0 && typeof Node !== 'undefined' && event.target instanceof Node
+      && this.view.contentDOM.contains(event.target)) this.holdLinkedPreviewAttention();
     if (event.button === 0 && event.target === this.view.scrollDOM) {
       this.scrollbarDragActive = true;
       const scroll = this.view.scrollDOM, rect = scroll.getBoundingClientRect();
@@ -2478,6 +2547,7 @@ export class ViewportController {
 
   /** Reserves currentness for one navigation intent without disturbing the active viewport owner. */
   beginNavigationReveal(): () => boolean {
+    this.releaseLinkedPreviewAttention();
     this.nativeInputViewport.release();
     this.modeTransitionChain = null;
     // An explicit newer navigation supersedes an absolute scroll lock left by
