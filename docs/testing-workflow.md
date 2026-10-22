@@ -34,6 +34,14 @@ need native platform verification before release; unavailable queries use fallba
 
 The user-facing inventory is in [testing-feature-coverage.md](testing-feature-coverage.md).
 
+Webview viewport setup waits for an editable mode to be applied before sending
+fixture navigation or sampling its controls. The mode button projects a request;
+Source preparation can still be pending. Check the visible, interactive editor's
+mode and the completed saved-mode projection, then keep the existing frame samples
+and behavioral assertions. Do not wait directly for the expected diff-row or gutter
+counts. Intentional transition-frame and pending Preview checks retain their own
+observation windows.
+
 Pasted-image naming is covered by `test:image-storage` and the production settings
 and link-destination contracts. They verify the document-name default, all naming
 presets, continuing numbers across image formats, concurrent exclusive creation,
