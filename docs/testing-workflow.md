@@ -1502,6 +1502,11 @@ Popup scroll-following checks use a real wheel gesture and verify its actual scr
 distance before comparing menu coordinates; direct scroll assignment is not user input.
 Sticky-header occlusion fixtures wait for an edited tall row to shrink before using
 its bounds to position the row behind the header.
+Column-width fixtures settle the current presentation before a trusted wheel
+gesture, then verify the main header is above the viewport and Sticky is visible.
+Use the same setup after font/mode restoration and in rich tables; preserve native
+cell focus where the scenario requires it. Sticky column resizing must retain the
+reading position after pointer release, without revealing the document caret.
 The selection-toolbar switch is checked through real Source/Live drag selections,
 native cell selections, immediate updates, failed writes, stale snapshots and
 reopened documents, while formatting shortcuts remain usable.

@@ -12,6 +12,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Added HTML tag, attribute and value completion through the shared input suggestion menu. Preserved unfinished-tag completion, improved candidate sizing and detail alignment, and added Beta feature indicators.
 - Added pasted-image naming presets with document-name numbering, date/time, image numbers and millisecond timestamps, including concurrent creation and escaped Markdown paths.
 - Kept local-link navigation and missing-file hints synchronized with filesystem changes, retained reading positions on native window return, and improved wrapped formula spacing and Preview export-menu dismissal.
+- Preserved the reading position when releasing a floating table-header column resize instead of scrolling to the document caret.
 
 ## 0.3.34
 - Added in-place HTML fragment editing with syntax-colored source, live previews, visible placeholders for non-rendering fragments, and feedback for filtered content. Improved fragment rendering, inline styles, tables, images and disclosure elements.

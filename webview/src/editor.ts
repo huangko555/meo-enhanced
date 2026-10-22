@@ -2696,9 +2696,12 @@ export function createEditor({
     if (event.button === 0) {
       suppressRenderedBlockPointerFocus(view.dom);
       if (currentMode === 'live' && event.target instanceof Element &&
-        event.target.closest('.meo-md-html-table-shell')) {
+        event.target.closest('.meo-md-html-table-shell') &&
+        !event.target.closest('.meo-md-html-table-column-resize-handle')) {
         // Table widgets bypass CodeMirror's pointer handlers. Keep the same
         // source presentation until their own pointerup resolves the cell.
+        // Column resizing preserves its own interaction and must not reveal
+        // the document caret when the resize pointer is released.
         liveSelectionGeneration += 1;
         liveSelectionPointerId = event.pointerId;
         view.dispatch({ effects: setLivePointerSelectionActiveEffect.of({ active: true, preservedLine: null }) });
