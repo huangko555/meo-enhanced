@@ -17,7 +17,7 @@ import { logWebviewRenderError } from './errors';
 import { normalizeDocumentText } from '../../../src/foundation/documentText';
 import { assessLargeDocument } from '../../../src/foundation/largeDocument';
 import { getPreviewViewportResources, observePreviewViewportResources } from './previewViewportResources';
-import { createPreviewSourceGeometry } from './previewSourceGeometry';
+import { comparePreviewVisualSourceEntries, createPreviewSourceGeometry } from './previewSourceGeometry';
 import { capturePreviewReadingAnchor, restoreFullPreviewReadingScrollTop } from './previewReadingAnchor';
 import { createPreviewScrollRange } from './previewScrollRange';
 import { writePreviewFrame } from './previewFrameWriter';
@@ -2756,7 +2756,7 @@ export function createPreviewController({
         .sort((left, right) => left.start - right.start || right.end - left.end || left.top - right.top);
       visualSourceMap = [...sourceMap]
         .filter(entry => entry.rendered)
-        .sort((left, right) => left.top - right.top || left.bottom - right.bottom || left.start - right.start);
+        .sort(comparePreviewVisualSourceEntries);
       sourceMapByElement = new WeakMap();
       for (const entry of sourceMap) sourceMapByElement.set(entry.element, entry);
     }

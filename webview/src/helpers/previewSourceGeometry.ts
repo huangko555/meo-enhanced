@@ -9,6 +9,15 @@ export type PreviewSourceEntry = {
 
 type SourceNode = { element: HTMLElement; entry?: PreviewSourceEntry; children: SourceNode[] };
 
+/** A visual lookup takes the last entry starting before its reading point.
+ * At a shared start, put containers first so the inner source wins the tie. */
+export function comparePreviewVisualSourceEntries(
+  left: Pick<PreviewSourceEntry, 'top' | 'bottom' | 'start' | 'end'>,
+  right: Pick<PreviewSourceEntry, 'top' | 'bottom' | 'start' | 'end'>
+): number {
+  return left.top - right.top || right.bottom - left.bottom || left.start - right.start || right.end - left.end;
+}
+
 /** Source identity is indexed once. Geometry belongs to the current reading
  * band: resource reflow must not turn a caret/scroll query into a document walk.
  * Complete DOM remains available to native selection, find, links and copying. */
@@ -109,7 +118,7 @@ export function createPreviewSourceGeometry(document: Document) {
       }
     }
     if (!sortable) { if (before) visit(before); if (after) visit(after); }
-    return result.sort((left, right) => left.top - right.top || left.bottom - right.bottom || left.start - right.start);
+    return result.sort(comparePreviewVisualSourceEntries);
   };
   const linkedRegions = () => roots.flatMap(root => {
     const members: PreviewSourceEntry[] = [];

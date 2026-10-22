@@ -1,4 +1,6 @@
 import { Worker } from 'node:worker_threads';
+import { readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import type { PreviewRenderValue } from '../protocol/previewRender';
 import type { PreviewPresetDefinition, PreviewContentWidth, PreviewPresetId } from '../foundation/previewPresets';
 import type { ResolvedWikiResources } from '../foundation/wikiReference';
@@ -36,13 +38,13 @@ export function createBackgroundPreviewRenderer(workerPath: string) {
   let disposed = false;
   let nextId = 0;
   let idle: ReturnType<typeof setTimeout> | null = null;
-  const documentOwners = new Set<string>();
+  const owners = new Set<string>();
   const releasingOwners = new Set<string>();
   const pending = new Map<number, { resolve(value: PreviewWorkerValue): void; reject(error: Error): void;
     timeout: ReturnType<typeof setTimeout> }>();
   const clearIdle = () => { if (idle !== null) clearTimeout(idle); idle = null; };
   const scheduleIdle = (current: Worker) => {
-    if (pending.size !== 0 || documentOwners.size !== 0) return;
+    if (pending.size !== 0 || owners.size !== 0) return;
     clearIdle();
     idle = setTimeout(() => {
       if (worker === current && pending.size === 0) { worker = null; void current.terminate(); }
@@ -55,12 +57,15 @@ export function createBackgroundPreviewRenderer(workerPath: string) {
     worker = null;
     for (const request of pending.values()) { clearTimeout(request.timeout); request.reject(error); }
     pending.clear();
-    documentOwners.clear();
+    owners.clear();
     void current?.terminate();
   };
   const getWorker = (): Worker => {
     clearIdle();
     if (worker) return worker;
+    // Overlap independent disk reads. Grammar initialization stays lazy, while
+    // the first code block need not inherit another catalogue's cold file read.
+    void readFile(join(dirname(workerPath), 'fallback-code-highlighter.js')).then(() => {}, () => {});
     const current = worker = new Worker(workerPath);
     current.on('message', (response: PreviewWorkerResponse) => {
       if (worker !== current) return;
@@ -90,17 +95,24 @@ export function createBackgroundPreviewRenderer(workerPath: string) {
         } catch (error) { reject(error); }
       });
   };
+  const retainOwner = (owner: string) => {
+    if (!disposed && !releasingOwners.has(owner)) { owners.add(owner); clearIdle(); }
+  };
   return {
-    render: (options: BackgroundPreviewOptions) => request<PreviewRenderValue>({ kind: 'render', options }),
+    render: async (owner: string, options: BackgroundPreviewOptions) => {
+      const value = await request<PreviewRenderValue>({ kind: 'render', options });
+      retainOwner(owner);
+      return value;
+    },
     open: async (owner: string, documentId: string, options: BackgroundPreviewOptions, anchorLine: number) => {
       const value = await request<PreviewRenderValue>({ kind: 'open', owner, documentId, options, anchorLine });
-      if (!disposed && !releasingOwners.has(owner)) { documentOwners.add(owner); clearIdle(); }
+      retainOwner(owner);
       return value;
     },
     operate: (owner: string, documentId: string, operation: PreviewDocumentOperation) =>
       request<PreviewDocumentResult>({ kind: 'document', owner, documentId, operation }),
     release: async (owner: string) => {
-      documentOwners.delete(owner);
+      owners.delete(owner);
       if (worker === null) return null;
       releasingOwners.add(owner);
       try {

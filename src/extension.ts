@@ -3,7 +3,6 @@ import { pathToFileURL } from 'node:url';
 import * as vscode from 'vscode';
 import { createBackgroundPreviewRenderer } from './host/previewRenderWorker';
 import { createImageDimensionCatalog } from './host/imageDimensions';
-import { assessLargeDocument } from './foundation/largeDocument';
 import { disposeWikiResources, resolveDocumentWikiResources } from './host/wikiResources';
 import type { ResolvedWikiResources } from './foundation/wikiReference';
 import { shouldPreloadMermaid } from './extension/webviewResourceHints';
@@ -692,9 +691,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         };
         if (!this.activePanels.has(panel)) throw new Error('Preview was closed');
         if (options.window) return this.previewRenderer.open(previewOwner, options.window.documentId, request, options.window.anchorLine);
-        if (assessLargeDocument(options.markdownText).windowedPreview) return this.previewRenderer.render(request);
-        const exportRuntime = await loadExportRuntimeModule(this.context.extensionUri);
-        return exportRuntime.renderPreviewDocument(request);
+        return this.previewRenderer.render(previewOwner, request);
       },
       operatePreviewDocument: (id, operation) => this.previewRenderer.operate(previewOwner, id, operation),
       getFindOptions: () => this.getFindOptions(),

@@ -94,14 +94,22 @@ export function splitMarkdownTableBands(tokens: readonly MarkdownNode[], blocks:
 
 export function renderTableBandTokens(tokens: readonly MarkdownNode[], band: MarkdownTableBand): MarkdownNode[] {
   const table = band.table;
-  const open = Object.assign(Object.create(Object.getPrototypeOf(tokens[table.open])), tokens[table.open]) as MarkdownNode;
-  open.attrs = tokens[table.open]!.attrs?.map(([name, value]) => [name, value]) ?? [];
+  const clone = (index: number): MarkdownNode => {
+    const original = tokens[index]!;
+    const node = Object.assign(Object.create(Object.getPrototypeOf(original)), original) as MarkdownNode;
+    node.attrs = original.attrs?.map(([name, value]) => [name, value]) ?? [];
+    return node;
+  };
+  const open = clone(table.open);
   open.attrSet('data-source-line', String(band.sourceLine));
   open.attrSet('data-source-end-line', String(band.sourceEndLine));
   open.attrSet('data-meo-preview-table-widths', table.widths.join(','));
   open.attrSet('data-meo-preview-table-origin', tokens[table.open]!.attrGet('data-source-line')!);
   open.attrSet('data-meo-preview-table-part', table.first ? 'start' : table.last ? 'end' : 'middle');
-  return [open, ...(table.first ? tokens.slice(table.open + 1, table.headEnd) : []), tokens[table.bodyOpen]!,
+  const body = clone(table.bodyOpen);
+  body.attrSet('data-source-line', tokens[band.from]!.attrGet('data-source-line')!);
+  body.attrSet('data-source-end-line', String(band.sourceEndLine));
+  return [open, ...(table.first ? tokens.slice(table.open + 1, table.headEnd) : []), body,
     ...tokens.slice(band.from, band.to), tokens[table.bodyClose]!, tokens[table.close]!];
 }
 
@@ -124,6 +132,7 @@ export function joinPreviewTableBands(html: string): string {
       for (const row of [...body.children]) DomUtils.appendChild(previousBody, row);
       previous.attribs['data-meo-preview-table-part'] = part!;
       previous.attribs['data-source-end-line'] = table.attribs['data-source-end-line']!;
+      previousBody.attribs['data-source-end-line'] = body.attribs['data-source-end-line']!;
       DomUtils.removeElement(node);
     } else previous = part ? table : undefined;
   }

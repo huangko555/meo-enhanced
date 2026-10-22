@@ -18,18 +18,13 @@ const markdownStructureGrammar = (markdownLanguage.parser as MarkdownParser).con
 ]);
 const markdownStructureGrammarIdentity = markdownStructureGrammar.nodeSet.types.map(type => type.name).join('\0');
 
-let doc: Text | undefined, revision = 0, busy = false;
+let doc: Text | undefined, revision = 0;
 let completed: Tree | undefined;
 let sourceContext: MarkdownSourceContext | undefined;
 let fragments: readonly TreeFragment[] = [];
 const encoder = createMarkdownTreeEncoder();
 
-self.onmessage = async ({ data: request }: MessageEvent<MarkdownParseRequest>) => {
-  if (busy) {
-    self.postMessage({ id: request.id, error: 'Markdown parser received overlapping requests' } satisfies MarkdownParseResponse);
-    return;
-  }
-  busy = true;
+self.onmessage = ({ data: request }: MessageEvent<MarkdownParseRequest>) => {
   try {
     let update: ChangeSet | undefined;
     if (!Number.isSafeInteger(request.id) || request.id <= revision || request.base !== revision) throw new Error('Markdown parser revision mismatch');
@@ -49,15 +44,11 @@ self.onmessage = async ({ data: request }: MessageEvent<MarkdownParseRequest>) =
       }
     }
     if (!completed) {
-      const parse = markdownStructureGrammar.startParse(new DocInput(doc), fragments);
-      let tree: Tree | null, deadline = performance.now() + 8;
-      while (!(tree = parse.advance())) {
-        if (performance.now() >= deadline) {
-          await new Promise(resolve => setTimeout(resolve, 0));
-          deadline = performance.now() + 8;
-        }
-      }
-      completed = tree;
+      // This dedicated worker owns one in-flight revision. Main-thread parsing
+      // still has a time budget; yielding here only adds nested timer delays.
+      // Disposal and timeout terminate it externally; the owner still validates
+      // the exact revision before publication and queues intervening edits.
+      completed = markdownStructureGrammar.parse(new DocInput(doc), fragments);
     }
     const tree = completed;
     if (tree.length !== doc.length || tree.type.name !== 'Document') throw new Error('Markdown parser produced incomplete structure');
@@ -82,5 +73,5 @@ self.onmessage = async ({ data: request }: MessageEvent<MarkdownParseRequest>) =
     sourceContext = undefined;
     encoder.clear();
     self.postMessage({ id: request.id, error: error instanceof Error ? error.message : String(error) } satisfies MarkdownParseResponse);
-  } finally { busy = false; }
+  }
 };

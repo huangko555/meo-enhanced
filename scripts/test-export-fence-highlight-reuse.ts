@@ -15,6 +15,7 @@ try {
       builder.onLoad({ filter: /[\\/]highlight\.js[\\/]lib[\\/]index\.js$/ }, args => {
         observed++;
         return { loader: 'js', resolveDir: path.dirname(args.path), contents: fs.readFileSync(args.path, 'utf8') + `
+          globalThis.__fenceLibraryLoads = (globalThis.__fenceLibraryLoads ?? 0) + 1;
           const originalHighlight = module.exports.highlight;
           module.exports.highlight = (...args) => {
             globalThis.__fenceHighlightCalls = (globalThis.__fenceHighlightCalls ?? 0) + 1;
@@ -41,15 +42,22 @@ try {
   fs.writeFileSync(runner, `
     const assert = require('node:assert/strict');
     const { renderMarkdownToHtml } = require('./runtime.cjs');
+    assert.equal(globalThis.__fenceLibraryLoads ?? 0, 0, 'Loading Markdown rendering must not initialize every fallback language');
     const options = { markdownFilePath: 'C:/fences.md', target: 'html' };
     const calls = () => globalThis.__fenceHighlightCalls ?? 0;
     const fence = (language, source) => '\\x60\\x60\\x60' + language + '\\n' + source + '\\n\\x60\\x60\\x60';
     const render = (text, extra = {}) => renderMarkdownToHtml({ ...options, markdownText: text, ...extra });
+    render('# Text first\\n\\nAn ordinary paragraph.');
+    render(fence('', '<literal> & plain code'));
+    render(fence('javascript', 'const supplied = 1;'), { highlightCode: () => 'supplied color' });
+    render(fence('javascript', 'const later = 1;\\n'.repeat(4000)), { windowedPresentation: true });
+    assert.equal(globalThis.__fenceLibraryLoads ?? 0, 0, 'Text, supplied highlighting and viewport-deferred code do not load fallback grammars');
     const firstFence = fence('typescript', 'const first = 42;');
     const secondFence = fence('typescript', 'const second = 43;');
     const text = firstFence + '\\n\\n' + secondFence;
     const first = render(text);
     assert.equal(calls(), 2, 'The initial render must highlight both fences before returning');
+    assert.equal(globalThis.__fenceLibraryLoads, 1, 'The first actual fallback loads the complete shared language catalogue once');
     assert.match(first.html, /hljs-keyword/);
     assert.deepEqual(render(text), first);
     assert.equal(calls(), 2, 'An unchanged render must reuse both successful highlights');

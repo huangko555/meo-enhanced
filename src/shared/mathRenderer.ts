@@ -1,5 +1,3 @@
-import katex from 'katex';
-
 export type SharedMathMode = 'inline' | 'display';
 
 const MATH_RENDER_CACHE_LIMIT = 300;
@@ -40,6 +38,9 @@ export function renderMathToHtml(content: string, mode: SharedMathMode): string 
   }
 
   try {
+    // Source-only consumers share the scanners and caches without initializing
+    // KaTeX. Its library is needed only when a surface actually renders math.
+    const katex = require('katex') as typeof import('katex');
     const html = katex.renderToString(normalized, {
       displayMode: mode === 'display',
       throwOnError: false,

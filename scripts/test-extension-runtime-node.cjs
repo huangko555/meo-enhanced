@@ -32,6 +32,15 @@ try {
     worker.on('message', receive); worker.on('error', fail);
     worker.postMessage({ id, kind: 'render', ...(options === undefined ? {} : { options }), ...operation });
   });
+  // A text-first reader must not load the fallback grammar bundle. Keep it
+  // absent until the first real code block to exercise the installed boundary.
+  const textFirst = await request(101, { markdownText: '# Text first\n\nOrdinary **prose** and $x^2$.',
+    sourceDocumentPath: '/fixture/text-first.md', uiLanguage: 'en' });
+  assert.match(textFirst.value.html, /<strong>prose<\/strong>/);
+  const missingFallback = await request(102, { markdownText: '```js\nconst first = 1;\n```',
+    sourceDocumentPath: '/fixture/text-first.md', uiLanguage: 'en' });
+  assert.match(missingFallback.error, /fallback-code-highlighter/);
+  fs.copyFileSync(path.join(__dirname, '..', 'dist', 'fallback-code-highlighter.js'), path.join(installRoot, 'fallback-code-highlighter.js'));
   let heartbeats = 0;
   const heartbeat = setInterval(() => { heartbeats += 1; }, 5);
   let result;

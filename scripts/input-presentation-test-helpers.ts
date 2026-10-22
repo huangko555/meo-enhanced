@@ -145,7 +145,7 @@ async function assertStablePaint(page: Page, clip: PaintClip | readonly PaintCli
     await page.evaluate(() => document.getElementById('presentation-paint-witness')?.remove()); }
 }
 
-async function open(page: Page, text: string, coldPreview = false, initialMode: 'source' | 'live' = 'source') {
+async function open(page: Page, text: string, coldPreview = false, initialMode: 'source' | 'live' | 'preview' = 'source') {
   let hostText = text, version = 1, ready = false, firstRender = false;
   let renderedText = '', renderedDocumentId: string | undefined;
   const documents = new Map<string, ReturnType<typeof createPreviewDocument>>();
@@ -212,8 +212,10 @@ async function open(page: Page, text: string, coldPreview = false, initialMode: 
   await page.goto(server.url.href, { waitUntil: 'domcontentloaded' });
   await page.bringToFront();
   await page.waitForFunction(() => document.visibilityState === 'visible');
-  await page.waitForFunction(() => document.querySelector('.editor-host > .cm-editor') && !document.querySelector('.meo-preload-toolbar')
-    && !document.querySelector('.editor-host')?.hasAttribute('inert') && !document.querySelector('.mode-group [aria-busy="true"]'));
+  await page.waitForFunction(mode => !document.querySelector('.meo-preload-toolbar') && !document.querySelector('.mode-group [aria-busy="true"]')
+    && (mode === 'preview' ? document.querySelector<HTMLElement>('.preview-status')?.hidden
+      && !!document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('main.meo-export-doc')
+      : document.querySelector('.editor-host > .cm-editor') && !document.querySelector('.editor-host')?.hasAttribute('inert')), {}, initialMode);
   return { renders, errors, readHost: () => hostText, readPresentation: () => ({ text: renderedText, id: renderedDocumentId }),
     async replaceHostText(text: string) {
       hostText = text; version++;

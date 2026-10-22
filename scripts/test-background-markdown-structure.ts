@@ -89,6 +89,8 @@ assert.ok(build.success, build.logs.map(String).join('\n'));
 const bundle = await build.outputs[0]!.text();
 const workerBuild = await Bun.build({ entrypoints: ['webview/src/markdownParseWorker.ts'], target: 'browser', format: 'iife',
   plugins: [{ name: 'observe-worker-context-preparation', setup(builder) {
+    builder.onLoad({ filter: /[\\/]katex[\\/]dist[\\/]katex\.(?:js|mjs)$/ }, () => ({ loader: 'js', contents:
+      'throw new Error("Source structure must not initialize the formula renderer"); export default {};' }));
     builder.onLoad({ filter: /webview[\\/]src[\\/]markdownDocumentContext\.ts$/ }, async ({ path }) => {
       const source = await Bun.file(path).text(), marker = '  const state = EditorState.create({ doc, extensions: EditorState.tabSize.of(tabSize) });';
       assert.equal(source.split(marker).length, 2);

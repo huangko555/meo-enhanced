@@ -1329,6 +1329,14 @@ export class ViewportController {
       ? Math.max(0, anchor.viewportOffset ?? 0)
       : null;
     this.stabilize(() => {
+      if (viewportOffset !== null && this.getMode() === 'live'
+        && this.view.contentDOM?.querySelector?.('.meo-md-html-table')) {
+        const line = this.view.state.doc.lineAt(position).number;
+        const progress = anchor.sourceRange?.startLine === line && anchor.sourceRange.endLine === line
+          ? Math.max(0, Math.min(1, anchor.sourceRange.progress)) : 0;
+        const tableTarget = this.liveTableRowScrollTarget(line, progress, viewportOffset);
+        if (tableTarget) return tableTarget;
+      }
       if (anchor.sourceRange && viewportOffset !== null && !anchor.preciseTextPosition) {
         const startLine = Math.min(
           Math.max(1, Math.floor(anchor.sourceRange.startLine)),
@@ -3112,6 +3120,31 @@ export class ViewportController {
     return true;
   }
 
+  private liveTableRowScrollTarget(line: number, progress: number, viewportOffset: number): ScrollTarget | null {
+    const scroller = this.view.scrollDOM, bounds = scroller.getBoundingClientRect();
+    const row = Array.from(this.view.contentDOM.querySelectorAll<HTMLElement>(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tr[data-source-line-number]'
+    )).find(row => Number(row.dataset.sourceLineNumber) === line && row.getClientRects().length > 0);
+    if (row) {
+      const rect = row.getBoundingClientRect();
+      return { top: Math.max(0, scroller.scrollTop + rect.top - bounds.top + rect.height * progress - viewportOffset) };
+    }
+    // An unmounted row still has a source-backed position in the existing row
+    // height index. Do not estimate it from the complete table's line count.
+    for (const shell of this.view.contentDOM.querySelectorAll<HTMLElement>(
+      '.meo-md-html-table-shell[data-meo-rendered-block-start-line][data-meo-rendered-block-end-line]'
+    )) {
+      const start = Number(shell.dataset.meoRenderedBlockStartLine), end = Number(shell.dataset.meoRenderedBlockEndLine);
+      if (line < start + 2 || line > end) continue;
+      const body = shell.querySelector<HTMLTableSectionElement>('table[data-meo-table-windowed] > tbody');
+      const rowBounds = body && tableRowWindowFor(body)?.bounds(line - start - 2);
+      if (!body || !rowBounds || body.getClientRects().length === 0) continue;
+      return { top: Math.max(0, scroller.scrollTop + body.getBoundingClientRect().top - bounds.top
+        + rowBounds.top + (rowBounds.bottom - rowBounds.top) * progress - viewportOffset) };
+    }
+    return null;
+  }
+
   private captureEditorReadingAnchor(viewportOffset: number): ViewportDocumentAnchor {
     const scroller = this.view.scrollDOM;
     const boundedViewportOffset = Math.max(0, Math.min(viewportOffset, scroller.clientHeight));
@@ -3119,6 +3152,16 @@ export class ViewportController {
     if (this.getMode() === 'live') {
       const scrollerRect = scroller.getBoundingClientRect();
       const sampleY = scrollerRect.top + boundedViewportOffset;
+      const row = this.view.contentDOM?.querySelector?.('.meo-md-html-table') && Array.from(this.view.contentDOM.querySelectorAll<HTMLElement>(
+        '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tr[data-source-line-number]'
+      )).find(row => { const rect = row.getBoundingClientRect(); return rect.top <= sampleY && rect.bottom > sampleY; });
+      const rowLine = Number(row?.dataset.sourceLineNumber);
+      if (row && Number.isInteger(rowLine) && rowLine >= 1 && rowLine <= this.view.state.doc.lines) {
+        const rect = row.getBoundingClientRect();
+        return { position: this.view.state.doc.line(rowLine).from, lineOffset: 0, viewportOffset: boundedViewportOffset,
+          sourceRange: { startLine: rowLine, endLine: rowLine,
+            progress: Math.max(0, Math.min(1, (sampleY - rect.top) / Math.max(1, rect.height))) } };
+      }
       const renderedBlock = Array.from(
         this.view.contentDOM.querySelectorAll<HTMLElement>(
           '[data-meo-rendered-block-start-line][data-meo-rendered-block-end-line]'

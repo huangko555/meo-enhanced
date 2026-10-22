@@ -9,6 +9,53 @@ let primary: unknown;
 let stage = 'Preview opening';
 const linked = process.argv.includes('--sync');
 try {
+  // A direct Preview open has no earlier Live geometry to hide a bad source
+  // projection. In particular tbody must never represent all 1600 source rows
+  // while only one reading band is mounted.
+  for (const width of [1280, 820]) {
+    const coldPage = await browser.newPage(), coldHost = await open(coldPage, text, false, 'preview');
+    try {
+      await coldPage.setViewport({ width, height: 900 }); await frames(coldPage, 12);
+      const rowAtReadingBand = (live: boolean) => coldPage.evaluate(live => {
+        const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+        const view = (document.querySelector('.editor-host > .cm-editor .cm-content') as any).cmTile.root.view;
+        const doc = live ? document : frame.contentDocument!;
+        const bounds = live ? view.scrollDOM.getBoundingClientRect() : { top: 0, height: frame.clientHeight };
+        const point = bounds.top + bounds.height / 3;
+        const rows = [...doc.querySelectorAll<HTMLElement>(live
+          ? 'table[data-meo-table-windowed] > tbody > tr[data-table-body-row]'
+          : 'table[data-meo-preview-table-part] > tbody > tr[data-source-line]')];
+        const row = rows.find(row => { const r = row.getBoundingClientRect(); return r.top <= point && r.bottom > point; });
+        return { line: row ? Number(live ? row.dataset.sourceLineNumber : row.dataset.sourceLine) : null,
+          top: live ? view.scrollDOM.scrollTop : doc.scrollingElement!.scrollTop };
+      }, live);
+      const before = await rowAtReadingBand(false);
+      await coldPage.click('[data-mode="live"]');
+      await coldPage.waitForFunction(() => document.querySelector('.meo-mode-live') && !document.querySelector('[data-mode][aria-busy="true"]'));
+      await frames(coldPage, 12);
+      const after = await rowAtReadingBand(true);
+      assert.ok(before.line !== null && after.line !== null && Math.abs(before.line - after.line) <= 2,
+        `Cold Preview to Live keeps the actual row (${width}px): ${JSON.stringify({ before, after })}`);
+      assert.ok(await coldPage.$eval('tr[data-table-body-row="0"]', row => {
+        const r = row.getBoundingClientRect(), s = row.closest('.cm-scroller')!.getBoundingClientRect();
+        return r.bottom > s.top && r.top < s.bottom;
+      }), 'The first authored row remains visible after the first mode switch');
+      await coldPage.click('[data-mode="preview"]');
+      await coldPage.waitForFunction(() => document.querySelector<HTMLElement>('.preview-status')?.hidden);
+      const point = await coldPage.$eval('.preview-frame', frame => { const r = frame.getBoundingClientRect(); return { x: r.left + 160, y: r.top + 300 }; });
+      await coldPage.mouse.move(point.x, point.y); await coldPage.mouse.wheel({ deltaY: 18_000 }); await frames(coldPage, 24);
+      const middle = await rowAtReadingBand(false);
+      assert.ok(middle.line !== null && middle.line > 100, 'The second case reads a distant band');
+      await coldPage.click('[data-mode="live"]');
+      await coldPage.waitForFunction(() => document.querySelector('.meo-mode-live') && !document.querySelector('[data-mode][aria-busy="true"]'));
+      await frames(coldPage, 16);
+      const returned = await rowAtReadingBand(true);
+      assert.ok(returned.line !== null && Math.abs(middle.line - returned.line) <= 2,
+        `Distant Preview rows project to the same Live rows (${width}px): ${JSON.stringify({ middle, returned })}`);
+      assert.equal(coldHost.readHost(), text);
+      assert.deepEqual(coldHost.errors, []);
+    } finally { coldHost.dispose(); await coldPage.close(); }
+  }
   const page = await browser.newPage(), host = await open(page, text);
   try {
     await page.click('[data-mode="preview"]');

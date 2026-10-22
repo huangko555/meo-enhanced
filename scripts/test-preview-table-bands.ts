@@ -4,6 +4,14 @@ import { preparePreviewDocument } from '../src/export/runtime';
 import { createPreviewDocument } from '../src/export/previewDocument';
 import MarkdownIt from 'markdown-it';
 import { createPreviewTableColumnPreferences } from '../webview/src/helpers/previewTableColumns';
+import { comparePreviewVisualSourceEntries } from '../webview/src/helpers/previewSourceGeometry';
+
+const outer = { top: 100, bottom: 1400, start: 5, end: 36 };
+const inner = { top: 100, bottom: 200, start: 5, end: 5 };
+assert.equal([inner, outer].sort(comparePreviewVisualSourceEntries).at(-1), inner,
+  'A table body starting at its first row must not override that row in a reading lookup');
+assert.equal([{ ...inner, end: 36 }, inner].sort(comparePreviewVisualSourceEntries).at(-1), inner,
+  'Equal visual bounds prefer the narrower authored source range');
 
 const rows = 1600;
 const text = '# Before\n\n| Name | Value |\n| --- | --- |\n'
@@ -22,6 +30,10 @@ for (const block of tableBlocks) {
   assert.ok(count > 0 && count <= 33, `One requested band must not materialize the complete table (${count} rows)`);
   mountedRows += count;
   assert.ok(block.sourceEndLine - block.sourceLine < 35, 'Source geometry follows the rows in this band');
+  const body = DomUtils.findAll(element => element.name === 'tbody', root.children)[0]!;
+  assert.ok(Number(body.attribs['data-source-line']) >= block.sourceLine
+    && Number(body.attribs['data-source-end-line']) <= block.sourceEndLine,
+  'Every band container must describe its own rows, including tbody rather than the complete source table');
 }
 assert.equal(mountedRows, rows + 1, 'The authored header and all body rows occur exactly once');
 assert.equal(prepared.renderAll().html, preparePreviewDocument(options).renderAll().html,
@@ -40,6 +52,8 @@ try {
   assert.ok(copied.kind === 'copy' && copied.text.includes('ROW-0') && copied.text.includes('ROW-1599'));
   assert.equal((copied.html.match(/ROW-\d+/g) ?? []).length, rows, 'Logical copy includes each unmounted row exactly once');
   assert.equal((copied.html.match(/<table\b/g) ?? []).length, 1, 'Copy joins internal reading bands back into one table');
+  const body = DomUtils.findAll(element => element.name === 'tbody', parseDocument(copied.html).children)[0]!;
+  assert.equal(Number(body.attribs['data-source-end-line']), rows + 4, 'Joined clipboard containers regain the complete source range');
 } finally { document.dispose(); }
 
 for (const value of ['1. first<br>2. second', '> quote<br>next', '<span>**rich**</span> and <kbd>key</kbd>',
