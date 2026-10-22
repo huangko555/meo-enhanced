@@ -5444,8 +5444,21 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   border-left: 1px solid var(--meo-semantic-tableBorder, var(--meo-content-panel-border));
 }
 
-.cm-editor .meo-mermaid-inline-separator:is(:hover, :focus-visible) {
+.cm-editor .meo-mermaid-inline-separator::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -1px;
+  width: 4px;
+  pointer-events: none;
+}
+
+.cm-editor .meo-mermaid-inline-separator:is(:hover, :focus-visible)::before {
   background: #316dca;
+}
+
+.cm-editor .meo-mermaid-inline-separator:focus-visible {
   outline: none;
 }
 
