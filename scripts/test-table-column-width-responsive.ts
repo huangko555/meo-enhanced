@@ -26,6 +26,23 @@ const selector = '.meo-md-html-table:not(.meo-md-html-table-sticky-table)';
 
 async function settle(page: Page): Promise<void> {
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))));
+  // Preview's ResizeObserver schedules its projection on the iframe's clock.
+  // Outer-document frames alone can sample the previous wrapper width.
+  await page.evaluate(async () => {
+    const host = document.querySelector<HTMLElement>('.preview-host');
+    const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
+    if (!host || host.hidden || host.inert || !host.getClientRects().length || !frame?.contentWindow) return;
+    const view = frame.contentWindow;
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Preview document frame clock did not settle')), 5000);
+      let remaining = 3;
+      const tick = () => {
+        if (--remaining === 0) { clearTimeout(timeout); resolve(); }
+        else view.requestAnimationFrame(tick);
+      };
+      view.requestAnimationFrame(tick);
+    });
+  });
 }
 
 async function dragColumn(page: Page, column: number, delta: number): Promise<void> {
