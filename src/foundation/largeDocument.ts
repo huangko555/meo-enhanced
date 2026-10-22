@@ -27,6 +27,9 @@ export type LargeDocumentAssessment = {
 const REFERENCE_BYTES = 300_000;
 const REFERENCE_LINES = 8_000;
 const REFERENCE_RICH_BLOCKS = 256;
+// Preview has to create reading DOM for fences as well as rich resources.
+// Keep this admission independent of opening mode and Source syntax budgets.
+const PREVIEW_BLOCK_BUDGET = 128;
 
 /** Cheap proof using the same size budgets. A UTF-16 length may be passed as a
  * lower bound for UTF-8 bytes when the caller must not scan a changing document. */
@@ -118,12 +121,14 @@ export function assessLargeDocument(text: string): LargeDocumentAssessment {
   const pressure = dimensions.bytes / REFERENCE_BYTES
     + dimensions.lines / REFERENCE_LINES
     + dimensions.richBlocks / REFERENCE_RICH_BLOCKS;
+  const previewBlocks = dimensions.richBlocks + codeFences - mermaid - fencedMath;
   // Short rich documents also need bounded presentation work. Preserve their
   // ordinary opening policy and Source palette at the earlier work threshold.
   // One long table can be expensive even in a short file. The optional opening
   // preference covers that case without lowering Source coloring. Preview can
   // now partition a giant Markdown table into independent source-backed bands.
   return { dimensions, pressure, preferSource: pressure >= 1 || maxTableRows >= 1_024,
-    lightweightSourceSyntax: pressure >= 1, windowedPreview: pressure >= 1 || maxTableRows >= 1024,
+    lightweightSourceSyntax: pressure >= 1,
+    windowedPreview: pressure >= 1 || maxTableRows >= 1024 || previewBlocks >= PREVIEW_BLOCK_BUDGET,
     boundedEditorWork: pressure >= 0.25 || codeFences >= 48 || maxTableRows >= 512 };
 }

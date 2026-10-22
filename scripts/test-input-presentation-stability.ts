@@ -120,6 +120,47 @@ async function assertRichInput(page: Page, mode: 'source' | 'live', text: string
 }
 
 try {
+  if (!richOnly && !stickyOnly && !heightOnly) {
+    stage = 'Source split Preview crosses its presentation budget';
+    const text = 'Typing target.\n\n# Stable reading witness\n\nUnchanged reading paragraph.\n\n'
+      + '~~~\nplain fixture\n~~~\n\n'.repeat(127);
+    const extra = '~~~\nnew block\n~~~\n\n';
+    const page = await browser.newPage(), host = await open(page, text, true);
+    try {
+      await page.click('.source-preview-button');
+      await page.waitForFunction(() => !document.querySelector<HTMLElement>('.preview-host')?.hidden
+        && document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('h1'));
+      if (await page.$eval('.source-preview-scroll-sync-button', button => button.getAttribute('aria-pressed') === 'true')) {
+        await page.click('.source-preview-scroll-sync-button');
+      }
+      await page.evaluate(() => {
+        const view = (document.querySelector('.editor-host > .cm-editor .cm-content') as any).cmTile.root.view;
+        view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true }); view.focus();
+        document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop = 0;
+      });
+      await frames(page, 12);
+      assert.equal(await page.$eval('.preview-frame', frame => (frame as HTMLIFrameElement).contentDocument!
+        .documentElement.dataset.meoPreviewWindowed), 'false');
+      const before = await page.$eval('.preview-frame', frame => (frame as HTMLIFrameElement).contentDocument!.querySelector('h1')!.getBoundingClientRect().top);
+      const clip = await page.$eval('.preview-frame', frame => {
+        const r = frame.getBoundingClientRect();
+        return { left: Math.ceil(r.left + 25), top: Math.ceil(r.top + 20), width: Math.floor(r.width - 60), height: Math.floor(r.height - 50) };
+      });
+      for (const windowed of [true, false]) {
+        await assertStablePaint(page, clip, async () => {
+          if (windowed) await page.keyboard.sendCharacter(extra);
+          else { await page.keyboard.down('Control'); await page.keyboard.press('z'); await page.keyboard.up('Control'); }
+          await page.waitForFunction(windowed => document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument!
+            .documentElement.dataset.meoPreviewWindowed === String(windowed), {}, windowed);
+          await new Promise(resolve => setTimeout(resolve, 800)); await frames(page, 6);
+        }, `Source split Preview presentation budget ${windowed}`);
+        const after = await page.$eval('.preview-frame', frame => (frame as HTMLIFrameElement).contentDocument!.querySelector('h1')!.getBoundingClientRect().top);
+        assert.ok(Math.abs(after - before) <= 1, 'Preview admission must preserve its independent reading position');
+        assert.equal(host.readHost(), text + (windowed ? extra : ''));
+      }
+      assert.deepEqual(host.errors, []);
+    } finally { host.dispose(); await page.close(); }
+  }
   const paragraphs = 'Typing target.\n\n' + Array.from({ length: 70 }, (_, index) => `Unchanged paragraph ${index}.`).join('\n\n');
   for (const windowed of richOnly || stickyOnly || heightOnly ? [] : [false, true]) for (const sync of [false, true]) {
     const text = paragraphs + (windowed ? '\n\n' + Array.from({ length: 5000 }, (_, index) => `Far paragraph ${index}.\n\n`).join('') : '');

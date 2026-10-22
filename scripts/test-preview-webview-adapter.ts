@@ -228,6 +228,17 @@ largeAdapter.setActive({ active: true, text: largeHiddenText + 'latest edit' });
 assert.deepEqual(largePreviewWork, [largeHiddenText + 'latest edit'], 'Preview activation renders the latest full document on demand');
 largeAdapter.dispose();
 
+// A short complex document can use bounded DOM without inheriting the large
+// document's cold-switch penalty. Its ordinary startup preload stays bounded.
+const shortComplexText = ('| A | B |\n| --- | --- |\n| one | two |\n\n```js\nconst x = 1;\n```\n\n').repeat(100);
+for (const [text, expected] of [[shortComplexText, 1], ['| A | B |\n| --- | --- |\n' + '| one | two |\n'.repeat(1200), 0]] as const) {
+  let preloads = 0;
+  const startup = createPreviewWebviewAdapter({ ...surface, preload() { preloads++; }, dispose() {} });
+  startup.start({ text, appearance: 'auto', fontFamily: '', sourceColoring: true, showComments: false, active: false });
+  assert.equal(preloads, expected, expected ? 'short bounded Preview retains one startup preload' : 'a giant single table skips hidden startup work');
+  startup.dispose();
+}
+
 const repoRoot = path.resolve(import.meta.dir, '..');
 const bootstrap = fs.readFileSync(path.join(repoRoot, 'webview/src/index.ts'), 'utf8');
 assert.equal((bootstrap.match(/createPreviewWebviewAdapter\s*\(/g) ?? []).length, 1);

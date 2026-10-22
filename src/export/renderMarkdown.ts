@@ -274,7 +274,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
     githubStyle: github,
     deferDefinitionPreparation: options.windowedPresentation === true,
     onFenceInfo: info => { hasMermaid ||= (github ? info.trim().split(/\s+/)[0] : normalizeFenceLanguage(info)) === 'mermaid'; },
-    ...(github ? { onReferenceTags: (tags: readonly string[]) => tags.forEach(tag => generatedFootnoteTags.add(tag)) } : {}),
+    onReferenceTags: (tags: readonly string[]) => tags.forEach(tag => generatedFootnoteTags.add(tag)),
     target: options.target,
     outputFilePath: options.outputFilePath,
     renderMarkdown: (markdownText) => md.render(markdownText, github ? { meoGithubFootnote: true } : undefined),
@@ -298,11 +298,12 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
   headings.length = 0;
   const environment = {};
   const deferredInline = options.windowedPresentation
-    ? prepareDeferredMarkdownInline(md, normalizedBody.markdown, environment, documentAnchors) : undefined;
+    ? prepareDeferredMarkdownInline(md, normalizedBody.markdown, environment, documentAnchors, generatedFootnoteTags) : undefined;
   const bodyTokens = deferredInline?.tokens ?? md.parse(normalizedBody.markdown, environment);
   hasMermaid ||= bodyTokens.some(node => node.type === 'fence'
     && (github ? node.info.trim().split(/\s+/)[0] : normalizeFenceLanguage(node.info)) === 'mermaid');
-  const roots = markdownPresentationBlocks(bodyTokens, bodySourceLines);
+  const roots = markdownPresentationBlocks(bodyTokens, bodySourceLines,
+    deferredInline ? index => deferredInline.prepareRange(index, index + 1) : undefined);
   const tokenBlocks = options.windowedPresentation && !github && !options.presetDefinition?.custom
     ? splitMarkdownTableBands(bodyTokens, roots, bodySourceLines) : roots;
   const documentHref = options.target === 'html' && options.outputFilePath

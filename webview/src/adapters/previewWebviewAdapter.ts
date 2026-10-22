@@ -140,9 +140,10 @@ export function createPreviewWebviewAdapter(
       surface.setFontFamily(input.fontFamily);
       surface.setCodeFontFamily?.(input.codeFontFamily ?? '');
       if (input.presetState !== undefined) surface.restorePresetState?.(input.presetState);
-      // Hidden Preview still parses the full document and initializes its rich
-      // renderers. Keep that work off the Source/Live startup path under pressure.
-      if (!input.active && !assessLargeDocument(input.text).windowedPreview) {
+      // Full document preparation stays off expensive Source/Live startups.
+      // Short complex documents preload their bounded reading window, keeping
+      // the first Preview switch warm without constructing their complete DOM.
+      if (!input.active && !assessLargeDocument(input.text).preferSource) {
         trackBackgroundRender(surface.preload(input.text));
       }
     },

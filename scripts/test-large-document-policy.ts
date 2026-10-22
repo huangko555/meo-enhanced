@@ -42,6 +42,15 @@ assert.equal(shortCode.dimensions.codeFences, 50);
 assert.equal(shortCode.boundedEditorWork, true, 'many short fences also require a bounded editing budget');
 const unlabeledCode = assessLargeDocument(('~~~\nplain code\n~~~\n\n').repeat(60));
 assert.equal(unlabeledCode.dimensions.codeFences, 60, 'unlabeled tilde fences must count as code blocks');
+assert.equal(unlabeledCode.windowedPreview, false, 'sixty small plain fences retain complete Preview');
+const mixedPreview = assessLargeDocument(Array.from({ length: 40 }, (_, index) =>
+  `## Section ${index}\n\n| A | B |\n| --- | --- |\n| one | two |\n\n`
+  + '```javascript\nconst x = 1;\n```\n\n$$\nx^2\n$$\n\n![pixel](image.png)\n\n').join(''));
+assert.ok(mixedPreview.pressure < 1 && !mixedPreview.preferSource && !mixedPreview.lightweightSourceSyntax,
+  'a short complex document keeps its opening policy and Source coloring');
+assert.equal(mixedPreview.windowedPreview, true, 'many rendered resources and fences need bounded Preview before the file-size opening limit');
+const diagramPreview = assessLargeDocument('```mermaid\nflowchart LR; A-->B\n```\n\n'.repeat(120));
+assert.equal(diagramPreview.windowedPreview, false, 'rich fences must not count twice in the Preview block budget');
 const literalExample = assessLargeDocument('````markdown\n```mermaid\nA-->B\n```\n| A | B |\n| --- | --- |\n![literal](image.png)\n$$\nx\n$$\n````');
 assert.equal(literalExample.dimensions.codeFences, 1);
 assert.equal(literalExample.dimensions.richBlocks, 0, 'literal examples must not count as rendered resources');

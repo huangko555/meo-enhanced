@@ -9,7 +9,7 @@ type CoreRule = (state: CoreState) => void;
  * Headings need global IDs; contextual HTML roots need early children so
  * containers spanning roots can be partitioned without changing semantics. */
 export function prepareDeferredMarkdownInline(md: MarkdownIt, source: string, environment: object,
-  documentAnchors: CoreRule
+  documentAnchors: CoreRule, generatedFootnoteTags: ReadonlySet<string>
 ) {
   const marker: CoreRule = () => {};
   md.core.ruler.before('inline', 'meo-windowed-inline-boundary', marker);
@@ -62,12 +62,22 @@ export function prepareDeferredMarkdownInline(md: MarkdownIt, source: string, en
     }
     group.ready = true;
   };
+  const contextualHtml = (content: string) => {
+    // Generated references are balanced within one inline source. The block
+    // partitioner still requests these children when continuing an existing
+    // HTML context. Leave all other HTML conservative.
+    const independent = generatedFootnoteTags.size === 0 ? content : content.replace(
+      /(<sup class="footnote-ref">)(<a href="[^"]*" id="fnref-\d+(?:-\d+)?">)\[?\d+\]?<\/a><\/sup>/g,
+      (reference, sup: string, link: string) => generatedFootnoteTags.has(sup) && generatedFootnoteTags.has(link) ? '' : reference
+    );
+    return /<(?!br[ \t]*\/?>)/i.test(independent);
+  };
   for (let index = 0; index < groups.length; index++) {
     const group = groups[index]!;
     if (tokens.slice(group.from, group.to).some(node => node.type === 'heading_open'
       // A bare void break neither owns a container nor implicitly closes one.
       // Keep other HTML (including attributes/closing tags) conservative.
-      || node.type === 'inline' && /<(?!br[ \t]*\/?>)/i.test(node.content))) prepare(index);
+      || node.type === 'inline' && contextualHtml(node.content))) prepare(index);
   }
   documentAnchors(state);
   anchorsApplied = true;
