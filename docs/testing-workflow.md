@@ -112,6 +112,13 @@ reading focus and document-end completion without text mutation. It distinguishe
 expansion and samples every frame of a tall Mermaid roundtrip, rather than checking
 only coordinates after a fixed settlement delay. It belongs to `test:rendered-source`.
 
+`scripts/test-block-passive-updates.ts` covers compact long-code summary focus,
+unchanged reading focus through passive refresh and position mapping, retained
+neighboring render roots and source tokens during typing, and painted Mermaid
+layout icon/caption alignment in both themes, languages, fonts and directions.
+It also belongs to `test:rendered-source` and saves visual evidence under
+`.local/block-passive-acceptance/`.
+
 The Mermaid/formula inner-source matrix and findings are in
 [testing-rendered-block-source.md](testing-rendered-block-source.md). Run
 `bun run test:rendered-source` for its dedicated input, boundary and appearance

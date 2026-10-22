@@ -197,8 +197,8 @@ export function blockInteractionExtensions(enter: (view: EditorView, block: Bloc
         const block = blockReadingFocusAt(update.state);
         if (block !== blockReadingFocusAt(update.startState)) {
           const ownedFocus = this.target === this.view.dom.ownerDocument.activeElement;
-          this.releaseTarget();
           this.needsFocus = !!block && (ownedFocus || update.transactions.some(transaction => transaction.effects.some(effect => effect.is(setReadingFocus))));
+          if (!block) this.releaseTarget();
         }
         if (!block) return;
         this.view.requestMeasure({ key: this, read: () => blockFocusElement(this.view, block), write: target => {
@@ -208,9 +208,10 @@ export function blockInteractionExtensions(enter: (view: EditorView, block: Bloc
             this.target = target;
             target.classList.add('meo-block-reading-target');
           }
-          target.tabIndex = -1;
-          if (target.classList.contains('meo-code-language-label')) target.removeAttribute('aria-hidden');
-          target.setAttribute('aria-label', getUiStrings(this.view.state.facet(uiLanguageFacet)).blockReadingArea);
+          if (target.getAttribute('tabindex') !== '-1') target.tabIndex = -1;
+          if (target.classList.contains('meo-code-language-label') && target.hasAttribute('aria-hidden')) target.removeAttribute('aria-hidden');
+          const label = getUiStrings(this.view.state.facet(uiLanguageFacet)).blockReadingArea;
+          if (target.getAttribute('aria-label') !== label) target.setAttribute('aria-label', label);
           if (this.needsFocus) { this.needsFocus = false; target.focus({ preventScroll: true }); }
         } });
       }

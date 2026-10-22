@@ -279,9 +279,12 @@ function updateMermaidLayoutButton(button: HTMLButtonElement, view: EditorView, 
   const side = blockMode(view, anchor)?.layout === 'side-by-side';
   const caption = side ? strings.mermaidStackedAction : strings.mermaidSideBySideAction;
   if (button.textContent !== caption) {
+    const label = button.ownerDocument.createElement('span');
+    label.className = 'meo-mermaid-layout-caption';
+    label.textContent = caption;
     button.replaceChildren(
       createElement(side ? Rows2 : Columns2, { width: 15, height: 15, 'aria-hidden': 'true' }),
-      button.ownerDocument.createTextNode(caption)
+      label
     );
   }
   const label = narrow ? strings.mermaidNarrowLayout : side ? strings.mermaidStacked : strings.mermaidSideBySide;
