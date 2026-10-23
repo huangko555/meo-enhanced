@@ -152,6 +152,22 @@ full/side loading, warm silence, input silence, cancellation, errors and initial
 Preview startup. Its screenshots are actual DOM captures under an injected wait.
 The full and split captures are saved in `.local/preview-loading/`.
 
+Live and Source use the same 200ms quiet window for initial mounting and explicit
+mode preparation. Their loading surface follows the existing mode intent through
+actual readiness; it does not advance parsing, own mode state or start on edits.
+The bootstrap shell is revealed when feedback becomes visible. In established
+split layouts the overlay occupies only the editor's final grid column. A full
+Preview remains a cover until the atomic split commit, so feedback covers that
+whole preparing surface rather than exposing right-hand fragments of the old
+full-width document beside a half-width loading surface.
+The covered editor is inert while mode controls remain available to cancel.
+Completion, failure, a newer intent and disposal retire both the deadline and
+surface. An old completion cannot clear a newer intent's loading state. Mode
+buttons keep their selected pill and keyboard focus without a progress underline.
+`scripts/test-editor-loading-presentation.ts` holds actual cold module requests
+and the production adapter's asynchronous preparation boundary to verify those
+rules, quiet fast transitions, silent editing and Preview/split coordination.
+
 VS Code's official Preview implementation similarly moves new styles into place
 before morphing specifically to prevent an unstyled flash, and preserves equal
 nodes during incremental updates. See

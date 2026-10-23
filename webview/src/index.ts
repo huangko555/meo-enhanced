@@ -1334,6 +1334,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   findPanelController.setUiLanguage(language);
   outlineController.setUiLanguage(language);
   previewController.setUiLanguage(language);
+  refreshEditorLoadingLabel();
   toolbarOverflowLayoutKey = '';
   syncToolbarOverflow();
 };
@@ -1935,7 +1936,64 @@ outlineController = createOutlineController({
 
 const editorSurface = document.createElement('div');
 editorSurface.className = 'editor-surface';
-editorSurface.append(editorHost, previewController.host);
+const editorLoading = document.createElement('div');
+editorLoading.className = 'editor-loading';
+editorLoading.hidden = true;
+editorLoading.setAttribute('role', 'status');
+editorLoading.setAttribute('aria-live', 'polite');
+const editorLoadingSpinner = document.createElement('span');
+editorLoadingSpinner.className = 'editor-loading-spinner';
+editorLoadingSpinner.setAttribute('aria-hidden', 'true');
+const editorLoadingLabel = document.createElement('span');
+editorLoading.append(editorLoadingSpinner, editorLoadingLabel);
+editorSurface.append(editorHost, previewController.host, editorLoading);
+let editorInteractive = true;
+let initialEditorPresentationPending = true;
+let pendingEditorLoading: { mode: 'live' | 'source'; intent: number; timer: number | null } | null = null;
+const refreshEditorLoadingLabel = (): void => {
+  editorLoadingLabel.textContent = pendingEditorLoading?.mode === 'source'
+    ? activeUiStrings.sourceLoading : activeUiStrings.liveLoading;
+};
+const finishEditorLoading = (): void => {
+  const wasVisible = !editorLoading.hidden;
+  const timer = pendingEditorLoading?.timer;
+  if (timer !== null && timer !== undefined) window.clearTimeout(timer);
+  pendingEditorLoading = null;
+  editorLoading.hidden = true;
+  editorHost.removeAttribute('aria-busy');
+  editorHost.inert = !editorInteractive;
+  // Inert can move focus to the body. Restore only that lost editor focus;
+  // never take it from a mode button, search field or another user action.
+  if (wasVisible && editorInteractive && document.activeElement === document.body
+    && editorModeApplication.getState().mode !== 'preview') editor?.focus();
+};
+const editorPresentationPending = (mode: 'live' | 'source', intent: number): boolean => {
+  const state = editorModeApplication.getState();
+  const target = state.pendingTransition?.fallbackToSource ? 'source' : state.mode;
+  return state.lifecycle === 'ready' && target === mode && state.intentId === intent
+    && (initialEditorPresentationPending || state.pendingTransition !== null
+      || state.editorMount === 'scheduled' || state.editorMount === 'mounting');
+};
+const beginEditorLoading = (mode: 'live' | 'source'): void => {
+  const intent = editorModeApplication.getState().intentId;
+  if (pendingEditorLoading?.intent === intent && pendingEditorLoading.mode === mode) return;
+  finishEditorLoading();
+  if (!editorPresentationPending(mode, intent)) return;
+  const loading = { mode, intent, timer: null as number | null };
+  pendingEditorLoading = loading;
+  refreshEditorLoadingLabel();
+  // The existing mode intent owns this deadline. Edits and parser publications
+  // do not start another loading presentation or restart its quiet window.
+  loading.timer = window.setTimeout(() => {
+    loading.timer = null;
+    if (pendingEditorLoading !== loading) return;
+    if (!editorPresentationPending(mode, intent)) { finishEditorLoading(); return; }
+    editorLoading.hidden = false;
+    editorHost.setAttribute('aria-busy', 'true');
+    editorHost.inert = true;
+    revealInitialShell();
+  }, 200);
+};
 editorWrapper.replaceChildren(editorSurface, outlineController.sidebar, selectionMenuElements.menu);
 // Keep the shared popup outside toolbar stacking and inside editor focus ownership.
 root.replaceChildren(toolbar, editorNoticeBanner, editorWrapper, previewOptionsPanel);
@@ -2966,6 +3024,7 @@ const handleLocalEditorChange = (edit: DocumentTextEdit) => {
 
 const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal): Promise<void> => {
   if (editor) return;
+  const mountingIntent = editorModeApplication.getState().intentId;
   const createEditor = await loadCreateEditorFactory();
   if (signal.aborted) return;
   await documentSessionAdapter.whenIdle();
@@ -3079,6 +3138,9 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
   setWikiLinkRefreshContext({ refreshDecorations: () => editor?.refreshDecorations?.() });
   setLocalLinkRefreshContext({ refreshDecorations: () => editor?.refreshDecorations?.() });
   scheduleEditorSurfaceRecovery();
+  if (!initialEditorPresentationPending && editorModeApplication.getState().intentId === mountingIntent) {
+    finishEditorLoading();
+  }
 };
 
 const editorModeEffectAdapter = createEditorModeEffectAdapter({
@@ -3111,6 +3173,7 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
       && editorModeApplication.getState().lifecycle === 'ready'
       && editorModeApplication.getState().intentId === intent;
     presentModePreparation(mode);
+    beginEditorLoading(mode);
     try {
       const prepared = mode === 'source'
         ? await preparingEditor.prepareSourceSyntax(isCurrent)
@@ -3152,7 +3215,10 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
       failureNotice.updateEditorNotice();
     } finally {
       // An older preparation must not clear the newer intent's indicator.
-      if (isCurrent()) presentModePreparation(null);
+      if (isCurrent()) {
+        presentModePreparation(null);
+        finishEditorLoading();
+      }
     }
   },
   setPreviewActive(active, presentation) {
@@ -3206,7 +3272,8 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
       && !editorSurface.hasAttribute('data-source-preview');
     editorSurface.toggleAttribute('data-source-preview-preparing', preparingSourceSplit);
     editorHost.toggleAttribute('data-preview-cover', !visible && !previewPaintReady);
-    editorHost.inert = !interactive;
+    editorInteractive = interactive;
+    editorHost.inert = !interactive || !editorLoading.hidden;
     editorHost.hidden = !visible;
     if (visible && interactive && findPanelController.isVisible()) findPanelController.refreshForModeChange();
     if (preparingSourceSplit && editor) {
@@ -3218,6 +3285,8 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     if (mode !== 'preview' && !isSidePreviewVisible()) previewController.finishLoadingPresentation();
     presentModePreparation(null);
     root.dataset.mode = mode;
+    if (mode === 'preview') finishEditorLoading();
+    else beginEditorLoading(mode);
     refreshDocumentActionButtons();
     outlineController.refreshAppearance();
     modeControl.setActive(mode);
@@ -3290,6 +3359,7 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
   persistMode: (mode, lastEditableMode) => persistUiState(mode, lastEditableMode),
   postMode: (mode) => vscode.postMessage({ type: 'setMode', mode }),
   showNotice(notice) {
+    finishEditorLoading();
     if (notice === 'transient-live') {
       failureNotice.setFailureNotice(() => ({
         title: activeUiStrings.noticeLiveRenderIssueTitle,
@@ -3333,6 +3403,7 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     return shouldAutoFallbackToSourceForLiveError(error) ? 'live-incompatible' : 'transient-live';
   },
   dispose() {
+    finishEditorLoading();
     presentModePreparation(null);
     editor?.destroy?.();
     editor = null;
@@ -3666,6 +3737,7 @@ window.addEventListener('message', (event) => {
             }
           }
           const initializedMode = editorModeApplication.getState().mode;
+          const initialPresentationIntent = editorModeApplication.getState().intentId;
           if (message.saveAsViewState && editor) {
             const { anchor, head } = message.saveAsViewState.selection;
             editor.revealSelection(Math.min(anchor, message.text.length), Math.min(head, message.text.length), {
@@ -3678,11 +3750,16 @@ window.addEventListener('message', (event) => {
           } else {
             await editor?.whenVisiblePresentationReady(LIVE_PRESENTATION_REVEAL_WAIT_MS);
           }
+          initialEditorPresentationPending = false;
+          const initialPresentationCurrent = editorModeApplication.getState().intentId === initialPresentationIntent;
+          if (initialPresentationCurrent) finishEditorLoading();
           revealInitialShell();
           failureNotice.updateEditorNotice();
         })
         .catch((error) => {
           logWebviewRenderError('editorMode.initialReveal', error);
+          initialEditorPresentationPending = false;
+          finishEditorLoading();
           revealInitialShell();
         });
     });

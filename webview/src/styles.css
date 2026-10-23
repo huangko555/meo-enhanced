@@ -1932,29 +1932,6 @@ html[data-editor-appearance='dark'] .preview-preset-dropdown-panel {
   padding-inline: 9px;
 }
 
-.mode-group .mode-button[aria-busy='true'] .segmented-control-button-indicator::after {
-  content: '';
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 2px;
-  height: 2px;
-  border-radius: 1px;
-  background: currentColor;
-  animation: mode-preparation-pulse 1s ease-in-out infinite alternate;
-}
-
-@keyframes mode-preparation-pulse {
-  from { opacity: 0.3; }
-  to { opacity: 0.9; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .mode-group .mode-button[aria-busy='true'] .segmented-control-button-indicator::after {
-    animation: none;
-  }
-}
-
 html[lang='zh-CN'] .mode-group .segmented-control-button-label {
   letter-spacing: 0.8px;
 }
@@ -7105,7 +7082,8 @@ html[data-meo-ui-contrast='high'] .meo-preview-viewport-alignment {
   background: var(--meo-content-editorWidget-background, var(--meo-content-sideBar-background));
 }
 
-.preview-loading {
+.preview-loading,
+.editor-loading {
   position: absolute;
   inset: 0;
   z-index: 2;
@@ -7119,11 +7097,25 @@ html[data-meo-ui-contrast='high'] .meo-preview-viewport-alignment {
   font-size: 13px;
 }
 
-.preview-loading[hidden] {
+.editor-loading {
+  grid-area: 1 / 1 / 2 / 2;
+  z-index: 5;
+  color: var(--meo-foreground);
+  background: var(--meo-background);
+}
+
+/* A full Preview still spans both columns until the atomic split commit. */
+.editor-surface[data-source-preview-preparing] > .editor-loading {
+  grid-column: 1 / -1;
+}
+
+.preview-loading[hidden],
+.editor-loading[hidden] {
   display: none;
 }
 
-.preview-loading-spinner {
+.preview-loading-spinner,
+.editor-loading-spinner {
   width: 22px;
   height: 22px;
   box-sizing: border-box;
@@ -7138,7 +7130,7 @@ html[data-meo-ui-contrast='high'] .meo-preview-viewport-alignment {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .preview-loading-spinner { animation: none; }
+  .preview-loading-spinner, .editor-loading-spinner { animation: none; }
 }
 
 .editor-root[data-mode='preview'] .format-group {

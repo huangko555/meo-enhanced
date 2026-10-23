@@ -1,5 +1,10 @@
 {
   "separate": {
+    "scripts/test-editor-loading-presentation.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-editor-loading-presentation.ts",
+      "reason": "Production Live/Source delayed loading feedback across cold module loading, slow/fast switching, cancellation, late completion, silent editing and failed preparation; verifies bootstrap visibility and absence of the mode progress underline."
+    },
     "scripts/test-outline-loading.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-outline-loading.ts",

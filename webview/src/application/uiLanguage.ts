@@ -140,6 +140,8 @@ export type UiStrings = Readonly<{
   markdownMode: string;
   live: string;
   source: string;
+  liveLoading: string;
+  sourceLoading: string;
   split: string;
   preview: string;
   sidePreview: string;
@@ -429,7 +431,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     outlineExpand: 'Expand', outlineCollapse: 'Collapse', outlineNoHeadings: 'No headings', outlineLoading: 'Preparing outline…', untitled: 'Untitled',
     backToTop: 'Back to top',
     editorToolbar: 'Editor toolbar', formatting: 'Formatting', markdownMode: 'Markdown mode',
-    live: 'Live', source: 'Source', split: 'Split', preview: 'Preview',
+    live: 'Live', source: 'Source', liveLoading: 'Loading Live view…', sourceLoading: 'Loading Source view…', split: 'Split', preview: 'Preview',
     sidePreview: 'Side preview', sidePreviewMore: 'Preview options', exitSidePreview: 'Exit side preview',
     showSidePreview: 'Show side preview', hideSidePreview: 'Hide side preview',
     disableSynchronizedScrolling: 'Disable scroll sync',
@@ -649,7 +651,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     outlineExpand: '展开', outlineCollapse: '折叠', outlineNoHeadings: '暂无标题', outlineLoading: '正在生成目录…', untitled: '未命名',
     backToTop: '回到顶部',
     editorToolbar: '编辑器工具栏', formatting: '格式', markdownMode: 'Markdown 模式',
-    live: '实时', source: '源码', split: '分栏', preview: '预览',
+    live: '实时', source: '源码', liveLoading: '正在加载实时视图…', sourceLoading: '正在加载源码视图…', split: '分栏', preview: '预览',
     sidePreview: '侧边预览', sidePreviewMore: '预览选项', exitSidePreview: '退出侧边预览',
     showSidePreview: '显示侧边预览', hideSidePreview: '关闭侧边预览',
     disableSynchronizedScrolling: '关闭同步滚动',
