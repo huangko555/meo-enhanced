@@ -218,7 +218,7 @@ assert.doesNotMatch(
 );
 assert.match(
   liveModeSource,
-  /collectColorSyntaxRanges\(tree\)/,
+  /collectColorSyntaxRanges\(tree, scope\)/,
   'Live must derive non-overlapping scan ranges from its existing Markdown syntax tree'
 );
 assert.doesNotMatch(

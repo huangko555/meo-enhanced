@@ -41,6 +41,18 @@ export function withMarkdownSyntaxSnapshot<T>(state: EditorState, tree: Tree, re
   }
 }
 
+/** Physical payload bounds, including container prefixes but excluding real fence rows. */
+export function getFencedCodeBodyRange(state: EditorState, node: SyntaxNode): { from: number; to: number } | null {
+  const opening = state.doc.lineAt(node.from);
+  const last = state.doc.lineAt(Math.max(node.from, node.to - 1));
+  const closing = node.lastChild;
+  const hasClosingFence = closing?.name === 'CodeMark' && closing.from > opening.to;
+  const firstContentLine = opening.number + 1;
+  const lastContentLine = last.number - (hasClosingFence ? 1 : 0);
+  if (firstContentLine > lastContentLine) return null;
+  return { from: state.doc.line(firstContentLine).from, to: state.doc.line(lastContentLine).to };
+}
+
 export function resolvedSyntaxTree(state: EditorState, timeout: number = 50): Tree {
   return resolvedSyntaxTreeAt(state, state.doc.length, timeout);
 }

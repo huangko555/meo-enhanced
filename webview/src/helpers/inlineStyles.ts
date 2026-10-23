@@ -2,6 +2,7 @@ import { EditorView } from '@codemirror/view';
 import type { MarkdownConfig } from '@lezer/markdown';
 import { matchInlineScript } from '../../../src/foundation/inlineScript';
 import { darkDefaultLiveStrongForeground, markdownInlineStyles } from '../../../src/shared/markdownInlineStyles';
+import { mathReflowBaseStyle } from '../../../src/shared/mathStyles';
 
 // Override the inherited parsers while retaining their node types and highlight tags.
 export const inlineScriptMarkdownExtension: MarkdownConfig = {
@@ -34,5 +35,6 @@ export const markdownInlineStyleTheme = EditorView.baseTheme({
   },
   '& .meo-md-strike': markdownInlineStyles.strikethrough,
   '&.meo-mode-live .meo-md-subscript': markdownInlineStyles.subscript,
-  '&.meo-mode-live .meo-md-superscript': markdownInlineStyles.superscript
+  '&.meo-mode-live .meo-md-superscript': markdownInlineStyles.superscript,
+  '& .meo-md-math-display.meo-math-reflow .katex-display > .katex > .katex-html > .base': mathReflowBaseStyle
 });

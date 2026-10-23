@@ -6,7 +6,8 @@ export type InteractionContinuityViewport = {
   retainCaretTop(
     position: number,
     top: number,
-    isCurrent: () => boolean
+    isCurrent: () => boolean,
+    measuredLayout?: boolean
   ): void;
   revealCaret(
     position: number,
@@ -47,12 +48,23 @@ type ActiveMainInput = ActiveInput & {
   inputLineHeightBefore: number | null;
   inputLineNumberBefore: number | null;
   retainingCaretTop: boolean;
+  lastMeasuredScrollTop: number;
   scrollTopBeforeInput: number;
   viewportMoved: boolean;
 };
 
 type ActiveNestedInput = ActiveInput & {
   scrollTopBeforeInput: number;
+  viewportMoved: boolean;
+};
+
+type MainInputMeasurement = {
+  caretTop: number | null;
+  inputLineHeight: number;
+  inputLineNumber: number;
+  position: number;
+  scrollTop: number;
+  visible: boolean;
   viewportMoved: boolean;
 };
 
@@ -111,9 +123,9 @@ export function createEditorInteractionContinuity(input: {
     !disposed && active === candidate && candidate.generation === nextGeneration
   );
 
-  const schedule = (candidate: ActiveMainInput, immediate = false): void => {
-    if (!isCurrent(candidate) || candidate.frame !== null) return;
-    const measure = () => {
+  const schedule = (candidate: ActiveMainInput, immediate = false, measuredLayout = false): void => {
+    if (!isCurrent(candidate) || (!immediate && candidate.frame !== null)) return;
+    const measure = (animationFrame = false) => {
       if (
         !isCurrent(candidate) || !view.hasFocus ||
         (getMode() !== 'live' && !candidate.settleInSource)
@@ -121,26 +133,31 @@ export function createEditorInteractionContinuity(input: {
         cancel();
         return;
       }
-      view.requestMeasure({
-        read: () => {
+      const request = {
+        read: (): MainInputMeasurement | null => {
           if (!isCurrent(candidate)) return null;
           const position = Math.max(0, Math.min(candidate.position, view.state.doc.length));
+          // Height-map access can flush a queued editor measure. Read the
+          // physical caret afterwards so this snapshot describes one layout.
+          const inputLineHeight = view.lineBlockAt(position).height;
+          const inputLineNumber = view.state.doc.lineAt(position).number;
           const coords = view.coordsAtPos(position);
           const scroller = view.scrollDOM.getBoundingClientRect();
           return {
             caretTop: coords?.top ?? null,
-            inputLineHeight: view.lineBlockAt(position).height,
-            inputLineNumber: view.state.doc.lineAt(position).number,
+            inputLineHeight,
+            inputLineNumber,
             position,
+            scrollTop: view.scrollDOM.scrollTop,
             visible: Boolean(coords && coords.top >= scroller.top && coords.bottom <= scroller.bottom),
             viewportMoved: candidate.viewportMoved || (
               Math.abs(view.scrollDOM.scrollTop - candidate.scrollTopBeforeInput) > 0.5
             )
           };
         },
-        write: (measurement) => {
+        write: (measurement: MainInputMeasurement | null) => {
           if (!measurement || !isCurrent(candidate)) return;
-          candidate.remainingFrames -= 1;
+          if (animationFrame) candidate.remainingFrames -= 1;
           candidate.viewportMoved = measurement.viewportMoved;
           const inputLineReflowed = (
             candidate.inputLineHeightBefore !== null &&
@@ -149,6 +166,9 @@ export function createEditorInteractionContinuity(input: {
             candidate.inputLineNumberBefore !== null &&
             measurement.inputLineNumber !== candidate.inputLineNumberBefore
           );
+          const largeScrollCorrection = !inputLineReflowed
+            && Math.abs(measurement.scrollTop - candidate.lastMeasuredScrollTop) > view.defaultLineHeight * 1.5;
+          candidate.lastMeasuredScrollTop = measurement.scrollTop;
           if (inputLineReflowed && measurement.caretTop !== null && measurement.visible) {
             // The caret moved because the edited line wrapped or changed lines,
             // not because an upstream layout correction displaced the viewport.
@@ -176,7 +196,11 @@ export function createEditorInteractionContinuity(input: {
           // Retaining a previous Y only makes sense when that Y was visible.
           // An offscreen edit must reveal its caret instead of preserving the
           // very position that made the edit invisible.
-          candidate.retainingCaretTop ||= largeLayoutShift && candidate.caretVisibleBeforeInput;
+          // Virtual height corrections can change scrollTop while leaving the
+          // physical caret in place. Adopt that anchor before a reveal can
+          // project through the burst's obsolete absolute scroll offset.
+          candidate.retainingCaretTop ||= (largeLayoutShift || largeScrollCorrection)
+            && candidate.caretVisibleBeforeInput;
           // Later keys must inherit an adopted physical anchor. Returning to the
           // burst's old absolute offset would alternate between two positions.
           inputSessionRetainingCaretTop = candidate.retainingCaretTop;
@@ -191,7 +215,8 @@ export function createEditorInteractionContinuity(input: {
               viewport.retainCaretTop(
                 measurement.position,
                 candidate.caretTopBeforeInput,
-                () => isCurrent(candidate)
+                () => isCurrent(candidate),
+                measuredLayout
               );
             }
           } else if (!measurement.visible || measurement.viewportMoved) {
@@ -205,30 +230,40 @@ export function createEditorInteractionContinuity(input: {
             candidate.stableFrames += 1;
           }
 
+          if (!animationFrame) {
+            // Transactions and completed geometry receipts can both queue
+            // several measures in one frame. Only the RAF owns this budget.
+            candidate.stableFrames = 0;
+            schedule(candidate);
+            return;
+          }
           if (candidate.remainingFrames <= 0 || candidate.stableFrames >= REQUIRED_STABLE_FRAMES) {
             if (!candidate.awaitingDerivedPresentation) active = null;
             return;
           }
           schedule(candidate);
         }
-      });
+      };
+      if (measuredLayout) request.write(request.read());
+      else view.requestMeasure(request);
     };
     if (immediate) measure();
     else {
       candidate.frame = requestAnimationFrame(() => {
         candidate.frame = null;
-        measure();
+        measure(true);
       });
     }
   };
 
   const beginInputSettlement = (settleInSource = false): void => {
+    const scrollTopAtInput = pendingScrollTopBeforeInput ?? view.scrollDOM.scrollTop;
     // A burst of keyboard input is one viewport interaction. If an earlier
     // character triggered a delayed height-map correction, the next
     // `beforeinput` observes that transient scroll offset. Keep the original
     // baseline until the burst settles instead of ratcheting toward the drift.
     const scrollTopBeforeInput = (
-      inputSessionScrollTop ?? pendingScrollTopBeforeInput ?? view.scrollDOM.scrollTop
+      inputSessionScrollTop ?? scrollTopAtInput
     );
     const caretTopBeforeInput = inputSessionCaretTop
       ?? pendingCaretTopBeforeInput
@@ -263,6 +298,7 @@ export function createEditorInteractionContinuity(input: {
       inputLineHeightBefore,
       inputLineNumberBefore,
       retainingCaretTop: inputSessionRetainingCaretTop,
+      lastMeasuredScrollTop: scrollTopAtInput,
       scrollTopBeforeInput,
       viewportMoved: false,
       awaitingDerivedPresentation: getMode() === 'live',
@@ -354,6 +390,11 @@ export function createEditorInteractionContinuity(input: {
           selection.head === inputSessionPosition
         ) return;
         cancel();
+      }
+      // A height-map correction is already in CodeMirror's measure pass.
+      // Waiting for the queued input RAF would expose the displaced caret.
+      if ((update.geometryChanged || update.viewportChanged) && active) {
+        schedule(active, true, update.transactions.length === 0);
       }
     },
     cancel,

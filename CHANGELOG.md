@@ -3,6 +3,33 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.35
+- Edit Mermaid source directly in the Live document with syntax coloring and a live preview. Switch between stacked and side-by-side layouts, resize the split, and finish editing to return to the diagram; narrow panels adapt automatically.
+- Unified block editing transitions and reading focus across Mermaid, formulas, HTML and code. Preserved caret visibility, selections and reading positions through keyboard navigation, pointer release, folding, history and delayed layout updates.
+- Improved Mermaid navigation, localized diagnostics, theme and Gantt colors, and split-preview alignment. Kept block feedback stable during unrelated updates and refined layout controls and resize indicators.
+- Expanded Mermaid and image zoom beyond the previous 4x limit, with proportional button and wheel steps while preserving reset, panning and document layout.
+- Added an independent Ctrl/Cmd + mouse wheel font-size setting, enabled by default, with saved sizes across Live, Source and Preview.
+- Added HTML tag, attribute and value completion through the shared input suggestion menu. Preserved unfinished-tag completion, improved candidate sizing and detail alignment, and added Beta feature indicators.
+- Added pasted-image naming presets with document-name numbering, date/time, image numbers and millisecond timestamps, including concurrent creation and escaped Markdown paths.
+- Kept local-link navigation and missing-file hints synchronized with filesystem changes, retained reading positions on native window return, and improved wrapped formula spacing and Preview export-menu dismissal.
+- Preserved the reading position when releasing a floating table-header column resize instead of scrolling to the document caret.
+- Prevented an intermediate viewport jump during rich-document input when virtual block measurements changed the scroll offset while the caret stayed in place.
+
+## 0.3.34
+- Added in-place HTML fragment editing with syntax-colored source, live previews, visible placeholders for non-rendering fragments, and feedback for filtered content. Improved fragment rendering, inline styles, tables, images and disclosure elements.
+- Added explicit HTML and block-math source formatting with a configurable shortcut. Formatting preserves protected content, command spelling and local source structure, and remains a single undoable edit.
+- Unified HTML and formula editing frames and preview dividers. Stabilized expansion, pointer selections, final-line hit testing, copying, line numbers and viewport positions; kept source actions visible only when their source is shown.
+- Kept HTML and formula source at the selected font size, prevented edited tables from jumping during layout changes, and kept pressed Mermaid controls attached during background updates.
+- Preserved rendered tables' source identities during widget reuse and kept visible table rows mounted while font changes reflow a long document.
+- Kept HTML and formula source expanded through table pointer gestures so collapsing source cannot move the cell before release or interrupt entering its editor.
+- Prevented mixed table and formula edits from briefly scrolling away from the active caret while virtual layouts settle.
+- Added LaTeX completion previews and syntax coloring in Source and Live, with better handling of unfinished formulas, fenced blocks and currency-like text.
+- Added Save As and undo/redo toolbar actions, configurable shortcuts and safer recovery from document-action failures. Improved saved-copy state and link navigation within MEO.
+- Added table actions and refined cell selection, active-cell borders, responsive column widths, paste handling and caret visibility.
+- Added bidirectional navigation and viewport alignment for split Source/Preview, GitHub frontmatter rows, and matching Setext heading rendering.
+- Added typography and color autosave controls, rendered-block image copying and refined fullscreen interactions. Improved Mermaid controls and preserved keyboard focus feedback without mouse-triggered focus rings.
+- Matched PDF paper backgrounds to document colors and preserved HTML visibility, text, figure captions and whitespace in Word exports.
+
 ## 0.3.33
 - Preserved Preview and Source split Preview reading positions when switching to native VS Code editor tabs with the outline open, including hidden Webview resizing and normal visible panel resizing.
 - Added Whitey dark mode using Typora Whitey Deep's palette, with Auto/Light/Dark choices, per-document appearance memory, and matching custom preset examples and HTML/PDF exports.

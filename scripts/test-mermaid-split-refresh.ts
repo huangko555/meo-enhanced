@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { launchTestBrowser } from './browser-test-helpers';
 
-// Exercise nested source edits through the production editor. A held renderer
+// Exercise main-document source edits through the production editor. A held renderer
 // makes the old-diagram/loading transition observable without timing a CPU.
 const build = await Bun.build({
   entrypoints: ['scripts/test-mermaid-editing-entry.ts'], target: 'browser', format: 'iife'
@@ -31,30 +31,30 @@ try {
     const waitFor = async (predicate: () => boolean) => {
       const deadline = performance.now() + 3000;
       while (!predicate()) {
-        if (performance.now() > deadline) throw new Error('Mermaid split refresh did not settle');
+        if (performance.now() > deadline) throw new Error('Mermaid preview refresh did not settle');
         await new Promise(resolve => setTimeout(resolve, 10));
       }
     };
     const editor = (window as any).MermaidEditingHarness.createEditor({
       parent: document.getElementById('app'),
-      text: '```mermaid\ngraph TD\nA[Old] --> B[End]\n```\n\nafter',
+      // Begin outside the fence so the button still exercises reading-to-edit entry.
+      text: 'before\n\n```mermaid\ngraph TD\nA[Old] --> B[End]\n```\n\nafter',
       initialMode: 'live', onApplyChanges() {}
     });
     try {
       await waitFor(() => Boolean(document.querySelector('.meo-mermaid-svg-wrapper svg')));
       document.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')!.click();
-      await waitFor(() => Boolean(document.querySelector('.meo-mermaid-editing-block svg')));
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')!;
-      const controller = (block as any).__meoMermaidEditingController;
-      const inner = controller.innerView;
+      await waitFor(() => Boolean(document.querySelector('.meo-mermaid-editing-preview .meo-mermaid-svg-wrapper > svg')));
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-preview')!;
+      const inner = editor.view;
       const label = (text: string) => {
         const source = inner.state.doc.toString();
         const from = source.indexOf('A[') + 2;
         inner.dispatch({ changes: { from, to: source.indexOf(']', from), insert: text } });
       };
-      const visibleSource = () => decodeURIComponent(block.querySelector('svg')?.getAttribute('data-source') ?? '');
+      const visibleSource = () => decodeURIComponent(block.querySelector('.meo-mermaid-svg-wrapper > svg')?.getAttribute('data-source') ?? '');
       const oldDiagram = block.querySelector('.meo-mermaid-block');
-      const oldSvg = block.querySelector('svg');
+      const oldSvg = block.querySelector('.meo-mermaid-svg-wrapper > svg');
       const start = performance.now();
       const from = inner.state.doc.toString().indexOf('Old');
       inner.dispatch({ changes: { from, to: from + 3, insert: 'New' } });
@@ -65,13 +65,13 @@ try {
       await new Promise(resolve => setTimeout(resolve, Math.max(0, 260 - (performance.now() - start))));
       const pending = {
         sameContainer: oldDiagram === block.querySelector('.meo-mermaid-block'),
-        sameSvg: oldSvg === block.querySelector('svg'),
+        sameSvg: oldSvg === block.querySelector('.meo-mermaid-svg-wrapper > svg'),
         loading: Boolean(block.querySelector('.meo-mermaid-loading')),
         renderCalls: calls.length,
         renderStartMs
       };
       release!();
-      await waitFor(() => block.querySelector('svg')?.getAttribute('data-source')?.includes('New') ?? false);
+      await waitFor(() => block.querySelector('.meo-mermaid-svg-wrapper > svg')?.getAttribute('data-source')?.includes('New') ?? false);
       heldSource = 'never-held';
       const beforeBurst = calls.length;
       const burstStart = performance.now();
@@ -82,11 +82,11 @@ try {
       }
       await waitFor(() => visibleSource().includes('Burst4'));
       const burst = { renderCalls: calls.length - beforeBurst, readyMs: Math.round(performance.now() - burstStart) };
-      const stableSvg = block.querySelector('svg');
+      const stableSvg = block.querySelector('.meo-mermaid-svg-wrapper > svg');
       const beforeNoop = calls.length;
       for (let index = 0; index < 3; index += 1) editor.refreshDecorations();
       await new Promise(resolve => setTimeout(resolve, 260));
-      const unchanged = { sameSvg: stableSvg === block.querySelector('svg'), renderCalls: calls.length - beforeNoop };
+      const unchanged = { sameSvg: stableSvg === block.querySelector('.meo-mermaid-svg-wrapper > svg'), renderCalls: calls.length - beforeNoop };
 
       const beforeCached = calls.length;
       label('Old');
@@ -121,27 +121,27 @@ try {
 
       heldSource = 'Recovered';
       release = null;
-      const beforeTheme = block.querySelector('svg');
+      const beforeTheme = block.querySelector('.meo-mermaid-svg-wrapper > svg');
       document.documentElement.style.setProperty('--meo-background', '#111111');
       document.documentElement.style.setProperty('--meo-foreground', '#eeeeee');
       (window as any).MermaidEditingHarness.refreshMermaidTheme();
       await waitFor(() => release !== null);
       const themePending = {
         sameContainer: oldDiagram === block.querySelector('.meo-mermaid-block'),
-        sameSvg: beforeTheme === block.querySelector('svg'),
+        sameSvg: beforeTheme === block.querySelector('.meo-mermaid-svg-wrapper > svg'),
         loading: Boolean(block.querySelector('.meo-mermaid-loading'))
       };
       release!();
-      await waitFor(() => block.querySelector('svg') !== beforeTheme);
+      await waitFor(() => block.querySelector('.meo-mermaid-svg-wrapper > svg') !== beforeTheme);
 
       heldSource = 'Disposed';
       release = null;
       label('Disposed');
       await waitFor(() => release !== null);
-      document.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')!.click();
+      editor.setMode('source');
       release!();
       await new Promise(resolve => setTimeout(resolve, 150));
-      const sourceMode = { previews: block.querySelectorAll('.meo-mermaid-block').length };
+      const sourceMode = { previews: document.querySelectorAll('.meo-mermaid-editing-preview').length };
       return { pending, burst, unchanged, cached, superseded, error, recoveryPending, recovered, themePending, sourceMode };
     } finally { editor.destroy(); }
   });
@@ -191,19 +191,19 @@ try {
     };
     const editor = (window as any).MermaidEditingHarness.createEditor({
       parent: document.getElementById('app'), initialMode: 'live', onApplyChanges() {},
-      text: '```mermaid\ngraph TD\nA[Foreground] --> B[End]\n```\n\n'
+      text: 'before\n\n```mermaid\ngraph TD\nA[Foreground] --> B[End]\n```\n\n'
         + 'Ordinary paragraph\n\n'.repeat(100) + '```mermaid\nBACKGROUND\n```'
     });
     try {
       await waitFor(() => Boolean(document.querySelector('.meo-mermaid-block svg')));
       document.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')!.click();
-      await waitFor(() => Boolean(document.querySelector('.meo-mermaid-editing-block svg')) && backgroundCalls > 0);
-      const block = document.querySelector('.meo-mermaid-editing-block') as any;
-      const inner = block.__meoMermaidEditingController.innerView;
+      await waitFor(() => Boolean(document.querySelector('.meo-mermaid-editing-preview .meo-mermaid-svg-wrapper > svg')) && backgroundCalls > 0);
+      const block = document.querySelector('.meo-mermaid-editing-preview') as any;
+      const inner = editor.view;
       const from = inner.state.doc.toString().indexOf('Foreground') + 'Foreground'.length;
       editStart = performance.now();
       inner.dispatch({ changes: { from, insert: '1' } });
-      await waitFor(() => block.querySelector('svg')?.getAttribute('data-source')?.includes('Foreground1') ?? false);
+      await waitFor(() => block.querySelector('.meo-mermaid-svg-wrapper > svg')?.getAttribute('data-source')?.includes('Foreground1') ?? false);
       const readyMs = Math.round(performance.now() - editStart);
       await waitFor(() => backgroundCalls >= 2);
       return { order, readyMs };

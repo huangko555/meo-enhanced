@@ -1,5 +1,5 @@
 import type MarkdownIt from 'markdown-it';
-import { inlineStyleDelimiter } from '../shared/punctuationInlineStyles';
+import { inlineStyleDelimiter } from './punctuationInlineStyles';
 
 const HIGHLIGHT_MARKER_CODE = 0x3D;
 

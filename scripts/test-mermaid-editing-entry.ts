@@ -7,6 +7,7 @@ import darkPlus from '@shikijs/themes/dark-plus';
 import lightPlus from '@shikijs/themes/light-plus';
 import { setShikiTheme, type RawVscodeTheme } from '../webview/src/helpers/shikiHighlighter';
 import { applyUiTheme } from '../webview/src/helpers/uiTheme';
+import { applyBuiltInVisualBaseline } from '../webview/src/helpers/theme';
 import { createMermaidToolbarWidget } from '../webview/src/helpers/mermaidEditing';
 
 function applyCodeTheme(appearance: 'light' | 'dark'): void {
@@ -54,6 +55,7 @@ function createMermaidDerivedPointerProbe(parent: HTMLElement) {
     },
     releaseSettlement() { releaseSettlement(); },
     requestAccepted() { requestLiveInputDerivedWork(editor.view, acceptedKey, () => { acceptedRuns += 1; }); },
+    announce() { editor.view.dispatch({ effects: EditorView.announce.of('Background presentation settled') }); },
     acceptsImmediately() {
       let ran = false;
       requestLiveInputDerivedWork(editor.view, {}, () => { ran = true; });
@@ -75,6 +77,7 @@ function createMermaidDerivedPointerProbe(parent: HTMLElement) {
     applyCodeTheme: typeof applyCodeTheme;
     editorViewportBounds: typeof editorViewportBounds;
     applyUiTheme: typeof applyUiTheme;
+    applyBuiltInVisualBaseline: typeof applyBuiltInVisualBaseline;
     createMermaidToolbarWidget: typeof createMermaidToolbarWidget;
   };
-}).MermaidEditingHarness = { createEditor, refreshPresentation, createMermaidDerivedPointerProbe, refreshMermaidTheme, applyCodeTheme, editorViewportBounds, applyUiTheme, createMermaidToolbarWidget };
+}).MermaidEditingHarness = { createEditor, refreshPresentation, createMermaidDerivedPointerProbe, refreshMermaidTheme, applyCodeTheme, editorViewportBounds, applyUiTheme, applyBuiltInVisualBaseline, createMermaidToolbarWidget };

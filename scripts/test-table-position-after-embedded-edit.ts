@@ -1,3 +1,4 @@
+import { enterMermaidSource, setMermaidLayout } from './history-mermaid-chromium';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -59,29 +60,8 @@ async function main(): Promise<void> {
     await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-mode-btn')));
     await page.waitForFunction(() => Boolean(document.querySelector('.meo-md-html-table textarea')));
 
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const split = await page.evaluate(() => {
-        const button = document.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn');
-        if (!button) throw new Error('Missing Mermaid mode button');
-        if (button.getAttribute('aria-label') === 'Split, Switch to source') return true;
-        button.click();
-        return false;
-      });
-      if (split) break;
-      await waitForFrames(page, 8);
-    }
-    await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-editing-block.is-split .cm-content')));
-    await page.evaluate(() => {
-      const content = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split .cm-content');
-      if (!content) throw new Error('Missing Mermaid split source editor');
-      const range = document.createRange();
-      range.selectNodeContents(content);
-      range.collapse(false);
-      const selection = window.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-      content.focus({ preventScroll: true });
-    });
+    await setMermaidLayout(page, '__tablePositionEditor', 3, 'side-by-side');
+    await enterMermaidSource(page, '__tablePositionEditor', 3, 'end');
     await page.evaluate(() => {
       const scope = window as any;
       scope.__tablePositionShell = document.querySelector('.meo-md-html-table-shell');

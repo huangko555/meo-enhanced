@@ -4,6 +4,7 @@ import { editorViewportBounds } from '../editor/editorViewportBounds';
 import { tableRowWindowFor } from '../editor/tableRowWindow';
 import { sourceLinePositionAtTarget } from '../editor/domSourceLine';
 import { NativeInputViewport } from '../editor/nativeInputViewport';
+import type { CaretRetentionReference } from '../editor/blockInteraction';
 import { EditorView } from '@codemirror/view';
 import { createLinkedViewportMap, type LinkedViewportMap, type LinkedViewportPoint } from './linkedViewportMap';
 
@@ -189,6 +190,7 @@ interface NavigationRevealState {
 interface NavigationRevealOptions {
   readonly schedule?: 'immediate' | 'next-frame';
   readonly settle?: boolean;
+  readonly measuredLayout?: boolean;
 }
 
 interface RevealPositionOptions {
@@ -392,6 +394,7 @@ export class ViewportController {
   private scrollLockGeneration = 0;
   private activeScrollLockGeneration: number | null = null;
   private activeScrollLockCorrection: (() => void) | null = null;
+  private windowReturnCorrection: (() => void) | null = null;
   private elementRetentionGeneration = 0;
   private activeElementRetentionObserver: MutationObserver | null = null;
   private activeElementRetentionCorrection: (() => void) | null = null;
@@ -439,6 +442,7 @@ export class ViewportController {
       this.projectLinkedViewport('editor');
       return;
     }
+    this.windowReturnCorrection?.();
     // Adopt the reading line after native scrolling, using the same layout
     // stabilizer as block updates. A newer interaction invalidates this anchor.
     if (this.getMode() === 'live' && this.isUserScrolling() &&
@@ -546,6 +550,7 @@ export class ViewportController {
   private invalidateViewportWork(preserveInteractionGeneration = false): void {
     this.nativeScrollbarBoundary = null;
     this.nativeInputViewport.release();
+    this.windowReturnCorrection = null;
     const scope = this.anchorTransactionScope;
     const programmaticCurrentTransaction = scope.kind === 'current'
       && this.isAnchorTokenCurrent(scope.record)
@@ -755,15 +760,30 @@ export class ViewportController {
     this.startScrollTopLock(targetTop, isCurrent);
   }
 
-  /** Retains one presentation element across a replacement without superseding its navigation intent. */
+  /** Ignore native focus scrolling during activation; new interactions keep their viewport. */
+  retainViewportOnWindowReturn(isCurrent: () => boolean): () => void {
+    const position = this.readScrollPosition();
+    const generation = this.interactionGeneration;
+    const correct = () => {
+      if (!this.destroyed && generation === this.interactionGeneration && isCurrent()) {
+        this.writeScrollPosition(position);
+      }
+    };
+    this.windowReturnCorrection = correct;
+    return () => {
+      if (this.windowReturnCorrection === correct) this.windowReturnCorrection = null;
+    };
+  }
+
+  /** Retains one presentation element, or aligns it at a requested viewport Y, across a replacement. */
   retainElementTopWhileMutation(
-    element: HTMLElement,
+    element: HTMLElement | null,
     resolveCurrentElement: () => HTMLElement | null,
     mutate: () => void,
     isCurrent: () => boolean = () => true,
-    retainedTop?: number
+    target?: { position: number; top: number } | number
   ): void {
-    const beforeTop = retainedTop ?? (element.isConnected ? element.getBoundingClientRect().top : null);
+    const beforeTop = (typeof target === 'number' ? target : target?.top) ?? (element?.isConnected ? element.getBoundingClientRect().top : null);
     if (this.destroyed || beforeTop === null || !isCurrent()) {
       mutate();
       return;
@@ -795,12 +815,17 @@ export class ViewportController {
         return;
       }
       const currentElement = resolveCurrentElement();
-      if (currentElement?.isConnected) {
+      // A long source may have virtualized its original header. Its document
+      // position brings it back into the DOM; subsequent correction uses the
+      // actual header, including its inset, before painting.
+      const currentTop = currentElement?.isConnected ? currentElement.getBoundingClientRect().top
+        : target && typeof target !== 'number' ? this.view.documentTop + this.view.lineBlockAt(target.position).top : null;
+      if (currentTop !== null) {
         const current = this.readScrollPosition();
-        const target = this.resolveScrollTarget({
-          top: current.top + currentElement.getBoundingClientRect().top - beforeTop
+        const scrollTarget = this.resolveScrollTarget({
+          top: current.top + currentTop - beforeTop
         }, current);
-        this.writeScrollPosition(target);
+        this.writeScrollPosition(scrollTarget);
       }
     };
     const settleFrame = () => {
@@ -814,7 +839,7 @@ export class ViewportController {
     // They correct geometry immediately without consuming the frame budget or
     // starting parallel settlement loops. Editor measurements use this owner too.
     this.activeElementRetentionCorrection = reconcile;
-    const MutationObserverConstructor = element.ownerDocument.defaultView?.MutationObserver;
+    const MutationObserverConstructor = (element?.ownerDocument ?? this.view.dom.ownerDocument).defaultView?.MutationObserver;
     if (MutationObserverConstructor) {
       this.activeElementRetentionObserver = new MutationObserverConstructor(() => reconcile());
       this.activeElementRetentionObserver.observe(this.view.dom, {
@@ -1587,6 +1612,9 @@ export class ViewportController {
   }
 
   preserveDocumentAnchorWhileMutation(mutate: () => void, immediateLayout = false): void {
+    // This layout operation replaces the previous cell/toolbar retention intent.
+    // Leaving its observer active would write a second, obsolete scroll target.
+    this.cancelElementRetention();
     const anchor = this.captureDocumentAnchor();
     // A new font layout supersedes absolute scroll retention from a block-mode
     // transition; that older target would otherwise pull this anchor away.
@@ -1599,9 +1627,12 @@ export class ViewportController {
       const rect = element.getBoundingClientRect();
       return rect.top <= scrollerRect.top + 2 && rect.bottom > scrollerRect.top + 2;
     });
-    const tableRows = visibleTable ? Array.from(visibleTable.querySelectorAll<HTMLElement>(
-      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tr[data-source-line-number]'
-    )) : [];
+    const tableStartLine = visibleTable?.dataset.meoRenderedBlockStartLine;
+    const tableRowsOf = (shell: HTMLElement | null | undefined) => Array.from(
+      shell?.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')
+        ?.querySelectorAll<HTMLElement>(':scope > thead > tr[data-source-line-number], :scope > tbody > tr[data-source-line-number]') ?? []
+    );
+    const tableRows = tableRowsOf(visibleTable);
     const tableRowIndex = scrollerRect ? (() => {
       const rowAtTop = tableRows.findIndex((element) => {
         const rect = element.getBoundingClientRect();
@@ -1620,9 +1651,9 @@ export class ViewportController {
     const tableRow = tableRows[tableRowIndex];
     const bodyRow = tableRow?.dataset.tableBodyRow;
     const resolveTableRow = () => {
-      if (tableRow?.isConnected) return tableRow;
+      if (tableRow?.isConnected && visibleTable?.dataset.meoRenderedBlockStartLine === tableStartLine) return tableRow;
       const shell = this.view.contentDOM.querySelector<HTMLElement>(
-        `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${visibleTable?.dataset.meoRenderedBlockStartLine}"]`
+        `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${tableStartLine}"]`
       );
       const body = shell?.querySelector<HTMLTableSectionElement>('table[data-meo-table-windowed] > tbody');
       if (body && bodyRow !== undefined) return tableRowWindowFor(body)?.ensure(Number(bodyRow)) ?? null;
@@ -1637,8 +1668,11 @@ export class ViewportController {
       return rect.bottom > scrollerRect.top + 2 && rect.top < scrollerRect.bottom;
     }));
     const blockTop = visibleBlock?.getBoundingClientRect().top;
+    const tableSourceLine = Number(tableRow?.dataset.sourceLineNumber);
+    const tableAnchorPosition = Number.isInteger(tableSourceLine) && tableSourceLine >= 1
+      && tableSourceLine <= this.view.state.doc.lines ? this.view.state.doc.line(tableSourceLine).from : null;
     const fontAnchorPosition = immediateLayout && scrollerRect
-      ? this.view.posAtCoords({ x: scrollerRect.left + 100, y: scrollerRect.top + 2 }) ?? anchor.position
+      ? tableAnchorPosition ?? this.view.posAtCoords({ x: scrollerRect.left + 100, y: scrollerRect.top + 2 }) ?? anchor.position
       : anchor.position;
     const foldedCodeNearTop = immediateLayout && scrollerRect && Array.from(
       this.view.contentDOM.querySelectorAll<HTMLElement>('.meo-md-long-code-placeholder')
@@ -1685,7 +1719,7 @@ export class ViewportController {
     mutate();
     // Keep the visible source position in CodeMirror's virtual viewport while
     // preceding tall blocks acquire their new font-dependent height.
-    if (immediateLayout && (this.getMode() === 'source' || foldedCodeNearTop || (!tableRow && anchorLineTop !== null)
+    if (immediateLayout && (tableRow || this.getMode() === 'source' || foldedCodeNearTop || (!tableRow && anchorLineTop !== null)
       || topRenderedBlock?.querySelector('.meo-mermaid-toolbar'))) queueMicrotask(() => {
       if (!this.destroyed && !this.isUserScrolling()) this.view.dispatch({
         effects: editorScrollIntoView(fontAnchorPosition, { y: 'nearest' })
@@ -1982,13 +2016,13 @@ export class ViewportController {
 
   /** Waits for the post-reconfiguration height map, anchor projection, and visible block geometry. */
   async whenPresentationSettled(timeoutMs: number, isCurrent: () => boolean = () => true): Promise<void> {
-    if (this.destroyed || timeoutMs <= 0) return;
+    if (this.destroyed || timeoutMs <= 0 && !this.hasActiveDocumentAnchorStabilization()) return;
     const deadline = performance.now() + timeoutMs;
     let previousSignature: string | null = null;
     let stableFrames = 0;
     await new Promise<void>((resolve) => {
       const sample = () => {
-        if (this.destroyed || !isCurrent() || performance.now() >= deadline) {
+        if (this.destroyed || !isCurrent() || performance.now() >= deadline && !this.hasActiveDocumentAnchorStabilization()) {
           resolve();
           return;
         }
@@ -2051,7 +2085,9 @@ export class ViewportController {
               : 0;
             previousSignature = reading.signature;
             if ((stableFrames >= REQUIRED_STABLE_FRAMES && !anchorBusy && !reading.hasPendingPresentation)
-              || performance.now() >= deadline) {
+              // A finite opening restore must finish its current height-map
+              // correction before its first reading frame can be exposed.
+              || performance.now() >= deadline && !this.hasActiveDocumentAnchorStabilization()) {
               resolve();
               return;
             }
@@ -2066,6 +2102,7 @@ export class ViewportController {
   destroy(): void {
     this.destroyed = true;
     this.nativeInputViewport.release();
+    this.windowReturnCorrection = null;
     this.activeNavigationReveals.clear();
     this.cancelElementRetention();
     this.modeTransitionChain = null;
@@ -2234,16 +2271,18 @@ export class ViewportController {
         finish();
         return;
       }
-      state.phase = 'settling';
+      // A no-op first measurement has not adopted scrolling yet. Keep its
+      // reservation through the same finite stability window as a real write.
+      if (state.phase !== 'measured') state.phase = 'settling';
       scheduleNextMeasure(measure);
     };
-    const measure = (): void => {
+    const measure = (measuredLayout = false): void => {
       if (!isRevealCurrent() || attempts >= MAX_SETTLE_FRAMES) {
         finish();
         return;
       }
       attempts += 1;
-      this.view.requestMeasure({
+      const request = {
         read: () => {
           if (!isRevealCurrent()) return { kind: 'unavailable' } as const;
           if (state.phase === 'reserved') state.phase = 'measured';
@@ -2258,14 +2297,13 @@ export class ViewportController {
             return { kind: 'unavailable' } as const;
           }
         },
-        write: (initialMeasurement) => {
+        write: (initialMeasurement: NavigationRevealMeasurement) => {
           if (!isRevealCurrent() || initialMeasurement.kind === 'unavailable') {
             finish();
             return;
           }
-          if (initialMeasurement.kind === 'stable') {
-            if (state.phase === 'measured') finish();
-            else completeFrame(measure, false);
+          if (initialMeasurement.kind === 'stable' && !options.settle) {
+            finish();
             return;
           }
           // CodeMirror can redraw and re-anchor after the read phase. Adopt only
@@ -2291,8 +2329,7 @@ export class ViewportController {
               return;
             }
             if (measurement.kind === 'stable') {
-              if (state.phase === 'measured') finish();
-              else completeFrame(measure, false);
+              completeFrame(measure, false);
               return;
             }
 
@@ -2303,8 +2340,7 @@ export class ViewportController {
               Math.abs(target.left - current.left) > POSITION_EPSILON
             );
             if (!differs) {
-              if (state.phase === 'measured') finish();
-              else completeFrame(measure, false);
+              completeFrame(measure, false);
               return;
             }
 
@@ -2349,11 +2385,15 @@ export class ViewportController {
             completeFrame(measure, changed);
           });
         }
-      });
+      };
+      // Editor measurement receipts already describe the finished DOM. A new
+      // RAF here would expose its height-map correction before retaining input.
+      if (measuredLayout) request.write(request.read());
+      else this.view.requestMeasure(request);
     };
 
     if (options.schedule === 'next-frame') scheduleNextMeasure(measure);
-    else measure();
+    else measure(options.measuredLayout);
   }
 
   private stabilizeScrollPosition(target: ScrollPosition): void {
@@ -2493,7 +2533,7 @@ export class ViewportController {
     if (
       event.target instanceof Element &&
       event.target.closest(
-        '.meo-mermaid-editing-block, .meo-latex-math-editing-block, .meo-mermaid-toolbar, .meo-latex-math-toolbar, .meo-md-html-block, .meo-md-html-source-control, .meo-md-html-table-context-trigger, .meo-md-html-table-context-menu, .meo-md-html-table-column-resize-handle, .meo-md-code-block-start, .meo-md-code-block-end'
+        '.meo-mermaid-editing-preview, .meo-mermaid-inline-preview, .meo-mermaid-inline-separator, .meo-latex-math-editing-block, .meo-mermaid-toolbar, .meo-latex-math-toolbar, .meo-md-html-block, .meo-md-html-table-context-trigger, .meo-md-html-table-context-menu, .meo-md-html-table-column-resize-handle, .meo-md-code-block-start, .meo-md-code-block-end'
       )
     ) return;
     const pointerPosition = sourceLinePositionAtTarget(this.view, event.target) ??
@@ -2643,19 +2683,50 @@ export class ViewportController {
   retainPositionTop(
     position: number,
     viewportTop: number,
-    isCurrent: () => boolean = () => true
+    isCurrent: () => boolean = () => true,
+    measuredLayout = false,
+    options: { keepVisible?: boolean; reference?: CaretRetentionReference } = {}
   ): void {
+    if (this.destroyed || !isCurrent()) return;
     const targetPosition = Math.max(0, Math.min(position, this.view.state.doc.length));
+    if (options.keepVisible) {
+      const bounds = editorViewportBounds(this.view);
+      const top = Math.max(bounds.top + 8, Math.min(bounds.bottom - this.view.defaultLineHeight - 8, viewportTop));
+      // Include the destination in CodeMirror's rendered viewport before the
+      // height change is painted. A later scroll write alone leaves a gap.
+      this.view.dispatch({ effects: editorScrollIntoView(targetPosition,
+        { y: 'start', yMargin: Math.max(0, top - bounds.top) }) });
+    }
     this.runNavigationReveal(() => {
       const coords = this.view.coordsAtPos(targetPosition);
-      if (!coords) return { kind: 'unavailable' };
-      const delta = coords.top - viewportTop;
+      if (!coords && !options.keepVisible) return { kind: 'unavailable' };
+      let top = viewportTop;
+      if (options.keepVisible) {
+        const bounds = editorViewportBounds(this.view);
+        const height = coords ? coords.bottom - coords.top : this.view.defaultLineHeight;
+        const margin = Math.min(8, Math.max(0, (bounds.height - height) / 2));
+        top = Math.max(bounds.top + margin, Math.min(bounds.bottom - height - margin, top));
+        const reference = options.reference;
+        const referenceTop = reference && (reference.geometry === 'line-block'
+          ? this.view.documentTop + this.view.lineBlockAt(reference.position).top : this.view.coordsAtPos(reference.position)?.top);
+        if (coords && reference && referenceTop !== undefined) {
+          const retainedTop = coords.top - (referenceTop - reference.top);
+          // Prefer the unchanged document boundary when it and the caret can
+          // remain visible together. A stacked preview can separate them.
+          if (retainedTop >= bounds.top + margin && retainedTop + height <= bounds.bottom - margin)
+            top = retainedTop;
+        }
+      }
+      // A mode change can leave its new caret outside the mounted DOM. Seed
+      // from the height map, then retain its actual painted Y as it mounts.
+      const currentTop = coords?.top ?? this.view.documentTop + this.view.lineBlockAt(targetPosition).top;
+      const delta = currentTop - top;
       if (Math.abs(delta) <= POSITION_EPSILON) return { kind: 'stable' };
       return {
         kind: 'target',
         target: { top: this.view.scrollDOM.scrollTop + delta }
       };
-    }, { settle: true }, isCurrent);
+    }, { settle: true, measuredLayout }, isCurrent);
   }
 
   private revealPositionInternal(

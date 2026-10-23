@@ -14,6 +14,10 @@ async function waitForFrames(page: import('puppeteer-core').Page, count = 6): Pr
   }, count);
 }
 
+function assertNearScroll(actual: number, expected: number, context: string): void {
+  if (Math.abs(actual - expected) > 0.5) throw new Error(`${context} moved the clicked row before pointerup: ${expected} -> ${actual}`);
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-live-embedded-input-viewport-entry.ts')],
@@ -106,7 +110,8 @@ async function main(): Promise<void> {
         initialMode: 'live',
         onApplyChanges() {}
       });
-      (window as any).__uatEditor.scrollToLine(273, 'center');
+      // Start the reading-to-edit button check outside the now-editable fence.
+      (window as any).__uatEditor.scrollToLine(271, 'center');
     });
     await page.waitForFunction(() => document.querySelectorAll('.meo-mermaid-mode-btn').length === 2);
     await page.waitForFunction(() => document.querySelectorAll('.meo-mermaid-block svg').length >= 1);
@@ -118,12 +123,11 @@ async function main(): Promise<void> {
       await waitForFrames(page, 5);
     };
 
-    // preview -> split -> source
-    await clickSecondMermaidMode();
+    // Explicitly expand main-document source.
     await clickSecondMermaidMode();
     await page.evaluate(() => {
       const editor = (window as any).__uatEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-source')!;
+      const block = (editor.view.domAtPos(editor.view.state.doc.line(274).from).node as Element).parentElement!.closest<HTMLElement>('.cm-line')!;
       const viewport = editor.view.scrollDOM.getBoundingClientRect();
       editor.view.scrollDOM.scrollTop += block.getBoundingClientRect().top - viewport.top - 120;
     });
@@ -134,7 +138,7 @@ async function main(): Promise<void> {
       return {
         scrollTop: editor.view.scrollDOM.scrollTop,
         buttonTop: button.getBoundingClientRect().top,
-        source: Boolean(document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-source'))
+        source: document.querySelectorAll<HTMLElement>('.meo-mermaid-toolbar')[1]?.dataset.meoMermaidMode==='edit'
       };
     });
     await page.evaluate(() => {
@@ -163,11 +167,13 @@ async function main(): Promise<void> {
     const sourcePreviewButtonSpan = Math.max(...sourcePreviewButtonTops) - Math.min(...sourcePreviewButtonTops);
     const sourcePreviewFocus = await page.evaluate(() => {
       const button = document.querySelectorAll<HTMLButtonElement>('.meo-mermaid-mode-btn')[1]!;
-      return { activeSecondModeButton: document.activeElement === button, activeTag: document.activeElement?.tagName ?? null };
+      const reading = button.closest('.meo-mermaid-toolbar');
+      return { activeReadingBlock: document.activeElement === reading && reading.classList.contains('meo-block-reading-target'),
+        activeTag: document.activeElement?.tagName ?? null };
     });
     if (
       !sourceSettled.source || sourcePreviewScrollSpan > 0.5 || sourcePreviewButtonSpan > 0.5 ||
-      !sourcePreviewFocus.activeSecondModeButton
+      !sourcePreviewFocus.activeReadingBlock
     ) {
       throw new Error(`Second Mermaid source-to-preview moved the viewport: ${JSON.stringify({
         sourceSettled,
@@ -188,7 +194,12 @@ async function main(): Promise<void> {
         )!;
         const targetRow = shell.querySelectorAll<HTMLElement>('tbody tr')[row]!;
         const viewport = editor.view.scrollDOM.getBoundingClientRect();
-        editor.view.scrollDOM.scrollTop += targetRow.getBoundingClientRect().top - viewport.top - 180;
+        const rowBounds = targetRow.getBoundingClientRect();
+        // A distant fixture jump is deliberate navigation, like a wheel or
+        // scrollToLine. A visible-row click below must itself retire the old
+        // native edit before any pointer presentation transaction runs.
+        if (rowBounds.bottom <= viewport.top || rowBounds.top >= viewport.bottom) editor.markViewportInteraction();
+        editor.view.scrollDOM.scrollTop += rowBounds.top - viewport.top - 180;
       }, { tableStart: tableStartLine, row: rowIndex });
       await waitForFrames(page, 5);
       const point = await page.evaluate(({ tableStart, row, col }) => {
@@ -198,9 +209,14 @@ async function main(): Promise<void> {
           .querySelectorAll<HTMLElement>('tbody tr')[row]!
           .querySelectorAll<HTMLTextAreaElement>('textarea')[col]!;
         const rect = input.getBoundingClientRect();
-        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2,
+          scrollTop: (window as any).__uatEditor.view.scrollDOM.scrollTop };
       }, { tableStart: tableStartLine, row: rowIndex, col: colIndex });
-      await page.mouse.click(point.x, point.y);
+      await page.mouse.move(point.x, point.y);
+      await page.mouse.down();
+      const pressedScrollTop = await page.evaluate(() => (window as any).__uatEditor.view.scrollDOM.scrollTop);
+      assertNearScroll(pressedScrollTop, point.scrollTop, `table ${tableIndex} row ${rowIndex} pointerdown`);
+      await page.mouse.up();
       await page.keyboard.press('End');
       const before = await page.evaluate(() => {
         const editor = (window as any).__uatEditor;
@@ -286,7 +302,7 @@ async function main(): Promise<void> {
       const editor = (window as any).__uatEditor = (window as any).EmbeddedInputViewportHarness.createEditor({
         parent: document.getElementById('app')!, text, initialMode: 'live', onApplyChanges() {}
       });
-      editor.scrollToLine(lineNumber, 'center');
+      editor.scrollToLine(lineNumber - 1, 'center');
       for (let frame = 0; frame < 12; frame++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
       return `.meo-mermaid-toolbar[data-meo-block-from="${editor.view.state.doc.line(lineNumber).from}"]:not([data-meo-floating]) .meo-mermaid-mode-btn`;
     }, { text: footnote.join('\n'), lineNumber: footnoteLine });
@@ -332,7 +348,7 @@ async function main(): Promise<void> {
           mode: (document.querySelector(selector)!.parentElement as HTMLElement).dataset.meoMermaidMode };
       }, selector);
       if (!result.samples.length || result.samples.some(top => Math.abs(top - before) > 1.5)
-        || Math.abs(result.top - before) > 1.5 || result.mode !== ['split', 'source', 'preview'][index % 3]) {
+        || Math.abs(result.top - before) > 1.5 || result.mode !== ['edit', 'preview'][index % 2]) {
         throw new Error(`Footnote Mermaid mode switch ${index} moved its reading position: ${JSON.stringify({ before, ...result })}`);
       }
     }

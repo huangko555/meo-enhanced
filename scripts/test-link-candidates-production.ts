@@ -39,23 +39,45 @@ const closed = () => page.waitForFunction(() => !document.querySelector('.meo-in
 const text = () => page.evaluate(() => (window as any).editor.getText());
 const tooltipText = () => page.$eval('.meo-tooltip.is-visible', element => element.textContent);
 const menuWidth = () => page.$eval('.meo-input-suggestions:not([hidden])', element => element.getBoundingClientRect().width);
-const nativeCaret = (head?: number) => page.evaluate(head => {
-  const input = document.activeElement as HTMLTextAreaElement, bounds = input.getBoundingClientRect(), style = getComputedStyle(input);
-  const mirror = document.createElement('div');
-  for (const property of ['box-sizing', 'padding', 'border', 'font-family', 'font-size', 'font-weight', 'font-style', 'letter-spacing', 'line-height', 'text-align', 'text-indent', 'tab-size'])
-    mirror.style.setProperty(property, style.getPropertyValue(property));
-  Object.assign(mirror.style, { position: 'fixed', left: '0', top: '0', width: bounds.width + 'px', whiteSpace: 'pre-wrap', overflowWrap: 'break-word', wordBreak: 'break-word', visibility: 'hidden' });
-  const node = document.createTextNode(input.value); mirror.append(node); document.body.append(mirror);
-  const position = head ?? input.selectionStart, range = document.createRange();
-  range.setStart(node, position - 1); range.setEnd(node, position);
-  const character = range.getBoundingClientRect(), box = mirror.getBoundingClientRect();
-  const result = { x: bounds.left + character.right - box.left - input.scrollLeft - 1,
-    y: bounds.top + (character.top + character.bottom) / 2 - box.top - input.scrollTop, head: position };
-  mirror.remove(); return result;
-}, head);
+const nativeCaret = async (head?: number): Promise<{ x: number; y: number; head: number; wrapped: boolean }> => {
+  // Measure Chromium's real text node, as in test-live-caret-continuity.ts.
+  // A separate div cannot establish where the native textarea paints its text.
+  const client = await page.createCDPSession();
+  try {
+    const { root } = await client.send('DOM.getDocument', { depth: 0, pierce: true });
+    const { nodeId } = await client.send('DOM.querySelector', { nodeId: root.nodeId, selector: 'tbody textarea:focus' });
+    assert.ok(nodeId, 'native caret measurement requires a focused body cell');
+    const described = await client.send('DOM.describeNode', { nodeId, depth: -1, pierce: true });
+    const descendants = (node: typeof described.node): Array<typeof described.node> => [node,
+      ...(node.shadowRoots ?? []).flatMap(descendants), ...(node.children ?? []).flatMap(descendants)];
+    const nativeText = descendants(described.node).filter(node => node.nodeType === 3);
+    assert.equal(nativeText.length, 1, 'expected one native path text node');
+    const { object } = await client.send('DOM.resolveNode', { backendNodeId: nativeText[0].backendNodeId });
+    const measured = await client.send('Runtime.callFunctionOn', {
+      objectId: object.objectId, returnByValue: true, arguments: head === undefined ? [] : [{ value: head }],
+      functionDeclaration: function(this: Text, head?: number) {
+        const input = (this.getRootNode() as ShadowRoot).host;
+        if (!(input instanceof HTMLTextAreaElement) || !input.isConnected || document.activeElement !== input || this.data !== input.value) {
+          throw new Error('Native path text no longer matches the focused textarea');
+        }
+        const position = head ?? input.selectionStart, range = this.ownerDocument.createRange();
+        if (position < 1 || position > this.length) throw new Error('Expected a caret after a native path character');
+        range.setStart(this, position - 1); range.setEnd(this, position);
+        const character = range.getBoundingClientRect(), bounds = input.getBoundingClientRect();
+        if (character.width <= 0 || character.height <= 0) throw new Error('Native path character is not painted');
+        const x = character.right - Math.min(1, character.width / 4), y = (character.top + character.bottom) / 2;
+        if (x < bounds.left || x >= bounds.right || y < bounds.top || y >= bounds.bottom) throw new Error('Native path character is clipped');
+        range.setStart(this, 0); range.setEnd(this, 1);
+        return { x, y, head: position, wrapped: character.top > range.getBoundingClientRect().top + 1 };
+      }.toString()
+    });
+    if (measured.exceptionDetails || !measured.result.value) throw new Error(`Native caret measurement failed: ${JSON.stringify(measured.exceptionDetails)}`);
+    return measured.result.value;
+  } finally { await client.detach(); }
+};
 try {
   await page.setViewport({ width: 1000, height: 720 });
-  await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}#other-focus{position:fixed;right:8px;top:8px;z-index:1000}</style><div id="app"></div><button id="other-focus">Other field</button>');
+  await page.setContent('<!doctype html><style>:root{--vscode-font-family:system-ui,sans-serif;--vscode-editor-font-family:monospace;--vscode-editor-font-weight:400;--vscode-editor-font-size:13px}html,body,#app{height:100%;margin:0}#other-focus{position:fixed;right:8px;top:8px;z-index:1000}</style><style id="native-column-layout"></style><div id="app"></div><button id="other-focus">Other field</button>');
   await page.addStyleTag({ path: 'webview/src/styles.css' });
   await page.addScriptTag({ content: await build.outputs[0].text() });
   await page.evaluate(() => { (window as any).inputDefaults = { selectionToolbar: true, wrapSelection: true, pairMode: 'smart', skipMode: 'smart', deleteMode: 'smart', lists: true, convertTables: true, pasteUrl: true, pasteHtml: false, documentSuggestions: true, slash: true, slashPreferAbove: false, emoji: false }; });
@@ -64,13 +86,13 @@ try {
     phase = mode + '/' + appearance + '/' + language;
     await prepare('[File](/)', 8, mode, appearance, language);
     await visible(); assert.equal(await page.$('.meo-tooltip.is-visible'), null, 'unclipped directory has no hint');
-    assert.equal(await menuWidth(), 260, 'normal-size directory menu is compact');
+    assert.equal(await menuWidth(), 248, 'normal-size directory menu is compact');
     assert.equal(await page.$('.meo-input-suggestions .meo-input-suggestion-detail'), null, 'directory candidates do not repeat their path');
     await page.keyboard.press('Tab'); await visible();
     await page.waitForFunction(() => (window as any).requests.some((request: any) => request.query === '/docs/'));
     await tooltip();
     assert.equal(await tooltipText(), longName, 'path hint reveals only the clipped filename without hover');
-    assert.equal(await menuWidth(), 260, 'directory chaining does not change width');
+    assert.equal(await menuWidth(), 248, 'directory chaining does not change width');
     assert.equal(await page.$('.meo-slash-suggestions:not([hidden])'), null, 'directory slash does not become a command');
     assert.equal(await page.evaluate(() => document.activeElement === (window as any).editor.view.contentDOM), true, 'hint retains editing focus');
     const geometry = await page.evaluate(() => {
@@ -82,14 +104,14 @@ try {
     assert.ok(['left', 'right'].includes(geometry.side!));
     await page.keyboard.press('ArrowDown');
     await page.waitForFunction(() => !document.querySelector('.meo-tooltip.is-visible'));
-    assert.equal(await menuWidth(), 260, 'short selection does not shrink the menu');
+    assert.equal(await menuWidth(), 248, 'short selection does not shrink the menu');
     await page.keyboard.press('ArrowUp'); await tooltip();
     await page.keyboard.press('Enter'); await closed();
     assert.equal(await text(), '[File](/docs/' + encodeMarkdownPath(longName) + ')');
     await page.keyboard.type('#'); await visible(); await page.keyboard.press('Tab'); await closed();
     assert.ok((await text()).endsWith('#overview)'));
     await prepare('[[pp]]', 4, mode, appearance, language); await visible(); await tooltip();
-    assert.equal(await menuWidth(), 360, 'Wiki search keeps the wider two-line menu');
+    assert.equal(await menuWidth(), 320, 'Wiki search keeps the wider two-line menu');
     assert.equal(await tooltipText(), longName + '\n' + longPath, 'Wiki search retains full name and path');
     await page.keyboard.press('Enter'); await closed();
     assert.equal(await text(), '[[project-plan|项目规划]]');
@@ -153,8 +175,25 @@ try {
   await prepare(sourceTable, sourceTable.indexOf('[[pp]]') + 4); await visible(); await page.keyboard.press('Enter'); await closed();
   assert.equal(await text(), sourceTable.replace('[[pp]]', '[[project-plan\\|项目规划]]'));
   assert.equal(await page.evaluate(() => (window as any).EditingFeaturesHarness.parseMarkdownTable((window as any).editor.getText()).cells[1].length), 2);
-  for (const value of ['[File](/)', '[[pp]]', '[[/]]']) {
-    phase = 'native ' + value;
+  const nativeCases: Array<{ value: string; fontFamily: string; columnWidth?: number; wrapped?: boolean }> = [
+    { value: '[File](/)', fontFamily: 'monospace' },
+    ...['monospace', '"Times New Roman", serif'].flatMap(fontFamily => [
+      { value: '[File](/)', fontFamily, columnWidth: 320, wrapped: false },
+      { value: '[File](/)', fontFamily, columnWidth: 65, wrapped: true }
+    ]),
+    { value: '[[pp]]', fontFamily: 'monospace' }, { value: '[[/]]', fontFamily: 'monospace' }
+  ];
+  for (const { value, fontFamily, columnWidth, wrapped } of nativeCases) {
+    phase = `native ${value}/${fontFamily}/${wrapped === undefined ? 'auto' : wrapped ? 'wrapped' : 'single-line'}`;
+    await page.evaluate(({ fontFamily, columnWidth }) => {
+      document.documentElement.style.setProperty('--vscode-editor-font-family', fontFamily);
+      // Size the real table columns; the native text witness below must confirm
+      // both layouts, independently of the textarea's shared row height.
+      document.getElementById('native-column-layout')!.textContent = columnWidth === undefined ? '' : `
+        .cm-editor .meo-md-html-table { table-layout: fixed; width: ${columnWidth + 92}px !important; }
+        .cm-editor .meo-md-html-table col:first-child { width: ${columnWidth}px !important; }
+        .cm-editor .meo-md-html-table col:nth-child(2) { width: 90px !important; }`;
+    }, { fontFamily, columnWidth });
     const table = '| A | B |\n| --- | --- |\n| ' + value + ' | x |';
     await prepare(table, table.length, 'live');
     await page.waitForSelector('tbody textarea');
@@ -169,13 +208,16 @@ try {
     } else {
       await page.keyboard.press('Tab'); await visible(); await tooltip();
       if (value === '[File](/)') {
-        phase = 'resume native partial path';
+        phase = `resume native partial path/${fontFamily}/${wrapped === undefined ? 'auto' : wrapped ? 'wrapped' : 'single-line'}`;
         const caret = await nativeCaret();
+        assert.equal(caret.head, 13, 'directory chaining leaves the native caret after /docs/');
+        if (wrapped !== undefined) assert.equal(caret.wrapped, wrapped, 'native path fixture reaches its required visual line');
         await page.keyboard.press('Escape'); await closed(); await page.click('#other-focus'); await closed();
         // Inactive table cells show rendered Markdown. Enter cell editing, then click the address.
         await page.click('tbody td .meo-md-html-table-cell-preview .meo-md-link span');
         await page.waitForFunction(() => document.activeElement instanceof HTMLTextAreaElement);
         const restored = await nativeCaret(caret.head);
+        if (wrapped !== undefined) assert.equal(restored.wrapped, wrapped, 'restored native path retains its required visual line');
         await page.mouse.click(restored.x, restored.y);
         assert.equal(await page.evaluate(() => (document.activeElement as HTMLTextAreaElement).selectionStart), caret.head, 'native same-caret click resumes');
         await visible();
@@ -188,6 +230,10 @@ try {
       await new Promise(resolve => setTimeout(resolve, 220)); await closed();
     }
   }
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty('--vscode-editor-font-family', 'monospace');
+    document.getElementById('native-column-layout')!.textContent = '';
+  });
   // Every candidate family uses the same selected-row truncation behavior.
   for (const fontSize of [17, 29]) {
     phase = 'large path font ' + fontSize;
@@ -203,7 +249,7 @@ try {
   const narrowPath = await page.$eval('.meo-input-suggestions:not([hidden])', element => {
     const bounds = element.getBoundingClientRect(); return { width: bounds.width, left: bounds.left, right: bounds.right };
   });
-  assert.ok(narrowPath.width < 260 && narrowPath.left >= 8 && narrowPath.right <= 212, 'narrow paths fit the viewport');
+  assert.ok(narrowPath.width < 248 && narrowPath.left >= 8 && narrowPath.right <= 212, 'narrow paths fit the viewport');
   await page.keyboard.press('Escape'); await closed();
   await page.setViewport({ width: 520, height: 720 });
   for (const source of ['/comment', ':thumbsdown', '# ' + 'Long heading '.repeat(14) + '\n\n[Go](#']) {
@@ -224,7 +270,7 @@ try {
   await page.evaluate(() => (window as any).editor.destroy());
   assert.equal(await page.$('.meo-tooltip'), null, 'owner destruction disposes selected hint');
   assert.deepEqual(errors, []);
-  console.log('Link candidate production contracts: directory chaining, resumed selection, quoted-directory IME, segment/alias preservation, native tables, keyboard full text, all candidate families, themes/languages, dismissal and disposal passed');
+  console.log('Link candidate production contracts: directory chaining, resumed selection, quoted-directory IME, segment/alias preservation, native tables (single-line/wrapped paths in two fonts), keyboard full text, all candidate families, themes/languages, dismissal and disposal passed');
 } catch (error) {
   console.error('Candidate failure:', phase, await page.evaluate(() => ({ active: document.activeElement?.tagName, value: (document.activeElement as HTMLTextAreaElement)?.value,
     menu: document.querySelector('.meo-input-suggestions:not([hidden])')?.className, tooltip: document.querySelector('.meo-tooltip.is-visible')?.textContent }))); throw error;

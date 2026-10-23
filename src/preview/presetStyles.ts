@@ -1,8 +1,10 @@
 import { buildPreviewStyles, type ExportStyleEnvironment } from '../export/exportStyles';
+import { normalizeEditorLineHeight } from '../foundation/editorLineHeight';
 import { getPreviewPreset, resolvePresetAppearance, type PreviewPresetId, type PreviewContentWidth, type PreviewPresetDefinition } from '../foundation/previewPresets';
 import { getGithubMarkdownStyles } from './presets/github-readme/styles.js';
 import { getReadingPresetStyles } from './presets/reading/styles.js';
 import { normalizePreviewFontFamily } from '../protocol/editorStyleEnvironment';
+import { readingMathReflowCss } from '../shared/mathStyles';
 
 export function buildPresetPreviewStyles(
   preset: PreviewPresetId,
@@ -26,8 +28,6 @@ export function buildPresetPreviewStyles(
     editorFontWeight: environment.editorFontWeight,
     liveFontWeight: environment.liveFontWeight,
     sourceFontWeight: environment.sourceFontWeight,
-    liveLineHeight: environment.liveLineHeight,
-    sourceLineHeight: environment.sourceLineHeight,
     previewSourceColoring: environment.previewSourceColoring,
     previewShowComments: environment.previewShowComments,
     previewThemeIsolation: true
@@ -55,7 +55,7 @@ html[data-meo-export-target='pdf'] .meo-export-doc { box-sizing: border-box; wid
 `;
   }
   if (definition.renderer === 'meo') {
-    if (preset === 'default') return `${buildPreviewStyles(environment, appearance)}\n${fontSizeStyles}`;
+    if (preset === 'default') return `${buildPreviewStyles(environment, appearance)}\n${fontSizeStyles}\n.meo-export-doc { --meo-line-height: ${normalizeEditorLineHeight(environment.liveLineHeight)}; }`;
     const effective = resolvePresetAppearance(definition, appearance, appearance);
     return `${buildPreviewStyles(baseEnvironment, effective)}\n${getReadingPresetStyles(preset, effective)}\n${fontOverride}\n${codeFontOverride}\n${fontSizeStyles}`;
   }
@@ -103,6 +103,7 @@ body { margin: 0; background: ${background}; color: ${foreground}; }
 .markdown-body .meo-export-mermaid-svg svg { display: block; max-width: 100%; height: auto; margin-inline: auto; }
 .markdown-body .meo-export-math-display { display: block; text-align: center; margin-bottom: 16px; }
 .markdown-body .meo-export-math-display .meo-export-math-canvas { margin-left: auto; margin-right: auto; }
+${readingMathReflowCss}
 .markdown-body .footnotes p { margin-top: 16px; }
 .markdown-body .footnote-backref { text-decoration: underline; }
 html[data-meo-export-target='pdf'] .markdown-body .meo-table-scroll { overflow: visible; }

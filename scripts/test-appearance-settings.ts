@@ -1,3 +1,5 @@
+import { DEFAULT_EDITOR_LINE_HEIGHT, normalizeEditorLineHeight } from '../src/foundation/editorLineHeight';
+import { decodeWebviewToHostMessage, decodeHostToWebviewMessage } from '../src/protocol/messages';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -129,6 +131,9 @@ const legacyValues = {
   await owner.setPreviewSourceColoring(true);
   await owner.setLiveStrongColoring(true);
   await owner.setEditorFontSizePreference({ mode: 'custom', value: 18 });
+  assert.equal(owner.getEditorMouseWheelZoom(), true);
+  await owner.setEditorMouseWheelZoom(false);
+  assert.equal(owner.getEditorMouseWheelZoom(), false);
   assert.deepEqual(
     [
       owner.getEditorAppearance(),
@@ -140,6 +145,22 @@ const legacyValues = {
     ],
     ['light', 'dark', 'Inter', true, true, { mode: 'custom', value: 18 }]
   );
+}
+
+{
+  const { store } = createStore();
+  const originalWrite = store.updateConfiguration;
+  store.updateConfiguration = async (key, value) => {
+    await new Promise(resolve => setTimeout(resolve, value === 16 ? 20 : 1));
+    await originalWrite(key, value);
+  };
+  const owner = await createAppearanceSettingsOwner(store);
+  await Promise.all([
+    owner.setEditorFontSizePreference({ mode: 'custom', value: 16 }),
+    owner.setEditorFontSizePreference({ mode: 'auto', value: 20 }),
+    owner.setEditorFontSizePreference({ mode: 'custom', value: 17 })
+  ]);
+  assert.deepEqual(owner.getEditorFontSizePreference(), { mode: 'custom', value: 17 }, 'Font preference writes retain intent order');
 }
 
 {
@@ -258,3 +279,24 @@ const legacyValues = {
 }
 
 console.log('appearance settings migration checks passed');
+
+{
+  const { store, configuration } = createStore();
+  const owner = await createAppearanceSettingsOwner(store);
+  assert.equal(owner.getEditorLineHeight(), DEFAULT_EDITOR_LINE_HEIGHT);
+  await owner.setEditorLineHeight(1.8);
+  assert.equal(configuration.get('appearance.lineHeight'), 1.8);
+  assert.equal((await createAppearanceSettingsOwner(store)).getEditorLineHeight(), 1.8, 'line spacing survives owner reload');
+  for (const invalid of [NaN, Infinity, -Infinity, '1.8', null, {}, undefined]) {
+    assert.equal(normalizeEditorLineHeight(invalid), 1.5);
+    assert.equal(decodeWebviewToHostMessage({type: 'setEditorLineHeight', value: invalid}), null);
+    assert.equal(decodeHostToWebviewMessage({type: 'editorLineHeightChanged', value: invalid}), null);
+  }
+  for (const invalid of [0.9, 2.6, 1.55]) assert.equal(decodeWebviewToHostMessage({type: 'setEditorLineHeight', value: invalid}), null);
+  assert.deepEqual(decodeWebviewToHostMessage({type: 'setEditorLineHeight', value: 1.8}), {type: 'setEditorLineHeight', value: 1.8});
+  assert.equal(normalizeEditorLineHeight(1.5000000000000002), 1.5);
+  const { store: failingStore } = createStore({failConfigurationOnce: 'appearance.lineHeight'});
+  const failingOwner = await createAppearanceSettingsOwner(failingStore);
+  await assert.rejects(() => failingOwner.setEditorLineHeight(1.8));
+  assert.equal(failingOwner.getEditorLineHeight(), 1.5, 'failed writes retain the authoritative value');
+}

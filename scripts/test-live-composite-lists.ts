@@ -279,6 +279,10 @@ async function main(): Promise<void> {
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const activeLine = Array.from(document.querySelectorAll<HTMLElement>('#order-host .cm-line'))
         .find((line) => line.innerText.includes('interleaved quote task'))!;
+      const sourceLine = editor.view.state.doc.line(9);
+      const orderedFrom = editor.view.coordsAtPos(sourceLine.from + 2)!;
+      const orderedTo = editor.view.coordsAtPos(sourceLine.from + 4)!;
+      const activeOrderedMarker = { text: sourceLine.text.slice(2, 4), left: orderedFrom.left, right: orderedTo.left };
       const activeBefore = getComputedStyle(activeLine, '::before');
       const activeQuoteLeft = activeLine.getBoundingClientRect().left + Number.parseFloat(activeBefore.left);
       const activeQuoteBarPositions = activeBefore.backgroundPositionX.split(',')
@@ -306,7 +310,7 @@ async function main(): Promise<void> {
           .getBoundingClientRect().right
       };
       editor.destroy();
-      return { lines, continuations, activeQuoteLeft, activeQuoteBarPositions, activeMarkerRects,
+      return { lines, continuations, activeQuoteLeft, activeQuoteBarPositions, activeMarkerRects, activeOrderedMarker,
         alert, wrapped };
     });
     assert.equal(quoteOrder.lines.length, 6);
@@ -329,9 +333,11 @@ async function main(): Promise<void> {
       && interleaved.quoteLeft + interleaved.quoteBarPositions[1]! >= interleaved.markers[0]!.right - 1
       && interleaved.quoteLeft + interleaved.quoteBarPositions[1]! <= interleaved.markers[1]!.left + 1,
       `an outer quote and inner quote must remain separate: ${JSON.stringify(interleaved)}`);
+    assert.equal(quoteOrder.activeOrderedMarker.text, '1.');
     assert.ok(quoteOrder.activeQuoteBarPositions.length === 2
       && quoteOrder.activeQuoteLeft + quoteOrder.activeQuoteBarPositions[1]!
-        >= quoteOrder.activeMarkerRects[0]!.right - 1,
+        >= quoteOrder.activeOrderedMarker.right - 1
+      && quoteOrder.activeQuoteLeft + quoteOrder.activeQuoteBarPositions[1]! <= quoteOrder.activeMarkerRects[0]!.left + 1,
       `the inner quote must stay after the list marker while editing: ${JSON.stringify(quoteOrder)}`);
     assert.ok(quoteOrder.alert.className.includes('meo-md-alert')
       && quoteOrder.alert.quoteLeft >= quoteOrder.alert.markerRight - 1

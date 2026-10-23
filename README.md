@@ -25,6 +25,7 @@ The toolbar and its settings panel provide the following options:
 - **Interface language**: Simplified Chinese, English, or the current VS Code display language.
 - **Editor appearance**: Light, Dark, or the current VS Code theme.
 - **Content font size**: Follow the VS Code editor font size or use a custom size from `10` to `32`.
+- **Document typography**: Adjust font size and line spacing in More Settings > Appearance. Line spacing defaults to `1.5×`; changes save automatically.
 - **Preview settings**: Choose a preset and adjust its supported appearance, font, and code-coloring options.
 
 ![MEO Enhanced settings panel with interface language, editor appearance, and font size options](docs/readme/en/settings-panel.png)
@@ -95,15 +96,17 @@ Markdown tables are displayed as interactive tables with support for:
 
 ### Images and HTML
 
-Images can use local paths, workspace-relative paths, Windows absolute paths, or remote URLs. Configure pasted images in **Settings → Input → Paste → Image save location**: beside the document, beside the document by file name, or a custom path (advanced). Each choice expands its own path controls when selected. The fixed ./ prefix starts in the current Markdown directory; no workspace is required. Valid changes save automatically and existing images stay in place. See [image folder settings](docs/image-storage.md).
+Images can use local paths, workspace-relative paths, Windows absolute paths, or remote URLs. Configure pasted images in **Settings → Input → Paste → Image save location**: beside the document, beside the document by file name, or a custom path (advanced). Each choice expands its own path controls when selected. The fixed ./ prefix starts in the current Markdown directory; no workspace is required. Image names default to the document name plus a sequence number; date/time, image numbers and millisecond timestamps are also available, with a full-path example. Valid changes save automatically and existing images stay in place. See [image folder and naming settings](docs/image-storage.md).
 
-Supported safe inline and block HTML can be rendered in Live and Preview modes or switched to source for editing. The rendered output is also used for Preview, HTML export, and PDF export.
+Supported safe inline and block HTML renders in Live and Preview. In Live, click an HTML block to edit its syntax-colored source in place; visible output is previewed below the source. Standalone fragments with no visible output remain discoverable as faint source text. The format action preserves protected content and can be undone. HTML and PDF exports use the supported rendered output.
 
 ![An interactive Markdown table with images and HTML rendered in Live mode](docs/readme/en/tables-images-html.png)
 
 ### Mermaid, LaTeX, and code blocks
 
-Mermaid diagrams and block LaTeX formulas provide **Source**, **Split**, and **Preview** display options within the block. Users can switch between source, side-by-side, and rendered views and use zoom controls. Larger diagrams and formulas adapt to the available Preview and export area.
+Mermaid diagrams expand their syntax-colored source directly in the Live document for editing, with a live preview below or beside it. Switch between stacked and side-by-side layouts, resize the split, and finish editing to return to the diagram. Diagrams support zoom, fullscreen viewing, and image/source copying.
+
+Click a block LaTeX formula to edit its syntax-colored source in the main document, with a live preview below. Completion suggestions include formula previews. Select-all and layout-formatting buttons appear while the source is shown. Larger diagrams and formulas adapt to the available Preview and export area.
 
 Code blocks support syntax highlighting, select all, copy, and folding for long code. Preview and exported documents can retain syntax colors.
 

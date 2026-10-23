@@ -6,6 +6,7 @@ import { usesLargeDocumentDerivedWorkBudget } from './liveInputDerivedWork';
 const completeOuterMarkdown = new NodeProp<number>({ perNode: true });
 const outerMarkdownIdentity = new NodeProp<Tree>({ perNode: true });
 const preparedDocuments = new WeakMap<Text, Parser>();
+const preparedStructures = new WeakMap<Text, { parser: Parser; tree: Tree }>();
 
 /** Installed before mixed-code parsing. A full-length partial tree alone is
  * never a completeness proof; this mark requires the outer parser to finish. */
@@ -24,10 +25,13 @@ export const certifyMarkdownStructure: { wrap: ParseWrapper } = { wrap(inner, in
         || ranges.length !== 1 || ranges[0]!.from !== 0 || ranges[0]!.to !== input.length) return tree;
       const context = ParseContext.get();
       const parser = context?.state.facet(language)?.parser;
-      if (context && parser) preparedDocuments.set(context.state.doc, parser);
-      if (complete) return tree;
-      return new Tree(tree.type, tree.children, tree.positions, tree.length,
+      const prepared = complete ? tree : new Tree(tree.type, tree.children, tree.positions, tree.length,
         [...tree.propValues, [completeOuterMarkdown, input.length], [outerMarkdownIdentity, tree]]);
+      if (context && parser) {
+        preparedDocuments.set(context.state.doc, parser);
+        preparedStructures.set(context.state.doc, { parser, tree: prepared });
+      }
+      return prepared;
     }
   };
 } };
@@ -59,6 +63,14 @@ export function markdownStructureAvailable(state: EditorState, tree: Tree = synt
 export function hasPreparedMarkdownStructure(state: EditorState): boolean {
   const parser = state.facet(language)?.parser;
   return !!parser && preparedDocuments.get(state.doc) === parser;
+}
+
+/** The completed outer pass is usable while distant embedded grammars are
+ * still parsing. Text identity and the configured parser own this proof; no
+ * partial tree or length-only placeholder can populate it. */
+export function preparedMarkdownStructure(state: EditorState): Tree | undefined {
+  const prepared = preparedStructures.get(state.doc);
+  return prepared && prepared.parser === state.facet(language)?.parser ? prepared.tree : undefined;
 }
 
 export type MarkdownLanguageViewport = { readonly from: number; readonly to: number };

@@ -1,6 +1,7 @@
+import { syncPreviewRenderedActions } from './previewBlockActions';
 import type { EditorAppearance } from '../../../src/protocol/editorCommands';
 import { getGithubMermaidConfig } from '../../../src/preview/githubMermaid';
-import { getMermaidPalette } from '../../../src/shared/mermaidPalette';
+import { getMermaidColorVariables, getMermaidPalette } from '../../../src/shared/mermaidPalette';
 import { getPreviewMermaidResourceIndex, getPreviewViewportResources } from './previewViewportResources';
 
 type PreviewAppearance = Exclude<EditorAppearance, 'auto'>;
@@ -26,18 +27,7 @@ function isNearPreviewViewport(block: HTMLElement, frameDocument: Document): boo
   return bounds.height > 0 && bounds.bottom >= -height && bounds.top <= height * 2;
 }
 
-type PreviewMermaidPalette = {
-  background: string;
-  nodeBackground: string;
-  secondaryBackground: string;
-  tertiaryBackground: string;
-  clusterBackground: string;
-  foreground: string;
-  border: string;
-  line: string;
-  chartColors: string[];
-  chartTextColor: string;
-};
+type PreviewMermaidPalette = ReturnType<typeof getMermaidPalette> & { background: string };
 
 export function createPreviewMermaidRenderer(
   resources: MermaidDiagramRenderResources,
@@ -131,6 +121,7 @@ async function renderMermaidBlocks(
   isInteracting: () => boolean
 ): Promise<void> {
   if (!isCurrent()) return;
+  syncPreviewRenderedActions(frameDocument);
   const preset = frameDocument.documentElement.dataset.meoPreviewPreset ?? 'default';
   const revision = frameDocument.documentElement.dataset.meoPreviewPresetRevision ?? '';
   const palette = readPreviewMermaidPalette(frameDocument, appearance);
@@ -160,38 +151,10 @@ async function renderMermaidBlocks(
     theme: 'base',
     look: 'classic',
     themeVariables: {
-      background: palette.background,
-      mainBkg: palette.nodeBackground,
-      secondBkg: palette.secondaryBackground,
-      secondaryColor: palette.secondaryBackground,
-      tertiaryColor: palette.tertiaryBackground,
-      primaryColor: palette.nodeBackground,
-      primaryTextColor: palette.foreground,
-      secondaryTextColor: palette.foreground,
-      tertiaryTextColor: palette.foreground,
-      primaryBorderColor: palette.border,
-      secondaryBorderColor: palette.border,
-      tertiaryBorderColor: palette.border,
-      nodeBorder: palette.border,
-      lineColor: palette.line,
-      signalColor: palette.line,
+      ...getMermaidColorVariables(palette),
       sequenceNumberColor: appearance === 'dark' ? palette.chartTextColor : '#ffffff',
-      textColor: palette.foreground,
-      nodeTextColor: palette.foreground,
-      edgeLabelBackground: palette.background,
-      clusterBkg: palette.clusterBackground,
-      clusterBorder: palette.border,
-      titleColor: palette.foreground,
-      noteBkgColor: palette.secondaryBackground,
-      noteTextColor: palette.foreground,
-      noteBorderColor: palette.border,
       ...Object.fromEntries(palette.chartColors.map((color, index) => [`pie${index + 1}`, color])),
-      pieSectionTextColor: palette.chartTextColor,
-      pieLegendTextColor: palette.foreground,
-      pieTitleTextColor: palette.foreground,
       pieOpacity: 1,
-      pieStrokeColor: palette.border,
-      pieOuterStrokeColor: palette.border,
       darkMode: appearance === 'dark'
     },
     htmlLabels: true,
@@ -271,10 +234,11 @@ async function renderMermaidBlocks(
       if (copyActions) block.append(copyActions);
     }
     for (const block of failed) {
-      if (!block.classList.contains('is-rendered')) block.classList.add('is-error');
+      block.classList.add('is-error');
       delete block.dataset.meoPreviewMermaidPending;
     }
   });
+  syncPreviewRenderedActions(frameDocument);
   onDiagramRendered?.();
 }
 
@@ -295,6 +259,7 @@ function readPreviewMermaidPalette(
   };
 
   return {
+    ...palette,
     background: readColor('--meo-mermaid-background', appearance === 'dark' ? '#20252b' : '#ffffff'),
     nodeBackground: readColor('--meo-mermaid-node-background', palette.nodeBackground),
     secondaryBackground: readColor('--meo-mermaid-secondary-background', palette.secondaryBackground),

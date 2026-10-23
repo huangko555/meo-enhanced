@@ -354,7 +354,7 @@ async function main() {
       return { zoom: matrix.a, x: matrix.e, y: matrix.f };
     });
     await page.click('.meo-md-image-fullscreen button[data-tooltip="Zoom in"]');
-    assert.equal((await transform()).zoom, 1.5);
+    assert.equal((await transform()).zoom, 1.25);
     const viewerPoint = await page.$eval('.meo-md-image-fullscreen-img', image => {
       const rect = image.getBoundingClientRect();
       return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
@@ -363,10 +363,37 @@ async function main() {
     await page.mouse.down();
     await page.mouse.move(viewerPoint.x + 40, viewerPoint.y + 25, { steps: 4 });
     await page.mouse.up();
-    assert.deepEqual(await transform(), { zoom: 1.5, x: 40, y: 25 });
+    assert.deepEqual(await transform(), { zoom: 1.25, x: 40, y: 25 });
     await page.mouse.wheel({ deltaY: 120 });
     await page.waitForFunction(() =>
-      new DOMMatrix(getComputedStyle(document.querySelector('.meo-md-image-fullscreen-img')!).transform).a === 1.25);
+      Math.abs(new DOMMatrix(getComputedStyle(document.querySelector('.meo-md-image-fullscreen-img')!).transform).a - 1.25 / 1.1) < 0.00001);
+    await page.mouse.wheel({ deltaY: -120 });
+    await page.waitForFunction(() =>
+      Math.abs(new DOMMatrix(getComputedStyle(document.querySelector('.meo-md-image-fullscreen-img')!).transform).a - 1.25) < 0.00001);
+    await page.$eval('.meo-md-image-fullscreen-controls', controls => {
+      const buttons = controls.querySelectorAll<HTMLButtonElement>('button');
+      for (let i = 0; i < 15; i++) buttons[0]!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    });
+    const enlarged = await transform();
+    assert.ok(Math.abs(enlarged.zoom - 1.25 ** 16) < 0.0001, 'Image zoom continues proportionally beyond 4x');
+    assert.equal(enlarged.x, 40, 'Image zoom preserves the existing pan behavior');
+    assert.equal(enlarged.y, 25);
+    await page.$eval('.meo-md-image-fullscreen-controls', controls => {
+      const buttons = controls.querySelectorAll<HTMLButtonElement>('button');
+      for (let i = 0; i < 16; i++) buttons[1]!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    });
+    assert.ok(Math.abs((await transform()).zoom - 1) < 0.00001, 'Matching image zoom steps return to the original scale');
+    const limits = await page.$eval('.meo-md-image-fullscreen-controls', controls => {
+      const buttons = controls.querySelectorAll<HTMLButtonElement>('button');
+      const image = document.querySelector<HTMLElement>('.meo-md-image-fullscreen-img')!;
+      const step = (index: number) => buttons[index]!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      for (let i = 0; i < 80; i++) step(0);
+      const maximum = new DOMMatrix(image.style.transform).a;
+      for (let i = 0; i < 80; i++) step(1);
+      return { maximum, minimum: new DOMMatrix(image.style.transform).a };
+    });
+    assert.ok(Number.isFinite(limits.maximum) && limits.maximum >= 128, 'Repeated zoom retains a finite, generous viewing range');
+    assert.equal(limits.minimum, 0.25, 'The existing image minimum is unchanged');
     await page.click('.meo-md-image-fullscreen button[data-tooltip="Reset zoom"]');
     assert.deepEqual(await transform(), { zoom: 1, x: 0, y: 0 });
     await page.keyboard.press('Escape');

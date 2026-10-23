@@ -13,26 +13,32 @@ export function markdownPathTarget(decodedPath: string, document: vscode.Uri): v
   return (root ?? document).with({ path: posix.resolve(basePath, normalized.startsWith('/') ? normalized.slice(1) : normalized), query: '', fragment: '' });
 }
 
-/** Existence checks and extension fallback are shared by navigation and heading lookup. */
-export async function resolveMarkdownReference(rawHref: string, document: vscode.Uri): Promise<vscode.Uri | null> {
+/** Ordered candidates are shared by navigation, heading lookup and resource watching. */
+export function markdownReferenceCandidates(rawHref: string, document: vscode.Uri): vscode.Uri[] {
   const href = normalizeLinkDestination(rawHref);
-  if (!href || href.startsWith('#') || href.startsWith('//')) return null;
+  if (!href || href.startsWith('#') || href.startsWith('//')) return [];
   const rawPath = href.split(/[?#]/, 1)[0];
-  const exists = async (uri: vscode.Uri) => { try { await vscode.workspace.fs.stat(uri); return true; } catch { return false; } };
   if (/^file:/i.test(rawPath)) {
-    try { const uri = vscode.Uri.parse(rawPath, true); return await exists(uri) ? uri : null; } catch { return null; }
+    try { return [vscode.Uri.parse(rawPath, true)]; } catch { return []; }
   }
   let decoded = rawPath;
   try { decoded = decodeURIComponent(rawPath); } catch { /* Keep partially encoded destinations literal. */ }
   decoded = decoded.replaceAll('\\', '/');
-  if (/^[a-z][a-z0-9+.-]*:/i.test(rawPath) && !/^[a-z]:\//i.test(decoded)) return null;
-  const find = async (base: vscode.Uri) => {
+  if (/^[a-z][a-z0-9+.-]*:/i.test(rawPath) && !/^[a-z]:\//i.test(decoded)) return [];
+  const expand = (base: vscode.Uri) => {
     const paths = posix.extname(decoded) ? [base.path] : [base.path, ...markdownFileExtensions.map(extension => base.path + extension)];
-    for (const path of paths) { const uri = base.with({ path }); if (await exists(uri)) return uri; }
-    return null;
+    return paths.map(path => base.with({ path }));
   };
-  const found = await find(markdownPathTarget(decoded, document));
-  if (found || decoded.startsWith('/') || /^\.\.?\//.test(decoded) || /^[a-z]:\//i.test(decoded)) return found;
+  const candidates = expand(markdownPathTarget(decoded, document));
+  if (decoded.startsWith('/') || /^\.\.?\//.test(decoded) || /^[a-z]:\//i.test(decoded)) return candidates;
   const root = vscode.workspace.getWorkspaceFolder(document)?.uri;
-  return root ? find(root.with({ path: posix.resolve(root.path, decoded), query: '', fragment: '' })) : null;
+  if (root) candidates.push(...expand(root.with({ path: posix.resolve(root.path, decoded), query: '', fragment: '' })));
+  return [...new Map(candidates.map(uri => [uri.toString(), uri])).values()];
+}
+
+export async function resolveMarkdownReference(rawHref: string, document: vscode.Uri): Promise<vscode.Uri | null> {
+  for (const uri of markdownReferenceCandidates(rawHref, document)) {
+    try { await vscode.workspace.fs.stat(uri); return uri; } catch { /* Try the next candidate. */ }
+  }
+  return null;
 }

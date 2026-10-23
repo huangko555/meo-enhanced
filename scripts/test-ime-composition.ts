@@ -330,13 +330,13 @@ async function main() {
         const marker = matches.at(-1);
         if (!marker) throw new Error(`Closing marker not found: ${lineLabel} ${text}`);
         const range = document.createRange();
-        // Collapsed source markers have no painted rectangle. Click the first
-        // visible character after the marker, at its leading caret boundary.
+        // Collapsed source markers have no painted rectangle. Stay within the
+        // first half of the next glyph: a 0.1px edge can round into the marker.
         range.setStart(marker.node, marker.offset + text.length);
         range.setEnd(line, line.childNodes.length);
         const rect = Array.from(range.getClientRects()).find(rect => rect.width > 0 && rect.height > 0);
         if (!rect) throw new Error(`Painted boundary not found: ${lineLabel}`);
-        const point = { x: rect.left + 0.1, y: rect.top + rect.height / 2 };
+        const point = { x: Math.floor(rect.left + Math.min(2, rect.width / 4)), y: rect.top + rect.height / 2 };
         if (!line.contains(document.elementFromPoint(point.x, point.y))) {
           throw new Error(`Boundary click does not hit its line: ${lineLabel}`);
         }

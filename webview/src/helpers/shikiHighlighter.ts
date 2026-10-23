@@ -5,6 +5,8 @@ import { toShikiTheme } from './shikiTheme';
 import { createShikiTokenCache } from './shikiTokenCache';
 import type { RawVscodeTheme, ShikiToken, ShikiTokenLines, ShikiSurface } from './shikiTypes';
 export type { RawVscodeTheme, ShikiToken, ShikiTokenLines, ShikiSurface } from './shikiTypes';
+import { mathSyntaxGrammar, withMarkdownSyntax } from '../adapters/markdownSyntaxGrammar';
+import { withMermaidBodySyntax } from '../adapters/mermaidSyntaxGrammar';
 
 const THEME_NAME = 'meo-code-theme';
 const CACHE_LIMIT = 300;
@@ -307,12 +309,20 @@ async function ensureLang(
     return true;
   }
   const loader = LANG_LOADERS[lang];
+  if (lang === mathSyntaxGrammar.name) {
+    record.grammarVersion += 1;
+    await highlighter.loadLanguage(mathSyntaxGrammar);
+    record.loadedLangs.add(lang);
+    return true;
+  }
   if (!loader) {
     return false;
   }
   const grammar = (await loader()).default;
   record.grammarVersion += 1;
-  await highlighter.loadLanguage(grammar as any);
+  const adapted = lang === 'markdown' ? withMarkdownSyntax(grammar as any)
+    : lang === 'mermaid' ? withMermaidBodySyntax(grammar as any) : grammar;
+  await highlighter.loadLanguage(adapted as any);
   record.loadedLangs.add(lang);
   return true;
 }
@@ -488,8 +498,16 @@ async function tokenizeAndCache(
           }
         }
         const grammars: unknown[] = [];
-        for (const requiredLanguage of required) if (!loaded.has(requiredLanguage) && LANG_LOADERS[requiredLanguage]) {
-          grammars.push((await LANG_LOADERS[requiredLanguage]!()).default);
+        for (const requiredLanguage of required) if (!loaded.has(requiredLanguage)) {
+          if (requiredLanguage === mathSyntaxGrammar.name) grammars.push(mathSyntaxGrammar);
+          else {
+            const loader = LANG_LOADERS[requiredLanguage];
+            if (!loader) continue;
+            const grammar = (await loader()).default;
+            const adapted = requiredLanguage === 'markdown' ? withMarkdownSyntax(grammar as any)
+              : requiredLanguage === 'mermaid' ? withMermaidBodySyntax(grammar as any) : grammar;
+            grammars.push(...(Array.isArray(adapted) ? adapted : [adapted]));
+          }
           loaded.add(requiredLanguage);
         }
         return grammars;

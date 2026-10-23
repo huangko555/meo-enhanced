@@ -106,34 +106,53 @@ try {
       doc.scrollingElement!.scrollTop += rect.top + rect.height * progress - doc.defaultView!.innerHeight / 3;
     }, { target, progress });
     await settle(350);
-    const witness = (readingPoint = { target, progress }) => page.evaluate(({ target, progress }) => {
+    // A height fraction changes meaning when a paragraph wraps. Retain an
+    // immutable painted character and sample it through every presentation frame.
+    const captureGlyph = () => page.evaluate(() => {
       const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
-      const paragraph = [...doc.querySelectorAll('p')].find(element => element.textContent!.startsWith(target))!;
-      const rect = paragraph.getBoundingClientRect();
-      return rect.top + rect.height * progress;
-    }, readingPoint);
+      const root = doc.querySelector('main.meo-export-doc')!, bounds = root.getBoundingClientRect();
+      const range = doc.caretRangeFromPoint(Math.max(4, bounds.left + 12), doc.defaultView!.innerHeight / 3)!;
+      if (range.startContainer.nodeType !== Node.TEXT_NODE || !root.contains(range.startContainer))
+        throw new Error('Reading fixture needs painted paragraph text');
+      return { text: range.startContainer.textContent!, offset: range.startOffset };
+    });
+    const initialGlyph = await captureGlyph();
+    const witness = (point = initialGlyph) => page.evaluate(point => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const walker = doc.createTreeWalker(doc.querySelector('main.meo-export-doc')!, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) if (walker.currentNode.textContent === point.text) {
+        const range = doc.createRange(); range.setStart(walker.currentNode, point.offset); range.collapse(true);
+        return range.getBoundingClientRect().top;
+      }
+      throw new Error('Unchanged reading character disappeared');
+    }, point);
     const initialPoint = await witness();
-    const startSampling = (readingPoint = { target, progress }) => page.evaluate(({ target, progress }) => {
-      const probe = { active: true, samples: [] as number[] };
+    const startSampling = async (readingPoint?: { text: string; offset: number }) => page.evaluate(point => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const read = () => {
+        const walker = doc.createTreeWalker(doc.querySelector('main.meo-export-doc')!, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) if (walker.currentNode.textContent === point.text) {
+          const range = doc.createRange(); range.setStart(walker.currentNode, point.offset); range.collapse(true);
+          return range.getBoundingClientRect().top;
+        }
+        throw new Error('Reading character disappeared during preset presentation');
+      };
+      const probe = { active: true, expected: read(), samples: [] as number[] };
       (window as any).__presetPositionSamples = probe;
       const sample = () => {
         if (!probe.active) return;
-        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
-        const paragraph = [...doc.querySelectorAll('p')].find(element => element.textContent!.startsWith(target))!;
-        const rect = paragraph.getBoundingClientRect();
-        probe.samples.push(rect.top + rect.height * progress);
-        requestAnimationFrame(sample);
+        probe.samples.push(read()); requestAnimationFrame(sample);
       };
       requestAnimationFrame(sample);
-    }, readingPoint);
-    const assertSamples = async (label: string, expectedPoint = initialPoint) => {
+    }, readingPoint ?? await captureGlyph());
+    const assertSamples = async (label: string, expectedPoint?: number) => {
       const samples = await page.evaluate(() => {
         const probe = (window as any).__presetPositionSamples;
         probe.active = false;
-        return probe.samples as number[];
+        return { points: probe.samples as number[], expected: probe.expected as number };
       });
-      assert.ok(samples.length >= 2, `${label}: must observe multiple frames`);
-      const drift = Math.max(...samples.map(point => Math.abs(point - expectedPoint)));
+      assert.ok(samples.points.length >= 2, `${label}: must observe multiple frames`);
+      const drift = Math.max(...samples.points.map(point => Math.abs(point - (expectedPoint ?? samples.expected))));
       assert.ok(drift <= 2, `${appearance}/${surface}/${label}: reading point moved ${drift}px`);
     };
     for (const preset of ['github-readme', custom.id, 'default', custom.id, 'github-readme', 'default']) {
@@ -161,16 +180,7 @@ try {
     await page.mouse.wheel({ deltaY: 300 });
     await settle(350);
     assert.ok(Math.abs(await witness() - initialPoint) > 100, 'Trusted scrolling must move the reading point');
-    const scrolledReadingPoint = await page.evaluate(() => {
-      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
-      const y = doc.defaultView!.innerHeight / 3;
-      const paragraph = [...doc.querySelectorAll('p')].find(element => {
-        const rect = element.getBoundingClientRect();
-        return rect.top <= y && rect.bottom > y;
-      })!;
-      const rect = paragraph.getBoundingClientRect();
-      return { target: paragraph.textContent!.split(':')[0]! + ':', progress: (y - rect.top) / rect.height };
-    });
+    const scrolledReadingPoint = await captureGlyph();
     const scrolledPoint = await witness(scrolledReadingPoint);
     await startSampling(scrolledReadingPoint);
     lateScroll.release();
@@ -220,17 +230,7 @@ try {
       await settle(350);
       await page.click('[data-mode="preview"]');
       await settle(350);
-      const roundtripPoint = await page.evaluate(() => {
-        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
-        const y = doc.defaultView!.innerHeight / 3;
-        const paragraph = [...doc.querySelectorAll('p')].find(element => {
-          const rect = element.getBoundingClientRect();
-          return rect.top <= y && rect.bottom > y;
-        });
-        if (!paragraph) throw new Error('Source roundtrip must return to an ordinary paragraph');
-        const rect = paragraph.getBoundingClientRect();
-        return { target: paragraph.textContent!.split(':')[0]! + ':', progress: (y - rect.top) / rect.height };
-      });
+      const roundtripPoint = await captureGlyph();
       const roundtripExpected = await witness(roundtripPoint);
       await startSampling(roundtripPoint);
       await choose('github-readme');

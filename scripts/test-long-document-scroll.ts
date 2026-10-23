@@ -52,6 +52,12 @@ async function snapshot(page: Page, preview: boolean) {
       if (!preview && element.closest('.cm-scroller') !== scroller) continue;
       const bounds = element.getBoundingClientRect();
       if (bounds.height < 1 || bounds.bottom <= rect.top || bounds.top >= rect.bottom) continue;
+      if (!preview && element.classList.contains('meo-md-html-table-shell')) {
+        const actualLine = view.state.doc.lineAt(view.posAtDOM(element)).number;
+        if (Number(element.dataset.meoRenderedBlockStartLine) !== actualLine) {
+          throw new Error(`Visible table source identity disagrees with its document position: ${element.dataset.meoRenderedBlockStartLine} / ${actualLine}`);
+        }
+      }
       let key: string;
       if (preview) key = `${element.tagName}:${element.dataset.sourceLine}:${element.dataset.sourceEndLine}`;
       else if (element.matches('tr')) {
@@ -133,6 +139,29 @@ try {
             `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${widget.tableData.startLine}"]`
           ));
           if (!before) throw new Error('Height cache contract needs a measured table');
+          // Framework comparisons can examine a candidate that is never mounted.
+          // Such a comparison must not change an already-created presentation.
+          const TableWidget = before.constructor;
+          const comparisonOwner = new TableWidget(before.tableData, before.stickyHeaderAdapterFactory, before.tableCommandEnvironment);
+          const comparisonShell = comparisonOwner.toDOM(view) as HTMLElement;
+          try {
+            const comparison = new TableWidget({ ...before.tableData,
+              from: before.tableData.from + 1, to: before.tableData.to + 1,
+              startLine: before.tableData.startLine + 1, endLine: before.tableData.endLine + 1
+            }, before.stickyHeaderAdapterFactory, before.tableCommandEnvironment);
+            const tableSnapshot = () => ({
+              sourceLine: comparisonShell.dataset.meoRenderedBlockStartLine,
+              values: Array.from(comparisonShell.querySelectorAll<HTMLTextAreaElement>('textarea')).map(input => input.value)
+            });
+            const comparisonBefore = tableSnapshot();
+            comparisonOwner.eq(comparison);
+            const comparisonAfter = tableSnapshot();
+            if (JSON.stringify(comparisonAfter) !== JSON.stringify(comparisonBefore)) {
+              throw new Error('Comparing another table changed source identity or cell contents: '
+                + JSON.stringify({ before: comparisonBefore.sourceLine, after: comparisonAfter.sourceLine,
+                  cellValuesUnchanged: JSON.stringify(comparisonBefore.values) === JSON.stringify(comparisonAfter.values) }));
+            }
+          } finally { comparisonOwner.destroy(comparisonShell); }
           const measured = document.querySelector<HTMLElement>(
             `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${before.tableData.startLine}"]`
           )!.getBoundingClientRect().height;
@@ -147,6 +176,18 @@ try {
             `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${startLine}"]`
           )!;
           const settle = async () => {
+            // History accepts source before the bounded Live presentation is
+            // published. Start geometry checks only after that exact revision
+            // reaches the widget, without waiting on the height being asserted.
+            let published = false;
+            for (let frame = 0; frame < 90; frame++) {
+              await new Promise(requestAnimationFrame);
+              const widget = current(), range = widget?.tableData.sourceRanges?.[1]?.[0];
+              if (range && view.state.doc.sliceString(range.from, range.to).trim() === widget.tableData.rows[0][0]) {
+                published = true; break;
+              }
+            }
+            if (!published) throw new Error('Accepted table history revision was not published');
             for (let frame = 0; frame < 12; frame++) await new Promise(requestAnimationFrame);
           };
           const originalDocument = view.state.doc.toString();
@@ -172,13 +213,16 @@ try {
               { y: 'start', geometry: 'line-block' }, controller.beginNavigationReveal());
             for (let frame = 0; frame < 20; frame++) await new Promise(requestAnimationFrame);
           };
+          // A viewport presentation can retire the offscreen widget value as
+          // well as its DOM. Capture the real mount boundary while it exists;
+          // retaining the class does not force the table to remain mounted.
+          const prototype = Object.getPrototypeOf(current());
           await reveal(Math.min(startLine + 400, view.state.doc.lines));
           const unmounted = !document.querySelector(
             `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${startLine}"]`
           );
           // Observe the actual DOM at the WidgetType mount boundary, before the
           // queued row sizing can conceal a provisional height in a later frame.
-          const prototype = Object.getPrototypeOf(current());
           const originalToDOM = prototype.toDOM;
           const remountedHeights: number[] = [];
           prototype.toDOM = function (...args: any[]) {

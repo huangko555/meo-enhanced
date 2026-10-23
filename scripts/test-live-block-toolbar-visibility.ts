@@ -67,8 +67,45 @@ async function main(): Promise<void> {
 
     await page.waitForFunction(() => (
       document.querySelectorAll('.meo-mermaid-preview-controls .meo-visual-control-btn').length === 4
+      && !document.querySelector('[data-meo-mermaid-rendering="true"]')
     ));
 
+    const settleMode = () => page.evaluate(async () => {
+      for (let i = 0; i < 8; i++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    });
+    const modeButton = '.meo-mermaid-toolbar .meo-mermaid-mode-btn';
+    const readModeFocus = () => page.$eval(modeButton, button => {
+      const style = getComputedStyle(button);
+      return { focused: document.activeElement === button, visible: button.matches(':focus-visible'),
+        shadow: style.boxShadow, outline: style.outlineStyle };
+    });
+    for (let cycle = 0; cycle < 2; cycle++) {
+      // Edit and Finish form one toggle; test keyboard focus from its stable reading state.
+      await page.click(modeButton); await settleMode();
+      await page.click(modeButton); await settleMode();
+      const pointer = await readModeFocus();
+      assert.equal(pointer.shadow, 'none', 'Mouse source-to-preview switch must not paint a focus ring: ' + JSON.stringify(pointer));
+      assert.equal(pointer.outline, 'none', 'Mouse source-to-preview switch must not paint an outline');
+      if (cycle === 0) {
+        fs.mkdirSync(path.join(repoRoot, '.local', 'probes', 'mermaid-mode-focus'), { recursive: true });
+        await (await page.$(modeButton))!.screenshot({ path: path.join(repoRoot, '.local', 'probes', 'mermaid-mode-focus', 'pointer.png') });
+      }
+      assert.equal(await page.$eval('.meo-mermaid-toolbar.meo-block-reading-target', target =>
+        document.activeElement === target), true,
+      'Completion gives focus to the visible block reading target');
+      await page.$eval(modeButton, button => (button as HTMLButtonElement).focus());
+      await page.keyboard.press('Tab');
+      await page.keyboard.down('Shift'); await page.keyboard.press('Tab'); await page.keyboard.up('Shift');
+      const keyboard = await readModeFocus();
+      assert.ok(keyboard.focused && keyboard.visible, 'Keyboard return still exposes the mode button focus');
+      assert.ok(keyboard.shadow !== 'none' || keyboard.outline !== 'none', 'Keyboard mode focus remains visible');
+    }
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    if (process.argv.includes('--mode-focus-only')) {
+      console.log('Mermaid mode pointer/keyboard focus checks passed'); return;
+    }
+
+    if (await page.$eval('.meo-mermaid-toolbar', node => node.getAttribute('data-meo-mermaid-mode') === 'edit')) { await page.click(modeButton); await settleMode(); }
     for (const appearance of ['light', 'dark'] as const) {
       await page.evaluate((theme) => {
         const style = document.documentElement.style;
@@ -93,10 +130,10 @@ async function main(): Promise<void> {
         await page.waitForFunction((toolbarSelector) => (
           getComputedStyle(document.querySelector(toolbarSelector)!).opacity === '1'
         ), {}, selector);
-        const buttons = await page.$$(`${selector} :is(button, [role="button"])`);
+        const buttons = await page.$$(`${selector} :is(button, [role="button"]):not([hidden])`);
         assert.equal(buttons.length, selector === '.meo-mermaid-toolbar' ? 3 : selector === '.meo-mermaid-preview-controls' ? 4 : 2);
         const gaps = await page.evaluate((toolbarSelector) => {
-          const rects = Array.from(document.querySelectorAll(`${toolbarSelector} :is(button, [role="button"])`),
+          const rects = Array.from(document.querySelectorAll(`${toolbarSelector} :is(button, [role="button"]):not([hidden])`),
             (button) => button.getBoundingClientRect());
           return rects.slice(0, -1).map((rect, index) => ({
             x: (rect.right + rects[index + 1].left) / 2, y: rect.top + rect.height / 2
@@ -153,11 +190,11 @@ async function main(): Promise<void> {
       }
     }
     for (const selector of toolbarSelectors.filter(selector => selector === '.meo-mermaid-toolbar')) {
-      const layout = await page.$$eval(`${selector} button, ${selector} [role="button"]`, (buttons) => (
+      const layout = await page.$$eval(`${selector} button:not([hidden]), ${selector} [role="button"]:not([hidden])`, (buttons) => (
         buttons.map(button => ({ label: button.getAttribute('aria-label'), y: button.getBoundingClientRect().top }))
       ));
       assert.deepEqual(layout.map(button => button.label), [
-        'Preview, Switch to split view', 'Select all code', 'Copy'
+        'Edit', 'Copy as image', 'Copy source'
       ]);
       assert.equal(new Set(layout.map(button => button.y)).size, 1, `${selector} preview controls stayed on a second row`);
       const previewSelector = selector === '.meo-mermaid-toolbar' ? '.meo-mermaid-block' : '.meo-latex-math-viewport';
@@ -179,14 +216,15 @@ async function main(): Promise<void> {
       await page.keyboard.press('Enter');
       assert.notDeepEqual(await collectScale(), initialScale, `${selector} keyboard zoom did not activate`);
       await page.click('.meo-mermaid-preview-controls [aria-label="Reset zoom"]');
-      await page.click('.meo-mermaid-preview-controls [aria-label="Fullscreen"]');
+      await page.click('.meo-mermaid-preview-controls [aria-label="View fullscreen"]');
       const fullscreenSelector = selector === '.meo-mermaid-toolbar' ? '.meo-mermaid-fullscreen-scrim' : '.meo-latex-math-fullscreen-scrim';
       await page.waitForSelector(fullscreenSelector);
       await page.keyboard.press('Escape');
       await page.waitForSelector(fullscreenSelector, { hidden: true });
 
       await page.$eval('#app', element => (element as HTMLElement).style.width = '240px');
-      await page.hover(previewSelector);
+      await page.waitForSelector(previewSelector);
+      await page.locator(previewSelector).hover();
       const narrowControls = '.meo-mermaid-preview-controls';
       await page.waitForSelector(narrowControls);
       const hits = await page.$$eval(`${narrowControls} .meo-visual-control-btn`, buttons => buttons.map(button => {
@@ -200,17 +238,16 @@ async function main(): Promise<void> {
       await page.$eval('#app', element => (element as HTMLElement).style.width = '800px');
 
       const modeSelector = selector === '.meo-mermaid-toolbar' ? '.meo-mermaid-mode-btn' : '.meo-latex-math-mode-btn';
-      const editingSelector = selector === '.meo-mermaid-toolbar' ? '.meo-mermaid-editing-block' : '.meo-latex-math-editing-block';
       await page.click(modeSelector);
-      await page.waitForSelector(`${editingSelector}.is-split`);
-      await page.waitForFunction(selector => document.querySelectorAll('.meo-mermaid-preview-controls .meo-visual-control-btn').length === 4, {}, selector);
+      await page.waitForSelector('.meo-mermaid-toolbar[data-meo-mermaid-mode="edit"]');
+      await page.waitForFunction(() => document.querySelectorAll('.meo-mermaid-preview-controls .meo-visual-control-btn').length === 4);
+      await page.mouse.move(950, 680);
+      assert.equal(await page.$eval('.meo-mermaid-preview-controls', node => getComputedStyle(node).opacity), '1', 'Editing camera controls stay visible without hover');
       await page.$eval(modeSelector, element => (element as HTMLElement).focus());
       await page.keyboard.press('Enter');
-      await page.waitForSelector(`${editingSelector}.is-source`);
-      await page.waitForFunction(selector => !document.querySelector('.meo-mermaid-preview-controls'), {}, selector);
-      await page.$eval(modeSelector, element => (element as HTMLElement).focus());
-      await page.keyboard.press('Enter');
-      await page.waitForFunction(selector => document.querySelectorAll('.meo-mermaid-preview-controls .meo-visual-control-btn').length === 4, {}, selector);
+      await page.waitForSelector('.meo-mermaid-toolbar[data-meo-mermaid-mode="preview"]');
+      await page.waitForFunction(() => document.querySelectorAll('.meo-mermaid-preview-controls .meo-visual-control-btn').length === 4);
+
     }
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await page.mouse.move(950, 680);
@@ -262,7 +299,8 @@ async function main(): Promise<void> {
         const toolbar = document.querySelector<HTMLElement>(toolbarSelector)!;
         // Move to Copy with a real Tab event instead of inheriting the focus
         // modality of whichever control the earlier pointer checks left behind.
-        toolbar.querySelector<HTMLElement>('.meo-select-all-code-btn')!.focus();
+        (toolbar.querySelector<HTMLElement>('.meo-copy-image-btn')
+          ?? toolbar.querySelector<HTMLElement>('.meo-select-all-code-btn'))!.focus();
       }, selector);
       await page.keyboard.press('Tab');
       await new Promise((resolve) => setTimeout(resolve, 150));

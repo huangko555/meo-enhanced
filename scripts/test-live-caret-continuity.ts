@@ -29,9 +29,70 @@ function checkPendingInputLayoutOwnership(): void {
   };
   globalThis.cancelAnimationFrame = (handle) => { frames.delete(handle); };
   try {
+    for (const captureBeforeInput of [true, false]) {
+      let caretTop = 350;
+      let pendingCorrection = false;
+      const dom = Object.assign(new EventTarget(), { ownerDocument: new EventTarget() });
+      const scroller = Object.assign(new EventTarget(), {
+        scrollTop: 1_000,
+        getBoundingClientRect: () => ({ top: 0, bottom: 500 })
+      });
+      const correctVirtualHeights = () => {
+        if (!pendingCorrection) return;
+        pendingCorrection = false;
+        // CodeMirror changes its absolute offset while the physical caret stays put.
+        scroller.scrollTop = 600;
+      };
+      const view = {
+        dom, scrollDOM: scroller, hasFocus: true, defaultLineHeight: 24,
+        state: { selection: { main: { head: 100, empty: true } },
+          doc: { length: 1_000, lineAt: () => ({ number: 10 }) } },
+        coordsAtPos: () => {
+          correctVirtualHeights();
+          return { top: caretTop, bottom: caretTop + 24 };
+        },
+        lineBlockAt: () => { correctVirtualHeights(); return { height: 24 }; },
+        requestMeasure: ({ read, write }: any) => write(read())
+      };
+      let reveals = 0;
+      let retains = 0;
+      const continuity = createEditorInteractionContinuity({
+        view: view as any, getMode: () => 'live',
+        viewport: {
+          retainCaretTop(_position, top, isCurrent) {
+            if (!isCurrent()) throw new Error('Stale physical input anchor');
+            retains += 1;
+            caretTop = top;
+          },
+          revealCaret() { reveals += 1; }
+        }
+      });
+      if (captureBeforeInput) dom.dispatchEvent(new Event('beforeinput'));
+      // A handled paste can dispatch input without a separate beforeinput event.
+      pendingCorrection = true;
+      view.state.selection.main.head += 1;
+      continuity.observe({
+        transactions: [{ docChanged: true, isUserEvent: () => true }], selectionSet: true
+      } as any);
+      if (reveals !== 0 || caretTop !== 350 || scroller.scrollTop !== 600) {
+        throw new Error(`Virtual height correction must retain the physical input anchor: ${JSON.stringify({
+          captureBeforeInput, reveals, caretTop, scrollTop: scroller.scrollTop
+        })}`);
+      }
+      caretTop = 700;
+      continuity.observe({ transactions: [], selectionSet: false, geometryChanged: true } as any);
+      if (caretTop !== 350 || retains !== 1) throw new Error('Later layout must retain the adopted physical anchor');
+      view.state.selection.main.head += 10;
+      continuity.observe({ transactions: [], selectionSet: true } as any);
+      caretTop = 700;
+      continuity.observe({ transactions: [], selectionSet: false, geometryChanged: true } as any);
+      continuity.dispose();
+      if (caretTop !== 700 || retains !== 1) throw new Error('New navigation must cancel the physical input anchor');
+    }
     for (const reflowed of [false, true]) {
       let caretTop = 350;
       let lineHeight = 24;
+      let pendingHeightMapShift = false;
       const dom = Object.assign(new EventTarget(), { ownerDocument: new EventTarget() });
       const scroller = Object.assign(new EventTarget(), {
         scrollTop: 1_000,
@@ -42,7 +103,14 @@ function checkPendingInputLayoutOwnership(): void {
         state: { selection: { main: { head: 100, empty: true } },
           doc: { length: 1_000, lineAt: () => ({ number: 10 }) } },
         coordsAtPos: () => ({ top: caretTop, bottom: caretTop + 24 }),
-        lineBlockAt: () => ({ height: lineHeight }),
+        lineBlockAt: () => {
+          if (pendingHeightMapShift) {
+            pendingHeightMapShift = false;
+            caretTop = 700;
+            scroller.scrollTop = 800;
+          }
+          return { height: lineHeight };
+        },
         requestMeasure: ({ read, write }: any) => write(read())
       };
       let retains = 0;
@@ -77,9 +145,33 @@ function checkPendingInputLayoutOwnership(): void {
         continuity.observe({
           transactions: [{ docChanged: true, isUserEvent: () => true }], selectionSet: true
         } as any);
+        continuity.observe({ transactions: [{ docChanged: false, effects: [{ is: () => true }] }], selectionSet: false } as any);
+        // Two post-refresh geometry receipts can arrive before any queued RAF.
+        // They must not consume the input's two stable animation frames.
+        for (let receipt = 0; receipt < 2; receipt++) {
+          continuity.observe({ transactions: [{ docChanged: false, effects: [] }], selectionSet: false, geometryChanged: true } as any);
+        }
+        // CodeMirror can correct virtual heights during its current measure
+        // pass, while the input owner already has a later RAF scheduled.
+        caretTop = 700;
+        scroller.scrollTop = 800;
+        continuity.observe({ transactions: [], selectionSet: false, viewportChanged: true } as any);
+        if (caretTop !== 350 || retains !== 2) {
+          throw new Error('Post-refresh receipts ended input retention before a frame advanced');
+        }
+        // A height-map query can flush a queued CodeMirror measurement. Its
+        // final caret must be read afterwards, not paired with an older rect.
+        pendingHeightMapShift = true;
+        continuity.observe({ transactions: [], selectionSet: false, geometryChanged: true } as any);
+        if (caretTop !== 350 || retains !== 3) throw new Error('Input measurement mixed two height-map layouts');
+        view.state.selection.main.head += 10;
+        continuity.observe({ transactions: [], selectionSet: true } as any);
+        caretTop = 700;
+        continuity.observe({ transactions: [], selectionSet: false, geometryChanged: true } as any);
+        if (caretTop !== 700 || retains !== 3) throw new Error('New navigation must retire the main input anchor');
       }
       continuity.dispose();
-      if (reflowed ? retains !== 0 || reveals !== 0 : retains !== 1 || reveals !== 0 || caretTop !== 350) {
+      if (reflowed ? retains !== 0 || reveals !== 0 : retains !== 3 || reveals !== 0 || caretTop !== 700) {
         throw new Error(`Pending input layout ownership failed: ${JSON.stringify({ reflowed, retains, reveals, caretTop })}`);
       }
     }
@@ -447,7 +539,7 @@ async function main(): Promise<void> {
       '  <del>HTML 第 51 行式目标</del>',
       '</p>',
       ...matrixSuffix
-    ].join('\n'), '<del>HTML 第 51 行式目标</del>', '.meo-md-html-source-toggle');
+    ].join('\n'), '<del>HTML 第 51 行式目标</del>');
 
     const numericBurstText = [
       ...Array.from({ length: 799 }, (_, index) => `数字前正文 ${index + 1}`),

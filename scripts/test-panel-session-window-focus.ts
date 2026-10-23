@@ -64,6 +64,8 @@ assert.equal(countFocusMessages(), 0);
 await emitWindowState(true, false);
 assert.equal(countFocusMessages(), 1,
   'returning to a still-active panel should restore editor focus');
+assert.ok(messages.some(message => message.type === 'localLinkResourcesChanged'),
+  'returning from another window must recheck local targets after external changes or transient I/O failure');
 panel.active = false;
 await emitWindowState(false, false);
 await emitWindowState(true, true);

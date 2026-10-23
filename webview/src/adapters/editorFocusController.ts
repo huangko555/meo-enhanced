@@ -2,6 +2,7 @@ type FocusableEditor = {
   readonly view: { readonly dom: HTMLElement };
   hasFocus(): boolean;
   focus(): void;
+  retainViewportOnWindowReturn(isCurrent: () => boolean): () => void;
 };
 
 export type EditorFocusController = {
@@ -55,6 +56,7 @@ export function createEditorFocusController({
   let windowReturnInput: { target: NativeInput; selection: InputSelection } | null = null;
   let paintInput: NativeInput | null = null;
   let restoringInput = false;
+  let releaseWindowReturnViewport: (() => void) | null = null;
 
   const registeredInput = (target: EventTarget | null): NativeInput | null => (
     (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) && inputs.has(target) ? target : null
@@ -140,6 +142,8 @@ export function createEditorFocusController({
   };
   const finishWindowReturn = (): void => {
     clearWindowReturnPaint();
+    releaseWindowReturnViewport?.();
+    releaseWindowReturnViewport = null;
     windowReturnPending = false;
     restoreOnWindowReturn = false;
     windowReturnInput = null;
@@ -346,6 +350,8 @@ export function createEditorFocusController({
     }
   };
   const onWindowBlur = (): void => {
+    releaseWindowReturnViewport?.();
+    releaseWindowReturnViewport = null;
     const input = registeredInput(document.activeElement) ?? lastFocusedInput;
     const inputSelection = input && inputAvailable(input)
       ? (document.activeElement === input ? captureInput(input, true) : inputs.get(input)) : null;
@@ -359,6 +365,12 @@ export function createEditorFocusController({
     clearTransientFrame();
     windowReturnPending = restoreOnWindowReturn;
     windowReturnPointerGeneration = restoreOnWindowReturn ? documentPointerGeneration : null;
+    if (windowReturnPending && !windowReturnInput && isEditableMode()) {
+      releaseWindowReturnViewport = getEditor()?.retainViewportOnWindowReturn(() => (
+        windowReturnPending && document.hasFocus() && inEditor(document.activeElement)
+        && documentPointerGeneration === windowReturnPointerGeneration
+      )) ?? null;
+    }
     root.classList.toggle('meo-window-focus-return-pending', windowReturnPending);
   };
   const onWindowFocus = (): void => {

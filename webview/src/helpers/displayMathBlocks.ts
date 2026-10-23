@@ -1,9 +1,13 @@
 import { readDocumentTextProjection } from '../application/documentTextProjection';
 import type { EditorState } from '@codemirror/state';
 import type { Tree } from '@lezer/common';
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
+import { parseFrontmatterCandidate } from './frontmatter';
+import { isSuggestionAddress } from '../application/inputSuggestions';
+import type { MathCompletionBody } from '../editor/mathCompletion';
 import { isMathFenceLanguage, mathFenceBodyRange, mathFenceContent } from '../../../src/shared/mathFence';
 import { getCodeBlockSourceLines, parseBlockLinePrefix } from './blockIndent';
-import { collectLatexMathRanges } from './math';
+import { collectLatexMathRanges, findFencedDisplayMathEnd } from './math';
 import { collectMarkdownLiteralRanges } from './markdownLiteralRanges';
 import { getFencedCodeInfo, resolvedSyntaxTree } from './markdownSyntax';
 import { markdownStructureIdentity } from '../editor/markdownStructure';
@@ -105,4 +109,59 @@ export function getDisplayMathCopySource(state: EditorState, range: DocumentMath
     return line.to - lines[index]!.length + before[index]!.length;
   };
   return { text: source.text.slice(body.from, body.to), from: position(body.from), to: position(body.to) };
+}
+
+/** Editable source bounds may include unfinished math. They are input context,
+ * never a replacement for complete ranges used by rendering or export. */
+export function getMathCompletionBody(state: EditorState, position: number): MathCompletionBody | null {
+  const tree = ensureSyntaxTree(state, position, 10) ?? syntaxTree(state);
+  const frontmatter = parseFrontmatterCandidate(state);
+  if (frontmatter && position >= frontmatter.from && position <= frontmatter.to) return null;
+  let node = tree.resolveInner(position, -1);
+  for (let ancestor = node; ; ancestor = ancestor.parent!) {
+    if (ancestor.name === 'FencedCode') {
+      if (!isMathFenceLanguage(getFencedCodeInfo(state, { node: ancestor }))) return null;
+      const opening = state.doc.lineAt(ancestor.from), last = ancestor.lastChild;
+      const closed = last?.name === 'CodeMark' && last.from > opening.to;
+      const to = closed ? state.doc.lineAt(last!.from).from : ancestor.to;
+      if (position <= opening.to || (closed ? position >= to : position > to)) return null;
+      return { from: opening.to + 1, to, display: true,
+        prefix: parseBlockLinePrefix(state.doc.lineAt(position).text, state.tabSize).prefix };
+    }
+    if (!ancestor.parent) break;
+  }
+  const ranges = collectDocumentMathRanges(state, tree);
+  const range = ranges.find(range => position > range.from && position < range.to);
+  if (range) {
+    const source = range.fencedDisplay ? getDisplayMathSource(state, range) : null;
+    return { from: source?.from ?? range.from + (range.mode === 'display' ? 2 : 1),
+      to: range.fencedDisplay ? state.doc.lineAt(range.to - 1).from : range.to - (range.mode === 'display' ? 2 : 1),
+      display: range.mode === 'display', prefix: source?.prefix ?? '' };
+  }
+  for (;;) {
+    if (/^(?:InlineCode|CodeBlock|CodeInfo|HTMLBlock|HTMLTag|CommentBlock|ProcessingInstruction|Autolink|URL|LinkTitle|LinkLabel)$/.test(node.name)) return null;
+    if (!node.parent) break; node = node.parent;
+  }
+  const line = state.doc.lineAt(position), before = state.sliceDoc(line.from, position);
+  if (isSuggestionAddress(before)) return null;
+  const excluded = collectMarkdownLiteralRanges(state, tree).filter(range => !range.script);
+  // A virtual closing delimiter recognizes editing context only. It is never
+  // written to the document or shared with preview/export's complete syntax.
+  const inline = collectLatexMathRanges(before + '$', { excludedRanges: excluded.map(range => ({ from: range.from - line.from, to: range.to - line.from })) })
+    .find(range => range.to === before.length + 1 && range.mode === 'inline');
+  // A virtual closer must not turn a price into math. Numeric starts need an
+  // explicit TeX cue or operator until the author supplies a real closing $.
+  const ambiguousNumber = inline && /^[+-]?(?:\d|\.\d)/.test(inline.content)
+    && !/\\(?!\$)|[_^{}=+*/<>-]/.test(inline.content.replace(/^[+-]/, ''));
+  if (inline && !ambiguousNumber && !/^\d+(?:[.,]\d+)?\s+[A-Za-z]{2}/.test(inline.content)) {
+    return { from: line.from + inline.from + 1, to: line.to, display: false, prefix: '' };
+  }
+  const prefix = parseBlockLinePrefix(line.text, state.tabSize).prefix;
+  const beforeHead = state.sliceDoc(0, position), closing = '\n' + prefix + '$$';
+  const display = collectLatexMathRanges(beforeHead + closing, { excludedRanges: excluded, includeEmptyDisplay: true })
+    .find(range => range.fencedDisplay && range.to === beforeHead.length + closing.length);
+  if (!display) return null;
+  const opening = state.doc.lineAt(display.from);
+  const end = findFencedDisplayMathEnd(state.doc.toString(), opening.to + 1, state.sliceDoc(opening.from, display.from));
+  return { from: display.from + 2, to: end.closed ? state.doc.lineAt(end.to).from : end.to, display: true, prefix };
 }

@@ -128,7 +128,7 @@ async function main(): Promise<void> {
       }
       const live = {
         text: document.querySelector<HTMLElement>('.cm-content')?.textContent ?? '',
-        mermaidBlocks: document.querySelectorAll('.meo-mermaid-block, .meo-mermaid-editing-block').length,
+        mermaidBlocks: document.querySelectorAll('.meo-mermaid-block').length,
         mermaidToolbars: document.querySelectorAll('.meo-mermaid-toolbar').length,
         tables: document.querySelectorAll('.meo-md-html-table').length,
         math: document.querySelectorAll('.meo-md-math-display').length,

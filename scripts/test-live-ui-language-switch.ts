@@ -29,7 +29,7 @@ function expectedLabels(language: UiLanguage, mermaidLine: number, formulaLine: 
     imageActions: [strings.openLink, strings.refreshImage, strings.openWithSystemApp, strings.fullscreenImage],
     task: strings.markTaskComplete,
     alert: strings.alertLabel('NOTE'),
-    html: strings.showHtmlSource,
+    html: 'html',
     merge: [strings.acceptCurrent, strings.acceptIncoming, strings.acceptBoth],
     tableControls: [
       strings.tableActions,
@@ -40,6 +40,7 @@ function expectedLabels(language: UiLanguage, mermaidLine: number, formulaLine: 
       strings.insertColumnLeft,
       strings.insertColumnRight,
       strings.deleteColumn,
+      strings.deleteTable,
       strings.tableMoreActions,
       strings.tableCollapse,
       strings.moveRowUp,
@@ -49,10 +50,12 @@ function expectedLabels(language: UiLanguage, mermaidLine: number, formulaLine: 
       strings.alignColumnLeft,
       strings.alignColumnCenter,
       strings.alignColumnRight,
+      strings.sortTableAscending,
+      strings.sortTableDescending,
       strings.tablePreviousActions
     ],
     mermaidControls: strings.mermaidBlockControls(mermaidLine),
-    mermaidMode: `${strings.preview}, ${strings.editMermaidSplit}`,
+    mermaidMode: strings.editMermaidSource,
     formulaControls: strings.copyCode,
     formulaMode: null,
     color: strings.adjustColor('#ff0000')
@@ -160,18 +163,17 @@ async function main(): Promise<void> {
       && Boolean(document.querySelector('.meo-md-long-code-placeholder .meo-long-code-action'))
       && Boolean(document.querySelector('.meo-mermaid-mode-btn'))
       && Boolean(document.querySelector('.meo-math-copy-actions .meo-copy-code-btn'))
-      && Boolean(document.querySelector('.meo-md-html-source-toggle'))
+      && Boolean(document.querySelector('.meo-md-html-block'))
       && Boolean(document.querySelector('.meo-md-html-table-context-menu'))
     ));
     await waitForFrames(page);
 
     const result = await page.evaluate(async () => {
       const editor = (window as any).__liveUiLanguageEditor;
-      const pointer = (button: HTMLButtonElement) => button.dispatchEvent(new PointerEvent('pointerdown', {
-        button: 0,
-        bubbles: true,
-        cancelable: true
-      }));
+      const pointer = (button: HTMLButtonElement) => {
+        button.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
+        button.click();
+      };
       const readLabel = (selector: string) => document.querySelector<HTMLElement>(selector)?.getAttribute('aria-label') ?? null;
       const readLabels = (selector: string) => Array.from(
         document.querySelectorAll<HTMLElement>(selector),
@@ -187,7 +189,7 @@ async function main(): Promise<void> {
         imageActions: readLabels('.meo-md-image-controls [aria-label]'),
         task: readLabel('.meo-task-checkbox'),
         alert: document.querySelector('.meo-md-alert-label')?.textContent ?? null,
-        html: readLabel('.meo-md-html-source-toggle:not(.meo-md-details-source-toggle)'),
+        html: document.querySelector<HTMLElement>('.meo-md-html-block')?.dataset.meoRenderedBlockKind ?? null,
         merge: Array.from(document.querySelectorAll<HTMLElement>('.meo-merge-action-btn'), (button) => button.textContent),
         tableControls: [
           readLabel('.meo-md-html-table-context-trigger'),

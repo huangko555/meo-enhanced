@@ -25,6 +25,7 @@ try {
     try { return { type: 'uiColorsResult', requestId: input.requestId, result: { ok: true, value: await owner.setUiColors(input.colors) } }; }
     catch (error) { return { type: 'uiColorsResult', requestId: input.requestId, result: { ok: false, error: { code: 'operation-failed', message: String(error) } } }; }
   });
+  await page.exposeFunction('__savedColors', () => owner.getUiColors());
   const openFixture = async () => {
     await page.setViewport({ width: 1100, height: 820 });
     await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><body class="vscode-dark"><div id="app"></div></body>');
@@ -79,8 +80,7 @@ try {
     const values = [luminance(warning), luminance(selected)];
     assert.ok((Math.max(...values) + 0.05) / (Math.min(...values) + 0.05) >= 3, `${label}: a selected comparison warning icon remains distinguishable`);
   };
-  const apply = '.appearance-footer .settings-primary';
-  const cancel = '.appearance-footer .settings-actions button:first-child';
+  const resetColors = '.appearance-footer > button:first-child';
   const source = () => page.$$eval('.cm-content, .cm-line, .cm-line span, .cm-gutters', elements => elements.map(element => [element.textContent, getComputedStyle(element).color, getComputedStyle(element).backgroundColor]));
   await openFixture(); await openSettings();
   await checkSemanticColors('native dark');
@@ -122,7 +122,7 @@ try {
   };
   await checkControlLayout();
   await checkColorFocus();
-  assert.deepEqual(await page.$$eval('.settings-jump', elements => elements.map(e => e.textContent)), ['界面模式', '基础颜色', '高级颜色']);
+  assert.deepEqual(await page.$$eval('.settings-jump', elements => elements.map(e => e.textContent)), ['界面模式', '文档排版', '基础颜色', '高级颜色']);
   const screenshots = process.env.MEO_UI_COLORS_SCREENSHOT_DIR;
   if (screenshots) await fs.mkdir(screenshots, { recursive: true });
   for (const [index, tab] of ['general', 'appearance', 'typing', 'presets', 'shortcuts'].entries()) {
@@ -192,8 +192,8 @@ try {
   assert.deepEqual(await source(), lightSource, 'opposite host UI input changes do not alter Source content');
   await edit('accent', '#8844AA');
   assert.equal(await role('accent'), 'rgb(136, 68, 170)', 'custom input overrides the bundled default');
-  await page.click(cancel);
-  assert.deepEqual(await uiRoles(), defaultLightRoles, 'cancel restores the default palette');
+  await page.click(resetColors);
+  assert.deepEqual(await uiRoles(), defaultLightRoles, 'reset restores the default palette');
   await changeHost('light', '#33BB88'); await page.click('[data-appearance-mode="dark"]');
   assert.equal(await role('accent'), 'rgb(41, 122, 160)', 'VS Code light/MEO dark uses the Dark 2026 accent');
   assert.equal(await page.$eval(input('surface'), e => (e as HTMLInputElement).placeholder), '默认深色配色');
@@ -208,8 +208,8 @@ try {
   await edit('danger', '#F48771');
   assert.notEqual(await role('danger'), defaultDarkRoles.find(([key]) => key === '--meo-ui-danger')![1], 'an explicit color matching the native input bypasses chroma enhancement and invalidates the palette cache');
   assert.equal(await page.$eval('[data-setting="danger"] .appearance-color-swatch', element => (element as HTMLInputElement).value), '#f48771', 'the color picker preserves the explicit user color');
-  await page.click(cancel);
-  assert.deepEqual(await uiRoles(), defaultDarkRoles, 'cancel restores the vivid defaults after a semantic override');
+  await page.click(resetColors);
+  assert.deepEqual(await uiRoles(), defaultDarkRoles, 'reset restores the vivid defaults after a semantic override');
   await page.click('[data-section="appearanceMode"]');
   await changeHost('light', '#DD3355');
   assert.deepEqual(await uiRoles(), defaultDarkRoles, 'all default dark UI roles ignore opposite host inputs');
@@ -227,19 +227,26 @@ try {
   assert.equal(await page.$eval(input('surface'), e => (e as HTMLInputElement).placeholder), 'Follow VS Code theme');
   await page.click('[data-tab="general"]'); await page.click('[data-setting="language"] [data-value="zh-CN"]'); await page.click('[data-tab="appearance"]');
   assert.deepEqual(owner.getUiColors(), {light: {}, dark: {}}, 'bundled defaults and previews are never persisted as overrides');
+  const saved = async (mode: 'light' | 'dark', key: string, color: string | null) => {
+    try {
+      await page.waitForFunction(async ({mode, key, color}) => ((await (window as any).__savedColors())[mode][key] ?? null) === color, {}, {mode, key, color});
+    } catch (error) {
+      throw new Error(`Save ${mode}/${key}=${color}: ${JSON.stringify({saved: owner.getUiColors(), ui: await page.evaluate(() => ({status: document.querySelector('.appearance-status')?.textContent, messages: (window as any).__messages.filter((m: any) => m.type === 'updateUiColors').slice(-3)}))})}`, {cause: error});
+    }
+  };
   const originalSurface = await role('surface'); const sourceBefore = await source();
-  const originalDocumentBackground = await page.$eval('body', e => getComputedStyle(e).backgroundColor);
+  assert.equal(await page.$('.appearance-footer .settings-primary'), null, 'appearance has no Apply action');
+  assert.equal(await page.$('.appearance-footer .settings-actions'), null, 'appearance has no Cancel action');
+  assert.equal(await page.$eval('.appearance-save-retry', el => getComputedStyle(el).display), 'none', 'retry is invisible until a save fails');
   await edit('documentBackground', '#182C38');
   assert.equal(await page.$eval('body', e => getComputedStyle(e).backgroundColor), 'rgb(24, 44, 56)');
-  assert.equal(await page.$eval('.cm-editor', e => getComputedStyle(e).backgroundColor), 'rgb(24, 44, 56)');
-  assert.equal(await role('surface'), originalSurface, 'document background does not change the UI surface');
-  assert.deepEqual((await source()).map(([text, color]) => [text, color]), sourceBefore.map(([text, color]) => [text, color]), 'document background preserves native Source ink');
+  assert.equal(await role('surface'), originalSurface, 'document background is independent of UI surface');
+  assert.deepEqual((await source()).map(([text, color]) => [text, color]), sourceBefore.map(([text, color]) => [text, color]), 'background changes preserve Source ink');
+  await saved('dark', 'documentBackground', '#182C38');
   await edit('documentBackground', '#FFFFFF');
-  assert.equal(await page.$eval('.appearance-background-warning', element => (element as HTMLElement).hidden), false, 'an unsuitable custom background explains the ink/mode mismatch');
-  assert.equal(await value('documentBackground'), '#FFFFFF', 'contrast advice must not rewrite the user color');
-  await edit('documentBackground', '#182C38');
-  await page.click(cancel);
-  assert.equal(await page.$eval('body', e => getComputedStyle(e).backgroundColor), originalDocumentBackground, 'cancel restores the document carrier');
+  assert.equal(await page.$eval('.appearance-background-warning', e => (e as HTMLElement).hidden), false);
+  assert.equal(await value('documentBackground'), '#FFFFFF', 'contrast advice retains the chosen color');
+  await page.click(resetColors); await saved('dark', 'documentBackground', null);
   const drag = await page.evaluate(async () => {
     const swatch = document.querySelector<HTMLInputElement>('[data-setting="surface"] .appearance-color-swatch')!;
     const readback = CanvasRenderingContext2D.prototype.getImageData;
@@ -273,45 +280,38 @@ try {
   assert.equal(drag.feedbackWrites, 0, 'presenting a draft does not write back into an active color input');
   assert.equal(drag.latestHex, '#284836', 'HEX feedback follows the latest drag event immediately');
   assert.equal(await role('surface'), 'rgb(40, 72, 54)');
-  assert.deepEqual(owner.getUiColors(), {light: {}, dark: {}}, 'drag preview does not persist');
   assert.deepEqual(await source(), sourceBefore, 'continuous UI preview retains the Source palette');
-  await page.click(cancel);
-  for (const action of ['cancel', 'close', 'reset'] as const) {
-    await page.evaluate(action => {
-      const swatch = document.querySelector<HTMLInputElement>('[data-setting="surface"] .appearance-color-swatch')!;
-      swatch.value = '#284836'; swatch.dispatchEvent(new Event('input', {bubbles: true}));
-      // Act in the same event turn, before the queued preview gets a frame.
-      const selector = action === 'cancel' ? '.appearance-footer .settings-actions button:first-child'
-        : action === 'close' ? '.settings-close' : '.appearance-footer > button';
-      document.querySelector<HTMLButtonElement>(selector)!.click();
-    }, action);
-    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    assert.equal(await role('surface'), originalSurface, action + ' prevents a late drag preview from restoring the discarded color');
-    if (action === 'close') await openSettings();
-  }
-  await edit('surface', '#102537'); assert.equal(await role('surface'), 'rgb(16, 37, 55)', 'manual background retains its chroma');
-  await edit('text', '#FFD6E5'); assert.equal(await role('text'), 'rgb(255, 214, 229)', 'readable manual text is not neutralized');
-  assert.deepEqual(await source(), sourceBefore, 'UI overrides do not recolor Source content');
-  assert.deepEqual(owner.getUiColors(), {light: {}, dark: {}}, 'preview does not persist');
-  await page.click(cancel); assert.equal(await role('surface'), originalSurface); assert.equal(await value('surface'), '');
+  await saved('dark', 'surface', '#284836');
+  await page.click(resetColors); await saved('dark', 'surface', null);
+  const writesBefore = await page.evaluate(() => (window as any).__messages.filter((m: any) => m.type === 'updateUiColors').length);
+  await page.evaluate(() => {
+    const swatch = document.querySelector<HTMLInputElement>('[data-setting="surface"] .appearance-color-swatch')!;
+    for (const color of ['#102537', '#112638', '#122739']) { swatch.value = color; swatch.dispatchEvent(new Event('input', {bubbles: true})); }
+  });
+  await saved('dark', 'surface', '#122739');
+  assert.equal(await page.evaluate(() => (window as any).__messages.filter((m: any) => m.type === 'updateUiColors').length), writesBefore + 1, 'one drag burst makes one persisted write');
   for (const close of ['button', 'escape', 'backdrop'] as const) {
-    await edit('surface', '#102537');
+    const color = close === 'button' ? '#102537' : close === 'escape' ? '#112638' : '#122739';
+    await edit('surface', color);
     if (close === 'button') await page.click('.settings-close');
     else if (close === 'escape') await page.keyboard.press('Escape');
     else await page.mouse.click(1, 1);
-    assert.equal(await role('surface'), originalSurface, close + ' discards preview'); await openSettings();
+    await saved('dark', 'surface', color); await openSettings();
+    assert.equal(await value('surface'), color, close + ' flushes and retains the latest valid value');
   }
-  await edit('accent', '#1234'); assert.equal(await page.$eval(apply, e => (e as HTMLButtonElement).disabled), true); assert.equal(await page.$eval(input('accent'), e => e.getAttribute('aria-invalid')), 'true');
-  await edit('accent', '#2AF'); await page.click('[data-setting="accent"] .appearance-color-reset'); assert.equal(await value('accent'), '');
-  await edit('surface', '#102537'); await edit('textEmphasis', '#99CCAA'); await edit('documentBackground', '#182C38');
-  fail = true; await page.click(apply); await page.waitForFunction(() => !document.querySelector<HTMLElement>('.appearance-status')!.hidden);
-  assert.equal(await value('surface'), '#102537'); assert.equal(await role('surface'), 'rgb(16, 37, 55)'); assert.deepEqual(owner.getUiColors(), {light: {}, dark: {}});
-  fail = false; await page.click(apply); await page.waitForFunction(() => document.querySelector<HTMLButtonElement>('.appearance-footer .settings-primary')!.disabled);
-  assert.deepEqual(owner.getUiColors(), {light: {}, dark: {surface: '#102537', textEmphasis: '#99CCAA', documentBackground: '#182C38'}});
+  await edit('accent', '#1234');
+  assert.equal(await page.$eval(input('accent'), e => e.getAttribute('aria-invalid')), 'true');
+  await page.click('.settings-close'); await openSettings();
+  assert.equal(owner.getUiColors().dark.accent, undefined, 'an invalid HEX prefix cannot overwrite the saved color');
+  fail = true;
+  await edit('textEmphasis', '#99CCAA');
+  await page.waitForFunction(() => !document.querySelector<HTMLElement>('.appearance-status')!.hidden);
+  assert.equal(owner.getUiColors().dark.textEmphasis, undefined);
+  fail = false; await page.click('.appearance-save-retry'); await saved('dark', 'textEmphasis', '#99CCAA');
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('.appearance-save-retry')!.hidden);
   await page.click('.settings-close'); await openFixture(); await openSettings();
-  assert.equal(await value('surface'), '#102537', 'a reloaded Webview receives persisted colors');
-  assert.equal(await value('documentBackground'), '#182C38');
-  assert.equal(await page.$eval('body', e => getComputedStyle(e).backgroundColor), 'rgb(24, 44, 56)', 'reload restores the independent document background');
+  assert.equal(await value('surface'), '#122739', 'reload receives persisted values');
+  assert.equal(await value('textEmphasis'), '#99CCAA');
   await page.click('.settings-close'); await page.click('[data-mode="live"]');
   await page.waitForSelector('.meo-md-heading-content');
   assert.equal(await page.$eval('.meo-md-heading-content', e => getComputedStyle(e).color), await role('text-emphasis-content'), 'saved content emphasis projects its contrast-corrected role onto the actual Live heading');
@@ -327,48 +327,35 @@ try {
   });
   assert.ok(headingContrast >= 4.5, 'content emphasis stays readable on the stronger inline surface without rewriting the saved color');
   await openSettings();
-  await page.click('[data-appearance-mode="light"]'); assert.equal(await value('surface'), '', 'light profile is independent');
-  await checkControlLayout();
-  if (screenshots) await page.screenshot({ path: path.join(screenshots, '060-appearance-light.png') });
-  await checkColorFocus();
-  await edit('surface', '#F8F4EF'); await page.click(apply); await page.waitForFunction(() => document.querySelector<HTMLButtonElement>('.appearance-footer .settings-primary')!.disabled);
-  assert.equal(owner.getUiColors().light.surface, '#F8F4EF'); assert.equal(owner.getUiColors().dark.surface, '#102537');
-  await page.click('[data-appearance-mode="dark"]'); assert.equal(await value('surface'), '#102537');
-  await page.setViewport({width: 360, height: 740});
-  assert.equal(await page.$eval('.settings-window', e => e.scrollWidth <= e.clientWidth), true, 'narrow window has no horizontal clipping');
-  assert.equal(await page.$eval('.settings-content', e => e.scrollWidth <= e.clientWidth), true, 'narrow color controls fit their scroll surface');
-  await page.setViewport({width: 1100, height: 820});
-  // Host changes rebase only untouched fields of an open draft.
+  await page.click('[data-appearance-mode="light"]');
+  assert.equal(await value('surface'), '', 'light and dark profiles are independent');
+  await checkControlLayout(); await checkColorFocus();
+  await edit('surface', '#F8F4EF'); await saved('light', 'surface', '#F8F4EF');
+  if (screenshots) await page.screenshot({path: path.join(screenshots, '060-appearance-light.png')});
+  // Untouched fields accept external configuration while local edits are pending.
   await edit('surface', '#112638');
-  const external = {...owner.getUiColors(), light: {accent: '#005588'}};
-  await owner.setUiColors(external); await page.evaluate(colors => window.dispatchEvent(new MessageEvent('message', {data: {type: 'uiColorsChanged', colors}})), external);
-  assert.equal(await value('surface'), '#112638'); await page.click(apply); await page.waitForFunction(() => document.querySelector<HTMLButtonElement>('.appearance-footer .settings-primary')!.disabled);
-  assert.equal(owner.getUiColors().light.accent, '#005588', 'saving preserves unrelated external changes');
-  // A response to a closed window must not replace a newly opened draft.
-  await page.evaluate(() => { (window as any).__holdColorsReply = true; }); await edit('accent', '#4477CC'); await page.click(apply);
+  const external = {...owner.getUiColors(), light: {...owner.getUiColors().light, accent: '#005588'}};
+  await owner.setUiColors(external);
+  await page.evaluate(colors => window.dispatchEvent(new MessageEvent('message', {data: {type: 'uiColorsChanged', colors}})), external);
+  await saved('light', 'surface', '#112638');
+  assert.equal(owner.getUiColors().light.accent, '#005588');
+  // A held acknowledgement cannot erase newer edits, even an edit back to the previously saved value.
+  await page.evaluate(() => { (window as any).__holdColorsReply = true; });
+  await edit('accent', '#4477CC');
   await page.waitForFunction(() => typeof (window as any).__releaseColorsReply === 'function');
+  await edit('accent', '#005588');
   await page.click('.settings-close'); await openSettings();
   await page.evaluate(() => (window as any).__releaseColorsReply());
-  await page.waitForFunction(() => !document.querySelector<HTMLButtonElement>('[data-setting="accent"] .appearance-color-hex')!.disabled);
-  assert.equal(await value('accent'), '#4477CC');
+  await saved('light', 'accent', '#005588');
+  assert.equal(await value('accent'), '#005588', 'late acknowledgements preserve the latest intent');
   await page.click('[data-appearance-mode="auto"]');
   await page.evaluate(() => { document.body.className = 'vscode-high-contrast'; window.dispatchEvent(new MessageEvent('message', {data: {type: 'vscodeCodeThemeChanged', appearance: 'dark', vscodeTheme: {name: 'HC', type: 'dark', colors: {}, tokenColors: []}}})); });
-  assert.equal(await role('surface'), 'rgb(34, 39, 46)', 'high contrast uses native surface instead of saved custom surface');
-  assert.equal(await page.$eval('body', e => getComputedStyle(e).backgroundColor), 'rgb(34, 39, 46)', 'high contrast also preserves the native document carrier');
+  assert.equal(await role('surface'), 'rgb(34, 39, 46)', 'high contrast uses the native palette');
   assert.ok(await page.$eval('.appearance-note', e => e.textContent?.includes('高对比度')));
   await page.evaluate(() => { document.body.className = 'vscode-dark'; window.dispatchEvent(new MessageEvent('message', {data: {type: 'vscodeCodeThemeChanged', appearance: 'dark', vscodeTheme: {name: 'dark', type: 'dark', colors: {}, tokenColors: []}}})); });
-  assert.equal(await role('surface'), 'rgb(17, 38, 56)');
-  await page.evaluate(() => {
-    const swatch = document.querySelector<HTMLInputElement>('[data-setting="accent"] .appearance-color-swatch')!;
-    for (const color of ['#4488AA', '#5599BB']) { swatch.value = color; swatch.dispatchEvent(new Event('input', {bubbles: true})); }
-    document.querySelector<HTMLButtonElement>('.appearance-footer .settings-primary')!.click();
-  });
-  await page.waitForFunction(() => document.querySelector<HTMLButtonElement>('.appearance-footer .settings-primary')!.disabled);
-  await page.waitForFunction(() => !document.querySelector<HTMLInputElement>('[data-setting="accent"] .appearance-color-swatch')!.disabled);
-  assert.equal(owner.getUiColors().dark.accent, '#5599BB', 'Apply before a preview frame saves the latest drag value');
-  assert.equal(await role('accent'), 'rgb(85, 153, 187)');
-  await page.click('.appearance-footer > button'); await page.click(apply); await page.waitForFunction(() => document.querySelector<HTMLButtonElement>('.appearance-footer .settings-primary')!.disabled);
-  assert.deepEqual(owner.getUiColors(), {light: {}, dark: {}}, 'reset clears both profiles after Apply');
+  assert.equal(await value('surface'), '#122739');
+  await page.click(resetColors); await saved('dark', 'surface', null); await saved('light', 'surface', null);
+  assert.deepEqual(owner.getUiColors(), {light: {}, dark: {}}, 'reset immediately clears both profiles');
   assert.deepEqual(errors, []);
-  console.log('Production appearance: bundled defaults for opposite appearances, actual source hints/search, drag preview coalescing, immediate Apply/discard, preview/cancel, all close paths, validation, save failure/retry, reload, light/dark isolation, external updates, delayed responses, high contrast and narrow layout passed');
+  console.log('Production appearance: bilingual light/dark layout, defaults, semantic colors, drag projection/coalescing, autosave, all close paths, validation, retry, reload, external changes, delayed acknowledgements and high contrast passed');
 } finally { await closeTestBrowser(browser); }

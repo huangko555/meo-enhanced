@@ -26,25 +26,10 @@ async function focus(page: Page, scene: Scene) {
         .find(input => input.value === 'Target')!;
       input.focus({ preventScroll: true }); input.setSelectionRange(0, 0);
     });
-  } else if (scene === 'mermaid') {
-    const kind = 'mermaid';
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (await page.$(`.meo-${kind}-editing-block .cm-content`)) break;
-      await page.$eval(`.meo-${kind}-mode-btn`, (button: HTMLButtonElement) => button.click()); await frames(page, 4);
-    }
-    await page.evaluate(kind => {
-      const block = document.querySelector(`.meo-${kind}-editing-block`) as any;
-      const view = (kind === 'mermaid' ? block.__meoMermaidEditingController : block.__meoLatexMathEditingController).innerView;
-      view.dispatch({ selection: { anchor: view.state.doc.length } }); view.focus();
-    }, kind);
   } else {
-    if (scene === 'html') await page.evaluate(() => {
-      const block = [...document.querySelectorAll('.meo-md-html-block')].find(block => block.textContent?.includes('Html target'))!;
-      block.querySelector<HTMLButtonElement>('.meo-md-html-source-toggle')!.click();
-    });
     await page.evaluate(scene => {
       const view = (document.querySelector('.editor-host > .cm-editor .cm-content') as any).cmTile.root.view;
-      const needle = scene === 'math' || scene === 'latex' ? 'x+1' : `${scene === 'prose' ? 'Typing' : scene[0]!.toUpperCase() + scene.slice(1)} target`;
+      const needle = scene === 'mermaid' ? 'A-->B' : scene === 'math' || scene === 'latex' ? 'x+1' : `${scene === 'prose' ? 'Typing' : scene[0]!.toUpperCase() + scene.slice(1)} target`;
       const at = view.state.doc.toString().indexOf(needle);
       if (at < 0) throw new Error(`Missing ${needle}`);
       view.dispatch({ selection: { anchor: at + needle.length } }); view.focus();

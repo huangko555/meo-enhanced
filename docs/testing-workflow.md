@@ -3,6 +3,14 @@
 This repository separates fast feedback from release confidence. The normal
 repair loop stays narrow; broad and endurance runs are intentional events.
 
+`scripts/test-editor-font-wheel.ts` covers the default-enabled independent wheel
+setting, Auto-to-Custom adjustment from the displayed size, persistence/reopening,
+coalesced saves, ordinary scrolling, Live/Source/Preview input, fine trackpad
+deltas, Ctrl/Cmd modifiers, font bounds, and bilingual light/dark settings at
+normal and narrow widths. It runs in quick, targeted appearance and browser gates;
+visual evidence is saved under `.local/font-wheel-acceptance/`. The existing
+font-size viewport contract covers reading-anchor continuity during layout changes.
+
 Preview preset memory is covered by `scripts/test-preview-preset-preferences.ts`
 and `scripts/test-preview-preset-preferences-browser.ts` in quick, appearance and
 release gates. They verify built-in/custom initial Auto behavior, independent
@@ -113,6 +121,124 @@ DOM retention, and preserves distant overview endpoints, search, resize and
 line-number remounts. It is a targeted browser check; the normal table, search
 and diff ruler tests retain their existing gates.
 
+
+Webview viewport setup waits for an editable mode to be applied before sending
+fixture navigation or sampling its controls. The mode button projects a request;
+Source preparation can still be pending. Check the visible, interactive editor's
+mode and the completed saved-mode projection, then keep the existing frame samples
+and behavioral assertions. Do not wait directly for the expected diff-row or gutter
+counts. Intentional transition-frame and pending Preview checks retain their own
+observation windows.
+
+Document-update fixtures use strictly increasing Host revision numbers for changed
+content and verify the complete text was applied before starting another scenario.
+A captured `docChanged` message or a fixed frame delay does not establish that
+precondition; reusing a revision for different text can leave the old document on
+screen. Keep the later theme, trusted-wheel and painted geometry assertions.
+
+Responsive table setup waits on the visible Preview iframe's own animation-frame
+clock after outer Webview frames. Its ResizeObserver projects wrapper widths on
+that document; outer frames can still expose the preceding width. Keep the full
+theme/mode/continuous-resize matrix and the original geometry limits. A finite
+pause of the iframe clock must expose the old setup race and the owner-clock
+barrier must complete after release, without polling for the expected widths.
+
+Clipped rendered-content history verifies the exact changed native source target,
+collapsed selection, real editor focus and full caret visibility after undo.
+Retain the clipped-preview precondition and exact history snapshots. A derived
+Mermaid graph below that source need not also fit in the viewport: revealing it
+again would violate the single history-positioning intent.
+
+Pasted-image naming is covered by `test:image-storage` and the production settings
+and link-destination contracts. They verify the document-name default, all naming
+presets, continuing numbers across image formats, concurrent exclusive creation,
+Chinese folders/document names, escaped Markdown targets and final-file-name alt
+text. Settings coverage includes persisted selection, bilingual search and narrow
+light/dark layouts; `MEO_SETTINGS_SCREENSHOTS` captures the naming controls.
+
+`scripts/test-link-candidates-production.ts` initializes the standalone fixture's
+host font variables and measures native textarea text through Chromium's debugging
+protocol. Its real mouse-click checks cover both single-line and wrapped paths in
+monospace and serif fonts, retaining caret, completion-resume and insertion assertions.
+Native character bounds establish the target's visual line; a shared table-row
+height or a separate div mirror cannot establish the native text layout.
+
+`scripts/test-pdf-page-background.ts` runs in the browser gate and uses the production
+PDF renderer for every built-in preset and a custom dual-theme preset. It compares
+the final PDF's full-paper background drawing on every page against the rendered
+document color, including non-white light backgrounds, dark backgrounds, custom
+zero/variable margins and a partly filled last page. DOM color checks or a PDF file
+header alone cannot catch a contrasting frame in the printed page margins.
+`scripts/test-html-content.ts` covers shared HTML tag/style filtering in default
+HTML/PDF/DOCX output, adjacent and nested fragments, CommonMark boundaries, image
+dimensions, and Live source-above-result editing. Its browser checks preserve
+native text selection, disclosure/link actions, undo and mode continuity,
+tag/attribute completion, closing tags, literal paste and IME input. They
+use the shared input candidate menu. `scripts/test-html-completion-production.ts`
+covers its Live/Source tag, attribute and value insertion, single-step undo/redo,
+unfinished block tags across Markdown parse transitions (`<p` → `<pr`), quiet
+unfinished markup and retained warnings for completed unsupported tags,
+paired quotes to the right of an unfinished tag's attribute value,
+manual activation, disabled and reconfigured settings, Escape caret retention,
+IME ownership, shared placement and bilingual light/dark/narrow screenshots under
+`.local/html-completion-acceptance/`; it belongs to quick and browser/release gates.
+The HTML content checks
+verify pasted HTML opens source without reformatting or moving the native caret,
+including trailing blank lines, hidden fragments, sibling blocks and history.
+Source/Live transitions continue to respect the caret; inline HTML and code keep
+their own input paths. `bun scripts/test-html-content.ts --pointer-only` runs only
+the HTML layout/gutter alignment with hidden trailing nodes and nested containers,
+HTML/math final-row clicks, native source dragging and actual Ctrl+C/Ctrl+V round trips,
+the nonselectable format action and source presentation through pointer release, including
+entering a native table cell whose widget bypasses CodeMirror's pointer handlers. The checks also
+cover forward/reverse HTML/math cross-block drags, keyboard selection extension,
+source-only copying, exact cut/undo/redo and native HTML reading selection.
+`bun scripts/test-html-content.ts --selection-only` isolates those selection checks.
+Editing previews must not add a second copy of rendered text to the native source
+selection. Native VS Code clipboard acceptance has a separate disposable-profile
+launcher: `./scripts/test-vscode-html-copy.ps1 -CodePath <Code.exe>`. Build the
+current extension and Webview first; it checks mouse selection, Ctrl+C, the workbench copy command,
+Ctrl+V and whole-document copying through the system clipboard, restores previous
+clipboard text, and records results under `.local/probes/html-copy-*/`. The isolated
+launcher uses CDP rather than the host mouse/keyboard and writes only temporary
+fixture documents. This does not verify the user's existing profile or keybindings.
+The HTML browser checks also
+verify that empty/hidden fragments remain discoverable as muted source without
+adding an empty preview. Screenshots under `.local/html-fragment-acceptance/`
+cover Chinese/English, light/dark and narrow layouts. Existing gutter, mode,
+focus and layout contracts use main-document selection to enter HTML source.
+The same contract verifies explicit HTML formatting and its single undo/redo,
+Live/Source keyboard entry with reassigned and cleared bindings, unified tooltip
+shortcut labels, localized filtered-content details, preserved
+whitespace, invalid input and late-result protection. Its trusted-wheel scenario
+places rendered HTML above the viewport and checks every frame of HTML and math
+expansion, preventing unrelated reading-anchor restoration from shifting earlier content.
+Word HTML acceptance uses `scripts/test-docx-export-runtime.ts` for inline text,
+figure captions and explicit pre-wrap line breaks, and
+`scripts/test-docx-export-browser.ts` for hidden attributes, CSS visibility,
+transparent/zero-size text, closed details and visible child overrides. Inspect
+the final Word document in Word as well: its HTML converter retains editable
+text but approximates browser typography, repeated spaces, ruby and custom list
+numbering. Deliberately unclosed tags can still affect following HTML content.
+`scripts/test-block-editing-transitions.ts` adds a shared production-editor contract
+for formulas, HTML, short/folded code and both Mermaid layouts: four directional
+boundaries, pointer release, Escape/Enter, reverse Tab, document selection, visible
+reading focus and document-end completion without text mutation. It distinguishes temporary hidden-target reveals from explicit long-code
+expansion and samples every frame of a tall Mermaid roundtrip, rather than checking
+only coordinates after a fixed settlement delay. It belongs to `test:rendered-source`.
+
+`scripts/test-block-passive-updates.ts` covers compact long-code summary focus,
+unchanged reading focus through passive refresh and position mapping, retained
+neighboring render roots and source tokens during typing, and painted Mermaid
+layout icon/caption alignment in both themes, languages, fonts and directions.
+It also belongs to `test:rendered-source` and saves visual evidence under
+`.local/block-passive-acceptance/`.
+
+`scripts/test-mermaid-viewport-persistence.ts` and `scripts/test-image-layout.ts`
+also verify proportional button/wheel zoom beyond the former 4x limit, inverse
+steps, retained minimum, reset and unchanged camera/layout behavior. The Mermaid
+contract saves a production-rendered zoom screenshot under `.local/visual-zoom-acceptance/`.
+
 The Mermaid/formula inner-source matrix and findings are in
 [testing-rendered-block-source.md](testing-rendered-block-source.md). Run
 `bun run test:rendered-source` for its dedicated input, boundary and appearance
@@ -121,6 +247,12 @@ Review its operation outcomes against the README, commands, settings and changes
 since the last release before selecting acceptance evidence. Gate membership is
 necessary, but a visible control or emitted message alone is not a successful
 operation. Report browser, Host-contract and final installed-VSIX evidence separately.
+
+`scripts/test-mermaid-editing.ts` checks that a zoomed tall diagram in side-by-side
+editing fills the document viewport to its bottom, including after window resizing,
+and stops at its block boundary. It covers English/dark and Chinese/light with fixed
+editor chrome above the document. Use `--preview-viewport-only` for the focused
+regression; the default invocation retains it in the rendered and release suites.
 
 `scripts/test-tab-switch-reading-position.ts` checks retained Webviews with both
 offscreen parking and `visibility:hidden` inside the viewport. Geometric intersection
@@ -151,7 +283,9 @@ or disposing tables, while retaining focused-cell caret measurement.
 Its controlled height-map receipt isolates delayed CodeMirror anchoring from
 actual DOM movement. It also verifies that background Mermaid warming waits for
 native scrolling to settle, resumes afterward, and respects cancellation; visible
-render calls remain immediate. Full-document scroll tests load the same runtime.
+render calls remain immediate. Full-document scroll and font sweeps use delayed
+SVG adapters to control layout timing; actual Mermaid rendering is covered by
+the editing contracts and full-document UAT.
 The viewport-controller unit matrix interleaves background document presentation,
 native wheel adoption and virtual-gap contraction in both directions. Document
 presentation yields its fixed-target projection to the active native reading owner;
@@ -164,6 +298,12 @@ anchoring, browser boundary clamps, below-line growth/contraction and input whos
 native scroll has not yet been adopted, without replaying event deltas.
 Also combine range growth/contraction with continuing native motion in the same
 gesture: range changes alone must not reject actual scroll progress.
+`scripts/test-live-caret-continuity.ts` also covers input whose virtual height
+correction changes the scroll offset while the physical caret stays in place,
+with and without a separate `beforeinput` event. Compare successive measurements
+so accumulated normal typing scroll is not mistaken for a new correction.
+Retain normal wrapping context, later layout retention and cancellation by new
+navigation; supplement this contract with the original production document UAT.
 IME fixtures must hit painted text or use native caret movement, then verify the
 source boundary after Live marker reconciliation paints. A `display:none` source
 delimiter has a zero rectangle and must never become an editor click at `(0, 0)`.
@@ -340,6 +480,34 @@ exact commands without running them.
 
 ## Daily repair loop
 
+Browser fixtures must establish the state their assertions inspect. Reset an
+inherited selection and fit a finite fixture before querying its complete reading
+DOM; offscreen nodes may be virtualized. After a pointer release, wait for the
+resulting presentation before reading its activity markers. For text-boundary
+clicks, use integer coordinates inside the first half of the visible glyph rather
+than a fractional edge that can round into hidden syntax. Inject command failures
+into document-changing transactions so unrelated UI effects cannot consume them.
+When positioning a popup after typing, use a native wheel gesture and verify the
+actual anchor position before testing its edge layout. Assigning `scrollTop`
+alone does not signal a new user scroll and can compete with input retention.
+
+For native block-action clicks, wait for `whenVisiblePresentationReady` after the
+last fixture navigation and before acquiring the final control handle. A visible
+box and `scrollend` may precede that navigation's source presentation; stale
+coordinates can turn a button click into a source selection. Preserve actual
+pointer events and the existing identity/replacement guards.
+
+Document navigation may itself open a rendered block's source. Wait for that
+presentation before operating Edit/Finish or layout controls, and locate Mermaid
+toolbars by their source position rather than a label that changes on completion.
+After leaving Preview, wait for the editor host to become visible and non-inert
+before a separate focus/selection scenario; the active mode label precedes the
+end of the covered presentation transition.
+Inspect diagrams through `.meo-mermaid-svg-wrapper > svg`; toolbar icons are also
+SVG elements. Completion returns keyboard focus to the block's reading target.
+Assert a tooltip's retained identity only while its owning control survives;
+replaced or moved controls must close their previous hint before a fresh hover.
+
 `scripts/test-document-save-as-view-state.ts` checks one-shot view handoff before
 native replacement resolves and when the default editor needs a later MEO open.
 The first init retains mode, semantic reading position and selection with opening
@@ -410,6 +578,9 @@ palette must paint syntax immediately; edits prepare only the latest revision.
 It also checks preparation behind a hidden Preview cover and cancellation.
 The Shiki lifecycle contracts verify bounded shared caches, unchanged palette
 reuse, real palette invalidation, stale-work cancellation and final disposal.
+The background-demotion unit check explicitly advances reading-pause timers and
+idle callbacks, including fast polling turns. A fixed count of zero-delay timer
+callbacks does not prove that a real 50ms pause expired on every operating system.
 Background Source preparation pauses between batches during native reading and
 retains completed work. Explicit Source transitions promote the same job, keep
 the current surface covered until prepared, and reuse the cache on return.
@@ -502,6 +673,17 @@ multiline tags, unquoted attributes and entities, with code/comments and unsafe
 schemes excluded. Browser message delivery and Host command routing are distinct
 evidence; final installed-VSIX behavior still requires native acceptance.
 
+`scripts/test-local-links-production.ts` covers angle-wrapped local paths with
+Chinese and spaces in Live prose and tables, real Ctrl clicks, file-resource
+invalidation and out-of-order responses through the full Webview bootstrap in
+Chinese/light and English/dark. It runs in quick and browser/release gates.
+`scripts/test-document-links.ts` also runs in quick and retains Host coverage for
+creation/deletion, extension fallback, external file URIs, missing directory
+ancestors, watcher disposal, asynchronous native registration races and Markdown
+filenames that must not fall back to websites.
+`test-protocol-stale-responses.ts` covers immediate invalidation of
+obsolete missing hints; these focused checks take seconds rather than a long run.
+
 `scripts/test-export-links.ts` and `scripts/test-export-links-browser.ts` run in
 quick, targeted appearance and release gates. They cover all built-in presets and
 a custom preset with the GitHub base, both path separators, encoded filenames,
@@ -520,6 +702,13 @@ the browser export check also generates final Word and PDF files. Eight-category
 pie charts are checked in both themes, Word drawing bounds against actual page
 margins, and PDF heading/description/diagram pagination. Build first.
 This focused pack typically takes less than a minute.
+
+`bun scripts/test-fenced-code-boundaries.ts` checks Source/Live coloring and real
+Mermaid source typing at unfinished fences, including quote/list exits, nested
+quotes, ordered lists, deleting a closer, authoring an unfinished diagram, and exact document undo/redo. It also
+captures light/dark screenshots. `test:rendered-source` includes this contract.
+The quick Shiki recovery contract checks longer same-type closing fences and
+rejects short or mismatched closers, including unfinished embedded syntax.
 
 1. Reproduce the reported behavior with the smallest relevant contract.
 2. While implementing, rerun only that contract.
@@ -584,6 +773,18 @@ preview and HTML export, including PDF/Word formula fitting, with both themes
 and narrow/wide panes. Live zoom,
 reset and fullscreen are checked through their controls. This contract runs in
 the targeted rendered and full browser gates.
+It also checks automatic wrapping of continuous and nested fractions: adjacent
+rows must retain visible clearance and fit their container in Live, Preview,
+Source's side preview, HTML export and print preparation. Inline math, equation
+numbers and fraction/matrix internals retain their native spacing. The matrix
+covers Default, GitHub and a GitHub-based custom preset in Chinese/English,
+light/dark and narrow/wide panes. Live is checked once per language/theme/width
+because reading presets do not affect its layout. The Preview and side-preview
+checks confirm the requested preset actually rendered. `--capture` saves narrow
+Live/Preview screenshots under `.local/test-artifacts/math-reflow/`, named by
+preset, surface, theme and language.
+Use `--preview-only` for the focused preset display/visibility loop while
+retaining the full surface matrix in the registered regression run.
 
 `scripts/test-live-input-path-production.ts` observes inserted text's computed
 styles in the first four input frames, including IME preedit and commit. It covers
@@ -657,6 +858,45 @@ pointer hints start or renew the window, and covers expiry, empty
 targets, clicks, explicit dismissal, blur, removal, owner disposal, keyboard focus
 and stateful updates. It runs in the targeted appearance and release browser
 gates alongside the compositor timing and production control checks.
+
+## Math source highlighting
+
+`bun scripts/test-math-syntax-production.ts` checks math syntax through the production
+Source and Live editor in both themes: inline and display delimiters, all four math
+fence aliases, quoted/list containers, unfinished formulas, escaped/currency/code
+boundaries, comments, lazy language loads, multiline token batches, independent
+Source customizations and typing/undo/redo. It saves real-theme screenshots under
+`.local/test-artifacts/math-syntax/`. This contract belongs to the quick, targeted
+appearance and release browser gates. Source first-paint coverage also includes
+inline math so preparation and mode roundtrips retain its syntax colors.
+Currency checks compare every numeric run with the prose foreground, including
+Chinese text and a later escaped dollar on the same line. Closed numeric formulas
+and explicit unfinished math must retain their highlighting.
+Unclosed `$$` source stops at headings, code fences and quote/list container exits
+in both Source and Live, with or without blank separators. Recovery preserves
+native Markdown colors, typing/history, empty lines and long formulas; math code
+fences retain their normal Markdown extent. Completion cannot reuse a TeX closer
+past the recovered boundary. The contract also captures the unfinished-block result.
+
+## Math autocomplete
+
+`bun run test:math-completion` checks formula command contexts, replacement and
+template compatibility with the installed KaTeX, then exercises the production
+Live/Source editor. It covers incomplete delimiters and all four math fence
+aliases, nested tab stops, existing arguments and environment closers, literal
+and comment exclusions, IME composition, undo/redo, mode changes, read-only
+state, disabled preferences, bilingual light/dark menus and a narrow viewport.
+The deterministic contract and browser contract run in the quick gate and
+release suites; the browser contract also belongs to the targeted history pack.
+Settings persistence and the shared menu placement are covered by the existing
+editing-preferences and settings-window contracts.
+
+The browser contract also checks every catalog entry in both UI languages and
+light/dark themes: fixed insertion templates, valid KaTeX examples, equal row
+heights and preview containment. Existing arguments/closers do not change the
+menu template. `bun scripts/test-math-completion-production.ts --capture-catalog`
+saves actual production menu row screenshots for the full catalog, plus a
+manifest, under `.local/test-artifacts/math-completion/catalog/`.
 
 ## HTML comment input
 
@@ -1338,9 +1578,13 @@ When font-size or viewport behavior changes, supplement the release gate with
 --confirm-long-run` on a representative rich document. The runner checks every
 sampled position in Live, Source, split Source/Preview, and Preview through five
 size increases and decreases. Record the fixture hash and anomaly count. Near
-the document end, an enlarged layout can reach the maximum scroll position;
-those frames are reported as bottom-constrained instead of being counted as
-top-anchor jumps. Any remaining displacement over 12 px is a failure.
+the document end, either increasing or decreasing font size can exhaust the
+available scroll range. Count a frame as bottom-constrained only when preserving
+the same source anchor would require scrolling beyond the measured maximum and
+the actual scroll is already at that boundary. Report those frames separately;
+any remaining displacement over 12 px is a failure. Track table rows by their
+captured source identity, excluding duplicated sticky-header rows, since a
+previous DOM node can be reused for a different table.
 
 After focused fixes and review have converged, run the complete release gate before endurance. Keep browser performance and
 native endurance runs serial to avoid resource contention. Diagnose failures with
@@ -1356,6 +1600,11 @@ formula shells are reported rather than edited through the outer editor. For
 rendered blocks taller than the viewport, visible history checks the edited source
 line. A document-end scroll clamp is counted separately only when the target line's
 removed height accounts for the entire scroll-limit change without oscillation.
+
+The full-document editing UAT loads the packaged Mermaid runtime and verifies
+its render entry before creating the editor. Missing renderer dependencies are
+fixture failures; an error fallback must not stand in for normal rich-document
+rendering. Keep all original input, history and painted-frame assertions.
 
 The full-document endurance runner exercises editor history and viewport
 stability; it does **not** exercise VS Code's auto-save scheduler or real disk
@@ -1416,9 +1665,15 @@ segment/fragment/title preservation, vault-scoped fuzzy/multiword ranking before
 limit, background aliases/titles and invalidation, shortest unambiguous Wiki targets,
 native table alias escaping, slash ownership even when suggestions are disabled, and
 selected clipped text without pointer hover. Path menus use one line and do not repeat
-the path; default-size width is 260px, larger fonts stop at 300px, selection and
+the path; default-size width is 248px, larger fonts stop at 300px, selection and
 directory chaining retain width, and narrow viewports constrain the menu. Wiki
-document results retain the wider two-line layout. Browser checks include Source/Live,
+document results retain the wider two-line layout at 320px for the default size.
+Candidate widths are fixed by family and UI language, with font scaling and viewport
+constraints. Each menu family uses a uniform row structure: HTML omits type labels,
+all headings show anchors, and all slash commands retain descriptions. Math catalog checks
+assert that complete templates fit beside the rendered example. Focused visual smoke
+covers every family in Chinese/English, light/dark, large fonts and narrow windows.
+Browser checks include Source/Live,
 Chinese/light and English/dark, all candidate families, narrow menus, focus,
 Escape followed by metadata refresh and owner disposal. Quoted-directory IME checks
 retain literal directory prefixes and raw preedit spans while filtering separators
@@ -1426,6 +1681,16 @@ only in the current segment. Pointer-return checks resume an existing directory 
 Source/Live and native table editing after dismissal and external focus.
 Existing tooltip checks retain
 the ordinary hover delay and continuous-hover handoff contracts.
+Window-return checks in `scripts/test-input-focus-return-production.ts` cover
+offscreen native table cells and Live/Source document carets above and below the
+reading viewport. They sample every animation frame through window activation,
+late native element focus and duplicate Host recovery, preserving collapsed and
+backward selections. New wheel gestures, document clicks and the first typed
+character supersede the activation guard; typing still reveals the caret.
+These browser checks model native activation ordering; an actual desktop click
+outside and back into VS Code remains a separate native acceptance boundary.
+The contract belongs to the quick, search and release suites.
+
 Settings-return checks cover the close button, backdrop and Escape in Live/Source,
 scrolled documents, native table cells, and Mermaid/math Source/Split editors.
 They require preserved caret/selection direction and the first typed character
@@ -1435,10 +1700,19 @@ automatic font sizing disables the whole stepper. Toolbar checks cover localized
 HTML-comment labels and consistent indicator insets.
 Animation checks explicitly emulate both motion preferences so desktop accessibility
 settings cannot disable the ordinary-motion branch of the fixture.
+Table delete-confirmation checks wait for actual rendered width progress before
+asserting expansion. A fixed JavaScript delay does not establish that Chromium's
+animation timeline advanced; keep the bounded progress wait and the behavioral
+assertion, together with timeout cancellation, paging, deletion and history checks.
 Popup scroll-following checks use a real wheel gesture and verify its actual scroll
 distance before comparing menu coordinates; direct scroll assignment is not user input.
 Sticky-header occlusion fixtures wait for an edited tall row to shrink before using
 its bounds to position the row behind the header.
+Column-width fixtures settle the current presentation before a trusted wheel
+gesture, then verify the main header is above the viewport and Sticky is visible.
+Use the same setup after font/mode restoration and in rich tables; preserve native
+cell focus where the scenario requires it. Sticky column resizing must retain the
+reading position after pointer release, without revealing the document caret.
 The selection-toolbar switch is checked through real Source/Live drag selections,
 native cell selections, immediate updates, failed writes, stale snapshots and
 reopened documents, while formatting shortcuts remain usable.

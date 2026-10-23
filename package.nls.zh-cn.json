@@ -1,4 +1,5 @@
 {
+  "config.appearance.lineHeight": "按字号倍数设置行间距（默认 1.5 倍）。用于 Live、Source 和默认预览；独立预览预设保留自身排版。",
   "extension.displayName": "MEO Enhanced - Markdown 编辑器",
   "extension.description": "适用于 VS Code、支持实时编辑模式的增强型 Markdown 编辑器。",
   "command.open": "使用 MEO Enhanced 打开",
@@ -25,7 +26,8 @@
   "config.fontSize.auto": "跟随 VS Code 编辑器字号。",
   "config.fontSize.custom": "使用自定义内容字号。",
   "config.fontSize.mode": "选择编辑器内容跟随 VS Code 字号或使用自定义字号。",
-  "config.fontSize.value": "Live、Source 与 Preview 内容使用的自定义字号。",
+  "config.fontSize.value": "编辑、预览和导出使用的自定义字号。",
+  "config.fontSize.mouseWheelZoom": "按住 Ctrl（macOS 为 Cmd）并滚动鼠标滚轮，调整并保存文档字号。自动模式从当前显示字号开始调整，并切换为自定义。独立于 editor.mouseWheelZoom。",
   "config.outline.left": "在编辑器左侧显示文档目录。",
   "config.outline.right": "在编辑器右侧显示文档目录。",
   "config.outline.position": "文档目录侧边栏的位置。",
@@ -42,7 +44,7 @@
   "config.lineHighlights": "在源码模式中以淡色标示修改过的行。",
   "config.imageFolder": "保存粘贴图片的文件夹名称（相对于工作区根目录）。",
   "config.editing.preferences": "输入辅助与编辑器快捷键偏好。可在编辑器的“更多设置”窗口中调整。",
-  "config.imageStorage": "粘贴图片的保存方式。推荐在编辑器“设置 → 输入 → 粘贴”中设置；支持文档旁、按文档分开及高级路径规则。",
+  "config.imageStorage": "粘贴图片的保存与命名方式。在编辑器“设置 → 输入 → 粘贴”中选择目录和命名预设，默认使用文档名＋序号。",
   "config.imageFolderDeprecated": "旧目录配置会保留原有位置；请在编辑器设置中选择新的图片保存方式。",
   "config.preview.codeFontFamily": "Preview 与 HTML/PDF 导出的默认代码字体系列，同时用于行内代码与代码块；留空时使用默认字体。"
 }

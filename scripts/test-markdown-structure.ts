@@ -6,7 +6,7 @@ import { javascriptLanguage } from '@codemirror/lang-javascript';
 import { htmlLanguage } from '@codemirror/lang-html';
 import type { MarkdownParser } from '@lezer/markdown';
 import { NodeType, Parser, Tree, TreeCursor, type Input, type TreeFragment } from '@lezer/common';
-import { certifyMarkdownStructure, isCompleteMarkdownStructure, markdownStructureAvailable,
+import { certifyMarkdownStructure, isCompleteMarkdownStructure, markdownStructureAvailable, preparedMarkdownStructure,
   withMarkdownPreparationViewport } from '../webview/src/editor/markdownStructure';
 import { markdownMixedLanguages } from '../webview/src/editor/markdownMixedLanguages';
 import { liveInputDerivedWorkExtensions } from '../webview/src/editor/liveInputDerivedWork';
@@ -42,6 +42,13 @@ state = state.update({}).state;
 assert.ok(isCompleteMarkdownStructure(syntaxTree(state), state.doc.length), 'completed Markdown is certified even with skipped nested languages');
 assert.ok(!calls.includes(text.indexOf('const distantValue')), 'deferred viewport grammars have not run even when Markdown is complete');
 assert.equal(markdownStructureAvailable(state), true);
+assert.ok(isCompleteMarkdownStructure(preparedMarkdownStructure(state)!, state.doc.length),
+  'the outer producer retains its strictly certified text/parser result');
+assert.equal(preparedMarkdownStructure(EditorState.create({ doc: 'No language' })), undefined,
+  'a state with no parser cannot inherit or invent a completion receipt');
+const otherLanguage = EditorState.create({ doc: state.doc, extensions: markdownLanguage });
+assert.equal(preparedMarkdownStructure(otherLanguage), undefined,
+  'sharing the same immutable text does not permit another parser to reuse the proof');
 assert.ok(calls.length > 0 && calls.every(from => from < 100), 'structural preparation must not parse the distant code language');
 assert.ok(syntaxTree(state).toString().includes('Paragraph'), 'the complete outer syntax remains present');
 const published = syntaxTree(state);
@@ -109,8 +116,15 @@ class SlowParser extends Parser {
   }
 }
 const slow = new Language(javascriptLanguage.data, new SlowParser());
+const unfinishedInner = EditorState.create({ doc: text,
+  extensions: markdown({ base: certifiedBase, codeLanguages: () => slow }) });
+ensureSyntaxTree(unfinishedInner, unfinishedInner.doc.length, 20);
+assert.equal(syntaxTreeAvailable(unfinishedInner, unfinishedInner.doc.length), false);
+assert.ok(isCompleteMarkdownStructure(preparedMarkdownStructure(unfinishedInner)!, unfinishedInner.doc.length),
+  'an unfinished embedded grammar must not hide its completed outer Markdown');
+const slowBeforeManual = slowAdvances;
 const duringInner = markdown({ base: certifiedBase, codeLanguages: () => slow }).language.parser.startParse(text);
-while (slowAdvances === 0) assert.equal(duringInner.advance(), null);
+while (slowAdvances === slowBeforeManual) assert.equal(duringInner.advance(), null);
 // Stop only the unfinished inner pass after the full outer pass has completed.
 // This uses the public parser boundary: CodeMirror may defer publication while
 // a nested parser's progress is behind a previously published prefix.

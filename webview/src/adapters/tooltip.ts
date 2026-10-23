@@ -23,6 +23,7 @@ const ownedAnchors = new WeakMap<HTMLElement, 'automatic' | 'manual'>();
 const textMeasurementContexts = new WeakMap<Document, CanvasRenderingContext2D | null>();
 const menuSelector = '.heading-dropdown, .table-dropdown, .preview-dropdown-panel, .preview-options-panel, .source-preview-more-panel, [role="menu"], .changes-review-popover, .meo-md-html-table-context-menu';
 const modalSelector = 'dialog[open], .meo-md-image-fullscreen-scrim, .meo-mermaid-fullscreen-scrim, .meo-latex-math-fullscreen-scrim';
+const keyboardFocusSelector = ':focus-visible:not([data-meo-pointer-focus])';
 const intersects = (a: Bounds, b: Bounds) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 
 function painted(element: HTMLElement): boolean {
@@ -440,7 +441,7 @@ export function createTooltip(anchor: HTMLElement, options: {
     if (live && changed && engaged) {
       // Reparenting a mode toolbar can temporarily clear :hover before the
       // browser reconciles its pointer target; the hover session remains valid.
-      if (hovering || focusTarget.matches(':focus-visible')) reveal();
+      if (hovering || focusTarget.matches(keyboardFocusSelector)) reveal();
       else hide();
     } else if (changed || !pointerPositioning()) position();
   }
@@ -450,8 +451,8 @@ export function createTooltip(anchor: HTMLElement, options: {
     anchor.addEventListener('pointermove', event => {
       if (event.pointerType !== 'touch') setPointerPosition({ x: event.clientX, y: event.clientY });
     }, { signal: events.signal });
-    anchor.addEventListener('mouseleave', () => { hovering = false; if (!focusTarget.matches(':focus-visible')) hide('leave'); else setPointerPosition(); }, { signal: events.signal });
-    focusTarget.addEventListener('focus', () => { if (focusTarget.matches(':focus-visible')) show(); }, { signal: events.signal });
+    anchor.addEventListener('mouseleave', () => { hovering = false; if (!focusTarget.matches(keyboardFocusSelector)) hide('leave'); else setPointerPosition(); }, { signal: events.signal });
+    focusTarget.addEventListener('focus', () => { if (focusTarget.matches(keyboardFocusSelector)) show(); }, { signal: events.signal });
     focusTarget.addEventListener('blur', () => { if (!hovering) hide(); }, { signal: events.signal });
     focusTarget.addEventListener('pointerdown', pointerDown, { signal: events.signal });
     focusTarget.addEventListener('keydown', event => { if (event.key === 'Escape' || event.key === 'Tab') hide(); }, { signal: events.signal });
@@ -589,7 +590,7 @@ export function bindTooltips(root: HTMLElement, options: {
     // A pointer-driven mode switch may focus its source editor while the same
     // live-update button remains under the pointer. Keep that hint's ownership.
     if (event.type === 'focusin' && current?.anchor.dataset.tooltipLiveUpdate === 'true'
-      && current.hint.isHovered() && (!anchor || !anchor.matches(':focus-visible'))) return;
+      && current.hint.isHovered() && (!anchor || !anchor.matches(keyboardFocusSelector))) return;
     if (!anchor) { current?.hint.dispose(dismissal); current = undefined; return; }
     const content = contentFor(anchor, editableHref);
     if (!content) { current?.hint.dispose(dismissal); current = undefined; return; }
@@ -603,7 +604,7 @@ export function bindTooltips(root: HTMLElement, options: {
     // CodeMirror resets attributes on editable marks; describe its stable root instead.
     const focusTarget = anchor.isContentEditable ? anchor.closest<HTMLElement>('.cm-editor') ?? anchor : anchor;
     current = { anchor, hint: createTooltip(anchor, { content, focusTarget }), editableHref };
-    if (event.type !== 'focusin' || anchor.matches(':focus-visible')) current.hint.show(event instanceof view.PointerEvent && event.pointerType !== 'touch' ? pointer : undefined);
+    if (event.type !== 'focusin' || anchor.matches(keyboardFocusSelector)) current.hint.show(event instanceof view.PointerEvent && event.pointerType !== 'touch' ? pointer : undefined);
   }
 
   function sharedStyles(source: Document): string {

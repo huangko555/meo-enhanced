@@ -7,6 +7,7 @@ import {
 import { renderMathToHtml } from '../../../src/shared/mathRenderer';
 
 export type { LatexMathMode, LatexMathRange } from '../../../src/shared/latexMathScanner';
+export { findFencedDisplayMathEnd } from '../../../src/shared/latexMathScanner';
 
 export interface ParseLatexMathAtOptions {
   excludedRanges?: ReadonlyArray<Readonly<{ from: number; to: number }>>;

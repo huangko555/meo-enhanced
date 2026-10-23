@@ -75,7 +75,12 @@ const createPreviewHtml = (lines: readonly string[]): string => [
   ...lines.map((text, index) => {
     const line = index + 1;
     if (line === 20) {
-      return '<table data-source-line="20" data-source-end-line="36" style="display:block;height:520px;margin:0"><tbody><tr><td>rendered table block</td></tr></tbody></table>';
+      // Production Preview tables expose authored row identity. The delimiter
+      // has no painted row; a one-cell opaque mock cannot exercise that mapping.
+      return '<table data-source-line="20" data-source-end-line="36" style="display:block;height:520px;margin:0;border-spacing:0"><tbody style="display:block">'
+        + [20, ...Array.from({ length: 15 }, (_, i) => i + 22)].map(sourceLine =>
+          `<tr data-source-line="${sourceLine}" style="display:block;height:32.5px"><td style="padding:0;border:0">rendered row ${sourceLine}</td></tr>`).join('')
+        + '</tbody></table>';
     }
     if (line > 20 && line <= 36) return '';
     return `<p data-source-line="${line}" style="height:28px;margin:0 0 ${line === 76 || line === 100 ? 40 : 0}px">${text}</p>`;
@@ -644,21 +649,27 @@ async function main(): Promise<void> {
       })}`
     );
 
+    const previewReadingRow = await page.$eval('.preview-frame', frame => {
+      const doc = (frame as HTMLIFrameElement).contentDocument!, viewportOffset = doc.defaultView!.innerHeight / 3;
+      const row = [...doc.querySelectorAll<HTMLElement>('table[data-source-line="20"] tr[data-source-line]')]
+        .find(row => { const rect = row.getBoundingClientRect(); return rect.top <= viewportOffset && rect.bottom > viewportOffset; })!;
+      if (!row) throw new Error('Preview reading band must identify a painted source-backed table row');
+      const rect = row.getBoundingClientRect();
+      return { lineNumber: Number(row.dataset.sourceLine), progress: (viewportOffset - rect.top) / rect.height, viewportOffset };
+    });
     await page.click('[data-mode="source"]');
     await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');
     await waitForFrames(page, 3);
-    const sourceReadingOffset = await page.evaluate(({ progress, viewportOffset }) => {
+    const sourceReadingOffset = await page.evaluate(({ lineNumber, progress, viewportOffset }) => {
       const scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
       const lines = (window as any).__viewportAnchorTransaction.editor.getText().split('\n');
-      const rangeOffset = 17 * progress;
-      const index = Math.min(16, Math.floor(rangeOffset));
-      const lineText = lines[19 + index];
+      const lineText = lines[lineNumber - 1];
       const line = [...document.querySelectorAll<HTMLElement>('.editor-host .cm-line')]
         .find(element => element.textContent === lineText);
       if (!line) throw new Error('Missing Source reading-band line');
       const rect = line.getBoundingClientRect();
-      return rect.top - scroller.getBoundingClientRect().top + rect.height * (rangeOffset - index) - viewportOffset;
-    }, delayedReadingAnchor);
+      return rect.top - scroller.getBoundingClientRect().top + rect.height * progress - viewportOffset;
+    }, previewReadingRow);
     assert.ok(Math.abs(sourceReadingOffset) <= 2,
       `Preview to Source lost proportional reading-band position: ${sourceReadingOffset}`);
 

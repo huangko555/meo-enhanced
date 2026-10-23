@@ -29,8 +29,10 @@ import {
   shouldDeferLiveInputDerivedWork,
   usesLargeDocumentDerivedWorkBudget
 } from '../editor/liveInputDerivedWork';
-import { getFencedCodeInfo, syntaxTreeChanged } from './markdownSyntax';
+import { getFencedCodeBodyRange, getFencedCodeInfo, syntaxTreeChanged } from './markdownSyntax';
+import { getCodeBlockSourceLines } from './blockIndent';
 import { getViewportController } from './viewportController';
+import { collectDocumentMathRanges, getDisplayMathCopySource, getDisplayMathSource, getMathCompletionBody } from './displayMathBlocks';
 
 export const shikiRefreshEffect = StateEffect.define<null>();
 
@@ -111,7 +113,11 @@ function addPendingTokenDecorations(
       || isFencedCodeAt(transaction.startState, toA);
     const isFencedCode = isFencedCodeAt(transaction.state, fromB)
       || isFencedCodeAt(transaction.state, toB);
-    if (!wasFencedCode && !isFencedCode) return;
+    let wasMath = false;
+    decorations.between(Math.max(0, fromB - 1), toB, (_from, _to, decoration) => {
+      if (decoration.spec.shikiLanguage === 'meo-math') wasMath = true;
+    });
+    if (!wasFencedCode && !isFencedCode && !wasMath) return;
 
     const startLine = transaction.newDoc.lineAt(fromB).number;
     const endLine = transaction.newDoc.lineAt(Math.max(fromB, toB - 1)).number;
@@ -158,7 +164,8 @@ function addTokenDecorations(
   contentTo: number,
   previous: DecorationSet = Decoration.none,
   allowUnseen: () => boolean = () => true,
-  isNeeded: () => boolean = () => true
+  isNeeded: () => boolean = () => true,
+  sourceLines?: readonly { from: number; to: number }[]
 ): void {
   const tokens = getShikiTokens(lang, code);
   if (!tokens) {
@@ -187,9 +194,10 @@ function addTokenDecorations(
     if (!preservedPresentation) {
       const pending = pendingDocumentTokenDecoration(lang);
       let offset = 0;
-      for (const line of code.split('\n')) {
+      for (const [index, line] of code.split('\n').entries()) {
         if (line.length > 0) {
-          builder.add(contentFrom + offset, contentFrom + offset + line.length, pending);
+          const from = sourceLines?.[index]?.from ?? contentFrom + offset;
+          builder.add(from, from + line.length, pending);
         }
         offset += line.length + 1;
       }
@@ -205,10 +213,15 @@ function addTokenDecorations(
     if (from >= to || !style) {
       return;
     }
+    if (lang === 'meo-math') {
+      // Markdown/quote marks must not override the exposed TeX token palette.
+      style = ('font-style:normal;font-weight:var(--meo-font-source-weight);text-decoration:none;' + style)
+        .split(';').map(rule => rule + ' !important').join(';') + ';-webkit-text-fill-color:currentColor !important';
+    }
     const key = `${lang}:${style}`;
     let deco = markCache.get(key);
     if (!deco) {
-      deco = Decoration.mark({ attributes: { style }, shikiLanguage: lang, shikiThemeVersion: getShikiThemeVersion() });
+      deco = Decoration.mark({ class: lang === 'meo-math' ? 'meo-math-token' : '', attributes: { style }, shikiLanguage: lang, shikiThemeVersion: getShikiThemeVersion() });
       markCache.set(key, deco);
     }
     builder.add(from, to, deco);
@@ -216,13 +229,15 @@ function addTokenDecorations(
 
   let depth = 0;
 
-  for (const line of tokens) {
+  let lineOffset = 0;
+  const codeLines = sourceLines ? code.split('\n') : [];
+  for (const [index, line] of tokens.entries()) {
     for (const token of line) {
       const content = token.content;
       if (!content) {
         continue;
       }
-      const tokenFrom = contentFrom + token.offset;
+      const tokenFrom = sourceLines ? sourceLines[index]!.from + token.offset - lineOffset : contentFrom + token.offset;
       if (tokenFrom < contentFrom || tokenFrom + content.length > contentTo) {
         continue;
       }
@@ -264,7 +279,38 @@ function addTokenDecorations(
         addMark(tokenFrom + spanStart, tokenFrom + content.length, baseStyle);
       }
     }
+    if (sourceLines) lineOffset += codeLines[index]!.length + 1;
   }
+}
+
+function addMathTokenDecorations(
+  view: EditorView,
+  builder: RangeSetBuilder<Decoration>,
+  markCache: Map<string, Decoration>,
+  from: number,
+  to: number,
+  prefix: string,
+  previous: DecorationSet,
+  allowUnseen: () => boolean,
+  isNeeded: () => boolean
+): void {
+  if (from >= to) return;
+  const doc = view.state.doc, lines: Array<{ from: number; to: number }> = [];
+  const code: string[] = [];
+  for (let number = doc.lineAt(from).number; number <= doc.lineAt(to).number; number++) {
+    const line = doc.line(number);
+    let start = Math.max(from, line.from);
+    const end = Math.min(to, line.to);
+    if (start === line.from && prefix) {
+      if (line.text.startsWith(prefix)) start += prefix.length;
+      else if (line.text === prefix.trimEnd()) start = end;
+    }
+    lines.push({ from: start, to: end });
+    code.push(doc.sliceString(start, end));
+  }
+  // Container prefixes stay Markdown; only TeX payload receives math scopes.
+  addTokenDecorations(builder, markCache, 'meo-math', code.join('\n'), from, to,
+    previous, allowUnseen, isNeeded, lines);
 }
 
 function addBlockDecorations(
@@ -285,14 +331,9 @@ function addBlockDecorations(
     return;
   }
   const info = getFencedCodeInfo(state, node);
-  const startLine = state.doc.lineAt(node.from);
-  const endLine = state.doc.lineAt(Math.max(node.to - 1, node.from));
-  if (endLine.number - startLine.number < 2) {
-    return;
-  }
-
-  const contentFrom = state.doc.line(startLine.number + 1).from;
-  const contentTo = state.doc.line(endLine.number - 1).to;
+  const body = getFencedCodeBodyRange(state, node.node);
+  if (!body) return;
+  const { from: contentFrom, to: contentTo } = body;
   if (contentFrom >= contentTo) {
     return;
   }
@@ -305,13 +346,20 @@ function addBlockDecorations(
       deco = Decoration.mark({ attributes: { style } });
       markCache.set(style, deco);
     }
-    for (let lineNumber = startLine.number + 1; lineNumber < endLine.number; lineNumber += 1) {
+    for (let lineNumber = state.doc.lineAt(contentFrom).number; lineNumber <= state.doc.lineAt(contentTo).number; lineNumber += 1) {
       const line = state.doc.line(lineNumber);
       if (line.from < line.to) builder.add(line.from, line.to, deco);
     }
     return;
   }
 
+  if (lang === 'mermaid') {
+    const lines = getCodeBlockSourceLines(state, node.node).filter(line => !line.isFence);
+    const code = lines.map(line => state.doc.sliceString(line.prefixTo, line.to)).join('\n');
+    addTokenDecorations(builder, markCache, lang, code, contentFrom, contentTo, previous, allowUnseen, isNeeded,
+      lines.map(line => ({ from: line.prefixTo, to: line.to })));
+    return;
+  }
   const code = state.doc.sliceString(contentFrom, contentTo);
   addTokenDecorations(builder, markCache, lang, code, contentFrom, contentTo, previous, allowUnseen, isNeeded);
 }
@@ -330,17 +378,37 @@ function buildDecorations(
   const doc = view.state.doc;
   const isNeeded = () => view.state.doc === doc && canHighlight();
   try {
+    const math = collectDocumentMathRanges(view.state);
+    const bodies = math.map(range => {
+      const source = range.fencedDisplay ? getDisplayMathCopySource(view.state, range) : null;
+      return { from: source?.from ?? range.from + (range.mode === 'display' ? 2 : 1),
+        to: source?.to ?? range.to - (range.mode === 'display' ? 2 : 1),
+        prefix: range.fencedDisplay ? getDisplayMathSource(view.state, range)?.prefix ?? '' : '' };
+    });
+    const head = view.state.selection.main.head;
+    if (!math.some(range => range.from <= head && range.to >= head)) {
+      const incomplete = getMathCompletionBody(view.state, head);
+      if (incomplete) bodies.push(incomplete);
+    }
+    const entries: Array<{ from: number; to: number; node?: SyntaxNodeRef; prefix?: string }> = bodies
+      .filter(range => range.from < view.viewport.to && range.to > view.viewport.from);
     syntaxTree(view.state).iterate({
       from: view.viewport.from,
       to: view.viewport.to,
       enter(node) {
         if (node.name === 'FencedCode' || node.name === 'CodeBlock') {
-          addBlockDecorations(view, node, builder, markCache, previous, allowUnseen, isNeeded);
+          if (!bodies.some(body => body.from < node.to && body.to > node.from)) {
+            entries.push({ from: node.from, to: node.to, node: node.node.cursor() });
+          }
           return false;
         }
         return undefined;
       }
     });
+    for (const entry of entries.sort((left, right) => left.from - right.from)) {
+      if (entry.node) addBlockDecorations(view, entry.node, builder, markCache, previous, allowUnseen, isNeeded);
+      else addMathTokenDecorations(view, builder, markCache, entry.from, entry.to, entry.prefix ?? '', previous, allowUnseen, isNeeded);
+    }
   } catch {
     return Decoration.none;
   }
@@ -426,7 +494,7 @@ const shikiPlugin = ViewPlugin.fromClass(
           || isLiveInputDerivedWorkRefresh(transaction)
           || syntaxTreeChanged(transaction)
       );
-      if (update.docChanged || update.viewportChanged || refreshed || becameVisible) {
+      if (update.docChanged || update.selectionSet || update.viewportChanged || refreshed || becameVisible) {
         this.decorations = buildDecorations(update.view, this.decorations, this.allowUnseen, this.canHighlight);
       }
     }

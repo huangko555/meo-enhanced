@@ -40,6 +40,12 @@ const markdown = [
   '',
   '<details open><summary><strong>Visible summary</strong></summary><p>Visible HTML body</p></details>',
   '',
+  '<p><kbd>Ctrl</kbd> + <kbd>S</kbd> <small>Small note</small> <q>Quoted text</q> <abbr>HTML abbreviation</abbr> <ruby>Ruby text<rt>Ruby reading</rt></ruby></p>',
+  '',
+  '<figure><figcaption>Figure caption</figcaption></figure>',
+  '',
+  '<div style="white-space:pre-wrap">First preserved line\n  Second preserved line</div>',
+  '',
   '![pixel](pixel.png)'
 ].join('\n');
 
@@ -136,6 +142,11 @@ try {
   assert.match(coloredXml, /<w:drawing>/, 'embedded Markdown images must remain embedded in DOCX');
   assert.match(coloredXml, /<w:b\/>[^]*bold text/, 'Markdown strong text must remain native bold text');
   assert.match(coloredXml, /Visible summary[^]*Visible HTML body/, 'safe HTML content must remain visible in DOCX');
+  for (const text of ['Ctrl', 'Small note', 'Quoted text', 'HTML abbreviation', 'Ruby text', 'Ruby reading', 'Figure caption']) {
+    assert.ok(coloredXml.includes(text), `HTML text must survive Word conversion: ${text}`);
+  }
+  assert.match(paragraphContaining(coloredXml, 'First preserved line'), /<w:br\b[^>]*\/>[^]*Second preserved line/,
+    'authored pre-wrap must retain explicit line breaks');
   assert.doesNotMatch(coloredXml, /__MEO_EXPORT_READY__/, 'export runtime scripts must not leak into DOCX text');
   const coloredCodeParagraph = paragraphContaining(coloredXml, 'const answer = 42;');
   assert.match(coloredCodeParagraph, /<w:rFonts\b[^>]*w:ascii="Consolas"[^>]*w:hAnsi="Consolas"/, 'Word code must keep the Consolas override');

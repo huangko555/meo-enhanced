@@ -14,6 +14,7 @@ const messages: unknown[] = [];
 const controller = createPreviewController({
   vscode: { postMessage(message) { messages.push(message); scope.__previewHostMessage?.(message); } },
   uiLanguage: 'en',
+  ...((window as any).__previewDeclineViewportTransactionOwner ? { runViewportTransaction: () => false as const } : {}),
   getEditorAppearance: () => 'dark',
   getImageIntrinsicSize: src => (window as any).__previewImageSizes?.[src] ?? null,
   getCodePalette: appearance => palette.resolve(undefined, appearance).preview,

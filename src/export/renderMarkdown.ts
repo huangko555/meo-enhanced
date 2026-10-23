@@ -14,16 +14,19 @@ import { installMathTransform } from './mathTransform';
 import { collectMarkdownCodeLines } from './markdownCodeLines';
 import { renderLatexMathPresentation } from './math';
 import { isMathFenceLanguage, mathFenceBodyRange, mathFenceContent } from '../shared/mathFence';
-import { installHighlightTransform } from './highlightTransform';
-import { installInlineScriptTransform } from './inlineScriptTransform';
-import { installPunctuationInlineTransform } from './punctuationInlineTransform';
+import { installHighlightTransform } from '../shared/markdownHighlight';
+import { installInlineScriptTransform } from '../shared/markdownInlineScript';
+import { installPunctuationInlineTransform } from '../shared/markdownPunctuation';
 import { Info, Lightbulb, AlertCircle, AlertTriangle, XCircle } from 'lucide';
 import {
   getSupportedHtmlAttributes,
   matchInlineHtmlCode,
   isSupportedHtmlSource,
+  sanitizeHtmlStyle,
+  htmlInlineStyleRules,
   supportedHtmlTags
 } from '../shared/htmlPolicy';
+import { splitHtmlBlockFragments } from '../foundation/htmlSyntax';
 import type { UiLanguage } from '../foundation/uiLanguage';
 import { getReadingUiStrings } from './readingUiLanguage';
 import { normalizeFenceLanguage } from './fenceLanguage';
@@ -324,6 +327,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
   const html = sanitizeHtml(github ? replaceGithubEmoji(linkifyGithubFilteredHtml(addGithubDetailsSummary(stripGithubSelectMarkup(rawHtml))), deferImageSrc) : rawHtml, {
     allowedTags: [
       ...sanitizeHtml.defaults.allowedTags,
+      ...supportedHtmlTags,
       ...(github ? [...githubHtmlTags, 'input'] : []),
       'mark',
       'details',
@@ -365,7 +369,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
       img: ['src', 'alt', 'title', 'width', 'height', 'loading', DEFERRED_IMAGE_ATTRIBUTE, ...(github ? githubHtmlAttributes.img : [])],
       ol: ['start', 'reversed', ...(github ? githubHtmlAttributes.ol : [])],
       li: ['value'],
-      '*': ['class', 'style', 'id', 'data-source-b64', 'data-meo-deferred-math', 'data-source-line', 'data-source-end-line', 'data-meo-preview-table-widths', 'data-meo-preview-table-part', 'data-meo-preview-table-origin', 'aria-hidden', ...(github ? githubHtmlAttributes['*'] : [])],
+      '*': ['class', 'style', 'id', 'title', 'hidden', 'lang', 'dir', 'data-source-b64', 'data-meo-deferred-math', 'data-meo-preview-table-widths', 'data-meo-preview-table-part', 'data-meo-preview-table-origin', 'data-source-line', 'data-source-end-line', 'aria-hidden', ...(github ? githubHtmlAttributes['*'] : [])],
       span: ['class', 'style', 'title', 'role', 'aria-label', 'aria-hidden', 'data-line-number'],
       th: ['colspan', 'rowspan', 'scope', 'style'],
       td: ['colspan', 'rowspan', 'style'],
@@ -411,6 +415,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
     allowedStyles: {
       img: { width: [/^\d+px$/], height: [/^\d+px$/] },
       '*': {
+        ...htmlInlineStyleRules,
         'text-align': [/^left$/i, /^right$/i, /^center$/i, /^justify$/i],
         '--meo-table-indent': [/^\d+(?:\.\d+)?ch$/i]
       },
@@ -611,6 +616,16 @@ function installSafeHtmlTransform(
     },
     allowProtocolRelative: false,
     transformTags: {
+      '*': (tagName, attribs) => {
+        const attributes = { ...attribs };
+        if (attributes.hidden === '') attributes.hidden = 'hidden';
+        if ('style' in attributes) {
+          const style = sanitizeHtmlStyle(attributes.style);
+          if (style) attributes.style = style;
+          else delete attributes.style;
+        }
+        return { tagName, attribs: attributes };
+      },
       a: (tagName, attribs) => ({ tagName, attribs: { ...attribs, ...(attribs.href ? { href: normalizeLinkDestination(attribs.href) } : {}) } }),
       img: (tagName, attribs) => {
         const rewritten = attribs.src ? rewriteImageSrc(attribs.src) : null;
@@ -626,7 +641,7 @@ function installSafeHtmlTransform(
     }
   };
   const sanitizeRawSource = (source: string, tokenType: string): string => {
-    if (!preserveSourceStyles && tokenType === 'html_block' && isSupportedHtmlSource(source)) {
+    if (tokenType === 'html_block' && isSupportedHtmlSource(source)) {
       // A GFM HTML container can span multiple Markdown tokens. Sanitizing each
       // block as a balanced document closes <details> before its Markdown body.
       let fragment = '';
@@ -728,7 +743,12 @@ function installSafeHtmlTransform(
     if (htmlNode?.type !== 'html_block' || !Array.isArray(htmlNode.map)) return rendered;
     const sourceRange = resolveSourceRange(Number(htmlNode.map[0]), Number(htmlNode.map[1]));
     if (sourceRange.start <= 0) return rendered;
-    if (!preserveSourceStyles) {
+    const fragments = splitHtmlBlockFragments(source);
+    const withoutComments = (text: string) => text.replace(/<!--[\s\S]*?-->/g, '').trim();
+    const complete = /^\s*<!--/.test(source) && !withoutComments(source)
+      || fragments.length > 0 && !withoutComments(source.slice(fragments.at(-1)!.to))
+        && !withoutComments(source.slice(0, fragments[0].from));
+    if (!preserveSourceStyles || !complete) {
       return rendered.replace(/^(\s*<[a-z][a-z\d-]*)(?=[\s>])/i, `$1 data-source-line="${sourceRange.start}" data-source-end-line="${Math.max(sourceRange.start, sourceRange.end)}"`);
     }
     return `<div class="meo-export-html-block" data-source-line="${sourceRange.start}" data-source-end-line="${Math.max(sourceRange.start, sourceRange.end)}">${rendered}</div>`;

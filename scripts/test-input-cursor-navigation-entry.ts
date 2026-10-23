@@ -153,7 +153,7 @@ import { refreshLiveDecorationsAfterSearchEffect } from '../webview/src/liveMode
   const originalIterate = treePrototype.iterate;
   let iterations = 0;
   treePrototype.iterate = function(...args: any[]) {
-    iterations += 1;
+    if (this === syntaxTree(view.state)) iterations += 1;
     return originalIterate.apply(this, args);
   };
   return {

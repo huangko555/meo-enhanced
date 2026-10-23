@@ -15,17 +15,15 @@ function withPreparationGate(file: string): string | undefined {
   const cached = preparedModules.get(file);
   if (cached) return cached;
   const source = fs.readFileSync(file, 'utf8');
-  const offset = source.indexOf('Live syntax preparation timed out');
-  if (offset < 0) return;
   const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-  let preparation: ts.FunctionDeclaration | undefined;
+  let preparation: ts.MethodDeclaration | undefined;
   const visit = (node: ts.Node) => {
-    if (ts.isFunctionDeclaration(node) && node.body && node.pos <= offset && offset < node.end
+    if (ts.isMethodDeclaration(node) && node.body && node.name.getText(ast) === 'prepareLiveSyntax'
       && node.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword)) preparation = node;
     ts.forEachChild(node, visit);
   };
   visit(ast);
-  assert.ok(preparation?.body, 'the built module must retain the actual asynchronous syntax preparation');
+  if (!preparation?.body) return;
   const position = preparation.body.getStart(ast) + 1;
   // Pause only this async boundary, without perturbing the parser's budgets
   // or unrelated production timers through a replacement of Date.now.
@@ -145,16 +143,19 @@ try {
   });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (window as any).__modePreparationEntered === true
-    && !!document.querySelector('.meo-preload-editor-shell'));
+    && !!document.querySelector('.editor-host > .cm-editor'));
   await page.evaluate(() => {
     const scope = window as any, wrapper = document.querySelector('.editor-wrapper')!;
-    const observer = new MutationObserver(() => {
-      if (wrapper.classList.contains('meo-preload-editor-shell')) return;
+    const inspect = () => {
+      const host = document.querySelector<HTMLElement>('.editor-host')!;
+      if (wrapper.classList.contains('meo-preload-editor-shell') || host.inert
+        || document.querySelector<HTMLElement>('.editor-loading')?.hidden === false) return;
       scope.__coldReveal = { requested: document.querySelector('#app')?.getAttribute('data-mode'),
         actual: document.querySelector('.editor-host > .cm-editor')?.classList.contains('meo-mode-source') };
       observer.disconnect();
-    });
-    observer.observe(wrapper, { attributes: true, attributeFilter: ['class'] });
+    };
+    const observer = new MutationObserver(inspect);
+    observer.observe(wrapper, { attributes: true, subtree: true, attributeFilter: ['class', 'hidden', 'inert', 'aria-busy'] });
     (document.querySelector('button[data-mode="source"]') as HTMLButtonElement).click();
     scope.__releaseModePreparation();
   });

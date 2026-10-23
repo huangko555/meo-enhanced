@@ -3,7 +3,7 @@ import { EditorView, ViewPlugin, type ViewUpdate, type WidgetType } from '@codem
 import type { SyntaxNode } from '@lezer/common';
 import { currentSyntaxTree, getFencedCodeInfo } from './markdownSyntax';
 import { createCodeBlockActionsWidget } from './codeBlocks';
-import { createFloatingMermaidToolbarWidget, getMermaidBlockMode } from './mermaidEditing';
+import { createFloatingMermaidToolbarWidget, createMermaidPreviewHeading, getMermaidBlockMode } from './mermaidEditing';
 import { getLiveRenderedBlocks } from './liveRenderedBlocks';
 import { getFencedCodeContent } from './mermaidDiagram';
 import { getUiStrings } from '../application/uiLanguage';
@@ -29,6 +29,8 @@ type Measurement = {
   block: BlockHeader;
   rect: FixedChromeRect;
   previewOwner: ReturnType<typeof getRenderedBlockPreviewControlsOwner>;
+  sourceWidth?: number;
+  inlinePreview: HTMLElement | null;
 };
 
 function codeNodeAt(view: EditorView, position: number): SyntaxNode | null {
@@ -87,11 +89,11 @@ function readBlockHeader(view: EditorView, position: number): BlockHeader | null
       if (!node) return null;
       const content = getFencedCodeContent(state, node);
       const mode = getMermaidBlockMode(
-        state, opening.from, state.doc.line(opening.number + 1).from, state.doc.line(ending.number - 1).to
-      ).decision.effectiveMode;
+        state, opening.from, ending.to
+      );
       return { from: opening.from, to: ending.to, language: 'mermaid', kind: 'mermaid', quoted,
-        languageClass: mode === 'preview' ? 'meo-rendered-block-preview-language' : 'meo-code-language-label',
-        widget: createFloatingMermaidToolbarWidget(opening.from, opening.number, mode, content, ending.to) };
+        languageClass: mode.decision.effectiveMode === 'preview' ? 'meo-rendered-block-preview-language' : 'meo-code-language-label',
+        widget: createFloatingMermaidToolbarWidget(opening.from, opening.number, mode.decision.effectiveMode, content, ending.to, state.facet(uiLanguageFacet)) };
     }
     return null;
   }
@@ -111,6 +113,8 @@ class BlockStickyHeader {
   private previewCleanup: () => void = () => undefined;
   private readonly contentObserver: MutationObserver;
   private readonly fullscreenObserver: MutationObserver;
+  private readonly inlineResizeObserver: ResizeObserver;
+  private inlinePreview: HTMLElement | null = null;
   private destroyed = false;
   private measurePending = false;
   private stale = false;
@@ -145,6 +149,7 @@ class BlockStickyHeader {
     this.contentObserver.observe(view.contentDOM, { childList: true, subtree: true });
     this.fullscreenObserver = new MutationObserver(this.requestMeasure);
     this.fullscreenObserver.observe(view.dom.ownerDocument.body, { childList: true });
+    this.inlineResizeObserver = new ResizeObserver(this.requestMeasure);
     this.requestMeasure();
   }
 
@@ -232,7 +237,12 @@ class BlockStickyHeader {
       rect: { left, top: scroller.top, width: right - left, height: HEADER_HEIGHT }, vectors: []
     });
     if (!projection.ok) return null;
-    return { block, rect: projection.geometry.rect, previewOwner: shell ? getRenderedBlockPreviewControlsOwner(shell) : null };
+    const inline = block.kind === 'mermaid'
+      ? view.scrollDOM.querySelector<HTMLElement>(`.meo-mermaid-inline-preview[data-meo-mermaid-anchor="${block.from}"]:not([hidden])`)
+      : null;
+    return { block, rect: projection.geometry.rect, previewOwner: shell ? getRenderedBlockPreviewControlsOwner(shell) : null,
+      inlinePreview: inline,
+      sourceWidth: inline ? Math.max(0, inline.getBoundingClientRect().left - left) / (right - left) * projection.geometry.rect.width : undefined };
   }
 
   private render(value: Measurement | 'fullscreen' | 'pending' | null): void {
@@ -247,6 +257,15 @@ class BlockStickyHeader {
     if (!value) { this.clear(); return; }
     const { block, rect } = value;
     this.pendingRange = { from: block.from, to: block.to };
+    const focused = this.view.dom.ownerDocument.activeElement;
+    const layoutHadFocus = focused?.classList.contains('meo-mermaid-layout-btn')
+      && (this.header.contains(focused) || !!value.inlinePreview?.contains(focused));
+    if (this.inlinePreview !== value.inlinePreview) {
+      this.inlinePreview?.classList.remove('has-sticky-header');
+      this.inlineResizeObserver.disconnect();
+      this.inlinePreview = value.inlinePreview;
+      if (this.inlinePreview) this.inlineResizeObserver.observe(this.inlinePreview);
+    }
     Object.assign(this.header.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
     const identity = `${block.kind}:${block.from}:${this.view.state.doc.lineAt(block.from).number}:${this.view.state.facet(uiLanguageFacet)}`;
     if (identity !== this.identity || !this.toolbar || !this.widget ||
@@ -260,6 +279,13 @@ class BlockStickyHeader {
       this.identity = identity;
     }
     this.header.classList.toggle('is-quoted', block.quoted);
+    this.header.classList.toggle('is-mermaid-side', value.sourceWidth !== undefined);
+    const heading = this.header.querySelector('.meo-native-source-preview-label');
+    if (value.sourceWidth !== undefined) {
+      this.header.style.setProperty('--meo-mermaid-source-width', value.sourceWidth + 'px');
+      if (!heading) this.header.insertBefore(createMermaidPreviewHeading(this.view, block.from), this.toolbar);
+      this.inlinePreview?.classList.add('has-sticky-header');
+    } else heading?.remove();
     this.header.classList.toggle('meo-md-code-block-start',
       block.kind === 'math' || codeNodeAt(this.view, this.view.state.doc.lineAt(block.from).to)?.name === 'FencedCode');
     const label = this.header.firstElementChild!;
@@ -270,6 +296,9 @@ class BlockStickyHeader {
     this.header.dataset.meoBlockFrom = String(block.from);
     this.header.dataset.meoBlockTo = String(block.to);
     this.header.hidden = false;
+    if (layoutHadFocus && value.sourceWidth !== undefined) {
+      this.header.querySelector<HTMLButtonElement>('.meo-mermaid-layout-btn')?.focus({ preventScroll: true });
+    }
     this.view.scrollDOM.dataset.meoBlockHeaderInset = String(HEADER_HEIGHT);
     if (this.previewOwner !== value.previewOwner) {
       this.previewCleanup();
@@ -281,6 +310,12 @@ class BlockStickyHeader {
 
   private clear(): void {
     this.pendingRange = null; this.stale = false;
+    this.inlinePreview?.classList.remove('has-sticky-header');
+    if (!this.destroyed && this.inlinePreview?.isConnected &&
+        this.header.querySelector('.meo-mermaid-layout-btn') === this.view.dom.ownerDocument.activeElement) {
+      this.inlinePreview.querySelector<HTMLButtonElement>('.meo-mermaid-layout-btn')?.focus({ preventScroll: true });
+    }
+    this.inlineResizeObserver.disconnect(); this.inlinePreview = null;
     this.header.hidden = true;
     delete this.view.scrollDOM.dataset.meoBlockHeaderInset;
     this.previewCleanup(); this.previewCleanup = () => undefined;
@@ -289,6 +324,7 @@ class BlockStickyHeader {
   }
 
   destroy(): void {
+    this.inlineResizeObserver.disconnect();
     this.destroyed = true;
     this.view.scrollDOM.removeEventListener('scroll', this.requestMeasure);
     this.contentObserver.disconnect(); this.fullscreenObserver.disconnect();

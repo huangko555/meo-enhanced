@@ -17,6 +17,26 @@ export function isLocalFileLinkDestination(destination: string): boolean {
   return /^file:/i.test(normalizeLinkDestination(destination));
 }
 
+/** The same authored target must be local for both navigation and missing-link hints. */
+export function isLikelyLocalLinkDestination(destination: string): boolean {
+  const href = normalizeLinkDestination(destination);
+  if (!href || href.startsWith('#') || href.startsWith('//')) return false;
+  if (/^file:/i.test(href)) return true;
+  const rawPath = href.split(/[?#]/, 1)[0];
+  if (!rawPath) return false;
+  let path = rawPath;
+  try { path = decodeURIComponent(path); } catch { /* Keep malformed escapes literal. */ }
+  path = path.replaceAll('\\', '/');
+  if (/^[a-z]:\//i.test(path)) return true;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(rawPath)) return false;
+  if (/^(?:\.\.?\/|\/|~)/.test(path)) return true;
+  if (/^www\./i.test(path)) return false;
+  if (/\.(?:md|markdown|mdx|mdc)$/i.test(path)) return true;
+  const host = path.split('/', 1)[0].split(':', 1)[0];
+  return host !== 'localhost' && !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)
+    && !/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(host);
+}
+
 /**
  * Serialize a raw filesystem path for a Markdown destination. Keep Unicode
  * readable; escape syntax and URI delimiters so filenames retain their identity.

@@ -204,6 +204,44 @@ try {
       'geometry readers must retain distant rich blocks while the syntax publication is only a prefix');
     assert.ok(partialInput.mapped && !partialInput.pending && partialInput.exact && partialInput.notes);
   }
+  // A deliberately unfinished new parse must not turn one closed paragraph's
+  // Enter into a delayed full rebuild. Selection intent also cancels that retry.
+  for (const cancel of [false, true]) {
+    const deferred = await page.evaluate(async cancel => {
+      const scope = window as any, api = scope.__liveHistory;
+      const text = 'EDIT target.\n\n| Name | Value |\n| --- | --- |\n| stable | cell |\n\n'
+        + '**Distant paragraph**.\n\n'.repeat(4_100);
+      const editor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'live', onApplyChanges() {} });
+      api.parse(editor); editor.refreshDecorations();
+      editor.view.dispatch({ selection: { anchor: 4 } });
+      const builds = scope.__fullLiveBuilds ?? 0;
+      try {
+        scope.__liveTestParseEnd = 128; scope.__liveTestFreshParse = true;
+        scope.__liveTestLimitedParses = [];
+        api.input(editor, 4, '\n');
+        const partial = scope.__liveTestLimitedParses.some((parse: { done: boolean }) => !parse.done);
+        delete scope.__liveTestParseEnd; delete scope.__liveTestFreshParse;
+        if (cancel) editor.view.dispatch({ selection: { anchor: 1 } });
+        api.parse(editor);
+        const deadline = performance.now() + 5_000;
+        while (api.pending(editor) && performance.now() < deadline) await new Promise(requestAnimationFrame);
+        const projected = api.positionSnapshot(editor), actual = editor.getText();
+        const selected = editor.view.state.selection.main.head;
+        const localBuilds = (scope.__fullLiveBuilds ?? 0) - builds;
+        editor.refreshDecorations();
+        return { partial, pending: api.pending(editor), actual, expected: 'EDIT\n target.' + text.slice('EDIT target.'.length),
+          selected, projected, canonical: api.positionSnapshot(editor), builds: localBuilds };
+      } finally {
+        delete scope.__liveTestParseEnd; delete scope.__liveTestFreshParse; editor.destroy();
+      }
+    }, cancel);
+    assert.ok(deferred.partial, 'deferred projection fixture must actually leave the new parse unfinished');
+    assert.equal(deferred.pending, false, 'the existing input generation must settle');
+    assert.equal(deferred.actual, deferred.expected);
+    assert.equal(deferred.selected, cancel ? 1 : 5, 'a later selection owns its caret');
+    assert.deepEqual(deferred.projected, deferred.canonical, 'deferred/cancelled local publication must match the current canonical renderer');
+    if (!cancel) assert.equal(deferred.builds, 0, 'parse completion must publish only the deferred local block');
+  }
   const inputBudgets: Array<{ mode: string; pending: boolean; diffs: number; discoveries: number; htmlRequests: number }> = [];
   const syntaxPublication = await page.evaluate(async () => {
     const scope = window as any, api = scope.__liveHistory;

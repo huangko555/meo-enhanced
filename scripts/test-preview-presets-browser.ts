@@ -57,6 +57,22 @@ try {
     return page;
   };
   const page = await open();
+  const previewLineHeight = async () => page.evaluate(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+    const paragraph = frame.contentDocument!.querySelector('.meo-export-doc p')!;
+    const style = frame.contentWindow!.getComputedStyle(paragraph);
+    return Math.round(parseFloat(style.lineHeight) / parseFloat(style.fontSize) * 10) / 10;
+  });
+  await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {data: {type: 'editorLineHeightChanged', value: 2.1}})));
+  await page.waitForFunction(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
+    const paragraph = frame?.contentDocument?.querySelector('.meo-export-doc p');
+    if (!paragraph) return false;
+    const style = frame!.contentWindow!.getComputedStyle(paragraph);
+    return Math.abs(parseFloat(style.lineHeight) / parseFloat(style.fontSize) - 2.1) < .01;
+  });
+  assert.equal(await previewLineHeight(), 2.1, 'Default preview follows editor line spacing');
+  await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {data: {type: 'editorLineHeightChanged', value: 1.5}})));
   await page.evaluate(() => {
     (window as any).__sharedPreviewMenu = {
       panel: document.querySelector('.preview-options-panel'),
@@ -100,6 +116,11 @@ try {
     };
   });
   const assertGithubVisuals = async (appearance: 'light' | 'dark') => {
+    const beforeLineHeight = await previewLineHeight();
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {data: {type: 'editorLineHeightChanged', value: 2.1}})));
+    assert.equal(await previewLineHeight(), beforeLineHeight, 'GitHub retains its own line spacing');
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {data: {type: 'editorLineHeightChanged', value: 1.5}})));
+
     await waitFor((appearance: string) => {
       const block = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector<HTMLElement>('.meo-export-mermaid.is-rendered');
       return block?.dataset.meoPreviewMermaidAppearance === appearance && block.dataset.meoPreviewMermaidPreset === 'github-readme';

@@ -203,9 +203,14 @@ try {
   await page.click('.more-tools-wrapper > button');
   const previewBefore = await page.evaluate(() => {
     const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
-    const anchor = Array.from(doc.querySelectorAll<HTMLElement>('[data-source-line]'))
-      .find((element) => element.getBoundingClientRect().bottom > 0)!;
-    return { line: anchor.dataset.sourceLine, top: anchor.getBoundingClientRect().top, scroll: doc.scrollingElement!.scrollTop };
+    const root = doc.querySelector<HTMLElement>('main.meo-export-doc')!;
+    // Font and preset reflow retain the actual text in the reading band.
+    const range = doc.caretRangeFromPoint(Math.max(4, root.getBoundingClientRect().left + 12), doc.defaultView!.innerHeight / 3);
+    if (!range || range.startContainer.nodeType !== Node.TEXT_NODE) throw new Error('Missing painted Preview reading witness');
+    const text = range.startContainer as Text;
+    const line = text.parentElement!.closest<HTMLElement>('[data-source-line]')!.dataset.sourceLine!;
+    (window as any).__previewFontReadingWitness = { text: text.data, offset: range.startOffset, line };
+    return { line, top: range.getBoundingClientRect().top, scroll: doc.scrollingElement!.scrollTop };
   });
   await page.click('.editor-font-size-stepper-button:last-child');
   await page.waitForFunction((previous) => window.__hostMessages.findLast((message: { type: string; requestId?: string }) => message.type === 'requestPreviewRender')?.requestId !== previous, {}, settledRequest.id);
@@ -214,13 +219,20 @@ try {
   const previewAfter = await page.evaluate(async (line) => {
     for (let i = 0; i < 3; i++) await new Promise(requestAnimationFrame);
     const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const witness = (window as any).__previewFontReadingWitness;
+    const root = doc.querySelector<HTMLElement>(`[data-source-line="${line}"]`)!;
+    const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node: Text | null = null;
+    while (walker.nextNode()) if (walker.currentNode.textContent === witness.text) { node = walker.currentNode as Text; break; }
+    if (!node) throw new Error('Font reflow lost the original reading text');
+    const range = doc.createRange(); range.setStart(node, witness.offset); range.collapse(true);
     return {
-      top: doc.querySelector<HTMLElement>(`[data-source-line="${line}"]`)!.getBoundingClientRect().top,
+      top: range.getBoundingClientRect().top,
       scroll: doc.scrollingElement!.scrollTop,
       fontSize: getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-doc')!).fontSize
     };
   }, previewBefore.line);
-  if (previewAfter.fontSize !== `${nextRequest.size}px` || Math.abs(previewAfter.top - previewBefore.top) > 12) {
+  if (previewAfter.fontSize !== `${nextRequest.size}px` || Math.abs(previewAfter.top - previewBefore.top) > 2) {
     const requests = await page.evaluate(() => window.__hostMessages.filter((message: { type: string }) => message.type === 'requestPreviewRender').map((message: { requestId: string; text?: string; environment?: { editorFontSizePx?: number } }) => ({ id: message.requestId, length: message.text?.length, size: message.environment?.editorFontSizePx })));
     throw new Error(`Preview font size step moved the reading line: ${JSON.stringify({ previewBefore, previewAfter, requests })}`);
   }
@@ -288,6 +300,9 @@ try {
   });
   await regressionPage.evaluate(async (line) => {
     for (let attempt = 0; attempt < 3; attempt++) {
+      // A newer navigation must supersede a still-settling font layout. A raw
+      // scrollTop assignment does not reserve that navigation intent.
+      (window as any).__fontTestPreserveLayout(() => {});
       (window as any).__fontTestScrollToLine(line);
       for (let frame = 0; frame < 8; frame++) await new Promise(requestAnimationFrame);
     }

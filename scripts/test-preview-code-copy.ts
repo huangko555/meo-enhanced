@@ -104,8 +104,8 @@ try {
   assert.equal(await frame.$$eval('.meo-export-math-display .meo-select-all-code-btn', nodes => nodes.length), 0,
     'Preview formulas expose only copy, including legacy and invalid formula fences');
   assert.deepEqual(await frame.$$eval('.meo-export-math-display', nodes => nodes.map(node =>
-    node.querySelectorAll(':scope > .meo-preview-code-actions > [role="button"]').length)), [1, 1, 1],
-  'Every Preview formula block has exactly one action');
+    node.querySelectorAll(':scope > .meo-preview-code-actions > [role="button"]').length)), [2, 2, 2],
+  'Every Preview formula block has image and source copy actions');
   await page.evaluate(() => {
     (window as any).__originalMathBlock = document.querySelector<HTMLIFrameElement>('iframe')!
       .contentDocument!.querySelector('.meo-export-math-display');
@@ -161,10 +161,10 @@ try {
           label: node.querySelector('.meo-tooltip-label')?.textContent ?? null,
           opacity: getComputedStyle(node).opacity
         })).catch(() => null);
-        if (visibleHint?.label === (language === 'en' ? 'Copy' : '复制') && visibleHint.opacity === '1') break;
+        if (visibleHint?.label === (language === 'en' ? 'Copy source' : '复制源码') && visibleHint.opacity === '1') break;
         await new Promise(resolve => setTimeout(resolve, 50));
       }
-      assert.equal(visibleHint?.label, language === 'en' ? 'Copy' : '复制');
+      assert.equal(visibleHint?.label, language === 'en' ? 'Copy source' : '复制源码');
       assert.equal(visibleHint?.opacity, '1');
       const hint = await frame.$eval(buttonSelector, node => ({
         label: node.getAttribute('aria-label'), tooltip: node.getAttribute('data-tooltip'),
@@ -182,7 +182,7 @@ try {
         })(),
         gapCursor: getComputedStyle(node.parentElement!).cursor, hintOpacity: getComputedStyle(document.querySelector('.meo-tooltip')!).opacity
       }));
-      assert.equal(hint.label, language === 'en' ? 'Copy' : '复制');
+      assert.equal(hint.label, language === 'en' ? 'Copy source' : '复制源码');
       assert.equal(hint.tooltip, hint.label);
       assert.equal(hint.native, null);
       assert.equal(hint.cursor, 'pointer');
@@ -376,8 +376,8 @@ try {
         throw new Error(`Preview copy payload failed for ${language}/${JSON.stringify(prefix)}: ${JSON.stringify(actual)}`, { cause: error });
       }
       assert.deepEqual(await frame.$$eval('.meo-export-math-display .meo-preview-code-actions > [role="button"]', nodes =>
-        nodes.map(node => node.classList.contains('meo-copy-code-btn'))), [true],
-      `${language}/${JSON.stringify(prefix)}: formula controls contain only copy`);
+        nodes.map(node => node.classList.contains('meo-copy-code-btn'))), [false, true],
+      `${language}/${JSON.stringify(prefix)}: formula controls contain image and source copy`);
       await frame.$eval('.meo-export-math-display .meo-copy-code-btn', node => (node as HTMLElement).click());
       assert.equal(await readClipboard(), spacedMath, `${language}/${JSON.stringify(prefix)}: preserve body whitespace, omit container and delimiters`);
       mathCopyCases++;

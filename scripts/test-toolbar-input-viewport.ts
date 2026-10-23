@@ -64,6 +64,9 @@ async function open(browser: Browser, mode: 'live' | 'source', documentText = te
     window.dispatchEvent(new MessageEvent('message', { data: message }));
   }, init(mode, documentText));
   await page.waitForSelector('.editor-wrapper:not(.meo-preload-editor-shell) .cm-content');
+    await page.waitForFunction(() => !document.querySelector<HTMLElement>('.editor-host')!.inert
+      && document.querySelector<HTMLElement>('.editor-loading')?.hidden !== false);
+
   return page;
 }
 
@@ -497,11 +500,11 @@ async function runComponentFocusReturn(browser: Browser): Promise<void> {
     { kind: 'code', text: 'intro\n\n```js\nconst value = 1;\n```\n\ntail',
       selector: '.cm-content', line: 'const value = 1;', from: 'const value = 1;', to: 'const value = 1;R' },
     { kind: 'html', text: 'intro\n\n<div>\n<p>alpha beta</p>\n</div>\n\ntail',
-      selector: '.cm-content', button: '.meo-md-html-source-toggle', clicks: 1,
+      selector: '.cm-content',
       line: '<p>alpha beta</p>', from: '<p>alpha beta</p>', to: '<p>alpha beta</p>R' },
-    ...[1, 2].map((clicks) => ({ kind: `mermaid-${clicks === 1 ? 'split' : 'source'}`,
+    ...[1, 2].map((clicks) => ({ kind: `mermaid-${clicks === 1 ? 'stacked' : 'side'}`,
       text: 'intro\n\n```mermaid\ngraph TD\nA --> B\n```\n\ntail',
-      selector: '.meo-mermaid-source-editor .cm-content', button: '.meo-mermaid-mode-btn', clicks,
+      selector: '.cm-editor > .cm-scroller > .cm-content', button: '.meo-mermaid-mode-btn', clicks, line: 'A --> B',
       from: 'A --> B', to: 'A --> BR' })),
     ...(['live', 'source'] as const).map((mode) => ({ kind: `math-${mode}`, mode,
       text: 'intro\n\n$$\nx^2 + y^2 = 1\n$$\n\ntail',
@@ -511,9 +514,10 @@ async function runComponentFocusReturn(browser: Browser): Promise<void> {
     const page = await open(browser, 'mode' in fixture ? fixture.mode : 'live', fixture.text, fixture.kind.startsWith('mermaid'));
     try {
       if (fixture.kind === 'math-live') await page.click('.meo-md-math-fenced-display');
+      if (fixture.kind === 'html') await page.click('.meo-md-html-content');
       if ('button' in fixture) {
         for (let step = 0; step < fixture.clicks; step += 1) {
-          await page.evaluate((selector) => document.querySelector<HTMLButtonElement>(selector)!.click(), fixture.button);
+          await page.evaluate((selector) => document.querySelector<HTMLButtonElement>(selector)!.click(), step===0?fixture.button:'.meo-mermaid-layout-btn');
           await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
         }
       }
@@ -521,11 +525,20 @@ async function runComponentFocusReturn(browser: Browser): Promise<void> {
       if ('line' in fixture) {
         const point = await page.evaluate((lineText) => {
           const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-            .find((element) => element.textContent === lineText)!;
-          const rect = line.getBoundingClientRect();
-          return { x: rect.left + 12, y: rect.top + rect.height / 2 };
+            .find((element) => element.textContent?.endsWith(lineText))!;
+          const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+          while (walker.nextNode()) {
+            const text = walker.currentNode.textContent!, index = text.search(/\S/);
+            if (index < 0 || walker.currentNode.parentElement?.closest('[contenteditable="false"],.cm-widgetBuffer')) continue;
+            const range = document.createRange(); range.setStart(walker.currentNode, index);
+            range.setEnd(walker.currentNode, index + 1);
+            const rect = range.getBoundingClientRect();
+            return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+          }
+          throw new Error('Native source focus fixture needs an actual text glyph');
         }, fixture.line);
         await page.mouse.click(point.x, point.y);
+        assert.equal(await page.evaluate(() => document.activeElement?.matches('.cm-content[contenteditable="true"]')), true, `${fixture.kind}: source glyph click must enter its native editor`);
         await page.keyboard.press('End');
       } else {
         await page.focus(fixture.selector);
@@ -979,7 +992,7 @@ function testPaintedCaretFrameClassification(): void {
   assert.throws(() => assertPaintedCaretFrames('unattributed', [...valid, { epoch: 5, old: 0, next: 19 }]));
 }
 
-async function runWorkbenchMenuFocus(browser: Browser, mode: 'live' | 'source'): Promise<void> {
+async function runWorkbenchMenuFocus(browser: Browser, mode: 'live' | 'source', loading = false): Promise<void> {
   const page = await browser.newPage();
   try {
     await page.setViewport({ width: 1000, height: 700 });
@@ -991,10 +1004,36 @@ async function runWorkbenchMenuFocus(browser: Browser, mode: 'live' | 'source'):
     await content.setContent('<style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"></div>');
     await content.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await content.addScriptTag({ content: 'window.__hostMessages=[];window.acquireVsCodeApi=()=>({postMessage(message){window.__hostMessages.push(message)},getState(){},setState(){}})' });
+    if (loading) await content.evaluate(() => {
+      // Let the real editor mount, then hold its preparation frames until the
+      // loading cover is visible and focus has moved to the Workbench menu.
+      const scope = window as any, request = window.requestAnimationFrame.bind(window);
+      const cancel = window.cancelAnimationFrame.bind(window), held = new Map<number, FrameRequestCallback>();
+      let released = false;
+      window.requestAnimationFrame = callback => {
+        const id = request(time => {
+          if (!released && document.querySelector('.cm-content')) held.set(id, callback);
+          else callback(time);
+        });
+        return id;
+      };
+      window.cancelAnimationFrame = id => { held.delete(id); cancel(id); };
+      scope.__releaseWorkbenchLoading = () => {
+        released = true;
+        for (const callback of held.values()) request(callback);
+        held.clear();
+        window.requestAnimationFrame = request;
+        window.cancelAnimationFrame = cancel;
+      };
+    });
     await content.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
     await content.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), init(mode, 'alpha\nbeta'));
     await content.waitForSelector('.cm-content');
-    await (await content.$('.cm-line:nth-child(2)'))!.click();
+    await content.waitForFunction(loading => loading
+      ? document.querySelector<HTMLElement>('.editor-loading')?.hidden === false && document.querySelector<HTMLElement>('.editor-host')?.inert
+      : document.querySelector<HTMLElement>('.editor-loading')?.hidden !== false && !document.querySelector<HTMLElement>('.editor-host')?.inert,
+      { polling: 10 }, loading);
+    await (await content.$(loading ? '.editor-loading' : '.cm-line:nth-child(2)'))!.click();
     const before = await content.evaluate(() => {
       const element = document.querySelector('.cm-content') as HTMLElement & { cmTile: any };
       return element.cmTile.root.view.state.selection.main.head as number;
@@ -1002,7 +1041,12 @@ async function runWorkbenchMenuFocus(browser: Browser, mode: 'live' | 'source'):
     await page.click('#host-menu');
     assert.equal(await content.evaluate(() => document.hasFocus()), false, `${mode} menu fixture stayed focused`);
     await content.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } })));
-    assert.equal(await page.evaluate(() => document.activeElement?.id), 'host-menu', `${mode} late Host notification dismissed the Workbench menu`);
+    if (loading) {
+      await content.evaluate(() => (window as any).__releaseWorkbenchLoading());
+      await content.waitForFunction(() => document.querySelector<HTMLElement>('.editor-loading')?.hidden
+        && !document.querySelector<HTMLElement>('.editor-host')?.inert);
+    }
+    assert.equal(await page.evaluate(() => document.activeElement?.id), 'host-menu', `${mode} late Host notification or loading completion dismissed the Workbench menu`);
     assert.equal(await content.evaluate(() => document.hasFocus()), false, `${mode} late Host notification stole frame focus`);
     // Restoring only the shell is not permission to steal focus. A real return
     // into the content window must still reconnect input at the saved position.
@@ -1048,6 +1092,8 @@ async function main(): Promise<void> {
   try {
     await runWorkbenchMenuFocus(browser, 'live');
     await runWorkbenchMenuFocus(browser, 'source');
+    await runWorkbenchMenuFocus(browser, 'live', true);
+    await runWorkbenchMenuFocus(browser, 'source', true);
     await runAltFocusPolicy(browser, 'live');
     await runAltFocusPolicy(browser, 'source');
     await runIsolatedPaintedActivationClicks();

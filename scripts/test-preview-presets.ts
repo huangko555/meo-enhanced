@@ -41,7 +41,7 @@ checkCompatibility('GitHub heading with inline link and underscore', render('# T
 checkCompatibility('GitHub heading with math', render('# P06 Heading with spaces $a+b$').html.includes('id="p06-heading-with-spaces-ab"'), true);
 checkCompatibility('GitHub heading with literal TeX', render('# Formula:$\\alpha + \\beta$').html.includes('id="formulaalpha--beta"'), true);
 checkCompatibility('GitHub raw del', render('<del>deleted text</del>').html.includes('<del>deleted text</del>'), true);
-checkCompatibility('Default raw del unchanged', render('<del>deleted text</del>', 'default').html.includes('<del>'), false);
+checkCompatibility('Default raw del supported', render('<del>deleted text</del>', 'default').html.includes('<del>'), true);
 const mathCount = (markdown: string, preset: 'default' | 'github-readme' = 'github-readme') =>
   (render(markdown, preset).html.match(/class="meo-export-math /g) ?? []).length;
 for (const preset of ['default', 'github-readme'] as const) {
@@ -195,6 +195,6 @@ for (const preset of previewPresets) {
   });
   assert.equal(padding.at(-1), '0', `${preset.id}: screen padding does not double PDF margins`);
   const html = await exportRuntime.renderExportHtmlDocument({ ...options, target: 'html' });
-  assert.ok(!html.htmlDocument.includes('@page { size: A4; margin: 20mm; }'), 'HTML retains its screen layout');
+  assert.ok(!html.htmlDocument.includes('@page { size: A4; margin: 20mm;'), 'HTML retains its screen layout');
 }
 console.log('Preview preset rendering, capabilities and protocol tests passed.');

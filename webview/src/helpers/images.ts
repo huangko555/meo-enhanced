@@ -14,6 +14,7 @@ import type {
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 import { encodeMarkdownPath } from '../../../src/foundation/linkDestination';
 import { isWikiImageTarget, parseWikiReference, wikiImageSrc, wikiTargetFromImageSrc, WIKI_IMAGE_SCHEME } from '../../../src/foundation/wikiReference';
+import { stepVisualZoom } from './visualZoom';
 
 const wikiImageIssues = new Map<string, string>();
 const wikiIssueRequests = new Map<string, number>();
@@ -266,13 +267,13 @@ export const handleImagePaste = async (
         if (!savedImage) {
           const extension = imageExtensionFromMimeType(parseDataUrlMimeType(imageData)) ||
             imageExtensionFromMimeType(mimeType) || 'png';
-          const fileName = `${Date.now()}.${extension}`;
-          const result = await clipboardImageSaveTransport.save({ imageData, fileName });
+          const result = await clipboardImageSaveTransport.save({ imageData, extension });
           if (result.ok === false) throw new Error(result.error.message);
-          savedImage = { fileName, path: result.value.path };
+          savedImage = result.value;
         }
         const markdownPath = encodeMarkdownPath(savedImage.path);
-        const imageMarkdown = `![${savedImage.fileName}](${markdownPath})`;
+        const altText = savedImage.fileName.replace(/[\\`*_[\]<>&]/g, '\\$&');
+        const imageMarkdown = `![${altText}](${markdownPath})`;
         if (tableInput && tableSelection && tableInput.isConnected) {
           const start = tableInput.value === tableTextAtPaste
             ? tableSelection.start : tableInput.selectionStart;
@@ -476,7 +477,7 @@ export class ImageWidget extends WidgetType {
       img.width = intrinsic.width;
       img.height = intrinsic.height;
       img.style.aspectRatio = `${intrinsic.width} / ${intrinsic.height}`;
-      if (!this.width && !this.height) img.style.width = `${intrinsic.width * Math.min(1, 240 / intrinsic.height)}px`;
+      if (!this.width && !this.height) img.style.width = `var(--meo-html-image-width, ${intrinsic.width * Math.min(1, 240 / intrinsic.height)}px)`;
     }
     if (this.width) { img.width = this.width; img.style.width = `${this.width}px`; }
     if (this.height) { img.height = this.height; img.style.height = `${this.height}px`; }
@@ -660,8 +661,8 @@ export class ImageWidget extends WidgetType {
     const applyTransform = () => {
       image.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
     };
-    const changeZoom = (delta: number) => {
-      zoom = Math.min(4, Math.max(0.25, zoom + delta));
+    const changeZoom = (direction: 1 | -1, input: 'button' | 'wheel' = 'button') => {
+      zoom = stepVisualZoom(zoom, direction, input);
       applyTransform();
     };
 
@@ -682,8 +683,8 @@ export class ImageWidget extends WidgetType {
       controls.appendChild(button);
     };
     const strings = getUiStrings(this.uiLanguage);
-    addButton(ZoomIn, strings.zoomIn, () => changeZoom(0.5));
-    addButton(ZoomOut, strings.zoomOut, () => changeZoom(-0.5));
+    addButton(ZoomIn, strings.zoomIn, () => changeZoom(1));
+    addButton(ZoomOut, strings.zoomOut, () => changeZoom(-1));
     addButton(RotateCcw, strings.resetZoom, () => {
       zoom = 1;
       panX = 0;
@@ -736,7 +737,7 @@ export class ImageWidget extends WidgetType {
     };
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
-      changeZoom(event.deltaY > 0 ? -0.25 : 0.25);
+      changeZoom(event.deltaY > 0 ? -1 : 1, 'wheel');
     };
 
     viewer.addEventListener('pointerdown', onPointerDown);
@@ -917,9 +918,9 @@ export function getImageData(state: any, node: any): { url: string; altText: str
 
   let altText = '';
   const imageText = state.doc.sliceString(node.from, node.to);
-  const altMatch = /!\[([^\]]*)\]/.exec(imageText);
+  const altMatch = /!\[((?:\\.|[^\]\\])*)\]/.exec(imageText);
   if (altMatch) {
-    altText = altMatch[1];
+    altText = altMatch[1].replace(/\\([\\`*_[\]<>&])/g, '$1');
   }
 
   let linkUrl = '';

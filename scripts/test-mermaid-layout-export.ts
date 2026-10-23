@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import exportRuntime from '../src/export/runtime';
 import { getMermaidPalette } from '../src/shared/mermaidPalette';
+import { assertReadableMermaidTasks } from './mermaid-contrast-helpers';
 import { complexMermaidSamples } from './fixtures/mermaid-community-samples';
 import { launchTestBrowser, closeTestBrowser } from './browser-test-helpers';
 
@@ -24,6 +25,8 @@ const diagrams = [flow, `---\nconfig:\n  layout: dagre\n---\n${flow}`,
   'classDiagram\n  Document <|-- Markdown\n  Document : +String content\n  Markdown : +render()',
   complexMermaidSamples.find(sample => sample.id === 'pie')!.source,
   'mindmap\n  root((文档))\n    编辑\n      源码\n      预览\n    导出',
+  'gantt\n  dateFormat YYYY-MM-DD\n  section 状态\n  完成 :done, a, 2026-10-01, 3d\n  进行 :active, b, after a, 4d\n  普通 :c, after b, 3d\n  这是放在短任务条外面的完成标签 :done, outside, after c, 1d',
+  '---\nconfig:\n  themeVariables:\n    doneTaskBkgColor: "#ffdab9"\n    taskTextDarkColor: "#241208"\n---\ngantt\n  dateFormat YYYY-MM-DD\n  section 自定义\n  作者颜色 :done, custom, 2026-10-01, 5d',
   'flowchart LR\n  A[自定义颜色] --> B[保留作者样式]\n  classDef custom fill:#ffdab9,stroke:#8c4a2f,color:#241208\n  class A custom\n  linkStyle 0 stroke:#8c4a2f'
 ];
 const runtime = fs.readFileSync(path.resolve(import.meta.dir, '../webview/dist/mermaid.min.js'));
@@ -100,11 +103,21 @@ try {
           noteText: getComputedStyle(blocks[3]!.querySelector('.noteText')!).fill,
           sequenceLine: getComputedStyle(blocks[3]!.querySelector('.messageLine0')!).stroke,
           sequenceNumber: getComputedStyle(blocks[3]!.querySelector('.sequenceNumber')!).fill,
+          ganttTasks: Array.from(blocks[8]!.querySelectorAll<SVGElement>('rect.task')).map(bar => {
+            const label = blocks[8]!.querySelector<SVGElement>(`[id="${bar.id}-text"]`)!;
+            return { background: getComputedStyle(bar).fill, foreground: getComputedStyle(label).fill,
+              outside: /taskTextOutside/.test(label.getAttribute('class') ?? '') };
+          }),
+          customTask: getComputedStyle(blocks[9]!.querySelector('.done0')!).fill,
+          customTaskText: getComputedStyle(blocks[9]!.querySelector('.doneText0')!).fill,
           look: config.look
         };
       }, flow);
       assert.ok(result.rendered.every(Boolean), `${target}/${appearance}: every diagram type must render: ${JSON.stringify(result.errors)}`);
       assert.equal(result.look, 'classic');
+      assertReadableMermaidTasks(result.ganttTasks, `${target}/${appearance} Gantt`);
+      assert.equal(result.customTask, 'rgb(255, 218, 185)', 'Author Gantt bar colors remain effective');
+      assert.equal(result.customTaskText, 'rgb(36, 18, 8)', 'Author Gantt label colors remain effective');
       assert.ok(result.actual.edges.length > 0, 'Layout comparison must examine real rendered edges');
       assert.deepEqual(result.actual, result.references[0], 'Default output must really use ELK');
       assert.notDeepEqual(result.references[0], result.references[1], 'ELK must differ from Dagre on this fixture');
@@ -112,6 +125,9 @@ try {
       // HTML/PDF preserve the reading appearance; Word keeps its fixed light format.
       const palette = getMermaidPalette(target !== 'docx' && appearance === 'dark');
       const rgb = (hex: string) => `rgb(${[1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16)).join(', ')})`;
+      assert.deepEqual(result.ganttTasks.slice(0, 3).map(task => task.background),
+        [palette.doneTaskBackground, palette.activeTaskBackground, palette.taskBackground].map(rgb),
+        'Every export target uses the shared low-saturation Gantt state colors');
       assert.equal(result.nodeFill, rgb(palette.nodeBackground), 'Export must use the shared diagram palette');
       assert.equal(result.customFill, 'rgb(255, 218, 185)', 'Author classDef colors must remain effective');
       assert.equal(result.noteFill, rgb(palette.secondaryBackground), 'Sequence notes must use a neutral surface');

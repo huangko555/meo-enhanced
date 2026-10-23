@@ -21,6 +21,20 @@ async function waitForFrames(page: Page, count = 8): Promise<void> {
   }, count);
 }
 
+async function selectEditableMode(page: Page, mode: 'live' | 'source'): Promise<void> {
+  await page.click(`button[data-mode="${mode}"]`);
+  // The control projects the request before asynchronous Source preparation.
+  // Fixture navigation needs the applied mode, including its completion state.
+  await page.waitForFunction((expected) => {
+    const host = document.querySelector<HTMLElement>('.editor-host');
+    const editor = host?.querySelector('.cm-editor');
+    const savedMode = (window as typeof window & { __webviewState?: { mode?: string } }).__webviewState?.mode;
+    return document.querySelector('.editor-root')?.getAttribute('data-mode') === expected
+      && savedMode === expected && host?.inert === false && !host.hidden
+      && editor?.classList.contains(expected === 'source' ? 'meo-mode-source' : 'meo-mode-live');
+  }, { polling: 'raf', timeout: 5000 }, mode);
+}
+
 async function positionPreviewElement(page: Page, selector: string, ratio = 0): Promise<void> {
   await page.evaluate(({ targetSelector, targetRatio }) => {
     const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
@@ -342,9 +356,9 @@ async function main() {
       gutter: Boolean(document.querySelector('.editor-host .cm-lineNumbers')),
       meoToggle: Boolean(document.querySelector('[data-action="lineNumbers"]'))
     }));
-    await page.click('[data-mode="source"]');
+    await selectEditableMode(page, 'source');
     const sourceLineNumberGutter = await page.$('.editor-host .cm-lineNumbers');
-    await page.click('[data-mode="live"]');
+    await selectEditableMode(page, 'live');
     if (!liveLineNumberBoundary.gutter || liveLineNumberBoundary.meoToggle || !sourceLineNumberGutter) {
       throw new Error(`Line-number ownership boundary regressed: ${JSON.stringify(liveLineNumberBoundary)}`);
     }
@@ -1403,7 +1417,7 @@ async function main() {
       }}));
     }, toolbarBaselineText);
     await waitForFrames(page, 8);
-    await page.click('[data-mode="source"]');
+    await selectEditableMode(page, 'source');
     await page.evaluate((selection) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'revealSelection', anchor: selection, head: selection, focus: false
@@ -1460,7 +1474,7 @@ async function main() {
       throw new Error(`Source diff detail rendering regressed: ${JSON.stringify(sourceDiffDetails)}`);
     }
     await page.click('[data-toggle="before-content"]');
-    await page.click('[data-mode="live"]');
+    await selectEditableMode(page, 'live');
     await waitForFrames(page, 4);
     const toolbarDocumentActions = [
       { name: 'save', selector: '[data-action="save"]' },
@@ -1588,7 +1602,7 @@ async function main() {
       throw new Error(`Toolbar save did not request an exact Revision save: ${JSON.stringify(saveMessages)}`);
     }
     for (const mode of ['source', 'live'] as const) {
-      await page.click(`[data-mode="${mode}"]`);
+      await selectEditableMode(page, mode);
       await waitForFrames(page, 2);
       const persistedMode = await page.evaluate(() => (
         (window as typeof window & { __webviewState?: { mode?: string } }).__webviewState?.mode
@@ -1889,7 +1903,7 @@ async function main() {
       throw new Error(`Preview render error was not shown: ${previewError}`);
     }
     const stalePreviewRequestId = previewRequestId;
-    await page.click('[data-mode="live"]');
+    await selectEditableMode(page, 'live');
     await page.$eval<HTMLElement, number>('.editor-host > .cm-editor .cm-scroller', (element, scrollTop) => {
       element.scrollTop = scrollTop;
     }, editorScrollTopBeforePreview);
@@ -2084,7 +2098,7 @@ async function main() {
       throw new Error(`Wide Preview toolbar layout regressed: ${JSON.stringify(widePreviewToolbar)}`);
     }
     await positionPreviewElement(page, '#collapsed-long-code', 0.7);
-    await page.click('[data-mode="live"]');
+    await selectEditableMode(page, 'live');
     await waitForFrames(page, 16);
     const collapsedLongBlockState = await page.evaluate(() => ({
       placeholders: document.querySelectorAll('.meo-md-long-code-placeholder').length,
@@ -2099,7 +2113,7 @@ async function main() {
     await page.click('[data-mode="preview"]');
     await waitForFrames(page, 2);
     await positionPreviewElement(page, '#collapsed-long-code', 0.7);
-    await page.click('[data-mode="live"]');
+    await selectEditableMode(page, 'live');
     await waitForFrames(page, 16);
     const expandedLongBlockState = await page.evaluate(() => ({
       placeholders: document.querySelectorAll('.meo-md-long-code-placeholder').length,
@@ -2112,7 +2126,7 @@ async function main() {
     await page.click('[data-mode="preview"]');
     await waitForFrames(page, 2);
     await positionPreviewElement(page, '#short-code', 0.5);
-    await page.click('[data-mode="live"]');
+    await selectEditableMode(page, 'live');
     await waitForFrames(page, 16);
     const shortCodeBlockVisible = await page.evaluate(() => {
       const scroller = document.querySelector<HTMLElement>('.cm-scroller')!.getBoundingClientRect();
@@ -2424,8 +2438,12 @@ async function main() {
       throw new Error(`Preview Mermaid theme was not isolated: ${JSON.stringify(mermaidThemeIsolation)}`);
     }
     const previewExitReadingAnchor = await capturePreviewReadingAnchor(page);
-    await page.click('[data-mode="live"]');
-    await waitForFrames(page, 2);
+    await selectEditableMode(page, 'live');
+    await page.waitForFunction(() => {
+      const host = document.querySelector<HTMLElement>('.editor-host');
+      return document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live'
+        && host?.inert === false && !host.hidden;
+    });
     const liveEntryReadingAnchor = await captureSourceReadingAnchor(page, initialText);
     if (
       previewExitReadingAnchor.line === null ||
@@ -2462,7 +2480,7 @@ async function main() {
       return anchorRange.compareBoundaryPoints(Range.START_TO_START, focusRange) > 0;
     };
     await page.waitForFunction(editableSelectionMatches, {}, backwardSelectionText);
-    await page.click('[data-mode="source"]');
+    await selectEditableMode(page, 'source');
     await page.waitForFunction(editableSelectionMatches, {}, backwardSelectionText);
     await page.click('[data-mode="preview"]');
     await page.waitForSelector('.preview-host:not([hidden]) .preview-frame');
@@ -2481,7 +2499,7 @@ async function main() {
     await page.waitForFunction(() => document.querySelector<HTMLElement>('.preview-status')?.hidden
       && !document.querySelector('.editor-host')?.hasAttribute('data-preview-cover'));
     await waitForFrames(page, 2);
-    await page.click('[data-mode="source"]');
+    await selectEditableMode(page, 'source');
     await page.waitForFunction(editableSelectionMatches, {}, backwardSelectionText);
     await page.evaluate((text) => {
       const selection = text.indexOf('## Short Mermaid');
@@ -2530,7 +2548,7 @@ async function main() {
     ) {
       throw new Error(`Unchanged Preview switch lost its cached semantic anchor: ${JSON.stringify({ previewRequestsBeforeCachedSwitch, sourceReadingAnchor, cachedPreviewReadingAnchor, cachedSwitchState })}`);
     }
-    await page.click('[data-mode="source"]');
+    await selectEditableMode(page, 'source');
     await waitForFrames(page, 2);
     await page.evaluate(() => {
       const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
@@ -2575,7 +2593,7 @@ async function main() {
     }
     await positionPreviewElement(page, '#short-mermaid', 0);
     const shortPreviewReadingAnchor = await capturePreviewReadingAnchor(page);
-    await page.click('[data-mode="source"]');
+    await selectEditableMode(page, 'source');
     await page.waitForFunction(() => {
       const editorHost = document.querySelector<HTMLElement>('.editor-host');
       return document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source'
@@ -2646,7 +2664,7 @@ async function main() {
       const rect = heading.getBoundingClientRect();
       return rect.bottom > viewport.top && rect.top < viewport.bottom;
     });
-    await page.click('[data-mode="source"]');
+    await selectEditableMode(page, 'source');
     await page.waitForFunction(() => {
       if (document.querySelector('.editor-root')?.getAttribute('data-mode') !== 'source') return false;
       const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller');
@@ -2684,7 +2702,7 @@ async function main() {
     ) {
       throw new Error(`Live to Source lost the visible document position: ${JSON.stringify(liveSourceViewport)}`);
     }
-    await page.click('[data-mode="live"]');
+    await selectEditableMode(page, 'live');
     await waitForFrames(page, 2);
     await page.evaluate((text) => {
       const selection = text.indexOf('## Tall Mermaid');
@@ -2738,7 +2756,8 @@ async function main() {
     const before = await readViewport();
     const updatedText = initialText.replace('Start --> Done', 'Start --> Check --> Done');
     await page.evaluate((text) => {
-      window.dispatchEvent(new MessageEvent('message', { data: { type: 'docChanged', text, version: 2 } }));
+      // Version 2 already presented the unchanged document in the Preview case.
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'docChanged', text, version: 3 } }));
       const selection = text.indexOf('const line6');
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'revealSelection', anchor: selection, head: selection, focus: false, preserveViewport: true
@@ -2747,6 +2766,7 @@ async function main() {
       window.dispatchEvent(new Event('blur'));
       window.dispatchEvent(new Event('focus'));
     }, updatedText);
+    await page.waitForFunction(text => (window as any).__viewportTestText() === text, {}, updatedText);
     await page.keyboard.down('Control');
     await page.keyboard.press('s');
     await page.keyboard.up('Control');
@@ -2829,7 +2849,7 @@ async function main() {
       throw new Error(`Implicit webview updates moved the visual anchor: ${JSON.stringify({ before, afterUpdate, afterTheme, wheelScrollTops, wheelLinePositions, afterUpwardScroll })}`);
     }
 
-    const tallMermaidBefore = await page.evaluate(async () => {
+    let tallMermaidBefore = await page.evaluate(async () => {
       const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
       scroller.scrollTop = scroller.scrollHeight;
       for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -2894,6 +2914,26 @@ async function main() {
     if (!tallMermaidBefore || tallMermaidBefore.top === null || tallMermaidBefore.blockHeight <= 0) {
       throw new Error(`Tall Mermaid did not enter the controlled pending state: ${JSON.stringify(tallMermaidBefore)}`);
     }
+    // Raw DOM scrolling discovers the block, but does not reserve a reading
+    // intent while CodeMirror replaces virtual gaps. Establish that intent
+    // through the product navigation API before measuring trusted wheel input.
+    tallMermaidBefore = await page.evaluate(async before => {
+      await (window as any).__viewportTestRetainReadingLine(before.text, before.top);
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+      const anchor = Array.from(scroller.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(line => line.textContent === before.text);
+      const block = scroller.querySelector<HTMLElement>('.meo-mermaid-block[aria-busy="true"]:has(svg[height="3000"])');
+      const anchorTop = anchor?.getBoundingClientRect().top;
+      if (anchorTop === undefined || Math.abs(anchorTop - before.top!) > 1 || !block) {
+        throw new Error(`Tall Mermaid reading navigation did not settle: ${JSON.stringify({ before, anchorTop, pending: Boolean(block) })}`);
+      }
+      return {
+        ...before, top: anchorTop, blockTop: block.getBoundingClientRect().top,
+        blockHeight: block.getBoundingClientRect().height, scrollTop: scroller.scrollTop,
+        scrollHeight: scroller.scrollHeight,
+        gaps: Array.from(scroller.querySelectorAll<HTMLElement>('.cm-gap')).map(gap => gap.getBoundingClientRect().height)
+      };
+    }, tallMermaidBefore);
     const tallMermaidWheelDelta = -20;
     const tallMermaidWheelCount = 6;
     const pendingWheelCount = tallMermaidWheelCount / 2;
@@ -3038,7 +3078,7 @@ async function main() {
     console.log('Tall Mermaid trusted wheel reception, scroll response and settled geometry checks passed');
 
     const testEditorScrollToTop = async (mode: 'live' | 'source') => {
-      await page.click(`[data-mode="${mode}"]`);
+      await selectEditableMode(page, mode);
       await waitForFrames(page);
       await page.evaluate(() => {
         const scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;

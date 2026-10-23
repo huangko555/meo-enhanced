@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { launchTestBrowser } from './browser-test-helpers';
-import { runHistoryRenderedBlockChromiumInteraction } from './history-rendered-block-interaction-chromium';
+import { setMermaidLayout, type MermaidTestLayout } from './history-mermaid-chromium';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-toolbar-line-identity-'));
@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   const browser = await launchTestBrowser();
   try {
     for (const kind of ['mermaid', 'math'] as const) {
-      for (const mode of (kind === 'mermaid' ? ['source', 'split', 'preview'] : ['editing', 'reading']) as string[]) {
+      for (const mode of (kind === 'mermaid' ? ['stacked', 'side-by-side', 'preview'] : ['editing', 'reading']) as string[]) {
         const page = await browser.newPage();
         try {
           await page.setViewport({ width: 920, height: 600 });
@@ -40,8 +40,7 @@ async function main(): Promise<void> {
           }, kind);
           const settle = async (lineNumber: number, state: string) => {
             if (kind === 'mermaid') {
-              await runHistoryRenderedBlockChromiumInteraction(page,
-                { kind, lineNumber, targetMode: state as 'source' | 'split' | 'preview' }, '__historyMatrixEditor');
+              await setMermaidLayout(page, '__historyMatrixEditor', lineNumber, state as MermaidTestLayout);
               return;
             }
             await page.evaluate(lineNumber => {
@@ -51,13 +50,19 @@ async function main(): Promise<void> {
             }, lineNumber);
             await page.waitForSelector('.meo-math-copy-actions');
             if (state === 'editing') {
+              await page.click('.meo-md-math-fenced-display .katex');
+              await page.waitForSelector('.meo-math-source-actions');
               await page.click('.meo-math-copy-actions [aria-label="Select formula source"]');
               await page.waitForSelector('.meo-math-live-result');
               assert.equal(await page.evaluate(() => {
                 const view = (window as any).__historyMatrixEditor.view;
                 return view.state.doc.lineAt(view.state.selection.main.from).number;
               }), lineNumber + 1, 'Relocated formula action must select the current document source');
-            } else assert.equal(await page.$('.meo-math-source-line'), null, 'Reading formula must hide document source');
+            } else {
+              assert.equal(await page.$('.meo-math-source-line'), null, 'Reading formula must hide document source');
+              assert.equal(await page.$('.meo-math-copy-actions .meo-select-all-code-btn'), null,
+                'Reading formula must hide source selection actions');
+            }
           };
           await settle(103, mode);
           const originalLength = await page.evaluate(() => {
@@ -72,7 +77,7 @@ async function main(): Promise<void> {
           await page.mouse.move(0, 0);
           const shiftedLength = await page.evaluate(() => (window as any).__historyMatrixEditor.getText().length);
           assert.equal(shiftedLength, originalLength);
-          await settle(104, kind === 'math' ? (mode === 'editing' ? 'reading' : 'editing') : mode === 'split' ? 'source' : 'split');
+          await settle(104, kind === 'math' ? (mode === 'editing' ? 'reading' : 'editing') : mode === 'side-by-side' ? 'stacked' : 'side-by-side');
           assert.equal(await page.evaluate(async () => (window as any).__historyMatrixEditor.undo()), true);
           await settle(103, mode);
         } finally { await page.close(); }

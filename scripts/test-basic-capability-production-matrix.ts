@@ -21,7 +21,10 @@ async function open(browser: Browser, text: string, mode: 'live' | 'source' | 'p
   await page.evaluate((mode) => (window as any).__initialUiState = mode ? { mode, lastEditableMode: 'live' } : undefined, persistedMode ?? null);
   if (stallPreviewPaint) await page.evaluate(() => {
     (window as any).__stalledFrames = 0;
-    window.requestAnimationFrame = () => {
+    (window as any).__resumePreviewFrames = window.requestAnimationFrame.bind(window);
+    (window as any).__pausedPreviewFrames = [];
+    window.requestAnimationFrame = callback => {
+      (window as any).__pausedPreviewFrames.push(callback);
       // Simulate a restored webview whose compositor has not resumed frame callbacks.
       (window as any).__stalledFrames += 1;
       return (window as any).__stalledFrames;
@@ -65,6 +68,13 @@ async function open(browser: Browser, text: string, mode: 'live' | 'source' | 'p
   await page.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), init(text, mode, sourceLineNumbers));
   await page.waitForSelector('.editor-host > .cm-editor');
   await page.waitForSelector('.editor-wrapper:not(.meo-preload-editor-shell)');
+  if (mode !== 'preview') {
+    await page.waitForFunction(() => !document.querySelector<HTMLElement>('.editor-host')!.inert
+      && document.querySelector<HTMLElement>('.editor-loading')?.hidden !== false);
+  } else if (!stallPreviewPaint) {
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('.preview-loading')?.hidden === true);
+  }
+
   return page;
 }
 
@@ -581,6 +591,7 @@ async function reopenedPreviewMode(browser: Browser): Promise<void> {
         editorCover: document.querySelector<HTMLElement>('.editor-host')?.hasAttribute('data-preview-cover'),
         previewHidden: document.querySelector<HTMLElement>('.preview-host')?.hidden,
         hitPreview: hit?.matches('.preview-frame') ?? false,
+        loadingVisible: !document.querySelector<HTMLElement>('.preview-loading')?.hidden,
         previewText: document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent?.includes('Reopened preview') ?? false,
         stalledFrames: (window as any).__stalledFrames
       };
@@ -590,8 +601,20 @@ async function reopenedPreviewMode(browser: Browser): Promise<void> {
     assert.deepEqual(presentation, {
       selected: 'true', rootMode: 'preview', editorHidden: true,
       editorInert: true, editorCover: false, previewHidden: false,
-      hitPreview: true, previewText: true
+      hitPreview: false, loadingVisible: true, previewText: true
     }, `Reopened Preview selected a noninteractive Live surface: ${JSON.stringify(state)}`);
+    // With the compositor deliberately paused, the visible fallback is a Preview
+    // loading surface. Resume real frames and require the completed surface to
+    // become interactive without revealing its hidden editable carrier.
+    await page.evaluate(() => { window.requestAnimationFrame = (window as any).__resumePreviewFrames;
+      for (const callback of (window as any).__pausedPreviewFrames) window.requestAnimationFrame(callback);
+      (window as any).__pausedPreviewFrames = []; });
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('.preview-loading')?.hidden === true);
+    assert.equal(await page.evaluate(() => {
+      const surface = document.querySelector<HTMLElement>('.editor-surface')!, rect = surface.getBoundingClientRect();
+      return document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.matches('.preview-frame')
+        && document.querySelector<HTMLElement>('.editor-host')?.inert;
+    }), true, 'Resumed Preview must expose its reading surface while keeping the editable carrier inert');
   } finally {
     await page.close();
   }

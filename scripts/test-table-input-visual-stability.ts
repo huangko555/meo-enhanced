@@ -71,14 +71,28 @@ async function assertPendingCellSurvivesPresentation(page: import('puppeteer-cor
     const from = scene.key === 'Backspace' ? scene.start - 1 : scene.start;
     const to = scene.key === 'Delete' ? scene.end + 1 : scene.end;
     const expected = before.slice(0, from) + scene.insert + before.slice(to), caret = from + scene.insert.length;
+    // Deliver the older accepted presentation in the same trusted input task,
+    // after the native editor records its draft and before its commit timer can
+    // run. A second CDP round trip can otherwise miss the pending-edit race.
+    await page.$eval(target, (input: HTMLTextAreaElement, before) => {
+      const probe = { baseline: 0, delivered: false, error: '' };
+      (window as any).__pendingPresentationProbe = probe;
+      input.addEventListener('input', () => {
+        const editor = (window as any).__tableVisualEditor;
+        const from = editor.view.state.doc.toString().indexOf(before);
+        probe.baseline = input.getBoundingClientRect().top;
+        if (from < 0) { probe.error = 'Pending edit fixture lost its accepted source'; return; }
+        editor.setDiagnostics([{ from, to: from + 1, severity: 1, message: `Late presentation ${from}` }]);
+        probe.delivered = true;
+      }, { once: true });
+    }, before);
     if (scene.key) await page.keyboard.press(scene.key);
     else await page.keyboard.sendCharacter(scene.insert);
-    const baseline = await page.$eval(target, (input: HTMLTextAreaElement) => input.getBoundingClientRect().top);
-    await page.evaluate(before => {
-      const editor = (window as any).__tableVisualEditor, from = editor.view.state.doc.toString().indexOf(before);
-      if (from < 0) throw new Error('Pending edit fixture lost its accepted source');
-      editor.setDiagnostics([{ from, to: from + 1, severity: 1, message: `Late presentation ${from}` }]);
-    }, before);
+    const baseline = await page.evaluate(() => {
+      const probe = (window as any).__pendingPresentationProbe;
+      if (probe.error || !probe.delivered) throw new Error(probe.error || 'Pending input listener did not deliver the presentation');
+      return probe.baseline as number;
+    });
     await waitForFrames(page, 4);
     const result = await page.$eval(target, (input: HTMLTextAreaElement) => ({ value: input.value,
       start: input.selectionStart, end: input.selectionEnd, top: input.getBoundingClientRect().top,

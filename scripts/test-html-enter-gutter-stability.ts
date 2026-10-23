@@ -39,10 +39,7 @@ try {
     for (let index = 0; index < 10; index++) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     }
-    const toggle = editor.view.dom.querySelector<HTMLButtonElement>(
-      '.meo-md-html-block[data-meo-rendered-block-start-line="97"] .meo-md-html-source-toggle'
-    );
-    toggle?.click();
+    editor.view.dispatch({ selection: { anchor: editor.view.state.doc.line(97).from } });
     for (let index = 0; index < 8; index++) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     }

@@ -30,6 +30,18 @@ for (const theme of [darkPlus, lightPlus]) {
     try {
       const baseline = await tokensFor(surface, 'markdown', markdownTail.join('\n'));
       assert.ok(baseline[0].some(syntax => syntax.scopeNames?.some(scope => scope.startsWith('markup.heading'))));
+      for (const diagram of ['sequenceDiagram\nparticipant User\nUser->>Editor: Edit', 'flowchart TD\nA[Start] --> B[End]']) {
+        const tokens = await tokensFor(surface, 'mermaid', diagram);
+        assert.equal(tokens.map(line => line.map(syntax => syntax.content).join('')).join('\n'), diagram);
+        assert.ok(tokens.flat().some(syntax => syntax.scopeNames?.includes('keyword.control.mermaid')),
+          `${theme.type}/${surface}: Mermaid body receives real keyword scopes`);
+        assert.ok(new Set(tokens.flat().map(syntax => syntax.color)).size > 1,
+          `${theme.type}/${surface}: Mermaid source is not a single plain-text color`);
+        checked++;
+      }
+      const plainMermaidWords = await tokensFor(surface, 'markdown', 'sequenceDiagram\nUser->>Editor: prose');
+      assert.ok(plainMermaidWords.flat().every(syntax => !syntax.scopeNames?.some(scope => scope.endsWith('.mermaid'))),
+        'Loading Mermaid must not inject Mermaid syntax into ordinary Markdown paragraphs');
       // Loading HTML in another code block used to change whether Markdown
       // recovered after a raw HTML block. Source loads these embeddings eagerly.
       for (const language of ['html', 'html-derivative', 'vue']) {
@@ -60,6 +72,27 @@ for (const theme of [darkPlus, lightPlus]) {
       for (const prefix of ['> quote', '- list item']) {
         const tokens = await tokensFor(surface, 'markdown', prefix + '\n\n' + markdownTail.join('\n'));
         assert.deepEqual(projection(tokens[2]), projection(baseline[0]), 'Blank lines end quote/list continuations');
+        checked++;
+      }
+      for (const marker of ['`', '~']) for (const width of [3, 4]) {
+        for (const [language, payload] of [
+          ['javascript', '/* unfinished comment'], ['python', 'value = """unfinished string'],
+          ['text', 'literal payload'], ['mermaid', 'flowchart LR'], ['math', String.raw`\frac{x`]
+        ]) {
+          const opening = marker.repeat(width);
+          const text = [opening + language, payload, opening + marker.repeat(2), '', ...markdownTail].join('\n');
+          const tokens = await tokensFor(surface, 'markdown', text);
+          for (let index = 0; index < markdownTail.length; index++) {
+            assert.deepEqual(projection(tokens[4 + index]), projection(baseline[index]),
+              `${surface} ${theme.name}: ${language} must end at a longer ${marker} fence`);
+          }
+          checked++;
+        }
+      }
+      for (const [opening, invalidClose] of [['````', '```'], ['~~~~', '~~~'], ['```', '~~~'], ['~~~', '```'], ['```', '```~']]) {
+        const tokens = await tokensFor(surface, 'markdown', opening + 'text\nliteral\n' + invalidClose + '\n## still literal');
+        assert.ok(tokens[3].every(syntax => !syntax.scopeNames?.some(scope => scope.startsWith('markup.heading'))),
+          `${opening}: a short or mismatched fence cannot close the block`);
         checked++;
       }
       // Empty lines must advance the grammar, without resetting open constructs.

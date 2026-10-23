@@ -1524,19 +1524,10 @@ async function main(): Promise<void> {
     const pendingPointer = await page.evaluate(() => {
       const editor = (window as any).__liveInputEditor;
       (window as any).__dispatchProductionInput(editor, 'plain'.length, 'P');
-      const line = Array.from(document.querySelectorAll<HTMLElement>('#primary .meo-md-code-line-numbered'))
-        .find((candidate) => candidate.textContent?.includes('const liveLine1 = 1;'));
-      const rect = line?.getBoundingClientRect();
-      if (!line || !rect) throw new Error('Missing visible long-code line for pointer command');
-      line.dispatchEvent(new PointerEvent('pointerdown', {
-        bubbles: true,
-        cancelable: true,
-        button: 0,
-        buttons: 1,
-        pointerId: 19,
-        clientX: rect.left + 8,
-        clientY: rect.top + rect.height / 2
-      }));
+      // Visible source clicks keep folding preferences; expansion is an explicit action.
+      const expand = document.querySelector<HTMLButtonElement>('#primary .meo-md-long-code-placeholder .meo-long-code-action');
+      if (!expand) throw new Error('Missing explicit long-code expansion action');
+      expand.click();
       return document.querySelectorAll('#primary .meo-md-long-code-placeholder').length;
     });
     await waitForFrames(page, 5);

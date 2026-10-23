@@ -1,5 +1,5 @@
 import type MarkdownIt from 'markdown-it';
-import { inlineStyleDelimiter } from '../shared/punctuationInlineStyles';
+import { inlineStyleDelimiter } from './punctuationInlineStyles';
 
 export function installPunctuationInlineTransform(md: MarkdownIt): void {
   md.inline.ruler.before('strikethrough', 'meo_punctuation_styles', (state, silent) => {

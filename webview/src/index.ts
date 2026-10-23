@@ -1,8 +1,10 @@
 import { effectiveShortcuts } from '../../src/application/editingPreferences';
 import type { DocumentText, DocumentTextEdit } from '../../src/foundation/documentSnapshot';
+import { createEditorFontWheel } from './adapters/editorFontWheel';
 import { createImageLocationSettings } from './adapters/imageLocationSettings';
 import { createImageStorageTransport } from './adapters/imageStorageTransport';
 import { createSettingsWindow, type GeneralSetting } from './adapters/settingsWindow';
+import { DEFAULT_EDITOR_LINE_HEIGHT, normalizeEditorLineHeight } from '../../src/foundation/editorLineHeight';
 import { createUiColorsTransport } from './adapters/uiColorsTransport';
 import type { UiColors } from '../../src/foundation/uiColors';
 import { createPreviewPresetSettings } from './adapters/previewPresetSettings';
@@ -19,7 +21,7 @@ import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleIm
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
 import { normalizeWikiTarget, replaceWikiLinkStatuses, initializeWikiLinkHandling, collectWikiLinkTargets, requestWikiLinkStatuses, scheduleWikiLinkStatusRefresh, setWikiLinkRefreshContext, cancelPendingWikiStatusRefresh, handleResolvedWikiLinks } from './helpers/wikiLinks';
-import { initializeLocalLinkHandling, requestLocalLinkStatuses, scheduleLocalLinkStatusRefresh, setLocalLinkRefreshContext, cancelPendingLocalLinkStatusRefresh, handleResolvedLocalLinks } from './helpers/localLinks';
+import { initializeLocalLinkHandling, requestLocalLinkStatuses, invalidateLocalLinkStatuses, scheduleLocalLinkStatusRefresh, setLocalLinkRefreshContext, cancelPendingLocalLinkStatusRefresh, handleResolvedLocalLinks } from './helpers/localLinks';
 import { setGitDiffLineHighlightsEnabled } from './helpers/gitDiffLineHighlights';
 import { applyBuiltInVisualBaseline, applyUiVisualBaseline } from './helpers/theme';
 import { setShikiTheme } from './helpers/shikiHighlighter';
@@ -1045,7 +1047,7 @@ exportControl.addEventListener('pointerleave', () => {
   exportMenuCloseTimer = window.setTimeout(() => {
     if (exportControl.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
     setExportMenuExpanded(false);
-  }, 300);
+  }, 200);
 });
 exportControl.addEventListener('focusin', () => {
   previewOptionsMenu.close();
@@ -1769,6 +1771,7 @@ const acceptImageIntrinsicSizes = (entries: readonly ImageIntrinsicSize[]) => {
 };
 const previewController = createPreviewController({
   getImageIntrinsicSize: src => imageIntrinsicSizes.get(imageDimensionSourceKey(src)) ?? null,
+  onFontSizeWheel: event => editorFontWheel.handleWheel(event),
   requestFonts: previewFontsTransport.request,
   vscode,
   optionsMenu: previewOptionsPanel,
@@ -1851,10 +1854,7 @@ const previewController = createPreviewController({
     if (isSidePreviewVisible()) editor?.linkedPreviewReady?.();
   },
   runViewportTransaction: (mutate, documentChange) => {
-    if (!editor?.runPreviewPresentationTransaction) {
-      mutate();
-      return;
-    }
+    if (!editor?.runPreviewPresentationTransaction) return false;
     const reloadViewport = pendingReloadPreviewViewport;
     editor.runPreviewPresentationTransaction(mutate, documentChange);
     if (
@@ -1964,7 +1964,7 @@ const finishEditorLoading = (): void => {
   editorHost.inert = !editorInteractive;
   // Inert can move focus to the body. Restore only that lost editor focus;
   // never take it from a mode button, search field or another user action.
-  if (wasVisible && editorInteractive && document.activeElement === document.body
+  if (wasVisible && editorInteractive && document.hasFocus() && document.activeElement === document.body
     && editorModeApplication.getState().mode !== 'preview') editor?.focus();
 };
 const editorPresentationPending = (mode: 'live' | 'source', intent: number): boolean => {
@@ -1977,7 +1977,15 @@ const editorPresentationPending = (mode: 'live' | 'source', intent: number): boo
 const beginEditorLoading = (mode: 'live' | 'source'): void => {
   const intent = editorModeApplication.getState().intentId;
   if (pendingEditorLoading?.intent === intent && pendingEditorLoading.mode === mode) return;
-  finishEditorLoading();
+  // During cold startup there is no accepted reading surface to return to.
+  // Transfer an already visible cover to the newer mode intent atomically;
+  // clearing it here would briefly expose the old, unprepared editor.
+  const retainStartupCover = initialEditorPresentationPending && !editorLoading.hidden;
+  if (retainStartupCover) {
+    const timer = pendingEditorLoading?.timer;
+    if (timer !== null && timer !== undefined) window.clearTimeout(timer);
+    pendingEditorLoading = null;
+  } else finishEditorLoading();
   if (!editorPresentationPending(mode, intent)) return;
   const loading = { mode, intent, timer: null as number | null };
   pendingEditorLoading = loading;
@@ -2215,6 +2223,8 @@ let pendingRevealDocumentFragment: string | null = null;
 let pendingEditorSurfaceRecoveryRaf: number | null = null;
 let createEditorFactoryPromise: Promise<CreateEditorFactory> | null = null;
 let editorFontSizePreference: EditorFontSizePreference = { mode: 'auto', value: 14 };
+let editorMouseWheelZoom = true;
+let editorLineHeight = DEFAULT_EDITOR_LINE_HEIGHT;
 const INITIAL_EDITOR_MOUNT_FALLBACK_MS = 120;
 const LIVE_PRESENTATION_REVEAL_WAIT_MS = 500;
 
@@ -2265,6 +2275,15 @@ const switchToSourceAction = (emphasis: 'primary' | 'secondary' = 'secondary'): 
   run: () => requestModeFromNotice('source')
 });
 
+const applyEditorLineHeight = (value: number, { post = false, refreshPreview = true } = {}): void => {
+  editorLineHeight = normalizeEditorLineHeight(value);
+  const mutate = () => document.documentElement.style.setProperty('--meo-user-editor-line-height', String(editorLineHeight));
+  if (editor?.preserveViewport) editor.preserveViewport(mutate, true); else mutate();
+  if (refreshPreview) previewAdapter.refreshVisible(getCurrentEditorText(), { preserveViewport: true, preserveFrame: true });
+  if (post) vscode.postMessage({ type: 'setEditorLineHeight', value: editorLineHeight });
+  settingsWindow?.present();
+};
+
 const syncEditorFontSizeControls = (): void => {
   const custom = editorFontSizePreference.mode === 'custom';
   editorFontSizeModeControl.setActive(editorFontSizePreference.mode);
@@ -2272,12 +2291,14 @@ const syncEditorFontSizeControls = (): void => {
   editorFontSizeStepper.classList.toggle('is-disabled', !custom);
   decreaseEditorFontSizeBtn.disabled = !custom || editorFontSizePreference.value <= EDITOR_FONT_SIZE_MIN;
   increaseEditorFontSizeBtn.disabled = !custom || editorFontSizePreference.value >= EDITOR_FONT_SIZE_MAX;
+  settingsWindow?.present();
 };
 
 const applyEditorFontSizePreference = (
   preference: EditorFontSizePreference,
   { post = false, refreshPreview = true }: { readonly post?: boolean; readonly refreshPreview?: boolean } = {}
 ): void => {
+  if (post) editorFontWheel.flush();
   editorFontSizePreference = {
     mode: preference.mode === 'custom' ? 'custom' : 'auto',
     value: normalizeEditorFontSize(preference.value)
@@ -2306,6 +2327,23 @@ const applyEditorFontSizePreference = (
     });
   }
 };
+
+const editorFontWheel = createEditorFontWheel({
+  mac: /Mac|iPhone|iPad|iPod/.test(navigator.platform),
+  enabled: () => editorMouseWheelZoom && !settingsWindow?.isOpen(),
+  getPreference: () => editorFontSizePreference,
+  getAutomaticSize: () => {
+    const content = document.querySelector('.editor-host .cm-editor');
+    const size = content ? getComputedStyle(content).fontSize : getComputedStyle(document.documentElement).getPropertyValue('--vscode-editor-font-size');
+    return Number.parseFloat(size) || 14;
+  },
+  apply: preference => applyEditorFontSizePreference(preference),
+  save: () => vscode.postMessage({ type: 'setEditorFontSize', ...editorFontSizePreference })
+});
+const fontWheelAbort = new AbortController();
+document.addEventListener('wheel', event => {
+  if (event.target instanceof Element && event.target.closest('.editor-host')) editorFontWheel.handleWheel(event);
+}, { capture: true, passive: false, signal: fontWheelAbort.signal });
 
 editorAppearanceControl.element.addEventListener('click', (event) => {
   const button = event.target instanceof Element
@@ -3419,6 +3457,9 @@ editorModeRuntime = createEditorModeRuntime(
 const handleInit = (message: InitMessage) => {
   imageDimensionDocumentId = message.documentId;
   acceptImageIntrinsicSizes(message.imageIntrinsicSizes ?? []);
+  editorFontWheel.flush();
+  editorMouseWheelZoom = message.editorMouseWheelZoom ?? true;
+  applyEditorLineHeight(message.editorLineHeight ?? DEFAULT_EDITOR_LINE_HEIGHT, { refreshPreview: false });
   acceptEditingPreferences(message.editingPreferences, message.editingPreferencesRevision ?? 0);
   activeUiLanguagePreference = message.uiLanguagePreference;
   automaticUiLanguage = message.automaticUiLanguage;
@@ -3589,6 +3630,19 @@ const previewPresetSettings = createPreviewPresetSettings({
 settingsWindow = createSettingsWindow({
   appearance: {
     getColors: () => uiColors, getMode: () => themeAdapter.getPreference(), getScheme: () => themeAdapter.getAppearance(),
+    getFontSize: () => editorFontSizePreference,
+    mac: /Mac|iPhone|iPad|iPod/.test(navigator.platform),
+    getMouseWheelZoom: () => editorMouseWheelZoom,
+    setMouseWheelZoom: enabled => {
+      editorFontWheel.flush();
+      editorMouseWheelZoom = enabled;
+      vscode.postMessage({ type: 'setEditorMouseWheelZoom', enabled });
+    },
+    setFontSize: value => applyEditorFontSizePreference(value, { post: true }),
+    getLineHeight: () => editorLineHeight,
+    setLineHeight: value => applyEditorLineHeight(value, { post: true }),
+    reportSaveError: message => failureNotice.setFailureNotice(() => ({ title: activeUiLanguage === 'zh-CN' ? '外观设置保存失败' : 'Unable to save appearance settings', message }), 'error', 'appearance-settings'),
+    clearSaveError: () => failureNotice.clearFailureNotice('appearance-settings'),
     setMode: mode => themeAdapter.setAppearance(mode, { post: true }),
     preview: colors => { uiColorsPreview = colors; refreshUiColors(); },
     update: colors => uiColorsTransport.update(colors)
@@ -3611,7 +3665,6 @@ settingsWindow = createSettingsWindow({
       switchItem('restorePosition', 'opening', strings.resumeReadingPositionLabel, () => restoreReadingPositionOnOpen, setRestoreReadingPositionOnOpen),
       switchItem('largeDocument', 'opening', strings.largeDocumentStartup, () => largeDocumentOptimizationEnabled, setLargeDocumentOptimizationEnabled, strings.largeDocumentStartupDescription),
       { id: 'language', section: 'interface', title: strings.interfaceLanguage, control: { kind: 'choice', get: () => activeUiLanguagePreference, set: value => { activeUiLanguagePreference = value as UiLanguagePreference; uiLanguageControl.setActive(activeUiLanguagePreference); applyUiLanguage(value === 'auto' ? automaticUiLanguage : value as UiLanguage); vscode.postMessage({ type: 'setUiLanguagePreference', language: activeUiLanguagePreference }); }, options: [{ value: 'auto', label: strings.auto }, { value: 'zh-CN', label: '简体中文' }, { value: 'en', label: 'English' }] } },
-      { id: 'fontSize', section: 'interface', title: strings.editorFontSize, control: { kind: 'font', get: () => editorFontSizePreference, set: value => applyEditorFontSizePreference(value, { post: true }) } }
     ];
   }
 });
@@ -3643,6 +3696,8 @@ window.addEventListener('message', (event) => {
   queueMicrotask(() => { if (settingsWindow?.isOpen()) settingsWindow.present(); });
   if (message.type === 'webviewVisibilityResult') { readingLayout.accept(message); return; }
   if (message.type === 'webviewVisibilityChanged') { readingLayout.refresh(); return; }
+  if (message.type === 'editorLineHeightChanged') { applyEditorLineHeight(message.value); return; }
+  if (message.type === 'editorMouseWheelZoomChanged') { editorFontWheel.flush(); editorMouseWheelZoom = message.enabled; return; }
   if (message.type === 'uiColorsResult') { uiColorsTransport.accept(message); return; }
   if (message.type === 'uiColorsChanged') { uiColors = message.colors; refreshUiColors(); return; }
   if (message.type === 'openPreviewPresetSettings') { setMoreToolsVisible(false); settingsWindow?.open('presets'); return; }
@@ -3932,6 +3987,10 @@ window.addEventListener('message', (event) => {
     editor?.refreshInputSuggestions();
     return;
   }
+  if (message.type === 'localLinkResourcesChanged') {
+    if (editor) invalidateLocalLinkStatuses(editor.getText());
+    return;
+  }
   if (message.type === 'wikiResourcesChanged') {
     if (!editor) return;
     editor.refreshInputSuggestions();
@@ -4031,6 +4090,8 @@ window.addEventListener('focus', () => {
 window.addEventListener('beforeunload', () => {
   readingLayout.dispose();
   previewFontsTransport.dispose();
+  fontWheelAbort.abort();
+  editorFontWheel.dispose();
   settingsWindow?.dispose();
   largeDocumentTooltip?.dispose();
   tooltipBinding.dispose();

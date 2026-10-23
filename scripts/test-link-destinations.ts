@@ -1,9 +1,17 @@
 import assert from 'node:assert/strict';
 import MarkdownIt from 'markdown-it';
-import { encodeMarkdownPath, formatLinkDestination, normalizeLinkDestination, isLocalFileLinkDestination } from '../src/foundation/linkDestination';
+import { encodeMarkdownPath, formatLinkDestination, normalizeLinkDestination, isLocalFileLinkDestination, isLikelyLocalLinkDestination } from '../src/foundation/linkDestination';
 import exportRuntime from '../src/export/runtime';
 
 const markdown = new MarkdownIt();
+for (const destination of ['guide.md', 'guide.markdown#title', 'guide.mdx', 'guide.mdc', '<folder/文档.md>',
+  '<folder/文档 file.md>', 'notes%3Av1.md', './file.pdf', '/guide', 'C:%5Cnotes%5Cguide.md', 'file:///C:/notes/guide.md']) {
+  assert.equal(isLikelyLocalLinkDestination(destination), true, destination);
+}
+for (const destination of ['https://example.md', 'mailto:person@example.test', 'www.example.md', 'example.com/page',
+  '//example.com/page', 'localhost:3000/page', '#title', '?query', '']) {
+  assert.equal(isLikelyLocalLinkDestination(destination), false, destination);
+}
 for (const [raw, destination] of [
   ['assets/image.png', 'assets/image.png'],
   ['设计资料/截图🖼️.png', '设计资料/截图🖼️.png'],

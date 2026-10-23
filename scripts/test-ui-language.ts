@@ -26,6 +26,11 @@ assert.deepEqual(
 
 const english = getUiStrings('en');
 const chinese = getUiStrings('zh-CN');
+const mermaidParseFailure = "Parse error on line 3:\nA[Label --> B\n------------^\nExpecting 'SQE', got 'EOF'";
+assert.equal(english.mermaidError(mermaidParseFailure), `Mermaid error: ${mermaidParseFailure}`);
+assert.equal(chinese.mermaidError(mermaidParseFailure), "Mermaid 错误：第 3 行存在语法错误：\nA[Label --> B\n------------^\n期望 'SQE'，实际为 'EOF'");
+assert.equal(chinese.mermaidError('Mermaid runtime failed to load'), 'Mermaid 错误：图表运行资源加载失败。');
+assert.equal(chinese.mermaidError('Unknown renderer failure'), 'Mermaid 错误：暂时无法渲染图表。\n原始错误：Unknown renderer failure');
 assert.equal(english.properties, 'Properties');
 assert.equal(chinese.properties, 'Properties');
 assert.equal(getReadingUiStrings('en').properties, 'Properties');
@@ -77,11 +82,13 @@ assert.equal(chinese.untitled, '未命名');
 assert.equal(chinese.backToTop, '回到顶部');
 assert.equal(chinese.markTaskComplete, '标记任务为已完成');
 assert.equal(chinese.jumpToFootnoteReference(2), '跳转到脚注引用 2');
-assert.equal(chinese.copyCode, '复制');
+assert.equal(chinese.copyCode, '复制源码');
+assert.equal(getUiStrings('en').copyCode, 'Copy source');
+assert.equal(chinese.copyImage, '复制为图片');
 assert.equal(chinese.showMoreCode(9), '显示其余 9 行代码');
 assert.deepEqual(
   [chinese.loading, chinese.zoomIn, chinese.zoomOut, chinese.resetZoom, chinese.fullscreen, chinese.exitFullscreen],
-  ['正在加载…', '放大', '缩小', '重置缩放', '全屏', '退出全屏']
+  ['正在加载…', '放大', '缩小', '重置缩放', '全屏查看', '退出全屏']
 );
 assert.deepEqual(
   [chinese.colorLabel('#ff0000'), chinese.acceptCurrent, chinese.acceptIncoming, chinese.acceptBoth],

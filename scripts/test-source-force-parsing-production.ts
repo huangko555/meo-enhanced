@@ -17,6 +17,12 @@ type ParseCall = {
   duration: number;
 };
 
+function assertBoundedPreparation(calls: ParseCall[], length: number): void {
+  assert.ok(calls.every(call => call.upto <= length &&
+    (call.kind === 'ensure' ? call.timeout <= 50 : call.timeout === 0)),
+  'Live may complete its missing structure in bounded slices or publish an existing receipt; it must not force distant embedded languages');
+}
+
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-source-force-parsing-production-'));
 
@@ -90,14 +96,15 @@ async function main(): Promise<void> {
       editor.scrollToLine(line, 'top');
       editor.revealSelection(position, position, { focusEditor: true, align: 'nearest' });
       (window as any).__immediateDetailsEditor = editor;
-      return { sourceCalls, liveCalls };
+      return { sourceCalls, liveCalls, structure: harness.preparedStructure(editor) };
     }, { text: immediateDetailsText, line: immediateDetailsLine, position: immediateDetailsPosition });
     assert.deepEqual(immediateDetails.sourceCalls, []);
-    assert.equal(immediateDetails.liveCalls.filter((call: ParseCall) => call.kind === 'force').length, 1);
-    assert.equal(
-      immediateDetails.liveCalls.find((call: ParseCall) => call.kind === 'force')?.result,
-      'complete'
-    );
+    assert.ok(immediateDetails.liveCalls.every((call: ParseCall) => call.upto === immediateDetailsText.length && (call.kind === 'ensure' ? call.timeout <= 50 : call.timeout === 0)),
+      'cold preparation may ensure within its existing slice, but must reuse a completed outer pass instead of forcing it again');
+    assert.equal(immediateDetails.structure.complete, true);
+    assert.equal(immediateDetails.structure.length, immediateDetailsText.length);
+    assert.ok(immediateDetails.structure.nodes.some((node: any) => node.name === 'HTMLBlock' && node.to > immediateDetailsPosition),
+      'preparation includes the actual distant details block');
     await waitForFrames(page, 4);
     const immediateDetailsPresentation = await page.evaluate(() => ({
       summary: document.querySelector('.meo-md-details-summary-label')?.textContent ?? null,
@@ -108,10 +115,14 @@ async function main(): Promise<void> {
     }));
     assert.deepEqual(immediateDetailsPresentation, {
       summary: 'Remote details summary',
-      sourceToggle: true,
-      rawDetails: false,
+      sourceToggle: false,
+      rawDetails: true,
       history: { undo: 0, redo: 0 }
     });
+    await page.evaluate(position => (window as any).__immediateDetailsEditor.view.dispatch({
+      selection: { anchor: position - '<details>\n'.length - 1 }
+    }), immediateDetailsPosition);
+    await waitForFrames(page, 2);
     await page.click('.meo-md-details-summary');
     await waitForFrames(page, 2);
     const immediateDetailsToggle = await page.evaluate(() => ({
@@ -174,6 +185,7 @@ async function main(): Promise<void> {
         mode: editor.view.dom.classList.contains('meo-mode-source') ? 'source' : 'live',
         text: editor.getText(),
         history: editor.getHistoryDepth(),
+        structure: (window as any).EditorSyntaxParsingHarness.preparedStructure(editor),
         calls: structuredClone((window as any).__meoSyntaxParseCalls)
       };
     }, documentText);
@@ -237,7 +249,8 @@ async function main(): Promise<void> {
           history: editor.getHistoryDepth(),
           focused: editor.hasFocus(),
           viewport: editor.getTopVisiblePosition(),
-          calls: structuredClone((window as any).__meoSyntaxParseCalls)
+          structure: (window as any).EditorSyntaxParsingHarness.preparedStructure(editor),
+        calls: structuredClone((window as any).__meoSyntaxParseCalls)
         };
       });
       assert.equal(result.text, expectedText, `${label} must preserve Document text`);
@@ -255,7 +268,7 @@ async function main(): Promise<void> {
         beforePublication,
         `${label} must preserve text, selection, history, focus and viewport while the parser publishes`
       );
-      assert.deepEqual(result.calls, [], `${label} must not call ensureSyntaxTree/forceParsing`);
+      assert.ok(result.calls.every((call: ParseCall) => call.timeout === 0), `${label} may publish a completed receipt without extending synchronous parsing`);
       assert.equal(result.realHeader.tableLine, false, `${label} must not retain Live table header decorations`);
       assert.equal(result.realHeader.tableCells, 0, `${label} must not retain Live table cell decorations`);
       assert.equal(result.validTag.tags, 0, `${label} must keep native Source tags as TextMate syntax`);
@@ -296,7 +309,11 @@ async function main(): Promise<void> {
       });
       editor.focus();
     }, targetLine);
-    await page.waitForSelector('#app .meo-source-token');
+    await page.waitForFunction(() => [...document.querySelectorAll<HTMLElement>('#app .cm-line span[class]')]
+      .some(span => span.textContent?.includes('trace-highlight') || span.textContent === 'Markdown'));
+    // Large Source uses bounded Lezer coloring; ordinary Source uses TextMate.
+    // Both must paint actual authored syntax, without depending on one engine's
+    // private token class or requiring whole-document TextMate preparation.
     await waitForFrames(page);
 
     const before = await page.evaluate(() => {
@@ -322,20 +339,14 @@ async function main(): Promise<void> {
       editor.setMode('live');
       return {
         elapsed: performance.now() - startedAt,
+        structure: (window as any).EditorSyntaxParsingHarness.preparedStructure(editor),
         calls: structuredClone((window as any).__meoSyntaxParseCalls)
       };
     });
-    const liveForceCalls = sourceToLive.calls.filter((call: ParseCall) => call.kind === 'force');
-    assert.equal(liveForceCalls.length, 1);
-    assert.deepEqual(
-      liveForceCalls.map(({ upto, timeout }) => ({ upto, timeout })),
-      [{ upto: documentText.length, timeout: 500 }]
-    );
-    assert.ok(
-      sourceToLive.calls.filter((call: ParseCall) => call.kind === 'ensure').every((call) => (
-        call.upto === documentText.length && call.timeout === 50
-      ))
-    );
+    assertBoundedPreparation(sourceToLive.calls, documentText.length);
+    assert.equal(sourceToLive.structure.complete, true);
+    assert.equal(sourceToLive.structure.length, documentText.length);
+    assert.ok(sourceToLive.structure.nodes.some((node: any) => node.name === 'Table' && node.from > documentText.indexOf('OFFSCREEN FINAL SYNTAX')));
 
     await waitForFrames(page);
     const liveState = await page.evaluate(() => {
@@ -367,6 +378,7 @@ async function main(): Promise<void> {
       editor.setMode('source');
       return {
         elapsed: performance.now() - startedAt,
+        structure: (window as any).EditorSyntaxParsingHarness.preparedStructure(editor),
         calls: structuredClone((window as any).__meoSyntaxParseCalls)
       };
     });
@@ -404,7 +416,8 @@ async function main(): Promise<void> {
         return {
           direction: 'source-to-live',
           elapsed: performance.now() - startedAt,
-          calls: structuredClone((window as any).__meoSyntaxParseCalls)
+          structure: (window as any).EditorSyntaxParsingHarness.preparedStructure(editor),
+        calls: structuredClone((window as any).__meoSyntaxParseCalls)
         };
       }, cycle));
       await waitForFrames(page);
@@ -417,14 +430,17 @@ async function main(): Promise<void> {
         return {
           direction: 'live-to-source',
           elapsed: performance.now() - startedAt,
-          calls: structuredClone((window as any).__meoSyntaxParseCalls)
+          structure: (window as any).EditorSyntaxParsingHarness.preparedStructure(editor),
+        calls: structuredClone((window as any).__meoSyntaxParseCalls)
         };
       }, cycle));
       await waitForFrames(page);
     }
     for (const trace of repeatedTraces) {
       if (trace.direction === 'source-to-live') {
-        assert.equal(trace.calls.filter((call) => call.kind === 'force').length, 1);
+        assertBoundedPreparation(trace.calls, documentText.length);
+        assert.equal(trace.structure.complete, true);
+        assert.equal(trace.structure.length, documentText.length);
       } else {
         assert.deepEqual(trace.calls, []);
       }

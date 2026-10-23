@@ -14,12 +14,14 @@ import {
   isMappedLiveInputRefresh,
   shouldDeferLiveInputDerivedWork
 } from '../editor/liveInputDerivedWork';
-import { isExternalDocumentPresentation } from '../editor/externalDocumentPresentation';
 import { getUiStrings } from '../application/uiLanguage';
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
 import { markdownStructureIdentity } from '../editor/markdownStructure';
+import { blockReadingFocusAt, focusBlockReading } from '../editor/blockInteraction';
+import { editorViewportBounds } from '../editor/editorViewportBounds';
 import { getViewportController } from './viewportController';
+import { isExternalDocumentPresentation } from '../editor/externalDocumentPresentation';
 
 const LONG_CODE_LINE_THRESHOLD = 18;
 const LONG_CODE_VISIBLE_LINES = 10;
@@ -55,17 +57,15 @@ type LongCodeBlockState = {
   descriptorTabSize?: number;
 };
 
-const setLongCodeBlockPointerInteractionEffect = StateEffect.define<{ position: number }>();
 const toggleLongCodeBlockEffect = StateEffect.define<{ anchor: number; collapsed: boolean }>();
 /** These effects change this module's own folding decorations, not Markdown's
  * source-dependent presentation. Other fields can retain their current value. */
 export function isLongCodeBlockInteractionEffect(effect: StateEffect<unknown>): boolean {
-  return effect.is(toggleLongCodeBlockEffect) || effect.is(setLongCodeBlockPointerInteractionEffect);
+  return effect.is(toggleLongCodeBlockEffect);
 }
 export const longCodeBlockEnabledFacet = Facet.define<boolean, boolean>({
   combine: (values) => values.at(-1) ?? true
 });
-const viewportGeneration = new WeakMap<EditorView, number>();
 
 function isMermaidLanguage(info: string | null): boolean {
   return info === 'mermaid';
@@ -100,75 +100,27 @@ function findBlockIntersectingHiddenRange(
   const rangeFrom = Math.min(from, to);
   const rangeTo = Math.max(from, to);
   return blocks.find((block) => rangeFrom === rangeTo
-    ? rangeFrom >= block.collapsedFrom && rangeFrom <= block.contentTo
+    ? rangeFrom >= block.collapsedFrom && rangeFrom <= block.end
     : rangeFrom < block.contentTo && rangeTo > block.collapsedFrom) ?? null;
 }
 
-function getCollapseSelectionPosition(
-  view: EditorView,
-  descriptor: LongCodeBlockDescriptor
-): number | null {
-  const selectionTouchesHiddenRange = view.state.selection.ranges.some((range) => (
-    range.empty
-      ? range.from >= descriptor.collapsedFrom && range.from <= descriptor.end
-      : range.from < descriptor.end && range.to > descriptor.collapsedFrom
-  ));
-  if (!selectionTouchesHiddenRange) return null;
-  const firstHiddenLine = view.state.doc.lineAt(descriptor.collapsedFrom);
-  return firstHiddenLine.number > 1
-    ? view.state.doc.line(firstHiddenLine.number - 1).to
-    : descriptor.start;
-}
-
-function revealCollapsedBlockIfNeeded(
-  view: EditorView,
-  collapsedFrom: number,
-  generation: number
-): void {
-  getViewportController(view)?.revealPositionUntilStable(
-    collapsedFrom,
-    { geometry: 'line-block', y: 'nearest', yMargin: 8 },
-    () => viewportGeneration.get(view) === generation
-  );
-}
-
 function setLongCodeBlockCollapsed(view: EditorView, anchor: number, collapsed: boolean): void {
-  const generation = (viewportGeneration.get(view) ?? 0) + 1;
-  viewportGeneration.set(view, generation);
-  const descriptor = collectLongCodeBlockDescriptors(view.state)
-    .find((block) => block.anchor === anchor);
-  const previousScrollTop = collapsed ? view.scrollDOM.scrollTop : null;
-  const scroller = collapsed ? view.scrollDOM.getBoundingClientRect() : null;
-  const start = collapsed && descriptor ? view.coordsAtPos(descriptor.start) : null;
-  const startWasVisible = Boolean(start && scroller && (
-    start.bottom >= scroller.top && start.top <= scroller.bottom
-  ));
-  const selectionPosition = collapsed && descriptor
-    ? getCollapseSelectionPosition(view, descriptor)
-    : null;
-  view.dispatch({
-    ...(selectionPosition === null ? {} : { selection: { anchor: selectionPosition } }),
-    effects: [
-      toggleLongCodeBlockEffect.of({ anchor, collapsed }),
-      ...(collapsed && !startWasVisible && descriptor
-        ? [editorScrollIntoView(descriptor.collapsedFrom, { y: 'nearest', yMargin: 8 })]
-        : [])
-    ]
-  });
-  view.focus();
-  if (!collapsed) {
+  const block = collectLongCodeBlockDescriptors(view.state).find(block => block.anchor === anchor);
+  if (!block) return;
+  const effects = [toggleLongCodeBlockEffect.of({ anchor, collapsed })];
+  const selection = view.state.selection.main, caret = view.coordsAtPos(selection.head), bounds = editorViewportBounds(view);
+  const hiddenSelection = selection.empty ? selection.head >= block.collapsedFrom && selection.head <= block.end
+    : selection.from < block.end && selection.to >= block.collapsedFrom;
+  if (collapsed && view.hasFocus && !hiddenSelection && caret && caret.top >= bounds.top && caret.bottom <= bounds.bottom) {
+    const controller = getViewportController(view), isCurrent = controller?.beginNavigationReveal() ?? (() => true);
+    view.dispatch({ effects });
+    controller?.retainPositionTop(selection.head, caret.top, isCurrent);
     return;
   }
-
-  const viewportController = getViewportController(view);
-  if (startWasVisible && previousScrollTop !== null) {
-    viewportController?.lockScrollTop(
-      previousScrollTop,
-      () => viewportGeneration.get(view) === generation
-    );
-    return;
-  }
-  if (descriptor) revealCollapsedBlockIfNeeded(view, descriptor.collapsedFrom, generation);
+  if (collapsed || blockReadingFocusAt(view.state)?.from === block.start)
+    focusBlockReading(view, { kind: 'code', from: block.start, to: block.end,
+      summaryFrom: collapsed ? block.collapsedFrom : undefined }, effects);
+  else view.dispatch({ effects });
 }
 
 function resolveCurrentBlockAnchor(view: EditorView, dom: HTMLElement, fallbackAnchor: number): number {
@@ -410,7 +362,7 @@ function buildLongCodeState(
 }
 
 function hasLongCodeImmediateEffect(transaction: Transaction): boolean {
-  return transaction.effects.some(isLongCodeBlockInteractionEffect);
+  return transaction.effects.some(effect => effect.is(toggleLongCodeBlockEffect));
 }
 
 function applyTemporaryTarget(
@@ -463,15 +415,6 @@ function reduceLongCodeInteractions(
         target.temporaryTarget = false;
         target.temporaryTargetKind = null;
         target.collapsed = effect.value.collapsed;
-        presentationChanged = true;
-      }
-    } else if (effect.is(setLongCodeBlockPointerInteractionEffect)) {
-      const target = findBlockContainingPosition(blocks, effect.value.position);
-      if (target?.isLong) {
-        target.manualCollapsed = false;
-        target.temporaryTarget = false;
-        target.temporaryTargetKind = null;
-        target.collapsed = false;
         presentationChanged = true;
       }
     }
@@ -564,6 +507,13 @@ const longCodeBlockStateField = StateField.define<LongCodeBlockState>({
   }
 });
 
+export function codeEditingBlockAt(state: EditorState, position: number) {
+  const block = state.field(longCodeBlockStateField, false)?.blocks.find(block => position >= block.start && position <= block.end);
+  return block ? { kind: 'code' as const, from: block.start, to: block.end,
+    startLine: state.doc.lineAt(block.start).number, endLine: state.doc.lineAt(block.end).number,
+    hiddenFrom: block.collapsed ? block.collapsedFrom : null } : null;
+}
+
 class LongCodeFloatingButtonPlugin {
   button: HTMLButtonElement;
   view: EditorView;
@@ -571,23 +521,6 @@ class LongCodeFloatingButtonPlugin {
   private destroyed = false;
   private measurePending = false;
   private readonly onScroll = (): void => this.refresh();
-  private readonly onPointerDown = (event: PointerEvent): void => {
-    const target = event.target instanceof Element ? event.target : null;
-    if (target?.closest('.meo-long-code-action, .meo-code-block-actions, .meo-code-language-label, .meo-md-long-code-placeholder, .meo-md-long-code-footer')) {
-      return;
-    }
-    const state = this.view.state.field(longCodeBlockStateField, false);
-    if (!state) {
-      return;
-    }
-    const position = sourceLinePositionAtTarget(this.view, event.target)
-      ?? this.view.posAtCoords({ x: event.clientX, y: event.clientY });
-    if (position === null) return;
-    const block = findBlockContainingPosition(state.blocks, position);
-    if (block?.collapsed || block?.temporaryTargetKind === 'selection') {
-      this.view.dispatch({ effects: setLongCodeBlockPointerInteractionEffect.of({ position }) });
-    }
-  };
 
   constructor(view: EditorView) {
     this.view = view;
@@ -611,7 +544,6 @@ class LongCodeFloatingButtonPlugin {
       setLongCodeBlockCollapsed(view, anchor, true);
     });
     view.dom.appendChild(this.button);
-    view.dom.addEventListener('pointerdown', this.onPointerDown, true);
     view.scrollDOM.addEventListener('scroll', this.onScroll, { passive: true });
     this.refresh();
   }
@@ -621,9 +553,6 @@ class LongCodeFloatingButtonPlugin {
       const strings = getUiStrings(update.state.facet(uiLanguageFacet));
       this.button.textContent = strings.showLess;
       this.button.setAttribute('aria-label', strings.showLessCode);
-    }
-    if (update.transactions.some(isExternalDocumentPresentation)) {
-      viewportGeneration.set(this.view, (viewportGeneration.get(this.view) ?? 0) + 1);
     }
     if (update.transactions.some(shouldDeferLiveInputDerivedWork)
       && !update.transactions.some(hasLongCodeImmediateEffect)) return;
@@ -644,8 +573,6 @@ class LongCodeFloatingButtonPlugin {
 
   destroy(): void {
     this.destroyed = true;
-    viewportGeneration.set(this.view, (viewportGeneration.get(this.view) ?? 0) + 1);
-    this.view.dom.removeEventListener('pointerdown', this.onPointerDown, true);
     this.view.scrollDOM.removeEventListener('scroll', this.onScroll);
     this.button.remove();
   }

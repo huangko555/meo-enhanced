@@ -35,13 +35,15 @@ import { prepareSourceSyntax, sourceSyntax, sourceSyntaxPreparation } from './he
 import { prepareLiveSyntax, refreshLiveSyntax } from './editor/liveSyntaxPreparation';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
 import type { UiLanguage } from '../../src/foundation/uiLanguage';
-import { longCodeBlockEnabledFacet } from './helpers/longCodeBlocks';
+import { codeEditingBlockAt, longCodeBlockEnabledFacet } from './helpers/longCodeBlocks';
+import { blockInteractionExtensions, blockReadingFocusAt, clearBlockReadingFocus, focusBlockReading, moveAcrossBlockBoundary, retainBlockCaret } from './editor/blockInteraction';
 import type { SourceLineNumberMode } from '../../src/protocol/readyInit';
 import { formatSourceLineNumber, sourceLineNumberModeFacet } from './editor/sourceLineNumbers';
 import { flushEditorLayout } from './editor/layoutMeasurement';
 import { assessLargeDocument } from '../../src/foundation/largeDocument';
 import { uiLanguageFacet } from './editor/uiLanguage';
-import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, publishPreparedLivePresentation, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
+import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, publishPreparedLivePresentation, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect } from './liveMode';
+import { setLivePointerSelectionActiveEffect } from './editor/livePointerSelection';
 import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
 import { insertMountedTableCellBreak } from './helpers/tables';
 import { insertCodeBlock, sourceCodeBlockLines } from './helpers/codeBlocks';
@@ -122,15 +124,17 @@ import {
   tableUsableViewportBounds
 } from './helpers/tables';
 import { parseFrontmatter, parseFrontmatterCandidate } from './helpers/frontmatter';
-import { collectLatexMathRanges } from './helpers/math';
+import { collectLatexMathRanges, renderLatexMathToHtml } from './helpers/math';
+import { observeRenderedBlockImageAvailability, refreshRenderedBlockImageLabel } from './helpers/renderedBlockImage';
+import { suppressRenderedBlockPointerFocus } from './helpers/renderedBlockActionFocus';
 import { diagnosticDataField, diagnosticField, setDiagnosticsEffect, type EditorDiagnostic } from './helpers/diagnostics';
 import type { GitBaselinePayload } from '../../src/protocol/git';
 import type { SelectionMenuState } from './helpers/selectionMenu';
 import {
-  focusMermaidEditingOffset, getMermaidBlockMode, mermaidEditingStateField,
-  restoreMermaidModeSelection, setMermaidBlockModeEffect, setMermaidSearchRevealEffect,
-  takeMermaidModeSelection
+  focusMermaidEditingOffset, finishMermaidEditing, getMermaidBlockMode, mermaidEditingStateField,
+  setMermaidLayoutEffect, setMermaidSearchRevealEffect
 } from './helpers/mermaidEditing';
+import { mermaidPasteText, insertMermaidNewline, indentMermaidSource } from './helpers/mermaidSource';
 import {
   focusLatexMathEditingOffset, getLatexMathBlockMode, latexMathEditingStateField,
   restoreLatexMathModeSelection, setLatexMathBlockModeEffect, setLatexMathSearchRevealEffect,
@@ -138,7 +142,11 @@ import {
 } from './helpers/latexMathEditing';
 import { getLiveRenderedBlocks } from './helpers/liveRenderedBlocks';
 import { parseBlockLinePrefix } from './helpers/blockIndent';
-import { displayMathPasteText, indentDisplayMathSource, insertDisplayMathNewline, selectedDisplayMathBody } from './helpers/displayMathEditing';
+import { canFormatDisplayMathSource, formatActiveDisplayMathSource, displayMathPasteText, indentDisplayMathSource, insertDisplayMathNewline, selectedDisplayMathBody, isDisplayMathEditing } from './helpers/displayMathEditing';
+import { createHtmlSourceEditing } from './editor/htmlSource';
+import { formatActiveHtmlSource, getHtmlEditingRange } from './helpers/htmlContent';
+import { supportedHtmlTags } from '../../src/shared/htmlPolicy';
+import { getMathCompletionBody } from './helpers/displayMathBlocks';
 import {
   ViewportController,
   visualLineContextMargin,
@@ -1000,47 +1008,74 @@ export function createEditor({
     return false;
   };
 
-  const tryEnterRenderedBlockSource = (editorView: EditorView, forward: boolean, vertical: boolean) => {
+  const tryMoveAcrossRenderedBlockSource = (editorView: EditorView, forward: boolean, vertical: boolean) => {
     if (currentMode !== 'live') return false;
     const selection = editorView.state.selection.main;
-    if (!selection.empty) return false;
+    if (!selection.empty || editorView.state.selection.ranges.length !== 1) return false;
     const line = editorView.state.doc.lineAt(selection.head);
     if (!vertical && selection.head !== (forward ? line.to : line.from)) return false;
-    const block = getLiveRenderedBlocks(editorView.state, { includeSelectedMath: true }).find(block =>
-      block.kind === 'math'
-        ? forward ? line.number === block.startLine || line.number === block.startLine - 1
-          : line.number === block.endLine || line.number === block.endLine + 1
-        : block.kind === 'mermaid' && (forward ? line.number === block.startLine : line.number === block.endLine));
-    if (!block || block.endLine <= block.startLine + 1) return false;
-    const opening = editorView.state.doc.line(block.startLine);
-    const first = editorView.state.doc.line(block.startLine + 1);
-    const last = editorView.state.doc.line(block.endLine - 1);
-    const target = forward ? first : last;
-    const column = selection.head - line.from;
-    if (block.kind === 'math') {
-      const prefix = parseBlockLinePrefix(editorView.state.doc.line(block.endLine).text, editorView.state.tabSize).prefix.length;
-      const targetColumn = vertical ? Math.min(target.length, Math.max(prefix, column)) : forward ? Math.min(prefix, target.length) : target.length;
-      editorView.dispatch({ selection: { anchor: target.from + targetColumn }, scrollIntoView: true });
-      return true;
+    const adjacent = (block: { startLine: number; endLine: number }) => line.number === block.startLine || line.number === block.endLine ||
+      line.number === (forward ? block.startLine - 1 : block.endLine + 1);
+    const html = collectRenderableHtmlBlocks(editorView.state).find(block => block.visible && adjacent(block));
+    const code = codeEditingBlockAt(editorView.state, selection.head)
+      ?? (line.number + (forward ? 1 : -1) > 0 && line.number + (forward ? 1 : -1) <= editorView.state.doc.lines
+        ? codeEditingBlockAt(editorView.state, editorView.state.doc.line(line.number + (forward ? 1 : -1)).from) : null);
+    if (code && code.hiddenFrom !== null && forward
+      && editorView.state.doc.lineAt(code.hiddenFrom).number === line.number + 1
+      && (!vertical || editorView.moveToLineBoundary(selection, true).head === line.to)) {
+      const target = editorView.state.doc.lineAt(code.hiddenFrom);
+      return moveAcrossBlockBoundary(editorView, true, null, () => {
+        editorView.dispatch({ selection: { anchor: target.from + (vertical ? Math.min(selection.head - line.from, target.length) : 0) }, userEvent: 'select' });
+      });
     }
-    const offset = target.from - first.from + (vertical ? Math.min(column, target.length) : forward ? 0 : target.length);
-    // These helpers only focus a mounted Source/Split editor. Preview retains
-    // the document's normal navigation and does not change presentation.
-    return focusMermaidEditingOffset(editorView, opening.from, offset);
+    const block = html ? { ...html, kind: 'html' as const } : getLiveRenderedBlocks(editorView.state, { includeSelectedMath: true })
+      .find(block => (block.kind === 'math' || block.kind === 'mermaid') && adjacent(block)) ?? (code && adjacent(code) ? code : null);
+    if (!block) return false;
+    const opening = editorView.state.doc.line(block.startLine);
+    const first = editorView.state.doc.line(Math.min(block.startLine + 1, editorView.state.doc.lines));
+    const column = selection.head - line.from;
+    const closing = editorView.state.doc.line(block.endLine);
+    const inside = line.number >= block.startLine && line.number <= block.endLine;
+    const before = opening.number > 1 ? editorView.state.doc.line(opening.number - 1).to : null;
+    const after = closing.number < editorView.state.doc.lines ? editorView.state.doc.line(closing.number + 1).from : null;
+    const editing = block.kind === 'mermaid' ? getMermaidBlockMode(editorView.state, opening.from, closing.to).manual === 'edit'
+      : block.kind === 'math' ? isDisplayMathEditing(editorView.state, opening.number, closing.number)
+        : block.kind === 'html' ? !!getHtmlEditingRange(editorView.state) : true;
+    if (inside && editing) {
+      if (editorView.state.selection.ranges.length !== 1 || line.number !== (forward ? closing.number : opening.number)) return false;
+      const next = vertical ? editorView.moveVertically(selection, forward) : editorView.moveByChar(selection, forward);
+      if (next.head >= opening.from && next.head <= closing.to) return false;
+      return moveAcrossBlockBoundary(editorView, forward, forward ? after : before, () => {
+        editorView.dispatch({ selection: EditorSelection.create([next]), userEvent: 'select' });
+        return true;
+      });
+    }
+    if (inside && line.number !== (forward ? opening.number : closing.number)) return false;
+    // A wrapped prose line must finish moving within itself before entering the block.
+    if (vertical && !inside && editorView.moveToLineBoundary(selection, forward).head !== (forward ? line.to : line.from)) return false;
+    const fence = forward ? opening : closing;
+    const offset = fence.from - first.from + (vertical ? Math.min(column, fence.length) : forward ? 0 : fence.length);
+    return moveAcrossBlockBoundary(editorView, forward, forward ? before : after, isCurrent => {
+      if (block.kind === 'mermaid') focusMermaidEditingOffset(editorView, opening.from, offset, isCurrent);
+      else {
+        editorView.dispatch({ selection: { anchor: first.from + offset }, userEvent: 'select', effects: [
+          supersedeLiveInputDerivedWork(), ...(block.kind === 'html' ? [setHtmlEditingRangeEffect.of({ from: html!.from, to: html!.to })] : [])
+        ] });
+        editorView.focus();
+      }
+    });
   };
 
   const finishDisplayMathEditing = (editorView: EditorView) => {
-    if (currentMode !== 'live') return false;
+    if (currentMode !== 'live' || editorView.composing || editorView.state.selection.ranges.length !== 1) return false;
     const lineNo = editorView.state.doc.lineAt(editorView.state.selection.main.head).number;
     const block = getLiveRenderedBlocks(editorView.state, { includeSelectedMath: true })
       .find(block => block.kind === 'math' && block.startLine <= lineNo && block.endLine >= lineNo);
     if (!block) return false;
-    if (block.endLine < editorView.state.doc.lines) {
-      editorView.dispatch({ selection: { anchor: editorView.state.doc.line(block.endLine + 1).from }, scrollIntoView: true });
-    } else {
-      editorView.dispatch({ changes: { from: editorView.state.doc.length, insert: '\n' },
-        selection: { anchor: editorView.state.doc.length + 1 }, scrollIntoView: true });
-    }
+    const selection = editorView.state.selection.main;
+    if (selection.from < editorView.state.doc.line(block.startLine).from || selection.to > editorView.state.doc.line(block.endLine).to) return false;
+    focusBlockReading(editorView, { kind: 'math', from: editorView.state.doc.line(block.startLine).from,
+      to: editorView.state.doc.line(block.endLine).to });
     return true;
   };
 
@@ -1106,9 +1141,21 @@ export function createEditor({
     }
     liveSelectionPointerId = null;
     if (view && currentMode === 'live') {
-      view.dispatch({
-        effects: setLivePointerSelectionActiveEffect.of({ active: false, preservedLine: null })
-      });
+      const mutate = () => {
+        // Native table controls bypass CodeMirror's selection handler. Retiring
+        // the held-pointer presentation must adopt the clicked cell, even when
+        // a reused table DOM follows an external document replacement.
+        const input = getActiveTableInput();
+        const range = input ? getTableInputSourceRange(input) : null;
+        const head = view.state.selection.main.head;
+        const selection = input && range && (head < range.from || head > range.to)
+          ? { anchor: Math.min(range.to, range.from + tableCellEditorOffsetToSourceOffset(input.value, input.selectionStart ?? 0)) }
+          : undefined;
+        view.dispatch({ selection, effects: setLivePointerSelectionActiveEffect.of({ active: false, preservedLine: null }) });
+      };
+      const top = view.hasFocus && view.state.selection.main.empty ? view.coordsAtPos(view.state.selection.main.head)?.top : undefined;
+      if (top !== undefined) retainBlockCaret(view, top, mutate);
+      else mutate();
     }
   };
 
@@ -1937,22 +1984,27 @@ export function createEditor({
       return null;
     }
 
-    if (block.kind === 'math') {
+    if (block.kind === 'math' || block.kind === 'mermaid') {
       const contentFrom = view.state.doc.line(block.startLine + 1).from;
       const contentTo = Math.max(contentFrom, view.state.doc.line(block.endLine).from - 1);
-      // A newline edit can map the history end to the closing fence. Keep the
-      // restored caret in the editable formula body, as for embedded Mermaid.
-      const mathTargetPosition = Math.max(contentFrom, Math.min(targetPosition, contentTo));
-      view.dispatch({ selection: { anchor: mathTargetPosition } });
-      // Opening native formula source can move its caret beyond the old reading
+      // Mermaid uses the native document selection, including editable fences.
+      // A textual changed range can include the following newline and point at
+      // the closing fence even when native history restored a caret in the body.
+      const nativeHead = view.state.selection.main.head;
+      const sourceTargetPosition = block.kind === 'math'
+        ? Math.max(contentFrom, Math.min(targetPosition, contentTo))
+        : nativeHead >= view.state.doc.line(block.startLine).from
+          && nativeHead <= view.state.doc.line(block.endLine).to ? nativeHead : targetPosition;
+      view.dispatch({ selection: { anchor: sourceTargetPosition } });
+      // Opening native source can move its caret beyond the old reading
       // viewport even when the logical line was visible in the collapsed result.
-      const coords = view.coordsAtPos(mathTargetPosition);
+      const coords = view.coordsAtPos(sourceTargetPosition);
       const viewport = editorViewportBounds(view);
       const scrollDelta = view.scrollDOM.scrollTop - previousViewport.scrollTop;
       const wasVisible = coords !== null && coords.top + scrollDelta >= viewport.top
         && coords.bottom + scrollDelta <= viewport.bottom;
       if (wasVisible) viewportController.lockScrollTop(previousViewport.scrollTop, isCurrent);
-      else viewportController.revealPositionUntilStable(mathTargetPosition, { y: 'center-if-outside' }, isCurrent);
+      else viewportController.revealPositionUntilStable(sourceTargetPosition, { y: 'center-if-outside' }, isCurrent);
       return () => {
         if (!isCurrent()) return false;
         view.contentDOM.focus({ preventScroll: true });
@@ -1960,98 +2012,7 @@ export function createEditor({
       };
     }
 
-    const openingLine = view.state.doc.line(block.startLine);
-    const contentFrom = view.state.doc.line(block.startLine + 1).from;
-    const closingLine = view.state.doc.line(block.endLine);
-    const contentTo = Math.max(contentFrom, closingLine.from - 1);
-    const offset = Math.max(0, Math.min(targetPosition - contentFrom, contentTo - contentFrom));
-    const targetWasVisibleBeforeReplay = targetLineNumber >= previousViewport.selection.visibleFromLineNumber
-      && targetLineNumber <= previousViewport.selection.visibleToLineNumber;
-    const manualMode = block.kind === 'mermaid'
-      ? getMermaidBlockMode(view.state, openingLine.from, contentFrom, contentTo).manual
-      : getLatexMathBlockMode(view.state, openingLine.from, contentFrom, contentTo).manual;
-    view.dispatch({
-      selection: { anchor: manualMode === 'preview' ? openingLine.from : targetPosition },
-      effects: targetWasVisibleBeforeReplay
-        ? []
-        : editorScrollIntoView(openingLine.from, { y: 'center' })
-    });
-    if (targetWasVisibleBeforeReplay) {
-      viewportController.lockScrollTop(previousViewport.scrollTop, isCurrent);
-    } else {
-      viewportController.revealPositionUntilStable(openingLine.from, { y: 'center', geometry: 'line-block' }, isCurrent);
-    }
-    // Undo/Redo follows the user's chosen presentation. Preview has no source
-    // editor to focus, so restoring the visible block and outer editor is the
-    // complete interaction outcome; Source and Split restore the inner caret.
-    const renderedBlockRoots = () => manualMode === 'preview'
-      ? Array.from(view.dom.querySelectorAll<HTMLElement>(
-          `[data-meo-rendered-block-start-line="${block.startLine}"]`
-        ))
-      : Array.from(view.dom.querySelectorAll<HTMLElement>(
-          block.kind === 'mermaid'
-            ? `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${openingLine.from}"]`
-            : `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${openingLine.from}"]`
-        ));
-    const renderedBlockIsReady = () => {
-      const viewport = view.scrollDOM.getBoundingClientRect();
-      return renderedBlockRoots().some((element) => {
-        const rect = element.getBoundingClientRect();
-        const visibleHeight = Math.min(rect.bottom, viewport.bottom) - Math.max(rect.top, viewport.top);
-        const requiredVisibleHeight = Math.min(
-          rect.height,
-          Math.max(96, viewport.height * 0.4)
-        );
-        return visibleHeight >= requiredVisibleHeight;
-      });
-    };
-    // Retrying focus must not restart the settling navigation every frame.
-    // That starves distant nested blocks until the history adapter falls back.
-    let boundaryRevealRequested = !targetWasVisibleBeforeReplay;
-    const requestBoundaryReveal = () => {
-      if (boundaryRevealRequested) return;
-      boundaryRevealRequested = true;
-      viewportController.revealPositionUntilStable(openingLine.from, { y: 'center', geometry: 'line-block' }, isCurrent);
-    };
-    if (manualMode === 'preview') {
-      return () => {
-        if (!isCurrent()) return false;
-        if (!renderedBlockIsReady()) {
-          requestBoundaryReveal();
-          return false;
-        }
-        view.contentDOM.focus({ preventScroll: true });
-        return true;
-      };
-    }
-    let stableFocusedElement: Element | null = null;
-    return () => {
-      const blockIsReady = renderedBlockIsReady();
-      if (!blockIsReady) {
-        requestBoundaryReveal();
-      }
-      const focused = block.kind === 'mermaid'
-        ? focusMermaidEditingOffset(view, openingLine.from, offset, isCurrent)
-        : focusLatexMathEditingOffset(view, openingLine.from, offset, isCurrent);
-      const activeElement = view.dom.ownerDocument.activeElement;
-      if (
-        !focused || !(activeElement instanceof Element) ||
-        !activeElement.isConnected ||
-        !renderedBlockRoots().some((root) => root.contains(activeElement))
-      ) {
-        stableFocusedElement = null;
-        return false;
-      }
-      if (!blockIsReady) {
-        stableFocusedElement = activeElement;
-        return false;
-      }
-      if (stableFocusedElement !== activeElement) {
-        stableFocusedElement = activeElement;
-        return false;
-      }
-      return true;
-    };
+    return null;
   };
 
   const revealRenderedSourceLine = (lineNumber: number) => {
@@ -2096,34 +2057,9 @@ export function createEditor({
       return true;
     }
     const contentFrom = view.state.doc.line(block.startLine + 1).from;
-    const offset = targetLine.from - contentFrom;
-    const modeEffect = block.kind === 'mermaid'
-      ? setMermaidBlockModeEffect.of({ anchor: openingLine.from, mode: 'source' })
-      : setLatexMathBlockModeEffect.of({ anchor: openingLine.from, mode: 'source' });
-
     const isRevealCurrent = viewportController.beginNavigationReveal();
-    view.dispatch({
-      selection: { anchor: targetLine.from },
-      effects: modeEffect
-    });
-    viewportController.revealPosition(openingLine.from, {
-      y: isPositionVisible(openingLine.from) ? 'nearest' : 'center'
-    }, isRevealCurrent);
-    view.requestMeasure({
-      read() {
-        return null;
-      },
-      write() {
-        const focusSource = () => block.kind === 'mermaid'
-          ? focusMermaidEditingOffset(view, openingLine.from, offset, isRevealCurrent)
-          : focusLatexMathEditingOffset(view, openingLine.from, offset, isRevealCurrent);
-        requestAnimationFrame(() => {
-          if (isRevealCurrent() && !focusSource()) {
-            requestAnimationFrame(focusSource);
-          }
-        });
-      }
-    });
+    if (!focusMermaidEditingOffset(view, openingLine.from, targetLine.from - contentFrom, isRevealCurrent)) return false;
+    viewportController.revealPosition(targetLine.from, { y: isPositionVisible(openingLine.from) ? 'nearest' : 'center' }, isRevealCurrent);
     return true;
   };
 
@@ -2424,8 +2360,9 @@ export function createEditor({
       inputAssistanceCompartment.of(inputAssistanceFacet.of(initialInputAssistance)),
       Prec.highest(htmlCommentEditing),
       Prec.highest(typingAssistance),
-      Prec.highest(pasteAssistance(displayMathPasteText)),
-      Prec.highest(createInputSuggestions({ inputContext, requestLinks: requestLinkCandidates, currentHeadings: () => currentHeadingSuggestions(readDocumentTextProjection(view.state.doc)),
+      Prec.highest(pasteAssistance((view, text) => mermaidPasteText(view, text) ?? displayMathPasteText(view, text))),
+      Prec.highest(createInputSuggestions({ inputContext, mathContext: getMathCompletionBody, requestLinks: requestLinkCandidates, currentHeadings: () => currentHeadingSuggestions(readDocumentTextProjection(view.state.doc)),
+        renderMathPreview: source => renderLatexMathToHtml(source, 'inline'),
         cellCoords: measureTextareaSelectionStart,
         focusTable: focusInsertedTable,
         focusMath: () => {
@@ -2450,17 +2387,25 @@ export function createEditor({
       keymap.of([
         { key: 'Mod-/', run: () => runCommentCommand(true) },
         { key: 'Alt-A', run: () => runCommentCommand(false) },
-        { key: 'Tab', run: (view) => indentDisplayMathSource(view, false) || indentListByTwoSpaces(view) || indentMore(view) },
-        { key: 'Shift-Tab', run: (view) => indentDisplayMathSource(view, true) || outdentListByTwoSpaces(view) || indentLess(view) },
+        { key: 'Escape', run: editorView => {
+          if (currentMode !== 'live' || editorView.composing || blockReadingFocusAt(editorView.state)) return false;
+          if (finishMermaidEditing(editorView) || finishDisplayMathEditing(editorView)) return true;
+          const block = codeEditingBlockAt(editorView.state, editorView.state.selection.main.head);
+          if (!block || editorView.state.selection.ranges.length !== 1
+            || editorView.state.selection.main.from < block.from || editorView.state.selection.main.to > block.to) return false;
+          focusBlockReading(editorView, block); return true;
+        } },
+        { key: 'Tab', run: (view) => indentMermaidSource(view, false) || indentDisplayMathSource(view, false) || indentListByTwoSpaces(view) || indentMore(view) },
+        { key: 'Shift-Tab', run: (view) => indentMermaidSource(view, true) || indentDisplayMathSource(view, true) || outdentListByTwoSpaces(view) || indentLess(view) },
         { key: 'Alt-]', run: indentListByTwoSpaces },
         { key: 'Alt-[', run: outdentListByTwoSpaces },
         { key: 'Backspace', run: deleteBackwardSmart },
-        { key: 'ArrowLeft', run: (view) => tryEnterRenderedBlockSource(view, false, false) || isLiveMode(view) && handleArrowLeftAtListContentStart(view) },
-        { key: 'ArrowRight', run: (view) => tryEnterRenderedBlockSource(view, true, false) || isLiveMode(view) && handleArrowRightAtListLineStart(view) },
+        { key: 'ArrowLeft', run: (view) => tryMoveAcrossRenderedBlockSource(view, false, false) || isLiveMode(view) && handleArrowLeftAtListContentStart(view) },
+        { key: 'ArrowRight', run: (view) => tryMoveAcrossRenderedBlockSource(view, true, false) || isLiveMode(view) && handleArrowRightAtListLineStart(view) },
         {
           key: 'Enter',
           run: (view) =>
-            insertDisplayMathNewline(view) ||
+            insertMermaidNewline(view) || insertDisplayMathNewline(view) ||
             handleEnterContinueContainedCodeBlock(view) ||
             (view.state.facet(inputAssistanceFacet).lists && (
               handleEnterOnEmptyListItem(view) ||
@@ -2470,8 +2415,8 @@ export function createEditor({
         },
         { key: 'Shift-Enter', run: insertTableCellLineBreak },
         { key: 'Ctrl-Enter', run: (view) => finishDisplayMathEditing(view) || insertTableCellLineBreak(view) },
-        { key: 'ArrowUp', run: (view) => tryEnterAdjacentTable(view, 'up') || tryEnterRenderedBlockSource(view, false, true) },
-        { key: 'ArrowDown', run: (view) => tryEnterAdjacentTable(view, 'down') || tryEnterRenderedBlockSource(view, true, true) },
+        { key: 'ArrowUp', run: (view) => tryEnterAdjacentTable(view, 'up') || tryMoveAcrossRenderedBlockSource(view, false, true) },
+        { key: 'ArrowDown', run: (view) => tryEnterAdjacentTable(view, 'down') || tryMoveAcrossRenderedBlockSource(view, true, true) },
         ...markdownKeymap.map(binding => ({ ...binding, run: (view: EditorView) =>
           (binding.key === 'Backspace' && selectedDisplayMathBody(view.state))
           || (binding.key === 'Enter' && !view.state.facet(inputAssistanceFacet).lists)
@@ -2480,6 +2425,19 @@ export function createEditor({
         ...editorHistoryKeymap
       ]),
       historyCompartment.of(history()),
+      ...blockInteractionExtensions((editorView, block) => {
+        const top = editorView.coordsAtPos(block.from)?.top ?? null;
+        retainBlockCaret(editorView, top === null ? null : top + editorView.defaultLineHeight, isCurrent => {
+          if (block.kind === 'mermaid') focusMermaidEditingOffset(editorView, block.from, 0, isCurrent);
+          else {
+            const line = editorView.state.doc.lineAt(block.from);
+            const position = block.kind === 'html' ? block.from : editorView.state.doc.line(Math.min(line.number + 1, editorView.state.doc.lines)).from;
+            editorView.dispatch({ selection: { anchor: position }, effects: block.kind === 'html'
+              ? [setHtmlEditingRangeEffect.of({ from: block.from, to: block.to })] : [] });
+            editorView.focus();
+          }
+        });
+      }, () => viewportController),
       lineNumberCompartment.of(lineNumberExtensions(startMode, currentSourceLineNumbers)),
       longCodeBlockPreferenceCompartment.of(longCodeBlockEnabledFacet.of(initialLongCodeBlockFolding)),
       tableTransactionProvenanceAdapter.extension,
@@ -2686,6 +2644,7 @@ export function createEditor({
       ),
       markdownInlineStyleTheme,
       sourcePreparationCompartment.of(lightweightSourceSyntax ? [] : sourceSyntaxPreparation),
+      createHtmlSourceEditing(getHtmlEditingRange, supportedHtmlTags),
       modeCompartment.of(startMode === 'live' ? [shikiCodeHighlight, ...liveModeExtensions({ largeDocument: boundedEditorWork })] : sourceMode(boundedEditorWork, lightweightSourceSyntax)),
       searchQueryField,
       searchAnchorField,
@@ -2719,7 +2678,7 @@ export function createEditor({
         ));
         const renderedPresentationChanged = update.transactions.some((transaction) => (
           transaction.effects.some((effect) => (
-            effect.is(setMermaidBlockModeEffect) || effect.is(setLatexMathBlockModeEffect)
+            effect.is(setMermaidLayoutEffect) || effect.is(setLatexMathBlockModeEffect)
           ))
         ));
         const presentationMayHaveChanged = update.docChanged
@@ -2817,6 +2776,7 @@ export function createEditor({
     state,
     parent
   });
+  const stopImageAvailability = observeRenderedBlockImageAvailability(view.dom);
   const editableTarget = (target: EventTarget | null): HTMLElement | null => {
     if (!(target instanceof Element) || !view.contentDOM.contains(target)) return null;
     const editable = target.closest<HTMLElement>('textarea, input, [contenteditable="true"]');
@@ -2848,6 +2808,22 @@ export function createEditor({
   };
   onEditorPointerDown = (event) => {
     if (event.button === 0) {
+      suppressRenderedBlockPointerFocus(view.dom);
+      if (currentMode === 'live' && event.target instanceof Element &&
+        event.target.closest('.meo-md-html-table-shell') &&
+        !event.target.closest('.meo-md-html-table-column-resize-handle')) {
+        // Table widgets bypass CodeMirror's pointer handlers. Keep the same
+        // source presentation until their own pointerup resolves the cell.
+        // Column resizing preserves its own interaction and must not reveal
+        // the document caret when the resize pointer is released.
+        // This capture listener precedes the scroller's pointer listener.
+        // Retire the old native cell anchor before dispatch can reconcile it
+        // and move a different row under the new pointer.
+        viewportController.markInteraction();
+        liveSelectionGeneration += 1;
+        liveSelectionPointerId = event.pointerId;
+        view.dispatch({ effects: setLivePointerSelectionActiveEffect.of({ active: true, preservedLine: null }) });
+      }
       const target = editableTarget(event.target);
       if (target) {
         // A new document click takes precedence over the focus target saved before blur.
@@ -2934,8 +2910,8 @@ export function createEditor({
   interactionContinuity = createEditorInteractionContinuity({
     view,
     viewport: {
-      retainCaretTop(position, top, isCurrent) {
-        viewportController.retainPositionTop(position, top, isCurrent);
+      retainCaretTop(position, top, isCurrent, measuredLayout) {
+        viewportController.retainPositionTop(position, top, isCurrent, measuredLayout);
       },
       revealCaret(position, isCurrent, originScrollTop) {
         viewportController.revealPosition(position, {
@@ -3350,7 +3326,11 @@ export function createEditor({
     // Keep the originating diff domain while the completed selection remains.
     // Otherwise Chromium repaints the DOM range after pointerup and reveals
     // text from the other version under the same native range.
-    clearPointerSelection(true);
+    if (liveSelectionPointerId === event.pointerId && event.target instanceof Element &&
+      event.target.closest('.meo-md-html-table-shell')) {
+      // The table still needs the original hit geometry during this release.
+      finishPointerSelection(event.pointerId, true, true);
+    } else clearPointerSelection(true);
     if (completedSelection && quoteClick?.pointerId === event.pointerId && isLiveMode(view)
       && isPlainPrimaryPointerEvent(event) && view.state.selection.ranges.length === 1
       && view.state.selection.main.empty && Math.hypot(event.clientX - quoteClick.x, event.clientY - quoteClick.y) <= 3) {
@@ -3735,6 +3715,9 @@ export function createEditor({
     setLinkedPreviewEnabled(enabled: boolean, activationOwner?: LinkedPreviewActivationOwner): void {
       viewportController.setLinkedPreviewEnabled(enabled, activationOwner);
     },
+    retainViewportOnWindowReturn(isCurrent: () => boolean) {
+      return viewportController.retainViewportOnWindowReturn(isCurrent);
+    },
     focus() {
       const target = lastFocusedEditorTarget;
       // A modal can move the browser selection away from the document. CodeMirror
@@ -3768,6 +3751,7 @@ export function createEditor({
         window.removeEventListener('mouseup', onWindowMouseUp);
         onWindowMouseUp = null;
       }
+      stopImageAvailability();
       if (onEditorFocusIn) view.dom.removeEventListener('focusin', onEditorFocusIn, true);
       if (onEditorFocusOut) view.dom.removeEventListener('focusout', onEditorFocusOut, true);
       if (onEditorPointerDown) view.dom.removeEventListener('pointerdown', onEditorPointerDown, true);
@@ -3941,6 +3925,7 @@ export function createEditor({
       { deferViewportRestore = false }: { deferViewportRestore?: boolean } = {}
     ) {
       const applyMode = (isTransactionCurrent: () => boolean): void => {
+        clearBlockReadingFocus(view);
         interactionContinuity?.cancel();
         const tableInput = currentMode === 'live' ? getActiveTableInput() ?? (
           lastFocusedEditorTarget instanceof HTMLTextAreaElement &&
@@ -3968,9 +3953,8 @@ export function createEditor({
         const activeElement = view.dom.ownerDocument.activeElement;
         const editingTarget = activeElement instanceof HTMLElement && view.contentDOM.contains(activeElement)
           ? activeElement : lastFocusedEditorTarget;
-        const mermaidSelection = takeMermaidModeSelection(view, editingTarget);
         const latexMathSelection = takeLatexMathModeSelection(view, editingTarget);
-        const nestedSelection = mermaidSelection ?? latexMathSelection;
+        const nestedSelection = latexMathSelection;
         let modeSelection = nestedSelection ?? {
           anchor: view.state.selection.main.anchor,
           head: view.state.selection.main.head
@@ -4058,8 +4042,7 @@ export function createEditor({
         // navigation wins over the discarded widget, and viewport ownership stays here.
         if (nextMode === 'live') {
           if (!restoreTableModeSelection(modeSelection, restoreFocus) && view.state.selection.ranges.length === 1) {
-            const target = restoreMermaidModeSelection(view, modeSelection, restoreFocus)
-              ?? restoreLatexMathModeSelection(view, modeSelection, restoreFocus);
+            const target = restoreLatexMathModeSelection(view, modeSelection, restoreFocus);
             if (target) {
               lastFocusedEditorTarget = target;
               lastTextareaSelection = null;
@@ -4126,6 +4109,13 @@ export function createEditor({
     },
     executeCommand(command: EditorCommandId): boolean {
       if (view.state.readOnly) return false;
+      if (command === 'formatHtml') {
+        if (getActiveTableInput()) return false;
+        if (canFormatDisplayMathSource(view.state)) { void formatActiveDisplayMathSource(view); return true; }
+        if (!getHtmlEditingRange(view.state)) return false;
+        void formatActiveHtmlSource(view);
+        return true;
+      }
       if (command === 'lineComment' || command === 'selectionComment') {
         const input = getActiveTableInput();
         if (!input) return runCommentCommand(command === 'lineComment');
@@ -4163,7 +4153,7 @@ export function createEditor({
       if (command === 'cellBreak') { if (getActiveTableInput()) return insertMountedTableCellBreak(view); return insertTableCellLineBreak(view); }
       return runEditorCommand(view, command);
     },
-    pastePlainText(text: string) { return insertPlainClipboardText(view, text, displayMathPasteText); },
+    pastePlainText(text: string) { return insertPlainClipboardText(view, text, (view, text) => mermaidPasteText(view, text) ?? displayMathPasteText(view, text)); },
     setInputAssistance(preferences: InputAssistance) {
       view.dispatch({ effects: inputAssistanceCompartment.reconfigure(inputAssistanceFacet.of(preferences)) });
     },
@@ -4172,6 +4162,9 @@ export function createEditor({
         effects: uiLanguageCompartment.reconfigure(uiLanguageFacet.of(language))
       });
       refreshMountedTableUiLanguage(view, language);
+      for (const button of view.dom.querySelectorAll<HTMLElement>('.meo-copy-image-btn')) {
+        refreshRenderedBlockImageLabel(button, language);
+      }
     },
     insertFormat(action: EditorFormatAction, level?: EditorFormatLevel) {
       const activeTableInput = getActiveTableInput();

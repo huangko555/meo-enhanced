@@ -20,22 +20,10 @@ type ParseCall = {
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-editor-syntax-parsing-matrix-'));
 
-function assertFullDocumentEnsures(calls: ParseCall[], docLength: number, label: string): void {
-  const ensures = calls.filter((call) => call.kind === 'ensure');
-  assert.ok(ensures.length > 0, `${label} must request the syntax needed by existing Live decorations`);
-  assert.ok(
-    ensures.every((call) => call.upto === docLength && call.timeout === 50 && call.result === 'partial'),
-    `${label} must keep the existing 50ms Live ensureSyntaxTree contract and accept timeout fallback`
-  );
-}
-
-function assertOneLiveForce(calls: ParseCall[], docLength: number, label: string): void {
-  const forceCalls = calls.filter((call) => call.kind === 'force');
-  assert.deepEqual(
-    forceCalls.map(({ upto, timeout, result }) => ({ upto, timeout, result })),
-    [{ upto: docLength, timeout: 500, result: 'partial' }],
-    `${label} must have one bounded full-document Live parse request and tolerate a partial result`
-  );
+function assertPreparedLiveWork(calls: ParseCall[], structure: any, docLength: number, label: string): void {
+  assert.equal(structure.complete, true, `${label}: Live must have a proven complete Markdown structure`);
+  assert.equal(structure.length, docLength, `${label}: the receipt belongs to this complete revision`);
+  assert.deepEqual(calls, [], `${label}: a complete prepared structure must not be synchronously reparsed`);
 }
 
 async function main(): Promise<void> {
@@ -113,6 +101,7 @@ async function main(): Promise<void> {
         viewport: editor.getTopVisiblePosition(),
         richHighlightCount: document.querySelectorAll('#source .meo-md-highlight').length,
         offscreenPosition: text.indexOf('OFFSCREEN SYNTAX'),
+        structure: (window as any).EditorSyntaxParsingHarness.preparedStructure(editor),
         calls: structuredClone((window as any).__meoSyntaxParseCalls)
       };
     }, largeText);
@@ -171,14 +160,17 @@ async function main(): Promise<void> {
       const editor = (window as any).__syntaxSourceEditor;
       (window as any).__meoSyntaxParseCalls = [];
       (window as any).__meoSyntaxParsePhase = 'source-document-change';
+      (window as any).__meoSyntaxParseControls.backgroundLimit = 3000;
       editor.setText(text);
       return {
         text: editor.getText(),
         history: editor.getHistoryDepth(),
+        structure: (window as any).EditorSyntaxParsingHarness.preparedStructure(editor),
         calls: structuredClone((window as any).__meoSyntaxParseCalls)
       };
     }, sourceEditedText);
     assert.equal(sourceDocumentChange.text, sourceEditedText);
+    assert.equal(sourceDocumentChange.structure.complete, false, 'The partial fixture must actually stop before a complete structural receipt');
     assert.deepEqual(sourceDocumentChange.history, initialSource.history);
     assert.deepEqual(
       sourceDocumentChange.calls,
@@ -202,6 +194,7 @@ async function main(): Promise<void> {
         focused: editor.hasFocus(),
         viewport: editor.getTopVisiblePosition(),
         visibleRichContent: Boolean(document.querySelector('#source .meo-md-table-shell, #source .meo-md-highlight')),
+        structure: (window as any).EditorSyntaxParsingHarness.preparedStructure(editor),
         calls: structuredClone((window as any).__meoSyntaxParseCalls)
       };
     });
@@ -212,11 +205,44 @@ async function main(): Promise<void> {
     assert.equal(sourceToLive.focused, true);
     assert.deepEqual(sourceToLive.viewport, initialSource.viewport);
     assert.equal(sourceToLive.visibleRichContent, true, 'partial Live parse must preserve visible rendering');
-    assertFullDocumentEnsures(sourceToLive.calls, largeText.length, 'Source-to-Live');
-    assertOneLiveForce(sourceToLive.calls, largeText.length, 'Source-to-Live');
+    assert.equal(sourceToLive.structure.complete, false, 'Installing Live must not certify a parser limited to a visible prefix');
+    const partialEnsures = sourceToLive.calls.filter((call: ParseCall) => call.kind === 'ensure');
+    assert.ok(partialEnsures.length > 0 && partialEnsures.every((call: ParseCall) =>
+      call.upto === largeText.length && call.timeout === 50 && call.result === 'partial'),
+      'Unprepared component installation retains the existing Live fallback contract');
+    assert.deepEqual(sourceToLive.calls.filter((call: ParseCall) => call.kind === 'force')
+      .map(({ upto, timeout, result }: ParseCall) => ({ upto, timeout, result })),
+      [{ upto: largeText.length, timeout: 8, result: 'partial' }],
+      'The partial component refresh must use one bounded slice instead of the old 500ms force');
+
+    // Production prepares asynchronously before installing Live. Exercise that
+    // boundary separately from the deliberately partial synchronous component.
+    const preparedSourceToLive = await page.evaluate(async () => {
+      const scope = window as any, editor = scope.__syntaxSourceEditor;
+      editor.setMode('source');
+      scope.__meoSyntaxParseControls = { ensure: 'delegate', force: 'delegate' };
+      scope.__meoSyntaxParseCalls = [];
+      scope.__meoSyntaxParsePhase = 'source-to-live-preparation';
+      const ready = await editor.prepareLiveSyntax(() => true);
+      const oldSurfaceRetained = editor.view.dom.classList.contains('meo-mode-source');
+      const structure = scope.EditorSyntaxParsingHarness.preparedStructure(editor);
+      const preparationCalls = structuredClone(scope.__meoSyntaxParseCalls);
+      scope.__meoSyntaxParseCalls = [];
+      scope.__meoSyntaxParseControls = { ensure: 'null', force: 'false' };
+      scope.__meoSyntaxParsePhase = 'source-to-live-prepared-install';
+      editor.setMode('live');
+      return { ready, oldSurfaceRetained, structure, preparationCalls,
+        installed: scope.EditorSyntaxParsingHarness.preparedStructure(editor),
+        calls: structuredClone(scope.__meoSyntaxParseCalls) };
+    });
+    assert.equal(preparedSourceToLive.ready, true);
+    assert.equal(preparedSourceToLive.oldSurfaceRetained, true, 'Preparation must keep the Source surface until it is ready');
+    assert.ok(preparedSourceToLive.preparationCalls.every((call: ParseCall) => call.timeout <= 8),
+      'Real asynchronous preparation must retain its per-slice budget');
+    assertPreparedLiveWork(preparedSourceToLive.calls, preparedSourceToLive.installed, largeText.length, 'prepared Source-to-Live');
     assert.ok(
-      sourceToLive.calls.some((call) => call.kind === 'force' && call.upto > initialSource.offscreenPosition),
-      'the retained Live force request must explicitly include offscreen syntax'
+      preparedSourceToLive.structure.nodes.some((node: any) => node.name === 'Table' && node.from > initialSource.offscreenPosition),
+      'the completed preparation must include the actual offscreen table, not a length-only placeholder'
     );
 
     const liveToSource = await page.evaluate(() => {
@@ -234,6 +260,7 @@ async function main(): Promise<void> {
         history: editor.getHistoryDepth(),
         focused: editor.hasFocus(),
         viewport: editor.getTopVisiblePosition(),
+        structure: (window as any).EditorSyntaxParsingHarness.preparedStructure(editor),
         calls: structuredClone((window as any).__meoSyntaxParseCalls)
       };
     });
@@ -284,6 +311,7 @@ async function main(): Promise<void> {
           focused: editor.hasFocus(),
           viewport: editor.getTopVisiblePosition()
         },
+        structure: (window as any).EditorSyntaxParsingHarness.preparedStructure(editor),
         calls: structuredClone((window as any).__meoSyntaxParseCalls)
       };
     });
@@ -306,6 +334,7 @@ async function main(): Promise<void> {
         mode: editor.view.dom.classList.contains('meo-mode-source') ? 'source' : 'live',
         text: editor.getText(),
         history: editor.getHistoryDepth(),
+        structure: (window as any).EditorSyntaxParsingHarness.preparedStructure(editor),
         calls: structuredClone((window as any).__meoSyntaxParseCalls)
       };
     });
@@ -315,8 +344,7 @@ async function main(): Promise<void> {
     for (let cycle = 0; cycle < 2; cycle += 1) {
       const toLive = roundTrips.calls.filter((call: ParseCall) => call.phase === `round-${cycle}-source-to-live`);
       const toSource = roundTrips.calls.filter((call: ParseCall) => call.phase === `round-${cycle}-live-to-source`);
-      assertFullDocumentEnsures(toLive, largeText.length, `round ${cycle} Source-to-Live`);
-      assertOneLiveForce(toLive, largeText.length, `round ${cycle} Source-to-Live`);
+      assertPreparedLiveWork(toLive, roundTrips.structure, largeText.length, `round ${cycle} Source-to-Live`);
       assert.deepEqual(toSource, []);
     }
 
@@ -332,10 +360,10 @@ async function main(): Promise<void> {
         onApplyChanges() {}
       });
       (window as any).__syntaxLiveEditor = editor;
-      return structuredClone((window as any).__meoSyntaxParseCalls);
+      return { calls: structuredClone((window as any).__meoSyntaxParseCalls), structure: harness.preparedStructure(editor) };
     }, smallText);
-    assertFullDocumentEnsures(initialLiveCalls, smallText.length, 'initial Live');
-    assert.equal(initialLiveCalls.some((call: ParseCall) => call.kind === 'force'), false);
+    assertPreparedLiveWork(initialLiveCalls.calls, initialLiveCalls.structure, smallText.length, 'initial Live');
+    assert.equal(initialLiveCalls.calls.some((call: ParseCall) => call.kind === 'force'), false);
 
     const publicationPrefix = Array.from(
       { length: 6_200 },
@@ -374,6 +402,7 @@ async function main(): Promise<void> {
       return {
         text: editor.getText(),
         history: editor.getHistoryDepth(),
+        structure: (window as any).EditorSyntaxParsingHarness.preparedStructure(editor),
         calls: structuredClone((window as any).__meoSyntaxParseCalls)
       };
     }, publicationText);
@@ -430,13 +459,15 @@ async function main(): Promise<void> {
         // Earlier editors remain mounted so their asynchronous parser-publication
         // transactions can arrive during this phase. Attribute only calls made
         // for the publication document under test.
+        structure: (window as any).EditorSyntaxParsingHarness.preparedStructure(editor),
         calls: structuredClone((window as any).__meoSyntaxParseCalls)
           .filter((call: ParseCall) => call.docLength === publicationDocumentLength)
       };
     });
     assert.equal(publicationDecorations.text, publicationText);
     assert.deepEqual(publicationDecorations.history, publicationInitial.history);
-    assert.deepEqual(publicationDecorations.calls, [], 'parser publication must not add explicit ensure/force calls');
+    assert.ok(publicationDecorations.calls.every((call: ParseCall) => call.timeout === 0),
+      'publishing completed parsing may inspect the receipt with a zero budget, but cannot extend parsing');
     assert.equal(publicationDecorations.realHeader.tableLine, false, 'Native Source must not retain Live table header decorations');
     assert.equal(publicationDecorations.realHeader.tableCells, 0);
     assert.equal(publicationDecorations.validTag.tags, 0, 'Native Source must use TextMate tag syntax instead of Live decorations');

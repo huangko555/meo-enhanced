@@ -204,6 +204,16 @@
       "kind": "native",
       "command": "scripts/test-vscode-preview-shortcuts.cjs is loaded by scripts/test-vscode-preview-shortcuts.ps1",
       "reason": "Native acceptance host entry module, not a standalone Bun test; owned by the PowerShell launcher."
+    },
+    "scripts/test-vscode-html-copy.ps1": {
+      "kind": "native",
+      "command": "./scripts/test-vscode-html-copy.ps1 -CodePath <Code.exe>",
+      "reason": "Focused native HTML/math clipboard acceptance requires a selected VS Code installation and an isolated profile."
+    },
+    "scripts/test-vscode-html-copy.cjs": {
+      "kind": "native",
+      "command": "scripts/test-vscode-html-copy.cjs is loaded by scripts/test-vscode-html-copy.ps1",
+      "reason": "Native extension-host entry verifies actual Ctrl+C, Host copy commands and raw source paste through the system clipboard."
     }
   },
   "repeats": [

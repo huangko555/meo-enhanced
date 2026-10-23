@@ -573,7 +573,6 @@ async function main(): Promise<void> {
       const baseOutput = {
         openLink: read('.meo-md-link-open-btn'),
         details: read('.meo-md-details-summary'),
-        detailsSource: read('.meo-md-details-source-toggle'),
         footnote: read('.meo-md-footnote-ref'),
         footnoteBack: read('.meo-md-footnote-backref'),
         codeActions: Array.from(document.querySelectorAll('.meo-code-block-actions [aria-label]')).map((element) => element.getAttribute('aria-label')),
@@ -613,7 +612,7 @@ async function main(): Promise<void> {
       await revealText('> [!NOTE]');
       const alertLabel = document.querySelector('.meo-md-alert-label')?.textContent;
       await revealText('<div>HTML</div>');
-      const htmlLabel = read('.meo-md-html-source-toggle');
+      const htmlLabel = document.querySelector<HTMLElement>('.meo-md-html-block')?.dataset.meoRenderedBlockKind;
       const output = {
         ...baseOutput,
         featureChrome: {
@@ -649,16 +648,16 @@ async function main(): Promise<void> {
       openLink: '打开链接',
       footnote: '跳转到脚注 1',
       footnoteBack: '跳转到脚注引用 1',
-      codeActions: ['全选代码', '复制', '全选代码', '复制'],
+      codeActions: ['全选代码', '复制源码', '全选代码', '复制源码'],
       longCode: { lineCountVisible: false, action: '显示其余 10 行代码' },
       imageActions: ['打开链接', '刷新图片', '使用系统应用打开', '全屏查看图片'],
       featureChrome: {
         alert: '备注',
-        html: '显示 HTML 源码'
+        html: 'html'
       },
       renderedBlocks: {
-        controls: ['第 41 行 Mermaid 块控件', '复制'],
-        modes: ['预览, 切换为分栏', null]
+        controls: ['第 41 行 Mermaid 块控件', '复制源码'],
+        modes: ['编辑', null]
       }
     });
     assert.equal(result.appliedAfterCheckbox, result.afterCheckbox, 'checkbox must publish exactly its accepted text');

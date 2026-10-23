@@ -1,4 +1,5 @@
 import type { EditorAppearance } from '../protocol/editorCommands';
+import { normalizeEditorLineHeight } from '../foundation/editorLineHeight';
 import { decodeUiColors, type UiColors } from '../foundation/uiColors';
 import { normalizePreviewFontFamily } from '../protocol/editorStyleEnvironment';
 import type { PreviewAppearance } from '../protocol/readyInit';
@@ -36,6 +37,8 @@ export const PREVIEW_SOURCE_COLORING_SETTING_KEY = 'preview.sourceColoring';
 export const LIVE_STRONG_COLORING_SETTING_KEY = 'appearance.strongColoring';
 export const EDITOR_FONT_SIZE_MODE_SETTING_KEY = 'appearance.fontSizeMode';
 export const EDITOR_FONT_SIZE_SETTING_KEY = 'appearance.fontSize';
+export const EDITOR_LINE_HEIGHT_SETTING_KEY = 'appearance.lineHeight';
+export const EDITOR_MOUSE_WHEEL_ZOOM_SETTING_KEY = 'appearance.mouseWheelZoom';
 export const APPEARANCE_SETTINGS_MIGRATION_STATE_KEY = 'appearanceSettingsMigration';
 
 export type AppearanceSettings = {
@@ -63,6 +66,8 @@ export type AppearanceSettingsStore = {
 };
 
 export type AppearanceSettingsOwner = {
+  getEditorLineHeight: () => number;
+  setEditorLineHeight: (value: number) => Promise<void>;
   getUiColors: () => UiColors;
   setUiColors: (colors: UiColors) => Promise<UiColors>;
   getEditorAppearance: () => EditorAppearance;
@@ -79,6 +84,8 @@ export type AppearanceSettingsOwner = {
   setLiveStrongColoring: (enabled: boolean) => Promise<void>;
   getEditorFontSizePreference: () => EditorFontSizePreference;
   setEditorFontSizePreference: (preference: EditorFontSizePreference) => Promise<void>;
+  getEditorMouseWheelZoom: () => boolean;
+  setEditorMouseWheelZoom: (enabled: boolean) => Promise<void>;
 };
 
 type Descriptor = {
@@ -335,7 +342,17 @@ export async function createAppearanceSettingsOwner(
     if (fallback) fallback = { ...fallback, [key]: value };
   };
 
+  let fontSizeSave = Promise.resolve();
   return {
+    getEditorLineHeight: () => normalizeEditorLineHeight(store.readConfiguration(EDITOR_LINE_HEIGHT_SETTING_KEY).value),
+    getEditorMouseWheelZoom: () => store.readConfiguration(EDITOR_MOUSE_WHEEL_ZOOM_SETTING_KEY).value !== false,
+    setEditorMouseWheelZoom: enabled => store.updateConfiguration(EDITOR_MOUSE_WHEEL_ZOOM_SETTING_KEY, enabled),
+    setEditorLineHeight: async value => {
+      const normalized = normalizeEditorLineHeight(value);
+      if (normalizeEditorLineHeight(store.readConfiguration(EDITOR_LINE_HEIGHT_SETTING_KEY).value) !== normalized) {
+        await store.updateConfiguration(EDITOR_LINE_HEIGHT_SETTING_KEY, normalized);
+      }
+    },
     getUiColors: () => decodeUiColors(store.readConfiguration(UI_COLORS_SETTING_KEY).value) ?? { light: {}, dark: {} },
     setUiColors: async (colors) => {
       const normalized = decodeUiColors(colors);
@@ -383,11 +400,15 @@ export async function createAppearanceSettingsOwner(
       mode: readSettings().editorFontSizeMode,
       value: readSettings().editorFontSize
     }),
-    setEditorFontSizePreference: async (preference) => {
+    setEditorFontSizePreference: (preference) => {
       const mode = normalizeEditorFontSizeMode(preference.mode);
       const value = normalizeEditorFontSize(preference.value);
-      await write('editorFontSize', EDITOR_FONT_SIZE_SETTING_KEY, value);
-      await write('editorFontSizeMode', EDITOR_FONT_SIZE_MODE_SETTING_KEY, mode);
+      const save = fontSizeSave.then(async () => {
+        await write('editorFontSize', EDITOR_FONT_SIZE_SETTING_KEY, value);
+        await write('editorFontSizeMode', EDITOR_FONT_SIZE_MODE_SETTING_KEY, mode);
+      });
+      fontSizeSave = save.catch(() => {});
+      return save;
     }
   };
 }

@@ -175,7 +175,7 @@ async function main(): Promise<void> {
 
     const defaultCollapsedSourceState = await page.evaluate(() => {
       const editor = (window as any).__editor;
-      document.querySelector<HTMLButtonElement>('.meo-md-html-source-toggle')!.click();
+      editor.view.dispatch({ selection: { anchor: editor.getText().indexOf('<details') } });
       return (window as any).LiveLayoutStabilityHarness.getDetailsBlocks(editor.view.state)[0];
     });
     await waitForFrames(page);
@@ -311,7 +311,7 @@ async function main(): Promise<void> {
     const detailsSourceAnchor = await page.evaluate(() => {
       const editor = (window as any).__editor;
       const anchor = editor.getText().indexOf('<details>');
-      document.querySelector<HTMLButtonElement>('.meo-md-html-source-toggle')!.click();
+      editor.view.dispatch({ selection: { anchor } });
       return anchor;
     });
     await waitForFrames(page);
@@ -359,7 +359,7 @@ async function main(): Promise<void> {
       })}`);
     }
     await page.evaluate(() => {
-      document.querySelector<HTMLButtonElement>('.meo-md-html-preview-toggle')?.click();
+      (window as any).__editor.view.dispatch({ selection: { anchor: 0 } });
     });
     await waitForFrames(page);
 
@@ -380,8 +380,7 @@ async function main(): Promise<void> {
     await waitForFrames(page);
     const defaultOpenSourceAnchor = await page.evaluate(() => {
       const editor = (window as any).__editor;
-      const button = document.querySelector<HTMLButtonElement>('.meo-md-html-source-toggle');
-      button!.click();
+      editor.view.dispatch({ selection: { anchor: editor.getText().indexOf('<details open>') } });
       return editor.getText().indexOf('<details open>');
     });
     await waitForFrames(page);
@@ -437,7 +436,7 @@ async function main(): Promise<void> {
     }
 
     await page.evaluate(() => {
-      document.querySelector<HTMLButtonElement>('.meo-md-html-preview-toggle')?.click();
+      (window as any).__editor.view.dispatch({ selection: { anchor: 0 } });
     });
     const hybridDetailsSource = [
       ...Array.from({ length: 20 }, (_, index) => `before hybrid ${index + 1}`),
@@ -471,7 +470,6 @@ async function main(): Promise<void> {
       const summaryLineRect = summaryLine?.getBoundingClientRect() ?? null;
       const sourceToggleRect = sourceToggle?.getBoundingClientRect() ?? null;
       const scrollerRect = editor.view.scrollDOM.getBoundingClientRect();
-      editor.view.dispatch({ selection: { anchor: anchor + 1 } });
       return {
         collapsed: (window as any).LiveLayoutStabilityHarness.getDetailsBlocks(editor.view.state)[0]?.collapsed,
         rawOpeningVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
@@ -502,15 +500,14 @@ async function main(): Promise<void> {
       hybridPreview.collapsed !== true || hybridPreview.rawOpeningVisible ||
       !hybridPreview.summaryIconVisible || hybridPreview.summaryIconTransform !== 'none' ||
       hybridPreview.summaryExpanded !== 'false' ||
-      !hybridPreview.sourceToggleVisible || !hybridPreview.sourceToggleSameRow ||
-      !hybridPreview.sourceToggleOutsideContent || !hybridPreview.sourceToggleInsideViewport ||
-      hybridPreview.sourceToggleTopDelta === null || Math.abs(hybridPreview.sourceToggleTopDelta) > 1 ||
+      hybridPreview.sourceToggleVisible ||
       hybridPreview.bodyVisible || hybridPreview.summaryTop === null
     ) {
       throw new Error(`Hybrid details did not use the unified preview shell: ${JSON.stringify(hybridPreview)}`);
     }
     await page.evaluate(() => {
-      document.querySelector<HTMLButtonElement>('.meo-md-details-source-toggle')!.click();
+      const editor = (window as any).__editor;
+      editor.view.dispatch({ selection: { anchor: editor.getText().indexOf('<details>') } });
     });
     await waitForFrames(page, 6);
     const hybridSourceMode = await page.evaluate(() => {
@@ -520,7 +517,7 @@ async function main(): Promise<void> {
           .some((line) => line.textContent?.includes('<details>')),
         markdownBodyVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
           .some((line) => line.textContent?.includes('Hybrid body with **bold text**.')),
-        previewToggleVisible: Boolean(document.querySelector('.meo-md-html-preview-toggle')),
+        previewVisible: Boolean(document.querySelector('.meo-md-html-live-result')),
         summaryWidgetVisible: Boolean(document.querySelector('.meo-md-details-summary')),
         sourceRangeLineCount: sourceRangeLines.length,
         sourceRangeStart: sourceRangeLines[0]?.classList.contains('meo-md-html-source-range-start') ?? false,
@@ -529,14 +526,14 @@ async function main(): Promise<void> {
     });
     if (
       !hybridSourceMode.rawOpeningVisible || !hybridSourceMode.markdownBodyVisible ||
-      !hybridSourceMode.previewToggleVisible || hybridSourceMode.summaryWidgetVisible ||
+      !hybridSourceMode.previewVisible || hybridSourceMode.summaryWidgetVisible ||
       hybridSourceMode.sourceRangeLineCount !== 8 ||
       !hybridSourceMode.sourceRangeStart || !hybridSourceMode.sourceRangeEnd
     ) {
       throw new Error(`Hybrid details source mode was not fully editable: ${JSON.stringify(hybridSourceMode)}`);
     }
     await page.evaluate(() => {
-      document.querySelector<HTMLButtonElement>('.meo-md-html-preview-toggle')!.click();
+      (window as any).__editor.view.dispatch({ selection: { anchor: 0 } });
     });
     await waitForFrames(page, 6);
     const hybridSummaryPoint = await page.$eval('.meo-md-details-summary', (element) => {

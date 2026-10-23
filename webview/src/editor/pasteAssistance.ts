@@ -11,13 +11,17 @@ import { clipboardHtmlToMarkdown, clipboardHtmlBlockEdges, parseClipboardHtml, s
 // history/input rules without depending on rendered widgets.
 type MathPasteText = (view: EditorView, text: string) => string | null;
 
-export function isCodeInput(view: EditorView, position = view.state.selection.main.head): boolean {
+function hasInputSyntax(view: EditorView, position: number, names: RegExp): boolean {
   let node = syntaxTree(view.state).resolveInner(position, -1);
   for (;;) {
-    if (/^(?:FencedCode|CodeBlock|InlineCode|CodeText|CodeInfo)$/.test(node.name)) return true;
+    if (names.test(node.name)) return true;
     if (!node.parent) return false;
     node = node.parent;
   }
+}
+
+export function isCodeInput(view: EditorView, position = view.state.selection.main.head): boolean {
+  return hasInputSyntax(view, position, /^(?:FencedCode|CodeBlock|InlineCode|CodeText|CodeInfo)$/);
 }
 
 /** Shared explicit plain paste bypasses conversion while retaining the existing edit/history owner. */
@@ -46,7 +50,8 @@ export const pasteAssistance = (mathPasteText: MathPasteText) => EditorView.domE
       view.dispatch(view.state.replaceSelection(mathText), { annotations: Transaction.userEvent.of('input.paste') });
       return true;
     }
-    if (isCodeInput(view, selection.from) || isCodeInput(view, selection.to)) return false;
+    if ([selection.from, selection.to].some(position => isCodeInput(view, position)
+      || hasInputSyntax(view, position, /^(?:HTMLBlock|HTMLTag)$/))) return false;
     const text = clipboard.getData('text/plain');
     const meoMatrix = parseMeoTableClipboard(clipboard.getData(meoTableClipboardMime));
     const htmlText = clipboard.getData('text/html');

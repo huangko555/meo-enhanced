@@ -1273,10 +1273,7 @@ html[data-editor-appearance='dark'] .preview-preset-dropdown-panel {
   border-radius: 8px;
   color: var(--meo-ui-text);
   background: var(--meo-ui-surface);
-  transition:
-    opacity 80ms ease,
-    transform 80ms ease,
-    visibility 0s linear 80ms;
+  transition: none;
 }
 
 .preview-export-menu::before {
@@ -1293,7 +1290,7 @@ html[data-editor-appearance='dark'] .preview-preset-dropdown-panel {
   visibility: visible;
   pointer-events: auto;
   transform: translateY(0);
-  transition-delay: 0s;
+  transition: opacity 80ms ease, transform 80ms ease;
 }
 
 .preview-export-control.is-dismissed .preview-export-menu {
@@ -2307,7 +2304,7 @@ html[data-meo-ui-contrast='high'] :is(.format-button, .preview-toolbar-action, .
 }
 
 .meo-code-block-actions.is-block-hovered,
-.meo-code-block-actions:has(:focus-visible) {
+.meo-code-block-actions:has(:focus-visible:not([data-meo-pointer-focus])) {
   opacity: 1;
 }
 
@@ -2417,6 +2414,20 @@ html[data-meo-ui-contrast='high'] :is(.format-button, .preview-toolbar-action, .
   cursor: pointer;
   color: var(--meo-code-action-foreground);
   background-color: var(--meo-semantic-codeCopyBackground);
+}
+
+.cm-editor .meo-block-reading-target:focus {
+  opacity: 1;
+  box-shadow: inset 0 0 0 1px var(--meo-document-focus);
+}
+.cm-editor.meo-block-reading .cm-cursorLayer { visibility: hidden; }
+.cm-editor.meo-block-reading {
+  --meo-active-line-bg: transparent;
+  --meo-code-block-active-line-bg: var(--meo-code-background);
+}
+.cm-editor .meo-md-long-code-placeholder.meo-block-reading-target:focus { box-shadow: none; }
+.cm-editor .meo-md-long-code-placeholder.meo-block-reading-target:focus .meo-long-code-action {
+  box-shadow: inset 0 0 0 1px var(--meo-document-focus);
 }
 
 .meo-select-all-code-btn:hover,
@@ -3128,27 +3139,6 @@ html[data-editor-appearance='dark'] .meo-tooltip-shortcut { background: rgba(255
 .cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-code-marker-active {
   color: var(--meo-semantic-markdownSyntax) !important;
   -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;
-}
-
-.cm-editor .meo-md-details-source-toggle {
-  position: absolute;
-  top: 0;
-  right: -28px;
-  z-index: 10;
-  opacity: 0;
-  transition: opacity 100ms ease;
-}
-
-.cm-editor .cm-line.meo-md-details-summary-line:hover .meo-md-details-source-toggle,
-.cm-editor .cm-line.meo-md-details-summary-line:focus-within .meo-md-details-source-toggle {
-  opacity: 1;
-}
-
-.cm-editor .cm-line.meo-md-details-summary-line:has(.meo-md-details-source-toggle:hover),
-.cm-editor .cm-line.meo-md-details-summary-line:has(.meo-md-details-source-toggle:focus-visible) {
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--meo-foreground) 5%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--meo-border) 72%, transparent);
 }
 
 .cm-editor.meo-mode-live .meo-md-highlight,
@@ -3988,24 +3978,33 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   -webkit-user-select: none;
 }
 
-.cm-editor .meo-math-source-line {
-  background: var(--meo-code-background);
+.cm-editor :is(.meo-math-source-line, .cm-line.meo-md-html-source-range) {
+  background: var(--meo-code-background) !important;
   font-family: var(--meo-font-source);
-  font-size: var(--meo-user-editor-font-size, var(--meo-font-source-size));
-  line-height: var(--meo-line-height-source);
+  font-size: var(--meo-user-editor-font-size, var(--meo-active-editor-font-size));
+  line-height: var(--meo-active-editor-line-height);
 }
 
-.cm-editor .meo-math-source-start {
+.cm-editor :is(.meo-math-source-start, .cm-line.meo-md-html-source-range-start) {
   position: relative;
   border-radius: 6px 6px 0 0;
 }
 
-.cm-editor .meo-md-math-fenced-display.meo-math-live-result {
-  /* The editing result needs room for its label; reading has no label rail. */
-  padding: 24px 0;
+.cm-editor :is(.meo-md-math-fenced-display.meo-math-live-result, .meo-md-html-live-result) {
+  /* Keep the divider label below editable source and above rendered content. */
+  padding: 20px 0 12px;
   background: var(--meo-code-background);
-  border-top: 1px solid var(--meo-document-separator);
   border-radius: 0 0 6px 6px;
+}
+
+.cm-editor :is(.meo-md-math-fenced-display.meo-math-live-result, .meo-md-html-live-result)::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--meo-document-separator);
+  pointer-events: none;
 }
 
 .meo-math-copy-actions {
@@ -4019,18 +4018,23 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   gap: 3px;
   opacity: 0;
   pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
+.meo-math-copy-actions * { user-select: none; -webkit-user-select: none; }
+.cm-editor .meo-mermaid-toolbar .meo-select-all-code-btn[hidden] { display: none; }
+
 .meo-md-math-fenced-display:hover > .meo-math-copy-actions,
-.meo-md-math-fenced-display:focus-within > .meo-math-copy-actions,
+.meo-md-math-fenced-display:has(:focus-visible:not([data-meo-pointer-focus])) > .meo-math-copy-actions,
 .meo-math-source-start:hover .meo-math-copy-actions,
-.meo-math-source-actions:focus-within,
+.meo-math-source-actions:has(:focus-visible:not([data-meo-pointer-focus])),
 .cm-focused .meo-math-source-actions {
   opacity: 1;
   pointer-events: auto;
 }
 
-.meo-math-copy-actions :is(.meo-copy-code-btn, .meo-select-all-code-btn) {
+.meo-math-copy-actions :is(.meo-copy-code-btn, .meo-select-all-code-btn, .meo-copy-image-btn) {
   position: static;
   display: inline-flex;
   align-items: center;
@@ -4044,18 +4048,25 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   color: var(--meo-code-action-foreground);
 }
 
-.meo-math-copy-actions :is(.meo-copy-code-btn, .meo-select-all-code-btn):hover,
-.meo-math-copy-actions :is(.meo-copy-code-btn, .meo-select-all-code-btn):focus-visible {
+.meo-math-copy-actions :is(.meo-copy-code-btn, .meo-select-all-code-btn, .meo-copy-image-btn):hover,
+.meo-math-copy-actions :is(.meo-copy-code-btn, .meo-select-all-code-btn, .meo-copy-image-btn):focus-visible:not([data-meo-pointer-focus]) {
   background: var(--meo-semantic-codeCopyHoverBackground);
   color: var(--meo-code-action-hover-foreground);
 }
 
-.meo-math-result-status {
+.meo-math-result-status,
+.meo-md-html-result-status {
   position: absolute;
-  top: 3px;
-  left: 8px;
+  top: 8px;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: calc(100% - 16px);
+  padding: 0 8px;
+  background: var(--meo-code-background);
   font-size: 11px;
-  line-height: 18px;
+  line-height: 16px;
+  text-align: center;
+  white-space: nowrap;
   color: var(--meo-semantic-secondaryForeground);
 }
 
@@ -4231,7 +4242,7 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 
 .meo-mermaid-toolbar.is-block-hovered,
 .meo-latex-math-toolbar.is-block-hovered,
-.meo-mermaid-toolbar:has(:focus-visible),
+.meo-mermaid-toolbar:has(:focus-visible:not([data-meo-pointer-focus])),
 .meo-latex-math-toolbar:has(:focus-visible) {
   opacity: 1;
   pointer-events: auto;
@@ -4246,12 +4257,13 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   }
 }
 
-.meo-mermaid-toolbar .meo-copy-code-btn,
+.meo-mermaid-toolbar :is(.meo-copy-code-btn, .meo-copy-image-btn),
 .meo-latex-math-toolbar .meo-copy-code-btn {
   position: static;
 }
 
 .meo-mermaid-mode-btn,
+.meo-mermaid-layout-btn,
 .meo-latex-math-mode-btn {
   display: inline-flex;
   align-items: center;
@@ -4268,6 +4280,8 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 
 .meo-mermaid-mode-btn:hover,
 .meo-mermaid-mode-btn:focus-visible,
+.meo-mermaid-layout-btn:hover,
+.meo-mermaid-layout-btn:focus-visible,
 .meo-latex-math-mode-btn:hover,
 .meo-latex-math-mode-btn:focus-visible {
   color: var(--meo-code-action-hover-foreground);
@@ -4336,8 +4350,13 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   z-index: 20;
 }
 
+.cm-editor .meo-rendered-block-preview > .meo-mermaid-toolbar {
+  background: var(--meo-code-background);
+  border-radius: 6px;
+}
+
 .cm-editor :is(.meo-code-block-actions, .meo-mermaid-toolbar, .meo-latex-math-toolbar)
-  > :is(.meo-code-block-pill, .meo-mermaid-mode-btn, .meo-latex-math-mode-btn) {
+  > :is(.meo-code-block-pill, .meo-mermaid-mode-btn, .meo-mermaid-layout-btn, .meo-latex-math-mode-btn) {
   border: 0;
   border-radius: 6px;
   background-color: transparent;
@@ -4346,7 +4365,7 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 
 /* The same controls also appear on source fence rows and floating headers. */
 .cm-editor :is(.meo-code-block-actions, .meo-mermaid-toolbar, .meo-latex-math-toolbar)
-  > :is(.meo-code-block-pill, .meo-mermaid-mode-btn, .meo-latex-math-mode-btn):is(:hover, :focus-visible) {
+  > :is(.meo-code-block-pill, .meo-mermaid-mode-btn, .meo-mermaid-layout-btn, .meo-latex-math-mode-btn):is(:hover, :focus-visible) {
   color: var(--meo-code-action-hover-foreground);
   background-color: var(--meo-semantic-codeCopyHoverBackground);
 }
@@ -4465,7 +4484,6 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 .cm-editor .meo-md-html-block {
   position: relative;
   box-sizing: border-box;
-  --meo-html-action-rail-offset: 28px;
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -4484,21 +4502,23 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   transition: background-color 100ms ease, box-shadow 100ms ease;
 }
 
-.cm-editor .meo-md-html-block::after {
-  position: absolute;
-  top: 0;
-  right: calc(-1 * var(--meo-html-action-rail-offset));
-  bottom: 0;
-  width: var(--meo-html-action-rail-offset);
-  content: '';
-}
-
 .cm-editor .meo-md-html-content {
+  /* Keep descendant margins inside the widget CodeMirror measures. A hidden
+     last child can otherwise let an earlier paragraph's margin escape. */
+  display: flow-root;
   min-width: 0;
   color: inherit;
   white-space: normal;
   user-select: text;
   -webkit-user-select: text;
+}
+
+.cm-editor.meo-mode-live .meo-md-html-live-result,
+.cm-editor.meo-mode-live .meo-md-html-live-result * {
+  /* The editing result is derived; source dragging must select each byte once.
+     Reading HTML outside this result keeps its native text selection. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .cm-editor .meo-md-html-comment {
@@ -4511,11 +4531,6 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 
 .cm-editor .meo-md-html-comment[data-display='block'] {
   display: block;
-}
-
-.cm-editor .meo-md-html-comment:focus-visible {
-  outline: 1px solid var(--vscode-focusBorder);
-  outline-offset: 2px;
 }
 
 .cm-editor .meo-md-html-content > :first-child {
@@ -4676,87 +4691,98 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
   margin-left: auto;
 }
 
-.cm-editor .meo-md-html-mode-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: calc(var(--meo-active-editor-line-height) * 1em);
-  height: calc(var(--meo-active-editor-line-height) * 1em);
-  padding: 0;
-  border: 1px solid var(--meo-document-border-control);
-  border-radius: 6px;
-  color: var(--meo-semantic-codeCopyForeground);
-  background: transparent;
-  font: inherit;
-  cursor: pointer;
+.cm-editor .meo-md-html-image > .meo-md-image-img {
+  width: var(--meo-html-image-width, auto);
+  height: var(--meo-html-image-height, auto);
+  max-height: var(--meo-html-image-max-height, 240px);
 }
 
-.cm-editor .meo-md-html-mode-btn:hover {
-  color: var(--meo-semantic-codeCopyHoverForeground, var(--meo-foreground));
-  background: var(--meo-document-block-hover);
-}
-
-.cm-editor .meo-md-html-mode-btn:active {
-  color: var(--meo-semantic-codeCopyHoverForeground, var(--meo-foreground));
+.cm-editor :is(.meo-copy-code-btn, .meo-copy-image-btn, .meo-select-all-code-btn, .meo-mermaid-mode-btn,
+  .meo-mermaid-layout-btn, .meo-latex-math-mode-btn, .meo-long-code-action):active {
   background: var(--meo-document-block-pressed);
 }
 
-.cm-editor :is(.meo-copy-code-btn, .meo-select-all-code-btn, .meo-mermaid-mode-btn,
-  .meo-latex-math-mode-btn, .meo-md-html-mode-btn, .meo-long-code-action):active {
-  background: var(--meo-document-block-pressed);
-}
-
-.cm-editor :is(.meo-copy-code-btn, .meo-select-all-code-btn, .meo-mermaid-mode-btn,
-  .meo-latex-math-mode-btn, .meo-md-html-mode-btn, .meo-long-code-action):focus-visible {
+.cm-editor :is(.meo-copy-code-btn, .meo-copy-image-btn, .meo-select-all-code-btn, .meo-mermaid-mode-btn,
+  .meo-mermaid-layout-btn, .meo-latex-math-mode-btn, .meo-long-code-action):focus-visible:not([data-meo-pointer-focus]) {
   box-shadow: inset 0 0 0 1px var(--meo-document-focus);
-}
-
-.cm-editor .meo-md-html-block > .meo-md-html-source-toggle {
-  position: absolute;
-  top: 0;
-  right: calc(-1 * var(--meo-html-action-rail-offset));
-  z-index: 10;
-  opacity: 0;
-  transition: opacity 100ms ease;
-}
-
-.cm-editor .meo-md-html-block:hover > .meo-md-html-source-toggle,
-.cm-editor .meo-md-html-block:focus-within > .meo-md-html-source-toggle {
-  opacity: 1;
-}
-
-.cm-editor .meo-md-html-block:has(> .meo-md-html-source-toggle:hover),
-.cm-editor .meo-md-html-block:has(> .meo-md-html-source-toggle:focus-visible) {
-  background: color-mix(in srgb, var(--meo-foreground) 5%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--meo-border) 72%, transparent);
 }
 
 .cm-editor .cm-line.meo-md-html-source-line {
   position: relative;
+  padding-right: 30px;
 }
+
+.cm-editor .cm-line.meo-md-html-source-line:has(.meo-md-html-warning:not([hidden])) { padding-right: 50px; }
+
+.cm-editor .meo-md-html-source-actions {
+  position: absolute;
+  top: 0;
+  right: 3px;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  gap: 4px;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.cm-editor .meo-md-html-source-actions * { user-select: none; -webkit-user-select: none; }
+
+.cm-editor .meo-md-html-source-actions .meo-md-html-warning { margin-left: 0; }
+.cm-editor .meo-md-html-source-actions .meo-md-html-warning[hidden] { display: none; }
+
+.cm-editor .meo-source-format-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  font: 12px/18px var(--meo-ui-font-family, sans-serif);
+  white-space: nowrap;
+  border: 0;
+  border-radius: 6px;
+  background: var(--meo-semantic-codeCopyBackground);
+  color: var(--meo-code-action-foreground);
+  cursor: pointer;
+}
+
+.cm-editor .meo-source-format-btn:is(:hover, :focus-visible) {
+  background: var(--meo-semantic-codeCopyHoverBackground);
+  color: var(--meo-code-action-hover-foreground);
+}
+
+.cm-editor .meo-source-format-btn:focus-visible { box-shadow: inset 0 0 0 1px var(--meo-document-focus); }
+.cm-editor .meo-source-format-btn:disabled { opacity: 0.6; cursor: default; }
+.cm-editor .meo-source-format-btn > span:first-child { display: inline-flex; }
 
 .cm-editor .cm-line.meo-md-html-source-range {
-  background: var(--meo-code-background) !important;
+  color: var(--meo-token-foreground-color, var(--meo-content-editor-foreground));
 }
 
-.cm-editor .cm-line.meo-md-html-source-range-start {
-  border-radius: 6px 6px 0 0;
-}
-
-.cm-editor .cm-line.meo-md-html-source-range-end {
+.cm-editor .cm-line.meo-md-html-source-range-end:not(.meo-md-html-source-has-preview) {
   border-radius: 0 0 6px 6px;
 }
 
-.cm-editor .cm-line.meo-md-html-source-range-start.meo-md-html-source-range-end {
+.cm-editor .cm-line.meo-md-html-source-range-start.meo-md-html-source-range-end:not(.meo-md-html-source-has-preview) {
   border-radius: 6px;
 }
 
-.cm-editor .meo-md-html-source-control {
-  position: absolute;
-  top: 0;
-  right: -28px;
-  z-index: 10;
-  display: inline-flex;
+.cm-editor .cm-line.meo-md-html-invisible-source {
+  font-family: var(--meo-font-source);
+  font-size: var(--meo-active-editor-font-size);
+  line-height: var(--meo-active-editor-line-height);
+  background: transparent;
+}
+
+.cm-editor .meo-md-html-invisible-source-text,
+.cm-editor .meo-md-html-invisible-source-text * {
+  color: var(--meo-token-comment-color, #676f7d) !important;
+  -webkit-text-fill-color: currentColor !important;
+  font-style: normal !important;
+  font-weight: normal !important;
+  background: transparent !important;
 }
 
 .cm-editor .meo-md-html-warning {
@@ -4802,13 +4828,6 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 .cm-editor .meo-md-html-inline-link-button {
   margin-top: 0;
   vertical-align: -2px;
-}
-
-@media (hover: none) {
-  .cm-editor .meo-md-html-block > .meo-md-html-source-toggle,
-  .cm-editor .meo-md-details-source-toggle {
-    opacity: 1;
-  }
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-code-line-numbered {
@@ -5258,8 +5277,8 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   outline: none;
 }
 
-.meo-visual-control-btn:focus-visible::before {
-  outline: 1px solid var(--vscode-focusBorder);
+.meo-visual-control-btn:focus-visible:not([data-meo-pointer-focus])::before {
+  outline: 1px solid var(--meo-ui-focus, currentColor);
   outline-offset: 1px;
 }
 
@@ -5282,20 +5301,185 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   );
 }
 
-.cm-editor .meo-mermaid-mode-btn {
-  width: 76px;
-  gap: 4px;
-  padding: 0 4px;
-  font: 12px/20px var(--meo-font-live, sans-serif);
+.cm-editor .meo-mermaid-toolbar [hidden] { display: none; }
+
+.cm-editor.meo-mode-live .cm-line.meo-mermaid-source-join {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.cm-editor .meo-mermaid-editing-preview {
+  position: relative;
+  background: var(--meo-code-background);
+  border-radius: 0 0 6px 6px;
+  overflow: clip;
+}
+
+.cm-editor .meo-native-source-preview-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px;
+  padding: 4px 0;
+  position: relative;
+  z-index: 1;
+  background: var(--meo-code-background);
+  color: var(--meo-code-action-foreground);
+  font: 11px/20px var(--meo-font-live, sans-serif);
+  user-select: none;
+}
+
+.cm-editor .meo-native-source-preview-label::before,
+.cm-editor .meo-native-source-preview-label::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: var(--meo-semantic-tableBorder, var(--meo-content-panel-border));
+}
+
+.cm-editor .meo-native-source-preview-label .meo-mermaid-layout-btn {
+  flex: 0 0 auto;
+  width: auto;
+  height: 20px;
+  gap: 5px;
+  padding: 0 6px;
+  border: 0;
+  font: inherit;
   white-space: nowrap;
 }
 
-.cm-editor .meo-mermaid-toolbar[data-meo-ui-language='zh-CN'] .meo-mermaid-mode-btn {
-  width: 60px;
+.meo-mermaid-layout-caption {
+  text-box-trim: trim-both;
+  text-box-edge: cap alphabetic;
 }
 
-/* Fixed chrome never contributes height or line-number geometry to the document. */
-.cm-editor .meo-mermaid-preview-controls {
+.cm-editor .meo-mermaid-editing-preview > .meo-mermaid-block {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  margin: 0;
+  min-height: clamp(200px, 36vh, 360px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Keep the full block surface; only native text wraps before its local canvas. */
+.cm-editor.meo-mode-live .cm-line.meo-md-code-block.meo-mermaid-inline-source {
+  padding-right: calc((100% - var(--meo-live-block-indent, 0px)) * var(--meo-mermaid-preview-share, 0.6) + 2ch);
+}
+
+.cm-editor .meo-mermaid-side-space {
+  background: var(--meo-code-background);
+  border-radius: 0 0 6px 6px;
+}
+
+.cm-editor > .cm-scroller > .meo-mermaid-inline-preview {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  border-radius: 0 6px 6px 0;
+  overflow: clip;
+  user-select: none;
+  background: var(--meo-code-background);
+}
+
+.cm-editor .meo-mermaid-inline-preview .meo-native-source-preview-label {
+  flex: 0 0 auto;
+  justify-content: flex-start;
+  box-sizing: border-box;
+  height: 30px;
+  padding: 5px calc(var(--meo-mermaid-actions-width, 100px) + 8px) 5px 0;
+  white-space: nowrap;
+}
+
+.cm-editor .meo-mermaid-inline-preview .meo-native-source-preview-label > span,
+.cm-editor .meo-block-sticky-header .meo-native-source-preview-label > span {
+  flex: none;
+}
+
+.cm-editor .meo-mermaid-inline-preview .meo-native-source-preview-label::before,
+.cm-editor .meo-mermaid-inline-preview .meo-native-source-preview-label::after,
+.cm-editor .meo-block-sticky-header .meo-native-source-preview-label::before,
+.cm-editor .meo-block-sticky-header .meo-native-source-preview-label::after {
+  display: none;
+}
+
+.cm-editor .meo-mermaid-inline-preview.has-sticky-header .meo-native-source-preview-label {
+  visibility: hidden;
+}
+
+.cm-editor .meo-mermaid-inline-preview > .meo-mermaid-editing-preview {
+  position: sticky;
+  top: 0;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cm-editor .meo-mermaid-inline-preview .meo-mermaid-block {
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-height: 0 !important;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8px 12px;
+  margin: 0;
+}
+
+.cm-editor .meo-mermaid-inline-preview .meo-mermaid-svg-wrapper {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+}
+
+.cm-editor .meo-mermaid-inline-preview .meo-mermaid-svg-wrapper > svg { width: 100%; height: 100%; }
+
+.cm-editor .meo-mermaid-inline-separator {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 6px;
+  cursor: col-resize;
+  border-left: 1px solid var(--meo-semantic-tableBorder, var(--meo-content-panel-border));
+}
+
+.cm-editor .meo-mermaid-inline-separator::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -1px;
+  width: 4px;
+  pointer-events: none;
+}
+
+.cm-editor .meo-mermaid-inline-separator:is(:hover, :focus-visible)::before {
+  background: #316dca;
+}
+
+.cm-editor .meo-mermaid-inline-separator:focus-visible {
+  outline: none;
+}
+
+.meo-mermaid-layout-btn:disabled { opacity: 0.45; cursor: default; }
+
+.cm-editor .meo-mermaid-editing-preview .meo-mermaid-fallback {
+  display: none;
+}
+
+.cm-editor .meo-mermaid-editing-preview .meo-mermaid-error-badge {
+  white-space: pre-wrap;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+/* Inline controls stay flat above shared light-mode floating toolbar styles. */
+.cm-editor .meo-visual-controls.meo-mermaid-preview-controls {
   position: fixed;
   inset: auto;
   display: grid;
@@ -5304,7 +5488,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   padding: 4px;
   z-index: 25;
   border-radius: 7px;
-  background: color-mix(in srgb, var(--meo-code-background) 94%, transparent);
+  background: var(--meo-code-background);
   box-shadow: none;
   backdrop-filter: none;
   opacity: 0;
@@ -5322,7 +5506,8 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
 }
 
 .cm-editor .meo-mermaid-block:hover .meo-mermaid-preview-controls,
-.cm-editor .meo-mermaid-preview-controls:focus-within {
+.cm-editor .meo-mermaid-editing-preview .meo-mermaid-preview-controls,
+.cm-editor .meo-mermaid-preview-controls:has(:focus-visible:not([data-meo-pointer-focus])) {
   opacity: 1;
   pointer-events: auto;
 }
@@ -5346,14 +5531,13 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   display: none;
 }
 
-.cm-editor .meo-mermaid-preview-controls .meo-visual-control-btn:is(:hover, :focus-visible) {
+.cm-editor .meo-mermaid-preview-controls .meo-visual-control-btn:is(:hover, :focus-visible:not([data-meo-pointer-focus])) {
   color: var(--meo-code-action-hover-foreground);
   background: var(--meo-semantic-codeCopyHoverBackground);
 }
 
-.cm-editor .meo-mermaid-preview-controls .meo-visual-control-btn:focus-visible {
-  outline: 1px solid var(--vscode-focusBorder, currentColor);
-  outline-offset: 1px;
+.cm-editor .meo-mermaid-preview-controls .meo-visual-control-btn:focus-visible:not([data-meo-pointer-focus]) {
+  box-shadow: inset 0 0 0 1px var(--meo-document-focus, currentColor);
 }
 
 .meo-mermaid-exit-btn {
@@ -5928,7 +6112,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
 
 .outline-resizer:hover::before,
 body.outline-resizing .outline-resizer::before {
-  background: var(--meo-outline-focus, #316dca);
+  background: #316dca;
 }
 
 .outline-sidebar:has(.outline-resizer:hover) .outline-content {
@@ -6506,10 +6690,6 @@ body.outline-resizing .preview-frame {
   overflow: clip;
 }
 
-/* Fence rows own the outer corners; the Mermaid middle joins must stay square. */
-.cm-editor .meo-mermaid-editing-block {
-  border-radius: 0;
-}
 
 .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="source-only"] {
   grid-template-columns: minmax(0, 1fr);
@@ -6525,15 +6705,13 @@ body.outline-resizing .preview-frame {
   border-left: 1px solid var(--meo-semantic-tableBorder, var(--meo-content-panel-border));
 }
 
-.cm-editor .meo-mermaid-source-sticky,
-.cm-editor .meo-mermaid-preview-sticky,
+
 .cm-editor .meo-latex-math-source-sticky,
 .cm-editor .meo-latex-math-preview-sticky {
   width: 100%;
 }
 
-.cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-mermaid-source-sticky,
-.cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-mermaid-preview-sticky,
+
 .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-latex-math-source-sticky,
 .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-latex-math-preview-sticky {
   position: relative;
@@ -6541,12 +6719,6 @@ body.outline-resizing .preview-frame {
   align-self: stretch;
 }
 
-.cm-editor .meo-mermaid-preview-sticky {
-  display: flex;
-  align-items: stretch;
-  min-height: var(--meo-mermaid-preview-preferred-height, 0px);
-  overflow: hidden;
-}
 
 .cm-editor .meo-latex-math-preview-sticky {
   display: flex;
@@ -6568,35 +6740,11 @@ body.outline-resizing .preview-frame {
   white-space: pre-wrap;
 }
 
-.cm-editor .meo-mermaid-preview-sticky > .meo-mermaid-block {
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  min-height: 0;
-}
 
-.cm-editor .meo-mermaid-preview-sticky > .meo-mermaid-block .meo-mermaid-svg-wrapper {
-  flex: 1 1 auto;
-  width: 100%;
-  min-height: 0;
-}
 
-.cm-editor .meo-mermaid-preview-sticky > .meo-mermaid-block .meo-mermaid-svg-wrapper svg {
-  width: 100%;
-  height: 100%;
-  max-height: 100%;
-}
 
-@media (min-width: 761px) {
-  .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-mermaid-preview-sticky {
-    height: 100%;
-  }
-}
 
-.cm-editor .meo-mermaid-source-editor > .cm-editor,
+
 .cm-editor .meo-latex-math-source-editor > .cm-editor {
   height: auto;
   outline: none;
@@ -6609,7 +6757,6 @@ body.outline-resizing .preview-frame {
   text-rendering: auto;
 }
 
-.cm-editor .meo-mermaid-source-editor .cm-scroller,
 .cm-editor .meo-latex-math-source-editor .cm-scroller {
   overflow: visible !important;
   padding-right: 0;
@@ -6617,7 +6764,6 @@ body.outline-resizing .preview-frame {
   background: var(--meo-code-background);
 }
 
-.cm-editor .meo-mermaid-source-editor .cm-gutters,
 .cm-editor .meo-latex-math-source-editor .cm-gutters {
   min-width: 0;
   max-width: none;
@@ -6630,7 +6776,7 @@ body.outline-resizing .preview-frame {
   font-weight: var(--meo-font-source-weight);
 }
 
-.cm-editor :is(.meo-mermaid-source-editor, .meo-latex-math-source-editor)
+.cm-editor .meo-latex-math-source-editor
   :is(.cm-gutter.cm-lineNumbers, .cm-lineNumbers .cm-gutterElement) {
   /* Local line counts must not inherit the document gutter's fixed width. */
   width: auto;
@@ -6638,7 +6784,6 @@ body.outline-resizing .preview-frame {
   max-width: none;
 }
 
-.cm-editor .meo-mermaid-source-editor .cm-content,
 .cm-editor .meo-latex-math-source-editor .cm-content {
   min-width: 0;
   padding: 0 12px 0 4px;
@@ -6646,7 +6791,6 @@ body.outline-resizing .preview-frame {
   caret-color: var(--meo-caret);
 }
 
-.cm-editor .meo-mermaid-source-editor .cm-line,
 .cm-editor .meo-latex-math-source-editor .cm-line {
   padding-left: 8px;
   background: var(--meo-code-background);
@@ -6654,7 +6798,6 @@ body.outline-resizing .preview-frame {
   font-weight: var(--meo-font-source-weight);
 }
 
-.cm-editor .meo-mermaid-source-editor .cm-line.cm-activeLine,
 .cm-editor .meo-latex-math-source-editor .cm-line.cm-activeLine {
   background: var(--meo-code-block-active-line-bg);
 }
@@ -6669,8 +6812,7 @@ body.outline-resizing .preview-frame {
     border-left: 0;
   }
 
-  .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-mermaid-source-sticky,
-  .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-mermaid-preview-sticky,
+
   .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-latex-math-source-sticky,
   .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-latex-math-preview-sticky {
     position: relative;
@@ -6694,6 +6836,7 @@ body.outline-resizing .preview-frame {
   margin-left: 0;
   overflow-x: clip;
   overflow-y: visible;
+  overflow-clip-margin: 1px;
   scrollbar-color: var(--meo-scrollbar-thumb) transparent;
   scrollbar-width: thin;
 }
@@ -6746,8 +6889,15 @@ body.outline-resizing .preview-frame {
   table-layout: auto;
 }
 
+html[data-editor-appearance='light'] .cm-editor .meo-md-html-table {
+  --meo-table-editing-outline-color: var(--meo-semantic-tableSelectionBorder);
+}
+
 html[data-meo-ui-contrast='high'] .cm-editor .meo-md-html-table {
   --meo-semantic-tableSelectionBorder: var(--meo-ui-focus);
+  --meo-table-editing-outline-width: 1.5px;
+  --meo-table-editing-outline-inset: -0.5px;
+  --meo-table-editing-outline-color: var(--meo-semantic-tableSelectionBorder);
 }
 
 .cm-editor .meo-md-html-table th,
@@ -6761,15 +6911,15 @@ html[data-meo-ui-contrast='high'] .cm-editor .meo-md-html-table {
   white-space: normal;
 }
 
-/* Frame the full cell even when another cell makes the row taller. */
+/* Keep the original 1px frame's inner edge and grow the extra pixel outward. */
 .cm-editor .meo-md-html-table :is(th, td):not(.meo-md-html-table-cell-selected):has(> .meo-md-html-table-cell-content.is-editing > textarea:focus)::after {
   content: '';
   position: absolute;
   z-index: 3;
-  inset: 0;
+  inset: var(--meo-table-editing-outline-inset, -1.5px);
   pointer-events: none;
-  outline: 1.5px solid var(--meo-semantic-tableSelectionBorder);
-  outline-offset: -1.5px;
+  box-shadow: inset 0 0 0 var(--meo-table-editing-outline-width, 2px)
+    var(--meo-table-editing-outline-color, color-mix(in srgb, var(--meo-semantic-tableSelectionBorder) 80%, var(--meo-background)));
 }
 
 .cm-editor .meo-md-html-table th.meo-md-html-table-cell-selected,
@@ -8196,11 +8346,12 @@ html[data-meo-ui-contrast='high'] .cm-editor :is(.meo-md-html-table-context-trig
 .settings-search-clear { width: 24px; height: 24px; flex: 0 0 auto; color: var(--meo-settings-search-muted); }
 .settings-search-clear[hidden] { display: none; }
 .settings-layout { display: grid; grid-template-columns: minmax(170px, max-content) minmax(0, 1fr); min-height: 0; flex: 1 1 auto; }
+.settings-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .settings-navigation { padding: 16px 12px; border-right: 1px solid var(--meo-ui-separator); overflow: auto; }
 .settings-jump { display: block; box-sizing: border-box; width: 100%; border: 0; padding: 8px 10px; border-radius: 6px; margin: 2px 0; text-align: left; white-space: nowrap; color: var(--meo-ui-text-muted); background: transparent; font: inherit; cursor: pointer; }
 .settings-jump:hover { background: var(--meo-ui-surface-hover); }
 .settings-jump.is-active { color: var(--meo-ui-text-selected); background: var(--meo-ui-surface-selected); }
-.settings-content { min-height: 0; overflow: auto; padding: 20px 24px 24px; scroll-behavior: auto; }
+.settings-content { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 20px 24px 24px; scroll-behavior: auto; }
 .settings-section { padding-bottom: 6px; border-bottom: 1px solid var(--meo-ui-separator); }
 .settings-section + .settings-section { margin-top: 30px; }
 .settings-section-title { margin: 0 0 6px; font-size: 16px; font-weight: 600; }
@@ -8208,12 +8359,16 @@ html[data-meo-ui-contrast='high'] .cm-editor :is(.meo-md-html-table-context-trig
 .settings-item:last-child { border-bottom: 0; }
 .settings-item-text { flex: 1 1 180px; min-width: 0; }
 .settings-item-title { font-size: 13px; font-weight: 400; line-height: 1.5; }
+.settings-item-title-with-badge { display: flex; align-items: center; gap: 6px; }
+.meo-beta-badge { display: inline-flex; flex: 0 0 auto; align-items: center; box-sizing: border-box; padding: 1px 5px; border: 1px solid var(--meo-ui-border-float); border-radius: 4px; background: var(--meo-ui-surface-field); color: var(--meo-ui-accent-text); font: 600 10px/14px var(--meo-ui-font-family, sans-serif); letter-spacing: .02em; white-space: nowrap; vertical-align: middle; cursor: help; }
+.meo-beta-badge:focus-visible { border-color: var(--meo-ui-focus); box-shadow: 0 0 0 1px var(--meo-ui-focus); }
 .appearance-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .appearance-section-heading .settings-section-title { margin: 0; }
 .appearance-scheme { flex: 0 0 auto; padding: 3px 7px; border-radius: 4px; color: var(--meo-ui-text-muted); background: var(--meo-ui-surface-field); font-size: 11px; line-height: 16px; white-space: nowrap; }
 .appearance-note { margin-bottom: 14px; }
 .appearance-item .settings-item-text { flex: 1 1 220px; }
 .appearance-item { padding-block: 12px; }
+.appearance-typography-controls { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-left: auto; }
 .appearance-mode-control { flex: 0 1 240px; height: 32px; margin-left: auto; }
 .appearance-mode-control .segmented-control-button { height: 100%; font-size: 12px; }
 .appearance-color-controls { display: flex; align-items: center; gap: 8px; flex: 0 1 240px; width: 240px; max-width: 100%; min-width: 0; margin-left: auto; }
@@ -8234,7 +8389,8 @@ html[data-meo-ui-contrast='high'] .appearance-color-field:not(:focus-within):not
 .settings-button.appearance-color-reset { flex: 0 0 32px; width: 32px; height: 32px; border-radius: 8px; padding: 0; color: var(--meo-ui-text-muted); }
 .appearance-color-reset > svg { display: block; flex: none; }
 .appearance-color-reset:hover:not(:disabled) { color: var(--meo-ui-text); }
-.appearance-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
+.appearance-footer { display: flex; align-items: center; justify-content: flex-end; gap: 12px; width: 100%; }
+.appearance-footer [hidden] { display: none; }
 .appearance-status { margin: 0 0 12px; color: var(--meo-ui-danger); font-size: 12px; }
 .appearance-background-warning {
   display: flex;
@@ -8271,6 +8427,7 @@ html[data-meo-ui-contrast='high'] .appearance-color-field:not(:focus-within):not
 .settings-choice-button { flex: 1 1 0; height: 100%; font-size: 13px; font-weight: 400; padding-inline: 8px; }
 .settings-choice .editor-font-size-stepper { flex: 0 0 76px; width: 76px; height: 30px; grid-template-columns: 24px 24px 24px; }
 .settings-choice .editor-font-size-stepper-button, .settings-choice .editor-font-size-value { font-size: 13px; line-height: 1; }
+[data-setting='lineHeight'] .editor-font-size-stepper { flex-basis: 104px; width: 104px; grid-template-columns: 24px 52px 24px; }
 .settings-shortcut-controls { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex: 0 1 auto; }
 .settings-shortcut-keys { display: flex; flex-wrap: wrap; gap: 5px; }
 .settings-key { border: 1px solid var(--meo-ui-border-control); padding: 3px 6px; border-radius: 4px; background: var(--meo-ui-surface-field); color: inherit; font: 11px var(--meo-ui-editor-font-family, monospace); }
@@ -8388,8 +8545,17 @@ html[data-editor-appearance='dark'] :is(.settings-warning, .settings-shortcut-co
   font-family: var(--meo-suggestion-font, var(--meo-active-editor-font));
   font-size: var(--meo-suggestion-font-size, 13px);
 }
-.meo-path-suggestions { width: min(clamp(260px, 20em, 300px), calc(100vw - 16px)); }
-.meo-narrow-suggestions { width: min(240px, calc(100vw - 16px)); }
+.meo-link-suggestions { width: min(max(320px, calc(24em + 8px)), calc(100vw - 16px)); }
+.meo-path-suggestions { width: min(clamp(248px, calc(19em + 1px), 300px), calc(100vw - 16px)); }
+.meo-input-suggestions[data-suggestion-kind='slash'] { width: min(max(288px, 22.15em), calc(100vw - 16px)); }
+.meo-input-suggestions[data-suggestion-kind='slash']:lang(en) { width: min(max(336px, 25.85em), calc(100vw - 16px)); }
+.meo-input-suggestions[data-suggestion-kind='headings'] { width: min(max(272px, 20.92em), calc(100vw - 16px)); }
+.meo-input-suggestions[data-suggestion-kind='headings']:lang(en) { width: min(max(360px, 27.69em), calc(100vw - 16px)); }
+.meo-narrow-suggestions { width: min(max(184px, 14.15em), calc(100vw - 16px)); }
+.meo-html-suggestions { width: min(max(208px, 16em), calc(100vw - 16px)); }
+.meo-html-suggestions[data-html-kind='property'] { width: min(max(224px, 17.23em), calc(100vw - 16px)); }
+.meo-html-suggestions[data-html-kind='constant'] { width: min(max(304px, 23.38em), calc(100vw - 16px)); }
+.meo-math-suggestions { width: min(max(336px, 25.85em), calc(100vw - 16px)); }
 .meo-input-suggestions[hidden] { display: none; }
 html[data-editor-appearance='dark'] .meo-input-suggestions {
   --meo-suggestion-match-color: var(--meo-ui-text-emphasis);
@@ -8455,6 +8621,33 @@ html[data-meo-ui-contrast='normal'] .meo-input-suggestions:not(.meo-narrow-sugge
 .meo-suggestion-parameters { color: var(--meo-ui-text-muted); }
 .meo-input-suggestion-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--meo-ui-text-muted); font: inherit; text-align: right; white-space: nowrap; overflow-wrap: normal; }
 
+.meo-math-suggestions .meo-input-suggestion {
+  grid-template-columns: 16px minmax(0, 1fr) 4em;
+  height: max(28px, calc(1.45em + 6px));
+  min-height: 0;
+  overflow: hidden;
+}
+.meo-math-completion-added { color: var(--meo-ui-text-muted); }
+.meo-math-completion-preview {
+  position: relative;
+  align-self: stretch;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 1.35em;
+  color: inherit;
+}
+.meo-math-completion-preview > .katex {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  /* Include thin borders and glyph overhang in the existing fit measurement. */
+  padding: 2px;
+  font-size: 1em;
+  white-space: nowrap;
+  transform: translateY(-50%) scale(var(--meo-math-preview-scale, 1));
+  transform-origin: right center;
+}
+
 /* The prefix and generated suffix are outside the editable folder field. */
 .image-location-settings { display: grid; justify-content: stretch; gap: 10px; min-width: 0; }
 .image-location-settings [hidden] { display: none; }
@@ -8502,6 +8695,30 @@ html[data-meo-ui-contrast='normal'] .meo-input-suggestions:not(.meo-narrow-sugge
   user-select: none;
 }
 .cm-editor .meo-block-sticky-header[hidden] { display: none; }
+.cm-editor .meo-block-sticky-header.is-mermaid-side {
+  pointer-events: none;
+}
+.cm-editor .meo-block-sticky-header.is-mermaid-side::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--meo-mermaid-source-width);
+  border-right: 1px solid var(--meo-semantic-tableBorder, var(--meo-content-panel-border));
+  pointer-events: auto;
+}
+.cm-editor .meo-block-sticky-header .meo-native-source-preview-label {
+  position: absolute;
+  inset: 0 0 0 calc(var(--meo-mermaid-source-width) + 6px);
+  box-sizing: border-box;
+  height: 30px;
+  margin: 0;
+  padding: 5px 6px;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+.cm-editor .meo-block-sticky-header.is-mermaid-side > .meo-mermaid-toolbar {
+  z-index: 1;
+}
 .cm-editor .meo-block-sticky-header .meo-block-sticky-language {
   position: static;
   margin-left: 2ch;
@@ -8717,4 +8934,26 @@ html[data-meo-ui-contrast='high'] .meo-input-suggestion[aria-selected='true'] :i
   --meo-ui-focus: color-mix(in srgb, var(--meo-preview-foreground) 55%, var(--meo-preview-background));
   --meo-ui-danger: light-dark(#b42318, #ff837b);
   --meo-ui-shadow: 0 4px 14px rgb(0 0 0 / 24%);
+}
+
+.cm-editor .meo-copy-image-btn {
+  cursor: pointer;
+  color: var(--meo-code-action-foreground);
+}
+[data-meo-pointer-focus]:focus,
+.meo-mermaid-fullscreen-scrim:focus { outline: none; box-shadow: none; }
+.cm-editor .meo-copy-image-btn[aria-disabled="true"] { opacity: .4; cursor: default; }
+.cm-editor .meo-preview-action-status {
+  position: absolute;
+  top: 25px;
+  right: 0;
+  z-index: 1;
+  width: max-content;
+  max-width: 240px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--meo-ui-surface-raised);
+  color: var(--meo-ui-text);
+  font-size: 12px;
+  white-space: normal;
 }

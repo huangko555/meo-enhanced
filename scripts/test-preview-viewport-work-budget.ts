@@ -36,6 +36,9 @@ try {
   await page.setContent('<!doctype html><style>html,body{height:100%;margin:0}</style><body></body>');
   await page.addStyleTag({ path: 'webview/src/styles.css' });
   await page.addStyleTag({ content: '.preview-host:not([hidden]){height:100%;display:flex;flex-direction:column}.preview-frame{width:100%;height:100%;flex:1}' });
+  if (process.argv.includes('--declined-owner')) await page.evaluate(() => {
+    (window as any).__previewDeclineViewportTransactionOwner = true;
+  });
   await page.addScriptTag({ content: await build.outputs[0].text() });
   const windowText = '# Reading window\n\n' + Array.from({ length: 5000 }, (_, index) =>
     `Paragraph ${index} with **needle-${index}** and editable source context.\n\n`).join('')
@@ -287,8 +290,16 @@ try {
     const target = doc.querySelector('[data-source-line="6003"]:not([data-meo-preview-gap])')?.getBoundingClientRect();
     return target && target.top < doc.defaultView.innerHeight && target.bottom > 0;
   });
-  const destinationPaint = await page.evaluate(() => {
+  const destinationPaint = await page.evaluate(async () => {
     const scope = window as any, doc = scope.__previewController.host.querySelector('iframe').contentDocument;
+    // Gap measurements may finish after the destination's first paint. Keep
+    // it visible on every frame while adjacent blocks are still pending.
+    for (let frame = 0; frame < 12; frame++) {
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      const rect = doc.querySelector('[data-source-line="6003"]:not([data-meo-preview-gap])')?.getBoundingClientRect();
+      if (!rect || rect.top >= doc.defaultView.innerHeight || rect.bottom <= 0)
+        throw new Error(`Prepared destination left the reading viewport on frame ${frame}: ${JSON.stringify(rect?.toJSON())}`);
+    }
     const bottoms = [...doc.querySelectorAll('[data-meo-preview-block]')].map((element: any) => element.getBoundingClientRect().bottom);
     const gate = scope.__projectionGate; scope.__projectionGate = null; gate.release?.();
     return Math.max(...bottoms);

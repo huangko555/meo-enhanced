@@ -117,7 +117,12 @@ try {
     const codeMirrorLineTop = codeMirrorLine ? codeMirrorLine.getBoundingClientRect().top - bounds.top : null;
     const table = sampleMode === 'preview' ? null : Array.from(document.querySelectorAll<HTMLElement>('.editor-host .meo-md-html-table-shell'))
       .find((item) => item.getBoundingClientRect().top <= bounds.top + 2 && item.getBoundingClientRect().bottom > bounds.top + 2);
-    const rows = table ? Array.from(table.querySelectorAll<HTMLElement>('tr')) : [];
+    const tableStartLine = table?.dataset.meoRenderedBlockStartLine;
+    const tableRows = (shell: HTMLElement | null | undefined) => Array.from(
+      shell?.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')
+        ?.querySelectorAll<HTMLElement>(':scope > thead > tr, :scope > tbody > tr') ?? []
+    );
+    const rows = tableRows(table);
     const rowIndex = rows.findIndex((item) => item.getBoundingClientRect().bottom > bounds.top + 2);
     const topPlaceholder = sampleMode === 'live'
       ? doc.elementFromPoint(bounds.left + 100, bounds.top + 2)?.closest<HTMLElement>('.meo-md-long-code-placeholder')
@@ -146,8 +151,8 @@ try {
           : rect.top - bounds.top;
       }
       if (table && rowIndex >= 0) {
-        const currentTable = document.querySelector<HTMLElement>(`.editor-host .meo-md-html-table-shell[data-meo-rendered-block-start-line="${table.dataset.meoRenderedBlockStartLine}"]`);
-        const row = currentTable?.querySelectorAll<HTMLElement>('tr')[rowIndex];
+        const currentTable = document.querySelector<HTMLElement>(`.editor-host .meo-md-html-table-shell[data-meo-rendered-block-start-line="${tableStartLine}"]`);
+        const row = tableRows(currentTable)[rowIndex];
         if (row) return row.getBoundingClientRect().top - bounds.top;
       }
       if (placeholderLine) {
@@ -187,16 +192,16 @@ try {
     // count as visible flashes.
     const initialTop = trace[0]!.top;
     const painted = trace.slice(2);
-    // When enlargement reaches the scroll limit, keeping the old top anchor
-    // would require scrolling past the document end. Check those frames against
-    // the bottom boundary instead of treating the unavoidable shift as a jump.
-    const isBottomConstrained = (item: (typeof trace)[number]) => delta > 0
-      && initialTop !== null && item.top !== null && item.top > initialTop
+    // Either direction can hit the document end: shrinkage also lowers the
+    // maximum scroll. Prove that preserving this source anchor would require an
+    // unavailable scroll position, then account for the unavoidable deficit.
+    const isBottomConstrained = (item: (typeof trace)[number]) => initialTop !== null && item.top !== null
+      && item.scroll + item.top - initialTop > item.maxScroll + 1
       && item.scroll >= item.maxScroll - 1;
     const bottomConstrained = painted.some(isBottomConstrained);
     const displacement = initialTop === null ? 0 : Math.max(...painted.map((item) => item.top === null
       ? 9999 : isBottomConstrained(item) ? 0 : Math.abs(item.top - initialTop)));
-    return { sourceLine: sourceLine ?? previewLine?.dataset.sourceLine, codeMirrorLineTop, placeholderLine, renderedBlockLine, tableRow: rowIndex, displacement, bottomConstrained, trace };
+    return { sourceLine: sourceLine ?? previewLine?.dataset.sourceLine, codeMirrorLineTop, placeholderLine, renderedBlockLine, tableStartLine, tableRow: rowIndex, displacement, bottomConstrained, trace };
   }, { sampleMode: mode, delta: direction });
   for (const mode of modes) {
     if (mode !== 'live') {
@@ -247,7 +252,7 @@ try {
         });
         console.log(`live line ${line} nearby blocks: ${JSON.stringify(nearbyBlocks)}`);
       }
-      const scenario = mode === 'live' && line === mermaidLine ? ['preview', 'split', 'source'] : ['default'];
+      const scenario = mode === 'live' && line === mermaidLine ? ['preview', 'side-by-side', 'stacked'] : ['default'];
       for (const blockMode of scenario) {
         if (blockMode !== 'default') {
           if (process.argv.includes('--details')) console.log('mermaid probe', await page.evaluate((targetLine) => {
@@ -270,36 +275,26 @@ try {
               .some((item) => item.dataset.meoBlockFrom === anchor);
           }, { timeout: 5000 }, line);
         }
-        if (blockMode !== 'default' && blockMode !== 'preview') {
-          const modeChange = await page.evaluate((targetLine) => {
-            const anchor = String((window as any).__fontTestView().state.doc.line(targetLine).from);
-            const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.meo-mermaid-mode-btn'))
-              .find((item) => (item.closest('[role="group"]') as HTMLElement | null)?.dataset.meoBlockFrom === anchor);
-            if (!button) return 'missing';
-            button.click();
-            return button.getAttribute('aria-label');
-          }, line);
-          if (modeChange === 'missing') {
-            const visibleControls = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>('.meo-mermaid-mode-btn'))
-              .map((item) => item.closest('[role="group"]')?.getAttribute('aria-label')));
-            throw new Error(`Mermaid controls at line ${line} were not visible: ${JSON.stringify(visibleControls)}`);
-          }
-          await page.waitForFunction(({ targetLine, expectedMode }) => {
-            const anchor = String((window as any).__fontTestView().state.doc.line(targetLine).from);
-            return Array.from(document.querySelectorAll<HTMLElement>('.meo-mermaid-toolbar'))
-              .some((item) => item.dataset.meoBlockFrom === anchor && item.dataset.meoMermaidMode === expectedMode);
-          }, { timeout: 5000 }, { targetLine: line, expectedMode: blockMode });
-          if (!process.argv.includes('--rapid-mermaid')) {
-            await page.evaluate(async () => { for (let i = 0; i < 20; i++) await new Promise(requestAnimationFrame); });
-          }
-        }
         if (blockMode !== 'default') {
-          const actualMode = await page.evaluate((targetLine) => {
-            const anchor = String((window as any).__fontTestView().state.doc.line(targetLine).from);
-            return Array.from(document.querySelectorAll<HTMLElement>('.meo-mermaid-toolbar'))
-              .find((item) => item.dataset.meoBlockFrom === anchor)?.dataset.meoMermaidMode;
-          }, line);
-          if (actualMode !== blockMode) throw new Error(`Mermaid line ${line} should be ${blockMode}, got ${actualMode}`);
+          await page.evaluate(({ line, layout }) => {
+            const view = (window as any).__fontTestView();
+            const anchor = String(view.state.doc.line(line).from);
+            const toolbar = view.dom.querySelector<HTMLElement>(`.meo-mermaid-toolbar[data-meo-block-from="${anchor}"]`)!;
+            if ((toolbar.dataset.meoMermaidMode === 'edit') !== (layout !== 'preview')) toolbar.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn')!.click();
+          }, { line, layout: blockMode });
+          if (blockMode !== 'preview') {
+            await page.waitForSelector('.meo-mermaid-toolbar[data-meo-mermaid-mode="edit"]');
+            await page.evaluate(({ line, layout }) => {
+              const view = (window as any).__fontTestView(), anchor = String(view.state.doc.line(line).from);
+              const side = view.dom.querySelector(`.meo-mermaid-inline-preview[data-meo-mermaid-anchor="${anchor}"]`);
+              if (!!side !== (layout === 'side-by-side')) view.dom.querySelector<HTMLButtonElement>(`[data-meo-mermaid-anchor="${anchor}"] .meo-mermaid-layout-btn:not(:disabled)`)!.click();
+            }, { line, layout: blockMode });
+            await page.waitForFunction(({ line, layout }) => {
+              const view = (window as any).__fontTestView(), anchor = String(view.state.doc.line(line).from);
+              return !!view.dom.querySelector(`.meo-mermaid-inline-preview[data-meo-mermaid-anchor="${anchor}"]`) === (layout === 'side-by-side');
+            }, {}, { line, layout: blockMode });
+          }
+          if (!process.argv.includes('--rapid-mermaid')) await page.evaluate(async () => { for (let i=0; i<20; i++) await new Promise(requestAnimationFrame); });
         }
         for (let step = 0; step < 5; step++) {
           const up = await measureStep(mode, 1);
@@ -310,6 +305,7 @@ try {
         for (let step = 0; step < 5; step++) {
           const down = await measureStep(mode, -1);
           samples += 1;
+          if (down.bottomConstrained) bottomConstrainedSteps += 1;
           if (down.displacement > 12) failures.push({ mode, line, blockMode, direction: `decrease-${step}`, ...down });
         }
       }

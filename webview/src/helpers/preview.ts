@@ -12,7 +12,7 @@ import previewPresetBrandIcons from './previewPresetBrandIcons.json';
 import { getExportStyleEnvironment } from './export';
 import { documentSurfaceVariables } from '../../../src/shared/documentSurfaceRoles';
 import { createPreviewMermaidRenderer } from './previewMermaid';
-import { createCopyCodeButton } from './codeBlockControls';
+import { addPreviewCodeCopyControls, previewCopyBlockSelector, closePreviewBlockFullscreen } from './previewBlockActions';
 import { logWebviewRenderError } from './errors';
 import { normalizeDocumentText } from '../../../src/foundation/documentText';
 import { assessLargeDocument } from '../../../src/foundation/largeDocument';
@@ -79,16 +79,18 @@ type PreviewControllerOptions = {
   onPaletteChanged?: () => void;
   /** Return true for a handled global command; other command keys continue to VS Code. */
   onShortcut?: (event: KeyboardEvent) => boolean;
+  onFontSizeWheel?: (event: WheelEvent) => boolean;
   onSearchResultsChanged?: () => void;
   onNavigateToTop?: () => boolean;
   onAlignViewport?: (owner: 'source' | 'preview') => void;
   onViewportInteraction?: (owner: 'source' | 'preview') => void;
   onViewportChange?: () => void;
   onGeometryChanged?: () => void;
+  /** Return false without mutating when no outer reading-position owner exists yet. */
   runViewportTransaction?: (
     mutate: () => void,
     documentChange?: { readonly previousText: string; readonly nextText: string }
-  ) => void | Promise<void>;
+  ) => false | void | Promise<void>;
   mermaidRenderResources: MermaidDiagramRenderResources;
 };
 
@@ -285,57 +287,10 @@ function preserveLoadedPreviewImage(fromImage: HTMLImageElement, toImage: HTMLIm
   return true;
 }
 
-// These reading controls are added only to the iframe DOM, never to shared export HTML.
-const previewCopyBlockSelector = '.meo-export-code-block-wrap, .meo-export-mermaid, .meo-export-math-display';
-
 function setPreviewStyle(element: HTMLElement, property: string, value: string): void {
   if (element.style.getPropertyValue(property) === value) return;
   if (value) element.style.setProperty(property, value);
   else element.style.removeProperty(property);
-}
-
-function addPreviewCodeCopyControls(root: ParentNode, language: UiLanguage): void {
-  const strings = getUiStrings(language);
-  const nearby = root.nodeType === 9 ? getPreviewViewportResources(root as Document, 'copy') : undefined;
-  for (const block of nearby ?? root.querySelectorAll<HTMLElement>(previewCopyBlockSelector)) {
-    if (block.classList.contains('meo-export-mermaid')
-      && !block.querySelector(':scope > .meo-export-code-language-label')) {
-      const label = block.ownerDocument.createElement('div');
-      label.className = 'meo-export-code-language-label';
-      label.textContent = 'mermaid';
-      block.prepend(label);
-    }
-    const code = block.querySelector<HTMLElement>(':scope > pre > code');
-    if (!code && block.dataset.sourceB64 === undefined) continue;
-    let button = block.querySelector<HTMLElement>(':scope > .meo-preview-code-actions > .meo-copy-code-btn');
-    if (!button) {
-      const copyButton = createCopyCodeButton(() => {
-        // Resolve the live DOM after incremental updates and Shiki token projection.
-        const currentBlock = copyButton.closest<HTMLElement>(previewCopyBlockSelector);
-        if (currentBlock?.dataset.sourceB64 !== undefined) {
-          const binary = window.atob(currentBlock.dataset.sourceB64);
-          const source = new TextDecoder().decode(Uint8Array.from(binary, character => character.charCodeAt(0)));
-          // Mermaid's render payload includes the structural newline before its fence.
-          return currentBlock.classList.contains('meo-export-mermaid') ? source.replace(/\n$/, '') : source;
-        }
-        const currentCode = currentBlock?.querySelector(':scope > pre > code');
-        if (!currentCode) return '';
-        const lines = Array.from(currentCode.querySelectorAll('.meo-export-code-line-source'));
-        return lines.map(line => line.textContent ?? '').join('\n');
-      }, language, block.ownerDocument);
-      // A mouse click must not collapse the reader's existing text selection.
-      copyButton.addEventListener('mousedown', event => {
-        if (event.button === 0) event.preventDefault();
-      });
-      const actions = block.ownerDocument.createElement('span');
-      actions.className = 'meo-preview-code-actions';
-      actions.append(copyButton);
-      block.append(actions);
-      button = copyButton;
-    }
-    button.dataset.tooltip = strings.copyCode;
-    button.setAttribute('aria-label', strings.copyCode);
-  }
 }
 
 const previewCodeCopyStyles = `
@@ -347,20 +302,24 @@ const previewCodeCopyStyles = `
   opacity: 0; pointer-events: none;
 }
 :is(.meo-export-code-block-wrap, .meo-export-mermaid, .meo-export-math-display):hover > .meo-preview-code-actions,
-.meo-preview-code-actions:focus-within { opacity: 1; pointer-events: auto; }
-.meo-preview-code-actions > .meo-copy-code-btn {
+.meo-preview-code-actions:has(:focus-visible:not([data-meo-pointer-focus])) { opacity: 1; pointer-events: auto; }
+.meo-preview-code-actions > [role="button"] {
   display: inline-flex; align-items: center; justify-content: center;
   box-sizing: border-box; width: 22px; height: 20px; padding: 0; border: 0; border-radius: 6px;
+  outline: none;
   cursor: pointer; color: var(--meo-preview-code-copy-fg, var(--meo-fg)); background: var(--meo-preview-code-copy-bg, transparent);
 }
-.meo-preview-code-actions > .meo-copy-code-btn:is(:hover, :focus-visible) {
+.meo-preview-code-actions > [role="button"]:is(:hover, :focus-visible:not([data-meo-pointer-focus])) {
   color: var(--meo-preview-code-copy-hover-fg, var(--meo-fg));
   background: var(--meo-preview-code-copy-hover-bg, color-mix(in srgb, var(--meo-fg) 12%, var(--meo-bg)));
 }
-.meo-preview-code-actions > .meo-copy-code-btn:focus-visible {
+.meo-preview-code-actions > [role="button"]:focus-visible:not([data-meo-pointer-focus]) {
   outline: 1px solid var(--meo-preview-code-copy-hover-fg, var(--meo-fg)); outline-offset: 1px;
 }
 .meo-preview-code-actions svg { display: block; }
+.meo-preview-code-actions > [aria-disabled="true"] { opacity: .4; cursor: default; }
+.meo-preview-action-status { position: absolute; top: 25px; right: 0; width: max-content; max-width: 240px; padding: 4px 8px; border-radius: 6px; background: var(--meo-bg); color: var(--meo-fg); font-size: 12px; white-space: normal; }
+
 @media print { .meo-preview-code-actions { display: none; } }
 `;
 
@@ -832,6 +791,7 @@ export function createPreviewController({
   onLoadingVisible,
   onPaletteChanged,
   onShortcut,
+  onFontSizeWheel,
   onSearchResultsChanged,
   onNavigateToTop,
   onAlignViewport,
@@ -1112,6 +1072,7 @@ export function createPreviewController({
   };
 
   const applyUiLanguage = (language: UiLanguage): void => {
+    if (language !== uiLanguage) closePreviewBlockFullscreen(frame.contentDocument);
     uiLanguage = language;
     uiStrings = getUiStrings(language);
     loadingLabel.textContent = uiStrings.previewGenerating;
@@ -1566,8 +1527,21 @@ export function createPreviewController({
     const previousSlot = acceptingViewportProjection;
     acceptingViewportProjection = slot;
     try {
-      if (runViewportTransaction) runViewportTransaction(() => mutate(slot), documentChange);
-      else mutate(slot);
+      const handled = runViewportTransaction?.(() => mutate(slot), documentChange);
+      if (!runViewportTransaction || handled === false) {
+        // Cold Preview and standalone controllers have no editor-owned anchor.
+        // Retain an actual painted glyph while window gaps/resources settle;
+        // estimates above the reading window cannot own its physical position.
+        const document = getFrameDocument();
+        const interaction = viewportInteractionGeneration;
+        const restore = document && !host.hidden && activePreviewScrollbarPointers.size === 0
+          ? capturePreviewReadingAnchor(document, top => restoreVisualReadingScrollTop(document, top),
+            documentChange ? 0 : 1 / 3, slot.mapSourceLine)
+          : null;
+        mutate(slot);
+        if (!disposed && !host.hidden && document === getFrameDocument()
+          && interaction === viewportInteractionGeneration && activePreviewScrollbarPointers.size === 0) restore?.();
+      }
       const restore = slot.restore;
       if (restore?.isCurrent()) {
         restoreTopLine(
@@ -2196,7 +2170,7 @@ export function createPreviewController({
         if (current) void current.ensure({ anchor, align: 'start', isCurrent: () => !disposed && !host.hidden
           && previewViewport === current && intent === viewportInteractionGeneration }).catch(handleWindowError);
       });
-      bindPreviewWheelFallback(frameDocument, signal);
+      bindPreviewWheelFallback(frameDocument, signal, onFontSizeWheel);
       bindPreviewShortcuts(frame, onShortcut, signal);
       const keepPosition = () => {
         if (
@@ -2303,6 +2277,7 @@ export function createPreviewController({
       else commit(null);
       return;
     }
+    closePreviewBlockFullscreen(frame.contentDocument);
     disposePreviewMathViewports();
     previewScrollRange?.dispose();
     previewScrollRange = null;
@@ -2325,6 +2300,13 @@ export function createPreviewController({
     frame.srcdoc = header + payload.html + footer;
   };
 
+  const restoreVisualReadingScrollTop = (document: Document, top: number): void => {
+    retainedViewportProjection = null;
+    if (previewViewport) {
+      if (previewViewport.restoreReadingScrollTop(top)) { sourceMapDirty = true; localGeometryViewport = null; }
+    } else if (restoreFullPreviewReadingScrollTop(document, top)) sourceMapDirty = true;
+  };
+
   const applyAppearanceToFrame = (preserveReadingPosition = false) => {
     if (disposed) return;
     cancelElementReveal();
@@ -2339,20 +2321,22 @@ export function createPreviewController({
     const preservedScrollTop = pendingPresentationScroll?.document === frameDocument
       ? pendingPresentationScroll.scrollTop
       : scrollElement?.scrollTop ?? 0;
-    const readingPosition = preserveReadingPosition ? getTopVisiblePosition() : null;
-    const wasAtDocumentTop = preserveReadingPosition && (scrollElement?.scrollTop ?? preservedScrollTop) <= 0.5;
     const viewportHeight = frame.clientHeight;
+    const readingY = viewportHeight / 3;
+    const readingPosition = preserveReadingPosition ? getTopVisiblePosition(readingY) : null;
+    const wasAtDocumentTop = preserveReadingPosition && (scrollElement?.scrollTop ?? preservedScrollTop) <= 0.5;
+    // This box only distinguishes external scrolling from a layout change.
+    // The shared text witness owns the actual presentation restoration.
     const visualAnchor = preserveReadingPosition && !wasAtDocumentTop
       ? Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]')).find((element) => {
         const rect = element.getBoundingClientRect();
-        return rect.bottom > 40 && rect.top < viewportHeight;
+        return rect.bottom > readingY && rect.top < viewportHeight;
       }) ?? null
       : null;
     const visualRect = visualAnchor?.getBoundingClientRect();
-    const visualProgress = visualRect && visualRect.height >= viewportHeight
-      ? Math.max(0, Math.min(1, (40 - visualRect.top) / visualRect.height)) : null;
-    const visualY = visualRect && visualProgress !== null
-      ? visualRect.top + visualRect.height * visualProgress : visualRect?.top;
+    const restoreVisualAnchor = preserveReadingPosition && !wasAtDocumentTop
+      ? capturePreviewReadingAnchor(frameDocument, top => restoreVisualReadingScrollTop(frameDocument, top), 1 / 3)
+      : null;
     const interactionGeneration = viewportInteractionGeneration;
     const presentationGeneration = mermaidPresentationGeneration + 1;
     const renderedText = frameRenderedText;
@@ -2374,8 +2358,8 @@ export function createPreviewController({
       if (isCurrent() && !retentionCancelled && retentionGeneration === appearanceRetentionGeneration
         && interactionGeneration === viewportInteractionGeneration && scrollElement) {
         const scrollDelta = scrollElement.scrollTop - retainedScrollTop;
-        const visualDelta = visualAnchor?.isConnected && visualY !== undefined
-          ? visualAnchor.getBoundingClientRect().top - (visualRect?.top ?? visualY) : null;
+        const visualDelta = visualAnchor?.isConnected && visualRect
+          ? visualAnchor.getBoundingClientRect().top - visualRect.top : null;
         if (!fromPresentation && hasRetainedPosition && Math.abs(scrollDelta) > 24 && (
           wasAtDocumentTop || (visualDelta !== null && Math.abs(visualDelta + scrollDelta) < 8)
         )) {
@@ -2394,11 +2378,7 @@ export function createPreviewController({
           recordRetainedPosition();
           return;
         }
-        if (visualAnchor?.isConnected && visualY !== undefined) {
-          const rect = visualAnchor.getBoundingClientRect();
-          const currentY = visualProgress === null ? rect.top : rect.top + rect.height * visualProgress;
-          scrollElement.scrollTop += currentY - visualY;
-          retainedViewportProjection = null;
+        if (restoreVisualAnchor?.() === true) {
           recordRetainedPosition();
           return;
         }
@@ -3571,6 +3551,7 @@ export function createPreviewController({
         previewMathObserver?.disconnect();
         previewMathObserver = null;
         for (const viewport of previewMathViewports.values()) viewport.controller.setActive(false);
+        closePreviewBlockFullscreen(frame.contentDocument);
         appearanceRetentionGeneration += 1;
         appearanceRetention?.release();
         cancelPaintReady();
@@ -3598,15 +3579,11 @@ export function createPreviewController({
     captureVisualReadingAnchor: (viewportRatio = 0) => {
       const document = getFrameDocument();
       if (!document) return null;
-      const fresh = capturePreviewReadingAnchor(document, top => {
-        retainedViewportProjection = null;
-        if (previewViewport) {
-          if (previewViewport.restoreReadingScrollTop(top)) { sourceMapDirty = true; localGeometryViewport = null; }
-        } else if (restoreFullPreviewReadingScrollTop(document, top)) sourceMapDirty = true;
-      }, viewportRatio, acceptingViewportProjection?.mapSourceLine);
+      const fresh = capturePreviewReadingAnchor(document, top => restoreVisualReadingScrollTop(document, top),
+        viewportRatio, acceptingViewportProjection?.mapSourceLine);
       const interaction = viewportInteractionGeneration;
       return () => {
-        if (interaction !== viewportInteractionGeneration) return false;
+        if (document !== getFrameDocument() || interaction !== viewportInteractionGeneration) return false;
         return fresh?.() === true;
       };
     },
@@ -3683,6 +3660,7 @@ export function createPreviewController({
       cancelFrameWrite?.();
       cancelFrameWrite = null;
       cancelElementReveal();
+      closePreviewBlockFullscreen(frame.contentDocument);
       appearanceRetention?.release();
       cancelPaintReady();
       cancelHighlightFrame();
@@ -3880,8 +3858,9 @@ function isPreviewHostShortcut(event: KeyboardEvent): boolean {
   return event.ctrlKey || event.metaKey || event.altKey || /^F(?:[1-9]|1\d|2[0-4])$/.test(event.key);
 }
 
-function bindPreviewWheelFallback(frameDocument: Document, signal: AbortSignal): void {
+function bindPreviewWheelFallback(frameDocument: Document, signal: AbortSignal, onFontSizeWheel?: (event: WheelEvent) => boolean): void {
   frameDocument.addEventListener('wheel', (event) => {
+    if (event.defaultPrevented || onFontSizeWheel?.(event)) return;
     if (event.ctrlKey) {
       return;
     }

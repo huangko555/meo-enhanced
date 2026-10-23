@@ -332,7 +332,8 @@ function createOpenLinkWaiter(options: {
 
 async function activateAndWaitForOpenLink(
   waiter: ReturnType<typeof createOpenLinkWaiter>,
-  action: () => Promise<void>
+  action: () => Promise<void>,
+  context?: string
 ): Promise<PreviewOpenLink> {
   const observedResult = waiter.wait().then(
     (value) => ({ status: 'fulfilled', value } as const),
@@ -347,7 +348,10 @@ async function activateAndWaitForOpenLink(
     throw primaryError;
   }
   const outcome = await observedResult;
-  if (outcome.status === 'rejected') throw outcome.error;
+  if (outcome.status === 'rejected') {
+    if (!context) throw outcome.error;
+    throw new Error(`Preview link activation failed (${context})`, { cause: outcome.error });
+  }
   return outcome.value;
 }
 
@@ -1230,6 +1234,14 @@ async function main(): Promise<void> {
           probe.remove();
           return value;
         })(),
+        selectedShadow: (() => {
+          const probe = document.createElement('span');
+          probe.style.boxShadow = 'inset 0 0 0 1px var(--meo-ui-selection-border)';
+          document.body.append(probe);
+          const value = getComputedStyle(probe).boxShadow;
+          probe.remove();
+          return value;
+        })(),
         exportMenuBackground: exportMenuStyle.backgroundColor,
         panelRadius: Number.parseFloat(panelStyle.borderRadius),
         panelShadow: panelStyle.boxShadow,
@@ -1244,6 +1256,8 @@ async function main(): Promise<void> {
       'Collapsed Preview font trigger must use the shared field surface');
     assert.equal(dropdownThemeContract.triggerBackground, dropdownThemeContract.selectedBackground,
       'Expanded Preview font trigger must use the shared selected surface');
+    assert.equal(dropdownThemeContract.triggerShadow, dropdownThemeContract.selectedShadow,
+      'The open Preview font trigger must use the shared selected border');
     assert.equal(dropdownThemeContract.panelShadow, dropdownThemeContract.floatingShadow,
       'Preview font popup must share the floating surface shadow');
     assert.deepEqual({
@@ -1418,7 +1432,27 @@ async function main(): Promise<void> {
       selection.removeAllRanges();
       selection.addRange(range);
       doc.defaultView!.scrollTo(0, 120);
-      return { frame, selection: selection.toString(), scrollTop: doc.scrollingElement!.scrollTop };
+      const root = doc.querySelector('main.meo-export-doc')!;
+      const bounds = root.getBoundingClientRect(), y = doc.defaultView!.innerHeight / 3;
+      let reading = [Math.max(4, bounds.left + 12), Math.max(4, bounds.left + 48), bounds.left + bounds.width / 2]
+        .map(x => doc.caretRangeFromPoint(x, y))
+        .find(range => range?.startContainer.nodeType === Node.TEXT_NODE && range.getBoundingClientRect().height > 0);
+      if (!reading) {
+        const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let distance = Number.POSITIVE_INFINITY;
+        while (walker.nextNode()) {
+          const node = walker.currentNode;
+          if (!node.textContent?.trim() || node.parentElement?.closest('script,style,svg')) continue;
+          const range = doc.createRange(); range.setStart(node, 0); range.collapse(true);
+          const rect = range.getBoundingClientRect();
+          if (rect.height > 0 && rect.top >= 0 && rect.bottom <= doc.defaultView!.innerHeight && Math.abs(rect.top - y) < distance) {
+            distance = Math.abs(rect.top - y); reading = range;
+          }
+        }
+      }
+      if (!reading) throw new Error('Font interaction needs painted reading text');
+      return { frame, selection: selection.toString(), scrollTop: doc.scrollingElement!.scrollTop,
+        reading: { node: reading.startContainer, offset: reading.startOffset, top: reading.getBoundingClientRect().top } };
     });
     await page.select('.preview-font-family-select', 'SimSun');
     const enumeratedFontOptions = await page.evaluate(() => ({
@@ -1453,15 +1487,21 @@ async function main(): Promise<void> {
         expectedSelection: before.selection,
         scrollTop: doc.scrollingElement!.scrollTop,
         expectedScrollTop: before.scrollTop,
+        readingDrift: (() => {
+          if (!before.reading.node.isConnected) throw new Error('Font preference replaced unchanged reading text');
+          const range = doc.createRange(); range.setStart(before.reading.node, before.reading.offset); range.collapse(true);
+          return range.getBoundingClientRect().top - before.reading.top;
+        })(),
         maxScrollTop: Math.max(0, doc.scrollingElement!.scrollHeight - doc.scrollingElement!.clientHeight)
       };
     }, fontInteractionState);
     await fontInteractionState.dispose();
-    assert.deepEqual(preservedFontInteraction, {
+    assert.ok(Math.abs(preservedFontInteraction.readingDrift) <= 2, 'Font preference preserves the same painted reading character');
+    const { readingDrift, scrollTop: _physicalTop, ...fontPresentation } = preservedFontInteraction;
+    assert.deepEqual(fontPresentation, {
       sameFrame: true,
       selection: preservedFontInteraction.expectedSelection,
       expectedSelection: preservedFontInteraction.expectedSelection,
-      scrollTop: Math.min(preservedFontInteraction.expectedScrollTop, preservedFontInteraction.maxScrollTop),
       expectedScrollTop: preservedFontInteraction.expectedScrollTop,
       maxScrollTop: preservedFontInteraction.maxScrollTop
     });
@@ -1690,7 +1730,8 @@ async function main(): Promise<void> {
       }, { probe: zoom === 0.8 ? 0.81 : 1.24, target: zoom });
       const enterActivation = await activateAndWaitForOpenLink(
         openLinkWaiter,
-        () => page.keyboard.press('Enter')
+        () => page.keyboard.press('Enter'),
+        `linked image Enter: width=${width}, zoom=${zoom}, dpr=${deviceScaleFactor}`
       );
       assert.deepEqual(enterActivation, {
         type: 'openLink', href: 'https://example.com/linked-image', source: 'preview'
@@ -1701,7 +1742,8 @@ async function main(): Promise<void> {
       assert.ok(linkedImageHandle, 'Linked Markdown image must remain reachable in the Preview iframe');
       const clickActivation = await activateAndWaitForOpenLink(
         openLinkWaiter,
-        () => linkedImageHandle.click()
+        () => linkedImageHandle.click(),
+        `linked image pointer: width=${width}, zoom=${zoom}, dpr=${deviceScaleFactor}`
       );
       assert.deepEqual(clickActivation, {
         type: 'openLink', href: 'https://example.com/linked-image', source: 'preview'
@@ -2000,7 +2042,7 @@ async function main(): Promise<void> {
           },
           math: {
             roots: mathRoots.map(inspectMathRoot),
-            controls: doc.querySelectorAll('.meo-latex-math-zoom-controls, [aria-label*="fullscreen" i]').length,
+            controls: doc.querySelectorAll('.meo-export-math .meo-latex-math-zoom-controls, .meo-export-math [aria-label*="fullscreen" i]').length,
             inline: {
               short: inspectInline(shortInline, shortBefore, shortAfter),
               long: inspectInline(longInline, longBefore, longAfter),
@@ -2285,7 +2327,8 @@ async function main(): Promise<void> {
       assert.equal(result.math.brokenFallbackVisible, true);
       const safeMathActivation = await activateAndWaitForOpenLink(
         openLinkWaiter,
-        () => page.keyboard.press('Enter')
+        () => page.keyboard.press('Enter'),
+        `inline formula link Enter: width=${width}, zoom=${zoom}, dpr=${deviceScaleFactor}`
       );
       assert.deepEqual(safeMathActivation, {
         type: 'openLink', href: 'https://example.com/safe', source: 'preview'

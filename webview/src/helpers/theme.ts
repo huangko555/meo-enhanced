@@ -191,7 +191,7 @@ export const applyBuiltInVisualBaseline = (appearance: Exclude<EditorAppearance,
     rootStyle.setProperty(`--meo-heading-${index + 1}-weight`, weight);
   }
   rootStyle.setProperty('--meo-heading-token-weight', defaultHeadingFontWeight);
-  rootStyle.setProperty('--meo-line-height-live', `${liveLineHeight}`);
-  rootStyle.setProperty('--meo-line-height-source', `${sourceLineHeight}`);
+  rootStyle.setProperty('--meo-line-height-live', `var(--meo-user-editor-line-height, ${liveLineHeight})`);
+  rootStyle.setProperty('--meo-line-height-source', `var(--meo-user-editor-line-height, ${sourceLineHeight})`);
   applyUiVisualBaseline(appearance, colors);
 };

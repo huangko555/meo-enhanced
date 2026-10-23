@@ -23,12 +23,13 @@ import {
   createMermaidToolbarWidget,
   getMermaidBlockMode,
   getMermaidBlockViewport,
-  MermaidEditingWidget
+  MermaidSourcePreviewWidget,
+  MermaidSideSpaceWidget
 } from './mermaidEditing';
 import { getCodeBlockSourceLines, getLiveBlockIndent, liveBlockIndentKey, parseBlockLinePrefix, type LiveBlockIndentValue } from './blockIndent';
 import { getViewportController } from './viewportController';
 import { getMermaidDiagramPresentationFactory } from '../editor/mermaidDiagramPresentation';
-import { currentSyntaxTree, getFencedCodeInfo, syntaxTreeChanged } from './markdownSyntax';
+import { currentSyntaxTree, getFencedCodeBodyRange, getFencedCodeInfo, syntaxTreeChanged } from './markdownSyntax';
 import {
   createRenderedBlockPreviewShell,
   RenderedBlockPreviewHeight,
@@ -606,14 +607,10 @@ export function isFenceMarker(state: EditorState, from: number, to: number): boo
 }
 
 export function addCodeBlockLineNumbers(builder: any[], state: EditorState, node: any): void {
-  const startLine = state.doc.lineAt(node.from);
-  const endLine = state.doc.lineAt(Math.max(node.to - 1, node.from));
-  const firstContentLine = node.name === 'FencedCode' ? startLine.number + 1 : startLine.number;
-  const lastChild = node.node.lastChild;
-  const hasClosingFence = node.name === 'FencedCode'
-    && lastChild?.name === 'CodeMark'
-    && state.doc.lineAt(lastChild.from).number === endLine.number;
-  const lastContentLine = endLine.number - (hasClosingFence ? 1 : 0);
+  const body = node.name === 'FencedCode' ? getFencedCodeBodyRange(state, node.node) : { from: node.from, to: node.to };
+  if (!body) return;
+  const firstContentLine = state.doc.lineAt(body.from).number;
+  const lastContentLine = state.doc.lineAt(node.name === 'FencedCode' ? body.to : Math.max(body.from, body.to - 1)).number;
   const lineCount = Math.max(0, lastContentLine - firstContentLine + 1);
   const numberWidth = Math.max(2, String(lineCount).length);
 
@@ -714,7 +711,8 @@ class CodeLanguageLabelWidget extends WidgetType {
   }
 }
 
-function addTopLineWidget(builder: any[], position: number, widget: WidgetType, side = 1): void {
+// Header chrome belongs to the preceding fence when Enter inserts a line break.
+function addTopLineWidget(builder: any[], position: number, widget: WidgetType, side = -1): void {
   builder.push(
     Decoration.widget({
       widget,
@@ -746,7 +744,7 @@ export function addTopLinePillLabel(
   builder: any[],
   position: number,
   labelText: string | null,
-  side = 1
+  side = -1
 ): void {
   if (!labelText) {
     return;
@@ -835,7 +833,8 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
       startLine,
       'preview',
       diagramText,
-      blockTo
+      blockTo,
+      uiLanguage
     );
   }
 
@@ -902,68 +901,28 @@ type MermaidPreviewShellElement = HTMLElement & {
 export function addMermaidDiagram(
   builder: any[],
   state: EditorState,
-  node: any,
-  activeLines: ReadonlySet<number>
+  node: any
 ): boolean {
+  const body = getFencedCodeBodyRange(state, node.node);
+  if (!body) return false;
   const startLine = state.doc.lineAt(node.from);
   const endLine = state.doc.lineAt(Math.max(node.to - 1, node.from));
+  // Keep the existing native source presentation for a lone unfinished row.
+  if (endLine.number <= startLine.number + 1) return false;
   const diagramText = getFencedCodeContent(state, node);
   const fullBlockText = state.doc.sliceString(startLine.from, endLine.to);
 
-  return addMermaidDiagramBlock(builder, state, {
-    startLine: startLine.number,
-    endLine: endLine.number,
-    diagramText,
-    fullBlockText,
-    indentColumns: getLiveBlockIndent(state, node.from, node.node),
-    activeLines
-  });
-}
-
-function addMermaidDiagramBlock(
-  builder: any[],
-  state: EditorState,
-  block: {
-    startLine: number;
-    endLine: number;
-    diagramText: string;
-    fullBlockText: string;
-    indentColumns?: LiveBlockIndentValue;
-    activeLines: ReadonlySet<number>;
-  }
-): boolean {
-  const startLine = state.doc.line(block.startLine);
-  const endLine = state.doc.line(block.endLine);
-
-  if (endLine.number <= startLine.number + 1) {
-    return false;
-  }
-
-  const contentStartLine = state.doc.line(startLine.number + 1);
-  const contentEndLine = state.doc.line(endLine.number - 1);
-
-  if (contentStartLine.from > contentEndLine.to) {
-    return false;
-  }
+  const contentStartLine = state.doc.lineAt(body.from);
 
   const anchor = startLine.from;
-  const indentColumns = block.indentColumns ?? 0;
-  const rawFirstLine = state.doc.sliceString(contentStartLine.from, contentStartLine.to);
-  const diagramFirstLine = block.diagramText.split('\n')[0] ?? '';
-  const sourceLinePrefix = diagramFirstLine && rawFirstLine.endsWith(diagramFirstLine)
-    ? rawFirstLine.slice(0, rawFirstLine.length - diagramFirstLine.length)
-    : parseBlockLinePrefix(startLine.text, state.tabSize).prefix;
+  const indentColumns = getLiveBlockIndent(state, node.from, node.node);
   const mode = getMermaidBlockMode(
     state,
     anchor,
-    contentStartLine.from,
-    contentEndLine.to
+    endLine.to
   );
   const decision = mode.decision;
-  if (!block.diagramText.trim() && decision.effectiveMode === 'preview') return false;
-  if (decision.effectiveMode !== 'preview' && !block.activeLines.has(startLine.number)) {
-    addTopLinePillLabel(builder, startLine.from, 'mermaid', -1);
-  }
+  if (!diagramText.trim() && decision.effectiveMode === 'preview') return false;
   if (decision.effectiveMode !== 'preview') {
     addMermaidToolbar(
       builder,
@@ -971,46 +930,41 @@ function addMermaidDiagramBlock(
       anchor,
       startLine.number,
       decision.effectiveMode,
-      block.diagramText,
-      endLine.to
+      diagramText,
+      endLine.to,
+      state.facet(uiLanguageFacet)
     );
   }
 
-  const widget = decision.effectiveMode === 'preview'
-    ? new MermaidPreviewWidget(
-        block.diagramText,
-        block.fullBlockText,
-        anchor,
-        endLine.to,
-        startLine.number,
-        endLine.number,
-        indentColumns,
-        getMermaidDiagramPresentationFactory(state),
-        state.facet(uiLanguageFacet),
-        getMermaidBlockViewport(state, anchor)
-      )
-    : new MermaidEditingWidget({
-      anchor,
-      contentFrom: contentStartLine.from,
-      contentTo: contentEndLine.to,
-      diagramText: block.diagramText,
-      sourceLinePrefix,
-      viewportState: getMermaidBlockViewport(state, anchor),
-      startLine: startLine.number,
-      endLine: endLine.number,
-      indentColumns
-    }, decision.effectiveMode, mode.searchReveal);
+  if (decision.effectiveMode === 'edit') {
+    if (mode.layout === 'stacked') {
+      builder.push(Decoration.line({ class: 'meo-mermaid-source-join' }).range(endLine.from));
+      builder.push(Decoration.widget({
+        widget: new MermaidSourcePreviewWidget(anchor, diagramText, startLine.number, endLine.number, indentColumns, state.facet(uiLanguageFacet), getMermaidBlockViewport(state, anchor)),
+        block: true, side: 1
+      }).range(endLine.to));
+    } else {
+      builder.push(Decoration.line({ class: 'meo-mermaid-inline-source' }).range(startLine.from));
+      for (let number = contentStartLine.number; number <= endLine.number; number++) {
+        builder.push(Decoration.line({ class: 'meo-mermaid-inline-source' }).range(state.doc.line(number).from));
+      }
+      if (mode.sideSpace > 0) builder.push(Decoration.line({ class: 'meo-mermaid-source-join' }).range(endLine.from));
+      builder.push(Decoration.widget({ widget: new MermaidSideSpaceWidget(mode.sideSpace, indentColumns),
+        block: true, side: 1 }).range(endLine.to));
+    }
+    return false;
+  }
+  const widget = new MermaidPreviewWidget(diagramText, fullBlockText, anchor, endLine.to,
+    startLine.number, endLine.number, indentColumns, getMermaidDiagramPresentationFactory(state),
+    state.facet(uiLanguageFacet), getMermaidBlockViewport(state, anchor));
   builder.push(
     Decoration.replace({
       widget,
       block: true,
-      // A block replacement must own both boundaries, including in preview,
-      // or CodeMirror leaves a phantom text line after the widget. Source/split
-      // projections also need boundary insertions owned until updateDOM runs.
+      // Own both boundaries so the reading widget does not leave a phantom row.
       inclusive: true
     }).range(
-      decision.effectiveMode === 'preview' ? startLine.from : contentStartLine.from,
-      decision.effectiveMode === 'preview' ? endLine.to : contentEndLine.to
+      startLine.from, endLine.to
     )
   );
   if (decision.effectiveMode === 'preview') {

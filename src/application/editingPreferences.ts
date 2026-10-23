@@ -38,7 +38,7 @@ export function defaultShortcuts(platform: ShortcutPlatform): Record<EditorComma
     save: [`${primary} + S`], saveAs: [`${primary} + Shift + S`], undo: [`${primary} + Z`], redo: platform === 'mac' ? ['Cmd + Shift + Z'] : ['Ctrl + Y', 'Ctrl + Shift + Z'],
     find: [`${primary} + F`], replace: platform === 'mac' ? ['Cmd + Alt + F'] : ['Ctrl + H'],
     all: [`${primary} + A`], copy: [`${primary} + C`], cut: [`${primary} + X`], paste: [`${primary} + V`],
-    lineComment: [`${primary} + /`], selectionComment: ['Alt + Shift + A'],
+    lineComment: [`${primary} + /`], selectionComment: ['Alt + Shift + A'], formatHtml: ['Alt + Shift + F'],
     bold: [`${primary} + B`], italic: [`${primary} + I`], mode: ['Alt + Shift + M'],
     moveUp: ['Alt + ArrowUp'], moveDown: ['Alt + ArrowDown'], copyUp: ['Alt + Shift + ArrowUp'], copyDown: ['Alt + Shift + ArrowDown'],
     deleteLine: platform === 'mac' ? ['Cmd + Shift + K'] : ['Ctrl + Shift + K'],
@@ -94,10 +94,12 @@ export function effectiveShortcuts(overrides: ShortcutOverrides, platform: Short
     const keys = overrides[command];
     if (keys && canBindCommand(command) && keys.every(key => normalizeShortcut(key))) defaults[command] = keys.map(key => normalizeShortcut(key)!);
   }
-  // Adding Save As must not steal a chord already assigned in older preferences.
-  if (!Object.hasOwn(overrides, 'saveAs') && editorCommandIds.some(command => command !== 'saveAs'
-    && canBindCommand(command) && Object.hasOwn(overrides, command)
-    && defaults[command].some(key => defaults.saveAs.includes(key)))) defaults.saveAs = [];
+  // Newly introduced defaults must not steal older custom bindings.
+  for (const added of ['saveAs', 'formatHtml'] as const) {
+    if (!Object.hasOwn(overrides, added) && editorCommandIds.some(command => command !== added
+      && canBindCommand(command) && Object.hasOwn(overrides, command)
+      && defaults[command].some(key => defaults[added].includes(key)))) defaults[added] = [];
+  }
   return defaults;
 }
 

@@ -45,6 +45,9 @@ export async function writeDocxExport(options: WriteDocxExportOptions): Promise<
     (element.name === 'img' && !/^data:image\/(?:png|jpe?g|gif|bmp);base64,/i.test(element.attribs.src ?? ''))
     || classNames(element).includes('meo-export-mermaid')
     || classNames(element).includes('meo-export-math-display')
+    || Object.hasOwn(element.attribs, 'hidden')
+    || element.name === 'details' && !Object.hasOwn(element.attribs, 'open')
+    || /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:|opacity\s*:\s*0(?:\D|$)|font-size\s*:\s*0(?:\D|$)|color\s*:\s*(?:transparent|#[\da-f]{3}0\b|#[\da-f]{6}00\b|rgba\(|hsla\())/i.test(element.attribs.style ?? '')
   ), stagedRoot.children, true) !== null;
   const documentHtml = needsMaterialization
     ? replaceExportRoot(
@@ -63,6 +66,7 @@ export async function writeDocxExport(options: WriteDocxExportOptions): Promise<
   if (!root) throw new Error('Word export could not prepare the rendered document body.');
 
   removeExecutableContent(document.children);
+  normalizeHtmlFragments(root);
   normalizeCodeBlocks(root);
   normalizeFrontmatter(root);
   normalizeTables(root);
@@ -112,6 +116,40 @@ function replaceExportRoot(originalHtml: string, replacementRootHtml: string): s
   }
   DomUtils.replaceElement(originalRoot, replacementRoot);
   return DomUtils.getOuterHTML(document);
+}
+
+function normalizeHtmlFragments(root: Element): void {
+  const inlineAliases = new Set(['abbr', 'kbd', 'small', 'q', 'ruby', 'rt', 'rp']);
+  const visit = (element: Element, preserveWhitespace = false): void => {
+    if (classNames(element).includes('meo-export-code-block')) return;
+    const whitespace = /(?:^|;)\s*white-space\s*:\s*([\w-]+)/i.exec(element.attribs.style ?? '')?.[1]?.toLowerCase();
+    const preserve = whitespace ? /^(?:pre|pre-wrap|pre-line|break-spaces)$/.test(whitespace)
+      : element.name === 'pre' || preserveWhitespace;
+    for (const child of [...element.children]) {
+      if (isElement(child)) visit(child, preserve);
+      else if (child.type === 'text' && preserve && child.data.includes('\n')) {
+        const parts = child.data.split(/\r?\n/);
+        child.data = parts[0];
+        let previous: ChildNode = child;
+        for (const part of parts.slice(1)) {
+          const br = new Element('br', {}), text = new Text(part);
+          DomUtils.append(previous, br); DomUtils.append(br, text); previous = text;
+        }
+      }
+    }
+    // Normalize HTML structure for the converter; leave Word styling to its existing HTML/CSS path.
+    if (element.name === 'q') {
+      DomUtils.prependChild(element, new Text('“')); DomUtils.appendChild(element, new Text('”'));
+    }
+    if (inlineAliases.has(element.name)) element.name = 'span';
+    else if (element.name === 'figure') element.name = 'div';
+    else if (element.name === 'figcaption') element.name = 'p';
+    if (element.name === 'div' && preserve && !element.children.some(child => isElement(child)
+      && /^(?:div|p|pre|table|ul|ol|blockquote|h[1-6]|section|article|dl|details)$/.test(child.name))) {
+      element.name = 'p';
+    }
+  };
+  visit(root);
 }
 
 function normalizeCodeBlocks(root: Element): void {

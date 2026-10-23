@@ -83,6 +83,7 @@ function targetedCommands(
     case 'history':
       return [
         script('scripts/test-preview-shortcuts-production.ts'),
+        script('scripts/test-math-completion-production.ts'),
         script('scripts/test-input-assistance-production.ts'),
         script('scripts/test-html-comment-input-production.ts'),
         script('scripts/test-editing-features-production.ts'),
@@ -130,6 +131,9 @@ function targetedCommands(
         script('scripts/test-history-rendered-block-interaction.ts'),
         script('scripts/test-mermaid-diagram-presentation-runtime.ts'),
         script('scripts/test-mermaid-editing.ts'),
+        script('scripts/test-preview-rendered-actions.ts'),
+        script('scripts/test-live-rendered-image-copy.ts'),
+        script('scripts/test-rendered-block-action-state.ts'),
         script('scripts/test-live-embedded-input-viewport.ts'),
         script('scripts/test-virtual-block-scroll-stability.ts')
       ];
@@ -156,6 +160,7 @@ function targetedCommands(
         script('scripts/test-preview-comment-toggle-browser.ts'),
         script('scripts/test-inline-code-layout-production.ts'),
         script('scripts/test-settings-window-production.ts'),
+        script('scripts/test-editor-font-wheel.ts'),
         script('scripts/test-preview-preset-management-browser.ts'),
         script('scripts/test-toolbar-menus-browser.ts'),
         script('scripts/test-tooltips-production.ts'),
@@ -165,6 +170,7 @@ function targetedCommands(
         script('scripts/test-appearance-webview-adapter.ts'),
         script('scripts/test-appearance-settings.ts'),
         script('scripts/test-vscode-theme-transition.ts'),
+        script('scripts/test-math-syntax-production.ts'),
         script('scripts/test-highlight.ts'),
         script('scripts/test-preview-code-highlight-layout.ts')
       ];
@@ -299,6 +305,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-shiki-empty-line-recovery.ts'),
           script('scripts/test-source-syntax-stability.ts'),
           script('scripts/test-source-syntax-first-paint.ts'),
+          script('scripts/test-math-syntax-production.ts'),
           script('scripts/test-preview-presets.ts'),
           script('scripts/test-export-links.ts'),
           script('scripts/test-export-links-browser.ts'),
@@ -308,8 +315,13 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-preview-preset-position.ts'),
           script('scripts/test-editor-shortcuts.ts'),
           script('scripts/test-editing-preferences.ts'),
+          script('scripts/test-math-completion.ts'),
+          script('scripts/test-math-completion-production.ts'),
+          script('scripts/test-html-completion-production.ts'),
           script('scripts/test-editor-services.ts'),
           script('scripts/test-link-candidates.ts'),
+          script('scripts/test-document-links.ts'),
+          script('scripts/test-local-links-production.ts'),
           script('scripts/test-input-assistance-production.ts'),
           script('scripts/test-html-comment-input-production.ts'),
           script('scripts/test-inline-code-layout-production.ts'),
@@ -318,6 +330,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-mixed-html-paste-production.ts'),
           script('scripts/test-slash-commands-production.ts'),
           script('scripts/test-settings-window-production.ts'),
+          script('scripts/test-editor-font-wheel.ts'),
           script('scripts/test-ui-colors.ts'),
           script('scripts/test-ui-colors-production.ts'),
           script('scripts/test-outline-colors-production.ts'),

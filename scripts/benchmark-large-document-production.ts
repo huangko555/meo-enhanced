@@ -299,7 +299,7 @@ async function observeStableEditor(page: Page, expectedMode: 'live' | 'source'):
         scrollHeight: scroller?.scrollHeight ?? -1,
         visibleLines: root?.querySelectorAll('.cm-line').length ?? 0,
         tables: root?.querySelectorAll('.meo-md-html-table-shell').length ?? 0,
-        mermaid: root?.querySelectorAll('.meo-mermaid-block, .meo-mermaid-editing-block').length ?? 0,
+        mermaid: root?.querySelectorAll('.meo-mermaid-block').length ?? 0,
         images: root?.querySelectorAll('.meo-md-image, .meo-image-editing-block').length ?? 0,
         math: root?.querySelectorAll('.meo-md-math, .meo-latex-math-editing-block').length ?? 0
       };

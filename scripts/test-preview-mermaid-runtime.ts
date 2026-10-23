@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { assertReadableMermaidTasks } from './mermaid-contrast-helpers';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,6 +27,69 @@ assert.equal(shouldPreloadMermaid('~'.repeat(100_000) + 'mermaid'), true);
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-preview-mermaid-runtime-'));
+
+async function assertGanttPreviewContrast(browser: Awaited<ReturnType<typeof launchTestBrowser>>, runtime: string, entry: string) {
+  // Keep this fresh Preview separate from the lifecycle/KaTeX loading cases.
+  const page = await browser.newPage();
+  try {
+    await page.setContent('<!doctype html><style>html,body{height:100%;margin:0}</style><body></body>');
+    await page.addStyleTag({ path: path.join(repoRoot, 'webview/src/styles.css') });
+    await page.addStyleTag({ content: ':root{--meo-background:#22272e;--meo-foreground:#d8dee9;--meo-code-background:#2e333b}body{background:#22272e;color:#d8dee9}' });
+    await page.addScriptTag({ content: runtime });
+    await page.addScriptTag({ content: entry });
+    const source = 'gantt\n  title 示例项目计划\n  dateFormat YYYY-MM-DD\n  axisFormat %m-%d\n  section 设计\n  调研 :done, a1, 2026-10-01, 3d\n  方案 :done, a2, after a1, 4d\n  section 实施\n  开发 :active, b1, after a2, 8d\n  测试 :b2, after b1, 5d\n  section 交付\n  验收 :milestone, c1, after b2, 0d';
+    const custom = '---\nconfig:\n  themeVariables:\n    doneTaskBkgColor: "#ffdab9"\n    taskTextDarkColor: "#241208"\n---\ngantt\n  dateFormat YYYY-MM-DD\n  section 自定义\n  作者颜色 :done, custom, 2026-10-01, 5d';
+    const text = [source, custom].map(source => '```mermaid\n' + source + '\n```').join('\n\n');
+    const rendered = renderMarkdownToHtml({ markdownText: text, markdownFilePath: 'C:/tmp/gantt-preview.md', target: 'html' });
+    const styles = { light: buildPreviewStyles({ previewFontFamily: '' }, 'light'), dark: buildPreviewStyles({ previewFontFamily: '' }, 'dark') };
+    await page.setViewport({ width: 1000, height: 720 });
+    await page.evaluate(({ text, rendered, styles }) => {
+      const controller = (window as any).__previewController;
+      controller.setAppearance('dark'); controller.setVisible(true);
+      controller.host.style.height = '100vh';
+      controller.requestRender(text, { restoreLine: 1 });
+      const requestId = (window as any).__previewMessages.findLast((message: any) => message.type === 'requestPreviewRender').requestId;
+      controller.acceptRenderResponse({ type: 'previewRenderResult', requestId, result: { ok: true, value: { ...rendered, styles } } });
+    }, { text, rendered, styles });
+    for (const appearance of ['dark', 'light', 'dark'] as const) {
+      await page.evaluate(appearance => (window as any).__previewController.setAppearance(appearance), appearance);
+      await page.waitForFunction(appearance => {
+        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+        const blocks = Array.from(doc?.querySelectorAll<HTMLElement>('.meo-export-mermaid') ?? []);
+        return blocks.length === 2 && blocks.every(block => block.querySelector('svg rect.task') && block.dataset.meoPreviewMermaidAppearance === appearance);
+      }, {}, appearance);
+      const result = await page.evaluate(() => {
+        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!, win = doc.defaultView!;
+        const blocks = doc.querySelectorAll('.meo-export-mermaid');
+        return { tasks: Array.from(blocks[0]!.querySelectorAll<SVGElement>('rect.task')).map(bar => {
+          const label = blocks[0]!.querySelector<SVGElement>(`[id="${bar.id}-text"]`)!;
+          return { background: win.getComputedStyle(bar).fill, foreground: win.getComputedStyle(label).fill,
+            outside: /taskTextOutside/.test(label.getAttribute('class') ?? '') };
+        }), customBackground: win.getComputedStyle(blocks[1]!.querySelector('.done0')!).fill,
+          customForeground: win.getComputedStyle(blocks[1]!.querySelector('.doneText0')!).fill };
+      });
+      assertReadableMermaidTasks(result.tasks, `Actual Preview Gantt/${appearance}`);
+      assert.ok(new Set(result.tasks.filter(task => !task.outside).map(task => task.background)).size >= 3,
+        'Completed, active and upcoming tasks keep distinct backgrounds');
+      const palette = getMermaidPalette(appearance === 'dark');
+      const rgb = (hex: string) => `rgb(${[1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16)).join(', ')})`;
+      assert.deepEqual(result.tasks.slice(0, 4).map(task => task.background),
+        [palette.doneTaskBackground, palette.doneTaskBackground, palette.activeTaskBackground, palette.taskBackground].map(rgb),
+        'Actual Preview uses the shared low-saturation Gantt state colors');
+      assert.equal(result.customBackground, 'rgb(255, 218, 185)');
+      assert.equal(result.customForeground, 'rgb(36, 18, 8)');
+      fs.mkdirSync(path.join(repoRoot, '.local/mermaid-preview-contrast'), { recursive: true });
+      const clip = await page.evaluate(() => {
+        const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!, frameRect = frame.getBoundingClientRect();
+        const block = frame.contentDocument!.querySelector('.meo-export-mermaid')!.getBoundingClientRect();
+        return { x: frameRect.left + block.left, y: frameRect.top + block.top, width: block.width, height: block.height };
+      });
+      await page.screenshot({ path: path.join(repoRoot, `.local/mermaid-preview-contrast/${appearance}.png`), clip });
+    }
+    await page.evaluate(() => (window as any).__previewController.dispose());
+    console.log('Actual Preview Gantt contrast, appearance roundtrip and author overrides passed');
+  } finally { await page.close(); }
+}
 
 let releaseFirstPreview!: () => void;
 const firstPreviewGate = new Promise<void>((resolve) => { releaseFirstPreview = resolve; });
@@ -131,7 +195,7 @@ ordinaryInteractionRenderer.dispose();
 
 const browser = await launchTestBrowser();
 
-try {
+async function assertPreviewRuntime() {
   const extensionSource = fs.readFileSync(path.join(repoRoot, 'src', 'extension.ts'), 'utf8');
   if (!extensionSource.includes('data-meo-mermaid-src="${mermaidRuntimeUri}"')
     || !extensionSource.includes('data-meo-script-nonce="${nonce}"')
@@ -189,6 +253,10 @@ try {
   const gestureBatch = await page.evaluate(() => (window as any).__probePreviewGestureBatch());
   assert.deepEqual(gestureBatch, { between: { started: 1, painted: 0 }, beforeCommit: { painted: 0, notices: 0 },
     after: { painted: 2, notices: 1 } }, 'an in-flight batch must yield between diagrams and before SVG projection, then resume exactly once');
+  if (process.argv.includes('--gantt-only')) {
+    await assertGanttPreviewContrast(browser, runtime, entry);
+    return;
+  }
   const invalidMermaidLeaked = await page.evaluate(() => (
     (window as typeof window & { __probeInvalidMermaidCleanup?: () => Promise<boolean> })
       .__probeInvalidMermaidCleanup?.()
@@ -887,7 +955,12 @@ try {
   if (Math.abs(disposedViewport.afterCompletion - disposedViewport.afterDispose) > 2) {
     throw new Error(`Disposed Preview Mermaid completion changed the viewport: ${JSON.stringify(disposedViewport)}`);
   }
+  await assertGanttPreviewContrast(browser, runtime, entry);
   console.log('Preview Mermaid runtime test passed');
+}
+
+try {
+  await assertPreviewRuntime();
 } finally {
   await browser.close();
   fs.rmSync(tempDir, { recursive: true, force: true });

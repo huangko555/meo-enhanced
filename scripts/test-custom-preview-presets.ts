@@ -182,7 +182,8 @@ const marginExport = await exportRuntime.renderExportHtmlDocument({
   mermaidRuntimeSrc: '', baseHref: '', title: 'Page margins', shikiLanguageAssetsRoot: ''
 });
 assert.ok(marginExport.htmlDocument.includes(marginCss), 'Imported page margins reach the PDF renderer without losing zero values or variables');
-assert.ok(marginExport.htmlDocument.indexOf('@page { size: A4; margin: 20mm; }') < marginExport.htmlDocument.indexOf(marginCss), 'User page margins follow the defaults in the CSS cascade');
+const defaultPageRule = marginExport.htmlDocument.indexOf('@page { size: A4; margin: 20mm;');
+assert.ok(defaultPageRule >= 0 && defaultPageRule < marginExport.htmlDocument.indexOf(marginCss), 'User page margins follow the defaults in the CSS cascade');
 await library.remove(marginPreset.id);
 
 const before = saved.get('paper-notes');

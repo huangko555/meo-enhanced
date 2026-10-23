@@ -1,4 +1,5 @@
 import { documentLines } from './documentLines';
+import { language, type Language } from '@codemirror/language';
 import { EditorState, type ChangeDesc } from '@codemirror/state';
 import { IterMode, type SyntaxNodeRef, type Tree } from '@lezer/common';
 import { isThematicBreakLine } from './frontmatter';
@@ -36,7 +37,12 @@ const renderedBlockCache = new WeakMap<EditorState, { tree: any; blocks: LiveRen
 type DiscoveredBlock = DiscoveredMarkdownBlock;
 // Discovery depends on text and the resolved parse. Selection and HTML editing
 // only filter that discovery; they must not invalidate its whole-document scans.
-const discoveredBlockCache = new WeakMap<EditorState['doc'], { tree: Tree; tabSize: number; blocks: DiscoveredBlock[] }>();
+const discoveredBlockCache = new WeakMap<EditorState['doc'], {
+  tree: Tree; tabSize: number; blocks: DiscoveredBlock[];
+  // A proven source projection remains valid while the parser publishes its
+  // next tree. This certifies block membership, never parser completeness.
+  projected?: { language: Language | null };
+}>();
 
 export function prepareLiveBlockContext(state: EditorState, tree: Tree): DiscoveredMarkdownBlock[] {
   return withMarkdownSyntaxSnapshot(state, tree, () => discoverRenderedBlocks(state, tree));
@@ -57,8 +63,10 @@ export function projectUnchangedLiveRenderedBlocks(
   newTree: Tree
 ): void {
   const previous = discoveredBlockCache.get(before.doc);
-  if (!previous || markdownStructureIdentity(previous.tree) !== markdownStructureIdentity(oldTree) || oldTree.length !== before.doc.length
-    || newTree.length !== state.doc.length || before.tabSize !== state.tabSize) return;
+  const sourceLanguage = state.facet(language);
+  if (!previous || before.facet(language) !== sourceLanguage || before.tabSize !== state.tabSize
+    || previous.tabSize !== state.tabSize || !(previous.projected?.language === sourceLanguage
+      || markdownStructureIdentity(previous.tree) === markdownStructureIdentity(oldTree) && oldTree.length === before.doc.length)) return;
   let unchangedLines = true;
   changes.iterChangedRanges((from, to, nextFrom, nextTo) => {
     if (before.doc.lineAt(from).number !== before.doc.lineAt(to).number
@@ -89,7 +97,7 @@ export function projectUnchangedLiveRenderedBlocks(
     }
     return { block: mapped, htmlFrom: htmlFrom === undefined ? undefined : changes.mapPos(htmlFrom, 1) };
   });
-  discoveredBlockCache.set(state.doc, { tree: newTree, tabSize: state.tabSize, blocks });
+  discoveredBlockCache.set(state.doc, { tree: newTree, tabSize: state.tabSize, blocks, projected: { language: sourceLanguage } });
 }
 const collapsedBlockCache = new WeakMap<EditorState, {
   lineFlags: readonly LineFlagLike[];
@@ -229,7 +237,9 @@ export function getLiveRenderedBlocks(
   }
 
   let discovered = discoveredBlockCache.get(state.doc);
-  if (!discovered || markdownStructureIdentity(discovered.tree) !== markdownStructureIdentity(tree) || discovered.tabSize !== state.tabSize) {
+  if (!discovered || discovered.tabSize !== state.tabSize
+    || (discovered.projected ? discovered.projected.language !== state.facet(language)
+      : markdownStructureIdentity(discovered.tree) !== markdownStructureIdentity(tree))) {
     discovered = { tree, tabSize: state.tabSize, blocks: prepareLiveBlockContext(state, tree) };
     discoveredBlockCache.set(state.doc, discovered);
   }
@@ -311,6 +321,7 @@ function discoverRenderedBlocks(state: EditorState, tree: Tree): DiscoveredBlock
   }
 
   for (const htmlBlock of collectRenderableHtmlBlocks(state, tree)) {
+    if (!htmlBlock.visible) continue;
     const block = createRenderedBlock('html', htmlBlock.startLine, htmlBlock.endLine, null);
     if (!block) continue;
     block.lineNumberHiddenFrom = htmlBlock.startLine + 1;

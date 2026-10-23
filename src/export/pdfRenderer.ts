@@ -105,6 +105,33 @@ export async function renderPdfFromHtmlExport(options: RenderPdfExportOptions): 
 
 export async function materializeDocxBodyFromHtmlExport(options: HeadlessExportOptions): Promise<string> {
   return withPreparedExportPage(options, async (page) => {
+    await page.evaluate(() => {
+      const root = document.querySelector('.meo-export-doc')!;
+      const transparent = (color: string) => color === 'transparent'
+        || /^rgba\([^)]*,\s*0(?:\.0+)?\s*\)$/.test(color) || /\/\s*0(?:\.0+)?\s*\)$/.test(color);
+      const entries = Array.from(root.querySelectorAll<HTMLElement>('*')).map(element => {
+        const style = getComputedStyle(element);
+        return { element, excluded: element.hidden || style.display === 'none' || Number(style.opacity) === 0,
+          visible: style.visibility !== 'hidden' && style.visibility !== 'collapse',
+          textVisible: parseFloat(style.fontSize) > 0 && !transparent(style.color),
+          backgroundVisible: !transparent(style.backgroundColor) };
+      });
+      for (const { element, excluded, visible, textVisible, backgroundVisible } of entries) {
+        if (!root.contains(element)) continue;
+        if (excluded || !visible && element.matches('img,svg,hr,br')) { element.remove(); continue; }
+        if (element instanceof HTMLDetailsElement && !element.open) {
+          for (const child of Array.from(element.childNodes)) {
+            if (!(child instanceof HTMLElement && child.tagName === 'SUMMARY')) child.remove();
+          }
+        }
+        if (!visible || !textVisible) {
+          for (const child of Array.from(element.childNodes)) if (child.nodeType === Node.TEXT_NODE) child.remove();
+        }
+        if (!backgroundVisible) {
+          element.style.removeProperty('background'); element.style.removeProperty('background-color');
+        }
+      }
+    });
     const handles = await page.$$('.meo-export-mermaid.is-rendered, .meo-export-math-display, img');
     for (const [index, handle] of handles.entries()) {
       const bounds = await handle.boundingBox();

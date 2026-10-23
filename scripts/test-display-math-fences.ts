@@ -213,7 +213,9 @@ try {
     await page.hover('.meo-md-math-fenced-display');
     await page.click('.meo-md-math-fenced-display .meo-copy-code-btn');
     assert.equal(await page.evaluate(() => (window as any).copiedMath), expected);
-    await page.click('.meo-md-math-fenced-display .meo-select-all-code-btn'); await settle();
+    assert.equal(await page.$('.meo-md-math-fenced-display .meo-select-all-code-btn'), null);
+    await page.click('.meo-md-math-fenced-display .katex'); await settle();
+    await page.click('.meo-math-source-actions .meo-select-all-code-btn'); await settle();
     assert.equal(await page.evaluate(() => { const state = (window as any).mathEditor.view.state;
       return state.doc.sliceString(state.selection.main.from, state.selection.main.to); }), expected);
     assert.equal(await readText(), text, 'Copy/select do not rewrite editable wrappers');

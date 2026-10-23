@@ -323,7 +323,9 @@ try {
   assert.equal(await page.evaluate(() => { const g = window as any; return g.EditingFeaturesHarness.findDocumentFragmentPosition(g.editor.view.state, '#hello-world-2'); }), headingDocument.indexOf('# Hello **world**', 1), 'the chosen canonical anchor navigates to the second heading');
   const setextDocument = 'Setext heading\n============\n\n[Go](#Se';
   await prepare('source', setextDocument, setextDocument.length, setextDocument.length, { pairMode: 'off' });
-  await page.waitForSelector('.meo-input-suggestions:not([hidden])', { timeout: 5000 }); await page.keyboard.press('Enter');
+  await page.waitForSelector('.meo-input-suggestions:not([hidden])', { timeout: 5000 });
+  assert.equal(await page.$eval('.meo-input-suggestion-detail', node => node.textContent), '#setext-heading', 'unique headings retain the same anchor column as duplicate headings');
+  await page.keyboard.press('Enter');
   assert.ok((await text()).endsWith('[Go](#setext-heading'));
   assert.equal(await page.evaluate(() => { const g = window as any; return g.EditingFeaturesHarness.findDocumentFragmentPosition(g.editor.view.state, '#setext-heading'); }), 0);
 
@@ -394,7 +396,9 @@ try {
       const { width: slashWidth, rowPadding: slashPadding, rowHeight: slashHeight, ...slashSurface } = expectedSurface;
       const documents = kind === 'documents';
       assert.deepEqual(sharedSurface, slashSurface, [mode, appearance, language, kind].join(':') + ': shares slash shell and editor font');
-      assert.equal(width, kind === 'emoji' ? '240px' : kind === 'paths' ? '300px' : slashWidth, kind + ': width follows the candidate content and editor font');
+      const expectedWidth = kind === 'emoji' ? 14.15 * 17 : kind === 'paths' ? 300
+        : kind === 'headings' ? (language === 'en' ? 27.69 : 20.92) * 17 : 416;
+      assert.ok(Math.abs(parseFloat(width) - expectedWidth) < 0.1, kind + ': width follows the candidate content and editor font');
       assert.equal(rowPadding, documents ? '5px 8px' : slashPadding);
       if (documents) assert.ok(rowHeight > slashHeight * 1.5, 'Wiki document rows reserve two full text lines');
       else assert.equal(rowHeight, slashHeight);
@@ -459,7 +463,20 @@ try {
     await page.evaluate(() => { (window as any).editor.view.dispatch({ scrollIntoView: true }); });
     await settleSuggestions();
     const placeCaret = async (top: number) => {
-      await page.evaluate(top => { const view = (window as any).editor.view, coords = view.coordsAtPos(view.state.selection.main.head); view.scrollDOM.scrollTop += coords.top - top; }, top);
+      await page.evaluate(top => {
+        const editor = (window as any).editor, view = editor.view;
+        // This fixture owns a new reading position, just like a user scroll.
+        // Retire the preceding input's deferred caret reveal before placing it.
+        editor.markViewportInteraction();
+        view.dispatch({ effects: (window as any).EditingFeaturesHarness.EditorView.scrollIntoView(view.state.selection.main.head, {
+          y: 'start', yMargin: top - view.scrollDOM.getBoundingClientRect().top
+        }) });
+      }, top);
+      await settleSuggestions();
+      await page.waitForFunction(top => {
+        const view = (window as any).editor.view, coords = view.coordsAtPos(view.state.selection.main.head);
+        return coords && Math.abs(coords.top - top) <= 1;
+      }, { timeout: 2000 }, top);
       await settleSuggestions();
     };
     await placeCaret(360); await page.keyboard.type(query); await openSuggestions(); await settleSuggestions();
@@ -509,7 +526,7 @@ try {
     await settleSuggestions(); await placeCaret(360); await page.keyboard.type(query); await openSuggestions();
     await placeCaret(slashPreferAbove ? 22 : 675);
     const fallback = await geometry();
-    assert.ok(slashPreferAbove ? fallback.top >= fallback.caretBottom + 3 : fallback.bottom <= fallback.caretTop - 3, label + ': falls back when the preferred side has no room');
+    assert.ok(slashPreferAbove ? fallback.top >= fallback.caretBottom + 3 : fallback.bottom <= fallback.caretTop - 3, label + ': falls back when the preferred side has no room: ' + JSON.stringify(fallback));
     assert.deepEqual(fallback.order, initial.order, label + ': fallback does not reverse the list');
     await page.keyboard.press('Escape');
     assert.equal(await text(), imePrefix + query + imeTail, label + ': dismissal leaves literal input intact');

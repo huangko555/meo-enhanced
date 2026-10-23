@@ -11,12 +11,14 @@ import { liveViewportPresentationExtensions, restrictLiveWidgetPresentation, get
   isLiveViewportPresentationEffect, livePresentationBandChanged } from './helpers/liveViewportPresentation';
 import { undoDepth } from '@codemirror/commands';
 import { blockStickyHeaderExtension } from './helpers/blockStickyHeader';
-import { countColumn, RangeSetBuilder, StateEffect, StateField, EditorState, type ChangeDesc, type Range, type RangeSet, type Extension, type EditorSelection, type Transaction } from '@codemirror/state';
+import { livePointerSelectionActiveField, setLivePointerSelectionActiveEffect } from './editor/livePointerSelection';
+import { blockReadingFocusAt, enterBlockSource, isBlockInteractionEffect } from './editor/blockInteraction';
+import { countColumn, RangeSetBuilder, StateEffect, StateField, EditorState, type ChangeDesc, type ChangeSet, type Range, type RangeSet, type Extension, type EditorSelection, type Transaction } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { html } from '@codemirror/lang-html';
 import { Language, LanguageSupport, syntaxHighlighting } from '@codemirror/language';
 import type { MarkdownParser } from '@lezer/markdown';
-import { certifyMarkdownStructure, markdownStructureAvailable } from './editor/markdownStructure';
+import { certifyMarkdownStructure, markdownStructureAvailable, preparedMarkdownStructure } from './editor/markdownStructure';
 import {
   Decoration,
   EditorView,
@@ -27,7 +29,7 @@ import {
   type DecorationSet
 } from '@codemirror/view';
 import { IterMode, type SyntaxNode, type SyntaxNodeRef, type Tree } from '@lezer/common';
-import { createElement, AlertCircle, Code2, Delete } from 'lucide';
+import { createElement, AlertCircle, Delete } from 'lucide';
 import {
   resolveCodeLanguage,
   isFenceMarker,
@@ -105,12 +107,12 @@ import { isTableBaselineRefreshEffect } from './adapters/codeMirrorTableTransact
 import { markdownTagField } from './helpers/tags';
 import {
   getMermaidBlockMode,
-  MermaidEditingWidget,
+  isMermaidPresentationEffect,
   mermaidEditingStateField,
-  setMermaidBlockModeEffect,
-  setMermaidSearchRevealEffect
+  mermaidInlinePreviewExtension,
 } from './helpers/mermaidEditing';
 import { collectMarkdownLiteralRanges } from './helpers/markdownLiteralRanges';
+import { mermaidSourceForAnchor } from './helpers/mermaidSource';
 import { collectHexColorRangesFromText } from '../../src/shared/hexColorSwatches';
 import { shikiRefreshEffect } from './helpers/shikiDecorations';
 import { addColorSwatchDecoration, hexColorAdjustmentExtension } from './helpers/colorSwatches';
@@ -122,7 +124,6 @@ import { mountProjectedLineNumbers } from './editor/projectedLineNumbers';
 import { createDisplayMathActions, displayMathResultField, getPreviousDisplayMathResult, isDisplayMathEditing } from './helpers/displayMathEditing';
 import {
   addHtmlContentDecorations,
-  enterHtmlSource,
   getHtmlEditingRange,
   setHtmlEditingRangeEffect,
   htmlContentExtensions
@@ -272,7 +273,7 @@ const headingGutterLineClassMarkers = Array.from({ length: 6 }, (_, index) => ne
 const renderedBlockPreviewAnchorGutterMarker = new (class extends GutterMarker {
   elementClass = 'meo-rendered-block-preview-anchor-gutter';
 })();
-type RenderedBlockDocumentLineNumberKind = 'mermaid' | 'math';
+type RenderedBlockDocumentLineNumberKind = 'math';
 
 class RenderedBlockPreviewLineNumberMarker extends GutterMarker {
   elementClass = 'meo-rendered-block-preview-line-number';
@@ -319,10 +320,8 @@ class RenderedBlockDocumentLineNumbersMarker extends GutterMarker {
   toDOM(view: EditorView): Node {
     const column = document.createElement('div') as RenderedBlockDocumentLineNumberColumn;
     column.className = 'meo-rendered-block-document-line-number-column';
-    const rootSelector = this.kind === 'mermaid'
-      ? `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${this.anchor}"]`
-      : `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${this.anchor}"]`;
-    const sourceSelector = this.kind === 'mermaid' ? '.meo-mermaid-source-editor' : '.meo-latex-math-source-editor';
+    const rootSelector = `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${this.anchor}"]`;
+    const sourceSelector = '.meo-latex-math-source-editor';
     column.__meoRenderedBlockLineNumberCleanup = mountProjectedLineNumbers(view, column,
       'meo-rendered-block-document-line-number', () => {
         const source = view.dom.querySelector<HTMLElement>(`${rootSelector} ${sourceSelector}`);
@@ -358,15 +357,6 @@ const renderedBlockLineNumberMarker = lineNumberWidgetMarker.of((view, widget, b
   if (hasRenderedBlockPreview(widget)) {
     return new RenderedBlockPreviewLineNumberMarker(formatSourceLineNumber(view.state.doc.lineAt(block.from).number, view.state));
   }
-  if (widget instanceof MermaidEditingWidget) {
-    return new RenderedBlockDocumentLineNumbersMarker(
-      'mermaid',
-      widget.block.anchor,
-      widget.block.startLine + 1,
-      widget.block.diagramText.split('\n').map((_, index) =>
-        formatSourceLineNumber(widget.block.startLine + 1 + index, view.state))
-    );
-  }
   if (widget instanceof LatexMathEditingWidget) {
     return new RenderedBlockDocumentLineNumbersMarker(
       'math',
@@ -389,34 +379,9 @@ function scopedDocumentLines(state: EditorState, scope?: LiveDecorationScope) {
 }
 type ActiveImageGroup = { line: ReturnType<EditorState['doc']['line']>; items: ImageGroupItem[] };
 
-type LivePointerSelectionState = {
-  active: boolean;
-  preservedLine: number | null;
-  /** Keep the existing layout until CodeMirror has resolved the initial hit. */
-  awaitingSelection?: true;
-};
-
-export const setLivePointerSelectionActiveEffect = StateEffect.define<LivePointerSelectionState>();
 export const setLiveDocumentIdleEffect = StateEffect.define<boolean>();
 export const preserveLiveDecorationsForSearchEffect = StateEffect.define<true>();
 export const refreshLiveDecorationsAfterSearchEffect = StateEffect.define<true>();
-
-const livePointerSelectionActiveField = StateField.define<LivePointerSelectionState>({
-  create() {
-    return { active: false, preservedLine: null };
-  },
-  update(value, transaction) {
-    for (const effect of transaction.effects) {
-      if (effect.is(setLivePointerSelectionActiveEffect)) {
-        return effect.value;
-      }
-    }
-    if (value.awaitingSelection && transaction.selection) {
-      return { active: value.active, preservedLine: value.preservedLine };
-    }
-    return value;
-  }
-});
 
 const liveDocumentIdleField = StateField.define<boolean>({
   create() {
@@ -1369,46 +1334,6 @@ function addMarkdownLinkDecorations(builder: DecorationCollector, state: EditorS
   }
 }
 
-class DetailsSourceToggleWidget extends UiLanguageSensitiveWidget {
-  [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
-    const from = changes.mapPos(this.from, 1), to = changes.mapPos(this.to, -1);
-    return from === this.from && to === this.to ? this : new DetailsSourceToggleWidget(from, to);
-  }
-  constructor(readonly from: number, readonly to: number) {
-    super();
-  }
-
-  eq(other: WidgetType): boolean {
-    return other instanceof DetailsSourceToggleWidget &&
-      this.hasSameUiLanguageEpoch(other) &&
-      other.from === this.from && other.to === this.to;
-  }
-
-  toDOM(view: EditorView): HTMLElement {
-    const strings = getUiStrings(view.state.facet(uiLanguageFacet));
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'meo-md-html-mode-btn meo-md-html-source-toggle meo-md-details-source-toggle';
-    button.dataset.tooltip = strings.showHtmlSource;
-    button.setAttribute('aria-label', strings.showHtmlSource);
-    button.appendChild(createElement(Code2, { width: 18, height: 18, 'aria-hidden': 'true' }));
-    button.addEventListener('pointerdown', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    });
-    button.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      enterHtmlSource(view, { from: this.from, to: this.to });
-    });
-    return button;
-  }
-
-  ignoreEvent(): boolean {
-    return true;
-  }
-}
-
 function addFootnoteReferenceDecorations(builder: DecorationCollector, state: EditorState, reference: FootnoteReference, activeLines: Set<number>): boolean {
   if (!shouldRenderFootnoteReference(state, reference, activeLines)) {
     return false;
@@ -1628,13 +1553,6 @@ function addDetailsBlockDecorations(builder: DecorationCollector, state: EditorS
         )
       }).range(detailsBlock.summaryFrom, detailsBlock.summaryTo)
     );
-    builder.push(
-      Decoration.widget({
-        widget: new DetailsSourceToggleWidget(detailsBlock.sectionFrom, detailsBlock.sectionTo),
-        side: 1
-      }).range(detailsBlock.lineFrom)
-    );
-
     if (detailsBlock.anchorTo > detailsBlock.summaryTo) {
       builder.push(
         hiddenDetailsSourceDeco.range(detailsBlock.summaryTo, detailsBlock.anchorTo)
@@ -2027,6 +1945,7 @@ function buildDecorationRanges(state: EditorState, previous?: DecorationSet, cha
   const insideHtmlCode = indexSourceRanges(htmlCodeBodies);
   for (const body of htmlCodeBodies) if (!scope || body.to >= scope.from && body.from <= scope.to) addRange(ranges, body.from, body.to, inlineStyleDecos.inlineCode);
   const inlineHtmlRanges: Array<{ from: number; to: number }> = [];
+  const htmlDecorationStart = ranges.length;
   const renderedHtmlBlocks = addHtmlContentDecorations(ranges, state, activeLines, previous, changes, inlineHtmlRanges, scope);
 
   // Foundation readers can finish the parser while preparing shared context.
@@ -2037,6 +1956,7 @@ function buildDecorationRanges(state: EditorState, previous?: DecorationSet, cha
     && markdownStructureAvailable(state) && !hasSameLiveMarkdownSyntax(tree, preparedTree)) {
     return buildDecorationRanges(state, previous, changes);
   }
+  const htmlDecorations = new Set(ranges.slice(htmlDecorationStart).map(range => range.value));
 
   tree.iterate({
     ...scope,
@@ -2152,20 +2072,23 @@ function buildDecorationRanges(state: EditorState, previous?: DecorationSet, cha
         ranges.push(lineStyleDecos.codeBlockStart.range(state.doc.lineAt(node.from).from));
         ranges.push(lineStyleDecos.codeBlockEnd.range(state.doc.lineAt(Math.max(node.to - 1, node.from)).from));
         if (node.name === 'FencedCode') {
+          const codeInfo = getFencedCodeInfo(state, node);
+          const mermaidEditing = codeInfo === 'mermaid' && getMermaidBlockMode(
+            state, state.doc.lineAt(node.from).from, state.doc.lineAt(Math.max(node.to - 1, node.from)).to
+          ).manual === 'edit';
           addFenceOpeningLineMarker(
             ranges,
             state,
             node.from,
-            activeLines,
+            mermaidEditing ? new Set([...activeLines, state.doc.lineAt(node.from).number]) : activeLines,
             addRange,
             activeLineMarkerDeco,
             fenceMarkerDeco
           );
 
-          const codeInfo = getFencedCodeInfo(state, node);
           if (codeInfo === 'mermaid') {
             const sourceDecorationEnd = ranges.length;
-            if (addMermaidDiagram(ranges, state, node, activeLines)) {
+            if (addMermaidDiagram(ranges, state, node)) {
               ranges.splice(sourceDecorationStart, sourceDecorationEnd - sourceDecorationStart);
             }
             return;
@@ -2360,8 +2283,11 @@ function buildDecorationRanges(state: EditorState, previous?: DecorationSet, cha
       }
       if (node.name === 'HeaderMark' && node.node.parent?.name.startsWith('SetextHeading')) return;
       if (isFenceMarker(state, node.from, node.to)) {
-        // Show fence markers on all lines (not just active)
-        addLineAwareRange(ranges, activeLines, line.number, node.from, node.to, fenceMarkerDeco, activeLineMarkerDeco);
+        const parent = node.node.parent;
+        const mermaidEditing = parent?.name === 'FencedCode' && getFencedCodeInfo(state, { node: parent }) === 'mermaid'
+          && getMermaidBlockMode(state, state.doc.lineAt(parent.from).from, state.doc.lineAt(Math.max(parent.from, parent.to - 1)).to).manual === 'edit';
+        if (mermaidEditing) addRange(ranges, node.from, node.to, activeLineMarkerDeco);
+        else addLineAwareRange(ranges, activeLines, line.number, node.from, node.to, fenceMarkerDeco, activeLineMarkerDeco);
       } else if (node.name === 'EmphasisMark') {
         const parentName = node.node.parent?.name;
         const inactiveDeco = parentName === 'StrongEmphasis' ? strongMarkerDeco : emMarkerDeco;
@@ -2595,6 +2521,10 @@ function buildDecorationRanges(state: EditorState, previous?: DecorationSet, cha
     ))
   );
   preserveRenderedBlockPreviewHeights(ranges, changes ? previous?.map(changes) : previous);
+  if (htmlEditingRange) for (let index = ranges.length - 1; index >= 0; index--) {
+    const range = ranges[index];
+    if (range.from >= htmlEditingRange.from && range.to <= htmlEditingRange.to && !htmlDecorations.has(range.value)) ranges.splice(index, 1);
+  }
   restrictLiveWidgetPresentation(ranges, state);
   return { ranges, tree };
 }
@@ -2621,9 +2551,12 @@ function buildDecorations(state: EditorState, previous?: DecorationSet, changes?
     // Markdown structure against the completed parse, never a lagging snapshot.
     const complete = markdownStructureAvailable(state)
       && hasSameLiveMarkdownSyntax(tree, resolvedSyntaxTree(state, 0));
-    liveDecorationMetadata.set(state, { ...liveDecorationMetadata.get(state), complete });
+    liveDecorationMetadata.set(state, { ...liveDecorationMetadata.get(state), complete, tree: complete ? tree : undefined });
     if (complete) filtered = prepareLiveWidgetPositions(filtered, !!getLivePresentationBand(state));
-    if (complete && !isEmptyDecorationSet(filtered)) completeLiveDecorationSets.add(filtered);
+    if (complete && !isEmptyDecorationSet(filtered)) {
+      completeLiveDecorationSets.add(filtered);
+      preparedLiveDecorationTrees.set(filtered, tree);
+    }
   }
   return filtered;
 }
@@ -2810,13 +2743,14 @@ class DisplayMathSourceActionsWidget extends UiLanguageSensitiveWidget {
     return anchor === this.anchor ? this : new DisplayMathSourceActionsWidget(anchor);
   }
   constructor(readonly anchor: number) { super(); }
-  eq(other: WidgetType): boolean { return other instanceof DisplayMathSourceActionsWidget && other.anchor === this.anchor; }
+  eq(other: WidgetType): boolean { return other instanceof DisplayMathSourceActionsWidget && this.hasSameUiLanguageEpoch(other) && other.anchor === this.anchor; }
   toDOM(view: EditorView): HTMLElement {
-    const actions = createDisplayMathActions(view, () => this.anchor);
+    const actions = createDisplayMathActions(view, () => this.anchor, true);
     actions.classList.add('meo-math-source-actions');
     return actions;
   }
   ignoreEvent(): boolean { return true; }
+  destroy(root: HTMLElement): void { (root as HTMLElement & { disposeMathActions?: () => void }).disposeMathActions?.(); }
 }
 
 class LatexMathWidget extends UiLanguageSensitiveWidget {
@@ -2912,6 +2846,7 @@ class LatexMathWidget extends UiLanguageSensitiveWidget {
     wrapper.className = `meo-md-math meo-md-math-${this.mode}`;
     if (this.fencedDisplay && this.mode === 'display') {
       wrapper.classList.add('meo-md-math-fenced-display');
+      wrapper.dataset.meoMathAnchor = String(this.anchor);
       wrapper.classList.toggle('meo-math-live-result', this.editing);
       wrapper.addEventListener('pointerdown', (event: PointerEvent) => {
         if (event.button === 0) {
@@ -2923,7 +2858,7 @@ class LatexMathWidget extends UiLanguageSensitiveWidget {
     if (this.fencedDisplay && this.mode === 'display') {
       applyLiveBlockIndent(wrapper, this.indentColumns);
       wrapper.__meoLatexMathViewport = attachLatexMathViewport(wrapper);
-      if (!this.editing) wrapper.append(createDisplayMathActions(view, () => wrapper.__meoLatexMathWidget!.anchor));
+      if (!this.editing) wrapper.append(createDisplayMathActions(view, () => wrapper.__meoLatexMathWidget!.anchor, false));
       this.updateResultLabel(wrapper, view);
       // Enter before pointerdown bubbles: another embedded editor may release
       // its projected selection and replace this DOM before a click can arrive.
@@ -2936,7 +2871,9 @@ class LatexMathWidget extends UiLanguageSensitiveWidget {
           const range = collectDocumentMathRanges(view.state).find(range => range.fencedDisplay
             && view.state.doc.lineAt(range.from).from === widget.anchor);
           const source = range && getDisplayMathSource(view.state, range);
-          view.dispatch({ selection: { anchor: source?.from ?? line.from }, scrollIntoView: true });
+          enterBlockSource(view, { kind: 'math', from: widget.anchor, to: widget.blockTo }, event.clientY - view.defaultLineHeight / 2, () => {
+            view.dispatch({ selection: { anchor: source?.from ?? line.from } });
+          });
         }
         view.focus();
       });
@@ -2948,6 +2885,7 @@ class LatexMathWidget extends UiLanguageSensitiveWidget {
   }
 
   private updateResultLabel(wrapper: HTMLElement, view: EditorView): void {
+    if (wrapper.dataset.meoMathStale !== String(this.stale)) wrapper.dataset.meoMathStale = String(this.stale);
     wrapper.querySelector(':scope > .meo-math-result-status')?.remove();
     if (!this.editing) return;
     const label = wrapper.ownerDocument.createElement('span');
@@ -2965,6 +2903,7 @@ class LatexMathWidget extends UiLanguageSensitiveWidget {
     // Keep both DOM and its fitted height across caret/input transactions.
     // Mounted callbacks resolve the current widget instead of a stale source range.
     wrapper.__meoLatexMathWidget = this;
+    if (wrapper.dataset.meoMathAnchor !== String(this.anchor)) wrapper.dataset.meoMathAnchor = String(this.anchor);
     applyLiveBlockIndent(wrapper, this.indentColumns);
     if (previous.html !== this.html) wrapper.__meoLatexMathViewport?.setContent(this.html);
     this.updateResultLabel(wrapper, view);
@@ -3485,7 +3424,7 @@ function projectInputCodeBlockLines(
   const projectedBlocks = new Set<string>();
   let projected = decorations;
 
-  transaction.changes.iterChangedRanges((fromA, toA, _fromB, toB) => {
+  transaction.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
     const lookupPosition = Math.min(fromA, startDocument.length);
     let node = codeBlockAtInputPosition(tree, lookupPosition);
     if (!node) {
@@ -3503,6 +3442,15 @@ function projectInputCodeBlockLines(
       && lastChild?.name === 'CodeMark'
       && startDocument.lineAt(lastChild.from).number === endLine.number;
     const info = node.getChild('CodeInfo');
+    const language = info ? startDocument.sliceString(info.from, info.to).trim().toLowerCase() : null;
+    // Mermaid uses only the document gutter, including the first input frame.
+    if (language === 'mermaid') return;
+    // Inline body edits cannot change a fenced block's physical line numbers.
+    // Keep their existing point groups (and order) instead of reinserting one
+    // decoration per row, especially for a giant fence.
+    if (node.name === 'FencedCode'
+      && startDocument.lineAt(fromA).number === startDocument.lineAt(toA).number
+      && nextDocument.lineAt(fromB).number === nextDocument.lineAt(toB).number) return;
     // Formula source owns its layout. Projecting ordinary code's inner line
     // numbers changes wrap width until the deferred formula refresh removes them.
     if (hasClosingFence && isMathFenceLanguage(info ? startDocument.sliceString(info.from, info.to) : null)) return;
@@ -3587,6 +3535,7 @@ type LiveDecorationCheckpoint = {
 };
 type LiveDecorationMetadata = {
   readonly complete: boolean;
+  readonly tree?: Tree;
   readonly checkpoint?: LiveDecorationCheckpoint;
 };
 // One complete checkpoint per current editor state. Values retain no prior
@@ -3595,6 +3544,13 @@ const liveDecorationMetadata = new WeakMap<EditorState, LiveDecorationMetadata>(
 // Creation during reconfiguration may use a provisional state identity. The
 // value's proof survives that handoff without retaining the provisional state.
 const completeLiveDecorationSets = new WeakSet<DecorationSet>();
+const preparedLiveDecorationTrees = new WeakMap<DecorationSet, Tree>();
+
+function acceptedLiveMarkdownSyntax(state: EditorState): Tree {
+  const accepted = liveDecorationMetadata.get(state);
+  return accepted?.complete && accepted.tree?.length === state.doc.length ? accepted.tree
+    : preparedMarkdownStructure(state) ?? (markdownStructureAvailable(state) ? resolvedSyntaxTree(state, 0) : currentSyntaxTree(state));
+}
 const localLiveSelectionUpdates = new WeakSet<EditorState>();
 
 function isGitOnlyPresentationUpdate(transaction: Transaction): boolean {
@@ -3611,19 +3567,20 @@ function rebuildLiveSelectionBlocks(decorations: DecorationSet, transaction: Tra
     || !liveDecorationMetadata.get(before)?.complete
     || !transaction.effects.every(effect => effect.is(setLivePointerSelectionActiveEffect) || effect.is(setLiveDocumentIdleEffect)
       || isLiveViewportPresentationEffect(effect) || isLongCodeBlockInteractionEffect(effect) || isEditorScrollEffect(effect)
-      || effect.is(setMermaidBlockModeEffect) || effect.is(setMermaidSearchRevealEffect)
+      || isMermaidPresentationEffect(effect)
       || effect.is(setLatexMathBlockModeEffect) || effect.is(setLatexMathSearchRevealEffect)
-      || effect.is(setHtmlEditingRangeEffect))) return;
+      || effect.is(setHtmlEditingRangeEffect) || isBlockInteractionEffect(effect))) return;
   for (const selection of [before.selection, state.selection]) for (const range of selection.ranges) {
     if (state.doc.lineAt(range.to).number - state.doc.lineAt(range.from).number > 128) return;
   }
-  const tree = markdownStructureAvailable(state) ? resolvedSyntaxTree(state, 0) : currentSyntaxTree(state);
+  const previousTree = acceptedLiveMarkdownSyntax(before);
+  const tree = markdownStructureAvailable(state) ? resolvedSyntaxTree(state, 0) : previousTree;
   if (tree.length !== state.doc.length) return;
   // A caret transaction can publish the already completed parse too. Only
   // accept that publication when both complete outer Markdown trees agree;
   // a genuinely extended/inconclusive syntax result still takes the full path.
-  if (syntaxTreeChanged(transaction) && (!markdownStructureAvailable(before)
-    || !hasSameLiveMarkdownSyntax(resolvedSyntaxTree(before, 0), tree))) return;
+  if (syntaxTreeChanged(transaction) && (previousTree.length !== before.doc.length
+    || !hasSameLiveMarkdownSyntax(previousTree, tree))) return;
   return withMarkdownSyntaxSnapshot(state, tree, () => rebuildLiveSelectionWithSyntax(decorations, transaction, tree));
 }
 
@@ -3652,14 +3609,19 @@ function rebuildLiveSelectionWithSyntax(decorations: DecorationSet, transaction:
       active.add(state.doc.lineAt(range.from).number); active.add(state.doc.lineAt(range.to).number);
     }
   };
-  for (const [previous, next] of [
-    [before.field(mermaidEditingStateField, false), state.field(mermaidEditingStateField, false)],
-    [before.field(latexMathEditingStateField, false), state.field(latexMathEditingStateField, false)]
-  ] as const) {
-    includeChangedModes(previous?.modes, next?.modes);
-    includeChangedRange(previous?.searchReveal, next?.searchReveal);
+  const previousMermaid = before.field(mermaidEditingStateField, false), nextMermaid = state.field(mermaidEditingStateField, false);
+  includeChangedModes(previousMermaid?.layouts, nextMermaid?.layouts);
+  includeChangedRange(previousMermaid?.searchReveal, nextMermaid?.searchReveal);
+  if (previousMermaid?.activeAnchor !== nextMermaid?.activeAnchor
+    || previousMermaid?.narrow !== nextMermaid?.narrow || previousMermaid?.sideSpace !== nextMermaid?.sideSpace) {
+    changedBlockContext = true;
+    for (const anchor of [previousMermaid?.activeAnchor, nextMermaid?.activeAnchor]) if (anchor != null) active.add(state.doc.lineAt(anchor).number);
   }
+  const previousMath = before.field(latexMathEditingStateField, false), nextMath = state.field(latexMathEditingStateField, false);
+  includeChangedModes(previousMath?.modes, nextMath?.modes);
+  includeChangedRange(previousMath?.searchReveal, nextMath?.searchReveal);
   includeChangedRange(getHtmlEditingRange(before), getHtmlEditingRange(state));
+  includeChangedRange(blockReadingFocusAt(before), blockReadingFocusAt(state));
   if (livePresentationBandChanged(transaction)) for (const source of [before, state]) {
     const band = getLivePresentationBand(source);
     if (!band) continue;
@@ -3677,12 +3639,15 @@ function rebuildLiveSelectionWithSyntax(decorations: DecorationSet, transaction:
   const includeRoot = (range: SourceRange): SourceRange => {
     const expanded = { ...range };
     for (const position of [range.from, range.to]) {
-      let node = tree.resolveInner(position, position === range.from ? 1 : -1);
+      let node = tree.cursor(IterMode.IgnoreMounts).moveTo(position, position === range.from ? 1 : -1).node;
       while (node.parent && node.parent.name !== 'Document') node = node.parent;
       if (node.name !== 'Document' && node.from <= range.to && node.to >= range.from) {
         expanded.from = Math.min(expanded.from, state.doc.lineAt(node.from).from);
         expanded.to = Math.max(expanded.to, state.doc.lineAt(node.to).to);
-        if (node.name === 'FencedCode' && isMathFenceLanguage(getFencedCodeInfo(state, node))) {
+        // Native HTML editing also owns the preview widget on the following
+        // line. Include that attachment when entering/leaving the source range.
+        if (node.name === 'HTMLBlock' || node.name === 'Paragraph' && state.doc.sliceString(node.from, Math.min(node.to, node.from + 4)).trimStart().startsWith('<')
+          || node.name === 'FencedCode' && isMathFenceLanguage(getFencedCodeInfo(state, node))) {
           const closing = state.doc.lineAt(Math.max(node.from, node.to - 1));
           if (closing.number < state.doc.lines) expanded.to = Math.max(expanded.to, state.doc.line(closing.number + 1).from);
         }
@@ -3752,15 +3717,16 @@ function rebuildLiveSelectionWithSyntax(decorations: DecorationSet, transaction:
     }
   }
   if (!changedBlockContext) localLiveSelectionUpdates.add(state);
-  liveDecorationMetadata.set(state, { ...liveDecorationMetadata.get(state), complete: true });
+  liveDecorationMetadata.set(state, { ...liveDecorationMetadata.get(state), complete: true, tree });
   completeLiveDecorationSets.add(result);
+  preparedLiveDecorationTrees.set(result, tree);
   return result;
 }
 
 function hasDefaultLiveBlockPresentation(state: EditorState): boolean {
   const mermaid = state.field(mermaidEditingStateField, false);
   const math = state.field(latexMathEditingStateField, false);
-  return !mermaid?.modes.size && !mermaid?.searchReveal && !math?.modes.size && !math?.searchReveal
+  return mermaid?.activeAnchor == null && !mermaid?.searchReveal && !math?.modes.size && !math?.searchReveal
     && !getHtmlEditingRange(state);
 }
 
@@ -3804,7 +3770,7 @@ function isPlainProseInput(transaction: Transaction, nested = false): boolean {
 
 function hasUnchangedLivePresentationContext(transaction: Transaction): boolean {
   return !transaction.reconfigured
-    && transaction.effects.every(effect => isLiveInputDerivedWorkBookkeeping(effect)
+    && transaction.effects.every(effect => isLiveInputDerivedWorkBookkeeping(effect) || isCodeMirrorSyntaxPublicationEffect(effect)
       || isAutomaticSymbolPairHistoryEffect(effect) || effect.is(shikiRefreshEffect) || isLongCodeBlockInteractionEffect(effect) || isEditorScrollEffect(effect))
     && hasDefaultLivePresentation(transaction.startState) && hasDefaultLivePresentation(transaction.state)
     && (!transaction.selection || transaction.docChanged
@@ -3828,7 +3794,7 @@ function canMapUnchangedProseDecorations(decorations: DecorationSet, transaction
     || !hasUnchangedLivePresentationContext(transaction) || !isPlainProseInput(transaction, true)
     || transaction.state.selection.ranges.length !== 1 || !transaction.state.selection.main.empty
     || transaction.state.selection.main.head !== transaction.changes.mapPos(transaction.startState.selection.main.head, 1)) return false;
-  const before = currentSyntaxTree(transaction.startState);
+  const before = acceptedLiveMarkdownSyntax(transaction.startState);
   const after = currentSyntaxTree(transaction.state);
   // The accepted presentation already covers the whole document. A closed,
   // unchanged plain paragraph below proves this edit without requiring distant
@@ -3836,7 +3802,7 @@ function canMapUnchangedProseDecorations(decorations: DecorationSet, transaction
   // same complete presentation while their published syntax is still a prefix.
   if (!hasMappedLiveInputPresentation(transaction.startState)
     && (before.length !== transaction.startState.doc.length
-      || !markdownStructureAvailable(transaction.startState))) return false;
+      || !liveDecorationMetadata.get(transaction.startState)?.tree && !markdownStructureAvailable(transaction.startState))) return false;
   let valid = true;
   transaction.changes.iterChangedRanges((from, to, nextFrom, nextTo) => {
     const previous = plainPresentationParagraph(transaction.startState, before, to, true);
@@ -3870,9 +3836,37 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
     || !liveDecorationMetadata.get(before)?.complete
     || !hasUnchangedLivePresentationContext(transaction) || before.selection.ranges.length !== 1
     || !before.selection.main.empty || state.selection.ranges.length !== 1 || !state.selection.main.empty) return;
+  return projectLiveLocalChange(decorations, before, state, transaction.changes);
+}
+
+type DeferredLiveLocalInput = {
+  readonly before: EditorState;
+  readonly decorations: DecorationSet;
+  readonly changes: ChangeSet;
+  readonly selection: EditorSelection;
+};
+// One bounded source operation; a following edit or presentation intent retires
+// it. No prior-state chain is accumulated while the parser catches up.
+const deferredLiveLocalInputs = new WeakMap<EditorState, DeferredLiveLocalInput>();
+
+function resumeLiveLocalInput(transaction: Transaction): DecorationSet | undefined {
+  const pending = deferredLiveLocalInputs.get(transaction.startState), state = transaction.state;
+  if (!pending || transaction.docChanged || !pending.selection.eq(state.selection)
+    || !hasUnchangedLivePresentationContext(transaction)) return;
+  deferredLiveLocalInputs.set(state, pending);
+  if (!preparedMarkdownStructure(state) && !markdownStructureAvailable(state)) return;
+  const projected = projectLiveLocalChange(pending.decorations, pending.before, state, pending.changes);
+  // A complete parse either proves the local projection or deliberately uses
+  // the canonical full builder. It must never retry an inapplicable operation.
+  deferredLiveLocalInputs.delete(state);
+  return projected;
+}
+
+function projectLiveLocalChange(decorations: DecorationSet, before: EditorState,
+  state: EditorState, changes: ChangeSet): DecorationSet | undefined {
   let change: { from: number; to: number; nextFrom: number; nextTo: number } | undefined;
   let supported = true, lineChanged = false;
-  transaction.changes.iterChangedRanges((from, to, nextFrom, nextTo) => {
+  changes.iterChangedRanges((from, to, nextFrom, nextTo) => {
     const removed = before.doc.sliceString(from, to), inserted = state.doc.sliceString(nextFrom, nextTo);
     lineChanged = removed.includes('\n') || inserted.includes('\n');
     if (change || (lineChanged
@@ -3885,8 +3879,8 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
   // Foundation readers can finish parsing without publishing a new language
   // state. Use that already completed tree; a lagging published snapshot must
   // not retire the complete presentation and force a later full rebuild.
-  const oldTree = markdownStructureAvailable(before) ? resolvedSyntaxTree(before, 0) : currentSyntaxTree(before);
-  let newTree = markdownStructureAvailable(state) ? resolvedSyntaxTree(state, 0) : currentSyntaxTree(state);
+  const oldTree = acceptedLiveMarkdownSyntax(before);
+  let newTree = preparedMarkdownStructure(state) ?? (markdownStructureAvailable(state) ? resolvedSyntaxTree(state, 0) : currentSyntaxTree(state));
   // An accepted inline edit can exhaust CodeMirror's update slice just before
   // EOF. Finish only that small remainder once; nested readers below still use
   // one snapshot. A genuinely incomplete parse retains the full proof checks.
@@ -3894,7 +3888,15 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
     && newTree.length < state.doc.length && state.doc.length - newTree.length <= 1_024) {
     newTree = resolvedSyntaxTree(state, 2);
   }
-  if (oldTree.length !== before.doc.length || newTree.length !== state.doc.length) return;
+  if (oldTree.length !== before.doc.length) return;
+  if (newTree.length !== state.doc.length) {
+    let root = oldTree.cursor(IterMode.IgnoreMounts).moveTo(change.from, -1).node;
+    while (root.parent && root.parent.name !== 'Document') root = root.parent;
+    if (root.name !== 'Document' && root.to - root.from <= 32_768) {
+      deferredLiveLocalInputs.set(state, { before, decorations, changes, selection: state.selection });
+    }
+    return;
+  }
   const notes = parseFootnotes(before);
   if (notes.references.some(reference => change!.from > reference.containerFrom && change!.from < reference.containerTo
     || change!.to > reference.containerFrom && change!.from < reference.containerTo)) return;
@@ -3924,10 +3926,10 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
   if (lineChanged) {
     if (!['Paragraph', 'Blockquote', 'OrderedList', 'BulletList', 'FootnoteDefinition'].includes(previous.name)) return;
     if (previous.name === 'FootnoteDefinition' && (!definition || !next || next.name !== previous.name
-      || previous.from !== next.from || transaction.changes.mapPos(previous.to, 1) !== next.to)) return;
+      || previous.from !== next.from || changes.mapPos(previous.to, 1) !== next.to)) return;
     oldScope = { from: before.doc.lineAt(previous.from).from,
       to: before.doc.lineAt(Math.max(previous.to, change.to)).to };
-    nextScope = { from: transaction.changes.mapPos(oldScope.from, -1), to: transaction.changes.mapPos(oldScope.to, 1) };
+    nextScope = { from: changes.mapPos(oldScope.from, -1), to: changes.mapPos(oldScope.to, 1) };
     if (nextScope.to - nextScope.from > 32_768) return;
     // A tighter proof can also preserve the global rich-block index. Requiring
     // every node outside this bare paragraph to match catches list/indentation
@@ -3937,10 +3939,10 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
       // A newline can turn literal unmatched backticks/tildes into a new fence
       // wholly inside this scope, where the outside comparison cannot see it.
       && !/[`~]/.test(before.doc.sliceString(paragraph.from, paragraph.to))
-      && hasSameLiveMarkdownOutsideBlock(oldTree, newTree, transaction.changes, paragraph,
-        { from: transaction.changes.mapPos(paragraph.from, -1), to: transaction.changes.mapPos(paragraph.to, 1) });
+      && hasSameLiveMarkdownOutsideBlock(oldTree, newTree, changes, paragraph,
+        { from: changes.mapPos(paragraph.from, -1), to: changes.mapPos(paragraph.to, 1) });
     if (!unchangedParagraphMembership
-      && !hasSameLiveMarkdownOutsideBlock(oldTree, newTree, transaction.changes, oldScope, nextScope)) return;
+      && !hasSameLiveMarkdownOutsideBlock(oldTree, newTree, changes, oldScope, nextScope)) return;
     // A line break can create/remove a definition even though every outer node
     // beyond this region is identical. Its references are global consumers.
     const hasDefinition = (tree: Tree, scope: SourceRange) => {
@@ -3948,7 +3950,7 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
       tree.iterate({ ...scope, enter(node) {
         if (found) return false;
         if (node.name === 'LinkReference' || node.name === 'FootnoteDefinition'
-          && (!definition || node.from !== transaction.changes.mapPos(definition.lineFrom, 1))) { found = true; return false; }
+          && (!definition || node.from !== changes.mapPos(definition.lineFrom, 1))) { found = true; return false; }
       } });
       return found;
     };
@@ -3957,11 +3959,11 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
     if (!next) return;
     nextScope = next;
     const oldLine = before.doc.lineAt(change.from), newLine = state.doc.lineAt(change.nextFrom);
-    if (previous.name !== next.name || previous.from !== next.from || transaction.changes.mapPos(previous.to, 1) !== next.to
+    if (previous.name !== next.name || previous.from !== next.from || changes.mapPos(previous.to, 1) !== next.to
       || oldLine.text.match(/^[ \t]*/)![0] !== newLine.text.match(/^[ \t]*/)![0]
       || next.to - next.from > 32_768) return;
     if (!markdownStructureAvailable(state)
-      && !hasSameLiveMarkdownOutsideBlock(oldTree, newTree, transaction.changes, previous, next)) return;
+      && !hasSameLiveMarkdownOutsideBlock(oldTree, newTree, changes, previous, next)) return;
   }
   // A previously empty/invalid marker can gain a label/body without adding any
   // delimiter. Its numbering is global, so it must not inherit the old cache.
@@ -3974,7 +3976,7 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
       }
       return false;
     };
-    const protectedBefore = isProtected(oldTree, start), protectedAfter = isProtected(newTree, transaction.changes.mapPos(start, 1));
+    const protectedBefore = isProtected(oldTree, start), protectedAfter = isProtected(newTree, changes.mapPos(start, 1));
     if (protectedBefore !== protectedAfter || !protectedBefore
       && (change.from > start && change.from < end || change.to > start && change.from < end)) return;
   }
@@ -3984,15 +3986,15 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
     from = frontmatter.openingFrom; to = frontmatter.closingTo;
   }
   if (definition) {
-    from = Math.min(from, transaction.changes.mapPos(definition.lineFrom, 1));
-    to = Math.max(to, transaction.changes.mapPos(definition.lineTo, 1),
-      ...definition.continuationLines.map(line => transaction.changes.mapPos(line.to, 1)));
+    from = Math.min(from, changes.mapPos(definition.lineFrom, 1));
+    to = Math.max(to, changes.mapPos(definition.lineTo, 1),
+      ...definition.continuationLines.map(line => changes.mapPos(line.to, 1)));
   }
   if (next?.name === 'FencedCode') {
     const closing = state.doc.lineAt(next.to);
     if (closing.number < state.doc.lines) to = state.doc.line(closing.number + 1).from;
   }
-  const mapped = mapStableLiveDecorations(decorations, transaction.changes, state);
+  const mapped = mapStableLiveDecorations(decorations, changes, state);
   if (!mapped) return;
   // The original block must remain closed over its replacement widgets too.
   let crossesScope = false;
@@ -4000,11 +4002,11 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
   if (crossesScope) return;
   const oldParagraph = !lineChanged && plainPresentationParagraph(before, oldTree, change.to, true);
   const newParagraph = !lineChanged && plainPresentationParagraph(state, newTree, change.nextTo, true);
-  if (!projectUnchangedFootnotes(before, state, transaction.changes, { editedDefinition: lineChanged ? definition : undefined,
+  if (!projectUnchangedFootnotes(before, state, changes, { editedDefinition: lineChanged ? definition : undefined,
     container: oldParagraph && newParagraph ? { before: oldParagraph, after: newParagraph } : undefined })) return;
   const previousConflicts = mergeConflictRangeCache.get(before.doc);
   if (previousConflicts) mergeConflictRangeCache.set(state.doc, previousConflicts.map(range => ({
-    from: transaction.changes.mapPos(range.from, 1), to: transaction.changes.mapPos(range.to, -1)
+    from: changes.mapPos(range.from, 1), to: changes.mapPos(range.to, -1)
   })));
   const scope = { from, to, fromLine: state.doc.lineAt(from).number, toLine: state.doc.lineAt(to).number };
   const ranges = withMarkdownSyntaxSnapshot(state, newTree,
@@ -4014,18 +4016,18 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
   const result = replaceLivePresentationRanges(mapped.decorations, from, to, ranges.filter(range => !(
     range.to > range.from ? rangeOverlapsRanges(range.from, range.to, conflicts) : pointInsideRanges(range.from, conflicts)
   )));
-  liveDecorationMetadata.set(state, { complete: true,
+  liveDecorationMetadata.set(state, { complete: true, tree: newTree,
     checkpoint: mapped.rebasedWidgets ? undefined : liveDecorationMetadata.get(state)?.checkpoint });
   // Rebuilding a closed code/image/formula block proves canonical correctness,
   // not that every other structure consumer has already accepted its contents.
   // A later plain key must also retain any earlier unrefreshed structural edit.
   if ((!isLiveInputDerivedWorkPending(before) || hasMappedLiveInputPresentation(before))
     && oldParagraph && newParagraph && oldParagraph.from === newParagraph.from
-    && transaction.changes.mapPos(oldParagraph.to, 1) === newParagraph.to) {
+    && changes.mapPos(oldParagraph.to, 1) === newParagraph.to) {
     markLiveInputPresentationMapped(state);
-    projectUnchangedLiveRenderedBlocks(before, state, transaction.changes, oldTree, newTree);
+    projectUnchangedLiveRenderedBlocks(before, state, changes, oldTree, newTree);
   }
-  if (unchangedParagraphMembership) projectUnchangedLiveRenderedBlocks(before, state, transaction.changes, oldTree, newTree);
+  if (unchangedParagraphMembership) projectUnchangedLiveRenderedBlocks(before, state, changes, oldTree, newTree);
   completeLiveDecorationSets.add(result);
   return result;
 }
@@ -4074,7 +4076,8 @@ function restoreLiveDecorationCheckpoint(
       ? startsHistoryGroup ? current : checkpoint ?? current
       : undefined;
   }
-  liveDecorationMetadata.set(transaction.state, { checkpoint, complete: contextUnchanged && previous?.complete === true });
+  liveDecorationMetadata.set(transaction.state, { checkpoint, complete: contextUnchanged && previous?.complete === true,
+    tree: transaction.docChanged ? undefined : previous?.tree });
 }
 
 const liveDecorationField = StateField.define<DecorationSet>({
@@ -4090,7 +4093,8 @@ const liveDecorationField = StateField.define<DecorationSet>({
       // completed value with the final state too; failed creation returns none.
       if (usesLargeDocumentDerivedWorkBudget(transaction.state)) {
         liveDecorationMetadata.set(transaction.state, {
-          complete: completeLiveDecorationSets.has(decorations)
+          complete: completeLiveDecorationSets.has(decorations),
+          tree: preparedLiveDecorationTrees.get(decorations)
         });
       }
       return decorations;
@@ -4100,7 +4104,7 @@ const liveDecorationField = StateField.define<DecorationSet>({
     // may even be a shorter prefix while embedded parsing advances. Keep the
     // accepted result until source or presentation context actually changes.
     if (!transaction.docChanged && !transaction.selection && !transaction.reconfigured
-      && (transaction.effects.every(effect => isLiveInputDerivedWorkBookkeeping(effect) || isEditorScrollEffect(effect)
+      && (transaction.effects.every(effect => isLiveInputDerivedWorkBookkeeping(effect) || effect.is(shikiRefreshEffect) || isEditorScrollEffect(effect)
         || isCodeMirrorSyntaxPublicationEffect(effect))
         || isGitOnlyPresentationUpdate(transaction))
       && liveDecorationMetadata.get(transaction.startState)?.complete
@@ -4129,8 +4133,10 @@ const liveDecorationField = StateField.define<DecorationSet>({
     }
     const restored = restoreLiveDecorationCheckpoint(decorations, transaction);
     if (restored !== undefined) return restored;
+    const resumed = resumeLiveLocalInput(transaction);
+    if (resumed !== undefined) return resumed;
     if (usesLargeDocumentDerivedWorkBudget(transaction.state) && canKeepPlainProseCaret(decorations, transaction)) {
-      liveDecorationMetadata.set(transaction.state, { ...liveDecorationMetadata.get(transaction.state), complete: true });
+      liveDecorationMetadata.set(transaction.state, { ...liveDecorationMetadata.get(transaction.state), complete: true, tree: liveDecorationMetadata.get(transaction.startState)?.tree });
       return decorations;
     }
     let rebuiltSelection: DecorationSet | undefined;
@@ -4264,12 +4270,11 @@ export function publishPreparedLivePresentation(view: EditorView): void {
 function isRenderedBlockPreview(state: EditorState, block: LiveRenderedBlock): boolean {
   if (block.kind === 'mermaid' && block.endLine > block.startLine + 1) {
     const anchor = state.doc.line(block.startLine).from;
-    const contentFrom = state.doc.line(block.startLine + 1).from;
-    const contentTo = state.doc.line(block.endLine - 1).to;
-    if (contentFrom >= contentTo || !state.doc.sliceString(contentFrom, contentTo).trim()) {
+    const source = mermaidSourceForAnchor(state, anchor);
+    if (!source?.source.trim()) {
       return false;
     }
-    return getMermaidBlockMode(state, anchor, contentFrom, contentTo).decision.effectiveMode === 'preview';
+    return getMermaidBlockMode(state, anchor, source.closing.to).decision.effectiveMode === 'preview';
   }
   if (block.kind === 'math') {
     return !isDisplayMathEditing(state, block.startLine, block.endLine);
@@ -4291,6 +4296,7 @@ function buildLiveLineNumberMarkers(state: EditorState): RangeSet<GutterMarker> 
   for (const block of getLiveRenderedBlocks(state, { includeSelectedMath: true })) {
     if (block.endLine < firstLine || block.startLine > lastLine) continue;
     if (block.kind === 'math' && isDisplayMathEditing(state, block.startLine, block.endLine)) continue;
+    if (block.kind === 'mermaid' && !isRenderedBlockPreview(state, block)) continue;
     if (isRenderedBlockPreview(state, block)) {
       const anchorLine = state.doc.line(block.startLine);
       builder.add(anchorLine.from, anchorLine.from, renderedBlockPreviewAnchorGutterMarker);
@@ -4458,8 +4464,7 @@ const liveLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
       return transaction.docChanged ? markers.map(transaction.changes) : markers;
     }
     const renderedBlockPresentationChanged = transaction.effects.some((effect) => (
-      effect.is(setMermaidBlockModeEffect)
-      || effect.is(setMermaidSearchRevealEffect)
+      isMermaidPresentationEffect(effect)
       || effect.is(setLatexMathBlockModeEffect)
       || effect.is(setLatexMathSearchRevealEffect)
     ));
@@ -4534,6 +4539,7 @@ export function liveModeExtensions(options: { readonly largeDocument?: boolean }
     livePointerSelectionActiveField,
     liveDocumentIdleField,
     mermaidEditingStateField,
+    mermaidInlinePreviewExtension,
     latexMathEditingStateField,
     displayMathResultField,
     hexColorAdjustmentExtension(),

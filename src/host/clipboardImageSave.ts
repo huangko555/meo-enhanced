@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, realpath, unlink } from 'node:fs/promises';
+import { lstat, mkdir, open, readdir, realpath, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import { expandImageStorage } from '../application/imageStorage';
+import { expandImageStorage, imageFileNameCandidates } from '../application/imageStorage';
 import type { ImageStoragePreferences } from '../foundation/imageStorage';
 
 export type ClipboardImageFileRequest = {
@@ -9,12 +9,13 @@ export type ClipboardImageFileRequest = {
   readonly workspaceFsPath?: string;
   readonly configuredFolder?: string;
   readonly imageStorage?: ImageStoragePreferences;
-  readonly requestedFileName: string;
+  readonly extension: string;
   readonly contents: Uint8Array;
 };
 
 export type SavedClipboardImageFile = {
   readonly relativePath: string;
+  readonly fileName: string;
 };
 
 export type ClipboardImageDirectoryRequest = Pick<ClipboardImageFileRequest,
@@ -60,17 +61,15 @@ export async function saveClipboardImageFile(
   request: ClipboardImageFileRequest
 ): Promise<SavedClipboardImageFile> {
   const { documentDirectory, baseDirectory, targetDirectory } = resolveClipboardImageDirectory(request);
-  const requestedFileName = normalizeFileName(request.requestedFileName);
+  // Validate before creating directories, then use the same naming rule as the preview.
+  fileNameCandidates(request, []).next();
 
   if (baseDirectory !== path.parse(baseDirectory).root) await mkdir(baseDirectory, { recursive: true });
   // Bun omits the separator for Windows volume roots; retain an absolute root.
   const canonicalBaseDirectory = (await realpath(baseDirectory)).replace(/^([a-z]:)$/i, '$1' + path.sep);
   await ensureCanonicalDirectory(canonicalBaseDirectory, baseDirectory, targetDirectory);
-  const extension = path.extname(requestedFileName);
-  const stem = requestedFileName.slice(0, requestedFileName.length - extension.length);
-
-  for (let suffix = 0; ; suffix += 1) {
-    const candidateName = suffix === 0 ? requestedFileName : `${stem}-${suffix}${extension}`;
+  const candidates = fileNameCandidates(request, await readdir(targetDirectory));
+  for (const candidateName of candidates) {
     const candidatePath = resolveContainedPath(targetDirectory, candidateName, 'Image file name');
     let handle;
     try {
@@ -95,9 +94,26 @@ export async function saveClipboardImageFile(
     }
     await handle.close();
     return {
-      relativePath: path.relative(documentDirectory, candidatePath).replace(/\\/g, '/')
+      relativePath: path.relative(documentDirectory, candidatePath).replace(/\\/g, '/'), fileName: candidateName
     };
   }
+  throw new Error('No available image file name.');
+}
+
+function fileNameCandidates(request: ClipboardImageDirectoryRequest & { readonly extension: string }, existingNames: readonly string[]) {
+  return imageFileNameCandidates({ naming: request.imageStorage?.naming ?? 'documentSequence',
+    documentName: path.parse(request.documentFsPath).name, extension: request.extension,
+    timestamp: Date.now(), existingNames });
+}
+
+/** A non-reserving PNG example; neither previews nor opening settings create directories. */
+export async function previewClipboardImagePath(request: ClipboardImageDirectoryRequest): Promise<string> {
+  const { targetDirectory } = resolveClipboardImageDirectory(request);
+  const names = await readdir(targetDirectory).catch(error => {
+    if (isNotFoundError(error)) return [];
+    throw error;
+  });
+  return path.join(targetDirectory, fileNameCandidates({ ...request, extension: 'png' }, names).next().value!);
 }
 
 async function ensureCanonicalDirectory(
@@ -130,14 +146,6 @@ async function ensureCanonicalDirectory(
 function isUnsafeWindowsSegment(value: string): boolean {
   return /[<>:"|?*\x00-\x1f]/.test(value) || /[. ]$/.test(value)
     || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(value);
-}
-
-function normalizeFileName(value: string): string {
-  if (!value || value === '.' || value === '..' || path.basename(value) !== value || /[\\/]/.test(value)
-    || (process.platform === 'win32' && isUnsafeWindowsSegment(value))) {
-    throw new Error('Image file name must be a single safe path segment');
-  }
-  return value;
 }
 
 function resolveContainedPath(root: string, relativePath: string, label: string): string {

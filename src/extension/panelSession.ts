@@ -1,3 +1,4 @@
+import { DEFAULT_EDITOR_LINE_HEIGHT } from '../foundation/editorLineHeight';
 import { runEditorService } from '../host/editorServices';
 import type { createImageDimensionCatalog } from '../host/imageDimensions';
 import { onDidChangeWikiResources } from '../host/wikiResources';
@@ -96,6 +97,7 @@ import { createVscodeDocumentCopyAdapter } from '../host/vscodeDocumentCopyAdapt
 import { createVscodeDocumentSaveAsAdapter } from '../host/vscodeDocumentSaveAsAdapter';
 import { showSavedDocumentCopyFeedback } from '../host/vscodeDocumentCopyFeedback';
 import { createVscodeDocumentSaveLifecycleAdapter } from '../host/vscodeDocumentSaveLifecycleAdapter';
+import { createVscodeLocalLinkWatcher } from '../host/vscodeLocalLinkWatcher';
 import type { createImageStorageHost } from '../host/imageStorage';
 import { readVscodeImageStorage } from '../host/vscodeImageStorage';
 import { saveClipboardImageFile } from '../host/clipboardImageSave';
@@ -189,8 +191,12 @@ type PanelSessionControllerParams = {
   setEditorAppearance: (appearance: EditorAppearance) => Promise<void>;
   getUiColors?: () => UiColors;
   setUiColors?: (colors: UiColors) => Promise<UiColors>;
+  getEditorLineHeight?: () => number;
+  setEditorLineHeight?: (value: number) => Promise<void>;
   getEditorFontSizePreference: () => EditorFontSizePreference;
   setEditorFontSizePreference: (preference: EditorFontSizePreference) => Promise<void>;
+  getEditorMouseWheelZoom?: () => boolean;
+  setEditorMouseWheelZoom?: (enabled: boolean) => Promise<void>;
   setOutlineVisible: (visible: boolean) => Promise<void>;
   onPanelActivated: (panel: vscode.WebviewPanel) => void;
   onPanelViewStateChanged: () => void;
@@ -510,7 +516,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       editorAppearance: getEditorAppearance(),
       uiColors: params.getUiColors?.() ?? { light: {}, dark: {} },
       editorFontSizeMode: editorFontSizePreference.mode,
+      editorLineHeight: params.getEditorLineHeight?.() ?? DEFAULT_EDITOR_LINE_HEIGHT,
       editorFontSize: editorFontSizePreference.value,
+      editorMouseWheelZoom: params.getEditorMouseWheelZoom?.() ?? true,
       gitChangesGutter: getGitChangesGutterEnabled(context),
       gitDiffLineHighlights: getGitDiffLineHighlightsEnabled(),
       gitDiffDetailsVisible: getGitDiffDetailsVisible(),
@@ -679,6 +687,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     refreshGitBaseline,
     getGitRepoRoot: () => gitDocumentState.getRepoRoot()
   };
+
+  const refreshLocalLinks = (): void => {
+    runBackground(postToWebview({ type: 'localLinkResourcesChanged' } satisfies HostEditorEvent), 'localLinks.refresh');
+  };
+  const localLinkWatcher = createVscodeLocalLinkWatcher(documentUri, refreshLocalLinks);
 
   const handleMessage = async (raw: WebviewToHostMessage): Promise<void> => {
     if (disposed) {
@@ -870,8 +883,28 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       case 'setEditorAppearance':
         await setEditorAppearance(raw.appearance);
         return;
+      case 'setEditorLineHeight':
+        try {
+          await params.setEditorLineHeight?.(raw.value);
+        } catch (error) {
+          await postToWebview({ type: 'editorLineHeightChanged', value: params.getEditorLineHeight?.() ?? DEFAULT_EDITOR_LINE_HEIGHT });
+          void vscode.window.showErrorMessage((getUiLanguage() === 'zh-CN' ? '行间距保存失败：' : 'Unable to save line spacing: ') + (error instanceof Error ? error.message : String(error)));
+        }
+        return;
       case 'setEditorFontSize':
-        await setEditorFontSizePreference({ mode: raw.mode, value: raw.value });
+        try {
+          await setEditorFontSizePreference({ mode: raw.mode, value: raw.value });
+        } catch (error) {
+          void vscode.window.showErrorMessage((getUiLanguage() === 'zh-CN' ? '字号保存失败：' : 'Unable to save font size: ') + (error instanceof Error ? error.message : String(error)));
+        }
+        return;
+      case 'setEditorMouseWheelZoom':
+        try {
+          await params.setEditorMouseWheelZoom?.(raw.enabled);
+        } catch (error) {
+          await postToWebview({ type: 'editorMouseWheelZoomChanged', enabled: params.getEditorMouseWheelZoom?.() ?? true });
+          void vscode.window.showErrorMessage((getUiLanguage() === 'zh-CN' ? '滚轮字号设置保存失败：' : 'Unable to save mouse wheel zoom: ') + (error instanceof Error ? error.message : String(error)));
+        }
         return;
       case 'setUiLanguagePreference':
         await vscode.workspace
@@ -884,8 +917,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
           .update('lineNumbers', raw.mode, vscode.ConfigurationTarget.Global);
         return;
       case 'openLink': {
-        if (await viewNavigation.revealDocumentLink(raw.href)) return;
-        await openLink(raw.href, documentUri);
+        if (!await viewNavigation.revealDocumentLink(raw.href)) await openLink(raw.href, documentUri);
+        refreshLocalLinks();
         return;
       }
       case 'openImageExternally':
@@ -946,6 +979,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       case 'resolveLocalLinks': {
         let response: ResolvedLocalLinksResponse;
         try {
+          await localLinkWatcher.update(raw.targets);
           response = {
             type: 'resolvedLocalLinks',
             requestId: raw.requestId,
@@ -1188,6 +1222,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const viewStateSubscription = panel.onDidChangeViewState((event) => {
     runBackground(postToWebview({ type: 'webviewVisibilityChanged', visible: event.webviewPanel.visible }), 'webview.visibility');
     if (event.webviewPanel.active) {
+      refreshLocalLinks();
       onPanelActivated(event.webviewPanel);
       refreshGitBaseline({ forcePost: true, delayMs: GIT_BASELINE_REFRESH_DELAY_MS });
       runBackground(enqueue(async () => {
@@ -1206,6 +1241,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     windowWasFocused = focused;
     // WindowState can change for user activity while focus stays in a menu.
     if (returnedToWindow && panel.active) {
+      refreshLocalLinks();
       runBackground(postFocusEditor(), 'postFocusEditor.windowState');
     }
   });
@@ -1233,6 +1269,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     }
     disposed = true;
     params.imageDimensions?.dispose();
+    localLinkWatcher.dispose();
     wikiResourcesSubscription.dispose();
     viewNavigation.dispose();
     diffBaselineSelection.dispose();
@@ -1374,7 +1411,7 @@ async function handleSaveImageFromClipboard(
     const saved = await saveClipboardImageFile({
       ...storage,
       documentFsPath: storage.documentFsPath,
-      requestedFileName: message.fileName,
+      extension: message.extension,
       contents: imageBuffer
     });
 
@@ -1383,7 +1420,7 @@ async function handleSaveImageFromClipboard(
       requestId: message.requestId,
       result: {
         ok: true,
-        value: { path: saved.relativePath }
+        value: { path: saved.relativePath, fileName: saved.fileName }
       }
     };
   } catch (error) {

@@ -1,15 +1,67 @@
-import { StateField, Transaction, type EditorState } from '@codemirror/state';
+import { ChangeSet, EditorSelection, StateField, Transaction, type EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
+import { isolateHistory } from '@codemirror/commands';
 import { renderLatexMathToHtml } from './math';
 import { collectDocumentMathRanges, getDisplayMathCopySource, getDisplayMathSource } from './displayMathBlocks';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
+import { createRenderedBlockImageButton } from './renderedBlockImage';
 import { uiLanguageFacet } from '../editor/uiLanguage';
 import { isLiveInputDerivedWorkRefresh, isMappedLiveInputRefresh, shouldDeferLiveInputDerivedWork, usesLargeDocumentDerivedWorkBudget } from '../editor/liveInputDerivedWork';
 import { getLivePresentationBand, livePresentationBandChanged } from './liveViewportPresentation';
+import { sourcePresentationSelection } from '../editor/livePointerSelection';
+import { formatLatexSource } from '../editor/latexFormatting';
+import { createSourceFormatButton, type SourceFormatOutcome } from '../editor/sourceFormatButton';
+import { getUiStrings } from '../application/uiLanguage';
+import { getViewportController } from './viewportController';
+import { isBlockReading } from '../editor/blockInteraction';
+
+function activeMathSource(state: EditorState) {
+  if (state.readOnly || state.selection.ranges.length !== 1) return null;
+  const selection = state.selection.main;
+  const range = collectDocumentMathRanges(state).find(range => range.fencedDisplay
+    && selection.from >= range.from && selection.to <= range.to);
+  const body = range && getDisplayMathCopySource(state, range);
+  const source = range && getDisplayMathSource(state, range);
+  return range && body && source ? { range, body, prefix: source.prefix } : null;
+}
+
+export function canFormatDisplayMathSource(state: EditorState): boolean { return !!activeMathSource(state); }
+
+export async function formatActiveDisplayMathSource(view: EditorView, isCurrent: () => boolean = () => true): Promise<SourceFormatOutcome> {
+  const active = activeMathSource(view.state);
+  if (!active) return 'unavailable';
+  const { doc, selection } = view.state, { body, prefix } = active;
+  // Map between the document (with container prefixes) and the formatter's bare body.
+  const raw = doc.sliceString(body.from, body.to);
+  const unprefix = (text: string) => text.split('\n').map((line, index) => index && line.startsWith(prefix) ? line.slice(prefix.length) : line).join('\n');
+  if (unprefix(raw) !== body.text) return 'boundary';
+  const original = [selection.main.anchor, selection.main.head];
+  const offsets = original.map(position => unprefix(raw.slice(0, Math.max(0, Math.min(raw.length, position - body.from)))).length);
+  try {
+    const result = await formatLatexSource(body.text, offsets);
+    if (!isCurrent() || !view.dom.isConnected || view.state.readOnly || view.state.doc !== doc || !view.state.selection.eq(selection)) return 'changed';
+    if (result.kind === 'boundary' || result.kind === 'invalid') return result.kind;
+    const html = renderLatexMathToHtml(body.text, 'display');
+    if (!html || html.includes('class="katex-error"')) return 'unsupported';
+    if (result.kind === 'unchanged') return result.kind;
+    if (renderLatexMathToHtml(result.source, 'display') !== html) return 'unsafe';
+    const position = (offset: number) => body.from + offset + (body.text.slice(0, offset).split('\n').length - 1) * prefix.length;
+    const changes = ChangeSet.of(result.edits.map(edit => ({ from: position(edit.from), to: position(edit.to),
+      insert: edit.insert.replaceAll('\n', '\n' + prefix) })), doc.length);
+    const mapped = original.map(offset => changes.mapPos(offset, 1));
+    const mutate = () => view.dispatch({ changes,
+      selection: EditorSelection.single(mapped[0], mapped[1]), annotations: isolateHistory.of('full'), userEvent: 'input.format' });
+    const viewport = getViewportController(view);
+    if (viewport) viewport.preservePositionWhileMutation(active.range.from, mutate);
+    else mutate();
+    return result.kind;
+  } catch { return 'invalid'; }
+}
 
 /** Formula editing belongs to the document selection, including both delimiters. */
 export function isDisplayMathEditing(state: EditorState, startLine: number, endLine: number): boolean {
-  return state.selection.ranges.some(range => {
+  if (isBlockReading(state, state.doc.line(startLine).from, state.doc.line(endLine).to)) return false;
+  return sourcePresentationSelection(state).ranges.some(range => {
     const first = state.doc.lineAt(range.from).number;
     const last = state.doc.lineAt(range.empty ? range.to : range.to - 1).number;
     return first <= endLine && last >= startLine;
@@ -125,10 +177,12 @@ export function insertDisplayMathNewline(view: EditorView): boolean {
   return true;
 }
 
-export function createDisplayMathActions(view: EditorView, anchor: () => number): HTMLSpanElement {
+type MathActionsElement = HTMLSpanElement & { disposeMathActions?: () => void };
+export function createDisplayMathActions(view: EditorView, anchor: () => number, sourceVisible: boolean): MathActionsElement {
   const ownerDocument = view.dom.ownerDocument;
-  const actions = ownerDocument.createElement('span');
+  const actions = ownerDocument.createElement('span') as MathActionsElement;
   actions.className = 'meo-math-copy-actions';
+  actions.contentEditable = 'false';
   const body = () => {
     const range = collectDocumentMathRanges(view.state)
       .find(range => range.fencedDisplay && view.state.doc.lineAt(range.from).from === anchor());
@@ -149,9 +203,27 @@ export function createDisplayMathActions(view: EditorView, anchor: () => number)
     if (!source) return '';
     return source.text;
   }, language, ownerDocument);
+  const image = createRenderedBlockImageButton(() => {
+    const block = view.dom.querySelector<HTMLElement>(`.meo-md-math-fenced-display[data-meo-math-anchor="${anchor()}"]`);
+    if (!block || block.dataset.meoMathStale === 'true' || block.querySelector('.katex-error')) return null;
+    return block.querySelector('.katex-display') ? block : null;
+  }, language, ownerDocument);
+  image.classList.add('meo-code-block-pill');
   for (const type of ['pointerdown', 'mousedown']) actions.addEventListener(type, event => {
     event.preventDefault(); event.stopPropagation();
   });
-  actions.append(select, copy);
+  if (sourceVisible) {
+    const control = createSourceFormatButton(view, `math:${anchor()}`, () => view.state.doc, ownerDocument, () => {
+      const strings = getUiStrings(view.state.facet(uiLanguageFacet));
+      return { idle: strings.formatMath, busy: strings.formattingMath, formatted: strings.formattedMath,
+        'formatted-protected': strings.mathFormattedProtected, unchanged: strings.mathFormatUnchanged,
+        boundary: strings.mathFormatBoundary, unsafe: strings.mathFormatUnsafe, unsupported: strings.mathFormatUnsupported,
+        invalid: strings.mathFormatInvalid, changed: strings.htmlFormatChanged, unavailable: strings.mathFormatUnavailable };
+    }, current => formatActiveDisplayMathSource(view, current));
+    control.button.classList.add('meo-format-math-btn');
+    actions.disposeMathActions = control.dispose;
+    actions.append(select, control.button);
+  }
+  actions.append(image, copy);
   return actions;
 }

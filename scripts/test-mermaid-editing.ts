@@ -1,2408 +1,804 @@
+import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import type { Page } from 'puppeteer-core';
-import { launchTestBrowser } from './browser-test-helpers';
+import { launchTestBrowser, closeTestBrowser } from './browser-test-helpers';
+import { chooseMermaidEditingLayout } from '../webview/src/editor/mermaidEditingLayout';
 
-const repoRoot = path.resolve(import.meta.dir, '..');
-const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-mermaid-editing-'));
+const choose = (width: number, height: number, sourceRows: number, diagram: { width: number; height: number } | null) =>
+  chooseMermaidEditingLayout({ width, height, sourceRows, lineHeight: 22, diagram });
+assert.equal(choose(600, 700, 40, { width: 200, height: 900 }), 'stacked');
+assert.equal(choose(1100, 700, 5, { width: 120, height: 180 }), 'stacked');
+assert.equal(choose(1100, 700, 30, { width: 1200, height: 180 }), 'stacked');
+assert.equal(choose(1100, 700, 10, { width: 220, height: 1200 }), 'side-by-side');
+assert.equal(choose(1100, 700, 30, { width: 500, height: 500 }), 'side-by-side');
+assert.equal(choose(1100, 700, 2, { width: 180, height: 180 }), 'stacked');
+assert.equal(choose(1100, 700, 40, null), 'stacked');
 
-async function waitForFrames(page: Page, count = 8): Promise<void> {
-  await page.evaluate(async (frameCount) => {
-    for (let index = 0; index < frameCount; index += 1) {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    }
-  }, count);
-}
-
-async function clickVisibleBlockModeButton(page: Page, kind: 'mermaid' | 'latex-math'): Promise<void> {
-  // The floating header owns the visible action while the opening line is offscreen.
-  const button = `.meo-${kind}-mode-btn`;
-  const floating = `.meo-block-sticky-header:not([hidden]) ${button}`;
-  const selector = await page.$(floating) ? floating : button;
-  // A recreated toolbar starts with pointer-events:none. Move the pointer first,
-  // then wait for the actual hit target before sending the click.
-  await page.hover(selector);
-  await page.waitForFunction((query) => {
-    const control = document.querySelector<HTMLElement>(query);
-    if (!control) return false;
-    const rect = control.getBoundingClientRect();
-    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-    return rect.width > 0 && rect.height > 0 && hit !== null && control.contains(hit);
-  }, {}, selector);
-  await page.click(selector);
-}
-
-async function assertInitialInteractiveMathMeasurementStaysVisible(page: Page): Promise<void> {
-  const result = await page.evaluate(() => new Promise<{
-    rootClientWidth: number;
-    canvasWidth: number;
-    fontSize: string;
-    zoom: string;
-  }>((resolve, reject) => {
-    const host = document.createElement('div');
-    host.id = 'initial-interactive-math-probe';
-    host.style.width = '16px';
-    const style = document.createElement('style');
-    style.textContent = `
-      #initial-interactive-math-probe .meo-latex-math-viewport {
-        width: 16px !important;
-        max-width: 16px !important;
-      }
-    `;
-    document.head.appendChild(style);
-    document.body.appendChild(host);
-    const editor = (window as any).MermaidEditingHarness.createEditor({
-      parent: host,
-      text: ['$$', String.raw`\frac{a+b}{c+d}`, '$$'].join('\n'),
-      initialMode: 'live',
-      onApplyChanges() {}
+const build = await Bun.build({
+  entrypoints: ['scripts/test-mermaid-editing-entry.ts'],
+  target: 'browser',
+  format: 'iife'
+});
+assert.ok(build.success, build.logs.map(String).join('\n'));
+const browser = await launchTestBrowser();
+let failure: unknown;
+try {
+  const page = await browser.newPage();
+  page.setDefaultTimeout(8000);
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.setContent(
+    '<!doctype html><meta charset="utf-8"><style>html,body,#app{height:100%;margin:0}</style><div id="app" class="editor-host"></div>'
+  );
+  await page.addStyleTag({ path: 'webview/src/styles.css' });
+  await page.addStyleTag({
+    content:
+      ':root{--meo-font-live:Arial;--meo-font-source:monospace;--meo-font-live-size:16px;--meo-font-source-size:14px}'
+  });
+  await page.addScriptTag({ content: fs.readFileSync('webview/dist/mermaid.min.js', 'utf8') });
+  await page.addScriptTag({ content: await build.outputs[0]!.text() });
+  const frames = (count = 8) =>
+    page.evaluate(async (count) => {
+      for (let i = 0; i < count; i++) await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }, count);
+  const read = () =>
+    page.evaluate(() => {
+      const e = (window as any).nativeEditor;
+      return {
+        text: e.getText(),
+        head: e.view.state.selection.main.head,
+        anchor: e.view.state.selection.main.anchor,
+        focus: e.view.hasFocus
+      };
     });
-    const cleanup = () => {
-      editor.destroy();
-      host.remove();
-      style.remove();
-    };
-    const hostObserver = new MutationObserver(() => {
-      const canvas = host.querySelector<HTMLElement>('.meo-latex-math-viewport.is-interactive .meo-latex-math-canvas');
-      if (!canvas) return;
-      hostObserver.disconnect();
-      const root = canvas.parentElement!;
-      const measurementObserved = new Promise<void>((resolveMeasurement) => {
-        Object.defineProperty(root, 'clientWidth', {
-          configurable: true,
-          get: () => {
-            resolveMeasurement();
-            return 16;
-          }
-        });
-      });
-      void measurementObserved.then(() => {
-        const measured = {
-          rootClientWidth: 16,
-          canvasWidth: canvas.getBoundingClientRect().width,
-          fontSize: canvas.style.fontSize,
-          zoom: canvas.style.zoom
-        };
-        delete (root as HTMLElement & { clientWidth?: number }).clientWidth;
-        cleanup();
-        resolve(measured);
-      }).catch((error: unknown) => {
-        delete (root as HTMLElement & { clientWidth?: number }).clientWidth;
-        cleanup();
-        reject(error);
-      });
-    });
-    hostObserver.observe(host, { childList: true, subtree: true });
-    const modeButton = host.querySelector<HTMLButtonElement>('.meo-latex-math-mode-btn');
-    if (!modeButton) {
-      hostObserver.disconnect();
-      cleanup();
-      reject(new Error('Initial interactive LaTeX probe did not expose its public mode button'));
-      return;
-    }
-    modeButton.click();
-  }));
-
-  if (result.rootClientWidth > 16 || result.canvasWidth <= 0 || result.zoom === '0') {
-    throw new Error(`Initial interactive LaTeX measurement hid natural content: ${JSON.stringify(result)}`);
-  }
-}
-
-async function assertEmbeddedMermaidSupportsPointerPanning(page: Page): Promise<void> {
-  const wrapperSelector = '.meo-mermaid-block .meo-mermaid-svg-wrapper';
-  await page.waitForFunction((selector) => {
-    const wrapper = document.querySelector<HTMLElement>(selector);
-    const rect = wrapper?.getBoundingClientRect();
-    return Boolean(wrapper?.querySelector('svg') && rect && rect.width > 0 && rect.height > 0);
-  }, {}, wrapperSelector);
-
-  const initial = await page.$eval(wrapperSelector, (wrapper) => ({
-    transform: (() => {
-      const matrix = new DOMMatrix(getComputedStyle(wrapper).transform);
-      return { scale: matrix.a, x: matrix.e, y: matrix.f };
-    })(),
-    rect: wrapper.getBoundingClientRect().toJSON()
-  }));
-  const dragPoint = await page.$eval(wrapperSelector, (wrapper) => {
-    const rect = wrapper.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-  });
-  await page.mouse.move(dragPoint.x, dragPoint.y);
-  await page.mouse.down();
-  await page.mouse.move(dragPoint.x + 48, dragPoint.y + 32);
-  await page.mouse.up();
-
-  const afterDrag = await page.$eval(wrapperSelector, (wrapper) => ({
-    transform: (() => {
-      const matrix = new DOMMatrix(getComputedStyle(wrapper).transform);
-      return { scale: matrix.a, x: matrix.e, y: matrix.f };
-    })(),
-    rect: wrapper.getBoundingClientRect().toJSON()
-  }));
-  if (
-    Math.abs(afterDrag.transform.scale - initial.transform.scale) > 0.001 ||
-    Math.abs(afterDrag.transform.x - initial.transform.x - 48) > 2 ||
-    Math.abs(afterDrag.transform.y - initial.transform.y - 32) > 2 ||
-    Math.abs(afterDrag.rect.x - initial.rect.x - 48) > 2 ||
-    Math.abs(afterDrag.rect.y - initial.rect.y - 32) > 2
-  ) {
-    throw new Error(`Embedded Mermaid drag did not pan the diagram: ${JSON.stringify({ initial, afterDrag })}`);
-  }
-
-  await page.click('.meo-mermaid-preview-controls .meo-mermaid-zoom-btn[aria-label="Zoom in"]');
-  await page.waitForFunction(
-    ({ selector, scale }) => {
-      const wrapper = document.querySelector<HTMLElement>(selector);
-      return Boolean(wrapper && Math.abs(new DOMMatrix(getComputedStyle(wrapper).transform).a - scale) > 0.001);
-    },
-    {},
-    { selector: wrapperSelector, scale: initial.transform.scale }
-  );
-  await page.click('.meo-mermaid-preview-controls .meo-mermaid-zoom-btn[aria-label="Reset zoom"]');
-  await page.waitForFunction(
-    ({ selector, transform }) => {
-      const wrapper = document.querySelector<HTMLElement>(selector);
-      if (!wrapper) return false;
-      const matrix = new DOMMatrix(getComputedStyle(wrapper).transform);
-      return Math.abs(matrix.a - transform.scale) <= 0.001
-        && Math.abs(matrix.e - transform.x) <= 1
-        && Math.abs(matrix.f - transform.y) <= 1;
-    },
-    {},
-    { selector: wrapperSelector, transform: initial.transform }
-  );
-}
-
-async function enterMermaidFullscreen(page: Page): Promise<void> {
-  const overflow = await page.$(
-    '.meo-mermaid-toolbar .meo-rendered-block-preview-actions.is-collapsed:not([open]) > summary'
-  );
-  if (overflow) {
-    await page.hover('.meo-mermaid-block');
-    await waitForFrames(page);
-    await overflow.click();
-  }
-  const clicked = await page.evaluate(() => new Promise<boolean>((resolve) => {
-    let stableButton: HTMLButtonElement | null = null;
-    let stableFrames = 0;
-    let remainingFrames = 120;
-    const probe = () => {
-      const button = Array.from(document.querySelectorAll<HTMLButtonElement>(
-        '.meo-mermaid-preview-controls .meo-mermaid-zoom-btn[aria-label="Fullscreen"]'
-      )).find((candidate) => {
-        if (!candidate.isConnected || candidate.closest('.meo-rendered-block-preview')?.querySelector('.meo-mermaid-block')?.getAttribute('aria-busy') === 'true') {
-          return false;
-        }
-        const rect = candidate.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
-      }) ?? null;
-      stableFrames = button !== null && button === stableButton ? stableFrames + 1 : 0;
-      stableButton = button;
-      if (button && stableFrames >= 4) {
-        button.click();
-        resolve(true);
-        return;
-      }
-      remainingFrames -= 1;
-      if (remainingFrames <= 0) {
-        resolve(false);
-        return;
-      }
-      requestAnimationFrame(probe);
-    };
-    probe();
-  }));
-  if (!clicked) throw new Error('No connected visible Mermaid fullscreen control was available');
-  await page.waitForFunction(() => {
-    const fullscreen = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen');
-    const wrapper = fullscreen?.querySelector<HTMLElement>('.meo-mermaid-svg-wrapper');
-    const svg = wrapper?.querySelector<SVGSVGElement>('svg');
-    const rect = svg?.getBoundingClientRect();
-    return Boolean(
-      fullscreen && wrapper && wrapper.style.transform
-      && svg?.getScreenCTM() && rect && rect.width > 0 && rect.height > 0
-    );
-  });
-}
-
-async function assertFullscreenNavigationIsSessionLocal(page: Page): Promise<void> {
-  const embeddedSelector = '.meo-mermaid-block .meo-mermaid-svg-wrapper';
-  await page.click('.meo-mermaid-preview-controls .meo-mermaid-zoom-btn[aria-label="Reset zoom"]');
-  const embeddedBefore = await page.$eval(embeddedSelector, (wrapper) => {
-    const matrix = new DOMMatrix(getComputedStyle(wrapper).transform);
-    return { scale: matrix.a, x: matrix.e, y: matrix.f };
-  });
-
-  await enterMermaidFullscreen(page);
-  const point = await page.$eval('.meo-mermaid-fullscreen', (fullscreen) => {
-    const rect = fullscreen.getBoundingClientRect();
-    return { x: rect.left + rect.width * 0.34, y: rect.top + rect.height * 0.61 };
-  });
-  await page.mouse.move(point.x, point.y);
-  await page.mouse.wheel({ deltaY: -120 });
-  await page.mouse.wheel({ deltaY: -120 });
-  await page.mouse.move(100, 100);
-  await page.mouse.down();
-  await page.mouse.move(260, 220);
-  await page.mouse.up();
-  await page.click('.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Exit fullscreen"]');
-  await page.waitForFunction(() => !document.querySelector('.meo-mermaid-fullscreen-scrim'));
-
-  const embeddedAfterExit = await page.$eval(embeddedSelector, (wrapper) => {
-    const matrix = new DOMMatrix(getComputedStyle(wrapper).transform);
-    return { scale: matrix.a, x: matrix.e, y: matrix.f };
-  });
-  await page.click('.meo-mermaid-preview-controls .meo-mermaid-zoom-btn[aria-label="Zoom in"]');
-  const embeddedAfterZoom = await page.$eval(embeddedSelector, (wrapper) => {
-    const matrix = new DOMMatrix(getComputedStyle(wrapper).transform);
-    return { scale: matrix.a, x: matrix.e, y: matrix.f };
-  });
-  if (
-    Math.abs(embeddedAfterExit.scale - embeddedBefore.scale) > 0.001 ||
-    Math.abs(embeddedAfterExit.x - embeddedBefore.x) > 1 ||
-    Math.abs(embeddedAfterExit.y - embeddedBefore.y) > 1 ||
-    Math.abs(embeddedAfterZoom.scale - 1.5) > 0.001 ||
-    Math.abs(embeddedAfterZoom.x) > 1 ||
-    Math.abs(embeddedAfterZoom.y) > 1
-  ) {
-    throw new Error(`Fullscreen navigation leaked into embedded Mermaid: ${JSON.stringify({
-      embeddedBefore,
-      embeddedAfterExit,
-      embeddedAfterZoom
-    })}`);
-  }
-  await page.click('.meo-mermaid-preview-controls .meo-mermaid-zoom-btn[aria-label="Reset zoom"]');
-}
-
-async function assertFullscreenDisablesTextSelection(page: Page): Promise<void> {
-  await enterMermaidFullscreen(page);
-  const selectionContract = await page.evaluate(() => {
-    const fullscreen = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen')!;
-    const label = fullscreen.querySelector<SVGTextElement>('svg text');
-    return {
-      fullscreen: getComputedStyle(fullscreen).userSelect,
-      label: label ? getComputedStyle(label).userSelect : null
-    };
-  });
-  if (selectionContract.fullscreen !== 'none' || selectionContract.label !== 'none') {
-    throw new Error(`Fullscreen Mermaid still permits drag text selection: ${JSON.stringify(selectionContract)}`);
-  }
-  await page.click('.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Exit fullscreen"]');
-  await page.waitForFunction(() => !document.querySelector('.meo-mermaid-fullscreen-scrim'));
-}
-
-async function assertFullscreenWheelKeepsPointerAnchored(page: Page): Promise<void> {
-  await enterMermaidFullscreen(page);
-  const before = await page.evaluate(() => {
-    const fullscreen = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen')!;
-    const wrapper = fullscreen.querySelector<HTMLElement>('.meo-mermaid-svg-wrapper')!;
-    const svg = wrapper.querySelector<SVGSVGElement>('svg')!;
-    const rect = fullscreen.getBoundingClientRect();
-    const pointer = {
-      x: rect.left + rect.width * 0.31,
-      y: rect.top + rect.height * 0.63
-    };
-    const diagramPoint = new DOMPoint(pointer.x, pointer.y).matrixTransform(svg.getScreenCTM()!.inverse());
-    const scale = new DOMMatrix(getComputedStyle(wrapper).transform).a;
-    return { pointer, diagramPoint: { x: diagramPoint.x, y: diagramPoint.y }, scale };
-  });
-
-  await page.mouse.move(before.pointer.x, before.pointer.y);
-  await page.mouse.wheel({ deltaY: -120 });
-  await page.waitForFunction((previousScale) => {
-    const wrapper = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen .meo-mermaid-svg-wrapper');
-    return Boolean(wrapper && Math.abs(new DOMMatrix(getComputedStyle(wrapper).transform).a - previousScale) > 0.001);
-  }, {}, before.scale);
-
-  const after = await page.evaluate(({ pointer, diagramPoint }) => {
-    const svg = document.querySelector<SVGSVGElement>('.meo-mermaid-fullscreen .meo-mermaid-svg-wrapper svg')!;
-    const projected = new DOMPoint(diagramPoint.x, diagramPoint.y).matrixTransform(svg.getScreenCTM()!);
-    return {
-      projected: { x: projected.x, y: projected.y },
-      distance: Math.hypot(projected.x - pointer.x, projected.y - pointer.y)
-    };
-  }, { pointer: before.pointer, diagramPoint: before.diagramPoint });
-  if (after.distance > 1) {
-    throw new Error(`Fullscreen Mermaid wheel moved the diagram point under the pointer: ${JSON.stringify({ before, after })}`);
-  }
-  await page.click('.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Reset zoom"]');
-  await page.click('.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Exit fullscreen"]');
-  await page.waitForFunction(() => !document.querySelector('.meo-mermaid-fullscreen-scrim'));
-}
-
-async function assertFullscreenPanStaysWithinDiagramBounds(page: Page): Promise<void> {
-  await enterMermaidFullscreen(page);
-  const fitted = await page.$eval('.meo-mermaid-fullscreen .meo-mermaid-svg-wrapper svg', (svg) => (
-    svg.getBoundingClientRect().toJSON()
-  ));
-  for (let index = 0; index < 3; index += 1) {
-    await page.click('.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Zoom in"]');
-  }
-  await page.waitForFunction((fittedWidth) => {
-    const svg = document.querySelector<SVGSVGElement>('.meo-mermaid-fullscreen .meo-mermaid-svg-wrapper svg');
-    return Boolean(svg && svg.getBoundingClientRect().width > fittedWidth * 2);
-  }, {}, fitted.width);
-
-  const assertCoversViewport = async (direction: string) => {
-    const geometry = await page.evaluate(() => ({
-      viewport: document.querySelector<HTMLElement>('.meo-mermaid-fullscreen')!.getBoundingClientRect().toJSON(),
-      svg: document.querySelector<SVGSVGElement>('.meo-mermaid-fullscreen .meo-mermaid-svg-wrapper svg')!
-        .getBoundingClientRect().toJSON()
-    }));
-    if (
-      geometry.svg.left > geometry.viewport.left + 1 ||
-      geometry.svg.top > geometry.viewport.top + 1 ||
-      geometry.svg.right < geometry.viewport.right - 1 ||
-      geometry.svg.bottom < geometry.viewport.bottom - 1
-    ) {
-      throw new Error(`Fullscreen Mermaid pan exposed blank viewport space after ${direction}: ${JSON.stringify(geometry)}`);
-    }
+  const select = async (text: string) => {
+    await page.evaluate((text) => {
+      const e = (window as any).nativeEditor;
+      const from = e.getText().indexOf(text);
+      if (from < 0) throw new Error('Missing source ' + text);
+      e.view.dispatch({ selection: { anchor: from, head: from + text.length } });
+      e.view.focus();
+    }, text);
+    await frames();
   };
-
-  await page.mouse.move(100, 100);
-  await page.mouse.down();
-  await page.mouse.move(1090, 710);
-  await page.mouse.up();
-  await assertCoversViewport('positive drag');
-
-  await page.mouse.move(1000, 650);
-  await page.mouse.down();
-  await page.mouse.move(10, 10);
-  await page.mouse.up();
-  await assertCoversViewport('negative drag');
-
-  await page.click('.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Reset zoom"]');
-  await page.waitForFunction((expected) => {
-    const svg = document.querySelector<SVGSVGElement>('.meo-mermaid-fullscreen .meo-mermaid-svg-wrapper svg');
-    if (!svg) return false;
-    const rect = svg.getBoundingClientRect();
-    return Math.abs(rect.left - expected.left) <= 1
-      && Math.abs(rect.top - expected.top) <= 1
-      && Math.abs(rect.width - expected.width) <= 1
-      && Math.abs(rect.height - expected.height) <= 1;
-  }, {}, fitted);
-  await page.click('.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Exit fullscreen"]');
-  await page.waitForFunction(() => !document.querySelector('.meo-mermaid-fullscreen-scrim'));
-}
-
-async function assertFullscreenExitRestoresReadingContext(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    (window as any).__mermaidEditingEditor.destroy();
-    document.getElementById('app')!.replaceChildren();
-    const text = [
-      ...Array.from({ length: 80 }, (_, index) => `before ${index + 1}`),
-      '```mermaid',
-      'graph TD',
-      'A --> B',
-      '```',
-      ...Array.from({ length: 80 }, (_, index) => `after ${index + 1}`)
-    ].join('\n');
-    (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
-      parent: document.getElementById('app')!,
-      text,
-      initialMode: 'live',
-      onApplyChanges() {}
-    });
-  });
-  await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(80, 'center'));
-  await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-block svg')));
-  await page.waitForFunction(() => {
-    const scroller = document.querySelector<HTMLElement>('.cm-scroller');
-    const block = document.querySelector<HTMLElement>('.meo-mermaid-block');
-    if (!scroller || !block || scroller.scrollTop <= 0) return false;
-    const viewport = scroller.getBoundingClientRect();
-    const rect = block.getBoundingClientRect();
-    return rect.bottom > viewport.top && rect.top < viewport.bottom;
-  });
-  await page.$eval('.cm-content', (content) => (content as HTMLElement).focus());
-
-  for (const mechanism of ['escape', 'close'] as const) {
-    const before = await page.evaluate(() => {
-      const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-block')!;
-      return {
-        scrollTop: scroller.scrollTop,
-        blockTop: block.getBoundingClientRect().top,
-        contentFocused: document.activeElement === document.querySelector('.cm-content'),
-        live: Boolean(document.querySelector('.cm-editor.meo-mode-live'))
-      };
-    });
-    await enterMermaidFullscreen(page);
-    await page.$eval(
-      '.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Zoom in"]',
-      (button) => (button as HTMLButtonElement).focus()
-    );
-
-    const observation = page.evaluate(() => new Promise<{
-      scrollTrace: number[];
-      scrollTop: number;
-      blockTop: number;
-      contentFocused: boolean;
-      live: boolean;
-    }>((resolve) => {
-      const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-      const scrollTrace: number[] = [];
-      const onScroll = () => scrollTrace.push(scroller.scrollTop);
-      scroller.addEventListener('scroll', onScroll);
-      const observer = new MutationObserver(() => {
-        if (document.querySelector('.meo-mermaid-fullscreen-scrim')) return;
-        observer.disconnect();
-        scroller.removeEventListener('scroll', onScroll);
-        document.body.removeAttribute('data-mermaid-exit-observer');
-        resolve({
-          scrollTrace,
-          scrollTop: scroller.scrollTop,
-          blockTop: document.querySelector<HTMLElement>('.meo-mermaid-block')!.getBoundingClientRect().top,
-          contentFocused: document.activeElement === document.querySelector('.cm-content'),
-          live: Boolean(document.querySelector('.cm-editor.meo-mode-live'))
-        });
-      });
-      observer.observe(document.body, { childList: true });
-      document.body.setAttribute('data-mermaid-exit-observer', 'ready');
-    }));
-    await page.waitForFunction(() => document.body.getAttribute('data-mermaid-exit-observer') === 'ready');
-    if (mechanism === 'escape') {
-      await page.keyboard.press('Escape');
-    } else {
-      await page.click('.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Exit fullscreen"]');
-    }
-    const after = await observation;
-    if (
-      !before.contentFocused || !before.live || !after.contentFocused || !after.live ||
-      Math.abs(after.scrollTop - before.scrollTop) > 1 ||
-      Math.abs(after.blockTop - before.blockTop) > 1 ||
-      after.scrollTrace.some((value) => Math.abs(value - before.scrollTop) > 1)
-    ) {
-      throw new Error(`Fullscreen Mermaid ${mechanism} did not restore its reading context: ${JSON.stringify({ before, after })}`);
-    }
-  }
-
-  const lifecycleFocus = await page.evaluate(() => {
-    const oldTarget = document.createElement('button');
-    oldTarget.type = 'button';
-    oldTarget.textContent = 'Fullscreen lifecycle old focus';
-    const newTarget = document.createElement('button');
-    newTarget.type = 'button';
-    newTarget.textContent = 'Fullscreen lifecycle new focus';
-    document.body.append(oldTarget, newTarget);
-    return { oldTarget: oldTarget.textContent, newTarget: newTarget.textContent };
-  });
-  for (const cause of ['mode', 'replacement', 'destroy'] as const) {
-    await page.evaluate((targetText) => {
-      Array.from(document.querySelectorAll<HTMLButtonElement>('body > button'))
-        .find((button) => button.textContent === targetText)!.focus();
-    }, lifecycleFocus.oldTarget);
-    await enterMermaidFullscreen(page);
-    const before = await page.evaluate(() => {
-      const target = Array.from(document.querySelectorAll<HTMLButtonElement>('body > button'))
-        .find((button) => button.textContent === 'Fullscreen lifecycle new focus')!;
-      target.focus();
-      const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-      scroller.scrollTop += 37;
-      return {
-        scrollTop: scroller.scrollTop,
-        targetFocused: document.activeElement === target
-      };
-    });
-    await page.evaluate((lifecycleCause) => {
-      const editor = (window as any).__mermaidEditingEditor;
-      if (lifecycleCause === 'mode') editor.setMode('source');
-      else if (lifecycleCause === 'replacement') editor.setText(editor.getText().replace('A --> B', 'A --> C'));
-      else editor.destroy();
-    }, cause);
-    await page.waitForFunction(() => !document.querySelector('.meo-mermaid-fullscreen-scrim'));
-    const after = await page.evaluate((targetText) => {
-      const target = Array.from(document.querySelectorAll<HTMLButtonElement>('body > button'))
-        .find((button) => button.textContent === targetText)!;
-      const scroller = document.querySelector<HTMLElement>('.cm-scroller');
-      return {
-        scrollTop: scroller?.scrollTop ?? null,
-        targetFocused: document.activeElement === target,
-        fullscreen: Boolean(document.querySelector('.meo-mermaid-fullscreen-scrim'))
-      };
-    }, lifecycleFocus.newTarget);
-    if (
-      !before.targetFocused || !after.targetFocused || after.fullscreen ||
-      (after.scrollTop !== null && cause === 'destroy' && Math.abs(after.scrollTop - before.scrollTop) > 1)
-    ) {
-      throw new Error(`Fullscreen Mermaid ${cause} cleanup restored stale context: ${JSON.stringify({ before, after })}`);
-    }
-    if (cause === 'mode') {
-      await page.evaluate(() => (window as any).__mermaidEditingEditor.setMode('live'));
-      await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(80, 'center'));
-      await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-block svg')));
-    } else if (cause === 'replacement') {
-      await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(80, 'center'));
-      await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-block svg')));
-    }
-  }
-}
-
-async function assertLateFullscreenExitCannotCloseReplacementSession(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    if (document.querySelector('#app > .cm-editor')) {
-      (window as any).__mermaidEditingEditor.destroy();
-    }
-    document.getElementById('app')!.replaceChildren();
-    (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
-      parent: document.getElementById('app')!,
-      text: ['```mermaid', 'graph TD', 'A --> B', '```', '', 'after'].join('\n'),
-      initialMode: 'live',
-      onApplyChanges() {}
-    });
-    document.getElementById('app')!.scrollIntoView({ block: 'start' });
-  });
-  await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-block svg')));
-  await waitForFrames(page);
-  await enterMermaidFullscreen(page);
-  await page.evaluate(() => {
-    const staleExit = document.querySelector<HTMLButtonElement>(
-      '.meo-mermaid-fullscreen .meo-mermaid-exit-btn'
-    )!;
-    staleExit.setAttribute('aria-label', 'Exit stale Mermaid fullscreen');
-    Object.assign(staleExit.style, {
-      position: 'fixed',
-      left: '8px',
-      top: '48px',
-      zIndex: '10001',
-      opacity: '1'
-    });
-    document.body.appendChild(staleExit);
-  });
-  await page.mouse.move(320, 260);
-  await page.mouse.down();
-  await page.mouse.move(380, 310);
-  await page.keyboard.press('Escape');
-  await page.mouse.up();
-  await page.waitForFunction(() => !document.querySelector('.meo-mermaid-fullscreen-scrim'));
-  await enterMermaidFullscreen(page);
-  await page.$eval(
-    '.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Zoom in"]',
-    (button) => (button as HTMLButtonElement).focus()
-  );
-  const before = await page.evaluate(() => {
-    const wrapper = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen .meo-mermaid-svg-wrapper')!;
-    const matrix = new DOMMatrix(getComputedStyle(wrapper).transform);
-    return {
-      transform: { scale: matrix.a, x: matrix.e, y: matrix.f },
-      focusedLabel: document.activeElement?.getAttribute('aria-label') ?? null
-    };
-  });
-  await page.click('body > .meo-mermaid-exit-btn[aria-label="Exit stale Mermaid fullscreen"]');
-  const afterLateClose = await page.evaluate(() => {
-    const wrapper = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen .meo-mermaid-svg-wrapper');
-    const matrix = wrapper ? new DOMMatrix(getComputedStyle(wrapper).transform) : null;
-    return {
-      fullscreen: Boolean(document.querySelector('.meo-mermaid-fullscreen-scrim')),
-      transform: matrix ? { scale: matrix.a, x: matrix.e, y: matrix.f } : null,
-      focusedLabel: document.activeElement?.getAttribute('aria-label') ?? null
-    };
-  });
-  if (
-    !afterLateClose.fullscreen || !afterLateClose.transform ||
-    Math.abs(afterLateClose.transform.scale - before.transform.scale) > 0.001 ||
-    Math.abs(afterLateClose.transform.x - before.transform.x) > 1 ||
-    Math.abs(afterLateClose.transform.y - before.transform.y) > 1 ||
-    afterLateClose.focusedLabel !== before.focusedLabel
-  ) {
-    throw new Error(`Late Mermaid close changed the replacement session: ${JSON.stringify({ before, afterLateClose })}`);
-  }
-
-  await page.keyboard.press('Escape');
-  await page.waitForFunction(() => !document.querySelector('.meo-mermaid-fullscreen-scrim'));
-  await page.click('body > .meo-mermaid-exit-btn[aria-label="Exit stale Mermaid fullscreen"]');
-  await page.click('body > .meo-mermaid-exit-btn[aria-label="Exit stale Mermaid fullscreen"]');
-  const afterRepeatedExit = await page.evaluate(() => ({
-    fullscreen: Boolean(document.querySelector('.meo-mermaid-fullscreen-scrim')),
-    staleConnected: Boolean(document.querySelector('body > .meo-mermaid-exit-btn[aria-label="Exit stale Mermaid fullscreen"]'))
-  }));
-  if (afterRepeatedExit.fullscreen || !afterRepeatedExit.staleConnected) {
-    throw new Error(`Repeated stale Mermaid exit was not idempotent: ${JSON.stringify(afterRepeatedExit)}`);
-  }
-}
-
-async function assertFullscreenCleanupPreservesPrimaryCause(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    (window as any).__mermaidEditingEditor.destroy();
-    document.querySelectorAll('body > button').forEach((button) => button.remove());
-    document.getElementById('app')!.replaceChildren();
-    (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
-      parent: document.getElementById('app')!,
-      text: ['```mermaid', 'graph TD', 'A --> B', '```'].join('\n'),
-      initialMode: 'live',
-      onApplyChanges() {}
-    });
-  });
-  await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-block svg')));
-  await enterMermaidFullscreen(page);
-  await page.evaluate(() => {
-    const container = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen')!;
-    const overlay = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen-scrim')!;
-    container.setPointerCapture = () => {};
-    container.hasPointerCapture = () => true;
-    container.releasePointerCapture = () => { throw new Error('primary pointer capture cleanup failed'); };
-    overlay.remove = () => { throw new Error('secondary overlay cleanup failed'); };
-    container.dispatchEvent(new PointerEvent('pointerdown', {
-      bubbles: true,
-      button: 0,
-      pointerId: 91
-    }));
-  });
-  const failure = await page.evaluate(() => {
-    try {
-      (window as any).__mermaidEditingEditor.destroy();
-      return null;
-    } catch (error) {
-      const aggregate = error as AggregateError;
-      return {
-        name: aggregate.name,
-        message: aggregate.message,
-        cause: aggregate.cause instanceof Error ? aggregate.cause.message : String(aggregate.cause),
-        errors: Array.from(aggregate.errors ?? [], (item) => item instanceof Error ? item.message : String(item)),
-        overlayConnected: Boolean(document.querySelector('.meo-mermaid-fullscreen-scrim'))
-      };
-    }
-  });
-  await page.evaluate(() => {
-    const container = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen')!;
-    const overlay = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen-scrim')!;
-    delete (container as any).setPointerCapture;
-    delete (container as any).hasPointerCapture;
-    delete (container as any).releasePointerCapture;
-    delete (overlay as any).remove;
-    overlay.remove();
-  });
-  if (
-    !failure || failure.name !== 'AggregateError' ||
-    failure.message !== 'Mermaid fullscreen dispose cleanup failed' ||
-    failure.cause !== 'primary pointer capture cleanup failed' ||
-    JSON.stringify(failure.errors) !== JSON.stringify([
-      'primary pointer capture cleanup failed',
-      'secondary overlay cleanup failed'
-    ]) ||
-    !failure.overlayConnected
-  ) {
-    throw new Error(`Fullscreen cleanup did not preserve its primary cause: ${JSON.stringify(failure)}`);
-  }
-}
-
-async function assertSourceClickKeepsViewport(
-  page: Page,
-  blockSelector: string,
-  lineText: string,
-  controllerProperty: '__meoMermaidEditingController' | '__meoLatexMathEditingController'
-): Promise<void> {
-  // Position through the user's scroll path before recording click coordinates;
-  // a raw scrollTop write can be reconciled by the pending reading anchor.
-  const target = await page.evaluate(({ selector, text }) => {
-    const editor = (window as any).__mermaidEditingEditor;
-    const block = document.querySelector<HTMLElement>(selector)!;
-    const line = Array.from(block.querySelectorAll<HTMLElement>('.cm-line'))
-      .find((candidate) => candidate.textContent === text)!;
-    const viewport = editor.view.scrollDOM.getBoundingClientRect();
-    return {
-      x: viewport.left + 10,
-      y: viewport.top + viewport.height / 2,
-      delta: line.getBoundingClientRect().top - viewport.top - viewport.height / 2
-    };
-  }, { selector: blockSelector, text: lineText });
-  await page.mouse.move(target.x, target.y);
-  await page.mouse.wheel({ deltaY: target.delta });
-  await waitForFrames(page);
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  const before = await page.evaluate(({ selector, text }) => {
-    const editor = (window as any).__mermaidEditingEditor;
-    const block = document.querySelector<HTMLElement>(selector)!;
-    const line = Array.from(block.querySelectorAll<HTMLElement>('.cm-line'))
-      .find((candidate) => candidate.textContent === text)!;
-    const property = selector.includes('latex')
-      ? '__meoLatexMathEditingController'
-      : '__meoMermaidEditingController';
-    const innerView = (block as any)[property]?.innerView;
-    const positionedRect = line.getBoundingClientRect();
-
-    return {
-      scrollTop: editor.view.scrollDOM.scrollTop,
-      lineTop: positionedRect.top,
-      focused: innerView?.hasFocus ?? false,
-      x: positionedRect.left + Math.min(24, positionedRect.width / 2),
-      y: positionedRect.top + positionedRect.height / 2
-    };
-  }, { selector: blockSelector, text: lineText });
-  await waitForFrames(page, 2);
-  await page.mouse.move(before.x, before.y);
-  await page.mouse.down();
-  await waitForFrames(page, 2);
-  const afterDown = await page.evaluate(() => ({
-    scrollTop: (window as any).__mermaidEditingEditor.view.scrollDOM.scrollTop,
-    activeElement: document.activeElement?.className ?? null
-  }));
-  await page.mouse.up();
-  await waitForFrames(page, 4);
-  const after = await page.evaluate(({ selector, text, property }) => {
-    const editor = (window as any).__mermaidEditingEditor;
-    const block = document.querySelector<HTMLElement>(selector)!;
-    const line = Array.from(block.querySelectorAll<HTMLElement>('.cm-line'))
-      .find((candidate) => candidate.textContent === text)!;
-    const innerView = (block as any)[property]?.innerView;
-    const selection = innerView?.state.selection.main;
-    return {
-      focused: innerView?.hasFocus ?? false,
-      selectedLine: selection ? innerView.state.doc.lineAt(selection.head).text : null,
-      scrollTop: editor.view.scrollDOM.scrollTop,
-      lineTop: line.getBoundingClientRect().top
-    };
-  }, { selector: blockSelector, text: lineText, property: controllerProperty });
-  if (
-    !after.focused ||
-    after.selectedLine !== lineText ||
-    Math.abs(after.scrollTop - before.scrollTop) > 1 ||
-    Math.abs(after.lineTop - before.lineTop) > 1
-  ) {
-    throw new Error(`Clicking ${blockSelector} source moved the viewport or missed the cursor: ${JSON.stringify({ before, afterDown, after })}`);
-  }
-}
-
-async function assertBlockAreaClickKeepsViewport(
-  page: Page,
-  blockSelector: string,
-  targetSelector: string,
-  verticalRatio = 0.5,
-  preserveOuterSelection = true
-): Promise<void> {
-  const before = await page.evaluate(({ blockQuery, selector, ratio }) => {
-    const editor = (window as any).__mermaidEditingEditor;
-    const block = document.querySelector<HTMLElement>(blockQuery)!;
-    const viewport = editor.view.scrollDOM.getBoundingClientRect();
-    editor.view.scrollDOM.scrollTop += block.getBoundingClientRect().top - viewport.top - 120;
-    const target = document.querySelector<HTMLElement>(selector)!;
-    const targetRect = target.getBoundingClientRect();
-    const blockRect = block.getBoundingClientRect();
-    return {
-      scrollTop: editor.view.scrollDOM.scrollTop,
-      blockTop: blockRect.top,
-      selectionHead: editor.view.state.selection.main.head,
-      outerFocused: editor.view.hasFocus,
-      innerFocused: Boolean(
-        (block as any).__meoMermaidEditingController?.innerView?.hasFocus
-        || (block as any).__meoLatexMathEditingController?.innerView?.hasFocus
-      ),
-      x: targetRect.left + targetRect.width / 2,
-      y: Math.max(viewport.top + 24, Math.min(viewport.bottom - 24, targetRect.top + targetRect.height * ratio))
-    };
-  }, { blockQuery: blockSelector, selector: targetSelector, ratio: verticalRatio });
-  await waitForFrames(page, 2);
-  const settledBefore = await page.evaluate((blockQuery) => {
-    const editor = (window as any).__mermaidEditingEditor;
-    const block = document.querySelector<HTMLElement>(blockQuery)!;
-    return {
-      scrollTop: editor.view.scrollDOM.scrollTop,
-      blockTop: block.getBoundingClientRect().top,
-      selectionHead: editor.view.state.selection.main.head,
-      innerFocused: Boolean(
-        (block as any).__meoMermaidEditingController?.innerView?.hasFocus
-        || (block as any).__meoLatexMathEditingController?.innerView?.hasFocus
-      )
-    };
-  }, blockSelector);
-  const point = await page.evaluate(({ blockQuery, selector, ratio }) => {
-    const editor = (window as any).__mermaidEditingEditor;
-    const block = document.querySelector<HTMLElement>(blockQuery);
-    const target = document.querySelector<HTMLElement>(selector);
-    if (!block || !target || !block.contains(target)) {
-      throw new Error(`Rendered-block click target is not inside its block: ${selector}`);
-    }
-    const viewport = editor.view.scrollDOM.getBoundingClientRect();
-    const targetRect = target.getBoundingClientRect();
-    if (targetRect.width <= 0 || targetRect.height <= 0) {
-      throw new Error(`Rendered-block click target has empty geometry: ${selector}`);
-    }
-    return {
-      x: targetRect.left + targetRect.width / 2,
-      y: Math.max(viewport.top + 24, Math.min(viewport.bottom - 24, targetRect.top + targetRect.height * ratio))
-    };
-  }, { blockQuery: blockSelector, selector: targetSelector, ratio: verticalRatio });
-  await page.mouse.move(point.x, point.y);
-  await page.mouse.down();
-  await waitForFrames(page, 2);
-  const afterDown = await page.evaluate(() => {
-    const editor = (window as any).__mermaidEditingEditor;
-    return {
-      scrollTop: editor.view.scrollDOM.scrollTop,
-      selectionHead: editor.view.state.selection.main.head
-    };
-  });
-  await page.mouse.up();
-  await new Promise((resolve) => setTimeout(resolve, 850));
-  await waitForFrames(page, 2);
-  const after = await page.evaluate((blockQuery) => {
-    const editor = (window as any).__mermaidEditingEditor;
-    const block = document.querySelector<HTMLElement>(blockQuery)!;
-    return {
-      scrollTop: editor.view.scrollDOM.scrollTop,
-      blockTop: block.getBoundingClientRect().top,
-      selectionHead: editor.view.state.selection.main.head,
-      outerFocused: editor.view.hasFocus,
-      innerFocused: Boolean(
-        (block as any).__meoMermaidEditingController?.innerView?.hasFocus
-        || (block as any).__meoLatexMathEditingController?.innerView?.hasFocus
-      )
-    };
-  }, blockSelector);
-  if (
-    Math.abs(after.scrollTop - settledBefore.scrollTop) > 1 ||
-    Math.abs(after.blockTop - settledBefore.blockTop) > 1 ||
-    (preserveOuterSelection && after.selectionHead !== settledBefore.selectionHead) ||
-    (preserveOuterSelection && settledBefore.innerFocused && !after.innerFocused)
-  ) {
-    throw new Error(`Clicking ${targetSelector} moved the Mermaid block: ${JSON.stringify({ before, settledBefore, afterDown, after })}`);
-  }
-}
-
-async function assertModeButtonKeepsViewport(
-  page: Page,
-  buttonSelector: string,
-  blockSelector: string
-): Promise<void> {
-  await page.evaluate((blockQuery) => {
-    const editor = (window as any).__mermaidEditingEditor;
-    const block = document.querySelector<HTMLElement>(blockQuery)!;
-    const viewport = editor.view.scrollDOM.getBoundingClientRect();
-    editor.view.scrollDOM.scrollTop += block.getBoundingClientRect().top - viewport.top - 120;
-  }, blockSelector);
-  const readState = () => page.evaluate((buttonQuery) => {
-    const editor = (window as any).__mermaidEditingEditor;
-    const button = document.querySelector<HTMLElement>(buttonQuery)!;
-    return {
-      scrollTop: editor.view.scrollDOM.scrollTop,
-      buttonTop: button.getBoundingClientRect().top,
-      label: button.getAttribute('aria-label')
-    };
-  }, buttonSelector);
-  await waitForFrames(page, 2);
-  const before = await readState();
-  const buttonPoint = await page.$eval(buttonSelector, (button) => {
-    const rect = button.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-  });
-  await page.mouse.move(buttonPoint.x, buttonPoint.y);
-  await page.mouse.down();
-  await waitForFrames(page, 2);
-  const afterDown = await readState();
-  await page.mouse.up();
-  await new Promise((resolve) => setTimeout(resolve, 850));
-  await waitForFrames(page, 2);
-  const after = await readState();
-  if (
-    Math.abs(after.scrollTop - before.scrollTop) > 1 ||
-    Math.abs(after.buttonTop - before.buttonTop) > 1 ||
-    after.label === before.label
-  ) {
-    throw new Error(`Clicking ${buttonSelector} moved the viewport or missed the mode change: ${JSON.stringify({ before, afterDown, after })}`);
-  }
-}
-
-async function assertDocumentLineClickKeepsViewport(
-  page: Page,
-  lineNumber: number,
-  assertLinePosition = true
-): Promise<void> {
-  await page.evaluate((targetLineNumber) => {
-    const editor = (window as any).__mermaidEditingEditor;
-    const line = editor.view.state.doc.line(targetLineNumber);
-    editor.view.scrollDOM.scrollTop = Math.max(0, editor.view.lineBlockAt(line.from).top - 120);
-  }, lineNumber);
-  await waitForFrames(page, 2);
-  const before = await page.evaluate((targetLineNumber) => {
-    const editor = (window as any).__mermaidEditingEditor;
-    const line = editor.view.state.doc.line(targetLineNumber);
-    const coords = editor.view.coordsAtPos(Math.min(line.to, line.from + 1));
-    const lineBlock = editor.view.lineBlockAt(line.from);
-    const scroller = editor.view.scrollDOM.getBoundingClientRect();
-    const content = editor.view.contentDOM.getBoundingClientRect();
-    return {
-      scrollTop: editor.view.scrollDOM.scrollTop,
-      lineTop: coords?.top ?? scroller.top + lineBlock.top - editor.view.scrollDOM.scrollTop,
-      x: coords ? coords.left + 2 : content.left + 24,
-      y: coords
-        ? (coords.top + coords.bottom) / 2
-        : scroller.top + lineBlock.top - editor.view.scrollDOM.scrollTop + lineBlock.height / 2
-    };
-  }, lineNumber);
-  await page.mouse.move(before.x, before.y);
-  await page.mouse.down();
-  await waitForFrames(page, 2);
-  const afterDown = await page.evaluate((targetLineNumber) => {
-    const editor = (window as any).__mermaidEditingEditor;
-    const line = editor.view.state.doc.line(targetLineNumber);
-    const lineBlock = editor.view.lineBlockAt(line.from);
-    const scroller = editor.view.scrollDOM.getBoundingClientRect();
-    return {
-      scrollTop: editor.view.scrollDOM.scrollTop,
-      lineTop: editor.view.coordsAtPos(line.from)?.top ??
-        scroller.top + lineBlock.top - editor.view.scrollDOM.scrollTop,
-      selectedLine: editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number
-    };
-  }, lineNumber);
-  await page.mouse.up();
-  await new Promise((resolve) => setTimeout(resolve, 850));
-  await waitForFrames(page, 2);
-  const after = await page.evaluate((targetLineNumber) => {
-    const editor = (window as any).__mermaidEditingEditor;
-    const line = editor.view.state.doc.line(targetLineNumber);
-    const lineBlock = editor.view.lineBlockAt(line.from);
-    const scroller = editor.view.scrollDOM.getBoundingClientRect();
-    return {
-      scrollTop: editor.view.scrollDOM.scrollTop,
-      lineTop: editor.view.coordsAtPos(line.from)?.top ??
-        scroller.top + lineBlock.top - editor.view.scrollDOM.scrollTop,
-      selectedLine: editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number
-    };
-  }, lineNumber);
-  if (
-    after.selectedLine !== lineNumber ||
-    before.lineTop === null ||
-    afterDown.lineTop === null ||
-    after.lineTop === null ||
-    Math.abs(afterDown.scrollTop - before.scrollTop) > 1 ||
-    (assertLinePosition && Math.abs(afterDown.lineTop - before.lineTop) > 1) ||
-    Math.abs(after.scrollTop - before.scrollTop) > 1 ||
-    (assertLinePosition && Math.abs(after.lineTop - before.lineTop) > 1)
-  ) {
-    throw new Error(`Clicking document line ${lineNumber} moved the viewport: ${JSON.stringify({ before, afterDown, after })}`);
-  }
-}
-
-async function assertMermaidModePointerSurvivesToolbarUpdate(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const host = document.createElement('div');
-    host.id = 'mermaid-mode-pointer-probe';
-    host.style.cssText = 'position:fixed;inset:0;z-index:10000;background:white';
-    document.body.append(host);
-    const harness = (window as any).MermaidEditingHarness;
-    (window as any).__mermaidModePointerProbe = harness.createEditor({
-      parent: host, text: '```mermaid\nflowchart LR\nA --> B\n```', initialMode: 'live', onApplyChanges() {}
-    });
-  });
-  const selector = '#mermaid-mode-pointer-probe .meo-mermaid-mode-label';
-  try {
-    await page.waitForSelector(selector);
-    await page.hover(selector);
-    await page.waitForFunction((query) => {
-      const label = document.querySelector(query)!;
-      const rect = label.getBoundingClientRect();
-      return document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) === label;
-    }, {}, selector);
-    const label = (await page.$(selector))!;
-    const rect = (await label.boundingBox())!;
-    await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
-    await page.mouse.down();
-    try {
-      await page.evaluate(() => {
-        const harness = (window as any).MermaidEditingHarness;
-        const view = (window as any).__mermaidModePointerProbe.view;
-        // The real toolbar update runs while the trusted gesture is held.
-        harness.createMermaidToolbarWidget(0, 1, 'preview', 'flowchart LR\nA --> C', view.state.doc.length)
-          .updateDOM(document.querySelector('#mermaid-mode-pointer-probe .meo-mermaid-toolbar'), view);
-      });
-      if (!await label.evaluate(element => element.isConnected)) {
-        throw new Error('Mermaid toolbar update detached the pressed mode label');
-      }
-    } finally {
-      await page.mouse.up();
-      await label.dispose();
-    }
-    await page.waitForFunction(() => document.querySelector('#mermaid-mode-pointer-probe .meo-mermaid-toolbar')
-      ?.getAttribute('data-meo-mermaid-mode') === 'split');
-  } finally {
-    await page.evaluate(() => {
-      (window as any).__mermaidModePointerProbe.destroy();
-      delete (window as any).__mermaidModePointerProbe;
-      document.getElementById('mermaid-mode-pointer-probe')?.remove();
-    });
-  }
-}
-
-async function assertMermaidModePointerSurvivesDerivedRefresh(page: Page): Promise<void> {
-  for (const completion of ['click', 'outside'] as const) {
-    await page.evaluate(() => {
-      const host = document.createElement('div');
-      host.id = 'mermaid-derived-pointer-probe';
-      host.style.cssText = 'position:fixed;inset:0;z-index:10000;background:white';
-      document.body.append(host);
-      (window as any).__mermaidDerivedPointerProbe = (window as any).MermaidEditingHarness
-        .createMermaidDerivedPointerProbe(host);
-    });
-    const selector = '#mermaid-derived-pointer-probe .meo-mermaid-mode-label';
-    try {
-      await page.waitForSelector(selector);
-      await waitForFrames(page, 8);
-      await page.hover(selector);
-      const label = (await page.$(selector))!;
-      const rect = (await label.boundingBox())!;
-      await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
-      await page.mouse.down();
-      let released = false;
-      try {
-        // Primary input may already be accepted while its full derived frame is
-        // still queued. That frame must preserve the trusted gesture target.
-        await page.evaluate(() => (window as any).__mermaidDerivedPointerProbe.input());
-        await waitForFrames(page, 8);
-        const held = await label.evaluate(element => ({
-          connected: element.isConnected,
-          ...(window as any).__mermaidDerivedPointerProbe.snapshot()
-        }));
-        if (!held.text.endsWith('plain accepted') || !held.connected || !held.pending || held.refreshes !== 0) {
-          throw new Error(`Derived rebuild interrupted the held Mermaid mode gesture: ${JSON.stringify(held)}`);
-        }
-        if (completion === 'outside') await page.mouse.move(1090, 710);
-        await page.mouse.up();
-        released = true;
-        if (completion === 'click') {
-          await page.waitForFunction(() => document.querySelector('#mermaid-derived-pointer-probe .meo-mermaid-toolbar')
-            ?.getAttribute('data-meo-mermaid-mode') === 'split');
-        } else {
-          await page.waitForFunction(() => {
-            const result = (window as any).__mermaidDerivedPointerProbe.snapshot();
-            return result.refreshes === 1 && !result.pending;
-          });
-        }
-      } finally {
-        if (!released) await page.mouse.up();
-        await label.dispose();
-      }
-    } finally {
-      await page.evaluate(() => {
-        (window as any).__mermaidDerivedPointerProbe.destroy();
-        delete (window as any).__mermaidDerivedPointerProbe;
-        document.getElementById('mermaid-derived-pointer-probe')?.remove();
-      });
-    }
-  }
-}
-
-async function assertMermaidModePointerSurvivesSettlement(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const host = document.createElement('div');
-    host.id = 'mermaid-settle-pointer-probe';
-    host.style.cssText = 'position:fixed;inset:0;z-index:10000;background:white';
-    document.body.append(host);
-    (window as any).__mermaidSettlePointerProbe = (window as any).MermaidEditingHarness
-      .createMermaidDerivedPointerProbe(host);
-  });
-  const selector = '#mermaid-settle-pointer-probe .meo-mermaid-mode-label';
-  let pressed = false;
-  try {
-    await page.waitForSelector(selector);
-    await waitForFrames(page, 8);
-    await page.evaluate(() => {
-      const probe = (window as any).__mermaidSettlePointerProbe;
-      probe.holdSettlement();
-      probe.input();
-    });
-    await waitForFrames(page, 8);
-    // A completed diagram layout changes its real height cache after refresh,
-    // before consumer checkpoints retire that generation.
-    await page.evaluate(() => {
-      document.querySelector<HTMLElement>('#mermaid-settle-pointer-probe .meo-mermaid-block')!
-        .style.minHeight = '600px';
-    });
-    await waitForFrames(page, 8);
-    const label = (await page.$(selector))!;
-    try {
-      const rect = (await label.boundingBox())!;
-      await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
-      await page.mouse.down();
-      pressed = true;
-      await label.evaluate(element => {
-        const scope = window as any;
-        scope.__mermaidSettleRemovals = 0;
-        scope.__mermaidSettleClicks = 0;
-        element.closest('button')!.addEventListener('click', () => { scope.__mermaidSettleClicks += 1; });
-        scope.__mermaidSettleObserver = new MutationObserver(records => {
-          for (const record of records) for (const node of record.removedNodes) {
-            if (node === element || node.contains(element)) scope.__mermaidSettleRemovals += 1;
-          }
-        });
-        scope.__mermaidSettleObserver.observe(document.body, { childList: true, subtree: true });
-        scope.__mermaidSettlePointerProbe.requestAccepted();
-        scope.__mermaidSettlePointerProbe.releaseSettlement();
-      });
-      await waitForFrames(page, 8);
-      const settled = await label.evaluate(element => ({
-        connected: element.isConnected,
-        removals: (window as any).__mermaidSettleRemovals,
-        ...(window as any).__mermaidSettlePointerProbe.snapshot(),
-        idle: (window as any).__mermaidSettlePointerProbe.acceptsImmediately()
-      }));
-      if (!settled.connected || settled.removals !== 0 || !settled.idle
-        || settled.acceptedRuns !== 1 || settled.refreshes !== 1) {
-        throw new Error(`Generation settlement rebuilt the pressed Mermaid shell: ${JSON.stringify(settled)}`);
-      }
-      await page.evaluate(() => (window as any).__mermaidSettleObserver.disconnect());
-      await page.mouse.up();
-      pressed = false;
-      await page.waitForFunction(() => document.querySelector('#mermaid-settle-pointer-probe .meo-mermaid-toolbar')
-        ?.getAttribute('data-meo-mermaid-mode') === 'split');
-      if (await page.evaluate(() => (window as any).__mermaidSettleClicks) !== 1) {
-        throw new Error('Settled Mermaid gesture did not deliver exactly one real click');
-      }
-    } finally {
-      await label.dispose();
-    }
-  } finally {
-    if (pressed) await page.mouse.up();
-    await page.evaluate(() => {
-      (window as any).__mermaidSettleObserver?.disconnect();
-      (window as any).__mermaidSettlePointerProbe.destroy();
-      delete (window as any).__mermaidSettlePointerProbe;
-      document.getElementById('mermaid-settle-pointer-probe')?.remove();
-    });
-  }
-}
-
-async function main() {
-  const build = await Bun.build({
-    entrypoints: [path.join(repoRoot, 'scripts', 'test-mermaid-editing-entry.ts')],
-    outdir: tempDir,
-    target: 'browser',
-    format: 'iife',
-    naming: 'bundle.js'
-  });
-  if (!build.success) throw new Error(build.logs.map(String).join('\n'));
-
-  const browser = await launchTestBrowser();
-  try {
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1100, height: 720, deviceScaleFactor: 1 });
-    await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><body class="vscode-light"><div id="app"></div></body>');
-    await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
-    await page.addStyleTag({
-      content: ':root { --meo-background:#ffffff; --meo-foreground:#24292f; --meo-code-background:#f6f8fa; --meo-surface-background:#ffffff; --meo-color-base05:#0969da; --meo-font-live:Arial; --meo-font-live-weight:400; --meo-font-live-size:16px; --meo-font-source:"Courier New"; --meo-font-source-weight:500; --meo-font-source-size:14px; --meo-semantic-mutedForeground:#57606a; --meo-semantic-codeCopyForeground:#0969da; --meo-semantic-codeCopyBackground:transparent; --meo-semantic-codeCopyHoverForeground:#0969da; --meo-semantic-codeCopyHoverBackground:#eaeef2; --vscode-editor-font-family:monospace; --vscode-editor-font-size:14px; --vscode-editor-line-height:20px; }'
-    });
-    await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
-
-    await page.evaluate(() => {
-      const style = document.documentElement.style;
-      style.setProperty('--vscode-editor-background', '#ffffff');
-      style.setProperty('--vscode-editor-foreground', '#24292f');
-      style.setProperty('--meo-code-palette-background', '#f6f8fa');
-      style.setProperty('--meo-code-palette-foreground', '#24292f');
-    });
-
-    await page.evaluate(() => {
-      (window as any).mermaid = {
-        initialize(config: any) {
-          (window as any).__mermaidThemeConfig = config;
-        },
-        async render(_id: string, text: string) {
-          const tallPreview = text.includes('TALL_PREVIEW');
-          const widePreview = text.includes('WIDE_PREVIEW');
-          const height = tallPreview ? 900 : widePreview ? 180 : 120;
-          const width = tallPreview ? 320 : widePreview ? 2400 : 1200;
-          const resolvedHeight = tallPreview ? height : widePreview ? 180 : 400;
-          const variables = (window as any).__mermaidThemeConfig?.themeVariables ?? {};
-          const coloredNode = '<g class="node custom"><rect data-custom-node width="160" height="80" style="fill:#1e293b;stroke:#60a5fa"></rect><foreignObject><div class="nodeLabel" style="color:#f8fafc">Custom</div></foreignObject></g>';
-          const themedNode = `<rect data-themed-node x="180" width="160" height="80" fill="${variables.primaryColor ?? '#ffffff'}" stroke="${variables.primaryBorderColor ?? '#000000'}"></rect>`;
-          return { svg: `<svg width="${width}" height="${resolvedHeight}" viewBox="0 0 ${width} ${resolvedHeight}">${coloredNode}${themedNode}<text x="10" y="30">${text.length}</text></svg>` };
-        }
-      };
-      (window as any).__collectMermaidCodeStyle = (blockSelector: string) => {
-        const block = document.querySelector<HTMLElement>(blockSelector)!;
-        const editor = block?.querySelector<HTMLElement>('.meo-mermaid-source-editor')!;
-        const sourceLines = editor ? Array.from(editor.querySelectorAll<HTMLElement>('.cm-line')) : [];
-        const sourceLine = sourceLines[1] ?? sourceLines[0];
-        const normalLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line.meo-md-code-block'))
-          .find((line) => line.textContent?.includes('normalCodeStyle'))!;
-        const sourceStyle = sourceLine ? getComputedStyle(sourceLine) : null;
-        const normalStyle = normalLine ? getComputedStyle(normalLine) : null;
-        const firstOpaqueBackground = (element: HTMLElement | null): string | null => {
-          for (let current = element; current && block?.contains(current); current = current.parentElement) {
-            const background = getComputedStyle(current).backgroundColor;
-            if (background !== 'rgba(0, 0, 0, 0)' && background !== 'transparent') {
-              return background;
-            }
-          }
-          return null;
-        };
-        return {
-          sourceStyle: [
-            firstOpaqueBackground(sourceLine),
-            sourceStyle?.fontFamily ?? null,
-            sourceStyle?.fontSize ?? null,
-            sourceStyle?.fontWeight ?? null,
-            sourceStyle?.lineHeight ?? null
-          ],
-          normalStyle: [
-            normalStyle?.backgroundColor ?? null,
-            normalStyle?.fontFamily ?? null,
-            normalStyle?.fontSize ?? null,
-            normalStyle?.fontWeight ?? null,
-            normalStyle?.lineHeight ?? null
-          ],
-          sourceLayers: {
-            editor: editor?.querySelector<HTMLElement>('.cm-editor')
-              ? getComputedStyle(editor.querySelector<HTMLElement>('.cm-editor')!).backgroundColor
-              : null,
-            scroller: editor?.querySelector<HTMLElement>('.cm-scroller')
-              ? getComputedStyle(editor.querySelector<HTMLElement>('.cm-scroller')!).backgroundColor
-              : null,
-            content: editor?.querySelector<HTMLElement>('.cm-content')
-              ? getComputedStyle(editor.querySelector<HTMLElement>('.cm-content')!).backgroundColor
-              : null,
-            line: sourceStyle?.backgroundColor ?? null
-          }
-        };
-      };
-      const lines = Array.from({ length: 48 }, (_, index) => `node${index + 1} --> node${index + 2}`);
-      const text = [
-        '```mermaid',
-        'graph TD',
-        ...lines,
-        '```',
-        '',
-        'after',
-        '',
-        '$$',
-        '\\frac{a}{b}',
-        '$$'
-      ].join('\n');
-      (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
-        parent: document.getElementById('app')!,
-        text,
-        initialMode: 'live',
-        onApplyChanges() {}
-      });
-    });
-    // Display math now has a reading surface and main-document source editing.
-    await waitForFrames(page);
-    await assertMermaidModePointerSurvivesToolbarUpdate(page);
-    await assertMermaidModePointerSurvivesDerivedRefresh(page);
-    await assertMermaidModePointerSurvivesSettlement(page);
-
-    const defaultMode = await page.evaluate(() => {
-      const latexRoot = document.querySelector<HTMLElement>('.meo-md-math-fenced-display')!;
-      const latexCanvas = latexRoot.querySelector<HTMLElement>(':scope > .meo-latex-math-canvas')!;
-      const latexRootRect = latexRoot.getBoundingClientRect();
-      const latexCanvasRect = latexCanvas.getBoundingClientRect();
-      const readPreviewChrome = (kind: 'mermaid' | 'latex') => {
-        const shell = document.querySelector<HTMLElement>(
-          `.meo-rendered-block-preview[data-meo-rendered-block-kind="${kind === 'latex' ? 'math' : kind}"]`
-        );
-        const toolbar = shell?.querySelector<HTMLElement>(
-          `:scope > .meo-${kind === 'latex' ? 'latex-math' : kind}-toolbar`
-        ) ?? null;
-        const label = shell?.querySelector<HTMLElement>(
-          ':scope > .meo-rendered-block-preview-language'
-        ) ?? null;
-        const controls = Array.from(toolbar?.querySelectorAll<HTMLElement>('button, [role="button"]') ?? []);
-        return {
-          shell: Boolean(shell),
-          label: label?.textContent ?? null,
-          labelParent: label?.parentElement === shell,
-          toolbarParent: toolbar?.parentElement === shell,
-          controlCount: controls.length,
-          chrome: [label, ...controls].map((element) => {
-            if (!element) return null;
-            const style = getComputedStyle(element);
-            const rect = element.getBoundingClientRect();
-            return {
-              background: style.backgroundColor,
-              borderRadius: style.borderRadius,
-              borderWidth: style.borderWidth,
-              width: rect.width,
-              height: rect.height
-            };
-          })
-        };
-      };
-      return {
-        preview: Boolean(document.querySelector('.meo-mermaid-block')),
-        previewHeight: document.querySelector<HTMLElement>('.meo-mermaid-block')?.getBoundingClientRect().height ?? 0,
-        editing: Boolean(document.querySelector('.meo-mermaid-editing-block')),
-        buttonLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label'),
-        visibleMermaidFenceLines: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-          .filter((line) => (line.textContent ?? '').includes('```mermaid')).length,
-        visibleLatexFenceLines: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-          .filter((line) => (line.textContent ?? '').includes('$$')).length,
-        latexLabelClearance: latexCanvasRect.top - (latexRoot.parentElement!.querySelector('.meo-rendered-block-preview-language')?.getBoundingClientRect().bottom ?? latexRootRect.top),
-        latexVisualTop: latexCanvasRect.top - latexRootRect.top,
-        latexVisualBottom: latexRootRect.bottom - latexCanvasRect.bottom,
-        mermaidChrome: readPreviewChrome('mermaid'),
-        latexChrome: readPreviewChrome('latex'),
-        sharedSplitIcon: document.querySelector('.meo-mermaid-mode-btn svg')?.innerHTML
-          === document.querySelector('.meo-latex-math-mode-btn svg')?.innerHTML
-      };
-    });
-    const hasExpectedPreviewChrome = (
-      chrome: typeof defaultMode.mermaidChrome,
-      language: string
-    ) => chrome.shell
-      && (chrome.label === null || chrome.label === language)
-      && (chrome.label === null || chrome.labelParent)
-      && chrome.toolbarParent
-      && chrome.controlCount === 3
-      && chrome.chrome.filter((item) => item !== null).every((item) => item
-        && item.borderRadius === '6px'
-        && item.borderWidth === '0px'
-        && item.width > 0
-        && item.height > 0);
-    if (
-      !defaultMode.preview || defaultMode.editing
-      || defaultMode.buttonLabel !== 'Preview, Switch to split view'
-      || defaultMode.visibleMermaidFenceLines !== 0
-      || defaultMode.visibleLatexFenceLines !== 0
-      || defaultMode.latexVisualTop < 8
-      || defaultMode.latexVisualBottom < 8
-      || defaultMode.latexLabelClearance < 4
-      || !hasExpectedPreviewChrome(defaultMode.mermaidChrome, 'mermaid')
-      || defaultMode.latexChrome.shell
-    ) {
-      throw new Error(`Unexpected default Mermaid mode: ${JSON.stringify(defaultMode)}`);
-    }
-    const customLightNodeColors = await page.evaluate(() => {
-      const shape = document.querySelector<SVGElement>('[data-custom-node]')!;
-      const label = document.querySelector<HTMLElement>('.nodeLabel')!;
-      return {
-        fill: getComputedStyle(shape).fill,
-        stroke: getComputedStyle(shape).stroke,
-        label: getComputedStyle(label).color
-      };
-    });
-    if (JSON.stringify(customLightNodeColors) !== JSON.stringify({
-      fill: 'rgb(30, 41, 59)',
-      stroke: 'rgb(96, 165, 250)',
-      label: 'rgb(248, 250, 252)'
-    })) {
-      throw new Error(`Light Mermaid discarded explicit node colors: ${JSON.stringify(customLightNodeColors)}`);
-    }
-    const hiddenToolbarState = await page.evaluate(() => ({
-      mermaid: getComputedStyle(document.querySelector<HTMLElement>('.meo-mermaid-toolbar')!).opacity,
-      latex: getComputedStyle(document.querySelector<HTMLElement>('.meo-math-copy-actions')!).opacity
-    }));
-    if (hiddenToolbarState.mermaid !== '0' || hiddenToolbarState.latex !== '0') {
-      throw new Error(`Block toolbars were visible before hover: ${JSON.stringify(hiddenToolbarState)}`);
-    }
-          await assertEmbeddedMermaidSupportsPointerPanning(page);
-    await assertFullscreenDisablesTextSelection(page);
-    await assertFullscreenNavigationIsSessionLocal(page);
-    await assertFullscreenWheelKeepsPointerAnchored(page);
-    await assertFullscreenPanStaysWithinDiagramBounds(page);
-
-    const previewClickBefore = await page.evaluate(() => {
-      const editor = (window as any).__mermaidEditingEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-block')!;
-      return {
-        selectionHead: editor.view.state.selection.main.head,
-        scrollTop: editor.view.scrollDOM.scrollTop,
-        blockTop: block.getBoundingClientRect().top
-      };
-    });
-    const previewClickPoint = await page.$eval('.meo-mermaid-block', (block) => {
-      const rect = block.getBoundingClientRect();
-      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-    });
-    await page.mouse.move(previewClickPoint.x, previewClickPoint.y);
-    await page.waitForFunction(() => {
-      const mermaid = document.querySelector<HTMLElement>('.meo-mermaid-toolbar');
-      const latex = document.querySelector<HTMLElement>('.meo-math-copy-actions');
-      return mermaid?.classList.contains('is-block-hovered')
-        && getComputedStyle(mermaid).opacity === '1'
-        && !latex?.classList.contains('is-block-hovered')
-        && getComputedStyle(latex!).opacity === '0';
-    });
-    const hoveredToolbarState = await page.evaluate(() => ({
-      mermaid: {
-        hovered: document.querySelector('.meo-mermaid-toolbar')?.classList.contains('is-block-hovered'),
-        opacity: getComputedStyle(document.querySelector<HTMLElement>('.meo-mermaid-toolbar')!).opacity
-      },
-      latex: {
-        hovered: document.querySelector('.meo-math-copy-actions')?.classList.contains('is-block-hovered'),
-        opacity: getComputedStyle(document.querySelector<HTMLElement>('.meo-math-copy-actions')!).opacity
-      }
-    }));
-    if (
-      !hoveredToolbarState.mermaid.hovered ||
-      hoveredToolbarState.mermaid.opacity !== '1' ||
-      hoveredToolbarState.latex.hovered ||
-      hoveredToolbarState.latex.opacity !== '0'
-    ) {
-      throw new Error(`Mermaid hover revealed the wrong toolbar: ${JSON.stringify(hoveredToolbarState)}`);
-    }
-    await page.mouse.down();
-    await waitForFrames(page, 2);
-    const previewPointerDown = await page.evaluate(() => ({
-      preview: Boolean(document.querySelector('.meo-mermaid-block')),
-      editing: Boolean(document.querySelector('.meo-mermaid-editing-block')),
-      sourceVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .some((line) => line.textContent?.includes('node24 --> node25') && getComputedStyle(line).display !== 'none'),
-      buttonLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label')
-    }));
-    await page.mouse.up();
-    await waitForFrames(page, 4);
-    const previewClickAfter = await page.evaluate(() => {
-      const editor = (window as any).__mermaidEditingEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-block');
-      return {
-        selectionHead: editor.view.state.selection.main.head,
-        scrollTop: editor.view.scrollDOM.scrollTop,
-        blockTop: block?.getBoundingClientRect().top ?? null,
-        preview: Boolean(block),
-        editing: Boolean(document.querySelector('.meo-mermaid-editing-block')),
-        buttonLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label')
-      };
-    });
-    if (
-      previewClickAfter.selectionHead !== previewClickBefore.selectionHead ||
-      Math.abs(previewClickAfter.scrollTop - previewClickBefore.scrollTop) > 1 ||
-      previewClickAfter.blockTop === null ||
-      Math.abs(previewClickAfter.blockTop - previewClickBefore.blockTop) > 1 ||
-      !previewClickAfter.preview ||
-      previewClickAfter.editing ||
-      previewClickAfter.buttonLabel !== 'Preview, Switch to split view'
-    ) {
-      throw new Error(`Clicking Mermaid preview changed editor state: ${JSON.stringify({
-        before: previewClickBefore,
-        pointerDown: previewPointerDown,
-        after: previewClickAfter
-      })}`);
-    }
-    if (
-      !previewPointerDown.preview ||
-      previewPointerDown.editing ||
-      previewPointerDown.sourceVisible ||
-      previewPointerDown.buttonLabel !== 'Preview, Switch to split view'
-    ) {
-      throw new Error(`Pressing Mermaid preview temporarily revealed source: ${JSON.stringify(previewPointerDown)}`);
-    }
-
-    const latexHoverPoint = await page.$eval('.meo-latex-math-viewport', (block) => {
-      block.scrollIntoView({ block: 'center' });
-      const rect = block.getBoundingClientRect();
-      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-    });
-    await waitForFrames(page);
-    await page.mouse.move(latexHoverPoint.x, latexHoverPoint.y);
-    await page.waitForFunction(() => {
-      const mermaid = document.querySelector<HTMLElement>('.meo-mermaid-toolbar');
-      const latex = document.querySelector<HTMLElement>('.meo-math-copy-actions');
-      return !mermaid?.classList.contains('is-block-hovered')
-        && getComputedStyle(mermaid!).opacity === '0'
-        && latex && getComputedStyle(latex).opacity === '1';
-    });
-    const latexHoveredToolbarState = await page.evaluate(() => ({
-      mermaid: {
-        hovered: document.querySelector('.meo-mermaid-toolbar')?.classList.contains('is-block-hovered'),
-        opacity: getComputedStyle(document.querySelector<HTMLElement>('.meo-mermaid-toolbar')!).opacity
-      },
-      latex: {
-        hovered: document.querySelector('.meo-math-copy-actions')?.parentElement?.matches(':hover'),
-        opacity: getComputedStyle(document.querySelector<HTMLElement>('.meo-math-copy-actions')!).opacity
-      }
-    }));
-    if (
-      latexHoveredToolbarState.mermaid.hovered ||
-      latexHoveredToolbarState.mermaid.opacity !== '0' ||
-      !latexHoveredToolbarState.latex.hovered ||
-      latexHoveredToolbarState.latex.opacity !== '1'
-    ) {
-      throw new Error(`Formula hover revealed the wrong toolbar: ${JSON.stringify(latexHoveredToolbarState)}`);
-    }
-
-    await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(26, 'upper'));
-    await waitForFrames(page);
-    const lineJumpMode = await page.evaluate(() => {
-      const innerView = (document.querySelector<HTMLElement>('.meo-mermaid-editing-block') as any)
-        ?.__meoMermaidEditingController?.innerView;
-      const selection = innerView?.state.selection.main;
-      return {
-        source: Boolean(document.querySelector('.meo-mermaid-editing-block.is-source')),
-        selectedLine: selection ? innerView.state.doc.lineAt(selection.from).text : null
-      };
-    });
-    if (!lineJumpMode.source || lineJumpMode.selectedLine !== 'node24 --> node25') {
-      throw new Error(`Line jump did not reveal the target Mermaid source line: ${JSON.stringify(lineJumpMode)}`);
-    }
-    await page.evaluate(() => {
-      (window as any).__mermaidToolbarBeforeModeChange = document.querySelector('.meo-mermaid-toolbar');
-      (window as any).__mermaidModeButtonBeforeModeChange = document.querySelector('.meo-mermaid-mode-btn');
-      (window as any).__mermaidControlsBeforeModeChange = Array.from(
-        document.querySelector('.meo-mermaid-toolbar')?.querySelectorAll(':scope > :is(button, [role="button"])') ?? []
-      );
-    });
-    await clickVisibleBlockModeButton(page, 'mermaid');
-    await page.waitForFunction(() => {
-      const toolbar = document.querySelector<HTMLElement>('.meo-mermaid-toolbar');
-      return toolbar?.classList.contains('is-block-hovered')
-        && getComputedStyle(toolbar).opacity === '1'
-        && document.activeElement === toolbar.querySelector('.meo-mermaid-mode-btn');
-    });
-    const mermaidToolbarAfterModeChange = await page.evaluate(() => ({
-      hovered: document.querySelector('.meo-mermaid-toolbar')?.classList.contains('is-block-hovered'),
-      opacity: getComputedStyle(document.querySelector<HTMLElement>('.meo-mermaid-toolbar')!).opacity,
-      previewOwned: document.querySelector('.meo-mermaid-toolbar')?.parentElement
-        ?.classList.contains('meo-rendered-block-preview') ?? false,
-      focused: document.activeElement === document.querySelector('.meo-mermaid-mode-btn'),
-      sameToolbar: (window as any).__mermaidToolbarBeforeModeChange === document.querySelector('.meo-mermaid-toolbar'),
-      sameButton: (window as any).__mermaidModeButtonBeforeModeChange === document.querySelector('.meo-mermaid-mode-btn'),
-      sameControls: (window as any).__mermaidControlsBeforeModeChange.every(
-        (control: Element, index: number) => control === document.querySelector('.meo-mermaid-toolbar')?.querySelectorAll(':scope > :is(button, [role="button"])')[index]
-      )
-    }));
-    if (
-      !mermaidToolbarAfterModeChange.hovered ||
-      mermaidToolbarAfterModeChange.opacity !== '1' ||
-      !mermaidToolbarAfterModeChange.previewOwned ||
-      !mermaidToolbarAfterModeChange.focused ||
-      !mermaidToolbarAfterModeChange.sameToolbar ||
-      !mermaidToolbarAfterModeChange.sameButton ||
-      !mermaidToolbarAfterModeChange.sameControls
-    ) {
-      throw new Error(`Mermaid toolbar was recreated after returning to preview: ${JSON.stringify(mermaidToolbarAfterModeChange)}`);
-    }
-
-    await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(56, 'upper'));
-    await waitForFrames(page);
-    const latexLineJumpMode = await page.evaluate(() => {
-      const view = (window as any).__mermaidEditingEditor.view;
-      return { source: Boolean(document.querySelector('.meo-math-live-result')),
-        selectedLine: view.state.doc.lineAt(view.state.selection.main.head).text, focused: view.hasFocus };
-    });
-    if (!latexLineJumpMode.source || latexLineJumpMode.selectedLine !== '\\frac{a}{b}' || !latexLineJumpMode.focused) {
-      throw new Error('Line jump did not reveal main-editor math source: ' + JSON.stringify(latexLineJumpMode));
-    }
-    await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(1, 'top'));
-    await waitForFrames(page);
-
-    await page.evaluate(() => {
-      const editor = (window as any).__mermaidEditingEditor;
-      const samples: Array<{
-        scrollTop: number;
-        toolbarTop: number | null;
-        blockPresent: boolean;
-      }> = [];
-      (window as any).__mermaidSelectAllTrace = new Promise((resolve) => {
-        let remaining = 12;
-        const sample = () => {
-          const block = document.querySelector<HTMLElement>(
-            '.meo-mermaid-block, .meo-mermaid-editing-block'
-          );
-          samples.push({
-            scrollTop: editor.view.scrollDOM.scrollTop,
-            toolbarTop: document.querySelector<HTMLElement>('.meo-mermaid-toolbar')
-              ?.getBoundingClientRect().top ?? null,
-            blockPresent: Boolean(block)
-          });
-          remaining -= 1;
-          if (remaining <= 0) {
-            resolve(samples);
-            return;
-          }
-          requestAnimationFrame(sample);
-        };
-        sample();
-      });
-    });
-    const selectAllPoint = await page.$eval(
-      '.meo-mermaid-toolbar .meo-select-all-code-btn',
-      (button) => {
-        const rect = button.getBoundingClientRect();
-        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-      }
-    );
-    await page.mouse.move(selectAllPoint.x, selectAllPoint.y);
-    await page.waitForFunction(() => {
-      const toolbar = document.querySelector<HTMLElement>('.meo-mermaid-toolbar');
-      return toolbar?.classList.contains('is-block-hovered')
-        && getComputedStyle(toolbar).pointerEvents === 'auto';
-    });
-    const selectAllHitTarget = await page.evaluate(({ x, y }) => {
-      const target = document.elementFromPoint(x, y)?.closest('button, [role="button"]');
-      return {
-        className: target?.getAttribute('class') ?? null,
-        label: target?.getAttribute('aria-label') ?? null
-      };
-    }, selectAllPoint);
-    if (selectAllHitTarget.label !== 'Select all code') {
-      throw new Error(`Mermaid select-all backing plate missed hit testing: ${JSON.stringify({
-        selectAllPoint,
-        selectAllHitTarget
-      })}`);
-    }
-    await page.mouse.click(selectAllPoint.x, selectAllPoint.y);
-    const selectAllTrace = await page.evaluate(async () => (
-      await (window as any).__mermaidSelectAllTrace
-    )) as Array<{ scrollTop: number; toolbarTop: number | null; blockPresent: boolean }>;
-    const scrollValues = selectAllTrace.map((sample) => sample.scrollTop);
-    const toolbarTopValues = selectAllTrace
-      .map((sample) => sample.toolbarTop)
-      .filter((value): value is number => value !== null);
-    const scrollSpan = Math.max(...scrollValues) - Math.min(...scrollValues);
-    const toolbarTopSpan = Math.max(...toolbarTopValues) - Math.min(...toolbarTopValues);
-    if (
-      selectAllTrace.some((sample) => !sample.blockPresent) ||
-      scrollSpan > 1 ||
-      toolbarTopSpan > 1
-    ) {
-      throw new Error(`Mermaid select all visibly shifted the editor: ${JSON.stringify({
-        scrollSpan,
-        toolbarTopSpan,
-        samples: selectAllTrace
-      })}`);
-    }
-    await waitForFrames(page);
-    const selectAllMode = await page.evaluate(() => {
-      const innerView = (document.querySelector<HTMLElement>('.meo-mermaid-editing-block') as any)
-        ?.__meoMermaidEditingController?.innerView;
-      const selection = innerView?.state.selection.main;
-      return {
-        source: Boolean(document.querySelector('.meo-mermaid-editing-block.is-source')),
-        selectedText: selection ? innerView.state.doc.sliceString(selection.from, selection.to) : null,
-        controls: Array.from(document.querySelector('.meo-mermaid-toolbar')?.querySelectorAll(':scope > :is(button, [role="button"])') ?? [])
-          .map((element) => element.getAttribute('aria-label') ?? element.textContent)
-      };
-    });
-    if (!selectAllMode.source || !selectAllMode.selectedText?.startsWith('graph TD\nnode1 --> node2')) {
-      throw new Error(`Mermaid select all did not reveal and select source: ${JSON.stringify(selectAllMode)}`);
-    }
-    if (selectAllMode.controls.at(-2) !== 'Select all code' || selectAllMode.controls.at(-1) !== 'Copy') {
-      throw new Error(`Unexpected Mermaid action order: ${JSON.stringify(selectAllMode.controls)}`);
-    }
-    await clickVisibleBlockModeButton(page, 'mermaid');
-    await waitForFrames(page);
-
-    await clickVisibleBlockModeButton(page, 'mermaid');
-    await waitForFrames(page);
-    const splitMode = await page.evaluate(() => {
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
-      const source = block?.querySelector<HTMLElement>('.meo-mermaid-source-pane')!;
-      const sourceSticky = block?.querySelector<HTMLElement>('.meo-mermaid-source-sticky')!;
-      const preview = block?.querySelector<HTMLElement>('.meo-mermaid-preview-shell')!;
-      const sticky = block?.querySelector<HTMLElement>('.meo-mermaid-preview-sticky')!;
-      const previewBlock = block?.querySelector<HTMLElement>('.meo-mermaid-preview-sticky > .meo-mermaid-block')!;
-      const scroller = block?.querySelector<HTMLElement>('.meo-mermaid-source-editor .cm-scroller')!;
-      return {
-        sharedShell: block?.classList.contains('meo-rendered-block-mode-shell') ?? false,
-        shellMode: block?.dataset.meoRenderedBlockMode ?? null,
-        shellLayout: block?.dataset.meoRenderedBlockLayout ?? null,
-        controlsLabel: document.querySelector('.meo-mermaid-toolbar')?.getAttribute('aria-label') ?? null,
-        editorLabel: block?.getAttribute('aria-label') ?? null,
-        sourceText: block?.querySelector('.meo-mermaid-source-editor')?.textContent ?? '',
-        heightDelta: source && preview ? Math.abs(source.getBoundingClientRect().height - preview.getBoundingClientRect().height) : null,
-        sourceHeight: sourceSticky?.getBoundingClientRect().height ?? 0,
-        sourcePaneHeight: source?.getBoundingClientRect().height ?? 0,
-        sourceStickyPosition: sourceSticky ? getComputedStyle(sourceSticky).position : null,
-        previewHeight: previewBlock?.getBoundingClientRect().height ?? 0,
-        previewFrameHeight: sticky?.getBoundingClientRect().height ?? 0,
-        stickyPosition: sticky ? getComputedStyle(sticky).position : null,
-        hasInternalVerticalScroll: Boolean(scroller && scroller.scrollHeight > scroller.clientHeight + 1),
-        nextLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label')
-      };
-    });
-    if (!splitMode.sourceText.includes('node24 --> node25') || splitMode.heightDelta === null || splitMode.heightDelta > 1) {
-      throw new Error(`Split mode did not show equal-height complete source: ${JSON.stringify(splitMode)}`);
-    }
-    if (
-      !splitMode.sharedShell ||
-      splitMode.shellMode !== 'split' ||
-      splitMode.shellLayout !== 'side-by-side' ||
-      splitMode.controlsLabel !== 'Mermaid block controls at line 1' ||
-      splitMode.editorLabel !== 'Mermaid editor at line 1' ||
-      splitMode.hasInternalVerticalScroll ||
-      splitMode.sourceStickyPosition !== 'relative' ||
-      splitMode.stickyPosition !== 'relative' ||
-      splitMode.nextLabel !== 'Split, Switch to source'
-    ) {
-      throw new Error(`Unexpected split mode controls or scrolling: ${JSON.stringify(splitMode)}`);
-    }
-    if (
-      Math.abs(splitMode.sourcePaneHeight - splitMode.sourceHeight) > 1 ||
-      Math.abs(splitMode.previewFrameHeight - splitMode.sourcePaneHeight) > 1 ||
-      Math.abs(splitMode.previewHeight - splitMode.previewFrameHeight) > 1
-    ) {
-      throw new Error(`Split preview did not span the fenced block height: ${JSON.stringify({ defaultMode, splitMode })}`);
-    }
-
-    const lightSplitTheme = await page.$eval(
-      '.meo-mermaid-editing-block.is-split [data-themed-node]',
-      (node) => ({ fill: node.getAttribute('fill'), light: Boolean(node.closest('.meo-mermaid-light-theme')) })
-    );
-    await page.focus('.meo-mermaid-editing-block.is-split .meo-mermaid-zoom-btn[aria-label="Fullscreen"]');
-    await page.keyboard.press('Enter');
-    await page.waitForFunction(() => Boolean(
-      document.querySelector<HTMLElement>('.meo-mermaid-fullscreen .meo-mermaid-svg-wrapper')?.style.transform
-    ));
-    await page.click('.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Zoom in"]');
-    await page.evaluate(() => {
-      (window as any).__themeFullscreen = {
-        modal: document.querySelector('.meo-mermaid-fullscreen'),
-        wrapper: document.querySelector<HTMLElement>('.meo-mermaid-fullscreen .meo-mermaid-svg-wrapper'),
-        focus: document.activeElement
-      };
-      (window as any).__themeFullscreen.transform = (window as any).__themeFullscreen.wrapper.style.transform;
-    });
-    const assertFullscreenTheme = async (appearance: 'light' | 'dark', fill: string | null) => {
-      const state = await page.evaluate(({ appearance, fill }) => {
-        const before = (window as any).__themeFullscreen;
-        const modal = document.querySelector('.meo-mermaid-fullscreen');
-        const controls = [...document.querySelectorAll(
-          '.meo-mermaid-editing-block.is-split .meo-mermaid-zoom-controls, .meo-mermaid-fullscreen .meo-mermaid-zoom-controls'
-        )];
-        const opposite = appearance === 'light' ? 'dark' : 'light';
-        return {
-          sameModal: modal === before.modal,
-          sameWrapper: modal?.querySelector('.meo-mermaid-svg-wrapper') === before.wrapper,
-          sameCamera: before.wrapper.style.transform === before.transform,
-          sameFocus: document.activeElement === before.focus,
-          themedModal: modal?.classList.contains(`meo-mermaid-${appearance}-theme`) &&
-            !modal.classList.contains(`meo-mermaid-${opposite}-theme`),
-          themedControls: controls.length === 2 && controls.every((control) =>
-            control.classList.contains(`meo-mermaid-${appearance}-theme`) &&
-            !control.classList.contains(`meo-mermaid-${opposite}-theme`)),
-          sameFill: modal?.querySelector('[data-themed-node]')?.getAttribute('fill') === fill
-        };
-      }, { appearance, fill });
-      if (Object.values(state).some((value) => value !== true)) {
-        throw new Error(`Fullscreen Mermaid lost theme or session state: ${JSON.stringify({ appearance, state })}`);
-      }
-    };
-    await page.evaluate(() => {
-      const root = document.documentElement.style;
-      root.setProperty('--meo-code-background', '#1b1f23');
-      root.setProperty('--meo-surface-background', '#2f343d');
-      root.setProperty('--meo-background', '#24292e');
-      root.setProperty('--meo-foreground', '#e6edf3');
-      root.setProperty('--vscode-editor-background', '#24292e');
-      root.setProperty('--vscode-editor-foreground', '#e6edf3');
-      root.setProperty('--meo-code-palette-background', '#1b1f23');
-      root.setProperty('--meo-code-palette-foreground', '#e6edf3');
-      document.body.className = 'vscode-dark';
-      document.documentElement.dataset.editorAppearance = 'dark';
-      (window as any).MermaidEditingHarness.applyUiTheme('dark', true);
-      (window as any).MermaidEditingHarness.refreshMermaidTheme();
-      (window as any).__mermaidEditingEditor.refreshDecorations();
-    });
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    await waitForFrames(page, 2);
-    const darkSplitTheme = await page.$eval(
-      '.meo-mermaid-editing-block.is-split [data-themed-node]',
-      (node) => ({ fill: node.getAttribute('fill'), dark: Boolean(node.closest('.meo-mermaid-dark-theme')) })
-    );
-    if (!lightSplitTheme.light || !darkSplitTheme.dark || darkSplitTheme.fill === lightSplitTheme.fill) {
-      throw new Error(`Split Mermaid did not rerender for dark appearance: ${JSON.stringify({ lightSplitTheme, darkSplitTheme })}`);
-    }
-    await assertFullscreenTheme('dark', darkSplitTheme.fill);
-    await page.evaluate(() => {
-      const root = document.documentElement.style;
-      root.setProperty('--meo-code-background', '#f6f8fa');
-      root.setProperty('--meo-surface-background', '#ffffff');
-      root.setProperty('--meo-background', '#ffffff');
-      root.setProperty('--meo-foreground', '#24292f');
-      root.setProperty('--vscode-editor-background', '#ffffff');
-      root.setProperty('--vscode-editor-foreground', '#24292f');
-      root.setProperty('--meo-code-palette-background', '#f6f8fa');
-      root.setProperty('--meo-code-palette-foreground', '#24292f');
-      document.body.className = 'vscode-light';
-      document.documentElement.dataset.editorAppearance = 'light';
-      (window as any).MermaidEditingHarness.applyUiTheme('light', true);
-      (window as any).MermaidEditingHarness.refreshMermaidTheme();
-      (window as any).__mermaidEditingEditor.refreshDecorations();
-    });
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    await waitForFrames(page, 2);
-    const restoredLightSplitTheme = await page.$eval(
-      '.meo-mermaid-editing-block.is-split [data-themed-node]',
-      (node) => ({ fill: node.getAttribute('fill'), light: Boolean(node.closest('.meo-mermaid-light-theme')) })
-    );
-    if (!restoredLightSplitTheme.light || restoredLightSplitTheme.fill !== lightSplitTheme.fill) {
-      throw new Error(`Split Mermaid did not rerender for light appearance: ${JSON.stringify({ lightSplitTheme, restoredLightSplitTheme })}`);
-    }
-    await assertFullscreenTheme('light', restoredLightSplitTheme.fill);
-    await page.keyboard.press('Escape');
-    await page.waitForFunction(() => !document.querySelector('.meo-mermaid-fullscreen-scrim'));
-    await waitForFrames(page, 3);
-    const restoredThemeFocus = await page.evaluate(() => {
-      const target = document.querySelector<HTMLButtonElement>(
-        '.meo-mermaid-editing-block.is-split .meo-mermaid-zoom-btn[aria-label="Fullscreen"]'
-      );
-      return {
-        restored: Boolean(target?.isConnected && document.activeElement === target),
-        active: document.activeElement?.className,
-        target: target?.className,
-        visibility: target ? getComputedStyle(target).visibility : null
-      };
-    });
-    if (!restoredThemeFocus.restored) throw new Error(`Theme rerender prevented fullscreen exit from restoring the current trigger focus: ${JSON.stringify(restoredThemeFocus)}`);
-
-    await page.evaluate(() => {
-      const editor = (window as any).__mermaidEditingEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
-      const viewportTop = editor.view.scrollDOM.getBoundingClientRect().top;
-      editor.view.scrollDOM.scrollTop += block.getBoundingClientRect().top - viewportTop + 240;
-    });
-    await waitForFrames(page);
-    const codeTallerScroll = await page.evaluate(() => {
-      const editor = (window as any).__mermaidEditingEditor;
-      const viewportTop = editor.view.scrollDOM.getBoundingClientRect().top;
-      const sourceTop = document.querySelector<HTMLElement>('.meo-mermaid-source-sticky')!.getBoundingClientRect().top;
-      const previewTop = document.querySelector<HTMLElement>('.meo-mermaid-preview-sticky')!.getBoundingClientRect().top;
-      return { viewportTop, sourceTop, previewTop };
-    });
-    if (
-      Math.abs(codeTallerScroll.previewTop - codeTallerScroll.sourceTop) > 3 ||
-      codeTallerScroll.previewTop >= codeTallerScroll.viewportTop - 100
-    ) {
-      throw new Error(`Fixed split panes did not scroll together: ${JSON.stringify(codeTallerScroll)}`);
-    }
-    await page.evaluate(() => {
-      (window as any).__mermaidEditingEditor.view.scrollDOM.scrollTop = 0;
-    });
-    await waitForFrames(page);
-
-    await page.click('.meo-mermaid-source-editor .cm-content');
-    await page.keyboard.down('Control');
-    await page.keyboard.press('End');
-    await page.keyboard.up('Control');
-    await page.keyboard.press('Enter');
-    await page.keyboard.type('EDITED_NODE --> EDITED_TARGET');
-    await waitForFrames(page);
-    const editedText = await page.evaluate(() =>
-      (window as any).__mermaidEditingEditor.view.state.doc.toString()
-    );
-    if (!editedText.includes('EDITED_NODE --> EDITED_TARGET')) {
-      throw new Error('Editing split source did not update the outer Markdown document');
-    }
-    await page.evaluate(() => (window as any).__mermaidEditingEditor.undo());
-    await waitForFrames(page);
-    const undoText = await page.evaluate(() =>
-      (window as any).__mermaidEditingEditor.view.state.doc.toString()
-    );
-    if (undoText.includes('EDITED_NODE --> EDITED_TARGET')) {
-      throw new Error('Outer editor undo did not revert Mermaid source editing');
-    }
-    await page.evaluate(() => (window as any).__mermaidEditingEditor.redo());
-    await waitForFrames(page);
-    const redoText = await page.evaluate(() =>
-      (window as any).__mermaidEditingEditor.view.state.doc.toString()
-    );
-    if (!redoText.includes('EDITED_NODE --> EDITED_TARGET')) {
-      throw new Error('Outer editor redo did not restore Mermaid source editing');
-    }
-
-    await clickVisibleBlockModeButton(page, 'mermaid');
-    await waitForFrames(page);
-    const codeMode = await page.evaluate(() => ({
-      code: Boolean(document.querySelector('.meo-mermaid-editing-block.is-source')),
-      preview: Boolean(document.querySelector('.meo-mermaid-preview-shell')),
-      nextLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label')
-    }));
-    if (!codeMode.code || codeMode.preview || codeMode.nextLabel !== 'Source, Switch to preview') {
-      throw new Error(`Unexpected Mermaid code mode: ${JSON.stringify(codeMode)}`);
-    }
-
-    await clickVisibleBlockModeButton(page, 'mermaid');
-    await waitForFrames(page);
-    await page.evaluate(() => {
-      const editor = (window as any).__mermaidEditingEditor;
-      editor.setSearchQuery('node24');
-      editor.findNext('node24', { focusEditor: false });
-    });
-    await waitForFrames(page);
-    if (!(await page.$('.meo-mermaid-editing-block.is-split')) || !(await page.$('.meo-mermaid-source-editor .meo-search-match-active'))) {
-      throw new Error('Search match did not temporarily reveal Mermaid split mode');
-    }
-
-    await page.evaluate(() => {
-      const editor = (window as any).__mermaidEditingEditor;
-      editor.view.dispatch({ selection: { anchor: editor.view.state.doc.length } });
-    });
-    await waitForFrames(page);
-    if (!(await page.$('.meo-mermaid-block')) || (await page.$('.meo-mermaid-editing-block'))) {
-      throw new Error('Moving the selection away did not restore Mermaid preview mode');
-    }
-
-    await page.evaluate(() => (window as any).__mermaidEditingEditor.findNext('node24', { focusEditor: false }));
-    await waitForFrames(page);
-    if (!(await page.$('.meo-mermaid-editing-block.is-split'))) {
-      throw new Error('Search navigation did not reapply temporary Mermaid split mode');
-    }
-
-    await clickVisibleBlockModeButton(page, 'mermaid');
-    await waitForFrames(page);
-    if (!(await page.$('.meo-mermaid-editing-block.is-source')) || (await page.$('.meo-mermaid-preview-shell'))) {
-      throw new Error('Manual mode change did not override temporary Mermaid split mode');
-    }
-
-    await clickVisibleBlockModeButton(page, 'mermaid');
-    await waitForFrames(page);
-    if (!(await page.$('.meo-mermaid-block')) || (await page.$('.meo-mermaid-editing-block'))) {
-      throw new Error('Manual preview mode remained overridden by the previous search match');
-    }
-
-    await page.evaluate(() => (window as any).__mermaidEditingEditor.setSearchQuery(''));
-    await waitForFrames(page);
-    if (!(await page.$('.meo-mermaid-block')) || (await page.$('.meo-mermaid-editing-block'))) {
-      throw new Error('Closing search did not restore Mermaid preview mode');
-    }
-
-    await page.setViewport({ width: 700, height: 720, deviceScaleFactor: 1 });
-    await clickVisibleBlockModeButton(page, 'mermaid');
-    await waitForFrames(page);
-    const narrowLayout = await page.evaluate(() => {
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
-      const source = block?.querySelector<HTMLElement>('.meo-mermaid-source-pane')!;
-      const preview = block?.querySelector<HTMLElement>('.meo-mermaid-preview-shell')!;
-      return {
-        sharedShell: block?.classList.contains('meo-rendered-block-mode-shell') ?? false,
-        shellMode: block?.dataset.meoRenderedBlockMode ?? null,
-        shellLayout: block?.dataset.meoRenderedBlockLayout ?? null,
-        columns: block ? getComputedStyle(block).gridTemplateColumns.split(' ').length : 0,
-        previewBelowSource: Boolean(source && preview && preview.getBoundingClientRect().top >= source.getBoundingClientRect().bottom - 1),
-        sourceStickyPosition: source
-          ? getComputedStyle(source.querySelector<HTMLElement>('.meo-mermaid-source-sticky')!).position
-          : null,
-        stickyPosition: preview
-          ? getComputedStyle(preview.querySelector<HTMLElement>('.meo-mermaid-preview-sticky')!).position
-          : null
-      };
-    });
-    if (
-      narrowLayout.columns !== 1 ||
-      !narrowLayout.sharedShell ||
-      narrowLayout.shellMode !== 'split' ||
-      narrowLayout.shellLayout !== 'side-by-side' ||
-      !narrowLayout.previewBelowSource ||
-      narrowLayout.sourceStickyPosition !== 'relative' ||
-      narrowLayout.stickyPosition !== 'relative'
-    ) {
-      throw new Error(`Unexpected narrow Mermaid split layout: ${JSON.stringify(narrowLayout)}`);
-    }
-
-    await page.setViewport({ width: 1100, height: 720, deviceScaleFactor: 1 });
-    await page.evaluate(() => {
-      const previous = (window as any).__mermaidEditingEditor;
-      previous.destroy();
-      document.getElementById('app')!.replaceChildren();
-      (window as any).MermaidEditingHarness.applyCodeTheme('light');
-      const prelude = Array.from({ length: 40 }, (_, index) => `prelude ${index + 1}`);
-      (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
-        parent: document.getElementById('app')!,
-        text: [
-          ...prelude,
-          '```mermaid',
-          'graph TD',
-          'A --> B',
-          '%% TALL_PREVIEW',
-          '```',
-          '',
-          '```typescript',
-          'const normalCodeStyle = true;',
-          '```'
-        ].join('\n'),
-        initialMode: 'live',
-        onApplyChanges() {}
-      });
-    });
-    await waitForFrames(page);
-    await page.evaluate(() => (window as any).__mermaidEditingEditor.setMode('source'));
-    await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(43, 'center'));
-    await page.waitForFunction(() => {
-      const view = (window as any).__mermaidEditingEditor.view;
-      const position = view.state.doc.toString().indexOf('graph TD') + 1;
-      const target = view.domAtPos(position).node;
-      const element = target instanceof HTMLElement ? target : target.parentElement;
-      return element ? getComputedStyle(element).color === 'rgb(0, 0, 0)' : false;
-    });
-    const outerMermaidTokenColors = await page.evaluate(() => {
-      const view = (window as any).__mermaidEditingEditor.view;
-      const source = view.state.doc.toString();
-      const colorAt = (position: number): string | null => {
-        const target = view.domAtPos(position).node;
-        const element = target instanceof HTMLElement ? target : target.parentElement;
-        return element ? getComputedStyle(element).color : null;
-      };
-      const graph = source.indexOf('graph TD');
-      const edge = source.indexOf('A --> B');
-      return [colorAt(graph + 1), colorAt(graph + 7), colorAt(edge), colorAt(edge + 3), colorAt(edge + 6)];
-    });
-    await page.evaluate(() => (window as any).__mermaidEditingEditor.setMode('live'));
-    await waitForFrames(page, 8);
-    await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(42, 'center'));
-    await waitForFrames(page);
-    await clickVisibleBlockModeButton(page, 'mermaid');
-    await waitForFrames(page);
-    await page.waitForFunction((expectedColors) => {
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split');
-      const view = (block as any)?.__meoMermaidEditingController?.innerView;
-      if (!view) return false;
-      const source = view.state.doc.toString();
-      const colorAt = (position: number): string | null => {
-        const target = view.domAtPos(position).node;
-        const element = target instanceof HTMLElement ? target : target.parentElement;
-        return element ? getComputedStyle(element).color : null;
-      };
-      const graph = source.indexOf('graph TD');
-      const edge = source.indexOf('A --> B');
-      const actualColors = [
-        colorAt(graph + 1), colorAt(graph + 7), colorAt(edge), colorAt(edge + 3), colorAt(edge + 6)
-      ];
-      return JSON.stringify(actualColors) === JSON.stringify(expectedColors);
-    }, { timeout: 3000 }, outerMermaidTokenColors);
-    const innerMermaidTokenColors = await page.evaluate(() => {
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
-      const view = (block as any).__meoMermaidEditingController?.innerView;
-      const source = view.state.doc.toString();
-      const colorAt = (position: number): string | null => {
-        const target = view.domAtPos(position).node;
-        const element = target instanceof HTMLElement ? target : target.parentElement;
-        return element ? getComputedStyle(element).color : null;
-      };
-      const graph = source.indexOf('graph TD');
-      const edge = source.indexOf('A --> B');
-      return [colorAt(graph + 1), colorAt(graph + 7), colorAt(edge), colorAt(edge + 3), colorAt(edge + 6)];
-    });
-    if (JSON.stringify(innerMermaidTokenColors) !== JSON.stringify(outerMermaidTokenColors)) {
-      throw new Error(`Mermaid source token palette differs from outer Source mode: ${JSON.stringify({ outerMermaidTokenColors, innerMermaidTokenColors })}`);
-    }
-    await page.evaluate(() => (window as any).MermaidEditingHarness.applyCodeTheme('dark'));
-    await page.waitForFunction(() => {
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split');
-      const view = (block as any)?.__meoMermaidEditingController?.innerView;
-      if (!view) return false;
-      const position = view.state.doc.toString().indexOf('graph TD') + 1;
-      const target = view.domAtPos(position).node;
-      const element = target instanceof HTMLElement ? target : target.parentElement;
-      return element ? getComputedStyle(element).color === 'rgb(212, 212, 212)' : false;
-    }, { timeout: 3000 });
-    await page.evaluate(() => (window as any).MermaidEditingHarness.applyCodeTheme('light'));
-    await page.waitForFunction(() => {
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split');
-      const view = (block as any)?.__meoMermaidEditingController?.innerView;
-      if (!view) return false;
-      const position = view.state.doc.toString().indexOf('graph TD') + 1;
-      const target = view.domAtPos(position).node;
-      const element = target instanceof HTMLElement ? target : target.parentElement;
-      return element ? getComputedStyle(element).color === 'rgb(0, 0, 0)' : false;
-    }, { timeout: 3000 });
-    const shortSplitLayout = await page.evaluate(() => {
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
-      const sourcePane = block?.querySelector<HTMLElement>('.meo-mermaid-source-pane')!;
-      const sourceSticky = block?.querySelector<HTMLElement>('.meo-mermaid-source-sticky')!;
-      const preview = block?.querySelector<HTMLElement>('.meo-mermaid-preview-shell')!;
-      const previewSticky = block?.querySelector<HTMLElement>('.meo-mermaid-preview-sticky')!;
-      const codeStyle = (window as any).__collectMermaidCodeStyle('.meo-mermaid-editing-block.is-split');
-      return {
-        blockHeight: block?.getBoundingClientRect().height ?? 0,
-        sourcePaneHeight: sourcePane?.getBoundingClientRect().height ?? 0,
-        sourceHeight: sourceSticky?.getBoundingClientRect().height ?? 0,
-        sourceStickyPosition: sourceSticky ? getComputedStyle(sourceSticky).position : null,
-        previewHeight: preview?.getBoundingClientRect().height ?? 0,
-        previewNaturalHeight: previewSticky?.getBoundingClientRect().height ?? 0,
-        ...codeStyle
-      };
-    });
-    if (
-      shortSplitLayout.previewNaturalHeight <= shortSplitLayout.sourceHeight ||
-      Math.abs(shortSplitLayout.blockHeight - shortSplitLayout.previewNaturalHeight) > 1 ||
-      Math.abs(shortSplitLayout.sourcePaneHeight - shortSplitLayout.blockHeight) > 1 ||
-      shortSplitLayout.sourceStickyPosition !== 'relative'
-    ) {
-      throw new Error(`Short Mermaid split mode did not preserve natural pane heights: ${JSON.stringify(shortSplitLayout)}`);
-    }
-    if (JSON.stringify(shortSplitLayout.sourceStyle) !== JSON.stringify(shortSplitLayout.normalStyle)) {
-      throw new Error(`Mermaid split source style differs from normal code: ${JSON.stringify(shortSplitLayout)}`);
-    }
-    await assertBlockAreaClickKeepsViewport(
-      page,
-      '.meo-mermaid-editing-block.is-split',
-      '.meo-mermaid-source-pane',
-      0.9,
-      false
-    );
-    await page.evaluate(() => {
-      const editor = (window as any).__mermaidEditingEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
-      const viewportTop = editor.view.scrollDOM.getBoundingClientRect().top;
-      editor.view.scrollDOM.scrollTop += block.getBoundingClientRect().top - viewportTop + 240;
-    });
-    await waitForFrames(page);
-    const previewTallerScroll = await page.evaluate(() => {
-      const editor = (window as any).__mermaidEditingEditor;
-      const viewportTop = editor.view.scrollDOM.getBoundingClientRect().top;
-      const sourceTop = document.querySelector<HTMLElement>('.meo-mermaid-source-sticky')!.getBoundingClientRect().top;
-      const previewTop = document.querySelector<HTMLElement>('.meo-mermaid-preview-sticky')!.getBoundingClientRect().top;
-      return { viewportTop, sourceTop, previewTop };
-    });
-    if (
-      Math.abs(previewTallerScroll.sourceTop - previewTallerScroll.previewTop) > 3 ||
-      previewTallerScroll.previewTop >= previewTallerScroll.viewportTop - 100
-    ) {
-      throw new Error(`Fixed split panes did not scroll together: ${JSON.stringify(previewTallerScroll)}`);
-    }
-    await page.evaluate(() => {
-      (window as any).__mermaidEditingEditor.view.scrollDOM.scrollTop = 0;
-    });
-    await waitForFrames(page);
-    await clickVisibleBlockModeButton(page, 'mermaid');
-    await waitForFrames(page);
-    const shortSourceLayout = await page.evaluate(() => {
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-source')!;
-      const editor = block?.querySelector<HTMLElement>('.meo-mermaid-source-editor')!;
-      const codeStyle = (window as any).__collectMermaidCodeStyle('.meo-mermaid-editing-block.is-source');
-      return {
-        blockHeight: block?.getBoundingClientRect().height ?? 0,
-        editorHeight: editor?.getBoundingClientRect().height ?? 0,
-        ...codeStyle
-      };
-    });
-    if (shortSourceLayout.blockHeight - shortSourceLayout.editorHeight > 1) {
-      throw new Error(`Short Mermaid source mode contains vertical filler: ${JSON.stringify(shortSourceLayout)}`);
-    }
-    if (JSON.stringify(shortSourceLayout.sourceStyle) !== JSON.stringify(shortSourceLayout.normalStyle)) {
-      throw new Error(`Mermaid source style differs from normal code: ${JSON.stringify(shortSourceLayout)}`);
-    }
-
-    // Formula editing, fitting and copy behavior now live in test-display-math-editing.
-    const assertHistoryFocusForRenderedBlock = async ({
-      text,
-      modeButton,
-      editingBlock,
-      controllerProperty,
-      insert
-    }: {
-      text: string;
-      modeButton: string;
-      editingBlock: string;
-      controllerProperty: '__meoMermaidEditingController' | '__meoLatexMathEditingController';
-      insert: string;
-    }) => {
-      await page.evaluate((documentText) => {
-        const previous = (window as any).__mermaidEditingEditor;
-        previous.destroy();
+  const mount = async (text: string, width: number, language = 'en', appearance: 'light' | 'dark' = 'dark', editing = true) => {
+    await page.setViewport({ width, height: 800, deviceScaleFactor: 1 });
+    await page.evaluate(
+      ({ text, language, appearance }) => {
+        const w = window as any;
+        w.nativeEditor?.destroy();
         document.getElementById('app')!.replaceChildren();
-        (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
-          parent: document.getElementById('app')!,
-          text: documentText,
+        document.documentElement.dataset.editorAppearance = appearance;
+        w.MermaidEditingHarness.applyUiTheme(appearance, false);
+        w.MermaidEditingHarness.applyCodeTheme(appearance);
+        w.nativeEditor = w.MermaidEditingHarness.createEditor({
+          parent: document.getElementById('app'),
+          text,
           initialMode: 'live',
+          uiLanguage: language,
           onApplyChanges() {}
         });
-      }, text);
-      await waitForFrames(page);
-
-      // preview -> split, edit source, split -> source -> preview
-      await page.click(modeButton);
-      await waitForFrames(page);
-      const positions = await page.evaluate(({ blockSelector, property, insertedText }) => {
-        const block = document.querySelector<HTMLElement>(blockSelector)!;
-        const innerView = (block as any)[property].innerView;
-        const from = innerView.state.doc.length;
-        innerView.dispatch({
-          changes: { from, insert: insertedText },
-          selection: { anchor: from + insertedText.length }
+      },
+      { text, language, appearance }
+    );
+    if (!editing) await page.evaluate(() => {
+      const e = (window as any).nativeEditor;
+      e.scrollToLine(e.view.state.doc.lineAt(e.getText().indexOf('```mermaid')).number - 1, 'start');
+    });
+    await page.waitForSelector('.meo-mermaid-block svg');
+    await frames();
+    if (!editing) return;
+    await page.$eval('.meo-mermaid-mode-btn', (b) => (b as HTMLButtonElement).click());
+    await frames();
+    await page.waitForFunction(
+      () => document.querySelector('.meo-mermaid-toolbar')?.getAttribute('data-meo-mermaid-mode') === 'edit'
+    );
+    assert.equal(
+      await page.$$eval('.cm-content[contenteditable="true"]', (nodes) => nodes.length),
+      1,
+      'Mermaid uses the single main document input'
+    );
+    assert.equal(await page.$('.meo-mermaid-source-editor'), null, 'No internal source editor remains');
+  };
+  const assertNavigation = async () => {
+    fs.mkdirSync('.local/mermaid-navigation-acceptance', {recursive:true});
+    const text = Array.from({ length: 45 }, (_, i) => 'Before paragraph ' + i + '\n').join('\n') + '\n```mermaid\nflowchart TD\n' +
+      Array.from({ length: 35 }, (_, i) => `N${i}[Stage ${i}] --> N${i + 1}[Stage ${i + 1}]`).join('\n') + '\n' +
+      Array.from({ length: 65 }, (_, i) => '%% comment ' + i).join('\n') + '\n```\n\n' +
+      Array.from({ length: 30 }, (_, i) => 'After paragraph ' + i + '\n').join('\n');
+    const opening = text.indexOf('```mermaid'), first = text.indexOf('flowchart TD'), closing = text.lastIndexOf('```');
+    const geometry = () => page.evaluate(({opening}) => {
+      const view = (window as any).nativeEditor.view;
+      const bounds = (window as any).MermaidEditingHarness.editorViewportBounds(view);
+      const caret = view.coordsAtPos(view.state.selection.main.head);
+      const block = view.lineBlockAt(opening);
+      const toolbar = view.dom.querySelector(`.meo-mermaid-toolbar[data-meo-block-from="${opening}"]:not([data-meo-floating])`);
+      const header = toolbar?.getBoundingClientRect();
+      const blockTop = view.documentTop + block.top;
+      return {top:bounds.top, bottom:bounds.bottom, caretTop:caret?.top, caretBottom:caret?.bottom,
+        blockTop, headerTop:header?.top, headerBottom:header?.bottom, viewportTop:view.scrollDOM.getBoundingClientRect().top,
+        scroll:view.scrollDOM.scrollTop, head:view.state.selection.main.head, focused:view.hasFocus};
+    }, {opening});
+    const observeSwitch = (event: 'click' | 'keydown') => page.evaluate(({opening,event}) => {
+      const samples: (number | null)[] = [];
+      (window as any).__mermaidNavigationFrames = samples;
+      const sample = () => {
+        const toolbar = document.querySelector(`.meo-mermaid-toolbar[data-meo-block-from="${opening}"]:not([data-meo-floating])`);
+        samples.push(toolbar?.getBoundingClientRect().top ?? null);
+        if (samples.length < 20) requestAnimationFrame(sample);
+      };
+      window.addEventListener(event, () => requestAnimationFrame(sample), {capture:true,once:true});
+    }, {opening,event});
+    const assertFrames = async (top: number, message: string) => {
+      const samples = await page.evaluate(() => (window as any).__mermaidNavigationFrames as (number|null)[]);
+      assert.ok(samples.length === 20 && samples.every(value => value !== null && Math.abs(value - top) <= 1.5),
+        message + ': ' + JSON.stringify(samples));
+    };
+    for (const width of [520, 1200]) {
+      await mount(text, width, width === 520 ? 'zh-CN' : 'en', width === 520 ? 'light' : 'dark', false);
+      await page.evaluate(opening => {
+        const view = (window as any).nativeEditor.view;
+        view.scrollDOM.scrollTop = view.lineBlockAt(opening).top + 800;
+      }, opening);
+      await frames(12);
+      const sticky = '.meo-block-sticky-header:not([hidden]) .meo-mermaid-mode-btn';
+      await page.waitForSelector(sticky, {visible:true});
+      await observeSwitch('click');
+      await page.click(sticky);
+      await frames(24);
+      const entered = await geometry();
+      assert.equal(entered.head, first, 'Explicit edit starts on the first Mermaid source line');
+      assert.ok(Math.abs(entered.headerTop! - entered.viewportTop - 8) <= 1,
+        `Sticky edit aligns the block header 8px below the viewport top (${width}): ${JSON.stringify(entered)}`);
+      await assertFrames(entered.viewportTop + 8, 'Sticky edit must align before its first painted frame');
+      assert.ok(entered.focused && entered.caretTop! >= Math.max(entered.top, entered.headerBottom!) && entered.caretBottom! <= entered.bottom,
+        `Sticky edit must reveal the source caret below its header (${width}): ${JSON.stringify(entered)}`);
+      assert.equal(Boolean(await page.$('.meo-mermaid-inline-preview')), width === 1200,
+        'Navigation covers stacked and side-by-side layouts');
+      await page.screenshot({path:`.local/mermaid-navigation-acceptance/enter-${width}.png`});
+      for (const exit of ['button', 'escape']) {
+        if (exit === 'escape') {
+          await page.$eval('.meo-mermaid-toolbar:not([data-meo-floating]) .meo-mermaid-mode-btn', b=>(b as HTMLButtonElement).click());
+          await frames(12);
+        }
+        await page.evaluate(position => {
+          const view = (window as any).nativeEditor.view;
+          view.dispatch({selection:{anchor:position}, scrollIntoView:true}); view.focus();
+        }, text.indexOf('%% comment 55'));
+        await frames(16);
+        await observeSwitch(exit === 'button' ? 'click' : 'keydown');
+        if (exit === 'button') { await page.waitForSelector(sticky,{visible:true}); await page.click(sticky); }
+        else await page.keyboard.press('Escape');
+        await frames(24);
+        const finished = await geometry();
+        assert.ok(Math.abs(finished.headerTop! - finished.viewportTop - 8) <= 1,
+          `Explicit ${exit} aligns the block header (${width}): ${JSON.stringify(finished)}`);
+        await assertFrames(finished.viewportTop + 8, `Explicit ${exit} must not flash through other positions`);
+        assert.equal((await read()).text,text,'Navigation never changes Markdown');
+        assert.equal(await page.$('.meo-mermaid-editing-preview'),null,'Explicit exit folds source');
+        await page.screenshot({path:`.local/mermaid-navigation-acceptance/${exit}-${width}.png`});
+      }
+      await page.evaluate(() => { (window as any).nativeEditor.view.scrollDOM.scrollTop -= 12; });
+      await frames(12);
+      const visible = await geometry();
+      await page.$eval('.meo-mermaid-toolbar:not([data-meo-floating]) .meo-mermaid-mode-btn', b=>(b as HTMLButtonElement).click());
+      await frames(16);
+      const reopened = await geometry();
+      assert.ok(Math.abs(reopened.scroll - visible.scroll) <= 1,
+        'Entering an already visible source does not scroll: ' + JSON.stringify({visible,reopened}));
+      await page.keyboard.press('Escape');
+      await frames(20);
+      assert.ok(Math.abs((await geometry()).scroll - visible.scroll) <= 1,
+        'Finishing beside an already visible diagram does not scroll');
+      // A fully visible header is the only witness, even when its first source
+      // line would fall outside the viewport after expanding.
+      await page.evaluate(opening => {
+        const view = (window as any).nativeEditor.view;
+        const toolbar = view.dom.querySelector(`.meo-mermaid-toolbar[data-meo-block-from="${opening}"]:not([data-meo-floating])`)!;
+        const rect = toolbar.getBoundingClientRect();
+        view.scrollDOM.scrollTop += rect.bottom - view.scrollDOM.getBoundingClientRect().bottom + 2;
+      }, opening);
+      await frames(12);
+      const bottomHeader = await geometry();
+      await observeSwitch('click');
+      await page.$eval('.meo-mermaid-toolbar:not([data-meo-floating]) .meo-mermaid-mode-btn', b=>(b as HTMLButtonElement).click());
+      await frames(24);
+      const bottomEntered = await geometry();
+      assert.ok(Math.abs(bottomEntered.headerTop! - bottomHeader.headerTop!) <= 1,
+        `A fully visible bottom header stays in place on entry (${width}): ${JSON.stringify({bottomHeader,bottomEntered})}`);
+      await assertFrames(bottomHeader.headerTop!, 'Entering beside a visible bottom header must not flicker');
+      await observeSwitch('keydown');
+      await page.keyboard.press('Escape');
+      await frames(24);
+      assert.ok(Math.abs((await geometry()).headerTop! - bottomHeader.headerTop!) <= 1,
+        'A fully visible bottom header stays in place on exit');
+      await assertFrames(bottomHeader.headerTop!, 'Finishing beside a visible bottom header must not flicker');
+      await page.evaluate(() => { (window as any).nativeEditor.view.scrollDOM.scrollTop -= 14; });
+      await frames(12);
+      const clipped = await geometry();
+      assert.ok(clipped.headerTop! < clipped.bottom && clipped.headerBottom! > clipped.bottom,
+        'Fixture exposes only part of the original header');
+      await observeSwitch('click');
+      await page.$eval('.meo-mermaid-toolbar:not([data-meo-floating]) .meo-mermaid-mode-btn', b=>(b as HTMLButtonElement).click());
+      await frames(24);
+      await assertFrames(clipped.viewportTop + 8, 'A partially clipped header aligns to the top on entry');
+      await page.keyboard.press('Escape');
+      await frames(24);
+      await page.$eval('.meo-mermaid-toolbar:not([data-meo-floating]) .meo-mermaid-mode-btn', b=>(b as HTMLButtonElement).click());
+      await frames(12);
+      await page.evaluate(position => {
+        const view = (window as any).nativeEditor.view;
+        view.dispatch({selection:{anchor:position},scrollIntoView:true});view.focus();
+      }, closing + 3);
+      await frames(12);
+      await page.keyboard.press('ArrowDown');
+      await frames(24);
+      const left = await geometry();
+      assert.ok(left.head > closing + 3 && left.caretTop! >= left.top && left.caretBottom! <= left.bottom,
+        `Natural keyboard exit follows the outside caret (${width}): ${JSON.stringify(left)}`);
+      assert.equal(await page.$('.meo-mermaid-editing-preview'),null);
+      await page.$eval('.meo-mermaid-toolbar:not([data-meo-floating]) .meo-mermaid-mode-btn', b=>(b as HTMLButtonElement).click());
+      await frames(24);
+      const after = text.indexOf('After paragraph 8');
+      const point = await page.evaluate(async position => {
+        const view = (window as any).nativeEditor.view;
+        view.scrollDOM.scrollTop = view.lineBlockAt(position).top - 200;
+        for (let i=0;i<12;i++) await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
+        const caret = view.coordsAtPos(position)!;
+        return {x:caret.left+3,y:(caret.top+caret.bottom)/2};
+      },after);
+      assert.ok(await page.$('.meo-mermaid-editing-preview'), 'Preparing the prose click must keep source open');
+      await page.mouse.click(point.x,point.y);
+      await frames(24);
+      const clicked = await geometry();
+      assert.ok(clicked.head >= after && clicked.head <= after + 'After paragraph 8'.length &&
+        clicked.caretTop! >= clicked.top && clicked.caretBottom! <= clicked.bottom,
+        `Clicking prose follows its caret without returning to the diagram (${width}): ${JSON.stringify(clicked)}`);
+      assert.equal(await page.$('.meo-mermaid-editing-preview'),null);
+      assert.equal((await read()).text,text);
+      await page.evaluate(opening => {
+        const view = (window as any).nativeEditor.view;
+        view.scrollDOM.scrollTop = view.lineBlockAt(opening).top + 800;
+      },opening);
+      await frames(12);
+      await page.waitForSelector(sticky,{visible:true});
+      await page.click(sticky);
+      await frames(2);
+      const beforeWheel = await geometry();
+      await page.mouse.move(width/2,400);
+      await page.mouse.wheel({deltaY:400});
+      await frames(12);
+      const wheeled = await geometry();
+      assert.ok(wheeled.scroll > beforeWheel.scroll + 100, 'A new wheel gesture supersedes the edit reveal');
+      await frames(24);
+      assert.ok(Math.abs((await geometry()).scroll-wheeled.scroll) <= 2,
+        'Settling a reveal must not pull back a later wheel gesture');
+      const tail = text.slice(0, opening) + '```mermaid\nflowchart LR\nA --> B\n' +
+        Array.from({length:65}, (_, i) => '%% tail comment ' + i).join('\n') + '\n```';
+      await mount(tail, width, width === 520 ? 'zh-CN' : 'en', width === 520 ? 'light' : 'dark', false);
+      await page.$eval('.meo-mermaid-toolbar:not([data-meo-floating]) .meo-mermaid-mode-btn', b=>(b as HTMLButtonElement).click());
+      await frames(24);
+      await page.evaluate(position => {
+        const view = (window as any).nativeEditor.view;
+        view.dispatch({selection:{anchor:position},scrollIntoView:true}); view.focus();
+      }, tail.indexOf('%% tail comment 55'));
+      await frames(16);
+      await observeSwitch('keydown');
+      await page.keyboard.press('Escape');
+      await frames(24);
+      const boundary = await geometry();
+      const atEnd = await page.evaluate(() => {
+        const view = (window as any).nativeEditor.view;
+        return Math.abs(view.scrollDOM.scrollTop - (view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight)) <= 1;
+      });
+      assert.ok(boundary.headerTop! >= boundary.viewportTop && boundary.headerBottom! <= boundary.bottom && atEnd,
+        'Document-end clamping keeps the original header visible: ' + JSON.stringify(boundary));
+      await assertFrames(boundary.headerTop!, 'Document-end exit must not flicker while clamping');
+      assert.equal((await read()).text, tail, 'Exiting at the document end never inserts a line');
+      console.log(`Mermaid explicit/natural navigation passed (${width})`);
+    }
+  };
+  const assertKeyboardEntry = async () => {
+    fs.mkdirSync('.local/mermaid-navigation-acceptance', {recursive:true});
+    const text = Array.from({length:35}, (_, i) => 'Before ' + i + '\n').join('\n') +
+      '\n```mermaid\nflowchart TD\nA-->B-->C-->D-->E-->F-->G-->H-->I-->J-->K-->L-->M-->N-->O\n```\n\n' +
+      Array.from({length:35}, (_, i) => 'After ' + i + '\n').join('\n');
+    const opening = text.indexOf('```mermaid'), closing = text.lastIndexOf('```');
+    for (const {width,height} of [{width:520,height:800},{width:1200,height:800},{width:1200,height:360}])
+    for (const key of ['ArrowUp','ArrowLeft','ArrowDown','ArrowRight']) {
+      const forward = key === 'ArrowDown' || key === 'ArrowRight';
+      await mount(text, width, width === 520 ? 'zh-CN' : 'en', width === 520 ? 'light' : 'dark', false);
+      await page.setViewport({width,height,deviceScaleFactor:1});
+      await page.evaluate(({position,height}) => {
+        const view = (window as any).nativeEditor.view;
+        view.dispatch({selection:{anchor:position}});
+        view.scrollDOM.scrollTop = view.lineBlockAt(position).top - Math.min(400,height-100);
+        view.focus();
+      }, {position:forward ? opening - 1 : closing + 4,height});
+      await frames(24);
+      assert.equal(await page.$('.meo-mermaid-editing-preview'),null, 'Keyboard entry starts in reading mode');
+      const before = await page.evaluate(() => (window as any).nativeEditor.view.scrollDOM.scrollTop);
+      await page.keyboard.press(key);
+      await frames(24);
+      const entered = await page.evaluate(() => {
+        const view = (window as any).nativeEditor.view;
+        const bounds = (window as any).MermaidEditingHarness.editorViewportBounds(view);
+        const caret = view.coordsAtPos(view.state.selection.main.head);
+        return {head:view.state.selection.main.head, caretTop:caret?.top, caretBottom:caret?.bottom,
+          top:bounds.top,bottom:bounds.bottom,scroll:view.scrollDOM.scrollTop};
+      });
+      assert.equal(entered.head, forward ? opening : closing + (key === 'ArrowLeft' ? 3 : 0),
+        key + ' enters the corresponding fence');
+      assert.ok(await page.$('.meo-mermaid-editing-preview'), key + ' expands the Mermaid source');
+      assert.ok(entered.caretTop! >= entered.top && entered.caretBottom! <= entered.bottom,
+        `Entering a tall diagram must keep the final caret visible (${width}x${height}/${key}): ${JSON.stringify(entered)}`);
+      if (forward) assert.ok(Math.abs(entered.scroll-before) <= 1, 'An already visible entry caret needs no scroll');
+      assert.equal((await read()).text,text,'Natural entry does not change Markdown');
+      if (key === 'ArrowUp') await page.screenshot({path:`.local/mermaid-navigation-acceptance/keyboard-entry-${width}-${height}.png`});
+      console.log(`Tall Mermaid keyboard entry passed (${width}x${height}/${key})`);
+    }
+  };
+  const assertKeyboardBoundaryStability = async () => {
+    fs.mkdirSync('.local/mermaid-navigation-acceptance', {recursive:true});
+    const text = Array.from({length:35}, (_, i) => 'Before ' + i + '\n').join('\n') +
+      '\n```mermaid\nflowchart TD\n' + Array.from({length:70}, (_, i) => `N${i}[Stage ${i}] --> N${i+1}[Stage ${i+1}]`).join('\n') +
+      '\n```\n\n' + Array.from({length:35}, (_, i) => 'After ' + i + '\n').join('\n');
+    const opening = text.indexOf('```mermaid'), closing = text.lastIndexOf('```');
+    for (const width of [520,1200]) for (const fromAbove of [false,true]) for (const vertical of [true,false])
+    for (const screenTop of width===1200 && !fromAbove && vertical ? [650,45] : [fromAbove?160:650]) {
+      const outside = fromAbove ? opening-1 : closing+4;
+      await mount(text,width,width===520?'zh-CN':'en',width===520?'light':'dark',false);
+      await page.evaluate(({outside,screenTop}) => {
+        const view = (window as any).nativeEditor.view;
+        view.dispatch({selection:{anchor:outside}});
+        view.scrollDOM.scrollTop = view.lineBlockAt(outside).top - screenTop;
+        view.focus();
+      },{outside,screenTop});
+      await frames(24);
+      const boundary = () => page.evaluate(outside => {
+        const view = (window as any).nativeEditor.view;
+        const caret = view.coordsAtPos(view.state.selection.main.head);
+        const bounds = (window as any).MermaidEditingHarness.editorViewportBounds(view);
+        return {top:view.coordsAtPos(outside)?.top,caretTop:caret?.top,caretBottom:caret?.bottom,
+          viewportTop:bounds.top,viewportBottom:bounds.bottom,head:view.state.selection.main.head,lineHeight:view.defaultLineHeight};
+      },outside);
+      const before = await boundary();
+      for (let cycle=0;cycle<3;cycle++) for (const entering of [true,false]) {
+        const backward = entering !== fromAbove;
+        await page.keyboard.press(vertical ? backward ? 'ArrowUp':'ArrowDown' : backward ? 'ArrowLeft':'ArrowRight');
+        await frames(24);
+        const after = await boundary();
+        assert.ok(after.caretTop!>=after.viewportTop && after.caretBottom!<=after.viewportBottom,
+          'Boundary retention must preserve the existing visible-caret baseline: '+JSON.stringify(after));
+        if (entering && !fromAbove && width===520) {
+          assert.ok(Math.abs(after.caretTop!-(before.caretTop!-before.lineHeight))<=1.5,
+            'A stacked preview between the fence and prose must preserve the natural caret row: '+JSON.stringify({before,after}));
+        } else assert.ok(after.top!==undefined && Math.abs(after.top-before.top!)<=(screenTop<80?before.lineHeight+1.5:1.5),
+          `Keyboard boundary stays at its original screen Y (${width}/${fromAbove}/${cycle}/${entering}): ${JSON.stringify({before,after})}`);
+        const editing = await page.$$eval(`.meo-mermaid-toolbar[data-meo-block-from="${opening}"]`,
+          nodes => nodes.some(node => (node as HTMLElement).dataset.meoMermaidMode==='edit'));
+        assert.equal(editing,entering,'The visible toolbar follows the natural boundary transition');
+        if (cycle===0 && vertical && !fromAbove && screenTop>80) await page.screenshot({
+          path:`.local/mermaid-navigation-acceptance/boundary-${width}-${entering?'edit':'read'}.png`
         });
-        return { before: from, after: from + insertedText.length };
-      }, { blockSelector: editingBlock, property: controllerProperty, insertedText: insert });
-      await waitForFrames(page);
-      await page.click(modeButton);
-      await waitForFrames(page);
-      await page.click(modeButton);
-      await waitForFrames(page);
-
-      await page.evaluate(() => (window as any).__mermaidEditingEditor.undo());
-      await waitForFrames(page);
-      const previewUndo = await page.evaluate(({ blockSelector, property }) => {
-        const block = document.querySelector<HTMLElement>(blockSelector);
-        const innerView = block ? (block as any)[property]?.innerView : null;
-        return {
-          preview: block === null,
-          head: innerView?.state.selection.main.head ?? null,
-          focused: innerView?.hasFocus ?? false
+      }
+      assert.equal((await read()).text,text);
+      console.log(`Mermaid keyboard boundary roundtrip passed (${width}/${fromAbove?'above':'below'}/${vertical?'vertical':'horizontal'}/${screenTop})`);
+    }
+  };
+  const assertSidePreviewViewport = async () => {
+    const text = 'Before\n\n```mermaid\nflowchart TD\n' +
+      Array.from({ length: 65 }, (_, i) => `N${i}[Stage ${i}] --> N${i + 1}[Stage ${i + 1}]`).join('\n') +
+      '\n```\n\nAfter';
+    const geometry = () => page.evaluate(() => {
+      const v = (window as any).nativeEditor.view;
+      const pane = document.querySelector('.meo-mermaid-inline-preview')!;
+      const p = pane.getBoundingClientRect();
+      const canvas = pane.querySelector('.meo-mermaid-editing-preview')!.getBoundingClientRect();
+      const svg = pane.querySelector('.meo-mermaid-svg-wrapper > svg')!.getBoundingClientRect();
+      const viewport = v.scrollDOM.getBoundingClientRect();
+      return { paneTop: p.top, paneBottom: p.bottom, canvasTop: canvas.top, canvasBottom: canvas.bottom,
+        svgTop: svg.top, svgBottom: svg.bottom, viewportTop: viewport.top, viewportBottom: viewport.bottom };
+    });
+    fs.mkdirSync('.local/mermaid-preview-viewport-acceptance', { recursive: true });
+    for (const [width, height, language, appearance] of [
+      [1200, 800, 'en', 'dark'], [960, 620, 'zh-CN', 'light']
+    ] as const) {
+      await mount(text, width, language, appearance);
+      await page.waitForSelector('.meo-mermaid-inline-preview');
+      // Keep the document below fixed editor chrome, as in the full Webview.
+      await page.$eval('#app', app => (app as HTMLElement).style.cssText = 'margin-top:38px;height:calc(100% - 38px)');
+      await page.setViewport({ width, height });
+      await frames(12);
+      await page.$eval('.meo-mermaid-preview-controls button', button => {
+        for (let i = 0; i < 10; i++) (button as HTMLButtonElement).click();
+      });
+      await page.mouse.move(250, 400);
+      await page.mouse.wheel({ deltaY: 650 });
+      await frames(12);
+      for (const resizedHeight of [height, height - 140, height + 80]) {
+        await page.setViewport({ width, height: resizedHeight });
+        await frames(12);
+        const g = await geometry();
+        await page.screenshot({ path: `.local/mermaid-preview-viewport-acceptance/${appearance}-${resizedHeight}.png` });
+        assert.ok(g.paneTop < g.viewportTop && g.paneBottom > g.viewportBottom &&
+          g.svgTop < g.canvasTop && g.svgBottom > g.viewportBottom,
+          'The long Mermaid block and zoomed diagram span the reading viewport: ' + JSON.stringify(g));
+        assert.ok(Math.abs(g.canvasBottom - g.viewportBottom) <= 1,
+          'The sticky side preview fills the viewport down to its bottom: ' + JSON.stringify(g));
+      }
+      await page.mouse.wheel({ deltaY: 1600 });
+      await frames(12);
+      const end = await geometry();
+      assert.ok(end.paneBottom <= end.viewportBottom && Math.abs(end.canvasBottom - end.paneBottom) <= 1,
+        'The side preview stops at the Mermaid block bottom: ' + JSON.stringify(end));
+      assert.equal((await read()).text, text, 'Preview geometry never changes Markdown');
+      await page.$eval('#app', app => (app as HTMLElement).removeAttribute('style'));
+    }
+    console.log('Mermaid side preview viewport contract passed');
+  };
+  await assertSidePreviewViewport();
+  assert.deepEqual(errors, []);
+  if (!process.argv.includes('--preview-viewport-only')) {
+  const boundaryOnly = process.argv.includes('--boundary-navigation-only');
+  if (!boundaryOnly && !process.argv.includes('--keyboard-navigation-only')) await assertNavigation();
+  if (!boundaryOnly) await assertKeyboardEntry();
+  await assertKeyboardBoundaryStability();
+  if (process.argv.includes('--navigation-only') || process.argv.includes('--keyboard-navigation-only') || boundaryOnly) {
+    assert.deepEqual(errors, []);
+    console.log('Mermaid navigation contract passed');
+    process.exitCode = 0;
+  } else {
+  const containers = [
+    { name: 'plain', before: 'Before\n\n', prefix: '' },
+    { name: 'list', before: 'Before\n\n- Parent\n\n', prefix: '  ' },
+    { name: 'nested-list', before: 'Before\n\n- Parent\n  - Child\n\n', prefix: '    ' },
+    { name: 'quote', before: 'Before\n\n', prefix: '> ' },
+    { name: 'quote-list', before: 'Before\n\n> - Parent\n>\n', prefix: '>   ' },
+    { name: 'footnote', before: 'Before[^1]\n\n[^1]: Note\n\n', prefix: '    ' }
+  ];
+  let cases = 0;
+  for (const width of [520, 1100])
+    for (const c of containers) {
+      const text =
+        c.before +
+        ['```mermaid', 'flowchart LR', '  A[Initial] --> B[End]', '```'].map((line) => c.prefix + line).join('\n') +
+        '\n\nAfter';
+      await mount(text, width);
+      assert.equal(await page.$$eval('[data-meo-code-line-number]', nodes => nodes.length), 0,
+        'Mermaid uses only the main document gutter');
+      const join = await page.$eval('.meo-mermaid-source-join', line => {
+        const preview = line.nextElementSibling!, a = line.getBoundingClientRect(), b = preview.getBoundingClientRect();
+        return { radius: getComputedStyle(line).borderBottomLeftRadius,
+          background: getComputedStyle(line).backgroundColor === getComputedStyle(preview).backgroundColor,
+          edges: [b.top - a.bottom, b.left - a.left, b.right - a.right] };
+      });
+      assert.ok(join.radius === '0px' && join.background && join.edges.every(distance => Math.abs(distance) <= 1),
+        `${c.name}/${width}: source and preview join continuously ${JSON.stringify(join)}`);
+      await page.waitForFunction(() => {
+        const e = (window as any).nativeEditor, v = e.view;
+        const color = (text: string) => {
+          const node = v.domAtPos(e.getText().indexOf(text) + 2).node;
+          return getComputedStyle(node.nodeType === Node.TEXT_NODE ? node.parentElement : node).color;
         };
-      }, { blockSelector: editingBlock, property: controllerProperty });
-
-      await page.evaluate(() => (window as any).__mermaidEditingEditor.redo());
-      await waitForFrames(page);
-      const splitRedo = await page.evaluate(({ blockSelector, property }) => {
-        const block = document.querySelector<HTMLElement>(blockSelector);
-        const innerView = block ? (block as any)[property]?.innerView : null;
-        return {
-          preview: block === null,
-          head: innerView?.state.selection.main.head ?? null,
-          focused: innerView?.hasFocus ?? false
-        };
-      }, { blockSelector: editingBlock, property: controllerProperty });
-
-      await page.click(modeButton);
-      await waitForFrames(page);
-      await page.click(modeButton);
-      await waitForFrames(page);
-      await page.evaluate(({ blockSelector, property, offset }) => {
-        const block = document.querySelector<HTMLElement>(blockSelector)!;
-        (block as any)[property].focusOffset(offset);
-      }, { blockSelector: editingBlock, property: controllerProperty, offset: positions.after });
+        return color('flowchart') !== color('Initial');
+      });
+      assert.equal((await read()).text, text, `${c.name}: opening does not modify Markdown`);
+      await select('Initial');
+      await page.keyboard.type('Changed');
+      await frames();
+      assert.equal(await page.$$eval('[data-meo-code-line-number]', nodes => nodes.length), 0,
+        'Input refresh does not restore Mermaid local numbers');
+      assert.equal((await read()).text, text.replace('Initial', 'Changed'));
+      await page.waitForFunction(() =>
+        document.querySelector('.meo-mermaid-block svg')?.textContent?.includes('Changed')
+      );
       await page.keyboard.down('Control');
       await page.keyboard.press('z');
       await page.keyboard.up('Control');
-      await waitForFrames(page);
-      const sourceUndo = await page.evaluate(({ blockSelector, property }) => {
-        const block = document.querySelector<HTMLElement>(blockSelector);
-        const innerView = block ? (block as any)[property]?.innerView : null;
-        return {
-          source: Boolean(block?.classList.contains('is-source')),
-          head: innerView?.state.selection.main.head ?? null,
-          focused: innerView?.hasFocus ?? false
-        };
-      }, { blockSelector: editingBlock, property: controllerProperty });
-
+      await frames();
+      assert.equal((await read()).text, text, `${c.name}: native undo`);
       await page.keyboard.down('Control');
       await page.keyboard.press('y');
       await page.keyboard.up('Control');
-      await waitForFrames(page);
-      const sourceRedo = await page.evaluate(({ blockSelector, property }) => {
-        const block = document.querySelector<HTMLElement>(blockSelector);
-        const innerView = block ? (block as any)[property]?.innerView : null;
-        return {
-          source: Boolean(block?.classList.contains('is-source')),
-          head: innerView?.state.selection.main.head ?? null,
-          focused: innerView?.hasFocus ?? false
-        };
-      }, { blockSelector: editingBlock, property: controllerProperty });
-
-      if (
-        !previewUndo.preview || previewUndo.head !== null || previewUndo.focused ||
-        !splitRedo.preview || splitRedo.head !== null || splitRedo.focused ||
-        !sourceUndo.source || sourceUndo.head !== positions.before || !sourceUndo.focused ||
-        !sourceRedo.source || sourceRedo.head !== positions.after || !sourceRedo.focused
-      ) {
-        throw new Error(`Rendered-block history did not preserve mode and focus its changed offset: ${JSON.stringify({ positions, previewUndo, splitRedo, sourceUndo, sourceRedo })}`);
+      await frames();
+      assert.equal((await read()).text, text.replace('Initial', 'Changed'), `${c.name}: native redo`);
+      await select('Changed');
+      await page.keyboard.press('ArrowRight');
+      await page.keyboard.press('Enter');
+      await frames();
+      assert.ok(
+        (await read()).text.includes('Changed\n' + c.prefix + ']'),
+        `${c.name}: Enter preserves the container exactly once`
+      );
+      await page.keyboard.press('Tab');
+      await frames();
+      assert.ok((await read()).text.includes('Changed\n' + c.prefix + '  ]'));
+      await page.keyboard.down('Shift');
+      await page.keyboard.press('Tab');
+      await page.keyboard.up('Shift');
+      await frames();
+      assert.ok((await read()).text.includes('Changed\n' + c.prefix + ']'));
+      await page.$eval('.meo-select-all-code-btn', (b) => (b as HTMLButtonElement).click());
+      await frames();
+      const selected = await read();
+      assert.ok(selected.anchor > selected.text.indexOf('```mermaid'));
+      assert.ok(selected.head < selected.text.lastIndexOf('```'));
+      await page.evaluate(() => {
+        (window as any).nativeEditor.pastePlainText('flowchart LR\nA[中文] --> B[结果]');
+      });
+      await frames();
+      assert.ok((await read()).text.includes(c.prefix + 'flowchart LR\n' + c.prefix + 'A[中文] --> B[结果]'));
+      await select('中文');
+      const client = await page.createCDPSession();
+      await client.send('Input.imeSetComposition', { text: '新', selectionStart: 1, selectionEnd: 1 });
+      await client.send('Input.imeSetComposition', { text: '新的', selectionStart: 2, selectionEnd: 2 });
+      await client.send('Input.insertText', { text: '新的' });
+      await client.detach();
+      await frames(12);
+      assert.ok((await read()).text.includes('A[新的]'));
+      assert.equal((await read()).focus, true);
+      const beforeMode = await read();
+      await page.evaluate(() => {
+        const e = (window as any).nativeEditor;
+        e.setMode('source');
+        e.setMode('live');
+      });
+      await frames();
+      assert.equal((await read()).head, beforeMode.head);
+      assert.equal((await read()).text, beforeMode.text);
+      await page.$eval('.meo-select-all-code-btn', (b) => (b as HTMLButtonElement).click());
+      await page.keyboard.press('Backspace');
+      await frames();
+      assert.ok(
+        (await read()).text.includes('```mermaid\n' + c.prefix + '\n' + c.prefix + '```'),
+        `${c.name}: empty source and fences survive`
+      );
+      assert.equal((await read()).focus, true);
+      await page.keyboard.type('flowchart LR\nA-->B');
+      await frames();
+      await page.$eval('.meo-mermaid-mode-btn', (b) => (b as HTMLButtonElement).click());
+      await frames();
+      assert.equal(await page.$('.meo-mermaid-inline-preview'), null);
+      assert.equal(
+        await page.$eval('.meo-mermaid-toolbar', (e) => (e as HTMLElement).dataset.meoMermaidMode),
+        'preview'
+      );
+      cases++;
+      console.log('Native Mermaid input:', c.name, width);
+    }
+  for (const [index, c] of containers.entries()) {
+    const payload = ['flowchart TD', 'A[Start] --> B[End]',
+      ...Array.from({ length: 80 }, (_, number) => '%% source comment ' + number +
+        ' reading context'.repeat(number % 13 === 0 ? 12 : 1))];
+    const text = c.before + ['```mermaid', ...payload, '```'].map(line => c.prefix + line).join('\n') + '\n\nAfter';
+    await mount(text, 1100, index % 2 ? 'zh-CN' : 'en', index % 2 ? 'light' : 'dark');
+    await page.waitForSelector('.meo-mermaid-inline-preview');
+    assert.equal(await page.$eval('.meo-mermaid-inline-preview .meo-native-source-preview-label', e => getComputedStyle(e).display), 'flex',
+      'Side layout shares the preview heading and its layout action');
+    assert.equal(await page.$eval('.meo-mermaid-inline-preview .meo-mermaid-layout-btn', e => e.textContent),
+      index % 2 ? '切换为上下' : 'Switch to rows');
+    const proseWidth = await page.evaluate(() => {
+      const v = (window as any).nativeEditor.view, n = v.domAtPos(2).node;
+      return (n.nodeType === Node.TEXT_NODE ? n.parentElement : n).closest('.cm-line').getBoundingClientRect().width;
+    });
+    await page.click('.meo-mermaid-layout-btn');
+    await frames();
+    assert.equal(await page.evaluate(() => {
+      const v = (window as any).nativeEditor.view, n = v.domAtPos(2).node;
+      return (n.nodeType === Node.TEXT_NODE ? n.parentElement : n).closest('.cm-line').getBoundingClientRect().width;
+    }), proseWidth, c.name + ': switching a block layout leaves prose width unchanged');
+    await page.evaluate(() => {
+      const e = (window as any).nativeEditor, v = e.view;
+      v.scrollDOM.scrollTop = v.lineBlockAt(e.getText().lastIndexOf('```')).top - 100;
+    });
+    await frames(12);
+    await page.waitForSelector('.meo-native-source-preview-label .meo-mermaid-layout-btn');
+    await page.click('.meo-mermaid-layout-btn');
+    await frames();
+    await page.evaluate(() => {
+      const e = (window as any).nativeEditor, v = e.view, pos = e.getText().indexOf('source comment 40');
+      v.dispatch({ selection: { anchor: pos + 5 } }); v.focus();
+    });
+    await frames();
+    await page.evaluate(() => {
+      const e = (window as any).nativeEditor, v = e.view;
+      v.scrollDOM.scrollTop = v.lineBlockAt(e.getText().indexOf('source comment 40')).top - 100;
+    });
+    await frames(12);
+    const middle = await page.evaluate(() => {
+      const v = (window as any).nativeEditor.view, pane = document.querySelector('.meo-mermaid-inline-preview')!;
+      const p = pane.getBoundingClientRect(), canvas = pane.querySelector('.meo-mermaid-editing-preview')!.getBoundingClientRect();
+      const viewport = v.scrollDOM.getBoundingClientRect(), caret = v.coordsAtPos(v.state.selection.main.head);
+      const n = v.domAtPos((window as any).nativeEditor.getText().indexOf('source comment 39')).node;
+      const wrapped = (n.nodeType === Node.TEXT_NODE ? n.parentElement : n).closest('.cm-line');
+      const walker = document.createTreeWalker(wrapped, NodeFilter.SHOW_TEXT), rights: number[] = [];
+      for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+        if (text.parentElement?.closest('.meo-md-code-container-prefix')) continue;
+        const range = document.createRange(); range.selectNodeContents(text);
+        for (const rect of range.getClientRects()) if (rect.width > 0) rights.push(rect.right);
       }
-    };
-
-    await assertHistoryFocusForRenderedBlock({
-      text: ['```mermaid', 'graph TD', 'A --> B', '```'].join('\n'),
-      modeButton: '.meo-mermaid-mode-btn',
-      editingBlock: '.meo-mermaid-editing-block',
-      controllerProperty: '__meoMermaidEditingController',
-      insert: '\nC --> D'
+      return { paneTop: p.top, canvasTop: canvas.top, canvasBottom: canvas.bottom,
+        diagramTop: pane.querySelector('.meo-mermaid-block')!.getBoundingClientRect().top,
+        viewportTop: viewport.top, viewportBottom: viewport.bottom, paneLeft: p.left,
+        caretRight: caret.right, wrapRight: Math.max(...rights) };
     });
-    await assertFullscreenExitRestoresReadingContext(page);
-    await assertLateFullscreenExitCannotCloseReplacementSession(page);
-    await assertFullscreenCleanupPreservesPrimaryCause(page);
-
+    assert.ok(middle.paneTop < middle.viewportTop && middle.canvasTop >= middle.viewportTop && middle.diagramTop >= middle.viewportTop + 28 &&
+      middle.canvasBottom <= middle.viewportBottom + 1 && middle.caretRight < middle.paneLeft && middle.wrapRight <= middle.paneLeft + 1,
+      `${c.name}: long source keeps its caret and sticky preview in separate visible columns ${JSON.stringify(middle)}`);
     await page.evaluate(() => {
-      const host = document.createElement('div');
-      host.id = 'localized-rendered-block-actions';
-      document.body.appendChild(host);
-      (window as any).__localizedRenderedBlockEditor = (window as any).MermaidEditingHarness.createEditor({
-        parent: host,
-        text: ['```mermaid', 'graph TD', 'A --> B', '```', '', '$$', 'x = 1', '$$'].join('\n'),
-        initialMode: 'live',
-        uiLanguage: 'zh-CN',
-        onApplyChanges() {}
-      });
+      const e = (window as any).nativeEditor, v = e.view;
+      v.scrollDOM.scrollTop = v.lineBlockAt(e.getText().lastIndexOf('```')).top - v.scrollDOM.clientHeight / 2;
     });
-    await page.waitForFunction(() => (
-      document.querySelectorAll('#localized-rendered-block-actions .meo-mermaid-toolbar .meo-code-block-pill').length === 2
-      && document.querySelectorAll('#localized-rendered-block-actions .meo-math-copy-actions .meo-copy-code-btn').length === 1
-    ));
-    const localizedRenderedBlockActions = await page.evaluate(() => ({
-      mermaid: Array.from(document.querySelectorAll<HTMLElement>(
-        '#localized-rendered-block-actions .meo-mermaid-toolbar .meo-code-block-pill'
-      )).map((button) => ({ tooltip: button.dataset.tooltip, label: button.getAttribute('aria-label') })),
-      latex: Array.from(document.querySelectorAll<HTMLElement>(
-        '#localized-rendered-block-actions .meo-math-copy-actions .meo-copy-code-btn'
-      )).map((button) => ({ tooltip: button.dataset.tooltip, label: button.getAttribute('aria-label') }))
-    }));
-    const expectedLocalizedActions = [
-      { tooltip: '全选代码', label: '全选代码' },
-      { tooltip: '复制', label: '复制' }
-    ];
-    if (
-      JSON.stringify(localizedRenderedBlockActions.mermaid) !== JSON.stringify(expectedLocalizedActions)
-      || JSON.stringify(localizedRenderedBlockActions.latex) !== JSON.stringify(expectedLocalizedActions.slice(1))
-    ) {
-      throw new Error(`Rendered-block actions did not use the editor UI language: ${JSON.stringify(localizedRenderedBlockActions)}`);
-    }
-    await page.evaluate(() => {
-      (window as any).__localizedRenderedBlockEditor.destroy();
-      document.getElementById('localized-rendered-block-actions')?.remove();
+    await frames(12);
+    const end = await page.evaluate(() => {
+      const e = (window as any).nativeEditor, v = e.view, pane = document.querySelector('.meo-mermaid-inline-preview')!;
+      const row = (position: number) => { const n = v.domAtPos(position).node;
+        return (n.nodeType === Node.TEXT_NODE ? n.parentElement : n).closest('.cm-line').getBoundingClientRect(); };
+      const closing = row(e.getText().lastIndexOf('```')), after = row(e.getText().lastIndexOf('After'));
+      const p = pane.getBoundingClientRect(), canvas = pane.querySelector('.meo-mermaid-editing-preview')!.getBoundingClientRect();
+      return { right: p.right - closing.right, bottom: p.bottom - closing.bottom,
+        withinBlock: canvas.bottom <= p.bottom + 1, beforeProse: p.bottom <= after.top };
     });
-
-    await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 1 });
-    await page.evaluate(() => {
-      (window as any).__mermaidEditingEditor.destroy();
-      document.getElementById('app')!.replaceChildren();
-      (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
-        parent: document.getElementById('app')!,
-        text: [
-          '```mermaid',
-          'flowchart LR',
-          'A[Input and project materials] --> B[Complete rules and defaults]',
-          'C[Selected language] --> D[Choose representative pages]',
-          'B --> E{Diagram problem exists}',
-          'D --> E',
-          'E -- Yes --> F[Clarify centrally]',
-          'E -- No --> G[Generate chapter and page allocation]',
-          'F --> G',
-          'G --> H[Copy template pages and fill content]',
-          'H --> I[Critical issue inspection]',
-          'I --> J[Deliver editable draft and replacement list]',
-          '%% WIDE_PREVIEW',
-          '```'
-        ].join('\n'),
-        initialMode: 'live',
-        onApplyChanges() {}
-      });
-    });
-    await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-block svg[width="2400"]')));
-    await clickVisibleBlockModeButton(page, 'mermaid');
-    await waitForFrames(page, 12);
-    const wideSplitBounds = await page.evaluate(() => {
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
-      const source = block.querySelector<HTMLElement>('.meo-mermaid-source-pane')!;
-      const preview = block.querySelector<HTMLElement>('.meo-mermaid-preview-shell')!;
-      const previewViewport = block.querySelector<HTMLElement>('.meo-mermaid-preview-sticky')!;
-      const previewBlock = previewViewport.querySelector<HTMLElement>('.meo-mermaid-block')!;
-      const root = block.getBoundingClientRect();
-      const sourceRect = source.getBoundingClientRect();
-      const previewRect = preview.getBoundingClientRect();
-      const previewViewportRect = previewViewport.getBoundingClientRect();
-      const previewBlockRect = previewBlock.getBoundingClientRect();
-      return {
-        root: { top: root.top, bottom: root.bottom, height: root.height },
-        source: { top: sourceRect.top, bottom: sourceRect.bottom, height: sourceRect.height },
-        preview: { top: previewRect.top, bottom: previewRect.bottom, height: previewRect.height },
-        previewViewport: {
-          top: previewViewportRect.top,
-          bottom: previewViewportRect.bottom,
-          height: previewViewportRect.height
-        },
-        previewBlock: { top: previewBlockRect.top, bottom: previewBlockRect.bottom, height: previewBlockRect.height }
-      };
-    });
-    if (
-      Math.abs(wideSplitBounds.source.top - wideSplitBounds.root.top) > 1 ||
-      Math.abs(wideSplitBounds.preview.top - wideSplitBounds.root.top) > 1 ||
-      Math.abs(wideSplitBounds.source.bottom - wideSplitBounds.root.bottom) > 1 ||
-      Math.abs(wideSplitBounds.preview.bottom - wideSplitBounds.root.bottom) > 1 ||
-      Math.abs(wideSplitBounds.previewViewport.top - wideSplitBounds.root.top) > 1 ||
-      Math.abs(wideSplitBounds.previewViewport.bottom - wideSplitBounds.root.bottom) > 1 ||
-      Math.abs(wideSplitBounds.previewBlock.top - wideSplitBounds.root.top) > 1 ||
-      Math.abs(wideSplitBounds.previewBlock.bottom - wideSplitBounds.root.bottom) > 1
-    ) {
-      throw new Error(`Wide Mermaid split panes did not span the fenced block: ${JSON.stringify(wideSplitBounds)}`);
-    }
-
-    console.log('Mermaid editing checks passed');
-  } finally {
-    await browser.close();
+    assert.ok(Math.abs(end.right) <= 1 && Math.abs(end.bottom) <= 1 && end.withinBlock && end.beforeProse,
+      `${c.name}: sticky preview stops at the block boundary ${JSON.stringify(end)}`);
+    assert.equal((await read()).text, text, 'Layout and scrolling never change Markdown');
   }
-}
-
-main()
-  .finally(() => fs.rmSync(tempDir, { recursive: true, force: true }))
-  .catch((error) => {
-    console.error(error instanceof Error ? error.stack : error);
-    process.exitCode = 1;
+  for (const appearance of ['light', 'dark'] as const) {
+    const sequence = 'Before\n\n> ```mermaid\n> sequenceDiagram\n>   participant Reader\n>   participant Editor\n>   Reader->>Editor: Edit document\n> ```\n\nAfter';
+    await mount(sequence, 1100, 'en', appearance);
+    await page.waitForFunction(() => {
+      const e = (window as any).nativeEditor, v = e.view;
+      const color = (text: string) => {
+        const node = v.domAtPos(e.getText().indexOf(text) + 2).node;
+        return getComputedStyle(node.nodeType === Node.TEXT_NODE ? node.parentElement : node).color;
+      };
+      return new Set(['sequenceDiagram', 'Reader', 'Edit document'].map(color)).size === 3;
+    });
+    assert.equal((await read()).text, sequence, 'Lazy Mermaid highlighting preserves original container source');
+    assert.equal((await read()).focus, true, 'Lazy highlighting preserves native editing focus');
+    await page.$eval('.meo-mermaid-layout-btn', b => (b as HTMLElement).click());
+    await frames(12);
+    const short = await page.evaluate(() => {
+      const pane = document.querySelector('.meo-mermaid-inline-preview')!.getBoundingClientRect();
+      const space = document.querySelector('.meo-mermaid-side-space')!.getBoundingClientRect();
+      return { height: pane.height, tail: space.height, right: pane.right - space.right, bottom: pane.bottom - space.bottom };
+    });
+    assert.ok(short.height >= 300 && short.tail > 0 && Math.abs(short.right) <= 1 && Math.abs(short.bottom) <= 1,
+      `Short source reserves only its missing preview height ${JSON.stringify(short)}`);
+    assert.equal((await read()).text, sequence, 'Reserving preview height does not add document lines');
+  }
+  const long =
+    'Before\n\n```mermaid\nflowchart TD\n' +
+    Array.from({ length: 20 }, (_, i) => `N${i} --> N${i + 1}`).join('\n') +
+    '\n```\n\nAfter';
+  await mount(long, 1200);
+  await page.waitForSelector('.meo-mermaid-inline-preview');
+  await page.evaluate(() => {
+    const e = (window as any).nativeEditor;
+    (window as any).sidePreviewWitness = document.querySelector('.meo-mermaid-inline-preview');
+    e.view.dispatch({selection:{anchor:e.getText().indexOf('N5'),head:0}}); e.view.focus();
   });
+  await frames();
+  assert.equal(await page.evaluate(() => document.querySelector('.meo-mermaid-inline-preview') === (window as any).sidePreviewWitness),
+    true, 'Cross-block selection keeps the current side layout and diagram');
+  await page.evaluate(() => {
+    const e = (window as any).nativeEditor;
+    e.view.dispatch({ selection: { anchor: e.getText().indexOf('N5'), head: e.getText().length } });
+  });
+  await frames();
+  assert.equal(await page.evaluate(() => document.querySelector('.meo-mermaid-inline-preview') === (window as any).sidePreviewWitness),
+    true, 'Forward cross-block selection also retains the side panel');
+  await page.keyboard.down('Control');
+  await page.keyboard.press('a');
+  await page.keyboard.up('Control');
+  await frames();
+  assert.equal(await page.evaluate(() => document.querySelector('.meo-mermaid-inline-preview') === (window as any).sidePreviewWitness),
+    true, 'Main-document select-all retains the editing layout');
+  await page.evaluate(() => ((window as any).nativeEditor.view.contentDOM as HTMLElement).blur());
+  await frames();
+  assert.equal(await page.evaluate(() => document.querySelector('.meo-mermaid-inline-preview') === (window as any).sidePreviewWitness),
+    true, 'Temporary blur retains the editing layout');
+  await select('N5');
+  const drag = await page.evaluate(() => {
+    const e = (window as any).nativeEditor, v = e.view;
+    v.scrollDOM.scrollTop = 0;
+    const from = v.coordsAtPos(e.getText().indexOf('N1'))!, to = v.coordsAtPos(2)!;
+    return { from: { x: from.left + 2, y: (from.top + from.bottom) / 2 },
+      to: { x: to.left + 2, y: (to.top + to.bottom) / 2 } };
+  });
+  await page.mouse.move(drag.from.x, drag.from.y);
+  await page.mouse.down();
+  await page.mouse.move(drag.to.x, drag.to.y, { steps: 12 });
+  await page.mouse.up();
+  await frames();
+  const dragged = await read();
+  assert.ok(dragged.anchor > long.indexOf('```mermaid') && dragged.head < long.indexOf('```mermaid'),
+    'Native mouse drag actually crosses from source into preceding prose');
+  assert.equal(await page.evaluate(() => document.querySelector('.meo-mermaid-inline-preview') === (window as any).sidePreviewWitness),
+    true, 'Native mouse drag retains the same side preview');
+  await select('N5');
+  await page.evaluate(() => {
+    document.body.classList.add('meo-content-max-width-enabled');
+    document.documentElement.style.setProperty('--meo-content-max-width', '700px');
+  });
+  await frames();
+  assert.ok(
+    (await page.$eval('.cm-content', (e) => e.getBoundingClientRect().width)) > 300,
+    'Side layout gives source its column width instead of inheriting full-page centering padding'
+  );
+  const beforeWidth = await page.$eval('.cm-scroller', (e) => e.getBoundingClientRect().width);
+  const beforePadding = await page.$eval('.meo-mermaid-inline-source', e => parseFloat(getComputedStyle(e).paddingRight));
+  const separator = await page.$eval('.meo-mermaid-inline-separator', (e) => {
+    const r = e.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + 100 };
+  });
+  await page.mouse.move(separator.x, separator.y);
+  await page.mouse.down();
+  await page.mouse.move(separator.x + 80, separator.y, { steps: 5 });
+  await page.mouse.up();
+  await frames();
+  assert.equal(await page.$eval('.cm-scroller', (e) => e.getBoundingClientRect().width), beforeWidth,
+    'Dragging a block separator does not resize the document viewport');
+  assert.ok(await page.$eval('.meo-mermaid-inline-source', e => parseFloat(getComputedStyle(e).paddingRight)) < beforePadding - 50,
+    'Dragging changes only this block source width');
+  await select('N10');
+  await page.keyboard.type('Edited');
+  await frames();
+  assert.ok(await page.$('.meo-mermaid-inline-preview'));
+  await page.$eval('.meo-mermaid-layout-btn', (b) => (b as HTMLButtonElement).click());
+  await frames();
+  assert.equal(await page.$('.meo-mermaid-inline-preview'), null);
+  await page.$eval('.meo-mermaid-mode-btn', (b) => (b as HTMLButtonElement).click());
+  await frames();
+  await page.$eval('.meo-mermaid-mode-btn', (b) => (b as HTMLButtonElement).click());
+  await frames();
+  assert.equal(await page.$('.meo-mermaid-inline-preview'), null, 'Manual stacked preference persists');
+  await page.$eval('.meo-mermaid-layout-btn', (b) => (b as HTMLButtonElement).click());
+  await frames();
+  await page.setViewport({ width: 520, height: 800 });
+  await frames();
+  assert.equal(await page.$('.meo-mermaid-inline-preview'), null);
+  await page.setViewport({ width: 1200, height: 800 });
+  await frames();
+  assert.ok(await page.$('.meo-mermaid-inline-preview'), 'Narrow fallback retains the preference');
+  await page.evaluate(() => {
+    const e = (window as any).nativeEditor;
+    e.view.dispatch({ changes: { from: e.getText().length, insert: '\n\n```mermaid\nflowchart LR\nSecond --> Chart\n```' } });
+    (window as any).sidePreviewWitness = document.querySelector('.meo-mermaid-inline-preview');
+    e.view.dispatch({ selection: { anchor: e.getText().indexOf('N5'), head: e.getText().indexOf('Second') + 3 } });
+  });
+  await frames();
+  assert.equal(await page.evaluate(() => document.querySelector('.meo-mermaid-inline-preview') === (window as any).sidePreviewWitness),
+    true, 'Selection ending inside another Mermaid does not switch the active diagram');
+  await page.evaluate(() => document.body.classList.remove('meo-content-max-width-enabled'));
+  for (const appearance of ['light', 'dark'] as const)
+    for (const language of ['zh-CN', 'en']) {
+      await mount('Before\n\n```mermaid\nflowchart LR\nA[Initial] --> B\n```\n\nAfter', 1100, language, appearance);
+      const copy = await page.$eval('.meo-copy-code-btn', (e) => e.getAttribute('aria-label'));
+      assert.match(copy ?? '', language === 'en' ? /Copy/ : /复制/);
+      assert.ok(await page.$('.meo-copy-image-btn'));
+      assert.ok(await page.$('.meo-select-all-code-btn'));
+      await select('Initial');
+      await page.keyboard.type('Unfinished[');
+      await frames(20);
+      await page.waitForSelector('.meo-mermaid-error-badge');
+      assert.match(
+        await page.$eval('.meo-mermaid-error-badge', (e) => e.textContent ?? ''),
+        language === 'en' ? /Mermaid error/ : /Mermaid 错误/
+      );
+      await page.$eval('.meo-copy-image-btn', (e) => e.dispatchEvent(new PointerEvent('pointerenter')));
+      assert.equal(await page.$eval('.meo-copy-image-btn', (e) => e.getAttribute('aria-disabled')), 'true');
+      fs.mkdirSync('.local/mermaid-native-acceptance', { recursive: true });
+      await page.screenshot({ path: `.local/mermaid-native-acceptance/${appearance}-${language}.png` });
+    }
+  assert.deepEqual(errors, []);
+  console.log(
+    `Native Mermaid editing passed: ${cases} container/width cases, six long-source containers, local layout, history, IME, controls and bilingual appearances`
+  );
+  }
+  }
+} catch (error) {
+  failure = error;
+}
+if (failure === undefined) await closeTestBrowser(browser);
+else await closeTestBrowser(browser, failure);

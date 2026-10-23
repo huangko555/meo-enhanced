@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
 import type { Frame, Page } from 'puppeteer-core';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 import exportRuntime from '../src/export/runtime';
@@ -7,6 +8,7 @@ const text = 'alpha beta\n\nA document selection witness.\n\n| Cell |\n| --- |\n
 const build = await Bun.build({ entrypoints: ['scripts/test-settings-window-production-entry.ts'], target: 'browser', format: 'iife' });
 if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 const bundle = await build.outputs[0]!.text();
+await mkdir('.local/focus-return-production', { recursive: true });
 const browser = await launchTestBrowser();
 let primaryError: unknown;
 
@@ -50,6 +52,130 @@ async function readEditor(frame: Frame) {
   });
 }
 
+async function settle(frame: Frame, count = 15): Promise<void> {
+  await frame.evaluate(async count => {
+    for (let index = 0; index < count; index++) await new Promise(requestAnimationFrame);
+  }, count);
+}
+
+async function checkOffscreenReturn(page: Page, frame: Frame, target: 'table' | 'document', side: 'above' | 'below', backward = false): Promise<void> {
+  const original = (await readEditor(frame)).text;
+  const fixture = side === 'below' ? 'Earlier reading content.\n\n'.repeat(30) + original : original;
+  await frame.evaluate(({ fixture, target }) => {
+    const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: fixture },
+      selection: { anchor: fixture.indexOf(target === 'table' ? 'Table selection' : 'alpha beta') + 2 }, scrollIntoView: true });
+    view.focus();
+  }, { fixture, target });
+  await settle(frame);
+  if (target === 'table') await (await frame.$('tbody .meo-md-html-table-cell-preview'))!.click();
+  await settle(frame);
+  const selection = await frame.evaluate(({ target, backward }) => {
+    const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+    const input = document.querySelector<HTMLTextAreaElement>('tbody textarea');
+    if (target === 'table') {
+      input!.focus(); input!.setSelectionRange(2, backward ? 7 : 2, backward ? 'backward' : 'none');
+    } else {
+      const start = view.state.doc.toString().indexOf('alpha beta') + 2;
+      view.dispatch({ selection: { anchor: backward ? start + 5 : start, head: start } }); view.focus();
+    }
+    (window as any).__windowReturnTarget = target === 'table' ? input : view.contentDOM;
+    return { anchor: view.state.selection.main.anchor, head: view.state.selection.main.head };
+  }, { target, backward });
+  const scroller = await frame.$eval('.editor-host > .cm-editor .cm-scroller', node => {
+    const rect = node.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  const bounds = await (await page.$('#webview'))!.boundingBox();
+  assert.ok(bounds);
+  await page.mouse.move(bounds.x + scroller.x, bounds.y + scroller.y);
+  await page.mouse.wheel({ deltaY: side === 'above' ? 700 : -700 });
+  await settle(frame);
+  const before = await frame.evaluate(({ target, side }) => {
+    const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+    const input = (window as any).__windowReturnTarget as HTMLElement;
+    const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+    const rect = target === 'table' ? input.getBoundingClientRect() : view.coordsAtPos(view.state.selection.main.head);
+    const viewport = scroller.getBoundingClientRect();
+    return { scrollTop: scroller.scrollTop, offscreen: !rect || (side === 'above' ? rect.bottom < viewport.top : rect.top > viewport.bottom), focused: document.activeElement === input,
+      start: input instanceof HTMLTextAreaElement ? input.selectionStart : null, end: input instanceof HTMLTextAreaElement ? input.selectionEnd : null };
+  }, { target, side });
+  const label = `${target}/${side}/${backward ? 'selection' : 'caret'}`;
+  assert.ok(before.offscreen && before.focused, `${label}: fixture must retain an offscreen editing target: ${JSON.stringify(before)}`);
+  if (target === 'table') assert.deepEqual({ start: before.start, end: before.end }, { start: 2, end: backward ? 7 : 2 }, `${label}: scrolling must retain the native range`);
+  if (target === 'table' && side === 'above') await page.screenshot({ path: '.local/focus-return-production/before.png' });
+  await page.focus('#host-control');
+  assert.equal(await frame.evaluate(() => document.hasFocus()), false);
+  await frame.evaluate(() => {
+    ((window as any).__windowReturnTarget as HTMLElement).blur();
+    (window as any).__returnScrollFrames = [];
+    (window as any).__sampleReturnScroll = true;
+    const sample = () => {
+      if (!(window as any).__sampleReturnScroll) return;
+      (window as any).__returnScrollFrames.push(document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!.scrollTop);
+      requestAnimationFrame(sample);
+    };
+    sample();
+  });
+  await returnToFrame(page);
+  await frame.evaluate(async () => {
+    // A native activation may restore the embedded input after the window's
+    // focus notification. Exercise Chromium's default focus scrolling too.
+    const input = (window as any).__windowReturnTarget as HTMLElement;
+    input.blur(); input.focus();
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
+    for (let index = 0; index < 15; index++) await new Promise(requestAnimationFrame);
+    (window as any).__sampleReturnScroll = false;
+  });
+  const frames = await frame.evaluate(() => (window as any).__returnScrollFrames as number[]);
+  if (target === 'table' && side === 'above') await page.screenshot({ path: '.local/focus-return-production/after.png' });
+  assert.ok(frames.every(top => Math.abs(top - before.scrollTop) <= 2),
+    `${label}: window return moved the reading viewport: before=${before.scrollTop}, frames=${JSON.stringify(frames)}`);
+  assert.equal(await frame.evaluate(() => document.activeElement === (window as any).__windowReturnTarget), true, `${label}: keyboard focus must return`);
+  if (target === 'table') {
+    assert.deepEqual(await readInput(frame, 'tbody textarea'), {
+      focused: true, value: 'Table selection', start: 2, end: backward ? 7 : 2,
+      direction: backward ? 'backward' : 'forward', scrollLeft: 0
+    }, `${label}: native selection must survive`);
+  } else {
+    const after = await readEditor(frame);
+    assert.deepEqual({ anchor: after.anchor, head: after.head }, selection, `${label}: document selection must survive`);
+  }
+  // A fresh wheel gesture must take ownership even inside the activation grace.
+  await frame.evaluate(() => { window.dispatchEvent(new Event('blur')); window.dispatchEvent(new Event('focus')); });
+  await page.mouse.wheel({ deltaY: side === 'above' ? -200 : 200 });
+  await settle(frame);
+  const moved = (await readEditor(frame)).scrollTop - before.scrollTop;
+  assert.ok(side === 'above' ? moved < -100 : moved > 100, `${label}: focus retention blocked a new wheel gesture: ${moved}`);
+  if (side === 'above') {
+    await frame.evaluate(() => { window.dispatchEvent(new Event('blur')); window.dispatchEvent(new Event('focus')); });
+    await page.keyboard.type('Q');
+    const expected = target === 'table' ? 'TaQble selection' : 'alQpha beta';
+    await frame.waitForFunction(expected => {
+      const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+      return view.state.doc.toString().includes(expected);
+    }, {}, expected);
+    assert.ok((await readEditor(frame)).scrollTop < before.scrollTop + moved - 100, `${label}: typing must still reveal the offscreen caret`);
+  } else {
+    const readingTop = (await readEditor(frame)).scrollTop;
+    await frame.evaluate(() => { window.dispatchEvent(new Event('blur')); window.dispatchEvent(new Event('focus')); });
+    await page.mouse.click(bounds.x + scroller.x, bounds.y + scroller.y);
+    const clicked = await readEditor(frame);
+    await frame.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } })));
+    await settle(frame);
+    const returned = await readEditor(frame);
+    assert.equal(returned.head, clicked.head, `${label}: late Host recovery must preserve the new click`);
+    assert.ok(Math.abs(returned.scrollTop - readingTop) <= 2, `${label}: a new document click must retain its reading viewport`);
+  }
+  await frame.evaluate(original => {
+    const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: original }, selection: { anchor: 8, head: 3 } }); view.focus();
+    document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!.scrollTop = 0;
+    delete (window as any).__windowReturnTarget;
+  }, original);
+  await settle(frame);
+}
+
 try {
   for (const mode of ['live', 'source', 'preview'] as const) {
     const page = await browser.newPage();
@@ -80,6 +206,12 @@ try {
         restoreReadingPositionOnOpen: false, vscodeTheme: null
       } })), { text, mode });
       await frame.waitForSelector('.editor-wrapper:not(.meo-preload-editor-shell) .cm-content');
+      if (mode !== 'preview') {
+        for (const side of ['above', 'below'] as const) {
+          if (mode === 'live') await checkOffscreenReturn(page, frame, 'table', side, side === 'below');
+          await checkOffscreenReturn(page, frame, 'document', side, side === 'below');
+        }
+      }
       await frame.evaluate(() => {
         const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
         view.dispatch({ selection: { anchor: 8, head: 3 } }); view.focus();

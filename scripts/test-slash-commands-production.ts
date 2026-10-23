@@ -53,10 +53,22 @@ try {
   });
   const placeAnchor = async (offset: number) => {
     await page.evaluate(() => (window as any).editor.view.dispatch({ scrollIntoView: true })); await settlePosition();
-    await page.evaluate(offset => {
+    const target = await page.evaluate(offset => {
       const g = window as any, view = g.editor.view, coords = view.coordsAtPos(g.slashAnchor ?? view.state.selection.main.head);
-      view.scrollDOM.scrollTop += coords.top - view.scrollDOM.getBoundingClientRect().top - offset;
-    }, offset); await settlePosition();
+      const viewport = view.scrollDOM.getBoundingClientRect();
+      return { x: viewport.right - 24, y: viewport.top + viewport.height / 2,
+        delta: coords.top - viewport.top - offset };
+    }, offset);
+    // Scrolling after typing is a new user intent, so retire input retention
+    // through the native wheel path before measuring the popup's edge layout.
+    await page.mouse.move(target.x, target.y);
+    await page.mouse.wheel({ deltaY: target.delta });
+    await settlePosition();
+    await page.waitForFunction(offset => {
+      const g = window as any, view = g.editor.view;
+      const coords = view.coordsAtPos(g.slashAnchor ?? view.state.selection.main.head);
+      return Math.abs(coords.top - view.scrollDOM.getBoundingClientRect().top - offset) < 1;
+    }, { timeout: 3000 }, offset);
   };
   const geometry = () => page.evaluate(() => {
     const g = window as any, view = g.editor.view, anchor = view.coordsAtPos(g.slashAnchor), popup = document.querySelector<HTMLElement>('.meo-input-suggestions')!, menu = popup.getBoundingClientRect(), scroller = view.scrollDOM.getBoundingClientRect();
@@ -115,7 +127,10 @@ try {
     }
     for (const language of ['en', 'zh-CN']) {
       await prepare(mode); await page.evaluate(language => (window as any).editor.setUiLanguage(language), language);
-      await page.keyboard.type('/table3*4'); await open();
+      await page.keyboard.type('/'); await open();
+      assert.equal(await page.$$eval('.meo-slash-suggestion', rows => rows.every(row => row.querySelector('.meo-input-suggestion-detail')?.textContent?.trim())), true, 'every slash command retains its description');
+      assert.equal(await page.$eval('[data-command="bold"] .meo-input-suggestion-detail', row => row.textContent), language === 'en' ? 'Bold' : '粗体');
+      await page.keyboard.type('table3*4'); await open();
       assert.equal(await page.$eval('.meo-suggestion-command', row => row.textContent), '/table3*4');
       assert.equal(await page.$eval('.meo-input-suggestion-detail', row => row.textContent), language === 'en' ? '3 data rows × 4 cols' : '3 数据行 × 4 列');
       await page.keyboard.press('Enter'); await waitText(emptyMarkdownTable(4, 3)!);
@@ -628,11 +643,16 @@ try {
   const cellTop = () => page.$eval('.meo-input-suggestions', element => element.getBoundingClientRect().top);
   const originalCellTop = await cellTop();
   const cellBeforeScroll = await page.evaluate(() => ({ input: document.activeElement!.getBoundingClientRect().top, scroll: (window as any).editor.view.scrollDOM.scrollTop }));
-  await page.evaluate(() => { (window as any).editor.view.scrollDOM.scrollTop -= 40; }); await settlePosition();
+  const wheelPoint = await page.evaluate(() => {
+    const rect = (window as any).editor.view.scrollDOM.getBoundingClientRect();
+    return { x: rect.right - 18, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.move(wheelPoint.x, wheelPoint.y); await page.mouse.wheel({ deltaY: -40 }); await settlePosition();
   const cellAfterScroll = await page.evaluate(() => ({ input: document.activeElement!.getBoundingClientRect().top, scroll: (window as any).editor.view.scrollDOM.scrollTop, popup: document.querySelector('.meo-input-suggestions')!.getBoundingClientRect().top }));
   assert.ok(Math.abs(cellAfterScroll.input - cellBeforeScroll.input - 40) < 2, 'the native cell actually moves with the document scroll');
   assert.ok(Math.abs(cellAfterScroll.popup - originalCellTop - 40) < 2, 'native cell popup follows document scrolling: ' + JSON.stringify({ before: cellBeforeScroll, after: cellAfterScroll, originalCellTop }));
-  await page.evaluate(() => { const input = document.activeElement as HTMLTextAreaElement, view = (window as any).editor.view; view.scrollDOM.scrollTop += input.getBoundingClientRect().bottom - view.scrollDOM.getBoundingClientRect().top + 40; });
+  const hideDelta = await page.evaluate(() => document.activeElement!.getBoundingClientRect().bottom - (window as any).editor.view.scrollDOM.getBoundingClientRect().top + 40);
+  await page.mouse.wheel({ deltaY: hideDelta });
   await closed();
   await page.evaluate(() => { (document.activeElement as HTMLTextAreaElement).scrollIntoView({ block: 'center' }); }); await settlePosition(); await closed();
   await page.setViewport({ width: 1000, height: 320 });

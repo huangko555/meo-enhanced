@@ -5,6 +5,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { mock } from 'bun:test';
 import { URI, Utils } from 'vscode-uri';
+import { saveClipboardImageFile } from '../src/host/clipboardImageSave';
+import { encodeMarkdownPath } from '../src/foundation/linkDestination';
 
 const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-image-compatibility-'));
 let workspaceRoots: URI[] = [];
@@ -49,6 +51,16 @@ const webview = {
 };
 
 try {
+  const chineseNote = URI.file(path.join(fixture, '中文资料 空格', '中文 方案[甲]&copy;.md'));
+  write(chineseNote.fsPath, Buffer.from('# 中文文档'));
+  const savedChinese = await saveClipboardImageFile({ documentFsPath: chineseNote.fsPath,
+    imageStorage: {mode: 'default', folder: '图片(一)#50%', rule: 'assets'}, extension: 'png', contents: png });
+  const chineseTarget = encodeMarkdownPath(savedChinese.relativePath);
+  assert.equal(savedChinese.fileName, '中文 方案[甲]&copy;-1.png');
+  assert.equal((await links.resolveLocalImageTargetUri(chineseTarget, chineseNote as never))?.fsPath,
+    path.join(path.dirname(chineseNote.fsPath), savedChinese.relativePath));
+  assert.equal(await links.resolveWebviewImageSrc(chineseTarget, chineseNote as never, webview as never, {delivery: 'embedded'}), embedded,
+    'newly named images in Chinese directories resolve to the actual saved bytes');
   const workspace = URI.file(path.join(fixture, 'workspace')).fsPath;
   const note = URI.file(path.join(workspace, 'notes', 'chapter', 'note.md'));
   write(note.fsPath, Buffer.from('# Note'));

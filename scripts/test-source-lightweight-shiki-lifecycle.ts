@@ -55,11 +55,13 @@ const fakeCore = `
     metrics.initCalls += 1;
     metrics.instances.push(instance);
     return {
-      async loadLanguage(grammar) {
+      async loadLanguage(...grammars) {
         instance.loadCalls += 1;
         metrics.loadCalls += 1;
-        loaded.add(grammar.name);
-        instance.loadedLanguages.push(grammar.name);
+        for (const grammar of grammars.flat(Infinity)) {
+          loaded.add(grammar.name);
+          instance.loadedLanguages.push(grammar.name);
+        }
       },
       codeToTokens(code, options) {
         instance.tokenizeCalls += 1;
@@ -127,7 +129,8 @@ async function main(): Promise<void> {
         }));
         builder.onLoad({ filter: /.*/, namespace: 'shiki-language-test' }, (args) => ({
           loader: 'js',
-          contents: `export default { name: ${JSON.stringify(args.path)} };`
+          contents: `export default [{ name: ${JSON.stringify(args.path)}, scopeName: 'test.' + ${JSON.stringify(args.path)}, patterns: [],
+            repository: { fenced_code_block_latex: { begin: '(?:la|)tex', patterns: [{ patterns: [] }] } } }];`
         }));
       }
     }]
@@ -176,7 +179,7 @@ async function main(): Promise<void> {
     let initial = await readMetrics(page);
     assert.equal(initial.initCalls, 1);
     assert.equal(initial.tokenizeCalls, 1, 'Source tokenizes the whole Markdown document once');
-    assert.deepEqual(initial.instances[0].loadedLanguages.sort(), ['html', 'html-derivative', 'markdown', 'typescript', 'yaml']);
+    assert.deepEqual(initial.instances[0].loadedLanguages.sort(), ['html', 'html-derivative', 'markdown', 'meo-math', 'typescript', 'yaml']);
     assert.deepEqual(initial.instances[0].tokenizedCodes, [firstText]);
 
     await page.evaluate(() => (window as any).__shikiEditors.first.setMode('live'));

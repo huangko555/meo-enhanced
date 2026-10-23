@@ -1,7 +1,7 @@
 import type MarkdownIt from 'markdown-it';
 import { matchInlineScript } from '../foundation/inlineScript';
 
-function tokenize(state: MarkdownIt.StateInline, silent: boolean): boolean {
+function tokenize(state: InstanceType<MarkdownIt['inline']['State']>, silent: boolean): boolean {
   const match = matchInlineScript(state.src, state.pos, state.posMax);
   if (!match) return false;
   if (!silent) {

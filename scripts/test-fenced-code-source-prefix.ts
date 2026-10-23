@@ -8,6 +8,24 @@ import { getFencedCodeContent } from '../webview/src/helpers/mermaidDiagram';
 import { applySourceLinePrefix, outerOffsetToSourceOffset, sourceOffsetToOuterOffset } from '../webview/src/helpers/sourceLinePrefix';
 import { mathFenceBodyRange } from '../src/shared/mathFence';
 
+for (const fence of ['```', '~~~', '````', '~~~~']) {
+  for (const [suffix, expected] of [
+    ['', ''], ['\n', ''], ['\nflowchart LR', 'flowchart LR'],
+    ['\nflowchart LR\nA --> B', 'flowchart LR\nA --> B'],
+    ['\nflowchart LR\n\n' + fence, 'flowchart LR\n'],
+    ['\nflowchart LR\nA --> B\n' + fence + fence[0], 'flowchart LR\nA --> B']
+  ]) {
+    const state = EditorState.create({ doc: fence + 'mermaid' + suffix, extensions: [markdown()] });
+    let checked = false;
+    resolvedSyntaxTree(state).iterate({ enter(node) {
+      if (node.name !== 'FencedCode') return;
+      checked = true;
+      assert.equal(getFencedCodeContent(state, node), expected, `${fence}: actual fence rows delimit payload; unfinished final lines remain content`);
+    } });
+    assert.ok(checked);
+  }
+}
+
 for (const [source, expected] of [
   ['  x^2  \n', '  x^2  \n'], ['$x^2$', 'x^2'], ['$$ x^2 $$', ' x^2 '],
   ['\n $$\n\n  x^2  \n\n$$ \n', '\n  x^2  \n'], ['$$\r\n\r\n  x^2  \r\n\r\n$$', '\r\n  x^2  \r\n'],

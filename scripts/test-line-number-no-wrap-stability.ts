@@ -153,12 +153,10 @@ try {
       for (let index = 0; index < 4; index++) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
-      const button = editor.view.dom.querySelector<HTMLButtonElement>(
-        '.meo-md-html-block[data-meo-rendered-block-start-line="97"] .meo-md-html-source-toggle'
-      );
-      button?.click();
+      const block = editor.view.dom.querySelector<HTMLElement>('.meo-md-html-block[data-meo-rendered-block-start-line="97"]');
+      editor.view.dispatch({ selection: { anchor: editor.view.state.doc.line(97).from } });
       return {
-        found: Boolean(button), selection: editor.view.state.selection.main.head,
+        found: Boolean(block), selection: editor.view.state.selection.main.head,
         expected: editor.view.state.doc.line(97).from,
         sourceVisible: Boolean(editor.view.dom.querySelector('.meo-md-html-source-range-start'))
       };

@@ -1,4 +1,5 @@
 {
+  "config.appearance.lineHeight": "Line spacing as a font-size multiplier (default: 1.5). Applies to Live, Source and the Default preview; independent preview presets retain their typography.",
   "extension.displayName": "MEO Enhanced - Markdown Editor",
   "extension.description": "An enhanced Markdown editor with live editing mode for VS Code.",
   "command.open": "Open With MEO Enhanced",
@@ -25,7 +26,8 @@
   "config.fontSize.auto": "Follow the VS Code editor font size.",
   "config.fontSize.custom": "Use a custom content font size.",
   "config.fontSize.mode": "Choose whether editor content follows the VS Code font size or uses a custom size.",
-  "config.fontSize.value": "Custom font size for Live, Source, and Preview content.",
+  "config.fontSize.value": "Custom font size for Live, Source, Preview and export.",
+  "config.fontSize.mouseWheelZoom": "Use Ctrl (Cmd on macOS) + mouse wheel to adjust and save the document font size. Auto switches to Custom, starting from the currently displayed size. Independent of editor.mouseWheelZoom.",
   "config.outline.left": "Show the document outline on the left side of the editor.",
   "config.outline.right": "Show the document outline on the right side of the editor.",
   "config.outline.position": "Position of the document outline sidebar.",
@@ -42,7 +44,7 @@
   "config.lineHighlights": "Show subtle line coloring for modified lines in Source mode.",
   "config.imageFolder": "Folder name to save pasted images (relative to workspace root).",
   "config.editing.preferences": "Typing assistance and editor shortcut preferences. Change these in the editor’s More settings window.",
-  "config.imageStorage": "Pasted image storage. Use the editor's Settings > Input > Paste for document folders, per-document folders and advanced path rules.",
+  "config.imageStorage": "Pasted image storage and naming. Use Settings > Input > Paste for folders and naming presets. Names default to the document name plus a sequence number.",
   "config.imageFolderDeprecated": "Legacy folder settings keep their existing location. Choose a new image storage mode in the editor settings.",
   "config.preview.codeFontFamily": "Default code font family for Preview and HTML/PDF exports. Applies to inline code and code blocks; leave empty to use the default font."
 }

@@ -14,6 +14,21 @@ async function waitForFrames(page: import('puppeteer-core').Page, count = 8): Pr
   }, count);
 }
 
+async function scrollTable(page: import('puppeteer-core').Page, target: 'body' | 'top'): Promise<void> {
+  const point = await page.evaluate((target) => {
+    const scroller = (window as any).__tableBodyInteractionEditor.view.scrollDOM as HTMLElement;
+    const viewport = scroller.getBoundingClientRect();
+    const row = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table) tbody tr:nth-child(24)')!;
+    return { x: viewport.left + viewport.width / 2, y: viewport.bottom - 30,
+      delta: target === 'top' ? -scroller.scrollTop : row.getBoundingClientRect().top - viewport.top - viewport.height / 2 };
+  }, target);
+  // A real new scroll intent retires the cell's still-settling focus retention.
+  // A raw scrollTop assignment can be pulled back by that legitimate owner.
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.wheel({ deltaY: point.delta });
+  await waitForFrames(page, 12);
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-input-cursor-navigation-entry.ts')],
@@ -65,21 +80,12 @@ async function main(): Promise<void> {
     );
     await page.mouse.click(headerClickPoint.x, headerClickPoint.y);
     await waitForFrames(page, 2);
-    const activeHeaderStickyState = await page.evaluate(async () => {
-      const editor = (window as any).__tableBodyInteractionEditor;
-      const scroller = editor.view.scrollDOM as HTMLElement;
-      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
-      const bodyRow = table.querySelector<HTMLElement>('tbody tr:nth-child(24)')!;
-      const viewport = scroller.getBoundingClientRect();
+    await scrollTable(page, 'body');
+    const activeHeaderStickyState = await page.evaluate(() => {
       const active = document.activeElement;
       const activeHeader = active instanceof HTMLTextAreaElement
         && active.closest('th')?.dataset.tableRow === '0'
         && active.closest('th')?.dataset.tableCol === '2';
-      scroller.scrollTop += bodyRow.getBoundingClientRect().top - viewport.top - viewport.height / 2;
-      scroller.dispatchEvent(new Event('scroll'));
-      for (let frame = 0; frame < 12; frame += 1) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      }
       const stickyCell = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-table thead th:nth-child(3)');
       const stickyInput = stickyCell?.querySelector<HTMLTextAreaElement>('textarea') ?? null;
       const stickyPreview = stickyCell?.querySelector<HTMLElement>('.meo-md-html-table-cell-preview') ?? null;
@@ -111,12 +117,7 @@ async function main(): Promise<void> {
     ) {
       throw new Error(`Active header cell became empty in the floating header: ${JSON.stringify(activeHeaderStickyState)}`);
     }
-    await page.evaluate(() => {
-      const editor = (window as any).__tableBodyInteractionEditor;
-      editor.view.scrollDOM.scrollTop = 0;
-      editor.view.scrollDOM.dispatchEvent(new Event('scroll'));
-    });
-    await waitForFrames(page, 4);
+    await scrollTable(page, 'top');
 
     const clickPoint = await page.$eval(
       '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tbody tr:nth-child(2) td:nth-child(8) .meo-md-html-table-cell-preview',
@@ -137,18 +138,13 @@ async function main(): Promise<void> {
     });
     if (!clickedCell) throw new Error('Clicking a table body cell did not place the caret in that cell');
 
-    const scrollState = await page.evaluate(async () => {
+    await scrollTable(page, 'body');
+    const scrollState = await page.evaluate(() => {
       const editor = (window as any).__tableBodyInteractionEditor;
       const scroller = editor.view.scrollDOM as HTMLElement;
       const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
       const header = table.querySelector<HTMLElement>('thead')!;
-      const bodyRow = table.querySelector<HTMLElement>('tbody tr:nth-child(24)')!;
       const viewport = scroller.getBoundingClientRect();
-      scroller.scrollTop += bodyRow.getBoundingClientRect().top - viewport.top - viewport.height / 2;
-      scroller.dispatchEvent(new Event('scroll'));
-      for (let frame = 0; frame < 12; frame += 1) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      }
       const sticky = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-table');
       return {
         headerBottom: header.getBoundingClientRect().bottom,

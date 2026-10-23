@@ -3,6 +3,13 @@ import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 
 const build = await Bun.build({ entrypoints: ['scripts/test-live-decoration-history-entry.ts'], target: 'browser', format: 'iife',
   plugins: [{ name: 'explicit-background-syntax-publication', setup(builder) {
+    builder.onLoad({ filter: /webview[\\/]src[\\/]liveMode\.ts$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text();
+      const boundary = 'return buildDecorations(state, fallback, extra.changes);';
+      assert.equal(source.split(boundary).length, 2);
+      return { loader: 'ts', contents: source.replace(boundary,
+        '((globalThis as any).__widgetPositionFullBuilds ??= 0); (globalThis as any).__widgetPositionFullBuilds++; ' + boundary) };
+    });
     builder.onLoad({ filter: /@codemirror[\\/]language[\\/]dist[\\/]index\.js$/ }, async ({ path }) => {
       const source = await Bun.file(path).text();
       const boundary = 'Language.setState = /*@__PURE__*/StateEffect.define();';
@@ -69,6 +76,14 @@ try {
     await page.evaluate(target => {
       const scope = window as any, editor = scope.__editor, api = scope.__liveHistory;
       const position = editor.getText().indexOf(target) + 2;
+      scope.__inlineBuilds = scope.__widgetPositionFullBuilds ?? 0;
+      // None of these targets edits the table. Keep its actual mounted inputs
+      // and rendered cells as witnesses, including updates after parse arrival.
+      scope.__inlineTableNodes = [...editor.view.dom.querySelectorAll('.meo-md-html-table-shell')].flatMap(root => {
+        const nodes: Node[] = [root]; const walker = document.createTreeWalker(root, NodeFilter.SHOW_ALL);
+        while (walker.nextNode()) nodes.push(walker.currentNode);
+        return nodes;
+      });
       api.input(editor, position, 'x');
       scope.__inlineSet = api.decorations(editor);
       scope.__inlinePositions = structuredClone(api.positionSnapshot(editor));
@@ -77,10 +92,15 @@ try {
       scope.__publishWidgetSyntax(editor.view);
     }, target);
     await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__editor));
+    // If outer syntax is not ready on the input frame, the changed block may
+    // publish once later. RangeSet identity is then intentionally different;
+    // full-document rebuilding and replacing unaffected DOM remain forbidden.
     assert.equal(await page.evaluate(() => {
       const scope = window as any;
-      return scope.__inlineSet === scope.__liveHistory.decorations(scope.__editor);
-    }), true, `${target}: settling inline input must keep the complete block projection`);
+      return (scope.__widgetPositionFullBuilds ?? 0) - scope.__inlineBuilds;
+    }), 0, `${target}: settling inline input must not rebuild the whole Live document`);
+    assert.equal(await page.evaluate(() => (window as any).__inlineTableNodes.every((node: Node) => node.isConnected)), true,
+      `${target}: unchanged mounted table content must retain its actual DOM`);
     assert.deepEqual(await page.evaluate(() => {
       const scope = window as any;
       scope.__editor.refreshDecorations();

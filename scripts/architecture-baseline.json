@@ -79,8 +79,8 @@
       "exactImporters": [
           "webview/src/helpers/punctuationSyntax.ts",
         "webview/src/helpers/highlightSyntax.ts",
-        "src/export/punctuationInlineTransform.ts",
-        "src/export/highlightTransform.ts"
+        "src/shared/markdownPunctuation.ts",
+        "src/shared/markdownHighlight.ts"
       ],
       "delegates": []
     }

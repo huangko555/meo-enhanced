@@ -40,7 +40,7 @@ try {
       text: editor.getText(), selection: editor.view.state.selection.toJSON(), history: editor.getHistoryDepth()
     }; });
     await page.$eval(selector, node => {
-      if (node.getAttribute('aria-label') !== '复制' || (node as HTMLElement).dataset.tooltip !== '复制') {
+      if (node.getAttribute('aria-label') !== '复制源码' || (node as HTMLElement).dataset.tooltip !== '复制源码') {
         throw new Error('All block copy controls must use the same concise label');
       }
       (node as HTMLElement).click();
@@ -58,7 +58,7 @@ try {
       const text = before + '\n\n' + prefix + '~~~~mermaid\n'
         + body.split('\n').map(line => prefix + line).join('\n') + '\n' + prefix + '~~~~\n\nAfter';
       await mount(text);
-      for (const mode of ['preview', 'split', 'source']) {
+      for (const mode of ['preview', 'edit']) {
         if (mode !== 'preview') {
           await page.$eval('.meo-mermaid-mode-btn', node => (node as HTMLElement).click()); await settle();
         }
@@ -68,9 +68,9 @@ try {
       }
       await page.$eval('.meo-mermaid-toolbar .meo-select-all-code-btn', node => (node as HTMLElement).click()); await settle();
       assert.equal(await page.evaluate(() => {
-        const inner = (document.querySelector('.meo-mermaid-editing-block') as any).__meoMermaidEditingController.innerView;
+        const inner = (window as any).copyEditor.view;
         return inner.state.sliceDoc(inner.state.selection.main.from, inner.state.selection.main.to);
-      }), body, 'Mermaid select-all and copy use the same body');
+      }), body.replaceAll('\n','\n'+prefix), 'Native select-all retains Markdown container prefixes');
       await page.keyboard.type('flowchart TD\n  X --> Y'); await settle();
       await copy('.meo-mermaid-toolbar .meo-copy-code-btn', 'flowchart TD\n  X --> Y');
       await page.evaluate(() => (window as any).copyEditor.setMode('source')); await settle();

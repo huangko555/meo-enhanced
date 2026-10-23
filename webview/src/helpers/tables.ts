@@ -970,7 +970,7 @@ export function tableCellSourceRangeForInput(
   if (!Number.isInteger(lineNumber) || lineNumber < 1 || lineNumber > view.state.doc.lines ||
     !Number.isInteger(column) || column < 0) return null;
   const line = view.state.doc.line(lineNumber);
-  const segment = parseTableRowCells(line.text, line.from).segments[column];
+  const segment = parseTableLine(line.number, line.from, line.to, line.text).segments[column];
   if (segment) return { from: segment.from, to: segment.to };
   // Short source rows still render normalized empty cells. Their source owner
   // uses a zero-width range at the row start until a structural edit adds it.
@@ -984,6 +984,7 @@ function withTableCellVisualLineProbe<T>(
   run: (probe: {
     caret: number;
     lineHeight: number;
+    paddingBottom: number;
     lineTopAt(offset: number): number;
     value: string;
   }) => T
@@ -1022,6 +1023,7 @@ function withTableCellVisualLineProbe<T>(
     const parsedFontSize = Number.parseFloat(computed.fontSize);
     return run({
       caret,
+      paddingBottom: Number.parseFloat(computed.paddingBottom) || 0,
       lineHeight: Number.isFinite(parsedLineHeight)
         ? parsedLineHeight
         : (Number.isFinite(parsedFontSize) ? parsedFontSize * 1.2 : 16),
@@ -1057,16 +1059,17 @@ export function tableCellVisualLineBoundary(input: HTMLTextAreaElement): {
 }
 
 function tableCellCaretViewportBounds(input: HTMLTextAreaElement): { top: number; bottom: number } {
-  return withTableCellVisualLineProbe(input, ({ caret, lineHeight, lineTopAt }) => {
+  return withTableCellVisualLineProbe(input, ({ caret, lineHeight, lineTopAt, paddingBottom }) => {
     const inputRect = input.getBoundingClientRect();
     const measuredTop = inputRect.top + lineTopAt(caret) - input.scrollTop;
     const latestVisibleTop = Math.max(inputRect.top, inputRect.bottom - lineHeight);
     const top = Math.min(Math.max(measuredTop, inputRect.top), latestVisibleTop);
-    // At the final character, include the textarea's bottom padding and one
-    // border pixel. A glyph-only bound can preserve a fractional scroll offset
-    // that clips the editor/cell edge after the row wraps.
-    const atEnd = input.selectionStart === input.selectionEnd && caret === input.value.length;
-    return { top, bottom: atEnd ? inputRect.bottom + 1 : Math.min(inputRect.bottom, top + lineHeight) };
+    const bottom = Math.min(inputRect.bottom, top + lineHeight);
+    // At the final painted line, include the cell's fractional bottom border.
+    // A taller neighbouring cell must not pull a short input's caret downward.
+    const cellBottom = caret === input.value.length && bottom >= inputRect.bottom - paddingBottom - tableCellCaretRevealEpsilon
+      ? input.closest<HTMLElement>(tableCellSelector)?.getBoundingClientRect().bottom : undefined;
+    return { top, bottom: Math.max(bottom, cellBottom ?? bottom) };
   });
 }
 
@@ -2488,6 +2491,18 @@ export function flushMountedTableLayouts(view: EditorView): boolean {
   return flushed;
 }
 
+function sameTableSourceRanges(left: TableCellRange[][] | undefined, right: TableCellRange[][] | undefined): boolean {
+  if (left === right) return true;
+  if (!left || !right || left.length !== right.length) return false;
+  for (let row = 0; row < left.length; row++) {
+    if (left[row].length !== right[row].length) return false;
+    for (let cell = 0; cell < left[row].length; cell++) {
+      if (left[row][cell].from !== right[row][cell].from || left[row][cell].to !== right[row][cell].to) return false;
+    }
+  }
+  return true;
+}
+
 class HtmlTableWidget extends UiLanguageSensitiveWidget {
   private positionDocument: WeakRef<EditorState['doc']> | null = null;
   get [renderedBlockPreviewHeight](): RenderedBlockPreviewHeight { return this.measuredHeightCache; }
@@ -2636,8 +2651,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   eq(other: WidgetType): boolean {
     if (this.canReuseTableDom(other)) {
       const mounted = this.domRefs ? this : other.domRefs ? other : null;
-      // CodeMirror keeps the mounted DOM but adopts the new decoration's widget.
-      // Keep its last measurement until the observer publishes the next row layout.
       const cache = mounted?.measuredHeightCache ?? (
         this.measuredHeight >= other.measuredHeight ? this.measuredHeightCache : other.measuredHeightCache
       );
@@ -2646,7 +2659,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       // project source data here: the adopted value may own no mounted DOM.
       return this.tableData.signature === other.tableData.signature
         && this.tableData.from === other.tableData.from && this.tableData.to === other.tableData.to
-        && this.tableData.startLine === other.tableData.startLine && this.tableData.endLine === other.tableData.endLine;
+        && this.tableData.startLine === other.tableData.startLine && this.tableData.endLine === other.tableData.endLine
+        && sameTableSourceRanges(this.tableData.sourceRanges, other.tableData.sourceRanges);
     }
     return false;
   }
@@ -2911,7 +2925,10 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const doc = this.view?.state.doc;
     // The accepted source may be newer than the asynchronous presentation.
     // Evicting a row must never restore that older presentation's cell text.
-    if (doc && line >= 1 && line <= doc.lines) return parseTableRowCells(doc.line(line).text).cells;
+    if (doc && line >= 1 && line <= doc.lines) {
+      const source = doc.line(line);
+      return parseTableLine(line, source.from, source.to, source.text).cells;
+    }
     return row === 0 ? this.tableData.headerCells : this.tableData.rows[row - 1] ?? [];
   }
 
@@ -4159,7 +4176,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
             // the real native-input transaction below can defer its parsing.
             const next = state.changes(change).apply(state.doc);
             const line = next.line(tableStartLine + (edit.row === 0 ? 0 : edit.row + 1));
-            const segment = parseTableRowCells(line.text, line.from).segments[edit.col];
+            const segment = parseTableLine(line.number, line.from, line.to, line.text).segments[edit.col];
             const origins = this.cellSymbolSnapshots.get(edit.sequence) ?? [];
             this.cellSymbolSnapshots.delete(edit.sequence);
             const source = tableCellEditorValueToSource(edit.value);
@@ -4169,7 +4186,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
             const pairs = origins.map(pair => ({ ...pair, from: start + tableCellEditorOffsetToSourceOffset(edit.value, pair.from) - sourcePadding, to: start + tableCellEditorOffsetToSourceOffset(edit.value, pair.to) - sourcePadding }))
               .filter(pair => !!segment && pair.from >= segment.from && pair.to <= segment.to);
             const stableRow = next.lines === state.doc.lines
-              && parseTableRowCells(state.doc.line(line.number).text).cells.length === parseTableRowCells(line.text).cells.length
+              && parseTableLine(line.number, 0, 0, state.doc.line(line.number).text).cells.length === parseTableLine(line.number, 0, 0, line.text).cells.length
               && !(edit.row === 0 && isTableDelimiterLine(line.text));
             return state.update({ changes: change, effects: [
               ...(segment ? [replaceAutomaticSymbolPairArea(segment.from, segment.to, pairs)] : []),
@@ -5367,6 +5384,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       }
     });
     input.addEventListener('focus', () => {
+      const { selectionStart, selectionEnd, selectionDirection } = input;
       const view = this.view;
       const wrap = this.domRefs?.wrap;
       if (view && wrap) this.resolveCurrentTableRange(view, wrap);
@@ -5402,6 +5420,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       }
       this.setTableInteractionActive(container, true);
       this.setSingleCellSelection({ row: rowIndex, col: colIndex }, 'focus');
+      // Clearing the former document selection also resets Chromium's native
+      // textarea range. A focus return must retain the cell's caret/selection.
+      input.setSelectionRange(selectionStart, selectionEnd, selectionDirection);
       notifySelectionChange();
     });
     input.addEventListener('blur', (event) => {

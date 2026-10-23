@@ -1,8 +1,8 @@
 export const DEFAULT_PDF_MARGIN_MM = 20;
 
-/** A fallback layer lets explicit user @page margins win, including other layered CSS. */
+/** Paper shares the preset canvas; the fallback layer preserves explicit user margins. */
 export function buildPdfExportStyles(presetStyles: string): string {
-  return `@layer meo-pdf-default { @page { size: A4; margin: ${DEFAULT_PDF_MARGIN_MM}mm; } }
+  return `@layer meo-pdf-default { @page { size: A4; margin: ${DEFAULT_PDF_MARGIN_MM}mm; background: var(--meo-bg); } }
 ${presetStyles}
 /* Screen document padding must not add a second set of PDF page margins. */
 html[data-meo-export-target='pdf'] .meo-export-page,

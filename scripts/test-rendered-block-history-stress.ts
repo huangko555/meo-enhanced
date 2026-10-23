@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { launchTestBrowser } from './browser-test-helpers';
-import { runHistoryRenderedBlockChromiumInteraction } from './history-rendered-block-interaction-chromium';
+import { enterMermaidSource, findMermaidOpening, readMermaidHistoryTarget, setMermaidLayout } from './history-mermaid-chromium';
 
 type BlockKind = 'mermaid' | 'math';
 type BlockMode = 'preview' | 'split' | 'source';
@@ -141,11 +141,8 @@ async function setMode(
   occurrence: NeedleOccurrence = 'first'
 ) {
   const lineNumber = await renderedBlockControlLine(page, kind, needle, occurrence);
-  await runHistoryRenderedBlockChromiumInteraction(
-    page,
-    { kind, lineNumber, targetMode },
-    '__renderedHistoryStressEditor'
-  );
+  if (kind === 'mermaid') await setMermaidLayout(page, '__renderedHistoryStressEditor', lineNumber, targetMode === 'preview' ? 'preview' : targetMode === 'split' ? 'side-by-side' : 'stacked');
+  else await enterDisplayMathSource(page, '__renderedHistoryStressEditor', lineNumber, 'end');
 }
 
 async function editBlock(page: any, target: EditTarget, mode: Exclude<BlockMode, 'preview'>) {
@@ -158,36 +155,7 @@ async function editBlock(page: any, target: EditTarget, mode: Exclude<BlockMode,
     return;
   }
   await setMode(page, target.kind, target.needle, mode, occurrence);
-  await page.evaluate(({ blockKind, lineNeedle, targetOccurrence }) => {
-    const editor = (window as any).__renderedHistoryStressEditor;
-    const view = editor.view;
-    let targetLine = 0;
-    for (let lineNumber = 1; lineNumber <= view.state.doc.lines; lineNumber += 1) {
-      if (view.state.doc.line(lineNumber).text.includes(lineNeedle)) {
-        targetLine = lineNumber;
-        if (targetOccurrence === 'first') break;
-      }
-    }
-    for (let lineNumber = targetLine; lineNumber >= 1; lineNumber -= 1) {
-      const line = view.state.doc.line(lineNumber);
-      const opening = blockKind === 'mermaid'
-        ? line.text.trimStart().startsWith('```mermaid')
-        : line.text.trim() === '$$';
-      if (!opening) continue;
-      const selector = blockKind === 'mermaid'
-        ? `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${line.from}"]`
-        : `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${line.from}"]`;
-      const property = blockKind === 'mermaid'
-        ? '__meoMermaidEditingController'
-        : '__meoLatexMathEditingController';
-      const block = document.querySelector<HTMLElement>(selector) as any;
-      const controller = block?.[property];
-      if (!controller) throw new Error(`Missing ${blockKind} controller for ${lineNeedle}`);
-      controller.focusOffset(controller.innerView.state.doc.length);
-      return;
-    }
-    throw new Error(`Missing ${blockKind} opening line for ${lineNeedle}`);
-  }, { blockKind: target.kind, lineNeedle: target.needle, targetOccurrence: occurrence });
+  await enterMermaidSource(page, '__renderedHistoryStressEditor', await findMermaidOpening(page, '__renderedHistoryStressEditor', target.needle, occurrence), 'end');
   await page.keyboard.type(target.marker);
   await waitForFrames(page);
 }
@@ -200,37 +168,10 @@ async function assertFocusedTarget(page: any, target: EditTarget, direction: str
       throw new Error(`${direction} step ${step} missed native formula: ${JSON.stringify(state)}`);
     return;
   }
-  const state = await page.evaluate((blockKind) => {
-    const outer = (window as any).__renderedHistoryStressEditor.view;
-    const selector = blockKind === 'mermaid' ? '.meo-mermaid-editing-block' : '.meo-latex-math-editing-block';
-    const property = blockKind === 'mermaid'
-      ? '__meoMermaidEditingController'
-      : '__meoLatexMathEditingController';
-    const blocks = Array.from(document.querySelectorAll<HTMLElement>(selector));
-    const focused = blocks.find((block) => (block as any)[property]?.innerView?.hasFocus) ?? null;
-    return {
-      focused: Boolean(focused),
-      source: focused ? (focused as any)[property].innerView.state.doc.toString() : null,
-      head: focused ? (focused as any)[property].innerView.state.selection.main.head : null,
-      length: focused ? (focused as any)[property].innerView.state.doc.length : null,
-      activeClass: (document.activeElement as HTMLElement | null)?.className?.toString() ?? null,
-      activeRegion: (document.activeElement as HTMLElement | null)?.closest('[role="region"]')?.getAttribute('aria-label') ?? null,
-      outerSelectionLine: outer.state.doc.lineAt(outer.state.selection.main.head).number,
-      visibleFromLine: outer.state.doc.lineAt(outer.viewport.from).number,
-      visibleToLine: outer.state.doc.lineAt(outer.viewport.to).number,
-      scrollTop: outer.scrollDOM.scrollTop,
-      blocks: blocks.map((block) => ({
-        ariaLabel: block.getAttribute('aria-label'),
-        anchor: block.dataset.meoMermaidAnchor ?? block.dataset.meoLatexMathAnchor ?? null,
-        focused: Boolean((block as any)[property]?.innerView?.hasFocus),
-        top: block.getBoundingClientRect().top,
-        bottom: block.getBoundingClientRect().bottom
-      }))
-    };
-  }, target.kind);
-  if (!state.focused || !state.source?.includes(target.needle) || state.head !== state.length) {
-    throw new Error(`${direction} step ${step} did not focus ${target.kind} ${target.needle}: ${JSON.stringify(state)}`);
-  }
+  const opening = await findMermaidOpening(page, '__renderedHistoryStressEditor', target.needle, target.occurrence ?? 'first');
+  const state = await readMermaidHistoryTarget(page, '__renderedHistoryStressEditor', opening);
+  if (!state.focused || !state.caretAtEnd || !state.visible || !state.resultPresent || !state.source.includes(target.needle))
+    throw new Error(`${direction} step ${step} missed native Mermaid: ${JSON.stringify(state)}`);
 }
 
 async function main() {
@@ -352,11 +293,8 @@ async function main() {
       if (text === versions[versions.length - 1] || !text.includes(edit.marker)) {
         const state = await page.evaluate(() => ({
           activeClass: (document.activeElement as HTMLElement | null)?.className?.toString() ?? null,
-          mermaidSources: Array.from(document.querySelectorAll<HTMLElement>('.meo-mermaid-editing-block')).map((block: any) => ({
-            anchor: block.dataset.meoMermaidAnchor,
-            source: block.__meoMermaidEditingController?.innerView?.state.doc.toString() ?? null,
-            focused: Boolean(block.__meoMermaidEditingController?.innerView?.hasFocus)
-          }))
+          mermaidSource: (window as any).__renderedHistoryStressEditor.getText(),
+          focused: (window as any).__renderedHistoryStressEditor.view.hasFocus
         }));
         throw new Error(`Edit did not reach outer history: ${JSON.stringify({ edit, state, text })}`);
       }
@@ -451,32 +389,13 @@ async function main() {
     } finally {
       await page.keyboard.up('Control');
     }
-    const immediateTypingBefore = await page.evaluate(targetNeedle => {
-      const editor = (window as any).__renderedHistoryStressEditor;
-      const root = Array.from(document.querySelectorAll<HTMLElement>('.meo-mermaid-editing-block')).find((node: any) => node.__meoMermaidEditingController?.innerView?.state.doc.toString().includes(targetNeedle)) as any;
-      const inner = root?.__meoMermaidEditingController?.innerView;
-      const caret = inner?.coordsAtPos(inner.state.selection.main.head);
-      const bounds = (window as any).MermaidEditingHarness.editorViewportBounds(editor.view);
-      return { scrollTop: editor.view.scrollDOM.scrollTop,
-        caretVisible: !!caret && caret.top >= bounds.top && caret.bottom <= bounds.bottom };
-    }, immediateTypingTarget.needle);
+    const immediateOpening = await findMermaidOpening(page, '__renderedHistoryStressEditor', immediateTypingTarget.needle, immediateTypingTarget.occurrence ?? 'first');
+    const immediateState = await readMermaidHistoryTarget(page, '__renderedHistoryStressEditor', immediateOpening);
+    const immediateTypingBefore = { scrollTop: immediateState.scrollTop, caretVisible: immediateState.visible };
     if (!immediateTypingBefore.caretVisible) throw new Error('History returned keyboard ownership while the Mermaid caret was covered');
     await page.keyboard.type(' IMMEDIATE_AFTER_HISTORY');
     await waitForFrames(page, 20);
-    const immediateTypingAfter = await page.evaluate((targetNeedle) => {
-      const editor = (window as any).__renderedHistoryStressEditor;
-      const block = Array.from(document.querySelectorAll<HTMLElement>('.meo-mermaid-editing-block')).find((candidate: any) => (
-        candidate.__meoMermaidEditingController?.innerView?.state.doc.toString().includes(targetNeedle)
-      )) as any;
-      const innerView = block?.__meoMermaidEditingController?.innerView;
-      return {
-        scrollTop: editor.view.scrollDOM.scrollTop,
-        source: innerView?.state.doc.toString() ?? null,
-        focused: Boolean(innerView?.hasFocus),
-        head: innerView?.state.selection.main.head ?? null,
-        length: innerView?.state.doc.length ?? null
-      };
-    }, immediateTypingTarget.needle);
+    const immediateTypingAfter = await readMermaidHistoryTarget(page, '__renderedHistoryStressEditor', immediateOpening);
     if (
       !immediateTypingAfter.source?.includes('IMMEDIATE_AFTER_HISTORY') ||
       !immediateTypingAfter.focused ||

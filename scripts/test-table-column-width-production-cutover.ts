@@ -151,6 +151,31 @@ async function revealHitTestableHandle(page: any, selector: string): Promise<voi
   }, { polling: 'raf', timeout: 5000 }, selector);
 }
 
+async function scrollCurrentTableHeaderOutOfView(page: any, selector: string): Promise<void> {
+  await page.$eval(selector, (table: HTMLTableElement) => table.scrollIntoView({ block: 'start' }));
+  await page.evaluate(async () => (window as any).__columnWidthProduction.whenVisiblePresentationReady(1_200));
+  const point = await page.$eval(selector, (table: HTMLTableElement) => {
+    const scroller = table.closest<HTMLElement>('.cm-scroller')!;
+    const viewport = scroller.getBoundingClientRect(), header = table.tHead!.getBoundingClientRect();
+    return { x: viewport.left + viewport.width / 2, y: viewport.top + viewport.height / 2,
+      delta: Math.max(24, header.bottom - viewport.top + 8) };
+  });
+  // A trusted reading gesture supersedes the preceding navigation owner.
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.wheel({ deltaY: point.delta });
+  await page.waitForFunction((selector: string) => {
+    const table = document.querySelector<HTMLTableElement>(selector), viewport = table?.closest('.cm-scroller')?.getBoundingClientRect();
+    const sticky = table?.closest('.meo-md-html-table-shell')?.querySelector('.meo-md-html-table-sticky-chrome.is-visible');
+    return viewport && table!.tHead!.getBoundingClientRect().bottom <= viewport.top
+      && sticky && sticky.getBoundingClientRect().height > 0;
+  }, { polling: 'raf', timeout: 5000 }, selector);
+}
+
+async function scrollPastTableHeader(page: any, lineNumber: number): Promise<void> {
+  await page.evaluate((line: number) => (window as any).__columnWidthProduction.scrollToLine(line, 'top'), lineNumber);
+  await scrollCurrentTableHeaderOutOfView(page, '.meo-md-html-table:not(.meo-md-html-table-sticky-table):first-of-type');
+}
+
 async function dragWithPresentationSamples(
   page: any,
   selector: string,
@@ -164,6 +189,7 @@ async function dragWithPresentationSamples(
 }>> {
   const point = await page.$eval(selector, (handle: Element) => {
     const rect = handle.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) throw new Error('Column resize requires a visible current handle');
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   });
   const samples: Array<{
@@ -915,13 +941,7 @@ async function main(): Promise<void> {
       preferredWidthsAfterResize.every((width, index) => width >= preferredWidthsBeforeResize[index] - 1),
       `automatic column widths must survive maximize and restore: ${JSON.stringify({ preferredWidthsBeforeResize, preferredWidthsAfterResize })}`
     );
-    await page.evaluate(async () => {
-      (window as any).__columnWidthProduction.scrollToLine(26, 'top');
-      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-      const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-      scroller.scrollTop += 32;
-      scroller.dispatchEvent(new Event('scroll'));
-    });
+    await scrollPastTableHeader(page, 26);
     await waitForTableLayout(page, tableSelector, 2, 3);
     await page.waitForFunction(() => {
       const chrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome.is-visible');
@@ -936,7 +956,7 @@ async function main(): Promise<void> {
     const initial = await page.evaluate((selector) => {
       const tables = Array.from(document.querySelectorAll<HTMLTableElement>(selector));
       const outside = document.getElementById('outside') as HTMLButtonElement;
-      outside.focus();
+      outside.focus({ preventScroll: true });
       return {
         owners: tables.map((table) => table.dataset.tableColumnWidthOwner),
         widths: tables.map((table) => Array.from(table.querySelectorAll<HTMLElement>('thead th'))
@@ -946,11 +966,13 @@ async function main(): Promise<void> {
       };
     }, tableSelector);
     if (rightEdgeCase) {
+      await revealHitTestableHandle(page, firstHandle);
       await drag(
         page,
         `${tableSelector}:first-of-type th:first-child .meo-md-html-table-column-resize-handle`,
         1000
       );
+      await page.evaluate(async () => (window as any).__columnWidthProduction.whenVisiblePresentationReady(1_200));
     }
     const initialRightEdgeDiagnostics = await page.$eval(`${tableSelector}:first-of-type`, (table: HTMLTableElement) => {
       const shell = table.closest<HTMLElement>('.meo-md-html-table-shell')!;
@@ -989,6 +1011,8 @@ async function main(): Promise<void> {
       );
       const widthSweep = await page.evaluate(async (selector) => {
         const app = document.getElementById('app')!;
+        app.style.width = '430px';
+        await (window as any).__columnWidthProduction.whenVisiblePresentationReady(1_200);
         const samples = [];
         for (let step = 0; step <= 120; step += 1) {
           app.style.width = `${430 + step * 2.75}px`;
@@ -1244,13 +1268,7 @@ async function main(): Promise<void> {
           + numeric(cellStyle.borderRightWidth);
       })
     );
-    await page.$eval(`${tableSelector}:first-of-type`, (table: HTMLTableElement) => {
-      table.scrollIntoView({ block: 'start' });
-      const scroller = table.closest('.cm-scroller') as HTMLElement;
-      const headerHeight = table.tHead?.getBoundingClientRect().height ?? 0;
-      scroller.scrollTop += Math.max(24, headerHeight + 8);
-      scroller.dispatchEvent(new Event('scroll'));
-    });
+    await scrollCurrentTableHeaderOutOfView(page, tableSelector + ':first-of-type');
     await page.waitForFunction((selector) => {
       const handle = document.querySelector<HTMLElement>(selector);
       const rect = handle?.getBoundingClientRect();
@@ -1840,20 +1858,11 @@ async function main(): Promise<void> {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
     });
-    // Use editor navigation so a pending mode restoration cannot undo the
-    // fixture's scroll before Sticky column boundaries are measured.
-    await page.evaluate(async (selector) => {
+    const roundTripHeaderLine = await page.$eval(tableSelector + ':first-of-type', (table: HTMLTableElement) => {
       const editor = (window as any).__columnWidthProduction;
-      const table = document.querySelector<HTMLTableElement>(selector)!;
-      const line = editor.getText().slice(0, Number(table.dataset.tableFrom)).split('\n').length;
-      editor.scrollToLine(line, 'top');
-      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-      const currentTable = document.querySelector<HTMLTableElement>(selector)!;
-      const scroller = currentTable.closest<HTMLElement>('.cm-scroller')!;
-      const headerHeight = currentTable.tHead?.getBoundingClientRect().height ?? 0;
-      scroller.scrollTop += Math.max(24, headerHeight + 8);
-      scroller.dispatchEvent(new Event('scroll'));
-    }, `${tableSelector}:first-of-type`);
+      return editor.getText().slice(0, Number(table.dataset.tableFrom)).split('\n').length;
+    });
+    await scrollPastTableHeader(page, roundTripHeaderLine);
     try {
       await page.waitForFunction((selector) => {
         const table = document.querySelector<HTMLTableElement>(selector);
@@ -1943,13 +1952,7 @@ async function main(): Promise<void> {
       input.focus();
       input.setSelectionRange(1, 1);
     }, tableSelector);
-    await page.$eval(`${tableSelector}:first-of-type`, (table: HTMLTableElement) => {
-      table.scrollIntoView({ block: 'start' });
-      const scroller = table.closest('.cm-scroller') as HTMLElement;
-      const headerHeight = table.tHead?.getBoundingClientRect().height ?? 0;
-      scroller.scrollTop += Math.max(24, headerHeight + 8);
-      scroller.dispatchEvent(new Event('scroll'));
-    });
+    await scrollCurrentTableHeaderOutOfView(page, tableSelector + ':first-of-type');
     await page.waitForFunction((selector) => {
       const handle = document.querySelector<HTMLElement>(selector);
       const rect = handle?.getBoundingClientRect();
@@ -2217,19 +2220,17 @@ async function main(): Promise<void> {
     assert.ok(richWidthsAfterMiddle[1] < richWidthsBefore[1] - 60);
     assert.equal(await page.evaluate(() => (window as any).__columnWidthProduction.getText()), richTable);
 
-    await page.evaluate(async () => {
-      (window as any).__columnWidthProduction.scrollToLine(3, 'top');
-      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-      const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-      scroller.scrollTop += 32;
-      scroller.dispatchEvent(new Event('scroll'));
-    });
+    await scrollPastTableHeader(page, 3);
     await page.waitForSelector('.meo-md-html-table-sticky-chrome.is-visible');
+    const richScrollBeforeResize = await page.$eval('.cm-scroller', scroller => scroller.scrollTop);
     await drag(
       page,
       '.meo-md-html-table-sticky-table th:last-child .meo-md-html-table-column-resize-handle',
       -30
     );
+    await page.evaluate(async () => (window as any).__columnWidthProduction.whenVisiblePresentationReady(1_200));
+    assert.ok(Math.abs(await page.$eval('.cm-scroller', scroller => scroller.scrollTop) - richScrollBeforeResize) < 2,
+      'resizing a Sticky column must preserve reading position rather than reveal the document caret');
     const richLastProjection = await tablePresentationWidths(page, tableSelector);
     assert.ok(richLastProjection.primaryWidths[2] < richWidthsAfterMiddle[2] - 20);
     assert.deepEqual(
@@ -2477,7 +2478,8 @@ if (cleanupContractCase) {
   const releaseFailure = new Error('synthetic pointer release failure');
   let moves = 0;
   const fakePage = {
-    $eval: async () => ({ x: 20, y: 30 }),
+    $eval: async () => ({ x: 20, y: 30, active: true }),
+    async evaluate() {},
     mouse: {
       async move() {
         moves += 1;

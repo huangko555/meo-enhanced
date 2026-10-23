@@ -18,7 +18,7 @@ try {
   await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
   await page.addStyleTag({ path: path.resolve(import.meta.dir, '../webview/src/styles.css') });
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
-  const text = '<table><tr><td>HTML</td></tr></table>\n\n' + Array.from({ length: 40 }, (_, i) =>
+  const text = '<table><tr><td>HTML</td></tr></table>\n\n$\\frac{x_1}{2} + \\alpha$\n\n' + Array.from({ length: 40 }, (_, i) =>
     `## Heading ${i}\n\nBody **bold** *italic* \u0060code\u0060\n`).join('\n');
   await page.evaluate(text => {
     const harness = (window as any).SourceLightweightShikiHarness;

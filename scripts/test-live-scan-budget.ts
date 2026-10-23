@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { EditorState, Prec, RangeSet, StateEffect, Text, Transaction } from '@codemirror/state';
-import { editorMarkdownLanguage, getLivePresentationDecorations, liveModeExtensions, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from '../webview/src/liveMode';
+import { editorMarkdownLanguage, getLivePresentationDecorations, liveModeExtensions, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect } from '../webview/src/liveMode';
+import { setLivePointerSelectionActiveEffect } from '../webview/src/editor/livePointerSelection';
 import { ensureSyntaxTree, syntaxTree, syntaxTreeAvailable } from '@codemirror/language';
 import { parseFootnotes } from '../webview/src/helpers/footnotes';
 import { parseFrontmatter } from '../webview/src/helpers/frontmatter';

@@ -141,36 +141,38 @@ function findDisplayMathClose(text: string, start: number, excludedRanges: Reado
   return -1;
 }
 
-/** A malformed block cannot borrow a delimiter across a Markdown boundary. */
-function findFencedDisplayClose(text: string, firstLine: number, openingPrefix: string): number {
+/** Finds a standalone $$ closer or the first Markdown boundary after bodyFrom.
+ * openingPrefix is the original opener's quote/list prefix. `to` is the closer's
+ * dollar offset when closed, otherwise the boundary line's start (or EOF). */
+export function findFencedDisplayMathEnd(text: string, bodyFrom: number, openingPrefix: string): { to: number; closed: boolean } {
   const quoteDepth = openingPrefix.match(/>/g)?.length ?? 0;
   const listMarker = /(?:[-+*]|\d+[.)])[ \t]+$/.exec(openingPrefix);
   let prefixPayload = openingPrefix;
   for (let depth = 0; depth < quoteDepth; depth++) prefixPayload = prefixPayload.replace(/^[ \t]*>[ \t]?/, '');
   const continuationIndent = listMarker
     ? prefixPayload.length : 0;
-  for (let start = firstLine; start < text.length;) {
+  for (let start = bodyFrom; start < text.length;) {
     const newline = text.indexOf('\n', start);
     const end = newline < 0 ? text.length : newline;
     const line = text.slice(start, end);
     let offset = 0;
     for (let depth = 0; depth < quoteDepth; depth++) {
       const prefix = /^[ \t]*>[ \t]?/.exec(line.slice(offset));
-      if (!prefix) { if (line.trim()) return -1; break; }
+      if (!prefix) { if (line.trim()) return { to: start, closed: false }; break; }
       offset += prefix[0].length;
     }
     const payload = line.slice(offset);
     if (payload.trim()) {
-      if (continuationIndent && (/^[ \t]*/.exec(payload)?.[0].length ?? 0) < continuationIndent) return -1;
-      if (/^[ \t]*\$\$[ \t\r]*$/.test(payload)) return start + offset + payload.indexOf('$$');
+      if (continuationIndent && (/^[ \t]*/.exec(payload)?.[0].length ?? 0) < continuationIndent) return { to: start, closed: false };
+      if (/^[ \t]*\$\$[ \t\r]*$/.test(payload)) return { to: start + offset + payload.indexOf('$$'), closed: true };
       // Do not hide headings, code fences, container exits or another display formula.
       if (/^[ \t]*(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|\$\$)/.test(payload)
-        || /^[ \t]*(?:>[ \t]*|(?:[-+*]|\d+[.)])[ \t]+)\$\$/.test(payload)) return -1;
+        || /^[ \t]*(?:>[ \t]*|(?:[-+*]|\d+[.)])[ \t]+)\$\$/.test(payload)) return { to: start, closed: false };
     }
     if (newline < 0) break;
     start = newline + 1;
   }
-  return -1;
+  return { to: text.length, closed: false };
 }
 
 type LatexMathCandidate = {
@@ -203,9 +205,8 @@ function scanLatexMathCandidateAt(
     const openingPrefix = text.slice(openLineStart, open);
     const standaloneOpen = /^[ \t]*(?:>[ \t]*)*(?:(?:[-+*]|\d+[.)])[ \t]+)?$/.test(openingPrefix)
       && openLineEnd >= 0 && !text.slice(open + 2, openLineEnd).trim();
-    const close = standaloneOpen
-      ? findFencedDisplayClose(text, openLineEnd + 1, openingPrefix)
-      : findDisplayMathClose(text, open + 2, excludedRanges);
+    const end = standaloneOpen ? findFencedDisplayMathEnd(text, openLineEnd + 1, openingPrefix) : null;
+    const close = end ? (end.closed ? end.to : -1) : findDisplayMathClose(text, open + 2, excludedRanges);
     if (close <= open + 2) {
       return { range: null, nextOpen: open + 2 };
     }

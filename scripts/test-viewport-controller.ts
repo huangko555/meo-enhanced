@@ -407,6 +407,24 @@ await flushFrames(documentFrames);
 if (documentScrollDOM.scrollTop !== 1470) {
   throw new Error(`Layout refresh moved the document anchor to ${documentScrollDOM.scrollTop}`);
 }
+// A newer layout operation supersedes an older retained cell/toolbar position.
+// They must never alternate between two scroll targets during settlement.
+let retainedElementTop = 4000;
+const retainedElement = {
+  isConnected: true,
+  ownerDocument: { defaultView: {} },
+  getBoundingClientRect: () => ({ top: retainedElementTop - documentScrollDOM.scrollTop })
+};
+documentController.retainElementTopWhileMutation(retainedElement as any, () => retainedElement as any, () => {});
+documentController.preserveDocumentAnchorWhileMutation(() => {
+  documentBlockTop += 100;
+  retainedElementTop += 700;
+});
+await flushFrames(documentFrames);
+if (documentScrollDOM.scrollTop !== 1570) {
+  throw new Error(`An obsolete element anchor overrode the newer layout operation: ${documentScrollDOM.scrollTop}`);
+}
+
 documentBlockTop = 1750;
 documentController.restoreDocumentAnchor({ position: 42, lineOffset: 20 });
 const selectionOnlyNavigation = documentController.beginNavigationReveal();
@@ -1434,10 +1452,10 @@ if (revealScrollDOM.scrollTop !== 420) {
   throw new Error(`A stale reveal moved the viewport to ${revealScrollDOM.scrollTop}`);
 }
 
-type GeometryShiftInterruption = 'none' | 'stale-frame' | 'destroy' | 'late-measure' | 'editor-update-overwrite' | 'read-write-layout' | 'layout-preservation' | 'overlap-layout-preservation';
+type GeometryShiftInterruption = 'none' | 'stale-frame' | 'destroy' | 'late-measure' | 'editor-update-overwrite' | 'editor-update-layout' | 'read-write-layout' | 'font-read-write-layout' | 'layout-preservation' | 'overlap-layout-preservation';
 
 const runGeometryShiftReveal = async (
-  kind: 'ordinary' | 'settled' | 'bounds',
+  kind: 'ordinary' | 'settled' | 'bounds' | 'retained' | 'initially-stable' | 'retained-stable',
   interruption: GeometryShiftInterruption = 'none'
 ) => {
   const frames: FrameRequestCallback[] = [];
@@ -1451,7 +1469,7 @@ const runGeometryShiftReveal = async (
     return frames.length;
   };
 
-  let targetTop = 1600;
+  let targetTop = kind === 'initially-stable' ? 1240 : kind === 'retained-stable' ? 1350 : 1600;
   let readingLineTop = 1500;
   let scrollTop = 1000;
   const writes: number[] = [];
@@ -1504,14 +1522,21 @@ const runGeometryShiftReveal = async (
 
   try {
     const isCurrent = controller.beginNavigationReveal();
-    if (kind === 'ordinary') controller.revealPosition(1600, { y: 'center' }, isCurrent);
+    if (kind === 'retained' || kind === 'retained-stable') controller.retainPositionTop(1600, 350, isCurrent);
+    else if (kind === 'ordinary') controller.revealPosition(1600, { y: 'center' }, isCurrent);
     else if (kind === 'bounds') controller.revealVerticalBounds(
       () => ({ top: targetTop - scrollTop, bottom: targetTop + 20 - scrollTop }),
       isCurrent
     );
     else controller.revealPositionUntilStable(1600, { y: 'center' }, isCurrent);
 
-    if (interruption === 'read-write-layout') {
+    if (interruption === 'font-read-write-layout') {
+      flushMeasure(() => { targetTop += 40; });
+      await Promise.resolve();
+      if (scrollTop !== 1040) throw new Error('An initially stable measurement painted a later font offset before retaining it');
+      await flushAll();
+      return { scrollTop, writes, targetVisible: true };
+    } else if (interruption === 'read-write-layout') {
       // CodeMirror redraws and changes the height map between requestMeasure's
       // read and write phases. No stale absolute target may reach the scroller.
       flushMeasure(() => { targetTop += 600; scrollTop += 600; });
@@ -1521,6 +1546,20 @@ const runGeometryShiftReveal = async (
     } else {
       flushMeasure();
       await Promise.resolve();
+      if (interruption === 'editor-update-layout') {
+        targetTop += 600;
+        scrollTop += 200;
+        controller.reconcileAfterEditorUpdate();
+        // The input owner receives this completed geometry receipt before the
+        // browser paints, while the next measure request is still queued.
+        controller.retainPositionTop(1600, 350, isCurrent, true);
+        await Promise.resolve();
+        if (targetTop - scrollTop !== 350) {
+          throw new Error(`Retained caret used an old absolute offset after measurement: ${targetTop - scrollTop}`);
+        }
+        await flushAll();
+        return { scrollTop, writes, targetVisible: targetTop >= scrollTop && targetTop + 20 <= scrollTop + 500 };
+      }
       if (interruption === 'layout-preservation' || interruption === 'overlap-layout-preservation') {
         if (interruption === 'overlap-layout-preservation') {
           // The same navigation can request another reveal after adopting its
@@ -1576,6 +1615,15 @@ const runGeometryShiftReveal = async (
   }
 };
 
+const initiallyStableReveal = await runGeometryShiftReveal('initially-stable');
+if (!initiallyStableReveal.targetVisible || JSON.stringify(initiallyStableReveal.writes) !== '[1600]')
+  throw new Error(`An initially stable reveal missed the following layout receipt: ${JSON.stringify(initiallyStableReveal)}`);
+const cancelledStableReveal = await runGeometryShiftReveal('initially-stable', 'stale-frame');
+if (cancelledStableReveal.writes.length !== 0)
+  throw new Error('A newer interaction must cancel an initially stable reveal before it adopts scrolling');
+await runGeometryShiftReveal('initially-stable', 'font-read-write-layout');
+await runGeometryShiftReveal('retained-stable', 'font-read-write-layout');
+
 for (const kind of ['settled', 'bounds'] as const) {
   const result = await runGeometryShiftReveal(kind, 'read-write-layout');
   const expected = kind === 'bounds' ? '[1720]' : '[1960]';
@@ -1590,6 +1638,10 @@ if (
   JSON.stringify(ordinaryGeometryReveal.writes) !== '[1360]'
 ) {
   throw new Error(`One-shot reveal did not expose the layout overwrite: ${JSON.stringify(ordinaryGeometryReveal)}`);
+}
+const retainedGeometryReveal = await runGeometryShiftReveal('retained', 'editor-update-layout');
+if (!retainedGeometryReveal.targetVisible || JSON.stringify(retainedGeometryReveal.writes) !== '[1250,1250,1850]') {
+  throw new Error(`Measured layout changed a retained caret's viewport offset: ${JSON.stringify(retainedGeometryReveal)}`);
 }
 const settledGeometryReveal = await runGeometryShiftReveal('settled');
 if (

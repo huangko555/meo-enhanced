@@ -1,4 +1,5 @@
 import { tags as t, type Tag } from '@lezer/highlight';
+import { DEFAULT_EDITOR_LINE_HEIGHT } from '../foundation/editorLineHeight';
 
 export const themeColorKeys = [
   'base01',
@@ -100,7 +101,7 @@ export const semanticColorKeys = [
 export type SemanticVisualColorKey = (typeof semanticColorKeys)[number];
 export type SemanticVisualColors = Readonly<Record<SemanticVisualColorKey, string>>;
 
-const builtInLineHeight = 1.5;
+const builtInLineHeight = DEFAULT_EDITOR_LINE_HEIGHT;
 
 export type BuiltInTypography = Readonly<{
   liveFont: string;

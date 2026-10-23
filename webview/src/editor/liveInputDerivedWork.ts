@@ -691,8 +691,8 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     shouldWaitForPresentation: () => activePointers.size > 0
       || !isLiveInputDerivedWorkReady(view.state)
       || Boolean(view.dom.querySelector(
-      '.meo-mermaid-editing-block[data-meo-mermaid-rendering="true"], '
-        + '.meo-mermaid-editing-block [data-meo-mermaid-rendering="true"]'
+      '.meo-mermaid-editing-preview[data-meo-mermaid-rendering="true"], '
+        + '.meo-mermaid-editing-preview [data-meo-mermaid-rendering="true"]'
     )),
     apply() {
       try {

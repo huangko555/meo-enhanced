@@ -1,3 +1,4 @@
+import { enterMermaidSource, findMermaidOpening, setMermaidLayout } from './history-mermaid-chromium';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -348,18 +349,13 @@ async function main(): Promise<void> {
       });
     }, nestedDocument);
     await page.waitForSelector('#nested-rich-list .meo-mermaid-mode-btn');
-    await page.click('#nested-rich-list .meo-mermaid-mode-btn');
-    await page.waitForSelector('#nested-rich-list .meo-mermaid-editing-block.is-split');
-    await page.click('#nested-rich-list .meo-mermaid-source-editor .cm-content');
-    await page.keyboard.down('Control');
-    await page.keyboard.press('End');
-    await page.keyboard.up('Control');
-    await waitForFrames(page, 8);
-
+    const nestedOpening = await findMermaidOpening(page, '__nestedRichListEditor', 'graph TD');
+    await setMermaidLayout(page, '__nestedRichListEditor', nestedOpening, 'side-by-side');
+    await enterMermaidSource(page, '__nestedRichListEditor', nestedOpening, 'end');
     const nestedBefore = await page.evaluate(() => {
       const editor = (window as any).__nestedRichListEditor;
-      const block = document.querySelector<HTMLElement>('#nested-rich-list .meo-mermaid-editing-block')!;
-      const innerContent = block.querySelector<HTMLElement>('.meo-mermaid-source-editor .cm-content')!;
+      const block = document.querySelector<HTMLElement>('#nested-rich-list .meo-mermaid-inline-preview')!;
+      const innerContent = editor.view.contentDOM;
       const outerSelectionLine = editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number;
       const frames: Array<Record<string, unknown>> = [];
       (window as any).__nestedRichListFrames = frames;
@@ -371,13 +367,13 @@ async function main(): Promise<void> {
           }
         }
       });
-      observer.observe(editor.view.contentDOM, { childList: true, subtree: true });
+      observer.observe(editor.view.dom, { childList: true, subtree: true });
       const recordFrame = () => {
         const currentBlock = document.querySelector<HTMLElement>(
-          '#nested-rich-list .meo-mermaid-editing-block'
+          '#nested-rich-list .meo-mermaid-inline-preview'
         );
         const visibleOuterSource = Array.from(editor.view.contentDOM.querySelectorAll<HTMLElement>('.cm-line'))
-          .filter((line) => !line.closest('.meo-mermaid-editing-block'))
+          .filter((line) => line.classList.contains('meo-md-code-block'))
           .filter((line) => {
             const text = line.textContent ?? '';
             const rect = line.getBoundingClientRect();
@@ -420,7 +416,7 @@ async function main(): Promise<void> {
         frames: (window as any).__nestedRichListFrames ?? null,
         removedBlocks: (window as any).__nestedRichListRemovedBlocks ?? 0,
         focused: document.querySelector<HTMLElement>(
-          '#nested-rich-list .meo-mermaid-source-editor .cm-content'
+          '#nested-rich-list > .cm-editor .cm-content'
         )?.contains(document.activeElement) ?? false
       };
     });
@@ -442,11 +438,11 @@ async function main(): Promise<void> {
     assert.equal(
       projectedSelectionLines.size,
       1,
-      `the hidden outer projection anchor must stay stable while nested input owns focus: ${JSON.stringify(nestedAfter.frames)}`
+      `the document caret must stay on the edited line: ${JSON.stringify(nestedAfter.frames)}`
     );
     for (const frame of nestedAfter.frames) {
       assert.equal(frame.sameBlock, true, 'the rendered block must remain mounted on every frame');
-      assert.deepEqual(frame.visibleOuterSource, [], 'outer Markdown source must remain hidden on every frame');
+      assert.deepEqual(frame.visibleOuterSource, ['graph TD', frame.text === nestedExpected ? 'A --> BX' : 'A --> B'], 'native source must remain visible on every frame');
       assert.equal(frame.innerFocused, true, 'nested focus must not move during normalization');
       assert.ok(Math.abs(Number(frame.scrollTop) - nestedBefore.scrollTop) <= 1);
       assert.ok(Math.abs(Number(frame.blockTop) - nestedBefore.blockTop) <= 1);
@@ -462,7 +458,7 @@ async function main(): Promise<void> {
         return editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number;
       }),
       nestedBefore.outerSelectionLine,
-      'nested input blur must restore the unrelated outer selection'
+      'blur must preserve the native document caret'
     );
     assert.equal(await page.evaluate(() => (window as any).__nestedRichListEditor.undo()), true);
     await waitForFrames(page, 4);

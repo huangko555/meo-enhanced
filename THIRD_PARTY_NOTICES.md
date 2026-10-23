@@ -23,6 +23,37 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
 - Source availability: The corresponding source is available from the linked
   upstream release. The worker itself is not modified.
 
+## VS Code Markdown Math grammars
+
+- Source: https://github.com/microsoft/vscode/tree/7debcd0e2acdea1c52de81bf9ee1620444407dda/extensions/markdown-math/syntaxes
+- Version: VS Code 1.138.0
+- Bundled grammar data: `webview/src/adapters/grammars/md-math*.json`
+- The upstream math-body grammar credits rules from https://github.com/James-Yu/LaTeX-Workshop/blob/master/syntax/TeX.tmLanguage.json.
+- Integration changes in `mathSyntaxGrammar.ts`: local Markdown injections, MEO's delimiters and fence aliases, container prefixes and unfinished inline input. The grammar data retains the upstream contributor notice.
+
+MIT License
+
+Copyright (c) 2015 - present Microsoft Corporation
+Copyright (c) 2016 James Yu
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 ## VS Code Codicons
 
 - Author: Microsoft

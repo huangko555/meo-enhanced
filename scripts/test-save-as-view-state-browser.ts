@@ -33,6 +33,7 @@ try {
       findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null };
     const createPage = async (data: Record<string, unknown>) => {
       const page = await browser.newPage();
+      if (process.argv.includes('--slow-renderer')) await page.emulateCPUThrottling(4);
       await page.setViewport({ width: 900, height: 650 });
       await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>');
       await page.addStyleTag({ path: 'webview/src/styles.css' });
@@ -41,7 +42,11 @@ try {
       await page.evaluate(data => {
         const inspect = () => {
           const editor = document.querySelector('.editor-wrapper:not(.meo-preload-editor-shell) .editor-host > .cm-editor');
-          if (editor) {
+          const host = document.querySelector<HTMLElement>('.editor-host');
+          const loading = document.querySelector<HTMLElement>('.editor-loading');
+          // The delayed loading fallback reveals its shell before its covered
+          // editor. Only an exposed reading surface is a first visible frame.
+          if (editor && !host?.inert && loading?.hidden !== false) {
             const { EditorView, getViewportController } = (window as any).LongDocumentScrollHarness;
             const view = EditorView.findFromDOM(editor);
             const anchor = getViewportController(view).captureDocumentAnchor();

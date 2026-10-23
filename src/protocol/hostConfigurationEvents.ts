@@ -1,4 +1,5 @@
 import { decodeUiColors, type UiColors } from '../foundation/uiColors';
+import { normalizeEditorLineHeight } from '../foundation/editorLineHeight';
 
 export type CodeThemeDto = {
   readonly name: string;
@@ -10,6 +11,8 @@ export type CodeThemeDto = {
 };
 
 export type HostConfigurationEvent =
+  | { readonly type: 'editorMouseWheelZoomChanged'; readonly enabled: boolean }
+  | { readonly type: 'editorLineHeightChanged'; readonly value: number }
   | { readonly type: 'uiColorsChanged'; readonly colors: UiColors }
   | { readonly type: 'toggleMode' }
   | { readonly type: 'developmentStylesChanged'; readonly css: string }
@@ -58,9 +61,12 @@ export function decodeHostConfigurationEvent(value: unknown): HostConfigurationE
     }
     case 'toggleMode':
       return { type: 'toggleMode' };
+    case 'editorLineHeightChanged':
+      return typeof value.value === 'number' && Number.isFinite(value.value) && normalizeEditorLineHeight(value.value) === value.value ? value as HostConfigurationEvent : null;
     case 'developmentStylesChanged':
       return typeof value.css === 'string' ? { type: 'developmentStylesChanged', css: value.css } : null;
     case 'largeDocumentOptimizationChanged':
+    case 'editorMouseWheelZoomChanged':
     case 'tableStickyHeaderChanged':
     case 'boldHeadingsChanged':
     case 'restoreReadingPositionOnOpenChanged':

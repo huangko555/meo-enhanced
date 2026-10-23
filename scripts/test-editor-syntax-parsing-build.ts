@@ -17,6 +17,16 @@ const instrumentedLanguageModule = `
     return globalThis.__meoSyntaxParseCalls ??= [];
   }
 
+  // Limit the real parser to a visible prefix. A wall-clock budget alone
+  // cannot make the partial-tree case deterministic on fast or busy hosts.
+  const parseWork = actual.ParseContext.prototype.work;
+  actual.ParseContext.prototype.work = function (...args) {
+    const limit = controls().backgroundLimit;
+    return Number.isFinite(limit)
+      ? parseWork.call(this, args[0], Math.min(args[1] ?? limit, limit))
+      : parseWork.apply(this, args);
+  };
+
   function phase() {
     return String(globalThis.__meoSyntaxParsePhase ?? 'unlabelled');
   }

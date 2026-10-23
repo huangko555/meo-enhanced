@@ -13,8 +13,12 @@ import { createEditingPreferencesTransport } from '../webview/src/adapters/editi
 import type { EditingPreferences } from '../src/foundation/editingPreferences';
 import type { UpdateEditingPreferencesRequest } from '../src/protocol/editingPreferences';
 
-assert.deepEqual(Object.keys(generalSearchKeywords).sort(), ['lineNumbers', 'foldCode', 'width', 'strongColor', 'boldHeadings', 'stickyHeader', 'restorePosition', 'largeDocument', 'language', 'fontSize'].sort());
-assert.deepEqual(appearanceCatalog.map(item => item.id).sort(), ['mode', 'surface', 'documentBackground', 'text', 'accent', 'textEmphasis', 'success', 'warning', 'danger'].sort());
+assert.deepEqual(Object.keys(generalSearchKeywords).sort(), ['lineNumbers', 'foldCode', 'width', 'strongColor', 'boldHeadings', 'stickyHeader', 'restorePosition', 'largeDocument', 'language'].sort());
+assert.deepEqual(appearanceCatalog.map(item => item.id).sort(), ['mode', 'fontSize', 'mouseWheelZoom', 'lineHeight', 'surface', 'documentBackground', 'text', 'accent', 'textEmphasis', 'success', 'warning', 'danger'].sort());
+const wheelSetting = appearanceCatalog.find(item => item.id === 'mouseWheelZoom')!;
+for (const title of ['Ctrl + 滚轮调整字号', 'Cmd + 滚轮调整字号', 'Ctrl + wheel font size', 'Cmd + wheel font size']) {
+  assert.ok(settingsSearchMatches(title, ...wheelSetting.title, ...wheelSetting.description, ...wheelSetting.keywords), `Search includes the displayed platform title: ${title}`);
+}
 assert.deepEqual(Object.keys(typingSearchKeywords).sort(), Object.keys(defaultInputAssistance).sort(), 'every input setting has search aliases');
 assert.deepEqual(Object.keys(shortcutSearchKeywords).sort(), [...editorCommandIds].sort(), 'every shortcut has search aliases');
 for (const [zh, en] of [...Object.values(generalSearchKeywords), ...appearanceCatalog.map(item => item.keywords), ...Object.values(typingSearchKeywords), imageLocationSearchKeywords, ...Object.values(shortcutSearchKeywords)]) {
@@ -32,6 +36,23 @@ const defaults = { input: { ...defaultInputAssistance }, shortcuts: {} };
 assert.equal(defaults.input.selectionToolbar, true, 'existing users keep the selection toolbar by default');
 assert.equal(defaults.input.pasteHtml, false, 'HTML paste formatting is disabled by default');
 assert.equal(normalizeEditingPreferences(undefined).input.pasteHtml, false);
+const { math: _math, ...beforeMath } = defaultInputAssistance;
+assert.equal(normalizeEditingPreferences({ input: beforeMath }).input.math, true, 'older preferences enable math completion');
+assert.equal(normalizeEditingPreferences({ input: { math: false } }).input.math, false);
+assert.equal(normalizeEditingPreferences({ input: { math: 'off' } }).input.math, true);
+assert.equal(normalizeEditingPreferences({ input: { math: false } }).input.html, true, 'older preferences retain HTML completion');
+assert.equal(normalizeEditingPreferences({ input: { html: false } }).input.html, false);
+assert.equal(normalizeEditingPreferences({ input: { html: 'off' } }).input.html, true);
+for (const value of [true, false]) {
+  const change = { type: 'input' as const, key: 'html' as const, value };
+  assert.ok(decodeWebviewToHostMessage({ type: 'updateEditingPreferences', requestId: 'html', change }));
+  assert.equal(changeEditingPreferences(defaults, change, 'other').input.html, value);
+}
+for (const value of [true, false]) {
+  const change = { type: 'input' as const, key: 'math' as const, value };
+  assert.ok(decodeWebviewToHostMessage({ type: 'updateEditingPreferences', requestId: 'math', change }));
+  assert.equal(changeEditingPreferences(defaults, change, 'other').input.math, value);
+}
 const { selectionToolbar: _toolbar, ...previousInput } = defaultInputAssistance;
 assert.deepEqual(normalizeEditingPreferences({ input: { ...previousInput, emoji: true }, shortcuts: { bold: [] } }), {
   input: { ...defaultInputAssistance, emoji: true }, shortcuts: { bold: [] }
@@ -47,6 +68,17 @@ for (const platform of ['mac', 'other'] as const) {
   const bindings = defaultShortcuts(platform);
   assert.deepEqual(Object.keys(bindings), editorCommandIds);
   const primary = platform === 'mac' ? 'Cmd' : 'Ctrl';
+  assert.deepEqual(bindings.formatHtml, ['Alt + Shift + F']);
+  const formatStroke = { key: 'f', code: 'KeyF', ctrl: false, meta: false, alt: true, shift: true };
+  assert.equal(resolveShortcut(formatStroke, {}, platform, 'editor'), 'formatHtml');
+  assert.equal(resolveShortcut(formatStroke, {}, platform, 'global'), null, 'Preview cannot format a hidden HTML fragment');
+  assert.equal(resolveShortcut(formatStroke, { formatHtml: [] }, platform, 'editor'), null);
+  assert.equal(resolveShortcut(formatStroke, { bold: ['Alt + Shift + F'] }, platform, 'editor'), 'bold', 'new formatting default respects older custom bindings');
+  assert.deepEqual(effectiveShortcuts({ bold: ['Alt + Shift + F'] }, platform).formatHtml, []);
+  assert.deepEqual(shortcutConflicts('italic', ['Alt + Shift + F'], {}, platform), ['formatHtml']);
+  const formatBinding = changeEditingPreferences(defaults, { type: 'bind', command: 'formatHtml', keys: [`${primary} + Alt + L`], replaceConflicts: false }, platform);
+  assert.deepEqual(effectiveShortcuts(formatBinding.shortcuts, platform).formatHtml, [`${primary} + Alt + L`]);
+  assert.equal(resolveShortcut(formatStroke, formatBinding.shortcuts, platform, 'editor'), null);
   const saveAsKey = `${primary} + Shift + S`;
   assert.deepEqual(bindings.saveAs, [saveAsKey]);
   const legacySaveAsChord = { bold: [saveAsKey] };
@@ -160,6 +192,11 @@ const saveAsResponse = await host.update(saveAsRequest);
 assert.equal(saveAsResponse.result.ok, true);
 assert.ok(decodeHostToWebviewMessage(saveAsResponse));
 assert.deepEqual(reloaded.read().shortcuts.saveAs, ['Ctrl + Shift + S'], 'Save As bindings survive a new Host instance');
+const formatRequest = { type: 'updateEditingPreferences' as const, requestId: 'html-format-binding',
+  change: { type: 'bind' as const, command: 'formatHtml' as const, keys: ['Ctrl + Alt + L'], replaceConflicts: false } };
+assert.ok(decodeWebviewToHostMessage(formatRequest));
+assert.equal((await host.update(formatRequest)).result.ok, true);
+assert.deepEqual(reloaded.read().shortcuts.formatHtml, ['Ctrl + Alt + L'], 'HTML formatting binding persists through Host');
 assert.equal(changeEditingPreferences(persisted, { type: 'resetShortcuts' }, 'other').input.selectionToolbar, false);
 const failing = createEditingPreferencesHost({ platform: 'other', read: () => persisted, write: async () => { throw new Error('disk failure'); } });
 const failure = await failing.update({ ...request, requestId: 'failed' });

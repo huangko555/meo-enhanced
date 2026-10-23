@@ -85,8 +85,7 @@ export function livePresentationWindow(state: EditorState, tree: Tree) {
           preview = false; height += (block.endLine - block.startLine + 1) * 24 + 49;
         }
         if (block.kind === 'mermaid' && block.endLine > block.startLine + 1) {
-          const bounds = blockBounds(state, { ...block, startLine: block.startLine + 1, endLine: block.endLine - 1 });
-          const mode = getMermaidBlockMode(state, from, bounds.from, bounds.to).decision.effectiveMode;
+          const mode = getMermaidBlockMode(state, from, to).decision.effectiveMode;
           if (mode !== 'preview') { preview = false; height = (block.endLine - block.startLine + 1) * 24 + 49; }
         }
         const previousWidget = previousWidgets.get(`${from}:${to}`);

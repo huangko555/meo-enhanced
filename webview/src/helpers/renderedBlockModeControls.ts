@@ -3,6 +3,7 @@ import type { RenderedBlockModeShellDecision } from '../editor/renderedBlockMode
 import type { EditorView } from '@codemirror/view';
 import { measureFixedContainingBlockMapping } from '../editor/fixedChromeDomGeometry';
 import { projectFixedChromeGeometry, type FixedChromeRect } from '../editor/fixedChromeGeometry';
+import { focusRenderedBlockAction } from './renderedBlockActionFocus';
 
 /** A single preview-owned group follows the visible diagram, outside document layout.
  * Both normal and split previews use these same controls and zoom state. */
@@ -139,7 +140,9 @@ export function restoreRenderedBlockModeFocus(button: HTMLButtonElement | null, 
   if (!button) return;
   const state = modeButtonFocus.get(button);
   if (state) state.pointerFocus = pointerDriven;
-  button.focus({ preventScroll: true });
+  // Programmatic focus inherits the embedded text editor's :focus-visible state.
+  // The shared focus styles need the pointer origin before focus is restored.
+  focusRenderedBlockAction(button, pointerDriven);
   // The toolbar can be reparented before this restoration. Use its tracked
   // hover session, and also handle a pointer that left before the queued frame.
   if (pointerDriven && !state?.hovered) button.blur();

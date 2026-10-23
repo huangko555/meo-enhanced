@@ -67,16 +67,20 @@ try {
       assert.equal(floating[key], normal[key], `${context}: language ${key} changes while floating`);
     }
   };
-  const assertSourceLanguageLayout = async (context: string) => {
+  const assertMermaidSourceHeaderLayout = async (context: string) => {
     await page.evaluate(() => {
       const view = (window as any).__editor.view;
       view.scrollDOM.scrollTop = 0;
       view.dispatch({ selection: { anchor: view.state.doc.line(20).from } });
     });
     await frames(15);
-    const normal = await readLanguageLayout('.cm-content .meo-code-language-label');
+    assert.equal(await page.$('.cm-content .meo-code-language-label'), null, 'Editable fence replaces the passive language label');
+    assert.ok((await page.$eval('.cm-content .meo-md-code-block-start', el => el.textContent)).includes('```mermaid'), 'Original opening fence remains in the source header');
+    const normal = await page.$$eval('.cm-content .meo-mermaid-toolbar button', buttons => buttons.map(button => ({ x: button.getBoundingClientRect().x, width: button.getBoundingClientRect().width })));
     await pin();
-    await assertLanguageLayout(normal, context);
+    assert.equal(await page.$eval(header + ' .meo-block-sticky-language', el => el.textContent), 'mermaid');
+    const floating = await page.$$eval(header + ' .meo-mermaid-toolbar button', buttons => buttons.map(button => ({ x: button.getBoundingClientRect().x, width: button.getBoundingClientRect().width })));
+    assert.deepEqual(floating, normal, `${context}: editable fences do not move floating actions`);
   };
   await mount('Plain hover target.\n\n```javascript\nconst hoverValue = 1;\n```\n');
   const hover = await page.evaluate(() => {
@@ -249,7 +253,10 @@ try {
 
   await page.evaluate(() => document.documentElement.style.removeProperty('--meo-font-live-size'));
   const mermaid = ['```mermaid', 'flowchart TD', ...Array.from({ length: 45 }, (_, i) => `N${i} --> N${i + 1}`), '```'].join('\n');
-  await mount(mermaid + after); await page.waitForSelector('.meo-mermaid-block svg');
+  await mount(mermaid + after);
+  // The opening fence is now editable, so put the caret outside for the reading checks.
+  await page.evaluate(() => { const view = (window as any).__editor.view; view.dispatch({ selection: { anchor: view.state.doc.length } }); });
+  await frames(); await page.waitForSelector('.meo-mermaid-block svg');
   const mermaidLanguage = await readLanguageLayout('.meo-rendered-block-preview-language');
   await pin(); await assertLanguageLayout(mermaidLanguage, 'Mermaid preview');
   assert.equal(await page.$eval(header + ' .meo-block-sticky-language', el => el.textContent), 'mermaid');
@@ -259,31 +266,41 @@ try {
   const previewControls = '.meo-mermaid-preview-controls:not(.is-outside-viewport)';
   assert.equal(await page.$$eval(previewControls + ' .meo-visual-control-btn', els => els.length), 4);
   await page.evaluate(() => (window as any).__editor.setUiLanguage('en')); await frames(12);
-  assert.equal(await page.$eval(header + ' .meo-mermaid-mode-btn', el => (el as HTMLElement).dataset.tooltip), 'Switch to split view');
+  assert.equal(await page.$eval(header + ' .meo-mermaid-mode-btn', el => (el as HTMLElement).dataset.tooltip), 'Edit');
   await page.evaluate(() => (window as any).__editor.setUiLanguage('zh-CN')); await frames(12);
-  assert.notEqual(await page.$eval(header + ' .meo-mermaid-mode-btn', el => (el as HTMLElement).dataset.tooltip), 'Switch to split view');
+  assert.notEqual(await page.$eval(header + ' .meo-mermaid-mode-btn', el => (el as HTMLElement).dataset.tooltip), 'Edit');
 
   const transform = await page.$eval('.meo-mermaid-svg-wrapper', el => (el as HTMLElement).style.transform);
   await page.click(previewControls + ' .meo-visual-control-btn');
   assert.notEqual(await page.$eval('.meo-mermaid-svg-wrapper', el => (el as HTMLElement).style.transform), transform, 'bottom controls update the original preview');
   await page.click(previewControls + ' .meo-visual-control-btn:nth-child(3)');
   await page.hover(header + ' .meo-mermaid-mode-btn');
+  await frames(16);
   await page.waitForSelector('.meo-tooltip.is-visible');
-  await page.click(header + ' .meo-mermaid-mode-btn'); await frames(15);
-  await page.waitForSelector('.meo-mermaid-editing-block.is-split');
   assert.equal(await page.$eval('.meo-tooltip.is-visible .meo-tooltip-label', el => el.textContent),
-    await page.$eval(header + ' .meo-mermaid-mode-btn', el => (el as HTMLElement).dataset.tooltip), 'hovered mode tooltip changes without re-entry');
+    await page.$eval(header + ' .meo-mermaid-mode-btn', el => (el as HTMLElement).dataset.tooltip),
+    'Icon-only edit control exposes its action');
+  await page.click(header + ' .meo-mermaid-mode-btn'); await frames(24);
+  await page.waitForFunction(()=>document.querySelector('.meo-mermaid-toolbar')?.getAttribute('data-meo-mermaid-mode')==='edit');
+  // Explicit editing reveals the block head; scroll again to exercise its floating header.
+  await pin();
+  assert.ok(await page.$(header + ' .meo-native-source-preview-label .meo-mermaid-layout-btn'), 'The opaque split header includes the preview layout action');
+  await page.hover(header + ' .meo-mermaid-layout-btn');
+  await page.waitForSelector('.meo-tooltip.is-visible');
+  assert.equal(await page.$eval('.meo-tooltip.is-visible .meo-tooltip-label', el => el.textContent),
+    await page.$eval(header + ' .meo-mermaid-layout-btn', el => (el as HTMLElement).dataset.tooltip),
+    'Preview layout control exposes its full action');
+  await page.mouse.move(0,0);
   assert.ok(await page.$(header), 'Split retains a single header');
-  assert.equal(await page.$eval(header + ' .meo-mermaid-toolbar', el => (el as HTMLElement).dataset.meoMermaidMode), 'split');
+  assert.equal(await page.$eval(header + ' .meo-mermaid-toolbar', el => (el as HTMLElement).dataset.meoMermaidMode), 'edit');
   await page.evaluate(() => { (window as any).__editor.view.scrollDOM.scrollTop = 0; }); await frames(15);
   assert.equal(await page.$$eval('.cm-content .meo-mermaid-toolbar .meo-visual-control-btn', els => els.length), 0, 'returning to the original header keeps preview controls separate');
   assert.equal(await page.$$eval(previewControls + ' .meo-visual-control-btn', els => els.length), 4);
-  await assertSourceLanguageLayout('Mermaid split');
-  await page.click(header + ' .meo-mermaid-mode-btn'); await frames(15);
-  await page.waitForSelector('.meo-mermaid-editing-block.is-source');
-  assert.equal(await page.$('.meo-mermaid-preview-controls'), null, 'Source has no preview controls');
-  await assertSourceLanguageLayout('Mermaid source');
-  await page.click(header + ' .meo-mermaid-mode-btn'); await frames(15); await pin();
+  await assertMermaidSourceHeaderLayout('Mermaid split');
+  await page.click('.meo-native-source-preview-label .meo-mermaid-layout-btn'); await frames(15);
+  assert.equal(await page.$$eval('.cm-content[contenteditable="true"]',nodes=>nodes.length),1, 'Both layouts use the same main input');
+  await assertMermaidSourceHeaderLayout('Mermaid source');
+  await page.click(header + ' .meo-mermaid-mode-btn'); await frames(24); await pin();
   await page.click(previewControls + ' .meo-visual-control-btn:nth-child(4)');
   await page.waitForSelector('.meo-mermaid-fullscreen-scrim'); await frames();
   assert.equal(await page.$(header), null, 'fullscreen hides floating header');
@@ -295,9 +312,9 @@ try {
 
   await page.evaluate(() => { const editor = (window as any).__editor; editor.setSearchQuery('N30'); editor.findNext('N30', { focusEditor: false }); });
   await frames(15); await pin();
-  assert.equal(await page.$eval(header + ' .meo-mermaid-toolbar', el => (el as HTMLElement).dataset.meoMermaidMode), 'split', 'floating mode follows temporary search presentation');
+  assert.equal(await page.$eval(header + ' .meo-mermaid-toolbar', el => (el as HTMLElement).dataset.meoMermaidMode), 'edit', 'floating mode follows temporary search presentation');
   await page.click(header + ' .meo-mermaid-mode-btn'); await frames(15);
-  assert.ok(await page.$('.meo-mermaid-editing-block.is-source'), 'manual action overrides the temporary search mode');
+  assert.equal(await page.$eval('.meo-mermaid-toolbar',node=>(node as HTMLElement).dataset.meoMermaidMode),'preview','Finish editing ends temporary search reveal');
 
   const math = ['$$', '\\begin{aligned}', ...Array.from({ length: 30 }, (_, i) => `x_{${i}} &= ${i} \\\\`), '\\end{aligned}', '$$'].join('\n');
   await mount('Before\n\n' + math + after);

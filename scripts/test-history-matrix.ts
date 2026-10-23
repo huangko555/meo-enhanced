@@ -1,3 +1,4 @@
+import { enterMermaidSource, findMermaidOpening, readMermaidHistoryTarget, setMermaidLayout } from './history-mermaid-chromium';
 import { enterDisplayMathSource, findDisplayMathOpening, readDisplayMathHistoryTarget } from './history-display-math-chromium';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -9,14 +10,13 @@ import {
   type HistoryRenderedBlockInteractionAdapter,
   type HistoryRenderedBlockTargetMode
 } from './history-rendered-block-interaction';
-import { runHistoryRenderedBlockChromiumInteraction } from './history-rendered-block-interaction-chromium';
 
 type BlockMode = 'preview' | 'split' | 'source';
 type NeedleOccurrence = 'first' | 'last';
 type HistoryTarget =
   | { kind: 'outer'; lineNeedle: string }
   | { kind: 'table'; undoValue: string; redoValue: string }
-  | { kind: 'mermaid'; marker: string; mode: Exclude<BlockMode, 'preview'> }
+  | { kind: 'mermaid'; marker: string; mode: Exclude<BlockMode, 'preview'>; needle: string; occurrence?: NeedleOccurrence }
   | { kind: 'math'; marker: string; needle: string; occurrence?: NeedleOccurrence };
 
 const repoRoot = path.resolve(import.meta.dir, '..');
@@ -214,12 +214,7 @@ async function editRenderedBlock(
     if (finalMode === 'preview') await page.evaluate(() => (window as any).__historyMatrixEditor.revealSelection(0, 0, { align: 'none' }));
     return;
   }
-  const modeButton = kind === 'mermaid' ? '.meo-mermaid-mode-btn' : '.meo-latex-math-mode-btn';
-  const blockSelector = kind === 'mermaid' ? '.meo-mermaid-editing-block' : '.meo-latex-math-editing-block';
   let targetLineNumber = 0;
-  const editorRegionLabel = () => kind === 'mermaid'
-    ? `Mermaid editor at line ${targetLineNumber}`
-    : `Formula editor at line ${targetLineNumber}`;
   let modeClickSequence = 0;
   const settleTargetModeControl = async () => {
     targetLineNumber = await scrollToLineContaining(page, lineNeedle, occurrence, null, kind);
@@ -320,15 +315,15 @@ async function editRenderedBlock(
       const labels = blockKind === 'mermaid'
         ? {
             controls: `Mermaid block controls at line ${lineNumber}`,
-            preview: 'Preview, Switch to split view',
-            split: 'Split, Switch to source',
-            source: 'Source, Switch to preview'
+            preview: 'Edit',
+            split: 'Finish editing',
+            source: 'Finish editing'
           }
         : {
             controls: `Formula block controls at line ${lineNumber}`,
-            preview: 'Preview, Switch to split view',
-            split: 'Split, Switch to source',
-            source: 'Source, Switch to preview'
+            preview: 'Edit',
+            split: 'Finish editing',
+            source: 'Finish editing'
           };
       const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${labels.controls}"]`);
       const button = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
@@ -339,12 +334,13 @@ async function editRenderedBlock(
         )) ?? null;
       if (!button) throw new Error(`Missing ${blockKind} mode button for ${needle}`);
       const currentLabel = button.getAttribute('aria-label');
-      const expectedLabel = currentLabel === labels.preview
-        ? labels.split
-        : currentLabel === labels.split ? labels.source : labels.preview;
+      const expectedLabel = currentLabel === labels.preview ? labels.split : labels.preview;
       const rect = button.getBoundingClientRect();
       return {
         controlsLabel: labels.controls,
+        groupSelector: blockKind === 'mermaid'
+          ? `.meo-mermaid-toolbar[data-meo-block-from="${group!.dataset.meoBlockFrom}"]`
+          : `[role="group"][aria-label="${labels.controls}"]`,
         currentLabel,
         expectedLabel,
         hitPoint: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
@@ -357,7 +353,7 @@ async function editRenderedBlock(
         || expectFinalPreviewReplacementFailure
         || stopAfterFinalPreviewStableMovement
       )
-      && modeClickSequence === 3
+      && modeClickSequence === 2
     );
     if (exerciseFinalPreviewPointerSeam) {
       await page.evaluate((lineNumber) => {
@@ -384,14 +380,17 @@ async function editRenderedBlock(
     const safeReleaseLabel = 'History pointer safe release target';
     try {
       const targetMode: HistoryRenderedBlockTargetMode = transition.expectedLabel === (
-        kind === 'mermaid' ? 'Split, Switch to source' : 'Split, Switch to source'
+        kind === 'mermaid' ? 'Finish editing' : 'Finish editing'
       ) ? 'split' : transition.expectedLabel === (
-        kind === 'mermaid' ? 'Source, Switch to preview' : 'Source, Switch to preview'
+        kind === 'mermaid' ? 'Finish editing' : 'Finish editing'
       ) ? 'source' : 'preview';
       await runHistoryRenderedBlockInteraction({ kind, lineNumber: targetLineNumber, targetMode }, {
       isCurrent: async () => true,
       settleScroll: async () => {
         await settleTargetModeControl();
+        // Navigation starts another source presentation. Its visible box and
+        // scrollend can precede final layout; acquire the native target afterward.
+        await page.evaluate(async () => (window as any).__historyMatrixEditor.whenVisiblePresentationReady(1_200));
         return 'settled';
       },
       isTargetSettled: async () => false,
@@ -566,7 +565,7 @@ async function editRenderedBlock(
       async afterPointerDown(modeButtonHandle: any) {
         const stableModeButton = modeButtonHandle.asElement();
         if (!stableModeButton) throw new Error(`Missing stable mode button after pointerdown: ${transition.controlsLabel}`);
-        if (expectFinalPreviewReplacementFailure && modeClickSequence === 3) {
+        if (expectFinalPreviewReplacementFailure && modeClickSequence === 2) {
           await stableModeButton.evaluate((button: HTMLButtonElement) => {
             const evidence = document.createElement('output');
             evidence.setAttribute('aria-label', 'History pointer replacement release evidence');
@@ -584,7 +583,7 @@ async function editRenderedBlock(
             }, { once: true });
             button.replaceWith(replacement);
           });
-        } else if (stopAfterFinalPreviewStableMovement && modeClickSequence === 3) {
+        } else if (stopAfterFinalPreviewStableMovement && modeClickSequence === 2) {
           if (!pointerDownRect) throw new Error('Missing pointerdown geometry before stable movement');
           await stableModeButton.evaluate((button: HTMLButtonElement) => {
             const movement = button.animate(
@@ -611,8 +610,8 @@ async function editRenderedBlock(
       settleTarget: async () => {
         if (injectPreDownReplacement) return;
         try {
-          await page.waitForFunction(({ controlsLabel, expectedLabel }) => Array.from(
-            document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`)
+          await page.waitForFunction(({ groupSelector, expectedLabel }) => Array.from(
+            document.querySelector<HTMLElement>(groupSelector)
               ?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
           ).some((candidate) => candidate.getAttribute('aria-label') === expectedLabel), {}, transition);
         } catch (error) {
@@ -671,7 +670,7 @@ async function editRenderedBlock(
         document.querySelector(`[aria-label="${ariaLabel}"]`)?.remove();
       }, safeReleaseLabel),
       async cancelAnimation(modeButtonHandle: any) {
-        if (!stopAfterFinalPreviewStableMovement || modeClickSequence !== 3) return;
+        if (!stopAfterFinalPreviewStableMovement || modeClickSequence !== 2) return;
         const stableModeButton = modeButtonHandle.asElement();
         if (stableModeButton) {
           await stableModeButton.evaluate((button: HTMLButtonElement) => {
@@ -726,65 +725,19 @@ async function editRenderedBlock(
   };
   targetLineNumber = await scrollToLineContaining(page, lineNeedle, occurrence, null, kind);
   await clickTargetModeButton();
-  if (finalMode === 'source') {
-    await clickTargetModeButton();
-  }
+  await setMermaidLayout(page, '__historyMatrixEditor', targetLineNumber, finalMode === 'source' ? 'stacked' : 'side-by-side');
   if (stopAfterModeSettlement) return;
-  await page.waitForFunction(({ selector, regionLabel }) => {
-    const viewport = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller')?.getBoundingClientRect();
-    const block = document.querySelector<HTMLElement>(`${selector}[role="region"][aria-label="${regionLabel}"]`);
-    const rect = block?.getBoundingClientRect();
-    return Boolean(viewport && rect && rect.bottom > viewport.top && rect.top < viewport.bottom);
-  }, {}, { selector: blockSelector, regionLabel: editorRegionLabel() }).catch(async (error: unknown) => {
-    const state = await page.evaluate(({ buttonSelector, blockSelector }) => ({
-      viewport: document.querySelector<HTMLElement>('.cm-editor > .cm-scroller')?.getBoundingClientRect().toJSON(),
-      buttons: Array.from(document.querySelectorAll<HTMLButtonElement>(buttonSelector)).map((button) => ({
-        label: button.getAttribute('aria-label'),
-        groupLabel: button.closest('[role="group"]')?.getAttribute('aria-label'),
-        rect: button.getBoundingClientRect().toJSON(),
-        lineText: button.closest('.cm-line')?.textContent
-      })),
-      blocks: Array.from(document.querySelectorAll<HTMLElement>(blockSelector)).map((block) => ({
-        label: block.getAttribute('aria-label'),
-        rect: block.getBoundingClientRect().toJSON(),
-        text: block.textContent
-      }))
-    }), { buttonSelector: modeButton, blockSelector });
-    throw new Error(`Rendered block did not enter editing mode: ${JSON.stringify({ kind, lineNeedle, state })}`, { cause: error });
-  });
-  await page.evaluate(({ blockKind, needle, selector, regionLabel }) => {
-    const block = document.querySelector<HTMLElement>(`${selector}[role="region"][aria-label="${regionLabel}"]`);
-    if (!block) throw new Error(`Missing ${blockKind} editing block for ${needle}`);
-    const content = block.querySelector<HTMLElement>('.cm-content');
-    if (!content) throw new Error(`Missing ${blockKind} source editor for ${needle}`);
-    const range = document.createRange();
-    range.selectNodeContents(content);
-    range.collapse(false);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-    content.focus();
-  }, {
-    blockKind: kind,
-    needle: lineNeedle,
-    selector: blockSelector,
-    regionLabel: editorRegionLabel()
-  });
+  await enterMermaidSource(page, '__historyMatrixEditor', targetLineNumber, 'end');
   await page.keyboard.type(marker);
-  await page.waitForFunction(({ selector, expected }) => {
-    const active = document.activeElement;
-    const block = active instanceof HTMLElement ? active.closest<HTMLElement>(selector) : null;
-    return Boolean(block && (window as any).__historyMatrixEditor.getText().includes(expected));
-  }, {}, { selector: blockSelector, expected: marker });
+  await page.waitForFunction(expected => (window as any).__historyMatrixEditor.getText().includes(expected), {}, marker);
   if (finalMode === 'preview') {
-    await clickTargetModeButton();
     if (stopBeforeFinalPreviewPointer) {
       await settleTargetModeControl();
       await page.evaluate(({ blockKind, lineNumber }) => {
         const controlsLabel = blockKind === 'mermaid'
           ? `Mermaid block controls at line ${lineNumber}`
           : `Formula block controls at line ${lineNumber}`;
-        const expectedLabel = blockKind === 'mermaid' ? 'Source, Switch to preview' : 'Source, Switch to preview';
+        const expectedLabel = blockKind === 'mermaid' ? 'Finish editing' : 'Finish editing';
         const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`);
         const settledBeforePointer = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
           .some((button) => button.getAttribute('aria-label') === expectedLabel);
@@ -799,34 +752,7 @@ async function editRenderedBlock(
       || stopAfterFinalPreviewStableMovement
     ) return;
   }
-  const desiredMode = finalMode === 'preview' ? 'split' : finalMode;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const actualMode = await page.evaluate(({ blockKind, lineNumber }) => {
-      const labels = blockKind === 'mermaid'
-        ? {
-            controls: `Mermaid block controls at line ${lineNumber}`,
-            preview: 'Preview, Switch to split view',
-            split: 'Split, Switch to source',
-            source: 'Source, Switch to preview'
-          }
-        : {
-            controls: `Formula block controls at line ${lineNumber}`,
-            preview: 'Preview, Switch to split view',
-            split: 'Split, Switch to source',
-            source: 'Source, Switch to preview'
-          };
-      const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${labels.controls}"]`);
-      const currentLabel = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
-        .map((candidate) => candidate.getAttribute('aria-label'))
-        .find((label) => label === labels.preview || label === labels.split || label === labels.source);
-      if (currentLabel === labels.preview) return 'preview';
-      if (currentLabel === labels.split) return 'split';
-      if (currentLabel === labels.source) return 'source';
-      return null;
-    }, { blockKind: kind, lineNumber: targetLineNumber });
-    if (actualMode === desiredMode) break;
-    await clickTargetModeButton();
-  }
+
 }
 
 async function assertFirstMermaidModeClickAfterAdjacentEdit(page: any, lineNeedle: string) {
@@ -845,10 +771,11 @@ async function assertFirstMermaidModeClickAfterAdjacentEdit(page: any, lineNeedl
       ?.getBoundingClientRect();
     return Boolean(scroller && group && group.top >= scroller.top && group.bottom <= scroller.bottom);
   }, {}, controlsLabel);
+  await setMermaidLayout(page, '__historyMatrixEditor', targetLineNumber, 'preview');
   const hitPoint = await page.evaluate((label) => {
     const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${label}"]`);
     const button = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
-      .find((candidate) => candidate.getAttribute('aria-label') === 'Preview, Switch to split view');
+      .find((candidate) => candidate.getAttribute('aria-label') === 'Edit');
     if (!button) throw new Error(`Missing preview mode control: ${label}`);
     const rect = button.getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
@@ -857,41 +784,13 @@ async function assertFirstMermaidModeClickAfterAdjacentEdit(page: any, lineNeedl
   await page.waitForFunction((controlsLabel) => Array.from(
     document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`)
       ?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
-  ).some((candidate) => candidate.getAttribute('aria-label') === 'Split, Switch to source'), {}, controlsLabel);
+  ).some((candidate) => candidate.getAttribute('aria-label') === 'Finish editing'), {}, controlsLabel);
 
-  const regionLabel = `Mermaid editor at line ${targetLineNumber}`;
-  await page.waitForFunction((label) => {
-    const scroller = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller')?.getBoundingClientRect();
-    const region = document.querySelector<HTMLElement>(`[role="region"][aria-label="${label}"]`)
-      ?.getBoundingClientRect();
-    return Boolean(scroller && region && region.bottom > scroller.top && region.top < scroller.bottom);
-  }, { timeout: 5000 }, regionLabel).catch(async (error: unknown) => {
-    const state = await page.evaluate(({ controlsLabel, editorLabel }) => {
-      const scrollerElement = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller');
-      const scroller = scrollerElement?.getBoundingClientRect();
-      const toolbar = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`);
-      const region = document.querySelector<HTMLElement>(`[role="region"][aria-label="${editorLabel}"]`);
-      const active = document.activeElement as HTMLElement | null;
-      const visibleLines = Array.from(document.querySelectorAll<HTMLElement>('.cm-line')).filter((line) => {
-        const rect = line.getBoundingClientRect();
-        return Boolean(scroller && rect.bottom > scroller.top && rect.top < scroller.bottom);
-      });
-      return {
-        scroller: scroller?.toJSON() ?? null,
-        toolbar: toolbar?.getBoundingClientRect().toJSON() ?? null,
-        region: region?.getBoundingClientRect().toJSON() ?? null,
-        active: active ? {
-          tag: active.tagName,
-          role: active.getAttribute('role'),
-          label: active.getAttribute('aria-label'),
-          className: active.className
-        } : null,
-        regionFocused: Boolean(region?.contains(active)),
-        viewportAnchor: visibleLines[0]?.textContent ?? null
-      };
-    }, { controlsLabel, editorLabel: regionLabel });
-    throw new Error(`First Mermaid editing region is not visible: ${JSON.stringify(state)}`, { cause: error });
-  });
+  await page.waitForFunction(lineNumber => {
+    const view = (window as any).__historyMatrixEditor.view, position = view.state.doc.line(lineNumber + 1).from;
+    const coords = view.coordsAtPos(position), viewport = view.scrollDOM.getBoundingClientRect();
+    return view.hasFocus && !!coords && coords.bottom > viewport.top && coords.top < viewport.bottom;
+  }, {}, targetLineNumber);
 
   const repeatedLineNumber = await scrollToLineContaining(page, lineNeedle, 'last', null, 'mermaid');
   if (repeatedLineNumber === targetLineNumber) {
@@ -901,7 +800,7 @@ async function assertFirstMermaidModeClickAfterAdjacentEdit(page: any, lineNeedl
     document.querySelector<HTMLElement>(
       `[role="group"][aria-label="Mermaid block controls at line ${lineNumber}"]`
     )?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
-  ).some((candidate) => candidate.getAttribute('aria-label') === 'Preview, Switch to split view'), {}, repeatedLineNumber);
+  ).some((candidate) => candidate.getAttribute('aria-label') === 'Finish editing'), {}, repeatedLineNumber);
 }
 
 async function assertHistoryTarget(
@@ -950,60 +849,12 @@ async function assertHistoryTarget(
       throw new Error(`${direction} step ${step} missed native formula: ${JSON.stringify({ target, state })}`);
     return;
   }
-  const markerExpected = direction === 'redo';
-  await page.waitForFunction(({ kind, marker, mode, expected }) => {
-    const kindLabel = kind === 'mermaid' ? 'Mermaid' : 'Formula';
-    const active = document.activeElement;
-    const block = active instanceof HTMLElement
-      ? active.closest<HTMLElement>(`[role="region"][aria-label^="${kindLabel} editor at line "]`)
-      : null;
-    if (!block) return false;
-    const lineNumber = block.getAttribute('aria-label')?.match(/ at line (\d+)$/)?.[1] ?? null;
-    const labels = kind === 'mermaid'
-      ? {
-          preview: 'Preview, Switch to split view',
-          split: 'Split, Switch to source',
-          source: 'Source, Switch to preview'
-        }
-      : {
-          preview: 'Preview, Switch to split view',
-          split: 'Split, Switch to source',
-          source: 'Source, Switch to preview'
-        };
-    const buttonLabel = lineNumber
-      ? Array.from(document.querySelector<HTMLElement>(
-          `[role="group"][aria-label="${kindLabel} block controls at line ${lineNumber}"]`
-        )?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
-          .map((button) => button.getAttribute('aria-label'))
-          .find((label) => label === labels.preview || label === labels.split || label === labels.source) ?? null
-      : null;
-    const rect = block.getBoundingClientRect();
-    const actualMode = buttonLabel === labels.source
-      ? 'source'
-      : buttonLabel === labels.split ? 'split' : buttonLabel === labels.preview ? 'preview' : null;
-    return actualMode === mode
-      && (window as any).__historyMatrixEditor.getText().includes(marker) === expected
-      && rect.bottom > 0
-      && rect.top < window.innerHeight;
-  }, {}, {
-    kind: target.kind,
-    marker: target.marker,
-    mode: target.mode,
-    expected: markerExpected
-  }).catch(async (error: unknown) => {
-    const state = await page.evaluate(({ kind, marker }) => {
-      const kindLabel = kind === 'mermaid' ? 'Mermaid' : 'Formula';
-      return Array.from(document.querySelectorAll<HTMLElement>(
-        `[role="region"][aria-label^="${kindLabel} editor at line "]`
-      )).map((block) => ({
-        active: block.contains(document.activeElement),
-        label: block.getAttribute('aria-label'),
-        documentContainsMarker: (window as any).__historyMatrixEditor.getText().includes(marker),
-        rect: block.getBoundingClientRect().toJSON()
-      }));
-    }, { kind: target.kind, marker: target.marker });
-    throw new Error(`${direction} step ${step} missed rendered-block target: ${JSON.stringify({ target, state })}`, { cause: error });
-  });
+  const opening = await findMermaidOpening(page, '__historyMatrixEditor', target.needle, target.occurrence ?? 'first');
+  const state = await readMermaidHistoryTarget(page, '__historyMatrixEditor', opening);
+  if (!state.focused || !state.visible || !state.caretAtEnd || !state.resultPresent
+    || state.side !== (target.mode === 'split') || state.source.includes(target.marker) !== (direction === 'redo'))
+    throw new Error(`${direction} step ${step} missed native Mermaid target: ${JSON.stringify({ target, state })}`);
+
 }
 
 async function assertReplacementSafeReleaseAndRecovery(page: any) {
@@ -1281,11 +1132,14 @@ async function main() {
       const command = table?.closest<HTMLElement>('.meo-md-html-table-shell')
         ?.querySelector<HTMLButtonElement>('button[data-tooltip="Insert row below"]');
       if (!command) throw new Error('Missing Insert row below control');
-      return !command.dispatchEvent(new PointerEvent('pointerdown', {
+      const consumed = !command.dispatchEvent(new PointerEvent('pointerdown', {
         button: 0,
         bubbles: true,
         cancelable: true
       }));
+      command.dispatchEvent(new PointerEvent('pointerup', { button: 0, bubbles: true }));
+      command.click();
+      return consumed;
     });
     if (!commandConsumed) throw new Error('Insert row below command was not consumed');
     await page.waitForFunction((expectedRows) => document.querySelectorAll<HTMLElement>(
@@ -1449,11 +1303,11 @@ async function main() {
       console.log('suite-prefix first default Mermaid pre-down replacement checks passed');
       return;
     }
-    await record({ kind: 'mermaid', marker: 'M_PREVIEW_EDIT', mode: 'split' });
+    await record({ kind: 'mermaid', marker: 'M_PREVIEW_EDIT', mode: 'split', needle: fixture.mermaidPreview });
     await editRenderedBlock(page, 'mermaid', fixture.mermaidSplit, ' M_SPLIT_EDIT', 'split');
-    await record({ kind: 'mermaid', marker: 'M_SPLIT_EDIT', mode: 'split' });
+    await record({ kind: 'mermaid', marker: 'M_SPLIT_EDIT', mode: 'split', needle: fixture.mermaidSplit });
     await editRenderedBlock(page, 'mermaid', fixture.mermaidSource, ' M_SOURCE_EDIT', 'source');
-    await record({ kind: 'mermaid', marker: 'M_SOURCE_EDIT', mode: 'source' });
+    await record({ kind: 'mermaid', marker: 'M_SOURCE_EDIT', mode: 'source', needle: fixture.mermaidSource });
 
     const mathPreviewMarker = realFixtureText ? '555' : ' + MATH_PREVIEW_EDIT';
     await editRenderedBlock(
@@ -1483,9 +1337,9 @@ async function main() {
     await editOuterLine(page, fixture.extraOuter2, ' EXTRA_TWO_EDIT');
     await record({ kind: 'outer', lineNeedle: fixture.extraOuter2 });
     await editRenderedBlock(page, 'mermaid', fixture.extraMermaid1, ' M_EXTRA_ONE', 'source', 'last');
-    await record({ kind: 'mermaid', marker: 'M_EXTRA_ONE', mode: 'source' });
+    await record({ kind: 'mermaid', marker: 'M_EXTRA_ONE', mode: 'source', needle: fixture.extraMermaid1, occurrence: 'last' });
     await editRenderedBlock(page, 'mermaid', fixture.extraMermaid2, ' M_EXTRA_TWO', 'split');
-    await record({ kind: 'mermaid', marker: 'M_EXTRA_TWO', mode: 'split' });
+    await record({ kind: 'mermaid', marker: 'M_EXTRA_TWO', mode: 'split', needle: fixture.extraMermaid2 });
     await editRenderedBlock(page, 'math', fixture.extraMath1, ' MATH_EXTRA_ONE', 'source');
     await record({ kind: 'math', marker: 'MATH_EXTRA_ONE', needle: fixture.extraMath1 });
     await editRenderedBlock(page, 'math', fixture.extraMath2, ' MATH_EXTRA_TWO', 'split');
@@ -1614,32 +1468,14 @@ async function main() {
         after: shiftedSemanticLines
       })}`);
     }
-    // This intentionally uses the shared public Chromium Adapter. A direct DOM
-    // click can appear green while its detached/offscreen control never
-    // receives the real pointer transaction.
-    await runHistoryRenderedBlockChromiumInteraction(
-      page,
-      { kind: 'mermaid', lineNumber: shiftedSemanticLines.mermaidLine, targetMode: 'split' },
-      '__historyMatrixEditor'
-    );
+    // Drive the current public controls after their document line identity changes.
+    await setMermaidLayout(page, '__historyMatrixEditor', shiftedSemanticLines.mermaidLine, 'side-by-side');
     await enterDisplayMathSource(page, '__historyMatrixEditor', shiftedSemanticLines.formulaLine);
     await page.evaluate(async () => {
       const applied = await (window as any).__historyMatrixEditor.undo();
       if (!applied) throw new Error('Equal-length line shift undo was not applied');
     });
-    for (const [kind, lineNumber] of [
-      ['Mermaid', semanticLines.mermaidLine]
-    ] as const) {
-      await page.evaluate((line) => (window as any).__historyMatrixEditor.scrollToLine(line, 'center'), lineNumber);
-      await page.waitForFunction(({ groupLabel, regionLabel }) => Boolean(
-        document.querySelector(`[role="group"][aria-label="${groupLabel}"]`)
-        && document.querySelector(`[role="region"][aria-label="${regionLabel}"]`)
-      ), {}, {
-        groupLabel: `${kind} block controls at line ${lineNumber}`,
-        regionLabel: `${kind} editor at line ${lineNumber}`
-      });
-    }
-
+    await setMermaidLayout(page, '__historyMatrixEditor', semanticLines.mermaidLine, 'side-by-side');
     await enterDisplayMathSource(page, '__historyMatrixEditor', semanticLines.formulaLine);
     const relocatedMath = await readDisplayMathHistoryTarget(page, '__historyMatrixEditor', semanticLines.formulaLine);
     if (!relocatedMath.focused || !relocatedMath.visible) throw new Error('Relocated formula lost its main document target');
