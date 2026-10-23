@@ -135,6 +135,9 @@ async function initialPreview() {
   try {
     await started;
     await page.waitForFunction(() => !document.querySelector<HTMLElement>('.preview-loading')!.hidden);
+    assert.equal(await page.$eval('.editor-wrapper', e => getComputedStyle(e).opacity), '1',
+      'Initial loading must reveal the actual shell rather than remain behind its bootstrap cover');
+    assert.equal(await page.$eval('.mode-toolbar', e => e.getAttribute('aria-hidden')), null);
     assert.equal(await page.$eval('.editor-host', e => e.hasAttribute('data-preview-cover')), false);
     release(); const host = await opening;
     await page.waitForFunction(() => document.querySelector<HTMLElement>('.preview-loading')!.hidden);

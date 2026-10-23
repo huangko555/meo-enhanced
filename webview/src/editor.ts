@@ -28,6 +28,7 @@ import { indentUnit, syntaxTree, forceParsing } from '@codemirror/language';
 import { sourceHighlightStyle } from './theme';
 import { viewportSyntaxHighlighting } from './editor/viewportSyntaxHighlighting';
 import { backgroundMarkdownStructureExtensions } from './editor/backgroundMarkdownStructure';
+import { isCompleteMarkdownStructure, markdownStructureIdentity } from './editor/markdownStructure';
 import { adoptMarkdownDocumentContext } from './markdownDocumentContext';
 import type { MarkdownParser } from '@lezer/markdown';
 import { prepareSourceSyntax, sourceSyntax, sourceSyntaxPreparation } from './helpers/sourceSyntax';
@@ -451,6 +452,11 @@ export function createEditor({
   let imeCompositionChanged = false;
   let imeCompositionBaseText: Text | null = null;
   let unpublishedChanges: { before: Text; changes: ChangeSet } | null = null;
+  let outlinePending = false;
+  let outlineChanges: ChangeDesc | null = null;
+  let outlineCache: {
+    doc: Text; tree: ReturnType<typeof resolvedSyntaxTree> | null; headings: ReturnType<typeof extractHeadings>;
+  } | null = null;
   let imeCompositionFlushTimer: number | null = null;
   let capturedPointerId: number | null = null;
   let selectionMenuPointerId: number | null = null;
@@ -2691,6 +2697,9 @@ export function createEditor({
         return suppressHistoryAutoScrollAt(range.head);
       }),
       EditorView.updateListener.of((update) => {
+        if (update.docChanged && outlineCache) {
+          outlineChanges = outlineChanges?.composeDesc(update.changes) ?? update.changes.desc;
+        }
         if (update.focusChanged || update.viewportChanged || update.geometryChanged) scheduleLargeDocumentAssessment();
         // Rebuilt widgets already contain current positions. Only the deferred
         // suffix still carries mapped DOM whose datasets must move before paint.
@@ -3456,10 +3465,6 @@ export function createEditor({
   emitSourcePositionChange(view.hasFocus);
   emitHistoryAvailability();
 
-  let outlinePending = false;
-  let outlineCache: {
-    doc: EditorState['doc']; tree: ReturnType<typeof resolvedSyntaxTree>; headings: ReturnType<typeof extractHeadings>;
-  } | null = null;
   return {
     view,
     state: view.state,
@@ -4257,10 +4262,24 @@ export function createEditor({
     },
     getHeadings() {
       const state = view.state, tree = resolvedSyntaxTree(state, 8);
-      outlinePending = tree.length < state.doc.length;
-      if (outlineCache?.doc === state.doc && outlineCache.tree === tree) return outlineCache.headings;
+      outlinePending = state.doc.length > 0 && !isCompleteMarkdownStructure(tree, state.doc.length);
+      // Keep the last accepted outline navigable while its replacement parses.
+      // Accumulate edits on input; map heading offsets only when the UI reads.
+      if (outlinePending) {
+        if (outlineCache && outlineChanges) {
+          outlineCache = { doc: state.doc, tree: null, headings: outlineCache.headings.map(heading => {
+            const from = outlineChanges!.mapPos(heading.from, 1);
+            return { ...heading, from, line: state.doc.lineAt(from).number };
+          }) };
+          outlineChanges = null;
+        }
+        return outlineCache?.headings ?? [];
+      }
+      const identity = markdownStructureIdentity(tree);
+      if (outlineCache?.doc === state.doc && outlineCache.tree === identity) return outlineCache.headings;
       const headings = extractHeadings(state, tree);
-      outlineCache = { doc: state.doc, tree, headings };
+      outlineCache = { doc: state.doc, tree: identity, headings };
+      outlineChanges = null;
       return headings;
     },
     isOutlinePending: () => outlinePending,

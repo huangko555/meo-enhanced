@@ -1676,6 +1676,12 @@ const existingEditorWrapper = root.querySelector('.editor-wrapper');
 const editorWrapper = existingEditorWrapper instanceof HTMLElement ? existingEditorWrapper : document.createElement('div');
 editorWrapper.classList.add('editor-wrapper', 'meo-preload-editor-shell');
 editorWrapper.setAttribute('aria-hidden', 'true');
+const revealInitialShell = (): void => {
+  toolbar.classList.remove('meo-preload-toolbar');
+  toolbar.removeAttribute('aria-hidden');
+  editorWrapper.classList.remove('meo-preload-editor-shell');
+  editorWrapper.removeAttribute('aria-hidden');
+};
 
 const existingEditorHost = editorWrapper.querySelector('.editor-host');
 const editorHost = existingEditorHost instanceof HTMLElement ? existingEditorHost : document.createElement('div');
@@ -1807,6 +1813,9 @@ const previewController = createPreviewController({
     if (getActiveEditorMode() === 'preview') {
       editorHost.removeAttribute('data-preview-cover');
       editorSurface.removeAttribute('data-source-preview-exit-cover');
+      // Initial Preview also waits for paint under the bootstrap shell. A real
+      // loading surface must be visible while that first frame is still pending.
+      revealInitialShell();
     } else if (isSidePreviewVisible()) {
       previewController.host.style.removeProperty('visibility');
       // The loading status remains accessible while the unfinished iframe
@@ -3669,18 +3678,12 @@ window.addEventListener('message', (event) => {
           } else {
             await editor?.whenVisiblePresentationReady(LIVE_PRESENTATION_REVEAL_WAIT_MS);
           }
-          toolbar.classList.remove('meo-preload-toolbar');
-          toolbar.removeAttribute('aria-hidden');
-          editorWrapper.classList.remove('meo-preload-editor-shell');
-          editorWrapper.removeAttribute('aria-hidden');
+          revealInitialShell();
           failureNotice.updateEditorNotice();
         })
         .catch((error) => {
           logWebviewRenderError('editorMode.initialReveal', error);
-          toolbar.classList.remove('meo-preload-toolbar');
-          toolbar.removeAttribute('aria-hidden');
-          editorWrapper.classList.remove('meo-preload-editor-shell');
-          editorWrapper.removeAttribute('aria-hidden');
+          revealInitialShell();
         });
     });
     return;

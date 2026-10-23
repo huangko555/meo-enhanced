@@ -132,6 +132,7 @@ export type UiStrings = Readonly<{
   outlineExpand: string;
   outlineCollapse: string;
   outlineNoHeadings: string;
+  outlineLoading: string;
   untitled: string;
   backToTop: string;
   editorToolbar: string;
@@ -425,7 +426,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     outlineSwitchRight: 'Switch to right side', outlineClose: 'Close outline',
     outlineResize: 'Drag to resize outline',
     outlineEmptyHeading: '(Empty heading)',
-    outlineExpand: 'Expand', outlineCollapse: 'Collapse', outlineNoHeadings: 'No headings', untitled: 'Untitled',
+    outlineExpand: 'Expand', outlineCollapse: 'Collapse', outlineNoHeadings: 'No headings', outlineLoading: 'Preparing outline…', untitled: 'Untitled',
     backToTop: 'Back to top',
     editorToolbar: 'Editor toolbar', formatting: 'Formatting', markdownMode: 'Markdown mode',
     live: 'Live', source: 'Source', split: 'Split', preview: 'Preview',
@@ -645,7 +646,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     outlineSwitchRight: '切换到右侧', outlineClose: '关闭目录',
     outlineResize: '拖动调整目录宽度',
     outlineEmptyHeading: '(空标题)',
-    outlineExpand: '展开', outlineCollapse: '折叠', outlineNoHeadings: '暂无标题', untitled: '未命名',
+    outlineExpand: '展开', outlineCollapse: '折叠', outlineNoHeadings: '暂无标题', outlineLoading: '正在生成目录…', untitled: '未命名',
     backToTop: '回到顶部',
     editorToolbar: '编辑器工具栏', formatting: '格式', markdownMode: 'Markdown 模式',
     live: '实时', source: '源码', split: '分栏', preview: '预览',

@@ -1,5 +1,15 @@
 {
   "separate": {
+    "scripts/test-outline-loading.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-outline-loading.ts",
+      "reason": "Outline loading stays silent for 200ms, waits through editor mounting, preserves accepted rows and mapped navigation during editing, cancels on hide and distinguishes complete empty results."
+    },
+    "scripts/test-outline-large-startup.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-outline-large-startup.ts",
+      "reason": "Cold production Live/Source outlines independent of Preview; delayed Preview initialization, retained rows and folding, mapped navigation, mode changes, rich/Setext headings, fenced-code exclusions and empty results."
+    },
     "scripts/test-preview-loading-presentation.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-preview-loading-presentation.ts",

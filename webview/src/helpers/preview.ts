@@ -3411,6 +3411,7 @@ export function createPreviewController({
 
   const outlineAdapter = {
     getHeadings,
+    isOutlinePending: () => !previewViewport && frameRenderedText === null && status.hidden,
     getViewportAnchorOffset: (ratio = 0.2) => {
       if (host.hidden || host.getClientRects().length === 0) return 1;
       const windowAnchor = previewViewport?.readAnchor((frame.contentWindow?.innerHeight ?? host.clientHeight) * ratio);

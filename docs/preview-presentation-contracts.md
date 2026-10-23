@@ -90,6 +90,28 @@ side Preview, cold-scroll and compositor suites cover the companion rules.
 
 ## Atomic asynchronous presentation
 
+### Outline metadata
+
+- A full-length placeholder syntax tree is not proof of complete headings. Live
+  and Source consume the certified outer Markdown structure, including its
+  background result, without rendering a hidden Preview to obtain headings.
+- An initially pending outline remains visually quiet for 200ms, then displays
+  a localized loading label. Only a completed empty result says "No headings".
+  Hiding the outline cancels the deadline; existing headings stay visible and
+  quiet during editing and mode transitions.
+- Accumulated document changes map accepted heading offsets when the directory
+  reads them, keeping navigation current while parsing finishes without walking
+  every heading on each keystroke. Complete metadata then replaces that snapshot.
+- When title text, inline styling and hierarchy have not changed, update source
+  coordinates while retaining the same rows and collapsed state. Mixed-language
+  token publication alone does not invalidate the outer Markdown heading cache.
+
+`scripts/test-outline-large-startup.ts` exercises the production split build and
+real Workers with 1,301 headings in a 1.37MB document. The targeted loading suite
+checks the quiet window, cancellation and pending-to-empty completion.
+
+### Rendered blocks
+
 - A visible Mermaid diagram, decoded image, or Shiki-highlighted code block is
   retained until its replacement is ready.
 - A changed code block must not expose the renderer's fallback token markup and

@@ -72,6 +72,22 @@ interface OutlineController {
 
 const ACTIVE_VIEWPORT_RATIO = 0.2;
 const OUTLINE_SCROLL_CONTEXT_PX = 100;
+const OUTLINE_PENDING_REFRESH_MS = 50;
+const OUTLINE_LOADING_DELAY_MS = 200;
+
+function sameOutlinePresentation(before: OutlineHeading[], after: OutlineHeading[]): boolean {
+  return before.length === after.length && before.every((heading, index) => {
+    const next = after[index];
+    if (heading.text !== next.text || heading.level !== next.level) return false;
+    const segments = heading.inlineSegments ?? [], nextSegments = next.inlineSegments ?? [];
+    return segments.length === nextSegments.length && segments.every((segment, i) => {
+      const other = nextSegments[i];
+      return segment.text === other.text && segment.strong === other.strong
+        && segment.emphasis === other.emphasis && segment.strikethrough === other.strikethrough
+        && segment.highlight === other.highlight;
+    });
+  });
+}
 
 export function buildOutlineTree(headings: OutlineHeading[]): {
   roots: OutlineTreeNode[];
@@ -191,6 +207,9 @@ export function createOutlineController({
   let boundScrollElement: EventTarget | null = null;
   let scrollFrame = 0;
   let headingRefreshTimer: number | null = null;
+  let loadingTimer: number | null = null;
+  let loadingVisible = false;
+  let hasCompletedOutline = false;
 
   const notifyUiState = () => onUiStateChange?.({ mode, width });
   const mutateLayoutWithViewportPreserved = (mutate: () => void) => {
@@ -394,7 +413,9 @@ export function createOutlineController({
     if (currentTreeRoots.length === 0) {
       const emptyMsg = document.createElement('div');
       emptyMsg.className = 'outline-empty';
-      emptyMsg.textContent = uiStrings.outlineNoHeadings;
+      emptyMsg.setAttribute('role', 'status');
+      emptyMsg.textContent = hasCompletedOutline ? uiStrings.outlineNoHeadings
+        : loadingVisible ? uiStrings.outlineLoading : '';
       outlineContent.appendChild(emptyMsg);
       return;
     }
@@ -410,42 +431,71 @@ export function createOutlineController({
     if (headingRefreshTimer !== null) window.clearTimeout(headingRefreshTimer);
     headingRefreshTimer = null;
   };
+  const cancelLoading = () => {
+    if (loadingTimer !== null) window.clearTimeout(loadingTimer);
+    loadingTimer = null;
+    loadingVisible = false;
+  };
+  const updateLoading = (pending: boolean) => {
+    if (!visible || !pending || hasCompletedOutline) {
+      cancelLoading();
+      return;
+    }
+    if (loadingTimer !== null || loadingVisible) return;
+    loadingTimer = window.setTimeout(() => {
+      loadingTimer = null;
+      if (!visible || !outlineSidebar.isConnected || hasCompletedOutline) return;
+      loadingVisible = true;
+      // The result may have completed since the last bounded poll. Read once
+      // at the deadline before painting a status that is already obsolete.
+      refresh();
+      if (loadingVisible && !hasCompletedOutline) renderTree();
+    }, OUTLINE_LOADING_DELAY_MS);
+  };
   const refresh = () => {
     cancelHeadingRefresh();
     refreshAppearance();
     const editor = getEditor();
-    if (!editor) {
-      outlineContent.setAttribute('aria-busy', 'false');
-      currentOutlineHeadings = [];
-      currentOutlineHeadingIndexByFrom = new Map();
-      currentTreeRoots = [];
-      currentNodeByIndex = new Map();
-      visibleHeadingIndexes = new Set();
-      activeHeadingIndex = -1;
-      renderTree();
-      return;
-    }
-    const headings = editor.getHeadings(), pending = editor.isOutlinePending?.() === true;
+    const headings = editor?.getHeadings() ?? currentOutlineHeadings;
+    const pending = !editor || editor.isOutlinePending?.() === true;
     const busy = String(pending);
+    const wasPending = outlineContent.getAttribute('aria-busy') === 'true';
     if (outlineContent.getAttribute('aria-busy') !== busy) outlineContent.setAttribute('aria-busy', busy);
+    if (!pending) hasCompletedOutline = true;
+    updateLoading(pending);
     // A partial CodeMirror tree is not a complete document outline. Advance it
     // in bounded tasks, retaining identical rows until more metadata is ready.
-    if (!pending || headings !== currentOutlineHeadings) {
+    const metadataChanged = headings !== currentOutlineHeadings && (!pending || headings.length > 0);
+    if (metadataChanged || !pending && wasPending) {
+      const reuseRows = headings.length > 0 && sameOutlinePresentation(currentOutlineHeadings, headings);
       currentOutlineHeadings = headings;
       currentOutlineHeadingIndexByFrom = new Map(currentOutlineHeadings.map((heading, index) => [heading.from, index]));
-      const tree = buildOutlineTree(currentOutlineHeadings);
-      currentTreeRoots = tree.roots;
-      currentNodeByIndex = tree.nodeByIndex;
-      const validKeys = new Set(Array.from(currentNodeByIndex.values(), (node) => node.key));
-      collapsedKeys = new Set([...collapsedKeys].filter((key) => validKeys.has(key)));
+      if (reuseRows) {
+        const positions = new Map<string, number>();
+        for (const node of currentNodeByIndex.values()) {
+          node.heading = headings[node.index];
+          positions.set(node.key, node.heading.from);
+        }
+        for (const item of outlineContent.querySelectorAll<HTMLElement>('.outline-item')) {
+          const from = positions.get(item.dataset.outlineKey ?? '');
+          if (from !== undefined && item.dataset.headingFrom !== String(from)) item.dataset.headingFrom = String(from);
+        }
+      } else {
+        const tree = buildOutlineTree(currentOutlineHeadings);
+        currentTreeRoots = tree.roots;
+        currentNodeByIndex = tree.nodeByIndex;
+        const validKeys = new Set(Array.from(currentNodeByIndex.values(), (node) => node.key));
+        collapsedKeys = new Set([...collapsedKeys].filter((key) => validKeys.has(key)));
+      }
       bindScroll();
       updateActiveHeadings();
-      renderTree();
+      if (reuseRows) highlightVisibleHeadings();
+      else renderTree();
     }
     if (visible && pending) headingRefreshTimer = window.setTimeout(() => {
       headingRefreshTimer = null;
       if (visible && outlineSidebar.isConnected) refresh();
-    }, 0);
+    }, OUTLINE_PENDING_REFRESH_MS);
   };
 
   const updateModeButton = () => {
@@ -482,7 +532,11 @@ export function createOutlineController({
   };
 
   const setVisible = (nextVisible: boolean) => {
-    if (!nextVisible) cancelHeadingRefresh();
+    if (!nextVisible) {
+      cancelHeadingRefresh();
+      cancelLoading();
+      if (!hasCompletedOutline) renderTree();
+    }
     const changed = visible !== (nextVisible === true);
     const update = () => {
       visible = nextVisible === true;
