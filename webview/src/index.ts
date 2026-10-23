@@ -3001,6 +3001,12 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
           sourceRange: position.sourceRange
         } : null;
       },
+      captureLinkedPosition(viewportOffset) {
+        const position = previewController.getLinkedPosition(viewportOffset);
+        return position ? { line: position.topLine, lineOffset: position.topLineOffset,
+          editorLineOffset: position.editorLineOffset, viewportOffset: position.viewportOffset,
+          sourceRange: position.sourceRange } : null;
+      },
       captureReadingPosition(viewportRatio) {
         const position = previewController.getReadingPosition(viewportRatio);
         return position ? {

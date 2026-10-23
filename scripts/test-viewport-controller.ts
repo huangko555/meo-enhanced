@@ -3242,4 +3242,52 @@ for (const [insert, removed, expectedLine] of [['x', 0, 3], ['x\n', 0, 4], ['', 
   } finally { controller.destroy(); }
 }
 
+// Windowed Preview cannot reuse a global pixel map after a minimal click reveal.
+// Both owners must continue from the same measured semantic point, including
+// fractional positions inside a Source line and a delayed matching revision.
+{
+  const doc = Text.of(Array.from({ length: 100 }, () => 'line'));
+  const scroll = { scrollTop: 200, scrollLeft: 0, scrollHeight: 2000, clientHeight: 400 };
+  let previewTop = 400, current = true;
+  const block = (line: number) => ({ from: doc.line(line).from, to: doc.line(line).to, top: (line - 1) * 20, bottom: line * 20 });
+  const controller = new ViewportController({ dom: {}, state: { doc }, scrollDOM: scroll, contentHeight: 2000,
+    lineBlockAt: (pos: number) => block(doc.lineAt(pos).number),
+    lineBlockAtHeight: (height: number) => block(Math.min(100, Math.floor(height / 20) + 1))
+  } as any, { attachInteractions: false, getMode: () => 'source', previewSurface: {
+    isCurrentDocument: () => current, captureLinkedGeometry: () => null,
+    readScrollTop: () => previewTop, writeScrollTop: top => { previewTop = top; },
+    captureTopVisiblePosition: (viewportOffset = 0) => {
+      const point = previewTop + viewportOffset, line = Math.floor(point / 40) + 1;
+      return { line, lineOffset: 0, viewportOffset, sourceRange: { startLine: line, endLine: line, progress: point % 40 / 40 } };
+    },
+    restoreTopVisiblePosition: (point, isCurrent) => {
+      if (isCurrent()) previewTop = (point.line - 1) * 40 + (point.sourceRange?.progress ?? 0) * 40 - (point.viewportOffset ?? 0);
+    },
+    revealSourcePosition: () => { previewTop = 700; }
+  } });
+  const wheel = (delta: number) => { (controller as any).onWheel({ ctrlKey: false, deltaX: 0, deltaY: delta });
+    scroll.scrollTop += delta; controller.editorViewportChanged(); };
+  try {
+    controller.setLinkedPreviewEnabled(true); controller.locateLinkedSourcePosition(30);
+    wheel(10);
+    if (previewTop !== 720) throw new Error(`First Source wheel discarded the click origin: ${previewTop}`);
+    wheel(-10);
+    if (previewTop !== 700) throw new Error('A reversed Source wheel accumulated a click offset');
+    controller.markPreviewInteraction(); previewTop += 20; controller.previewViewportChanged();
+    if (scroll.scrollTop !== 210) throw new Error('Reverse Preview ownership discarded the shared origin');
+    controller.markPreviewInteraction(); previewTop -= 20; controller.previewViewportChanged();
+    if (scroll.scrollTop !== 200) throw new Error('Reverse Preview scrolling did not return to the same Source point');
+    controller.reconcileAfterEditorUpdate(p => p); current = false;
+    wheel(10);
+    if (previewTop !== 700) throw new Error('A stale revision must retain the actual reading point');
+    current = true; controller.linkedPreviewReady(false); await new Promise(resolve => setTimeout(resolve, 350));
+    if (previewTop !== 720) throw new Error(`A delayed revision lost the pre-gesture origin: ${previewTop}`);
+    controller.beginNavigationReveal(); scroll.scrollTop = 400; controller.editorViewportChanged();
+    if (previewTop !== 800) throw new Error('Explicit Source navigation must retire a previous relative origin');
+    controller.locateLinkedSourcePosition(30); controller.setLinkedPreviewEnabled(false);
+    scroll.scrollTop = 300; controller.setLinkedPreviewEnabled(true);
+    if (previewTop !== 600) throw new Error('Re-enabling sync must not revive an old click origin');
+  } finally { controller.destroy(); }
+}
+
 console.log('viewport controller checks passed');

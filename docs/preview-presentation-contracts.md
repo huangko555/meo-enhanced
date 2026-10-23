@@ -41,6 +41,7 @@ of its accepted reading revision; its render completion is not a new user intent
 | Action | Synchronized panes | Independent panes |
 | --- | --- | --- |
 | Click Source text | Reveal the corresponding block only if outside Preview; a visible block stays put. Wait for the current revision and a mounted reading block. | Update the locator without moving Preview. |
+| Scroll after a click reveal or input hold | Continue from the pair currently being read. Neither the first delta, a reversal, nor switching the driving pane may first restore the old top alignment. A new click replaces this origin. | Each pane keeps its own position. |
 | Type, compose, paste, delete, undo/redo, or accept an external edit | Preserve Preview's reading witness. Source caret auto-reveal and native height-map anchoring do not drive Preview. | Preserve Preview's reading witness. |
 | Stop typing / finish delayed rendering | Commit content and layout while retaining that witness; do not realign to the caret or replay an old scroll. | Same. |
 | Wheel, touch scroll, drag a thumb, or navigate with arrows/Page/Home/End | The surface receiving the gesture drives. Follower scroll events never take ownership. Keyboard selection changes without viewport movement do not scroll the other pane. | Each pane moves independently. |
@@ -53,6 +54,17 @@ matching coordinates. Only its latest position is applied; another edit, a new
 owner, a newer click, hiding the pane, or disabling synchronization retires stale
 destinations. A queued Source click is applied **after** the presentation's
 reading-position restoration, so the old transaction cannot overwrite it.
+
+Complete Preview uses its measured, pinned pixel map. Windowed Preview instead
+retains one source-backed point and its offset from each pane's current viewport;
+unmounted height estimates must not become a global alignment map. The same point
+is projected in both directions using actual Source line-block heights, including
+wrapped lines. Inter-block blank lines retain fractional progress, so reversing
+through a rendered margin does not accumulate integer-line rounding drift. If the
+Preview revision is pending, retain the pre-gesture Source origin until matching
+coordinates are ready. Explicit navigation, document-top navigation and disabling
+synchronization retire this relative origin; idle presentation rebases it against
+the accepted reading geometry without inventing another scroll gesture.
 
 When editing replaces the sampled paragraph's text node, a uniquely matched,
 revision-mapped paragraph boundary retains its pixel offset. This is a fallback
@@ -69,6 +81,9 @@ requiring every source line to share a pixel row with rendered text.
 `scripts/test-source-preview-edit-ownership.ts` drives production Source input
 until caret auto-scrolling actually occurs, holds render responses across native
 wheel/click gestures, and checks both complete and windowed reading surfaces.
+It also samples the first wheel after a minimal reveal, alternating owners and
+directions, a second click, wrapped paragraphs and fractional device pixel ratios;
+the reading witness must stay visible and return to its original painted point.
 The viewport-controller suite locks down cancellation, reverse ownership,
 revision matching and nested presentation completion. Existing Source marker,
 side Preview, cold-scroll and compositor suites cover the companion rules.

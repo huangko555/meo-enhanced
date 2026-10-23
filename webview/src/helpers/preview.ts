@@ -3160,7 +3160,11 @@ export function createPreviewController({
     }
     if (source.before && source.after) {
       const lineGap = Math.max(1, source.after.start - source.before.end);
-      const ratio = Math.max(0, Math.min(1, (line - source.before.end) / lineGap));
+      const gapLines = lineGap - 1;
+      const continuous = gapLines > 0 && sourceRange?.startLine === line && sourceRange.endLine === line;
+      const ratio = Math.max(0, Math.min(1, continuous
+        ? (line - source.before.end - 1 + sourceRange.progress) / gapLines
+        : (line - source.before.end) / lineGap));
       scrollElement.scrollTop = source.before.bottom
         + (source.after.top - source.before.bottom) * ratio
         - Math.max(0, viewportOffset);
@@ -3183,7 +3187,7 @@ export function createPreviewController({
       interactionGeneration: viewportInteractionGeneration
     };
   };
-  const getTopVisiblePosition = (viewportOffset = 0): {
+  const getTopVisiblePosition = (viewportOffset = 0, linked = false): {
     topLine: number;
     topLineOffset: number;
     editorLineOffset: number;
@@ -3243,6 +3247,13 @@ export function createPreviewController({
     const next = entries[Math.max(0, high) + 1];
     if (candidate.bottom < viewportAnchor && next) {
       if (next.top > viewportAnchor) {
+        const gapLines = next.start - candidate.end - 1;
+        if (linked && gapLines > 0) {
+          const progress = Math.max(0, Math.min(1, (viewportAnchor - candidate.bottom) / (next.top - candidate.bottom)));
+          return { topLine: candidate.end + 1 + Math.min(gapLines - 1, Math.floor(progress * gapLines)),
+            topLineOffset: 0, editorLineOffset: 0, viewportOffset: boundedViewportOffset,
+            sourceRange: { startLine: candidate.end + 1, endLine: next.start - 1, progress } };
+        }
         // A same-surface capture in whitespace must retain the visible gap.
         // Mode transitions sample a nonzero reading band and keep interpolation.
         if (boundedViewportOffset === 0) {
@@ -3542,6 +3553,7 @@ export function createPreviewController({
       frame.contentDocument?.body.focus({ preventScroll: true });
     },
     getTopVisiblePosition,
+    getLinkedPosition: (viewportOffset = 0) => getTopVisiblePosition(viewportOffset, true),
     getReadingPosition: (viewportRatio: number) => getTopVisiblePosition(
       Math.max(0, frame.contentWindow?.innerHeight ?? host.clientHeight)
         * Math.max(0, Math.min(1, viewportRatio))

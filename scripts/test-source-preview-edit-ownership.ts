@@ -2,6 +2,137 @@ import assert from 'node:assert/strict';
 import { closeTestBrowser } from './browser-test-helpers';
 import { browser, server, open, frames } from './input-presentation-test-helpers';
 
+async function exerciseClickScrollHandoff(count: number, wrapped = false, scale = 1) {
+  const page = await browser.newPage();
+  const text = '# Click scroll handoff\n\n' + Array.from({ length: count }, (_, i) =>
+    `## Heading ${i}\n\nShort paragraph ${i}. ${wrapped ? 'Wrapped text. '.repeat(8) : ''}\n\n`).join('');
+  const host = await open(page, text);
+  try {
+    await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: scale });
+    await page.click('.source-preview-button');
+    await page.waitForFunction(() => !document.querySelector<HTMLElement>('.preview-host')?.inert
+      && !!document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('main.meo-export-doc'));
+    await page.evaluate(() => {
+      const v = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+      v.scrollDOM.scrollTop = v.lineBlockAt(v.state.doc.line(251).from).top;
+    });
+    await frames(page, 12);
+    const target = await page.evaluate(() => {
+      const v = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+      const bounds = v.scrollDOM.getBoundingClientRect();
+      const element = [...document.querySelectorAll<HTMLElement>('.editor-host .cm-line')]
+        .filter(e => e.textContent?.startsWith('Short paragraph'))
+        .filter(e => { const r = e.getBoundingClientRect(); return r.top > bounds.top && r.bottom < bounds.bottom - 5; }).at(-1)!;
+      const r = element.getBoundingClientRect(), x = r.left + 24, y = r.top + r.height / 2;
+      return { x, y, line: v.state.doc.lineAt(v.posAtCoords({ x, y })).number, text: element.textContent };
+    });
+    await page.waitForFunction(line => !!document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
+      ?.querySelector(`p[data-source-line="${line}"]`), {}, target.line);
+    if (wrapped) {
+      // Wrapped Source/Preview lines can have similar density. Establish the
+      // same legitimate offset as a previous minimal reveal before clicking.
+      await page.evaluate(line => {
+        const d = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+        const r = d.querySelector<HTMLElement>(`p[data-source-line="${line}"]`)!.getBoundingClientRect();
+        d.scrollingElement!.scrollTop -= Math.max(0, d.documentElement.clientHeight + 80 - r.top);
+      }, target.line);
+      await frames(page, 8);
+    }
+    const before = await page.evaluate(line => {
+      const d = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const r = d.querySelector<HTMLElement>(`p[data-source-line="${line}"]`)!.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, height: d.documentElement.clientHeight };
+    }, target.line);
+    assert.ok(before.top >= before.height, `The Source bottom click must need a real Preview reveal: ${JSON.stringify(before)}`);
+    await page.mouse.click(target.x, target.y);
+    await page.waitForFunction(line => {
+      const d = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const r = d.querySelector<HTMLElement>(`p[data-source-line="${line}"]`)?.getBoundingClientRect();
+      return r && r.top >= 0 && r.bottom <= d.documentElement.clientHeight;
+    }, {}, target.line);
+    await frames(page, 8);
+    const initial = await page.evaluate(line => {
+      const scope = window as any, d = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      scope.__handoffLine = line;
+      scope.__handoffSamples = []; scope.__handoffSampling = true;
+      const read = () => {
+        const e = d.querySelector<HTMLElement>(`p[data-source-line="${scope.__handoffLine}"]`), r = e?.getBoundingClientRect();
+        return { source: document.querySelector('.editor-host .cm-scroller')!.scrollTop,
+          preview: d.scrollingElement!.scrollTop, y: r?.top ?? null, visible: !!r && r.bottom > 0 && r.top < d.documentElement.clientHeight };
+      };
+      const sample = () => { if (!scope.__handoffSampling) return; scope.__handoffSamples.push(read()); requestAnimationFrame(sample); };
+      scope.__handoffRead = read;
+      scope.__handoffStart = () => { scope.__handoffSamples = []; scope.__handoffSampling = true; requestAnimationFrame(sample); return read(); };
+      requestAnimationFrame(sample); return read();
+    }, target.line);
+    await page.mouse.move(target.x, target.y);
+    await page.mouse.wheel({ deltaY: 48 });
+    await new Promise(resolve => setTimeout(resolve, 500)); await frames(page, 8);
+    const samples = await page.evaluate(() => { (window as any).__handoffSampling = false;
+      return (window as any).__handoffSamples as Array<{ source: number; preview: number; y: number | null; visible: boolean }>; });
+    assert.ok(samples.at(-1)!.source > initial.source + 20, 'The native Source wheel must actually move');
+    const pullback = Math.max(...samples.map(s => initial.preview - s.preview));
+    assert.ok(pullback <= 1 && samples.every(s => s.visible),
+      `Click reveal must hand off to scrolling without pulling the newly visible paragraph away: ${JSON.stringify({ count, target, initial, pullback, last: samples.at(-1) })}`);
+    for (const [owner, delta] of [['source', -48], ['preview', 48], ['preview', -48], ['source', 48], ['source', -48]] as const) {
+      const point = owner === 'source' ? target : await page.$eval('.preview-frame', el => {
+        const r = el.getBoundingClientRect(); return { x: r.right - 12, y: r.top + r.height / 2 };
+      });
+      const baseline = await page.evaluate(() => (window as any).__handoffStart());
+      await page.mouse.move(point.x, point.y); await page.mouse.wheel({ deltaY: delta });
+      await new Promise(resolve => setTimeout(resolve, 400)); await frames(page, 8);
+      const next = await page.evaluate(() => { (window as any).__handoffSampling = false;
+        return (window as any).__handoffSamples as Array<{ source: number; preview: number; y: number | null; visible: boolean }>; });
+      const driver = owner === 'source' ? 'source' : 'preview', follower = owner === 'source' ? 'preview' : 'source';
+      const sign = Math.sign(delta);
+      assert.ok(sign * (next.at(-1)![driver] - baseline[driver]) > 20, 'Every wheel must move its actual native driver');
+      assert.ok(next.every(s => sign * (s[follower] - baseline[follower]) >= -1 && s.visible),
+        `A ${owner} ${delta} wheel must continue from the current pair without an opposite jump: ${JSON.stringify({ count, baseline, last: next.at(-1) })}`);
+    }
+    const returned = await page.evaluate(() => (window as any).__handoffRead());
+    assert.ok(Math.abs(returned.source - initial.source) <= 2 && Math.abs(returned.y - initial.y!) <= 2,
+      `Alternating owners and directions must not accumulate reading drift: ${JSON.stringify({ count, initial, returned })}`);
+    const upper = await page.evaluate(() => {
+      const v = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+      const bounds = v.scrollDOM.getBoundingClientRect();
+      const e = [...document.querySelectorAll<HTMLElement>('.editor-host .cm-line')]
+        .filter(e => e.textContent?.startsWith('Short paragraph')).find(e => e.getBoundingClientRect().top > bounds.top + 5)!;
+      const r = e.getBoundingClientRect(), x = r.left + 24, y = r.top + 10;
+      const line = v.state.doc.lineAt(v.posAtCoords({ x, y })).number;
+      const d = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const p = d.querySelector<HTMLElement>(`p[data-source-line="${line}"]`);
+      return { x, y, line, hidden: !p || p.getBoundingClientRect().bottom <= 0 };
+    });
+    if (count > 180) {
+      if (!wrapped) assert.ok(upper.hidden, 'The second Source click must reveal content above the current Preview');
+      await page.mouse.click(upper.x, upper.y);
+      await page.waitForFunction(line => {
+        const d = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+        const r = d.querySelector<HTMLElement>(`p[data-source-line="${line}"]`)?.getBoundingClientRect();
+        return r && r.bottom > 0 && r.top < d.documentElement.clientHeight;
+      }, {}, upper.line);
+      await frames(page, 8);
+      await page.evaluate(line => { (window as any).__handoffLine = line; }, upper.line);
+      const newOrigin = await page.evaluate(() => (window as any).__handoffRead());
+      for (const delta of [-48, 48]) {
+        const baseline = await page.evaluate(() => (window as any).__handoffStart());
+        await page.mouse.move(upper.x, upper.y); await page.mouse.wheel({ deltaY: delta });
+        await new Promise(resolve => setTimeout(resolve, 400)); await frames(page, 8);
+        const next = await page.evaluate(() => { (window as any).__handoffSampling = false; return (window as any).__handoffSamples; });
+        assert.ok(next.every((s: any) => Math.sign(delta) * (s.preview - baseline.preview) >= -1 && s.visible),
+          'A new Source click must replace the previous scroll origin without a reverse jump');
+      }
+      const restored = await page.evaluate(() => (window as any).__handoffRead());
+      assert.ok(Math.abs(restored.source - newOrigin.source) <= 2 && Math.abs(restored.y - newOrigin.y) <= 2,
+        'A second click must not accumulate the first click\'s offset');
+    }
+    if (process.argv.includes('--capture')) await page.screenshot({ path: `.local/click-scroll-${count}-${wrapped}-${scale}.png` });
+    assert.equal(host.readHost(), text, 'Scrolling must never edit source');
+    assert.deepEqual(host.errors, []);
+    console.log(`Click/scroll continuity passed (${count} sections, wrapped=${wrapped}, DPR=${scale})`);
+  } finally { host.dispose(); await page.close(); }
+}
+
 async function exercise(count: number) {
   const page = await browser.newPage();
   const text = '# Edit ownership\n\n' + Array.from({ length: count }, (_, i) =>
@@ -207,6 +338,11 @@ async function exercise(count: number) {
   } finally { host.dispose(); await page.close(); }
 }
 let primaryError: unknown;
-try { for (const count of process.argv.includes('--ordinary-only') ? [180] : [180, 2500]) await exercise(count); }
+try {
+  for (const [count, wrapped, scale] of [[180, false, 1], [5000, false, 1], [180, true, 1], [1800, true, 1.25]] as const) {
+    await exerciseClickScrollHandoff(count, wrapped, scale);
+  }
+  if (!process.argv.includes('--handoff-only')) for (const count of process.argv.includes('--ordinary-only') ? [180] : [180, 2500]) await exercise(count);
+}
 catch (error) { primaryError = error; }
 finally { server.stop(true); if (primaryError === undefined) await closeTestBrowser(browser); else await closeTestBrowser(browser, primaryError); }
