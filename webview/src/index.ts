@@ -1796,10 +1796,23 @@ const previewController = createPreviewController({
     resolveInitialPreviewPaint?.();
     editorHost.removeAttribute('data-preview-cover');
     editorSurface.removeAttribute('data-source-preview-exit-cover');
+    const splitWillReveal = pendingSourcePreviewReveal !== null;
     markSourcePreviewSurfaceReady();
+    if (!splitWillReveal) previewController.finishLoadingPresentation();
     outlineController?.refreshAppearance();
     if (getActiveEditorMode() === 'preview' && outlineController?.isVisible()) outlineController.refreshViewport();
     if (getActiveEditorMode() === 'preview') findPanelController.refreshForModeChange();
+  },
+  onLoadingVisible: () => {
+    if (getActiveEditorMode() === 'preview') {
+      editorHost.removeAttribute('data-preview-cover');
+      editorSurface.removeAttribute('data-source-preview-exit-cover');
+    } else if (isSidePreviewVisible()) {
+      previewController.host.style.removeProperty('visibility');
+      // The loading status remains accessible while the unfinished iframe
+      // itself stays inert. Source input remains independent and usable.
+      previewController.host.inert = false;
+    }
   },
   onRendered: (options) => {
     if (outlineController?.isVisible()) {
@@ -2031,6 +2044,7 @@ const finishSourcePreviewReveal = (): void => {
     if (editor) (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
     restorePendingEditorViewportAfterPreviewExit();
     activateSourcePreviewLinkage();
+    previewController.finishLoadingPresentation();
     previewController.host.inert = false;
     previewController.host.style.removeProperty('visibility');
     outlineController.refreshAppearance();
@@ -2070,7 +2084,10 @@ const presentPreviewSurface = (
   // cover itself would reflow CodeMirror and expose a different Source
   // position for the one or two frames before Preview is ready.
   editorSurface.toggleAttribute('data-source-preview-exit-cover', fullPreview && hadSplit);
-  if (visible !== !previewController.host.hidden || splitGeometryChanged) previewPaintReady = false;
+  if (visible !== !previewController.host.hidden || splitGeometryChanged) {
+    previewPaintReady = false;
+    if (visible) previewController.beginLoadingPresentation();
+  }
   editorSurface.removeAttribute('data-source-preview-preparing');
   editorSurface.toggleAttribute('data-source-preview', split);
   sourcePreviewButton.classList.toggle('is-active', split);
@@ -3189,6 +3206,7 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     outlineController.refreshAppearance();
   },
   presentModeControl(mode) {
+    if (mode !== 'preview' && !isSidePreviewVisible()) previewController.finishLoadingPresentation();
     presentModePreparation(null);
     root.dataset.mode = mode;
     refreshDocumentActionButtons();

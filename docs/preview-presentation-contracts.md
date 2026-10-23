@@ -102,8 +102,33 @@ side Preview, cold-scroll and compositor suites cover the companion rules.
   an edit strictly above it maps the top semantic anchor through the text change.
   Presentation-only geometry changes retain the semantic point in the reading
   band, then pin the cached linked-scroll map to the committed position.
-- Initial split Preview becomes visible only after both editor layout and Preview
-  paint readiness are confirmed. Render completion alone is not a reveal signal.
+- Initial split Preview content becomes visible only after both editor layout and
+  Preview paint readiness are confirmed. Render completion alone is not a reveal
+  signal. Slow explicit activation may show a loading surface while content stays
+  covered.
+
+## Preview loading feedback
+
+Opening Preview, opening its side pane, or changing between their final widths
+starts a single 200ms presentation deadline. A ready surface cancels it without
+showing a busy label or animation. After the deadline, a theme-colored opaque
+loading surface replaces the previous editor cover (or occupies only the right
+pane), with a localized status and a reduced-motion-aware spinner. The unfinished
+iframe stays inert; Source and the mode/side-pane controls remain usable.
+
+Feedback ends on accepted paint readiness, after final split geometry and source
+alignment when applicable. Receiving a Host payload alone does not end loading.
+Content appears immediately when ready, without a minimum spinner duration. An
+error replaces loading with the existing failure status. Leaving Preview for an
+editor without a side pane, hiding or disposing Preview cancels the deadline;
+a late response cannot reopen it. Source edits and
+resource refreshes never start this feedback or clear the existing reading surface.
+
+`scripts/test-preview-loading-presentation.ts` drives the production bootstrap,
+holds actual Host responses and iframe commit separately, and checks delayed
+full/side loading, warm silence, input silence, cancellation, errors and initial
+Preview startup. Its screenshots are actual DOM captures under an injected wait.
+The full and split captures are saved in `.local/preview-loading/`.
 
 VS Code's official Preview implementation similarly moves new styles into place
 before morphing specifically to prevent an unstyled flash, and preserves equal

@@ -73,6 +73,8 @@ type PreviewControllerOptions = {
   requestFonts?: (refresh: boolean) => Promise<readonly PreviewFont[] | null>;
   onRendered?: (options?: { readonly skipLinkedViewportProjection?: boolean }) => void;
   onPaintReady?: () => void;
+  /** A slow explicit activation may replace its old cover with loading UI. */
+  onLoadingVisible?: () => void;
   /** Publishes final document colors, including CSS-only background updates. */
   onPaletteChanged?: () => void;
   /** Return true for a handled global command; other command keys continue to VS Code. */
@@ -827,6 +829,7 @@ export function createPreviewController({
   requestFonts,
   onRendered,
   onPaintReady,
+  onLoadingVisible,
   onPaletteChanged,
   onShortcut,
   onSearchResultsChanged,
@@ -1071,9 +1074,47 @@ export function createPreviewController({
   status.setAttribute('aria-live', 'polite');
   status.hidden = true;
 
+  const loading = document.createElement('div');
+  loading.className = 'preview-loading';
+  loading.setAttribute('role', 'status');
+  loading.setAttribute('aria-live', 'polite');
+  loading.hidden = true;
+  const loadingSpinner = document.createElement('span');
+  loadingSpinner.className = 'preview-loading-spinner';
+  loadingSpinner.setAttribute('aria-hidden', 'true');
+  const loadingLabel = document.createElement('span');
+  loadingLabel.textContent = uiStrings.previewGenerating;
+  loading.append(loadingSpinner, loadingLabel);
+  let loadingPending = false;
+  let loadingTimer: ReturnType<typeof setTimeout> | null = null;
+  const finishLoadingPresentation = (): void => {
+    if (!loadingPending) return;
+    if (loadingTimer !== null) clearTimeout(loadingTimer);
+    loadingTimer = null;
+    loadingPending = false;
+    loading.hidden = true;
+    host.removeAttribute('aria-busy');
+    frame.inert = false;
+  };
+  const beginLoadingPresentation = (): void => {
+    if (disposed || loadingPending) return;
+    loadingPending = true;
+    // Only explicit opening/width transitions start this deadline. Render
+    // requests and coalesced edits must not create or restart loading feedback.
+    loadingTimer = setTimeout(() => {
+      loadingTimer = null;
+      if (disposed || !loadingPending || host.hidden) return;
+      loading.hidden = false;
+      host.setAttribute('aria-busy', 'true');
+      frame.inert = true;
+      onLoadingVisible?.();
+    }, 200);
+  };
+
   const applyUiLanguage = (language: UiLanguage): void => {
     uiLanguage = language;
     uiStrings = getUiStrings(language);
+    loadingLabel.textContent = uiStrings.previewGenerating;
     frame.title = uiStrings.previewTitle;
     presetSelectControl.setLabel(uiStrings.previewPreset);
     presetSelectControl.setFooterAction(uiStrings.previewPresetManage, () => onManagePresets?.());
@@ -1112,7 +1153,7 @@ export function createPreviewController({
     notifyViewportInteraction();
     return onNavigateToTop?.() ?? false;
   });
-  host.append(frame, status, scrollToTopController.button);
+  host.append(frame, status, scrollToTopController.button, loading);
 
   let appearancePreference: PreviewAppearance = 'auto';
   let appearance: 'light' | 'dark' = 'dark';
@@ -1924,17 +1965,9 @@ export function createPreviewController({
   };
 
   const setStatus = (message: string | null) => {
+    if (message) finishLoadingPresentation();
     status.hidden = !message;
     status.textContent = message ?? '';
-  };
-
-  const setPendingStatus = (background: boolean): void => {
-    // Once a usable reading surface exists it is the progress UI. Keeping it
-    // unobstructed also avoids turning every coalesced Source edit into a flash.
-    const hasReadablePresentation = latestPayload !== null || Boolean(
-      frame.contentDocument?.querySelector('main.meo-export-doc')
-    );
-    setStatus(!background && !hasReadablePresentation ? uiStrings.previewGenerating : null);
   };
 
   const renderFrame = (
@@ -2498,7 +2531,7 @@ export function createPreviewController({
 
   const performRequestRender = (
     text: string,
-    { background = false, force = false, preserveViewport = false, preserveFrame = false }: {
+    { force = false, preserveViewport = false, preserveFrame = false }: {
       background?: boolean;
       force?: boolean;
       preserveViewport?: boolean;
@@ -2523,7 +2556,7 @@ export function createPreviewController({
       return Promise.resolve();
     }
     if (!force && hasPendingRequest && text === pendingText) {
-      setPendingStatus(background);
+      setStatus(null);
       return Promise.resolve();
     }
 
@@ -2539,7 +2572,7 @@ export function createPreviewController({
     hasPendingRequest = true;
     pendingText = text;
     updateViewportAlignment();
-    setPendingStatus(background);
+    setStatus(null);
     return previewRenderTransport.render({
       text,
       uiLanguage,
@@ -3424,6 +3457,8 @@ export function createPreviewController({
 
   return {
     host,
+    beginLoadingPresentation,
+    finishLoadingPresentation,
     presetControl,
     widthControl,
     presetInfoControl,
@@ -3522,6 +3557,7 @@ export function createPreviewController({
       previewViewport?.refresh({ active: visible });
       updateViewportAlignment();
       if (!visible) {
+        finishLoadingPresentation();
         // A hidden window cannot commit a destination. Retrying its restore
         // from an already cached block would otherwise spin in microtasks.
         pendingWindowPosition = null;
@@ -3638,6 +3674,7 @@ export function createPreviewController({
     dispose: () => {
       if (disposed) return;
       disposed = true;
+      finishLoadingPresentation();
       accessibilityObserver.disconnect();
       previewDocumentSearch?.dispose(); previewDocumentSearch = null;
       previewViewport?.dispose(); previewViewport = null;

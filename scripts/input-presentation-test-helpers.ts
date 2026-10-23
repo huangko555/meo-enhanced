@@ -145,7 +145,8 @@ async function assertStablePaint(page: Page, clip: PaintClip | readonly PaintCli
     await page.evaluate(() => document.getElementById('presentation-paint-witness')?.remove()); }
 }
 
-async function open(page: Page, text: string, coldPreview = false, initialMode: 'source' | 'live' | 'preview' = 'source') {
+async function open(page: Page, text: string, coldPreview = false, initialMode: 'source' | 'live' | 'preview' = 'source',
+  testOptions: { uiLanguage?: 'en' | 'zh-CN'; beforePreviewRender?: () => Promise<void> } = {}) {
   let hostText = text, version = 1, ready = false, firstRender = false;
   let renderedText = '', renderedDocumentId: string | undefined;
   const documents = new Map<string, ReturnType<typeof createPreviewDocument>>();
@@ -166,7 +167,7 @@ async function open(page: Page, text: string, coldPreview = false, initialMode: 
     if (message.type === 'ready') {
       ready = true;
       return { type: 'init', documentId: 'file:///presentation.md', text, version, savedRevision: { version, text },
-        diagnostics: [], mode: initialMode, uiLanguage: 'en', sourceLineNumbers: 'on', previewAppearance: 'dark',
+        diagnostics: [], mode: initialMode, uiLanguage: testOptions.uiLanguage ?? 'en', sourceLineNumbers: 'on', previewAppearance: 'dark',
         previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'dark', editorFontSizeMode: 'auto', editorFontSize: 14,
         gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit',
         fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, largeDocumentOptimizationEnabled: true,
@@ -182,6 +183,7 @@ async function open(page: Page, text: string, coldPreview = false, initialMode: 
     }
     if (message.type === 'requestPreviewRender') {
       renders.push({ fontSize: message.environment.editorFontSizePx }); firstRender = true;
+      if (testOptions.beforePreviewRender) await testOptions.beforePreviewRender();
       await Promise.all(held.splice(0).map(release => release()));
       const options = { markdownText: message.text, sourceDocumentPath: '/fixture/presentation.md', uiLanguage: 'en' as const,
         preset: message.preset, styleEnvironment: message.environment };

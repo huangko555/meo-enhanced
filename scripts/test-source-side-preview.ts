@@ -128,6 +128,13 @@ const browser = await launchTestBrowser();
 let primaryError: unknown;
 try {
   const page = await browser.newPage();
+  const waitForFunction = page.waitForFunction.bind(page);
+  page.waitForFunction = (async (predicate: any, options: any, ...args: any[]) => {
+    try { return await waitForFunction(predicate, options, ...args); }
+    catch (error) {
+      throw new Error(`Source side Preview wait failed: ${String(predicate)}`, { cause: error });
+    }
+  }) as typeof page.waitForFunction;
   if (!process.argv.includes('--windowed-only')) {
   await page.setViewport({ width: 1200, height: 760 });
   let previewRenderCount = 0;
@@ -298,6 +305,7 @@ try {
     const preview = document.querySelector<HTMLIFrameElement>('.preview-frame');
     return document.querySelector('.editor-surface')?.hasAttribute('data-source-preview')
       && preview?.contentDocument?.body.textContent?.includes('Section 140')
+      && document.querySelector<HTMLElement>('.preview-loading')?.hidden
       && getComputedStyle(document.querySelector<HTMLElement>('.preview-host')!).visibility !== 'hidden';
   });
   const layout = await page.evaluate(() => {

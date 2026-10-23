@@ -131,12 +131,31 @@ try {
     });
     const cdp = await page.createCDPSession();
     const frames: string[] = [];
+    let markFirstFrame!: () => void;
+    const firstFrame = new Promise<void>(resolve => { markFirstFrame = resolve; });
     cdp.on('Page.screencastFrame', event => {
       frames.push(event.data);
+      markFirstFrame();
       void cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId });
     });
     await cdp.send('Page.startScreencast', { format: 'png', everyNthFrame: 1 });
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // A stationary headless surface need not produce another frame within a
+    // fixed 100ms. Force a tiny paint outside the inspected content rectangle,
+    // then wait for CDP's actual first frame before starting the transition.
+    await page.evaluate(() => {
+      const witness = document.createElement('span'); witness.id = 'transition-paint-witness';
+      witness.style.cssText = 'position:fixed;left:4px;top:4px;width:2px;height:2px;background:magenta;pointer-events:none;z-index:9999';
+      document.body.append(witness);
+    });
+    let warmupTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([firstFrame, new Promise((_, reject) => {
+        warmupTimer = setTimeout(() => reject(new Error(`${phase}: screencast did not produce a warm-up frame`)), 5_000);
+      })]);
+    } finally {
+      clearTimeout(warmupTimer);
+      await page.evaluate(() => document.getElementById('transition-paint-witness')?.remove());
+    }
     assert.ok(frames.length > 0, `${phase}: screencast must capture a warm-up frame`);
     // CDP may emit an empty initialization frame before the user action. The
     // transition contract starts with the click, so keep only frames captured

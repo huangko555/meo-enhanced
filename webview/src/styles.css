@@ -7105,6 +7105,42 @@ html[data-meo-ui-contrast='high'] .meo-preview-viewport-alignment {
   background: var(--meo-content-editorWidget-background, var(--meo-content-sideBar-background));
 }
 
+.preview-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--meo-preview-foreground, var(--meo-foreground));
+  background: var(--meo-preview-background, var(--meo-background));
+  font-size: 13px;
+}
+
+.preview-loading[hidden] {
+  display: none;
+}
+
+.preview-loading-spinner {
+  width: 22px;
+  height: 22px;
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-top-color: var(--meo-ui-focus);
+  border-radius: 50%;
+  animation: preview-loading-spin 0.85s linear infinite;
+}
+
+@keyframes preview-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preview-loading-spinner { animation: none; }
+}
+
 .editor-root[data-mode='preview'] .format-group {
   display: none;
 }

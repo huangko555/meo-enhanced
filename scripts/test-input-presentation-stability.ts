@@ -129,6 +129,9 @@ try {
     try {
       await page.click('.source-preview-button');
       await page.waitForFunction(() => !document.querySelector<HTMLElement>('.preview-host')?.hidden
+        && !document.querySelector<HTMLElement>('.preview-host')?.inert
+        && getComputedStyle(document.querySelector<HTMLElement>('.preview-host')!).visibility === 'visible'
+        && document.querySelector<HTMLElement>('.preview-loading')?.hidden
         && document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('h1'));
       if (await page.$eval('.source-preview-scroll-sync-button', button => button.getAttribute('aria-pressed') === 'true')) {
         await page.click('.source-preview-scroll-sync-button');
@@ -169,6 +172,9 @@ try {
     try {
       await page.locator('.source-preview-button').click();
       await page.waitForFunction(() => !document.querySelector<HTMLElement>('.preview-host')?.hidden
+        && !document.querySelector<HTMLElement>('.preview-host')?.inert
+        && getComputedStyle(document.querySelector<HTMLElement>('.preview-host')!).visibility === 'visible'
+        && document.querySelector<HTMLElement>('.preview-loading')?.hidden
         && document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('p'));
       if (await page.$eval('.source-preview-scroll-sync-button', button => button.getAttribute('aria-pressed') === 'true') !== sync) {
         await page.locator('.source-preview-scroll-sync-button').click();

@@ -1,5 +1,10 @@
 {
   "separate": {
+    "scripts/test-preview-loading-presentation.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-preview-loading-presentation.ts",
+      "reason": "Production Preview loading feedback: silent fast/warm activation, delayed full/side loading, editable Source, silent refresh, cancellation and failure. Captures actual loading surfaces."
+    },
     "scripts/test-source-preview-edit-ownership.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-source-preview-edit-ownership.ts",
