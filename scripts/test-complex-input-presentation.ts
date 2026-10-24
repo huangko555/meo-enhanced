@@ -211,13 +211,39 @@ try {
     stage = `Rapid quoted code Enter ${mode}, large ${large}`;
     const text = '> ```ts\n> const value = {}\n> ```\n\nAfter' + (large ? '\n'.repeat(8000) : '');
     const at = text.indexOf('{}') + 1;
-    const page = await browser.newPage(), host = await open(page, text, false, mode);
+    const page = await browser.newPage();
+    // Source accepts input before its first syntax reply. Hold actual requests,
+    // including blob-backed workers, until the immediate input checks finish.
+    if (large && mode === 'source') await page.evaluateOnNewDocument(() => {
+      const NativeWorker = window.Worker;
+      const pending: Array<() => void> = [];
+      let released = false;
+      (window as any).__heldMarkdownRequests = pending;
+      (window as any).__releaseMarkdownRequests = () => {
+        released = true;
+        for (const send of pending.splice(0)) send();
+      };
+      window.Worker = class extends NativeWorker {
+        constructor(url: string | URL, options?: WorkerOptions) {
+          super(url, options);
+          const send = this.postMessage.bind(this);
+          this.postMessage = (message, transfer) => {
+            if (!released && typeof message.blocks === 'boolean' && typeof message.tabSize === 'number') {
+              pending.push(() => send(message, transfer as Transferable[]));
+            } else send(message, transfer as Transferable[]);
+          };
+        }
+      };
+    });
+    const host = await open(page, text, false, mode);
     try {
       await page.evaluate(at => {
         const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
         view.dispatch({ selection: { anchor: at }, scrollIntoView: true }); view.focus();
       }, at);
       await frames(page, 4);
+      if (large && mode === 'source') assert.ok(await page.evaluate(() => (window as any).__heldMarkdownRequests.length > 0),
+        stage + ': the first input must precede the held syntax result');
       for (let key = 0; key < 3; key++) await page.keyboard.press('Enter');
       await delay(700);
       const expected = text.slice(0, at) + '\n> '.repeat(3) + text.slice(at);
@@ -230,6 +256,7 @@ try {
       });
       await page.keyboard.press('Enter'); await delay(300);
       assert.equal(host.readHost(), 'Plain\n', stage + ': discard obsolete continuation');
+      if (large && mode === 'source') await page.evaluate(() => (window as any).__releaseMarkdownRequests());
       const closingEnd = text.indexOf('\n> ```') + '\n> ```'.length;
       await page.evaluate(({ text, closingEnd }) => {
         const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;

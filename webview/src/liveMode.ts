@@ -4757,6 +4757,14 @@ const markdownHtmlLanguage = html({ matchClosingTags: false });
 // grammar, while CodeMirror still runs its mixed-language pass afterwards.
 const editorBaseMarkdownParser = (markdownLanguage.parser as MarkdownParser)
   .configure([...inlineMarkdownExtensions, { props: [sourceMarkdownHighlightProps] }, { remove: ['Emoji'] }]);
+
+/** Cold Source input can precede the worker. Starting at document offset zero
+ * proves all preceding container/fence context; cap the complete current line.
+ * This command-local prefix is never published as a document syntax result. */
+export function boundedMarkdownInputPrefix(state: EditorState, upto: number): Tree | undefined {
+  return upto <= 4_096 ? editorBaseMarkdownParser.parse(state.doc.sliceString(0, upto)) : undefined;
+}
+
 const editorOuterMarkdownParser = editorBaseMarkdownParser
   .configure(backgroundMarkdownParser)
   .configure(certifyMarkdownStructure);

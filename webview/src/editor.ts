@@ -23,7 +23,7 @@ import { EditorView, keymap, highlightActiveLine, lineNumbers, highlightActiveLi
 import type { SyntaxNode } from '@lezer/common';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
 import { markdownKeymap } from '@codemirror/lang-markdown';
-import { editorMarkdownLanguage } from './liveMode';
+import { boundedMarkdownInputPrefix, editorMarkdownLanguage } from './liveMode';
 import { indentUnit, syntaxTree, forceParsing } from '@codemirror/language';
 import { sourceHighlightStyle } from './theme';
 import { viewportSyntaxHighlighting } from './editor/viewportSyntaxHighlighting';
@@ -4541,7 +4541,10 @@ function handleEnterContinueContainedCodeBlock(view: EditorView): boolean {
 
 function getContainedCodeBlockLineContinuation(state: EditorState, position: number): { prefix: string; literal: boolean } | null {
   const line = state.doc.lineAt(position);
-  let node: SyntaxNode | null = syntaxTree(state).resolveInner(position, -1);
+  const resolved = resolvedSyntaxTreeAt(state, position);
+  const tree = isCompleteMarkdownStructure(resolved, state.doc.length)
+    ? resolved : boundedMarkdownInputPrefix(state, line.to) ?? resolved;
+  let node: SyntaxNode | null = tree.resolveInner(position, -1);
   let codeBlock: SyntaxNode | null = null;
   let insideContainer = false;
   while (node) {
@@ -4550,7 +4553,7 @@ function getContainedCodeBlockLineContinuation(state: EditorState, position: num
     node = node.parent;
   }
   if (!codeBlock || !insideContainer) return null;
-  const source = getCodeBlockSourceLines(state, codeBlock).find(candidate => candidate.from === line.from);
+  const source = getCodeBlockSourceLines(state, codeBlock, line.number)[0];
   if (!source) return null;
   // Continue the complete container and payload indentation. A quote-only
   // prefix or generic Markdown indentation loses nested lists and footnotes.

@@ -64,7 +64,26 @@ for (const { name, parent, prefix } of [
     assert.equal(getFencedCodeContent(state, node), payload.join('\n'), `${name}: rendering must preserve payload spaces and remove the container prefix on blank lines`);
     const rows = getCodeBlockSourceLines(state, node.node).filter(row => !row.isFence);
     assert.deepEqual(rows.map(row => state.doc.sliceString(row.prefixTo, row.to)), payload, `${name}: ordinary code and Mermaid must agree on source indentation`);
+    for (const row of rows) assert.deepEqual(getCodeBlockSourceLines(state, node.node, state.doc.lineAt(row.from).number), [row],
+      `${name}: command input must read the same prefix without enumerating the block`);
   } });
   assert.ok(checked, `${name}: fenced code fixture must parse`);
+}
+for (const [doc, kind, line] of [
+  ['> ```ts\n' + '> value\n'.repeat(12000) + '> ```', 'FencedCode', 2],
+  ['- Item\n\n      code\n' + '      \n'.repeat(12000), 'CodeBlock', 3]
+] as const) {
+  const state = EditorState.create({ doc, extensions: [markdown()] });
+  let block: any;
+  resolvedSyntaxTree(state).iterate({ enter(node) { if (!block && node.name === kind) block = node.node; } });
+  assert.ok(block, `${kind}: work-budget fixture must parse`);
+  const readLine = state.doc.line.bind(state.doc);
+  let lineReads = 0;
+  Object.defineProperty(state.doc, 'line', { configurable: true, value(number: number) { lineReads++; return readLine(number); } });
+  try {
+    const rows = getCodeBlockSourceLines(state, block, line);
+    assert.equal(rows.length, 1, `${kind}: input must project just the requested row`);
+    assert.ok(lineReads <= 4, `${kind}: a single-line input scanned ${lineReads} rows`);
+  } finally { delete (state.doc as any).line; }
 }
 console.log('Fenced code container-prefix round trips passed');

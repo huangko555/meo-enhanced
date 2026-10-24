@@ -110,10 +110,12 @@ export function indentedCodeBlockAt(state: EditorState, position: number, tree: 
 }
 
 /** Source layout for a FencedCode or CodeBlock. Payload indentation is retained,
- * including the visible remainder of tabs crossing a container boundary. */
-export function getCodeBlockSourceLines(state: EditorState, node: SyntaxNode) {
+ * including the visible remainder of tabs crossing a container boundary.
+ * Input commands can request one row without enumerating the whole block. */
+export function getCodeBlockSourceLines(state: EditorState, node: SyntaxNode, onlyLine?: number) {
   const firstLine = state.doc.lineAt(node.from);
-  const lastLine = getCodeBlockLastLine(state, node);
+  const lastLine = getCodeBlockLastLine(state, node, onlyLine);
+  if (onlyLine !== undefined && (onlyLine < firstLine.number || onlyLine > lastLine.number)) return [];
   const openingPrefix = firstLine.text.slice(0, node.from - firstLine.from);
   const marks = node.getChildren('CodeMark');
   const fenceIndent = node.name === 'FencedCode'
@@ -127,7 +129,7 @@ export function getCodeBlockSourceLines(state: EditorState, node: SyntaxNode) {
     if (mark) listMarks.push(mark);
   }
   let markIndex = 0;
-  for (let lineNo = firstLine.number; lineNo <= lastLine.number; lineNo += 1) {
+  for (let lineNo = onlyLine ?? firstLine.number; lineNo <= (onlyLine ?? lastLine.number); lineNo += 1) {
     const line = state.doc.line(lineNo);
     while (markIndex < marks.length && marks[markIndex]!.to <= line.from) markIndex += 1;
     const nextMark = marks[markIndex];
