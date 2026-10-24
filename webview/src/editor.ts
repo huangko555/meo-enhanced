@@ -47,6 +47,7 @@ import { setLivePointerSelectionActiveEffect } from './editor/livePointerSelecti
 import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
 import { insertMountedTableCellBreak } from './helpers/tables';
 import { insertCodeBlock, sourceCodeBlockLines } from './helpers/codeBlocks';
+import { insertIndentedCodeNewline } from './editor/indentedCodeEditing';
 import { getCodeBlockSourceLines } from './helpers/blockIndent';
 import { markdownInlineStyleTheme } from './helpers/inlineStyles';
 import { markdownTagField } from './helpers/tags';
@@ -87,7 +88,7 @@ import { createGitDiffOverviewRulerController } from './helpers/gitDiffOverviewR
 import type { SearchMatchAnchor } from './application/searchMatchAnchor';
 import { createSearchOverviewRulerController } from './helpers/searchOverviewRuler';
 import { mergeConflictSourceExtensions } from './helpers/mergeConflicts';
-import { resolvedSyntaxTree, extractHeadings } from './helpers/markdownSyntax';
+import { resolvedSyntaxTree, resolvedSyntaxTreeAt, extractHeadings } from './helpers/markdownSyntax';
 import {
   sourceListMarkerField,
   listMarkerData,
@@ -2406,6 +2407,7 @@ export function createEditor({
           key: 'Enter',
           run: (view) =>
             insertMermaidNewline(view) || insertDisplayMathNewline(view) ||
+            insertIndentedCodeNewline(view, resolvedSyntaxTreeAt(view.state, view.state.selection.main.to)) ||
             handleEnterContinueContainedCodeBlock(view) ||
             (view.state.facet(inputAssistanceFacet).lists && (
               handleEnterOnEmptyListItem(view) ||
@@ -2413,7 +2415,7 @@ export function createEditor({
               handleEnterContinueList(view) ||
               handleEnterBeforeNestedList(view)))
         },
-        { key: 'Shift-Enter', run: insertTableCellLineBreak },
+        { key: 'Shift-Enter', run: (view) => insertIndentedCodeNewline(view, resolvedSyntaxTreeAt(view.state, view.state.selection.main.to), false) || insertTableCellLineBreak(view) },
         { key: 'Ctrl-Enter', run: (view) => finishDisplayMathEditing(view) || insertTableCellLineBreak(view) },
         { key: 'ArrowUp', run: (view) => tryEnterAdjacentTable(view, 'up') || tryMoveAcrossRenderedBlockSource(view, false, true) },
         { key: 'ArrowDown', run: (view) => tryEnterAdjacentTable(view, 'down') || tryMoveAcrossRenderedBlockSource(view, true, true) },

@@ -3,6 +3,9 @@ import { syntaxTree } from '@codemirror/language';
 import type { SyntaxNode } from '@lezer/common';
 import { parseFootnotes } from './footnotes';
 import type { MarkdownBlockIndent, MarkdownTaskIndent } from '../../../src/foundation/markdownDocumentContext';
+import { getCodeContainerColumns, parseBlockLinePrefix } from '../editor/codeBlockSource';
+
+export { getCodeContainerColumns, getCodeBlockLastLine, getCodeBlockSourceLines, indentedCodeBlockAt, parseBlockLinePrefix } from '../editor/codeBlockSource';
 
 export const liveBlockIndentProperty = '--meo-live-block-indent';
 
@@ -40,26 +43,6 @@ export type LiveBlockIndent = MarkdownBlockIndent;
 
 export type LiveBlockIndentValue = number | LiveBlockIndent;
 
-/** Source offsets remain intact; only the rendered shell consumes this prefix. */
-export function parseBlockLinePrefix(text: string, tabSize = 4) {
-  let offset = 0;
-  let columns = 0;
-  const quoteColumns: number[] = [];
-  while (offset < text.length) {
-    const character = text[offset];
-    if (character === ' ' || character === '\t') {
-      columns += character === '\t' ? tabSize - columns % tabSize : 1;
-    } else if (character === '>') {
-      quoteColumns.push(columns);
-      columns += 1;
-    } else {
-      break;
-    }
-    offset += 1;
-  }
-  return { prefix: text.slice(0, offset), content: text.slice(offset), columns, quoteColumns };
-}
-
 function hasListItemAncestor(node: SyntaxNode | null): boolean {
   for (let current = node; current; current = current.parent) {
     if (current.name === 'ListItem') {
@@ -89,73 +72,6 @@ export function getLiveListBlockIndentColumns(
   }
 
   return parseBlockLinePrefix(leadingWhitespace, state.tabSize).columns;
-}
-
-/** Physical source columns consumed by Markdown containers, before code indentation. */
-export function getCodeContainerColumns(state: EditorState, node: SyntaxNode, line = state.doc.lineAt(node.from)): number {
-  let columns = 0;
-  let quoteDepth = 0;
-  for (let parent = node.parent; parent; parent = parent.parent) {
-    if (parent.name === 'Blockquote') quoteDepth += 1;
-    if (parent.name === 'FootnoteDefinition') columns = Math.max(columns, 4);
-    if (parent.name !== 'ListItem') continue;
-    const mark = parent.getChild('ListMark');
-    if (!mark) continue;
-    const markerLine = state.doc.lineAt(mark.to);
-    const end = mark.to - markerLine.from;
-    const whitespace = /^[ \t]*/.exec(markerLine.text.slice(end))?.[0] ?? '';
-    const markerColumn = countColumn(markerLine.text, state.tabSize, end);
-    const padding = countColumn(markerLine.text, state.tabSize, end + whitespace.length) - markerColumn;
-    columns = Math.max(columns, markerColumn + (padding > 4 ? 1 : padding));
-  }
-  if (quoteDepth) {
-    const prefix = parseBlockLinePrefix(line.text, state.tabSize);
-    const lastQuote = prefix.quoteColumns[Math.min(quoteDepth, prefix.quoteColumns.length) - 1];
-    let quoteOffset = -1;
-    for (let depth = 0; depth < quoteDepth; depth += 1) quoteOffset = line.text.indexOf('>', quoteOffset + 1);
-    if (lastQuote !== undefined && quoteOffset >= 0) {
-      const afterQuote = line.text[quoteOffset + 1];
-      columns = Math.max(columns, lastQuote + 1 + (afterQuote === ' ' || afterQuote === '\t' ? 1 : 0));
-    }
-  }
-  return columns;
-}
-
-/** Source layout for a FencedCode or CodeBlock. Payload indentation is retained,
- * including the visible remainder of tabs crossing a container boundary. */
-export function getCodeBlockSourceLines(state: EditorState, node: SyntaxNode) {
-  const firstLine = state.doc.lineAt(node.from);
-  const lastLine = state.doc.lineAt(Math.max(node.to - 1, node.from));
-  const openingPrefix = firstLine.text.slice(0, node.from - firstLine.from);
-  const contents = node.getChildren('CodeText');
-  const marks = node.getChildren('CodeMark');
-  const fenceIndent = node.name === 'FencedCode'
-    ? Math.max(0, parseBlockLinePrefix(openingPrefix, state.tabSize).columns - getCodeContainerColumns(state, node)) : 4;
-  const lines: Array<{from:number;to:number;prefixTo:number;prefixColumns:number;quoteDepth:number;payloadInset:number;isFence:boolean}> = [];
-  let contentIndex = 0;
-  let markIndex = 0;
-  for (let lineNo = firstLine.number; lineNo <= lastLine.number; lineNo += 1) {
-    const line = state.doc.line(lineNo);
-    while (contentIndex < contents.length && contents[contentIndex]!.to <= line.from) contentIndex += 1;
-    while (markIndex < marks.length && marks[markIndex]!.to <= line.from) markIndex += 1;
-    const nextContent = contents[contentIndex];
-    const nextMark = marks[markIndex];
-    const content = nextContent && nextContent.from <= line.to ? nextContent : undefined;
-    const mark = nextMark && nextMark.from <= line.to ? nextMark : undefined;
-    let prefixTo = content ? Math.max(line.from, content.from)
-      : mark?.from ?? line.from + Math.min(openingPrefix.length, parseBlockLinePrefix(line.text, state.tabSize).prefix.length);
-    const consumedColumns = getCodeContainerColumns(state, node, line) + fenceIndent;
-    // Blank payload lines can lack a CodeText node, but still own the same
-    // container prefix. Leaving it in the payload re-adds it on every edit.
-    if (!mark && node.name === 'FencedCode') {
-      while (prefixTo < line.to && /[ \t]/.test(state.doc.sliceString(prefixTo, prefixTo + 1))
-        && parseBlockLinePrefix(state.doc.sliceString(line.from, prefixTo), state.tabSize).columns < consumedColumns) prefixTo += 1;
-    }
-    const prefix = parseBlockLinePrefix(state.doc.sliceString(line.from, prefixTo), state.tabSize);
-    lines.push({from:line.from,to:line.to,prefixTo,prefixColumns:prefix.columns,quoteDepth:prefix.quoteColumns.length,
-      payloadInset:content?Math.max(0,prefix.columns-consumedColumns):0,isFence:Boolean(mark)});
-  }
-  return lines;
 }
 
 export function getLiveBlockIndent(

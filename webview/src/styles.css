@@ -4865,12 +4865,35 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 }
 
 .cm-editor.meo-mode-live .meo-md-code-container-prefix {
+  /* Hidden quote markers must use code columns too. Their prose-font widths
+     otherwise move the native caret away from the payload boundary. */
+  --meo-live-container-ch: 1ch;
   display: inline-block;
   width: var(--meo-code-prefix-width);
+  /* Quote glyphs consume source columns but no code-panel columns. Scale the
+     hidden contents so native caret paint ends at the same boundary as layout. */
+  transform: scaleX(var(--meo-code-prefix-scale, 1));
+  transform-origin: left center;
   white-space: pre;
   text-indent: 0;
-  /* Container syntax remains in the document, while rails express it in Live. */
-  opacity: 0;
+  /* Keep the native caret visible when it lands inside a structural prefix.
+     Opacity also hides the caret; only the source glyphs should disappear. */
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+  caret-color: var(--meo-caret-color);
+}
+
+.cm-editor.meo-mode-live .meo-md-code-container-prefix * {
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+.cm-editor.meo-mode-live .meo-code-header-caret-anchor {
+  display: inline-block;
+  width: 0;
+  height: 1em;
+  vertical-align: baseline;
+  text-indent: 0;
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-quoted-code-block.meo-md-quote-source-order:is(.meo-md-quote, .meo-md-alert)::before {
