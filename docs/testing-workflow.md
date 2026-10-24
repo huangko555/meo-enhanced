@@ -658,6 +658,13 @@ and Settings search in Live, Source and Preview. It uses separate browser
 documents to exercise window focus ownership, backward/forward/collapsed ranges,
 horizontal input scrolling, immediate typing and returning to the document on
 close. New clicks, explicit Find and value changes must supersede old recovery.
+Its table activation matrix covers ordinary and large documents, same/cross-table
+text clicks, text and multi-cell drags, pointer cancellation/lost capture, repeated blur and
+pending cell input. It replays a late native input/contenteditable focus and Host
+hint during a trusted held pointer, sampling the old outline, visible selection,
+cell identity and viewport before release as well as the final exact caret.
+Keyboard return to the original cell, native same-cell clicks, the first key and
+Undo retain their separate ownership. `--only=table-activation` narrows this loop.
 It belongs to the quick and targeted search gates. The smaller
 `scripts/test-editor-focus-window-return.ts` also checks both blur event orders,
 input invalidation, modal ownership and disposal. Browser evidence does not

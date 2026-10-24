@@ -2461,6 +2461,22 @@ export function endTableCellEditing(view: EditorView): void {
   }
 }
 
+/** A held text gesture owns its DOM range across native focus restoration. */
+export function restoreTablePointerSelection(view: EditorView): void {
+  for (const widget of mountedTableWidgets.get(view) ?? []) {
+    const phase = widget.cellSelection.snapshot().phase;
+    if (phase === 'text-candidate') {
+      widget.projectPointerTextSelection(widget.selectionDomHead);
+      return;
+    }
+    if (phase === 'dragging' && widget.domRefs) {
+      widget.setTableInteractionActive(widget.domRefs.wrap, true);
+      widget.domRefs.table.focus({ preventScroll: true });
+      return;
+    }
+  }
+}
+
 export function refreshMountedTablePositions(
   view: EditorView,
   diagnostics: EditorDiagnostic[] = [],
@@ -2551,6 +2567,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   tableCommandTargetId: string;
   tableCommandTargetRegistration: TableCommandTargetRegistration | null;
   selectionDomAnchor: { node: Node; offset: number } | null;
+  selectionDomHead: { node: Node; offset: number } | null = null;
   measuredHeightCache: RenderedBlockPreviewHeight;
   pendingContextMenuRestore: boolean;
   contextPage: TableContextPage;
@@ -3383,25 +3400,12 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     };
     const clearNativeTextSelection = (onlyOwned = false) => {
       this.selectionDomAnchor = null;
+      this.selectionDomHead = null;
       const selection = document.getSelection();
       // Virtual widget disposal must not clear a caret owned by another editor.
       if (onlyOwned && !wrap?.contains(selection?.anchorNode ?? null) &&
         !wrap?.contains(selection?.focusNode ?? null)) return;
       selection?.removeAllRanges();
-    };
-    const projectNativeTextSelection = (domHead: { node: Node; offset: number } | null | undefined) => {
-      if (!this.selectionDomAnchor || !domHead) return;
-      const selection = document.getSelection();
-      try {
-        selection?.setBaseAndExtent(
-          this.selectionDomAnchor.node,
-          this.selectionDomAnchor.offset,
-          domHead.node,
-          domHead.offset
-        );
-      } catch {
-        selection?.removeAllRanges();
-      }
     };
 
     for (const effect of transition.effects) {
@@ -3469,12 +3473,22 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         runPrimary(() => {
           this.selectionDomAnchor = context.domCaret ?? null;
         });
-        runPrimary(() => projectNativeTextSelection(context.domCaret));
+        runPrimary(() => {
+          const active = document.activeElement;
+          if (active instanceof HTMLTextAreaElement && this.view?.contentDOM.contains(active)
+            && active.closest('.meo-md-html-table-shell')) {
+            // Activation may restore the old input before the new press. Hand
+            // focus to the accepted table gesture, without a body blur that
+            // would prematurely commit pending input as a separate history step.
+            table?.focus({ preventScroll: true });
+          }
+        });
+        runPrimary(() => this.projectPointerTextSelection(context.domCaret));
         continue;
       }
       if (effect.phase === 'preview') {
         runPrimary(() => this.applySelection(null));
-        runPrimary(() => projectNativeTextSelection(context.domCaret));
+        runPrimary(() => this.projectPointerTextSelection(context.domCaret));
         continue;
       }
       runPrimary(clearNativeTextSelection);
@@ -3501,6 +3515,19 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       throw new AggregateError(cleanupErrors, 'Table cell selection cleanup failed', { cause: cleanupErrors[0] });
     }
     return true;
+  }
+
+  projectPointerTextSelection(domHead: { node: Node; offset: number } | null | undefined) {
+    if (!this.selectionDomAnchor || !domHead) return;
+    this.selectionDomHead = domHead;
+    const selection = document.getSelection();
+    try {
+      selection?.setBaseAndExtent(
+        this.selectionDomAnchor.node, this.selectionDomAnchor.offset, domHead.node, domHead.offset
+      );
+    } catch {
+      selection?.removeAllRanges();
+    }
   }
 
   setSingleCellSelection(coords: CellCoords, origin: 'focus' | 'command') {
@@ -3998,6 +4025,10 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     };
 
     const onFocusOut = (event: FocusEvent) => {
+      const phase = this.cellSelection.snapshot().phase;
+      // A native focus return must not retire a newer held pointer, including
+      // a multi-cell range whose former editing target has already ended.
+      if (phase === 'text-candidate' || phase === 'dragging') return;
       const nextTarget = event.relatedTarget;
       if (nextTarget instanceof Element && nextTarget.closest('.meo-hex-color-adjustment')) return;
       const wrap = this.domRefs?.wrap ?? table;

@@ -88,6 +88,22 @@ async function main() {
     if (wrappedMetrics.height < wrappedMetrics.lineHeight * 2.5) {
       throw new Error(`Narrow production cell did not wrap onto visual lines: ${JSON.stringify(wrappedMetrics)}`);
     }
+    await page.click(first);
+    const nativePoint = await page.$eval(first, input => {
+      const rect = input.getBoundingClientRect();
+      return { x: rect.left + 16, y: rect.top + 10 };
+    });
+    await page.mouse.move(nativePoint.x, nativePoint.y);
+    await page.mouse.down();
+    const nativeCaret = await page.$eval(first, input => (input as HTMLTextAreaElement).selectionStart);
+    await page.evaluate(() => (window as any).__tableCellEditor.view.contentDOM.focus({ preventScroll: true }));
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await page.mouse.up();
+    const nativeReturn = await page.$eval(first, input => ({ focused: document.activeElement === input,
+      caret: (input as HTMLTextAreaElement).selectionStart }));
+    if (!nativeReturn.focused || nativeReturn.caret !== nativeCaret) {
+      throw new Error(`Late document focus stole the current cell's native click: ${JSON.stringify({ nativeCaret, ...nativeReturn })}`);
+    }
     await page.click(first, { offset: { x: 18, y: wrappedMetrics.lineHeight * 1.5 } });
     await page.keyboard.press('ArrowUp');
     const wrappedArrowUp = await page.evaluate(() => {

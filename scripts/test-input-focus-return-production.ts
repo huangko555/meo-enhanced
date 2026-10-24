@@ -58,6 +58,141 @@ async function settle(frame: Frame, count = 15): Promise<void> {
   }, count);
 }
 
+async function checkTableActivationClick(page: Page, frame: Frame): Promise<void> {
+  const original = (await readEditor(frame)).text;
+  for (const large of [false, true]) {
+    for (const crossTable of [false, true]) {
+      for (const restore of ['none', 'cell', 'document'] as const) {
+        for (const gesture of ['click', 'drag', 'cells', 'cancel', 'lostcapture', 'blur'] as const) {
+          const fixture = 'Before\n\n| A | B |\n| --- | --- |\n| original cell | second target text |\n\nBetween\n\n'
+            + '| C | D |\n| --- | --- |\n| third cell | fourth target text |\n\nAfter'
+            + (large ? '\n'.repeat(8000) : '');
+          await frame.evaluate(fixture => {
+            const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+            view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: fixture }, selection: { anchor: 0 } });
+            view.focus(); view.scrollDOM.scrollTop = 0;
+          }, fixture);
+          await settle(frame, 8);
+          await (await frame.$('tbody td .meo-md-html-table-cell-preview'))!.click();
+          const pendingEdit = large && restore === 'cell' && gesture === 'click';
+          if (pendingEdit) await frame.evaluate(() => {
+            const input = document.activeElement as HTMLTextAreaElement;
+            input.value += '!'; input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: '!' }));
+          });
+          const point = await frame.evaluate(crossTable => {
+            const cells = [...document.querySelectorAll<HTMLTableCellElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table) tbody td')];
+            const oldInput = cells[0].querySelector('textarea')!;
+            oldInput.setSelectionRange(2, 5, 'backward');
+            const target = cells[crossTable ? 3 : 1];
+            const preview = target.querySelector('.meo-md-html-table-cell-preview')!;
+            const node = document.createTreeWalker(preview, NodeFilter.SHOW_TEXT).nextNode()!;
+            const range = document.createRange(); range.setStart(node, 2); range.setEnd(node, 3);
+            const rect = range.getBoundingClientRect();
+            (window as any).__activationFixture = { oldInput, input: target.querySelector('textarea'), cells,
+              scrollTop: document.querySelector('.cm-scroller')!.scrollTop, samples: [] };
+            document.addEventListener('pointerdown', event => {
+              (window as any).__activationFixture.pointerId = event.pointerId;
+            }, { capture: true, once: true });
+            range.setStart(node, 7); range.setEnd(node, 8);
+            const end = range.getBoundingClientRect();
+            const adjacent = cells[crossTable ? 2 : 0].getBoundingClientRect();
+            return { x: rect.right, y: rect.top + rect.height / 2, endX: end.right, endY: end.top + end.height / 2,
+              adjacentX: adjacent.left + 10, adjacentY: adjacent.top + 10 };
+          }, crossTable);
+          await page.focus('#host-control');
+          // Window activation may restore the old input before the press too.
+          await returnToFrame(page);
+          const bounds = await (await page.$('#webview'))!.boundingBox();
+          assert.ok(bounds);
+          await page.mouse.move(bounds.x + point.x, bounds.y + point.y);
+          await page.mouse.down();
+          if (gesture === 'drag') await page.mouse.move(bounds.x + point.endX, bounds.y + point.endY, { steps: 3 });
+          if (gesture === 'cells') await page.mouse.move(bounds.x + point.adjacentX, bounds.y + point.adjacentY, { steps: 3 });
+          // Native activation and its Host hint may reach the Webview after the
+          // new pointer press. Exercise both suspended editable return targets.
+          await frame.evaluate(restore => {
+            const state = (window as any).__activationFixture;
+            const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+            if (restore !== 'none') (restore === 'cell' ? state.oldInput : view.contentDOM).focus({ preventScroll: true });
+            window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
+            state.sample = () => {
+              const outline = getComputedStyle(state.cells[0], '::after');
+              state.samples.push({ oldPainted: document.activeElement === state.oldInput
+                && outline.visibility !== 'hidden' && outline.boxShadow !== 'none', scrollTop: view.scrollDOM.scrollTop,
+                text: document.getSelection()?.toString() ?? '' });
+              state.raf = requestAnimationFrame(state.sample);
+            };
+            state.sample();
+          }, restore);
+          await settle(frame, 8);
+          if (gesture === 'cancel' || gesture === 'lostcapture' || gesture === 'blur') {
+            await frame.evaluate(gesture => {
+              const state = (window as any).__activationFixture;
+              if (gesture === 'blur') { window.dispatchEvent(new Event('blur')); window.dispatchEvent(new Event('focus')); }
+              else if (gesture === 'lostcapture') state.input.closest('table').releasePointerCapture(state.pointerId);
+              else state.input.closest('table').dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: state.pointerId }));
+            }, gesture);
+          }
+          await page.mouse.up();
+          if (gesture === 'cancel' || gesture === 'lostcapture' || gesture === 'blur') await page.mouse.click(bounds.x + point.x, bounds.y + point.y);
+          await settle(frame, 8);
+          const result = await frame.evaluate(() => {
+            const state = (window as any).__activationFixture;
+            cancelAnimationFrame(state.raf);
+            return { focused: document.activeElement === state.input, caret: state.input.selectionStart, end: state.input.selectionEnd,
+              cellRange: state.input.closest('table').querySelectorAll('.meo-md-html-table-cell-selected').length,
+              samples: state.samples, scrollTop: state.scrollTop,
+              retained: state.cells.every((cell: Element) => cell.isConnected) };
+          });
+          const label = `${large ? 'large' : 'small'}/${crossTable ? 'cross-table' : 'same-table'}/${restore}/${gesture}`;
+          assert.ok(result.samples.length >= 8 && result.samples.every((sample: any) => !sample.oldPainted),
+            `${label}: native activation repainted the old cell outline: ${JSON.stringify(result)}`);
+          assert.ok(gesture === 'cells' ? result.cellRange === 2 : result.focused && result.caret === 3 && result.end === (gesture === 'drag' ? 8 : 3),
+            `${label}: the new text click lost its caret: ${JSON.stringify(result)}`);
+          if (gesture === 'drag') assert.ok(result.samples.slice(0, 8).every((sample: any) => sample.text === (crossTable ? 'rth t' : 'ond t')),
+            `${label}: activation cleared the visible text drag: ${JSON.stringify(result)}`);
+          assert.ok(result.retained && result.samples.every((sample: any) => Math.abs(sample.scrollTop - result.scrollTop) <= 2),
+            `${label}: activation replaced cells or moved the viewport`);
+          assert.equal((await readEditor(frame)).text, pendingEdit ? fixture.replace('original cell', 'original cell!') : fixture,
+            `${label}: focus handoff must retain pending input without editing other Markdown`);
+        }
+      }
+    }
+  }
+  await frame.evaluate(original => {
+    const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: original }, selection: { anchor: 0 } }); view.focus();
+  }, original);
+  await settle(frame);
+  await (await frame.$('tbody .meo-md-html-table-cell-preview'))!.click();
+  const sameCellPoint = await frame.evaluate(() => {
+    const input = document.activeElement as HTMLTextAreaElement;
+    input.setSelectionRange(2, 7, 'backward');
+    const node = document.createTreeWalker(input.parentElement!.querySelector('.meo-md-html-table-cell-preview')!, NodeFilter.SHOW_TEXT).nextNode()!;
+    const range = document.createRange(); range.setStart(node, 2); range.setEnd(node, 3);
+    const rect = range.getBoundingClientRect();
+    return { x: rect.right, y: rect.top + rect.height / 2 };
+  });
+  await page.focus('#host-control');
+  await returnToFrame(page);
+  await settle(frame);
+  const returned = await readInput(frame, 'tbody textarea');
+  assert.ok(returned.focused && returned.start === 2 && returned.end === 7 && returned.direction === 'backward',
+    'keyboard window return must retain the original cell and backward range');
+  await page.focus('#host-control');
+  const bounds = await (await page.$('#webview'))!.boundingBox();
+  assert.ok(bounds);
+  await page.mouse.click(bounds.x + sameCellPoint.x, bounds.y + sameCellPoint.y);
+  const clicked = await readInput(frame, 'tbody textarea');
+  assert.ok(clicked.focused && clicked.start === 3 && clicked.end === 3,
+    `clicking the original cell must use the new native caret: ${JSON.stringify(clicked)}`);
+  await page.keyboard.type('Q');
+  assert.ok((await readInput(frame, 'tbody textarea')).value === 'TabQle selection', 'the first key must reach the clicked original cell');
+  await chord(page, 'z');
+  await settle(frame);
+  assert.equal((await readEditor(frame)).text, original, 'same-cell return Undo must restore Markdown');
+}
+
 async function checkOffscreenReturn(page: Page, frame: Frame, target: 'table' | 'document', side: 'above' | 'below', backward = false): Promise<void> {
   const original = (await readEditor(frame)).text;
   const fixture = side === 'below' ? 'Earlier reading content.\n\n'.repeat(30) + original : original;
@@ -177,7 +312,7 @@ async function checkOffscreenReturn(page: Page, frame: Frame, target: 'table' | 
 }
 
 try {
-  for (const mode of ['live', 'source', 'preview'] as const) {
+  for (const mode of (process.argv.includes('--only=table-activation') ? ['live'] : ['live', 'source', 'preview']) as ('live' | 'source' | 'preview')[]) {
     const page = await browser.newPage();
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(String(error)));
@@ -206,6 +341,8 @@ try {
         restoreReadingPositionOnOpen: false, vscodeTheme: null
       } })), { text, mode });
       await frame.waitForSelector('.editor-wrapper:not(.meo-preload-editor-shell) .cm-content');
+      if (mode === 'live') await checkTableActivationClick(page, frame);
+      if (process.argv.includes('--only=table-activation')) continue;
       if (mode !== 'preview') {
         for (const side of ['above', 'below'] as const) {
           if (mode === 'live') await checkOffscreenReturn(page, frame, 'table', side, side === 'below');
@@ -431,7 +568,9 @@ try {
       assert.deepEqual(errors, [], `${mode}: focus handlers must not throw`);
     } finally { await page.close(); }
   }
-  console.log('Input window-return and document handoff production checks passed in Live, Source and Preview.');
+  console.log(process.argv.includes('--only=table-activation')
+    ? 'Table window-return activation, drag, cancellation and native caret checks passed.'
+    : 'Input window-return and document handoff production checks passed in Live, Source and Preview.');
 } catch (error) { primaryError = error; }
 finally {
   if (primaryError === undefined) await closeTestBrowser(browser);

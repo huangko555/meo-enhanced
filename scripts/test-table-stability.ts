@@ -1888,8 +1888,10 @@ async function main() {
           '.meo-md-html-table:not(.meo-md-html-table-sticky-table)'
         ));
         const focusedInput = tables[0].querySelector<HTMLTextAreaElement>('tbody textarea')!;
+        const oldOutline = getComputedStyle(focusedInput.closest('td')!, '::after');
         return {
           focusedInputStillActive: document.activeElement === focusedInput,
+          oldOutlineVisible: document.activeElement === focusedInput && oldOutline.visibility !== 'hidden' && oldOutline.boxShadow !== 'none',
           selectedPreviewText: document.getSelection()?.toString() ?? '',
           originalTargetConnected: Boolean((window as any).__focusedTableDragTargetPreview?.isConnected),
           originalTargetStillRendered: document.contains((window as any).__focusedTableDragTargetPreview)
@@ -1919,7 +1921,7 @@ async function main() {
       ['cross table', focusedCrossTableDrag]
     ] as const) {
       if (
-        !state.during.focusedInputStillActive ||
+        state.during.oldOutlineVisible ||
         state.during.selectedPreviewText !== 'lpha b' ||
         state.pixelChangeRatio < 0.08 ||
         state.up.selectedText !== 'lpha b' ||
