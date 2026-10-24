@@ -11,7 +11,7 @@ import {
 } from '../editor/mermaidEditingLayout';
 import { getMermaidDiagramPresentationFactory } from '../editor/mermaidDiagramPresentation';
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
-import { sourcePresentationSelection } from '../editor/livePointerSelection';
+import { setLivePointerSelectionActiveEffect, sourcePresentationSelection } from '../editor/livePointerSelection';
 import { supersedeLiveInputDerivedWork } from '../editor/liveInputDerivedWork';
 import {
   MermaidDiagramWidget,
@@ -79,8 +79,9 @@ export const mermaidEditingStateField = StateField.define<MermaidEditingState>({
     sideSpace: 0
   }),
   update(value, transaction) {
+    const pointerPresentationChanged = transaction.effects.some(effect => effect.is(setLivePointerSelectionActiveEffect));
     if (!transaction.docChanged && !transaction.selection && !transaction.reconfigured
-      && !transaction.effects.some(isMermaidPresentationEffect)) return value;
+      && !pointerPresentationChanged && !transaction.effects.some(isMermaidPresentationEffect)) return value;
     const layouts = new Map<number, MermaidEditingLayout>(),
       viewports = new Map<number, MermaidViewportState>();
     const mapped = (anchor: number): number | null => {
@@ -119,8 +120,10 @@ export const mermaidEditingStateField = StateField.define<MermaidEditingState>({
     if (transaction.selection && !revealing) searchReveal = null;
     let activeAnchor = value.activeAnchor === null ? null : mapped(value.activeAnchor);
     const previousActive = activeAnchor;
-    if (transaction.selection || transaction.docChanged) {
-      const selection = transaction.state.selection.main;
+    if (transaction.selection || transaction.docChanged || pointerPresentationChanged) {
+      // The source/canvas layout follows the same held selection as its
+      // decorations. Native hit testing may already point below the block.
+      const selection = sourcePresentationSelection(transaction.state).main;
       const touches = (source: ReturnType<typeof mermaidSourceAt>) =>
         source &&
         (selection.empty

@@ -11,7 +11,7 @@ import { liveViewportPresentationExtensions, restrictLiveWidgetPresentation, get
   isLiveViewportPresentationEffect, livePresentationBandChanged } from './helpers/liveViewportPresentation';
 import { undoDepth } from '@codemirror/commands';
 import { blockStickyHeaderExtension } from './helpers/blockStickyHeader';
-import { livePointerSelectionActiveField, setLivePointerSelectionActiveEffect } from './editor/livePointerSelection';
+import { livePointerSelectionActiveField, setLivePointerSelectionActiveEffect, sourcePresentationSelection } from './editor/livePointerSelection';
 import { blockReadingFocusAt, enterBlockSource, isBlockInteractionEffect } from './editor/blockInteraction';
 import { countColumn, RangeSetBuilder, StateEffect, StateField, EditorState, type ChangeDesc, type ChangeSet, type Range, type RangeSet, type Extension, type EditorSelection, type Transaction } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
@@ -3570,7 +3570,7 @@ function rebuildLiveSelectionBlocks(decorations: DecorationSet, transaction: Tra
       || isMermaidPresentationEffect(effect)
       || effect.is(setLatexMathBlockModeEffect) || effect.is(setLatexMathSearchRevealEffect)
       || effect.is(setHtmlEditingRangeEffect) || isBlockInteractionEffect(effect))) return;
-  for (const selection of [before.selection, state.selection]) for (const range of selection.ranges) {
+  for (const selection of [sourcePresentationSelection(before), sourcePresentationSelection(state), before.selection, state.selection]) for (const range of selection.ranges) {
     if (state.doc.lineAt(range.to).number - state.doc.lineAt(range.from).number > 128) return;
   }
   const previousTree = acceptedLiveMarkdownSyntax(before);
@@ -3588,9 +3588,9 @@ function rebuildLiveSelectionWithSyntax(decorations: DecorationSet, transaction:
   const before = transaction.startState, state = transaction.state;
   let changedBlockContext = false;
   const active = new Set([...collectActiveLines(before), ...collectActiveLines(state)]);
-  // The pointer's new selection can be masked during pointerdown; include both
-  // caret locations so later pointerup reveals exactly the same source block.
-  for (const selection of [before.selection, state.selection]) for (const range of selection.ranges) {
+  // Pointer release changes the presentation selection without moving the
+  // native caret. Retire the held source block as well as rebuilding the hit.
+  for (const selection of [sourcePresentationSelection(before), sourcePresentationSelection(state), before.selection, state.selection]) for (const range of selection.ranges) {
     const first = state.doc.lineAt(range.from).number, last = state.doc.lineAt(range.to).number;
     for (let line = first; line <= last; line += 1) active.add(line);
   }
@@ -3636,6 +3636,8 @@ function rebuildLiveSelectionWithSyntax(decorations: DecorationSet, transaction:
   const frontmatter = parseFrontmatter(state);
   const details = getDetailsBlocks(state, tree);
   const definitions = parseFootnotes(state).definitions;
+  const displayMathBlocks = getLiveRenderedBlocks(state, { includeSelectedMath: true, tree })
+    .filter(block => block.kind === 'math');
   const includeRoot = (range: SourceRange): SourceRange => {
     const expanded = { ...range };
     for (const position of [range.from, range.to]) {
@@ -3652,6 +3654,20 @@ function rebuildLiveSelectionWithSyntax(decorations: DecorationSet, transaction:
           if (closing.number < state.doc.lines) expanded.to = Math.max(expanded.to, state.doc.line(closing.number + 1).from);
         }
       }
+    }
+    // Display-math source owns a result attached to the next physical line,
+    // outside its Markdown root. Include it for both $$ and fenced formulas,
+    // including a formula at the end of a list/quote/footnote root.
+    const firstLine = state.doc.lineAt(expanded.from).number, lastLine = state.doc.lineAt(expanded.to).number;
+    for (const block of displayMathBlocks) {
+      // Block membership is cached as line numbers. Reject distant formulas
+      // before looking up any of their physical lines on this caret operation.
+      if (block.startLine > lastLine || block.endLine < firstLine) continue;
+      const opening = state.doc.line(block.startLine), closing = state.doc.line(block.endLine);
+      if (expanded.from > closing.to || expanded.to < opening.from) continue;
+      expanded.from = Math.min(expanded.from, opening.from);
+      expanded.to = Math.max(expanded.to, closing.number < state.doc.lines
+        ? state.doc.line(closing.number + 1).from : closing.to);
     }
     return expanded;
   };
