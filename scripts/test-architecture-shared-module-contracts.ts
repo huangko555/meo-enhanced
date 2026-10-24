@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { inspectArchitecture } from './check-architecture';
 import {
   darkBuiltInVisuals,
   getBuiltInVisuals,
@@ -31,21 +32,7 @@ const write = (path: string, contents: string): void => {
   writeFileSync(absolute, contents);
 };
 
-const runCheck = (): { ok: boolean; output: string } => {
-  try {
-    return {
-      ok: true,
-      output: execFileSync('bun', ['scripts/check-architecture.ts'], {
-        cwd: fixtureRoot,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe']
-      })
-    };
-  } catch (error) {
-    const failure = error as { stdout?: string; stderr?: string };
-    return { ok: false, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
-  }
-};
+const runCheck = () => inspectArchitecture(fixtureRoot);
 
 try {
   mkdirSync(join(fixtureRoot, 'scripts'), { recursive: true });
@@ -117,7 +104,7 @@ try {
   assert.doesNotMatch(architectureSource, /caughtThrowsByContext|orderedCompletions/);
   const bindingLoopSource = architectureSource.slice(
     bindingLoopIndex,
-    architectureSource.indexOf('\n  return ranges;', bindingLoopIndex)
+    architectureSource.indexOf('\n    return ranges;', bindingLoopIndex)
   );
   assert.doesNotMatch(
     bindingLoopSource,
@@ -170,6 +157,8 @@ try {
 
   const valid = runCheck();
   assert.equal(valid.ok, true, `valid thin callers should pass: ${valid.output}`);
+  const cliValid = execFileSync('bun', ['scripts/check-architecture.ts'], { cwd: fixtureRoot, encoding: 'utf8' });
+  assert.equal(cliValid.trim(), valid.output, 'CLI and in-process rules must agree');
 
   write('scripts/architecture-baseline.json', JSON.stringify({
     targetRoots: ['webview/src/application'], knownLegacyTestFailures: []
@@ -197,6 +186,8 @@ try {
     assert.equal(outcome.ok, false, `Application external dependency must be rejected: ${contents}`);
     assert.match(outcome.output, /ARCH004/);
   }
+  assert.throws(() => execFileSync('bun', ['scripts/check-architecture.ts'], { cwd: fixtureRoot, stdio: 'pipe' }),
+    (error: any) => error.status === 1 && error.stderr.toString().includes('ARCH004'), 'CLI must reject the same invalid fixture');
   write('webview/src/application/palette.ts', [
     'export type SerializablePalette = { document: string; elementColor: string; storageKey: string };',
     'export const describeDocument = (palette: SerializablePalette) => palette.document;',

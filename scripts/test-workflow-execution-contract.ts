@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import fs, { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import fs, { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spyOn } from 'bun:test';
 import { join } from 'node:path';
 import { digest, executeWorkflow, expandTestCommand, prepareWorkflow, readResumeReport, saveReport,
@@ -86,6 +86,14 @@ try {
   await assert.rejects(executeWorkflow({ stages, report: buildFailure, inputs: () => 'input', artifacts: () => 'artifact',
     persist: () => {}, log: () => {}, run: async () => 1 }), /Production build failed/);
   assert.equal(buildFailure.tasks.length, 1, 'Failed build blocks dependent tests');
+  const blockedSupplement = createReport();
+  const supplementStages = prepareWorkflow({ ...plan, stages: [
+    { title: 'census', commands: [{ args: ['scripts/test-first.ts'] }] },
+    { title: 'font sweep', requiresPassed: true, commands: [{ args: ['scripts/test-font.ts'] }] }
+  ] }, {});
+  await assert.rejects(executeWorkflow({ stages: supplementStages, report: blockedSupplement, inputs: () => 'input', artifacts: () => 'artifact',
+    collectFailures: true, persist: () => {}, log: () => {}, run: async () => 1 }), /font sweep was not started/);
+  assert.equal(blockedSupplement.tasks.length, 1, 'Long supplements stay blocked after a failed full census');
   const shortFailure = createReport();
   await assert.rejects(executeWorkflow({ stages, report: shortFailure, inputs: () => 'input', artifacts: () => 'artifact',
     persist: () => {}, log: () => {}, run: async task => task.id === '2-1-1' ? 1 : 0 }), /unit failed/);
@@ -96,6 +104,51 @@ try {
   writeFileSync(evidence, 'original evidence');
   const evidenceFields = { stdout: evidence, stderr: evidence,
     stdoutHash: digest(readFileSync(evidence)), stderrHash: digest(readFileSync(evidence)) };
+  const duplicatePlan: TestWorkflowPlan = { ...plan, stages: [
+    plan.stages[0]!,
+    { title: 'overlapping packs', maxConcurrency: 3, commands: [
+      { args: ['scripts/test-duplicate.ts'], env: { A: '1', B: '2' } },
+      { args: ['scripts/test-duplicate.ts'], env: { B: '2', A: '1' } },
+      { args: ['scripts/test-duplicate.ts', '--different'] }
+    ] },
+    { title: 'supplement preflight', commands: [{ args: ['scripts/test-duplicate.ts'], env: { A: '1', B: '2' } }] }
+  ] };
+  for (const exitCode of [0, 1]) {
+    let calls = 0;
+    const report = createReport();
+    const execute = executeWorkflow({ stages: prepareWorkflow(duplicatePlan, {}), report,
+      inputs: () => 'input', artifacts: () => 'artifact', collectFailures: true, deduplicate: true,
+      persist: () => {}, log: () => {}, run: async (task, result) => {
+        Object.assign(result, evidenceFields);
+        if (!task.reusable) return 0;
+        calls++;
+        await new Promise(resolve => setTimeout(resolve, 5));
+        return exitCode;
+      } });
+    if (exitCode) await assert.rejects(execute, /test command\(s\) failed/); else await execute;
+    assert.equal(calls, 2, 'Identical concurrent and later invocations share execution; different arguments execute');
+    assert.equal(report.tasks.length, 5, 'Every logical coverage item retains a receipt');
+    assert.equal(report.tasks.filter(task => task.evidence?.startsWith('current#')).length, 2);
+    assert.equal(report.status, exitCode ? 'failed' : 'passed', 'A failed duplicate cannot be retried to green');
+  }
+  const resourcePlan: TestWorkflowPlan = { ...plan, stages: [{ title: 'resources', maxConcurrency: 3,
+    commands: ['a', 'b', 'c', 'd'].map(name => ({ args: [`scripts/test-${name}.ts`] })) }] };
+  const resourceStages = prepareWorkflow(resourcePlan, {}, {
+    'scripts/test-a.ts': 'process', 'scripts/test-b.ts': 'exclusive', 'scripts/test-c.ts': 'process'
+  });
+  assert.equal(resourceStages[0]!.groups[3]![0]!.resource, 'exclusive', 'Unknown resources stay exclusive');
+  let running = 0;
+  let browserRunning = false;
+  await executeWorkflow({ stages: resourceStages, report: createReport(), inputs: () => 'input', artifacts: () => 'artifact',
+    persist: () => {}, log: () => {}, run: async task => {
+      assert.equal(browserRunning, false, 'Other tasks cannot run while an exclusive test owns resources');
+      if (task.resource === 'exclusive') { assert.equal(running, 0); browserRunning = true; }
+      running++;
+      await new Promise(resolve => setTimeout(resolve, 5));
+      running--;
+      browserRunning = false;
+      return 0;
+    } });
   const previous = createReport();
   previous.status = 'passed'; previous.artifactHash = 'artifact';
   previous.tasks = stages.flatMap(stage => stage.groups.flat()).map(task => ({
@@ -157,6 +210,29 @@ try {
   assert.notEqual(initial, added);
   writeFileSync(join(fixtureDir, 'helper.ts'), 'version two');
   assert.notEqual(added, hashPaths([fixtureDir]));
+  const graph = join(root, 'dependency-graph');
+  const sharedDependency = join(graph, 'package');
+  mkdirSync(sharedDependency, { recursive: true });
+  writeFileSync(join(sharedDependency, 'runtime.js'), 'one');
+  for (const name of ['first', 'second']) symlinkSync(sharedDependency, join(graph, name), 'junction');
+  const metrics = { files: 0, bytes: 0, directories: 0, cacheHits: 0 };
+  const graphHash = hashPaths([graph], metrics);
+  assert.equal(metrics.files, 1, 'Shared dependency bytes must be read once per snapshot');
+  assert.ok(metrics.cacheHits >= 2);
+  writeFileSync(join(sharedDependency, 'runtime.js'), 'two');
+  assert.notEqual(hashPaths([graph]), graphHash, 'A later snapshot must reread changed dependency bytes of the same length');
+  const beforeLinkRemoval = hashPaths([graph]);
+  unlinkSync(join(graph, 'second'));
+  assert.notEqual(hashPaths([graph]), beforeLinkRemoval, 'Logical dependency edges remain part of the identity');
+  symlinkSync(graph, join(sharedDependency, 'cycle'), 'junction');
+  assert.throws(() => hashPaths([graph]), /Circular/);
+  unlinkSync(join(sharedDependency, 'cycle'));
+  const collisionA = join(root, 'file-boundaries-a');
+  const collisionB = join(root, 'file-boundaries-b');
+  writeFileSync(collisionA, 'a'); writeFileSync(collisionB, 'bc');
+  const boundaryHash = hashPaths([collisionA, collisionB]);
+  writeFileSync(collisionA, 'ab'); writeFileSync(collisionB, 'c');
+  assert.notEqual(hashPaths([collisionA, collisionB]), boundaryHash, 'File boundaries cannot be confused with concatenated bytes');
   const childScript = join(root, 'child.ts');
   writeFileSync(childScript, 'console.log("stdout witness"); console.error("stderr witness"); process.exitCode = 7;');
   const result: TaskResult = { id: 'child', status: 'running', startedAt: new Date().toISOString() };

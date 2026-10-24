@@ -25,6 +25,7 @@ export type TestWorkflowStage = {
   title: string;
   commands: TestWorkflowCommand[];
   maxConcurrency?: number;
+  requiresPassed?: boolean;
 };
 
 export type TestWorkflowRequest = {
@@ -389,7 +390,9 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
       return {
         tier: 'release',
         title: 'Full release gate',
-        expectedDuration: 'last measured baseline about 60 minutes, excluding native acceptance and endurance',
+        expectedDuration: request.documentPath
+          ? 'full release gate plus complete font sweep and endurance; see per-stage timing report'
+          : 'historical baseline 55-105 minutes, excluding native acceptance and document supplements',
         longRunning: true,
         stages: [
           serialStage('Production build', [packageScript('build')]),
@@ -423,7 +426,12 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
             packageScript('test:browser-high-risk')
           ]),
           serialStage('Production browser matrix', [packageScript('test:browser')]),
-          serialStage('VSIX content validation', [packageScript('package:check')])
+          serialStage('VSIX content validation', [packageScript('package:check')]),
+          ...(request.documentPath ? [
+            { ...serialStage('Full-document font sweep', [{ args: ['scripts/test-font-size-full-document.ts',
+              `--document=${request.documentPath}`, '--confirm-long-run'] }]), requiresPassed: true },
+            ...createTestWorkflowPlan({ ...request, tier: 'endurance' }).stages.map(stage => ({ ...stage, requiresPassed: true }))
+          ] : [])
         ]
       };
     case 'endurance': {

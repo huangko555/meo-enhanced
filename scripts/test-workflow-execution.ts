@@ -7,11 +7,13 @@ export type WorkflowTask = {
   id: string;
   command: TestWorkflowCommand;
   reusable: boolean;
+  resource?: 'process' | 'exclusive';
 };
 export type WorkflowStage = {
   title: string;
   maxConcurrency: number;
   prerequisite: boolean;
+  requiresPassed?: boolean;
   groups: WorkflowTask[][];
 };
 export type TaskResult = {
@@ -40,6 +42,9 @@ export type WorkflowReport = {
   status: 'running' | 'passed' | 'failed' | 'invalidated';
   startedAt: string;
   completedAt?: string;
+  preparationSeconds?: number;
+  verificationSeconds?: number;
+  fingerprintTimings?: Array<{ phase: 'before' | 'after'; section: string; seconds: number; files?: number; bytes?: number; directories?: number; cacheHits?: number }>;
   seconds?: number;
   tasks: TaskResult[];
   stages: Array<{ title: string; seconds: number }>;
@@ -47,6 +52,18 @@ export type WorkflowReport = {
 
 export function digest(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+export function commandIdentity(command: TestWorkflowCommand): string {
+  return JSON.stringify([command.args, Object.entries(command.env ?? {}).sort(([a], [b]) => a.localeCompare(b))]);
+}
+
+function verifyEvidence(prior: TaskResult): void {
+  if (!prior.stdout || !prior.stderr || !prior.stdoutHash || !prior.stderrHash
+    || digest(readFileSync(prior.stdout)) !== prior.stdoutHash
+    || digest(readFileSync(prior.stderr)) !== prior.stderrHash) {
+    throw new Error(`Missing or changed evidence for ${prior.id}; start a fresh run.`);
+  }
 }
 
 // Only test aliases are expanded. Build/typecheck aliases retain their shell
@@ -71,7 +88,7 @@ export function expandTestCommand(
   });
 }
 
-export function prepareWorkflow(plan: TestWorkflowPlan, scripts: Record<string, string>): WorkflowStage[] {
+export function prepareWorkflow(plan: TestWorkflowPlan, scripts: Record<string, string>, resources?: Record<string, 'process' | 'exclusive'>): WorkflowStage[] {
   for (const stage of plan.stages) {
     if (!stage.commands.length || !Number.isInteger(stage.maxConcurrency ?? 1) || (stage.maxConcurrency ?? 1) < 1) {
       throw new Error(`Invalid stage scheduling: ${stage.title}`);
@@ -81,11 +98,13 @@ export function prepareWorkflow(plan: TestWorkflowPlan, scripts: Record<string, 
     title: stage.title,
     maxConcurrency: stage.maxConcurrency ?? 1,
     prerequisite: stage.commands.some(command => command.args.join(' ') === 'run build'),
+    ...(stage.requiresPassed ? { requiresPassed: true } : {}),
     groups: stage.commands.map((command, groupIndex) =>
       expandTestCommand(command, scripts).map((leaf, leafIndex) => ({
         id: `${stageIndex + 1}-${groupIndex + 1}-${leafIndex + 1}`,
         command: leaf,
-        reusable: leaf.args[0]?.startsWith('scripts/test-') === true
+        reusable: leaf.args[0]?.startsWith('scripts/test-') === true,
+        ...(resources ? { resource: resources[leaf.args[0]!] ?? resources[leaf.args.join(' ')] ?? 'exclusive' } : {})
       })))
   }));
 }
@@ -144,11 +163,30 @@ export async function executeWorkflow(options: {
   inputs: () => string;
   log: (message: string) => void;
   collectFailures?: boolean;
+  deduplicate?: boolean;
 }): Promise<void> {
   const { stages, report, previous, persist, run, artifacts, inputs, log } = options;
   const started = performance.now();
+  const executions = new Map<string, Promise<TaskResult>>();
+  // Fair reader/writer lease: isolated processes can share capacity, while a
+  // browser/desktop measurement runs without competing workflow commands.
+  let shared = 0;
+  let exclusive = false;
+  const queue: Array<{ kind: 'process' | 'exclusive'; resolve: (release: () => void) => void }> = [];
+  const pump = () => {
+    while (queue.length && !exclusive) {
+      if (queue[0]!.kind === 'exclusive' && shared) return;
+      const next = queue.shift()!;
+      if (next.kind === 'exclusive') exclusive = true; else shared++;
+      next.resolve(() => { if (next.kind === 'exclusive') exclusive = false; else shared--; pump(); });
+    }
+  };
+  const acquire = (kind: 'process' | 'exclusive') => new Promise<() => void>(resolve => { queue.push({ kind, resolve }); pump(); });
   try {
     for (const stage of stages) {
+      if (stage.requiresPassed && report.tasks.some(task => task.status === 'failed')) {
+        throw new Error(`Earlier checks failed; ${stage.title} was not started.`);
+      }
       const stageStarted = performance.now();
       log(`\n[stage] ${stage.title}`);
       let nextGroup = 0;
@@ -158,15 +196,29 @@ export async function executeWorkflow(options: {
           if (stageFailed && !options.collectFailures) return;
           const group = stage.groups[nextGroup++]!;
           for (const task of group) {
+            const key = commandIdentity(task.command);
+            const existing = options.deduplicate && task.reusable ? executions.get(key) : undefined;
+            if (existing) {
+              const source = await existing;
+              verifyEvidence(source);
+              const result: TaskResult = { ...source, id: task.id, command: task.command,
+                status: source.status === 'failed' ? 'failed' : 'reused', seconds: 0,
+                evidence: `current#${source.id}` };
+              report.tasks.push(result);
+              stageFailed ||= result.status === 'failed';
+              persist();
+              log(`[${task.id}] ${result.status.toUpperCase()} ${task.command.args.join(' ')} (${result.evidence})`);
+              if (result.error) throw new Error(`Test execution infrastructure failed: ${result.error}`);
+              if (result.status === 'failed' && !options.collectFailures) break;
+              continue;
+            }
             const prior = previous?.report.tasks.find(result => result.id === task.id);
             if (task.reusable && prior && ['passed', 'reused'].includes(prior.status)
               && report.artifactHash && report.artifactHash === previous?.report.artifactHash) {
-              if (!prior.stdout || !prior.stderr || !prior.stdoutHash || !prior.stderrHash
-                || digest(readFileSync(prior.stdout)) !== prior.stdoutHash
-                || digest(readFileSync(prior.stderr)) !== prior.stderrHash) {
-                throw new Error(`Missing or changed evidence for ${task.id}; start a fresh run.`);
-              }
-              report.tasks.push({ ...prior, status: 'reused', evidence: `${previous!.path}#${task.id}` });
+              verifyEvidence(prior);
+              const result: TaskResult = { ...prior, status: 'reused', evidence: `${previous!.path}#${task.id}` };
+              report.tasks.push(result);
+              if (options.deduplicate && task.reusable) executions.set(key, Promise.resolve(result));
               persist();
               log(`[${task.id}] REUSE ${task.command.args.join(' ')}`);
               continue;
@@ -176,14 +228,19 @@ export async function executeWorkflow(options: {
             persist();
             log(`[${task.id}] START ${task.command.args.join(' ')}`);
             const taskStarted = performance.now();
+            let settle: (result: TaskResult) => void = () => {};
+            if (options.deduplicate && task.reusable) executions.set(key, new Promise(resolve => { settle = resolve; }));
             try {
-              result.exitCode = await run(task, result);
+              const release = await acquire(task.resource ?? 'process');
+              try { result.exitCode = await run(task, result); }
+              finally { release(); }
               result.status = result.exitCode === 0 ? 'passed' : 'failed';
             } catch (error) {
               result.status = 'failed';
               result.error = error instanceof Error ? error.message : String(error);
             }
             result.seconds = (performance.now() - taskStarted) / 1000;
+            settle(result);
             stageFailed ||= result.status === 'failed';
             persist();
             log(`[${task.id}] ${result.status.toUpperCase()} ${task.command.args.join(' ')} (${result.seconds.toFixed(1)}s)`);
@@ -204,7 +261,11 @@ export async function executeWorkflow(options: {
       persist();
       if (stageFailed && !options.collectFailures) throw new Error(`${stage.title} failed.`);
     }
-    if (inputs() !== report.fingerprint || (report.artifactHash && artifacts() !== report.artifactHash)) {
+    const verificationStarted = performance.now();
+    let unchanged: boolean;
+    try { unchanged = inputs() === report.fingerprint && (!report.artifactHash || artifacts() === report.artifactHash); }
+    finally { report.verificationSeconds = (performance.now() - verificationStarted) / 1000; }
+    if (!unchanged) {
       report.status = 'invalidated';
       throw new Error('Inputs or built artifacts changed during verification. Results are diagnostic only.');
     }
@@ -218,7 +279,7 @@ export async function executeWorkflow(options: {
     if (report.status !== 'invalidated') report.status = 'failed';
     throw error;
   } finally {
-    report.seconds = (performance.now() - started) / 1000;
+    report.seconds = (report.preparationSeconds ?? 0) + (performance.now() - started) / 1000;
     report.completedAt = new Date().toISOString();
     persist();
   }

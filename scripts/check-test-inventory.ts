@@ -8,6 +8,7 @@ type InventoryCommand = TestWorkflowCommand & { runtime?: 'bun' | 'node' };
 export type TestInventory = {
   separate: Record<string, Exception>;
   repeats: Array<InventoryCommand & { count: number; reason: string }>;
+  resources: { process: string[]; exclusive: string[] };
 };
 type Snapshot = Map<string, string>;
 const candidate = (path: string) => /^scripts\/(?:.*\/)?test-[^/]+\.(?:ts|tsx|js|mjs|cjs|ps1)$/.test(path);
@@ -61,12 +62,14 @@ export function inspectTestInventory(files: Snapshot, commands: TestWorkflowComm
   };
   for (const command of commands) executable.push(...expand(command));
   const reached = new Set(executable.map(command => command.args[0]!));
+  const runnable = new Set([...reached].filter(candidate));
   for (const [path, exception] of Object.entries(inventory.separate)) {
     if (!candidate(path) || !files.has(path)) errors.push(`Stale separate-test registration: ${path}`);
     if (!['targeted', 'native', 'endurance'].includes(exception.kind)
       || !exception.reason?.trim() || !exception.command?.includes(path)) errors.push(`Missing classification, command or reason: ${path}`);
     if (reached.has(path)) errors.push(`Test is now in release; remove its separate registration: ${path}`);
     reached.add(path);
+    runnable.add(path);
   }
 
   // Imported helpers and explicitly referenced browser entry fixtures belong to
@@ -74,14 +77,18 @@ export function inspectTestInventory(files: Snapshot, commands: TestWorkflowComm
   const queue = [...reached];
   const transpiler = new Bun.Transpiler({ loader: 'ts' });
   const jsxTranspiler = new Bun.Transpiler({ loader: 'tsx' });
+  const dependenciesByPath = new Map<string, string[]>();
+  const browserOwners = new Set<string>();
   for (let i = 0; i < queue.length; i++) {
     const path = queue[i]!;
     const source = files.get(path);
     if (source === undefined) { errors.push(`Missing test or helper: ${path}`); continue; }
     if (!/\.(?:ts|tsx|js|mjs|cjs)$/.test(path)) continue;
     const parser = path.endsWith('.tsx') ? jsxTranspiler : transpiler;
-    const refs = parser.scan(source).imports
-      .map(item => item.path).filter(item => item.startsWith('.'));
+    const imports = parser.scan(source).imports.map(item => item.path);
+    if (imports.some(ref => /(?:puppeteer|playwright|browser-test-helpers|@vscode\/test-electron)/.test(ref))
+      || /(?:launchTestBrowser\s*\(|puppeteer-runtime|remote-debugging-port|\bStart-Process\b|\bSendInput\b)/.test(source)) browserOwners.add(path);
+    const refs = imports.filter(item => item.startsWith('.'));
     const dependencies = refs.flatMap(ref => {
       const base = posix.normalize(posix.join(posix.dirname(path), ref));
       const matches = [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.mjs`, `${base}.cjs`].filter(item => files.has(item));
@@ -99,6 +106,7 @@ export function inspectTestInventory(files: Snapshot, commands: TestWorkflowComm
     for (const dependency of dependencies) {
       if (!reached.has(dependency)) { reached.add(dependency); queue.push(dependency); }
     }
+    dependenciesByPath.set(path, dependencies);
   }
   for (const path of files.keys()) if (candidate(path) && !reached.has(path)) errors.push(`Unregistered test: ${path}`);
   // A new convenience alias is fine only when every test already has an owner.
@@ -120,10 +128,32 @@ export function inspectTestInventory(files: Snapshot, commands: TestWorkflowComm
     if (counts.get(key) !== repeat.count) errors.push(`Stale repeat allowance: ${key}`);
   }
   for (const [key, count] of counts) if (count > 1 && allowances.get(key) !== count) errors.push(`Unexplained repeated test (${count}): ${key}`);
+  const assigned = new Set<string>();
+  if (!inventory.resources || !Array.isArray(inventory.resources.process) || !Array.isArray(inventory.resources.exclusive)) {
+    errors.push('Missing test resource classification (process/exclusive)');
+  } else {
+    for (const kind of ['process', 'exclusive'] as const) for (const path of inventory.resources[kind]) {
+      if (!runnable.has(path)) errors.push(`Stale test resource classification: ${path}`);
+      if (assigned.has(path)) errors.push(`Duplicate test resource classification: ${path}`);
+      assigned.add(path);
+      if (kind === 'process') {
+        const pending = [path];
+        const visited = new Set<string>();
+        while (pending.length) {
+          const current = pending.pop()!;
+          if (visited.has(current)) continue;
+          visited.add(current);
+          if (browserOwners.has(current)) { errors.push(`Process-only test reaches browser/desktop resources: ${path} via ${current}`); break; }
+          pending.push(...dependenciesByPath.get(current) ?? []);
+        }
+      }
+    }
+    for (const path of runnable) if (!assigned.has(path)) errors.push(`Unclassified test resources: ${path}`);
+  }
   return errors;
 }
 
-export async function checkTestInventory(root: string, staged = false): Promise<void> {
+export async function checkTestInventory(root: string, staged = false): Promise<Record<string, 'process' | 'exclusive'>> {
   const files = readInventorySnapshot(root, staged);
   const policySource = files.get('scripts/test-workflow-policy.ts');
   if (!policySource) throw new Error('Missing test workflow policy');
@@ -138,6 +168,7 @@ export async function checkTestInventory(root: string, staged = false): Promise<
   const errors = inspectTestInventory(files, commands, inventory);
   if (errors.length) throw new Error(`Test inventory failed:\n${errors.map(error => `  ${error}`).join('\n')}`);
   console.log(`Test inventory (${staged ? 'staged index' : 'working tree'}) passed: ${[...files.keys()].filter(candidate).length} files accounted for; ${inventory.repeats.length} documented repeats.`);
+  return Object.fromEntries((['process', 'exclusive'] as const).flatMap(kind => inventory.resources[kind].map(path => [path, kind])));
 }
 
 if (import.meta.main) {

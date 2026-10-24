@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { createTestWorkflowPlan, parseTestWorkflowRequest, validateTestWorkflowAuthorization } from './test-workflow-policy';
 import { digest, executeWorkflow, prepareWorkflow, readResumeReport, saveReport,
-  type TaskResult, type WorkflowReport, type WorkflowTask } from './test-workflow-execution';
+  commandIdentity, type TaskResult, type WorkflowReport, type WorkflowTask } from './test-workflow-execution';
 import { artifactFingerprint, workflowFingerprint } from './test-workflow-snapshot';
 
 const help = `MEO Enhanced test workflow
@@ -14,7 +14,7 @@ Usage:
   bun scripts/test-workflow.ts quick [--dry-run]
   bun scripts/test-workflow.ts targeted <history|table|rendered|appearance|search|viewport|changes> [--dry-run]
   bun scripts/test-workflow.ts targeted uat <document> [--dry-run]
-  bun scripts/test-workflow.ts release --confirm-long-run [--dry-run]
+  bun scripts/test-workflow.ts release [document] --confirm-long-run [--dry-run]
   bun scripts/test-workflow.ts release --confirm-long-run --resume=<report.json> --same-environment
   bun scripts/test-workflow.ts endurance <document> --confirm-long-run [--dry-run]
   bun scripts/test-workflow.ts large-document <document> --confirm-long-run [--dry-run]
@@ -64,25 +64,32 @@ export async function runCommand(directory: string, task: WorkflowTask, result: 
 }
 
 async function main(): Promise<void> {
+  const startedAt = new Date().toISOString();
+  const preparationStarted = performance.now();
   const argv = process.argv.slice(2);
   if (!argv.length || argv.includes('--help') || argv.includes('-h')) { console.log(help); return; }
   const resume = argv.find(value => value.startsWith('--resume='))?.slice('--resume='.length);
   const request = parseTestWorkflowRequest(argv.filter(value => !value.startsWith('--resume=') && value !== '--same-environment'));
   const plan = createTestWorkflowPlan(request);
   validateTestWorkflowAuthorization(plan, request.confirmLongRun, request.dryRun);
+  if (request.documentPath && !request.dryRun) readFileSync(resolve(request.documentPath));
   if (resume !== undefined && (!resume || plan.tier !== 'release' || !argv.includes('--same-environment'))) {
     throw new Error('Resume requires release, --resume=<report.json> and verified --same-environment.');
   }
   const root = process.cwd();
   const { checkTestInventory } = await import('./check-test-inventory');
-  await checkTestInventory(root);
+  const resources = await checkTestInventory(root);
   const scripts = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts as Record<string, string>;
-  const stages = prepareWorkflow(plan, scripts);
+  const stages = prepareWorkflow(plan, scripts, { ...resources, 'run typecheck': 'process', 'run architecture:check': 'process' });
   const planHash = digest(JSON.stringify(stages));
   console.log(`${plan.title} (${plan.expectedDuration})`);
   for (const stage of stages) {
     console.log(`  ${stage.title} (up to ${stage.maxConcurrency} groups)`);
-    for (const task of stage.groups.flat()) console.log(`    ${task.id}. bun ${task.command.args.join(' ')}${task.command.env ? ' ' + JSON.stringify(task.command.env) : ''}`);
+    for (const task of stage.groups.flat()) console.log(`    ${task.id}. [${task.resource}] bun ${task.command.args.join(' ')}${task.command.env ? ' ' + JSON.stringify(task.command.env) : ''}`);
+  }
+  if (plan.tier === 'release') {
+    const commands = stages.flatMap(stage => stage.groups.flat()).filter(task => task.reusable);
+    console.log(`Test coverage: ${commands.length} logical invocations, ${new Set(commands.map(task => commandIdentity(task.command))).size} distinct executions; exact duplicates reference the first result.`);
   }
   if (request.dryRun) { console.log('Dry run only; no tests were executed.'); return; }
 
@@ -91,25 +98,35 @@ async function main(): Promise<void> {
     const { findBrowserExecutable } = await import('./browser-test-helpers');
     browserPath = findBrowserExecutable();
   }
-  const inputs = () => plan.tier === 'release' ? workflowFingerprint(root, browserPath) : '';
+  const fingerprintTimings: NonNullable<WorkflowReport['fingerprintTimings']> = [];
+  let phase: 'before' | 'after' = 'before';
+  const inputs = () => plan.tier === 'release' ? workflowFingerprint(root, browserPath, (section, seconds, metrics) => {
+    fingerprintTimings.push({ phase, section, seconds, ...metrics });
+    console.log(`Fingerprint ${phase}: ${section} ${seconds.toFixed(1)}s${metrics ? ` (${metrics.files} physical files, ${metrics.cacheHits} shared nodes)` : ''}`);
+  }, request.documentPath ? [request.documentPath] : []) : '';
   const fingerprint = inputs();
+  phase = 'after';
   const previous = resume ? { path: resolve(resume), report: readResumeReport(resolve(resume), fingerprint, planHash) } : undefined;
   const directory = join(root, '.local', 'test-runs', `${Date.now()}-${randomUUID().slice(0, 8)}`);
   mkdirSync(directory, { recursive: true });
   const report: WorkflowReport = { schemaVersion: 1, pid: process.pid, title: plan.title, fingerprint, planHash,
     candidate: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
-    status: 'running', startedAt: new Date().toISOString(), tasks: [], stages: [] };
+    status: 'running', startedAt, preparationSeconds: (performance.now() - preparationStarted) / 1000,
+    fingerprintTimings, tasks: [], stages: [] };
   const persist = () => saveReport(directory, report);
   persist();
   console.log(`Report: ${join(directory, 'report.json')}`);
   try {
     await executeWorkflow({ stages, report, previous, persist, inputs,
       collectFailures: plan.tier === 'release',
+      deduplicate: plan.tier === 'release',
       artifacts: () => artifactFingerprint(root), run: (task, result) => runCommand(directory, task, result, persist),
       log: message => console.log(message) });
     console.log(`\n${plan.title} passed in ${report.seconds!.toFixed(1)}s`);
   } finally {
     console.log(`Result: ${report.status}; report: ${join(directory, 'report.json')}`);
+    console.log(`Preparation: ${report.preparationSeconds?.toFixed(1)}s; final verification: ${report.verificationSeconds?.toFixed(1) ?? 'incomplete'}s; total: ${report.seconds?.toFixed(1) ?? 'incomplete'}s`);
+    console.log(`Coverage: ${report.tasks.filter(task => task.status === 'passed').length} executed passes, ${report.tasks.filter(task => task.status === 'reused').length} evidence references, ${report.tasks.filter(task => task.status === 'failed').length} failures`);
     const slowest = report.tasks.filter(task => task.status !== 'reused' && task.seconds !== undefined)
       .sort((a, b) => b.seconds! - a.seconds!).slice(0, 10);
     for (const task of slowest) console.log(`  ${task.id}: ${task.seconds!.toFixed(1)}s (${task.status}) ${task.command?.args.join(' ') ?? ''}`);

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkTestInventory, inspectTestInventory, readInventorySnapshot, type TestInventory } from './check-test-inventory';
 
-const empty = (): TestInventory => ({ separate: {}, repeats: [] });
+const empty = (): TestInventory => ({ separate: {}, repeats: [], resources: { process: ['scripts/test-a.ts'], exclusive: [] } });
 const command = { args: ['run', 'test'] };
 const fixture = (scripts: Record<string, string> = { test: 'bun scripts/test-a.ts' }) => new Map([
   ['package.json', JSON.stringify({ scripts })], ['scripts/test-a.ts', 'export const value = 1;']
@@ -17,7 +17,7 @@ assert.ok(inspectTestInventory(orphan, [command], empty()).some(error => error.i
 
 const special: TestInventory = { separate: { 'scripts/test-new.ts': {
   kind: 'native', command: 'node scripts/test-new.ts', reason: 'Requires an installed extension host.'
-} }, repeats: [] };
+} }, repeats: [], resources: { process: ['scripts/test-a.ts'], exclusive: ['scripts/test-new.ts'] } };
 assert.deepEqual(inspectTestInventory(orphan, [command], special), []);
 assert.ok(inspectTestInventory(orphan, [command], { ...special, separate: {
   'scripts/test-new.ts': { ...special.separate['scripts/test-new.ts']!, reason: '' }
@@ -43,7 +43,7 @@ assert.equal(inspectTestInventory(support, [command], empty()).filter(error => e
 
 const duplicate = fixture({ test: 'bun scripts/test-a.ts && bun run test:nested', 'test:nested': 'bun scripts/test-a.ts' });
 assert.ok(inspectTestInventory(duplicate, [command], empty()).some(error => error.includes('Unexplained repeated')));
-const repeated: TestInventory = { separate: {}, repeats: [{ args: ['scripts/test-a.ts'], count: 2, reason: 'Early preflight and final matrix.' }] };
+const repeated: TestInventory = { ...empty(), repeats: [{ args: ['scripts/test-a.ts'], count: 2, reason: 'Early preflight and final matrix.' }] };
 assert.deepEqual(inspectTestInventory(duplicate, [command], repeated), []);
 assert.ok(inspectTestInventory(fixture(), [command], repeated).some(error => error.includes('Stale repeat')));
 assert.ok(inspectTestInventory(duplicate, [command, command], repeated).some(error => error.includes('Unexplained repeated test (4)')));
@@ -64,6 +64,17 @@ assert.ok(inspectTestInventory(fixture({ test: 'bun scripts/test-missing.ts' }),
 const missingHelper = fixture();
 missingHelper.set('scripts/test-a.ts', 'import "./test-missing-helper";');
 assert.ok(inspectTestInventory(missingHelper, [command], empty()).some(error => error.includes('Missing test helper')));
+
+assert.ok(inspectTestInventory(fixture(), [command], { ...empty(), resources: { process: [], exclusive: [] } })
+  .some(error => error.includes('Unclassified test resources')));
+assert.ok(inspectTestInventory(fixture(), [command], { ...empty(), resources: { process: ['scripts/test-a.ts'], exclusive: ['scripts/test-a.ts'] } })
+  .some(error => error.includes('Duplicate test resource')));
+const browser = fixture();
+browser.set('scripts/test-a.ts', 'import { open } from "./test-helper"; open();');
+browser.set('scripts/test-helper.ts', 'import puppeteer from "puppeteer"; export const open = () => puppeteer.launch();');
+assert.ok(inspectTestInventory(browser, [command], empty()).some(error => error.includes('Process-only test reaches browser')),
+  'A new shared browser dependency must invalidate a former process-only classification');
+assert.deepEqual(inspectTestInventory(browser, [command], { ...empty(), resources: { process: [], exclusive: ['scripts/test-a.ts'] } }), []);
 
 // Use an isolated index: a pre-commit environment may export GIT_INDEX_FILE.
 mkdirSync(join(process.cwd(), '.local'), { recursive: true });
@@ -90,10 +101,11 @@ try {
   assert.ok(readInventorySnapshot(root, false).has('scripts/test-new.ts'), 'Discover untracked, nonignored new tests');
   git('add', 'scripts/test-new.ts');
   save('package.json', JSON.stringify({ scripts: { test: 'bun scripts/test-a.ts && bun scripts/test-new.ts' } }));
+  save('scripts/test-inventory.json', JSON.stringify({ ...empty(), resources: { process: ['scripts/test-a.ts', 'scripts/test-new.ts'], exclusive: [] } }));
   await checkTestInventory(root, false);
   await assert.rejects(checkTestInventory(root, true), /Unregistered test: scripts\/test-new.ts/,
     'An unstaged registration must not fix the staged snapshot');
-  git('add', 'package.json');
+  git('add', 'package.json', 'scripts/test-inventory.json');
   await checkTestInventory(root, true);
   save('scripts/test-workflow-policy.ts', `
     export const parseTestWorkflowRequest = () => ({});

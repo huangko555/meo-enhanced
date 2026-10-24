@@ -3,6 +3,14 @@
 This repository separates fast feedback from release confidence. The normal
 repair loop stays narrow; broad and endurance runs are intentional events.
 
+For release execution and new-test placement, start with
+[long-running gates](#long-running-gates) and [adding or changing tests](#adding-or-changing-tests).
+After release authorization, pass the chosen disposable document to
+`bun run test:release -- <document> --confirm-long-run` when the acceptance scope
+requires the full font sweep and endurance. This keeps their complete coverage
+in one report and shares identical preflight results. Final installed-VSIX
+and native desktop acceptance remain required separately for their applicable scope.
+
 `scripts/test-editor-font-wheel.ts` covers the default-enabled independent wheel
 setting, Auto-to-Custom adjustment from the displayed size, persistence/reopening,
 coalesced saves, ordinary scrolling, Live/Source/Preview input, fine trackpad
@@ -414,7 +422,7 @@ the long-run authorization policy below.
 | Light UI | Copy, existing icon replacements, or local visual style changes meet the boundary below | Build plus a scoped smoke pass | `bun run test:ui-light` |
 | Quick | A behavior or other implementation change is ready for a general regression check | Last measured baseline about 18 minutes; host dependent | `bun run test:quick` |
 | Targeted | A change affects one high-risk area, or a quick check identifies that area | About 1–5 minutes | `bun run test:targeted -- <area>` |
-| Release | A release candidate or separately authorized cross-cutting risk needs the complete gate | Last measured baseline about 60 minutes, excluding native acceptance and endurance | `bun run test:release -- --confirm-long-run` |
+| Release | A release candidate or separately authorized cross-cutting risk needs the complete gate | Historical baseline 55–105 minutes before execution optimizations; document supplements and native acceptance are additional | `bun run test:release -- --confirm-long-run` |
 | Large document | A shorter production-like document stress pass is specifically needed | About 1–3 minutes | `bun run test:large-document -- <document> --confirm-long-run` |
 | Endurance | Full-document edit, undo/redo, cursor, and viewport stress is specifically needed | About 20–35 minutes per run | `bun run test:endurance -- <document> --confirm-long-run` |
 
@@ -1438,20 +1446,47 @@ The production build runs first, so tests that consume generated assets cannot
 accidentally use an old checkout's output. Build failure blocks dependent tests.
 Independent static and domain suites retain bounded concurrency. High-risk
 browser contracts run before the complete serial production browser matrix;
-package validation runs last. Workflow contracts
+package validation finishes the base gate. Workflow contracts
 verify both that every sub-suite from `bun run test` appears exactly once in
 the release plan and that every non-UAT targeted contract is transitively
 included in the full suite, so scheduling changes cannot silently remove
-coverage.
+coverage. Each runnable test also has a resource classification in
+`scripts/test-inventory.json`: `process` permits bounded concurrency for isolated
+process-only work; `exclusive` runs without any other command in this workflow.
+Browser, real frame/pixel/timing, desktop focus, clipboard and native input checks
+use `exclusive`. Unknown commands default to exclusive execution. A queued
+exclusive test cannot be starved by later process checks. Other terminal sessions
+are outside this lease: do not launch competing browser, native or stress jobs.
 
 The workflow expands test aliases into individual script executions, preserving
-their arguments, environment and within-group order. It does not add browser
+their arguments, environment and within-group order. Within one release invocation,
+identical script/argument/environment combinations share their first execution;
+every logical occurrence still has a result and an evidence reference. A failed
+first execution remains failed for all its occurrences, without retry. Distinct
+arguments or environments execute separately. Independently invoked packs remain
+self-contained; the documented alias overlaps do not require redundant execution.
+It does not add browser
 workers, remove cases, change thresholds or retry tests. During release, a test
 failure does not short-circuit the remaining independent scripts or stages:
 collect their results in the same run, then report a failing gate. Infrastructure
 errors that prevent safe execution stop the run. Short repair and endurance
 workflows retain stage failure boundaries. Direct `bun run test` retains its
 existing shell behavior; use the guarded workflow for release evidence.
+
+When the acceptance scope includes full-document supplements, use one entry:
+
+```shell
+bun run test:release -- path/to/disposable-document.md --confirm-long-run
+```
+
+The plan first completes every base release check, including package validation,
+then runs the unchanged complete font sweep and all endurance contracts. The final
+input/artifact check still covers the whole combined run. Document bytes
+join the before/after input fingerprint even when the fixture is ignored or outside
+the repository. A failed base census blocks supplements; a failed supplement blocks
+its downstream stages. The overlapping endurance preflight references the same
+candidate's earlier results. Omitting the document intentionally selects only the
+base gate, so it must not be reported as full-document or native acceptance.
 
 Each invocation owns a fresh `.local/test-runs/<run-id>/` directory. `report.json`
 records per-script commands, status, elapsed time and separate stdout/stderr logs;
@@ -1461,6 +1496,15 @@ console lists the ten slowest executed commands. Reused results are labelled
 separately and point back to the original evidence. Never infer completion from
 the latest console line: require the final report's passed status and complete
 coverage. Keep the report and all referenced logs together.
+
+Total time starts before inventory and fingerprints. Reports include preparation,
+final verification and individual fingerprint section times, physical file/byte
+counts and shared dependency nodes. Resource wait is included in command wall time.
+Input hashing reads actual bytes and retains file boundaries, directory membership
+and link targets; physical nodes are shared only within a single snapshot. The
+final snapshot reads them again. Never replace installed-content checks with only
+lockfile or modification-time checks. Architecture fixture checks call the same
+rules with fresh per-fixture state, retaining CLI and staged-index coverage.
 
 ### Adding or changing tests
 
@@ -1482,18 +1526,33 @@ workflow registration, without waiting for the user to request it:
    a reviewable testing decision, not a way to waive a failing regression. The
    initial supplementary entries record existing practice; they do not claim
    those checks have passed or that their behavior is covered by another test.
+   Register every runnable script exactly once under `resources.process` or
+   `resources.exclusive`, including separately run checks. Helpers inherit their
+   runnable owner's placement. Choose exclusive whenever isolation is uncertain;
+   a script name or a fast local run is not evidence that parallel execution is safe.
+   The inventory rejects missing/stale/duplicate resource declarations and known
+   browser/desktop dependencies in process-only tests, including shared helpers.
+   This static guard is conservative and does not replace reviewing dynamic
+   subprocesses, shared output paths and external state.
 4. Run `bun run test:inventory`, then the smallest relevant behavioral tests.
    The inventory check discovers nonignored untracked files too. It verifies
    reachable tests, helpers, separate-test registrations and every `test:` alias.
    Same runtime, arguments and environment count as the same invocation. Exact
    intentional repeat counts need a reason; stale registrations also fail. The
-   six existing repeat allowances preserve the current release baseline.
+   existing repeat allowances describe overlapping suite ownership; a guarded
+   release records each occurrence while executing the identical invocation once.
 5. In the change summary, identify the added/changed tests, their suite or
    separate classification, the behavior protected, why costly execution is
    necessary, and measured time when available. Use the next natural run's timing
    report when no representative timing exists; do not start a long acceptance
    run merely to fill this field. Timing informs optimization and never skips a
    required test automatically.
+
+New tests join the smallest owning suite. Quick membership needs a distinct daily
+regression benefit; do not add every browser matrix to quick or repeat it in an
+endurance preflight by habit. Keep actual input/frame observation and negative
+controls when optimizing a costly test. Separate environments or fewer samples
+require an explicit coverage argument; runtime targets never waive checks.
 
 CI runs inventory validation and its small contract tests before typechecking
 and building. Every guarded workflow checks registration before launching work,
@@ -1530,7 +1589,10 @@ The original report is never overwritten. Build and package checks execute
 again; a different built artifact invalidates reuse and reruns the test cases.
 Incomplete scripts restart from their beginning, never from the middle of a
 stateful scenario. Inputs and built outputs are checked again before success.
-This does not import historical ad-hoc logs or resume the separate font sweep.
+This does not import historical ad-hoc logs. A standalone font sweep is not
+resumable; in the combined plan only an entirely completed font script can be
+reused, never a partial mode/position sequence. Changing the selected document
+invalidates the combined plan's evidence.
 
 This first implementation deliberately does not infer which tests are unaffected
 by a code or test change. Fixing a known failure requires a fresh gate, but the

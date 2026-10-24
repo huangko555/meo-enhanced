@@ -156,6 +156,13 @@ assert.throws(
 );
 assert.doesNotThrow(() => validateTestWorkflowAuthorization(release, true, false));
 assert.doesNotThrow(() => validateTestWorkflowAuthorization(release, false, true));
+const combined = createTestWorkflowPlan(parseTestWorkflowRequest(['release', 'fixtures/uat.md']));
+const combinedCommands = flattenTestWorkflowCommands(combined);
+assert.ok(combinedCommands.some(command => command.args.join(' ') ===
+  'scripts/test-font-size-full-document.ts --document=fixtures/uat.md --confirm-long-run'));
+assert.deepEqual(combined.stages.slice(0, release.stages.length), release.stages,
+  'The complete base gate, including package checks, must finish before long supplements');
+assert.throws(() => validateTestWorkflowAuthorization(combined, false, false), /confirm-long-run/);
 
 const endurance = createTestWorkflowPlan(
   parseTestWorkflowRequest(['endurance', 'fixtures/uat.md'])
@@ -163,6 +170,8 @@ const endurance = createTestWorkflowPlan(
 assert.equal(endurance.longRunning, true);
 assert.equal(endurance.stages.length, 3);
 const enduranceCommands = flattenTestWorkflowCommands(endurance);
+for (const command of enduranceCommands) assert.ok(combinedCommands.some(candidate => JSON.stringify(candidate) === JSON.stringify(command)),
+  `Combined release must preserve the full endurance invocation: ${JSON.stringify(command)}`);
 assert.deepEqual(
   enduranceCommands.slice(0, 14).map((command) => command.args[0]),
   [
