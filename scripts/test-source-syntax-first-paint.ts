@@ -185,5 +185,50 @@ try {
   assert.equal(largeSourceResult.prepared, true, 'large Source must be available without waiting for whole-document tokens');
   assert.equal(largeSourceResult.text, largeSource);
   assert.equal(largeSourceResult.fullTokens, false, 'large Source must use incremental parser coloring instead of full-document TextMate work');
+  // Differential regression: the viewport renderer must preserve the native
+  // TextMate heading rules, even when a later Setext rule has another style.
+  const headingFixture = '# 一级标题\n\n## Second heading\n\n###### Heading six\n\n[Link label](#target)';
+  const headingTheme = { ...darkPlus, tokenColors: [...darkPlus.tokenColors!,
+    { scope: 'markup.heading', settings: { foreground: '#c792ea', fontStyle: '' } },
+    { scope: 'markup.heading.setext', settings: { foreground: '#abb2bf', fontStyle: 'bold' } },
+    { scope: 'markup.heading punctuation.definition.heading', settings: { foreground: '#ffaa44' } },
+    { scope: 'string.other.link.title.markdown', settings: { foreground: '#61afef' } },
+    { scope: 'markup.underline.link.markdown', settings: { foreground: '#c792ea' } }
+  ] };
+  const headingResults = [];
+  for (const large of [false, true]) {
+    const headingPage = await browser.newPage();
+    headingPage.on('pageerror', error => errors.push(String(error)));
+    await headingPage.setViewport({ width: 1100, height: 1100 });
+    await headingPage.setContent('<!doctype html><body class="vscode-dark"><div id="app"></div></body>');
+    await headingPage.addStyleTag({ path: path.resolve(import.meta.dir, '../webview/src/styles.css') });
+    await headingPage.evaluate(() => { (window as any).acquireVsCodeApi = () => ({ getState() {}, setState() {}, postMessage() {} }); });
+    await headingPage.addScriptTag({ content: await productionBuild.outputs[0]!.text() });
+    await headingPage.evaluate(({ text, theme }) => window.dispatchEvent(new MessageEvent('message', { data: {
+      type: 'init', documentId: 'file:///heading-scopes.md', text, version: 1, savedRevision: { version: 1, text }, diagnostics: [],
+      mode: 'source', uiLanguage: 'en', sourceLineNumbers: 'on', editorAppearance: 'auto', previewAppearance: 'auto',
+      previewFontFamily: '', previewSourceColoring: true, gitChangesGutter: false, gitDiffLineHighlights: false,
+      gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
+      contentMaxWidthEnabled: false, largeDocumentOptimizationEnabled: true, findOptions: { wholeWord: false, caseSensitive: false },
+      outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, restoreReadingPositionOnOpen: false, vscodeTheme: theme
+    } })), { text: headingFixture + (large ? '\n'.repeat(8000) : ''), theme: headingTheme });
+    await headingPage.waitForSelector(large ? '.cm-editor.meo-mode-source .cm-line span' : '.meo-source-token');
+    const result = await headingPage.evaluate(() => [...document.querySelectorAll<HTMLElement>('.cm-line')].slice(0, 7).map(line => {
+      const walk = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+      const characters: { text: string; color: string; weight: string; style: string }[] = [];
+      while (walk.nextNode()) {
+        const style = getComputedStyle(walk.currentNode.parentElement!);
+        for (const text of walk.currentNode.textContent ?? '') characters.push({ text, color: style.color, weight: style.fontWeight, style: style.fontStyle });
+      }
+      // Link punctuation belongs to separate TextMate scopes; compare the
+      // visible label and destination rather than Lezer's generic LinkMark.
+      return line.textContent?.startsWith('[Link') ? characters.filter(character => /[\w#-]/.test(character.text)) : characters;
+    }));
+    headingResults.push(result);
+    assert.equal(Boolean(await headingPage.$('.meo-source-token')), !large, 'The differential must exercise both syntax renderers');
+    await headingPage.close();
+  }
+  assert.deepEqual(headingResults[1], headingResults[0], 'Large Source headings, heading marks and link targets must match the native TextMate path');
+  assert.deepEqual(errors, []);
   console.log('Source prewarm, roundtrip, first-paint colors and large-document budget checks passed');
 } finally { await closeTestBrowser(browser); }

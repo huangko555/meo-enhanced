@@ -29,12 +29,20 @@ function createHighlightStyle(excludedTokenIds: ReadonlySet<string> = new Set())
   );
 }
 
-// Source treats heading punctuation like heading text; Live keeps the default
+// Source resolves heading punctuation separately; Live keeps the default
 // processing-instruction styling. A derived tag preserves both on one grammar.
 const headerMarkTag = Tag.define(tags.processingInstruction);
+const setextHeadingTag = Tag.define(tags.heading);
+const sourceHeadingSpec = (role: 'heading' | 'heading-mark' | 'setext') => ({
+  color: `var(--meo-source-${role}-color, var(--meo-token-heading-color))`,
+  fontWeight: `var(--meo-source-${role}-weight, var(--meo-heading-token-weight))`,
+  fontStyle: `var(--meo-source-${role}-style, normal)`,
+  textDecoration: `var(--meo-source-${role}-decoration, none)`
+});
 export const sourceHighlightStyle = HighlightStyle.define([
-  ...SYNTAX_TAG_SPECS.map(buildSpec),
-  { ...buildSpec(SYNTAX_TAG_SPECS.find(spec => spec.id === 'heading')!), tag: headerMarkTag }
+  ...SYNTAX_TAG_SPECS.map(spec => spec.id === 'heading' ? { tag: spec.tags, ...sourceHeadingSpec('heading') } : buildSpec(spec)),
+  { tag: headerMarkTag, ...sourceHeadingSpec('heading-mark') },
+  { tag: setextHeadingTag, ...sourceHeadingSpec('setext') }
 ]);
 
 // VS Code's Markdown grammar gives ATX heading punctuation and heading text
@@ -43,6 +51,7 @@ export const sourceHighlightStyle = HighlightStyle.define([
 // applying the native palette.
 export const sourceMarkdownHighlightProps = styleTags({
   HeaderMark: headerMarkTag,
+  'SetextHeading1/... SetextHeading2/...': setextHeadingTag,
   // Lezer marks every descendant of TableHeader as a heading. A Markdown
   // table header is structural table content, not a document heading.
   'TableHeader/...': tags.content

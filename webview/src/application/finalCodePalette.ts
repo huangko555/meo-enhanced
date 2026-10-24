@@ -124,22 +124,74 @@ function resolveTokenColor(
   return resolved;
 }
 
-/** Reading accents reuse the Source document rules, including user token overrides. */
-export function resolveMarkdownContentColors(theme: RawCodeTheme): { heading: string; link: string } {
+type MarkdownTokenStyle = { foreground: string; fontStyle: string };
+const markdownScope = 'text.html.markdown';
+const headingScopes = (level: number, mark = false) => [markdownScope, 'markup.heading.markdown',
+  `heading.${level}.markdown`, mark ? 'punctuation.definition.heading.markdown' : 'entity.name.section.markdown'];
+
+/** Match actual TextMate scope stacks rather than treating descendant rules as
+ * interchangeable categories. Each inner scope inherits its parent's style;
+ * specificity wins within that scope, with later rules breaking equal ties. */
+function resolveMarkdownTokenStyle(theme: RawCodeTheme, stack: readonly string[], fallback = ''): MarkdownTokenStyle {
+  const style: MarkdownTokenStyle = { foreground: fallback, fontStyle: '' };
+  const containsScope = (scope: string, selector: string) => scope === selector || scope.startsWith(selector + '.');
+  for (let index = 0; index < stack.length; index++) {
+    const matches: { specificity: number[]; settings: NonNullable<TokenColorRule['settings']> }[] = [];
+    for (const value of theme.tokenColors) {
+      if (!isTokenColorRule(value)) continue;
+      for (const selector of ruleScopes(value)) {
+        const parts = selector.split(/\s+/).reverse();
+        const leaf = parts.shift()!;
+        if (!containsScope(stack[index]!, leaf)) continue;
+        let ancestor = index - 1, matchesParents = true;
+        for (let parent = 0; parent < parts.length; parent++) {
+          const direct = parts[parent] === '>';
+          const required = parts[direct ? ++parent : parent];
+          if (!required) { matchesParents = false; break; }
+          while (ancestor >= 0 && !containsScope(stack[ancestor]!, required) && !direct) ancestor--;
+          if (ancestor < 0 || !containsScope(stack[ancestor]!, required)) { matchesParents = false; break; }
+          ancestor--;
+        }
+        if (matchesParents) matches.push({ specificity: [leaf.split('.').length,
+          ...parts.filter(part => part !== '>').map(part => part.length), parts.length], settings: value.settings! });
+      }
+    }
+    matches.sort((a, b) => {
+      for (let i = 0; i < Math.max(a.specificity.length, b.specificity.length); i++) {
+        const difference = (a.specificity[i] ?? 0) - (b.specificity[i] ?? 0);
+        if (difference) return difference;
+      }
+      return 0;
+    });
+    for (const { settings } of matches) {
+      if (typeof settings.foreground === 'string') style.foreground = settings.foreground;
+      if (typeof settings.fontStyle === 'string') style.fontStyle = settings.fontStyle;
+    }
+  }
+  return style;
+}
+
+/** Fixed Markdown roles keep large Source documents on their viewport renderer.
+ * This only projects the theme; it never tokenizes or scans document contents. */
+export function resolveMarkdownStyles(theme: RawCodeTheme): Readonly<Record<string, MarkdownTokenStyle>> {
+  const foreground = theme.colors['editor.foreground'] ?? (theme.type === 'light' ? '#000000' : '#d4d4d4');
+  const linkScopes = [markdownScope, 'meta.paragraph.markdown', 'meta.link.inline.markdown'];
   return {
-    heading: resolveTokenColor(theme, SOURCE_TOKEN_SCOPES.heading!, ''),
-    link: resolveTokenColor(theme, SOURCE_TOKEN_SCOPES.link!, '')
+    heading: resolveMarkdownTokenStyle(theme, headingScopes(1), foreground),
+    'heading-mark': resolveMarkdownTokenStyle(theme, headingScopes(1, true), foreground),
+    setext: resolveMarkdownTokenStyle(theme, [markdownScope, 'meta.paragraph.markdown', 'markup.heading.setext.1.markdown'], foreground),
+    link: resolveMarkdownTokenStyle(theme, [...linkScopes, 'string.other.link.title.markdown'], foreground),
+    url: resolveMarkdownTokenStyle(theme, [...linkScopes, 'markup.underline.link.markdown'], foreground)
   };
 }
 
-function resolveHeadingFontWeight(theme: RawCodeTheme | null | undefined): '400' | '700' {
-  let resolved: '400' | '700' = '400';
-  for (const value of theme?.tokenColors ?? []) {
-    if (!isTokenColorRule(value) || typeof value.settings?.fontStyle !== 'string') continue;
-    if (!ruleScopes(value).some((scope) => matchesScope(scope, 'markup.heading'))) continue;
-    resolved = value.settings.fontStyle.split(/\s+/).includes('bold') ? '700' : '400';
-  }
-  return resolved;
+/** Reading accents reuse the Source document rules, including user token overrides. */
+export function resolveMarkdownContentColors(theme: RawCodeTheme): { heading: string; link: string } {
+  return {
+    heading: resolveMarkdownTokenStyle(theme, headingScopes(1)).foreground,
+    link: resolveMarkdownTokenStyle(theme, [markdownScope, 'meta.paragraph.markdown', 'meta.link.inline.markdown', 'string.other.link.title.markdown']).foreground
+      || resolveMarkdownTokenStyle(theme, [markdownScope, 'meta.paragraph.markdown', 'meta.link.inline.markdown', 'markup.underline.link.markdown']).foreground
+  };
 }
 
 function hasUsableTokenPalette(
@@ -167,11 +219,13 @@ export function resolveFinalCodePalette(
   const foreground = theme?.colors['editor.foreground'] ?? (appearance === 'light' ? '#24292f' : '#d4d4d4');
   const sourceForeground = sourceTheme?.colors['editor.foreground']
     ?? (appearance === 'light' ? '#24292f' : '#d4d4d4');
+  const sourceHeading = resolveMarkdownTokenStyle(sourceTheme, headingScopes(1), sourceForeground);
   const sourceTokens = {
     foreground: sourceForeground,
     ...Object.fromEntries(Object.entries(SOURCE_TOKEN_SCOPES).map(([id, scopes]) => (
       [id, resolveTokenColor(sourceTheme, scopes, sourceForeground)]
-    )))
+    ))),
+    heading: sourceHeading.foreground
   };
   const previewBracketFallbacks = appearance === 'light'
     ? ['#0431fa', '#319331', '#7b3814']
@@ -181,7 +235,7 @@ export function resolveFinalCodePalette(
     theme,
     sourceTheme,
     sourceTokens: Object.freeze(sourceTokens),
-    sourceHeadingFontWeight: resolveHeadingFontWeight(sourceTheme),
+    sourceHeadingFontWeight: sourceHeading.fontStyle.split(/\s+/).includes('bold') ? '700' : '400',
     preview: Object.freeze({
       foreground,
       comment: resolveTokenColor(theme, ['comment'], foreground),

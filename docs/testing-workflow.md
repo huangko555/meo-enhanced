@@ -630,6 +630,12 @@ and independent Preview presets retaining their paired backgrounds.
 the production editor. An unchanged Live/Source roundtrip and reapplying the same
 palette must paint syntax immediately; edits prepare only the latest revision.
 It also checks preparation behind a hidden Preview cover and cancellation.
+Its small/large document comparison protects ATX heading text, heading markers,
+link labels and destinations against a theme with conflicting Setext rules.
+The large fixture must retain the viewport renderer without whole-document
+TextMate tokens. `scripts/test-source-theme-customizations.ts` additionally
+checks scope specificity, independent punctuation rules and Source overrides
+feeding the automatic reading colors. Both remain in quick and appearance gates.
 The Shiki lifecycle contracts verify bounded shared caches, unchanged palette
 reuse, real palette invalidation, stale-work cancellation and final disposal.
 The background-demotion unit check explicitly advances reading-pause timers and

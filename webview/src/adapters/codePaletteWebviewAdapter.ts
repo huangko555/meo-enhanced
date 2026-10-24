@@ -3,6 +3,7 @@ import lightPlus from '@shikijs/themes/light-plus';
 import {
   resolveFinalCodePalette,
   resolveMarkdownContentColors,
+  resolveMarkdownStyles,
   type FinalCodePalette,
   type RawCodeTheme
 } from '../application/finalCodePalette';
@@ -77,6 +78,18 @@ export function createCodePaletteWebviewAdapter(input: {
         }
       }
       sourceStyle.setProperty('--meo-source-foreground', documentTheme.colors['editor.foreground'] ?? (documentTheme.type === 'light' ? '#000000' : '#d4d4d4'));
+      const markdownStyles = resolveMarkdownStyles(documentTheme);
+      for (const role of ['heading', 'heading-mark', 'setext'] as const) {
+        const style = markdownStyles[role]!;
+        sourceStyle.setProperty(`--meo-source-${role}-color`, style.foreground);
+        sourceStyle.setProperty(`--meo-source-${role}-weight`, style.fontStyle.split(/\s+/).includes('bold') ? '700' : 'var(--meo-font-source-weight)');
+        sourceStyle.setProperty(`--meo-source-${role}-style`, style.fontStyle.split(/\s+/).includes('italic') ? 'italic' : 'normal');
+        sourceStyle.setProperty(`--meo-source-${role}-decoration`, [style.fontStyle.includes('underline') ? 'underline' : '', style.fontStyle.includes('strikethrough') ? 'line-through' : ''].filter(Boolean).join(' ') || 'none');
+      }
+      sourceStyle.setProperty('--meo-token-heading-color', markdownStyles.heading!.foreground);
+      sourceStyle.setProperty('--meo-heading-token-weight', markdownStyles.heading!.fontStyle.split(/\s+/).includes('bold') ? '700' : '400');
+      sourceStyle.setProperty('--meo-token-link-color', markdownStyles.link!.foreground);
+      sourceStyle.setProperty('--meo-token-url-color', markdownStyles.url!.foreground);
       const contentColors = resolveMarkdownContentColors(documentTheme);
       sourceStyle.setProperty('--meo-content-heading-input', contentColors.heading);
       sourceStyle.setProperty('--meo-content-link-input', contentColors.link);
