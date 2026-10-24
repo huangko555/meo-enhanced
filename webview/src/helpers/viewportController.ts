@@ -35,6 +35,14 @@ export interface ViewportScrollDelta {
   left?: number;
 }
 
+export type ElementTopRetention = {
+  correct(): void;
+  isCurrent(): boolean;
+  /** Continue through deferred layout, then retire this reference. */
+  finish(): void;
+  cancel(): void;
+};
+
 export interface ViewportLayoutRegion {
   element: HTMLElement;
   from: number;
@@ -783,10 +791,25 @@ export class ViewportController {
     isCurrent: () => boolean = () => true,
     target?: { position: number; top: number } | number
   ): void {
+    const retention = this.retainElementTop(element, resolveCurrentElement, isCurrent, target);
+    try {
+      mutate();
+      retention?.correct();
+    } finally {
+      retention?.finish();
+    }
+  }
+
+  /** One reference owns an entire gesture, including its later measured layout. */
+  retainElementTop(
+    element: HTMLElement | null,
+    resolveCurrentElement: () => HTMLElement | null,
+    isCurrent: () => boolean = () => true,
+    target?: { position: number; top: number } | number
+  ): ElementTopRetention | null {
     const beforeTop = (typeof target === 'number' ? target : target?.top) ?? (element?.isConnected ? element.getBoundingClientRect().top : null);
     if (this.destroyed || beforeTop === null || !isCurrent()) {
-      mutate();
-      return;
+      return null;
     }
     this.cancelElementRetention();
     const retentionGeneration = ++this.elementRetentionGeneration;
@@ -797,13 +820,16 @@ export class ViewportController {
     // CodeMirror settlement window. Keep this low-frequency transition bounded
     // while still covering that second layout phase.
     let remainingFrames = MAX_SETTLE_FRAMES * 2;
+    let settling = false;
+    let finished = false;
     const isRetentionCurrent = () => (
-      !this.destroyed &&
+      !finished && !this.destroyed &&
       ownerGeneration === this.generation &&
       retentionGeneration === this.elementRetentionGeneration &&
       isCurrent()
     );
     const finish = () => {
+      finished = true;
       if (retentionGeneration !== this.elementRetentionGeneration) return;
       this.activeElementRetentionObserver?.disconnect();
       this.activeElementRetentionObserver = null;
@@ -831,7 +857,7 @@ export class ViewportController {
     const settleFrame = () => {
       if (!isRetentionCurrent()) { finish(); return; }
       reconcile();
-      remainingFrames -= 1;
+      if (settling) remainingFrames -= 1;
       if (remainingFrames > 0) requestAnimationFrame(settleFrame);
       else finish();
     };
@@ -848,13 +874,9 @@ export class ViewportController {
         subtree: true
       });
     }
-    mutate();
-    if (!isRetentionCurrent()) {
-      finish();
-      return;
-    }
-    reconcile();
     requestAnimationFrame(settleFrame);
+    return { correct: reconcile, isCurrent: isRetentionCurrent,
+      finish: () => { settling = true; }, cancel: finish };
   }
 
   private cancelElementRetention(): void {

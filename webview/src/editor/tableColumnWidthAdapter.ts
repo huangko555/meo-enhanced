@@ -29,6 +29,8 @@ export type CodeMirrorDomTableColumnWidthAdapterOptions = {
   readonly policy?: TableColumnWidthPolicy;
   /** Captures the active cell before column writes trigger intrinsic row reflow. */
   readonly preserveLayout?: (table: HTMLTableElement, apply: () => void) => void;
+  readonly onResizeStart?: (table: HTMLTableElement) => void;
+  readonly onResizeEnd?: (table: HTMLTableElement) => void;
 };
 
 type TableLayoutFacts = {
@@ -708,6 +710,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         }
         dragPreviewActive = false;
         dragCleanup = null;
+        options.onResizeEnd?.(table);
       };
       const finish = (finishEvent?: PointerEvent) => {
         if (finishEvent && finishEvent.pointerId !== event.pointerId) return;
@@ -744,6 +747,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       dragCleanup = removeDragListeners;
       options.root.classList.add(resizingClassName);
       pointerBoundary.classList.add(resizingClassName);
+      options.onResizeStart?.(table);
       window.addEventListener('pointermove', move, true);
       window.addEventListener('pointerup', finish, true);
       window.addEventListener('pointercancel', finish, true);

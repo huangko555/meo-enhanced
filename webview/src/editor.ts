@@ -68,6 +68,7 @@ import { createCodeMirrorTableTransactionProvenanceAdapter } from './adapters/co
 import { createCodeMirrorTableHistoryFocusAdapter } from './adapters/codeMirrorTableHistoryFocusAdapter';
 import { createCodeMirrorDomTableColumnWidthAdapter } from './editor/tableColumnWidthAdapter';
 import { tableColumnWidthPolicy } from './editor/tableColumnWidthPolicy';
+import { beginTableColumnResizeViewport, finishTableColumnResizeViewport, preserveTableColumnResizeLayout } from './helpers/tableColumnResizeViewport';
 import { createCodeMirrorDomTableStickyHeaderAdapter } from './editor/internal/codeMirrorDomTableStickyHeaderAdapter';
 import { tableStickyHeaderPolicy } from './editor/tableStickyHeaderPolicy';
 import {
@@ -2281,7 +2282,12 @@ export function createEditor({
   const tableColumnWidthAdapter = createCodeMirrorDomTableColumnWidthAdapter({
     root: parent,
     policy: tableColumnWidthPolicy,
+    onResizeStart(table) {
+      beginTableColumnResizeViewport(view, table, () => currentMode === 'live');
+    },
+    onResizeEnd: finishTableColumnResizeViewport,
     preserveLayout(table, apply) {
+      if (preserveTableColumnResizeLayout(table, apply)) return;
       const active = table.ownerDocument.activeElement;
       if (viewportController && active instanceof HTMLTextAreaElement && table.contains(active)
         && !table.closest('.is-context-menu-open') && !viewportController.isUserScrolling()) {
