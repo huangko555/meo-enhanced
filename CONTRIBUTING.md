@@ -78,8 +78,10 @@ bun run package:check
 `package:check` runs after the build and verifies the local VSIX file listing;
 it does not publish or upload an extension.
 
-For broad runtime changes, production ownership cutovers, and feature or
-project milestones, intentionally start the guarded release workflow:
+For a release candidate, or specific cross-cutting risks that exceed the normal
+checks, follow the testing guide's
+[long-run recommendation and authorization](docs/testing-workflow.md#long-run-recommendation-and-authorization)
+before starting the guarded release workflow:
 
 ```shell
 bun run test:release -- --confirm-long-run
@@ -97,6 +99,10 @@ before an authorized release gate. See the testing guide for reports and the
 strict same-input resume procedure; changed candidates and known failures
 require a fresh run.
 
+Ordinary commits, merges, and feature milestones use scope-appropriate checks
+and reusable evidence as described in
+[validation for commits and merges](docs/testing-workflow.md#validation-for-commits-and-merges).
+
 ### Full-suite expectation
 
 The full suite is expected to finish with exit code 0. The repository has no
@@ -104,6 +110,12 @@ known-failure baseline. Do not skip, rename, or soften a failing test to obtain 
 green run; investigate and fix the underlying regression instead.
 
 ## Architecture boundaries
+
+When a change affects input, rendering, layout, scrolling, focus, history, mode
+transitions, or background work, apply the
+[editor performance contracts](docs/editor-performance-contracts.md). Assess
+this proactively for ordinary and large documents, including controls and styles
+that affect those behaviors.
 
 - Every state value has one authoritative owner; projections and caches must be
   rebuildable and must not become a second source of truth.
