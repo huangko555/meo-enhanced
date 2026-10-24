@@ -532,7 +532,7 @@ class ListMarkerWidget extends WidgetType {
   }
 }
 
-class CheckboxWidget extends UiLanguageSensitiveWidget {
+export class CheckboxWidget extends UiLanguageSensitiveWidget {
   [mapLiveWidgetPositions](changes: ChangeDesc): WidgetType {
     const from = changes.mapPos(this.bracketStart, 1);
     return from === this.bracketStart ? this : new CheckboxWidget(this.status, from);
@@ -554,26 +554,30 @@ class CheckboxWidget extends UiLanguageSensitiveWidget {
   }
 
   toDOM(view: EditorView): HTMLElement {
-    const isDone = this.status === 'done';
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
+    checkbox.addEventListener('mousedown', (e) => { e.preventDefault(); });
+    this.updateDOM(checkbox, view);
+    return checkbox;
+  }
+
+  updateDOM(checkbox: HTMLElement, view: EditorView): boolean {
+    if (!(checkbox instanceof HTMLInputElement)) return false;
+    const isDone = this.status === 'done';
     checkbox.className = `meo-task-checkbox ${taskStatusCssClass(this.status)}`;
     checkbox.checked = isDone;
     const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     checkbox.setAttribute('aria-label', isDone ? strings.markTaskIncomplete : strings.markTaskComplete);
 
-    checkbox.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-    });
-
-    checkbox.addEventListener('change', () => {
+    // Rebind the current immutable widget, including rebased source positions.
+    checkbox.onchange = () => {
       const newChar = checkbox.checked ? 'x' : ' ';
       view.dispatch({
-        changes: { from: this.bracketStart + 1, to: this.bracketStart + 2, insert: newChar }
+        changes: { from: this.bracketStart + 1, to: this.bracketStart + 2, insert: newChar },
+        userEvent: 'input.task'
       });
-    });
-
-    return checkbox;
+    };
+    return true;
   }
 
   ignoreEvent(): boolean {

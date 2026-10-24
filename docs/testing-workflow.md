@@ -1838,6 +1838,32 @@ It observes held pointers and compositor frames, retains unrelated DOM and forma
 and checks cell focus returns and long-table deletion's visible document caret.
 The long-table setup uses an assigned starting viewport; the toolbar actions are
 native pointer input, and delayed settlement is observed through 80 frames.
+Its `--local-units` slice adds heading-preservation and viewport checks for task
+toggles, lists, quotes and heading commands, rapid toggles with undo/redo, and
+continuous row/column operations. Each table column structure must retain its
+accepted widths from the first observed frame, with source/DOM row parity.
+`--action=checkbox` narrows that slice to task interaction. History may deliberately
+reveal a changed source marker; direct task toggles must keep their control mounted.
+`test-complex-input-presentation.ts --only=tokens` uses the actual Markdown Worker
+to type consecutive characters in Markdown/TypeScript fences in small and large
+documents. Each key must inherit the preceding accepted token's color and weight,
+including keys whose old/new language states both contain a pending parse.
+These slices complement the unchanged-content and work-budget contracts; they do
+not replace the full owning suites or prove native VS Code performance.
+The local-unit slice also formats rich prose after an earlier table, exercising
+the deferred fallback. `test-live-scan-budget.ts` compares actual CodeMirror height
+points before/after its filtering with 20,000 marks: unchanged blocks must remain
+visible to height comparison, and only a widget covering edited source may retire.
+The `--cell-preview` slice retains an unrelated cell control while another cell
+types and commits. `--color-only` isolates the existing color-popup pointer/focus
+matrix. Source movement rebases retained action coordinates; changed cell content,
+diagnostics and footnote numbering refresh dependent previews. The cell slice also
+edits an earlier header and applies a color afterward, checking that retained
+controls still address the current source and leave unrelated text intact.
+`test-live-decoration-history.ts` holds a nested newline's outer parse to a
+prefix and slows that bounded scenario through CDP. Quiet-time refresh must wait
+for its existing local proof: both full Live rebuilds and distant block discovery
+remain zero, and the final geometry/footnotes match an independent complete parse.
 `test-table-provenance-history.ts` checks inverse effect coordinates against
 the restored document with the real input extenders, including combined pending
 cell edits, row insertion/deletion and repeated undo/redo.

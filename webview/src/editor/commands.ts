@@ -13,7 +13,7 @@ import { markdownCodeRanges } from './blockInsertion';
 import { planHtmlCommentToggle } from '../application/htmlCommentInput';
 import { beginHtmlCommentTemplate } from './htmlCommentEditing';
 import { addAutomaticSymbolPair } from './typingAssistance';
-import { supersedeLiveInputDerivedWork } from './liveInputDerivedWork';
+import { supersedeLiveInputDerivedWork, usesLargeDocumentDerivedWorkBudget } from './liveInputDerivedWork';
 
 const selectionHistory = new WeakMap<EditorView, { after: EditorSelection; before: EditorSelection[] }>();
 // Programmatic edits share the existing toolbar caret-continuity path in both modes.
@@ -102,8 +102,8 @@ function toggleLines(view: EditorView, command: EditorCommandId): boolean {
       const contentStart = changeSet.mapPos(line.from, -1) + offset;
       return mapped.head < contentStart ? EditorSelection.cursor(contentStart, range.assoc) : mapped;
     }), view.state.selection.mainIndex),
-    effects: supersedeLiveInputDerivedWork(),
-    annotations: [annotation, isolateHistory.of('full')]
+    effects: usesLargeDocumentDerivedWorkBudget(view.state) ? [] : supersedeLiveInputDerivedWork(),
+    annotations: [Transaction.userEvent.of('input.toolbar.block'), isolateHistory.of('full')]
   });
   view.dispatch(transaction);
   return true;

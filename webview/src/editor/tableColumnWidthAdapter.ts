@@ -839,6 +839,14 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     }
   };
 
+  const prepareAttachedTable = (table: HTMLTableElement, epoch: LifecycleEpoch): void => {
+    if (bindings.has(table) || !isCurrentEpoch(epoch) || !table.isConnected || !options.root.contains(table)) return;
+    const binding = bind(table, epoch);
+    bindings.set(table, binding);
+    binding.project();
+    table.dispatchEvent(new CustomEvent(projectionEventName));
+  };
+
   const mapIntents = (update: ViewUpdate): void => {
     if (disposed) return;
     let shouldReconcile = false;
@@ -909,6 +917,15 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       const epoch = { alive: true, projectionConsumer: {} };
       currentEpoch = epoch;
       mutationObserver = new MutationObserver(records => {
+        // The first layout belongs to mounting, before this DOM can be painted.
+        // Waiting for input settlement exposes natural widths, then fits them a
+        // second time. Only newly attached tables need this synchronous leaf;
+        // content/resize invalidation keeps the existing coalesced consumer.
+        for (const record of records) for (const node of record.addedNodes) {
+          if (!(node instanceof Element)) continue;
+          if (node.matches(tableSelector)) prepareAttachedTable(node as HTMLTableElement, epoch);
+          for (const table of node.querySelectorAll<HTMLTableElement>(tableSelector)) prepareAttachedTable(table, epoch);
+        }
         // Virtual scrolling also mounts text, gutters and passive sticky chrome.
         // Only source-table content or table attachment changes invalidate widths;
         // container size changes retain their ResizeObserver path.

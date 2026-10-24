@@ -1,7 +1,7 @@
 import { Annotation, EditorState, Facet, StateEffect, StateField, Transaction, type Extension } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, type DecorationSet } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import { mapStableLiveDecorations } from './liveWidgetPositions';
+import { mapStableLiveDecorations, updateLivePresentationRanges } from './liveWidgetPositions';
 
 export type LiveInputDerivedWorkScheduler = {
   documentChanged(): void;
@@ -314,7 +314,7 @@ export function mapLiveInputDerivedDecorations(
     const doc = transaction.newDoc;
     const filterFrom = doc.lineAt(Math.min(range.from, doc.length)).from;
     const filterTo = doc.lineAt(Math.min(range.to, doc.length)).to;
-    mapped = mapped.update({
+    mapped = updateLivePresentationRanges(mapped, {
       filterFrom,
       filterTo,
       filter: (from, to, decoration) => {

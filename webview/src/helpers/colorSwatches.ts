@@ -486,7 +486,12 @@ export function createInteractiveColorSwatchElement(
   swatch.setAttribute('aria-label', strings.adjustColor(range.value));
   swatch.setAttribute('aria-haspopup', 'dialog');
   const openAdjustment = () => {
-    view.dispatch({ effects: setActiveHexColorAdjustment.of({ ...range, anchor: swatch }) });
+    // A retained table cell can move without changing its rendered content.
+    // Its owner rebases this source coordinate alongside the table metadata.
+    const from = Number(swatch.dataset.colorFrom), to = from + range.value.length;
+    if (!Number.isInteger(from) || from < 0 || to > view.state.doc.length
+      || view.state.doc.sliceString(from, to) !== range.value) return;
+    view.dispatch({ effects: setActiveHexColorAdjustment.of({ ...range, from, to, anchor: swatch }) });
   };
   swatch.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;

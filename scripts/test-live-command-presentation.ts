@@ -20,6 +20,177 @@ const commands = [
 ];
 let cases = 0;
 
+async function localUnitCase(large: boolean, action: string, rich = false) {
+  const page = await browser.newPage();
+  await page.evaluateOnNewDocument(() => {
+    const observer = new MutationObserver(() => {
+      if (!document.documentElement) return;
+      document.documentElement.style.setProperty('--vscode-editor-font-size', '26px');
+      observer.disconnect();
+    });
+    observer.observe(document, { childList: true, subtree: true });
+  });
+  const task = action === 'checkbox', body = (task ? '- [ ] Editable body' : 'Editable body') + (rich ? ' with `inline code`.' : '');
+  const prefix = rich ? '| A | B |\n| --- | --- |\n' + '| Stable | Earlier table |\n'.repeat(24) + '\n' : '';
+  const text = prefix + `### Unchanged heading\n\n${body}\n\n` + (large ? '\n'.repeat(8000) : 'After.');
+  const host = await open(page, text, false, 'live');
+  const label = `local unit ${action} large ${large} rich ${rich}`;
+  try {
+    await page.addStyleTag({ content: '.cm-cursor{visibility:hidden!important}' });
+    await page.evaluate(({ task, rich }) => {
+      const scope = window as any;
+      const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+      scope.__commandView = view;
+      const from = view.state.doc.toString().indexOf('Editable body');
+      view.dispatch({ selection: { anchor: task ? from - 6 : from, head: task ? from - 6 : from + 13 } });
+      if (rich) view.scrollDOM.scrollTop = Math.max(0, view.lineBlockAt(from).top - 200);
+      view.focus();
+    }, { task, rich });
+    if (rich) await new Promise(resolve => setTimeout(resolve, 700));
+    await frames(page, 6);
+    const clip = await page.evaluate(() => {
+      const scope = window as any, view = scope.__commandView;
+      const heading = view.contentDOM.querySelector('.meo-md-h3') as HTMLElement;
+      if (!heading) throw new Error('Missing initial heading');
+      const rect = heading.getBoundingClientRect();
+      const checkbox = view.contentDOM.querySelector('.meo-task-checkbox');
+      scope.__unitFrames = [];
+      const sample = () => {
+        const current = [...view.contentDOM.querySelectorAll('.cm-line')].find((line: any) => line.textContent.includes('Unchanged heading')) as HTMLElement;
+        const body = [...view.contentDOM.querySelectorAll('.cm-line')].find((line: any) => line.textContent.includes('Editable body')) as HTMLElement;
+        scope.__unitFrames.push({ same: current === heading, classes: current?.className,
+          height: current?.getBoundingClientRect().height, top: body?.getBoundingClientRect().top, scroll: view.scrollDOM.scrollTop,
+          sameCheckbox: view.contentDOM.querySelector('.meo-task-checkbox') === checkbox,
+          history: scope.__unitHistory === true });
+        scope.__unitFrame = requestAnimationFrame(sample);
+      };
+      sample();
+      return { left: Math.ceil(rect.left), top: Math.ceil(rect.top), width: Math.floor(rect.width), height: Math.floor(rect.height) };
+    });
+    const act = async () => {
+      if (task) {
+        for (let index = 0; index < 3; index++) { await page.click('.meo-task-checkbox'); await frames(page, 2); }
+        await page.evaluate(() => { (window as any).__unitHistory = true; });
+        await page.keyboard.down('Control'); await page.keyboard.press('z'); await page.keyboard.up('Control');
+        await frames(page, 3);
+        await page.keyboard.down('Control'); await page.keyboard.press('y'); await page.keyboard.up('Control');
+      }
+      else if (action === 'heading') {
+        await page.hover('[data-action="heading"]');
+        await page.click('.heading-dropdown-option[data-level="1"]');
+        await page.mouse.move(2, 2);
+      } else await page.click(`[data-action="${action}"]`);
+      await frames(page, 30);
+      await page.evaluate(() => { const witness = document.getElementById('presentation-paint-witness'); if (witness) witness.style.background = 'rgb(19,211,41)'; });
+      await frames(page, 2);
+    };
+    // The heading menu legitimately covers this clip. Its frame observer still
+    // checks DOM/geometry; commands without an overlay also compare pixels.
+    if (action === 'heading') await act();
+    else await assertStablePaint(page, clip, act, label);
+    const samples = await page.evaluate(() => {
+      cancelAnimationFrame((window as any).__unitFrame);
+      return (window as any).__unitFrames as Array<{ same: boolean; classes: string; height: number; top: number; scroll: number; sameCheckbox: boolean; history: boolean }>;
+    });
+    assert.ok(samples.length > 5, label + ': observe input and deferred settlement');
+    assert.ok(samples.every(value => value.same && value.classes === samples[0].classes && value.height === samples[0].height), label + ': preserve unmodified heading');
+    assert.ok(samples.every(value => Math.abs(value.top - samples[0].top) <= 1 && Math.abs(value.scroll - samples[0].scroll) <= 1), label + ': preserve body viewport');
+    // History deliberately reveals its changed source range, including markers.
+    if (task && large) assert.ok(samples.filter(value => !value.history).every(value => value.sameCheckbox), label + ': keep the operated control mounted');
+    const prefix = task ? '- [x] ' : ({ bulletList: '- ', numberedList: '1. ', task: '- [ ] ', quote: '> ', heading: '# ' } as Record<string, string>)[action];
+    assert.ok(host.readHost().includes(prefix + 'Editable body'), label + ': commit command and history');
+    assert.deepEqual(host.errors, [], label + ': no runtime errors');
+    cases++;
+  } finally { host.dispose(); await page.close(); }
+}
+
+async function columnFrameCase(large: boolean) {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1000, height: 900 });
+  const table = ['| Sample | Scenario | Bytes | Lines | State | Notes |', '| --- | --- | ---: | ---: | --- | --- |',
+    ...Array.from({ length: 12 }, (_, index) => `| R-${index} | 阅读位置与多语言内容 | 2,185 | 31 | Ready | Observation ${index} with a long description and code |`)].join('\n');
+  const text = '# Column continuity\n\n' + table + '\n\nAfter.\n\n' + (large ? '\n'.repeat(8000) : '');
+  const host = await open(page, text, false, 'live');
+  const label = `column frames large ${large}`;
+  try {
+    await page.click('tbody tr:nth-child(1) td:nth-child(2) .meo-md-html-table-cell-preview');
+    await frames(page, 6);
+    await page.evaluate(() => {
+      const scope = window as any;
+      scope.__widthFrames = [];
+      const sample = () => {
+        const table = document.querySelector<HTMLTableElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
+        scope.__widthFrames.push([...table?.tHead?.rows[0]?.cells ?? []].map(cell => cell.getBoundingClientRect().width));
+        scope.__widthFrame = requestAnimationFrame(sample);
+      };
+      sample();
+    });
+    for (const command of ['insert-row-above', 'insert-row-below', 'delete-row', 'insert-column-left', 'insert-column-right']) {
+      if (await page.$eval('.meo-md-html-table-context-menu', element => element.hasAttribute('hidden'))) await page.click('.meo-md-html-table-context-trigger');
+      await page.click(`[data-command="${command}"]`);
+      await frames(page, 24);
+    }
+    const samples = await page.evaluate(() => {
+      cancelAnimationFrame((window as any).__widthFrame);
+      return (window as any).__widthFrames as number[][];
+    });
+    assert.ok(samples.length > 20 && samples.every(widths => widths.length >= 6), label + ': table remains mounted');
+    for (const count of [6, 7, 8]) {
+      const group = samples.filter(widths => widths.length === count);
+      assert.ok(group.length > 2, label + ': observe each column structure');
+      assert.ok(group.every(widths => widths.every((width, index) => Math.abs(width - group.at(-1)![index]) <= 1)), label + ': each structure is painted at its accepted widths');
+    }
+    const sourceRows = host.readHost().split('\n').filter(line => line.startsWith('|'));
+    assert.ok(sourceRows.every(line => line.split('|').length - 2 === 8), label + ': source columns match the command result');
+    assert.equal(await page.$eval('.meo-md-html-table:not(.meo-md-html-table-sticky-table)', element => (element as HTMLTableElement).tBodies[0].rows.length), sourceRows.length - 2, label + ': rendered rows match complete source');
+    assert.deepEqual(host.errors, []);
+    cases++;
+  } finally { host.dispose(); await page.close(); }
+}
+
+async function cellPreviewUnitCase(large: boolean) {
+  const page = await browser.newPage(), host = await prepare(page, large);
+  const label = `cell preview unit large ${large}`;
+  try {
+    await page.click('tbody tr:nth-child(2) td:nth-child(2) .meo-md-html-table-cell-preview');
+    await page.keyboard.press('End'); await frames(page, 4);
+    await page.evaluate(() => {
+      const scope = window as any;
+      const swatch = document.querySelector('.meo-md-html-table .meo-md-color-swatch-interactive');
+      if (!swatch) throw new Error('Missing unrelated cell control');
+      scope.__cellUnitSwatch = swatch;
+      scope.__cellUnitFrames = [];
+      const sample = () => {
+        scope.__cellUnitFrames.push(document.querySelector('.meo-md-html-table .meo-md-color-swatch-interactive') === swatch);
+        scope.__cellUnitFrame = requestAnimationFrame(sample);
+      };
+      sample();
+    });
+    await page.keyboard.type('777', { delay: 40 });
+    await new Promise(resolve => setTimeout(resolve, 700)); await frames(page, 6);
+    const samples = await page.evaluate(() => { cancelAnimationFrame((window as any).__cellUnitFrame); return (window as any).__cellUnitFrames as boolean[]; });
+    assert.ok(samples.length > 10 && samples.every(Boolean), label + ': unrelated cell controls retain their DOM through commit');
+    assert.ok(host.readHost().includes('10777'), label + ': edited cell commits');
+    // An earlier edit moves the same control's absolute source coordinates.
+    // Keeping its old click handler would apply a color to stale source.
+    await page.click('thead th:nth-child(1) .meo-md-html-table-cell-preview');
+    await page.keyboard.press('End'); await page.keyboard.type('777');
+    await new Promise(resolve => setTimeout(resolve, 700)); await frames(page, 6);
+    assert.ok(await page.evaluate(() => document.querySelector('.meo-md-html-table .meo-md-color-swatch-interactive') === (window as any).__cellUnitSwatch), label + ': source movement only rebases control metadata');
+    assert.equal(await page.$eval('.meo-md-html-table .meo-md-color-swatch-interactive', element => Number((element as HTMLElement).dataset.colorFrom)),
+      host.readHost().indexOf('#60A5FA', host.readHost().indexOf('| beta')), label + ': refresh moved source coordinates');
+    await page.click('.meo-md-html-table .meo-md-color-swatch-interactive');
+    await page.click('.meo-hex-color-adjustment-value');
+    await page.keyboard.down('Control'); await page.keyboard.press('a'); await page.keyboard.up('Control');
+    await page.keyboard.type('#112233');
+    await page.click('.meo-hex-color-adjustment-apply'); await frames(page, 8);
+    assert.ok(host.readHost().includes('| beta #112233'), label + ': retained control edits the current cell');
+    assert.ok(host.readHost().includes('**Editable color** #60A5FA'), label + ': unrelated source remains intact');
+    assert.deepEqual(host.errors, []);
+    cases++;
+  } finally { host.dispose(); await page.close(); }
+}
+
 async function prepare(page: Page, large: boolean) {
   const host = await open(page, fixture + (large ? '\n\n' + 'Padding with **formatting**.\n\n'.repeat(5000) : ''), false, 'live');
   // Native caret blink is allowed; changing text presentation is not.
@@ -118,7 +289,8 @@ async function colorCase(large: boolean, inTable: boolean, apply: boolean, fromC
     }
     assert.deepEqual(host.errors, [], label + ': no runtime errors');
     cases++;
-  } finally { host.dispose(); await page.close(); }
+  } catch (error) { throw new Error(label, { cause: error }); }
+  finally { host.dispose(); await page.close(); }
 }
 
 async function tableCase(large: boolean, command: string) {
@@ -231,13 +403,24 @@ async function longTableCase(command: string) {
 
 let failure: unknown;
 try {
+  const onlyColor = process.argv.includes('--color-only');
+  const onlyCellPreview = process.argv.includes('--cell-preview');
+  const onlyAction = process.argv.find(arg => arg.startsWith('--action='))?.slice(9);
+  if (!onlyColor && !onlyCellPreview) {
+    for (const large of [false, true]) for (const action of ['checkbox', 'bulletList', 'numberedList', 'task', 'quote', 'heading'].filter(action => !onlyAction || onlyAction === action)) await localUnitCase(large, action);
+    if (!onlyAction || onlyAction === 'bulletList') for (const large of [false, true]) await localUnitCase(large, 'bulletList', true);
+    if (!onlyAction) for (const large of [false, true]) await columnFrameCase(large);
+  }
+  if (!onlyColor && !onlyAction) for (const large of [false, true]) await cellPreviewUnitCase(large);
+  if (!process.argv.includes('--local-units') && !onlyCellPreview) {
   for (const large of [false, true]) {
     for (const inTable of [false, true]) for (const apply of [false, true]) await colorCase(large, inTable, apply);
     for (const apply of [false, true]) await colorCase(large, true, apply, true);
-    for (const command of commands) await tableCase(large, command);
+    if (!onlyColor) for (const command of commands) await tableCase(large, command);
   }
-  for (const command of ['insert-row-below', 'align-center', 'sort-descending', 'delete-table']) await longTableCase(command);
-  console.log(`Live command presentation passed: ${cases} table/color cases, ${observedPaints} compositor frames`);
+  if (!onlyColor) for (const command of ['insert-row-below', 'align-center', 'sort-descending', 'delete-table']) await longTableCase(command);
+  }
+  console.log(`Live command presentation passed: ${cases} cases, ${observedPaints} compositor frames`);
 } catch (error) { failure = error; throw error; }
 finally {
   server.stop(true);

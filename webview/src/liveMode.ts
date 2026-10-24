@@ -5,7 +5,7 @@ import { backgroundMarkdownParser, prepareBackgroundMarkdownPresentation } from 
 import { markdownMixedLanguages } from './editor/markdownMixedLanguages';
 import { documentLines } from './helpers/documentLines';
 import { isAutomaticSymbolPairHistoryEffect } from './editor/typingAssistance';
-import { liveWidgetPresentationLayers, mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions, replaceLivePresentationRanges } from './editor/liveWidgetPositions';
+import { liveWidgetPresentationLayers, mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions, replaceLivePresentationRanges, updateLivePresentationRanges } from './editor/liveWidgetPositions';
 import { livePresentationWindow } from './helpers/livePresentationWindow';
 import { liveViewportPresentationExtensions, restrictLiveWidgetPresentation, getLivePresentationBand,
   isLiveViewportPresentationEffect, livePresentationBandChanged } from './helpers/liveViewportPresentation';
@@ -28,7 +28,7 @@ import {
   lineNumberWidgetMarker,
   type DecorationSet
 } from '@codemirror/view';
-import { IterMode, type SyntaxNode, type SyntaxNodeRef, type Tree } from '@lezer/common';
+import { IterMode, Tree, type SyntaxNode, type SyntaxNodeRef } from '@lezer/common';
 import { createElement, AlertCircle, Delete } from 'lucide';
 import {
   resolveCodeLanguage,
@@ -53,6 +53,7 @@ import { indexSourceRanges } from './helpers/sourceRangeIndex';
 import { detailsBlockLiveExtensions, getDetailsBlocks, toggleDetailsBlock } from './helpers/detailsBlocks';
 import {
   addListMarkerDecoration,
+  CheckboxWidget,
   listMarkerData,
   detectListIndentStylesByLine,
   nextOrderedSequenceNumber
@@ -175,6 +176,7 @@ import {
   isMappedLiveInputRefresh,
   liveInputDerivedWorkExtensions,
   mapLiveInputDerivedDecorations,
+  liveInputDerivedWorkReadiness,
   replaceLiveInputNestedDecorationEffect,
   shouldDeferLiveInputDerivedWork,
   usesLargeDocumentDerivedWorkBudget
@@ -3372,7 +3374,7 @@ function projectInputMermaidSourceLines(
       additions.push(prefix.decoration.range(line.from, line.from + prefix.text.length));
     }
   }
-  return additions.length ? decorations.update({ add: additions, sort: true }) : decorations;
+  return additions.length ? updateLivePresentationRanges(decorations, { add: additions, sort: true }) : decorations;
 }
 
 /**
@@ -3451,7 +3453,7 @@ function projectInputBlockquoteLines(
   const markerClasses = new Set([
     markerDeco.spec.class, quoteMarkerDeco.spec.class, activeLineMarkerDeco.spec.class, activeQuoteMarkerDeco.spec.class
   ]);
-  return decorations.update({
+  return updateLivePresentationRanges(decorations, {
     filterFrom: markerFilterFrom,
     filterTo: markerFilterTo,
     filter: (from, to, decoration) => (
@@ -3980,6 +3982,83 @@ function projectLiveLocalInput(decorations: DecorationSet, transaction: Transact
   return projectLiveLocalChange(decorations, before, state, transaction.changes);
 }
 
+/** A block-format command owns complete lines. Render a bounded, closed prose
+ * block now, while the existing worker validates its wider Markdown context.
+ * This is provisional presentation, never a replacement global syntax tree. */
+function projectLiveBlockCommand(decorations: DecorationSet, transaction: Transaction): DecorationSet | undefined {
+  if (!transaction.isUserEvent('input.toolbar.block') || !liveDecorationMetadata.get(transaction.startState)?.complete
+    || !hasUnchangedLivePresentationContext(transaction)) return;
+  const before = transaction.startState, state = transaction.state;
+  let from = Infinity, to = -Infinity, endSide: -1 | 1 = -1;
+  transaction.changes.iterChangedRanges((start, end) => {
+    from = Math.min(from, start);
+    if (end >= to) { to = end; endSide = start === end ? 1 : -1; }
+  });
+  if (!Number.isFinite(from)) return;
+  const tree = acceptedLiveMarkdownSyntax(before);
+  const rootAt = (position: number, side: -1 | 1) => {
+    let node = tree.cursor(IterMode.IgnoreMounts).moveTo(position, side).node;
+    while (node.parent && node.parent.name !== 'Document') node = node.parent;
+    return node;
+  };
+  let first = rootAt(from, 1), last = rootAt(to, endSide);
+  if (![first, last].every(node => /^(?:Paragraph|ATXHeading[1-6]|SetextHeading[12]|BulletList|OrderedList|Blockquote)$/.test(node.name))) return;
+  // Prefix changes can join lists across a blank line. Their numbering and
+  // loose/tight membership belong to the same update unit as the new item.
+  if (first.prevSibling && /^(?:BulletList|OrderedList)$/.test(first.prevSibling.name)) first = first.prevSibling;
+  if (last.nextSibling && /^(?:BulletList|OrderedList)$/.test(last.nextSibling.name)) last = last.nextSibling;
+  from = before.doc.lineAt(Math.min(first.from, from)).from;
+  to = before.doc.lineAt(Math.max(last.to, to)).to;
+  const nextFrom = transaction.changes.mapPos(from, -1), nextTo = transaction.changes.mapPos(to, 1);
+  if (nextTo - nextFrom > 4_096) return;
+  const source = state.doc.sliceString(nextFrom, nextTo);
+  // Definitions and protected blocks require authoritative context, including
+  // references outside this scope. They keep the mapped input presentation.
+  const prose = source.replace(/(^|\n)([ \t]*(?:[-+*]|\d+[.)])[ \t]+)\[[ xX/-]\](?=[ \t])/g, '$1$2');
+  if (/[`~<>\[\]\\|]/.test(prose) || parseFrontmatter(before)?.openingFrom === from) return;
+  const local = editorBaseMarkdownParser.parse(source);
+  const snapshot = new Tree(local.type, local.children, local.positions.map(position => position + nextFrom), state.doc.length);
+  const mapped = mapStableLiveDecorations(decorations, transaction.changes, state);
+  if (!mapped || !projectUnchangedFootnotes(before, state, transaction.changes)) return;
+  const scope = { from: nextFrom, to: nextTo, fromLine: state.doc.lineAt(nextFrom).number, toLine: state.doc.lineAt(nextTo).number };
+  const ranges = withMarkdownSyntaxSnapshot(state, snapshot, () => buildDecorationRanges(state, mapped.decorations, undefined, scope).ranges);
+  if (ranges.some(range => range.from < nextFrom || range.to > nextTo)) return;
+  liveDecorationMetadata.set(state, { complete: false });
+  const conflicts = mergeConflictRanges(state);
+  return replaceLivePresentationRanges(mapped.decorations, nextFrom, nextTo, ranges.filter(range => !(
+    range.to > range.from ? rangeOverlapsRanges(range.from, range.to, conflicts) : pointInsideRanges(range.from, conflicts)
+  )));
+}
+
+/** A status-only edit cannot change list structure. Keep the control and all
+ * surrounding presentation while the worker accepts the new source revision. */
+function projectLiveTaskToggle(decorations: DecorationSet, transaction: Transaction): DecorationSet | undefined {
+  let change: { from: number; to: number; nextFrom: number; nextTo: number } | undefined, count = 0;
+  transaction.changes.iterChangedRanges((from, to, nextFrom, nextTo) => { count++; change = { from, to, nextFrom, nextTo }; });
+  if (count !== 1 || !change || change.to - change.from !== 1 || change.nextTo - change.nextFrom !== 1
+    || !/^[ xX]$/.test(transaction.startState.doc.sliceString(change.from, change.to))
+    || !/^[ xX]$/.test(transaction.newDoc.sliceString(change.nextFrom, change.nextTo))) return;
+  const edit = change;
+  let replacement: Range<Decoration> | undefined;
+  decorations.between(edit.from, edit.to, (from, to, value) => {
+    const widget = value.spec.widget;
+    if (widget instanceof CheckboxWidget && widget.bracketStart + 1 === edit.from) {
+      replacement = Decoration.replace({ ...value.spec,
+        widget: new CheckboxWidget(transaction.newDoc.sliceString(edit.nextFrom, edit.nextTo) === ' ' ? 'todo' : 'done', widget.bracketStart)
+      }).range(from, to);
+    }
+  });
+  if (!replacement) return;
+  const mapped = mapStableLiveDecorations(decorations, transaction.changes, transaction.state);
+  if (!mapped) return;
+  const additions = [replacement];
+  mapped.decorations.between(replacement.from, replacement.to, (from, to, value) => {
+    if (!(value.spec.widget instanceof CheckboxWidget) && from >= replacement!.from && to <= replacement!.to) additions.push(value.range(from, to));
+  });
+  liveDecorationMetadata.set(transaction.state, { complete: false });
+  return replaceLivePresentationRanges(mapped.decorations, replacement.from, replacement.to, additions);
+}
+
 type DeferredLiveLocalInput = {
   readonly before: EditorState;
   readonly decorations: DecorationSet;
@@ -4276,6 +4355,10 @@ const liveDecorationField = StateField.define<DecorationSet>({
     if (restored !== undefined) return restored;
     const resumed = resumeLiveLocalInput(transaction);
     if (resumed !== undefined) return resumed;
+    // Quiet-time refresh can precede the completed outer parse. The existing
+    // receipt will retry this closed block on publication; a provisional full
+    // build here would discard that proof and scan unchanged presentation.
+    if (!transaction.docChanged && deferredLiveLocalInputs.has(transaction.state)) return decorations;
     if (usesLargeDocumentDerivedWorkBudget(transaction.state) && canKeepPlainProseCaret(decorations, transaction)) {
       liveDecorationMetadata.set(transaction.state, { ...liveDecorationMetadata.get(transaction.state), complete: true, tree: liveDecorationMetadata.get(transaction.startState)?.tree });
       return decorations;
@@ -4303,8 +4386,16 @@ const liveDecorationField = StateField.define<DecorationSet>({
       // Phase bookkeeping, especially settlement after an authoritative refresh,
       // must not discard distant block heights a second time.
       if (!transaction.docChanged) return decorations;
+      const taskToggle = projectLiveTaskToggle(decorations, transaction);
+      if (taskToggle !== undefined) return taskToggle;
       const tableCommand = projectLiveTableCommand(decorations, transaction);
       if (tableCommand !== undefined) return tableCommand;
+      if (usesLargeDocumentDerivedWorkBudget(transaction.state)) {
+        let blockCommand: DecorationSet | undefined;
+        try { blockCommand = projectLiveBlockCommand(decorations, transaction); }
+        catch { /* Preserve mapped input until the authoritative worker refresh. */ }
+        if (blockCommand !== undefined) return blockCommand;
+      }
       if (usesLargeDocumentDerivedWorkBudget(transaction.state)
         && canMapUnchangedProseDecorations(decorations, transaction)) {
         const mapped = mapStableLiveDecorations(decorations, transaction.changes, transaction.state);
@@ -4337,7 +4428,7 @@ const liveDecorationField = StateField.define<DecorationSet>({
             .filter((effect) => effect.is(replaceLiveInputNestedDecorationEffect))
             .reduce((mapped, effect) => {
               const { from, to, decoration } = effect.value;
-              return mapped.update({
+              return updateLivePresentationRanges(mapped, {
                 filterFrom: from,
                 filterTo: to,
                 filter: (_rangeFrom, _rangeTo, value) => !value.spec.widget,
@@ -4664,8 +4755,9 @@ const markdownHtmlLanguage = html({ matchClosingTags: false });
 // Separate configure calls preserve wrapper order. Markdown extension arrays
 // compose wrappers outside-in; the background pass must replace only the outer
 // grammar, while CodeMirror still runs its mixed-language pass afterwards.
-const editorOuterMarkdownParser = (markdownLanguage.parser as MarkdownParser)
-  .configure([...inlineMarkdownExtensions, { props: [sourceMarkdownHighlightProps] }, { remove: ['Emoji'] }])
+const editorBaseMarkdownParser = (markdownLanguage.parser as MarkdownParser)
+  .configure([...inlineMarkdownExtensions, { props: [sourceMarkdownHighlightProps] }, { remove: ['Emoji'] }]);
+const editorOuterMarkdownParser = editorBaseMarkdownParser
   .configure(backgroundMarkdownParser)
   .configure(certifyMarkdownStructure);
 const editorOuterMarkdownLanguage = new Language(markdownLanguage.data, editorOuterMarkdownParser, [], 'markdown');
@@ -4678,6 +4770,8 @@ export const editorMarkdownLanguage = new LanguageSupport(new Language(markdownL
 export function liveModeExtensions(options: { readonly largeDocument?: boolean } = {}): Extension[] {
   return [
     ...liveInputDerivedWorkExtensions(options),
+    liveInputDerivedWorkReadiness.of(state => !deferredLiveLocalInputs.has(state)
+      || !!preparedMarkdownStructure(state) || markdownStructureAvailable(state)),
     // Seed changed-line conflict proofs before any Live presentation reader.
     ...mergeConflictSourceExtensions(),
     ...(options.largeDocument ? liveViewportPresentationExtensions() : []),

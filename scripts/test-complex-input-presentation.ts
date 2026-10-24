@@ -207,6 +207,49 @@ try {
       assert.deepEqual(host.errors, []); await captureResult(page, `complex-long-table-${large}-${row}`);
     } finally { host.dispose(); await page.close(); }
   }
+  if (!only || only === 'tokens') for (const large of [false, true]) for (const language of ['markdown', 'typescript']) {
+    stage = `Token inheritance ${language}, large ${large}`;
+    const body = language === 'markdown' ? '### Nested heading 55555' : 'const value = 55555;';
+    const text = `# Stable heading\n\n\`\`\`${language}\n${body}\n\`\`\`\n\n` + (large ? '\n'.repeat(8000) : 'After.');
+    const page = await browser.newPage(), host = await open(page, text, false, 'live');
+    try {
+      await page.evaluate(() => {
+        const scope = window as any;
+        const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+        scope.__tokenView = view;
+        view.dispatch({ selection: { anchor: view.state.doc.toString().indexOf('55555') + 5 } });
+        view.focus();
+        scope.__readInputToken = () => {
+          const { node } = view.domAtPos(view.state.selection.main.head - 1);
+          const element = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement!;
+          const style = getComputedStyle(element);
+          return { color: style.color, weight: style.fontWeight };
+        };
+        scope.__hasPaintedInputToken = () => {
+          const { node } = view.domAtPos(view.state.selection.main.head - 1);
+          const element = node.nodeType === Node.ELEMENT_NODE ? node as HTMLElement : node.parentElement!;
+          const color = element.style.color;
+          return !!color && !color.includes('var(');
+        };
+      });
+      // The code fallback and content foreground can be different colors.
+      // Capture the baseline only after a concrete Shiki token is painted.
+      const baseline = await page.waitForFunction(() => {
+        const scope = window as any;
+        const token = scope.__readInputToken();
+        return scope.__hasPaintedInputToken() && token.color !== getComputedStyle(scope.__tokenView.contentDOM).color ? token : false;
+      });
+      const before = await baseline.jsonValue();
+      await baseline.dispose();
+      for (let index = 0; index < 8; index++) {
+        await page.keyboard.type('5'); await frames(page, 1);
+        assert.deepEqual(await page.evaluate(() => (window as any).__readInputToken()), before, `${stage}: inherit the accepted token on every key`);
+      }
+      await delay(700);
+      assert.ok(host.readHost().includes('55555' + '5'.repeat(8)), stage + ': preserve input source');
+      assert.deepEqual(host.errors, []);
+    } finally { host.dispose(); await page.close(); }
+  }
   console.log(`Complex production input presentation passed (${observedPaints} compositor paints)`);
 } catch (error) { primary = error; console.error('Complex input failed during:', stage); throw error; }
 finally { server.stop(true); if (primary === undefined) await closeTestBrowser(browser); else await closeTestBrowser(browser, primary); }

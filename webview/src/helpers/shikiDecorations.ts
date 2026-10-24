@@ -113,11 +113,14 @@ function addPendingTokenDecorations(
       || isFencedCodeAt(transaction.startState, toA);
     const isFencedCode = isFencedCodeAt(transaction.state, fromB)
       || isFencedCodeAt(transaction.state, toB);
-    let wasMath = false;
+    let hadAcceptedToken = false;
     decorations.between(Math.max(0, fromB - 1), toB, (_from, _to, decoration) => {
-      if (decoration.spec.shikiLanguage === 'meo-math') wasMath = true;
+      if (decoration.spec.shikiLanguage && decoration.spec.shikiThemeVersion === getShikiThemeVersion()) hadAcceptedToken = true;
     });
-    if (!wasFencedCode && !isFencedCode && !wasMath) return;
+    // Consecutive keys can see placeholder trees on both sides of the edit.
+    // A mapped token from this theme still proves the local highlighting surface;
+    // keep its style until the existing worker publishes authoritative tokens.
+    if (!wasFencedCode && !isFencedCode && !hadAcceptedToken) return;
 
     const startLine = transaction.newDoc.lineAt(fromB).number;
     const endLine = transaction.newDoc.lineAt(Math.max(fromB, toB - 1)).number;

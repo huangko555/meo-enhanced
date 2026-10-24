@@ -75,28 +75,35 @@ export function prepareLiveWidgetPositions(decorations: DecorationSet, viewportB
 
 /** Keep the prepared partition when replacing a closed presentation block. */
 export function replaceLivePresentationRanges(decorations: DecorationSet, from: number, to: number, add: Range<Decoration>[]): DecorationSet {
-  const filter = (start: number, end: number) => start < from || end > to;
+  return updateLivePresentationRanges(decorations, { filterFrom: from, filterTo: to,
+    filter: (start, end) => start < from || end > to, add, sort: true });
+}
+
+/** Provisional filtering and additions must preserve the same height/mark
+ * partition as closed replacements. Updating a joined set directly can hide
+ * unchanged block points behind its mark layer's maxPoint summary. */
+export function updateLivePresentationRanges(decorations: DecorationSet, update: Parameters<DecorationSet['update']>[0]): DecorationSet {
   const parts = mappableSets.get(decorations);
-  if (!parts) return decorations.update({ filterFrom: from, filterTo: to, filter, add, sort: true });
+  if (!parts) return decorations.update(update);
   // Use the same accepted ordering as a complete Decoration.set before
   // partitioning. Equal-position marks and controls can otherwise change
   // nesting when a locally rebuilt block replaces the complete presentation.
   const accepted: Range<Decoration>[] = [];
-  for (const cursor = Decoration.set(add, true).iter(); cursor.value; cursor.next()) {
+  for (const cursor = Decoration.set(update.add ?? [], true).iter(); cursor.value; cursor.next()) {
     accepted.push(cursor.value.range(cursor.from, cursor.to));
   }
   // A scoped rebuild can introduce a control absent from the prepared set.
   // It must satisfy the same contract as a complete build before being cached.
   if (accepted.some(range => !supportsWidgetProjection(range.from, range.to, range.value))) {
-    const result = decorations.update({ filterFrom: from, filterTo: to, filter, add: accepted, sort: true });
+    const result = decorations.update({ ...update, add: accepted, sort: true });
     mappableSets.set(result, false);
     return result;
   }
   const nextParts = {
-    stable: parts.stable.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => !range.value.point), sort: true }),
-    points: parts.points.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => range.value.point && range.from === range.to), sort: true }),
-    positioned: parts.positioned.update({ filterFrom: from, filterTo: to, filter, add: accepted.filter(range => range.value.point && range.from !== range.to), sort: true }),
-    widgetPositions: parts.widgetPositions.update({ filterFrom: from, filterTo: to, filter,
+    stable: parts.stable.update({ ...update, add: accepted.filter(range => !range.value.point), sort: true }),
+    points: parts.points.update({ ...update, add: accepted.filter(range => range.value.point && range.from === range.to), sort: true }),
+    positioned: parts.positioned.update({ ...update, add: accepted.filter(range => range.value.point && range.from !== range.to), sort: true }),
+    widgetPositions: parts.widgetPositions.update({ ...update,
       add: accepted.filter(range => range.value.spec.widget && !range.value.spec.widget[liveWidgetPositionsIndependent]), sort: true })
   };
   const result = RangeSet.join([nextParts.stable, nextParts.points, nextParts.positioned]);

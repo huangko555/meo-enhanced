@@ -500,18 +500,26 @@ try {
     const scope = window as any; scope.__nestedBudgetEditor.refreshDecorations();
     return scope.__liveHistory.positionSnapshot(scope.__nestedBudgetEditor);
   }), projectedNested, 'the bounded nested block must match a fresh authoritative presentation');
+  // Keep the outer tree partial past the quiet-time refresh. A fast host can
+  // otherwise finish parsing first and conceal a redundant whole-document build.
+  const nestedParseClient = await page.createCDPSession();
+  await nestedParseClient.send('Emulation.setCPUThrottlingRate', { rate: 6 });
   const newlineBuilds = await page.evaluate(() => {
     const scope = window as any, api = scope.__liveHistory, editor = scope.__nestedBudgetEditor;
     scope.__nestedBeforeEnter = editor.getText();
     api.renderedBlocks(editor);
     scope.__nestedBeforeEnterDiscoveries = scope.__renderedDiscoveries ?? 0;
     const builds = scope.__fullLiveBuilds ?? 0;
-    api.input(editor, editor.getText().indexOf('NESTED_TARGETxx') + 'NESTED_TARGETxx'.length, '\n      ', Date.now() + 10_000);
+    scope.__liveTestParseEnd = 128; scope.__liveTestFreshParse = true;
+    try { api.input(editor, editor.getText().indexOf('NESTED_TARGETxx') + 'NESTED_TARGETxx'.length, '\n      ', Date.now() + 10_000); }
+    finally { delete scope.__liveTestParseEnd; delete scope.__liveTestFreshParse; }
     scope.__nestedBeforeEnterBuilds = builds;
     return (scope.__fullLiveBuilds ?? 0) - builds;
   });
   assert.equal(newlineBuilds, 0, 'a local newline must preserve distant Live presentation on its input frame');
   await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__nestedBudgetEditor));
+  await nestedParseClient.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+  await nestedParseClient.detach();
   assert.equal(await page.evaluate(() => ((window as any).__fullLiveBuilds ?? 0) - (window as any).__nestedBeforeEnterBuilds), 0,
     'settling a newline inside a closed Markdown block must not rebuild the whole document');
   assert.equal(await page.evaluate(() => ((window as any).__renderedDiscoveries ?? 0) - (window as any).__nestedBeforeEnterDiscoveries), 0,

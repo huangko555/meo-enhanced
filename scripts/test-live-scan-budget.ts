@@ -14,7 +14,7 @@ import { IterMode, NodeType, parseMixed, Tree } from '@lezer/common';
 import { javascriptLanguage } from '@codemirror/lang-javascript';
 import { imagePresentationFactoryFacet, type ImagePresentationFactory } from '../webview/src/editor/imagePresentation';
 import { longCodeBlockSessionUiExtension } from '../webview/src/helpers/longCodeBlocks';
-import { hasMappedLiveInputPresentation, supersedeLiveInputDerivedWork } from '../webview/src/editor/liveInputDerivedWork';
+import { hasMappedLiveInputPresentation, supersedeLiveInputDerivedWork, liveInputDerivedWorkExtensions, mapLiveInputDerivedDecorations } from '../webview/src/editor/liveInputDerivedWork';
 import { getLiveRenderedBlocks } from '../webview/src/helpers/liveRenderedBlocks';
 import { setLatexMathBlockModeEffect } from '../webview/src/helpers/latexMathEditing';
 import { setHtmlEditingRangeEffect } from '../webview/src/helpers/htmlContent';
@@ -22,6 +22,37 @@ import { mergeConflictSourceExtensions, parseMergeConflicts } from '../webview/s
 import { markdownTagField } from '../webview/src/helpers/tags';
 import { getLivePresentationBand, liveViewportPresentationExtensions } from '../webview/src/helpers/liveViewportPresentation';
 import { livePresentationWindow } from '../webview/src/helpers/livePresentationWindow';
+
+{
+  class AcceptedBlock extends WidgetType {
+    readonly [liveWidgetPositionsIndependent] = true;
+    [mapLiveWidgetPositions]() { return this; }
+    get estimatedHeight() { return 500; }
+  }
+  const state = EditorState.create({ doc: 'x'.repeat(600) + '\n\nTarget paragraph.\n\n' + 'x'.repeat(100_010),
+    extensions: liveInputDerivedWorkExtensions({ largeDocument: true }) });
+  const mark = Decoration.mark({ class: 'unchanged-distant-mark' });
+  const firstBlock = new AcceptedBlock();
+  const ranges = Array.from({ length: 20_000 }, (_, index) => mark.range(620 + index * 5, 622 + index * 5));
+  ranges.push(Decoration.replace({ widget: firstBlock, block: true }).range(102, 500));
+  ranges.push(Decoration.replace({ widget: new AcceptedBlock(), block: true }).range(1000, 1100));
+  const before = prepareLiveWidgetPositions(Decoration.set(ranges, true));
+  let reads = 0;
+  Object.defineProperty(mark, 'point', { get() { reads++; return false; } });
+  const change = state.update({ changes: { from: 602, insert: '- ' }, userEvent: 'input.toolbar.block' });
+  const after = mapLiveInputDerivedDecorations(before, change);
+  reads = 0;
+  RangeSet.compare(liveWidgetPresentationLayers(before), liveWidgetPresentationLayers(after), change.changes,
+    { compareRange() {}, comparePoint(from, to) { assert.fail(`deferred input must retain unchanged height points at ${from}..${to}`); } }, 0);
+  assert.ok(reads < 1_000, `fallback height comparison must skip unchanged marks (${reads} reads)`);
+  const inside = state.update({ changes: { from: 200, insert: 'x' }, userEvent: 'input.type' });
+  const filtered = mapLiveInputDerivedDecorations(before, inside);
+  const removed = new Set<WidgetType>();
+  RangeSet.compare(liveWidgetPresentationLayers(before), liveWidgetPresentationLayers(filtered), inside.changes,
+    { compareRange() {}, comparePoint(_from, _to, left, right) { if (left?.spec.widget && !right) removed.add(left.spec.widget); } }, 0);
+  assert.ok(removed.size === 1 && removed.has(firstBlock), 'only the widget covering edited source may be dropped');
+  console.log(`Deferred input retains unrelated block heights and 20,000 mark chunks (${reads} point reads)`);
+}
 
 {
   const text = '# Pending Live\n\n' + 'Ordinary **formatted** paragraph.\n\n'.repeat(8_000);

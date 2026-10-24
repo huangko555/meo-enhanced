@@ -2703,7 +2703,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     // does not change cell text, diagnostics or footnote presentation.
     const contentChanged = this.tableData.signature !== tableData.signature
       && cellPreviewSignature(this.tableData) !== cellPreviewSignature(tableData);
-    const previousStartLine = this.tableData.startLine;
+    const previousData = this.tableData;
+    const previousStartLine = previousData.startLine;
     this.tableData = tableData;
     if (!this.domRefs) return;
     const { shell, table, rowEntries, allRowInputs } = this.domRefs;
@@ -2722,8 +2723,26 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       const bodyIndex = row.dataset.tableBodyRow;
       setSourceData(row, 'sourceLineNumber', String(tableData.startLine + (bodyIndex === undefined ? 0 : Number(bodyIndex) + 2)));
     });
+    if (previousData.sourceRanges !== tableData.sourceRanges) {
+      // Absolute action coordinates are metadata, not a reason to rebuild an
+      // unchanged preview (and reload its images). Rebase only those controls.
+      for (const swatch of table.querySelectorAll<HTMLElement>('.meo-md-color-swatch-interactive')) {
+        const input = swatch.closest('.meo-md-html-table-cell-content')?.querySelector<HTMLTextAreaElement>('textarea');
+        const coords = input && this.parseCellCoords(input.dataset.tableRow, input.dataset.tableCol);
+        if (!coords) continue;
+        const previousRange = previousData.sourceRanges?.[coords.row]?.[coords.col];
+        const nextRange = tableData.sourceRanges?.[coords.row]?.[coords.col];
+        const from = Number(swatch.dataset.colorFrom);
+        if (previousRange && nextRange && previousRange.from !== nextRange.from && Number.isInteger(from)) {
+          swatch.dataset.colorFrom = String(from + nextRange.from - previousRange.from);
+        }
+      }
+    }
     if (contentChanged) {
       const values = [tableData.headerCells, ...tableData.rows];
+      const previousValues = [previousData.headerCells, ...previousData.rows];
+      const footnotesChanged = JSON.stringify(JSON.parse(previousData.signature).footnoteReferences)
+        !== JSON.stringify(JSON.parse(tableData.signature).footnoteReferences);
       const pending = this.cellInteraction.snapshot().pending;
       for (let row = 0; row < allRowInputs.length; row += 1) {
         for (let col = 0; col < allRowInputs[row].length; col += 1) {
@@ -2733,7 +2752,13 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
           // The native textarea may already own a newer, uncommitted edit.
           const ownsPending = pending.some(edit => edit.row === row && edit.col === col);
           if (input !== this.composingInput && !ownsPending && input.value !== value) input.value = value;
-          this.refreshCellPreviewFromInput(input);
+          // A cell owns its preview; reference numbering remains a dependency
+          // even when the cell's own source text has not changed.
+          if (previousValues[row]?.[col] !== values[row]?.[col]
+            || JSON.stringify(previousData.diagnostics?.[row]?.[col] ?? []) !== JSON.stringify(tableData.diagnostics?.[row]?.[col] ?? [])
+            || footnotesChanged && /\[\^|\^\[/.test(values[row]?.[col] ?? '')) {
+            this.refreshCellPreviewFromInput(input);
+          }
         }
       }
       this.stickyHeaderAdapter.update();
