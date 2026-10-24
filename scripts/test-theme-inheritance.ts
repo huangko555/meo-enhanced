@@ -186,7 +186,10 @@ try {
         assert.equal(row[3], emphasis, `${profile.id}: Live heading currentColor follows text emphasis`);
       }
       const copyRest = await page.$eval('.meo-copy-code-btn', element => getComputedStyle(element).color);
-      await page.hover('.meo-copy-code-btn');
+      // Startup syntax/layout can still settle after the first token appears.
+      // Hover only once the real control has a stable viewport position.
+      await page.locator('.meo-copy-code-btn').hover();
+      await page.waitForFunction(() => document.querySelector('.meo-copy-code-btn')?.matches(':hover'));
       await page.$eval('.meo-copy-code-btn', async element => {
         await Promise.all(element.getAnimations().map(animation => animation.finished.catch(() => undefined)));
       });
@@ -250,22 +253,26 @@ try {
           const root = document.documentElement, style = root.style;
           const read = () => Object.fromEntries([...style].filter(name => name.startsWith('--meo-ui-')).map(name => [name, style.getPropertyValue(name)]));
           const before = read(), oldMenu = style.getPropertyValue('--vscode-menu-background'), oldWidget = style.getPropertyValue('--vscode-editorWidget-background');
-          const oldEmphasis = style.getPropertyValue('--vscode-textLink-foreground');
+          const oldEmphasis = style.getPropertyValue('--meo-content-heading-input');
+          const oldLink = style.getPropertyValue('--meo-content-link-input');
           const refresh = () => (window as any).ThemeAcceptance.refreshUiTheme();
           refresh(); const reused = read();
           style.setProperty('--vscode-menu-background', '#ff00ff'); refresh(); const independent = read();
-          style.setProperty('--vscode-textLink-foreground', '#e886ff'); refresh(); const emphasisChanged = read();
-          if (oldEmphasis) style.setProperty('--vscode-textLink-foreground', oldEmphasis);
-          else style.removeProperty('--vscode-textLink-foreground');
+          style.setProperty('--meo-content-heading-input', '#e886ff'); refresh(); const emphasisChanged = read();
+          style.setProperty('--meo-content-heading-input', oldEmphasis);
+          style.setProperty('--meo-content-link-input', '#77eedd'); refresh(); const linkChanged = read();
+          style.setProperty('--meo-content-link-input', oldLink);
           style.setProperty('--vscode-editorWidget-background', '#122b38'); refresh(); const changed = read();
           style.setProperty('--vscode-menu-background', oldMenu); style.setProperty('--vscode-editorWidget-background', oldWidget); refresh();
-          return { before, reused, independent, emphasisChanged, changed, restored: read() };
+          return { before, reused, independent, emphasisChanged, linkChanged, changed, restored: read() };
         });
         assert.deepEqual(palette.reused, palette.before, 'Reapplying identical inputs preserves all UI roles');
         assert.deepEqual(palette.independent, palette.before, 'Floating UI derives from the toolbar base independently of native menu fills');
         for (const [name, value] of Object.entries(palette.before)) {
           if (name.startsWith('--meo-ui-text-emphasis')) assert.notEqual(palette.emphasisChanged[name], value, `Text emphasis invalidates ${name}`);
           else assert.equal(palette.emphasisChanged[name], value, `Text emphasis must not recolor ${name}`);
+          if (name === '--meo-ui-link' || name === '--meo-ui-link-background') assert.notEqual(palette.linkChanged[name], value, `Link input invalidates ${name}`);
+          else assert.equal(palette.linkChanged[name], value, `Link input must not recolor ${name}`);
         }
         assert.notEqual(palette.changed['--meo-ui-surface'], palette.before['--meo-ui-surface'], 'Changing the shared base invalidates the resolved palette');
         assert.notEqual(palette.changed['--meo-ui-surface-raised'], palette.before['--meo-ui-surface-raised'], 'Floating UI follows the changed shared base');
@@ -368,7 +375,7 @@ try {
           const context = canvas.getContext('2d')!;
           const footnoteBase = document.createElement('span'); footnoteBase.style.color = 'var(--meo-background)'; document.body.append(footnoteBase);
           const documentBackground = getComputedStyle(footnoteBase).color; footnoteBase.remove();
-          return { expected: resolve('text-emphasis-content'), colors: Object.fromEntries(selectors.map(selector => [selector,
+          return { expected: resolve('text-emphasis-content'), link: resolve('link'), colors: Object.fromEntries(selectors.map(selector => [selector,
             [...document.querySelectorAll(selector)].map(el => getComputedStyle(el).color)])),
             fills: [...document.querySelectorAll('.meo-md-list-marker-bullet-dot')].map(el => ({ fill: getComputedStyle(el).fill, stroke: getComputedStyle(el).stroke })),
             tableMarkers: [...document.querySelectorAll('.meo-md-html-table-cell-list > li')].map(el => getComputedStyle(el, '::marker').color),
@@ -377,7 +384,7 @@ try {
               const background = getComputedStyle(el).backgroundColor;
               context.clearRect(0, 0, 1, 1); context.fillStyle = documentBackground; context.fillRect(0, 0, 1, 1);
               context.fillStyle = background; context.fillRect(0, 0, 1, 1);
-              return { background, expected: resolve('text-emphasis-background'),
+              return { background, expected: resolve('link-background'),
                 carrier: `rgb(${[...context.getImageData(0, 0, 1, 1).data].slice(0, 3).join(', ')})` };
             }),
             backgrounds: ['--meo-background', '--meo-inline-code-background'].map(name => {
@@ -387,14 +394,15 @@ try {
         });
         for (const [selector, colors] of Object.entries(contentEmphasis.colors)) {
           assert.ok(colors.length, `${profile.id}: ${selector} is rendered`);
-          assert.ok(colors.every(color => color === contentEmphasis.expected), `${profile.id}: ${selector} shares content text emphasis (${colors.join(', ')}; expected ${contentEmphasis.expected})`);
+          const expected = /link|footnote/.test(selector) ? contentEmphasis.link : contentEmphasis.expected;
+          assert.ok(colors.every(color => color === expected), `${profile.id}: ${selector} shares content text emphasis (${colors.join(', ')}; expected ${contentEmphasis.expected})`);
         }
         assert.ok(contentEmphasis.fills.length && contentEmphasis.fills.every(value => value.fill === contentEmphasis.expected || value.stroke === contentEmphasis.expected), `${profile.id}: list bullet fills/strokes`);
         assert.ok(contentEmphasis.tableMarkers.length && contentEmphasis.tableMarkers.every(value => value === contentEmphasis.expected), `${profile.id}: table list markers`);
         assert.ok(contentEmphasis.body.every(color => color !== contentEmphasis.expected), `${profile.id}: list body keeps ordinary document color`);
         assert.ok(contentEmphasis.backgrounds.every(background => contrastRatio(contentEmphasis.expected, background) >= 4.5), `${profile.id}: content emphasis is readable on document and inline code`);
         assert.ok(contentEmphasis.footnotes.length && contentEmphasis.footnotes.every(note => note.background === note.expected && note.carrier !== contentEmphasis.backgrounds[0]), `${profile.id}: reference and definition numbers use a visible derived emphasis tint`);
-        assert.ok(contentEmphasis.footnotes.every(note => contrastRatio(contentEmphasis.expected, note.carrier) >= 4.5), `${profile.id}: footnotes remain readable on their composited emphasis tint`);
+        assert.ok(contentEmphasis.footnotes.every(note => contrastRatio(contentEmphasis.link, note.carrier) >= 4.5), `${profile.id}: footnotes remain readable on their composited emphasis tint`);
         await page.waitForSelector('.meo-md-color-swatch-interactive');
         await page.click('.meo-md-color-swatch-interactive');
         await page.waitForSelector('.meo-hex-color-adjustment');

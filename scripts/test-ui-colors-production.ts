@@ -219,7 +219,7 @@ try {
   assert.match(await page.$eval('.appearance-note', e => e.textContent!), /dark default palette/);
   assert.match(await page.$eval('.appearance-color-reset', e => e.getAttribute('aria-label')!), /Default dark palette/);
   await page.click('.settings-search'); await page.keyboard.type('Default dark palette');
-  assert.equal(await page.$$eval('.appearance-item', elements => elements.length), 8, 'default palette searches expose all color inputs');
+  assert.equal(await page.$$eval('.appearance-item', elements => elements.length), 9, 'default palette searches expose all color inputs');
   await page.click('.settings-search-clear');
   await page.evaluate(inputs => { for (const [key, value, priority] of inputs) document.documentElement.style.setProperty(key!, value!, priority!); }, originalHostInputs);
   await changeHost('dark'); await page.click('[data-appearance-mode="auto"]');
@@ -356,6 +356,83 @@ try {
   assert.equal(await value('surface'), '#122739');
   await page.click(resetColors); await saved('dark', 'surface', null); await saved('light', 'surface', null);
   assert.deepEqual(owner.getUiColors(), {light: {}, dark: {}}, 'reset immediately clears both profiles');
+  // Distinct syntax colors must reach actual reading content, not just swatches.
+  await page.click('.settings-close');
+  const fixture = '# Heading [**heading link**](https://example.com)\n\n- List body\n1. Numbered body\n\n[Link **bold**](https://example.com) and [^note]\n\n| Item | Value |\n| --- | --- |\n| Link | [Table link](https://example.com) |\n\n[^note]: Footnote\n\nEnd';
+  const ink = (selector: string) => page.$eval(selector, element => getComputedStyle(element).color);
+  for (const scheme of ['dark', 'light'] as const) {
+    const heading = scheme === 'dark' ? '#DDEE66' : '#445500';
+    const link = scheme === 'dark' ? '#66CCFF' : '#004477';
+    await page.evaluate(({ scheme, heading, link, fixture }) => {
+      document.body.className = `vscode-${scheme}`;
+      const root = document.documentElement.style;
+      root.setProperty('--vscode-editor-background', scheme === 'dark' ? '#22272e' : '#ffffff');
+      root.setProperty('--vscode-editor-foreground', scheme === 'dark' ? '#dddddd' : '#222222');
+      root.setProperty('--vscode-editorWidget-background', scheme === 'dark' ? '#22272e' : '#fafafa');
+      window.dispatchEvent(new MessageEvent('message', { data: {type: 'vscodeCodeThemeChanged', appearance: scheme,
+        vscodeTheme: {name: 'Distinct accents', type: scheme, colors: {'editor.foreground': scheme === 'dark' ? '#dddddd' : '#222222'}, tokenColors: [
+          {scope: 'markup.heading', settings: {foreground: heading}},
+          {scope: 'markup.underline.link', settings: {foreground: link}}
+        ]}
+      }}));
+      const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor'));
+      view.dispatch({changes: {from: 0, to: view.state.doc.length, insert: fixture}, selection: {anchor: fixture.length}});
+    }, {scheme, heading, link, fixture});
+    await page.click('[data-mode="live"]');
+    await page.waitForSelector('.meo-md-html-table-cell-preview .meo-md-link');
+    const expectedHeading = scheme === 'dark' ? 'rgb(221, 238, 102)' : 'rgb(68, 85, 0)';
+    const expectedLink = scheme === 'dark' ? 'rgb(102, 204, 255)' : 'rgb(0, 68, 119)';
+    assert.equal(await ink('.meo-md-heading-content'), expectedHeading, 'readable Source heading color is preserved');
+    assert.equal(await ink('.meo-md-list-marker-ordered'), expectedHeading, 'numbered lists share the heading color');
+    for (const selector of ['.meo-md-link', '.meo-md-link .meo-md-strong, .meo-md-strong.meo-md-link', '.meo-md-html-table-cell-preview .meo-md-link', '.meo-md-footnote-ref', '.meo-md-footnote-backref']) {
+      assert.equal(await ink(selector), expectedLink, `${scheme}: ${selector} uses the independent Source link color`);
+    }
+    if (screenshots) await page.screenshot({path: path.join(screenshots, `split-colors-${scheme}.png`)});
+    await openSettings();
+    if (screenshots) {
+      await page.$eval('[data-setting="link"]', element => element.scrollIntoView({block: 'center'}));
+      await page.screenshot({path: path.join(screenshots, `split-settings-${scheme}.png`)});
+    }
+    await edit('link', scheme === 'dark' ? '#FFBBCC' : '#660033');
+    await saved(scheme, 'link', scheme === 'dark' ? '#FFBBCC' : '#660033');
+    assert.equal(await ink('.meo-md-heading-content'), expectedHeading, 'link overrides leave headings unchanged');
+    assert.notEqual(await ink('.meo-md-link'), expectedLink);
+    await page.click('[data-setting="link"] .appearance-color-reset');
+    await saved(scheme, 'link', null);
+    assert.equal(await ink('.meo-md-link'), expectedLink, 'reset returns to Source link color');
+    await edit('textEmphasis', scheme === 'dark' ? '#FFBBCC' : '#660033');
+    await saved(scheme, 'textEmphasis', scheme === 'dark' ? '#FFBBCC' : '#660033');
+    assert.equal(await ink('.meo-md-link'), expectedLink, 'heading overrides leave links unchanged');
+    assert.notEqual(await ink('.meo-md-heading-content'), expectedHeading);
+    await page.click('[data-setting="textEmphasis"] .appearance-color-reset');
+    await saved(scheme, 'textEmphasis', null);
+    assert.equal(await ink('.meo-md-heading-content'), expectedHeading, 'reset returns to Source heading color');
+    await page.click('.settings-close');
+  }
+  for (const large of [false, true]) {
+    await page.evaluate(text => {
+      const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor'));
+      view.dispatch({changes: {from: 0, to: view.state.doc.length, insert: text}, selection: {anchor: 10}, scrollIntoView: true});
+    }, fixture + (large ? '\n\n' + 'A plain paragraph for the large document color projection.\n\n'.repeat(5000) : ''));
+    await page.waitForSelector('.meo-md-link');
+    const stable = await page.evaluate(async () => {
+      const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+      await frame(); await frame();
+      const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor'));
+      const state = view.state;
+      const line = document.querySelector('.cm-line');
+      const link = document.querySelector('.meo-md-link')!;
+      const before = getComputedStyle(link).color;
+      const top = view.scrollDOM.scrollTop;
+      window.dispatchEvent(new MessageEvent('message', {data: {type: 'uiColorsChanged', colors: {light: {link: '#660033'}, dark: {}}}}));
+      await frame(); await frame();
+      return {state: view.state === state, line: document.querySelector('.cm-line') === line,
+        link: document.querySelector('.meo-md-link') === link, scroll: Math.abs(view.scrollDOM.scrollTop - top) < 1,
+        recolored: getComputedStyle(link).color !== before};
+    });
+    assert.deepEqual(stable, {state: true, line: true, link: true, scroll: true, recolored: true}, `${large ? 'large' : 'ordinary'} document color changes preserve editor state, DOM and viewport`);
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {data: {type: 'uiColorsChanged', colors: {light: {}, dark: {}}}})));
+  }
   assert.deepEqual(errors, []);
   console.log('Production appearance: bilingual light/dark layout, defaults, semantic colors, drag projection/coalescing, autosave, all close paths, validation, retry, reload, external changes, delayed acknowledgements and high contrast passed');
 } finally { await closeTestBrowser(browser); }

@@ -2,6 +2,7 @@ import darkPlus from '@shikijs/themes/dark-plus';
 import lightPlus from '@shikijs/themes/light-plus';
 import {
   resolveFinalCodePalette,
+  resolveMarkdownContentColors,
   type FinalCodePalette,
   type RawCodeTheme
 } from '../application/finalCodePalette';
@@ -76,6 +77,9 @@ export function createCodePaletteWebviewAdapter(input: {
         }
       }
       sourceStyle.setProperty('--meo-source-foreground', documentTheme.colors['editor.foreground'] ?? (documentTheme.type === 'light' ? '#000000' : '#d4d4d4'));
+      const contentColors = resolveMarkdownContentColors(documentTheme);
+      sourceStyle.setProperty('--meo-content-heading-input', contentColors.heading);
+      sourceStyle.setProperty('--meo-content-link-input', contentColors.link);
       input.setSourceDocumentTheme?.(documentTheme);
     }
   };

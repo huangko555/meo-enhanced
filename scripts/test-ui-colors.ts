@@ -20,7 +20,8 @@ for (const invalid of [null, [], { surface: '#123' }, { dark: [] }, { light: { u
   assert.equal(decodeWebviewToHostMessage({ type: 'updateUiColors', requestId: 'test', colors: invalid }), null);
   assert.equal(decodeHostToWebviewMessage({ type: 'uiColorsChanged', colors: invalid }), null);
 }
-const colors = { light: { accent: '#226644', documentBackground: '#FFFAEE' }, dark: { textEmphasis: '#99CCAA', documentBackground: '#182C38' } };
+const colors = { light: { accent: '#226644', documentBackground: '#FFFAEE', link: '#0055AA' }, dark: { textEmphasis: '#99CCAA', link: '#66CCFF', documentBackground: '#182C38' } };
+assert.deepEqual(decodeUiColors({ dark: { textEmphasis: '#99CCAA' } }), { light: {}, dark: { textEmphasis: '#99CCAA' } }, 'existing heading overrides survive without forcing a link override');
 assert.deepEqual(decodeWebviewToHostMessage({ type: 'updateUiColors', requestId: 'save', colors }), { type: 'updateUiColors', requestId: 'save', colors });
 assert.equal(decodeWebviewToHostMessage({ type: 'updateUiColors', requestId: '', colors }), null);
 assert.equal(decodeHostToWebviewMessage({ type: 'uiColorsResult', requestId: 'save', result: { ok: true, value: { dark: { text: 'red' } } } }), null);

@@ -11,6 +11,7 @@ export const defaultUiColors = {
     text: '#202020',
     accent: '#0069CC',
     textEmphasis: '#0069CC',
+    link: '#0069CC',
     success: '#73C991',
     warning: '#BF8803',
     danger: '#AD0707'
@@ -21,6 +22,7 @@ export const defaultUiColors = {
     text: '#BFBFBF',
     accent: '#297AA0',
     textEmphasis: '#48A0C7',
+    link: '#48A0C7',
     success: '#73C991',
     warning: '#CCA700',
     danger: '#F48771'

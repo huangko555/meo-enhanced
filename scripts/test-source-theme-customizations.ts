@@ -25,9 +25,18 @@ assert.deepEqual(live, customized, 'Existing code surfaces retain the original t
 assert.equal((source as typeof theme).colors['editor.foreground'], '#eeeeee');
 assert.equal((source as typeof theme).tokenColors.length, 4);
 assert.equal(writes.get('--meo-source-foreground'), '#eeeeee');
+assert.equal(writes.get('--meo-content-heading-input'), '#44aaff', 'heading accent uses the Source override without borrowing heading punctuation');
+assert.equal(writes.get('--meo-content-link-input'), '', 'absent link rules clear the previous input for UI fallback');
+adapter.apply(adapter.resolve({ ...customized, sourceTokenColors: [...custom.sourceTokenColors,
+  { scope: 'markup.underline.link.markdown', settings: { foreground: '#66ccff' } }
+] }, 'dark'));
+assert.equal(writes.get('--meo-content-link-input'), '#66ccff', 'link accent follows Source customizations independently');
+assert.equal(writes.get('--meo-content-heading-input'), '#44aaff');
 adapter.apply(adapter.resolve(customized, 'light'));
 assert.equal((source as typeof theme).type, 'light');
 assert.notEqual((source as typeof theme).colors['editor.foreground'], '#eeeeee', 'Inverse appearance cannot borrow dark user customizations');
+assert.notEqual(writes.get('--meo-content-heading-input'), '#44aaff');
+assert.notEqual(writes.get('--meo-content-link-input'), '#66ccff');
 const missing = { ...theme, tokenColors: [], sourceTokenColors: [{ scope: 'comment', settings: { foreground: '#123456' } }], sourceColors: { 'editor.foreground': '#abcdef' } };
 adapter.apply(adapter.resolve(missing, 'dark'));
 assert.equal((source as typeof theme).colors['editor.foreground'], '#abcdef');

@@ -141,11 +141,14 @@ export function applyUiTheme(appearance: 'light' | 'dark', matchesHost: boolean,
       || documentDark !== (appearance === 'dark') ? 'low' : 'normal';
     // Matches start from the final heading ink. Keep it unchanged when readable,
     // otherwise apply only the existing contrast correction for the menu carrier.
-    const textEmphasis = custom.textEmphasis ? sample(custom.textEmphasis) : read('textLink.foreground', defaults.textEmphasis, contentSurface);
-    const footnoteBackground = `color-mix(in srgb, ${rgb(textEmphasis)} 12%, transparent)`;
-    const contentSurfaces = [contentSurface,
-      inlineSurface,
-      sample(footnoteBackground, contentSurface)];
+    const contentInput = (kind: 'heading' | 'link', fallbackColor: string): Rgb => highContrast
+      ? read('textLink.foreground', fallbackColor, contentSurface)
+      : sample(`var(--meo-content-${kind}-input, ${color('textLink.foreground', fallbackColor)})`, contentSurface);
+    const textEmphasis = custom.textEmphasis ? sample(custom.textEmphasis) : contentInput('heading', defaults.textEmphasis);
+    const link = custom.link ? sample(custom.link) : contentInput('link', defaults.link);
+    const footnoteBackground = `color-mix(in srgb, ${rgb(link)} 12%, transparent)`;
+    const contentSurfaces = [contentSurface, inlineSurface, tableSurface];
+    const linkSurfaces = [...contentSurfaces, sample(footnoteBackground, contentSurface)];
     const tint = endpoint([surface]);
     // All ordinary surfaces must admit one shared neutral foreground. Near
     // middle luminance, a fixed hover mix can otherwise cross that boundary.
@@ -156,7 +159,7 @@ export function applyUiTheme(appearance: 'light' | 'dark', matchesHost: boolean,
     const nativeActiveBorder = highContrast ? read('contrastActiveBorder', color('focusBorder', rgb(accent)), raised) : undefined;
     const nativeSelection = highContrast ? read('list.activeSelectionBackground', rgb(raised), raised) : undefined;
     const nativeSelectionText = highContrast ? read('list.activeSelectionForeground', rgb(foreground), nativeSelection) : undefined;
-    const key = JSON.stringify([appearance, highContrast, surface, raised, foreground, accent, success, warning, danger, !!custom.success, !!custom.warning, !!custom.danger, textEmphasis, contentSurfaces, documentInk, blockSurface,
+    const key = JSON.stringify([appearance, highContrast, surface, raised, foreground, accent, success, warning, danger, !!custom.success, !!custom.warning, !!custom.danger, textEmphasis, link, contentSurfaces, linkSurfaces, documentInk, blockSurface,
       nativeFocus, nativeBorder, nativeActiveBorder, nativeSelection, nativeSelectionText]);
 
     if (paletteCache?.key !== key) {
@@ -213,13 +216,14 @@ export function applyUiTheme(appearance: 'light' | 'dark', matchesHost: boolean,
         accent, 'accent-hover': accentHover, 'on-accent': onAccent, 'accent-text': accentText,
         'text-emphasis': fit(contentEmphasis, highContrast ? [raised, hover] : [raised, hover, selected], 4.55),
         'text-emphasis-content': contentEmphasis,
+        link: fit(link, linkSurfaces, 4.55),
         'text-emphasis-selected': fit(contentEmphasis, [selected], 4.55),
         success: semanticColor(success, custom.success), warning: semanticColor(warning, custom.warning), danger: semanticColor(danger, custom.danger),
         'success-emphasis': semanticColor(success, custom.success, [surface, raised, hover]),
         'danger-emphasis': semanticColor(danger, custom.danger, [surface, raised, hover]),
         'switch-off': switchOff, 'on-switch-off': fit(mix(text, neutral(raised), 0.20), [switchOff], 3.05)
       }).map(([role, value]) => [role, rgb(value)]));
-      roles['text-emphasis-background'] = footnoteBackground;
+      roles['link-background'] = footnoteBackground;
       roles.shadow = appearance === 'light' ? '0 4px 12px rgb(0 0 0 / 14%)' : '0 4px 14px rgb(0 0 0 / 38%)';
       roles.scrim = appearance === 'light' ? 'rgb(0 0 0 / 28%)' : 'rgb(0 0 0 / 45%)';
       roles.scrollbar = `color-mix(in srgb, ${rgb(text)} 32%, transparent)`;

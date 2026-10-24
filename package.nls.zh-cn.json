@@ -13,7 +13,7 @@
   "config.language.zhCN": "使用简体中文。",
   "config.language.description": "MEO Enhanced 编辑器和预览界面的显示语言。",
   "config.appearance.auto": "跟随当前 VS Code 颜色主题。",
-  "config.appearance.colors": "八项基础颜色，包含独立的界面背景与文档背景，浅色与深色分别保存。未配置的颜色在明暗一致时跟随 VS Code 主题，不一致时使用内置默认浅色或深色配色。可在 MEO 设置 > 外观中调整。高对比度沿用 VS Code 规则。",
+  "config.appearance.colors": "九项基础颜色，包含独立的界面背景、文档背景、标题与链接颜色，浅色与深色分别保存。未配置的颜色在明暗一致时跟随 VS Code 主题，不一致时使用内置默认浅色或深色配色。可在 MEO 设置 > 外观中调整。高对比度沿用 VS Code 规则。",
   "config.appearance.light": "使用浅色外观。",
   "config.appearance.dark": "使用深色外观。",
   "config.appearance.editor": "新打开的 MEO Enhanced 编辑器面板的默认外观。",

@@ -387,7 +387,7 @@
               "type": "object",
               "additionalProperties": false,
               "patternProperties": {
-                "^(surface|documentBackground|text|accent|textEmphasis|success|warning|danger)$": {
+                "^(surface|documentBackground|text|accent|textEmphasis|link|success|warning|danger)$": {
                   "type": "string",
                   "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
                 }

@@ -124,6 +124,14 @@ function resolveTokenColor(
   return resolved;
 }
 
+/** Reading accents reuse the Source document rules, including user token overrides. */
+export function resolveMarkdownContentColors(theme: RawCodeTheme): { heading: string; link: string } {
+  return {
+    heading: resolveTokenColor(theme, SOURCE_TOKEN_SCOPES.heading!, ''),
+    link: resolveTokenColor(theme, SOURCE_TOKEN_SCOPES.link!, '')
+  };
+}
+
 function resolveHeadingFontWeight(theme: RawCodeTheme | null | undefined): '400' | '700' {
   let resolved: '400' | '700' = '400';
   for (const value of theme?.tokenColors ?? []) {

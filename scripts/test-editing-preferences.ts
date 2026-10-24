@@ -14,7 +14,7 @@ import type { EditingPreferences } from '../src/foundation/editingPreferences';
 import type { UpdateEditingPreferencesRequest } from '../src/protocol/editingPreferences';
 
 assert.deepEqual(Object.keys(generalSearchKeywords).sort(), ['lineNumbers', 'foldCode', 'width', 'strongColor', 'boldHeadings', 'stickyHeader', 'restorePosition', 'largeDocument', 'language'].sort());
-assert.deepEqual(appearanceCatalog.map(item => item.id).sort(), ['mode', 'fontSize', 'mouseWheelZoom', 'lineHeight', 'surface', 'documentBackground', 'text', 'accent', 'textEmphasis', 'success', 'warning', 'danger'].sort());
+assert.deepEqual(appearanceCatalog.map(item => item.id).sort(), ['mode', 'fontSize', 'mouseWheelZoom', 'lineHeight', 'surface', 'documentBackground', 'text', 'accent', 'textEmphasis', 'link', 'success', 'warning', 'danger'].sort());
 const wheelSetting = appearanceCatalog.find(item => item.id === 'mouseWheelZoom')!;
 for (const title of ['Ctrl + 滚轮调整字号', 'Cmd + 滚轮调整字号', 'Ctrl + wheel font size', 'Cmd + wheel font size']) {
   assert.ok(settingsSearchMatches(title, ...wheelSetting.title, ...wheelSetting.description, ...wheelSetting.keywords), `Search includes the displayed platform title: ${title}`);

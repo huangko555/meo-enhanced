@@ -3102,8 +3102,8 @@ html[data-editor-appearance='dark'] .meo-tooltip-shortcut { background: rgba(255
 
 .meo-live-strong-coloring .cm-editor.meo-mode-live :is(.meo-md-link, .meo-md-wiki-link) .meo-md-strong,
 .meo-live-strong-coloring .cm-editor.meo-mode-live .meo-md-strong:is(.meo-md-link, .meo-md-wiki-link) {
-  color: var(--meo-ui-text-emphasis-content) !important;
-  -webkit-text-fill-color: var(--meo-ui-text-emphasis-content) !important;
+  color: var(--meo-ui-link) !important;
+  -webkit-text-fill-color: var(--meo-ui-link) !important;
 }
 
 .cm-editor.meo-mode-live :is(.meo-md-marker, .meo-md-marker-active, .meo-md-code-marker, .meo-md-code-marker-active),
@@ -3170,11 +3170,17 @@ html[data-editor-appearance='dark'] .meo-tooltip-shortcut { background: rgba(255
 }
 
 .cm-editor.meo-mode-live .meo-md-link {
-  color: var(--meo-ui-text-emphasis-content, #79b8ff);
-  -webkit-text-fill-color: var(--meo-ui-text-emphasis-content, #79b8ff);
+  color: var(--meo-ui-link, #79b8ff);
+  -webkit-text-fill-color: var(--meo-ui-link, #79b8ff);
   text-decoration: underline;
-  text-decoration-color: var(--meo-ui-text-emphasis-content, #79b8ff);
+  text-decoration-color: var(--meo-ui-link, #79b8ff);
   text-underline-offset: 4px;
+}
+
+/* Embedded links keep their own ink inside the heading's formatted text. */
+.cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) :is(.meo-md-link, .meo-md-link :is(.meo-md-heading-content, .meo-md-em, .meo-md-strong, .meo-md-strike, .meo-md-highlight, .meo-md-inline-code), .meo-md-footnote-ref) {
+  color: var(--meo-ui-link) !important;
+  -webkit-text-fill-color: var(--meo-ui-link) !important;
 }
 
 .cm-editor.meo-mode-live .meo-md-url-boundary {
@@ -3246,11 +3252,11 @@ html[data-editor-appearance='dark'] .meo-tooltip-shortcut { background: rgba(255
 }
 
 .cm-editor.meo-mode-live :is(.meo-md-footnote-ref, .meo-md-footnote-backref, .meo-md-footnote-separator) {
-  color: var(--meo-ui-text-emphasis-content);
+  color: var(--meo-ui-link);
 }
 
 .cm-editor.meo-mode-live :is(.meo-md-footnote-ref, .meo-md-footnote-backref) {
-  background: var(--meo-ui-text-emphasis-background);
+  background: var(--meo-ui-link-background);
 }
 
 .cm-editor .meo-md-footnote-ref {
@@ -3274,8 +3280,8 @@ html[data-editor-appearance='dark'] .meo-tooltip-shortcut { background: rgba(255
 
 .cm-editor.meo-mode-live .meo-md-footnote-literal,
 .cm-editor.meo-mode-live .meo-md-footnote-literal * {
-  color: var(--meo-ui-text-emphasis-content) !important;
-  -webkit-text-fill-color: var(--meo-ui-text-emphasis-content) !important;
+  color: var(--meo-ui-link) !important;
+  -webkit-text-fill-color: var(--meo-ui-link) !important;
   text-decoration: none !important;
   vertical-align: baseline !important;
   font-size: inherit !important;
@@ -7483,7 +7489,7 @@ html[data-editor-appearance='dark'] body.vscode-dark
 }
 
 .cm-editor.meo-mode-live .meo-md-html-table-cell-preview .meo-md-link {
-  color: var(--meo-ui-text-emphasis-content, #79b8ff);
+  color: var(--meo-ui-link, #79b8ff);
   overflow-wrap: anywhere;
   word-break: normal;
 }

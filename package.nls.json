@@ -13,7 +13,7 @@
   "config.language.zhCN": "Use Simplified Chinese.",
   "config.language.description": "Display language for the MEO Enhanced editor and Preview interface.",
   "config.appearance.auto": "Follow the current VS Code color theme.",
-  "config.appearance.colors": "Eight base colors, including independent UI and document backgrounds, stored separately for light and dark appearances. Missing colors follow the VS Code theme when appearances match, otherwise use built-in light/dark defaults. Configure them in MEO Settings > Appearance. High contrast follows the existing VS Code rules.",
+  "config.appearance.colors": "Nine base colors, including independent UI/document backgrounds and heading/link colors, stored separately for light and dark appearances. Missing colors follow the VS Code theme when appearances match, otherwise use built-in light/dark defaults. Configure them in MEO Settings > Appearance. High contrast follows the existing VS Code rules.",
   "config.appearance.light": "Use the light appearance.",
   "config.appearance.dark": "Use the dark appearance.",
   "config.appearance.editor": "Default appearance for newly opened MEO Enhanced editor panels.",
