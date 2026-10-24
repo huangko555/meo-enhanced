@@ -1,7 +1,42 @@
-import { EditorSelection, Transaction } from '@codemirror/state';
+import { EditorSelection, Transaction, type Text } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import type { Tree } from '@lezer/common';
 import { getCodeContainerColumns, getIndentedCodeLinePrefix, indentedCodeBlockAt, parseBlockLinePrefix } from './codeBlockSource';
+
+/** Markdown source continues existing whitespace, not the embedded language's
+ * bracket/tag indentation. Literal block owners can also retain their container. */
+export function insertLiteralSourceNewline(view: EditorView, containerPrefix?: string, rememberContinuation = true): boolean {
+  const { state } = view;
+  if (state.readOnly || view.composing) return false;
+  const prefix = containerPrefix ?? '';
+  let continuation = '';
+  const transaction = state.update(state.changeByRange(range => {
+    const before = state.doc.sliceString(state.doc.lineAt(range.from).from, range.from);
+    const payload = before.startsWith(prefix) ? before.slice(prefix.length) : before;
+    continuation = prefix + /^[ \t]*/.exec(payload)![0];
+    const insert = '\n' + continuation;
+    return { changes: { from: range.from, to: range.to, insert },
+      range: EditorSelection.cursor(range.from + insert.length) };
+  }), { annotations: Transaction.userEvent.of('input'), scrollIntoView: true });
+  view.dispatch(transaction);
+  if (rememberContinuation && containerPrefix !== undefined && state.selection.ranges.length === 1) {
+    literalContinuations.set(transaction.newDoc, { head: transaction.newSelection.main.head, prefix: continuation });
+  }
+  return true;
+}
+
+// A known block's newline can precede its worker parse. The continuation is
+// valid only for that exact immutable output and caret. Another edit or caret
+// location cannot use it; weak keys retain no document, history or editor.
+const literalContinuations = new WeakMap<Text, { head: number; prefix: string }>();
+
+export function continueLiteralSourceNewline(view: EditorView): boolean {
+  const { state } = view, selection = state.selection.main;
+  if (state.selection.ranges.length !== 1 || !selection.empty) return false;
+  const continuation = literalContinuations.get(state.doc);
+  return continuation?.head === selection.head
+    ? insertLiteralSourceNewline(view, continuation.prefix) : false;
+}
 
 /** Continue literal indentation; an empty code row exits only the code layer. */
 export function insertIndentedCodeNewline(view: EditorView, tree: Tree, exitOnEmpty = true): boolean {

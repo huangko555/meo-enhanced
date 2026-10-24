@@ -47,7 +47,7 @@ import { setLivePointerSelectionActiveEffect } from './editor/livePointerSelecti
 import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
 import { insertMountedTableCellBreak } from './helpers/tables';
 import { insertCodeBlock, sourceCodeBlockLines } from './helpers/codeBlocks';
-import { insertIndentedCodeNewline } from './editor/indentedCodeEditing';
+import { continueLiteralSourceNewline, insertIndentedCodeNewline, insertLiteralSourceNewline } from './editor/indentedCodeEditing';
 import { getCodeBlockSourceLines } from './helpers/blockIndent';
 import { markdownInlineStyleTheme } from './helpers/inlineStyles';
 import { markdownTagField } from './helpers/tags';
@@ -2412,7 +2412,7 @@ export function createEditor({
         {
           key: 'Enter',
           run: (view) =>
-            insertMermaidNewline(view) || insertDisplayMathNewline(view) ||
+            continueLiteralSourceNewline(view) || insertMermaidNewline(view) || insertDisplayMathNewline(view) ||
             insertIndentedCodeNewline(view, resolvedSyntaxTreeAt(view.state, view.state.selection.main.to)) ||
             handleEnterContinueContainedCodeBlock(view) ||
             (view.state.facet(inputAssistanceFacet).lists && (
@@ -2429,7 +2429,8 @@ export function createEditor({
           (binding.key === 'Backspace' && selectedDisplayMathBody(view.state))
           || (binding.key === 'Enter' && !view.state.facet(inputAssistanceFacet).lists)
             ? false : binding.run?.(view) ?? false })),
-        ...defaultKeymap,
+        ...defaultKeymap.map(binding => binding.key === 'Enter'
+          ? { ...binding, run: insertLiteralSourceNewline, shift: insertLiteralSourceNewline } : binding),
         ...editorHistoryKeymap
       ]),
       historyCompartment.of(history()),
@@ -4526,25 +4527,19 @@ function insertTableCellLineBreak(view: EditorView): boolean {
 function handleEnterContinueContainedCodeBlock(view: EditorView): boolean {
   const { state } = view;
   const selection = state.selection.main;
-  if (!selection.empty) {
+  if (state.selection.ranges.length !== 1 || !selection.empty) {
     return false;
   }
 
-  const quotePrefix = getContainedCodeBlockLinePrefix(state, selection.from);
-  if (!quotePrefix) {
+  const continuation = getContainedCodeBlockLineContinuation(state, selection.from);
+  if (!continuation?.prefix) {
     return false;
   }
 
-  const insert = `\n${quotePrefix}`;
-  const nextPos = selection.from + insert.length;
-  view.dispatch({
-    changes: { from: selection.from, to: selection.from, insert },
-    selection: { anchor: nextPos }
-  });
-  return true;
+  return insertLiteralSourceNewline(view, continuation.prefix, continuation.literal);
 }
 
-function getContainedCodeBlockLinePrefix(state: EditorState, position: number): string | null {
+function getContainedCodeBlockLineContinuation(state: EditorState, position: number): { prefix: string; literal: boolean } | null {
   const line = state.doc.lineAt(position);
   let node: SyntaxNode | null = syntaxTree(state).resolveInner(position, -1);
   let codeBlock: SyntaxNode | null = null;
@@ -4560,7 +4555,13 @@ function getContainedCodeBlockLinePrefix(state: EditorState, position: number): 
   // Continue the complete container and payload indentation. A quote-only
   // prefix or generic Markdown indentation loses nested lists and footnotes.
   const payloadIndent = /^[ \t]*/.exec(state.doc.sliceString(source.prefixTo, line.to))?.[0] ?? '';
-  return state.doc.sliceString(line.from, source.prefixTo) + payloadIndent;
+  const opening = codeBlock.firstChild, closing = codeBlock.lastChild;
+  // Splitting before/inside a delimiter can change the block boundary. Only
+  // carry the receipt when the resulting caret is still in its literal body.
+  const literal = !source.isFence
+    || opening?.name === 'CodeMark' && line.from === state.doc.lineAt(opening.from).from && position >= opening.to
+    || closing?.name === 'CodeMark' && closing.from !== opening?.from && position === closing.from;
+  return { prefix: state.doc.sliceString(line.from, source.prefixTo) + payloadIndent, literal };
 }
 
 function deleteTableCellLineBreakBackward(view: EditorView): boolean {

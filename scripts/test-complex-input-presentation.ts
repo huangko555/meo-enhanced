@@ -207,6 +207,40 @@ try {
       assert.deepEqual(host.errors, []); await captureResult(page, `complex-long-table-${large}-${row}`);
     } finally { host.dispose(); await page.close(); }
   }
+  if (!only || only === 'literal-enter') for (const large of [false, true]) for (const mode of ['source', 'live'] as const) {
+    stage = `Rapid quoted code Enter ${mode}, large ${large}`;
+    const text = '> ```ts\n> const value = {}\n> ```\n\nAfter' + (large ? '\n'.repeat(8000) : '');
+    const at = text.indexOf('{}') + 1;
+    const page = await browser.newPage(), host = await open(page, text, false, mode);
+    try {
+      await page.evaluate(at => {
+        const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+        view.dispatch({ selection: { anchor: at }, scrollIntoView: true }); view.focus();
+      }, at);
+      await frames(page, 4);
+      for (let key = 0; key < 3; key++) await page.keyboard.press('Enter');
+      await delay(700);
+      const expected = text.slice(0, at) + '\n> '.repeat(3) + text.slice(at);
+      assert.ok(host.readHost() === expected, stage + ': retain the container during pending parses: '
+        + JSON.stringify({ actual: host.readHost().slice(0, 90), expected: expected.slice(0, 90) }));
+      // A different document must not inherit a previous block's continuation.
+      await page.evaluate(() => {
+        const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'Plain' }, selection: { anchor: 5 } });
+      });
+      await page.keyboard.press('Enter'); await delay(300);
+      assert.equal(host.readHost(), 'Plain\n', stage + ': discard obsolete continuation');
+      const closingEnd = text.indexOf('\n> ```') + '\n> ```'.length;
+      await page.evaluate(({ text, closingEnd }) => {
+        const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, selection: { anchor: closingEnd } });
+      }, { text, closingEnd });
+      await delay(700);
+      for (let key = 0; key < 3; key++) { await page.keyboard.press('Enter'); await delay(400); }
+      assert.ok(!host.readHost().slice(closingEnd).includes('> '), stage + ': closing fences must return to normal quote exit');
+      assert.deepEqual(host.errors, []);
+    } finally { host.dispose(); await page.close(); }
+  }
   if (!only || only === 'tokens') for (const large of [false, true]) for (const language of ['markdown', 'typescript']) {
     stage = `Token inheritance ${language}, large ${large}`;
     const body = language === 'markdown' ? '### Nested heading 55555' : 'const value = 55555;';

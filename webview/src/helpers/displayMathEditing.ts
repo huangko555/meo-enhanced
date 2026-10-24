@@ -14,6 +14,7 @@ import { createSourceFormatButton, type SourceFormatOutcome } from '../editor/so
 import { getUiStrings } from '../application/uiLanguage';
 import { getViewportController } from './viewportController';
 import { isBlockReading } from '../editor/blockInteraction';
+import { insertLiteralSourceNewline } from '../editor/indentedCodeEditing';
 
 function activeMathSource(state: EditorState) {
   if (state.readOnly || state.selection.ranges.length !== 1) return null;
@@ -170,11 +171,7 @@ export function insertDisplayMathNewline(view: EditorView): boolean {
   if (view.state.readOnly || view.state.selection.ranges.length !== 1) return false;
   const body = selectedDisplayMathBody(view.state);
   if (!body) return false;
-  const { from, to } = view.state.selection.main;
-  const insert = '\n' + body.prefix;
-  view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length },
-    annotations: Transaction.userEvent.of('input') });
-  return true;
+  return insertLiteralSourceNewline(view, body.prefix);
 }
 
 type MathActionsElement = HTMLSpanElement & { disposeMathActions?: () => void };

@@ -1850,6 +1850,18 @@ documents. Each key must inherit the preceding accepted token's color and weight
 including keys whose old/new language states both contain a pending parse.
 These slices complement the unchanged-content and work-budget contracts; they do
 not replace the full owning suites or prove native VS Code performance.
+`test-list-layout-interaction.ts` also drags text forward/backward across nested,
+ordered and task lists in ordinary and large documents. Markers must remain
+visible at stable positions, while precise marker edits still reveal source.
+`test-fenced-block-enter-stability.ts` checks literal newline indentation against
+native Markdown examples across Source/Live and both sizes, including HTML,
+Mermaid, math, quoted containers and undo; inner language brackets must not add
+an indentation level or a second newline.
+`test-complex-input-presentation.ts --only=literal-enter` repeats quoted-code
+Enter against the real Worker in both modes and sizes, then replaces the document
+to verify that a prior literal continuation cannot leak into unrelated prose.
+It also leaves the closing fence and exits empty quotes, ensuring that the
+continuation is retained only when the next caret still belongs to literal code.
 The local-unit slice also formats rich prose after an earlier table, exercising
 the deferred fallback. `test-live-scan-budget.ts` compares actual CodeMirror height
 points before/after its filtering with 20,000 marks: unchanged blocks must remain

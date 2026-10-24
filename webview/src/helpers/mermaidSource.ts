@@ -3,6 +3,7 @@ import type { EditorView } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import { getCodeBlockSourceLines, parseBlockLinePrefix } from './blockIndent';
 import { getFencedCodeInfo, currentSyntaxTree } from './markdownSyntax';
+import { insertLiteralSourceNewline } from '../editor/indentedCodeEditing';
 
 export function mermaidSourceAt(state: EditorState, position = state.selection.main.head) {
   let node: SyntaxNode | null = currentSyntaxTree(state).resolveInner(
@@ -60,14 +61,7 @@ export function mermaidPasteText(view: EditorView, text: string): string | null 
 export function insertMermaidNewline(view: EditorView): boolean {
   const source = selectedMermaidSource(view);
   if (!source) return false;
-  const selection = view.state.selection.main,
-    insert = '\n' + source.prefix;
-  view.dispatch({
-    changes: { from: selection.from, to: selection.to, insert },
-    selection: { anchor: selection.from + insert.length },
-    userEvent: 'input'
-  });
-  return true;
+  return insertLiteralSourceNewline(view, source.prefix);
 }
 
 export function indentMermaidSource(view: EditorView, outdent: boolean): boolean {

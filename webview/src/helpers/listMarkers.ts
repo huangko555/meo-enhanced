@@ -605,12 +605,12 @@ export function addListMarkerDecoration(
   const markerEnd = line.from + marker.markerEndOffset;
   const markerTo = line.from + marker.toOffset;
 
-  // Keep editable source whenever the caret/selection enters a marker. A
-  // contenteditable=false replacement cannot represent a caret in its interior.
+  // A caret or a precise marker-only selection needs editable source. A text
+  // selection spanning the item keeps its marker and stable reading geometry.
   // A prefix without a separator also has no room for the widget's trailing gap.
   const editingMarker = state.selection.ranges.some(range => range.empty
     ? range.head > indentEnd && range.head < markerTo
-    : range.from < markerTo && range.to > indentEnd);
+    : range.from >= indentEnd && range.to <= markerTo);
   if (options?.useSourceStyleLiteral || marker.toOffset === marker.markerEndOffset || editingMarker) {
     if (markerTo > indentEnd) {
       builder.push(sourceListMarkerDeco.range(indentEnd, markerTo));

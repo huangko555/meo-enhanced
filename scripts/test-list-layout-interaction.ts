@@ -160,6 +160,61 @@ async function assertListPrefixTyping(page: import('puppeteer-core').Page): Prom
   console.log('list prefix typing and separator deletion frames passed in light/dark themes');
 }
 
+async function assertListTextSelection(page: import('puppeteer-core').Page): Promise<void> {
+  for (const large of [false, true]) for (const backwards of [false, true]) {
+    const text = 'Before\n\n- bullet\n  - nested\n\n1. numbered\n\n> - [ ] task\n\nAfter' + (large ? '\n'.repeat(8000) : '');
+    await page.evaluate(text => {
+      const scope = window as any, host = document.getElementById('editor-host')!;
+      host.replaceChildren();
+      scope.__listSelectionEditor = scope.ListEditingHarness.createEditor({ parent: host, text, initialMode: 'live', onApplyChanges() {} });
+      scope.__listSelectionEditor.focus();
+    }, text);
+    try {
+      await page.evaluate(async () => { for (let i = 0; i < 6; i++) await new Promise(requestAnimationFrame); });
+      const points = await page.evaluate(backwards => {
+        const scope = window as any, view = scope.__listSelectionEditor.view;
+        scope.__listSelectionMarkers = [...view.contentDOM.querySelectorAll('.meo-md-list-marker, .meo-task-checkbox')];
+        scope.__listSelectionFrames = [];
+        const sample = () => {
+          // CodeMirror can split a marked line's DOM when selection crosses it.
+          // Its visible marker and the surrounding line geometry must persist.
+          const markers = [...view.contentDOM.querySelectorAll('.meo-md-list-marker, .meo-task-checkbox')] as HTMLElement[];
+          scope.__listSelectionFrames.push(markers.map(node => ({ top: node.getBoundingClientRect().top, height: node.getBoundingClientRect().height })));
+          scope.__listSelectionFrame = requestAnimationFrame(sample);
+        }; sample();
+        const start = view.coordsAtPos(2)!, end = view.coordsAtPos(view.state.doc.toString().indexOf('After') + 3)!;
+        const points = [start, end].map(rect => ({ x: rect.left, y: (rect.top + rect.bottom) / 2 }));
+        return backwards ? points.reverse() : points;
+      }, backwards);
+      await page.mouse.move(points[0]!.x, points[0]!.y); await page.mouse.down();
+      await page.mouse.move(points[1]!.x, points[1]!.y, { steps: 16 }); await page.mouse.up();
+      await page.evaluate(async () => { for (let i = 0; i < 6; i++) await new Promise(requestAnimationFrame); });
+      const result = await page.evaluate(() => {
+        const scope = window as any, view = scope.__listSelectionEditor.view;
+        cancelAnimationFrame(scope.__listSelectionFrame);
+        const baseline = scope.__listSelectionFrames[0];
+        return { count: baseline.length, stable: scope.__listSelectionFrames.every((frame: Array<{ top: number; height: number }>) =>
+          frame.length === baseline.length && frame.every((value, index) => Math.abs(value.top - baseline[index].top) <= 1 && value.height > 0)),
+          text: view.state.doc.sliceString(view.state.selection.main.from, view.state.selection.main.to), source: view.state.doc.toString() };
+      });
+      assert.ok(result.count >= 4 && result.stable, `large ${large} backwards ${backwards}: dragging must retain list markers and tasks: ${JSON.stringify(result)}`);
+      assert.equal(result.source, text);
+      assert.ok(result.text.includes('- bullet\n  - nested') && result.text.includes('> - [ ] task'), 'selection retains original Markdown for copying');
+      const editable = await page.evaluate(() => {
+        const view = (window as any).__listSelectionEditor.view;
+        const from = view.state.doc.toString().indexOf('- bullet');
+        view.dispatch({ selection: { anchor: from + 1 } });
+        const caret = view.contentDOM.querySelectorAll('.meo-md-list-marker-bullet').length;
+        view.dispatch({ selection: { anchor: from, head: from + 2 } });
+        return { caret, markerSelection: view.contentDOM.querySelectorAll('.meo-md-list-marker-bullet').length };
+      });
+      assert.deepEqual(editable, { caret: 1, markerSelection: 1 }, 'a precise marker edit must still reveal source');
+    } finally {
+      await page.evaluate(() => (window as any).__listSelectionEditor.destroy());
+    }
+  }
+}
+
 async function assertOrderedMarkerWidths(page: import('puppeteer-core').Page): Promise<void> {
   const fixtures = [
     { initial: '', prefix: '', start: 1, count: 12, suffix: '.', task: false, repeated: 1 },
@@ -255,6 +310,7 @@ async function main(): Promise<void> {
     ` });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
+    await assertListTextSelection(page);
     await assertListPrefixTyping(page);
     await assertOrderedMarkerWidths(page);
 

@@ -48,6 +48,49 @@ const fixtures: readonly FenceFixture[] = [
 ];
 const failures: string[] = [];
 
+async function assertLiteralSourceEnter(page: Page): Promise<void> {
+  // Native VS Code Markdown (1.143.1), with two-space editing options: inner
+  // code/HTML syntax does not add indentation or split a matched pair twice.
+  const fixtures = [
+    { before: '```ts\nconst value = {|\nnext\n```', insert: '\n' },
+    { before: '```ts\nconst value = {|}\n```', insert: '\n' },
+    { before: '```ts\n  const value = 1;|\n```', insert: '\n  ' },
+    { before: '```ts\n|  const value = 1;\n```', insert: '\n' },
+    { before: '<div>|</div>', insert: '\n' },
+    { before: '```mermaid\nflowchart TD\n    A --> B|\n```', insert: '\n    ' },
+    { before: '$$\n  x + y|\n$$', insert: '\n  ' },
+    { before: '> ```ts\n>   const value = 1;|\n> ```', insert: '\n>   ' },
+    { before: '> $$\n>   x + y|\n> $$', insert: '\n>   ' }
+  ];
+  for (const mode of ['source', 'live']) for (const large of [false, true]) for (const fixture of fixtures) {
+    const at = fixture.before.indexOf('|');
+    const text = fixture.before.replace('|', '') + (large ? '\n'.repeat(8000) : '');
+    const label = `literal Enter ${mode} large ${large}: ${fixture.before}`;
+    await page.evaluate(({ text, at, mode }) => {
+      const scope = window as any;
+      scope.__editor?.destroy(); document.getElementById('app')!.replaceChildren();
+      const editor = scope.__editor = scope.LineNumberTypingHarness.createEditor({
+        parent: document.getElementById('app')!, text, initialMode: mode, onApplyChanges() {}
+      });
+      editor.view.dispatch({ selection: { anchor: at }, scrollIntoView: true }); editor.focus();
+    }, { text, at, mode });
+    await waitForFrames(page, 5);
+    await page.keyboard.press('Enter');
+    await waitForFrames(page, 5);
+    const actual = await page.evaluate(() => {
+      const e = (window as any).__editor;
+      return { text: e.getText(), head: e.view.state.selection.main.head };
+    });
+    const expected = text.slice(0, at) + fixture.insert + text.slice(at);
+    if (actual.text !== expected || actual.head !== at + fixture.insert.length) {
+      throw new Error(`${label}: ${JSON.stringify({ expected: expected.slice(0, 150), actual: actual.text.slice(0, 150), head: actual.head })}`);
+    }
+    await page.keyboard.down('Control'); await page.keyboard.press('z'); await page.keyboard.up('Control');
+    if (await page.evaluate(() => (window as any).__editor.getText()) !== text) throw new Error(label + ': undo');
+  }
+  console.log('Literal source Enter retains indentation, source and undo in both modes and document sizes');
+}
+
 async function waitForFrames(page: Page, count: number): Promise<void> {
   await page.evaluate(async (frameCount) => {
     for (let index = 0; index < frameCount; index += 1) {
@@ -79,6 +122,8 @@ try {
     content: ':root { --meo-background:#24292e; --meo-foreground:#e6edf3; --meo-semantic-markdownSyntax:#8b949e; --meo-semantic-mutedForeground:#8b949e; --meo-font-live:Arial; --meo-font-live-weight:400; --meo-font-live-size:16px; }'
   });
   await page.addScriptTag({ path: path.join(outdir, 'bundle.js') });
+
+  await assertLiteralSourceEnter(page);
 
   const scenarios = fixtures.flatMap((fixture) => (
     cases.map((enterCase) => ({ fixture, enterCase }))
