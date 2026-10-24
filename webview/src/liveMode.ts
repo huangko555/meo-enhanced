@@ -116,7 +116,7 @@ import { mermaidSourceForAnchor } from './helpers/mermaidSource';
 import { collectHexColorRangesFromText } from '../../src/shared/hexColorSwatches';
 import { shikiRefreshEffect } from './helpers/shikiDecorations';
 import { addColorSwatchDecoration, hexColorAdjustmentExtension } from './helpers/colorSwatches';
-import { isLongCodeBlockInteractionEffect, longCodeBlockSessionUiExtension } from './helpers/longCodeBlocks';
+import { codeLineNumberSourceAt, isLongCodeBlockInteractionEffect, longCodeBlockSessionUiExtension } from './helpers/longCodeBlocks';
 import { attachLatexMathViewport, type LatexMathViewportController } from './helpers/latexMathViewport';
 import { createCopyCodeButton } from './helpers/codeBlockControls';
 import { formatSourceLineNumber } from './editor/sourceLineNumbers';
@@ -3286,7 +3286,9 @@ function addColorSwatchDecorations(
 
 function codeBlockAtInputPosition(tree: Tree, position: number): SyntaxNode | null {
   for (const side of [-1, 1] as const) {
-    let node: SyntaxNode | null = tree.resolveInner(position, side);
+    // Embedded languages can have their own Document root. The physical row
+    // belongs to the outer Markdown fence, regardless of the payload grammar.
+    let node: SyntaxNode | null = tree.cursor(IterMode.IgnoreMounts).moveTo(position, side).node;
     while (node) {
       if (node.name === 'FencedCode' || node.name === 'CodeBlock') return node;
       node = node.parent;
@@ -3420,71 +3422,87 @@ function projectInputCodeBlockLines(
 ): DecorationSet {
   const startDocument = transaction.startState.doc;
   const nextDocument = transaction.newDoc;
-  const tree = currentSyntaxTree(transaction.startState);
+  // CodeMirror can publish only a prefix while its background parse catches
+  // up. Number the accepted source block without waiting for that publication.
+  const tree = acceptedLiveMarkdownSyntax(transaction.startState);
   const projectedBlocks = new Set<string>();
   let projected = decorations;
 
   transaction.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
     const lookupPosition = Math.min(fromA, startDocument.length);
     let node = codeBlockAtInputPosition(tree, lookupPosition);
-    if (!node) {
+    const source = !node ? codeLineNumberSourceAt(transaction.startState, lookupPosition) : null;
+    if (!node && !source) {
       // Typing into a trailing indented blank can extend an existing block.
       const nextNode = codeBlockAtInputPosition(currentSyntaxTree(transaction.state), toB);
       if (nextNode?.name !== 'CodeBlock') return;
       node = codeBlockAtInputPosition(tree, transaction.changes.invertedDesc.mapPos(nextNode.from, -1));
     }
-    if (!node) return;
+    if (!node && !source) return;
 
-    const startLine = startDocument.lineAt(node.from);
-    const endLine = startDocument.lineAt(Math.max(node.to - 1, node.from));
-    const lastChild = node.lastChild;
-    const hasClosingFence = node.name === 'FencedCode'
+    const blockFrom = node?.from ?? source!.from, blockTo = node?.to ?? source!.to;
+    const fenced = node?.name === 'FencedCode' || source !== null;
+    const startLine = startDocument.lineAt(blockFrom);
+    const endLine = startDocument.lineAt(Math.max(blockTo - 1, blockFrom));
+    const lastChild = node?.lastChild;
+    const hasClosingFence = source ? source.contentTo < source.to : fenced
       && lastChild?.name === 'CodeMark'
       && startDocument.lineAt(lastChild.from).number === endLine.number;
-    const info = node.getChild('CodeInfo');
-    const language = info ? startDocument.sliceString(info.from, info.to).trim().toLowerCase() : null;
+    const info = node?.getChild('CodeInfo');
+    const language = source?.language.toLowerCase()
+      ?? (info ? startDocument.sliceString(info.from, info.to).trim().toLowerCase() : null);
     // Mermaid uses only the document gutter, including the first input frame.
     if (language === 'mermaid') return;
     // Inline body edits cannot change a fenced block's physical line numbers.
     // Keep their existing point groups (and order) instead of reinserting one
     // decoration per row, especially for a giant fence.
-    if (node.name === 'FencedCode'
+    if (fenced
       && startDocument.lineAt(fromA).number === startDocument.lineAt(toA).number
       && nextDocument.lineAt(fromB).number === nextDocument.lineAt(toB).number) return;
     // Formula source owns its layout. Projecting ordinary code's inner line
     // numbers changes wrap width until the deferred formula refresh removes them.
-    if (hasClosingFence && isMathFenceLanguage(info ? startDocument.sliceString(info.from, info.to) : null)) return;
-    const firstContentLine = node.name === 'FencedCode' ? startLine.number + 1 : startLine.number;
+    if (hasClosingFence && isMathFenceLanguage(language)) return;
+    const firstContentLine = fenced ? startLine.number + 1 : startLine.number;
     const lastContentLine = endLine.number - (hasClosingFence ? 1 : 0);
     if (firstContentLine > lastContentLine) return;
 
     const contentFrom = startDocument.line(firstContentLine).from;
     const contentTo = startDocument.line(lastContentLine).to;
-    if (node.name === 'FencedCode' && (fromA < contentFrom || toA > contentTo)) return;
+    if (fenced && (fromA < contentFrom || toA > contentTo)) return;
 
-    const key = `${node.from}:${node.to}`;
+    const key = `${blockFrom}:${blockTo}`;
     if (projectedBlocks.has(key)) return;
     projectedBlocks.add(key);
 
-    const mappedFrom = transaction.changes.mapPos(node.from, -1);
-    const mappedTo = transaction.changes.mapPos(node.to, 1);
+    const mappedFrom = transaction.changes.mapPos(blockFrom, -1);
+    const mappedTo = transaction.changes.mapPos(blockTo, 1);
     const nextStartLine = nextDocument.lineAt(Math.min(mappedFrom, nextDocument.length));
     const mappedEndLine = nextDocument.lineAt(Math.max(mappedFrom, Math.min(mappedTo - 1, nextDocument.length)));
     // Indented blocks have padding on their boundary rows. Move those rows in
     // the input transaction as well, rather than painting the old footer above
     // the new text until the deferred presentation catches up.
-    const nextIndentedBlock = node.name === 'CodeBlock'
+    const nextIndentedBlock = node?.name === 'CodeBlock'
       ? codeBlockAtInputPosition(currentSyntaxTree(transaction.state), nextStartLine.to)
       : null;
     const nextEndLine = nextIndentedBlock?.name === 'CodeBlock'
       ? nextDocument.lineAt(Math.max(nextIndentedBlock.from, nextIndentedBlock.to - 1))
       : mappedEndLine;
-    const nextFirstContentLine = node.name === 'FencedCode'
+    const nextFirstContentLine = fenced
       ? nextStartLine.number + 1
       : nextStartLine.number;
     const nextLastContentLine = nextEndLine.number - (hasClosingFence ? 1 : 0);
     const lineCount = Math.max(0, nextLastContentLine - nextFirstContentLine + 1);
     const numberWidth = Math.max(2, String(lineCount).length);
+    const changedFirstLine = nextDocument.lineAt(fromB).number;
+    const changedLastLine = nextDocument.lineAt(toB).number;
+    // A newly inserted row has no mapped line point of its own. Carry its
+    // existing code-container geometry (quote/list/footnote inset) until the
+    // canonical prefix layout is available, preserving untouched row styles.
+    const previousLine = startDocument.lineAt(fromA);
+    let containerLine: Decoration | undefined;
+    transaction.startState.field(liveDecorationField, false)?.between(previousLine.from, previousLine.from, (from, to, value) => {
+      if (from === to && value.spec.attributes?.class?.split(/\s+/).includes('meo-md-code-container-line')) containerLine = value;
+    });
     const additions: Range<Decoration>[] = [];
     for (let lineNumber = nextFirstContentLine; lineNumber <= nextLastContentLine; lineNumber += 1) {
       const line = nextDocument.line(lineNumber);
@@ -3492,10 +3510,24 @@ function projectInputCodeBlockLines(
         lineNumber - nextFirstContentLine + 1,
         numberWidth
       ).range(line.from));
-      if (node.name === 'CodeBlock') additions.push(lineStyleDecos.codeBlock.range(line.from));
+      // The inner number is absolutely positioned relative to its code row.
+      // A new fenced row needs this class in the input transaction too, or its
+      // correct number is briefly painted over the block's first row.
+      additions.push(lineStyleDecos.codeBlock.range(line.from));
+      if (fenced && containerLine && lineNumber >= changedFirstLine && lineNumber <= changedLastLine) {
+        let hasContainer = false;
+        projected.between(line.from, line.from, (from, to, value) => {
+          if (from === to && value.spec.attributes?.class?.split(/\s+/).includes('meo-md-code-container-line')) hasContainer = true;
+        });
+        if (!hasContainer) additions.push(containerLine.range(line.from));
+      }
     }
-    const projectedClasses = new Set(['meo-md-code-line-numbered']);
-    if (node.name === 'CodeBlock') {
+    const projectedClasses = new Set(['meo-md-code-line-numbered', lineStyleDecos.codeBlock.spec.class]);
+    if (fenced) {
+      additions.push(lineStyleDecos.codeBlock.range(nextStartLine.from));
+      if (hasClosingFence) additions.push(lineStyleDecos.codeBlock.range(nextEndLine.from));
+    }
+    if (node?.name === 'CodeBlock') {
       for (const decoration of [lineStyleDecos.codeBlock, lineStyleDecos.codeBlockStart,
         lineStyleDecos.codeBlockEnd, lineStyleDecos.indentedCodeBlockStart, lineStyleDecos.indentedCodeBlockEnd]) {
         projectedClasses.add(decoration.spec.class);
@@ -4260,7 +4292,12 @@ const liveDecorationField = StateField.define<DecorationSet>({
       return decorations;
     }
 
-    return next;
+    // History/deletion may leave the scheduler's pending-input phase before
+    // the outer tree is ready. Project their provisional row numbers as well.
+    return transaction.docChanged && !liveDecorationMetadata.get(transaction.state)?.complete
+      && (transaction.isUserEvent('delete') || transaction.isUserEvent('undo') || transaction.isUserEvent('redo'))
+      ? projectInputCodeBlockLines(next, transaction)
+      : next;
   },
   provide: (field) => EditorView.decorations.computeN([field], state => liveWidgetPresentationLayers(state.field(field)))
 });

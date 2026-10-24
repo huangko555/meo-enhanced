@@ -514,6 +514,23 @@ export function codeEditingBlockAt(state: EditorState, position: number) {
     hiddenFrom: block.collapsed ? block.collapsedFrom : null } : null;
 }
 
+/** Physical source rows from the current session, including while parsing is
+ * pending. Consumers must treat these as provisional, never as new syntax. */
+export function codeLineNumberSourceAt(state: EditorState, position: number) {
+  const block = state.field(longCodeBlockStateField, false)?.blocks
+    .find(block => position >= block.start && position <= block.end);
+  if (!block) return null;
+  const first = state.doc.lineAt(block.start).number + 1;
+  const closed = block.contentTo < block.endLineFrom;
+  const last = state.doc.lineAt(block.end).number - (closed ? 1 : 0);
+  if (first > last) return null;
+  // Session endpoints exclude insertions at the original payload boundary.
+  // Physical rows between the known fence rows include those new blank rows.
+  const contentFrom = state.doc.line(first).from, contentTo = state.doc.line(last).to;
+  return position >= contentFrom && position <= contentTo
+    ? { from: block.start, to: block.end, contentFrom, contentTo, language: block.language } : null;
+}
+
 class LongCodeFloatingButtonPlugin {
   button: HTMLButtonElement;
   view: EditorView;
