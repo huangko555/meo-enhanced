@@ -10,6 +10,8 @@ After release authorization, pass the chosen disposable document to
 requires the full font sweep and endurance. This keeps their complete coverage
 in one report and shares identical preflight results. Final installed-VSIX
 and native desktop acceptance remain required separately for their applicable scope.
+Choose their environment using [native acceptance environment](#native-acceptance-environment)
+before preparing a host profile or VM.
 
 `scripts/test-editor-font-wheel.ts` covers the default-enabled independent wheel
 setting, Auto-to-Custom adjustment from the displayed size, persistence/reopening,
@@ -483,8 +485,8 @@ the work reaches one of these boundaries:
   live-scroll integrity pass are enough to assess document-scale risk.
 - **Endurance:** undo/redo, cursor, viewport, tables, or rendered-block editing
   has changed substantially, regressed repeatedly, or is ready for final UAT.
-- **Clean-environment/VM validation:** a final VSIX or installer needs an
-  installation and startup check outside the development checkout.
+- **Clean-environment/VM validation:** a concrete environment risk cannot be
+  resolved by isolated host acceptance; apply [native acceptance environment](#native-acceptance-environment).
 
 Every recommendation must state the test type, why it is warranted, its scope,
 and its expected duration. Release, endurance, full browser matrices, repeated
@@ -493,6 +495,42 @@ in the current task. A generic request to fix, build, test, commit, or merge
 is not authorization. The confirmation flag records an intentional invocation;
 it is not a substitute for asking. `--dry-run` is always safe and prints the
 exact commands without running them.
+
+## Native acceptance environment
+
+For every release, assess the changes since the last published version and choose
+the environment before starting setup. The agent owns this choice; the user does
+not need to request a VM assessment. Preserve final installed-VSIX and applicable
+native behavior checks regardless of the chosen environment.
+
+- **Default: isolated host acceptance.** Install the final VSIX using the official
+  `code` CLI with dedicated user-data and extensions directories, and use disposable
+  documents outside the development checkout. Check startup and reopening after a
+  normal VS Code restart, plus affected native behavior such as IME, window focus,
+  save and Save As. Use the installed package, not `--extensionDevelopmentPath`.
+- **Escalate for environment risk.** Changed package contents/layout, runtime
+  dependencies, installation paths, OS/VS Code requirements, or suspected reliance
+  on development-machine files/settings/tools warrant a clean environment when
+  host evidence cannot rule out the risk. A separate profile isolates VS Code
+  state; it does not prove independence from installed OS dependencies. Select a
+  VM or appropriate native platform that can actually reproduce the risk.
+- **Authorization and preparation.** Before starting or operating a VM, obtain
+  explicit authorization in the current task, stating the unresolved risk,
+  checks, and estimated setup and execution times. Release acceptance authorization
+  and approval of this policy do not authorize VM use. Once authorized, prefer an
+  approved disposable baseline snapshot with VS Code and test fixtures ready.
+  Verify relevant OS/VS Code/runtime versions, preserve needed prior evidence,
+  install the candidate and match its SHA-256. Update or rebuild the baseline only
+  when its state or versions no longer meet the required scope.
+- **Scope and completion.** Run installation/startup and the native cases needed
+  for that environment risk. Reuse valid host evidence for other checks rather
+  than automatically repeating the full gate in the VM. A restored snapshot is
+  setup, not passing evidence for the new candidate. Keep timing-sensitive native
+  checks separate from competing stress work. Record the environment choice and
+  reason, versions/baseline, artifact hash, results, remaining gaps, and setup time
+  separately from test time. If necessary environment validation is unavailable
+  or unapproved, complete independent work and report acceptance as incomplete;
+  elapsed-time targets never waive required coverage.
 
 ## Daily repair loop
 
