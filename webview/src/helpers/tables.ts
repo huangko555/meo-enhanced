@@ -34,6 +34,7 @@ import { normalizeSourceHref } from './rawUrls';
 import type { EditorDiagnostic } from './diagnostics';
 import { continuedListMarker, listMarkerData, listMarkerDataInContainerLine, nextOrderedSequenceNumber } from './listMarkers';
 import { getViewportController, visualLineContextMargin } from './viewportController';
+import { preserveTableColumnResizeLayout } from './tableColumnResizeViewport';
 import { changedDocumentRange, runEditorHistoryCommand } from './historyCommands';
 import { createOpenLinkButton } from './linkOpenButton';
 import { collectHexColorRangesFromText, isHexColorLikeLiteral } from '../../../src/shared/hexColorSwatches';
@@ -5546,6 +5547,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     if (!this.domRefs) return;
     const { table, rowEntries } = this.domRefs;
     const resize = () => this.resizeRows(rowEntries);
+    if (preserveTableColumnResizeLayout(table, resize)) return;
     const active = table.ownerDocument.activeElement;
     const controller = this.view ? getViewportController(this.view) : null;
     if (
@@ -5635,6 +5637,11 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   recalcLayout() {
+    const recalc = () => this.recalcTableLayout();
+    if (!this.domRefs || !preserveTableColumnResizeLayout(this.domRefs.table, recalc)) recalc();
+  }
+
+  recalcTableLayout() {
     if (this.pendingResizeRows) this.rowWindow?.invalidate();
     this.rowWindow?.update();
     if (this.pendingResizeRows) {

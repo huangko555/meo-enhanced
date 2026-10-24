@@ -142,6 +142,8 @@ import {
   liveTaskListIndentCssValue,
   type TaskListIndent,
   getCodeBlockSourceLines,
+  getCodeBlockLastLine,
+  indentedCodeBlockAt,
   parseBlockLinePrefix,
   liveBlockIndentCssValue,
   liveBlockIndentKey,
@@ -1081,7 +1083,7 @@ function addCodeContainerLines(
     const visibleColumns = line.prefixColumns - line.quoteDepth;
     builder.push(Decoration.line({ attributes: {
       class: 'meo-md-code-container-line' + (quoted ? ' meo-md-quoted-code-block' : ''),
-      style: liveBlockIndentProperty + ':' + cssIndent + ';--meo-code-prefix-width:' + visibleColumns + 'ch;--meo-code-prefix-inset:' + line.payloadInset + 'ch;'
+      style: liveBlockIndentProperty + ':' + cssIndent + ';--meo-code-prefix-width:' + visibleColumns + 'ch;--meo-code-prefix-inset:' + line.payloadInset + 'ch;--meo-code-prefix-scale:' + (line.prefixColumns ? visibleColumns / line.prefixColumns : 1) + ';'
     } }).range(line.from));
     if (line.prefixTo > line.from) {
       builder.push(Decoration.mark({ class: 'meo-md-code-container-prefix' }).range(line.from, line.prefixTo));
@@ -2066,11 +2068,12 @@ function buildDecorationRanges(state: EditorState, previous?: DecorationSet, cha
       } else if (node.name === 'FencedCode' || node.name === 'CodeBlock') {
         const sourceDecorationStart = ranges.length;
         const indentColumns = getLiveBlockIndent(state, node.from, node.node);
-        addLineClass(ranges, state, node.from, node.to, lineStyleDecos.codeBlock);
-        addBlockIndentLines(ranges, state, node.from, node.to, indentColumns);
+        const lastCodeLine = getCodeBlockLastLine(state, node.node);
+        addLineClass(ranges, state, node.from, lastCodeLine.to, lineStyleDecos.codeBlock);
+        addBlockIndentLines(ranges, state, node.from, lastCodeLine.to, indentColumns);
         addCodeContainerLines(ranges, state, node.node, indentColumns);
         ranges.push(lineStyleDecos.codeBlockStart.range(state.doc.lineAt(node.from).from));
-        ranges.push(lineStyleDecos.codeBlockEnd.range(state.doc.lineAt(Math.max(node.to - 1, node.from)).from));
+        ranges.push(lineStyleDecos.codeBlockEnd.range(lastCodeLine.from));
         if (node.name === 'FencedCode') {
           const codeInfo = getFencedCodeInfo(state, node);
           const mermaidEditing = codeInfo === 'mermaid' && getMermaidBlockMode(
@@ -2097,7 +2100,7 @@ function buildDecorationRanges(state: EditorState, previous?: DecorationSet, cha
         addCodeLanguageLabel(ranges, state, node, activeLines);
         if (node.name === 'CodeBlock') {
           ranges.push(lineStyleDecos.indentedCodeBlockStart.range(state.doc.lineAt(node.from).from));
-          ranges.push(lineStyleDecos.indentedCodeBlockEnd.range(state.doc.lineAt(Math.max(node.to - 1, node.from)).from));
+          ranges.push(lineStyleDecos.indentedCodeBlockEnd.range(lastCodeLine.from));
         }
         addCodeBlockLineNumbers(ranges, state, node);
         addCopyCodeButton(ranges, state, node);
@@ -3324,6 +3327,55 @@ function blockquoteLineDecorationsAtInputPosition(
 }
 
 /**
+ * Mermaid has no inner line numbers, but its native source still needs the
+ * accepted code font, panel inset, container prefix and split-column width on
+ * the first input frame. Only carry body geometry onto the changed rows; the
+ * diagram and its deferred render keep their existing owners.
+ */
+function projectInputMermaidSourceLines(
+  decorations: DecorationSet,
+  transaction: Transaction,
+  fromA: number,
+  fromB: number,
+  toB: number
+): DecorationSet {
+  const previousLine = transaction.startState.doc.lineAt(fromA);
+  const lineDecorations = new Map<string, Decoration>();
+  let prefix: { text: string; decoration: Decoration } | undefined;
+  transaction.startState.field(liveDecorationField, false)?.between(previousLine.from, previousLine.to, (from, to, value) => {
+    const className = value.spec.attributes?.class ?? value.spec.class ?? '';
+    if (from === to && from === previousLine.from && className
+      && !className.split(/\s+/).some((name: string) =>
+        ['meo-md-code-block-start', 'meo-md-code-block-end', 'meo-mermaid-source-join'].includes(name))) {
+      lineDecorations.set(className, value);
+    } else if (from === previousLine.from && className === 'meo-md-code-container-prefix') {
+      prefix = { text: transaction.startState.doc.sliceString(from, to), decoration: value };
+    }
+  });
+  if (!lineDecorations.has(lineStyleDecos.codeBlock.spec.class)) return decorations;
+  const additions: Range<Decoration>[] = [];
+  const firstLine = transaction.newDoc.lineAt(fromB).number;
+  const lastLine = transaction.newDoc.lineAt(toB).number;
+  for (let number = firstLine; number <= lastLine; number++) {
+    const line = transaction.newDoc.line(number);
+    const existing = new Set<string>();
+    let hasPrefix = false;
+    decorations.between(line.from, line.to, (from, to, value) => {
+      const className = value.spec.attributes?.class ?? value.spec.class ?? '';
+      if (from === to && from === line.from) existing.add(className);
+      if (from === line.from && className === 'meo-md-code-container-prefix') hasPrefix = true;
+    });
+    for (const [className, decoration] of lineDecorations) {
+      if (!existing.has(className)) additions.push(decoration.range(line.from));
+    }
+    if (!hasPrefix && prefix && line.text.startsWith(prefix.text)) {
+      additions.push(prefix.decoration.range(line.from, line.from + prefix.text.length));
+    }
+  }
+  return additions.length ? decorations.update({ add: additions, sort: true }) : decorations;
+}
+
+/**
  * A continued blockquote line is visible before deferred Live decorations are
  * rebuilt. Carry the enclosing line style and refresh the affected quote marks
  * so that the split lines match the authoritative refresh on their first frame.
@@ -3430,7 +3482,7 @@ function projectInputCodeBlockLines(
 
   transaction.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
     const lookupPosition = Math.min(fromA, startDocument.length);
-    let node = codeBlockAtInputPosition(tree, lookupPosition);
+    let node = indentedCodeBlockAt(transaction.startState, lookupPosition, tree) ?? codeBlockAtInputPosition(tree, lookupPosition);
     const source = !node ? codeLineNumberSourceAt(transaction.startState, lookupPosition) : null;
     if (!node && !source) {
       // Typing into a trailing indented blank can extend an existing block.
@@ -3451,8 +3503,6 @@ function projectInputCodeBlockLines(
     const info = node?.getChild('CodeInfo');
     const language = source?.language.toLowerCase()
       ?? (info ? startDocument.sliceString(info.from, info.to).trim().toLowerCase() : null);
-    // Mermaid uses only the document gutter, including the first input frame.
-    if (language === 'mermaid') return;
     // Inline body edits cannot change a fenced block's physical line numbers.
     // Keep their existing point groups (and order) instead of reinserting one
     // decoration per row, especially for a giant fence.
@@ -3470,6 +3520,11 @@ function projectInputCodeBlockLines(
     const contentTo = startDocument.line(lastContentLine).to;
     if (fenced && (fromA < contentFrom || toA > contentTo)) return;
 
+    if (language === 'mermaid') {
+      projected = projectInputMermaidSourceLines(projected, transaction, fromA, fromB, toB);
+      return;
+    }
+
     const key = `${blockFrom}:${blockTo}`;
     if (projectedBlocks.has(key)) return;
     projectedBlocks.add(key);
@@ -3484,8 +3539,19 @@ function projectInputCodeBlockLines(
     const nextIndentedBlock = node?.name === 'CodeBlock'
       ? codeBlockAtInputPosition(currentSyntaxTree(transaction.state), nextStartLine.to)
       : null;
+    if (node?.name === 'CodeBlock' && nextIndentedBlock?.name !== 'CodeBlock'
+      && markdownStructureAvailable(transaction.state)) {
+      // Outdenting can turn all or part of a code block into prose. Rebuild
+      // that physical scope immediately instead of re-projecting stale code
+      // rows, hidden prefixes and header widgets onto the new paragraph.
+      const from = nextStartLine.from, to = Math.max(mappedEndLine.to, nextDocument.lineAt(toB).to);
+      const scope = { from, to, fromLine: nextStartLine.number, toLine: nextDocument.lineAt(to).number };
+      const ranges = buildDecorationRanges(transaction.state, projected, undefined, scope).ranges;
+      projected = replaceLivePresentationRanges(projected, from, to, ranges);
+      return;
+    }
     const nextEndLine = nextIndentedBlock?.name === 'CodeBlock'
-      ? nextDocument.lineAt(Math.max(nextIndentedBlock.from, nextIndentedBlock.to - 1))
+      ? getCodeBlockLastLine(transaction.state, nextIndentedBlock)
       : mappedEndLine;
     const nextFirstContentLine = fenced
       ? nextStartLine.number + 1

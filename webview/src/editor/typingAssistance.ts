@@ -6,6 +6,7 @@ import { markdownCodeRanges } from './blockInsertion';
 import { beginHtmlCommentTemplate } from './htmlCommentEditing';
 import { planHtmlCommentInput, deleteEmptyHtmlComment } from '../application/htmlCommentInput';
 import { syntaxTree } from '@codemirror/language';
+import { indentedCodeBlockAt } from './codeBlockSource';
 import { planSymbolInput, shouldDeleteSymbolPair } from '../application/symbolInput';
 import { isExternalDocumentPresentation } from './externalDocumentPresentation';
 
@@ -72,6 +73,7 @@ function automaticRightAt(view: EditorView, position: number, closing?: string):
 }
 
 function insideCode(view: EditorView): boolean {
+  if (indentedCodeBlockAt(view.state, view.state.selection.main.head)) return true;
   for (let node = syntaxTree(view.state).resolveInner(view.state.selection.main.head, -1); node; node = node.parent!)
     if (/^(?:FencedCode|CodeBlock|InlineCode|CodeText|CodeInfo)$/.test(node.name)) return true;
   return false;

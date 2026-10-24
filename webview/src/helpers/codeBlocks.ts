@@ -26,7 +26,7 @@ import {
   MermaidSourcePreviewWidget,
   MermaidSideSpaceWidget
 } from './mermaidEditing';
-import { getCodeBlockSourceLines, getLiveBlockIndent, liveBlockIndentKey, parseBlockLinePrefix, type LiveBlockIndentValue } from './blockIndent';
+import { getCodeBlockLastLine, getCodeBlockSourceLines, getLiveBlockIndent, liveBlockIndentKey, parseBlockLinePrefix, type LiveBlockIndentValue } from './blockIndent';
 import { getViewportController } from './viewportController';
 import { getMermaidDiagramPresentationFactory } from '../editor/mermaidDiagramPresentation';
 import { currentSyntaxTree, getFencedCodeBodyRange, getFencedCodeInfo, syntaxTreeChanged } from './markdownSyntax';
@@ -576,7 +576,7 @@ function computeSourceCodeBlockLines(view: EditorView): DecorationSet {
     enter(node) {
       if (node.name !== 'FencedCode' && node.name !== 'CodeBlock') return;
       const first = state.doc.lineAt(Math.max(node.from, visible.from)).number;
-      const last = state.doc.lineAt(Math.min(Math.max(node.to - 1, node.from), visible.to)).number;
+      const last = state.doc.lineAt(Math.min(getCodeBlockLastLine(state, node.node).to, visible.to)).number;
       for (let line = first; line <= last; line++) positions.add(state.doc.line(line).from);
       return false;
     }
@@ -610,7 +610,7 @@ export function addCodeBlockLineNumbers(builder: any[], state: EditorState, node
   const body = node.name === 'FencedCode' ? getFencedCodeBodyRange(state, node.node) : { from: node.from, to: node.to };
   if (!body) return;
   const firstContentLine = state.doc.lineAt(body.from).number;
-  const lastContentLine = state.doc.lineAt(node.name === 'FencedCode' ? body.to : Math.max(body.from, body.to - 1)).number;
+  const lastContentLine = node.name === 'FencedCode' ? state.doc.lineAt(body.to).number : getCodeBlockLastLine(state, node.node).number;
   const lineCount = Math.max(0, lastContentLine - firstContentLine + 1);
   const numberWidth = Math.max(2, String(lineCount).length);
 
@@ -711,11 +711,35 @@ class CodeLanguageLabelWidget extends WidgetType {
   }
 }
 
+/** An indented header shares a row with editable text. Keep its widget's native
+ * caret anchor in that text flow while the actual controls sit above it. */
+class CodeHeaderCaretAnchor extends WidgetType {
+  constructor(readonly inner: WidgetType) { super(); }
+  eq(other: WidgetType): boolean {
+    return other instanceof CodeHeaderCaretAnchor && this.inner.eq(other.inner);
+  }
+  [mapLiveWidgetPositions](changes: ChangeDesc, state: EditorState): WidgetType {
+    const mapped = (this.inner as WidgetType & { [mapLiveWidgetPositions]?: (changes: ChangeDesc, state: EditorState) => WidgetType })
+      [mapLiveWidgetPositions]?.(changes, state) ?? this.inner;
+    return mapped === this.inner ? this : new CodeHeaderCaretAnchor(mapped);
+  }
+  toDOM(view: EditorView): HTMLElement {
+    const anchor = document.createElement('span');
+    anchor.className = 'meo-code-header-caret-anchor';
+    anchor.append(this.inner.toDOM(view));
+    return anchor;
+  }
+  ignoreEvent(event: Event): boolean { return this.inner.ignoreEvent(event); }
+  destroy(dom: HTMLElement): void {
+    if (dom.firstElementChild) this.inner.destroy(dom.firstElementChild as HTMLElement);
+  }
+}
+
 // Header chrome belongs to the preceding fence when Enter inserts a line break.
-function addTopLineWidget(builder: any[], position: number, widget: WidgetType, side = -1): void {
+function addTopLineWidget(builder: any[], position: number, widget: WidgetType, side = -1, anchorCaret = false): void {
   builder.push(
     Decoration.widget({
-      widget,
+      widget: anchorCaret ? new CodeHeaderCaretAnchor(widget) : widget,
       side
     }).range(position)
   );
@@ -744,12 +768,13 @@ export function addTopLinePillLabel(
   builder: any[],
   position: number,
   labelText: string | null,
-  side = -1
+  side = -1,
+  anchorCaret = false
 ): void {
   if (!labelText) {
     return;
   }
-  addTopLineWidget(builder, position, new CodeLanguageLabelWidget(labelText), side);
+  addTopLineWidget(builder, position, new CodeLanguageLabelWidget(labelText), side, anchorCaret);
 }
 
 const renderedBlockPreviewAnchorLineDeco = Decoration.line({
@@ -772,7 +797,9 @@ export function addCodeLanguageLabel(builder: any[], state: EditorState, node: a
     addTopLinePillLabel(
       builder,
       state.doc.lineAt(node.from).to,
-      getUiStrings(state.facet(uiLanguageFacet)).indentedCodeBlockLabel
+      getUiStrings(state.facet(uiLanguageFacet)).indentedCodeBlockLabel,
+      -1,
+      true
     );
     return;
   }
@@ -975,7 +1002,7 @@ export function addMermaidDiagram(
 
 export function addCopyCodeButton(builder: any[], state: EditorState, node: SyntaxNodeRef): void {
   const widget = createCodeBlockActionsWidget(state, node);
-  if (widget) addTopLineWidget(builder, state.doc.lineAt(node.from).to, widget);
+  if (widget) addTopLineWidget(builder, state.doc.lineAt(node.from).to, widget, -1, node.name === 'CodeBlock');
 }
 
 export function createCodeBlockActionsWidget(state: EditorState, node: SyntaxNodeRef): WidgetType | null {

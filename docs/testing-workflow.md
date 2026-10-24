@@ -243,6 +243,14 @@ The Mermaid/formula inner-source matrix and findings are in
 [testing-rendered-block-source.md](testing-rendered-block-source.md). Run
 `bun run test:rendered-source` for its dedicated input, boundary and appearance
 checks; it also belongs to the targeted rendered and browser gates.
+
+`scripts/test-mermaid-partial-line-input-viewport.ts` also samples each native
+source input frame in stacked and side-by-side Mermaid layouts, across plain,
+quote, list, nested quote/list, footnote and tab prefixes in both appearances.
+Enter, continuous typing and undo/redo must retain the code font, source inset,
+split wrap width, focus and scroll position, without adding inner line numbers
+or modifying real container prefixes. Visual samples are saved under
+`.local/mermaid-input-acceptance/`.
 Review its operation outcomes against the README, commands, settings and changes
 since the last release before selecting acceptance evidence. Gate membership is
 necessary, but a visible control or emitted message alone is not a successful
@@ -975,6 +983,18 @@ changes and incremental rendering. It also checks that HTML, PDF and Word export
 inputs contain no reading controls or tooltips, and generates PDF/Word smoke
 artifacts. Run this focused check for Preview copy changes; it also belongs to
 the full browser suite.
+
+`scripts/test-indented-code-blocks-production.ts` checks Live/Source indentation
+entry, Shift+Tab and Backspace exit, exact space/tab and container continuation,
+empty-Enter exit, Shift+Enter blank code rows, literal multiline paste with
+retained prefixes, internal empty-line exit and undo/redo. Explicitly indented
+trailing blanks remain part of the editable code surface even though Markdown
+excludes them from its syntax node. Ordinary and 9,000-line documents sample
+the first painted input frame for caret, scroll and line-number stability.
+Native caret checks inspect screenshot pixels inside structural prefixes, at
+payload boundaries and beside the first-row toolbar, including real clicks.
+The existing light/dark palette, wrapped layout, document gutter, selection and
+copy checks remain part of the same contract and the targeted rendered gate.
 
 ## Editor startup and loading
 

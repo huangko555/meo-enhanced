@@ -2,6 +2,7 @@ import { sourceTablePaste, sourceTableAt } from './sourceTableCommands';
 import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
+import { getIndentedCodeLinePrefix, indentedCodeBlockAt } from './codeBlockSource';
 import { inputAssistanceFacet } from './typingAssistance';
 import { markdownTableFromCells, parseMarkdownTable } from '../application/delimitedTable';
 import { parseMeoTableClipboard, parseHtmlTableElement, parseTsvTableClipboard, meoTableClipboardMime, maxClipboardCells } from './tableClipboard';
@@ -21,7 +22,18 @@ function hasInputSyntax(view: EditorView, position: number, names: RegExp): bool
 }
 
 export function isCodeInput(view: EditorView, position = view.state.selection.main.head): boolean {
-  return hasInputSyntax(view, position, /^(?:FencedCode|CodeBlock|InlineCode|CodeText|CodeInfo)$/);
+  return hasInputSyntax(view, position, /^(?:FencedCode|CodeBlock|InlineCode|CodeText|CodeInfo)$/)
+    || indentedCodeBlockAt(view.state, position) !== null;
+}
+
+function indentedCodePasteText(view: EditorView, text: string): string | null {
+  if (view.state.selection.ranges.length !== 1 || !/[\r\n]/.test(text)) return null;
+  const { state } = view, selection = state.selection.main;
+  const node = indentedCodeBlockAt(state, selection.from);
+  if (!node || indentedCodeBlockAt(state, selection.to)?.from !== node.from) return null;
+  const prefix = getIndentedCodeLinePrefix(state, node, state.doc.lineAt(selection.from));
+  if (selection.from < state.doc.lineAt(selection.from).from + prefix.length) return null;
+  return text.replace(/\r\n?/g, '\n').replaceAll('\n', '\n' + prefix);
 }
 
 /** Shared explicit plain paste bypasses conversion while retaining the existing edit/history owner. */
@@ -31,7 +43,7 @@ export function insertPlainClipboardText(view: EditorView, text: string, mathPas
     active.setRangeText(text.replace(/\r\n?/g, '\n'), active.selectionStart, active.selectionEnd, 'end');
     active.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste', data: text }));
   } else {
-    view.dispatch(view.state.replaceSelection(mathPasteText(view, text) ?? text.replace(/\r\n?/g, '\n')), { annotations: Transaction.userEvent.of('input.paste') });
+    view.dispatch(view.state.replaceSelection(mathPasteText(view, text) ?? indentedCodePasteText(view, text) ?? text.replace(/\r\n?/g, '\n')), { annotations: Transaction.userEvent.of('input.paste') });
     view.focus();
   }
   return true;
@@ -48,6 +60,12 @@ export const pasteAssistance = (mathPasteText: MathPasteText) => EditorView.domE
     if (mathText !== null) {
       event.preventDefault();
       view.dispatch(view.state.replaceSelection(mathText), { annotations: Transaction.userEvent.of('input.paste') });
+      return true;
+    }
+    const codeText = indentedCodePasteText(view, clipboard.getData('text/plain'));
+    if (codeText !== null) {
+      event.preventDefault();
+      view.dispatch(view.state.replaceSelection(codeText), { annotations: Transaction.userEvent.of('input.paste') });
       return true;
     }
     if ([selection.from, selection.to].some(position => isCodeInput(view, position)

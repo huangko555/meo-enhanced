@@ -3,6 +3,7 @@ import { EditorSelection, type EditorState, type TransactionSpec } from '@codemi
 import type { Tree } from '@lezer/common';
 import { syntaxTree } from '@codemirror/language';
 import { isSuggestionAddress } from '../application/inputSuggestions';
+import { indentedCodeBlockAt } from './codeBlockSource';
 export type MarkdownInputContext = 'block' | 'inline' | 'heading' | 'excluded';
 
 /** Literal comment markers in code cannot affect later prose comment operations. */
@@ -17,6 +18,7 @@ export function markdownCodeRanges(tree: Tree): { from: number; to: number }[] {
 /** Code/HTML/address contexts never execute prose commands, including while syntax is incomplete. */
 export function markdownSyntaxContext(state: EditorState, position: number): MarkdownInputContext {
   if (state.readOnly) return 'excluded';
+  if (indentedCodeBlockAt(state, position)) return 'excluded';
   const line = state.doc.lineAt(position), before = state.sliceDoc(line.from, position);
   if (isSuggestionAddress(before)) return 'excluded';
   let context: MarkdownInputContext = 'block';

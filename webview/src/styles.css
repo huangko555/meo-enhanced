@@ -232,7 +232,7 @@ body {
   --meo-scroll-top-foreground: var(--meo-foreground);
   --meo-scroll-top-focus: var(--meo-document-focus, var(--meo-ui-focus));
   position: absolute;
-  right: 18px;
+  right: 16px;
   bottom: 18px;
   z-index: var(--meo-layer-document-floating);
   display: inline-flex;
@@ -2738,7 +2738,7 @@ html[data-editor-appearance='dark'] .cm-editor.meo-mode-live {
   margin-left: -10px;
   padding-top: 0;
   padding-right: var(--meo-editor-inline-end-padding);
-  padding-bottom: 50px;
+  padding-bottom: 64px;
   padding-left: 10px !important;
   caret-color: var(--meo-caret-color);
   cursor: text;
@@ -4865,12 +4865,35 @@ html[data-editor-appearance='light'] .cm-tooltip.meo-hex-color-adjustment {
 }
 
 .cm-editor.meo-mode-live .meo-md-code-container-prefix {
+  /* Hidden quote markers must use code columns too. Their prose-font widths
+     otherwise move the native caret away from the payload boundary. */
+  --meo-live-container-ch: 1ch;
   display: inline-block;
   width: var(--meo-code-prefix-width);
+  /* Quote glyphs consume source columns but no code-panel columns. Scale the
+     hidden contents so native caret paint ends at the same boundary as layout. */
+  transform: scaleX(var(--meo-code-prefix-scale, 1));
+  transform-origin: left center;
   white-space: pre;
   text-indent: 0;
-  /* Container syntax remains in the document, while rails express it in Live. */
-  opacity: 0;
+  /* Keep the native caret visible when it lands inside a structural prefix.
+     Opacity also hides the caret; only the source glyphs should disappear. */
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+  caret-color: var(--meo-caret-color);
+}
+
+.cm-editor.meo-mode-live .meo-md-code-container-prefix * {
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+.cm-editor.meo-mode-live .meo-code-header-caret-anchor {
+  display: inline-block;
+  width: 0;
+  height: 1em;
+  vertical-align: baseline;
+  text-indent: 0;
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-quoted-code-block.meo-md-quote-source-order:is(.meo-md-quote, .meo-md-alert)::before {
@@ -6626,7 +6649,7 @@ body.outline-resizing .preview-frame {
   position: relative;
   z-index: 1;
   padding: 0;
-  width: calc(100% - 24px - var(--meo-html-table-indent));
+  width: calc(100% - var(--meo-html-table-indent));
   max-width: 100%;
   min-width: 0;
   margin: 0 0 0 var(--meo-html-table-indent);
@@ -8287,7 +8310,7 @@ html[data-meo-ui-contrast='high'] .cm-editor :is(.meo-md-html-table-context-trig
 }
 
 .cm-editor.meo-mode-live .meo-md-html-table-shell.meo-live-indented-block {
-  width: calc(100% - 24px - var(--meo-live-block-indent));
+  width: calc(100% - var(--meo-live-block-indent));
 }
 
 .cm-editor .meo-rendered-block-preview.meo-live-quoted-block > :is(.meo-mermaid-block, .meo-md-math-fenced-display) {
@@ -8705,6 +8728,15 @@ html[data-meo-ui-contrast='normal'] .meo-input-suggestions:not(.meo-narrow-sugge
   width: var(--meo-mermaid-source-width);
   border-right: 1px solid var(--meo-semantic-tableBorder, var(--meo-content-panel-border));
   pointer-events: auto;
+}
+/* Continue the separator highlight above the scroller's stacking context. */
+.cm-editor:has(.meo-mermaid-inline-separator:is(:hover, :focus-visible)) .meo-block-sticky-header.is-mermaid-side::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 var(--meo-mermaid-source-width);
+  width: 4px;
+  background: #316dca;
+  pointer-events: none;
 }
 .cm-editor .meo-block-sticky-header .meo-native-source-preview-label {
   position: absolute;

@@ -47,6 +47,7 @@ import { setLivePointerSelectionActiveEffect } from './editor/livePointerSelecti
 import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
 import { insertMountedTableCellBreak } from './helpers/tables';
 import { insertCodeBlock, sourceCodeBlockLines } from './helpers/codeBlocks';
+import { insertIndentedCodeNewline } from './editor/indentedCodeEditing';
 import { getCodeBlockSourceLines } from './helpers/blockIndent';
 import { markdownInlineStyleTheme } from './helpers/inlineStyles';
 import { markdownTagField } from './helpers/tags';
@@ -68,6 +69,7 @@ import { createCodeMirrorTableTransactionProvenanceAdapter } from './adapters/co
 import { createCodeMirrorTableHistoryFocusAdapter } from './adapters/codeMirrorTableHistoryFocusAdapter';
 import { createCodeMirrorDomTableColumnWidthAdapter } from './editor/tableColumnWidthAdapter';
 import { tableColumnWidthPolicy } from './editor/tableColumnWidthPolicy';
+import { beginTableColumnResizeViewport, finishTableColumnResizeViewport, preserveTableColumnResizeLayout } from './helpers/tableColumnResizeViewport';
 import { createCodeMirrorDomTableStickyHeaderAdapter } from './editor/internal/codeMirrorDomTableStickyHeaderAdapter';
 import { tableStickyHeaderPolicy } from './editor/tableStickyHeaderPolicy';
 import {
@@ -87,7 +89,7 @@ import { createGitDiffOverviewRulerController } from './helpers/gitDiffOverviewR
 import type { SearchMatchAnchor } from './application/searchMatchAnchor';
 import { createSearchOverviewRulerController } from './helpers/searchOverviewRuler';
 import { mergeConflictSourceExtensions } from './helpers/mergeConflicts';
-import { resolvedSyntaxTree, extractHeadings } from './helpers/markdownSyntax';
+import { resolvedSyntaxTree, resolvedSyntaxTreeAt, extractHeadings } from './helpers/markdownSyntax';
 import {
   sourceListMarkerField,
   listMarkerData,
@@ -2281,7 +2283,12 @@ export function createEditor({
   const tableColumnWidthAdapter = createCodeMirrorDomTableColumnWidthAdapter({
     root: parent,
     policy: tableColumnWidthPolicy,
+    onResizeStart(table) {
+      beginTableColumnResizeViewport(view, table, () => currentMode === 'live');
+    },
+    onResizeEnd: finishTableColumnResizeViewport,
     preserveLayout(table, apply) {
+      if (preserveTableColumnResizeLayout(table, apply)) return;
       const active = table.ownerDocument.activeElement;
       if (viewportController && active instanceof HTMLTextAreaElement && table.contains(active)
         && !table.closest('.is-context-menu-open') && !viewportController.isUserScrolling()) {
@@ -2406,6 +2413,7 @@ export function createEditor({
           key: 'Enter',
           run: (view) =>
             insertMermaidNewline(view) || insertDisplayMathNewline(view) ||
+            insertIndentedCodeNewline(view, resolvedSyntaxTreeAt(view.state, view.state.selection.main.to)) ||
             handleEnterContinueContainedCodeBlock(view) ||
             (view.state.facet(inputAssistanceFacet).lists && (
               handleEnterOnEmptyListItem(view) ||
@@ -2413,7 +2421,7 @@ export function createEditor({
               handleEnterContinueList(view) ||
               handleEnterBeforeNestedList(view)))
         },
-        { key: 'Shift-Enter', run: insertTableCellLineBreak },
+        { key: 'Shift-Enter', run: (view) => insertIndentedCodeNewline(view, resolvedSyntaxTreeAt(view.state, view.state.selection.main.to), false) || insertTableCellLineBreak(view) },
         { key: 'Ctrl-Enter', run: (view) => finishDisplayMathEditing(view) || insertTableCellLineBreak(view) },
         { key: 'ArrowUp', run: (view) => tryEnterAdjacentTable(view, 'up') || tryMoveAcrossRenderedBlockSource(view, false, true) },
         { key: 'ArrowDown', run: (view) => tryEnterAdjacentTable(view, 'down') || tryMoveAcrossRenderedBlockSource(view, true, true) },

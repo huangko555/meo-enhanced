@@ -110,6 +110,7 @@ function targetedCommands(
         script('scripts/test-table-cell-editing.ts'),
         script('scripts/test-table-column-width-policy.ts'),
         script('scripts/test-table-column-width-lifecycle.ts'),
+        script('scripts/test-table-column-resize-viewport.ts'),
         script('scripts/test-table-diff-refresh.ts'),
         script('scripts/test-table-body-interaction-sticky-production.ts'),
         script('scripts/test-table-input-visual-stability.ts'),

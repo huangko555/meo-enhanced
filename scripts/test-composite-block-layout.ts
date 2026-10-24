@@ -351,7 +351,12 @@ async function verifyCodeContainerLayouts(browser: Awaited<ReturnType<typeof lau
                   if(style.opacity==='0'||style.color==='transparent'||style.color==='rgba(0, 0, 0, 0)'||style.display==='none'||style.visibility==='hidden'){headerSourceHidden=true;break;}
                 }
               }
-              return {rows:[...rows.values()],expectedLeft,numberRight:r.left+parseFloat(number.left)+parseFloat(number.width),lastRail,panelLeft:r.left,childLeft:childRange.getBoundingClientRect().left,ch,numberTop:parseFloat(number.top),topPadding:parseFloat(s.paddingTop),payloadRight,panelRight:r.right,rightPadding:parseFloat(s.paddingRight),prefixHidden:[...line.querySelectorAll('.meo-md-code-container-prefix')].every(e=>getComputedStyle(e).opacity==='0'),headerSourceHidden,labels:header.querySelectorAll('.meo-code-language-label').length};
+              const transparent=(color:string)=>color==='transparent'||color==='rgba(0, 0, 0, 0)';
+              const prefixHidden=[...line.querySelectorAll('.meo-md-code-container-prefix')].every(e=>{
+                const style=getComputedStyle(e);
+                return transparent(style.color)&&style.opacity==='1'&&!transparent(style.caretColor);
+              });
+              return {rows:[...rows.values()],expectedLeft,numberRight:r.left+parseFloat(number.left)+parseFloat(number.width),lastRail,panelLeft:r.left,childLeft:childRange.getBoundingClientRect().left,ch,numberTop:parseFloat(number.top),topPadding:parseFloat(s.paddingTop),payloadRight,panelRight:r.right,rightPadding:parseFloat(s.paddingRight),prefixHidden,headerSourceHidden,labels:header.querySelectorAll('.meo-code-language-label').length};
             });
             count++;
             const label=fixture.name+'/'+font.family+'/'+width+'/'+(active?'active':'inactive');

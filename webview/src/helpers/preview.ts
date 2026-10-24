@@ -550,6 +550,13 @@ body {
   word-break: normal;
 }
 
+@media (max-width: 700px) {
+  html[data-meo-preview-preset="default"] .meo-export-doc {
+    /* The page adds another 12px below the document. */
+    padding-bottom: 52px;
+  }
+}
+
 .meo-export-math,
 .meo-export-math * {
   overflow-wrap: normal;
