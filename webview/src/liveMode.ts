@@ -3875,6 +3875,33 @@ function canMapUnchangedProseDecorations(decorations: DecorationSet, transaction
   catch { return false; } // The guarded scoped builder owns unsupported projections.
 }
 
+function projectLiveTableCommand(decorations: DecorationSet, transaction: Transaction): DecorationSet | undefined {
+  if (!transaction.docChanged || !(transaction.isUserEvent('input.table-command')
+    || transaction.isUserEvent('input.hex-color'))) return;
+  // A table command already owns a closed source range. Rebuild that table
+  // directly, without waiting for a partial document parse or exposing its
+  // Markdown in the meantime. Unrelated presentation keeps its accepted DOM.
+  let from = Infinity, to = -Infinity;
+  transaction.changes.iterChangedRanges((start, end) => { from = Math.min(from, start); to = Math.max(to, end); });
+  let table: SourceRange | undefined;
+  decorations.between(from, to, (start, end, decoration) => {
+    if (decoration.spec.meoTable && start <= from && end >= to) table = { from: start, to: end };
+  });
+  if (!table) return;
+  const state = transaction.state;
+  const nextFrom = transaction.changes.mapPos(table.from, -1), nextTo = transaction.changes.mapPos(table.to, 1);
+  const ranges: Range<Decoration>[] = [];
+  if (nextTo > nextFrom) {
+    addTableDecorationsForLineRange(ranges, state, state.doc.lineAt(nextFrom).number,
+      state.doc.lineAt(nextTo).number, state.field(diagnosticDataField, false) ?? [], state.field(gitDiffLineFlagsField, false));
+    if (!ranges.length) return;
+  }
+  const mapped = mapStableLiveDecorations(decorations, transaction.changes, state)?.decorations
+    ?? decorations.map(transaction.changes);
+  liveDecorationMetadata.set(state, { complete: false });
+  return replaceLivePresentationRanges(mapped, nextFrom, nextTo, ranges);
+}
+
 /** Rebuild a closed changed block from the shared renderer and map the rest.
  * Whitespace line changes additionally prove every outer node outside that
  * block unchanged. Definitions and reference labels keep global invalidation. */
@@ -4210,6 +4237,8 @@ const liveDecorationField = StateField.define<DecorationSet>({
       // Phase bookkeeping, especially settlement after an authoritative refresh,
       // must not discard distant block heights a second time.
       if (!transaction.docChanged) return decorations;
+      const tableCommand = projectLiveTableCommand(decorations, transaction);
+      if (tableCommand !== undefined) return tableCommand;
       if (usesLargeDocumentDerivedWorkBudget(transaction.state)
         && canMapUnchangedProseDecorations(decorations, transaction)) {
         const mapped = mapStableLiveDecorations(decorations, transaction.changes, transaction.state);

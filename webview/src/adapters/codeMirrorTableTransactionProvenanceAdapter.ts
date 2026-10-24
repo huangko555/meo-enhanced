@@ -48,6 +48,15 @@ const mapPositionedEffect = (value: PositionedRowEffect, mapping: ChangeDesc): P
   at: mapping.mapPos(value.at, value.assoc)
 });
 
+function invertPositionedEffect(value: PositionedRowEffect, transaction: Transaction): PositionedRowEffect {
+  const at = transaction.changes.invertedDesc.mapPos(value.at, value.assoc);
+  // Inverse effects address the document after undo. A combined native-cell
+  // replacement can swallow the row's anchor, so retain the lost relative
+  // distance for redo rather than keeping an out-of-range forward position.
+  const restoredAt = transaction.changes.mapPos(at, value.assoc);
+  return { ...value, at, offset: value.offset + value.at - restoredAt };
+}
+
 const provenanceEffect = StateEffect.define<AdapterEffectValue>({
   map(value, mapping) {
     if (value.type === 'baselineRefreshed' || value.type === 'externalDocumentPresented') return value;
@@ -169,7 +178,7 @@ export function createCodeMirrorTableTransactionProvenanceAdapter(
         mutations.push({
           type: 'markDeletedRows',
           id: value.id,
-          at: value.at,
+          at: value.at + value.offset,
           baselineRanges: value.baselineRanges,
           deletionAtEnd: value.deletionAtEnd
         });
@@ -201,14 +210,15 @@ export function createCodeMirrorTableTransactionProvenanceAdapter(
     for (const candidate of transaction.effects) {
       if (!candidate.is(provenanceEffect)) continue;
       const value = candidate.value;
-      if (value.type === 'markInsertedRow') inverse.push(provenanceEffect.of({ ...value, type: 'removeInsertedRow' }));
-      else if (value.type === 'removeInsertedRow') inverse.push(provenanceEffect.of({ ...value, type: 'markInsertedRow' }));
-      else if (value.type === 'markDeletedRows') inverse.push(provenanceEffect.of({ ...value, type: 'removeDeletedRows' }));
-      else if (value.type === 'removeDeletedRows') inverse.push(provenanceEffect.of({ ...value, type: 'markDeletedRows' }));
+      if (value.type === 'markInsertedRow') inverse.push(provenanceEffect.of({ ...value, ...invertPositionedEffect(value, transaction), type: 'removeInsertedRow' }));
+      else if (value.type === 'removeInsertedRow') inverse.push(provenanceEffect.of({ ...value, ...invertPositionedEffect(value, transaction), type: 'markInsertedRow' }));
+      else if (value.type === 'markDeletedRows') inverse.push(provenanceEffect.of({ ...value, ...invertPositionedEffect(value, transaction), type: 'removeDeletedRows' }));
+      else if (value.type === 'removeDeletedRows') inverse.push(provenanceEffect.of({ ...value, ...invertPositionedEffect(value, transaction), type: 'markDeletedRows' }));
       else if (value.type === 'remapInsertedRows') {
         for (const row of value.rows) explicitlyRemappedIds.add(row.id);
         inverse.push(provenanceEffect.of({
           ...value,
+          tableFrom: transaction.changes.invertedDesc.mapPos(value.tableFrom, -1),
           rows: value.rows.map(({ id, oldOffset, newOffset }) => ({
             id,
             oldOffset: newOffset,
@@ -219,7 +229,8 @@ export function createCodeMirrorTableTransactionProvenanceAdapter(
     }
     for (const row of replacedInsertedRows(provenance.snapshot(), transaction)) {
       if (!explicitlyRemappedIds.has(row.id)) {
-        inverse.push(provenanceEffect.of({ ...row, type: 'markInsertedRow' }));
+        inverse.push(provenanceEffect.of({ ...row,
+          at: transaction.changes.invertedDesc.mapPos(row.at, row.assoc), type: 'markInsertedRow' }));
       }
     }
     return inverse;

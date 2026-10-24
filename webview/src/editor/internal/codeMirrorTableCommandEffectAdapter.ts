@@ -49,7 +49,7 @@ export function createCodeMirrorTableCommandEffectAdapter(
     executeTableCellCommitBoundary(plan.confirmations ?? [], () => {
       if (!plan.transaction) return;
       for (const confirmation of plan.confirmations ?? []) confirmation.applied = true;
-      const dispatch = () => target.view.dispatch(plan.transaction!);
+      const dispatch = () => target.view.dispatch({ userEvent: 'input.table-command', ...plan.transaction! });
       if (plan.preserveViewport) target.preserveViewport(dispatch);
       else dispatch();
       plan.afterDispatch?.();

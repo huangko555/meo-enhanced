@@ -13,7 +13,7 @@ import { wireNativeSymbolInput, nativeSymbolInput } from '../editor/nativeTyping
 import { automaticSymbolPairs, symbolOriginEpoch, replaceAutomaticSymbolPairArea, inputAssistanceFacet, type AutomaticSymbolPair } from '../editor/typingAssistance';
 import { emptyMarkdownTable, markdownTableFromCells, serializeDelimitedTable, parseMarkdownTable, externalTableCellToMarkdown } from '../application/delimitedTable';
 import { defaultInputAssistance, type EditorCommandId } from '../../../src/foundation/editingPreferences';
-import { countColumn, EditorState, RangeSet, RangeValue, StateEffect, StateField, type Annotation, type ChangeDesc, type Range, type SelectionRange as CodeMirrorSelectionRange, type Transaction } from '@codemirror/state';
+import { countColumn, EditorState, RangeSet, RangeValue, StateEffect, StateField, Transaction, type Annotation, type ChangeDesc, type Range, type SelectionRange as CodeMirrorSelectionRange } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
 import type { SyntaxNode, SyntaxNodeRef, Tree } from '@lezer/common';
@@ -763,7 +763,7 @@ function isTableControlTarget(target: EventTarget | null): boolean {
 
 
 function isEditingMenuTarget(target: EventTarget | null): boolean {
-  return Boolean(target instanceof Element && target.closest('.selection-inline-menu, .meo-input-suggestions'));
+  return Boolean(target instanceof Element && target.closest('.selection-inline-menu, .meo-input-suggestions, .meo-hex-color-adjustment'));
 }
 
 function targetElementFrom(target: EventTarget | null): Element | null {
@@ -3625,7 +3625,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     executeTableCellCommitBoundary(confirmations, () => {
       if (!plan.transaction) return;
       for (const pending of confirmations) pending.applied = true;
-      this.preserveTableCommandViewport(() => view.dispatch(plan.transaction!));
+      this.preserveTableCommandViewport(() => view.dispatch({ userEvent: 'input.table-command.paste', ...plan.transaction! }));
       plan.restoreInteraction?.();
     });
   }
@@ -3685,7 +3685,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     executeTableCellCommitBoundary(confirmations, () => {
       if (!plan.transaction) return;
       for (const pending of confirmations) pending.applied = true;
-      this.preserveTableCommandViewport(() => view.dispatch(plan.transaction!));
+      this.preserveTableCommandViewport(() => view.dispatch({ userEvent: 'input.table-command.clear', ...plan.transaction! }));
       this.scheduleFocusCellAfterCommit(
         view,
         tableStartLine,
@@ -3973,6 +3973,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
     const onFocusOut = (event: FocusEvent) => {
       const nextTarget = event.relatedTarget;
+      if (nextTarget instanceof Element && nextTarget.closest('.meo-hex-color-adjustment')) return;
       const wrap = this.domRefs?.wrap ?? table;
       const container = this.domRefs?.container ?? wrap;
       if (nextTarget instanceof Node && container.contains(nextTarget)) return;
@@ -4271,12 +4272,15 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     if (confirmation) this.cancelPendingCellAutoCommit();
     try {
       const plan = this.buildTableCommandTransactionPlan(command, target);
-      if (!confirmation) return plan.transaction ? { ...plan, preserveViewport: true } : plan;
+      // Removing the anchor transfers ownership to the document caret. Keeping
+      // the old table's absolute viewport would leave that caret off-screen.
+      const preserveViewport = command !== 'delete-table';
+      if (!confirmation) return plan.transaction ? { ...plan, preserveViewport } : plan;
       if (!plan.transaction) {
         confirmation.settle('failed');
         return plan;
       }
-      return { ...plan, preserveViewport: true, confirmations: [confirmation] };
+      return { ...plan, preserveViewport, confirmations: [confirmation] };
     } catch (error) {
       confirmation?.settle('failed');
       throw error;
@@ -4360,7 +4364,11 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         this.pendingContextMenuRestore = false;
         this.setContextMenuOpen(false);
       },
-      restoreInteraction: () => view.focus()
+      restoreInteraction: () => {
+        view.focus();
+        const viewport = getViewportController(view);
+        if (viewport) viewport.revealPositionUntilStable(from, { yMargin: view.defaultLineHeight }, viewport.beginNavigationReveal());
+      }
     };
   }
 
@@ -4625,6 +4633,15 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       if (input === replacedInput && !input.isConnected) return false;
       const caret = Math.min(Math.max(focusTarget.caret ?? 0, 0), input.value.length);
       input.focus({ preventScroll: true });
+      // Structural replacements can map the outer caret to the table header.
+      // Adopt the restored cell explicitly; toolbar/keyboard commands do not
+      // own a text-pointer release that could project this position for them.
+      const range = tableCellSourceRangeForInput(view, input), head = view.state.selection.main.head;
+      if (range && (head < range.from || head > range.to)) {
+        view.dispatch({ selection: { anchor: Math.min(range.to,
+          range.from + tableCellEditorOffsetToSourceOffset(input.value, caret)) },
+          annotations: Transaction.addToHistory.of(false) });
+      }
       input.setSelectionRange(caret, caret);
       if (restoreContextMenu) {
         const owner = shell ? tableDomOwners.get(shell) : null;
@@ -4633,10 +4650,16 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         this.pendingContextMenuRestore = false;
       }
       dispose();
-      // A contextual command is an in-place table operation. Revealing the
-      // restored caret would make the document chase rows changed by the
-      // command even though focus was restored with preventScroll.
       if (revealCaret && !restoreContextMenu) this.revealTableCellCaretIfNeeded(input, isRevealCurrent);
+      else if (revealCaret) {
+        // Most contextual commands stay in place. Sorting/moving can relocate
+        // the focused cell outside the viewport; only that case transfers
+        // ownership from the old table anchor to a minimal caret reveal.
+        const caret = tableCellCaretViewportBounds(input), bounds = tableUsableViewportBounds(view, input);
+        if (caret.top < bounds.top || caret.bottom > bounds.bottom) {
+          this.revealTableCellCaretIfNeeded(input, viewport?.beginNavigationReveal() ?? isRevealCurrent);
+        }
+      }
       return true;
     };
 
@@ -5431,6 +5454,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       this.cellInteraction.accept({ type: 'blur', target: { row: rowIndex, col: colIndex } });
       notifySelectionChange();
       const nextTarget = event.relatedTarget;
+      if (nextTarget instanceof Element && nextTarget.closest('.meo-hex-color-adjustment')) return;
       const nextTableShell = nextTarget instanceof Element
         ? nextTarget.closest('.meo-md-html-table-shell')
         : null;
@@ -6896,6 +6920,7 @@ function addTableWidgetDecoration(
   builder.push(
     Decoration.replace({
       block: true,
+      meoTable: true,
       widget: new HtmlTableWidget(
         tableData,
         stickyHeaderAdapterFactory,

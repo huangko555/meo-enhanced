@@ -116,7 +116,7 @@ function replaceActiveHexColor(view: EditorView, current: ActiveHexColorAdjustme
     ...(value === current.value ? {} : { changes: { from: current.from, to: current.to, insert: value } }),
     effects: setActiveHexColorAdjustment.of(null),
     annotations: isolateHistory.of('full'),
-    userEvent: 'change.color'
+    userEvent: 'input.hex-color'
   });
 }
 
@@ -125,6 +125,19 @@ function closeHexColorAdjustment(view: EditorView): void {
 }
 
 function createHexColorAdjustmentPanel(view: EditorView, active: ActiveHexColorAdjustment): HexColorAdjustmentPanel {
+  // A popup borrows focus from a native cell just as a table toolbar does.
+  // Returning to the outer document would abandon that cell's edit/selection.
+  const returnTarget = view.dom.ownerDocument.activeElement;
+  const returnSelection = returnTarget instanceof HTMLTextAreaElement
+    ? { start: returnTarget.selectionStart, end: returnTarget.selectionEnd, direction: returnTarget.selectionDirection }
+    : null;
+  const restoreFocus = () => {
+    if (returnTarget instanceof HTMLTextAreaElement && returnTarget.isConnected
+      && view.contentDOM.contains(returnTarget) && returnSelection) {
+      returnTarget.focus({ preventScroll: true });
+      returnTarget.setSelectionRange(returnSelection.start, returnSelection.end, returnSelection.direction);
+    } else view.focus();
+  };
   const strings = getUiStrings(view.state.facet(uiLanguageFacet));
   const dom = document.createElement('div');
   dom.className = 'cm-tooltip meo-hex-color-adjustment';
@@ -263,7 +276,7 @@ function createHexColorAdjustmentPanel(view: EditorView, active: ActiveHexColorA
   const apply = () => {
     if (applyButton.disabled) return;
     replaceActiveHexColor(view, active, draftValue);
-    view.focus();
+    restoreFocus();
   };
 
   hue.input.addEventListener('input', updateFromControls);
@@ -289,11 +302,11 @@ function createHexColorAdjustmentPanel(view: EditorView, active: ActiveHexColorA
   });
   closeButton.addEventListener('click', () => {
     closeHexColorAdjustment(view);
-    view.focus();
+    restoreFocus();
   });
   cancelButton.addEventListener('click', () => {
     closeHexColorAdjustment(view);
-    view.focus();
+    restoreFocus();
   });
   applyButton.addEventListener('click', apply);
 
@@ -307,7 +320,7 @@ function createHexColorAdjustmentPanel(view: EditorView, active: ActiveHexColorA
     event.preventDefault();
     event.stopPropagation();
     closeHexColorAdjustment(view);
-    view.focus();
+    restoreFocus();
   };
   let above: boolean | null = null;
   const position = (): boolean => {
@@ -386,7 +399,7 @@ function createHexColorAdjustmentPanel(view: EditorView, active: ActiveHexColorA
   document.addEventListener('keydown', onDocumentKeyDown, true);
   view.scrollDOM.addEventListener('scroll', onEditorScroll, { passive: true });
   view.dom.ownerDocument.defaultView?.addEventListener('resize', onEditorScroll);
-  valueInput.focus();
+  valueInput.focus({ preventScroll: true });
   return {
     position,
     destroy() {

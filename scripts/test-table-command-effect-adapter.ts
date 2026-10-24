@@ -54,7 +54,8 @@ const atomic = await adapter.execute({
 assert.deepEqual(atomic, { type: 'commandCompleted', commandId: 1, outcome: 'changed' });
 assert.equal(atomicBuilds, 1);
 assert.equal(atomicDispatches.length, 1, 'one atomic effect must dispatch exactly once');
-assert.equal(atomicDispatches[0], atomicTransactions[0], 'dispatch must receive the one transaction built by the plan');
+assert.deepEqual(atomicDispatches[0], { userEvent: 'input.table-command', ...atomicTransactions[0] },
+  'the atomic edit retains its plan and enters the shared user-input presentation path');
 
 assert.deepEqual(await adapter.execute({
   type: 'executeCommand', commandId: 3, command: 'delete-row',
@@ -72,7 +73,8 @@ await adapter.execute({
   target: { tableId: 'table-1', row: 1, column: 0, selection: null }
 }).completion;
 assert.equal(atomicDispatches.length, 2, 'each atomic effect must add exactly one dispatch');
-assert.equal(atomicDispatches[1], atomicTransactions[1], 'each dispatch must receive its plan transaction unchanged');
+assert.deepEqual(atomicDispatches[1], { userEvent: 'input.table-command', ...atomicTransactions[1] },
+  'each dispatch preserves its plan effects and classifies the user command');
 adapter.externalDocumentPresented();
 await adapter.execute({
   type: 'restoreInteraction', commandId: 6,

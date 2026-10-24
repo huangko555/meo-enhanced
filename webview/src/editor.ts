@@ -2820,9 +2820,14 @@ export function createEditor({
         // Retire the old native cell anchor before dispatch can reconcile it
         // and move a different row under the new pointer.
         viewportController.markInteraction();
-        liveSelectionGeneration += 1;
-        liveSelectionPointerId = event.pointerId;
-        view.dispatch({ effects: setLivePointerSelectionActiveEffect.of({ active: true, preservedLine: null }) });
+        // Buttons retire old caret/scroll work too, but borrow focus without
+        // selecting text. A text-pointer session would hide the current source
+        // line until release, even though the document caret never moved.
+        if (!event.target.closest('button')) {
+          liveSelectionGeneration += 1;
+          liveSelectionPointerId = event.pointerId;
+          view.dispatch({ effects: setLivePointerSelectionActiveEffect.of({ active: true, preservedLine: null }) });
+        }
       }
       const target = editableTarget(event.target);
       if (target) {

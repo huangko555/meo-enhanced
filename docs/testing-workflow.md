@@ -1706,6 +1706,15 @@ animation timeline advanced; keep the bounded progress wait and the behavioral
 assertion, together with timeout cancellation, paging, deletion and history checks.
 Popup scroll-following checks use a real wheel gesture and verify its actual scroll
 distance before comparing menu coordinates; direct scroll assignment is not user input.
+`test-live-command-presentation.ts` exercises the shipped Webview and Markdown Worker
+for all table commands and prose/table color popups in small and large documents.
+It observes held pointers and compositor frames, retains unrelated DOM and formatting,
+and checks cell focus returns and long-table deletion's visible document caret.
+The long-table setup uses an assigned starting viewport; the toolbar actions are
+native pointer input, and delayed settlement is observed through 80 frames.
+`test-table-provenance-history.ts` checks inverse effect coordinates against
+the restored document with the real input extenders, including combined pending
+cell edits, row insertion/deletion and repeated undo/redo.
 Sticky-header occlusion fixtures wait for an edited tall row to shrink before using
 its bounds to position the row behind the header.
 Column-width fixtures settle the current presentation before a trusted wheel

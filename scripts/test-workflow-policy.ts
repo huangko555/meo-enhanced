@@ -100,6 +100,8 @@ function targetedCommands(
       ];
     case 'table':
       return [
+        script('scripts/test-table-provenance-history.ts'),
+        script('scripts/test-live-command-presentation.ts'),
         script('scripts/test-editing-features-production.ts'),
         script('scripts/test-mixed-html-paste-production.ts'),
         script('scripts/test-slash-commands-production.ts'),
