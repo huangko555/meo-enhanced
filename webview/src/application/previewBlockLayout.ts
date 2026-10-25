@@ -18,7 +18,8 @@ export function createPreviewBlockLayout(blocks: readonly PreviewDocumentBlock[]
   for (const block of blocks) {
     const lines = Math.max(1, block.sourceEndLine - block.sourceLine + 1);
     const visualLines = Math.max(1, Math.ceil(block.sourceCharacters / columns));
-    const height = /^(?:fence|code_block)$/.test(block.kind) ? lines * options.lineHeight + 32
+    const height = block.kind === 'code_band' ? Math.max(lines, visualLines) * options.lineHeight
+      : /^(?:fence|code_block)$/.test(block.kind) ? lines * options.lineHeight + 32
       : block.kind === 'heading_open' ? options.lineHeight * 1.7 + 24
       : /(?:table|list|blockquote|html|footnotes|frontmatter)/.test(block.kind)
         ? Math.max(lines, visualLines) * options.lineHeight + 16 : visualLines * options.lineHeight + 16;

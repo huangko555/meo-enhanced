@@ -407,7 +407,8 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
     const selected = selection();
     if (!selected) return;
     const first = Math.min(selected.from.block, selected.to.block), last = Math.max(selected.from.block, selected.to.block);
-    let complete = !logicalAll;
+    const codeSelection = manifest.blocks[first]?.kind === 'code_band' && manifest.blocks[last]?.kind === 'code_band';
+    let complete = !logicalAll && !codeSelection;
     for (let index = first; complete && index <= last; index += 1) complete = mounted.has(index);
     if (complete) return;
     event.preventDefault();
@@ -425,7 +426,7 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
     // Endpoint offsets belong to hydrated DOM. Math/diagram source placeholders
     // may have changed their text; only unmounted interior uses parser offsets.
     const native = window.getSelection();
-    const range = !logicalAll && native?.rangeCount ? native.getRangeAt(0) : null;
+    const range = !logicalAll && !codeSelection && native?.rangeCount ? native.getRangeAt(0) : null;
     let copied: Promise<CopyValue>;
     const firstBlock = mounted.get(first), lastBlock = mounted.get(last);
     if (range && firstBlock && lastBlock) {

@@ -1,4 +1,5 @@
 import type { RawVscodeTheme, ShikiTokenLines, ShikiWorkerRequest, ShikiWorkerResponse } from './shikiTypes';
+import { unpackShikiTokens } from './shikiTokenTransfer';
 
 let source: { uri: string; promise: Promise<string> } | undefined;
 async function loadSource(uri: string): Promise<string> {
@@ -57,8 +58,14 @@ export function createBackgroundShiki(uri: string, theme: RawVscodeTheme,
         if (disposed || running !== job) return;
         const url = URL.createObjectURL(new Blob([text], { type: 'text/javascript' }));
         try { worker = new Worker(url); } finally { URL.revokeObjectURL(url); }
-        worker.onmessage = ({ data }: MessageEvent<ShikiWorkerResponse>) => {
-          if (data.id === running?.id) finish(data.tokens ?? null, !!data.error);
+        worker.onmessage = async ({ data }: MessageEvent<ShikiWorkerResponse>) => {
+          const active = running;
+          if (!active || data.id !== active.id) return;
+          try {
+            const tokens = data.tokens && active.isNeeded()
+              ? await unpackShikiTokens(data.tokens, active.code, () => !disposed && running === active && active.isNeeded()) : null;
+            if (running === active) finish(tokens, !!data.error);
+          } catch { if (running === active) finish(null, true); }
         };
         worker.onerror = event => { event.preventDefault(); finish(null, true); };
         worker.onmessageerror = () => finish(null, true);

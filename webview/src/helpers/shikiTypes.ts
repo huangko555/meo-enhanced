@@ -23,4 +23,5 @@ export type ShikiWorkerRequest = {
   readonly grammars: readonly unknown[];
   readonly code: string;
 };
-export type ShikiWorkerResponse = { readonly id: number; readonly tokens?: ShikiTokenLines; readonly error?: string };
+export type ShikiTokenTransfer = { rows: Uint32Array; tokens: Uint32Array; colors: string[] };
+export type ShikiWorkerResponse = { readonly id: number; readonly tokens?: ShikiTokenTransfer; readonly error?: string };

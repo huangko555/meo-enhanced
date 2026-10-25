@@ -154,6 +154,7 @@ export function preparePreviewDocument(options: PreviewDocumentOptions, windowed
     blocks: prepared.blocks,
     hasMermaid: prepared.hasMermaid,
     headings: prepared.headings,
+    codeSources: prepared.codeSources,
     renderBlock: prepared.renderBlock,
     renderAll: (): PreviewRenderResult => {
       const rendered = prepared.renderAll();
@@ -167,6 +168,11 @@ const windowedPreviewStyles = `
 .meo-table-scroll:has(>table[data-meo-preview-table-part]){margin-bottom:0}
 .meo-table-scroll:has(>table[data-meo-preview-table-part="end"]){margin-bottom:1em}
 table:is([data-meo-preview-table-part="middle"],[data-meo-preview-table-part="end"])>tbody>tr:first-child>td{border-top-width:0}
+.meo-export-code-block-wrap[data-meo-code-part]{margin-bottom:0}
+.meo-export-code-block-wrap[data-meo-code-part="end"]{margin-bottom:1em}
+.meo-export-code-block-wrap:is([data-meo-code-part="start"],[data-meo-code-part="middle"])>pre{padding-bottom:0;border-bottom:0;border-bottom-left-radius:0;border-bottom-right-radius:0}
+.meo-export-code-block-wrap:is([data-meo-code-part="middle"],[data-meo-code-part="end"])>pre{padding-top:0;border-top:0;border-top-left-radius:0;border-top-right-radius:0}
+${Array.from({ length: 8 }, (_, index) => `[data-meo-code-digits="${index + 3}"] .meo-export-code-line{grid-template-columns:${index + 3}ch minmax(0,1fr)}`).join('\n')}
 `;
 
 async function importPresetCodeTheme(name: string): Promise<CodeThemeDto> {

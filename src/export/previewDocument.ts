@@ -6,6 +6,7 @@ import type { PreviewDocumentChunk, PreviewDocumentManifest, PreviewDocumentOper
 import { previewBlockAtLine } from '../foundation/previewDocument';
 import { getPreviewPreset } from '../foundation/previewPresets';
 import { joinPreviewTableBands } from './markdownTableBands';
+import { joinPreviewCodeBands } from './markdownCodeBands';
 
 type TextPart = { text: string; lower: string; line: number; offset: number; fixedLine?: boolean };
 
@@ -102,7 +103,8 @@ export function createPreviewDocument(id: string, options: PreviewDocumentOption
     open(anchorLine: number) {
       const index = atLine(anchorLine) ?? 0;
       const chunks = prepared.blocks.slice(Math.max(0, index - 3), index + 9).map(block => read(block.index).chunk);
-      const document: PreviewDocumentManifest = { id, anchorLine, blocks: prepared.blocks, headings: prepared.headings, chunks };
+      const document: PreviewDocumentManifest = { id, anchorLine, blocks: prepared.blocks, headings: prepared.headings, chunks,
+        ...(prepared.codeSources.length ? { codeSources: prepared.codeSources } : {}) };
       return { html: '', hasMermaid: prepared.hasMermaid, styles: prepared.styles,
         preset: prepared.preset, presetRevision: prepared.presetRevision, document };
     },
@@ -147,7 +149,7 @@ export function createPreviewDocument(id: string, options: PreviewDocumentOption
             : slicePreviewHtml(entry.chunk.html, start, end);
           html.push(selected.html); text.push(selected.text);
         }
-        return { kind: 'copy', html: joinPreviewTableBands(html.join('')), text: text.join('') };
+        return { kind: 'copy', html: joinPreviewCodeBands(joinPreviewTableBands(html.join(''))), text: text.join('') };
       }
       let total = 0;
       let active: PreviewDocumentMatch | null = null;

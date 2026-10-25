@@ -7,6 +7,7 @@ import {
 } from './shikiHighlighter';
 import { projectShikiTokenLines, type ShikiPresentationRun } from '../../../src/shared/shikiTokenPresentation';
 import { getPreviewViewportResources } from './previewViewportResources';
+import { previewCodeSource } from './previewCodeSource';
 
 const FONT_STYLE_ITALIC = 1;
 const FONT_STYLE_BOLD = 2;
@@ -46,16 +47,21 @@ function getHighlightRequest(code: HTMLElement): {
   readonly language: string;
   readonly source: string;
   readonly sources: readonly HTMLElement[];
+  readonly offset: number;
+  readonly version: string;
 } | null {
   const languageClass = Array.from(code.classList).find((name) => name.startsWith('language-'));
   const language = resolveShikiLang(languageClass?.slice('language-'.length));
   if (!language) return null;
   const sources = Array.from(code.querySelectorAll<HTMLElement>('.meo-export-code-line-source'));
   if (sources.length === 0) return null;
+  const context = previewCodeSource(code);
   return {
     language,
-    source: sources.map((line) => line.textContent ?? '').join('\n'),
-    sources
+    source: context?.source ?? sources.map((line) => line.textContent ?? '').join('\n'),
+    sources,
+    offset: context ? Number(code.closest<HTMLElement>('[data-meo-code-offset]')?.dataset.meoCodeOffset ?? 0) : 0,
+    version: String(getShikiThemeVersion('preview')) + (context ? ':' + context.id : '')
   };
 }
 
@@ -77,14 +83,12 @@ export function hasAppliedPreviewCodeHighlight(root: ParentNode): boolean {
     .map(getHighlightRequest)
     .filter((request): request is NonNullable<ReturnType<typeof getHighlightRequest>> => request !== null);
   if (requests.length === 0) return false;
-  const themeVersion = String(getShikiThemeVersion('preview'));
-  return requests.every(request => request.sources.some(source => source.dataset.meoShiki === themeVersion));
+  return requests.every(request => request.sources.some(source => source.dataset.meoShiki === request.version));
 }
 
 /** Projects the exact Shiki tokens used by Live mode onto an already-rendered Preview code block. */
 export function applyPreviewCodeHighlight(frameDocument: Document, nearViewportOnly = false, isCurrent: () => boolean = () => true): void {
   if (!isCurrent()) return;
-  const themeVersion = String(getShikiThemeVersion('preview'));
   const nearby = nearViewportOnly ? getPreviewViewportResources(frameDocument, 'code') : undefined;
   const codes = nearby ?? Array.from(frameDocument.querySelectorAll<HTMLElement>('code.hljs'));
   const height = nearViewportOnly ? frameDocument.documentElement.clientHeight : 0;
@@ -99,7 +103,7 @@ export function applyPreviewCodeHighlight(frameDocument: Document, nearViewportO
     const [from, to] = nearViewportOnly ? previewCodeReadingBand(request.sources, height) : [0, request.sources.length];
     return [{ ...request, from, to }];
   });
-  for (const { language, source, sources, from, to } of requests) {
+  for (const { language, source, sources, from, to, offset, version: themeVersion } of requests) {
     if (sources.slice(from, to).every((sourceElement) => sourceElement.dataset.meoShiki === themeVersion)) continue;
     const lines = getShikiTokens(language, source, 'preview');
     if (!lines) {
@@ -111,7 +115,7 @@ export function applyPreviewCodeHighlight(frameDocument: Document, nearViewportO
     // for the reading band. A cached full-fence projection duplicates large
     // token arrays and erases much of the DOM reduction's memory benefit.
     const projectedLines = frameDocument.documentElement.dataset.meoPreviewBracketColoring === 'false'
-      ? lines.slice(from, to) : projectShikiTokenLines(lines, getShikiThemeMeta('preview'), { from, to });
+      ? lines.slice(from + offset, to + offset) : projectShikiTokenLines(lines, getShikiThemeMeta('preview'), { from: from + offset, to: to + offset });
     for (let lineIndex = from; lineIndex < to; lineIndex++) {
       const sourceElement = sources[lineIndex]!;
       if (sourceElement.dataset.meoShiki === themeVersion) continue;

@@ -222,6 +222,22 @@ complete-table semantics. Standalone exports retain the original complete table;
 logical whole-table clipboard HTML rejoins internal bands. Internal rendering
 bands must never become missing rows in full-document search or copying.
 
+Windowed built-in Preview also partitions top-level ordinary fences of at least
+512 lines into 32-line code bands. Each fence retains one complete syntax source;
+cross-band comments, strings and bracket depth never restart at a DOM boundary.
+Line numbers use a shared width and absolute row offsets. Copy-code reads the
+complete source, logical code selections rejoin the bands, and source search maps
+each rendered row to its authored line. Exports, screen readers, nested containers,
+unknown grammars, diagrams, GitHub and custom renderers retain complete semantics.
+An edit outside the mounted band still invalidates its syntax context. Previously
+themed rows remain painted until the replacement context is ready, through the
+existing atomic Preview commit and reading-position transaction.
+
+Shiki workers transfer numeric ranges and a shared color palette. The receiving
+surface reconstructs token objects in yielding batches and abandons retired work;
+the transfer never clones full scope explanations onto the UI thread. Tokenization
+and cache ownership remain with the existing per-surface highlighter lifecycle.
+
 Source positions are revision-specific. When edits insert/remove preceding blocks,
 an ordinary table wrapper derives identity from its direct authored table, rather
 than a changing window index. One transaction maps source identity for retained

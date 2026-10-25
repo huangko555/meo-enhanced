@@ -13,6 +13,7 @@ import { getExportStyleEnvironment } from './export';
 import { documentSurfaceVariables } from '../../../src/shared/documentSurfaceRoles';
 import { createPreviewMermaidRenderer } from './previewMermaid';
 import { addPreviewCodeCopyControls, previewCopyBlockSelector, closePreviewBlockFullscreen } from './previewBlockActions';
+import { setPreviewCodeSources } from './previewCodeSource';
 import { logWebviewRenderError } from './errors';
 import { normalizeDocumentText } from '../../../src/foundation/documentText';
 import { assessLargeDocument } from '../../../src/foundation/largeDocument';
@@ -468,7 +469,7 @@ function morphPreviewMain(
           deferUnreadyCodeBlock
           && fromElement.classList.contains('meo-export-code-block-wrap')
           && toElement.classList.contains('meo-export-code-block-wrap')
-          && fromElement.textContent !== toElement.textContent
+          && (fromElement.textContent !== toElement.textContent || fromElement.dataset.meoCodeId !== toElement.dataset.meoCodeId)
           && hasAppliedPreviewCodeHighlight(fromElement)
           && !isPreviewCodeHighlightReady(toElement, isCurrent)
         ) {
@@ -2026,6 +2027,7 @@ export function createPreviewController({
         previewScrollRange = null;
       }
       activeFrameDocument = frameDocument;
+      setPreviewCodeSources(frameDocument, payload.document?.codeSources);
       sourceMapDocument = null;
       sourceMap = [];
       visualSourceMap = [];
@@ -2258,6 +2260,7 @@ export function createPreviewController({
         reusableDocument.documentElement.dataset.meoPreviewWindowed = String(!!payload.document);
         const mapSourceLine = viewportSlot?.mapSourceLine ?? previewSourceLineMapper(previousRenderedText, renderedText);
         tableColumnPreferences.revise(previousRenderedText, renderedText, mapSourceLine);
+        setPreviewCodeSources(reusableDocument, payload.document?.codeSources);
         const deferredCodeBlocks = morphPreviewMain(
           reusableDocument,
           reusableMain,

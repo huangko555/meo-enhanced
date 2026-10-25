@@ -1,4 +1,5 @@
 import { getPreviewViewportResources } from './previewViewportResources';
+import { previewCodeSource } from './previewCodeSource';
 import { createElement, Maximize2 } from 'lucide';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 import { createCopyCodeButton } from './codeBlockControls';
@@ -79,6 +80,7 @@ export function addPreviewCodeCopyControls(root: ParentNode, language: UiLanguag
   const strings = getUiStrings(language);
   const nearby = root.nodeType === 9 ? getPreviewViewportResources(root as Document, 'copy') : undefined;
   for (const block of nearby ?? root.querySelectorAll<HTMLElement>(previewCopyBlockSelector)) {
+    if (block.dataset.meoCodePart && block.dataset.meoCodePart !== 'start') continue;
     if (block.classList.contains('meo-export-mermaid')
       && !block.querySelector(':scope > .meo-export-code-language-label')) {
       const label = block.ownerDocument.createElement('div');
@@ -101,6 +103,8 @@ export function addPreviewCodeCopyControls(root: ParentNode, language: UiLanguag
         }
         const currentCode = currentBlock?.querySelector(':scope > pre > code');
         if (!currentCode) return '';
+        const source = previewCodeSource(currentCode);
+        if (source) return source.source;
         const lines = Array.from(currentCode.querySelectorAll('.meo-export-code-line-source'));
         return lines.map(line => line.textContent ?? '').join('\n');
       }, language, block.ownerDocument);

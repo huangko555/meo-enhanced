@@ -19,6 +19,9 @@ export function decodePreviewDocumentManifest(value: unknown): PreviewDocumentMa
     || !Array.isArray(value.blocks) || !Array.isArray(value.chunks)
     || !value.chunks.every(chunk) || !Array.isArray(value.headings)) return null;
   const blockCount = value.blocks.length;
+  if (value.codeSources !== undefined && (!Array.isArray(value.codeSources) || !value.codeSources.every(source =>
+    record(source) && id(source.id) && typeof source.language === 'string' && typeof source.source === 'string')
+    || new Set(value.codeSources.map(source => source.id)).size !== value.codeSources.length)) return null;
   if (!value.blocks.every((block, index) => record(block) && block.index === index && integer(block.sourceLine)
     && block.sourceLine >= 1 && integer(block.sourceEndLine) && block.sourceEndLine >= block.sourceLine
     && integer(block.sourceCharacters) && typeof block.kind === 'string'

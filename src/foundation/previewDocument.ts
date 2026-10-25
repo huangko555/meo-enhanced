@@ -9,12 +9,14 @@ export type PreviewDocumentBlock = Readonly<{
 
 export type PreviewDocumentHeading = Readonly<{ text: string; level: number; line: number; id: string }>;
 export type PreviewDocumentChunk = Readonly<{ index: number; html: string; hasMermaid: boolean }>;
+export type PreviewCodeSource = Readonly<{ id: string; language: string; source: string }>;
 export type PreviewDocumentManifest = Readonly<{
   id: string;
   anchorLine: number;
   blocks: readonly PreviewDocumentBlock[];
   headings: readonly PreviewDocumentHeading[];
   chunks: readonly PreviewDocumentChunk[];
+  codeSources?: readonly PreviewCodeSource[];
 }>;
 
 export type PreviewDocumentPosition = Readonly<{ block: number; offset: number }>;

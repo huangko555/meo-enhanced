@@ -33,6 +33,8 @@ import { normalizeFenceLanguage } from './fenceLanguage';
 import { markdownPresentationBlocks, type MarkdownPresentationBlock } from './markdownPresentationBlocks';
 import { prepareDeferredMarkdownInline } from './deferredMarkdownInline';
 import { splitMarkdownTableBands, renderTableBandTokens, isMarkdownTableBand } from './markdownTableBands';
+import { splitMarkdownCodeBands, renderCodeBandToken, isMarkdownCodeBand, type CodeBand } from './markdownCodeBands';
+import type { PreviewCodeSource } from '../foundation/previewDocument';
 import type { PreviewDocumentHeading } from '../foundation/previewDocument';
 import { getPreviewPreset, type PreviewPresetId, type PreviewPresetDefinition } from '../foundation/previewPresets';
 import { load as loadYaml } from 'js-yaml';
@@ -100,6 +102,7 @@ export type MarkdownPresentation = Readonly<{
   blocks: readonly MarkdownPresentationBlock[];
   hasMermaid: boolean;
   headings: readonly PreviewDocumentHeading[];
+  codeSources: readonly PreviewCodeSource[];
   renderBlock(index: number): RenderMarkdownResult;
   renderAll(): RenderMarkdownResult;
 }>;
@@ -227,6 +230,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
       ? ` data-source-line="${escapeHtmlAttr(sourceLine)}"${sourceEndLine ? ` data-source-end-line="${escapeHtmlAttr(sourceEndLine)}"` : ''}`
       : '';
     const source = String(codeBlock.content ?? '');
+    const band = codeBlock.meta?.meoCodeBand as CodeBand | undefined;
     const richLanguage = github ? codeBlock.info.trim().split(/\s+/)[0] : language;
     const renderRichContent = !github || !env?.meoGithubFootnote;
 
@@ -257,17 +261,17 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
     // Windowed Preview owns viewport Shiki projection. Building a second,
     // whole-fence fallback token tree first defeats that bounded presentation.
     // Standalone HTML/PDF/Word continue to render their complete token HTML.
-    const highlighted = options.windowedPresentation && source.length >= 64_000 && viewportCodeLanguages.has(language) && !options.highlightCode
+    const highlighted = band || options.windowedPresentation && source.length >= 64_000 && viewportCodeLanguages.has(language) && !options.highlightCode
       ? escapeHtml(source)
       : options.highlightCode?.(source, language) ?? highlightFence(source, language);
     const className = language ? ` class="hljs language-${escapeHtmlAttr(language)}"` : ' class="hljs"';
-    const languageLabel = language
+    const languageLabel = language && (!band || band.first)
       ? `<div class="meo-export-code-language-label">${escapeHtml(language)}</div>`
       : '';
     return [
-      `<div class="meo-export-code-block-wrap"${sourceAttrs}>`,
+      `<div class="meo-export-code-block-wrap"${sourceAttrs}${band ? ` data-meo-code-id="${band.id}" data-meo-code-offset="${band.offset}" data-meo-code-digits="${band.digits}" data-meo-code-part="${band.first ? 'start' : band.last ? 'end' : 'middle'}"` : ''}>`,
       languageLabel,
-      `<pre class="meo-export-code-block"><code${className}>${renderHighlightedCodeLines(highlighted, source, options.target)}</code></pre>`,
+      `<pre class="meo-export-code-block"><code${className}>${renderHighlightedCodeLines(highlighted, source, options.target, band)}</code></pre>`,
       '</div>'
     ].join('');
   };
@@ -307,8 +311,12 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
     && (github ? node.info.trim().split(/\s+/)[0] : normalizeFenceLanguage(node.info)) === 'mermaid');
   const roots = markdownPresentationBlocks(bodyTokens, bodySourceLines,
     deferredInline ? index => deferredInline.prepareRange(index, index + 1) : undefined);
-  const tokenBlocks = options.windowedPresentation && !github && !options.presetDefinition?.custom
-    ? splitMarkdownTableBands(bodyTokens, roots, bodySourceLines) : roots;
+  const banded = options.windowedPresentation && !github && !options.presetDefinition?.custom;
+  const codeBands = banded ? splitMarkdownCodeBands(bodyTokens, roots, bodySourceLines, syntaxToken => {
+    const language = normalizeFenceLanguage(syntaxToken.info);
+    return !language || viewportCodeLanguages.has(language) && language !== 'mermaid' && !isMathFenceLanguage(language) ? language : null;
+  }) : { blocks: roots, sources: [] };
+  const tokenBlocks = banded ? splitMarkdownTableBands(bodyTokens, codeBands.blocks, bodySourceLines) : roots;
   const documentHref = options.target === 'html' && options.outputFilePath
     ? `./${encodeURIComponent(path.basename(options.outputFilePath))}`
     : '';
@@ -369,7 +377,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
       img: ['src', 'alt', 'title', 'width', 'height', 'loading', DEFERRED_IMAGE_ATTRIBUTE, ...(github ? githubHtmlAttributes.img : [])],
       ol: ['start', 'reversed', ...(github ? githubHtmlAttributes.ol : [])],
       li: ['value'],
-      '*': ['class', 'style', 'id', 'title', 'hidden', 'lang', 'dir', 'data-source-b64', 'data-meo-deferred-math', 'data-meo-preview-table-widths', 'data-meo-preview-table-part', 'data-meo-preview-table-origin', 'data-source-line', 'data-source-end-line', 'aria-hidden', ...(github ? githubHtmlAttributes['*'] : [])],
+      '*': ['class', 'style', 'id', 'title', 'hidden', 'lang', 'dir', 'data-source-b64', 'data-meo-deferred-math', 'data-meo-code-id', 'data-meo-code-digits', 'data-meo-code-offset', 'data-meo-code-part', 'data-meo-preview-table-widths', 'data-meo-preview-table-part', 'data-meo-preview-table-origin', 'data-source-line', 'data-source-end-line', 'aria-hidden', ...(github ? githubHtmlAttributes['*'] : [])],
       span: ['class', 'style', 'title', 'role', 'aria-label', 'aria-hidden', 'data-line-number'],
       th: ['colspan', 'rowspan', 'scope', 'style'],
       td: ['colspan', 'rowspan', 'style'],
@@ -509,6 +517,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
     blocks,
     hasMermaid,
     headings: headings.map(heading => ({ ...heading })),
+    codeSources: codeBands.sources,
     renderBlock(index) {
       if (!Number.isInteger(index) || index < 0 || index >= blocks.length) throw new RangeError('Unknown Markdown presentation block');
       if (prefixBlocks.length && index === 0) return sanitize(prefix);
@@ -522,7 +531,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
           + `<ol class="footnotes-list" start="${footerIndex + 1}">${note.render()}</ol></section>`);
       }
       return sanitize(block
-        ? md.renderer.render(isMarkdownTableBand(block) ? renderTableBandTokens(bodyTokens, block) : bodyTokens.slice(block.from, block.to), md.options, environment)
+        ? md.renderer.render(isMarkdownCodeBand(block) ? renderCodeBandToken(bodyTokens, block) : isMarkdownTableBand(block) ? renderTableBandTokens(bodyTokens, block) : bodyTokens.slice(block.from, block.to), md.options, environment)
         : preparedMarkdown.footnotesHtml);
     },
     renderAll: () => {
@@ -532,7 +541,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
   };
 }
 
-function renderHighlightedCodeLines(highlighted: string, source: string, target: RenderMarkdownOptions['target']): string {
+function renderHighlightedCodeLines(highlighted: string, source: string, target: RenderMarkdownOptions['target'], band?: CodeBand): string {
   const rows: string[] = [];
   const openSpans: string[] = [];
   let rowHtml = '';
@@ -578,10 +587,10 @@ function renderHighlightedCodeLines(highlighted: string, source: string, target:
   const sourceLines = source.split('\n');
   return rows.map((row, index) => [
     '<span class="meo-export-code-line">',
-    `<span class="meo-export-code-line-number" aria-hidden="true" data-line-number="${index + 1}"></span>`,
-    `<span class="meo-export-code-line-source">${row}${target !== 'docx' && source.length > 0 && sourceLines[index] === '' ? '<br>' : ''}</span>`,
+    `<span class="meo-export-code-line-number" aria-hidden="true" data-line-number="${(band?.offset ?? 0) + index + 1}"></span>`,
+    `<span class="meo-export-code-line-source"${band ? ` data-source-line="${band.lines[index]}"` : ''}>${row}${target !== 'docx' && source.length > 0 && sourceLines[index] === '' ? '<br>' : ''}</span>`,
     '</span>'
-  ].join('')).join('') + (source.endsWith('\n') ? '\n' : '');
+  ].join('')).join(band ? '\n' : '') + (source.endsWith('\n') ? '\n' : '');
 }
 
 function installSafeHtmlTransform(
