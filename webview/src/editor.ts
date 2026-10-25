@@ -472,7 +472,8 @@ export function createEditor({
   let capturedPointerId: number | null = null;
   let selectionMenuPointerId: number | null = null;
   let liveSelectionPointerId: number | null = null;
-  let tablePointerFocus: { pointerId: number; nativeTarget: HTMLTextAreaElement | null } | null = null;
+  let tablePointerFocus: { pointerId: number; nativeTarget: HTMLTextAreaElement | null;
+    released?: boolean; isCurrent?: () => boolean } | null = null;
   let gitDiffSelectionPointerId: number | null = null;
   let liveSelectionGeneration = 0;
   let inlineCodeClick: InlineCodeClickState | null = null;
@@ -1135,8 +1136,8 @@ export function createEditor({
     gitDiffSelectionPointerId = null;
   };
 
-  const clearPointerSelection = (preserveGitDiffDomain = false) => {
-    tablePointerFocus = null;
+  const clearPointerSelection = (preserveGitDiffDomain = false, preserveTableFocus = false) => {
+    if (!preserveTableFocus || !tablePointerFocus?.released) tablePointerFocus = null;
     quoteContentClick = null;
     if (view) {
       view.dom.classList.remove('meo-pointer-selecting');
@@ -1180,7 +1181,7 @@ export function createEditor({
         const generation = liveSelectionGeneration;
         requestAnimationFrame(() => {
           if (liveSelectionPointerId === pointerId && liveSelectionGeneration === generation) {
-            clearPointerSelection(preserveGitDiffDomain);
+            clearPointerSelection(preserveGitDiffDomain, true);
           }
         });
       } else {
@@ -2798,21 +2799,36 @@ export function createEditor({
   };
   onEditorFocusCapture = (event) => {
     const target = editableTarget(event.target);
+    if (tablePointerFocus?.released) {
+      if (tablePointerFocus.isCurrent?.() === false || tablePointerFocus.nativeTarget?.isConnected === false) {
+        tablePointerFocus = null;
+      } else if (target instanceof HTMLTextAreaElement && target.closest('.meo-md-html-table-shell') &&
+        target.parentElement?.classList.contains('is-editing')) {
+        // The table prepares its accepted target before focusing it on release.
+        // A native restore has not run that preparation for a stale input.
+        tablePointerFocus.nativeTarget = target;
+      } else if (tablePointerFocus.nativeTarget && !tablePointerFocus.nativeTarget.parentElement?.classList.contains('is-editing')) {
+        tablePointerFocus = null;
+      }
+    }
     if (!tablePointerFocus || !target || target !== event.target || target === tablePointerFocus.nativeTarget) return;
-    // Native window activation can restore an old textarea after
-    // a new table press. The table owns preview hit testing until release; do
-    // not let that stale focus clear its pointer session or repaint the old cell.
+    // Native activation can restore an old target during or after a new table
+    // click. Keep the gesture and its accepted cell until another explicit
+    // intent takes ownership, without repainting the stale native target.
     event.stopImmediatePropagation();
     // A click inside the already-editing textarea uses the browser's native
     // selection, rather than a preview gesture with a pointerup focus effect.
     if (tablePointerFocus.nativeTarget) {
-      tablePointerFocus.nativeTarget.focus({ preventScroll: true });
+      const input = tablePointerFocus.nativeTarget;
+      const selection = tablePointerFocus.released && lastTextareaSelection?.target === input ? lastTextareaSelection : null;
+      input.focus({ preventScroll: true });
+      if (selection) input.setSelectionRange(selection.start, selection.end, selection.direction);
       return;
     }
     // DOM text selection may focus its contenteditable ancestor. Leave that
     // native focus intact, without CodeMirror restoring its suspended range.
     if (target !== view.contentDOM) target.blur();
-    restoreTablePointerSelection(view);
+    restoreTablePointerSelection(view, tablePointerFocus.released === true);
   };
   onEditorFocusIn = (event) => {
     const target = editableTarget(event.target);
@@ -2820,7 +2836,7 @@ export function createEditor({
       // Selecting rendered table text can itself focus the contenteditable
       // ancestor. It must not end the table's still-held pointer interaction.
       if (tablePointerFocus && target === view.contentDOM) {
-        restoreTablePointerSelection(view);
+        restoreTablePointerSelection(view, tablePointerFocus.released === true);
         return;
       }
       // Table controls borrow focus without replacing the suspended cell's
@@ -2834,6 +2850,9 @@ export function createEditor({
     }
   };
   onEditorFocusOut = (event) => {
+    if (tablePointerFocus?.released && event.relatedTarget instanceof Node && !view.dom.contains(event.relatedTarget)) {
+      tablePointerFocus = null;
+    }
     const target = event.target;
     if (target instanceof HTMLTextAreaElement && target === lastFocusedEditorTarget) {
       lastTextareaSelection = {
@@ -2843,11 +2862,33 @@ export function createEditor({
         direction: target.selectionDirection
       };
     }
+    const next = editableTarget(event.relatedTarget);
+    const acceptedTableTarget = target === tablePointerFocus?.nativeTarget ||
+      !tablePointerFocus?.nativeTarget && target instanceof HTMLTableElement && target.classList.contains('meo-md-html-table');
+    if (tablePointerFocus?.released && acceptedTableTarget && next &&
+      next !== target && tablePointerFocus.isCurrent?.() !== false &&
+      !(next instanceof HTMLTextAreaElement && next.closest('.meo-md-html-table-shell') && next.parentElement?.classList.contains('is-editing'))) {
+      // Focusout precedes the new focus event. Keep the accepted cell session
+      // intact until capture can reject a stale native return; otherwise the
+      // table's bubbling handler ends it before the destination is checked.
+      event.stopImmediatePropagation();
+    }
   };
   onEditorPointerDown = (event) => {
     if (event.button === 0) {
       tablePointerFocus = null;
       suppressRenderedBlockPointerFocus(view.dom);
+      if (currentMode === 'live' && event.target instanceof Element &&
+        event.target.closest('.meo-md-html-table-column-resize-handle')) {
+        const shell = event.target.closest('.meo-md-html-table-shell');
+        const input = lastFocusedEditorTarget;
+        // Resizing owns geometry, while the suspended cell still owns typing.
+        // A late activation must not replace it with the outer document caret.
+        if (input instanceof HTMLTextAreaElement && input.isConnected &&
+          input.closest('.meo-md-html-table-shell') === shell && input.parentElement?.classList.contains('is-editing')) {
+          tablePointerFocus = { pointerId: event.pointerId, nativeTarget: input };
+        }
+      }
       if (currentMode === 'live' && event.target instanceof Element &&
         event.target.closest('.meo-md-html-table-shell') &&
         !event.target.closest('.meo-md-html-table-column-resize-handle')) {
@@ -3162,6 +3203,8 @@ export function createEditor({
   );
   setEditorHistoryRunner(view, (direction) => requestEditorHistoryReplay(direction));
   onHistoryKeyDown = (event) => {
+    // A new keyboard intent supersedes a completed pointer's native return target.
+    if (tablePointerFocus?.released) tablePointerFocus = null;
     const key = event.key.toLowerCase();
     const isHistory = (event.ctrlKey || event.metaKey) && (key === 'z' || key === 'y');
     const isModifier = key === 'control' || key === 'shift' || key === 'alt' || key === 'meta' || key === 'altgraph';
@@ -3363,7 +3406,10 @@ export function createEditor({
   };
   document.addEventListener('selectionchange', onDocumentSelectionChange);
   onWindowPointerUp = (event) => {
-    if (tablePointerFocus?.pointerId === event.pointerId) tablePointerFocus = null;
+    if (tablePointerFocus?.pointerId === event.pointerId) {
+      tablePointerFocus.released = true;
+      tablePointerFocus.isCurrent = viewportController.captureNavigationCurrentness();
+    }
     const nativeHit = inlineCodeClick?.nativeHit;
     if (inlineCodeClick?.pointerId === event.pointerId && nativeHit
       && Math.abs(nativeHit.x - event.clientX) <= 3 && Math.abs(nativeHit.y - event.clientY) <= 3)
@@ -3378,7 +3424,7 @@ export function createEditor({
       event.target.closest('.meo-md-html-table-shell')) {
       // The table still needs the original hit geometry during this release.
       finishPointerSelection(event.pointerId, true, true);
-    } else clearPointerSelection(true);
+    } else clearPointerSelection(true, true);
     if (completedSelection && quoteClick?.pointerId === event.pointerId && isLiveMode(view)
       && isPlainPrimaryPointerEvent(event) && view.state.selection.ranges.length === 1
       && view.state.selection.main.empty && Math.hypot(event.clientX - quoteClick.x, event.clientY - quoteClick.y) <= 3) {
@@ -3425,7 +3471,7 @@ export function createEditor({
     onSelectionChange?.({ visible: false });
   };
   onWindowLostPointerCapture = (event) => {
-    if (tablePointerFocus?.pointerId === event.pointerId) tablePointerFocus = null;
+    if (tablePointerFocus?.pointerId === event.pointerId && !tablePointerFocus.released) tablePointerFocus = null;
   };
   onWindowBlur = () => {
     inlineCodeClick = null;

@@ -665,6 +665,11 @@ hint during a trusted held pointer, sampling the old outline, visible selection,
 cell identity and viewport before release as well as the final exact caret.
 Keyboard return to the original cell, native same-cell clicks, the first key and
 Undo retain their separate ownership. `--only=table-activation` narrows this loop.
+`--only=table-boundaries` isolates native same-cell and body-to-cell return,
+outer/row borders and column resize. It covers ordinary and one MiB documents,
+late focus both during a held press and two frames after release, outline and
+geometry continuity, retained cells, first-key Undo and subsequent Tab/Shift+Tab.
+Completed multi-cell ranges also reject a late contenteditable focus after release.
 It belongs to the quick and targeted search gates. The smaller
 `scripts/test-editor-focus-window-return.ts` also checks both blur event orders,
 input invalidation, modal ownership and disposal. Browser evidence does not

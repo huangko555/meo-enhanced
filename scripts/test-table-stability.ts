@@ -772,10 +772,13 @@ async function main() {
 
       const dragSelectCells = (fromCell: HTMLElement, toCell: HTMLElement, pointerId: number) => {
         const table = fromCell.closest('table')!;
+        const startRect = fromCell.getBoundingClientRect();
         const targetRect = toCell.getBoundingClientRect();
         fromCell.dispatchEvent(new PointerEvent('pointerdown', {
           button: 0,
           pointerId,
+          clientX: startRect.left + startRect.width / 2,
+          clientY: startRect.top + startRect.height / 2,
           bubbles: true,
           cancelable: true
         }));
@@ -788,6 +791,8 @@ async function main() {
         }));
         table.dispatchEvent(new PointerEvent('pointerup', {
           pointerId,
+          clientX: targetRect.left + targetRect.width / 2,
+          clientY: targetRect.top + targetRect.height / 2,
           bubbles: true,
           cancelable: true
         }));
@@ -1955,10 +1960,13 @@ async function main() {
       const fromCell = document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="0"]')!;
       const toCell = document.querySelector<HTMLElement>('td[data-table-row="3"][data-table-col="0"]')!;
       const table = fromCell.closest('table')!;
+      const startRect = fromCell.getBoundingClientRect();
       const targetRect = toCell.getBoundingClientRect();
       fromCell.dispatchEvent(new PointerEvent('pointerdown', {
         button: 0,
         pointerId: 81,
+        clientX: startRect.left + startRect.width / 2,
+        clientY: startRect.top + startRect.height / 2,
         bubbles: true,
         cancelable: true
       }));
@@ -1971,6 +1979,8 @@ async function main() {
       }));
       table.dispatchEvent(new PointerEvent('pointerup', {
         pointerId: 81,
+        clientX: targetRect.left + targetRect.width / 2,
+        clientY: targetRect.top + targetRect.height / 2,
         bubbles: true,
         cancelable: true
       }));
@@ -2051,10 +2061,13 @@ async function main() {
       const fromCell = document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="0"]')!;
       const toCell = document.querySelector<HTMLElement>('td[data-table-row="3"][data-table-col="0"]')!;
       const table = fromCell.closest('table')!;
+      const startRect = fromCell.getBoundingClientRect();
       const targetRect = toCell.getBoundingClientRect();
       fromCell.dispatchEvent(new PointerEvent('pointerdown', {
         button: 0,
         pointerId: 82,
+        clientX: startRect.left + startRect.width / 2,
+        clientY: startRect.top + startRect.height / 2,
         bubbles: true,
         cancelable: true
       }));
@@ -2067,6 +2080,8 @@ async function main() {
       }));
       table.dispatchEvent(new PointerEvent('pointerup', {
         pointerId: 82,
+        clientX: targetRect.left + targetRect.width / 2,
+        clientY: targetRect.top + targetRect.height / 2,
         bubbles: true,
         cancelable: true
       }));

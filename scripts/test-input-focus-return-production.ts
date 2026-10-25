@@ -134,6 +134,14 @@ async function checkTableActivationClick(page: Page, frame: Frame): Promise<void
             }, gesture);
           }
           await page.mouse.up();
+          if (gesture === 'cells') {
+            await settle(frame, 2);
+            await frame.evaluate(() => {
+              const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+              view.contentDOM.focus({ preventScroll: true });
+              window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
+            });
+          }
           if (gesture === 'cancel' || gesture === 'lostcapture' || gesture === 'blur') await page.mouse.click(bounds.x + point.x, bounds.y + point.y);
           await settle(frame, 8);
           const result = await frame.evaluate(() => {
@@ -191,6 +199,122 @@ async function checkTableActivationClick(page: Page, frame: Frame): Promise<void
   await chord(page, 'z');
   await settle(frame);
   assert.equal((await readEditor(frame)).text, original, 'same-cell return Undo must restore Markdown');
+}
+
+async function checkTableActivationBoundaries(page: Page, frame: Frame): Promise<void> {
+  const original = (await readEditor(frame)).text;
+  for (const large of [false, true]) for (const origin of ['cell', 'document'] as const) {
+    for (const target of ['same', 'other', 'left-border', 'bottom-border', 'row-border', 'column-border'] as const)
+      for (const recovery of ['held', 'released'] as const) {
+      if (recovery === 'released' && target !== 'same' && target !== 'other') continue;
+      if (origin === 'document' && target === 'column-border') continue;
+      const fixture = 'Before table.\n\n| A | B |\n| --- | --- |\n| original cell | another target |\n| next row | final cell |\n\nAfter table.'
+        + (large ? '\n\n' + 'Unchanged background paragraph.\n\n'.repeat(34000) : '');
+      await frame.evaluate(fixture => {
+        const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: fixture }, selection: { anchor: 0 } });
+        view.focus(); view.scrollDOM.scrollTop = 0;
+      }, fixture);
+      await settle(frame, 8);
+      if (origin === 'cell') await (await frame.$('tbody td .meo-md-html-table-cell-preview'))!.click();
+      const point = await frame.evaluate(target => {
+        const table = document.querySelector<HTMLTableElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
+        const cells = [...table.querySelectorAll<HTMLTableCellElement>('tbody td')];
+        const bounds = cells[0].getBoundingClientRect(), outer = table.getBoundingClientRect();
+        const destination = cells[target === 'other' ? 1 : target === 'bottom-border' ? 2 : 0];
+        const input = destination.querySelector('textarea')!;
+        (window as any).__activationBoundary = { table, cells, input, oldInput: cells[0].querySelector('textarea'),
+          bounds: { top: outer.top, left: outer.left, width: outer.width, height: outer.height }, samples: [], armed: false };
+        document.addEventListener('pointerdown', event => {
+          const state = (window as any).__activationBoundary;
+          state.armed = true;
+          // The shared grid pixel can belong to either neighbouring native cell.
+          // Retain that real hit; TABLE/TR hits use the expected nearest cell.
+          const cell = event.target instanceof Element ? event.target.closest('td, th') : null;
+          if (cell && table.contains(cell)) state.input = cell.querySelector('textarea');
+        }, { capture: true, once: true });
+        if (target === 'left-border') return { x: outer.left + 0.1, y: bounds.top + bounds.height / 2 };
+        if (target === 'bottom-border') return { x: bounds.left + bounds.width / 2, y: outer.bottom - 0.1 };
+        if (target === 'row-border') return { x: bounds.left + bounds.width / 2, y: bounds.bottom - 0.1 };
+        if (target === 'column-border') return { x: bounds.right - 0.1, y: bounds.top + bounds.height / 2 };
+        const node = document.createTreeWalker(destination.querySelector('.meo-md-html-table-cell-preview')!, NodeFilter.SHOW_TEXT).nextNode()!;
+        const range = document.createRange(); range.setStart(node, 2); range.setEnd(node, 3);
+        const rect = range.getBoundingClientRect();
+        return { x: rect.right, y: rect.top + rect.height / 2 };
+      }, target);
+      await page.focus('#host-control');
+      await returnToFrame(page);
+      await frame.evaluate(() => {
+        const state = (window as any).__activationBoundary;
+        const sample = () => {
+          if (state.armed) {
+            const bounds = state.table.getBoundingClientRect();
+            const rings = state.cells.map((cell: Element) => {
+              const style = getComputedStyle(cell, '::after');
+              return style.visibility !== 'hidden' && style.boxShadow !== 'none';
+            });
+            state.samples.push({ rings, top: bounds.top, left: bounds.left, width: bounds.width, height: bounds.height });
+          }
+          state.raf = requestAnimationFrame(sample);
+        };
+        state.raf = requestAnimationFrame(sample);
+      });
+      const iframe = (await page.$('#webview'))!;
+      const bounds = await iframe.boundingBox(); assert.ok(bounds);
+      const inset = await iframe.evaluate(node => ({ x: node.clientLeft, y: node.clientTop }));
+      await page.mouse.move(bounds.x + inset.x + point.x, bounds.y + inset.y + point.y);
+      await page.mouse.down();
+      if (recovery === 'released') { await settle(frame, 3); await page.mouse.up(); await settle(frame, 2); }
+      await frame.evaluate(({ origin, target, recovery }) => {
+        const state = (window as any).__activationBoundary;
+        const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+        // A delayed native restore must not replace the newer pointer destination.
+        (recovery === 'held' && origin === 'cell' && target !== 'column-border' ? state.oldInput : view.contentDOM).focus({ preventScroll: true });
+        window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
+      }, { origin, target, recovery });
+      await settle(frame, 3);
+      if (recovery === 'held') await page.mouse.up();
+      await settle(frame, 10);
+      const result = await frame.evaluate(() => {
+        const state = (window as any).__activationBoundary;
+        cancelAnimationFrame(state.raf);
+        const input = state.input as HTMLTextAreaElement;
+        return { focused: document.activeElement === input, caret: input.selectionStart, samples: state.samples,
+          bounds: state.bounds, retained: state.cells.every((cell: Element) => cell.isConnected) };
+      });
+      const label = `${large ? 'large' : 'small'}/${origin}/${target}/${recovery}`;
+      assert.ok(result.focused, `${label}: a border or activation click lost the native cell caret`);
+      if (target === 'same' || target === 'other') assert.equal(result.caret, 3, `${label}: native hit testing moved the caret`);
+      let appeared = false;
+      for (const sample of result.samples) {
+        const visible = sample.rings.some(Boolean);
+        assert.ok(!appeared || visible, `${label}: the cell outline disappeared after appearing`);
+        appeared ||= visible;
+        for (const key of ['top', 'left', 'width', 'height'] as const) {
+          assert.ok(Math.abs(sample[key] - result.bounds[key]) <= 0.5, `${label}: table ${key} changed during focus handoff`);
+        }
+      }
+      assert.ok(appeared && result.samples.length >= 8 && result.retained, `${label}: missing outline frames or replaced cells`);
+      if (recovery === 'released') {
+        await page.keyboard.press('Tab');
+        assert.ok(await frame.evaluate(() => document.activeElement instanceof HTMLTextAreaElement
+          && document.activeElement !== (window as any).__activationBoundary.input), `${label}: the completed pointer trapped Tab`);
+        await page.keyboard.down('Shift');
+        try { await page.keyboard.press('Tab'); } finally { await page.keyboard.up('Shift'); }
+        assert.ok(await frame.evaluate(() => document.activeElement === (window as any).__activationBoundary.input), `${label}: Shift+Tab could not return`);
+      }
+      await page.keyboard.type('Q');
+      await frame.waitForFunction(() => (window as any).__activationBoundary.input.value.includes('Q'));
+      await chord(page, 'z');
+      await settle(frame, 4);
+      assert.equal((await readEditor(frame)).text, fixture, `${label}: first-key Undo changed unrelated Markdown`);
+    }
+  }
+  await frame.evaluate(original => {
+    const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: original }, selection: { anchor: 0 } }); view.focus();
+  }, original);
+  await settle(frame);
 }
 
 async function checkOffscreenReturn(page: Page, frame: Frame, target: 'table' | 'document', side: 'above' | 'below', backward = false): Promise<void> {
@@ -312,7 +436,8 @@ async function checkOffscreenReturn(page: Page, frame: Frame, target: 'table' | 
 }
 
 try {
-  for (const mode of (process.argv.includes('--only=table-activation') ? ['live'] : ['live', 'source', 'preview']) as ('live' | 'source' | 'preview')[]) {
+  const onlyTable = process.argv.includes('--only=table-activation') || process.argv.includes('--only=table-boundaries');
+  for (const mode of (onlyTable ? ['live'] : ['live', 'source', 'preview']) as ('live' | 'source' | 'preview')[]) {
     const page = await browser.newPage();
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(String(error)));
@@ -341,8 +466,11 @@ try {
         restoreReadingPositionOnOpen: false, vscodeTheme: null
       } })), { text, mode });
       await frame.waitForSelector('.editor-wrapper:not(.meo-preload-editor-shell) .cm-content');
-      if (mode === 'live') await checkTableActivationClick(page, frame);
-      if (process.argv.includes('--only=table-activation')) continue;
+      if (mode === 'live') {
+        if (!process.argv.includes('--only=table-boundaries')) await checkTableActivationClick(page, frame);
+        await checkTableActivationBoundaries(page, frame);
+      }
+      if (onlyTable) continue;
       if (mode !== 'preview') {
         for (const side of ['above', 'below'] as const) {
           if (mode === 'live') await checkOffscreenReturn(page, frame, 'table', side, side === 'below');
@@ -568,8 +696,8 @@ try {
       assert.deepEqual(errors, [], `${mode}: focus handlers must not throw`);
     } finally { await page.close(); }
   }
-  console.log(process.argv.includes('--only=table-activation')
-    ? 'Table window-return activation, drag, cancellation and native caret checks passed.'
+  console.log(onlyTable
+    ? 'Table window-return activation, border, resize, drag, cancellation and native caret checks passed.'
     : 'Input window-return and document handoff production checks passed in Live, Source and Preview.');
 } catch (error) { primaryError = error; }
 finally {

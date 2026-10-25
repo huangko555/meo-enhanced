@@ -2461,15 +2461,16 @@ export function endTableCellEditing(view: EditorView): void {
   }
 }
 
-/** A held text gesture owns its DOM range across native focus restoration. */
-export function restoreTablePointerSelection(view: EditorView): void {
+/** Retain a table gesture or its accepted cell range across native focus restoration. */
+export function restoreTablePointerSelection(view: EditorView, includeCompletedRange = false): void {
   for (const widget of mountedTableWidgets.get(view) ?? []) {
-    const phase = widget.cellSelection.snapshot().phase;
+    const { phase, range } = widget.cellSelection.snapshot();
     if (phase === 'text-candidate') {
       widget.projectPointerTextSelection(widget.selectionDomHead);
       return;
     }
-    if (phase === 'dragging' && widget.domRefs) {
+    if ((phase === 'dragging' || includeCompletedRange && phase === 'persisted' && range &&
+      (range.fromRow !== range.toRow || range.fromCol !== range.toCol)) && widget.domRefs) {
       widget.setTableInteractionActive(widget.domRefs.wrap, true);
       widget.domRefs.table.focus({ preventScroll: true });
       return;
@@ -3829,7 +3830,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         return;
       }
       if (isTableControlTarget(event.target)) return;
-      const cell = this.findCellElement(event.target);
+      // Collapsed borders can hit TABLE/TR rather than either adjacent cell.
+      // Resolve that press through the same bounded geometry as a table drag.
+      const cell = this.findCellElement(event.target) ?? findDragCell(event, false);
       if (!cell) return;
       this.setContextMenuOpen(false);
       const current = this.coordsFromCell(cell);
@@ -3874,7 +3877,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       applyPointerTransition(transition, event, cell);
     };
 
-    const findDragCell = (event: PointerEvent): HTMLTableCellElement | null => {
+    const findDragCell = (event: PointerEvent, preserveTextCandidate = true): HTMLTableCellElement | null => {
       const hit = this.findCellElement(document.elementFromPoint(event.clientX, event.clientY));
       if (hit) return hit;
       const grid = this.rowWindow && this.domRefs
@@ -3900,7 +3903,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       }
       const state = this.cellSelection.snapshot();
       // Leaving a text drag in its original cell still ends the native text preview.
-      if (state.phase === 'text-candidate' && state.anchor?.row === Number(cells[col].dataset.tableRow) && state.anchor.col === col) return null;
+      if (preserveTextCandidate && state.phase === 'text-candidate' && state.anchor?.row === Number(cells[col].dataset.tableRow) && state.anchor.col === col) return null;
       return cells[col];
     };
 
@@ -3925,14 +3928,15 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     };
 
     const endPointerSelection = (event: PointerEvent) => {
-      const releaseCell = event.type === 'pointerup'
-        ? this.findCellElement(document.elementFromPoint(event.clientX, event.clientY))
-        : null;
-      const releaseCoords = releaseCell ? this.coordsFromCell(releaseCell) : null;
       const hit = event.type === 'pointerup' ? document.elementFromPoint(event.clientX, event.clientY) : null;
       const endedInsideTable = (hit instanceof Node && table.contains(hit)) || (
         !event.isTrusted && event.target instanceof Node && table.contains(event.target)
       );
+      const releaseCell = event.type === 'pointerup'
+        ? this.findCellElement(hit) ?? (endedInsideTable && this.cellSelection.ownsPointer(event.pointerId)
+          ? findDragCell(event, false) : null)
+        : null;
+      const releaseCoords = releaseCell ? this.coordsFromCell(releaseCell) : null;
       const transition = event.type === 'pointerup'
         ? this.cellSelection.accept({
             type: 'end',
