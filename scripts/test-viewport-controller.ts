@@ -3081,6 +3081,9 @@ for (const interpolatedWhitespace of [undefined, true]) {
 
 // Independent alignment measures current semantic geometry only on explicit activation.
 {
+  const frames: FrameRequestCallback[] = [];
+  const previousRaf = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = callback => (frames.push(callback), frames.length);
   const doc = Text.of(Array.from({ length: 100 }, () => 'line'));
   const selection = { main: { anchor: 5, head: 9 } };
   const scrollDOM = { scrollTop: 300, scrollLeft: 27, scrollHeight: 2000, scrollWidth: 900, clientHeight: 400, clientWidth: 800 };
@@ -3091,6 +3094,7 @@ for (const interpolatedWhitespace of [undefined, true]) {
   const deferredAlignments: Array<{ line: number; isCurrent: () => boolean }> = [];
   const view = {
     dom: {}, scrollDOM, state: { doc, selection },
+    requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read()),
     dispatch: () => { throw new Error('View alignment must not dispatch a selection or document change'); },
     lineBlockAt: (position: number) => {
       const line = doc.lineAt(position);
@@ -3115,25 +3119,33 @@ for (const interpolatedWhitespace of [undefined, true]) {
     if (!controller.alignLinkedViewport('editor') || previewTop !== 550 || scrollDOM.scrollTop !== 300) throw new Error('Manual Source alignment ignored semantic geometry');
     if (controller.getLastViewportInteractionOwner() !== 'editor') throw new Error('Manual alignment lost its origin owner');
     scrollDOM.scrollTop = 1200;
-    if (!controller.alignLinkedViewport('preview') || scrollDOM.scrollTop !== 300 || previewTop !== 550 || scrollDOM.scrollLeft !== 27) throw new Error('Manual Preview alignment changed its origin or Source horizontal position');
+    if (!controller.alignLinkedViewport('preview')) throw new Error('Manual Preview alignment was not accepted');
+    await Promise.resolve();
+    // The newly mounted Source band can receive a native height-map correction
+    // after the first write. The explicit destination still owns settlement.
+    scrollDOM.scrollTop += 37;
+    await flushFrames(frames);
+    if (scrollDOM.scrollTop !== 300 || previewTop !== 550 || scrollDOM.scrollLeft !== 27) throw new Error('Manual Preview alignment changed its origin or Source horizontal position');
     if (controller.getLastViewportInteractionOwner() !== 'preview' || view.state.selection !== selection) throw new Error('Manual alignment changed Source selection');
+    const alignedMeasurements = measurements;
+    if (alignedMeasurements < 3 || alignedMeasurements > 19) throw new Error('Explicit alignment must use a bounded geometry settlement');
     geometryShift = 120;
     controller.alignLinkedViewport('editor');
-    if (previewTop !== 670 || measurements !== 3) throw new Error('Manual alignment reused stale geometry');
+    if (previewTop !== 670 || measurements !== alignedMeasurements + 1) throw new Error('Manual alignment reused stale geometry');
     scrollDOM.scrollTop = 1000;
     controller.editorViewportChanged();
     controller.previewViewportChanged();
     controller.linkedPreviewReady();
-    if (previewTop !== 670 || measurements !== 3) throw new Error('One-shot alignment enabled continuous sync or background measurements');
+    if (previewTop !== 670 || measurements !== alignedMeasurements + 1) throw new Error('One-shot alignment enabled continuous sync or background measurements');
     sourceLineRendered = false;
     controller.alignLinkedViewport('editor');
     if (deferredAlignments.length !== 1 || deferredAlignments[0].line !== 16 || !deferredAlignments[0].isCurrent()
-      || previewTop !== 670 || measurements !== 3) throw new Error('An unloaded Preview destination must prepare its window before a pixel-map jump');
+      || previewTop !== 670 || measurements !== alignedMeasurements + 1) throw new Error('An unloaded Preview destination must prepare its window before a pixel-map jump');
     controller.setLinkedPreviewEnabled(true, 'last-interaction');
     if (deferredAlignments[0].isCurrent()) throw new Error('A newer sync intent must cancel the pending one-shot alignment');
     if (controller.alignLinkedViewport('editor')) throw new Error('Automatic sync must own linked alignment');
     controller.setLinkedPreviewEnabled(false);
-  } finally { controller.destroy(); }
+  } finally { controller.destroy(); globalThis.requestAnimationFrame = previousRaf; }
   if (controller.alignLinkedViewport('editor')) throw new Error('Disposed alignment must be inert');
 }
 

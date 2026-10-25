@@ -4,6 +4,7 @@ import { editorViewportBounds } from './editorViewportBounds';
 import { uiLanguageFacet } from './uiLanguage';
 import { getUiStrings } from '../application/uiLanguage';
 import { isLivePointerSelectionActive, setLivePointerSelectionActiveEffect } from './livePointerSelection';
+import { isLiveInputDerivedWorkPending, requestLiveInputDerivedWork } from './liveInputDerivedWork';
 
 export type BlockReadingFocus = {
   kind: 'math' | 'html' | 'code' | 'mermaid';
@@ -22,6 +23,8 @@ interface BlockViewport {
     options: { keepVisible: boolean; reference?: CaretRetentionReference }): void;
   retainElementTopWhileMutation(element: HTMLElement | null, resolve: () => HTMLElement | null, mutate: () => void,
     isCurrent: () => boolean, target: { position: number; top: number }): void;
+  retainElementTop(element: HTMLElement | null, resolve: () => HTMLElement | null, isCurrent: () => boolean,
+    target: { position: number; top: number; geometry?: 'caret' }): { correct(): void; cancel(): void } | null;
 }
 const blockViewport = Facet.define<() => BlockViewport, (() => BlockViewport) | null>({ combine: values => values.at(-1) ?? null });
 const viewportFor = (view: EditorView) => view.state.facet(blockViewport)?.();
@@ -66,15 +69,30 @@ export function isBlockReading(state: EditorState, from: number, to: number): bo
   return !!focus && focus.from >= from && focus.from <= to;
 }
 
+const blockCaretRetentionConsumer = {};
 /** A transient caret target, shared by keyboard boundaries and pointer release. */
 export function retainBlockCaret(view: EditorView, top: number | null, mutate: (isCurrent: () => boolean) => void,
   reference?: CaretRetentionReference): void {
   const controller = viewportFor(view);
   const isCurrent = controller?.beginNavigationReveal() ?? (() => true);
+  const pendingPresentation = top !== null && isLiveInputDerivedWorkPending(view.state);
   mutate(isCurrent);
   const position = view.state.selection.main.head;
-  if (top === null) controller?.revealPositionUntilStable(position, { y: 'nearest', yMargin: 8 }, isCurrent);
-  else controller?.retainPositionTop(position, top, isCurrent, false, { keepVisible: true, reference });
+  const retention = pendingPresentation ? controller?.retainElementTop(null, () => null, isCurrent,
+    { position, top: top!, geometry: 'caret' }) : null;
+  const retain = () => {
+    if (!isCurrent()) return;
+    if (top === null) controller?.revealPositionUntilStable(position, { y: 'nearest', yMargin: 8 }, isCurrent);
+    else controller?.retainPositionTop(position, top, isCurrent, false, { keepVisible: true, reference });
+  };
+  if (retention) retention.correct();
+  else retain();
+  // A bounded input refresh may retire the held block presentation after the
+  // ordinary layout window. Keep the same intent through its accepted refresh.
+  if (pendingPresentation) requestLiveInputDerivedWork(view, blockCaretRetentionConsumer, () => {
+    retention?.cancel();
+    retain();
+  });
 }
 
 export function moveAcrossBlockBoundary(view: EditorView, forward: boolean, outside: number | null,

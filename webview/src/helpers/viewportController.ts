@@ -43,6 +43,8 @@ export type ElementTopRetention = {
   cancel(): void;
 };
 
+type ElementTopRetentionTarget = { position: number; top: number; geometry?: 'caret' };
+
 export interface ViewportLayoutRegion {
   element: HTMLElement;
   from: number;
@@ -789,7 +791,7 @@ export class ViewportController {
     resolveCurrentElement: () => HTMLElement | null,
     mutate: () => void,
     isCurrent: () => boolean = () => true,
-    target?: { position: number; top: number } | number
+    target?: ElementTopRetentionTarget | number
   ): void {
     const retention = this.retainElementTop(element, resolveCurrentElement, isCurrent, target);
     try {
@@ -805,7 +807,7 @@ export class ViewportController {
     element: HTMLElement | null,
     resolveCurrentElement: () => HTMLElement | null,
     isCurrent: () => boolean = () => true,
-    target?: { position: number; top: number } | number
+    target?: ElementTopRetentionTarget | number
   ): ElementTopRetention | null {
     const beforeTop = (typeof target === 'number' ? target : target?.top) ?? (element?.isConnected ? element.getBoundingClientRect().top : null);
     if (this.destroyed || beforeTop === null || !isCurrent()) {
@@ -845,7 +847,8 @@ export class ViewportController {
       // position brings it back into the DOM; subsequent correction uses the
       // actual header, including its inset, before painting.
       const currentTop = currentElement?.isConnected ? currentElement.getBoundingClientRect().top
-        : target && typeof target !== 'number' ? this.view.documentTop + this.view.lineBlockAt(target.position).top : null;
+        : target && typeof target !== 'number' ? (target.geometry === 'caret' ? this.view.coordsAtPos(target.position)?.top : undefined)
+          ?? this.view.documentTop + this.view.lineBlockAt(target.position).top : null;
       if (currentTop !== null) {
         const current = this.readScrollPosition();
         const scrollTarget = this.resolveScrollTarget({
@@ -1009,10 +1012,14 @@ export class ViewportController {
       if (owner === 'editor') {
         this.previewSurface.writeScrollTop(linkedMap.sourceToPreview(this.view.scrollDOM.scrollTop));
       } else {
-        this.writeScrollPosition({
-          top: linkedMap.previewToSource(this.previewSurface.readScrollTop()),
-          left: this.view.scrollDOM.scrollLeft
-        });
+        // Mounting the distant Source band can re-anchor CodeMirror after the
+        // initial write. This explicit navigation settles against fresh geometry;
+        // continuous linked gestures retain their single measured projection.
+        this.runNavigationReveal(() => {
+          const map = this.measureLinkedViewportMap();
+          if (!map || !this.previewSurface?.readScrollTop) return { kind: 'unavailable' };
+          return { kind: 'target', target: { top: map.previewToSource(this.previewSurface.readScrollTop()) } };
+        }, { settle: true }, isCurrent);
       }
       return true;
     }

@@ -483,6 +483,14 @@ try {
 
   // Each direction also handles the document boundaries without moving its origin.
   for (const boundary of [0, 1]) {
+    const sourceBounds = await page.$eval('.cm-scroller', element => {
+      const rect = element.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    });
+    await page.mouse.move(sourceBounds.x, sourceBounds.y);
+    // A new native gesture retires the preceding alignment's finite layout
+    // correction before preparing an exact boundary fixture.
+    await page.mouse.wheel({ deltaY: boundary ? 100_000 : -100_000 });
     await page.evaluate(boundary => {
       const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
       scroller.scrollTop = boundary * (scroller.scrollHeight - scroller.clientHeight);

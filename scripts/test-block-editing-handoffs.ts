@@ -36,6 +36,7 @@ async function checkBlockEditingHandoffs(page: Page,
     const target = Array.from(view.contentDOM.querySelectorAll<HTMLElement>('.cm-line'))
       .find((line: any) => line.textContent === 'AFTER TARGET') as HTMLElement | undefined;
     return { head: view.state.selection.main.head, focus: view.hasFocus, top: target?.getBoundingClientRect().top,
+      scrollTop: view.scrollDOM.scrollTop,
       math: view.dom.querySelectorAll('.meo-md-math-fenced-display').length,
       mathEditing: view.dom.querySelectorAll('.meo-math-live-result').length,
       htmlEditing: view.dom.querySelectorAll('.meo-md-html-live-result').length,
@@ -141,11 +142,24 @@ async function checkBlockEditingHandoffs(page: Page,
     if (sideIdentity) assert.equal(await page.evaluate(() => (window as any).handoffSidePanel ===
       document.querySelector('.meo-mermaid-inline-preview')), true, label + ': held side panel retains DOM identity');
     await page.mouse.up();
-    await frames(16);
+    const releaseTops = await page.evaluate(async () => {
+      const tops: Array<number | null> = [];
+      for (let index = 0; index < 16; index++) {
+        await new Promise(requestAnimationFrame);
+        const view = (window as any).nativeEditor.view;
+        const target = Array.from(view.contentDOM.querySelectorAll<HTMLElement>('.cm-line'))
+          .find((line: any) => line.textContent === 'AFTER TARGET') as HTMLElement | undefined;
+        tops.push(target?.getBoundingClientRect().top ?? null);
+      }
+      return tops;
+    });
+    assert.ok(releaseTops.every(top => top !== null && Math.abs(top - before.top!) <= 2),
+      label + ': every release frame retains the clicked prose ' + JSON.stringify(releaseTops));
     const released = await snapshot();
     expectEditing(released, fixture, false, label + '/released');
     assert.ok(released.focus && released.head >= after && released.head <= after + 'AFTER TARGET'.length, label + ': clicked prose owns the caret');
-    assert.ok(released.top !== undefined && Math.abs(released.top - before.top!) <= 2, label + ': release retains the clicked prose');
+    assert.ok(released.top !== undefined && Math.abs(released.top - before.top!) <= 2,
+      label + ': release retains the clicked prose ' + JSON.stringify({ before, held, released, point, after }));
     if (profile === 'rich' && fixture.side) {
       fs.mkdirSync('.local/block-editing-acceptance', { recursive: true });
       await page.screenshot({ path: '.local/block-editing-acceptance/side-pointer-released.png' });
