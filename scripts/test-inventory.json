@@ -608,6 +608,7 @@
       "scripts/test-preview-loading-reuse.ts",
       "scripts/test-preview-mermaid-runtime.ts",
       "scripts/test-preview-navigation-continuity.ts",
+      "scripts/test-preview-native-scroll-production.ts",
       "scripts/test-preview-outline-viewport-browser.ts",
       "scripts/test-preview-palette-stability.ts",
       "scripts/test-preview-preset-management-browser.ts",

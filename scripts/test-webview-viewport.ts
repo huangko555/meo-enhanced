@@ -2343,19 +2343,16 @@ async function main() {
     if (resizeWheelState.scrollTop <= scrollBeforeResizeWheel) {
       throw new Error(`Preview scrolling remained stuck after resizing the outline: ${JSON.stringify(resizeWheelState)}`);
     }
-    const syntheticWheelBefore = await page.evaluate(() => {
-      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
-      const scrollingElement = frame.contentDocument!.scrollingElement!;
-      const before = scrollingElement.scrollTop;
-      frame.contentDocument!.dispatchEvent(new WheelEvent('wheel', { deltaY: 60, bubbles: true }));
-      return before;
-    });
+    // Real input must also work in reverse after the outline's pointer capture.
+    // A synthetic WheelEvent has no browser default and must not be used to
+    // require a manual scrollTop fallback for ordinary native gestures.
+    await page.mouse.wheel({ deltaY: -60 });
     await waitForFrames(page, 2);
-    const syntheticWheelAfter = await page.evaluate(() => (
+    const reverseWheelAfter = await page.evaluate(() => (
       document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop
     ));
-    if (syntheticWheelAfter <= syntheticWheelBefore) {
-      throw new Error(`Preview wheel fallback did not recover scrolling: ${JSON.stringify({ syntheticWheelBefore, syntheticWheelAfter })}`);
+    if (reverseWheelAfter >= resizeWheelState.scrollTop) {
+      throw new Error(`Preview native reverse scrolling failed after outline resize: ${JSON.stringify({ resizeWheelState, reverseWheelAfter })}`);
     }
     await page.click('.outline-item[data-tooltip="Tall Mermaid"]');
     await waitForFrames(page, 2);

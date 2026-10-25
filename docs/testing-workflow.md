@@ -306,6 +306,15 @@ to native `smooth` scrolling while retaining the trusted wheel event. It belongs
 to the regression, targeted viewport and release gates. Late-layout compensation remains
 covered by the viewport and virtual-block contracts. Full-document scroll traversal
 must reach both boundaries; a capped or stalled loop cannot report full traversal.
+`scripts/test-preview-native-scroll-production.ts` applies the same test-only
+native-animation seam to ordinary/windowed Preview, long code and lists, with
+Live/Source controls. It records actual wheel receipt, intermediate reading
+witnesses, reversal, fine pixel packets, idle stability, bounded container DOM
+and split ownership on/off after deliberately slow loading. A cold-band geometry
+correction may end native animation; the test keeps that compensation and checks
+settling and the next gesture instead of replaying the abandoned destination.
+Physical mouse-wheel and trackpad inertia/feel still require device testing;
+CDP packets and native `smooth` calls do not establish that evidence.
 The tall-Mermaid viewport contract checks each trusted pixel-wheel event's target,
 delta and scroll response, then waits for stable anchor/gap/scroll geometry before
 applying its unchanged displacement limit. Failure reports retain event and frame

@@ -61,7 +61,7 @@ async function exercise(side: boolean) {
       const editor = document.querySelector<HTMLElement>('.editor-host')!;
       return { elapsed: scope.__loadingShows[0] - scope.__loadingStart, text: e.textContent,
         editorCovered: editor.hasAttribute('data-preview-cover'), editorInert: editor.inert,
-        frameInert: document.querySelector<HTMLElement>('.preview-frame')!.inert };
+        frameInert: document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.documentElement.inert };
     });
     assert.ok(state.elapsed >= 195 && state.elapsed < 1_000, JSON.stringify(state));
     assert.match(state.text!, /正在加载预览/);
@@ -114,7 +114,7 @@ async function exercise(side: boolean) {
     console.error(await page.evaluate(() => {
       const p = document.querySelector<HTMLElement>('.preview-host')!, f = p.querySelector<HTMLIFrameElement>('iframe')!;
       return { mode: document.querySelector<HTMLElement>('#app')?.dataset.mode, hostHidden: p.hidden, hostInert: p.inert,
-        loadingHidden: p.querySelector<HTMLElement>('.preview-loading')?.hidden, frameInert: f.inert,
+        loadingHidden: p.querySelector<HTMLElement>('.preview-loading')?.hidden, frameInert: f.contentDocument!.documentElement.inert,
         frameText: f.contentDocument?.body?.textContent?.slice(0, 140), frameUrl: f.contentDocument?.URL,
         status: p.querySelector<HTMLElement>('.preview-status')?.textContent, pending: (window as any).__loadingHold };
     }));

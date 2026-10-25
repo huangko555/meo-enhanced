@@ -9,7 +9,7 @@ const build = await Bun.build({
 if (!build.success) throw Error(build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
 try {
-  for (const scenario of ['ready', 'wheel-active', 'margin', 'gap', 'multiple', 'authored-size', 'error', 'hidden', 'replaced', 'font-increase', 'font-decrease', 'font-user-scroll', 'font-superseded', 'font-hidden', 'font-replaced']) {
+  for (const scenario of ['ready', 'wheel-active', 'smooth-tail', 'margin', 'gap', 'multiple', 'authored-size', 'error', 'hidden', 'replaced', 'font-increase', 'font-decrease', 'font-user-scroll', 'font-superseded', 'font-hidden', 'font-replaced']) {
     const page = await browser.newPage();
     const fontChange = scenario.startsWith('font-');
     const pageErrors: string[] = [];
@@ -205,6 +205,30 @@ try {
           .querySelector('[data-reading-anchor]')!.getBoundingClientRect().top;
       });
     }
+    if (scenario === 'smooth-tail') {
+      await page.evaluate(() => {
+        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!, scroll = doc.scrollingElement!;
+        const anchor = doc.querySelector('[data-reading-anchor]')!;
+        const state = (window as any).__imageScroll = { active: true, compensation: 0, samples: [] as number[], tops: [] as number[] };
+        const descriptor = Object.getOwnPropertyDescriptor(doc.defaultView!.Element.prototype, 'scrollTop')!;
+        Object.defineProperty(scroll, 'scrollTop', { configurable: true, get() { return descriptor.get!.call(this); }, set(top) {
+          const before = descriptor.get!.call(this); descriptor.set!.call(this, top);
+          state.compensation += descriptor.get!.call(this) - before;
+        } });
+        const sample = () => {
+          if (!state.active) return;
+          state.samples.push(anchor.getBoundingClientRect().top + scroll.scrollTop - state.compensation);
+          state.tops.push(anchor.getBoundingClientRect().top); requestAnimationFrame(sample);
+        }; sample();
+        // Test-only native animation, started by an unconsumed trusted wheel.
+        doc.addEventListener('wheel', event => {
+          if (event.defaultPrevented || !event.isTrusted) throw Error('Preview consumed the image scroll gesture');
+          event.preventDefault(); scroll.scrollBy({ top: event.deltaY, behavior: 'smooth' });
+        }, { passive: false, once: true });
+      });
+      await page.mouse.wheel({ deltaY: 240 });
+      await page.evaluate(async () => { for (let i = 0; i < 8; i++) await new Promise(requestAnimationFrame); });
+    }
     await releaseImage();
     await page.waitForFunction(({failed, count}) => {
       const images = Array.from(document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.images);
@@ -212,6 +236,7 @@ try {
         && img.src === 'https://preview-image.test/tall.svg');
     }, {}, {failed: scenario === 'error', count: scenario === 'multiple' ? 2 : 1});
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    if (scenario === 'smooth-tail') await page.evaluate(async () => { for (let i = 0; i < 52; i++) await new Promise(requestAnimationFrame); });
     const after = await page.evaluate(() => document.querySelector<HTMLIFrameElement>('.preview-frame')!
       .contentDocument!.querySelector('[data-reading-anchor]')!.getBoundingClientRect().top);
     if (scenario === 'gap') {
@@ -224,6 +249,14 @@ try {
       const sourceAfter = await page.$eval('.cm-scroller', element => element.scrollTop);
       assert.ok(Math.abs(sourceAfter - sourceTop) < 2,
         `A hidden Preview image must not project an anchor into Source: ${sourceTop} -> ${sourceAfter}`);
+    } else if (scenario === 'smooth-tail') {
+      const state = await page.evaluate(() => { const state = (window as any).__imageScroll; state.active = false;
+        return state as { samples: number[]; tops: number[] }; });
+      assert.ok(Math.max(...state.samples) - Math.min(...state.samples) <= 2, 'Late image geometry must retain the moving reading witness');
+      assert.ok(new Set(state.tops).size >= 5, `The image case must observe native intermediate frames: ${JSON.stringify(state)}`);
+      assert.ok(state.tops.every((top, i) => i === 0 || top <= state.tops[i - 1]! + 2), 'Late image must not pull reading backward');
+      const tail = state.tops.slice(-8);
+      assert.ok(Math.max(...tail) - Math.min(...tail) <= 1, 'The native tail and late image must settle');
     } else {
       // Chromium can land exactly two device-independent pixels apart after
       // resolving fractional line geometry; anything larger is visible drift.

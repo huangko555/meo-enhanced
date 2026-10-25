@@ -217,6 +217,13 @@ content-edit transactions retain their existing reading-position rules.
 Wheel quiet time is a resource-work budget, while only an actual held native
 scrollbar forbids viewport restoration. Delayed image geometry during a wheel
 must retain the current text witness rather than silently moving the page.
+Ordinary mouse-wheel and trackpad events retain the browser default; only the
+font-size shortcut consumes its wheel gesture. Do not replay wheel deltas through
+`scrollTop`, animate other navigation, or disable necessary reading compensation
+to prolong an animation. A real geometry correction can end a native animation.
+Loading inactivity belongs to the iframe's document root, including a replacement
+document: toggling `inert` on the iframe itself can leave Chromium's wheel scroller
+inactive after slow loading even after that attribute is removed.
 Screen readers, raw HTML/nested containers, GitHub and custom renderers retain
 complete-table semantics. Standalone exports retain the original complete table;
 logical whole-table clipboard HTML rejoins internal bands. Internal rendering

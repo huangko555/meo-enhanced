@@ -1062,7 +1062,7 @@ export function createPreviewController({
     loadingPending = false;
     loading.hidden = true;
     host.removeAttribute('aria-busy');
-    frame.inert = false;
+    if (frame.contentDocument?.documentElement) frame.contentDocument.documentElement.inert = false;
   };
   const beginLoadingPresentation = (): void => {
     if (disposed || loadingPending) return;
@@ -1074,7 +1074,9 @@ export function createPreviewController({
       if (disposed || !loadingPending || host.hidden) return;
       loading.hidden = false;
       host.setAttribute('aria-busy', 'true');
-      frame.inert = true;
+      // Keep inactivity inside the frame. Toggling inert on the iframe itself
+      // can leave Chromium's native wheel scroller disabled after slow loading.
+      if (frame.contentDocument?.documentElement) frame.contentDocument.documentElement.inert = true;
       onLoadingVisible?.();
     }, 200);
   };
@@ -2027,6 +2029,7 @@ export function createPreviewController({
         previewScrollRange = null;
       }
       activeFrameDocument = frameDocument;
+      frameDocument.documentElement.inert = !loading.hidden;
       setPreviewCodeSources(frameDocument, payload.document?.codeSources);
       sourceMapDocument = null;
       sourceMap = [];
@@ -2198,7 +2201,7 @@ export function createPreviewController({
         if (current) void current.ensure({ anchor, align: 'start', isCurrent: () => !disposed && !host.hidden
           && previewViewport === current && intent === viewportInteractionGeneration }).catch(handleWindowError);
       });
-      bindPreviewWheelFallback(frameDocument, signal, onFontSizeWheel);
+      bindPreviewFontSizeWheel(frameDocument, signal, onFontSizeWheel);
       bindPreviewShortcuts(frame, onShortcut, signal);
       const keepPosition = () => {
         if (
@@ -3898,23 +3901,12 @@ function isPreviewHostShortcut(event: KeyboardEvent): boolean {
   return event.ctrlKey || event.metaKey || event.altKey || /^F(?:[1-9]|1\d|2[0-4])$/.test(event.key);
 }
 
-function bindPreviewWheelFallback(frameDocument: Document, signal: AbortSignal, onFontSizeWheel?: (event: WheelEvent) => boolean): void {
+function bindPreviewFontSizeWheel(frameDocument: Document, signal: AbortSignal, onFontSizeWheel?: (event: WheelEvent) => boolean): void {
+  if (!onFontSizeWheel) return;
   frameDocument.addEventListener('wheel', (event) => {
-    if (event.defaultPrevented || onFontSizeWheel?.(event)) return;
-    if (event.ctrlKey) {
-      return;
-    }
-    const scrollElement = frameDocument.scrollingElement;
-    if (!scrollElement) {
-      return;
-    }
-    const deltaScale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-      ? 16
-      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-        ? frameDocument.defaultView?.innerHeight ?? 1
-        : 1;
-    event.preventDefault();
-    scrollElement.scrollTop += event.deltaY * deltaScale;
+    // Only the font-size shortcut owns wheel input. Ordinary mouse/trackpad
+    // gestures retain native animation, momentum and nested overflow routing.
+    if (!event.defaultPrevented) onFontSizeWheel(event);
   }, { passive: false, signal });
 }
 
