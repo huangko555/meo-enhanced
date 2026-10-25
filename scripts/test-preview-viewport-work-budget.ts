@@ -119,10 +119,15 @@ try {
     const scope = window as any, doc = scope.__windowFrame.contentDocument;
     scope.__windowDelay = { kind: 'blocks', block: scope.__windowViewport.manifest.blocks.length - 1 };
     doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', ctrlKey: true, bubbles: true, cancelable: true }));
+  });
+  // Establish the obsolete in-flight request before superseding it. A request
+  // still waiting behind background work can correctly be cancelled unopened.
+  await page.waitForFunction(() => (window as any).__windowDelay.started);
+  await page.evaluate(() => {
+    const doc = (window as any).__windowFrame.contentDocument;
     doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', ctrlKey: true, bubbles: true, cancelable: true }));
     doc.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', ctrlKey: true, bubbles: true, cancelable: true }));
   });
-  await page.waitForFunction(() => (window as any).__windowDelay.started);
   const supersededNavigation = await page.evaluate(async () => {
     const scope = window as any;
     scope.__windowDelay.reject(new Error('Obsolete block request')); scope.__windowDelay = null;
