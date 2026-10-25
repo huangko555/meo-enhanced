@@ -7,6 +7,7 @@ import { previewBlockAtLine } from '../foundation/previewDocument';
 import { getPreviewPreset } from '../foundation/previewPresets';
 import { joinPreviewTableBands } from './markdownTableBands';
 import { joinPreviewCodeBands } from './markdownCodeBands';
+import { joinPreviewContainerBands } from './markdownContainerBands';
 
 type TextPart = { text: string; lower: string; line: number; offset: number; fixedLine?: boolean };
 
@@ -149,7 +150,7 @@ export function createPreviewDocument(id: string, options: PreviewDocumentOption
             : slicePreviewHtml(entry.chunk.html, start, end);
           html.push(selected.html); text.push(selected.text);
         }
-        return { kind: 'copy', html: joinPreviewCodeBands(joinPreviewTableBands(html.join(''))), text: text.join('') };
+        return { kind: 'copy', html: joinPreviewContainerBands(joinPreviewCodeBands(joinPreviewTableBands(html.join('')))), text: text.join('') };
       }
       let total = 0;
       let active: PreviewDocumentMatch | null = null;

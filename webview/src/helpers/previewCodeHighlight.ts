@@ -70,7 +70,7 @@ export function isPreviewCodeHighlightReady(root: ParentNode, isCurrent: () => b
   let ready = true;
   for (const code of root.querySelectorAll<HTMLElement>('code.hljs')) {
     const request = getHighlightRequest(code);
-    if (!request || getShikiTokens(request.language, request.source, 'preview')) continue;
+    if (!request || getShikiTokens(request.language, request.source, 'preview', request.offset + request.sources.length)) continue;
     requestShikiTokens(request.language, request.source, 'preview', isCurrent);
     ready = false;
   }
@@ -105,7 +105,7 @@ export function applyPreviewCodeHighlight(frameDocument: Document, nearViewportO
   });
   for (const { language, source, sources, from, to, offset, version: themeVersion } of requests) {
     if (sources.slice(from, to).every((sourceElement) => sourceElement.dataset.meoShiki === themeVersion)) continue;
-    const lines = getShikiTokens(language, source, 'preview');
+    const lines = getShikiTokens(language, source, 'preview', offset + to);
     if (!lines) {
       requestShikiTokens(language, source, 'preview', isCurrent);
       continue;

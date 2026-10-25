@@ -77,6 +77,7 @@ type PendingHighlight = {
   priority: 'foreground' | 'background';
   readonly deferBackground: () => boolean;
   resumeForeground?: () => void;
+  previewPrefix?: ShikiTokenLines;
 };
 
 const alwaysNeeded = () => true;
@@ -208,10 +209,15 @@ function cacheKey(state: ShikiRuntimeState, lang: string, code: string): string 
 export function getShikiTokens(
   lang: string,
   code: string,
-  surface: ShikiSurface = 'editor'
+  surface: ShikiSurface = 'editor',
+  throughLine?: number
 ): ShikiTokenLines | null {
   const state = getRuntimeState(surface);
-  return state.tokenCache.get(cacheKey(state, lang, code)) ?? null;
+  const key = cacheKey(state, lang, code);
+  const complete = state.tokenCache.get(key);
+  if (complete) return complete;
+  const prefix = surface === 'preview' && throughLine !== undefined ? state.pending.get(key)?.previewPrefix : undefined;
+  return prefix && prefix.length >= throughLine! ? prefix : null;
 }
 
 /**
@@ -512,7 +518,9 @@ async function tokenizeAndCache(
         }
         return grammars;
       });
-      const tokens = await state.background.request(lang, code, isCurrent);
+      const tokens = await state.background.request(lang, code, isCurrent, prefix => {
+        if (state === runtimeStates.preview && isCurrent()) { request.previewPrefix = prefix; scheduleTokenRefresh(state); }
+      });
       if (tokens && isCurrent()) {
         state.tokenCache.set(key, tokens);
         scheduleTokenRefresh(state);

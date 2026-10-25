@@ -238,6 +238,27 @@ surface reconstructs token objects in yielding batches and abandons retired work
 the transfer never clones full scope explanations onto the UI thread. Tokenization
 and cache ownership remain with the existing per-surface highlighter lifecycle.
 
+Workers retain bounded grammar checkpoints for unchanged source ranges. A changed
+range is recomputed until its input text and incoming grammar stack match a cached
+range; insertion/deletion also remaps offsets. Blank lines and line endings still
+participate in grammar transitions. Loading new grammars invalidates checkpoints,
+and releasing the worker releases all derived state. At most four revisions share
+a 32 MiB estimated budget, with one oversized current document permitted. Cancelled
+prefixes must not evict the completed revision needed by the next keystroke.
+
+Worker results arrive as ordered, non-overlapping batches. Preview may project a
+completed prefix only when it covers the entire requested reading band. Source
+preparation and existing complete-result consumers still wait for the full result;
+an incomplete prefix is never presented as whole-document syntax. Superseding
+edits and disposal retire old work at yielding checkpoints.
+
+Top-level lists with at least 256 complete items and ordinary quotes with at least
+256 paragraphs also use 32-child reading bands. Nested item content stays together;
+numbering, task state, tight/loose spacing and authored source positions survive
+band boundaries. Alerts, raw HTML containers, GitHub/custom presets and complete
+exports retain their original renderer. Whole-container logical copy rejoins the
+bands; partially hydrated selection endpoints retain the existing DOM-copy path.
+
 Source positions are revision-specific. When edits insert/remove preceding blocks,
 an ordinary table wrapper derives identity from its direct authored table, rather
 than a changing window index. One transaction maps source identity for retained

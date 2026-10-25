@@ -164,6 +164,14 @@ export function preparePreviewDocument(options: PreviewDocumentOptions, windowed
 }
 
 const windowedPreviewStyles = `
+.meo-export-doc [data-meo-container-part]:not([data-meo-container-part="end"]){margin-bottom:0}
+.meo-export-doc [data-meo-container-part]:not([data-meo-container-part="start"]){margin-top:0}
+html[data-meo-preview-preset="default"] .meo-export-doc :is(ul,ol)[data-meo-container-part]:not([data-meo-container-part="start"])>li:first-child{margin-top:.2em}
+.meo-export-doc blockquote[data-meo-container-part]{display:flow-root}
+.meo-export-doc blockquote[data-meo-container-part]:not([data-meo-container-part="end"]){padding-bottom:0}
+.meo-export-doc blockquote[data-meo-container-part]:not([data-meo-container-part="start"]){padding-top:0}
+.meo-export-doc blockquote[data-meo-container-part]:not([data-meo-container-part="end"])>p:last-child{margin-bottom:1em}
+html[data-meo-preview-preset="newsprint"] .meo-export-doc blockquote[data-meo-container-part]:not([data-meo-container-part="end"])>p:last-child{margin-bottom:1.35em}
 .footnotes.meo-preview-footnotes-continuation{margin-top:.45em!important;padding-top:0!important;border-top:0!important}
 .meo-table-scroll:has(>table[data-meo-preview-table-part]){margin-bottom:0}
 .meo-table-scroll:has(>table[data-meo-preview-table-part="end"]){margin-bottom:1em}

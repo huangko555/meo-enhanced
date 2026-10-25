@@ -24,4 +24,5 @@ export type ShikiWorkerRequest = {
   readonly code: string;
 };
 export type ShikiTokenTransfer = { rows: Uint32Array; tokens: Uint32Array; colors: string[] };
-export type ShikiWorkerResponse = { readonly id: number; readonly tokens?: ShikiTokenTransfer; readonly error?: string };
+export type ShikiWorkerResponse = { readonly id: number; readonly tokens?: ShikiTokenTransfer; readonly error?: string;
+  readonly partial?: boolean; readonly checkpoint?: boolean; readonly fromLine?: number };
