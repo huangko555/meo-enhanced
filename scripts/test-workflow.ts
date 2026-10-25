@@ -12,6 +12,7 @@ const help = `MEO Enhanced test workflow
 Usage:
   bun scripts/test-workflow.ts ui-light [--dry-run]
   bun scripts/test-workflow.ts quick [--dry-run]
+  bun scripts/test-workflow.ts regression --confirm-long-run [--dry-run]
   bun scripts/test-workflow.ts targeted <history|table|rendered|appearance|search|viewport|changes> [--dry-run]
   bun scripts/test-workflow.ts targeted uat <document> [--dry-run]
   bun scripts/test-workflow.ts release [document] --confirm-long-run [--dry-run]
@@ -83,6 +84,7 @@ async function main(): Promise<void> {
   const stages = prepareWorkflow(plan, scripts, { ...resources, 'run typecheck': 'process', 'run architecture:check': 'process' });
   const planHash = digest(JSON.stringify(stages));
   console.log(`${plan.title} (${plan.expectedDuration})`);
+  if (plan.tier === 'quick') console.log('Core checks only: complete affected-feature and relevant document-scale checks before delivery.');
   for (const stage of stages) {
     console.log(`  ${stage.title} (up to ${stage.maxConcurrency} groups)`);
     for (const task of stage.groups.flat()) console.log(`    ${task.id}. [${task.resource}] bun ${task.command.args.join(' ')}${task.command.env ? ' ' + JSON.stringify(task.command.env) : ''}`);

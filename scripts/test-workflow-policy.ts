@@ -1,6 +1,7 @@
 export type TestWorkflowTier =
   | 'ui-light'
   | 'quick'
+  | 'regression'
   | 'targeted'
   | 'release'
   | 'endurance'
@@ -258,10 +259,10 @@ export function parseTestWorkflowRequest(argv: string[]): TestWorkflowRequest {
   const tier = positional[0] as TestWorkflowTier | undefined;
   if (
     !tier
-    || !['ui-light', 'quick', 'targeted', 'release', 'endurance', 'large-document'].includes(tier)
+    || !['ui-light', 'quick', 'regression', 'targeted', 'release', 'endurance', 'large-document'].includes(tier)
   ) {
     throw new Error(
-      'Expected one tier: ui-light, quick, targeted, release, endurance, or large-document'
+      'Expected one tier: ui-light, quick, regression, targeted, release, endurance, or large-document'
     );
   }
 
@@ -302,10 +303,35 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
     case 'quick':
       return {
         tier: 'quick',
-        title: 'Quick regression gate',
-        expectedDuration: 'host-dependent; last measured baseline about 18 minutes',
+        title: 'Core development checks',
+        expectedDuration: 'bounded core checks; affected-feature checks are additionally required',
         longRunning: false,
-        stages: [serialStage('Quick regression contracts', [
+        stages: [serialStage('Core development contracts', [
+          packageScript('typecheck'),
+          script('scripts/test-document-session.ts'),
+          script('scripts/test-document-auto-save-concurrency.ts'),
+          script('scripts/test-document-save-flush-protocol.ts'),
+          script('scripts/test-panel-session-ready-init.ts'),
+          script('scripts/test-panel-session-window-focus.ts'),
+          script('scripts/test-editor-history-runtime.ts'),
+          script('scripts/test-editing-preferences.ts'),
+          script('scripts/test-live-input-derived-work.ts'),
+          script('scripts/test-viewport-controller.ts'),
+          script('scripts/test-large-document-policy.ts'),
+          script('scripts/test-test-workflow.ts'),
+          script('scripts/test-test-inventory.ts'),
+          script('scripts/test-source-syntax-first-paint.ts'),
+          script('scripts/test-mode-roundtrip-reveal.ts'),
+          script('scripts/test-virtual-block-scroll-stability.ts')
+        ])]
+      };
+    case 'regression':
+      return {
+        tier: 'regression',
+        title: 'Broad development regression',
+        expectedDuration: 'historical full matrix 24-31 minutes; host dependent',
+        longRunning: true,
+        stages: [serialStage('Broad regression contracts', [
           packageScript('typecheck'),
           script('scripts/test-source-theme-customizations.ts'),
           script('scripts/test-shiki-empty-line-recovery.ts'),
@@ -380,7 +406,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
         tier: 'targeted',
         area,
         title: `Targeted ${area} regression`,
-        expectedDuration: area === 'uat' ? 'about 2-5 minutes' : area === 'rendered' ? 'about 4-7 minutes' : 'about 1-3 minutes',
+        expectedDuration: 'complete area pack; inspect the plan and recent timings before running',
         longRunning: false,
         stages: [serialStage(
           `Targeted ${area} contracts`,

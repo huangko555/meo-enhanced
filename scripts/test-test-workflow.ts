@@ -10,18 +10,30 @@ import {
 } from './test-workflow-policy';
 import { prepareWorkflow } from './test-workflow-execution';
 
+const regression = createTestWorkflowPlan(parseTestWorkflowRequest(['regression']));
 const quick = createTestWorkflowPlan(parseTestWorkflowRequest(['quick']));
+const coreCommands = flattenTestWorkflowCommands(quick);
+assert.equal(quick.longRunning, false);
+assert.doesNotThrow(() => validateTestWorkflowAuthorization(quick, false, false));
+assert.ok(coreCommands.length <= 20, 'Core checks need an explicit scope review before growing');
+assert.deepEqual(coreCommands.filter(command => command.args[0] === 'run'), [{ args: ['run', 'typecheck'] }],
+  'Broad aliases cannot silently inflate the daily core');
+for (const name of ['document-session', 'document-auto-save-concurrency', 'document-save-flush-protocol',
+  'editor-history-runtime', 'large-document-policy', 'test-workflow', 'test-inventory',
+  'source-syntax-first-paint', 'mode-roundtrip-reveal', 'virtual-block-scroll-stability']) {
+  assert.ok(coreCommands.some(command => command.args[0] === `scripts/test-${name}.ts`), `Missing core protection: ${name}`);
+}
 const lightUi = createTestWorkflowPlan(parseTestWorkflowRequest(['ui-light', '--dry-run']));
 assert.equal(lightUi.tier, 'ui-light');
 assert.equal(lightUi.longRunning, false);
 assert.deepEqual(flattenTestWorkflowCommands(lightUi), [{args: ['run', 'build:webview']}], 'light UI must not schedule broad regression packs');
 assert.doesNotThrow(() => validateTestWorkflowAuthorization(lightUi, false, false));
-const quickCommands = flattenTestWorkflowCommands(quick);
-assert.equal(quick.tier, 'quick');
-assert.equal(quick.longRunning, false);
-assert.ok(quickCommands.some((command) => command.args.join(' ') === 'run typecheck'));
-assert.ok(quickCommands.some(command => command.args.includes('scripts/test-source-theme-customizations.ts')));
-for (const tier of [quick, createTestWorkflowPlan(parseTestWorkflowRequest(['targeted', 'appearance'])), createTestWorkflowPlan(parseTestWorkflowRequest(['targeted', 'viewport']))]) {
+const regressionCommands = flattenTestWorkflowCommands(regression);
+assert.equal(regression.tier, 'regression');
+assert.equal(regression.longRunning, true);
+assert.ok(regressionCommands.some((command) => command.args.join(' ') === 'run typecheck'));
+assert.ok(regressionCommands.some(command => command.args.includes('scripts/test-source-theme-customizations.ts')));
+for (const tier of [regression, createTestWorkflowPlan(parseTestWorkflowRequest(['targeted', 'appearance'])), createTestWorkflowPlan(parseTestWorkflowRequest(['targeted', 'viewport']))]) {
   assert.ok(flattenTestWorkflowCommands(tier).some(command => command.args.includes('scripts/test-source-syntax-stability.ts')));
   assert.ok(flattenTestWorkflowCommands(tier).some(command => command.args.includes('scripts/test-preview-preset-position.ts')));
 }
@@ -32,18 +44,20 @@ for (const area of ['appearance', 'viewport']) {
 assert.ok(flattenTestWorkflowCommands(
   createTestWorkflowPlan(parseTestWorkflowRequest(['targeted', 'appearance']))
 ).some(command => command.args.join(' ') === 'run test:theme-inheritance'));
-assert.ok(!quickCommands.some((command) => command.args.join(' ') === 'run test'));
-assert.doesNotThrow(() => validateTestWorkflowAuthorization(quick, false, false));
-assert.ok(quickCommands.some((command) => (
+assert.ok(!regressionCommands.some((command) => command.args.join(' ') === 'run test'));
+assert.throws(() => validateTestWorkflowAuthorization(regression, false, false), /confirm-long-run/);
+assert.doesNotThrow(() => validateTestWorkflowAuthorization(regression, true, false));
+assert.doesNotThrow(() => validateTestWorkflowAuthorization(regression, false, true));
+assert.ok(regressionCommands.some((command) => (
   command.args.includes('scripts/test-virtual-block-scroll-stability.ts')
 )));
-assert.ok(quickCommands.some((command) => (
+assert.ok(regressionCommands.some((command) => (
   command.args.includes('scripts/test-html-enter-gutter-stability.ts')
 )));
-assert.ok(quickCommands.some((command) => (
+assert.ok(regressionCommands.some((command) => (
   command.args.includes('scripts/test-fenced-block-enter-stability.ts')
 )));
-assert.ok(quickCommands.some((command) => (
+assert.ok(regressionCommands.some((command) => (
   command.args.includes('scripts/test-mode-roundtrip-reveal.ts')
 )));
 
@@ -56,7 +70,7 @@ assert.ok(viewportCommands.some((command) => (
 
 assert.ok(viewportCommands.some(command => command.args.includes('scripts/test-long-document-scroll.ts')));
 
-for (const commands of [quickCommands, viewportCommands]) {
+for (const commands of [regressionCommands, viewportCommands]) {
   assert.ok(commands.some(command => command.args.join(' ') === 'run test:input-presentation'),
     'Input stability must exercise the production split build and compositor frames');
   for (const contract of ['test-line-number-rendered-block-stability.ts', 'test-line-number-layout-contract.ts',
@@ -278,11 +292,12 @@ for (const contract of [
   assert.ok(packageScripts['test:reading-position']?.includes(`bun ${contract}`),
     `reading-position gate must retain native tab return contract ${contract}`);
 }
-for (const plan of [quick, release, createTestWorkflowPlan(parseTestWorkflowRequest(['targeted', 'viewport']))]) {
+for (const plan of [regression, release, createTestWorkflowPlan(parseTestWorkflowRequest(['targeted', 'viewport']))]) {
   assert.ok(flattenTestWorkflowCommands(plan).some(command => command.args.join(' ') === 'run test:reading-position'),
     `${plan.tier} must run the native tab reading-position gate`);
 }
 assert.equal(packageScripts['test:quick'], 'bun scripts/test-workflow.ts quick');
+assert.equal(packageScripts['test:regression'], 'bun scripts/test-workflow.ts regression');
 assert.equal(packageScripts['test:ui-light'], 'bun scripts/test-workflow.ts ui-light');
 assert.equal(packageScripts['test:theme-inheritance'], 'bun scripts/test-source-active-line.ts && bun scripts/test-theme-inheritance.ts');
 assert.match(packageScripts['test:unit'] ?? '', /bun scripts\/test-source-theme-customizations\.ts/);
@@ -341,10 +356,10 @@ for (const command of flattenTestWorkflowCommands(release)) {
     releaseDirectScripts.add(command.args[0]);
   }
 }
-for (const command of flattenTestWorkflowCommands(quick)) {
+for (const command of [...coreCommands, ...flattenTestWorkflowCommands(regression)]) {
   if (!command.args[0]?.startsWith('scripts/')) continue;
   assert.ok(releaseDirectScripts.has(command.args[0]),
-    `release gate must include quick contract ${command.args[0]}`);
+    `release gate must include development contract ${command.args[0]}`);
 }
 for (const contract of [
   'scripts/test-native-scroll-progress-production.ts',
@@ -408,6 +423,7 @@ for (const link of featureCoverageGuide.matchAll(/\]\(\.\.\/(scripts\/test-[^)]+
 for (const command of [
   'bun run test:ui-light',
   'bun run test:quick',
+  'bun run test:regression',
   'bun run test:targeted',
   'bun run test:release',
   'bun run test:endurance',
@@ -427,5 +443,5 @@ console.log('Test workflow policy contract passed');
 await import('./test-workflow-execution-contract');
 
 for (const contract of ['test-editing-preferences.ts', 'test-editor-services.ts', 'test-link-candidates.ts', 'test-input-assistance-production.ts', 'test-editing-features-production.ts', 'test-link-candidates-production.ts', 'test-mixed-html-paste-production.ts', 'test-settings-window-production.ts']) {
-  assert.ok(quickCommands.some(command => command.args.includes('scripts/' + contract)), contract + ' is a quick contract');
+  assert.ok(regressionCommands.some(command => command.args.includes('scripts/' + contract)), contract + ' is a regression contract');
 }

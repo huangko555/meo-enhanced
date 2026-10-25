@@ -7,6 +7,14 @@ import { createLargeDocumentFixtures } from './large-document-fixtures';
 
 const fixtures = new Map(createLargeDocumentFixtures().map((fixture) => [fixture.kind, fixture]));
 const ordinary = assessLargeDocument(fixtures.get('ordinary')!.text);
+// Exercise growth across independent optimization boundaries, not just one
+// oversized fixture. Opening mode need not change with the earlier work limit.
+const fence = '```\nx\n```\n\n';
+assert.equal(assessLargeDocument(fence.repeat(47)).boundedEditorWork, false);
+assert.equal(assessLargeDocument(fence.repeat(48)).boundedEditorWork, true);
+assert.equal(assessLargeDocument(fence.repeat(127)).windowedPreview, false);
+assert.equal(assessLargeDocument(fence.repeat(128)).windowedPreview, true);
+assert.equal(assessLargeDocument(fence.repeat(128)).preferSource, false);
 const bytesHeavy = assessLargeDocument(fixtures.get('bytes-heavy')!.text);
 const linesHeavy = assessLargeDocument(fixtures.get('lines-heavy')!.text);
 const richHeavy = assessLargeDocument(fixtures.get('rich-heavy')!.text);

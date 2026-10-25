@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import darkPlus from '@shikijs/themes/dark-plus';
+import { assessLargeDocument } from '../src/foundation/largeDocument';
 import { launchTestBrowser, closeTestBrowser } from './browser-test-helpers';
 
 const build = await Bun.build({
@@ -173,6 +174,8 @@ try {
   assert.ok(samples.every(count => count === 0), 'Every revealed Source frame must contain complete syntax colors');
   assert.deepEqual(errors, []);
   const largeSource = '# Large source budget\n\n' + 'Synthetic paragraph for the source work budget.\n\n'.repeat(5_000);
+  assert.equal(assessLargeDocument(largeSource).lightweightSourceSyntax, true,
+    'The long fixture must cross the actual Source policy boundary');
   const largeSourceResult = await page.evaluate(async text => {
     (window as any).__editor.destroy();
     const harness = (window as any).SourceLightweightShikiHarness;

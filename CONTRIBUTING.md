@@ -50,16 +50,21 @@ and run `bun run test:inventory`. Agents own this step without a user reminder.
 For copy, existing icon replacements and local visual style changes, use the
 guide's Light UI path: `bun run test:ui-light` builds the Webview, then complete
 the scoped bilingual light/dark visual and affected-control functional smoke.
-For behavior or other implementation changes, run the quick gate after a
-coherent change and add the targeted pack for the affected high-risk area:
+For behavior or other implementation changes, run core quick checks after a
+coherent change and complete the affected-feature contracts. Use a full targeted
+pack when the whole area is affected or the impact is unclear:
 
 ```shell
 bun run test:quick
 bun run test:targeted -- table
 ```
 
-The feature contracts in `package.json` remain available when one narrower
-contract is sufficient during the implementation loop.
+The feature contracts in `package.json` remain available for narrower changes.
+Quick success alone does not certify a feature. Editor behavior changes also follow
+[document-scale coverage](docs/testing-workflow.md#document-scale-coverage), including
+evidence that the intended optimized path ran. The former broad quick matrix is
+preserved as `bun run test:regression -- --confirm-long-run`; propose it for concrete
+coverage gaps and obtain authorization instead of running it for every commit.
 
 Before submitting a change, run the relevant feature contract and the baseline
 checks that match its risk. The **CI checks** workflow runs on Ubuntu and Windows

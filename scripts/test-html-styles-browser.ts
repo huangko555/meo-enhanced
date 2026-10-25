@@ -6,6 +6,7 @@ import { createPreviewDocument } from '../src/export/previewDocument';
 import exportRuntime from '../src/export/runtime';
 import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { decodeInitMessage } from '../src/protocol/readyInit';
+import { assessLargeDocument } from '../src/foundation/largeDocument';
 
 const fixture = `Before witness.
 
@@ -82,6 +83,8 @@ export async function checkHtmlStyleRendering(): Promise<void> {
           await page.addScriptTag({content:`window.acquireVsCodeApi=()=>({getState(){},setState(){},postMessage(message){window.__htmlStyleHost(message).then(response=>{if(response)window.dispatchEvent(new MessageEvent('message',{data:response}));});}});`});
           await page.addScriptTag({content:bundle});
           const text = fixture + (large ? '\nUnchanged background paragraph with enough text to exceed the automatic large document threshold.\n'.repeat(15000) : '');
+          assert.equal(assessLargeDocument(text).windowedPreview, large,
+            'The paired fixtures must straddle the real Preview policy boundary');
           const init = {
             type:'init',documentId:'file:///html-styles.md',text,version:1,savedRevision:{version:1,text},diagnostics:[],
             mode:surface === 'source-preview' ? 'source' : surface,uiLanguage:appearance === 'dark' ? 'zh-CN' : 'en',
@@ -103,6 +106,8 @@ export async function checkHtmlStyleRendering(): Promise<void> {
             return Boolean(doc?.querySelector('#styled-box') && doc.querySelector('#empty-border') && doc.querySelector('#empty-background'));
           }, {}, surface === 'live');
           await frames(page, 12);
+          if (surface !== 'live') assert.equal(documents.size > 0, large,
+            'The production request must use the expected full or windowed Preview path');
           await page.waitForFunction(live => {
             const doc = live ? document : document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
             return ['styled-image','styled-ratio-image'].every(id => {

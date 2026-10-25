@@ -3,7 +3,8 @@
 This repository separates fast feedback from release confidence. The normal
 repair loop stays narrow; broad and endurance runs are intentional events.
 
-For release execution and new-test placement, start with
+For daily development, start with [the repair loop](#daily-repair-loop) and
+[document-scale coverage](#document-scale-coverage). For release execution and new-test placement, start with
 [long-running gates](#long-running-gates) and [adding or changing tests](#adding-or-changing-tests).
 After release authorization, pass the chosen disposable document to
 `bun run test:release -- <document> --confirm-long-run` when the acceptance scope
@@ -17,12 +18,12 @@ before preparing a host profile or VM.
 setting, Auto-to-Custom adjustment from the displayed size, persistence/reopening,
 coalesced saves, ordinary scrolling, Live/Source/Preview input, fine trackpad
 deltas, Ctrl/Cmd modifiers, font bounds, and bilingual light/dark settings at
-normal and narrow widths. It runs in quick, targeted appearance and browser gates;
+normal and narrow widths. It runs in regression, targeted appearance and browser gates;
 visual evidence is saved under `.local/font-wheel-acceptance/`. The existing
 font-size viewport contract covers reading-anchor continuity during layout changes.
 
 Preview preset memory is covered by `scripts/test-preview-preset-preferences.ts`
-and `scripts/test-preview-preset-preferences-browser.ts` in quick, appearance and
+and `scripts/test-preview-preset-preferences-browser.ts` in regression, appearance and
 release gates. They verify built-in/custom initial Auto behavior, independent
 theme/font/Boolean choices, switching away and back, reopening a fresh document
 without Webview state, stale-cache precedence, legacy migration, concurrent Host
@@ -198,7 +199,7 @@ unfinished markup and retained warnings for completed unsupported tags,
 paired quotes to the right of an unfinished tag's attribute value,
 manual activation, disabled and reconfigured settings, Escape caret retention,
 IME ownership, shared placement and bilingual light/dark/narrow screenshots under
-`.local/html-completion-acceptance/`; it belongs to quick and browser/release gates.
+`.local/html-completion-acceptance/`; it belongs to regression and browser/release gates.
 `bun scripts/test-html-content.ts --styles-only` isolates the shared style-policy
 and production rendering checks. Its imported style-policy suite covers valid and
 invalid values, duplicate/shorthand order, logical sides and incomplete declarations.
@@ -302,7 +303,7 @@ both directions, instantaneous scrolling and the browser's multi-frame native
 scroll animation, with independent visible-content witnesses. The headless wheel
 default does not animate, so this test switches only its platform scroll behavior
 to native `smooth` scrolling while retaining the trusted wheel event. It belongs
-to the quick, targeted viewport and release gates. Late-layout compensation remains
+to the regression, targeted viewport and release gates. Late-layout compensation remains
 covered by the viewport and virtual-block contracts. Full-document scroll traversal
 must reach both boundaries; a capped or stalled loop cannot report full traversal.
 The tall-Mermaid viewport contract checks each trusted pixel-wheel event's target,
@@ -438,8 +439,9 @@ the long-run authorization policy below.
 | Tier | Use it when | Expected time | Command |
 | --- | --- | --- | --- |
 | Light UI | Copy, existing icon replacements, or local visual style changes meet the boundary below | Build plus a scoped smoke pass | `bun run test:ui-light` |
-| Quick | A behavior or other implementation change is ready for a general regression check | Last measured baseline about 18 minutes; host dependent | `bun run test:quick` |
-| Targeted | A change affects one high-risk area, or a quick check identifies that area | About 1–5 minutes | `bun run test:targeted -- <area>` |
+| Quick | A coherent behavior change needs core feedback, alongside affected-feature checks | Bounded core; use the latest report for measured time | `bun run test:quick` |
+| Regression | Specific accumulated or shared-mechanism risk warrants the former broad quick matrix | Recent complete runs 24–31 minutes | `bun run test:regression -- --confirm-long-run` |
+| Targeted | A complete affected-area pack is warranted; individual contracts may be selected for narrower changes | Area dependent; inspect the plan and recent timings | `bun run test:targeted -- <area>` |
 | Release | A release candidate or separately authorized cross-cutting risk needs the complete gate | Historical baseline 55–105 minutes before execution optimizations; document supplements and native acceptance are additional | `bun run test:release -- --confirm-long-run` |
 | Large document | A shorter production-like document stress pass is specifically needed | About 1–3 minutes | `bun run test:large-document -- <document> --confirm-long-run` |
 | Endurance | Full-document edit, undo/redo, cursor, and viewport stress is specifically needed | About 20–35 minutes per run | `bun run test:endurance -- <document> --confirm-long-run` |
@@ -447,7 +449,7 @@ the long-run authorization policy below.
 ## Validation for commits and merges
 
 Select validation by behavioral scope and risk. An ordinary feature/fix commit
-or merge into `main` uses the normal quick/targeted checks and applicable type,
+or merge into `main` uses core quick checks plus affected-feature contracts and applicable type,
 build, privacy and staged architecture/Protocol checks. Reuse evidence that
 still covers the same candidate; a fast-forward merge does not require another
 run. Conflict resolution or integration changes require checking the affected
@@ -466,7 +468,7 @@ Use this path only for copy, replacing an existing icon, or local visual styling
 The diff must preserve interaction behavior, Protocol, persistence, configuration
 structure, and other high-risk logic. Changes to event handling, focus, keyboard
 routing, input, state, theme derivation, or multiple interactions use the normal
-quick and relevant targeted gates. When the boundary is unclear, use that path.
+quick and relevant targeted checks. When the boundary is unclear, use that path.
 
 Completion requires:
 
@@ -495,6 +497,8 @@ The agent owns the decision to recommend a long run; the user does not need to
 remember the tiers or commands. Recommend the appropriate run proactively when
 the work reaches one of these boundaries:
 
+- **Broad regression:** shared mechanisms or accumulated interactions exceed focused
+  checks; explain the missing coverage before requesting the preserved full matrix.
 - **Release:** a release candidate needs acceptance, or specific broad
   cross-cutting risks exceed the coverage of normal quick/targeted checks.
 - **Large document:** a shorter production benchmark, sampled strict UAT, and
@@ -505,7 +509,7 @@ the work reaches one of these boundaries:
   resolved by isolated host acceptance; apply [native acceptance environment](#native-acceptance-environment).
 
 Every recommendation must state the test type, why it is warranted, its scope,
-and its expected duration. Release, endurance, full browser matrices, repeated
+and its expected duration. Broad regression, release, endurance, full browser matrices, repeated
 stress runs, full-document sweeps, and VM validation wait for explicit user authorization
 in the current task. A generic request to fix, build, test, commit, or merge
 is not authorization. The confirmation flag records an intentional invocation;
@@ -635,7 +639,7 @@ default source in Chinese/English hints, reset labels and search. Returning to
 Auto must follow the active host again. Continuous swatch input
 must coalesce derivation into one frame, retain the latest value and avoid feedback
 writes to the native input. Apply and discard are also checked before that frame.
-Both are quick and targeted appearance checks; ordinary UI edits must preserve
+Both are regression and targeted appearance checks; ordinary UI edits must preserve
 Source content. Document background edits change only its carrier, retaining
 native Source ink and keeping the toolbar surface independent.
 `scripts/test-editor-background-theme.ts` additionally checks Live/Source/Default
@@ -651,7 +655,7 @@ link labels and destinations against a theme with conflicting Setext rules.
 The large fixture must retain the viewport renderer without whole-document
 TextMate tokens. `scripts/test-source-theme-customizations.ts` additionally
 checks scope specificity, independent punctuation rules and Source overrides
-feeding the automatic reading colors. Both remain in quick and appearance gates.
+feeding the automatic reading colors. Both remain in regression and appearance gates.
 The Shiki lifecycle contracts verify bounded shared caches, unchanged palette
 reuse, real palette invalidation, stale-work cancellation and final disposal.
 The background-demotion unit check explicitly advances reading-pause timers and
@@ -666,7 +670,7 @@ These checks are small, deterministic regressions rather than long benchmarks.
 Preview token caches in light and dark themes. Raw HTML followed by a blank line
 must recover Markdown headings, emphasis and inline code, regardless of language
 loading order or a token batch boundary. It also checks CRLF offsets, quote/list
-exits and open multiline strings/comments. It belongs to quick and appearance
+exits and open multiline strings/comments. It belongs to regression and appearance
 gates; Source DOM recovery and installed Node export have separate checks.
 
 `scripts/test-input-focus-return-production.ts` checks production Find, Replace
@@ -692,7 +696,7 @@ and after release. Accepted outlines must remain continuous through internal
 handoffs, disappear for genuine Host loss, and retain the exact native caret,
 cell DOM and reading viewport. `hostWindowFocusChanged` never grants DOM focus.
 Completed multi-cell ranges also reject a late contenteditable focus after release.
-It belongs to the quick and targeted search gates. The smaller
+It belongs to the regression and targeted search gates. The smaller
 `scripts/test-editor-focus-window-return.ts` also checks both blur event orders,
 input invalidation, modal ownership and disposal. Unregistered chrome subtrees
 must preserve either the document or a registered input across a complete
@@ -703,7 +707,7 @@ replace native Windows Alt+Tab or Workbench menu validation.
 with real Preview rendering. Outline jumps, keyboard fragment links and return
 to top must retain the new location when returning to either Live or Source,
 without a body click. It also checks unchanged roundtrips and samples multiple
-frames after the return. It belongs to the quick and targeted viewport gates.
+frames after the return. It belongs to the regression and targeted viewport gates.
 
 `scripts/test-tab-switch-reading-position.ts` connects the real Host navigation
 adapter to the production Webview in a separate browser document. It hides the
@@ -718,7 +722,7 @@ deduplication of an initial selection alone cannot prove that path.
 `scripts/test-panel-session-tab-navigation.ts` separately drives actual Panel
 Session activation, visibility and selection subscriptions. Both contracts and
 the navigation lifecycle check belong to `test:reading-position`, which is
-required by quick, targeted viewport and release gates. These browser and Host
+required by regression, targeted viewport and release gates. These browser and Host
 contracts do not replace installed-VSIX Workbench validation.
 
 `scripts/test-preview-preset-position.ts` samples the same content-relative reading
@@ -733,14 +737,14 @@ existing cold-linked Preview regression keeps Source's destination authoritative
 during window/resource commits, including distant jumps and reverse scrolling. The
 `--large` variant uses a roughly 1MiB mixed document, real window requests
 and distant navigation, and bounds mounted DOM through every preset. The ordinary
-variant belongs to quick; both variants belong to targeted appearance/viewport and
+variant belongs to regression; both variants belong to targeted appearance/viewport and
 the preview-preset acceptance pack. Pixel scroll offsets alone cannot pass this check.
 
 `scripts/test-preview-shortcuts-production.ts` checks trusted keyboard input in
 full and side Preview, including live binding changes, Save's emitted revision,
 Find/Replace and mode switching from text and margins. Native selection, copy,
 undo, scrolling, composition and iframe input controls must keep their scope.
-It belongs to the quick and targeted history gates.
+It belongs to the regression and targeted history gates.
 
 `scripts/test-wiki-paths.ts` uses POSIX and Windows URI fixtures on every host to
 distinguish vault-root `/...`, document-relative paths, explicit `file:` URIs and
@@ -780,8 +784,8 @@ evidence; final installed-VSIX behavior still requires native acceptance.
 `scripts/test-local-links-production.ts` covers angle-wrapped local paths with
 Chinese and spaces in Live prose and tables, real Ctrl clicks, file-resource
 invalidation and out-of-order responses through the full Webview bootstrap in
-Chinese/light and English/dark. It runs in quick and browser/release gates.
-`scripts/test-document-links.ts` also runs in quick and retains Host coverage for
+Chinese/light and English/dark. It runs in regression and browser/release gates.
+`scripts/test-document-links.ts` also runs in regression and retains Host coverage for
 creation/deletion, extension fallback, external file URIs, missing directory
 ancestors, watcher disposal, asynchronous native registration races and Markdown
 filenames that must not fall back to websites.
@@ -789,7 +793,7 @@ filenames that must not fall back to websites.
 obsolete missing hints; these focused checks take seconds rather than a long run.
 
 `scripts/test-export-links.ts` and `scripts/test-export-links-browser.ts` run in
-quick, targeted appearance and release gates. They cover all built-in presets and
+regression, targeted appearance and release gates. They cover all built-in presets and
 a custom preset with the GitHub base, both path separators, encoded filenames,
 local URI fragments, web/mail links, authored/raw HTML anchors, contents and
 footnotes. Trusted HTML clicks must stay in the exported file despite its resource
@@ -811,27 +815,86 @@ This focused pack typically takes less than a minute.
 Mermaid source typing at unfinished fences, including quote/list exits, nested
 quotes, ordered lists, deleting a closer, authoring an unfinished diagram, and exact document undo/redo. It also
 captures light/dark screenshots. `test:rendered-source` includes this contract.
-The quick Shiki recovery contract checks longer same-type closing fences and
+The regression Shiki recovery contract checks longer same-type closing fences and
 rejects short or mismatched closers, including unfinished embedded syntax.
 
 1. Reproduce the reported behavior with the smallest relevant contract.
-2. While implementing, rerun only that contract.
-3. For a coherent change within the Light UI boundary, complete that path.
-   For behavior or other implementation changes, run `bun run test:quick` once.
-4. Add the matching targeted pack when the change touches a high-risk area.
-5. Assess the long-run triggers above. If one applies, recommend the matching
-   run and wait for authorization; otherwise stop.
+2. While implementing, rerun that contract; resolve known failures before broadening.
+3. For a coherent Light UI change, complete that path. For other behavior changes,
+   run `bun run test:quick` once, plus contracts covering the actual affected behavior.
+   Core success alone is not a feature completion certificate.
+4. Select individual existing contracts for a local change. Use the complete
+   `test:targeted` area pack when its whole scope is affected or the impact is unclear.
+   Input, save, history, shared layout, Protocol and scheduling changes expand the
+   related coverage; do not select only the cheapest happy path. Use
+   [document-scale coverage](#document-scale-coverage) for affected editor behavior.
+5. Build when checking generated assets or the actual host; keep the tested build
+   fixed. Do not rebuild/reload F5 or run competing browser/stress jobs during
+   timing and visual checks. Fix an environment failure and verify the affected
+   checks; do not repeatedly retry unexplained failures until green.
+6. Run `test:regression -- --confirm-long-run` or release only when its scope is
+   warranted and authorized. The old broad quick matrix remains intact under
+   regression and all its release coverage remains required.
 
-When an authorized release gate immediately follows the repair, do not prepend
-another complete quick gate. The release gate covers those contracts. Finish
-the focused regression and review first, then fix the candidate and run release
-once. A real failure returns the task to diagnosis; report that phase separately
-instead of repeatedly promising that acceptance is almost finished.
+The new quick entry uses fresh-source browser fixtures and core state contracts;
+product builds, affected-feature tests and native acceptance remain distinct
+requirements. The Source smoke covers ordinary and optimized rendering, while
+mode and virtual-block checks protect representative interaction boundaries.
+They cannot certify every feature or every long-document path.
 
-This avoids repeatedly paying for browser startup and unrelated matrices while
-still checking type safety, workflow policy, history, tables, rendered blocks,
-input-derived work, viewport behavior, and one production browser scenario in
-the quick gate.
+For an unchanged candidate, retain relevant evidence with its command, parameters,
+environment, input/build identity, result and logs. After a change, identify what
+invalidated that evidence and retest the affected behavior. Report failures and
+incomplete runs honestly; task IDs or passing counts alone cannot establish reuse.
+Do not stitch a failed report into a passing gate with an ad-hoc tail script.
+Focused repair results may support development completion with explicit coverage
+and failure resolution, but do not become formal release evidence. A new full
+quick run is inexpensive enough to prefer over building an incremental cache.
+
+When an authorized release gate immediately follows repair, finish focused
+regressions, freeze the candidate and run release; do not prepend quick or the
+broad regression matrix. A real failure returns the task to diagnosis. Release
+resume retains its strict input, artifact and log validation.
+
+Before committing, inspect the installed hook. If it runs staged architecture and
+Protocol checks, let that hook validate the final index before the commit is
+created; do not routinely run the same staged check immediately beforehand.
+If the hook is missing or omits those checks, run them explicitly. Keep the hook
+and required staged privacy scan enabled; never substitute working-tree evidence
+for the staged snapshot. A staging/content change invalidates earlier index checks.
+
+## Document-scale coverage
+
+For changes to input, rendering, geometry, scrolling, focus, history, mode changes
+or asynchronous resources, record the affected behavior and its relevant scale
+paths before implementation. Extend the owning regression rather than adding an
+unrelated large-file stress run at the end:
+
+- Pair the same operation in an ordinary document and a document that activates
+  the affected optimization. Assert the production policy assessment and, where
+  observable, the actual renderer/request/work path. A fixture named `large` or a
+  byte count alone does not prove the path ran. Existing Source first-paint and
+  HTML-style checks demonstrate both policy and runtime witnesses.
+- When changing an admission policy, cover both sides of its threshold and growth
+  into the optimized path. Include short complex documents or a giant single block
+  when those trigger a distinct branch; length is not the only dimension.
+- For affected scheduling/lifecycle code, exercise cold startup before results are
+  ready, delayed Worker/resource completion, and offscreen removal/remount or a
+  deep-document target. Select the relevant branches, not a Cartesian product of
+  every theme, language, size and mode. Preserve meaningful negative controls.
+- Assert the same intended text, operation result, selection, undo/redo and saved
+  contents on both paths. For presentation changes also observe intermediate
+  frames, unchanged node identity, reading anchors and bounded work, as applicable.
+  Intentional startup preference/loading differences are explicit policy, not
+  permission for optimized paths to lose editing semantics.
+
+Completion identifies the behavior, owning commands, tested scale/path and
+lifecycle witnesses, results and any remaining gap. Quick passing is insufficient
+when a relevant long-document path is untested. Ordinary bounded scale contracts
+belong to focused development testing; full traversals, repeated stress and
+endurance keep their existing long-run authorization. Register new tests through
+[adding or changing tests](#adding-or-changing-tests) and preserve full release
+ownership of mandatory regressions.
 
 For semantic UI colors, `test:theme-inheritance` covers shared surfaces, neutral
 text and icons, switch states, cached palette reuse and invalidation when the
@@ -845,7 +908,7 @@ that ordinary, quoted, and fenced-code Source lines use the native
 `editor.lineHighlightBackground` without a rectangular shadow, border, or outline.
 It covers Light/Dark 2026, custom translucent colors, and transparent backgrounds.
 
-`scripts/test-line-number-rendered-block-stability.ts` runs in the quick, targeted
+`scripts/test-line-number-rendered-block-stability.ts` runs in the regression, targeted
 viewport, and high-risk browser gates. With real Mermaid, KaTeX and fonts, it
 samples every animation frame while typing and deleting above rendered blocks.
 Unchanged preview heights and all downstream line numbers must stay stable;
@@ -864,7 +927,7 @@ The [line-number layout contract](line-number-layout.md) defines numbering,
 geometry, caret and lifecycle invariants. `test-line-number-layout-contract.ts`
 checks first-frame split projection, caret-relative numbering in Mermaid/HTML,
 setting changes, typing, resizing and font changes. It and the input-frame test
-run in quick and targeted viewport gates. The daily long-caret test uses
+run in regression and targeted viewport gates. The daily long-caret test uses
 `--sampled --hidpi`: six distributed targets in a 2,112-line document, including
 original-content display, rather than a full-document sweep. Empty-line caret
 screenshots are included in the targeted viewport and source-diff gates.
@@ -970,7 +1033,7 @@ Source and Live editor in both themes: inline and display delimiters, all four m
 fence aliases, quoted/list containers, unfinished formulas, escaped/currency/code
 boundaries, comments, lazy language loads, multiline token batches, independent
 Source customizations and typing/undo/redo. It saves real-theme screenshots under
-`.local/test-artifacts/math-syntax/`. This contract belongs to the quick, targeted
+`.local/test-artifacts/math-syntax/`. This contract belongs to the regression, targeted
 appearance and release browser gates. Source first-paint coverage also includes
 inline math so preparation and mode roundtrips retain its syntax colors.
 Currency checks compare every numeric run with the prose foreground, including
@@ -990,7 +1053,7 @@ Live/Source editor. It covers incomplete delimiters and all four math fence
 aliases, nested tab stops, existing arguments and environment closers, literal
 and comment exclusions, IME composition, undo/redo, mode changes, read-only
 state, disabled preferences, bilingual light/dark menus and a narrow viewport.
-The deterministic contract and browser contract run in the quick gate and
+The deterministic contract and browser contract run in the regression gate and
 release suites; the browser contract also belongs to the targeted history pack.
 Settings persistence and the shared menu placement are covered by the existing
 editing-preferences and settings-window contracts.
@@ -1004,7 +1067,7 @@ manifest, under `.local/test-artifacts/math-completion/catalog/`.
 
 ## HTML comment input
 
-`scripts/test-html-comment-input-production.ts` runs in the quick, targeted history
+`scripts/test-html-comment-input-production.ts` runs in the regression, targeted history
 and browser release gates. It uses the production editor to check comment commands,
 slash completion, selection/caret continuity, configurable pairing, template exit,
 undo/redo and native table cells. It also checks shell, C# and Power Query comment
@@ -1015,7 +1078,7 @@ operating-system IME candidate handling still needs native verification.
 
 ## Window return focus and caret
 
-`scripts/test-toolbar-input-viewport.ts` runs in the quick and release gates.
+`scripts/test-toolbar-input-viewport.ts` runs in the regression and release gates.
 It checks input immediately after activation without waiting for focus, a trusted
 click delivered in a later frame, late Host notifications, Alt release, composition,
 passive controls, and nested table/rendered-block editors. Unknown activation may
@@ -1094,7 +1157,7 @@ copy checks remain part of the same contract and the targeted rendered gate.
 
 ## Editor startup and loading
 
-The quick and release gates run `scripts/test-panel-session-ready-init.ts` and
+The regression and release gates run `scripts/test-panel-session-ready-init.ts` and
 `scripts/test-editor-startup-load.ts`. The first checks that concurrent Webview
 `ready` messages share one `init`, a later `ready` can retry a lost delivery,
 and Markdown uses LF even when the file uses CRLF. The second opens the
@@ -1111,7 +1174,7 @@ preview is covered by
 `scripts/test-mode-roundtrip-reveal.ts` checks Live → Source → Preview → Live
 with a viewport table whose row layout is deliberately delayed. The first
 visible Live frame must already contain content and the table's final height;
-this check runs in the quick, targeted table/viewport, and release gates.
+this check runs in the core quick, regression, targeted table/viewport, and release gates.
 `scripts/test-preview-transition.ts` tolerates a temporarily absent iframe body
 while polling readiness. It establishes interactive Live readiness before the next
 case; rapid Preview/Live cancellation still must restore interactivity within 150ms.
@@ -1140,7 +1203,7 @@ new navigation, input, disposal and read/write measurement boundaries.
 `scripts/test-preview-loading-reuse.ts` holds the initial Preview iframe load after
 its Host response. It verifies that activation reuses that presentation while
 changed text, forced refresh, failed-response retry, and disposal retain their
-behavior. It runs in the full browser suite; the quick startup test also requires
+behavior. It runs in the full browser suite; the regression startup test also requires
 one Host render when opening directly in Preview, with the configured language
 and font size already applied to the initial request. Force-failure retry is
 checked both before and after the retained iframe becomes ready.
@@ -1191,7 +1254,7 @@ must not conceal a new mode-switch delay.
 asynchronous batch boundary. After successive edits, newly visible unchanged
 Source text must retain its last completed colors and font styles. Edited text
 must discard obsolete formatting, and the latest tokens must replace the retained
-projection when ready. The bounded check belongs to the quick, appearance and
+projection when ready. The bounded check belongs to the regression, appearance and
 viewport packs and the release browser gate.
 
 `scripts/test-shiki-highlighter-lifecycle.ts` also checks completed token reuse
@@ -1449,7 +1512,7 @@ selected fenced Mermaid source is rendered. Reports record its hash, viewport,
 cold render duration, long tasks, and whether Split reuses the cached SVG.
 Initial editor work and individual diagram computation should be distinguished:
 yielding can separate tasks without reducing total render time. Neither probe is
-part of the quick gate or a substitute for authorized repeated/endurance checks.
+part of the quick or regression gate or a substitute for authorized repeated/endurance checks.
 
 For a narrow ordinary-document input, scroll, resource, and Live/Source baseline:
 
@@ -1466,7 +1529,7 @@ incorrect scheduling; do not turn noisy millisecond samples into CI assertions.
 
 ## Auto-save verification
 
-Auto-save concurrency is part of `bun run test:quick`. The focused save checks are:
+Auto-save concurrency is part of `bun run test:quick` and the broad regression. The focused save checks are:
 
 ```shell
 bun scripts/test-document-auto-save-concurrency.ts
@@ -1636,9 +1699,9 @@ workflow registration, without waiting for the user to request it:
    run merely to fill this field. Timing informs optimization and never skips a
    required test automatically.
 
-New tests join the smallest owning suite. Quick membership needs a distinct daily
-regression benefit; do not add every browser matrix to quick or repeat it in an
-endurance preflight by habit. Keep actual input/frame observation and negative
+New tests join the smallest owning suite. Quick membership needs a distinct core
+benefit and a measured cost; keep full matrices in their owning area/release suites,
+and do not repeat them in an endurance preflight by habit. Keep actual input/frame observation and negative
 controls when optimizing a costly test. Separate environments or fewer samples
 require an explicit coverage argument; runtime targets never waive checks.
 
@@ -1822,7 +1885,7 @@ release acceptance session.
 
 ## Settings, typing assistance and shortcuts
 
-The quick and release gates include `test-editing-preferences.ts`,
+The regression and release gates include `test-editing-preferences.ts`,
 `test-editor-services.ts`, `test-link-candidates.ts`, `test-input-assistance-production.ts`,
 `test-editing-features-production.ts`, `test-link-candidates-production.ts`, `test-slash-commands-production.ts` and
 `test-settings-window-production.ts`.
@@ -1859,7 +1922,7 @@ backward selections. New wheel gestures, document clicks and the first typed
 character supersede the activation guard; typing still reveals the caret.
 These browser checks model native activation ordering; an actual desktop click
 outside and back into VS Code remains a separate native acceptance boundary.
-The contract belongs to the quick, search and release suites.
+The contract belongs to the regression, search and release suites.
 
 Settings-return checks cover the close button, backdrop and Escape in Live/Source,
 scrolled documents, native table cells, and Mermaid/math Source/Split editors.
