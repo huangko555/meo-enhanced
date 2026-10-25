@@ -1863,6 +1863,11 @@ reveal a changed source marker; direct task toggles must keep their control moun
 to type consecutive characters in Markdown/TypeScript fences in small and large
 documents. Each key must inherit the preceding accepted token's color and weight,
 including keys whose old/new language states both contain a pending parse.
+`test-complex-input-presentation.ts --only=mermaid` edits a heading above an
+unchanged chart in ordinary and one MiB documents with the shipped Worker and
+Mermaid runtime. It checks every delivered compositor frame, retained SVG/shell
+identity, no render activity, rebased fence/line metadata and the edit action
+after insertions, deletions and line-number changes.
 These slices complement the unchanged-content and work-budget contracts; they do
 not replace the full owning suites or prove native VS Code performance.
 `test-list-layout-interaction.ts` also drags text forward/backward across nested,

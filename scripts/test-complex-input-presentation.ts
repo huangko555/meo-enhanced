@@ -272,6 +272,76 @@ try {
       assert.deepEqual(host.errors, []);
     } finally { host.dispose(); await page.close(); }
   }
+  if (!only || only === 'mermaid') for (const large of [false, true]) {
+    stage = `Unchanged Mermaid below heading input, large ${large}`;
+    const distant = ('Unchanged paragraph with **formatting** and ordinary text. '.repeat(4) + '\n\n').repeat(2400);
+    const block = '### Mermaid heading target\n\n```mermaid\nflowchart LR\nA[Original chart] --> B{Ready}\nB --> C[Keep this chart]\n```';
+    const text = (large ? distant : '# Before\n\n') + block + '\n\nAfter.\n\n' + (large ? distant : '');
+    if (large) assert.ok(Buffer.byteLength(text) > 1024 * 1024, 'Exercise a deep block in a one MiB document');
+    const page = await browser.newPage(), host = await open(page, text, false, 'live');
+    try {
+      await placeCaret(page, 'Mermaid heading target', false);
+      await page.evaluate(() => {
+        const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+        const caret = view.coordsAtPos(view.state.selection.main.head)!;
+        view.scrollDOM.scrollTop += caret.top - view.scrollDOM.getBoundingClientRect().top - 100;
+      });
+      await page.waitForSelector('.meo-mermaid-block svg'); await delay(600); await frames(page, 8);
+      const clip = await page.evaluate(() => {
+        const scope = window as any, svg = document.querySelector('.meo-mermaid-block svg')!;
+        const shell = svg.closest<HTMLElement>('.meo-rendered-block-preview')!;
+        scope.__headingMermaid = { svg, shell, removed: 0, rendering: 0 };
+        scope.__headingMermaidObserver = new MutationObserver(records => {
+          for (const record of records) {
+            for (const node of record.removedNodes) if (node === svg || node.contains(svg)) scope.__headingMermaid.removed++;
+            if (record.type === 'attributes' && record.attributeName === 'data-meo-mermaid-rendering') scope.__headingMermaid.rendering++;
+          }
+        });
+        scope.__headingMermaidObserver.observe(document.querySelector('.editor-host')!, { subtree: true, childList: true, attributes: true,
+          attributeFilter: ['data-meo-mermaid-rendering'] });
+        const rect = svg.getBoundingClientRect();
+        if (rect.top < 150 || rect.bottom > innerHeight - 20) throw new Error('Chart must remain visible below its heading');
+        return { left: Math.ceil(rect.left + 3), top: Math.ceil(rect.top + 3), width: Math.floor(rect.width - 6), height: Math.floor(rect.height - 6) };
+      });
+      const assertRetained = async (action: string) => {
+        const result = await page.evaluate(() => {
+          const { svg, shell, removed, rendering } = (window as any).__headingMermaid;
+          const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+          const source = view.state.doc.toString(), start = source.indexOf('```mermaid'), end = source.indexOf('\n```', start) + 4;
+          const toolbar = shell.querySelector('.meo-mermaid-toolbar')!;
+          return { svg: svg.isConnected, shell: shell.isConnected, removed, rendering,
+            from: Number(toolbar.dataset.meoBlockFrom) === start, to: Number(toolbar.dataset.meoBlockTo) === end,
+            firstLine: Number(shell.dataset.meoRenderedBlockStartLine) === view.state.doc.lineAt(start).number,
+            lastLine: Number(shell.dataset.meoRenderedBlockEndLine) === view.state.doc.lineAt(end).number };
+        });
+        assert.deepEqual(result, { svg: true, shell: true, removed: 0, rendering: 0, from: true, to: true, firstLine: true, lastLine: true }, stage + ': ' + action);
+      };
+      await assertStablePaint(page, clip, () => settledNumericInput(page), stage);
+      await assertRetained('settled insertion and deletion');
+      await assertStablePaint(page, clip, async () => {
+        await page.keyboard.type('444444', { delay: 6 });
+        for (let i = 0; i < 6; i++) await page.keyboard.press('Backspace');
+        await delay(650);
+      }, stage + ' rapid input');
+      await assertRetained('rapid input');
+      // A real newline may move the chart, but must only rebase its source
+      // metadata. History and toolbar actions must target the rebased fence.
+      await page.keyboard.press('Enter'); await delay(500); await frames(page, 6);
+      await assertRetained('line-number shift');
+      await page.keyboard.press('Backspace'); await delay(500); await frames(page, 6);
+      await assertRetained('line-number restoration');
+      assert.equal(host.readHost(), text);
+      await page.evaluate(() => (window as any).__headingMermaidObserver.disconnect());
+      await page.$eval('.meo-mermaid-mode-btn', node => (node as HTMLElement).click());
+      await page.waitForFunction(() => document.querySelector('.meo-mermaid-toolbar')?.getAttribute('data-meo-mermaid-mode') === 'edit');
+      assert.equal(await page.evaluate(() => {
+        const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+        const from = view.state.doc.toString().indexOf('```mermaid'), to = view.state.doc.toString().indexOf('\n```', from) + 4;
+        return view.state.selection.main.head >= from && view.state.selection.main.head <= to;
+      }), true, stage + ': edit action follows the current fence');
+      assert.deepEqual(host.errors, []); await captureResult(page, `complex-mermaid-heading-${large}`);
+    } finally { host.dispose(); await page.close(); }
+  }
   if (!only || only === 'tokens') for (const large of [false, true]) for (const language of ['markdown', 'typescript']) {
     stage = `Token inheritance ${language}, large ${large}`;
     const body = language === 'markdown' ? '### Nested heading 55555' : 'const value = 55555;';

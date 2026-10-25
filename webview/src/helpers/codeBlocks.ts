@@ -905,7 +905,33 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
     });
     this[renderedBlockPreviewHeight].observe(shell, view);
     (shell as MermaidPreviewShellElement).__meoMermaidPreviewDiagramWidget = this.diagramWidget;
+    (shell as MermaidPreviewShellElement).__meoMermaidPreviewWidget = this;
     return shell;
+  }
+
+  updateDOM(shell: MermaidPreviewShellElement, view: EditorView): boolean {
+    const previous = shell.__meoMermaidPreviewWidget;
+    const mounted = shell.__meoMermaidPreviewDiagramWidget;
+    // Edits before the fence move its source coordinates, not its presentation.
+    // The mapped camera proves this is the same block, including equal-source
+    // neighbours; actual content/context changes keep the authoritative rebuild.
+    if (!previous || !mounted || !this.hasSameUiLanguageEpoch(previous)
+      || this.uiLanguage !== previous.uiLanguage || this.presentationFactory !== previous.presentationFactory
+      || this.viewportState !== previous.viewportState || this.diagramText !== previous.diagramText
+      || this.fullBlockText !== previous.fullBlockText
+      || liveBlockIndentKey(this.indentColumns) !== liveBlockIndentKey(previous.indentColumns)
+      || this.diagramWidget.themeSignature !== mounted.themeSignature) return false;
+    const toolbar = shell.querySelector<HTMLElement>('.meo-mermaid-toolbar');
+    if (!toolbar || !this.toolbarWidget.updateDOM(toolbar, view, previous.toolbarWidget)) return false;
+    shell.dataset.meoRenderedBlockStartLine = String(this.startLine);
+    shell.dataset.meoRenderedBlockEndLine = String(this.endLine);
+    // The outer shell alone owns source-line mapping. Rebasing metadata does
+    // not request presentation, re-read theme styles or disturb its observer.
+    mounted.startLine = this.startLine;
+    mounted.endLine = this.endLine;
+    this[renderedBlockPreviewHeight].seed(previous[renderedBlockPreviewHeight]);
+    shell.__meoMermaidPreviewWidget = this;
+    return true;
   }
 
   ignoreEvent(): boolean {
@@ -917,12 +943,14 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
     const shell = dom as MermaidPreviewShellElement;
     const mountedDiagram = shell.__meoMermaidPreviewDiagramWidget;
     delete shell.__meoMermaidPreviewDiagramWidget;
+    delete shell.__meoMermaidPreviewWidget;
     mountedDiagram?.destroy();
   }
 }
 
 type MermaidPreviewShellElement = HTMLElement & {
   __meoMermaidPreviewDiagramWidget?: MermaidDiagramWidget;
+  __meoMermaidPreviewWidget?: MermaidPreviewWidget;
 };
 
 export function addMermaidDiagram(
