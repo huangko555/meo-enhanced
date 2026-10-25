@@ -929,6 +929,42 @@ async function main(): Promise<void> {
   const previewFontFamilyCommands: string[] = [];
   let previewRenderRequestCount = 0;
   try {
+    const anchorBuild = await Bun.build({
+      entrypoints: [path.join(root, 'scripts', 'test-preview-reading-anchor-entry.ts')],
+      outdir: temp, target: 'browser', format: 'iife', naming: 'anchor.js'
+    });
+    if (!anchorBuild.success) throw new Error(anchorBuild.logs.map(String).join('\n'));
+    const anchorPage = await browser.newPage();
+    try {
+      await anchorPage.setViewport({ width: 800, height: 600 });
+      await anchorPage.setContent('<style>html{overflow-anchor:none}body{margin:0}pre{height:600px;margin:0}</style><main class="meo-export-doc"><div id="prefix" style="height:300px"></div><pre data-source-line="1"><code>short</code></pre><div style="height:1200px"></div></main>');
+      await anchorPage.addScriptTag({ path: path.join(temp, 'anchor.js') });
+      const result = await anchorPage.evaluate(() => {
+        const api = window as typeof window & {
+          capturePreviewReadingAnchor: typeof import('../webview/src/helpers/previewReadingAnchor').capturePreviewReadingAnchor;
+          restoreFullPreviewReadingScrollTop: typeof import('../webview/src/helpers/previewReadingAnchor').restoreFullPreviewReadingScrollTop;
+        };
+        const block = document.querySelector('pre')!;
+        window.scrollTo(0, 300);
+        const top = block.getBoundingClientRect().top;
+        const capture = () => api.capturePreviewReadingAnchor(document,
+          value => { api.restoreFullPreviewReadingScrollTop(document, value); }, 1 / 3);
+        const restore = capture();
+        document.querySelector<HTMLElement>('#prefix')!.style.height = '425.375px';
+        const restored = restore?.() ?? false;
+        const drift = block.getBoundingClientRect().top - top;
+        const resized = capture();
+        (block as HTMLElement).style.width = '50%';
+        const rejectsReflow = resized?.() === false;
+        (block as HTMLElement).style.width = '';
+        const detached = capture();
+        block.remove();
+        return { restored, drift, rejectsReflow, rejectsDetached: detached?.() === false };
+      });
+      assert.deepEqual(result, { restored: true, drift: 0, rejectsReflow: true, rejectsDetached: true },
+        'Blank space inside an unchanged reading block must retain its physical position');
+    } finally { await anchorPage.close(); }
+    if (process.argv.includes('--anchor-only')) return;
     await assertPreviewProjectionTransactions(browser, path.join(temp, 'bundle.js'));
     if (process.argv.includes('--projection-only')) {
       console.log('Preview projection transaction regression test passed');
@@ -1041,7 +1077,14 @@ async function main(): Promise<void> {
     await page.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), initMessage);
     await page.waitForFunction(() => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
-      return frame?.contentDocument?.body.textContent?.includes('continues */') === true;
+      const host = document.querySelector<HTMLElement>('.preview-host');
+      // The document is mounted before the production opening transition has
+      // painted it. Font/layout scenarios require its accepted reading surface.
+      return frame?.contentDocument?.body.textContent?.includes('continues */') === true
+        && !frame.contentDocument.documentElement.inert
+        && host?.hidden === false && !host.inert && !host.hasAttribute('aria-busy')
+        && document.querySelector<HTMLElement>('.preview-loading')?.hidden === true
+        && !document.querySelector('.editor-host')?.hasAttribute('data-preview-cover');
     });
     const initialPreviewRenderRequestCount = previewRenderRequestCount;
     const initialPreviewSurfaceColors = await page.evaluate(() => {

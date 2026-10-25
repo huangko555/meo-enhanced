@@ -136,5 +136,24 @@ export function capturePreviewReadingAnchor(document: Document, restore: (top: n
       };
     }
   }
+  // Blank space in a short code line or a graphic has no nearby text caret.
+  // Its unchanged painted block is still an exact witness; semantic range
+  // interpolation can otherwise move an idle viewport during work below it.
+  if (!mapSourceLine) for (const y of bands) {
+    for (const x of [left, left + 36, bounds.left + bounds.width / 2]) {
+      const block = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-source-line]');
+      if (!block || !root.contains(block) || block.closest('.meo-preview-viewport-gap')) continue;
+      const rect = block.getBoundingClientRect();
+      if (rect.top > y || rect.bottom < y || !rect.width || !rect.height) continue;
+      return () => {
+        if (!block.isConnected || block.ownerDocument !== document) return false;
+        const current = block.getBoundingClientRect();
+        if (current.width !== rect.width || current.height !== rect.height) return false;
+        const delta = current.top - rect.top;
+        if (Math.abs(delta) >= 0.001) restore(scroll.scrollTop + delta);
+        return true;
+      };
+    }
+  }
   return null;
 }

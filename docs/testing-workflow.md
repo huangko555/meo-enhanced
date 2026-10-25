@@ -161,6 +161,14 @@ theme/mode/continuous-resize matrix and the original geometry limits. A finite
 pause of the iframe clock must expose the old setup race and the owner-clock
 barrier must complete after release, without polling for the expected widths.
 
+The Preview reading-surface contract waits for the production opening cover and
+loading/inert state to finish before font or layout scenarios. Mounted text alone
+does not prove that native input or a selection can reach the reading document.
+It also checks blank space inside an unchanged code block as a physical reading
+witness, including fractional upstream movement. A resized or detached block must
+reject that witness and leave reflow to the existing semantic/text anchor paths;
+the full DPR/zoom matrix retains exact scroll, selection, focus and copy assertions.
+
 Clipped rendered-content history verifies the exact changed native source target,
 collapsed selection, real editor focus and full caret visibility after undo.
 Retain the clipped-preview precondition and exact history snapshots. A derived
