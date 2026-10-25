@@ -579,6 +579,17 @@ before a separate focus/selection scenario; the active mode label precedes the
 end of the covered presentation transition.
 Inspect diagrams through `.meo-mermaid-svg-wrapper > svg`; toolbar icons are also
 SVG elements. Completion returns keyboard focus to the block's reading target.
+The Mermaid and image presentation production contracts replay replacement DOM
+creation before old DOM destruction in ordinary and optimized documents. Preserve
+their delayed-completion assertions: each mount owns its observers, presentation
+handles and nested image cleanup, and retiring old DOM must leave the replacement
+visible while rejecting late writes to the retired nodes. This includes image
+groups and block/inline HTML images. For a native Host smoke check, open a document
+with initially offscreen diagrams and scroll them into view before entering source;
+standalone browser scrolling can miss CodeMirror's replacement order.
+Retiring an old image mount must also preserve the new mount's fullscreen viewer;
+destroying the current mount closes that viewer. The image layout contract retains
+trusted double-click opening across the first click's source reveal and remount.
 Assert a tooltip's retained identity only while its owning control survives;
 replaced or moved controls must close their previous hint before a fresh hover.
 

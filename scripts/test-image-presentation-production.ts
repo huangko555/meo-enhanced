@@ -398,6 +398,30 @@ async function main(): Promise<void> {
     );
     assert.equal(result.editorDomAfterDestroy, 0);
     assert.equal(result.imageDomAfterDestroy, 0, 'late image completion must not recreate visible DOM after destroy');
+    for (const large of [false, true]) {
+      for (const kind of ['image', 'group', 'html', 'inline-html']) {
+        await page.evaluate(({ kind, large }) => {
+          (window as any).__remountProbe = (window as any).TableStabilityHarness.createWidgetRemountProbe(kind, large);
+        }, { kind, large });
+        const pending = await page.evaluate(() => (window as any).__remountProbe.snapshot());
+        assert.equal(pending.optimized, large, 'image remount fixture must activate the intended document work budget');
+        assert.equal(pending.ready, false, `${kind}: image completion is held across the DOM replacement`);
+        await page.evaluate(() => (window as any).__remountProbe.release());
+        await page.waitForFunction(() => (window as any).__remountProbe.snapshot().ready, { timeout: 4000 });
+        const ready = await page.evaluate(() => (window as any).__remountProbe.snapshot());
+        assert.ok(ready.retiredStable && ready.textUnchanged && ready.selectionUnchanged,
+          `${kind}: retired DOM, source text and selection must survive delayed image completion`);
+        await page.evaluate(() => {
+          (window as any).__remountProbe.openImageFullscreen();
+          (window as any).__remountProbe.retireOldAgain();
+        });
+        assert.equal(await page.$$eval('.meo-md-image-fullscreen-scrim', elements => elements.length), 1,
+          `${kind}: retiring old DOM must leave the replacement's fullscreen viewer alive`);
+        await page.evaluate(() => (window as any).__remountProbe.destroy());
+        assert.equal(await page.$$eval('.meo-md-image-fullscreen-scrim', elements => elements.length), 0,
+          `${kind}: destroying the current mount must close its fullscreen viewer`);
+      }
+    }
     console.log('image presentation production characterization passed');
   } finally {
     await browser.close();

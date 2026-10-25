@@ -34,7 +34,7 @@ import { isPrimaryModifierPointerClick } from './linkNavigation';
 import { currentSyntaxTree, resolvedSyntaxTree, resolvedSyntaxTreeAt } from './markdownSyntax';
 import { indexSourceRanges } from './sourceRangeIndex';
 import { getViewportController } from './viewportController';
-import { ImageWidget } from './images';
+import { ImageWidget, disposeImagePresentations } from './images';
 import { getImagePresentationFactory } from '../editor/imagePresentation';
 import { getDetailsBlocks, toggleDetailsBlock } from './detailsBlocks';
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
@@ -573,8 +573,7 @@ function enhanceLinks(root: ParentNode, inline: boolean, uiLanguage: UiLanguage)
 
 function enhanceImages(
   root: ParentNode, view: EditorView, sourceFrom: number, sourceStartLine: number, source: string
-): ImageWidget[] {
-  const widgets: ImageWidget[] = [];
+): void {
   const resolveSourceFrom = () => currentHtmlBlock(view, source, sourceStartLine)?.from ?? null;
   for (const image of Array.from(root.querySelectorAll<HTMLImageElement>('img[src]'))) {
     const rawSrc = image.getAttribute('src')?.trim() ?? '';
@@ -633,9 +632,7 @@ function enhanceImages(
       wrapper.append(container);
       anchor.replaceWith(wrapper);
     } else image.replaceWith(container);
-    widgets.push(widget);
   }
-  return widgets;
 }
 
 function createSanitizedHtml(
@@ -645,7 +642,7 @@ function createSanitizedHtml(
   view?: EditorView,
   sourceFrom = 0,
   sourceStartLine = 1
-): { fragment: DocumentFragment; imageWidgets: ImageWidget[] } | null {
+): DocumentFragment | null {
   const masked = maskHtmlComments(source);
   const rendered = renderHtmlMarkdown(source, inline);
   const renderedMask = maskHtmlComments(rendered);
@@ -657,11 +654,9 @@ function createSanitizedHtml(
   if (view && masked.comments.length) {
     showHtmlComments(template.content, masked.comments, view, source, sourceFrom, inline, sourceStartLine);
   }
-  const imageWidgets = view
-    ? enhanceImages(template.content, view, sourceFrom, sourceStartLine, source)
-    : [];
+  if (view) enhanceImages(template.content, view, sourceFrom, sourceStartLine, source);
   enhanceLinks(template.content, inline, uiLanguage);
-  return { fragment: template.content, imageWidgets };
+  return template.content;
 }
 
 function preserveHtmlPosition(view: EditorView, from: number, mutate: () => void): void {
@@ -710,7 +705,6 @@ class HtmlBlockWidget extends UiLanguageSensitiveWidget {
     next.seedHeight(this);
     return next;
   }
-  private imageWidgets: ImageWidget[] = [];
   private readonly height: RenderedBlockPreviewHeight;
 
   constructor(readonly block: RenderableHtmlBlock, readonly editing = false) {
@@ -764,11 +758,10 @@ class HtmlBlockWidget extends UiLanguageSensitiveWidget {
       this.block.startLine
     );
     if (content) {
-      this.imageWidgets = content.imageWidgets;
-      const firstElement = content.fragment.firstElementChild as HTMLElement | null;
+      const firstElement = content.firstElementChild as HTMLElement | null;
       const align = normalizeHtmlAlign(firstElement?.getAttribute('align') ?? null);
       if (align) root.style.textAlign = align;
-      contentRoot.appendChild(content.fragment);
+      contentRoot.appendChild(content);
     }
     root.appendChild(contentRoot);
 
@@ -838,8 +831,7 @@ class HtmlBlockWidget extends UiLanguageSensitiveWidget {
     layout?.controller?.dispose();
     htmlTableLayouts.delete(dom);
     this.height.destroy(dom);
-    for (const widget of this.imageWidgets) widget.destroy();
-    this.imageWidgets = [];
+    disposeImagePresentations(dom);
   }
 }
 
@@ -956,7 +948,7 @@ class InlineHtmlWidget extends UiLanguageSensitiveWidget {
     const content = createSanitizedHtml(
       this.source, true, view.state.facet(uiLanguageFacet), view, this.from, this.startLine
     );
-    if (content) wrapper.appendChild(content.fragment);
+    if (content) wrapper.appendChild(content);
     const firstElement = wrapper.firstElementChild;
     if (firstElement) {
       const tagName = firstElement.tagName.toLowerCase();
@@ -967,6 +959,10 @@ class InlineHtmlWidget extends UiLanguageSensitiveWidget {
 
   ignoreEvent(): boolean {
     return true;
+  }
+
+  destroy(dom: HTMLElement): void {
+    disposeImagePresentations(dom);
   }
 }
 

@@ -828,7 +828,7 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
     return next;
   }
   readonly [renderedBlockPreviewHeight]: RenderedBlockPreviewHeight;
-  private readonly diagramWidget: MermaidDiagramWidget;
+  private diagramWidget: MermaidDiagramWidget;
   private readonly toolbarWidget: WidgetType;
 
   constructor(
@@ -887,11 +887,21 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
   }
 
   toDOM(view: EditorView): HTMLElement {
+    // CodeMirror can mount replacement DOM before destroying the old shell.
+    // Each shell must retain its own renderer and visibility subscriptions.
+    const diagramWidget = new MermaidDiagramWidget(this.diagramText, this.startLine, this.endLine, {
+      presentationFactory: this.presentationFactory,
+      viewportState: this.viewportState,
+      indentColumns: 0,
+      uiLanguage: this.uiLanguage,
+      mappedPresentation: this.diagramWidget
+    });
     const height = this[renderedBlockPreviewHeight].height;
     if (height > 0) {
-      this.diagramWidget.measuredHeight = height;
+      diagramWidget.measuredHeight = height;
     }
-    const content = this.diagramWidget.toDOM(view) as HTMLElement;
+    this.diagramWidget = diagramWidget;
+    const content = diagramWidget.toDOM(view) as HTMLElement;
     delete content.dataset.meoRenderedBlockStartLine;
     delete content.dataset.meoRenderedBlockEndLine;
     const shell = createRenderedBlockPreviewShell({
@@ -904,7 +914,7 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
       content
     });
     this[renderedBlockPreviewHeight].observe(shell, view);
-    (shell as MermaidPreviewShellElement).__meoMermaidPreviewDiagramWidget = this.diagramWidget;
+    (shell as MermaidPreviewShellElement).__meoMermaidPreviewDiagramWidget = diagramWidget;
     (shell as MermaidPreviewShellElement).__meoMermaidPreviewWidget = this;
     return shell;
   }

@@ -506,18 +506,20 @@ try {
       await page.keyboard.press('ArrowRight');
       await page.keyboard.press('Enter');
       await frames();
-      assert.ok(
-        (await read()).text.includes('Changed\n' + c.prefix + ']'),
-        `${c.name}: Enter preserves the container exactly once`
+      // Enter retains both the outer container and this source line's indent.
+      const afterEnter = text.replace('Initial', 'Changed').replace('Changed]', 'Changed\n' + c.prefix + '  ]');
+      assert.equal(
+        (await read()).text, afterEnter,
+        `${c.name}: Enter preserves the container and current source indentation exactly once`
       );
       await page.keyboard.press('Tab');
       await frames();
-      assert.ok((await read()).text.includes('Changed\n' + c.prefix + '  ]'));
+      assert.equal((await read()).text, afterEnter.replace('Changed\n' + c.prefix + '  ]', 'Changed\n' + c.prefix + '    ]'));
       await page.keyboard.down('Shift');
       await page.keyboard.press('Tab');
       await page.keyboard.up('Shift');
       await frames();
-      assert.ok((await read()).text.includes('Changed\n' + c.prefix + ']'));
+      assert.equal((await read()).text, afterEnter);
       await page.$eval('.meo-select-all-code-btn', (b) => (b as HTMLButtonElement).click());
       await frames();
       const selected = await read();

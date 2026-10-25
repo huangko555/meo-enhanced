@@ -340,6 +340,25 @@ async function main(): Promise<void> {
       'disposing a visibility-gated diagram must retire its observer and queued presentation');
     assert.equal(await page.evaluate(() => (window as any).__activeDiagramObservers.size), 0,
       'mode changes and disposal must release observers owned by retained diagram DOM');
+    for (const large of [false, true]) {
+      await page.evaluate(large => {
+        (window as any).__remountProbe = (window as any).MermaidEditingHarness.createWidgetRemountProbe('mermaid', large);
+      }, large);
+      await settleVisibility();
+      const pending = await page.evaluate(() => (window as any).__remountProbe.snapshot());
+      assert.equal(pending.optimized, large, 'the fixture must activate the intended document work budget');
+      assert.ok(pending.visible, 'replacement diagram must be in the actual scrolling viewport');
+      assert.equal(pending.ready, false, 'hold the real render until after the old DOM is destroyed');
+      await page.evaluate(() => (window as any).__remountProbe.release());
+      await page.waitForFunction(() => (window as any).__remountProbe.snapshot().ready, { timeout: 4000 });
+      const ready = await page.evaluate(() => (window as any).__remountProbe.snapshot());
+      assert.ok(ready.retiredStable && ready.textUnchanged && ready.selectionUnchanged,
+        'late rendering must preserve retired DOM, source text and selection');
+      await page.evaluate(() => (window as any).__remountProbe.destroy());
+    }
+    await settleVisibility();
+    assert.equal(await page.evaluate(() => (window as any).__activeDiagramObservers.size), 0,
+      'each diagram mount must release its own visibility observer');
     console.log('Mermaid diagram presentation production characterization passed');
   } finally {
     await browser.close();

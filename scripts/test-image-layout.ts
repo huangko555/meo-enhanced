@@ -344,6 +344,20 @@ async function main() {
     });
     const openViewer = '.meo-md-image button[data-tooltip="Fullscreen image"]';
     await page.waitForSelector(openViewer);
+    await page.evaluate(() => (window as any).TableStabilityHarness.initializeImageHandling({ postMessage() {} }));
+    const doubleClickPoint = await page.$eval('.meo-md-image-img', image => {
+      const rect = image.getBoundingClientRect();
+      return { x: rect.left + 20, y: rect.top + 20 };
+    });
+    await page.mouse.click(doubleClickPoint.x, doubleClickPoint.y);
+    await page.mouse.click(doubleClickPoint.x, doubleClickPoint.y);
+    await page.waitForSelector('.meo-md-image-fullscreen-img', { timeout: 4000 });
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => {
+      const editor = (window as any).__imageLayoutEditor;
+      editor.view.dispatch({ selection: { anchor: 0 } });
+    });
+    await page.waitForSelector(openViewer);
     const expectedSrc = await page.$eval(openViewer, button =>
       button.closest('.meo-md-image')!.querySelector<HTMLImageElement>('img')!.src);
     await page.click(openViewer);

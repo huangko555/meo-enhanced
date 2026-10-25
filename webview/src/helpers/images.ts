@@ -60,6 +60,17 @@ let clipboardImageSaveTransport: ClipboardImageSaveTransport = {
 const IMAGE_DOUBLE_CLICK_WINDOW_MS = 400;
 const IMAGE_DOUBLE_CLICK_MAX_DISTANCE_PX = 8;
 const IMAGE_PRESENTATION_DISPOSE_EVENT = 'meo-dispose-image-presentation';
+type ImageMount = {
+  disposed: boolean;
+  url: string;
+  sourceFrom: () => number | null;
+  presentationHandle: ImagePresentationHandle | null;
+  wikiPresentation?: WikiImagePresentation;
+  fullscreenOverlay: HTMLElement | null;
+  fullscreenCleanup: (() => void) | null;
+  exitFullscreenHandler: ((event: KeyboardEvent) => void) | null;
+};
+type ImageElement = HTMLElement & { __meoImageMount?: ImageMount };
 type ImageDoubleClickCandidate = {
   x: number;
   y: number;
@@ -342,11 +353,6 @@ export class ImageWidget extends WidgetType {
   private readonly initialSourceFrom: number | null;
   private readonly sourceFromResolver?: () => number | null;
   pointerInteractionOwner: 'widget' | 'parent';
-  fullscreenOverlay: HTMLElement | null;
-  fullscreenCleanup: (() => void) | null;
-  exitFullscreenHandler: ((event: KeyboardEvent) => void) | null;
-  presentationHandle: ImagePresentationHandle | null;
-  private wikiPresentation?: WikiImagePresentation;
   uiLanguage: UiLanguage;
 
   constructor(
@@ -375,10 +381,6 @@ export class ImageWidget extends WidgetType {
     this.height = options.height;
     this.displayImageStyle = options.displayImageStyle ?? '';
     this.pointerInteractionOwner = options.pointerInteractionOwner ?? 'widget';
-    this.fullscreenOverlay = null;
-    this.fullscreenCleanup = null;
-    this.exitFullscreenHandler = null;
-    this.presentationHandle = null;
     this.uiLanguage = options.uiLanguage ?? 'en';
     if (this.url) {
       void this.presentationFactory.preload(this.url);
@@ -400,7 +402,12 @@ export class ImageWidget extends WidgetType {
   }
 
   toDOM(view?: EditorView): HTMLElement {
-    const container = document.createElement('div');
+    const container: ImageElement = document.createElement('div');
+    const mount: ImageMount = {
+      disposed: false, url: this.url, sourceFrom: () => this.sourceFrom, presentationHandle: null,
+      fullscreenOverlay: null, fullscreenCleanup: null, exitFullscreenHandler: null
+    };
+    container.__meoImageMount = mount;
     container.className = 'meo-md-image';
     if (this.url.startsWith(WIKI_IMAGE_SCHEME)) container.dataset.tooltipKind = 'description';
 
@@ -414,25 +421,26 @@ export class ImageWidget extends WidgetType {
       return container;
     }
     if (this.pointerInteractionOwner === 'widget') {
-      this.attachImagePointerInteractions(container);
+      this.attachImagePointerInteractions(container, mount, view);
     }
 
-    this.disposePresentation();
     const presentationHandle = this.presentationFactory.create({
       showFallback: () => {
+        if (mount.disposed) return false;
         this.renderFallback(container);
         return true;
       },
       showImage: (loadedImage) => {
+        if (mount.disposed) return false;
         const image = this.createDisplayImage(loadedImage);
         delete container.dataset.tooltip;
         container.classList.remove('meo-md-image-fallback');
-        container.replaceChildren(image, this.createImageControls(image));
+        container.replaceChildren(image, this.createImageControls(image, mount));
         return true;
       },
       preserveLayoutChange: (apply) => this.preserveImageLayoutChange(container, view, apply),
       isVisible: () => {
-        if (!container.isConnected) return false;
+        if (mount.disposed || !container.isConnected) return false;
         const bounds = container.getBoundingClientRect();
         const viewport = view?.scrollDOM.getBoundingClientRect() ?? {
           top: 0,
@@ -446,20 +454,17 @@ export class ImageWidget extends WidgetType {
           && bounds.left < viewport.right;
       }
     });
-    this.presentationHandle = presentationHandle;
+    mount.presentationHandle = presentationHandle;
     const wikiPresentation = { url: this.url, handle: presentationHandle, reportIssue: (issue?: string) => {
-      if (this.presentationHandle !== presentationHandle) return;
+      if (mount.disposed) return;
       if (issue) container.dataset.tooltip = issue; else delete container.dataset.tooltip;
     } };
     if (this.url.startsWith(WIKI_IMAGE_SCHEME)) {
       wikiImagePresentations.add(wikiPresentation);
-      this.wikiPresentation = wikiPresentation;
+      mount.wikiPresentation = wikiPresentation;
     }
     container.addEventListener(IMAGE_PRESENTATION_DISPOSE_EVENT, () => {
-      wikiImagePresentations.delete(wikiPresentation);
-      if (this.wikiPresentation === wikiPresentation) this.wikiPresentation = undefined;
-      presentationHandle.dispose();
-      if (this.presentationHandle === presentationHandle) this.presentationHandle = null;
+      this.destroy(container);
     }, { once: true });
     presentationHandle.present(this.fallbackText(), this.url);
     return container;
@@ -490,7 +495,7 @@ export class ImageWidget extends WidgetType {
     if (this.displayImageStyle) img.style.cssText += `; ${this.displayImageStyle}`;
   }
 
-  attachImagePointerInteractions(container: HTMLElement): void {
+  private attachImagePointerInteractions(container: HTMLElement, mount: ImageMount, view?: EditorView): void {
     const isControlTarget = (target: EventTarget | null) => (
       target instanceof Element && target.closest('.meo-md-image-controls') !== null
     );
@@ -517,7 +522,17 @@ export class ImageWidget extends WidgetType {
       event.preventDefault();
       event.stopPropagation();
       const img = container.querySelector<HTMLImageElement>('.meo-md-image-img');
-      const openFullscreen = () => this.openFullscreen(img?.currentSrc || img?.src || this.url);
+      const sourceFrom = this.sourceFrom;
+      const openFullscreen = () => {
+        // The first click can reveal source and replace this DOM. Complete the
+        // existing double-click intent through the current mount of that image.
+        const current = !mount.disposed ? mount : Array.from(
+          view?.dom.querySelectorAll<ImageElement>('.meo-md-image') ?? []
+        ).map(element => element.__meoImageMount).find(candidate =>
+          candidate && !candidate.disposed && candidate.url === this.url && candidate.sourceFrom() === sourceFrom
+        );
+        if (current) this.openFullscreen(img?.currentSrc || img?.src || this.url, current);
+      };
       activateSource();
       registerImageDoubleClickCandidate(event, openFullscreen);
     });
@@ -572,7 +587,7 @@ export class ImageWidget extends WidgetType {
     return `![${this.altText}](${this.url})`;
   }
 
-  createImageControls(img: HTMLImageElement): HTMLElement {
+  private createImageControls(img: HTMLImageElement, mount: ImageMount): HTMLElement {
     const strings = getUiStrings(this.uiLanguage);
     const controls = document.createElement('div');
     controls.className = 'meo-visual-controls meo-md-image-controls';
@@ -617,7 +632,7 @@ export class ImageWidget extends WidgetType {
       event.preventDefault();
       event.stopPropagation();
       if (refresh.disabled) return;
-      const refreshWork = this.presentationHandle?.refresh();
+      const refreshWork = mount.presentationHandle?.refresh();
       if (!refreshWork) return;
       refresh.disabled = true;
       void refreshWork.finally(() => {
@@ -634,15 +649,15 @@ export class ImageWidget extends WidgetType {
     fullscreen.addEventListener('pointerdown', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      this.openFullscreen(img.currentSrc || img.src);
+      this.openFullscreen(img.currentSrc || img.src, mount);
     });
 
     controls.append(refresh, openExternally, fullscreen);
     return controls;
   }
 
-  openFullscreen(src: string): void {
-    if (!src || this.fullscreenOverlay) return;
+  private openFullscreen(src: string, mount: ImageMount): void {
+    if (!src || mount.disposed || mount.fullscreenOverlay) return;
     clearPendingImageDoubleClick();
 
     const overlay = document.createElement('div');
@@ -699,7 +714,7 @@ export class ImageWidget extends WidgetType {
       applyTransform();
     });
     addButton(AppWindow, strings.openWithSystemApp, () => openImageExternally(this.url));
-    addButton(X, strings.exitFullscreen, () => this.closeFullscreen());
+    addButton(X, strings.exitFullscreen, () => this.closeFullscreen(mount));
     viewer.appendChild(controls);
 
     const onPointerDown = (event: PointerEvent) => {
@@ -740,7 +755,7 @@ export class ImageWidget extends WidgetType {
     const onClick = (event: MouseEvent) => {
       if (!closeOnClick || (event.target instanceof Element && event.target.closest('.meo-md-image-fullscreen-controls'))) return;
       closeOnClick = false;
-      this.closeFullscreen();
+      this.closeFullscreen(mount);
     };
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
@@ -756,12 +771,12 @@ export class ImageWidget extends WidgetType {
     overlay.appendChild(viewer);
     document.body.appendChild(overlay);
 
-    this.fullscreenOverlay = overlay;
-    this.exitFullscreenHandler = (event) => {
-      if (event.key === 'Escape') this.closeFullscreen();
+    mount.fullscreenOverlay = overlay;
+    mount.exitFullscreenHandler = (event) => {
+      if (event.key === 'Escape') this.closeFullscreen(mount);
     };
-    document.addEventListener('keydown', this.exitFullscreenHandler);
-    this.fullscreenCleanup = () => {
+    document.addEventListener('keydown', mount.exitFullscreenHandler);
+    mount.fullscreenCleanup = () => {
       viewer.removeEventListener('pointerdown', onPointerDown);
       viewer.removeEventListener('pointermove', onPointerMove);
       viewer.removeEventListener('pointerup', onPointerUp);
@@ -771,15 +786,14 @@ export class ImageWidget extends WidgetType {
     };
   }
 
-  closeFullscreen(): void {
-    clearPendingImageDoubleClick();
-    this.fullscreenCleanup?.();
-    this.fullscreenCleanup = null;
-    this.fullscreenOverlay?.remove();
-    this.fullscreenOverlay = null;
-    if (this.exitFullscreenHandler) {
-      document.removeEventListener('keydown', this.exitFullscreenHandler);
-      this.exitFullscreenHandler = null;
+  private closeFullscreen(mount: ImageMount): void {
+    mount.fullscreenCleanup?.();
+    mount.fullscreenCleanup = null;
+    mount.fullscreenOverlay?.remove();
+    mount.fullscreenOverlay = null;
+    if (mount.exitFullscreenHandler) {
+      document.removeEventListener('keydown', mount.exitFullscreenHandler);
+      mount.exitFullscreenHandler = null;
     }
   }
 
@@ -811,16 +825,17 @@ export class ImageWidget extends WidgetType {
     return true;
   }
 
-  private disposePresentation(): void {
-    if (this.wikiPresentation) wikiImagePresentations.delete(this.wikiPresentation);
-    this.wikiPresentation = undefined;
-    this.presentationHandle?.dispose();
-    this.presentationHandle = null;
-  }
-
-  destroy(): void {
-    this.disposePresentation();
-    this.closeFullscreen();
+  destroy(dom: HTMLElement): void {
+    const container = dom as ImageElement;
+    const mount = container.__meoImageMount;
+    if (!mount) return;
+    delete container.__meoImageMount;
+    mount.disposed = true;
+    if (mount.wikiPresentation) wikiImagePresentations.delete(mount.wikiPresentation);
+    mount.wikiPresentation = undefined;
+    mount.presentationHandle?.dispose();
+    mount.presentationHandle = null;
+    this.closeFullscreen(mount);
   }
 }
 
@@ -897,8 +912,8 @@ export class ImageGroupWidget extends WidgetType {
     return true;
   }
 
-  destroy(): void {
-    for (const widget of this.widgets) widget.destroy();
+  destroy(dom: HTMLElement): void {
+    disposeImagePresentations(dom);
   }
 }
 

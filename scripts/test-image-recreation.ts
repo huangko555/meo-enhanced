@@ -156,11 +156,17 @@ const lifecycleFactory = {
 };
 const reusedWidget = new ImageWidget('/reused.png', 'reused', '', null, lifecycleFactory);
 const oldContainer = reusedWidget.toDOM() as any;
-reusedWidget.toDOM();
+const replacementContainer = reusedWidget.toDOM();
+reusedWidget.destroy(oldContainer);
+if (!lifecycleHandles[0]?.disposed || lifecycleHandles[1]?.disposed) {
+  throw new Error('Destroying old image DOM did not preserve the replacement handle');
+}
 oldContainer.dispatchEvent(new Event('meo-dispose-image-presentation'));
 if (!lifecycleHandles[0]?.disposed || lifecycleHandles[1]?.disposed) {
   throw new Error('Disposing an old image DOM did not preserve the replacement handle');
 }
+reusedWidget.destroy(replacementContainer);
+if (!lifecycleHandles[1]?.disposed) throw new Error('Destroying replacement DOM leaked its image presentation');
 
 releaseFactoryResources();
 factory.dispose();

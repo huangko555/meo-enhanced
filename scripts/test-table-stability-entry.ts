@@ -15,6 +15,7 @@ import {
 import { createTableCommandTargetRegistry } from '../webview/src/editor/tableCommandTargetRegistry';
 import { installCausalFrameSettlement } from './causal-frame-settlement';
 import { applyUiTheme } from '../webview/src/helpers/uiTheme';
+import { createWidgetRemountProbe } from './widget-remount-test-helpers';
 
 const getTableProvenanceSnapshot = () => {
   const view = EditorView.findFromDOM(document.querySelector('.cm-editor')!);
@@ -30,6 +31,7 @@ const getTableProvenanceSnapshot = () => {
   TableStabilityHarness?: {
     applyUiTheme: typeof applyUiTheme;
     createEditor: typeof createEditor;
+    createWidgetRemountProbe: typeof createWidgetRemountProbe;
     handleImagePaste: typeof handleImagePaste;
     handleSavedImagePath: typeof handleSavedImagePath;
     initializeImageHandling: typeof initializeImageHandling;
@@ -45,6 +47,7 @@ const getTableProvenanceSnapshot = () => {
 }).TableStabilityHarness = {
   applyUiTheme,
   createEditor,
+  createWidgetRemountProbe,
   handleImagePaste,
   handleSavedImagePath,
   initializeImageHandling,
