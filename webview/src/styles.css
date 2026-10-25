@@ -6941,7 +6941,8 @@ html[data-meo-ui-contrast='high'] .cm-editor .meo-md-html-table {
 }
 
 /* Editing and range selection share a stroke without moving its inner edge. */
-.cm-editor .meo-md-html-table :is(th, td):not(.meo-md-html-table-cell-selected):has(> .meo-md-html-table-cell-content.is-editing > textarea:focus)::after {
+.cm-editor .meo-md-html-table :is(th, td):not(.meo-md-html-table-cell-selected):has(> .meo-md-html-table-cell-content.is-editing > textarea:focus)::after,
+.editor-root.meo-editor-focus-owned .cm-editor .meo-md-html-table :is(th, td):not(.meo-md-html-table-cell-selected):has(> .meo-md-html-table-cell-content.is-editing > textarea)::after {
   content: '';
   position: absolute;
   z-index: 3;
@@ -7028,6 +7029,10 @@ html[data-meo-ui-contrast='high'] .cm-editor .meo-md-html-table {
   font-size: 0;
   line-height: 0;
   pointer-events: none;
+}
+
+.editor-root.meo-host-window-blurred .cm-editor .meo-md-html-table :is(th, td):has(> .meo-md-html-table-cell-content.is-editing)::after {
+  visibility: hidden;
 }
 
 .cm-editor .meo-md-html-table th {

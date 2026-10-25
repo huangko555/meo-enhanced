@@ -47,6 +47,8 @@ const createController = () => createPanelSessionController(createPanelSessionCo
 }) as never);
 const controller = createController();
 await controller.handleMessage({ type: 'ready' });
+assert.ok(messages.some(message => message.type === 'hostWindowFocusChanged' && message.focused === true),
+  'initial delivery must describe actual Host focus independently of frame focus');
 assert.ok(onWindowState, 'panel session did not subscribe to VS Code window focus changes');
 const countFocusMessages = () => messages.filter((message) => message.type === 'focusEditor').length;
 const emitWindowState = async (focused: boolean, active: boolean) => {
@@ -61,6 +63,8 @@ assert.equal(countFocusMessages(), 0,
   'activity-only changes must not steal focus from another input or the command palette');
 await emitWindowState(false, false);
 assert.equal(countFocusMessages(), 0);
+assert.equal(messages.at(-1)?.type, 'hostWindowFocusChanged');
+assert.equal(messages.at(-1)?.focused, false, 'actual window loss must retire focus feedback');
 await emitWindowState(true, false);
 assert.equal(countFocusMessages(), 1,
   'returning to a still-active panel should restore editor focus');

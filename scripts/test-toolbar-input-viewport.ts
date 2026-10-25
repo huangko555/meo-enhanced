@@ -719,7 +719,9 @@ async function runActivationClickPriority(browser: Browser, mode: 'live' | 'sour
         window.dispatchEvent(new Event('focus'));
         window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
       }, { capture: true, once: true });
-      document.addEventListener('pointerdown', () => {
+      // Paint feedback follows the accepted release. A held activation press
+      // can still receive another native blur/refocus before that boundary.
+      document.addEventListener('pointerup', () => {
         requestAnimationFrame(() => {
           (window as any).__activationPaints.push({
             line: document.getSelection()?.anchorNode?.parentElement?.closest('.cm-line')?.textContent,

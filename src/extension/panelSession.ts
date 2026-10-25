@@ -540,6 +540,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       vscodeTheme: getCurrentVscodeCodeTheme(),
     };
     const posted = await postToWebview(message);
+    if (posted) await postToWebview({ type: 'hostWindowFocusChanged', focused: vscode.window.state.focused } satisfies HostEditorEvent);
     if (posted && params.imageDimensions) {
       void params.imageDimensions.ready.then(() => {
         if (!disposed) return postToWebview({ type: 'imageIntrinsicSizes', documentId: documentKey, entries: params.imageDimensions!.snapshot() });
@@ -1237,8 +1238,12 @@ export function createPanelSessionController(params: PanelSessionControllerParam
 
   let windowWasFocused = vscode.window.state.focused;
   const windowStateSubscription = vscode.window.onDidChangeWindowState(({ focused }) => {
+    const changed = focused !== windowWasFocused;
     const returnedToWindow = focused && !windowWasFocused;
     windowWasFocused = focused;
+    if (changed && webviewReady && initDelivered) {
+      runBackground(postToWebview({ type: 'hostWindowFocusChanged', focused } satisfies HostEditorEvent), 'hostWindowFocusChanged');
+    }
     // WindowState can change for user activity while focus stays in a menu.
     if (returnedToWindow && panel.active) {
       refreshLocalLinks();

@@ -3855,6 +3855,10 @@ window.addEventListener('message', (event) => {
     focusEditorFromHost();
     return;
   }
+  if (message.type === 'hostWindowFocusChanged') {
+    editorFocusController.setHostWindowFocused(message.focused);
+    return;
+  }
 
   if (message.type === 'externalFileStatusChanged') {
     if (message.status === 'current') {

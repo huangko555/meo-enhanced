@@ -82,6 +82,13 @@ geometry/interaction check; synthetic pointer intent is not reported as OS input
 The previously focused cell must be able to blur without ending the scrollbar
 gesture. This catches capturing window blur listeners that incorrectly observe
 descendant focus changes; actual window blur still completes the gesture.
+The input focus production regression also replays a Webview blur/refocus between
+the same table pointer press and release, as observed during native activation.
+Same-cell and cross-cell text clicks accept their exact caret. Grid, resize and
+blank toolbar clicks retain the prior document/native caret and backward range.
+They also cover delayed focus after release, Tab, the first character and Undo;
+active-window frames must not lose an outline after it first appears or replace
+unchanged cell DOM.
 Native scrollbar checks first calibrate both directions in an ordinary scrolling
 container. Grips must exclude native arrow buttons; the lower vertical grip uses
 `clientTop + clientHeight`, excluding any horizontal scrollbar. A track click or
@@ -669,10 +676,18 @@ Undo retain their separate ownership. `--only=table-activation` narrows this loo
 outer/row borders and column resize. It covers ordinary and one MiB documents,
 late focus both during a held press and two frames after release, outline and
 geometry continuity, retained cells, first-key Undo and subsequent Tab/Shift+Tab.
+`--only=inactive-scroll` starts from a real prose click, scrolls to a distant
+table while unfocused, and clicks its text in ordinary and one MiB documents.
+It separates actual Host window loss from internal frame blur/refocus during
+and after release. Accepted outlines must remain continuous through internal
+handoffs, disappear for genuine Host loss, and retain the exact native caret,
+cell DOM and reading viewport. `hostWindowFocusChanged` never grants DOM focus.
 Completed multi-cell ranges also reject a late contenteditable focus after release.
 It belongs to the quick and targeted search gates. The smaller
 `scripts/test-editor-focus-window-return.ts` also checks both blur event orders,
-input invalidation, modal ownership and disposal. Browser evidence does not
+input invalidation, modal ownership and disposal. Unregistered chrome subtrees
+must preserve either the document or a registered input across a complete
+activation press, without adding location-specific handlers. Browser evidence does not
 replace native Windows Alt+Tab or Workbench menu validation.
 
 `scripts/test-preview-navigation-continuity.ts` exercises the production Webview

@@ -116,6 +116,7 @@ import {
   commitPendingTableEdits,
   endTableCellEditing,
   restoreTablePointerSelection,
+  tablePointerTarget,
   focusHistoryChange,
   focusTableHistoryChange,
   refreshMountedTablePositions,
@@ -472,7 +473,7 @@ export function createEditor({
   let capturedPointerId: number | null = null;
   let selectionMenuPointerId: number | null = null;
   let liveSelectionPointerId: number | null = null;
-  let tablePointerFocus: { pointerId: number; nativeTarget: HTMLTextAreaElement | null;
+  let tablePointerFocus: { pointerId: number; nativeTarget: HTMLElement | null;
     released?: boolean; isCurrent?: () => boolean } | null = null;
   let gitDiffSelectionPointerId: number | null = null;
   let liveSelectionGeneration = 0;
@@ -1136,8 +1137,9 @@ export function createEditor({
     gitDiffSelectionPointerId = null;
   };
 
-  const clearPointerSelection = (preserveGitDiffDomain = false, preserveTableFocus = false) => {
-    if (!preserveTableFocus || !tablePointerFocus?.released) tablePointerFocus = null;
+  const clearPointerSelection = (preserveGitDiffDomain = false, preserveTableFocus: 'held' | 'released' | false = false) => {
+    if (!preserveTableFocus || !tablePointerFocus ||
+      (preserveTableFocus === 'released') !== (tablePointerFocus.released === true)) tablePointerFocus = null;
     quoteContentClick = null;
     if (view) {
       view.dom.classList.remove('meo-pointer-selecting');
@@ -1181,7 +1183,7 @@ export function createEditor({
         const generation = liveSelectionGeneration;
         requestAnimationFrame(() => {
           if (liveSelectionPointerId === pointerId && liveSelectionGeneration === generation) {
-            clearPointerSelection(preserveGitDiffDomain, true);
+            clearPointerSelection(preserveGitDiffDomain, 'released');
           }
         });
       } else {
@@ -2807,7 +2809,7 @@ export function createEditor({
         // The table prepares its accepted target before focusing it on release.
         // A native restore has not run that preparation for a stale input.
         tablePointerFocus.nativeTarget = target;
-      } else if (tablePointerFocus.nativeTarget && !tablePointerFocus.nativeTarget.parentElement?.classList.contains('is-editing')) {
+      } else if (tablePointerFocus.nativeTarget instanceof HTMLTextAreaElement && !tablePointerFocus.nativeTarget.parentElement?.classList.contains('is-editing')) {
         tablePointerFocus = null;
       }
     }
@@ -2820,14 +2822,14 @@ export function createEditor({
     // selection, rather than a preview gesture with a pointerup focus effect.
     if (tablePointerFocus.nativeTarget) {
       const input = tablePointerFocus.nativeTarget;
-      const selection = tablePointerFocus.released && lastTextareaSelection?.target === input ? lastTextareaSelection : null;
-      input.focus({ preventScroll: true });
-      if (selection) input.setSelectionRange(selection.start, selection.end, selection.direction);
+      const selection = lastTextareaSelection?.target === input ? lastTextareaSelection : null;
+      if (input === view.contentDOM) view.focus();
+      else input.focus({ preventScroll: true });
+      if (input instanceof HTMLTextAreaElement && selection) input.setSelectionRange(selection.start, selection.end, selection.direction);
       return;
     }
     // DOM text selection may focus its contenteditable ancestor. Leave that
     // native focus intact, without CodeMirror restoring its suspended range.
-    if (target !== view.contentDOM) target.blur();
     restoreTablePointerSelection(view, tablePointerFocus.released === true);
   };
   onEditorFocusIn = (event) => {
@@ -2879,19 +2881,24 @@ export function createEditor({
       tablePointerFocus = null;
       suppressRenderedBlockPointerFocus(view.dom);
       if (currentMode === 'live' && event.target instanceof Element &&
-        event.target.closest('.meo-md-html-table-column-resize-handle')) {
-        const shell = event.target.closest('.meo-md-html-table-shell');
-        const input = lastFocusedEditorTarget;
-        // Resizing owns geometry, while the suspended cell still owns typing.
-        // A late activation must not replace it with the outer document caret.
-        if (input instanceof HTMLTextAreaElement && input.isConnected &&
-          input.closest('.meo-md-html-table-shell') === shell && input.parentElement?.classList.contains('is-editing')) {
-          tablePointerFocus = { pointerId: event.pointerId, nativeTarget: input };
+        event.target.closest('.meo-md-html-table-shell')) {
+        const hit = tablePointerTarget(event);
+        if (hit.kind === 'control') {
+          viewportController.markInteraction();
+          return;
         }
-      }
-      if (currentMode === 'live' && event.target instanceof Element &&
-        event.target.closest('.meo-md-html-table-shell') &&
-        !event.target.closest('.meo-md-html-table-column-resize-handle')) {
+        if (hit.kind !== 'cell') {
+          // A border has no text hit. Keep the accepted native/document caret;
+          // only the column-width owner may change geometry during a drag.
+          const previous = lastFocusedEditorTarget;
+          tablePointerFocus = { pointerId: event.pointerId,
+            nativeTarget: previous?.isConnected && view.contentDOM.contains(previous) ? previous : view.contentDOM };
+          if (hit.kind === 'border') {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+          return;
+        }
         // Table widgets bypass CodeMirror's pointer handlers. Keep the same
         // source presentation until their own pointerup resolves the cell.
         // Column resizing preserves its own interaction and must not reveal
@@ -2910,6 +2917,10 @@ export function createEditor({
           liveSelectionPointerId = event.pointerId;
           view.dispatch({ effects: setLivePointerSelectionActiveEffect.of({ active: true, preservedLine: null }) });
         }
+        // A preview press has not accepted a new editable target yet. Updating
+        // the return point to contentDOM here loses the suspended native caret
+        // if activation blurs again before the table resolves pointerup.
+        return;
       }
       const target = editableTarget(event.target);
       if (target) {
@@ -3203,8 +3214,9 @@ export function createEditor({
   );
   setEditorHistoryRunner(view, (direction) => requestEditorHistoryReplay(direction));
   onHistoryKeyDown = (event) => {
-    // A new keyboard intent supersedes a completed pointer's native return target.
-    if (tablePointerFocus?.released) tablePointerFocus = null;
+    // Keyboard input supersedes a pointer, including one whose release was
+    // swallowed while the native window was away.
+    if (tablePointerFocus) tablePointerFocus = null;
     const key = event.key.toLowerCase();
     const isHistory = (event.ctrlKey || event.metaKey) && (key === 'z' || key === 'y');
     const isModifier = key === 'control' || key === 'shift' || key === 'alt' || key === 'meta' || key === 'altgraph';
@@ -3424,7 +3436,7 @@ export function createEditor({
       event.target.closest('.meo-md-html-table-shell')) {
       // The table still needs the original hit geometry during this release.
       finishPointerSelection(event.pointerId, true, true);
-    } else clearPointerSelection(true, true);
+    } else clearPointerSelection(true, 'released');
     if (completedSelection && quoteClick?.pointerId === event.pointerId && isLiveMode(view)
       && isPlainPrimaryPointerEvent(event) && view.state.selection.ranges.length === 1
       && view.state.selection.main.empty && Math.hypot(event.clientX - quoteClick.x, event.clientY - quoteClick.y) <= 3) {
@@ -3477,7 +3489,10 @@ export function createEditor({
     inlineCodeClick = null;
     pendingNativeCaretHit = null;
     onLinkPointerLeave();
-    clearPointerSelection();
+    // Electron can blur/refocus the Webview during an activation press, before
+    // its matching pointerup. Retire the presentation hold, but keep that
+    // gesture's focus destination until release/cancel or a newer intent.
+    clearPointerSelection(false, 'held');
     onSelectionChange?.({ visible: false });
   };
   window.addEventListener('pointerup', onWindowPointerUp, true);
@@ -3817,7 +3832,16 @@ export function createEditor({
       return viewportController.retainViewportOnWindowReturn(isCurrent);
     },
     focus() {
-      const target = lastFocusedEditorTarget;
+      if (tablePointerFocus?.released && (tablePointerFocus.isCurrent?.() === false ||
+        tablePointerFocus.nativeTarget?.isConnected === false)) tablePointerFocus = null;
+      if (tablePointerFocus && !tablePointerFocus.nativeTarget) {
+        // A pending text hit or accepted cell range owns focus before the old
+        // document return point. CodeMirror.focus would reapply its suspended
+        // prose range after the native focus event and scroll away from the hit.
+        restoreTablePointerSelection(view, tablePointerFocus.released === true);
+        return;
+      }
+      const target = tablePointerFocus?.nativeTarget ?? lastFocusedEditorTarget;
       // A modal can move the browser selection away from the document. CodeMirror
       // restores that selection as well as focus; DOM focus alone cannot do so.
       const focusedView = target?.isConnected && view.contentDOM.contains(target) ? EditorView.findFromDOM(target) : null;

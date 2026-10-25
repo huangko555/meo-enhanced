@@ -204,10 +204,9 @@ async function checkTableActivationClick(page: Page, frame: Frame): Promise<void
 async function checkTableActivationBoundaries(page: Page, frame: Frame): Promise<void> {
   const original = (await readEditor(frame)).text;
   for (const large of [false, true]) for (const origin of ['cell', 'document'] as const) {
-    for (const target of ['same', 'other', 'left-border', 'bottom-border', 'row-border', 'column-border'] as const)
-      for (const recovery of ['held', 'released'] as const) {
-      if (recovery === 'released' && target !== 'same' && target !== 'other') continue;
-      if (origin === 'document' && target === 'column-border') continue;
+    for (const target of ['same', 'other', 'left-border', 'bottom-border', 'row-border', 'column-border', 'chrome'] as const)
+      for (const recovery of ['held', 'released', 'window-cycle'] as const) {
+      if (recovery === 'released' && target !== 'same' && target !== 'other' && target !== 'chrome') continue;
       const fixture = 'Before table.\n\n| A | B |\n| --- | --- |\n| original cell | another target |\n| next row | final cell |\n\nAfter table.'
         + (large ? '\n\n' + 'Unchanged background paragraph.\n\n'.repeat(34000) : '');
       await frame.evaluate(fixture => {
@@ -217,22 +216,37 @@ async function checkTableActivationBoundaries(page: Page, frame: Frame): Promise
       }, fixture);
       await settle(frame, 8);
       if (origin === 'cell') await (await frame.$('tbody td .meo-md-html-table-cell-preview'))!.click();
+      if (origin === 'cell') await frame.evaluate(() => (document.activeElement as HTMLTextAreaElement).setSelectionRange(2, 5, 'backward'));
+      await settle(frame, 3);
       const point = await frame.evaluate(target => {
         const table = document.querySelector<HTMLTableElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
         const cells = [...table.querySelectorAll<HTMLTableCellElement>('tbody td')];
         const bounds = cells[0].getBoundingClientRect(), outer = table.getBoundingClientRect();
         const destination = cells[target === 'other' ? 1 : target === 'bottom-border' ? 2 : 0];
-        const input = destination.querySelector('textarea')!;
+        const textClick = target === 'same' || target === 'other';
+        const input = textClick ? destination.querySelector('textarea')! : document.activeElement as HTMLElement;
+        const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
         (window as any).__activationBoundary = { table, cells, input, oldInput: cells[0].querySelector('textarea'),
+          beforeHead: view.state.selection.main.head,
+          beforeRange: input instanceof HTMLTextAreaElement ? {start:input.selectionStart,end:input.selectionEnd,direction:input.selectionDirection} : null,
           bounds: { top: outer.top, left: outer.left, width: outer.width, height: outer.height }, samples: [], armed: false };
         document.addEventListener('pointerdown', event => {
           const state = (window as any).__activationBoundary;
           state.armed = true;
-          // The shared grid pixel can belong to either neighbouring native cell.
-          // Retain that real hit; TABLE/TR hits use the expected nearest cell.
+          // Accept the native text hit only for text clicks; grid pixels keep
+          // the original cell/document target regardless of their DOM target.
           const cell = event.target instanceof Element ? event.target.closest('td, th') : null;
-          if (cell && table.contains(cell)) state.input = cell.querySelector('textarea');
+          if (textClick && cell && table.contains(cell)) state.input = cell.querySelector('textarea');
         }, { capture: true, once: true });
+        if (target === 'chrome') {
+          const toolbar = document.querySelector('.mode-toolbar')!.getBoundingClientRect();
+          const y = toolbar.top + toolbar.height / 2;
+          for (let x = toolbar.left + 2; x < toolbar.right - 2; x += 2) {
+            const hit = document.elementFromPoint(x, y);
+            if (hit && !hit.closest('button, input, select, [role="tab"], [role="tablist"]')) return {x,y};
+          }
+          throw new Error('Toolbar has no focus-preserving blank point');
+        }
         if (target === 'left-border') return { x: outer.left + 0.1, y: bounds.top + bounds.height / 2 };
         if (target === 'bottom-border') return { x: bounds.left + bounds.width / 2, y: outer.bottom - 0.1 };
         if (target === 'row-border') return { x: bounds.left + bounds.width / 2, y: bounds.bottom - 0.1 };
@@ -253,7 +267,7 @@ async function checkTableActivationBoundaries(page: Page, frame: Frame): Promise
               const style = getComputedStyle(cell, '::after');
               return style.visibility !== 'hidden' && style.boxShadow !== 'none';
             });
-            state.samples.push({ rings, top: bounds.top, left: bounds.left, width: bounds.width, height: bounds.height });
+            state.samples.push({ rings, focused: document.hasFocus(), top: bounds.top, left: bounds.left, width: bounds.width, height: bounds.height });
           }
           state.raf = requestAnimationFrame(sample);
         };
@@ -264,29 +278,48 @@ async function checkTableActivationBoundaries(page: Page, frame: Frame): Promise
       const inset = await iframe.evaluate(node => ({ x: node.clientLeft, y: node.clientTop }));
       await page.mouse.move(bounds.x + inset.x + point.x, bounds.y + inset.y + point.y);
       await page.mouse.down();
+      if (recovery === 'window-cycle') {
+        // Native VS Code activation can blur and refocus the Webview while the
+        // same press is still held. Replay that recorded handoff, not just a
+        // late focus call in an otherwise continuously focused document.
+        await settle(frame, 3);
+        await page.focus('#host-control');
+        await frame.evaluate(() => (document.activeElement as HTMLElement).blur());
+        await settle(frame, 3);
+        await returnToFrame(page);
+      }
       if (recovery === 'released') { await settle(frame, 3); await page.mouse.up(); await settle(frame, 2); }
       await frame.evaluate(({ origin, target, recovery }) => {
         const state = (window as any).__activationBoundary;
         const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
         // A delayed native restore must not replace the newer pointer destination.
-        (recovery === 'held' && origin === 'cell' && target !== 'column-border' ? state.oldInput : view.contentDOM).focus({ preventScroll: true });
+        (recovery === 'held' && origin === 'cell' && target !== 'column-border' && target !== 'chrome' ? state.oldInput : view.contentDOM).focus({ preventScroll: true });
         window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
       }, { origin, target, recovery });
       await settle(frame, 3);
-      if (recovery === 'held') await page.mouse.up();
+      if (recovery !== 'released') await page.mouse.up();
       await settle(frame, 10);
       const result = await frame.evaluate(() => {
         const state = (window as any).__activationBoundary;
         cancelAnimationFrame(state.raf);
         const input = state.input as HTMLTextAreaElement;
-        return { focused: document.activeElement === input, caret: input.selectionStart, samples: state.samples,
+        const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+        return { focused: document.activeElement === input, caret: input.selectionStart, end: input.selectionEnd, direction:input.selectionDirection,
+          beforeRange:state.beforeRange, beforeHead:state.beforeHead, head:view.state.selection.main.head, samples: state.samples,
           bounds: state.bounds, retained: state.cells.every((cell: Element) => cell.isConnected) };
       });
       const label = `${large ? 'large' : 'small'}/${origin}/${target}/${recovery}`;
       assert.ok(result.focused, `${label}: a border or activation click lost the native cell caret`);
-      if (target === 'same' || target === 'other') assert.equal(result.caret, 3, `${label}: native hit testing moved the caret`);
+      const textClick = target === 'same' || target === 'other';
+      if (textClick) assert.equal(result.caret, 3, `${label}: native hit testing moved the caret`);
+      else {
+        assert.equal(result.head, result.beforeHead, `${label}: a border changed the original source caret`);
+        if (result.beforeRange) assert.deepEqual({start:result.caret,end:result.end,direction:result.direction}, result.beforeRange,
+          `${label}: a preserving click changed the original native selection`);
+      }
       let appeared = false;
       for (const sample of result.samples) {
+        if (!sample.focused) continue;
         const visible = sample.rings.some(Boolean);
         assert.ok(!appeared || visible, `${label}: the cell outline disappeared after appearing`);
         appeared ||= visible;
@@ -294,8 +327,9 @@ async function checkTableActivationBoundaries(page: Page, frame: Frame): Promise
           assert.ok(Math.abs(sample[key] - result.bounds[key]) <= 0.5, `${label}: table ${key} changed during focus handoff`);
         }
       }
-      assert.ok(appeared && result.samples.length >= 8 && result.retained, `${label}: missing outline frames or replaced cells`);
-      if (recovery === 'released') {
+      assert.ok((appeared || !textClick && origin === 'document') && result.samples.length >= 8 && result.retained,
+        `${label}: missing outline frames or replaced cells`);
+      if (recovery === 'released' && (textClick || origin === 'cell')) {
         await page.keyboard.press('Tab');
         assert.ok(await frame.evaluate(() => document.activeElement instanceof HTMLTextAreaElement
           && document.activeElement !== (window as any).__activationBoundary.input), `${label}: the completed pointer trapped Tab`);
@@ -304,7 +338,11 @@ async function checkTableActivationBoundaries(page: Page, frame: Frame): Promise
         assert.ok(await frame.evaluate(() => document.activeElement === (window as any).__activationBoundary.input), `${label}: Shift+Tab could not return`);
       }
       await page.keyboard.type('Q');
-      await frame.waitForFunction(() => (window as any).__activationBoundary.input.value.includes('Q'));
+      await frame.waitForFunction(() => {
+        const input = (window as any).__activationBoundary.input;
+        return input instanceof HTMLTextAreaElement ? input.value.includes('Q')
+          : (window as any).EditingSettingsHarness.EditorView.findFromDOM(input).state.doc.toString().includes('Q');
+      });
       await chord(page, 'z');
       await settle(frame, 4);
       assert.equal((await readEditor(frame)).text, fixture, `${label}: first-key Undo changed unrelated Markdown`);
@@ -313,6 +351,110 @@ async function checkTableActivationBoundaries(page: Page, frame: Frame): Promise
   await frame.evaluate(original => {
     const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: original }, selection: { anchor: 0 } }); view.focus();
+  }, original);
+  await settle(frame);
+}
+
+async function checkInactiveScrollTableActivation(page: Page, frame: Frame): Promise<void> {
+  const original = (await readEditor(frame)).text;
+  for (const large of [false, true]) for (const recovery of ['native', 'held-cycle', 'released-cycle'] as const) {
+    const fixture = 'Original prose caret.\n\n' + 'Unchanged background paragraph.\n\n'.repeat(large ? 34000 : 80)
+      + '| A | B |\n| --- | --- |\n| distant target | another cell |\n\nAfter table.';
+    await frame.evaluate(fixture => {
+      const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+      view.dispatch({changes: {from: 0, to: view.state.doc.length, insert: fixture}, selection: {anchor: 2}});
+      view.focus(); view.scrollDOM.scrollTop = 0;
+    }, fixture);
+    await settle(frame, 8);
+    await (await frame.$('.cm-line'))!.click();
+    assert.equal(await frame.evaluate(() => document.activeElement?.classList.contains('cm-content')), true,
+      'inactive-scroll fixture must start with a real prose caret');
+    await frame.evaluate(() => window.dispatchEvent(new MessageEvent('message', {data: {type: 'hostWindowFocusChanged', focused: true}})));
+    await page.focus('#host-control');
+    await frame.evaluate(() => window.dispatchEvent(new MessageEvent('message', {data: {type: 'hostWindowFocusChanged', focused: false}})));
+    const bounds = await (await page.$('#webview'))!.boundingBox(); assert.ok(bounds);
+    const inset = await frame.$eval('.cm-scroller', node => {
+      const rect = node.getBoundingClientRect(); return {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2};
+    });
+    await page.mouse.move(bounds.x + inset.x, bounds.y + inset.y);
+    await page.mouse.wheel({deltaY: 10_000_000});
+    await settle(frame, 12);
+    assert.equal(await frame.evaluate(() => document.hasFocus()), false, 'inactive wheel must not activate the editor');
+    const point = await frame.evaluate(() => {
+      const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+      const cell = document.querySelector<HTMLTableCellElement>('tbody td')!;
+      const node = document.createTreeWalker(cell.querySelector('.meo-md-html-table-cell-preview')!, NodeFilter.SHOW_TEXT).nextNode()!;
+      const range = document.createRange(); range.setStart(node, 2); range.setEnd(node, 3);
+      const rect = range.getBoundingClientRect();
+      const state = (window as any).__inactiveScrollActivation = {cell, input: cell.querySelector('textarea'), top: view.scrollDOM.scrollTop, samples: [], events: []};
+      const read = () => {
+        const style = getComputedStyle(cell, '::after');
+        return {top: view.scrollDOM.scrollTop, focused: document.hasFocus(), active: document.activeElement?.tagName,
+          head: view.state.selection.main.head, domSelection: document.getSelection()?.anchorNode?.parentElement?.className,
+          ring: style.visibility !== 'hidden' && style.boxShadow !== 'none', retained: cell.isConnected};
+      };
+      state.record = (event: Event) => state.events.push({type: event.type,
+        target: event.target instanceof Element ? `${event.target.tagName}.${event.target.className}` : 'window', ...read()});
+      for (const type of ['focus', 'blur', 'pointerdown', 'pointerup', 'pointercancel', 'lostpointercapture']) window.addEventListener(type, state.record, true);
+      const sample = () => {state.samples.push(read()); state.raf = requestAnimationFrame(sample);}; sample();
+      return {x: rect.right, y: rect.top + rect.height / 2};
+    });
+    await returnToFrame(page);
+    await frame.evaluate(() => window.dispatchEvent(new MessageEvent('message', {data: {type: 'hostWindowFocusChanged', focused: true}})));
+    await page.mouse.move(bounds.x + point.x, bounds.y + point.y);
+    await page.mouse.down();
+    await settle(frame, 4);
+    if (recovery === 'held-cycle') {
+      await page.focus('#host-control');
+      await frame.evaluate(() => (document.activeElement as HTMLElement).blur());
+      await settle(frame, 3);
+      await returnToFrame(page);
+      await frame.evaluate(() => {
+        window.dispatchEvent(new MessageEvent('message', {data: {type: 'focusEditor'}}));
+      });
+    }
+    await page.mouse.up();
+    if (recovery === 'released-cycle') {
+      await settle(frame, 3);
+      // VS Code can refocus its frame again after the cell has been accepted.
+      // The actual Host is still focused throughout this internal handoff.
+      await page.focus('#host-control');
+      await frame.evaluate(() => (document.activeElement as HTMLElement).blur());
+      await settle(frame, 3);
+      await returnToFrame(page);
+      await frame.evaluate(() => window.dispatchEvent(new MessageEvent('message', {data: {type: 'focusEditor'}})));
+    }
+    await settle(frame, 10);
+    const result = await frame.evaluate(() => {
+      const state = (window as any).__inactiveScrollActivation;
+      cancelAnimationFrame(state.raf);
+      for (const type of ['focus', 'blur', 'pointerdown', 'pointerup', 'pointercancel', 'lostpointercapture']) window.removeEventListener(type, state.record, true);
+      return {focused: document.activeElement === state.input, caret: state.input.selectionStart, end: state.input.selectionEnd,
+        beforeTop: state.top, samples: state.samples, events: state.events};
+    });
+    const label = `${large ? 'large' : 'small'}/inactive-wheel/${recovery}`;
+    assert.ok(result.focused && result.caret === 3 && result.end === 3, `${label}: new cell lost its exact caret: ${JSON.stringify(result)}`);
+    let appeared = false;
+    for (const sample of result.samples) {
+      assert.ok(sample.retained && Math.abs(sample.top - result.beforeTop) <= 2, `${label}: activation replaced the table or moved its viewport: ${JSON.stringify(result)}`);
+      if (!sample.focused && recovery !== 'released-cycle') continue;
+      assert.ok(!appeared || sample.ring, `${label}: the new cell outline flashed: ${JSON.stringify(result)}`);
+      appeared ||= sample.ring;
+    }
+    assert.ok(appeared, `${label}: missing final native outline`);
+    if (large && recovery === 'released-cycle') await page.screenshot({path: '.local/focus-return-production/host-internal-return.png'});
+    await frame.evaluate(() => window.dispatchEvent(new MessageEvent('message', {data: {type: 'hostWindowFocusChanged', focused: false}})));
+    assert.equal(await frame.evaluate(() => {
+      const style = getComputedStyle((window as any).__inactiveScrollActivation.cell, '::after');
+      return style.visibility !== 'hidden' && style.boxShadow !== 'none';
+    }), false, `${label}: a genuinely inactive Host must hide the editing outline`);
+    if (large && recovery === 'released-cycle') await page.screenshot({path: '.local/focus-return-production/host-window-away.png'});
+    await frame.evaluate(() => window.dispatchEvent(new MessageEvent('message', {data: {type: 'hostWindowFocusChanged', focused: true}})));
+    console.log(`PASS ${label}: exact caret, outline, DOM and inactive reading viewport`);
+  }
+  await frame.evaluate(original => {
+    const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+    view.dispatch({changes: {from: 0, to: view.state.doc.length, insert: original}, selection: {anchor: 0}}); view.focus();
   }, original);
   await settle(frame);
 }
@@ -436,7 +578,8 @@ async function checkOffscreenReturn(page: Page, frame: Frame, target: 'table' | 
 }
 
 try {
-  const onlyTable = process.argv.includes('--only=table-activation') || process.argv.includes('--only=table-boundaries');
+  const onlyInactiveScroll = process.argv.includes('--only=inactive-scroll');
+  const onlyTable = onlyInactiveScroll || process.argv.includes('--only=table-activation') || process.argv.includes('--only=table-boundaries');
   for (const mode of (onlyTable ? ['live'] : ['live', 'source', 'preview']) as ('live' | 'source' | 'preview')[]) {
     const page = await browser.newPage();
     const errors: string[] = [];
@@ -467,8 +610,11 @@ try {
       } })), { text, mode });
       await frame.waitForSelector('.editor-wrapper:not(.meo-preload-editor-shell) .cm-content');
       if (mode === 'live') {
-        if (!process.argv.includes('--only=table-boundaries')) await checkTableActivationClick(page, frame);
-        await checkTableActivationBoundaries(page, frame);
+        if (!onlyInactiveScroll) {
+          if (!process.argv.includes('--only=table-boundaries')) await checkTableActivationClick(page, frame);
+          await checkTableActivationBoundaries(page, frame);
+        }
+        await checkInactiveScrollTableActivation(page, frame);
       }
       if (onlyTable) continue;
       if (mode !== 'preview') {

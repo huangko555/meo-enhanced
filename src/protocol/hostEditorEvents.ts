@@ -5,6 +5,7 @@ export type HostEditorEvent =
   | { readonly type: 'localLinkResourcesChanged' }
   | { readonly type: 'wikiCandidatesChanged' }
   | { readonly type: 'focusEditor' }
+  | { readonly type: 'hostWindowFocusChanged'; readonly focused: boolean }
   | { readonly type: 'webviewVisibilityChanged'; readonly visible: boolean }
   | {
       readonly type: 'externalFileStatusChanged';
@@ -40,6 +41,8 @@ export function decodeHostEditorEvent(value: unknown): HostEditorEvent | null {
       return { type: 'wikiCandidatesChanged' };
     case 'focusEditor':
       return { type: 'focusEditor' };
+    case 'hostWindowFocusChanged':
+      return typeof value.focused === 'boolean' ? value as HostEditorEvent : null;
     case 'externalFileStatusChanged':
       return value.status === 'current'
         || value.status === 'modified-while-dirty'

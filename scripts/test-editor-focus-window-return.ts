@@ -18,7 +18,7 @@ try {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(String(error)));
   page.setDefaultTimeout(5000);
-  await page.setContent('<input id="other-input"><iframe id="meo" srcdoc="<div id=editor contenteditable=true>Fixture</div>"></iframe>');
+  await page.setContent('<input id="other-input"><iframe id="meo" srcdoc="<main id=app><div id=editor contenteditable=true>Fixture</div></main>"></iframe>');
   const frame = await (await page.waitForSelector('#meo'))!.contentFrame();
   assert.ok(frame);
   await frame.waitForSelector('#editor');
@@ -27,7 +27,7 @@ try {
     const target = document.getElementById('editor')!;
     const state = { calls: 0, editable: true };
     const controller = (window as any).FocusController.createEditorFocusController({
-      root: target,
+      root: document.getElementById('app')!,
       getEditor: () => ({
         view: {dom: target},
         hasFocus: () => document.hasFocus() && document.activeElement === target,
@@ -83,7 +83,7 @@ try {
     const { controller } = (window as any).fixture;
     const input = document.createElement('input'); input.id = 'registered'; input.value = 'selection witness';
     const other = document.createElement('input'); other.id = 'unregistered';
-    document.body.append(input, other);
+    document.getElementById('app')!.append(input, other);
     (window as any).fixture.unregister = controller.registerInput(input);
   });
   // Both blur/focusout orders occur in Chromium and the native Webview.
@@ -101,6 +101,44 @@ try {
     }, blurFirst);
     assert.deepEqual(result, {restored: 'input', calls: 0, focused: true, start: 2, end: 7, direction: 'backward'},
       `input must own window recovery in both event orders: blurFirst=${blurFirst}`);
+  }
+  for (const owner of ['editor', 'registered'] as const) {
+    for (const tag of ['nav', 'aside'] as const) {
+      const result = await frame.evaluate(async ({owner, tag}) => {
+        const {state, controller} = (window as any).fixture;
+        const target = document.getElementById(owner)!;
+        // New chrome subtrees use the same policy without registering their
+        // location or assigning a private focus handler.
+        const chrome = document.createElement(tag);
+        const blank = document.createElement('span'); blank.textContent = 'Blank chrome';
+        chrome.append(blank); document.getElementById('app')!.append(chrome);
+        target.focus();
+        if (target instanceof HTMLInputElement) target.setSelectionRange(2, 7, 'backward');
+        window.dispatchEvent(new Event('blur')); target.blur();
+        window.dispatchEvent(new Event('focus'));
+        const press = new PointerEvent('pointerdown', {bubbles: true, cancelable: true, pointerId: 41, button: 0});
+        blank.dispatchEvent(press);
+        // Repeated activation while the same blank press is held must keep
+        // the accepted owner and withhold transient focus paint until release.
+        window.dispatchEvent(new Event('blur')); target.blur(); state.calls = 0;
+        window.dispatchEvent(new Event('focus')); controller.restoreFromHost();
+        for (let index = 0; index < 5; index++) await new Promise(requestAnimationFrame);
+        const during = {focused: document.activeElement === target, prevented: press.defaultPrevented,
+          pending: document.getElementById('app')!.classList.contains('meo-window-focus-return-pending'), calls: state.calls};
+        blank.dispatchEvent(new PointerEvent('pointerup', {bubbles: true, pointerId: 41}));
+        await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
+        const after = {focused: document.activeElement === target,
+          pending: document.getElementById('app')!.classList.contains('meo-window-focus-return-pending'),
+          range: target instanceof HTMLInputElement ? [target.selectionStart, target.selectionEnd, target.selectionDirection] : null};
+        chrome.remove(); return {during, after};
+      }, {owner, tag});
+      assert.equal(result.during.focused, true, `${owner}/${tag}: blank chrome changed the return owner`);
+      assert.equal(result.during.prevented, true, `${owner}/${tag}: blank chrome may not take native focus`);
+      assert.equal(result.during.pending, true, `${owner}/${tag}: activation paint ended before release`);
+      if (owner === 'registered') assert.equal(result.during.calls, 0, 'blank chrome must not transfer an input owner into the editor');
+      assert.deepEqual(result.after, {focused: true, pending: false, range: owner === 'registered' ? [2, 7, 'backward'] : null},
+        `${owner}/${tag}: blank chrome did not settle with its accepted owner`);
+    }
   }
   for (const invalidation of ['hidden', 'disabled', 'readOnly', 'unregister'] as const) {
     const result = await frame.evaluate(invalidation => {

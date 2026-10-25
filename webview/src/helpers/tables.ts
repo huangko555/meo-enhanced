@@ -313,6 +313,24 @@ const tableCellCaretRevealEpsilon = 1;
 let nextTableCellEditSequence = 0;
 let nextTableContextMenuSequence = 0;
 
+/** One hit policy for native inputs, rendered text, grid pixels and controls. */
+export function tablePointerTarget(event: PointerEvent):
+  { kind: 'cell'; cell: HTMLTableCellElement } | { kind: 'border' | 'resize' | 'control' } {
+  const target = event.target;
+  if (!(target instanceof Element)) return { kind: 'border' };
+  if (target.closest('.meo-md-html-table-column-resize-handle')) return { kind: 'resize' };
+  if (isTableControlTarget(target)) return { kind: 'control' };
+  const cell = target.closest<HTMLTableCellElement>(tableCellSelector);
+  if (!cell) return { kind: 'border' };
+  // An absolutely positioned textarea can receive the collapsed grid's pixel
+  // outside its cell. Native event.target alone is not a valid text hit there.
+  const rect = cell.getBoundingClientRect();
+  const inset = Math.max(0.5, cell.clientLeft / 2);
+  return event.clientX > rect.left + inset && event.clientX < rect.right - inset &&
+    event.clientY > rect.top + inset && event.clientY < rect.bottom - inset
+    ? { kind: 'cell', cell } : { kind: 'border' };
+}
+
 export function commitPendingTableEdits(view: EditorView): boolean {
   const detail: PendingTableCommitDetail = {
     committed: false,
@@ -3830,10 +3848,15 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         return;
       }
       if (isTableControlTarget(event.target)) return;
-      // Collapsed borders can hit TABLE/TR rather than either adjacent cell.
-      // Resolve that press through the same bounded geometry as a table drag.
-      const cell = this.findCellElement(event.target) ?? findDragCell(event, false);
-      if (!cell) return;
+      const hit = tablePointerTarget(event);
+      if (hit.kind !== 'cell') {
+        // Grid pixels have no text caret. Prevent CodeMirror's outer hit test
+        // without inventing a neighbouring cell or changing the prior range.
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      const cell = hit.cell;
       this.setContextMenuOpen(false);
       const current = this.coordsFromCell(cell);
       if (!current) return;
