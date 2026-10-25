@@ -760,6 +760,9 @@ export function createEditor({
     }
     event.preventDefault();
     event.stopPropagation();
+    // Navigation supersedes a cell press before its release can project that
+    // cell's caret over the newly accepted link destination.
+    clearPointerSelection();
     return openHref(href, editorView);
   };
   const setEditableLinkHoverCursor = (editorView: EditorView, active: boolean) => {
