@@ -7,6 +7,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Improved large and complex documents with background Markdown parsing and syntax highlighting, incremental updates, and bounded rendering for long tables, code fences, lists, quotes and footnotes. Copy, search, navigation, history and exports retain the complete document.
 - Separated the optional large-file startup mode from automatic runtime optimizations, and added delayed loading feedback while Live, Source or Preview prepares a document.
 - Preserved reading positions and unchanged rendered content during typing, font or preset changes, linked scrolling, delayed resources and native wheel scrolling. Improved cold Source input, table activation and caret continuity when returning to the VS Code window.
+- Prevented font changes from replacing a visible Live table with another table's content, while retaining native cell input after preceding edits.
 - Added independent heading and link appearance colors, and expanded supported HTML document styles across Live, Preview and exports.
 - Edit Mermaid source directly in the Live document with syntax coloring and a live preview. Switch between stacked and side-by-side layouts, resize the split, and finish editing to return to the diagram; narrow panels adapt automatically.
 - Unified block editing transitions and reading focus across Mermaid, formulas, HTML and code. Preserved caret visibility, selections and reading positions through keyboard navigation, pointer release, folding, history and delayed layout updates.

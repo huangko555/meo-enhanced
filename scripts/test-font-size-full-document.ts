@@ -30,6 +30,9 @@ if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 
 const browser = await launchTestBrowser();
 let primaryError: unknown;
+const failures: Array<Record<string, unknown>> = [];
+let activeStep: Record<string, unknown> | null = null;
+let sweepCompleted = false;
 try {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 760 });
@@ -89,7 +92,6 @@ try {
   await page.evaluate(async () => { for (let i = 0; i < 20; i++) await new Promise(requestAnimationFrame); });
   const initialFont = await page.evaluate(() => document.querySelector<HTMLOutputElement>('.editor-font-size-value')?.value);
   if (initialFont !== '15') throw new Error(`Expected to start at 15px, got ${initialFont}`);
-  const failures: Array<Record<string, unknown>> = [];
   let samples = 0;
   let bottomConstrainedSteps = 0;
   const requestedLines = process.argv.find((argument) => argument.startsWith('--lines='))?.slice('--lines='.length);
@@ -182,16 +184,15 @@ try {
     const button = document.querySelector<HTMLButtonElement>(delta > 0 ? '.editor-font-size-stepper-button:last-child' : '.editor-font-size-stepper-button:first-child')!;
     button.focus();
     button.click();
-    trace.push(record());
     for (let frame = 0; frame < 14; frame++) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
       trace.push(record());
     }
-    // The synchronous post-click layout is not painted. Observe after each
-    // rendering opportunity so pre-paint ResizeObserver corrections do not
-    // count as visible flashes.
+    // CodeMirror's synchronous post-click DOM can still be dirty. Record all
+    // fourteen actual rendering opportunities, preserving the original painted
+    // window without querying coordinates in the unpainted style mutation.
     const initialTop = trace[0]!.top;
-    const painted = trace.slice(2);
+    const painted = trace.slice(1);
     // Either direction can hit the document end: shrinkage also lowers the
     // maximum scroll. Prove that preserving this source anchor would require an
     // unavailable scroll position, then account for the unavoidable deficit.
@@ -297,12 +298,14 @@ try {
           if (!process.argv.includes('--rapid-mermaid')) await page.evaluate(async () => { for (let i=0; i<20; i++) await new Promise(requestAnimationFrame); });
         }
         for (let step = 0; step < 5; step++) {
+          activeStep = { mode, line, blockMode, direction: `increase-${step}` };
           const up = await measureStep(mode, 1);
           samples += 1;
           if (up.bottomConstrained) bottomConstrainedSteps += 1;
           if ('displacement' in up && up.displacement > 12) failures.push({ mode, line, blockMode, direction: `increase-${step}`, ...up });
         }
         for (let step = 0; step < 5; step++) {
+          activeStep = { mode, line, blockMode, direction: `decrease-${step}` };
           const down = await measureStep(mode, -1);
           samples += 1;
           if (down.bottomConstrained) bottomConstrainedSteps += 1;
@@ -332,8 +335,13 @@ try {
       trace.at(-1)
     ]) : trace
   })), null, 2));
+  sweepCompleted = true;
   if (failures.length) throw new Error(`${failures.length} font-size viewport anomalies`);
 } catch (error) {
+  if (!sweepCompleted) {
+    console.error('Interrupted font step:', JSON.stringify(activeStep));
+    console.error('Font anomalies before interruption:', JSON.stringify(failures));
+  }
   primaryError = error;
 } finally {
   fs.rmSync(tempDir, { recursive: true, force: true });

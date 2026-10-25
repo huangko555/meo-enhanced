@@ -169,6 +169,14 @@ witness, including fractional upstream movement. A resized or detached block mus
 reject that witness and leave reflow to the existing semantic/text anchor paths;
 the full DPR/zoom matrix retains exact scroll, selection, focus and copy assertions.
 
+`test-live-widget-positions.ts` also replays CodeMirror's fallback attempt to
+reuse one table's DOM for another source range with the same shape. The original
+table must retain its content and source identity; proven position mapping still
+retains native DOM across preceding input. The full-document font sweep preserves
+collected anomalies and the active step if a later measurement is interrupted.
+It records the initial witness and all fourteen rendering opportunities per size
+change; the dirty synchronous post-click DOM is outside that painted window.
+
 Clipped rendered-content history verifies the exact changed native source target,
 collapsed selection, real editor focus and full caret visibility after undo.
 Retain the clipped-preview precondition and exact history snapshots. A derived

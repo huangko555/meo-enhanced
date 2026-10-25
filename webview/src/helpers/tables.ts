@@ -2541,6 +2541,7 @@ function sameTableSourceRanges(left: TableCellRange[][] | undefined, right: Tabl
 
 class HtmlTableWidget extends UiLanguageSensitiveWidget {
   private positionDocument: WeakRef<EditorState['doc']> | null = null;
+  private sourceIdentity = {};
   get [renderedBlockPreviewHeight](): RenderedBlockPreviewHeight { return this.measuredHeightCache; }
 
   [mapLiveWidgetPositions](changes: ChangeDesc, state: EditorState): WidgetType {
@@ -2561,6 +2562,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         from: changes.mapPos(range.from, 1), to: changes.mapPos(range.to, -1) })))
     }, this.stickyHeaderAdapterFactory, this.tableCommandEnvironment);
     next.measuredHeightCache = this.measuredHeightCache;
+    next.sourceIdentity = this.sourceIdentity;
     next.positionDocument = new WeakRef(state.doc);
     return next;
   }
@@ -2686,8 +2688,10 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   eq(other: WidgetType): boolean {
-    if (this.canReuseTableDom(other)) {
+    if (this.canReuseTableDom(other) && (this.tableData.from === other.tableData.from
+      || this.sourceIdentity === other.sourceIdentity)) {
       const mounted = this.domRefs ? this : other.domRefs ? other : null;
+      this.sourceIdentity = other.sourceIdentity = mounted?.sourceIdentity ?? this.sourceIdentity;
       const cache = mounted?.measuredHeightCache ?? (
         this.measuredHeight >= other.measuredHeight ? this.measuredHeightCache : other.measuredHeightCache
       );
@@ -2704,12 +2708,16 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
   updateDOM(dom: HTMLElement, view: EditorView, _previous: WidgetType): boolean {
     const owner = tableDomOwners.get(dom);
-    if (!owner || owner.destroyed || owner.view !== view || !owner.canReuseTableDom(this)) return false;
+    if (!owner || owner.destroyed || owner.view !== view || !owner.canReuseTableDom(this)
+      || (owner.tableData.from !== this.tableData.from && owner.sourceIdentity !== this.sourceIdentity)) return false;
+    // TileCache also offers DOM from unrelated same-shaped tables. Its mutable
+    // input owner must stay with the same source, including a proven position map.
     // CodeMirror retains this DOM but adopts the new immutable widget value.
     // Reconcile through the instance that owns its inputs, images and listeners.
     owner.adoptEquivalentTableData(this.tableData);
     owner.positionDocument = new WeakRef(view.state.doc);
     this.measuredHeightCache = owner.measuredHeightCache;
+    this.sourceIdentity = owner.sourceIdentity;
     return true;
   }
 

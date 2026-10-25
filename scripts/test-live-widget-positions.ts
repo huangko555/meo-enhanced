@@ -1,6 +1,37 @@
 import assert from 'node:assert/strict';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 
+async function assertTableDomOwnership(page: import('puppeteer-core').Page): Promise<void> {
+  await page.evaluate(() => {
+    const scope = window as any;
+    scope.__editor.destroy();
+    document.getElementById('editor')!.replaceChildren();
+    scope.__editor = scope.__liveHistory.create({ parent: document.getElementById('editor'), initialMode: 'live',
+      onApplyChanges() {}, text: 'Before\n\n| Alpha | Value |\n| --- | --- |\n| first | 1 |\n\nBetween\n\n| Beta | Value |\n| --- | --- |\n| second | 2 |\n\nAfter' });
+    scope.__liveHistory.parse(scope.__editor);
+  });
+  await page.waitForFunction(() => document.querySelectorAll('.meo-md-html-table-shell').length === 2);
+  const ownership = await page.evaluate(() => {
+    const scope = window as any, editor = scope.__editor;
+    const widgets: any[] = [];
+    for (const cursor = scope.__liveHistory.decorations(editor).iter(); cursor.value; cursor.next()) {
+      const widget = cursor.value.spec.widget;
+      if (widget?.constructor.name === 'HtmlTableWidget') widgets.push(widget);
+    }
+    if (widgets.length !== 2) throw new Error('Ownership fixture needs two distinct table widgets');
+    const [first, second] = widgets;
+    const shell = document.querySelector<HTMLElement>(`.meo-md-html-table-shell[data-meo-rendered-block-start-line="${first.tableData.startLine}"]`)!;
+    const before = shell.textContent;
+    // TileCache tries same-class DOM after equality fails, even when that DOM
+    // came from a different source range which still has a live decoration.
+    const reused = second.updateDOM(shell, editor.view, first);
+    return { reused, preserved: shell.textContent === before,
+      firstSource: first.tableData.startLine, secondSource: second.tableData.startLine };
+  });
+  assert.deepEqual(ownership, { reused: false, preserved: true, firstSource: 3, secondSource: 9 },
+    'A same-shaped table must not adopt another live source range or rewrite its content');
+}
+
 const build = await Bun.build({ entrypoints: ['scripts/test-live-decoration-history-entry.ts'], target: 'browser', format: 'iife',
   plugins: [{ name: 'explicit-background-syntax-publication', setup(builder) {
     builder.onLoad({ filter: /webview[\\/]src[\\/]liveMode\.ts$/ }, async ({ path }) => {
@@ -210,6 +241,7 @@ try {
     'parser publication must not certify a provisional presentation after a reference-label edit');
   assert.deepEqual(changedReference.projected, changedReference.fresh);
   assert.deepEqual(changedReference.notes, changedReference.freshNotes, 'global footnote dependencies must still refresh');
+  await assertTableDomOwnership(page);
   assert.deepEqual(errors, []);
   await page.evaluate(() => (window as any).__editor.destroy());
   console.log('Projected images, math, Mermaid, HTML, code, checkboxes, footnotes and mounted tables preserve source positions');
