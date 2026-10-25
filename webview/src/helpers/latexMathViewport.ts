@@ -20,7 +20,10 @@ type LatexMathInlineViewportOptions = {
   layout: { kind: 'inline' };
 };
 
-type LatexMathViewportOptions = LatexMathBlockViewportOptions | LatexMathInlineViewportOptions;
+type LatexMathViewportOptions = (LatexMathBlockViewportOptions | LatexMathInlineViewportOptions) & {
+  /** Async fitting changes document geometry and shares the reading surface's viewport owner. */
+  mutate?: (run: () => void) => void;
+};
 
 type LatexMathViewportLayout =
   | { kind: 'block'; interactive: boolean }
@@ -403,7 +406,11 @@ export function attachLatexMathViewport(
     if (destroyed || !active || measureFrame !== 0) {
       return;
     }
-    measureFrame = ownerWindow.requestAnimationFrame(measure);
+    measureFrame = ownerWindow.requestAnimationFrame(() => {
+      if (destroyed || !active || !root.isConnected) { measureFrame = 0; return; }
+      if (options.mutate) options.mutate(measure);
+      else measure();
+    });
   };
 
   if (typeof ownerWindow.ResizeObserver !== 'undefined') {

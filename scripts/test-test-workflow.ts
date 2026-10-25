@@ -25,6 +25,10 @@ for (const tier of [quick, createTestWorkflowPlan(parseTestWorkflowRequest(['tar
   assert.ok(flattenTestWorkflowCommands(tier).some(command => command.args.includes('scripts/test-source-syntax-stability.ts')));
   assert.ok(flattenTestWorkflowCommands(tier).some(command => command.args.includes('scripts/test-preview-preset-position.ts')));
 }
+for (const area of ['appearance', 'viewport']) {
+  assert.ok(flattenTestWorkflowCommands(createTestWorkflowPlan(parseTestWorkflowRequest(['targeted', area])))
+    .some(command => command.args.join(' ') === 'scripts/test-preview-preset-position.ts --large'));
+}
 assert.ok(flattenTestWorkflowCommands(
   createTestWorkflowPlan(parseTestWorkflowRequest(['targeted', 'appearance']))
 ).some(command => command.args.join(' ') === 'run test:theme-inheritance'));

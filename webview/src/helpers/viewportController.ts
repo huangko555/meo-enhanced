@@ -1162,6 +1162,18 @@ export class ViewportController {
       }
       // Pin the refreshed hot-path map to the exact post-commit position so the
       // next wheel delta continues from this frame without a correction.
+      if (!documentChange && visualRestored && projectionDriver === 'preview' && linkedPreviewEnabled && this.linkedPreviewEnabled
+        && interactionGeneration === this.interactionGeneration && projectionGeneration === this.linkedProjectionGeneration
+        && this.linkedViewportDriver === projectionDriver && !this.linkedProjectionPending && !this.isLinkedInteractionActive()) {
+        // When Preview owns reading, its glyph-preserving correction is the
+        // accepted pair. Source-owned window/resource commits must instead
+        // keep projecting the authoritative Source destination.
+        // Its changed numerical Preview offset is not another user gesture,
+        // including when the windowed surface has no global pixel map.
+        this.linkedViewportPosition = { source: this.view.scrollDOM.scrollTop,
+          preview: this.previewSurface.readScrollTop() };
+        this.rebaseLinkedSemanticOrigin(this.view.scrollDOM.scrollTop);
+      }
       this.rebuildLinkedViewportMap(true);
       this.scheduleLinkedViewportMapRefresh();
       return;

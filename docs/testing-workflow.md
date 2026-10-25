@@ -693,11 +693,19 @@ required by quick, targeted viewport and release gates. These browser and Host
 contracts do not replace installed-VSIX Workbench validation.
 
 `scripts/test-preview-preset-position.ts` samples the same content-relative reading
-point on every frame while switching built-in and custom presets with different
-fonts, widths and spacing. It covers light/dark, full Preview, linked and independent
-Source side Preview, rapid switching, late responses after trusted scrolling and
-the document start. It belongs to quick, targeted appearance/viewport and the
-preview-preset acceptance pack; pixel scroll offsets alone cannot pass this check.
+character on every frame throughout repeated built-in and custom preset comparisons
+with different fonts, widths and spacing. It covers formulas, tables, lists and code
+above the reading point, light/dark, full Preview, linked and independent Source side
+Preview, token span flattening/merging in inline code, rapid switching, late responses
+after trusted scrolling and the document start. The viewport controller regression
+also checks that a preserved Preview glyph does not replay its layout correction as
+a Source scroll, and that the next real gesture uses the accepted pair. The
+existing cold-linked Preview regression keeps Source's destination authoritative
+during window/resource commits, including distant jumps and reverse scrolling. The
+`--large` variant uses a roughly 1MiB mixed document, real window requests
+and distant navigation, and bounds mounted DOM through every preset. The ordinary
+variant belongs to quick; both variants belong to targeted appearance/viewport and
+the preview-preset acceptance pack. Pixel scroll offsets alone cannot pass this check.
 
 `scripts/test-preview-shortcuts-production.ts` checks trusted keyboard input in
 full and side Preview, including live binding changes, Save's emitted revision,

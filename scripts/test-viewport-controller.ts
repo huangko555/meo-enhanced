@@ -2972,6 +2972,44 @@ for (const owner of ['editor', 'preview'] as const) {
   } finally { controller.destroy(); }
 }
 
+// A preset can move the Preview's numerical scrollTop while preserving its
+// exact glyph. Rebuilding a windowed semantic map must retain the accepted pair,
+// rather than treating that layout correction as a new Preview wheel gesture.
+{
+  const doc = Text.of(Array.from({ length: 80 }, () => 'line'));
+  const scrollDOM = { scrollTop: 1050, scrollLeft: 0, scrollHeight: 8000, scrollWidth: 800, clientHeight: 400, clientWidth: 800 };
+  let previewTop = 400, progress = 0.5;
+  const controller = new ViewportController({
+    dom: {}, scrollDOM, state: { doc }, contentHeight: 8000,
+    lineBlockAt: (position: number) => {
+      const line = doc.lineAt(position);
+      return { from: line.from, to: line.to, top: (line.number - 1) * 100, bottom: line.number * 100 };
+    },
+    lineBlockAtHeight: (height: number) => {
+      const index = Math.floor(height / 100), line = doc.line(index + 1);
+      return { from: line.from, to: line.to, top: index * 100, bottom: (index + 1) * 100 };
+    }
+  } as any, { attachInteractions: false, getMode: () => 'source', previewSurface: {
+    readScrollTop: () => previewTop, writeScrollTop: value => { previewTop = value; },
+    captureTopVisiblePosition: () => ({ line: 11, lineOffset: 0, sourceRange: { startLine: 11, endLine: 11, progress } }),
+    restoreTopVisiblePosition() {}, captureLinkedGeometry: () => null,
+    captureVisualReadingAnchor: () => () => true
+  } });
+  try {
+    controller.markPreviewInteraction();
+    controller.setLinkedPreviewEnabled(true, 'last-interaction');
+    await new Promise(resolve => setTimeout(resolve, 400));
+    const heldSource = scrollDOM.scrollTop;
+    controller.runPreviewPresentationTransaction(() => { previewTop = 800; progress = 0.8; });
+    controller.linkedPreviewReady();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    if (scrollDOM.scrollTop !== heldSource || previewTop !== 800) throw new Error('Preset reflow was replayed as a windowed linked scroll');
+    controller.markPreviewInteraction(); previewTop += 10; progress = 0.9;
+    controller.previewViewportChanged();
+    if (Math.abs(scrollDOM.scrollTop - heldSource - 10) > 0.01) throw new Error('The next real Preview gesture lost its rebased semantic origin');
+  } finally { controller.destroy(); }
+}
+
 // An offscreen line has no DOM coordinates until CodeMirror renders it. The
 // first projection must keep the reading band instead of relying on a later correction.
 for (const mode of ['source', 'live'] as const) {

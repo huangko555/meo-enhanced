@@ -51,8 +51,10 @@ export function capturePreviewReadingAnchor(document: Document, restore: (top: n
       const rect = range.getBoundingClientRect();
       if (!rect.height || rect.top < 0 || rect.bottom > window.innerHeight
         || rect.top > y + 24 || rect.bottom < y - 24) continue;
-      const text = node as Text, value = text.data, offset = range.startOffset;
-      const element = text.parentElement!.closest<HTMLElement>('[data-source-line]');
+      let text = node as Text;
+      const value = text.data, offset = range.startOffset;
+      let retainedValue = value, retainedOffset = offset;
+      let element = text.parentElement!.closest<HTMLElement>('[data-source-line]');
       const sourceLine = element?.dataset.sourceLine, sourceEndLine = element?.dataset.sourceEndLine;
       const mappedAttribute = (value: string | undefined) => {
         if (value === undefined || !mapSourceLine) return value;
@@ -61,16 +63,46 @@ export function capturePreviewReadingAnchor(document: Document, restore: (top: n
       };
       const expectedLine = mappedAttribute(sourceLine), expectedEndLine = mappedAttribute(sourceEndLine);
       if (expectedLine === null || expectedEndLine === null) continue;
-      const block = text.parentElement!.closest<HTMLElement>('p,li,td,th,pre,h1,h2,h3,h4,h5,h6,summary');
+      let block = text.parentElement!.closest<HTMLElement>('p,li,td,th,pre,h1,h2,h3,h4,h5,h6,summary');
       const blockRect = block?.getBoundingClientRect();
+      const rebindUnchangedText = (): boolean => {
+        // Renderer/token markup can replace the Text node without changing the
+        // authored block. Search only that exact mapped range, rejecting an
+        // ambiguous witness; content edits retain their separate boundary rule.
+        if (mapSourceLine || !element || expectedLine === undefined || !root.isConnected) return false;
+        const matches = element.isConnected && element.dataset.sourceLine === expectedLine
+          && element.dataset.sourceEndLine === expectedEndLine ? [element]
+          : Array.from(root.querySelectorAll<HTMLElement>(`[data-source-line="${expectedLine}"]`))
+            .filter(candidate => candidate.tagName === element!.tagName && candidate.dataset.sourceEndLine === expectedEndLine);
+        if (matches.length !== 1) return false;
+        const target = matches[0]!, content = target.textContent ?? '';
+        const start = value ? content.indexOf(value) : -1;
+        if (start < 0 || content.indexOf(value, start + 1) >= 0) return false;
+        const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+        let remaining = start + offset;
+        let replacement: Text | null = null;
+        while (walker.nextNode()) {
+          const candidate = walker.currentNode as Text;
+          if (remaining < candidate.length || remaining === candidate.length && offset > 0) {
+            replacement = candidate;
+            break;
+          }
+          remaining -= candidate.length;
+        }
+        if (!replacement) return false;
+        text = replacement; element = target; retainedValue = text.data; retainedOffset = remaining;
+        block = text.parentElement!.closest<HTMLElement>('p,li,td,th,pre,h1,h2,h3,h4,h5,h6,summary');
+        return true;
+      };
       const restoreEditedBoundary = (): boolean => {
         // A changed paragraph can replace its text witness while a window also
         // rebuilds estimated gaps above it. The same authored block boundary is
         // still a valid physical anchor; its new height/progress is not.
         if (!mapSourceLine || !block || block !== element || !blockRect || expectedLine === undefined
           || !root.isConnected) return false;
+        const blockTag = block.tagName;
         const matches = Array.from(root.querySelectorAll<HTMLElement>(`[data-source-line="${expectedLine}"]`))
-          .filter(candidate => candidate.tagName === block.tagName);
+          .filter(candidate => candidate.tagName === blockTag);
         if (matches.length !== 1) return false;
         const target = matches[0]!;
         if (!target.getClientRects().length) return false;
@@ -78,12 +110,14 @@ export function capturePreviewReadingAnchor(document: Document, restore: (top: n
         return true;
       };
       return () => {
-        if (!text.isConnected || text.ownerDocument !== document || text.data !== value
-          || element && (element.dataset.sourceLine !== expectedLine || element.dataset.sourceEndLine !== expectedEndLine)) return restoreEditedBoundary();
+        if (!text.isConnected || text.ownerDocument !== document || text.data !== retainedValue
+          || element && (element.dataset.sourceLine !== expectedLine || element.dataset.sourceEndLine !== expectedEndLine)) {
+          if (!rebindUnchangedText()) return restoreEditedBoundary();
+        }
         // A DOM move adjusts live Range boundaries to the old parent even when
         // morphing retains the same text node. Recreate from immutable coordinates.
         const currentRange = document.createRange();
-        currentRange.setStart(text, offset); currentRange.collapse(true);
+        currentRange.setStart(text, retainedOffset); currentRange.collapse(true);
         let previousDelta: number | undefined;
         for (let attempt = 0; attempt < 3; attempt++) {
           const current = currentRange.getBoundingClientRect();

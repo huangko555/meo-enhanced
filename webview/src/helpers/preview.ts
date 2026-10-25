@@ -1269,7 +1269,9 @@ export function createPreviewController({
   let frameGeneration = 0;
   let mermaidPresentationGeneration = 0;
   let activeFrameDocument: Document | null = null;
-  let pendingPresentationScroll: { document: Document; scrollTop: number } | null = null;
+  let presentationReadingPosition: {
+    document: Document; scrollTop: number; text: string | null; restore: (() => boolean) | null;
+  } | null = null;
   let appearanceRetention: { readonly retain: () => void; readonly release: () => void } | null = null;
   // Late diagram callbacks outlive the settling window and its shared reference.
   let appearanceRetentionGeneration = 0;
@@ -1327,7 +1329,7 @@ export function createPreviewController({
     appearanceRetention?.release();
     retainedViewportProjection = null;
     pendingExternalViewportRestore = null;
-    pendingPresentationScroll = null;
+    presentationReadingPosition = null;
     onViewportInteraction?.(owner);
   };
   const search = createPreviewSearchController({
@@ -1542,8 +1544,7 @@ export function createPreviewController({
         const document = getFrameDocument();
         const interaction = viewportInteractionGeneration;
         const restore = document && !host.hidden && activePreviewScrollbarPointers.size === 0
-          ? capturePreviewReadingAnchor(document, top => restoreVisualReadingScrollTop(document, top),
-            documentChange ? 0 : 1 / 3, slot.mapSourceLine)
+          ? captureVisualReadingAnchor(documentChange ? 0 : 1 / 3)
           : null;
         mutate(slot);
         if (!disposed && !host.hidden && document === getFrameDocument()
@@ -1753,9 +1754,14 @@ export function createPreviewController({
         search.invalidate();
         (previewDocumentSearch ?? search).surfaceReady();
       }
+      const mutate = (run: () => void) => {
+        if (disposed || activeFrameDocument !== frameDocument || !element.isConnected) return;
+        if (host.hidden) run();
+        else withViewportTransaction(() => { run(); sourceMapDirty = true; });
+      };
       const controller = element.classList.contains('meo-export-math-inline')
-        ? attachLatexMathViewport(element, { layout: { kind: 'inline' } })
-        : attachLatexMathViewport(element)
+        ? attachLatexMathViewport(element, { layout: { kind: 'inline' }, mutate })
+        : attachLatexMathViewport(element, { mutate });
       if (copyActions) element.append(copyActions);
       const signature = getPreviewPresentationSignature(element);
       if (signature) previewMathViewports.set(element, { controller, signature });
@@ -1934,13 +1940,23 @@ export function createPreviewController({
   };
 
   const capturePresentationScroll = (): void => {
+    if (host.hidden || host.inert) {
+      presentationReadingPosition = null;
+      return;
+    }
     const frameDocument = activeFrameDocument;
     const scrollElement = frameDocument?.scrollingElement;
     if (!frameDocument || !scrollElement) return;
-    if (!pendingPresentationScroll || pendingPresentationScroll.document !== frameDocument) {
-      pendingPresentationScroll = {
+    if (!presentationReadingPosition || presentationReadingPosition.document !== frameDocument
+      || presentationReadingPosition.text !== frameRenderedText
+      || Math.abs(presentationReadingPosition.scrollTop - scrollElement.scrollTop) > 1) {
+      presentationReadingPosition = {
         document: frameDocument,
-        scrollTop: scrollElement.scrollTop
+        scrollTop: scrollElement.scrollTop,
+        text: frameRenderedText,
+        // A newly wrapped line can begin before the character we were reading.
+        // Continuous preset comparisons retain that character until reading moves.
+        restore: capturePreviewReadingAnchor(frameDocument, top => restoreVisualReadingScrollTop(frameDocument, top), 1 / 3)
       };
     }
   };
@@ -1981,7 +1997,7 @@ export function createPreviewController({
     mermaidPresentationGeneration += 1;
     activeFrameDocument = null;
     retainedViewportProjection = null;
-    pendingPresentationScroll = null;
+    if (!reusableDocument || previousRenderedText !== renderedText) presentationReadingPosition = null;
     frameRenderedText = null;
     updateViewportAlignment();
     disposeDeferredImages();
@@ -2023,6 +2039,22 @@ export function createPreviewController({
       // window would measure 90/120px placeholders during an input handoff,
       // then repeatedly move the reading position as the real rows reappear.
       frameDocument.documentElement.dataset.meoPreviewWindowed = String(!!payload.document);
+      // The reading-window layout must measure the accepted preset from its
+      // first commit. Constructing it with the previous style lets the first
+      // ResizeObserver replace its height map while the old prefix gaps remain.
+      const styleElement = frameDocument.querySelector<HTMLStyleElement>('style[data-meo-preview-styles]');
+      if (styleElement && styleElement.textContent !== payload.styles[appearance]) {
+        styleElement.textContent = payload.styles[appearance];
+      }
+      previewTableLayout?.dispose();
+      frameDocument.documentElement.dataset.meoPreviewPreset = payload.preset ?? 'default';
+      frameDocument.documentElement.dataset.meoPreviewPresetRevision = payload.presetRevision ?? '';
+      if (!previewPresets.some(preset => preset.id === (payload.preset ?? 'default'))) return;
+      const preset = getPreviewPreset(payload.preset);
+      frameDocument.documentElement.dataset.meoPreviewRenderer = preset.renderer;
+      syncGithubPictures(frameDocument, appearance);
+      frameDocument.documentElement.dataset.meoPreviewBracketColoring = String(preset.id === 'default');
+      previewTableLayout = preset.renderer === 'meo' ? createPreviewTableLayoutController(frameDocument, frameDocument, tableColumnPreferences) : null;
       if (payload.document) {
         let constructing = true;
         previewViewport = createPreviewViewport(mappedRoot, payload.document, {
@@ -2084,19 +2116,6 @@ export function createPreviewController({
         });
         sourceMapResizeObserver.observe(mappedRoot);
       }
-      const styleElement = frameDocument.querySelector<HTMLStyleElement>('style[data-meo-preview-styles]');
-      if (styleElement && styleElement.textContent !== payload.styles[appearance]) {
-        styleElement.textContent = payload.styles[appearance];
-      }
-      previewTableLayout?.dispose();
-      frameDocument.documentElement.dataset.meoPreviewPreset = payload.preset ?? 'default';
-      frameDocument.documentElement.dataset.meoPreviewPresetRevision = payload.presetRevision ?? '';
-      if (!previewPresets.some(preset => preset.id === (payload.preset ?? 'default'))) return;
-      const preset = getPreviewPreset(payload.preset);
-      frameDocument.documentElement.dataset.meoPreviewRenderer = preset.renderer;
-      syncGithubPictures(frameDocument, appearance);
-      frameDocument.documentElement.dataset.meoPreviewBracketColoring = String(preset.id === 'default');
-      previewTableLayout = preset.renderer === 'meo' ? createPreviewTableLayoutController(frameDocument, frameDocument, tableColumnPreferences) : null;
       const presentationGeneration = mermaidPresentationGeneration + 1;
       mermaidPresentationGeneration = presentationGeneration;
       const isCurrent = () => (
@@ -2314,6 +2333,27 @@ export function createPreviewController({
     } else if (restoreFullPreviewReadingScrollTop(document, top)) sourceMapDirty = true;
   };
 
+  const captureVisualReadingAnchor = (viewportRatio = 0): (() => boolean) | null => {
+    const document = getFrameDocument();
+    if (!document) return null;
+    const fresh = capturePreviewReadingAnchor(document, top => restoreVisualReadingScrollTop(document, top),
+      viewportRatio, acceptingViewportProjection?.mapSourceLine);
+    const position = presentationReadingPosition;
+    const retained = viewportRatio > 0 && !acceptingViewportProjection?.mapSourceLine
+      && position?.document === document && Math.abs(position.scrollTop - (document.scrollingElement?.scrollTop ?? 0)) <= 1
+      ? position : null;
+    const interaction = viewportInteractionGeneration;
+    return () => {
+      if (document !== getFrameDocument() || interaction !== viewportInteractionGeneration) return false;
+      if (retained?.restore?.() === true) {
+        retained.scrollTop = document.scrollingElement?.scrollTop ?? retained.scrollTop;
+        return true;
+      }
+      if (retained && presentationReadingPosition === retained) presentationReadingPosition = null;
+      return fresh?.() === true;
+    };
+  };
+
   const applyAppearanceToFrame = (preserveReadingPosition = false) => {
     if (disposed) return;
     cancelElementReveal();
@@ -2325,8 +2365,8 @@ export function createPreviewController({
     }
     const payload = latestPayload;
     const scrollElement = frameDocument.scrollingElement;
-    const preservedScrollTop = pendingPresentationScroll?.document === frameDocument
-      ? pendingPresentationScroll.scrollTop
+    const preservedScrollTop = presentationReadingPosition?.document === frameDocument
+      ? presentationReadingPosition.scrollTop
       : scrollElement?.scrollTop ?? 0;
     const viewportHeight = frame.clientHeight;
     const readingY = viewportHeight / 3;
@@ -2342,7 +2382,7 @@ export function createPreviewController({
       : null;
     const visualRect = visualAnchor?.getBoundingClientRect();
     const restoreVisualAnchor = preserveReadingPosition && !wasAtDocumentTop
-      ? capturePreviewReadingAnchor(frameDocument, top => restoreVisualReadingScrollTop(frameDocument, top), 1 / 3)
+      ? captureVisualReadingAnchor(1 / 3)
       : null;
     const interactionGeneration = viewportInteractionGeneration;
     const presentationGeneration = mermaidPresentationGeneration + 1;
@@ -2372,7 +2412,7 @@ export function createPreviewController({
         )) {
           retention.release();
           retainedViewportProjection = null;
-          pendingPresentationScroll = null;
+          presentationReadingPosition = null;
           return;
         }
         const recordRetainedPosition = () => {
@@ -2471,9 +2511,6 @@ export function createPreviewController({
           else withViewportTransaction(() => commit());
         }
       );
-    }
-    if (!hasPendingRequest && pendingPresentationScroll?.document === frameDocument) {
-      pendingPresentationScroll = null;
     }
   };
 
@@ -3323,6 +3360,7 @@ export function createPreviewController({
     // An external scroll intent supersedes appearance's old reading witness.
     // Resource transactions use the slot above and retain their own anchor.
     appearanceRetention?.release();
+    presentationReadingPosition = null;
     const hasUsableFrame = frameRenderedText !== null && getSourceMap(false).length > 0;
     pendingExternalViewportRestore = hasPendingRequest || !hasUsableFrame
       ? { restore, requestGeneration }
@@ -3561,6 +3599,7 @@ export function createPreviewController({
         closePreviewBlockFullscreen(frame.contentDocument);
         appearanceRetentionGeneration += 1;
         appearanceRetention?.release();
+        presentationReadingPosition = null;
         cancelPaintReady();
         (previewDocumentSearch ?? search).surfaceHidden();
       }
@@ -3583,20 +3622,10 @@ export function createPreviewController({
       Math.max(0, frame.contentWindow?.innerHeight ?? host.clientHeight)
         * Math.max(0, Math.min(1, viewportRatio))
     ),
-    captureVisualReadingAnchor: (viewportRatio = 0) => {
-      const document = getFrameDocument();
-      if (!document) return null;
-      const fresh = capturePreviewReadingAnchor(document, top => restoreVisualReadingScrollTop(document, top),
-        viewportRatio, acceptingViewportProjection?.mapSourceLine);
-      const interaction = viewportInteractionGeneration;
-      return () => {
-        if (document !== getFrameDocument() || interaction !== viewportInteractionGeneration) return false;
-        return fresh?.() === true;
-      };
-    },
+    captureVisualReadingAnchor,
     restoreTopLine: (...args: Parameters<typeof restoreTopLine>) => {
       if (args[4]?.() === false) return;
-      if (!acceptingViewportProjection) appearanceRetention?.release();
+      if (!acceptingViewportProjection) { appearanceRetention?.release(); presentationReadingPosition = null; }
       restoreTopLine(...args);
     },
     restoreTopVisiblePosition,
@@ -3642,7 +3671,7 @@ export function createPreviewController({
         scrollElement.scrollHeight - scrollElement.clientHeight
       ));
       if (Math.abs(scrollElement.scrollTop - next) > 0.1) {
-        if (!acceptingViewportProjection) appearanceRetention?.release();
+        if (!acceptingViewportProjection) { appearanceRetention?.release(); presentationReadingPosition = null; }
         scrollElement.scrollTop = next;
       }
     },
@@ -3669,6 +3698,7 @@ export function createPreviewController({
       cancelElementReveal();
       closePreviewBlockFullscreen(frame.contentDocument);
       appearanceRetention?.release();
+      presentationReadingPosition = null;
       cancelPaintReady();
       cancelHighlightFrame();
       requestGeneration += 1;
