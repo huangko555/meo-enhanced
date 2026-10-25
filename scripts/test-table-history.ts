@@ -243,8 +243,12 @@ async function main() {
       const applied = await editor.undo();
       const inputs = Array.from(document.querySelectorAll<HTMLTextAreaElement>('tbody textarea'));
       const input = inputs[0];
-      input.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      const cellBounds = input.closest('td')!.getBoundingClientRect();
+      const pointer = { bubbles: true, cancelable: true, button: 0,
+        clientX: cellBounds.left + cellBounds.width / 2, clientY: cellBounds.top + cellBounds.height / 2 };
+      input.dispatchEvent(new PointerEvent('pointerdown', pointer));
       input.focus({ preventScroll: true });
+      input.dispatchEvent(new PointerEvent('pointerup', pointer));
       input.value = 'Immediate typing';
       input.setSelectionRange(input.value.length, input.value.length);
       input.dispatchEvent(new InputEvent('input', {

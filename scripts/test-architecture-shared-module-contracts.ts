@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import ts from 'typescript';
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -33,6 +34,9 @@ const write = (path: string, contents: string): void => {
 };
 
 const runCheck = () => inspectArchitecture(fixtureRoot);
+const withoutComments = (source: string): string => ts.createPrinter({ removeComments: true }).printFile(
+  ts.createSourceFile('contract.ts', source, ts.ScriptTarget.Latest, true)
+);
 
 try {
   mkdirSync(join(fixtureRoot, 'scripts'), { recursive: true });
@@ -45,7 +49,12 @@ try {
     join(repoRoot, 'webview/src/application/finalCodePalette.ts'),
     'utf8'
   );
-  assert.doesNotMatch(finalCodePaletteSource, /@shikijs|\b(?:document|CSSStyleDeclaration)\b/);
+  const forbiddenPaletteDependency = /@shikijs|\b(?:document|CSSStyleDeclaration)\b/;
+  assert.doesNotMatch(withoutComments('/** Projects document colors without DOM or CSSStyleDeclaration. */\nexport const color = "red";'), forbiddenPaletteDependency);
+  for (const dependency of ['document.createElement("p");', 'let style: CSSStyleDeclaration;', 'import type { Theme } from "@shikijs/types";']) {
+    assert.match(withoutComments(dependency), forbiddenPaletteDependency);
+  }
+  assert.doesNotMatch(withoutComments(finalCodePaletteSource), forbiddenPaletteDependency);
   const builtInVisualsSource = readFileSync(join(repoRoot, 'src/shared/builtInVisualBaseline.ts'), 'utf8');
   for (const removedShape of [
     /\bThemeFonts\b/,

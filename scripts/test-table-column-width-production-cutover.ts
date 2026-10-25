@@ -1321,6 +1321,13 @@ async function main(): Promise<void> {
       const input = table.querySelector<HTMLTextAreaElement>('tbody textarea')!;
       wrap.scrollLeft = 0;
       wrap.dispatchEvent(new Event('scroll'));
+      const cell = input.closest('td')!;
+      const preview = cell.querySelector<HTMLElement>('.meo-md-html-table-cell-preview')!;
+      const cellBounds = cell.getBoundingClientRect();
+      const pointer = { bubbles: true, cancelable: true, button: 0,
+        clientX: cellBounds.left + cellBounds.width / 2, clientY: cellBounds.top + cellBounds.height / 2 };
+      preview.dispatchEvent(new PointerEvent('pointerdown', pointer));
+      preview.dispatchEvent(new PointerEvent('pointerup', pointer));
       input.focus();
       input.setSelectionRange(1, 1);
       const wrapRect = wrap.getBoundingClientRect();

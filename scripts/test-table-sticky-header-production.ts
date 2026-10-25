@@ -597,11 +597,17 @@ async function main(): Promise<void> {
       const mainControls = document.querySelector<HTMLElement>(
         '.meo-md-html-table:not(.meo-md-html-table-sticky-table) .meo-md-image-controls'
       )!;
-      mainControls.querySelector<HTMLButtonElement>('[aria-label="Open with system app"]')!
-        .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+      const pressMainControl = (label: string) => {
+        const button = mainControls.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!;
+        const rect = button.getBoundingClientRect();
+        button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0,
+          clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 }));
+        button.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0,
+          clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 }));
+      };
+      pressMainControl('Open with system app');
       const mainOpenPosted = postMessages.some((message: any) => message?.type === 'openImageExternally');
-      mainControls.querySelector<HTMLButtonElement>('[aria-label="Fullscreen image"]')!
-        .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+      pressMainControl('Fullscreen image');
       const mainFullscreenOpened = Boolean(document.querySelector('.meo-md-image-fullscreen-scrim'));
       document.querySelector<HTMLElement>('.meo-md-image-fullscreen-scrim')?.remove();
       const stickyPostCountBefore = postMessages.length;

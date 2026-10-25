@@ -81,6 +81,13 @@ async function main() {
         button.dispatchEvent(new PointerEvent('pointerup', { button: 0, bubbles: true, cancelable: true }));
         return button.dispatchEvent(new MouseEvent('click', { button: 0, bubbles: true, cancelable: true }));
       };
+      const activateInput = (input: HTMLTextAreaElement, pointerId = 1) => {
+        const rect = input.closest('td')!.getBoundingClientRect();
+        const options = { button: 0, bubbles: true, cancelable: true, pointerId,
+          clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+        input.dispatchEvent(new PointerEvent('pointerdown', options));
+        input.dispatchEvent(new PointerEvent('pointerup', options));
+      };
       const editor = harness.createEditor({
         parent: app,
         text: [
@@ -206,13 +213,9 @@ async function main() {
       await waitUntil(() => document.querySelectorAll('tbody textarea').length === 4, 'race table');
       pointer(document.querySelector<HTMLButtonElement>('button[data-tooltip="Insert row below"]')!);
       const inputsAfterInsert = Array.from(document.querySelectorAll<HTMLTextAreaElement>('tbody textarea'));
-      inputsAfterInsert.find((input) => input.value === 'two')!.dispatchEvent(new PointerEvent('pointerdown', {
-        button: 0, bubbles: true, cancelable: true
-      }));
+      activateInput(inputsAfterInsert.find((input) => input.value === 'two')!);
       pointer(document.querySelector<HTMLButtonElement>('button[data-tooltip="Delete row"]')!);
-      inputsAfterInsert.find((input) => input.value === 'one')!.dispatchEvent(new PointerEvent('pointerdown', {
-        button: 0, bubbles: true, cancelable: true
-      }));
+      activateInput(inputsAfterInsert.find((input) => input.value === 'one')!);
       await waitUntil(() => !raceEditor.view.state.doc.toString().includes('| two | 2 |'), 'queued coordinate command');
       const afterQueuedCoordinateChange = raceEditor.view.state.doc.toString();
 
@@ -282,9 +285,7 @@ async function main() {
         onApplyChanges() {}
       });
       await waitUntil(() => document.querySelectorAll('tbody textarea').length === 2, 'queued guard table');
-      document.querySelector<HTMLTextAreaElement>('tbody textarea')!.dispatchEvent(new PointerEvent('pointerdown', {
-        button: 0, bubbles: true, cancelable: true, pointerId: 93
-      }));
+      activateInput(document.querySelector<HTMLTextAreaElement>('tbody textarea')!, 93);
       const queuedDelete = document.querySelector<HTMLButtonElement>('button[data-tooltip="Delete row"]')!;
       pointer(queuedDelete);
       pointer(queuedDelete);
@@ -666,12 +667,17 @@ async function main() {
         const input = document.querySelector<HTMLTextAreaElement>(
           `textarea[data-table-row="${target.row}"][data-table-col="${target.col}"]`
         )!;
-        input.dispatchEvent(new PointerEvent('pointerdown', {
+        const rect = input.closest('td')!.getBoundingClientRect();
+        const pointer = {
           button: 0,
           bubbles: true,
           cancelable: true,
-          pointerId: 101
-        }));
+          pointerId: 101,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2
+        };
+        input.dispatchEvent(new PointerEvent('pointerdown', pointer));
+        input.dispatchEvent(new PointerEvent('pointerup', pointer));
         if (caret !== undefined) {
           input.focus({ preventScroll: true });
           input.setSelectionRange(caret, caret);
@@ -753,7 +759,11 @@ async function main() {
     const pendingCommand = await page.evaluate(() => {
       const editor = (window as any).__tableCommandMatrixEditor;
       const input = document.querySelector<HTMLTextAreaElement>('textarea[data-table-row="1"][data-table-col="0"]')!;
-      input.dispatchEvent(new PointerEvent('pointerdown', {button: 0, bubbles: true, cancelable: true}));
+      const rect = input.closest('td')!.getBoundingClientRect();
+      const pointer = {button: 0, bubbles: true, cancelable: true,
+        clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2};
+      input.dispatchEvent(new PointerEvent('pointerdown', pointer));
+      input.dispatchEvent(new PointerEvent('pointerup', pointer));
       input.focus({preventScroll: true});
       input.setSelectionRange(input.value.length, input.value.length);
       input.setRangeText('!', input.selectionStart, input.selectionEnd, 'end');

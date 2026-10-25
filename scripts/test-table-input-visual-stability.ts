@@ -15,11 +15,19 @@ async function waitForFrames(page: import('puppeteer-core').Page, count = 6): Pr
 }
 
 async function focusCell(page: import('puppeteer-core').Page, value: string): Promise<void> {
-  await page.evaluate((targetValue) => {
+  const point = await page.evaluate((targetValue) => {
     const input = Array.from(document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table textarea'))
       .find((candidate) => candidate.value === targetValue);
     if (!input) throw new Error(`Missing table input: ${targetValue}`);
-    input.focus({ preventScroll: true });
+    const preview = input.closest('td')!.querySelector<HTMLElement>('.meo-md-html-table-cell-preview')!;
+    const bounds = preview.getBoundingClientRect();
+    return { x: bounds.left + Math.min(12, bounds.width / 2), y: bounds.top + bounds.height / 2 };
+  }, value);
+  await page.mouse.click(point.x, point.y);
+  await page.evaluate((targetValue) => {
+    const input = Array.from(document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table textarea'))
+      .find((candidate) => candidate.value === targetValue)!;
+    if (document.activeElement !== input) throw new Error(`Table click did not activate: ${targetValue}`);
     input.setSelectionRange(input.value.length, input.value.length);
   }, value);
   await waitForFrames(page, 8);

@@ -203,7 +203,7 @@ async function main() {
     await page.click('.find-close-button');
     await page.click('[data-mode="preview"]');
     await page.waitForFunction(() => !document.querySelector<HTMLElement>('.preview-host')?.hidden);
-    const previewState = await page.evaluate(async () => {
+    const previewWheelPoint = await page.evaluate(() => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
       const frameWindow = frame.contentWindow!;
       const frameDocument = frame.contentDocument!;
@@ -216,17 +216,31 @@ async function main() {
       frameWindow.getSelection()!.addRange(range);
 
       const scrollElement = frameDocument.scrollingElement!;
-      const before = scrollElement.scrollTop;
-      const wheel = new frameWindow.WheelEvent('wheel', { deltaY: 80, bubbles: true, cancelable: true });
-      frameDocument.dispatchEvent(wheel);
-      await new Promise<void>((resolve) => frameWindow.requestAnimationFrame(() => resolve()));
-
+      const trace = (window as any).__searchPreviewWheel = { before: scrollElement.scrollTop,
+        trusted: false, prevented: false, count: 0, ended: false };
+      frameDocument.addEventListener('wheel', event => {
+        trace.trusted = event.isTrusted; trace.prevented = event.defaultPrevented; trace.count++;
+      });
+      frameDocument.addEventListener('scrollend', () => {
+        if (trace.count && scrollElement.scrollTop !== trace.before) trace.ended = true;
+      });
+      const bounds = frame.getBoundingClientRect();
+      return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
+    });
+    await page.mouse.move(previewWheelPoint.x, previewWheelPoint.y);
+    await page.mouse.wheel({ deltaY: 80 });
+    await page.waitForFunction(() => (window as any).__searchPreviewWheel.ended, { timeout: 3000 });
+    const previewState = await page.evaluate(async () => {
+      const scrollElement = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!;
+      const trace = (window as any).__searchPreviewWheel;
       document.querySelector<HTMLButtonElement>('[data-action="find"]')!.click();
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       return {
         selectedText: document.querySelector<HTMLInputElement>('.find-input')!.value,
-        wheelPrevented: wheel.defaultPrevented,
-        wheelDelta: scrollElement.scrollTop - before
+        wheelTrusted: trace.trusted,
+        wheelCount: trace.count,
+        wheelPrevented: trace.prevented,
+        wheelDelta: scrollElement.scrollTop - trace.before
       };
     });
     await page.click('.find-close-button');
@@ -281,8 +295,8 @@ async function main() {
     if (previewState.selectedText !== 'Preview selected phrase') {
       failures.push(`Preview selection was not copied into Find: ${JSON.stringify(previewState.selectedText)}`);
     }
-    if (!previewState.wheelPrevented || Math.abs(previewState.wheelDelta - 80) > 1) {
-      failures.push(`Preview wheel used inconsistent native/fallback scrolling: ${JSON.stringify(previewState)}`);
+    if (!previewState.wheelTrusted || previewState.wheelCount !== 1 || previewState.wheelPrevented || Math.abs(previewState.wheelDelta - 80) > 1) {
+      failures.push(`Preview wheel must retain native scrolling and selection: ${JSON.stringify(previewState)}`);
     }
     if (
       !discardState.exists ||

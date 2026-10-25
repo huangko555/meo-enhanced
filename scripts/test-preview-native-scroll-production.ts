@@ -46,6 +46,28 @@ async function result(page: Page) {
   });
 }
 
+async function settleNativeMotion(page: Page): Promise<void> {
+  await page.evaluate(() => new Promise<void>((resolve, reject) => {
+    const scope = window as any, scroll = scope.__nativeScrollElement as Element;
+    const clock = scroll.ownerDocument.defaultView!;
+    let previous = scroll.scrollTop, stillSince: number | null = null, frame = 0;
+    const timeout = window.setTimeout(() => {
+      clock.cancelAnimationFrame(frame);
+      reject(new Error('Native scrolling did not settle within three seconds'));
+    }, 3000);
+    const sample = (now: number) => {
+      const top = scroll.scrollTop;
+      if (Math.abs(top - previous) < 0.01) stillSince ??= now;
+      else stillSince = null;
+      previous = top;
+      if (scope.__nativeTrace.wheels.length && stillSince !== null && now - stillSince >= 100) {
+        window.clearTimeout(timeout); resolve();
+      } else frame = clock.requestAnimationFrame(sample);
+    };
+    frame = clock.requestAnimationFrame(sample);
+  }));
+}
+
 function assertMotion(value: Awaited<ReturnType<typeof result>>, delta: number, animated: boolean, label: string, geometryChanges = false) {
   assert.ok(value.wheels.length && value.wheels.every(wheel => wheel.trusted && !wheel.prevented), `${label}: native wheel was intercepted`);
   const compensation = geometryChanges ? value.writes.reduce((sum, write) => sum + write.after - write.before, 0) : 0;
@@ -119,6 +141,7 @@ try {
       await page.mouse.move(point.x, point.y);
       for (const [animated, delta] of [[false, 360], [true, 720], [true, -360]] as const) {
         await record(page, animated); await page.mouse.wheel({ deltaY: delta }); await frames(page, 52);
+        await settleNativeMotion(page);
         const value = await result(page); assertMotion(value, delta, animated, `${testCase.name}/${animated}/${delta}`);
         if ('split' in testCase) {
           const sourceDelta = value.samples.at(-1)!.source - value.samples[0]!.source;
@@ -129,6 +152,7 @@ try {
       // new direction and never resume the abandoned destination after idle.
       await record(page, true); await page.mouse.wheel({ deltaY: 600 }); await frames(page, 4);
       await record(page, true); await page.mouse.wheel({ deltaY: -240 }); await frames(page, 52);
+      await settleNativeMotion(page);
       const reverse = await result(page);
       // The compositor can progress between issuing CDP input and actual wheel
       // delivery. Compare against receipt, not the earlier automation command.
@@ -145,6 +169,7 @@ try {
         await record(page, false);
         for (const delta of packets) { await page.mouse.wheel({ deltaY: delta * sign }); await frames(page, 1); }
         await frames(page, 16);
+        await settleNativeMotion(page);
         assertMotion(await result(page), packets.reduce((sum, delta) => sum + delta, 0) * sign, false, `${testCase.name}/pixel/${sign}`);
       }
       if (testCase.name === 'long-list') {
@@ -152,6 +177,7 @@ try {
         // correction may end Chromium's animation; it must neither pull back
         // nor replay the abandoned target after the next gesture.
         await record(page, true); await page.mouse.wheel({ deltaY: 3600 }); await frames(page, 90);
+        await settleNativeMotion(page);
         const crossing = await result(page);
         assert.ok(crossing.top > crossing.initial + 500 && crossing.top <= crossing.initial + 3604);
         assert.ok(crossing.top >= crossing.initial + 3598 || crossing.writes.some(write => Math.abs(write.after - write.before) > 1),
@@ -162,6 +188,7 @@ try {
         assert.ok(await page.$eval('.preview-frame', frame => (frame as HTMLIFrameElement).contentDocument!
           .querySelectorAll('[data-meo-container-part] > li').length < 256), 'Native motion must keep bounded DOM');
         await record(page, false); await page.mouse.wheel({ deltaY: -120 }); await frames(page, 20);
+        await settleNativeMotion(page);
         assertMotion(await result(page), -120, false, 'list/cold-boundary/reverse', true);
         console.log(`long-list cold boundary: ${crossing.top - crossing.initial}px native progress, ${crossing.writes.length} geometry writes`);
       }

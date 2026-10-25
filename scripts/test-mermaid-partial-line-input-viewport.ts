@@ -24,6 +24,7 @@ async function runNewlineMode(
 ): Promise<void> {
   await page.setViewport({ width: 1100, height: 700, deviceScaleFactor: 1 });
   const openingLine = fixture.before.split('\n').length;
+  const continuedPrefix = fixture.prefix + (fixture.payload?.match(/^[\t ]*/)?.[0] ?? '');
   const text = fixture.before + ['```mermaid', 'graph TD', fixture.payload ?? 'A --> B', '```']
     .map(line => fixture.prefix + line).join('\n') + '\n\nAfter';
   await page.evaluate(({ text, appearance }) => {
@@ -86,17 +87,17 @@ async function runNewlineMode(
   };
   await startTrace();
   await page.keyboard.press('Enter');
-  await assertTrace('Enter on an empty source row');
+  await assertTrace('Enter after the source payload');
   assert.equal(await page.evaluate(() => {
     const view = (window as any).__mermaidPartialLineEditor.view;
     return view.state.doc.lineAt(view.state.selection.main.head).text;
-  }), fixture.prefix, `${fixture.name}: Enter adds only the real container prefix`);
+  }), continuedPrefix, `${fixture.name}: Enter retains the source row indentation`);
   await startTrace();
   await page.keyboard.type('B --> C\nC --> D', { delay: 5 });
   await assertTrace('Enter and continuous input');
   const read = () => page.evaluate(() => (window as any).__mermaidPartialLineEditor.getText() as string);
   const expected = text.replace(fixture.prefix + '```\n\nAfter',
-    fixture.prefix + 'B --> C\n' + fixture.prefix + 'C --> D\n' + fixture.prefix + '```\n\nAfter');
+    continuedPrefix + 'B --> C\n' + continuedPrefix + 'C --> D\n' + fixture.prefix + '```\n\nAfter');
   assert.equal(await read(), expected, `${fixture.name}: input must preserve real Markdown prefixes`);
   await startTrace();
   await page.keyboard.down('Control');

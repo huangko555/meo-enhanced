@@ -335,20 +335,34 @@ try {
   ) {
     throw new Error(`Preview link click routing was inconsistent: ${JSON.stringify(result)}`);
   }
-  const wheel = await page.evaluate(() => {
+  const wheelPoint = await page.evaluate(() => {
     const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
     doc.body.style.minHeight = '2000px';
     const scroller = doc.scrollingElement!;
     scroller.scrollTop = 0;
-    doc.body.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 40 }));
+    const trace = (window as any).__previewWheelTrace = { events: [] as Array<{ trusted: boolean; prevented: boolean }>, ended: false };
+    doc.addEventListener('wheel', event => trace.events.push({ trusted: event.isTrusted, prevented: event.defaultPrevented }));
+    doc.addEventListener('scrollend', () => { if (trace.events.length && scroller.scrollTop > 0) trace.ended = true; });
+    const bounds = document.querySelector('.preview-frame')!.getBoundingClientRect();
+    return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
+  });
+  await page.mouse.move(wheelPoint.x, wheelPoint.y);
+  await page.mouse.wheel({ deltaY: 40 });
+  await page.waitForFunction(() => (window as any).__previewWheelTrace.ended, { timeout: 3000 });
+  const wheel = await page.evaluate(() => {
+    const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const scroller = doc.scrollingElement!;
     const afterRefresh = scroller.scrollTop;
+    const events = [...(window as any).__previewWheelTrace.events];
     (window as any).__previewController.dispose();
     ((window as any).__previewMessages as unknown[]).length = 0;
     doc.getElementById('external')!.click();
     doc.body.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 40 }));
-    return { afterRefresh, afterDispose: scroller.scrollTop, messages: (window as any).__previewMessages.length };
+    return { afterRefresh, afterDispose: scroller.scrollTop, messages: (window as any).__previewMessages.length,
+      events };
   });
-  if (wheel.afterRefresh !== 40 || wheel.afterDispose !== 40 || wheel.messages !== 0) {
+  if (wheel.afterRefresh !== 40 || wheel.afterDispose !== 40 || wheel.messages !== 0
+    || wheel.events.length !== 1 || !wheel.events[0].trusted || wheel.events[0].prevented) {
     throw new Error(`Refreshed or disposed Preview retained duplicate listeners: ${JSON.stringify(wheel)}`);
   }
 } finally {

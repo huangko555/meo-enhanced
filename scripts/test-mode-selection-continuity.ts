@@ -159,7 +159,7 @@ try {
     } else await page.keyboard.press(operation);
     await frames();
     const deletion = ['Backspace', 'Delete', 'cut'].includes(operation);
-    const replacement = operation === 'Enter' ? '\n  ' : deletion ? '' : operation === 'composition' ? '中' : 'Z';
+    const replacement = operation === 'Enter' ? '\n' : deletion ? '' : operation === 'composition' ? '中' : 'Z';
     const from = operation === 'Backspace' ? htmlHead - 1 : htmlHead;
     const to = htmlHead + (operation === 'Delete' ? 1 : operation === 'cut' ? 2 : 0);
     const text = html.slice(0, from) + replacement + html.slice(to);

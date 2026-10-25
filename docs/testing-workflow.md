@@ -573,6 +573,14 @@ into document-changing transactions so unrelated UI effects cannot consume them.
 When positioning a popup after typing, use a native wheel gesture and verify the
 actual anchor position before testing its edge layout. Assigning `scrollTop`
 alone does not signal a new user scroll and can compete with input retention.
+For native cell/control activation, use measured client coordinates and a complete
+press/release pair; direct `focus()` or a zero-coordinate synthetic press does not
+establish the accepted table target. Test default scrolling with trusted wheel
+input and native motion settlement, retaining the original distance and continuity
+assertions. Synthetic wheel events have no browser default scroll action.
+First-visible-content sampling excludes frames behind an opaque loading cover;
+continue sampling through cover removal and final presentation readiness, and
+retain the same geometry bounds for every frame that actually exposes content.
 
 For native block-action clicks, wait for `whenVisiblePresentationReady` after the
 last fixture navigation and before acquiring the final control handle. A visible
