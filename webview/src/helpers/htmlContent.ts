@@ -24,7 +24,6 @@ import {
   isSupportedHtmlSource,
   inspectHtmlStyle,
   normalizeHtmlAlign,
-  sanitizeHtmlStyle,
   supportedHtmlBlockTags,
   supportedHtmlTags
 } from '../../../src/shared/htmlPolicy';
@@ -116,31 +115,54 @@ function htmlHasVisibleContent(source: string): boolean {
   const hasInk = (color: string, inherited: boolean): boolean =>
     /^(?:inherit|unset|currentcolor)$/i.test(color) ? inherited : !transparent(color);
   type Paint = { visible: boolean; layout: boolean };
-  const paint = (node: ChildNode, ink = true, font = true, shown = true): Paint => {
+  const paint = (node: ChildNode, ink = true, font = true, shown = true,
+    inherited: Readonly<Record<string, string>> = {}, direction: 'ltr' | 'rtl' = 'ltr'): Paint => {
     if (node.type === 'comment') return { visible: shown && font, layout: font };
     if (node.type === 'text') {
       const layout = Boolean(node.data.trim()) && font;
       return { visible: layout && ink && shown, layout };
     }
     if (!('children' in node) || !('attribs' in node)) return { visible: false, layout: false };
-    const style = Object.fromEntries(sanitizeHtmlStyle(node.attribs.style ?? '').split(';')
-      .filter(Boolean).map(declaration => declaration.split(':').map(part => part.trim())));
-    if ('hidden' in node.attribs || style.display?.toLowerCase() === 'none' || Number(style.opacity) === 0) {
+    if (node.attribs.dir === 'rtl' || node.attribs.dir === 'ltr') direction = node.attribs.dir;
+    const style = { ...inspectHtmlStyle(node.attribs.style ?? '', direction).properties };
+    for (const [name, value] of Object.entries(style)) {
+      if (/^inherit$/i.test(value)) style[name] = inherited[name] ?? '';
+      else if (/^(?:initial|unset)$/i.test(value)) {
+        const initial = name === 'display' ? 'inline' : /^initial$/i.test(value)
+          ? ({ color: 'initial', visibility: 'visible', 'font-size': 'medium' } as Record<string, string>)[name] : undefined;
+        if (initial) style[name] = initial; else delete style[name];
+      }
+    }
+    if ('hidden' in node.attribs || style.display?.toLowerCase() === 'none' || style.opacity !== undefined
+      && Number.parseFloat(style.opacity) === 0) {
       return { visible: false, layout: false };
     }
     const color = style.color ? hasInk(style.color, ink) : ink;
     const size = style['font-size'];
-    const textSize = size ? parseFloat(size) > 0 && (font || !/(?:em|%)$/i.test(size) || /rem$/i.test(size)) : font;
+    const textSize = size ? (!Number.isFinite(parseFloat(size)) || parseFloat(size) > 0)
+      && (font || !/(?:em|ex|ch|lh|%)$/i.test(size) || /(?:rem|rlh)$/i.test(size)) : font;
     const visibility = style.visibility ? style.visibility.toLowerCase() === 'visible' : shown;
-    const children = node.children.map(child => paint(child, color, textSize, visibility));
+    const display = style.display?.toLowerCase() || (supportedHtmlBlockTags.has(node.name) ? 'block' : 'inline');
+    style.display = display;
+    const children = node.children.map(child => paint(child, color, textSize, visibility, style, direction));
     const media = ['img', 'hr', 'br', 'table', 'li'].includes(node.name);
-    const sizedBox = parseFloat(style.height ?? style['min-height'] ?? '0') > 0
-      && (supportedHtmlBlockTags.has(node.name) || style.display === 'block'
-        || style.display === 'inline-block' && parseFloat(style.width ?? '0') > 0);
-    const layout = media || sizedBox || children.some(child => child.layout);
-    const background = style['background-color'] ?? style.background;
+    const borders = ['top', 'right', 'bottom', 'left'].map(side => {
+      const kind = style[`border-${side}-style`]?.toLowerCase() ?? 'none';
+      const width = style[`border-${side}-width`] ?? 'medium';
+      const layout = kind !== 'none' && kind !== 'hidden' && (/^(?:thin|medium|thick)$/i.test(width) || parseFloat(width) > 0);
+      return { layout, visible: layout && hasInk(style[`border-${side}-color`] ?? 'currentcolor', color) };
+    });
+    const blockBox = display === 'block' || display === 'inline-block';
+    const paddedWidth = ['padding-left', 'padding-right'].some(name => parseFloat(style[name] ?? '0') > 0);
+    const sizedBox = (blockBox && Math.max(parseFloat(style.height ?? style['block-size'] ?? '0') || 0, parseFloat(style['min-height'] ?? style['min-block-size'] ?? '0') || 0) > 0
+      || ['padding-top', 'padding-bottom'].some(name => parseFloat(style[name] ?? '0') > 0)
+      || !blockBox && textSize && paddedWidth
+      || blockBox && parseFloat(style.width ?? '0') > 0 && style['aspect-ratio'] !== undefined && style['aspect-ratio'] !== 'auto')
+      && (display === 'block' || paddedWidth || parseFloat(style.width ?? '0') > 0);
+    const layout = media || sizedBox || borders.some(border => border.layout) || children.some(child => child.layout);
+    const background = style['background-color'];
     return { layout, visible: children.some(child => child.visible)
-      || visibility && (media || Boolean(background && hasInk(background, color) && layout)) };
+      || visibility && (media || borders.some(border => border.visible) || Boolean(background && hasInk(background, color) && layout)) };
   };
   return parseDocument(source).children.some(node => paint(node).visible);
 }
@@ -559,13 +581,19 @@ function enhanceImages(
     if (!isSafeHtmlUrl(rawSrc, 'src')) continue;
     const anchor = image.closest<HTMLAnchorElement>('a[href]');
     const linkUrl = anchor?.getAttribute('href')?.trim() ?? '';
+    const displayImageStyle = ['object-fit', 'object-position', 'aspect-ratio', 'border-radius',
+      'border-top-left-radius', 'border-top-right-radius', 'border-bottom-left-radius', 'border-bottom-right-radius']
+      .flatMap(name => {
+        const value = image.style.getPropertyValue(name);
+        return value ? [`${name}: ${value}`] : [];
+      }).join('; ');
     const widget = new ImageWidget(
       rawSrc,
       image.getAttribute('alt') ?? '',
       isSafeHtmlUrl(linkUrl, 'href') ? linkUrl : '',
       sourceFrom,
       getImagePresentationFactory(view.state),
-      { uiLanguage: view.state.facet(uiLanguageFacet), sourceFromResolver: resolveSourceFrom }
+      { uiLanguage: view.state.facet(uiLanguageFacet), sourceFromResolver: resolveSourceFrom, displayImageStyle }
     );
     const container = widget.toDOM(view);
     container.classList.add('meo-md-html-image');
@@ -589,6 +617,9 @@ function enhanceImages(
     if (container.style.width) container.style.setProperty('--meo-html-image-width', '100%');
     if (container.style.height) {
       container.style.setProperty('--meo-html-image-height', '100%');
+      container.style.setProperty('--meo-html-image-max-height', 'none');
+    }
+    if (container.style.aspectRatio && !/^(?:auto|initial|unset)$/.test(container.style.aspectRatio)) {
       container.style.setProperty('--meo-html-image-max-height', 'none');
     }
     const anchorOnlyContainsImage = anchor && Array.from(anchor.childNodes).every((node) => (

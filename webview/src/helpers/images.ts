@@ -330,10 +330,12 @@ export class ImageWidget extends WidgetType {
     if (from === null || this.sourceFromResolver) return this;
     const mapped = changes.mapPos(from, 1);
     return mapped === from ? this : new ImageWidget(this.url, this.altText, this.linkUrl, mapped, this.presentationFactory,
-      { pointerInteractionOwner: this.pointerInteractionOwner, uiLanguage: this.uiLanguage, width: this.width, height: this.height });
+      { pointerInteractionOwner: this.pointerInteractionOwner, uiLanguage: this.uiLanguage, width: this.width, height: this.height,
+        displayImageStyle: this.displayImageStyle });
   }
   readonly width?: number;
   readonly height?: number;
+  private readonly displayImageStyle: string;
   url: string;
   altText: string;
   linkUrl: string;
@@ -359,6 +361,8 @@ export class ImageWidget extends WidgetType {
       sourceFromResolver?: () => number | null;
       width?: number;
       height?: number;
+      /** Validated HTML image paint properties; applied to every loaded/fallback clone. */
+      displayImageStyle?: string;
     } = {}
   ) {
     super();
@@ -369,6 +373,7 @@ export class ImageWidget extends WidgetType {
     this.sourceFromResolver = options.sourceFromResolver;
     this.width = options.width;
     this.height = options.height;
+    this.displayImageStyle = options.displayImageStyle ?? '';
     this.pointerInteractionOwner = options.pointerInteractionOwner ?? 'widget';
     this.fullscreenOverlay = null;
     this.fullscreenCleanup = null;
@@ -387,6 +392,7 @@ export class ImageWidget extends WidgetType {
       other.altText === this.altText &&
       other.linkUrl === this.linkUrl &&
       other.width === this.width && other.height === this.height &&
+      other.displayImageStyle === this.displayImageStyle &&
       other.sourceFrom === this.sourceFrom &&
       other.pointerInteractionOwner === this.pointerInteractionOwner &&
       other.uiLanguage === this.uiLanguage
@@ -481,6 +487,7 @@ export class ImageWidget extends WidgetType {
     }
     if (this.width) { img.width = this.width; img.style.width = `${this.width}px`; }
     if (this.height) { img.height = this.height; img.style.height = `${this.height}px`; }
+    if (this.displayImageStyle) img.style.cssText += `; ${this.displayImageStyle}`;
   }
 
   attachImagePointerInteractions(container: HTMLElement): void {

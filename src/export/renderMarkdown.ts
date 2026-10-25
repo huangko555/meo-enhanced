@@ -23,7 +23,7 @@ import {
   matchInlineHtmlCode,
   isSupportedHtmlSource,
   sanitizeHtmlStyle,
-  htmlInlineStyleRules,
+  htmlSanitizedStyleRules,
   supportedHtmlTags
 } from '../shared/htmlPolicy';
 import { splitHtmlBlockFragments } from '../foundation/htmlSyntax';
@@ -415,8 +415,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
     allowedStyles: {
       img: { width: [/^\d+px$/], height: [/^\d+px$/] },
       '*': {
-        ...htmlInlineStyleRules,
-        'text-align': [/^left$/i, /^right$/i, /^center$/i, /^justify$/i],
+        ...htmlSanitizedStyleRules,
         '--meo-table-indent': [/^\d+(?:\.\d+)?ch$/i]
       },
       span: {

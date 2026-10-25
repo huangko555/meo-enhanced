@@ -12,6 +12,7 @@ import type { Page } from 'puppeteer-core';
 import { launchTestBrowser } from './browser-test-helpers';
 import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { formatHtmlFragment } from '../webview/src/editor/htmlFormatting';
+import { checkHtmlStyleRendering } from './test-html-styles-browser';
 
 {
 // HTML discovery also depends on the runtime details owner, even with the
@@ -520,7 +521,11 @@ async function checkHtmlEditingTools(page: Page): Promise<void> {
       hidden: (element as HTMLElement).hidden, label: (element as HTMLElement).dataset.tooltip
     }));
     assert.equal(tooltip.hidden, false);
-    for (const name of ['class', 'onclick', 'padding', 'border', 'opacity', 'href']) assert.ok(tooltip.label?.includes(name), name);
+    for (const name of ['class', 'onclick', 'opacity', 'href']) assert.ok(tooltip.label?.includes(name), name);
+    assert.doesNotMatch(tooltip.label!, /\b(?:padding|border)\b/, 'accepted formatting must not be reported as filtered');
+    assert.deepEqual(await page.$eval('#format-target', node => {
+      const style = getComputedStyle(node); return { padding: style.paddingTop, border: style.borderTopWidth };
+    }), { padding: '8px', border: '1px' });
     assert.match(tooltip.label!, language === 'zh-CN' ? /源码已保留/ : /source retained/);
     assert.equal(await page.evaluate(() => (window as any).__htmlEditor.getText()), text, 'Policy feedback does not modify source');
     await page.click('.meo-format-html-btn');
@@ -636,6 +641,8 @@ async function checkHtmlEditingTools(page: Page): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  if (!['--format-only', '--expansion-only', '--pointer-only', '--selection-only'].some(flag => process.argv.includes(flag))) await checkHtmlStyleRendering();
+  if (process.argv.includes('--styles-only')) return;
   checkExport();
   const plain = '<div id="one" title="long title" style="color:red"><p>Hello <strong>world</strong>.</p></div>';
   const formatted = await formatHtmlFragment(plain, [0, plain.indexOf('world')]);

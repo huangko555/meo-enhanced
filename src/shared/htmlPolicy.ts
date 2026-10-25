@@ -92,54 +92,8 @@ export function isSupportedHtmlAttribute(tagName: string, attributeName: string)
     attributesByTag[tagName.toLowerCase()]?.has(normalizedAttribute) === true;
 }
 
-const cssLength = /^(?:0|(?:\d+(?:\.\d+)?|\.\d+)(?:px|em|rem|%|ch))$/i;
-const cssColor = /^(?:#[\da-f]{3,4}|#[\da-f]{6}|#[\da-f]{8}|[a-z]+|(?:rgb|rgba|hsl|hsla)\([\d\s.,%+/-]+\))$/i;
-const cssKeywords: Readonly<Record<string, RegExp>> = {
-  'text-align': /^(?:left|center|right|justify|start|end)$/i,
-  'font-weight': /^(?:normal|bold|[1-9]00)$/i,
-  'font-style': /^(?:normal|italic|oblique)$/i,
-  'text-decoration': /^(?:none|underline|line-through|overline)(?:\s+(?:underline|line-through|overline))*$/i,
-  'white-space': /^(?:normal|pre|pre-wrap|pre-line|break-spaces)$/i,
-  'vertical-align': /^(?:baseline|sub|super|top|middle|bottom|text-top|text-bottom)$/i,
-  display: /^(?:none|block|inline|inline-block)$/i,
-  visibility: /^(?:visible|hidden|collapse)$/i,
-  opacity: /^(?:0(?:\.\d+)?|1(?:\.0+)?)$/
-};
-
-export const htmlInlineStyleRules: Record<string, RegExp[]> = {
-  color: [cssColor],
-  'background-color': [cssColor],
-  background: [cssColor],
-  ...Object.fromEntries(['width', 'height', 'max-width', 'max-height', 'min-width', 'min-height']
-    .map(name => [name, [cssLength, /^(?:auto|none)$/i]])),
-  'font-size': [cssLength],
-  ...Object.fromEntries(Object.entries(cssKeywords).map(([name, rule]) => [name, [rule]]))
-};
-
-/** Document formatting only: no CSS URLs, selectors, positioning or editor chrome. */
-export function inspectHtmlStyle(source: string): { style: string; unsupported: string[]; invalid: string[] } {
-  const declarations = new Map<string, string>();
-  const unsupported = new Set<string>(), invalid = new Set<string>();
-  for (const declaration of source.split(';')) {
-    const colon = declaration.indexOf(':');
-    if (colon < 0) {
-      if (declaration.trim()) invalid.add(declaration.trim().split(/\s+/)[0]);
-      continue;
-    }
-    const name = declaration.slice(0, colon).trim().toLowerCase();
-    const value = declaration.slice(colon + 1).trim();
-    const rules = Object.hasOwn(htmlInlineStyleRules, name) ? htmlInlineStyleRules[name] : undefined;
-    const valid = rules?.some(rule => rule.test(value)) === true;
-    if (valid) declarations.set(name, value);
-    else (rules ? invalid : unsupported).add(name);
-  }
-  return { style: [...declarations].map(([name, value]) => `${name}: ${value}`).join('; '),
-    unsupported: [...unsupported], invalid: [...invalid] };
-}
-
-export function sanitizeHtmlStyle(source: string): string {
-  return inspectHtmlStyle(source).style;
-}
+export { inspectHtmlStyle, sanitizeHtmlStyle, htmlSanitizedStyleRules } from './htmlStyle';
+export type { HtmlStyleInspection } from './htmlStyle';
 
 export function getSupportedHtmlAttributes(tagName: string): string[] {
   return [...globalAttributes, ...(attributesByTag[tagName.toLowerCase()] ?? [])];

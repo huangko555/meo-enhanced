@@ -199,6 +199,15 @@ paired quotes to the right of an unfinished tag's attribute value,
 manual activation, disabled and reconfigured settings, Escape caret retention,
 IME ownership, shared placement and bilingual light/dark/narrow screenshots under
 `.local/html-completion-acceptance/`; it belongs to quick and browser/release gates.
+`bun scripts/test-html-content.ts --styles-only` isolates the shared style-policy
+and production rendering checks. Its imported style-policy suite covers valid and
+invalid values, duplicate/shorthand order, logical sides and incomplete declarations.
+Its production Webview checks cover Live, standalone Preview and Source side Preview,
+light/dark ordinary documents and documents above 1 MiB, computed formatting,
+empty border/background visibility, nested padded table containers, actual
+loaded image fitting/position/radii and width-only aspect ratios, source
+preservation and unchanged HTML node identity after prose input. GitHub's separate
+filter remains unchanged. Screenshots are saved under `.local/html-style-audit/`.
 The HTML content checks
 verify pasted HTML opens source without reformatting or moving the native caret,
 including trailing blank lines, hidden fragments, sibling blocks and history.

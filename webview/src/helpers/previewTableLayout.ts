@@ -132,8 +132,9 @@ function visibleRightEdgeInset(table: HTMLTableElement): number {
 
 function layoutTables(tables: readonly HTMLTableElement[], preferences: ReturnType<typeof createPreviewTableColumnPreferences>): void {
   const visibleTables = tables.map(table => {
-    const wrapper = table.parentElement?.closest<HTMLElement>('td, th')
-      ?? table.closest<HTMLElement>('.meo-table-scroll, .meo-export-html-block, .meo-md-html-content') ?? table.parentElement;
+    // HTML may introduce a narrower, padded container inside the reading root.
+    // Its content box owns these columns, including nested tables inside cells.
+    const wrapper = table.parentElement;
     return { table, wrapper };
   }).filter(({ table, wrapper }) => wrapper && table.getClientRects().length && wrapper.clientWidth > 0);
   const entries = visibleTables.flatMap(({ table, wrapper }) => {
@@ -177,7 +178,11 @@ function layoutTables(tables: readonly HTMLTableElement[], preferences: ReturnTy
     const firstCell = entry.table.querySelector<HTMLTableCellElement>('th, td');
     const style = firstCell ? entry.table.ownerDocument.defaultView?.getComputedStyle(firstCell) ?? getComputedStyle(firstCell) : null;
     const authoredPadding = style ? Math.max(1, Math.min(Number.parseFloat(style.paddingInlineStart) || 0, Number.parseFloat(style.paddingInlineEnd) || 0)) : 1;
-    return { ...entry, rightEdgeInset, authoredPadding, availableWidth: Math.max(0, entry.wrapper.clientWidth - rightEdgeInset) };
+    const containerStyle = entry.table.ownerDocument.defaultView!.getComputedStyle(entry.wrapper);
+    const containerPadding = (Number.parseFloat(containerStyle.paddingLeft) || 0) + (Number.parseFloat(containerStyle.paddingRight) || 0);
+    const rightPadding = Number.parseFloat(containerStyle.paddingRight) || 0;
+    return { ...entry, rightEdgeInset, rightPadding, authoredPadding,
+      availableWidth: Math.max(0, entry.wrapper.clientWidth - containerPadding - rightEdgeInset) };
   });
   // Keep fitting synchronous, but batch each correction pass across the document.
   // This preserves the existing three-pass border convergence without a forced
@@ -187,7 +192,7 @@ function layoutTables(tables: readonly HTMLTableElement[], preferences: ReturnTy
       applyTableWidthPlan(entry.table, entry.columns, entry.preferred!, entry.availableWidth, entry.authoredPadding);
     }
     pending = pending.filter(entry => {
-      const clippedRightEdge = entry.wrapper.getBoundingClientRect().left + entry.wrapper.clientLeft + entry.wrapper.clientWidth - entry.rightEdgeInset;
+      const clippedRightEdge = entry.wrapper.getBoundingClientRect().left + entry.wrapper.clientLeft + entry.wrapper.clientWidth - entry.rightPadding - entry.rightEdgeInset;
       const overhang = entry.table.getBoundingClientRect().right - clippedRightEdge;
       if (overhang <= 0.01) return false;
       entry.availableWidth = Math.max(0, entry.availableWidth - overhang);
@@ -248,8 +253,7 @@ export function createPreviewTableLayoutController(
     });
     if (widthChanged) scheduleRefresh();
   }) : null;
-  const widthOwner = (table: HTMLTableElement) => table.closest<HTMLElement>(
-    '.meo-table-scroll, .meo-export-html-block, .meo-md-html-content') ?? table.parentElement;
+  const widthOwner = (table: HTMLTableElement) => table.parentElement;
   const observeWidth = (table: HTMLTableElement, visible: boolean) => {
     const wrapper = widthOwner(table);
     if (wrapper) {
