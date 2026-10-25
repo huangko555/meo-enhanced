@@ -2433,8 +2433,8 @@ function buildWidgetTableData(
   };
 }
 
-const mountedTableWidgets = new WeakMap<EditorView, Set<HtmlTableWidget>>();
-const tableDomOwners = new WeakMap<HTMLElement, HtmlTableWidget>();
+const mountedTableWidgets = new WeakMap<EditorView, Set<HtmlTableController>>();
+const tableDomOwners = new WeakMap<HTMLElement, HtmlTableController>();
 const cellPreviewSignatures = new WeakMap<WidgetTableData, string>();
 
 /** Navigation names a source cell; the reading projection mounts it on demand. */
@@ -2539,10 +2539,42 @@ function sameTableSourceRanges(left: TableCellRange[][] | undefined, right: Tabl
   return true;
 }
 
+function sameTableShape(left: WidgetTableData, right: WidgetTableData): boolean {
+  return left.indent === right.indent
+    && liveBlockIndentKey(left.visualIndent) === liveBlockIndentKey(right.visualIndent)
+    && left.colCount === right.colCount && left.headerCells.length === right.headerCells.length
+    && left.rows.length === right.rows.length
+    && left.rows.every((row, index) => row.length === right.rows[index]?.length)
+    && left.alignments.every((alignment, index) => alignment === right.alignments[index]);
+}
+
+function tablePreviewHeight(data: WidgetTableData): RenderedBlockPreviewHeight {
+  return new RenderedBlockPreviewHeight(JSON.stringify([
+    'table', data.indent, liveBlockIndentKey(data.visualIndent), data.colCount,
+    data.headerCells.length, data.rows.map(row => row.length), data.alignments
+  ]));
+}
+
+/** A decoration is an immutable source value, even when TileCache recycles its DOM. */
 class HtmlTableWidget extends UiLanguageSensitiveWidget {
-  private positionDocument: WeakRef<EditorState['doc']> | null = null;
-  private sourceIdentity = {};
+  private measuredHeightCache: RenderedBlockPreviewHeight;
+  private mountedController: WeakRef<HtmlTableController> | undefined;
+
+  constructor(
+    readonly tableData: WidgetTableData,
+    readonly stickyHeaderAdapterFactory: TableStickyHeaderAdapterFactory,
+    readonly tableCommandEnvironment: TableCommandEnvironment
+  ) {
+    super();
+    this.measuredHeightCache = tablePreviewHeight(tableData);
+  }
+
   get [renderedBlockPreviewHeight](): RenderedBlockPreviewHeight { return this.measuredHeightCache; }
+  get measuredHeight(): number { return this.measuredHeightCache.height; }
+  get estimatedHeight(): number {
+    return estimateBlockWidgetHeight({ kind: 'table', headerCells: this.tableData.headerCells,
+      rows: this.tableData.rows, measuredHeight: this.measuredHeight });
+  }
 
   [mapLiveWidgetPositions](changes: ChangeDesc, state: EditorState): WidgetType {
     const previous = this.tableData;
@@ -2562,10 +2594,56 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         from: changes.mapPos(range.from, 1), to: changes.mapPos(range.to, -1) })))
     }, this.stickyHeaderAdapterFactory, this.tableCommandEnvironment);
     next.measuredHeightCache = this.measuredHeightCache;
-    next.sourceIdentity = this.sourceIdentity;
-    next.positionDocument = new WeakRef(state.doc);
+    next.mountedController = this.mountedController;
     return next;
   }
+
+  private currentController(): HtmlTableController | undefined {
+    const owner = this.mountedController?.deref();
+    return owner?.domRefs?.shell.isConnected && owner.tableData.from === this.tableData.from
+      && owner.tableData.to === this.tableData.to && owner.tableData.signature === this.tableData.signature ? owner : undefined;
+  }
+
+  eq(other: WidgetType): boolean {
+    if (!(other instanceof HtmlTableWidget) || !this.hasSameUiLanguageEpoch(other)
+      || this.stickyHeaderAdapterFactory !== other.stickyHeaderAdapterFactory
+      || this.tableCommandEnvironment !== other.tableCommandEnvironment
+      || !sameTableShape(this.tableData, other.tableData)
+      || this.tableData.signature !== other.tableData.signature
+      || this.tableData.from !== other.tableData.from || this.tableData.to !== other.tableData.to
+      || this.tableData.startLine !== other.tableData.startLine || this.tableData.endLine !== other.tableData.endLine
+      || !sameTableSourceRanges(this.tableData.sourceRanges, other.tableData.sourceRanges)) return false;
+    const mounted = this.currentController() ?? other.currentController();
+    const cache = mounted?.measuredHeightCache ?? (
+      this.measuredHeight >= other.measuredHeight ? this.measuredHeightCache : other.measuredHeightCache
+    );
+    this.measuredHeightCache = other.measuredHeightCache = cache;
+    if (mounted) this.mountedController = other.mountedController = new WeakRef(mounted);
+    return true;
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const owner = new HtmlTableController(this.tableData, this.stickyHeaderAdapterFactory,
+      this.tableCommandEnvironment, this.measuredHeightCache);
+    this.mountedController = new WeakRef(owner);
+    return owner.toDOM(view);
+  }
+
+  updateDOM(dom: HTMLElement, view: EditorView, _previous: WidgetType): boolean {
+    const owner = tableDomOwners.get(dom);
+    if (!owner || owner.destroyed || owner.view !== view || !owner.canReuseTableDom(this)) return false;
+    owner.adoptPresentation(this.tableData, this.measuredHeightCache, view.state.doc);
+    this.mountedController = new WeakRef(owner);
+    return true;
+  }
+
+  ignoreEvent(): boolean { return true; }
+  destroy(dom: HTMLElement): void { tableDomOwners.get(dom)?.destroy(dom); }
+}
+
+/** Native input, resources and projected positions belong to this DOM alone. */
+class HtmlTableController extends UiLanguageSensitiveWidget {
+  private positionDocument: WeakRef<EditorState['doc']> | null = null;
   tableData: WidgetTableData;
   view: EditorView | null;
   layoutFrame: number;
@@ -2600,7 +2678,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   constructor(
     tableData: WidgetTableData,
     stickyHeaderAdapterFactory: TableStickyHeaderAdapterFactory,
-    tableCommandEnvironment: TableCommandEnvironment
+    tableCommandEnvironment: TableCommandEnvironment,
+    measuredHeightCache: RenderedBlockPreviewHeight
   ) {
     super();
     this.tableData = tableData;
@@ -2619,12 +2698,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     this.tableCommandTargetId = '';
     this.tableCommandTargetRegistration = null;
     this.selectionDomAnchor = null;
-    // Seed the current table geometry before CodeMirror compares height points,
-    // rather than sharing it later in eq/updateDOM after its gutter has updated.
-    this.measuredHeightCache = new RenderedBlockPreviewHeight(JSON.stringify([
-      'table', tableData.indent, liveBlockIndentKey(tableData.visualIndent), tableData.colCount,
-      tableData.headerCells.length, tableData.rows.map(row => row.length), tableData.alignments
-    ]));
+    this.measuredHeightCache = measuredHeightCache;
     this.pendingContextMenuRestore = false;
     this.contextPage = 'structure';
     this.tableCaretRevealGeneration = 0;
@@ -2663,62 +2737,19 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     return this.measuredHeightCache.height;
   }
 
-  get estimatedHeight(): number {
-    return estimateBlockWidgetHeight({
-      kind: 'table',
-      headerCells: this.tableData.headerCells,
-      rows: this.tableData.rows,
-      measuredHeight: this.measuredHeight
-    });
+  canReuseTableDom(other: HtmlTableWidget): boolean {
+    return this.hasSameUiLanguageEpoch(other) && sameTableShape(this.tableData, other.tableData)
+      && this.stickyHeaderAdapterFactory === other.stickyHeaderAdapterFactory
+      && this.tableCommandEnvironment === other.tableCommandEnvironment;
   }
 
-  private canReuseTableDom(other: WidgetType): other is HtmlTableWidget {
-    return (
-      other instanceof HtmlTableWidget &&
-      this.hasSameUiLanguageEpoch(other) &&
-      other.tableData.indent === this.tableData.indent &&
-      liveBlockIndentKey(other.tableData.visualIndent) === liveBlockIndentKey(this.tableData.visualIndent) &&
-      other.tableData.colCount === this.tableData.colCount &&
-      other.tableData.headerCells.length === this.tableData.headerCells.length &&
-      other.tableData.rows.length === this.tableData.rows.length &&
-      other.tableData.rows.every((row, index) => row.length === this.tableData.rows[index]?.length) &&
-      other.tableData.alignments.every((alignment, index) => alignment === this.tableData.alignments[index]) &&
-      other.stickyHeaderAdapterFactory === this.stickyHeaderAdapterFactory
-    );
-  }
-
-  eq(other: WidgetType): boolean {
-    if (this.canReuseTableDom(other) && (this.tableData.from === other.tableData.from
-      || this.sourceIdentity === other.sourceIdentity)) {
-      const mounted = this.domRefs ? this : other.domRefs ? other : null;
-      this.sourceIdentity = other.sourceIdentity = mounted?.sourceIdentity ?? this.sourceIdentity;
-      const cache = mounted?.measuredHeightCache ?? (
-        this.measuredHeight >= other.measuredHeight ? this.measuredHeightCache : other.measuredHeightCache
-      );
-      this.measuredHeightCache = other.measuredHeightCache = cache;
-      // Comparing decorations also happens outside DOM reconciliation. Never
-      // project source data here: the adopted value may own no mounted DOM.
-      return this.tableData.signature === other.tableData.signature
-        && this.tableData.from === other.tableData.from && this.tableData.to === other.tableData.to
-        && this.tableData.startLine === other.tableData.startLine && this.tableData.endLine === other.tableData.endLine
-        && sameTableSourceRanges(this.tableData.sourceRanges, other.tableData.sourceRanges);
-    }
-    return false;
-  }
-
-  updateDOM(dom: HTMLElement, view: EditorView, _previous: WidgetType): boolean {
-    const owner = tableDomOwners.get(dom);
-    if (!owner || owner.destroyed || owner.view !== view || !owner.canReuseTableDom(this)
-      || (owner.tableData.from !== this.tableData.from && owner.sourceIdentity !== this.sourceIdentity)) return false;
-    // TileCache also offers DOM from unrelated same-shaped tables. Its mutable
-    // input owner must stay with the same source, including a proven position map.
-    // CodeMirror retains this DOM but adopts the new immutable widget value.
-    // Reconcile through the instance that owns its inputs, images and listeners.
-    owner.adoptEquivalentTableData(this.tableData);
-    owner.positionDocument = new WeakRef(view.state.doc);
-    this.measuredHeightCache = owner.measuredHeightCache;
-    this.sourceIdentity = owner.sourceIdentity;
-    return true;
+  adoptPresentation(tableData: WidgetTableData, height: RenderedBlockPreviewHeight, document: EditorState['doc']): void {
+    // Seed a new value numerically; recycling DOM must never alias the previous
+    // source value's cache and overwrite its geometry with a different table.
+    if (height.height <= 0) height.height = this.measuredHeight;
+    this.measuredHeightCache = height;
+    this.adoptEquivalentTableData(tableData);
+    this.positionDocument = new WeakRef(document);
   }
 
   projectPosition(state: EditorState, changes: ChangeDesc): void {
@@ -6444,13 +6475,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       const signature = { ...JSON.parse(this.tableData.signature), diffFlagsByLine };
       this.tableData = { ...this.tableData, diffFlagsByLine, diffBaseline: acceptedDiff.baseline, signature: JSON.stringify(signature) };
     }
-    // CodeMirror can draw a widget instance again after destroying its previous DOM.
-    if (this.destroyed) {
-      this.cellSelection = new TableCellSelection();
-      this.cellInteraction = createTableCellInteraction();
-      this.stickyHeaderAdapter = this.createStickyHeaderAdapter();
-      this.destroyed = false;
-    }
+    this.positionDocument = new WeakRef(view.state.doc);
     this.view = view;
     const existingSearchState = (view.dom as any).__meoSearchState;
     if (existingSearchState && typeof existingSearchState === 'object') {
@@ -6756,13 +6781,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   destroy(dom: HTMLElement) {
-    // CodeMirror may retain the DOM while replacing an equivalent widget.
-    // Dispose the instance that actually allocated this DOM's resources.
-    const owner = tableDomOwners.get(dom);
-    if (owner && owner !== this) {
-      owner.destroy(dom);
-      return;
-    }
     tableDomOwners.delete(dom);
     this.clearDeleteTableConfirmation();
     this.destroyed = true;

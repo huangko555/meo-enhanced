@@ -21,15 +21,22 @@ async function assertTableDomOwnership(page: import('puppeteer-core').Page): Pro
     if (widgets.length !== 2) throw new Error('Ownership fixture needs two distinct table widgets');
     const [first, second] = widgets;
     const shell = document.querySelector<HTMLElement>(`.meo-md-html-table-shell[data-meo-rendered-block-start-line="${first.tableData.startLine}"]`)!;
-    const before = shell.textContent;
     // TileCache tries same-class DOM after equality fails, even when that DOM
     // came from a different source range which still has a live decoration.
     const reused = second.updateDOM(shell, editor.view, first);
-    return { reused, preserved: shell.textContent === before,
-      firstSource: first.tableData.startLine, secondSource: second.tableData.startLine };
+    const remounted = first.toDOM(editor.view) as HTMLElement;
+    try {
+      return { firstContent: [...remounted.querySelectorAll<HTMLTextAreaElement>('textarea')].map(input => input.value),
+        reusedContent: reused ? [...shell.querySelectorAll<HTMLTextAreaElement>('textarea')].map(input => input.value) : null,
+        firstSource: first.tableData.startLine, secondSource: second.tableData.startLine };
+    } finally { first.destroy(remounted); }
   });
-  assert.deepEqual(ownership, { reused: false, preserved: true, firstSource: 3, secondSource: 9 },
-    'A same-shaped table must not adopt another live source range or rewrite its content');
+  assert.deepEqual(ownership.firstContent, ['Alpha', 'Value', 'first', '1'],
+    'Recycling table DOM must leave the accepted source value intact for a later remount');
+  assert.equal(ownership.firstSource, 3);
+  assert.equal(ownership.secondSource, 9);
+  if (ownership.reusedContent) assert.deepEqual(ownership.reusedContent, ['Beta', 'Value', 'second', '2'],
+    'A recycled table must render the new value without changing the previous value');
 }
 
 const build = await Bun.build({ entrypoints: ['scripts/test-live-decoration-history-entry.ts'], target: 'browser', format: 'iife',
