@@ -188,6 +188,25 @@ try {
     return {restored: controller.restoreFromHost(), calls: state.calls, focused: document.activeElement?.id};
   });
   assert.deepEqual(blankPointer, {restored: false, calls: 0, focused: ''}, 'an outside blank click must not resurrect the former input');
+  const previewToolbar = await frame.evaluate(async () => {
+    const {state} = (window as any).fixture;
+    const editor = document.getElementById('editor')!;
+    const preview = document.createElement('iframe');
+    const button = document.createElement('button');
+    document.getElementById('app')!.append(preview, button);
+    editor.focus();
+    preview.contentDocument!.body.tabIndex = -1;
+    preview.contentDocument!.body.focus();
+    state.calls = 0;
+    const press = new PointerEvent('pointerdown', {bubbles: true, cancelable: true, pointerId: 73, button: 0});
+    button.dispatchEvent(press);
+    button.dispatchEvent(new PointerEvent('pointerup', {bubbles: true, pointerId: 73, button: 0}));
+    await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
+    const result = {calls: state.calls, focused: document.activeElement === preview, prevented: press.defaultPrevented};
+    preview.remove(); button.remove(); return result;
+  });
+  assert.deepEqual(previewToolbar, {calls: 0, focused: true, prevented: false},
+    'toolbar borrowing cannot restore stale editor ownership over a focused Preview iframe');
   const disposed = await frame.evaluate(() => {
     const {controller} = (window as any).fixture;
     const input = document.getElementById('registered') as HTMLInputElement;

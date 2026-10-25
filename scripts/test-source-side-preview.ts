@@ -50,6 +50,13 @@ async function assertWindowedAlignment(page: import('puppeteer-core').Page, bund
       && !document.querySelector('.mode-group [aria-busy="true"]') && !document.querySelector('.editor-host')?.hasAttribute('inert'));
     await page.click('.source-preview-button');
     await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('[data-meo-preview-block]'));
+    await page.waitForFunction(() => {
+      const surface = document.querySelector('.editor-surface');
+      const host = document.querySelector<HTMLElement>('.preview-host');
+      const editor = document.querySelector<HTMLElement>('.editor-host');
+      return surface?.hasAttribute('data-source-preview') && !surface.hasAttribute('data-source-preview-preparing')
+        && host?.hidden === false && getComputedStyle(host).visibility !== 'hidden' && editor?.inert === false;
+    }, { timeout: 2000 });
     if (await page.$eval('.source-preview-scroll-sync-button', button => button.getAttribute('aria-pressed') === 'true')) {
       await page.locator('.source-preview-scroll-sync-button').click();
     }
@@ -85,6 +92,19 @@ async function assertWindowedAlignment(page: import('puppeteer-core').Page, bund
     });
     assert.ok(await page.evaluate(() => { const scope = window as any; scope.__alignmentSampling = false; return scope.__alignmentFrames.every(Boolean); }),
       'the real split-preview alignment must keep content painted in every sampled frame');
+    const sourceSelection = await page.evaluate(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      doc.body.tabIndex = -1; doc.body.focus({ preventScroll: true });
+      return (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view.state.selection.toJSON();
+    });
+    await page.locator('[data-meo-align-viewport="source"]').click();
+    const alignedFocus = await page.evaluate(async () => {
+      for (let frame = 0; frame < 4; frame++) await new Promise(requestAnimationFrame);
+      return { previewFocused: document.activeElement === document.querySelector('.preview-frame'),
+        selection: (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view.state.selection.toJSON() };
+    });
+    assert.deepEqual(alignedFocus, { previewFocused: true, selection: sourceSelection },
+      'windowed Preview alignment retains its focus and the Source selection');
     await page.evaluate(() => {
       const scope = window as any, scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
       scroller.scrollTop = (scroller.scrollHeight - scroller.clientHeight) * 0.8;
@@ -473,6 +493,7 @@ try {
       visible: boolean;
       offset: number | null;
       scrollTop: number;
+      editorScrollTop?: number;
       width: number;
       split: boolean;
       editorVisible: boolean;
@@ -515,9 +536,11 @@ try {
         started,
         mode: document.querySelector<HTMLElement>('#app')?.dataset.mode ?? '',
         covered: document.querySelector<HTMLElement>('.editor-host')?.hasAttribute('data-preview-cover') ?? false,
-        visible: !host.hidden && getComputedStyle(host).visibility !== 'hidden',
+        visible: !host.hidden && getComputedStyle(host).visibility !== 'hidden'
+          && host.querySelector<HTMLElement>('.preview-loading')?.hidden !== false,
         offset: projection?.offset ?? null,
         scrollTop: frameDocument.scrollingElement?.scrollTop ?? 0,
+        editorScrollTop: editorScroller?.scrollTop,
         width: frame.getBoundingClientRect().width,
         split: document.querySelector('.editor-surface')?.hasAttribute('data-source-preview') ?? false,
         editorVisible: getComputedStyle(editorHost).display !== 'none'

@@ -245,7 +245,9 @@ export function createEditorFocusController({
     const editorPointer = inEditor(target);
     const preservesEditor = root.contains(target) && !isFocusTaking(target) && !isFocusTransfer(target);
     if (editorPointer || preservesEditor) {
-      const editorOwnsReturn = editorWasLastFocused || getEditor()?.hasFocus() === true;
+      const active = document.activeElement;
+      const editorOwnsReturn = !(active instanceof Element && isFocusTransfer(active))
+        && (editorWasLastFocused || getEditor()?.hasFocus() === true);
       const inputOwnsReturn = registeredInput(document.activeElement) !== null || windowReturnInput !== null;
       preservingEditorFocus = !editorPointer && editorOwnsReturn;
       if (editorPointer) {
