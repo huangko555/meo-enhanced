@@ -2113,12 +2113,17 @@ const finishSourcePreviewReveal = (): void => {
   if (!reveal || !reveal.editorReady || !reveal.previewReady) return;
   if (reveal.generation !== sourcePreviewRevealGeneration || !isSidePreviewVisible()) return;
   pendingSourcePreviewReveal = null;
-  window.requestAnimationFrame(() => {
+  window.requestAnimationFrame(async () => {
     if (reveal.generation !== sourcePreviewRevealGeneration || !isSidePreviewVisible()) return;
     previewController.refreshLayout();
     if (editor) (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
     restorePendingEditorViewportAfterPreviewExit();
     activateSourcePreviewLinkage();
+    const revealingEditor = editor;
+    // Initial linkage can queue a final source-map projection. Use the same
+    // presentation readiness gate after it, before exposing the split surface.
+    await revealingEditor?.whenVisiblePresentationReady(LIVE_PRESENTATION_REVEAL_WAIT_MS);
+    if (editor !== revealingEditor || reveal.generation !== sourcePreviewRevealGeneration || !isSidePreviewVisible()) return;
     previewController.finishLoadingPresentation();
     previewController.host.inert = false;
     previewController.host.style.removeProperty('visibility');
@@ -3234,16 +3239,18 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
         });
         (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
       }
-      if (mode === 'source' && pendingSourcePreviewReveal) {
+      const preparingAtomicSourcePreview = mode === 'source' && pendingSourcePreviewReveal !== null;
+      if (preparingAtomicSourcePreview) {
         (editor.view as typeof editor.view & { measure(flush?: boolean): void }).measure(false);
-        markSourcePreviewEditorReady();
       }
       if (
-        !previewController.host.hidden &&
+        !preparingAtomicSourcePreview && !previewController.host.hidden &&
         (mode === 'live' || (mode === 'source' && editorHost.inert))
       ) {
         await editor.whenVisiblePresentationReady(LIVE_PRESENTATION_REVEAL_WAIT_MS);
       }
+      if (!isCurrent()) return;
+      if (preparingAtomicSourcePreview) markSourcePreviewEditorReady();
       changesReviewMode = mode;
       syncGitDiffDetails();
       syncGitDiffLineHighlights();

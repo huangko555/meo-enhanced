@@ -58,8 +58,11 @@ async function exerciseInput(page: Page) {
 async function assertRichInput(page: Page, mode: 'source' | 'live', text: string, label: string, split = false) {
   if (split) {
     await page.locator('.source-preview-button').click();
-    await page.waitForFunction(() => !document.querySelector<HTMLElement>('.preview-host')?.hidden
-      && document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('table'));
+    await page.waitForFunction(() => {
+      const host = document.querySelector<HTMLElement>('.preview-host');
+      return host && !host.hidden && !host.inert && getComputedStyle(host).visibility !== 'hidden'
+        && document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('table');
+    });
     if (await page.$eval('.source-preview-scroll-sync-button', button => button.getAttribute('aria-pressed') === 'true')) {
       await page.locator('.source-preview-scroll-sync-button').click();
     }

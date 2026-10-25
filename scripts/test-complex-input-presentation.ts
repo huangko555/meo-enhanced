@@ -124,6 +124,10 @@ try {
     try {
       await page.locator('.source-preview-button').click();
       await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('[data-source-line]'));
+      await page.waitForFunction(() => {
+        const host = document.querySelector<HTMLElement>('.preview-host');
+        return host && !host.hidden && !host.inert && getComputedStyle(host).visibility !== 'hidden';
+      });
       if (await page.$eval('.source-preview-scroll-sync-button', button => button.getAttribute('aria-pressed') === 'true') !== sync) {
         await page.locator('.source-preview-scroll-sync-button').click();
       }
