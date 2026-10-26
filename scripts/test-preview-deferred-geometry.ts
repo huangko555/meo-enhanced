@@ -7,10 +7,12 @@ const build = await Bun.build({
   target: 'browser', format: 'iife'
 });
 if (!build.success) throw Error(build.logs.map(String).join('\n'));
+process.env.MEO_TEST_NATIVE_SMOOTH_SCROLLING = '1';
 const browser = await launchTestBrowser();
 try {
   for (const scenario of ['ready', 'wheel-active', 'smooth-tail', 'margin', 'gap', 'multiple', 'authored-size', 'error', 'hidden', 'replaced', 'font-increase', 'font-decrease', 'font-user-scroll', 'font-superseded', 'font-hidden', 'font-replaced']) {
     const page = await browser.newPage();
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
     const fontChange = scenario.startsWith('font-');
     const pageErrors: string[] = [];
     page.on('pageerror', error => pageErrors.push(String(error)));

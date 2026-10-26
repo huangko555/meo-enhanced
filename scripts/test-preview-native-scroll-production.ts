@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
-import { browser, server, open, frames } from './input-presentation-test-helpers';
 import { closeTestBrowser } from './browser-test-helpers';
 import { assessLargeDocument } from '../src/foundation/largeDocument';
+
+process.env.MEO_TEST_NATIVE_SMOOTH_SCROLLING = '1';
+const { browser, server, open, frames } = await import('./input-presentation-test-helpers');
 
 const prose = (count: number) => Array.from({ length: count }, (_, index) =>
   `Paragraph ${index}: ${'A stable reading witness. '.repeat(8)}\n`).join('\n');
@@ -92,7 +94,9 @@ let primary: unknown;
 try {
   for (const testCase of cases) {
     if (process.env.MEO_SCROLL_CASE && testCase.name !== process.env.MEO_SCROLL_CASE) continue;
-    const page = await browser.newPage(), host = await open(page, testCase.text, false, testCase.mode,
+    const page = await browser.newPage();
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
+    const host = await open(page, testCase.text, false, testCase.mode,
       'split' in testCase ? { beforePreviewRender: () => new Promise(resolve => setTimeout(resolve, 350)) } : {});
     try {
       const preview = testCase.mode === 'preview' || 'split' in testCase;

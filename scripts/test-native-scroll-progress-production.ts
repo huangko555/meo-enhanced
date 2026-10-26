@@ -30,6 +30,7 @@ const build = await Bun.build({
   outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js'
 });
 if (!build.success) throw new Error(build.logs.map(String).join('\n'));
+process.env.MEO_TEST_NATIVE_SMOOTH_SCROLLING = '1';
 const browser = await launchTestBrowser();
 let primaryError: unknown;
 try {
@@ -40,6 +41,7 @@ try {
     { name: 'live-table', mode: 'live', text: rich.split('\n').slice(30).join('\n'), fontSize: 14 }
   ] as const) {
     const page = await browser.newPage();
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
     try {
       await page.setViewport({ width: 1000, height: 700, deviceScaleFactor: 1 });
       await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>');

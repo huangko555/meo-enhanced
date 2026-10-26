@@ -46,6 +46,9 @@ export async function launchTestBrowser(
 
     executablePath = findBrowserExecutable();
     const args = ['--no-sandbox'];
+    // Native smooth-scroll fixtures need real intermediate frames even when
+    // the host OS disables animation. Other browser fixtures keep OS policy.
+    if (process.env.MEO_TEST_NATIVE_SMOOTH_SCROLLING === '1') args.push('--enable-smooth-scrolling');
     if (process.platform === 'win32' && path.basename(executablePath).toLowerCase() === 'msedge.exe') {
       // Edge can relaunch through the Windows compatibility layer, leaving Puppeteer watching a wrapper that exits.
       args.push('--edge-skip-compat-layer-relaunch');

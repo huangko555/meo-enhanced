@@ -322,6 +322,13 @@ to native `smooth` scrolling while retaining the trusted wheel event. It belongs
 to the regression, targeted viewport and release gates. Late-layout compensation remains
 covered by the viewport and virtual-block contracts. Full-document scroll traversal
 must reach both boundaries; a capped or stalled loop cannot report full traversal.
+Native-animation fixtures declare `MEO_TEST_NATIVE_SMOOTH_SCROLLING=1` before
+launching their isolated browser and emulate `prefers-reduced-motion: no-preference`.
+The owned browser explicitly enables native smooth scrolling: an OS reduced-motion
+preference can otherwise collapse the platform animation even after CSS media
+emulation. Keep all intermediate-frame, witness and settling assertions. This
+process-local requirement changes no system settings or other fixtures; dedicated
+reduced-motion UI cases retain their own media policy.
 `scripts/test-preview-native-scroll-production.ts` applies the same test-only
 native-animation seam to ordinary/windowed Preview, long code and lists, with
 Live/Source controls. It records actual wheel receipt, intermediate reading
