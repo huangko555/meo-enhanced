@@ -644,6 +644,28 @@ exact commands without running them.
 
 ## Native acceptance environment
 
+Before using browser-protocol pointer input in an installed Workbench, run
+`bun scripts/test-native-input-delivery.ts`. This bounded driver contract verifies
+actual press/move/release receipts, rejects an acknowledged but undelivered press,
+rejects pending/covered frames and removes its observer on failure. It runs separately
+from quick and does not establish Windows OS input coverage.
+
+For a disposable document already opened in an isolated, normally installed VS Code
+instance with its debugging port enabled, attach the same check with:
+
+```powershell
+bun scripts/test-native-input-delivery.ts --browser-url=http://127.0.0.1:9337 --heading="unique disposable heading" --selector=".target-selector" --dx=24 --output=.local/native-input-delivery.json
+```
+
+Omit `--dx` for a click. Scope the owning instance, document heading and target before
+invocation; a drag changes the target's layout. The probe selects one active content
+frame and visible outer Webview, maps coordinates through their owners, and requires
+trusted pointer receipts before advancing. Missing delivery is reported as
+`native-input-unavailable`, distinct from a later product assertion. It never retries
+the gesture and attempts release even when the press receipt times out. A CDP event
+receipt is browser-protocol evidence; it is not evidence of a physical Windows key
+or OS pointer, and this attachment check does not prove installed-package integrity.
+
 For every release, assess the changes since the last published version and choose
 the environment before starting setup. The agent owns this choice; the user does
 not need to request a VM assessment. Preserve final installed-VSIX and applicable

@@ -214,6 +214,11 @@
       "kind": "native",
       "command": "scripts/test-vscode-html-copy.cjs is loaded by scripts/test-vscode-html-copy.ps1",
       "reason": "Native extension-host entry verifies actual Ctrl+C, Host copy commands and raw source paste through the system clipboard."
+    },
+    "scripts/test-native-input-delivery.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-native-input-delivery.ts",
+      "reason": "Native acceptance driver preflight: real browser pointer receipts and negative controls; optional --browser-url attaches to an already scoped disposable Workbench. External application/OS acceptance remains separate, so this driver contract is not part of quick."
     }
   },
   "repeats": [
@@ -580,6 +585,7 @@
       "scripts/test-mode-selection-continuity.ts",
       "scripts/test-mode-transition-matrix.ts",
       "scripts/test-mode-wrapped-line-position.ts",
+      "scripts/test-native-input-delivery.ts",
       "scripts/test-native-input-fractional-viewport.ts",
       "scripts/test-native-save-table-flush.ts",
       "scripts/test-native-scroll-progress-production.ts",
@@ -607,8 +613,8 @@
       "scripts/test-preview-loading-presentation.ts",
       "scripts/test-preview-loading-reuse.ts",
       "scripts/test-preview-mermaid-runtime.ts",
-      "scripts/test-preview-navigation-continuity.ts",
       "scripts/test-preview-native-scroll-production.ts",
+      "scripts/test-preview-navigation-continuity.ts",
       "scripts/test-preview-outline-viewport-browser.ts",
       "scripts/test-preview-palette-stability.ts",
       "scripts/test-preview-preset-management-browser.ts",
