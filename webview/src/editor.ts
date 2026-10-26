@@ -2017,7 +2017,9 @@ export function createEditor({
       const wasVisible = coords !== null && coords.top + scrollDelta >= viewport.top
         && coords.bottom + scrollDelta <= viewport.bottom;
       if (wasVisible) viewportController.lockScrollTop(previousViewport.scrollTop, isCurrent);
-      else viewportController.revealPositionUntilStable(sourceTargetPosition, { y: 'center-if-outside' }, isCurrent);
+      else viewportController.revealPositionUntilStable(sourceTargetPosition, {
+        y: 'center-if-outside', retainOnLayout: true
+      }, isCurrent);
       return () => {
         if (!isCurrent()) return false;
         view.contentDOM.focus({ preventScroll: true });

@@ -675,6 +675,7 @@ export function focusHistoryChange(
       viewport.revealPositionUntilStable(selection.head, {
         geometry: 'line-block',
         marginMode: 'comfort-band',
+        retainOnLayout: true,
         y: 'nearest',
         yMargin: visualLineContextMargin(view, 2.5)
       }, () => isCurrent() && navigationIsCurrent());

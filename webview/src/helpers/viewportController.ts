@@ -195,15 +195,20 @@ interface NavigationRevealState {
   ownerGeneration: number;
   phase: NavigationRevealPhase;
   readonly isCurrent: () => boolean;
+  remeasureAfterLayout?: () => void;
+  settledScrollTop?: number;
 }
 
 interface NavigationRevealOptions {
   readonly schedule?: 'immediate' | 'next-frame';
   readonly settle?: boolean;
   readonly measuredLayout?: boolean;
+  readonly retainOnLayout?: boolean;
 }
 
 interface RevealPositionOptions {
+  /** Keep an offscreen history destination through later measured layout. */
+  readonly retainOnLayout?: boolean;
   readonly geometry?: 'caret' | 'line-block';
   readonly marginMode?: 'outside-only' | 'comfort-band';
   /** Evaluate visibility against the viewport that existed before browser auto-scroll. */
@@ -448,6 +453,12 @@ export class ViewportController {
   private pendingAsyncAnchorTransactions = 0;
   private readonly onWheel = (event: WheelEvent) => this.handleWheel(event);
   private readonly onScroll = () => {
+    for (const state of this.activeNavigationReveals) {
+      if (state.phase === 'idle' && state.settledScrollTop !== undefined &&
+        Math.abs(this.view.scrollDOM.scrollTop - state.settledScrollTop) > POSITION_EPSILON) {
+        this.retireNavigationReveal(state);
+      }
+    }
     if (this.restoreNativeScrollbarBoundary()) {
       this.projectLinkedViewport('editor');
       return;
@@ -498,6 +509,7 @@ export class ViewportController {
     if (!this.nativeInputViewport.hasOwner()) this.nativeInputViewport.capture(event.target);
   };
   private readonly onBeforeInput = (event: InputEvent) => {
+    this.clearNavigationReveals();
     this.holdLinkedPreviewAttention();
     // Composition input need not have a preceding keydown. It must still retire
     // a wheel reading anchor before the edit can change the visible layout.
@@ -558,6 +570,7 @@ export class ViewportController {
   }
 
   private invalidateViewportWork(preserveInteractionGeneration = false): void {
+    this.clearNavigationReveals();
     this.nativeScrollbarBoundary = null;
     this.nativeInputViewport.release();
     this.windowReturnCorrection = null;
@@ -2146,7 +2159,7 @@ export class ViewportController {
     this.destroyed = true;
     this.nativeInputViewport.release();
     this.windowReturnCorrection = null;
-    this.activeNavigationReveals.clear();
+    this.clearNavigationReveals();
     this.cancelElementRetention();
     this.modeTransitionChain = null;
     this.linkedPreviewEnabled = false;
@@ -2261,7 +2274,32 @@ export class ViewportController {
     else measure();
   }
 
-  /** Schedule/read are reservations; only a current non-zero write atomically adopts viewport ownership. */
+  private navigationLayoutListenerAttached = false;
+  private readonly onNavigationLayoutChange = (): void => {
+    for (const state of this.activeNavigationReveals) {
+      if (state.ownerGeneration !== this.generation || !state.isCurrent()) {
+        this.retireNavigationReveal(state);
+      } else if (state.phase === 'idle') {
+        state.remeasureAfterLayout?.();
+      }
+    }
+  };
+
+  private retireNavigationReveal(state: NavigationRevealState): void {
+    state.phase = this.destroyed ? 'disposed' : 'stale';
+    this.activeNavigationReveals.delete(state);
+    if (this.navigationLayoutListenerAttached &&
+      ![...this.activeNavigationReveals].some(reveal => reveal.remeasureAfterLayout)) {
+      this.view.scrollDOM.removeEventListener('meo-viewport-layout-change', this.onNavigationLayoutChange);
+      this.navigationLayoutListenerAttached = false;
+    }
+  }
+
+  private clearNavigationReveals(): void {
+    for (const state of this.activeNavigationReveals) this.retireNavigationReveal(state);
+  }
+
+  /** Schedule/read reserve intent; only a current non-zero write adopts viewport ownership. */
   private runNavigationReveal(
     readMeasurement: () => NavigationRevealMeasurement,
     options: NavigationRevealOptions,
@@ -2283,16 +2321,17 @@ export class ViewportController {
     let stableFrames = 0;
     const isRevealCurrent = (): boolean => (
       !this.destroyed &&
+      state.phase !== 'stale' && state.phase !== 'disposed' &&
       state.ownerGeneration === this.generation &&
       state.isCurrent()
     );
-    const finish = (): void => {
-      this.activeNavigationReveals.delete(state);
-      state.phase = this.destroyed
-        ? 'disposed'
-        : isRevealCurrent()
-          ? 'idle'
-          : 'stale';
+    const finish = (retain = false): void => {
+      if (retain && state.remeasureAfterLayout && isRevealCurrent()) {
+        state.phase = 'idle';
+        state.settledScrollTop = this.view.scrollDOM.scrollTop;
+      } else {
+        this.retireNavigationReveal(state);
+      }
     };
     const scheduleNextMeasure = (measure: () => void): void => {
       if (!isRevealCurrent()) {
@@ -2311,7 +2350,7 @@ export class ViewportController {
         stableFrames >= REQUIRED_STABLE_FRAMES ||
         attempts >= MAX_SETTLE_FRAMES
       ) {
-        finish();
+        finish(true);
         return;
       }
       // A no-op first measurement has not adopted scrolling yet. Keep its
@@ -2398,7 +2437,7 @@ export class ViewportController {
                 changedSinceFrame: false,
                 frameScheduled: false,
                 generation: state.ownerGeneration,
-                isCurrent: state.isCurrent,
+                isCurrent: options.retainOnLayout ? isRevealCurrent : state.isCurrent,
                 position: target,
                 remainingFrames: MAX_SETTLE_FRAMES,
                 stableFrames: 0
@@ -2435,6 +2474,19 @@ export class ViewportController {
       else this.view.requestMeasure(request);
     };
 
+    if (options.settle && options.retainOnLayout) {
+      state.remeasureAfterLayout = () => {
+        state.phase = 'reserved';
+        attempts = stableFrames = 0;
+        // The update listener runs at the end of CodeMirror's measure batch.
+        // Re-read its finished geometry before paint without another RAF.
+        queueMicrotask(() => measure(true));
+      };
+      if (!this.navigationLayoutListenerAttached) {
+        this.view.scrollDOM.addEventListener('meo-viewport-layout-change', this.onNavigationLayoutChange);
+        this.navigationLayoutListenerAttached = true;
+      }
+    }
     if (options.schedule === 'next-frame') scheduleNextMeasure(measure);
     else measure(options.measuredLayout);
   }
@@ -2679,6 +2731,7 @@ export class ViewportController {
 
   /** Reserves currentness for one navigation intent without disturbing the active viewport owner. */
   beginNavigationReveal(): () => boolean {
+    this.clearNavigationReveals();
     this.releaseLinkedPreviewAttention();
     this.linkedSemanticOrigin = null;
     this.nativeInputViewport.release();
@@ -2780,7 +2833,8 @@ export class ViewportController {
       originScrollTop,
       y = 'nearest',
       yMargin = 0,
-      schedule = 'immediate'
+      schedule = 'immediate',
+      retainOnLayout = false
     }: RevealPositionOptions = {},
     isCurrent: () => boolean,
     settle: boolean
@@ -2882,7 +2936,7 @@ export class ViewportController {
       return Math.abs(current.top - evaluationTop) <= POSITION_EPSILON
         ? { kind: 'stable' }
         : { kind: 'target', target: { top: evaluationTop } };
-    }, { schedule, settle }, isCurrent);
+    }, { schedule, settle, retainOnLayout }, isCurrent);
   }
 
   /** Capture background document presentation without superseding native reading. */

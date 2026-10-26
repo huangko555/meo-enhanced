@@ -1680,6 +1680,64 @@ for (const interruption of ['stale-frame', 'destroy', 'late-measure'] as const) 
     throw new Error(`A ${interruption} settled reveal wrote after invalidation: ${JSON.stringify(interruptedReveal)}`);
   }
 }
+// History can finish its finite reveal before CodeMirror's later height-map
+// measurement. Keep the target through that receipt, but yield to new intent.
+for (const initialTargetTop of [1400, 1600])
+for (const interruption of ['none', 'input', 'scroll', 'navigation', 'destroy'] as const) {
+  let targetTop = initialTargetTop;
+  const scroll = Object.assign(new FakeEventTarget(), {
+    scrollTop: 1000, scrollLeft: 0, scrollHeight: 5000, scrollWidth: 900,
+    clientHeight: 500, clientWidth: 900,
+    getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 900 })
+  });
+  const controller = new ViewportController({
+    dom: new FakeEventTarget(), scrollDOM: scroll, state: { doc: { length: 4999 } },
+    lineBlockAt: () => ({ top: targetTop, bottom: targetTop + 20, height: 20 }),
+    requestMeasure: ({ read, write }: any) => write(read())
+  } as any, { attachInteractions: false });
+  try {
+    const current = controller.beginNavigationReveal();
+    controller.revealPositionUntilStable(1600, {
+      geometry: 'line-block', marginMode: 'comfort-band', yMargin: 40,
+      retainOnLayout: true
+    }, current);
+    if (interruption === 'scroll') {
+      await Promise.resolve();
+      while ([...(controller as any).activeNavigationReveals][0]?.phase !== 'idle' && wheelFrames.length) {
+        wheelFrames.shift()?.(0);
+        await Promise.resolve();
+      }
+    } else await flushFrames(wheelFrames);
+    if (targetTop + 20 > scroll.scrollTop + 460) throw new Error('Initial history target was not revealed');
+    if (interruption === 'input') controller.markInteraction();
+    if (interruption === 'navigation') controller.beginNavigationReveal();
+    if (interruption === 'destroy') controller.destroy();
+    if (interruption === 'scroll') {
+      scroll.scrollTop -= 200;
+      (controller as any).onScroll();
+    }
+    if (interruption !== 'none' && scroll.listenerCount('meo-viewport-layout-change') !== 0) {
+      throw new Error(`History listener survived ${interruption}`);
+    }
+    // Same ordering as EditorView.measure: height-map scroll compensation,
+    // finished geometry receipt, then the browser scroll event.
+    targetTop += 260;
+    scroll.scrollTop += 70;
+    const beforeReceipt = scroll.scrollTop;
+    scroll.dispatch('meo-viewport-layout-change', {});
+    (controller as any).onScroll();
+    await Promise.resolve();
+    await flushFrames(wheelFrames);
+    if (interruption === 'none') {
+      if (targetTop + 20 > scroll.scrollTop + 460) throw new Error('Late measured history target escaped the viewport');
+    } else if (scroll.scrollTop !== beforeReceipt) {
+      throw new Error(`History retention survived ${interruption}`);
+    }
+    controller.destroy();
+    if (scroll.listenerCount('meo-viewport-layout-change') !== 0) throw new Error('History layout listener leaked');
+  } finally { controller.destroy(); }
+}
+
 const tallScrollDOM = Object.assign(new FakeEventTarget(), {
   ownerDocument: new FakeEventTarget(),
   scrollTop: 1000,

@@ -1072,6 +1072,13 @@ for the staged snapshot. A staging/content change invalidates earlier index chec
 
 ## Document-scale coverage
 
+History navigation must also survive a completed CodeMirror height-map measurement
+after its finite reveal frames have settled. `test-viewport-controller.ts` covers
+that ordering and verifies that input, user scrolling, a newer navigation and
+disposal immediately retire the old destination. Keep the full-document endurance
+history sequence and its original focus, visibility and frame bounds when fixing
+this path; increasing a global settling delay does not establish late-layout ownership.
+
 For changes to input, rendering, geometry, scrolling, focus, history, mode changes
 or asynchronous resources, record the affected behavior and its relevant scale
 paths before implementation. Extend the owning regression rather than adding an
