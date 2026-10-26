@@ -689,7 +689,7 @@
     "release:prep": "bun scripts/release-prep.mjs",
     "release:finalize": "bun scripts/release-prep.mjs finalize",
     "vscode:prepublish": "bun run build",
-    "vscode:package": "vsce package",
+    "vscode:package": "vsce package --no-dependencies",
     "vscode:publish": "vsce publish",
     "test:wiki": "bun scripts/test-wiki-paths.ts && bun scripts/test-wiki-resources.ts && bun scripts/test-wiki-production.ts && bun scripts/test-image-presentation-resource-pool.ts",
     "test:link-destinations": "bun scripts/test-link-destinations.ts && bun scripts/test-export-links.ts && bun scripts/test-link-destinations-production.ts && bun scripts/test-webview-image-src.ts && bun scripts/test-tooltips-production.ts",

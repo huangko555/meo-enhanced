@@ -1865,6 +1865,13 @@ Use the recommendation and authorization policy above before either long run.
 
 ## Release candidate evidence
 
+Package bundled output with `bun run vscode:package --out <artifact.vsix>`.
+The package script uses `--no-dependencies`, matching the VSIX content gate and
+the exclusion of `node_modules/`: runtime dependencies are bundled into `dist/`
+and `webview/dist/`. This also avoids npm dependency-tree enumeration against a
+Bun-installed development tree. Keep the prepublish build and archive/runtime
+checks; the flag does not establish that the bundles are self-contained.
+
 Before a release, compare the last published tag with the candidate commit.
 Map every user-visible change to a relevant contract or native acceptance result,
 and write release notes from that inventory. Do not describe an unconfirmed report
