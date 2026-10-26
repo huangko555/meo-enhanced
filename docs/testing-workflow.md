@@ -4,8 +4,10 @@ This repository separates fast feedback from release confidence. The normal
 repair loop stays narrow; broad and endurance runs are intentional events.
 
 For daily development, start with [the repair loop](#daily-repair-loop) and
-[document-scale coverage](#document-scale-coverage). For release execution and new-test placement, start with
-[long-running gates](#long-running-gates) and [adding or changing tests](#adding-or-changing-tests).
+[document-scale coverage](#document-scale-coverage). For release execution, start with
+[release acceptance sequence](#release-acceptance-sequence), then consult
+[long-running gates](#long-running-gates). New tests follow
+[adding or changing tests](#adding-or-changing-tests).
 After release authorization, pass the chosen disposable document to
 `bun run test:release -- <document> --confirm-long-run` when the acceptance scope
 requires the full font sweep and endurance. This keeps their complete coverage
@@ -13,6 +15,92 @@ in one report and shares identical preflight results. Final installed-VSIX
 and native desktop acceptance remain required separately for their applicable scope.
 Choose their environment using [native acceptance environment](#native-acceptance-environment)
 before preparing a host profile or VM.
+
+## Release acceptance sequence
+
+Acceptance has one executor and a recorded candidate. Keep a small ledger of
+required behaviors, commands, artifact/environment identities, results and unresolved
+failures. The ledger coordinates work; it does not replace the runner's report.
+Follow these steps when starting acceptance, resuming a failed attempt, or handing
+the candidate to another agent:
+
+1. **Scope and evidence.** Compare with the last published version, map affected
+   behaviors and scale paths to checks, and inspect prior failures before starting.
+   Reuse only evidence whose behavior, inputs, environment and artifact still match.
+   Separate setup, diagnosis, focused regression, full-gate and packaging time in
+   the estimate. An estimate for a clean run is not a deadline for fixing defects.
+2. **Prove the required environment early.** Before expensive checks, run the
+   smallest probe for each required driver capability: target identification,
+   input delivery, actual viewport changes, observation and cleanup. For installed
+   checks use a prospective VSIX and isolated normal VS Code installation. Record
+   the selected [native environment](#native-acceptance-environment) and its actual
+   capabilities. Successful enumeration, attachment or a command return is not
+   proof that a click, key, drag or OS interaction reached the intended surface.
+   If a required capability fails, record its boundary, investigate a supported
+   alternative with a specific hypothesis, and continue independent work. Repeating
+   the same failed setup or an unrelated full gate cannot clear that boundary.
+3. **Collect unknown failures once.** When coverage is broad or earlier execution
+   stopped before independent checks, use the existing authorized release runner's
+   failure census to expose those checks together. Preserve its frozen candidate
+   and every result. A valid complete passing invocation can serve as final
+   evidence; do not repeat it solely because it began as a census. Failed base
+   stages continue to block font/endurance supplements as documented below.
+4. **Concentrate repairs.** Classify failures as product behavior, fixture/driver,
+   or environment issues using observable evidence. Group common causes, reproduce
+   them with a bounded scenario, and verify repairs with affected neighbors before
+   expanding. Test input must reach the intended ready surface; deliberate cold,
+   pending-work and first-visible-frame scenarios retain their original timing.
+   A blanket delay or wait added everywhere can hide a product regression. Preserve
+   thresholds, negative controls, real gestures and intermediate-frame assertions.
+   A later green run alone does not explain an earlier failure.
+5. **Check final-gate readiness.** Every known failure has an evidenced disposition,
+   necessary fixes and affected regressions are complete, and remaining required
+   native checks have a proven execution path. Unresolved input/data-integrity
+   anomalies remain open. Record changed files, closed failures, residual gaps and
+   the exact final command before freezing a clean candidate. No required gap may
+   be waived to meet a runtime target. Finish reusable runner/flow changes now so
+   they do not invalidate an otherwise complete final run later.
+6. **Run the final complete gate and close evidence.** Use the guarded release
+   entry, including the document when full font/endurance coverage is required.
+   Avoid prepending quick or broad regression. Complete applicable installed/native
+   evidence against the same final package and verify archive/installed identities.
+   After a new failure, keep the failed report and return to concentrated diagnosis;
+   record the cause, repair, neighboring coverage and remaining unknowns before
+   authorizing the next invocation within the task's existing scope. Do not use
+   successive whole-gate attempts as the debugging loop. Conservative resume still
+   rejects changed inputs and recorded failures.
+
+Native acceptance defaults to repeatable scripts and official CLI/application
+interfaces. Computer use is an optional diagnostic or narrowly justified system
+boundary tool, not a universal prerequisite. A supported script can replace an
+interactive step only when it supplies the same behavioral evidence. Browser
+composition, application commands and actual OS input establish different scopes;
+keep that distinction in the result. An unavailable necessary OS boundary remains
+a release gap until equivalent evidence exists. VM selection and authorization
+remain governed by the native-environment policy.
+
+Keep native driver actions and observations separate: name the owning window/frame,
+record actual event target and complete press/release delivery, observe geometry
+and document effects, and restore temporary state even on failure. Check the
+observer itself with a known event before trusting absence/count assertions.
+For layout scenarios, specify the required actual viewport and behavior rather
+than depending on a driver's arbitrary outer-window size. Changing zoom or a
+window command is not evidence until measured layout satisfies the same scenario.
+
+Once a driver or focused method proves reusable, give it a documented script entry,
+bounded timeouts, explicit unsupported/failure results and cleanup; register its
+tests under the existing ownership policy. A private diagnostic passing once is
+not a reusable runner or permission to expand the acceptance matrix. Reuse a
+verified environment and install again only when candidate or relevant state
+changed. Preserve a fixed VSIX for excluded test/document-only changes only after
+checking package inputs, all archived contents and installed runtime identity,
+and recording the candidate rebinding. Such reuse does not reuse a failed gate.
+
+At handoff, report passed, failed, blocked and not-run scopes separately, including
+the reason for every remaining required gap, candidate, artifact hash and cleanup.
+Keep the latest checkpoint consistent with the actual run state. Compare total
+acceptance time and its components before claiming an improvement; a faster core
+gate or successful local repair does not establish a faster complete acceptance.
 
 `scripts/test-editor-font-wheel.ts` covers the default-enabled independent wheel
 setting, Auto-to-Custom adjustment from the displayed size, persistence/reopening,
@@ -561,11 +649,14 @@ the environment before starting setup. The agent owns this choice; the user does
 not need to request a VM assessment. Preserve final installed-VSIX and applicable
 native behavior checks regardless of the chosen environment.
 
-- **Default: isolated host acceptance.** Install the final VSIX using the official
+- **Default: scripted isolated host acceptance.** Install the final VSIX using the official
   `code` CLI with dedicated user-data and extensions directories, and use disposable
   documents outside the development checkout. Check startup and reopening after a
   normal VS Code restart, plus affected native behavior such as IME, window focus,
   save and Save As. Use the installed package, not `--extensionDevelopmentPath`.
+  Apply the capability preflight and evidence boundaries in
+  [release acceptance sequence](#release-acceptance-sequence); establishing an
+  isolated profile does not require computer use or a VM by itself.
 - **Escalate for environment risk.** Changed package contents/layout, runtime
   dependencies, installation paths, OS/VS Code requirements, or suspected reliance
   on development-machine files/settings/tools warrant a clean environment when
@@ -1825,8 +1916,10 @@ reused, never a partial mode/position sequence. Changing the selected document
 invalidates the combined plan's evidence.
 
 This first implementation deliberately does not infer which tests are unaffected
-by a code or test change. Fixing a known failure requires a fresh gate, but the
-preceding release census should already have exposed its independent siblings.
+by a code or test change. Fixing a known failure requires a fresh final gate after
+[concentrated repair and readiness](#release-acceptance-sequence), not immediately
+after each local patch. The preceding release census should already have exposed
+its independent siblings.
 Do not restore an earlier checkpoint to conceal a later failure. Do not use
 resume as an automatic flaky-test retry or as evidence from a different OS.
 
