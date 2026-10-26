@@ -54,7 +54,14 @@ try {
     outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null
   } })), text);
   await waitFor('preview mode', () => document.querySelector<HTMLElement>('.editor-root')?.dataset.mode === 'preview');
-  await waitFor('initial render', () => document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body?.textContent?.includes('After'));
+  await waitFor('initial presentation', () => {
+    const host = document.querySelector<HTMLElement>('.preview-host');
+    const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+    return doc?.body.textContent?.includes('After') && !doc.documentElement.inert
+      && host?.hidden === false && !host.inert && !host.hasAttribute('aria-busy')
+      && document.querySelector<HTMLElement>('.preview-loading')?.hidden === true
+      && !document.querySelector('.meo-preload-toolbar');
+  });
   await page.click('.preview-options-trigger');
   await page.click('[data-preview-source-coloring="false"]');
   assert.equal(await page.$eval('[data-preview-source-coloring="false"]', element => element.getAttribute('aria-pressed')), 'true');

@@ -148,6 +148,12 @@ and behavioral assertions. Do not wait directly for the expected diff-row or gut
 counts. Intentional transition-frame and pending Preview checks retain their own
 observation windows.
 
+The startup shell can disappear to expose loading feedback while the mounted
+editor remains inert. Before ordinary fixture input, require the visible,
+non-inert editor surface for the applied mode; shell removal or mounted text
+alone is insufficient. Keep cold/pending-work scenarios and their original
+input, undo, resource-budget and reading-position assertions.
+
 Document-update fixtures use strictly increasing Host revision numbers for changed
 content and verify the complete text was applied before starting another scenario.
 A captured `docChanged` message or a fixed frame delay does not establish that

@@ -93,7 +93,8 @@ try {
     }});
   });
   await page.goto(server.url.href);
-  await page.waitForSelector('.editor-wrapper:not(.meo-preload-editor-shell) .cm-editor.meo-mode-source');
+  // The shell also opens to show loading feedback; only the accepted surface can receive input.
+  await page.waitForSelector('.editor-wrapper:not(.meo-preload-editor-shell) .editor-host:not([hidden]):not([inert]):not([data-preview-cover]) .cm-editor.meo-mode-source .cm-content', { visible: true });
   assert.equal(messages.includes('requestPreviewRender'), false, 'Source startup must leave the large hidden Preview unrendered');
   stage = 'source input';
   await page.focus('.editor-host .cm-content');
