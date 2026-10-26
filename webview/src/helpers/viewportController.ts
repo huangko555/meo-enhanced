@@ -1015,10 +1015,12 @@ export class ViewportController {
         // Mounting the distant Source band can re-anchor CodeMirror after the
         // initial write. This explicit navigation settles against fresh geometry;
         // continuous linked gestures retain their single measured projection.
+        // The leader's position belongs to this click while the follower settles.
+        const previewTop = this.previewSurface.readScrollTop();
         this.runNavigationReveal(() => {
           const map = this.measureLinkedViewportMap();
           if (!map || !this.previewSurface?.readScrollTop) return { kind: 'unavailable' };
-          return { kind: 'target', target: { top: map.previewToSource(this.previewSurface.readScrollTop()) } };
+          return { kind: 'target', target: { top: map.previewToSource(previewTop) } };
         }, { settle: true }, isCurrent);
       }
       return true;
