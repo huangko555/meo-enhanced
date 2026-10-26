@@ -7,6 +7,106 @@ import { launchTestBrowser, closeTestBrowser } from './browser-test-helpers';
 
 type Fixture = { name: string; kind: 'math' | 'html' | 'code' | 'mermaid'; block: string; body: string; side?: boolean; width?: number };
 
+/** Mark each release epoch in pixels: a rAF geometry read may precede the same
+ * frame's CodeMirror write, so only its corresponding compositor PNG is visual evidence. */
+async function observeHandoffPaints(page: Page, frames: (count?: number) => Promise<unknown>) {
+  await page.evaluate(() => {
+    const view = (window as any).nativeEditor.view;
+    const witness = () => {
+      for (const line of view.contentDOM.querySelectorAll('.cm-line'))
+        if (line.textContent === 'AFTER TARGET' && !line.hasAttribute('data-handoff-witness'))
+          line.setAttribute('data-handoff-witness', '');
+    };
+    witness();
+    const observer = new MutationObserver(witness);
+    observer.observe(view.contentDOM, { childList: true, subtree: true,
+      attributes: true, attributeFilter: ['data-handoff-witness'] });
+    const epoch = document.createElement('div');
+    epoch.id = 'handoff-paint-epoch';
+    epoch.style.cssText = 'position:fixed;left:0;top:0;width:12px;height:12px;background:rgb(10,70,90);z-index:2147483647;pointer-events:none';
+    document.body.append(epoch);
+    (window as any).handoffPaintObserver = observer;
+  });
+  // Paint the geometry-neutral positive control before the deliberately pending input.
+  await frames(3);
+  const client = await page.createCDPSession();
+  const paints: string[] = [];
+  client.on('Page.screencastFrame', event => {
+    paints.push(event.data);
+    void client.send('Page.screencastFrameAck', { sessionId: event.sessionId });
+  });
+  await client.send('Page.startScreencast', { format: 'png', everyNthFrame: 1 });
+  await frames(2);
+  let expectedFrames = 0;
+  let rawTops: Array<number | null> = [];
+  return {
+    async sample(count: number) {
+      expectedFrames = count;
+      rawTops = await page.evaluate(async count => {
+        const tops: Array<number | null> = [];
+        for (let index = 0; index < count; index++) {
+          await new Promise(requestAnimationFrame);
+          const view = (window as any).nativeEditor.view;
+          const target = Array.from(view.contentDOM.querySelectorAll('.cm-line'))
+            .find((line: any) => line.textContent === 'AFTER TARGET') as HTMLElement | undefined;
+          tops.push(target?.getBoundingClientRect().top ?? null);
+          document.getElementById('handoff-paint-epoch')!.style.backgroundColor = `rgb(${20 + index * 10},70,90)`;
+        }
+        return tops;
+      }, count);
+      return rawTops;
+    },
+    async finish(label: string, beforeTop: number) {
+      try {
+        await frames(2); // Let the terminal epoch reach the compositor before stopping capture.
+        await client.send('Page.stopScreencast');
+        const samples: Array<{ epoch: number | null; top: number }> = [];
+        for (const encoded of paints) {
+          const { data, info } = await sharp(Buffer.from(encoded, 'base64')).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+          let top = -1;
+          for (let y = 0; y < info.height && top < 0; y++) {
+            let count = 0;
+            for (let x = 0; x < info.width; x++) {
+              const offset = (y * info.width + x) * info.channels;
+              if (data[offset]! > 240 && data[offset + 1]! < 20 && data[offset + 2]! > 240) count++;
+            }
+            if (count > 100) top = y;
+          }
+          const pixel = (5 * info.width + 5) * info.channels;
+          const epoch = data[pixel + 1] === 70 && data[pixel + 2] === 90
+            ? Math.round((data[pixel]! - 20) / 10) : null;
+          samples.push({ epoch, top });
+        }
+        const baseline = samples.some(sample => sample.epoch === -1 && sample.top >= 0
+          && Math.abs(sample.top - Math.round(beforeTop)) <= 2);
+        const observed = new Set(samples.map(sample => sample.epoch));
+        const complete = Array.from({ length: expectedFrames }, (_, index) => index).every(index => observed.has(index));
+        const release = samples.filter(sample => sample.epoch !== null && sample.epoch >= 0);
+        const retained = release.length > 0 && release.every(sample => sample.top >= 0
+          && Math.abs(sample.top - Math.round(beforeTop)) <= 2);
+        if (!baseline || !complete || !retained) {
+          const folder = `.local/block-editing-acceptance/${label.replaceAll('/', '-')}`;
+          fs.mkdirSync(folder, { recursive: true });
+          paints.forEach((paint, index) => fs.writeFileSync(`${folder}/${index}.png`, Buffer.from(paint, 'base64')));
+          fs.writeFileSync(`${folder}/samples.json`, JSON.stringify({ beforeTop, rawTops, samples }, null, 2));
+        }
+        assert.ok(baseline, label + ': the actual painted reading target is a visible positive control');
+        assert.ok(complete, label + ': every release epoch must have compositor evidence ' + JSON.stringify(samples));
+        assert.ok(retained, label + ': every painted release frame retains the target within 2px ' + JSON.stringify({ rawTops, samples }));
+        return paints.length;
+      } finally {
+        await client.detach();
+        await page.evaluate(() => {
+          (window as any).handoffPaintObserver.disconnect();
+          document.getElementById('handoff-paint-epoch')?.remove();
+          for (const line of document.querySelectorAll('[data-handoff-witness]')) line.removeAttribute('data-handoff-witness');
+          delete (window as any).handoffPaintObserver;
+        });
+      }
+    }
+  };
+}
+
 /** Native pointer/keyboard handoffs, including the intermediate presentation and actual painted frames. */
 async function checkBlockEditingHandoffs(page: Page,
   mount: (text: string, width: number) => Promise<void>,
@@ -102,6 +202,7 @@ async function checkBlockEditingHandoffs(page: Page,
       w.handoffSidePanel = document.querySelector('.meo-mermaid-inline-preview');
       return !!w.handoffSidePanel;
     });
+    const pointerPaint = await observeHandoffPaints(page, frames);
     // Leave immediately after real native input, while derived work may still
     // be queued. A settled, selection-only fixture misses that ownership race.
     const insertAt = body + fixture.body.length;
@@ -142,19 +243,8 @@ async function checkBlockEditingHandoffs(page: Page,
     if (sideIdentity) assert.equal(await page.evaluate(() => (window as any).handoffSidePanel ===
       document.querySelector('.meo-mermaid-inline-preview')), true, label + ': held side panel retains DOM identity');
     await page.mouse.up();
-    const releaseTops = await page.evaluate(async () => {
-      const tops: Array<number | null> = [];
-      for (let index = 0; index < 16; index++) {
-        await new Promise(requestAnimationFrame);
-        const view = (window as any).nativeEditor.view;
-        const target = Array.from(view.contentDOM.querySelectorAll<HTMLElement>('.cm-line'))
-          .find((line: any) => line.textContent === 'AFTER TARGET') as HTMLElement | undefined;
-        tops.push(target?.getBoundingClientRect().top ?? null);
-      }
-      return tops;
-    });
-    assert.ok(releaseTops.every(top => top !== null && Math.abs(top - before.top!) <= 2),
-      label + ': every release frame retains the clicked prose ' + JSON.stringify(releaseTops));
+    await pointerPaint.sample(16);
+    paintedFrames += await pointerPaint.finish(label + '/pointer', before.top!);
     const released = await snapshot();
     expectEditing(released, fixture, false, label + '/released');
     assert.ok(released.focus && released.head >= after && released.head <= after + 'AFTER TARGET'.length, label + ': clicked prose owns the caret');
@@ -171,66 +261,13 @@ async function checkBlockEditingHandoffs(page: Page,
     await select(closing);
     await center(after);
     expectEditing(await snapshot(), fixture, true, label + '/keyboard-enter');
-    if (fixture.side) {
-      await page.addStyleTag({ content: '[data-handoff-witness]{background:#ff00ff!important}' });
-      await page.evaluate(() => {
-        const view = (window as any).nativeEditor.view;
-        const witness = () => {
-          for (const line of view.contentDOM.querySelectorAll('.cm-line'))
-            if (line.textContent === 'AFTER TARGET' && !line.hasAttribute('data-handoff-witness'))
-              line.setAttribute('data-handoff-witness', '');
-        };
-        witness();
-        const observer = new MutationObserver(witness);
-        observer.observe(view.contentDOM, { childList: true, subtree: true,
-          attributes: true, attributeFilter: ['data-handoff-witness'] });
-        (window as any).handoffWitnessObserver = observer;
-      });
-      // Start recording only after the geometry-neutral witness itself has
-      // painted; an initial screencast frame may otherwise precede its style.
-      await frames(3);
-    }
-    const client = fixture.side ? await page.createCDPSession() : null;
-    const paints: string[] = [];
-    if (client) {
-      client.on('Page.screencastFrame', event => {
-        paints.push(event.data);
-        void client.send('Page.screencastFrameAck', { sessionId: event.sessionId });
-      });
-      await client.send('Page.startScreencast', { format: 'png', everyNthFrame: 1 });
-      await frames(2);
-    }
+    const keyboardTop = (await snapshot()).top;
+    const keyboardPaint = fixture.side ? await observeHandoffPaints(page, frames) : null;
     await page.keyboard.press('ArrowDown');
-    await frames(18);
-    if (client) {
-      await client.send('Page.stopScreencast');
-      const tops: number[] = [];
-      for (const encoded of paints) {
-        const { data, info } = await sharp(Buffer.from(encoded, 'base64')).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-        let top = -1;
-        for (let y = 0; y < info.height && top < 0; y++) {
-          let count = 0;
-          for (let x = 0; x < info.width; x++) {
-            const offset = (y * info.width + x) * info.channels;
-            if (data[offset]! > 240 && data[offset + 1]! < 20 && data[offset + 2]! > 240) count++;
-          }
-          if (count > 100) top = y;
-        }
-        tops.push(top);
-      }
-      if (!tops.every(top => top >= 0 && Math.abs(top - tops.at(-1)!) <= 2)) {
-        const folder = `.local/block-editing-acceptance/${profile}-${fixture.name}`;
-        fs.mkdirSync(folder, { recursive: true });
-        paints.forEach((paint, index) => fs.writeFileSync(`${folder}/${index}.png`, Buffer.from(paint, 'base64')));
-        console.log('Handoff paint diagnostic', label, await snapshot(), await page.evaluate(() =>
-          document.querySelector('[data-handoff-witness]')?.outerHTML));
-      }
-      assert.ok(tops.length >= 2 && tops.every(top => top >= 0 && Math.abs(top - tops.at(-1)!) <= 2),
-        label + ': actual painted frames never lose/displace the below-block target ' + JSON.stringify(tops));
-      paintedFrames += paints.length;
-      await client.detach();
-      await page.evaluate(() => (window as any).handoffWitnessObserver.disconnect());
-    }
+    if (keyboardPaint) {
+      await keyboardPaint.sample(18);
+      paintedFrames += await keyboardPaint.finish(label + '/keyboard', keyboardTop!);
+    } else await frames(18);
     expectEditing(await snapshot(), fixture, false, label + '/keyboard-exit');
     assert.equal(await page.evaluate(() => (window as any).nativeEditor.getText()), expectedSource,
       label + ': only the native digit changes source across handoffs');
@@ -254,7 +291,7 @@ try {
   await page.addStyleTag({ content: fs.readFileSync(path.join(katexDirectory, 'katex.min.css'), 'utf8')
     .replace(/url\((fonts\/[^)]+)\)/g, (_match, file) =>
       `url(data:font/${path.extname(file).slice(1)};base64,${fs.readFileSync(path.join(katexDirectory, file)).toString('base64')})`) });
-  await page.addStyleTag({ content: ':root{--meo-font-live:Arial;--meo-font-source:monospace;--meo-font-live-size:16px;--meo-font-source-size:14px}' });
+  await page.addStyleTag({ content: ':root{--meo-font-live:Arial;--meo-font-source:monospace;--meo-font-live-size:16px;--meo-font-source-size:14px}[data-handoff-witness]{background:#ff00ff!important}' });
   await page.addScriptTag({ content: fs.readFileSync('webview/dist/mermaid.min.js', 'utf8') });
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
   const frames = (n = 8) => page.evaluate(async n => {

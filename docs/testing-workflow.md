@@ -605,6 +605,15 @@ First-visible-content sampling excludes frames behind an opaque loading cover;
 continue sampling through cover removal and final presentation readiness, and
 retain the same geometry bounds for every frame that actually exposes content.
 
+`scripts/test-block-editing-handoffs.ts` records compositor PNGs for every pointer
+release, with a visible target and a geometry-neutral pixel marker for each of
+the original 16 sampled epochs. Side-layout keyboard exits similarly require all
+18 epochs. A rAF geometry read can precede CodeMirror's write in that same frame;
+keep those readings as diagnostics and use the corresponding painted target for
+the unchanged 2px bound. Missing epochs or an invisible target fail the check.
+Start capture before the deliberate native input, so the pending-work handoff
+remains immediate; retain held-pointer DOM, source, focus and final-position checks.
+
 For native block-action clicks, wait for `whenVisiblePresentationReady` after the
 last fixture navigation and before acquiring the final control handle. A visible
 box and `scrollend` may precede that navigation's source presentation; stale
