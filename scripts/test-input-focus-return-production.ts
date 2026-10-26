@@ -128,13 +128,18 @@ async function checkTableActivationClick(page: Page, frame: Frame): Promise<void
           if (gesture === 'cancel' || gesture === 'lostcapture' || gesture === 'blur') {
             await frame.evaluate(gesture => {
               const state = (window as any).__activationFixture;
+              state.phaseEvents = new AbortController();
+              const end = gesture === 'cancel' ? 'pointercancel' : gesture === 'lostcapture' ? 'lostpointercapture' : 'pointerup';
+              document.addEventListener(end, event => {
+                state.phase = 'between'; state.endedBy = event.type;
+              }, { capture: true, once: true, signal: state.phaseEvents.signal });
+              document.addEventListener('pointerdown', () => { state.phase = 'retry'; },
+                { capture: true, once: true, signal: state.phaseEvents.signal });
               if (gesture === 'blur') { window.dispatchEvent(new Event('blur')); window.dispatchEvent(new Event('focus')); }
               else if (gesture === 'lostcapture') state.input.closest('table').releasePointerCapture(state.pointerId);
               else state.input.closest('table').dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: state.pointerId }));
-              // Cancellation ends the first gesture. The still-accepted old
-              // cell may paint until a new trusted press starts the retry.
-              state.phase = 'between';
-              document.addEventListener('pointerdown', () => { state.phase = 'retry'; }, { capture: true, once: true });
+              // Blur/refocus retains the held gesture until its actual release.
+              // Only a matching termination may expose the accepted old cell.
             }, gesture);
           }
           await page.mouse.up();
@@ -155,13 +160,17 @@ async function checkTableActivationClick(page: Page, frame: Frame): Promise<void
           const result = await frame.evaluate(() => {
             const state = (window as any).__activationFixture;
             cancelAnimationFrame(state.raf);
+            state.phaseEvents?.abort();
             return { focused: document.activeElement === state.input, caret: state.input.selectionStart, end: state.input.selectionEnd,
               cellRange: state.input.closest('table').querySelectorAll('.meo-md-html-table-cell-selected').length,
-              samples: state.samples, scrollTop: state.scrollTop,
+              samples: state.samples, scrollTop: state.scrollTop, endedBy: state.endedBy,
               retained: state.cells.every((cell: Element) => cell.isConnected) };
           });
           const label = `${large ? 'large' : 'small'}/${crossTable ? 'cross-table' : 'same-table'}/${restore}/${gesture}`;
           const protectedSamples = result.samples.filter((sample: any) => sample.phase !== 'between');
+          if (retry) assert.equal(result.endedBy,
+            gesture === 'cancel' ? 'pointercancel' : gesture === 'lostcapture' ? 'lostpointercapture' : 'pointerup',
+            `${label}: the inter-gesture gap requires the matching termination event`);
           assert.ok(result.samples.filter((sample: any) => sample.phase === 'held').length >= 8
             && (!retry || result.samples.filter((sample: any) => sample.phase === 'retry').length >= 8)
             && protectedSamples.every((sample: any) => !sample.oldPainted),
