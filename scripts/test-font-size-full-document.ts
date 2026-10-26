@@ -135,22 +135,104 @@ try {
       : null;
     const renderedBlockLine = topRenderedBlock?.dataset.meoRenderedBlockStartLine;
     const renderedBlockClass = topRenderedBlock?.classList.contains('meo-md-html-block') ? 'meo-md-html-block' : 'meo-rendered-block-preview';
-    const previewLine = sampleMode === 'preview' ? Array.from(doc.querySelectorAll<HTMLElement>('[data-source-line]'))
-      .find((item) => item.getBoundingClientRect().bottom > bounds.top + 40) : null;
+    // Preview retains a painted character in its reading band. A block's top
+    // or height fraction names different content after text/table reflow.
+    const previewRoot = sampleMode === 'preview' ? doc.querySelector<HTMLElement>('main.meo-export-doc') : null;
+    const previewBounds = previewRoot?.getBoundingClientRect();
+    const previewY = bounds.bottom / 3;
+    const previewXs = previewBounds ? [Math.max(4, previewBounds.left + 12),
+      Math.max(4, previewBounds.left + 48), previewBounds.left + previewBounds.width / 2] : [];
+    const previewGlyph = (() => {
+      if (!previewRoot) return null;
+      for (const x of previewXs) {
+        const range = doc.caretRangeFromPoint(x, previewY), node = range?.startContainer;
+        if (!range || node?.nodeType !== Node.TEXT_NODE || !previewRoot.contains(node)
+          || node.parentElement?.closest('svg,script,style,.meo-export-mermaid:not(.is-error),.meo-preview-viewport-gap,.meo-preview-code-actions')) continue;
+        const rect = range.getBoundingClientRect();
+        if (!rect.height || rect.top < 0 || rect.bottom > bounds.bottom
+          || rect.top > previewY + 24 || rect.bottom < previewY - 24) continue;
+        const text = node as Text, block = text.parentElement!.closest<HTMLElement>('[data-source-line]');
+        const prefix = doc.createRange();
+        if (block) { prefix.selectNodeContents(block); prefix.setEnd(text, range.startOffset); }
+        return { text, value: text.data, offset: range.startOffset, block,
+          line: block?.dataset.sourceLine, endLine: block?.dataset.sourceEndLine,
+          blockText: block?.textContent, blockOffset: block ? prefix.toString().length : 0 };
+      }
+      return null;
+    })();
+    const previewAtTop = sampleMode === 'preview' && scroller.scrollTop <= .5;
+    const previewEmptyEnd = sampleMode === 'preview' && !previewGlyph
+      && scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1;
+    const previewLine = previewGlyph?.block ?? (previewRoot ? previewXs.map(x =>
+      doc.elementFromPoint(x, previewY)?.closest<HTMLElement>('[data-source-line]'))
+      .find((block): block is HTMLElement => Boolean(block && previewRoot.contains(block)
+        && !block.closest('.meo-preview-viewport-gap'))) ?? null : null);
     const previewInitialRect = previewLine?.getBoundingClientRect();
-    const previewTracksProgress = Boolean(previewInitialRect
-      && previewInitialRect.height >= bounds.bottom - bounds.top
-      && previewInitialRect.top <= bounds.top + 40
-      && previewInitialRect.bottom > bounds.top + 40);
+    const previewProgress = previewInitialRect?.height ? (previewY - previewInitialRect.top) / previewInitialRect.height : 0;
+    const previewSourceLine = previewLine?.dataset.sourceLine;
+    const previewGap = (() => {
+      if (!previewRoot || previewGlyph || previewLine || previewAtTop || previewEmptyEnd) return null;
+      if ([...doc.querySelectorAll<HTMLElement>('.meo-preview-viewport-gap')].some(gap => {
+        const rect = gap.getBoundingClientRect(); return rect.top <= previewY && rect.bottom >= previewY;
+      })) return null;
+      const painted = [...previewRoot.querySelectorAll<HTMLElement>('[data-source-line]')]
+        .filter(node => !node.closest('.meo-preview-viewport-gap'))
+        .map(node => ({ node, rect: node.getBoundingClientRect() })).filter(item => item.rect.width > 0 && item.rect.height > 0);
+      const before = painted.filter(item => item.rect.bottom <= previewY).sort((a, b) => b.rect.bottom - a.rect.bottom)[0];
+      const after = painted.filter(item => item.rect.top >= previewY).sort((a, b) => a.rect.top - b.rect.top)[0];
+      if (!before || !after || after.rect.top <= before.rect.bottom) return null;
+      const edge = (node: HTMLElement) => ({ node, line: node.dataset.sourceLine, endLine: node.dataset.sourceEndLine,
+        tag: node.tagName, text: node.textContent });
+      return { before: edge(before.node), after: edge(after.node),
+        progress: (previewY - before.rect.bottom) / (after.rect.top - before.rect.bottom) };
+    })();
     const currentTop = () => {
       if (sampleMode === 'preview') {
-        const line = previewLine?.dataset.sourceLine;
-        const item = line ? doc.querySelector<HTMLElement>(`[data-source-line="${line}"]`) : null;
+        if (previewAtTop) return scroller.scrollTop;
+        if (previewEmptyEnd) return scroller.scrollHeight - scroller.scrollTop;
+        if (previewGlyph) {
+          const currentBlock = previewGlyph.text.parentElement?.closest<HTMLElement>('[data-source-line]');
+          if (!previewGlyph.text.isConnected || previewGlyph.text.data !== previewGlyph.value
+            || currentBlock?.dataset.sourceLine !== previewGlyph.line || currentBlock?.dataset.sourceEndLine !== previewGlyph.endLine) {
+            const matches = Array.from(doc.querySelectorAll<HTMLElement>('[data-source-line]')).filter(block =>
+              block.dataset.sourceLine === previewGlyph.line && block.dataset.sourceEndLine === previewGlyph.endLine
+              && block.tagName === previewGlyph.block?.tagName && block.textContent === previewGlyph.blockText);
+            if (matches.length !== 1) return null;
+            const walker = doc.createTreeWalker(matches[0]!, NodeFilter.SHOW_TEXT);
+            let remaining = previewGlyph.blockOffset, replacement: Text | null = null;
+            while (walker.nextNode()) {
+              const text = walker.currentNode as Text;
+              if (remaining <= text.length) { replacement = text; break; }
+              remaining -= text.length;
+            }
+            if (!replacement) return null;
+            previewGlyph.text = replacement; previewGlyph.offset = remaining; previewGlyph.value = replacement.data;
+          }
+          const range = doc.createRange(); range.setStart(previewGlyph.text, previewGlyph.offset); range.collapse(true);
+          const rect = range.getBoundingClientRect();
+          return rect.height ? rect.top : null;
+        }
+        if (previewGap) {
+          const edges = [previewGap.before, previewGap.after].map(edge => {
+            if (!edge.node.isConnected || edge.node.dataset.sourceLine !== edge.line) {
+              const matches = [...doc.querySelectorAll<HTMLElement>('[data-source-line]')].filter(node =>
+                node.dataset.sourceLine === edge.line && node.dataset.sourceEndLine === edge.endLine
+                && node.tagName === edge.tag && node.textContent === edge.text);
+              if (matches.length !== 1) return null;
+              edge.node = matches[0]!;
+            }
+            return edge.node.getBoundingClientRect();
+          });
+          return edges[0] && edges[1]
+            ? edges[0].bottom + previewGap.progress * (edges[1].top - edges[0].bottom) : null;
+        }
+        const item = previewLine?.isConnected ? previewLine : Array.from(doc.querySelectorAll<HTMLElement>('[data-source-line]'))
+          .find(block => block.dataset.sourceLine === previewSourceLine && block.tagName === previewLine?.tagName);
         if (!item) return null;
         const rect = item.getBoundingClientRect();
-        return previewTracksProgress
-          ? (bounds.top + 40 - rect.top) / rect.height * (bounds.bottom - bounds.top)
-          : rect.top - bounds.top;
+        // Graphics without a text caret retain the same relative reading point,
+        // expressed in physical pixels so scroll-limit proofs use the same units.
+        return rect.top + previewProgress * rect.height;
       }
       if (table && rowIndex >= 0) {
         const currentTable = document.querySelector<HTMLElement>(`.editor-host .meo-md-html-table-shell[data-meo-rendered-block-start-line="${tableStartLine}"]`);
@@ -200,9 +282,11 @@ try {
       && item.scroll + item.top - initialTop > item.maxScroll + 1
       && item.scroll >= item.maxScroll - 1;
     const bottomConstrained = painted.some(isBottomConstrained);
-    const displacement = initialTop === null ? 0 : Math.max(...painted.map((item) => item.top === null
+    const displacement = initialTop === null ? (sampleMode === 'preview' ? 9999 : 0) : Math.max(...painted.map((item) => item.top === null
       ? 9999 : isBottomConstrained(item) ? 0 : Math.abs(item.top - initialTop)));
-    return { sourceLine: sourceLine ?? previewLine?.dataset.sourceLine, codeMirrorLineTop, placeholderLine, renderedBlockLine, tableStartLine, tableRow: rowIndex, displacement, bottomConstrained, trace };
+    return { sourceLine: sourceLine ?? previewSourceLine ?? previewGap?.before.line, codeMirrorLineTop, placeholderLine, renderedBlockLine, tableStartLine, tableRow: rowIndex,
+      witness: sampleMode !== 'preview' ? 'editor' : previewAtTop ? 'document-start' : previewEmptyEnd ? 'empty-document-end' : previewGlyph ? 'text' : previewGap ? 'whitespace' : 'graphic',
+      displacement, bottomConstrained, trace };
   }, { sampleMode: mode, delta: direction });
   for (const mode of modes) {
     if (mode !== 'live') {
@@ -212,6 +296,13 @@ try {
         await page.evaluate(() => document.querySelector<HTMLButtonElement>('.source-preview-button')!.click());
         await page.waitForFunction(() => document.querySelector('.editor-surface')?.hasAttribute('data-source-preview'));
       }
+      if (mode === 'preview') await page.waitForFunction(() => {
+        const host = document.querySelector<HTMLElement>('.preview-host');
+        const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
+        return host && !host.hidden && !host.inert && frame?.contentDocument?.documentElement.inert === false
+          && document.querySelector<HTMLElement>('.preview-loading')?.hidden === true
+          && document.querySelector<HTMLElement>('.preview-status')?.hidden === true;
+      });
     }
     for (const [positionIndex, line] of positions.entries()) {
       if (mode === 'preview') {
@@ -235,6 +326,17 @@ try {
             doc!.scrollingElement!.scrollTop += rect.top + rect.height * progress - 50;
           }
         }, line);
+        // A pending diagram's authored source is replaced by its normal SVG.
+        // Establish that reading presentation before measuring font reflow.
+        await page.waitForFunction(() => {
+          const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
+          const doc = frame?.contentDocument;
+          return doc && [...doc.querySelectorAll<HTMLElement>('.meo-export-mermaid')].every(block => {
+            const rect = block.getBoundingClientRect();
+            return rect.bottom <= 0 || rect.top >= frame!.clientHeight
+              || block.classList.contains('is-rendered') || block.classList.contains('is-error');
+          });
+        });
       } else {
         await page.evaluate((target) => (window as any).__fontTestScrollToLine(target), line);
         // CodeMirror's height map can refine long rendered blocks after the first jump.

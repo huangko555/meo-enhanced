@@ -25,16 +25,17 @@ export function capturePreviewReadingAnchor(document: Document, restore: (top: n
   const window = document.defaultView, scroll = document.scrollingElement;
   const root = document.querySelector<HTMLElement>('main.meo-export-doc');
   if (!window || !scroll || !root) return null;
-  // Presentation-only transactions sample a reading band. At the actual end,
-  // that intent is the document boundary, even when the visible tail is still
-  // an estimated gap without a painted text witness. Content edits use ratio 0
-  // and continue preserving their existing physical/semantic reading position.
+  // Presentation-only transactions sample a reading band. Font growth can add
+  // scroll space below its painted character even when the old viewport ended
+  // at the document boundary. Keep that text before falling back to an empty
+  // estimated tail. Content edits retain their ratio-0 physical/source anchor.
   const atTop = scroll.scrollTop <= .5;
-  if (viewportRatio > 0 && (atTop || scroll.scrollHeight > scroll.clientHeight
-    && scroll.scrollTop >= scroll.scrollHeight - scroll.clientHeight - 1)) {
+  const atEnd = scroll.scrollHeight > scroll.clientHeight
+    && scroll.scrollTop >= scroll.scrollHeight - scroll.clientHeight - 1;
+  if (viewportRatio > 0 && atTop) {
     return () => {
       if (!root.isConnected || root.ownerDocument !== document) return false;
-      restore(atTop ? 0 : Math.max(0, scroll.scrollHeight - scroll.clientHeight));
+      restore(0);
       return true;
     };
   }
@@ -136,6 +137,13 @@ export function capturePreviewReadingAnchor(document: Document, restore: (top: n
       };
     }
   }
+  if (viewportRatio > 0 && atEnd) {
+    return () => {
+      if (!root.isConnected || root.ownerDocument !== document) return false;
+      restore(Math.max(0, scroll.scrollHeight - scroll.clientHeight));
+      return true;
+    };
+  }
   // Blank space in a short code line or a graphic has no nearby text caret.
   // Its unchanged painted block is still an exact witness; semantic range
   // interpolation can otherwise move an idle viewport during work below it.
@@ -151,6 +159,45 @@ export function capturePreviewReadingAnchor(document: Document, restore: (top: n
         if (current.width !== rect.width || current.height !== rect.height) return false;
         const delta = current.top - rect.top;
         if (Math.abs(delta) >= 0.001) restore(scroll.scrollTop + delta);
+        return true;
+      };
+    }
+  }
+  if (!mapSourceLine && viewportRatio > 0) {
+    // A paragraph margin has no caret or source element at the reading point.
+    // Probe only the nearby painted boundaries; estimated gaps remain semantic.
+    if ([...root.querySelectorAll<HTMLElement>('.meo-preview-viewport-gap')].some(gap => {
+      const rect = gap.getBoundingClientRect(); return rect.top <= readingY && rect.bottom >= readingY;
+    })) return null;
+    let before: { node: HTMLElement; rect: DOMRect } | undefined;
+    let after: { node: HTMLElement; rect: DOMRect } | undefined;
+    for (const offset of [-24, 24, -48, 48, -72, 72]) for (const x of [left, left + 36, bounds.left + bounds.width / 2]) {
+      const node = document.elementFromPoint(x, readingY + offset)?.closest<HTMLElement>('[data-source-line]');
+      if (!node || !root.contains(node) || node.closest('.meo-preview-viewport-gap')) continue;
+      const rect = node.getBoundingClientRect();
+      if (!rect.width || !rect.height) continue;
+      if (rect.bottom <= readingY && (!before || rect.bottom > before.rect.bottom)) before = { node, rect };
+      if (rect.top >= readingY && (!after || rect.top < after.rect.top)) after = { node, rect };
+    }
+    if (before && after && after.rect.top > before.rect.bottom) {
+      const progress = (readingY - before.rect.bottom) / (after.rect.top - before.rect.bottom);
+      const snapshot = (node: HTMLElement) => ({ node, line: node.dataset.sourceLine,
+        endLine: node.dataset.sourceEndLine, text: node.textContent });
+      const previous = snapshot(before.node), next = snapshot(after.node);
+      const valid = (edge: typeof previous) => edge.node.isConnected && edge.node.ownerDocument === document
+        && root.contains(edge.node) && edge.node.dataset.sourceLine === edge.line
+        && edge.node.dataset.sourceEndLine === edge.endLine && edge.node.textContent === edge.text;
+      return () => {
+        let previousDelta: number | undefined;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          if (!valid(previous) || !valid(next)) return false;
+          const from = previous.node.getBoundingClientRect(), to = next.node.getBoundingClientRect();
+          if (!from.height || !to.height || to.top < from.bottom) return false;
+          const delta = from.bottom + progress * (to.top - from.bottom) - readingY;
+          if (Math.abs(delta) < .001 || delta === previousDelta) break;
+          previousDelta = delta;
+          restore(scroll.scrollTop + delta);
+        }
         return true;
       };
     }

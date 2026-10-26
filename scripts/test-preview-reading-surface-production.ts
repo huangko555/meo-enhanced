@@ -963,6 +963,77 @@ async function main(): Promise<void> {
       });
       assert.deepEqual(result, { restored: true, drift: 0, rejectsReflow: true, rejectsDetached: true },
         'Blank space inside an unchanged reading block must retain its physical position');
+      const endText = await anchorPage.evaluate(() => {
+        const api = window as any;
+        document.documentElement.style.paddingTop = '';
+        document.body.innerHTML = '<main class="meo-export-doc" style="font:16px/1.5 Arial"><div style="height:1000px"></div><p style="margin:0" data-source-line="1">'
+          + Array.from({ length: 80 }, (_, index) => `<span>Reading line ${index} with a stable character.</span><br>`).join('')
+          + '</p><div style="height:80px"></div></main>';
+        const scroll = document.scrollingElement!;
+        scroll.scrollTop = scroll.scrollHeight - scroll.clientHeight;
+        const point = document.caretRangeFromPoint(16, window.innerHeight / 3)!;
+        if (point.startContainer.nodeType !== Node.TEXT_NODE) throw new Error('End fixture needs painted reading text');
+        const text = point.startContainer, offset = point.startOffset, top = point.getBoundingClientRect().top;
+        const restore = api.capturePreviewReadingAnchor(document,
+          (value: number) => api.restoreFullPreviewReadingScrollTop(document, value), 1 / 3);
+        document.querySelector<HTMLElement>('main')!.style.fontSize = '20px';
+        const restored = restore?.() ?? false;
+        const current = document.createRange(); current.setStart(text, offset); current.collapse(true);
+        return { restored, drift: current.getBoundingClientRect().top - top,
+          remainingScroll: scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop };
+      });
+      assert.equal(endText.restored, true);
+      assert.ok(Math.abs(endText.drift) <= 1 && endText.remainingScroll > 20,
+        `Font growth at the document end must retain the painted reading character when scroll space exists: ${JSON.stringify(endText)}`);
+      const emptyEnd = await anchorPage.evaluate(() => {
+        const api = window as any;
+        document.documentElement.style.paddingTop = '';
+        document.body.innerHTML = '<main class="meo-export-doc"><div style="height:3000px"></div></main>';
+        const scroll = document.scrollingElement!;
+        scroll.scrollTop = scroll.scrollHeight - scroll.clientHeight;
+        const restore = api.capturePreviewReadingAnchor(document,
+          (value: number) => api.restoreFullPreviewReadingScrollTop(document, value), 1 / 3);
+        document.querySelector<HTMLElement>('main > div')!.style.height = '3500px';
+        return { restored: restore?.() ?? false,
+          deficit: scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop };
+      });
+      assert.deepEqual(emptyEnd, { restored: true, deficit: 0 },
+        'An estimated document tail without painted reading text must retain its end boundary');
+      const gapReading = await anchorPage.evaluate(() => {
+        const api = window as any;
+        document.documentElement.style.paddingTop = '';
+        document.body.innerHTML = '<main class="meo-export-doc" style="font:16px/1.5 Arial"><div style="height:1200px"></div>'
+          + '<p data-source-line="1" style="margin:0">Before the reading gap.</p>'
+          + '<h2 data-source-line="3" style="margin:4em 0 0;font:inherit">After the reading gap.</h2><div style="height:1200px"></div></main>';
+        const before = document.querySelector('p')!, after = document.querySelector('h2')!;
+        const middle = () => (before.getBoundingClientRect().bottom + after.getBoundingClientRect().top) / 2;
+        window.scrollBy(0, middle() - window.innerHeight / 3);
+        const top = middle();
+        const capture = () => api.capturePreviewReadingAnchor(document,
+          (value: number) => api.restoreFullPreviewReadingScrollTop(document, value), 1 / 3);
+        const restore = capture();
+        document.querySelector<HTMLElement>('main')!.style.fontSize = '20px';
+        const restored = restore?.() ?? false, drift = middle() - top;
+        const edited = capture(); before.textContent += ' changed';
+        const rejectsEdit = edited?.() === false;
+        const detached = capture(); after.remove();
+        return { restored, drift, rejectsEdit, rejectsDetached: detached?.() === false };
+      });
+      assert.deepEqual(gapReading, { restored: true, drift: 0, rejectsEdit: true, rejectsDetached: true },
+        'A real reading gap retains its source-backed position through font reflow and rejects changed or detached boundaries');
+      const rejectsEstimatedGap = await anchorPage.evaluate(() => {
+        const api = window as any;
+        document.documentElement.style.paddingTop = '';
+        document.body.innerHTML = '<main class="meo-export-doc" style="font:16px/1.5 Arial"><div style="height:1200px"></div>'
+          + '<p data-source-line="1" style="margin:0">Before the estimated gap.</p>'
+          + '<div class="meo-preview-viewport-gap" style="height:64px;pointer-events:none"></div>'
+          + '<h2 data-source-line="3" style="margin:0;font:inherit">After the estimated gap.</h2><div style="height:1200px"></div></main>';
+        const gap = document.querySelector<HTMLElement>('.meo-preview-viewport-gap')!;
+        window.scrollBy(0, gap.getBoundingClientRect().top + gap.offsetHeight / 2 - window.innerHeight / 3);
+        return api.capturePreviewReadingAnchor(document,
+          (value: number) => api.restoreFullPreviewReadingScrollTop(document, value), 1 / 3) === null;
+      });
+      assert.equal(rejectsEstimatedGap, true, 'Estimated viewport gaps must keep their existing semantic projection owner');
     } finally { await anchorPage.close(); }
     if (process.argv.includes('--anchor-only')) return;
     await assertPreviewProjectionTransactions(browser, path.join(temp, 'bundle.js'));

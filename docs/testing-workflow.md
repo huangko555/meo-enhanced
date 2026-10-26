@@ -1870,6 +1870,18 @@ any remaining displacement over 12 px is a failure. Track table rows by their
 captured source identity, excluding duplicated sticky-header rows, since a
 previous DOM node can be reused for a different table.
 
+Preview font sampling waits for the visible, non-inert reading surface and normal
+visible diagram presentation. It follows an immutable painted character in the
+one-third reading band; a block top or whole-table height fraction can name
+different content after reflow. Replaced text must rebind to the same unchanged
+source block. Graphics without a text caret use a relative reading point in
+physical pixels. Real paragraph whitespace uses its two painted source boundaries;
+estimated viewport gaps cannot provide this witness. The document start and an
+empty estimated tail retain their boundary. Missing witnesses fail. Keep all sampled positions, five increases and
+decreases, fourteen painted frames and the same 12 px threshold. A painted
+character at the old document end must take priority when font growth creates
+available scroll space; the no-text tail still follows its boundary.
+
 After focused fixes and review have converged, run the complete release gate before endurance. Keep browser performance and
 native endurance runs serial to avoid resource contention. Diagnose failures with
 the smallest reproducer and use the per-script census to inspect the full result,
