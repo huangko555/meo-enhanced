@@ -26,7 +26,11 @@ the candidate to another agent:
 
 1. **Scope and evidence.** Compare with the last published version, map affected
    behaviors and scale paths to checks, and inspect prior failures before starting.
-   Reuse only evidence whose behavior, inputs, environment and artifact still match.
+   Check each reusable result against product/build contents, test and shared
+   fixtures, arguments/document scale, dependencies, relevant environment and
+   complete logs. A failed report retains valid passing items when those inputs
+   still match; preserve its failed status and replace only resolved failures
+   with new applicable evidence. Commit changes or a reboot alone do not decide reuse.
    Separate setup, diagnosis, focused regression, full-gate and packaging time in
    the estimate. An estimate for a clean run is not a deadline for fixing defects.
 2. **Prove the required environment early.** Before expensive checks, run the
@@ -52,23 +56,31 @@ the candidate to another agent:
    pending-work and first-visible-frame scenarios retain their original timing.
    A blanket delay or wait added everywhere can hide a product regression. Preserve
    thresholds, negative controls, real gestures and intermediate-frame assertions.
-   A later green run alone does not explain an earlier failure.
-5. **Check final-gate readiness.** Every known failure has an evidenced disposition,
+   A later green run alone does not explain an earlier failure. Give each
+   investigation one hypothesis, a smallest discriminating action, an estimate
+   and an end condition. After two attempts yield no discriminating information,
+   stop that route, retain any blocker and continue independent required checks.
+5. **Check coverage readiness.** Every known failure has an evidenced disposition,
    necessary fixes and affected regressions are complete, and remaining required
    native checks have a proven execution path. Unresolved input/data-integrity
    anomalies remain open. Record changed files, closed failures, residual gaps and
-   the exact final command before freezing a clean candidate. No required gap may
-   be waived to meet a runtime target. Finish reusable runner/flow changes now so
-   they do not invalidate an otherwise complete final run later.
-6. **Run the final complete gate and close evidence.** Use the guarded release
-   entry, including the document when full font/endurance coverage is required.
-   Avoid prepending quick or broad regression. Complete applicable installed/native
+   the commands for remaining gaps before freezing a clean candidate. No required
+   gap may be waived to meet a runtime target. Tool generalization is separate
+   from release readiness once the required behavior has sufficient evidence.
+6. **Complete coverage and close evidence.** Run uncovered or invalidated checks
+   with their original scope and thresholds. Use the guarded complete release
+   entry when evidence cannot be shown applicable or integration risk requires it,
+   including the document for full font/endurance coverage. Otherwise summarize
+   individually verified evidence in the existing acceptance report and coverage
+   ledger, with independent review of completeness. Keep that conclusion distinct
+   from a successful complete runner invocation; preserve all original reports
+   and resume guards. Avoid prepending quick or broad regression. Complete installed/native
    evidence against the same final package and verify archive/installed identities.
    After a new failure, keep the failed report and return to concentrated diagnosis;
    record the cause, repair, neighboring coverage and remaining unknowns before
-   authorizing the next invocation within the task's existing scope. Do not use
-   successive whole-gate attempts as the debugging loop. Conservative resume still
-   rejects changed inputs and recorded failures.
+   choosing the next invocation within the task's existing scope. A whole-gate
+   rerun needs an explicit coverage or invalidation reason. Conservative resume
+   still rejects changed inputs and recorded failures.
 
 Native acceptance defaults to repeatable scripts and official CLI/application
 interfaces. Computer use is an optional diagnostic or narrowly justified system
@@ -87,14 +99,16 @@ For layout scenarios, specify the required actual viewport and behavior rather
 than depending on a driver's arbitrary outer-window size. Changing zoom or a
 window command is not evidence until measured layout satisfies the same scenario.
 
-Once a driver or focused method proves reusable, give it a documented script entry,
+When a driver or focused method is retained for reuse, give it a documented script entry,
 bounded timeouts, explicit unsupported/failure results and cleanup; register its
 tests under the existing ownership policy. A private diagnostic passing once is
 not a reusable runner or permission to expand the acceptance matrix. Reuse a
 verified environment and install again only when candidate or relevant state
 changed. Preserve a fixed VSIX for excluded test/document-only changes only after
 checking package inputs, all archived contents and installed runtime identity,
-and recording the candidate rebinding. Such reuse does not reuse a failed gate.
+and recording the candidate rebinding. Reusing applicable passing items never
+changes a failed gate's status. Use the existing report and a short coverage table;
+do not build a cache, cross-run scheduler or evidence platform for acceptance.
 
 At handoff, report passed, failed, blocked and not-run scopes separately, including
 the reason for every remaining required gap, candidate, artifact hash and cleanup.
@@ -1039,9 +1053,10 @@ environment, input/build identity, result and logs. After a change, identify wha
 invalidated that evidence and retest the affected behavior. Report failures and
 incomplete runs honestly; task IDs or passing counts alone cannot establish reuse.
 Do not stitch a failed report into a passing gate with an ad-hoc tail script.
-Focused repair results may support development completion with explicit coverage
-and failure resolution, but do not become formal release evidence. A new full
-quick run is inexpensive enough to prefer over building an incremental cache.
+Focused repair results can close the affected release scope after documented
+failure resolution and the applicability checks above; they do not convert the
+original failed report into a passed gate. A new full quick run is inexpensive
+enough to prefer over building an incremental cache.
 
 When an authorized release gate immediately follows repair, finish focused
 regressions, freeze the candidate and run release; do not prepend quick or the
@@ -1937,11 +1952,11 @@ resumable; in the combined plan only an entirely completed font script can be
 reused, never a partial mode/position sequence. Changing the selected document
 invalidates the combined plan's evidence.
 
-This first implementation deliberately does not infer which tests are unaffected
-by a code or test change. Fixing a known failure requires a fresh final gate after
-[concentrated repair and readiness](#release-acceptance-sequence), not immediately
-after each local patch. The preceding release census should already have exposed
-its independent siblings.
+The resume implementation does not infer which tests are unaffected by a code or
+test change. Its rejection leaves the separate evidence-review path in
+[release acceptance sequence](#release-acceptance-sequence) available; that path
+must verify every reused result and all remaining coverage without altering the
+runner or historical reports. A repair alone does not require a whole-gate rerun.
 Do not restore an earlier checkpoint to conceal a later failure. Do not use
 resume as an automatic flaky-test retry or as evidence from a different OS.
 
@@ -2032,10 +2047,11 @@ decreases, fourteen painted frames and the same 12 px threshold. A painted
 character at the old document end must take priority when font growth creates
 available scroll space; the no-text tail still follows its boundary.
 
-After focused fixes and review have converged, run the complete release gate before endurance. Keep browser performance and
+After focused fixes and review have converged, establish applicable complete base
+coverage before endurance using the release acceptance sequence. Keep browser performance and
 native endurance runs serial to avoid resource contention. Diagnose failures with
 the smallest reproducer and use the per-script census to inspect the full result,
-then run the required formal gate on the corrected candidate. For unchanged
+then complete the affected formal checks on the corrected candidate. For unchanged
 interrupted runs, use conservative resume above. Do not retry failures until one passes
 or lower endurance limits to obtain release evidence. A short runner preflight
 is useful during setup, but must be reported separately from the full run.
