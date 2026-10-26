@@ -431,6 +431,18 @@ and stops at its block boundary. It covers English/dark and Chinese/light with f
 editor chrome above the document. Use `--preview-viewport-only` for the focused
 regression; the default invocation retains it in the rendered and release suites.
 
+For installed Mermaid checks, confirm the source editing state before choosing a
+layout. A wide editor alone does not imply side-by-side mode: SVG readiness and
+source geometry also affect the initial layout. In a tall stacked block, the
+preview heading may be virtualized below the viewport; an absent heading does
+not prove that editing failed. Navigate to the relevant source position to mount
+its controls, explicitly select side-by-side when that is the case under test,
+then re-establish the intended reading position before checking geometry.
+When responsive layout can remount controls, obtain readiness and the observed
+width/layout/disabled state in the same DOM observation. Do not accept one node's
+state and read a replacement in a later operation. Retain the original viewport,
+block-boundary, resize, zoom and unchanged-source assertions.
+
 `scripts/test-tab-switch-reading-position.ts` checks retained Webviews with both
 offscreen parking and `visibility:hidden` inside the viewport. Geometric intersection
 alone treats the latter as visible; accepting its smaller size can let the outline
