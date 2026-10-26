@@ -625,15 +625,19 @@ async function editRendered(
   operation: Operation,
   openingLine: number
 ): Promise<void> {
-  // One native paste keeps this operation one history event, just like the
-  // other drivers' single edits. Enter and subsequent typing are separate
-  // native history groups and must not be treated as one projected edit.
-  await page.evaluate(marker => {
-    const content = (window as any).__fullUatEditor.view.contentDOM;
-    const clipboardData = new DataTransfer();
-    clipboardData.setData('text/plain', `%% ${marker}\n`);
-    content.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
-  }, operation.marker);
+  // One browser text insertion is one native history group. Preserve the
+  // literal container prefix when inserting before a nested source line.
+  const inserted = await page.evaluate(({ marker, openingLine }) => {
+    const view = (window as any).__fullUatEditor.view;
+    const selection = view.state.selection.main;
+    const line = view.state.doc.lineAt(selection.head);
+    const prefix = line.text.slice(0, selection.head - line.from);
+    if (!selection.empty || line.number !== openingLine + 1 || !/^[\s>]*$/.test(prefix)) {
+      throw new Error('Prepared Mermaid caret must be at the first literal source line');
+    }
+    return `%% ${marker}\n${prefix}`;
+  }, { marker: operation.marker, openingLine });
+  await page.keyboard.sendCharacter(inserted);
   await page.waitForFunction(marker => (window as any).__fullUatEditor.getText().includes(marker), { timeout: 30_000 }, operation.marker);
   await page.evaluate(async () => { await (window as any).__fullUatEditor.whenVisiblePresentationReady(1_200); });
   const state = await page.evaluate(() => {

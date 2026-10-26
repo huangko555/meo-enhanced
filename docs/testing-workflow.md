@@ -2067,6 +2067,9 @@ The full-document editing UAT loads the packaged Mermaid runtime and verifies
 its render entry before creating the editor. Missing renderer dependencies are
 fixture failures; an error fallback must not stand in for normal rich-document
 rendering. Keep all original input, history and painted-frame assertions.
+Mermaid endurance edits use a single browser text insertion, retaining the literal
+source container prefix and one history group. Verify input delivery and exact
+undo/redo separately from clipboard-specific and OS-input contracts.
 
 The full-document endurance runner exercises editor history and viewport
 stability; it does **not** exercise VS Code's auto-save scheduler or real disk
