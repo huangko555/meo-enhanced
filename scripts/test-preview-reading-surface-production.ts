@@ -1656,7 +1656,7 @@ async function main(): Promise<void> {
       `Preview fenced math must preserve the reading surface 0.45em spacing: ${JSON.stringify(fencedMathSpacing)}`
     );
 
-    const initialNative = await page.evaluate(() => {
+    await page.evaluate(() => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
       const doc = frame.contentDocument!;
       const paragraph = Array.from(doc.querySelectorAll<HTMLParagraphElement>('p'))
@@ -1667,6 +1667,29 @@ async function main(): Promise<void> {
       before.style.cssText = after.style.cssText = 'display:inline-block;width:0;height:0;padding:0;margin:0;border:0;';
       root.before(before);
       root.after(after);
+    });
+    // Installing baseline markers can queue a geometry correction even without
+    // a viewport change. Finish that preparation before the resize baseline.
+    await page.evaluate(async () => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      await doc.fonts.ready;
+      let previous = '', stable = 0;
+      for (let frame = 0; frame < 30; frame++) {
+        await new Promise(requestAnimationFrame);
+        const signature = [doc.scrollingElement!.scrollTop, doc.documentElement.style.paddingTop,
+          doc.querySelector<HTMLElement>('.meo-export-doc')!.getBoundingClientRect().height].join(':');
+        stable = signature === previous ? stable + 1 : 0;
+        if (stable >= 3) return;
+        previous = signature;
+      }
+      throw new Error('Native math baseline preparation did not settle');
+    });
+    const initialNative = await page.evaluate(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const paragraph = Array.from(doc.querySelectorAll<HTMLParagraphElement>('p'))
+        .find(candidate => candidate.textContent?.includes('Medium prefix'))!;
+      const root = paragraph.querySelector<HTMLElement>('.meo-export-math-inline')!;
+      const before = root.previousElementSibling!, after = root.nextElementSibling!;
       return {
         html: root.innerHTML,
         className: root.className,
