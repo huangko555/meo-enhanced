@@ -620,6 +620,13 @@ policy. Replacing a fixture document can schedule its own policy reconfiguration
 keep the original state, DOM, viewport and color assertions around the isolated
 CSS operation. Pending-input and cold-start cases retain their unfinished work.
 
+For split-preview continuity, require the colored code target to intersect the
+iframe viewport before editing; cached offscreen tokens do not establish that
+navigation has completed. Compare a follower with its pre-gesture position so
+an old nonzero offset cannot acknowledge a new wheel. Transition waits use the
+same loading-cover, inert and visibility conditions as their frame sampler,
+which continues from before the action through the first visible presentation.
+
 For native block-action clicks, wait for `whenVisiblePresentationReady` after the
 last fixture navigation and before acquiring the final control handle. A visible
 box and `scrollend` may precede that navigation's source presentation; stale

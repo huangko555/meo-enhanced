@@ -477,8 +477,11 @@ try {
       const surface = document.querySelector<HTMLElement>('.editor-surface');
       const preview = document.querySelector<HTMLElement>('.preview-host');
       const editor = document.querySelector<HTMLElement>('.editor-host');
+      const frame = preview?.querySelector<HTMLIFrameElement>('.preview-frame');
       if (app?.dataset.mode !== expectedMode || !surface || !preview || !editor
-        || preview.hidden || getComputedStyle(preview).visibility === 'hidden') return false;
+        || preview.hidden || preview.inert || getComputedStyle(preview).visibility === 'hidden'
+        || preview.querySelector<HTMLElement>('.preview-loading')?.hidden === false
+        || frame?.contentDocument?.documentElement.inert !== false) return false;
       return expectedMode === 'source'
         ? surface.hasAttribute('data-source-preview') && !surface.hasAttribute('data-source-preview-preparing')
           && !editor.hidden && !editor.inert
@@ -789,7 +792,11 @@ try {
     const code = Array.from(frameDocument?.querySelectorAll<HTMLElement>('code.hljs') ?? [])
       .find(candidate => candidate.textContent?.includes('previewHighlight'));
     const sources = Array.from(code?.querySelectorAll<HTMLElement>('.meo-export-code-line-source') ?? []);
-    return sources.length > 0 && sources.every(source => source.dataset.meoShiki && source.querySelector('span[style*="color"]'));
+    // Cached offscreen colors can precede the linked navigation's completion.
+    // Establish a painted reading target before testing update-color continuity.
+    const bounds = code?.getBoundingClientRect();
+    return bounds && bounds.bottom > 0 && bounds.top < frameDocument!.documentElement.clientHeight
+      && sources.length > 0 && sources.every(source => source.dataset.meoShiki && source.querySelector('span[style*="color"]'));
   }, { timeout: 10000 });
   await page.evaluate(() => {
     const samples: Array<{ text: string; highlighted: boolean }> = [];
@@ -917,13 +924,15 @@ try {
   // an actual reading gesture, rather than a synthetic post-edit scroll write.
   const linkedScrollPoint = await page.$eval('.cm-scroller', element => {
     const rect = element.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    const previewTop = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop;
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, previewTop };
   });
   await page.mouse.move(linkedScrollPoint.x, linkedScrollPoint.y);
   await page.mouse.wheel({ deltaY: 1800 });
-  await page.waitForFunction(() => (
-    (document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.scrollingElement?.scrollTop ?? 0) > 200
-  ));
+  await page.waitForFunction(previousTop => {
+    const top = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.scrollingElement?.scrollTop ?? 0;
+    return top > 200 && Math.abs(top - previousTop) > 1;
+  }, {}, linkedScrollPoint.previewTop);
 
   const refreshScrollTop = await page.$eval('.cm-scroller', element => element.scrollTop);
   await page.evaluate(() => {
