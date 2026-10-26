@@ -415,6 +415,17 @@ try {
       view.dispatch({changes: {from: 0, to: view.state.doc.length, insert: text}, selection: {anchor: 10}, scrollIntoView: true});
     }, fixture + (large ? '\n\n' + 'A plain paragraph for the large document color projection.\n\n'.repeat(5000) : ''));
     await page.waitForSelector('.meo-md-link');
+    // Isolate the CSS operation from the preceding document's async parsing
+    // and latched large-document policy reconfiguration.
+    await page.waitForFunction(large => {
+      const harness = (window as any).EditingSettingsHarness;
+      const view = harness.EditorView.findFromDOM(document.querySelector('.cm-editor'));
+      return (!large || (harness.usesLargeDocumentDerivedWorkBudget(view.state)
+        && !view.plugin(harness.sourceSyntaxPreparation)))
+        && harness.isLiveInputDerivedWorkReady(view.state)
+        && !harness.isLiveInputDerivedWorkPending(view.state)
+        && !harness.syntaxParserRunning(view);
+    }, { timeout: 10000 }, large);
     const stable = await page.evaluate(async () => {
       const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
       await frame(); await frame();

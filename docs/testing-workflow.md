@@ -614,6 +614,12 @@ the unchanged 2px bound. Missing epochs or an invisible target fail the check.
 Start capture before the deliberate native input, so the pending-work handoff
 remains immediate; retain held-pointer DOM, source, focus and final-position checks.
 
+For an appearance-only operation's `EditorState` identity check, first await the
+current document's derived-work readiness, parser idle and expected large-document
+policy. Replacing a fixture document can schedule its own policy reconfiguration;
+keep the original state, DOM, viewport and color assertions around the isolated
+CSS operation. Pending-input and cold-start cases retain their unfinished work.
+
 For native block-action clicks, wait for `whenVisiblePresentationReady` after the
 last fixture navigation and before acquiring the final control handle. A visible
 box and `scrollend` may precede that navigation's source presentation; stale
