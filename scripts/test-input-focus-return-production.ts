@@ -89,7 +89,7 @@ async function checkTableActivationClick(page: Page, frame: Frame): Promise<void
             const range = document.createRange(); range.setStart(node, 2); range.setEnd(node, 3);
             const rect = range.getBoundingClientRect();
             (window as any).__activationFixture = { oldInput, input: target.querySelector('textarea'), cells,
-              scrollTop: document.querySelector('.cm-scroller')!.scrollTop, samples: [] };
+              scrollTop: document.querySelector('.cm-scroller')!.scrollTop, samples: [], phase: 'held' };
             document.addEventListener('pointerdown', event => {
               (window as any).__activationFixture.pointerId = event.pointerId;
             }, { capture: true, once: true });
@@ -117,7 +117,7 @@ async function checkTableActivationClick(page: Page, frame: Frame): Promise<void
             window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
             state.sample = () => {
               const outline = getComputedStyle(state.cells[0], '::after');
-              state.samples.push({ oldPainted: document.activeElement === state.oldInput
+              state.samples.push({ phase: state.phase, oldPainted: document.activeElement === state.oldInput
                 && outline.visibility !== 'hidden' && outline.boxShadow !== 'none', scrollTop: view.scrollDOM.scrollTop,
                 text: document.getSelection()?.toString() ?? '' });
               state.raf = requestAnimationFrame(state.sample);
@@ -131,6 +131,10 @@ async function checkTableActivationClick(page: Page, frame: Frame): Promise<void
               if (gesture === 'blur') { window.dispatchEvent(new Event('blur')); window.dispatchEvent(new Event('focus')); }
               else if (gesture === 'lostcapture') state.input.closest('table').releasePointerCapture(state.pointerId);
               else state.input.closest('table').dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: state.pointerId }));
+              // Cancellation ends the first gesture. The still-accepted old
+              // cell may paint until a new trusted press starts the retry.
+              state.phase = 'between';
+              document.addEventListener('pointerdown', () => { state.phase = 'retry'; }, { capture: true, once: true });
             }, gesture);
           }
           await page.mouse.up();
@@ -142,7 +146,11 @@ async function checkTableActivationClick(page: Page, frame: Frame): Promise<void
               window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } }));
             });
           }
-          if (gesture === 'cancel' || gesture === 'lostcapture' || gesture === 'blur') await page.mouse.click(bounds.x + point.x, bounds.y + point.y);
+          const retry = gesture === 'cancel' || gesture === 'lostcapture' || gesture === 'blur';
+          if (retry) {
+            await settle(frame, 1);
+            await page.mouse.click(bounds.x + point.x, bounds.y + point.y);
+          }
           await settle(frame, 8);
           const result = await frame.evaluate(() => {
             const state = (window as any).__activationFixture;
@@ -153,7 +161,10 @@ async function checkTableActivationClick(page: Page, frame: Frame): Promise<void
               retained: state.cells.every((cell: Element) => cell.isConnected) };
           });
           const label = `${large ? 'large' : 'small'}/${crossTable ? 'cross-table' : 'same-table'}/${restore}/${gesture}`;
-          assert.ok(result.samples.length >= 8 && result.samples.every((sample: any) => !sample.oldPainted),
+          const protectedSamples = result.samples.filter((sample: any) => sample.phase !== 'between');
+          assert.ok(result.samples.filter((sample: any) => sample.phase === 'held').length >= 8
+            && (!retry || result.samples.filter((sample: any) => sample.phase === 'retry').length >= 8)
+            && protectedSamples.every((sample: any) => !sample.oldPainted),
             `${label}: native activation repainted the old cell outline: ${JSON.stringify(result)}`);
           assert.ok(gesture === 'cells' ? result.cellRange === 2 : result.focused && result.caret === 3 && result.end === (gesture === 'drag' ? 8 : 3),
             `${label}: the new text click lost its caret: ${JSON.stringify(result)}`);

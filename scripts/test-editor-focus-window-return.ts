@@ -207,6 +207,56 @@ try {
   });
   assert.deepEqual(previewToolbar, {calls: 0, focused: true, prevented: false},
     'toolbar borrowing cannot restore stale editor ownership over a focused Preview iframe');
+  // VS Code forwards unconsumed Ctrl+A and later echoes a native selectAll.
+  // Hold that reply until two new characters exist, as in the native failure.
+  for (const tag of ['input', 'textarea']) {
+    await frame.evaluate(tag => {
+      const scope = window as any, input = document.createElement(tag) as HTMLInputElement | HTMLTextAreaElement;
+      input.id = 'select-all-target'; input.value = 'previous query'; document.getElementById('app')!.append(input);
+      const unregister = scope.fixture.controller.registerInput(input);
+      const platform = Object.getOwnPropertyDescriptor(navigator, 'platform');
+      Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+      const state = scope.selectAllState = { forwarded: 0, inputs: 0, pending: false };
+      const forward = (event: KeyboardEvent) => {
+        if (event.target === input && event.ctrlKey && event.key.toLowerCase() === 'a') {
+          state.forwarded++; state.pending = true;
+        }
+      };
+      const receive = () => {
+        if (++state.inputs === 2 && state.pending) queueMicrotask(() => document.execCommand('selectAll'));
+      };
+      window.addEventListener('keydown', forward);
+      input.addEventListener('input', receive);
+      scope.cleanupSelectAll = () => {
+        window.removeEventListener('keydown', forward); input.removeEventListener('input', receive);
+        unregister(); input.remove();
+        if (platform) Object.defineProperty(navigator, 'platform', platform); else delete (navigator as any).platform;
+      };
+    }, tag);
+    try {
+      await frame.focus('#select-all-target');
+      await page.keyboard.down('Control'); await page.keyboard.press('a'); await page.keyboard.up('Control');
+      await page.keyboard.type('N89[Stage 89]', { delay: 10 });
+      const result = await frame.evaluate(() => ({ value: (document.getElementById('select-all-target') as HTMLInputElement).value,
+        forwarded: (window as any).selectAllState.forwarded }));
+      assert.deepEqual(result, { value: 'N89[Stage 89]', forwarded: 0 }, 'An echoed native selectAll must not erase a new input prefix');
+      const ignored = await frame.evaluate(() => {
+        const input = document.getElementById('select-all-target') as HTMLInputElement;
+        const send = (options: KeyboardEventInit) => {
+          const event = new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', ctrlKey: true, bubbles: true, cancelable: true, ...options });
+          input.dispatchEvent(event); return event.defaultPrevented;
+        };
+        const composing = send({ isComposing: true }), shifted = send({ shiftKey: true });
+        input.readOnly = true; const readonly = send({}); input.readOnly = false;
+        const external = document.createElement('input'); document.getElementById('app')!.append(external);
+        const event = new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true });
+        external.dispatchEvent(event); external.remove();
+        return { composing, shifted, readonly, unregistered: event.defaultPrevented };
+      });
+      assert.deepEqual(ignored, { composing: false, shifted: false, readonly: false, unregistered: false },
+        'Native select-all ownership must leave other shortcuts, composition and unowned inputs alone');
+    } finally { await frame.evaluate(() => (window as any).cleanupSelectAll()); }
+  }
   const disposed = await frame.evaluate(() => {
     const {controller} = (window as any).fixture;
     const input = document.getElementById('registered') as HTMLInputElement;

@@ -397,6 +397,18 @@ export function createEditorFocusController({
       return;
     }
     if (!['Alt', 'Control', 'Meta', 'Shift'].includes(event.key)) onInputCapture(event);
+    const input = registeredInput(event.target);
+    if (navigator.platform.startsWith('Win') && input && !input.disabled && !input.readOnly
+      && input.selectionStart !== null && event.key.toLowerCase() === 'a'
+      && event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey
+      && !event.isComposing && event.keyCode !== 229) {
+      // VS Code otherwise forwards Ctrl+A and echoes selectAll after the
+      // browser's native selection, potentially selecting freshly typed text.
+      event.preventDefault();
+      event.stopPropagation();
+      input.select();
+      captureInput(input);
+    }
   };
   const onKeyDownBubble = (event: KeyboardEvent): void => {
     if (event.key === 'Escape') onClick();

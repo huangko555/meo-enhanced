@@ -907,6 +907,11 @@ text clicks, text and multi-cell drags, pointer cancellation/lost capture, repea
 pending cell input. It replays a late native input/contenteditable focus and Host
 hint during a trusted held pointer, sampling the old outline, visible selection,
 cell identity and viewport before release as well as the final exact caret.
+For cancellation, lost capture and window blur, the first gesture's paint guard
+ends at its matching termination. Record the gap before an explicit retry as
+a separate phase: the still-accepted old cell may paint there. Require at least
+eight protected samples during the held gesture and eight after the retry's
+trusted pointerdown; retain source, cell identity and viewport checks in all phases.
 Keyboard return to the original cell, native same-cell clicks, the first key and
 Undo retain their separate ownership. `--only=table-activation` narrows this loop.
 `--only=table-boundaries` isolates native same-cell and body-to-cell return,
@@ -926,6 +931,15 @@ input invalidation, modal ownership and disposal. Unregistered chrome subtrees
 must preserve either the document or a registered input across a complete
 activation press, without adding location-specific handlers. Browser evidence does not
 replace native Windows Alt+Tab or Workbench menu validation.
+
+On Windows, registered chrome inputs consume their native Ctrl+A selection in
+the existing focus owner. VS Code otherwise forwards the key and may echo a
+second native selectAll after new text has arrived. The window-return contract
+holds that Host reply until two characters are typed, then verifies complete
+input/textarea values and no forwarded duplicate. Keep readonly/unregistered
+inputs, composition and other shortcuts outside that ownership. Native validation
+also records field identity, value/range and selection timing when diagnosing a
+prefix overwrite; a final-value retry alone cannot distinguish this race.
 
 `scripts/test-preview-navigation-continuity.ts` exercises the production Webview
 with real Preview rendering. Outline jumps, keyboard fragment links and return
