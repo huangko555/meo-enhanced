@@ -14,7 +14,16 @@ const text = [
   ...Array.from({ length: 300 }, (_, n) => `After reading line ${n + 1}`)
 ].join('\n');
 const build = await Bun.build({ entrypoints: ['scripts/test-long-document-scroll-entry.ts'],
-  outdir: temp, naming: 'bundle.js', target: 'browser', format: 'iife' });
+  outdir: temp, naming: 'bundle.js', target: 'browser', format: 'iife',
+  plugins: [{ name: 'save-as-destination-presentation-barrier', setup(builder) {
+    builder.onLoad({ filter: /webview[\\/]src[\\/]index\.ts$/ }, async ({ path: file }) => {
+      const source = fs.readFileSync(file, 'utf8').replaceAll('\r\n', '\n');
+      const anchor = '            await editor?.whenVisiblePresentationReady(LIVE_PRESENTATION_REVEAL_WAIT_MS);';
+      assert.equal(source.split(anchor).length, 2);
+      return { loader: 'ts', contents: source.replace(anchor,
+        '            if ((globalThis as any).__saveAsPresentationGate) await (globalThis as any).__saveAsPresentationGate;\n' + anchor) };
+    });
+  } }] });
 if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 async function frames(page: Page, count: number) {
   await page.evaluate(async count => { for (let n = 0; n < count; n++) await new Promise(requestAnimationFrame); }, count);
@@ -31,13 +40,27 @@ try {
       fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, largeDocumentOptimizationEnabled: true,
       restoreReadingPositionOnOpen: memoryEnabled, readingPositionRestore: null,
       findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null };
-    const createPage = async (data: Record<string, unknown>) => {
+    const createPage = async (data: Record<string, unknown>, holdPresentation = false) => {
       const page = await browser.newPage();
       if (process.argv.includes('--slow-renderer')) await page.emulateCPUThrottling(4);
       await page.setViewport({ width: 900, height: 650 });
       await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>');
       await page.addStyleTag({ path: 'webview/src/styles.css' });
-      await page.addScriptTag({ content: 'window.__messages=[];window.acquireVsCodeApi=()=>({postMessage(m){window.__messages.push(m)},getState(){},setState(){}});' });
+      await page.evaluate(({ text, hold }) => {
+        const scope = window as any;
+        scope.__messages = []; scope.__hostText = text; scope.__hostVersion = 1;
+        if (hold) scope.__saveAsPresentationGate = new Promise(resolve => { scope.__releaseSaveAsPresentation = resolve; });
+        scope.acquireVsCodeApi = () => ({ postMessage(message: any) {
+          scope.__messages.push(message);
+          if (message.type === 'applyChanges') {
+            if (message.baseVersion !== scope.__hostVersion) throw Error('Unexpected fixture Host version');
+            for (const change of [...message.changes].sort((a, b) => b.from - a.from))
+              scope.__hostText = scope.__hostText.slice(0, change.from) + change.insert + scope.__hostText.slice(change.to);
+            const version = ++scope.__hostVersion;
+            queueMicrotask(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'applied', version } })));
+          }
+        }, getState() {}, setState() {} });
+      }, { text: data.text, hold: holdPresentation });
       await page.addScriptTag({ path: path.join(temp, 'bundle.js') });
       await page.evaluate(data => {
         const inspect = () => {
@@ -57,6 +80,15 @@ try {
         window.dispatchEvent(new MessageEvent('message', { data }));
       }, data);
       await page.waitForSelector('.editor-wrapper:not(.meo-preload-editor-shell) .cm-content');
+      if (holdPresentation) await page.evaluate(() => {
+        if (!document.querySelector<HTMLElement>('.editor-host')?.inert) throw Error('Expected actual covered Source presentation');
+        setTimeout(() => (window as any).__releaseSaveAsPresentation(), 80);
+      });
+      await page.waitForFunction(() => {
+        const host = document.querySelector<HTMLElement>('.editor-host');
+        return host?.hidden === false && !host.inert && !host.hasAttribute('aria-busy')
+          && document.querySelector<HTMLElement>('.editor-loading')?.hidden !== false;
+      });
       return page;
     };
     const original = await createPage(init);
@@ -90,6 +122,24 @@ try {
     assert.deepEqual({ anchor: result.anchor, head: result.head }, state.selection);
     console.log(`${mode}, opening memory ${memoryEnabled}: Save As snapshot, first visible frame and settled position passed`);
     await original.close(); await destination.close();
+    if (mode === 'source' && !memoryEnabled) {
+      const baseline = '# Save As input\n\nBefore paragraph.\n\nAfter paragraph. SAVE_AS_SOURCE';
+      const pending = await createPage({ ...init, text: baseline, documentId: 'file:///pending-copy.md',
+        savedRevision: { version: 1, text: baseline }, saveAsViewState: { mode: 'source', position: { line: 5, lineOffset: 0 },
+          selection: { anchor: baseline.length, head: baseline.length } } }, true);
+      await pending.click('.editor-host .cm-content .cm-line:last-child');
+      await pending.keyboard.down('Control'); await pending.keyboard.press('End'); await pending.keyboard.up('Control');
+      await pending.keyboard.type(' FOCUS_CHANGE', { delay: 10 });
+      await frames(pending, 4);
+      const input = await pending.evaluate(() => {
+        const scope = window as any;
+        const view = scope.LongDocumentScrollHarness.EditorView.findFromDOM(document.querySelector('.editor-host > .cm-editor'));
+        return { host: scope.__hostText, text: view.state.doc.toString() };
+      });
+      assert.equal(input.text, baseline + ' FOCUS_CHANGE', 'The first input after Save As must reach the accepted Source');
+      assert.equal(input.host, input.text, 'The first input must reach the protocol Host exactly');
+      await pending.close();
+    }
   }
 } catch (error) { primaryError = error; }
 finally {

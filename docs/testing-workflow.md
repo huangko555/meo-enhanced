@@ -48,7 +48,11 @@ the candidate to another agent:
    failure census to expose those checks together. Preserve its frozen candidate
    and every result. A valid complete passing invocation can serve as final
    evidence; do not repeat it solely because it began as a census. Failed base
-   stages continue to block font/endurance supplements as documented below.
+   stages continue to block font/endurance supplements in that combined runner
+   as documented below. This is an execution guard, not a dependency claim for
+   every independent check: an authorized independent requirement may proceed
+   once its real prerequisites are confirmed. Preserve the failed report and
+   the runner guard; do not use another entry to disguise that run as passed.
 4. **Concentrate repairs.** Classify failures as product behavior, fixture/driver,
    or environment issues using observable evidence. Group common causes, reproduce
    them with a bounded scenario, and verify repairs with affected neighbors before
@@ -90,6 +94,20 @@ composition, application commands and actual OS input establish different scopes
 keep that distinction in the result. An unavailable necessary OS boundary remains
 a release gap until equivalent evidence exists. VM selection and authorization
 remain governed by the native-environment policy.
+
+Cancelling computer use pauses the cancelled operation. Do not resume it through
+another interface or driver without renewed authorization. Continue other
+independent work already authorized by the task; cancellation is not a request
+to stop the entire acceptance or to restart/unlock the user's desktop.
+
+Save As destination input requires the active, visible frame and an exposed,
+interactive editor. A removed preload toolbar and existing text are insufficient:
+the delayed loading shell can be visible while its editor remains inert.
+`test-save-as-view-state-browser.ts` holds that existing presentation boundary and
+checks immediate first input and exact protocol Host text after readiness. Keep
+the unready/ready contrast and native Host/disk assertions; do not mask lost first
+characters with a fixed quiet wait or retransmission. A controlled fixture defect
+does not retrospectively identify an unrecorded native failure's unique cause.
 
 Keep native driver actions and observations separate: name the owning window/frame,
 record actual event target and complete press/release delivery, observe geometry
