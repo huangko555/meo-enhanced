@@ -3214,7 +3214,12 @@ export function createPreviewController({
     if (!source) return;
     if (source.exact) {
       const lineSpan = Math.max(1, source.exact.end - source.exact.start + 1);
-      const ratio = Math.max(0, Math.min(1, (line - source.exact.start) / lineSpan));
+      // Linked Source scrolling supplies fractional progress through its line.
+      // Scale that fraction into the rendered block instead of carrying Source
+      // pixels into a potentially much shorter Preview block.
+      const progress = sourceRange?.startLine === line && sourceRange.endLine === line
+        ? sourceRange.progress : 0;
+      const ratio = Math.max(0, Math.min(1, (line - source.exact.start + progress) / lineSpan));
       scrollElement.scrollTop = source.exact.top
         + (source.exact.bottom - source.exact.top) * ratio
         + Math.max(0, lineOffset)

@@ -3258,7 +3258,7 @@ for (const interpolatedWhitespace of [undefined, true]) {
       const line = doc.lineAt(position);
       return { from: line.from, top: (line.number - 1) * 20, bottom: line.number * 20 };
     },
-    lineBlockAtHeight: () => ({ from: doc.line(16).from, top: 300 })
+    lineBlockAtHeight: () => ({ from: doc.line(16).from, to: doc.line(16).to, top: 300, bottom: 320 })
   };
   const controller = new ViewportController(view as any, { attachInteractions: false, previewSurface: {
     readScrollTop: () => 500, writeScrollTop: () => { pixelWrites++; },
@@ -3311,7 +3311,7 @@ for (const [insert, removed, expectedLine] of [['x', 0, 3], ['x\n', 0, 4], ['', 
   const controller = new ViewportController({
     dom: {}, scrollDOM: scroller, state: { doc },
     lineBlockAtHeight: (height: number) => { const line = doc.line(Math.floor(height / 20) + 1);
-      return { from: line.from, top: Math.floor(height / 20) * 20 }; }
+      return { from: line.from, to: line.to, top: Math.floor(height / 20) * 20, bottom: (Math.floor(height / 20) + 1) * 20 }; }
   } as any, { attachInteractions: false, getMode: () => 'source', previewSurface: {
     captureTopVisiblePosition: () => null,
     captureLinkedGeometry: () => null,

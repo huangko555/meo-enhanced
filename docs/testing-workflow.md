@@ -1014,6 +1014,13 @@ and distant navigation, and bounds mounted DOM through every preset. The ordinar
 variant belongs to regression; both variants belong to targeted appearance/viewport and
 the preview-preset acceptance pack. Pixel scroll offsets alone cannot pass this check.
 
+The Source side Preview contract also pairs ordinary and windowed documents with
+a compressed multiline HTML block. Trusted 7px Source wheels in both directions
+sample every animation frame through gesture settlement, rejecting follower
+rebound while preserving Source text, selection and horizontal position. It
+asserts both the production windowing assessment and actual window requests;
+coarse wheels alone can skip the faulty line boundaries.
+
 `scripts/test-preview-shortcuts-production.ts` checks trusted keyboard input in
 full and side Preview, including live binding changes, Save's emitted revision,
 Find/Replace and mode switching from text and margins. Native selection, copy,

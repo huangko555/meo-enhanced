@@ -1268,7 +1268,7 @@ export class ViewportController {
       }
       const sourcePosition = reference
         ? this.captureLinkedSourcePosition(position.source + reference.sourceOffset, reference.previewOffset)
-        : this.getTopVisiblePosition();
+        : this.captureLinkedSourcePosition(position.source, 0);
       this.previewSurface.restoreTopVisiblePosition(sourcePosition, () => (
         !this.destroyed && this.linkedPreviewEnabled &&
         semanticGeneration === this.linkedProjectionGeneration && this.linkedViewportDriver === 'editor'
@@ -1329,7 +1329,7 @@ export class ViewportController {
   }
 
   private captureLinkedSourcePosition(height: number, viewportOffset: number) {
-    const block = this.view.lineBlockAtHeight(Math.max(0, Math.min(height, this.view.contentHeight)));
+    const block = this.view.lineBlockAtHeight(Math.max(0, height));
     const start = this.view.state.doc.lineAt(block.from).number;
     const end = this.view.state.doc.lineAt(block.to).number;
     return { line: start, lineOffset: 0, viewportOffset,

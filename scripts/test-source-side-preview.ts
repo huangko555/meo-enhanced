@@ -2,9 +2,59 @@ import assert from 'node:assert/strict';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 import exportRuntime from '../src/export/runtime';
 import { createPreviewDocument } from '../src/export/previewDocument';
+import { assessLargeDocument } from '../src/foundation/largeDocument';
 
-async function assertWindowedAlignment(page: import('puppeteer-core').Page, bundle: string): Promise<void> {
-  const text = '# Windowed alignment\n\n' + Array.from({ length: 5000 }, (_, index) => `Paragraph ${index} with **formatting** and enough source context for a large reading window.\n\n`).join('');
+async function assertContinuousSourceScroll(page: import('puppeteer-core').Page): Promise<void> {
+  const before = await page.$eval('.cm-content', element => {
+    const view = (element as any).cmTile.root.view;
+    return { text: view.state.doc.toString(), selection: view.state.selection.toJSON(), left: view.scrollDOM.scrollLeft };
+  });
+  const bounds = await page.$eval('.cm-scroller', element => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.move(bounds.x, bounds.y);
+  for (const direction of [1, -1]) {
+    await page.evaluate(() => {
+      const scope = window as any;
+      scope.__continuousSourceScroll = { active: true, samples: [] };
+      const probe = scope.__continuousSourceScroll;
+      const sample = () => {
+        if (!probe.active) return;
+        probe.samples.push({ source: document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop,
+          preview: document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop });
+        requestAnimationFrame(sample);
+      };
+      sample();
+    });
+    // Small trusted deltas expose the line-boundary sawtooth that coarse wheels skip.
+    for (let index = 0; index < 30; index++) {
+      await page.mouse.wheel({ deltaY: direction * 7 });
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    await new Promise(resolve => setTimeout(resolve, 350));
+    const samples = await page.evaluate(() => {
+      const probe = (window as any).__continuousSourceScroll;
+      probe.active = false;
+      return probe.samples as Array<{ source: number; preview: number }>;
+    });
+    assert.ok((samples.at(-1)!.source - samples[0]!.source) * direction > 100, 'The native Source wheel must actually move');
+    assert.ok((samples.at(-1)!.preview - samples[0]!.preview) * direction > 2, 'Preview must follow the compressed HTML block');
+    assert.ok(samples.every((sample, index) => index === 0
+      || (sample.preview - samples[index - 1]!.preview) * direction >= -1),
+    `Preview must not rebound during continuous Source scrolling (${direction}): ${JSON.stringify(samples)}`);
+  }
+  const after = await page.$eval('.cm-content', element => {
+    const view = (element as any).cmTile.root.view;
+    return { text: view.state.doc.toString(), selection: view.state.selection.toJSON(), left: view.scrollDOM.scrollLeft };
+  });
+  assert.deepEqual(after, before, 'Linked scrolling preserves Source contents, selection and horizontal position');
+}
+
+async function assertScrollContinuityAndAlignment(page: import('puppeteer-core').Page, bundle: string, windowed: boolean): Promise<void> {
+  const text = '<div>\n' + Array.from({ length: 40 }, () => '<span>word</span>').join('\n') + '\n</div>\n\n'
+    + Array.from({ length: windowed ? 5000 : 100 }, (_, index) => `Paragraph ${index} with **formatting** and enough source context for a large reading window.\n\n`).join('');
+  assert.equal(assessLargeDocument(text).windowedPreview, windowed);
   const documents = new Map<string, ReturnType<typeof createPreviewDocument>>();
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(String(error)));
@@ -13,7 +63,9 @@ async function assertWindowedAlignment(page: import('puppeteer-core').Page, bund
     await page.bringToFront();
     await page.exposeFunction('__windowedAlignmentHost', async (message: any) => {
       if (message.type === 'requestPreviewRender') {
-        assert.ok(message.window, 'the real Webview must request a windowed document for this fixture');
+        assert.equal(Boolean(message.window), windowed, 'the real Webview must use the assessed Preview path');
+        if (!message.window) return { type: 'previewRenderResult', requestId: message.requestId, result: { ok: true,
+          value: exportRuntime.renderPreviewDocument({ markdownText: message.text, sourceDocumentPath: '/fixture/alignment.md', uiLanguage: 'en' }) } };
         const parsed = createPreviewDocument(message.requestId, {
           markdownText: message.text, sourceDocumentPath: '/fixture/alignment.md', uiLanguage: 'en'
         });
@@ -49,7 +101,10 @@ async function assertWindowedAlignment(page: import('puppeteer-core').Page, bund
       && !document.querySelector<HTMLButtonElement>('.source-preview-button')?.disabled
       && !document.querySelector('.mode-group [aria-busy="true"]') && !document.querySelector('.editor-host')?.hasAttribute('inert'));
     await page.click('.source-preview-button');
-    await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('[data-meo-preview-block]'));
+    await page.waitForFunction(windowed => {
+      const document = globalThis.document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+      return document?.querySelector('main.meo-export-doc') && (!windowed || document.querySelector('[data-meo-preview-block]'));
+    }, {}, windowed);
     await page.waitForFunction(() => {
       const surface = document.querySelector('.editor-surface');
       const host = document.querySelector<HTMLElement>('.preview-host');
@@ -57,6 +112,15 @@ async function assertWindowedAlignment(page: import('puppeteer-core').Page, bund
       return surface?.hasAttribute('data-source-preview') && !surface.hasAttribute('data-source-preview-preparing')
         && host?.hidden === false && getComputedStyle(host).visibility !== 'hidden' && editor?.inert === false;
     }, { timeout: 2000 });
+    if (await page.$eval('.source-preview-scroll-sync-button', button => button.getAttribute('aria-pressed') !== 'true')) {
+      await page.locator('.source-preview-scroll-sync-button').click();
+    }
+    await page.waitForFunction(() => document.querySelector('.source-preview-scroll-sync-button')?.getAttribute('aria-pressed') === 'true');
+    await assertContinuousSourceScroll(page);
+    if (!windowed) {
+      assert.deepEqual(errors, [], 'Ordinary linked scrolling must not throw browser errors');
+      return;
+    }
     if (await page.$eval('.source-preview-scroll-sync-button', button => button.getAttribute('aria-pressed') === 'true')) {
       await page.locator('.source-preview-scroll-sync-button').click();
     }
@@ -2147,7 +2211,8 @@ try {
   assert.equal(await page.$eval('.source-preview-more-panel', panel => (panel as HTMLElement).hidden), true);
   await page.waitForFunction(() => document.activeElement === document.querySelector('.source-preview-more-button'));
   }
-  await assertWindowedAlignment(await browser.newPage(), await build.outputs[0]!.text());
+  await assertScrollContinuityAndAlignment(await browser.newPage(), await build.outputs[0]!.text(), false);
+  await assertScrollContinuityAndAlignment(await browser.newPage(), await build.outputs[0]!.text(), true);
 } catch (error) {
   primaryError = error;
 } finally {
