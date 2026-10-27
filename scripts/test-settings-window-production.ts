@@ -13,6 +13,34 @@ const browser = await launchTestBrowser();
 let page = await browser.newPage();
 let imagePasteRoot: string | null = null;
 const errors: string[] = []; page.on('pageerror', error => errors.push(String(error)));
+async function clickImageMode(mode: string) {
+  const selector = '.image-location-modes input[value="' + mode + '"]';
+  await page.evaluate(selector => {
+    const scope = window as any, events: unknown[] = [];
+    let pressed: EventTarget | null = null;
+    const record = (event: Event) => {
+      if (event.type === 'pointerdown') pressed = event.target;
+      events.push({ type: event.type, trusted: event.isTrusted,
+        target: event.target === document.querySelector(selector), samePress: event.target === pressed });
+    };
+    for (const type of ['pointerdown', 'pointerup', 'click']) window.addEventListener(type, record, true);
+    scope.__imageModeDelivery = { events, stop() {
+      for (const type of ['pointerdown', 'pointerup', 'click']) window.removeEventListener(type, record, true);
+    } };
+  }, selector);
+  try {
+    // Viewport changes and path feedback can move this radio by one text line.
+    // The locator waits for visible, stable geometry before its single gesture.
+    await page.locator(selector).click();
+    const events = await page.evaluate(() => (window as any).__imageModeDelivery.events);
+    assert.deepEqual(events, ['pointerdown', 'pointerup', 'click'].map(type =>
+      ({ type, trusted: true, target: true, samePress: true })), 'The mode radio must receive the complete trusted click');
+    assert.equal(await page.$eval(selector, element => (element as HTMLInputElement).checked), true,
+      'The delivered mode click must immediately select its input');
+  } finally {
+    await page.evaluate(() => { const scope = window as any; scope.__imageModeDelivery?.stop(); delete scope.__imageModeDelivery; }).catch(() => {});
+  }
+}
 try {
   let imageContext: ImageStorageContext = { documentFsPath: path.join(os.tmpdir(), 'meo-image-notes', 'draft.md'), workspaceFsPath: path.join(os.tmpdir(), 'unrelated-workspace') };
   let imageWriteFailure = false;
@@ -862,8 +890,15 @@ try {
     await page.click('.settings-search-clear'); await page.keyboard.type(language === 'en' ? 'image' : '图片');
     await page.waitForFunction(() => !!document.querySelector<HTMLInputElement>('#meo-image-rule') && !document.querySelector<HTMLInputElement>('#meo-image-rule')!.disabled);
     assert.equal(await page.$eval('.image-location-settings .settings-item-title', element => element.textContent), language === 'en' ? 'Image save location' : '图片保存位置');
+    if (language === 'zh-CN' && appearance === 'dark') {
+      for (let round = 0; round < 4; round++) for (const mode of ['default', 'perDocument', 'advanced']) {
+        await page.setViewport({ width: round % 2 ? 320 : 1100, height: 780 });
+        await clickImageMode(mode);
+      }
+      console.log('Image-mode delivery: 12 complete trusted clicks across alternating narrow/desktop layouts passed');
+    }
     for (const mode of ['default', 'perDocument', 'advanced']) {
-      await page.click('.image-location-modes input[value="' + mode + '"]');
+      await clickImageMode(mode);
       await page.waitForFunction(() => !document.querySelector('.image-location-feedback')?.textContent?.includes('…'));
       for (const width of [1100, 320]) {
         await page.setViewport({ width, height: 780 });

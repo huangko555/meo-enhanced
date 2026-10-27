@@ -2232,6 +2232,11 @@ The table/history packs exercise the new editing paths; the appearance pack
 includes the actual settings and toolbar menus. Browser tests use the production
 editor and full Webview bootstrap. They assert resulting documents, undo results,
 actual remapped gestures, persisted projections, focus and DOM disposal.
+Image-location mode checks wait for a visible, stable radio after viewport or
+path-feedback layout changes, then require trusted press, release and click on
+the same current input plus its immediate checked state. The existing desktop
+and narrow detail-layout checks retain their original bounds; a short alternating
+layout sequence exercises delivery while configuration feedback is pending.
 Link candidate checks cover owning-workspace and remote root paths, directory chaining,
 segment/fragment/title preservation, vault-scoped fuzzy/multiword ranking before the
 limit, background aliases/titles and invalidation, shortest unambiguous Wiki targets,
