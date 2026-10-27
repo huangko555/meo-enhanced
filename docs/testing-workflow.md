@@ -131,6 +131,10 @@ Keep native driver actions and observations separate: name the owning window/fra
 record actual event target and complete press/release delivery, observe geometry
 and document effects, and restore temporary state even on failure. Check the
 observer itself with a known event before trusting absence/count assertions.
+For a Windows left-Alt requirement, require trusted `AltLeft` events with location
+`1`; a tool's `Alt_L` label can still deliver generic Alt with an empty code and
+location `0`. Probe that boundary before the scenario. An input-tool access error
+does not by itself establish that the user's desktop is locked or disconnected.
 For layout scenarios, specify the required actual viewport and behavior rather
 than depending on a driver's arbitrary outer-window size. Changing zoom or a
 window command is not evidence until measured layout satisfies the same scenario.
@@ -1368,7 +1372,11 @@ must leave the outside menu focused, and an actual return into the content frame
 must retain the insertion position and first input. Activity-only WindowState
 changes are covered by `scripts/test-panel-session-window-focus.ts`; they must
 not be treated as window activation. A shell-only return is not a content-focus
-signal. Native menu dismissal still requires separate Windows verification.
+signal. Native menu behavior still requires separate Windows verification.
+Closing a Workbench menu with Escape can leave focus outside a Webview; this
+known host behavior is not a failed editor return. Keep menu dismissal separate
+from an actual return into the content frame, whose insertion position and first
+input remain required. Do not add automatic refocusing that steals menu focus.
 
 The Live and Source painting cases capture the browser's actual caret pixels,
 using a distinct caret color and a visible-caret positive control. Disable blink on
