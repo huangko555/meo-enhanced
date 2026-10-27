@@ -489,7 +489,13 @@ export class ViewportController {
       this.restartLayoutStabilization();
     }
     this.scheduleActiveScrollFrame();
-    this.projectLinkedViewport('editor');
+    if (this.getMode() !== 'source') this.projectLinkedViewport('editor');
+  };
+  // CodeMirror's non-capture observer measures and anchors the newly visible
+  // Source lines synchronously. Project once after it, using matching geometry
+  // and scrollTop, while the capture listener still owns Live layout retention.
+  private readonly onLinkedSourceScroll = () => {
+    if (this.getMode() === 'source') this.projectLinkedViewport('editor');
   };
   private readonly onPointerDown = (event: PointerEvent) => this.handlePotentialLayoutInteraction(event);
   private readonly nativeInputViewport: NativeInputViewport;
@@ -540,6 +546,7 @@ export class ViewportController {
       // reconcile layout. Adopt native progress first so that reconciliation
       // cannot compensate from the previous scroll event's reading position.
       view.scrollDOM.addEventListener('scroll', this.onScroll, { capture: true, passive: true });
+      view.scrollDOM.addEventListener('scroll', this.onLinkedSourceScroll, { passive: true });
       view.scrollDOM.addEventListener('touchstart', this.onTouchStart, { passive: true });
       view.scrollDOM.addEventListener('touchmove', this.onTouchMove, { passive: true });
       view.scrollDOM.addEventListener('touchend', this.onTouchEnd, { passive: true });
@@ -1266,9 +1273,14 @@ export class ViewportController {
         this.previewSurface.writeScrollTop(0);
         return;
       }
-      const sourcePosition = reference
-        ? this.captureLinkedSourcePosition(position.source + reference.sourceOffset, reference.previewOffset)
-        : this.captureLinkedSourcePosition(position.source, 0);
+      const capture = () => reference
+        ? this.captureLinkedSourcePosition(this.view.scrollDOM.scrollTop + reference.sourceOffset, reference.previewOffset)
+        : this.captureLinkedSourcePosition(this.view.scrollDOM.scrollTop, 0);
+      let sourcePosition = capture();
+      // A geometry read may synchronously finish CodeMirror's pending measure
+      // and its scroll anchoring. Do not project the pre-measure pixel offset.
+      if (this.view.scrollDOM.scrollTop !== position.source) sourcePosition = capture();
+      this.linkedViewportPosition.source = this.view.scrollDOM.scrollTop;
       this.previewSurface.restoreTopVisiblePosition(sourcePosition, () => (
         !this.destroyed && this.linkedPreviewEnabled &&
         semanticGeneration === this.linkedProjectionGeneration && this.linkedViewportDriver === 'editor'
@@ -1365,6 +1377,17 @@ export class ViewportController {
   private measureLinkedViewportMap(pinnedPoint?: LinkedViewportPoint): LinkedViewportMap | null {
     const geometry = this.previewSurface?.captureLinkedGeometry?.();
     if (!geometry) return null;
+    // Source pixels are provisional until CodeMirror has measured each wrapped
+    // line. Keep the cached map in source-line space so a height-map correction
+    // cannot become another follower scroll. Only the current line is measured
+    // on projection; Preview geometry remains frozen for the gesture.
+    const sourceMode = this.getMode() === 'source';
+    const sourceCoordinate = (height: number): number => {
+      if (!sourceMode) return height;
+      const position = this.captureLinkedSourcePosition(height, 0);
+      const range = position.sourceRange;
+      return range.startLine - 1 + (range.endLine - range.startLine + 1) * range.progress;
+    };
     const sourceMaximum = Math.max(0, this.view.scrollDOM.scrollHeight - this.view.scrollDOM.clientHeight);
     const points: LinkedViewportPoint[] = [];
     for (const region of geometry.regions) {
@@ -1376,19 +1399,34 @@ export class ViewportController {
         Math.max(startLineNumber, region.endLine),
         this.view.state.doc.lines
       );
-      const startLine = this.view.state.doc.line(startLineNumber);
-      const endLine = this.view.state.doc.line(endLineNumber);
-      const startBlock = this.view.lineBlockAt(startLine.from);
-      const endBlock = this.view.lineBlockAt(endLine.from);
       points.push(
-        { source: startBlock.top, preview: region.top },
-        { source: endBlock.bottom, preview: region.bottom }
+        { source: sourceMode ? startLineNumber - 1 : this.view.lineBlockAt(this.view.state.doc.line(startLineNumber).from).top,
+          preview: region.top },
+        { source: sourceMode ? endLineNumber : this.view.lineBlockAt(this.view.state.doc.line(endLineNumber).from).bottom,
+          preview: region.bottom }
       );
     }
-    return createLinkedViewportMap(points, {
-      sourceMaximum,
+    const linkedMap = createLinkedViewportMap(points, {
+      sourceMaximum: sourceCoordinate(sourceMaximum),
       previewMaximum: Math.max(0, geometry.maximumScrollTop)
-    }, pinnedPoint);
+    }, pinnedPoint ? { source: sourceCoordinate(pinnedPoint.source), preview: pinnedPoint.preview } : undefined);
+    if (!sourceMode) return linkedMap;
+    return {
+      sourceToPreview: top => {
+        const before = this.view.scrollDOM.scrollTop;
+        const coordinate = sourceCoordinate(top);
+        const current = top === before && this.view.scrollDOM.scrollTop !== before
+          ? sourceCoordinate(this.view.scrollDOM.scrollTop) : coordinate;
+        return linkedMap.sourceToPreview(current);
+      },
+      previewToSource: top => {
+        const coordinate = linkedMap.previewToSource(top);
+        const index = Math.min(this.view.state.doc.lines - 1, Math.floor(coordinate));
+        return this.linkedEditorDocumentTop(index + 1, 0, {
+          startLine: index + 1, endLine: index + 1, progress: coordinate - index
+        });
+      }
+    };
   }
 
   private rebuildLinkedViewportMap(project: boolean): void {
@@ -2179,6 +2217,7 @@ export class ViewportController {
     if (this.interactionsAttached) {
       this.view.scrollDOM.removeEventListener('wheel', this.onWheel);
       this.view.scrollDOM.removeEventListener('scroll', this.onScroll, true);
+      this.view.scrollDOM.removeEventListener('scroll', this.onLinkedSourceScroll);
       this.view.scrollDOM.removeEventListener('touchstart', this.onTouchStart);
       this.view.scrollDOM.removeEventListener('touchmove', this.onTouchMove);
       this.view.scrollDOM.removeEventListener('touchend', this.onTouchEnd);

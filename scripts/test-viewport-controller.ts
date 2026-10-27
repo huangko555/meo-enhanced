@@ -1,6 +1,17 @@
 import { Text } from '@codemirror/state';
 import { ViewportController } from '../webview/src/helpers/viewportController';
 
+const uniformLineGeometry = (doc: Text, height = 20) => {
+  const block = (number: number) => {
+    const line = doc.line(Math.min(doc.lines, Math.max(1, number)));
+    return { from: line.from, to: line.to, top: (line.number - 1) * height, bottom: line.number * height };
+  };
+  return {
+    lineBlockAt: (position: number) => block(doc.lineAt(position).number),
+    lineBlockAtHeight: (top: number) => block(Math.floor(top / height) + 1)
+  };
+};
+
 const flushFrames = async (animationFrames: FrameRequestCallback[]): Promise<void> => {
   await Promise.resolve();
   while (animationFrames.length > 0) {
@@ -2978,6 +2989,48 @@ for (const settledShift of [0, 40]) {
   }
 }
 
+// Cold Source height estimates can change while reverse scrolling. The same
+// source character must project to the same Preview point even when its pixel
+// position or its wrapped line height changes, without a full-map measurement.
+{
+  const doc = Text.of(Array.from({ length: 100 }, () => 'wrapped source line'));
+  const scroll = { scrollTop: 1210, scrollLeft: 17, scrollHeight: 2000, clientHeight: 400 };
+  const selection = { anchor: 3, head: 8 };
+  let prefix = 0, wrap = 0, previewTop = 0, measurements = 0, lineReads = 0;
+  const block = (number: number) => {
+    const line = doc.line(number);
+    const top = (number - 1) * 20 + (number > 50 ? prefix : 0) + (number > 61 ? wrap : 0);
+    return { from: line.from, to: line.to, top, bottom: top + 20 + (number === 61 ? wrap : 0) };
+  };
+  const controller = new ViewportController({ dom: {}, state: { doc, selection }, scrollDOM: scroll,
+    lineBlockAt: (position: number) => { lineReads++; return block(doc.lineAt(position).number); },
+    lineBlockAtHeight: (height: number) => {
+      lineReads++;
+      return Array.from({ length: doc.lines }, (_, index) => block(index + 1))
+        .find(line => line.bottom > height) ?? block(doc.lines);
+    }
+  } as any, { attachInteractions: false, getMode: () => 'source', previewSurface: {
+    captureTopVisiblePosition: () => null, restoreTopVisiblePosition() {},
+    readScrollTop: () => previewTop, writeScrollTop: top => { previewTop = top; },
+    captureLinkedGeometry: () => { measurements++; return { maximumScrollTop: 3200,
+      regions: Array.from({ length: 100 }, (_, index) => ({ startLine: index + 1, endLine: index + 1,
+        top: index * 40, bottom: (index + 1) * 40 })) }; }
+  } });
+  try {
+    controller.setLinkedPreviewEnabled(true);
+    if (previewTop !== 2420) throw new Error(`Initial Source line progress was lost: ${previewTop}`);
+    prefix = 90; wrap = 20; scroll.scrollHeight += 110; scroll.scrollTop = 1310;
+    controller.editorViewportChanged();
+    if (previewTop !== 2420) throw new Error(`Cold Source measurement became a Preview scroll: ${previewTop}`);
+    scroll.scrollTop -= 10; controller.editorViewportChanged();
+    if (previewTop !== 2410) throw new Error(`Reverse Source scrolling lost fractional wrapped progress: ${previewTop}`);
+    controller.markPreviewInteraction(); previewTop = 2420; controller.previewViewportChanged();
+    if (scroll.scrollTop !== 1310) throw new Error(`Preview follower reused estimated Source pixels: ${scroll.scrollTop}`);
+    if (measurements !== 1 || lineReads > 8) throw new Error(`Linked scrolling must use bounded local geometry: ${measurements}/${lineReads}`);
+    if (scroll.scrollLeft !== 17 || selection.anchor !== 3 || selection.head !== 8) throw new Error('Linked scrolling changed selection or horizontal position');
+  } finally { controller.destroy(); }
+}
+
 // A geometry-refresh timer can beat the native scroll event. A driver that
 // already moved must not be pinned to the follower's still-old position.
 for (const owner of ['editor', 'preview'] as const) {
@@ -2990,10 +3043,7 @@ for (const owner of ['editor', 'preview'] as const) {
   let previewOffset = 0;
   const controller = new ViewportController({
     dom: {}, scrollDOM, state: { doc },
-    lineBlockAt: (position: number) => {
-      const number = doc.lineAt(position).number;
-      return { top: (number - 1) * 20, bottom: number * 20 };
-    }
+    ...uniformLineGeometry(doc)
   } as any, {
     attachInteractions: false, getMode: () => 'source',
     previewSurface: {
@@ -3154,11 +3204,7 @@ for (const interpolatedWhitespace of [undefined, true]) {
     dom: {}, scrollDOM, state: { doc, selection },
     requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read()),
     dispatch: () => { throw new Error('View alignment must not dispatch a selection or document change'); },
-    lineBlockAt: (position: number) => {
-      const line = doc.lineAt(position);
-      return { from: line.from, to: line.to, top: (line.number - 1) * 20, bottom: line.number * 20 };
-    },
-    lineBlockAtHeight: () => ({ from: doc.line(16).from, top: 300 })
+    ...uniformLineGeometry(doc)
   };
   const controller = new ViewportController(view as any, {
     attachInteractions: false, getMode: () => 'source',
@@ -3197,7 +3243,7 @@ for (const interpolatedWhitespace of [undefined, true]) {
     if (previewTop !== 670 || measurements !== alignedMeasurements + 1) throw new Error('One-shot alignment enabled continuous sync or background measurements');
     sourceLineRendered = false;
     controller.alignLinkedViewport('editor');
-    if (deferredAlignments.length !== 1 || deferredAlignments[0].line !== 16 || !deferredAlignments[0].isCurrent()
+    if (deferredAlignments.length !== 1 || deferredAlignments[0].line !== 51 || !deferredAlignments[0].isCurrent()
       || previewTop !== 670 || measurements !== alignedMeasurements + 1) throw new Error('An unloaded Preview destination must prepare its window before a pixel-map jump');
     controller.setLinkedPreviewEnabled(true, 'last-interaction');
     if (deferredAlignments[0].isCurrent()) throw new Error('A newer sync intent must cancel the pending one-shot alignment');
@@ -3345,8 +3391,7 @@ for (const [insert, removed, expectedLine] of [['x', 0, 3], ['x\n', 0, 4], ['', 
   let previewTop = 0, current = true;
   const reveals: Array<{ line: number; isCurrent: () => boolean }> = [];
   const controller = new ViewportController({ dom: {}, scrollDOM: scroll, state: { doc },
-    lineBlockAt: (pos: number) => { const line = doc.lineAt(pos).number;
-      return { top: (line - 1) * 20, bottom: line * 20 }; }
+    ...uniformLineGeometry(doc)
   } as any, { attachInteractions: false, getMode: () => 'source', previewSurface: {
     isCurrentDocument: () => current,
     captureTopVisiblePosition: () => null, restoreTopVisiblePosition() {},

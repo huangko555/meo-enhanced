@@ -51,9 +51,120 @@ async function assertContinuousSourceScroll(page: import('puppeteer-core').Page)
   assert.deepEqual(after, before, 'Linked scrolling preserves Source contents, selection and horizontal position');
 }
 
+async function assertColdSourceScroll(page: import('puppeteer-core').Page, windowed: boolean): Promise<void> {
+  // Jump directly over unmeasured wrapped lines and unloaded Preview windows.
+  await page.locator('.cm-content').click();
+  await page.keyboard.down('Control');
+  await page.keyboard.press('End');
+  await page.keyboard.up('Control');
+  await page.waitForFunction(() => {
+    const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+    const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    return scroller.scrollTop > 1000 && doc.scrollingElement!.scrollTop > 1000
+      && [...doc.querySelectorAll('main.meo-export-doc > *')].some(element => {
+        if (element.hasAttribute('data-meo-preview-gap')) return false;
+        const rect = element.getBoundingClientRect();
+        return rect.bottom > 0 && rect.top < doc.defaultView!.innerHeight;
+      });
+  });
+  const before = await page.$eval('.cm-content', element => {
+    const view = (element as any).cmTile.root.view;
+    return { text: view.state.doc.toString(), selection: view.state.selection.toJSON() };
+  });
+  const bounds = await page.$eval('.cm-scroller', element => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.move(bounds.x, bounds.y);
+  for (const direction of [-1, 1]) {
+    await page.evaluate(() => {
+      const scope = window as any;
+      const probe = scope.__coldSourceScroll = { active: true, samples: [] };
+      const sample = () => {
+        if (!probe.active) return;
+        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+        probe.samples.push({ source: document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop,
+          preview: doc.scrollingElement!.scrollTop, time: performance.now(),
+          mounted: doc.querySelectorAll('[data-meo-preview-block]').length });
+        requestAnimationFrame(sample);
+      };
+      sample();
+    });
+    for (let index = 0; index < 12; index++) {
+      await page.mouse.wheel({ deltaY: direction * 180 });
+      await new Promise(resolve => setTimeout(resolve, 45));
+    }
+    await new Promise(resolve => setTimeout(resolve, 350));
+    const samples = await page.evaluate(() => {
+      const probe = (window as any).__coldSourceScroll;
+      probe.active = false;
+      return probe.samples as Array<{ source: number; preview: number; time: number; mounted: number }>;
+    });
+    assert.ok((samples.at(-1)!.source - samples[0]!.source) * direction > 1000,
+      'The cold Source wheel must actually traverse unmeasured text');
+    assert.ok((samples.at(-1)!.preview - samples[0]!.preview) * direction > 500,
+      'Preview must follow the cold Source gesture');
+    assert.ok(samples.every((sample, index) => index === 0
+      || (sample.preview - samples[index - 1]!.preview) * direction >= -1),
+    `Cold Source scrolling must not rebound (${windowed}/${direction}): ${JSON.stringify(samples)}`);
+    if (windowed) assert.ok(samples.every(sample => sample.mounted > 0 && sample.mounted < 150),
+      'Cold scrolling must keep bounded Preview windows');
+    const gaps = samples.slice(1).map((sample, index) => sample.time - samples[index]!.time).sort((a, b) => a - b);
+    console.log(`Cold split scroll (${windowed ? 'windowed' : 'ordinary'}, ${direction}): ${samples.length} frames, p95 ${gaps[Math.floor(gaps.length * 0.95)]!.toFixed(1)}ms`);
+  }
+  const after = await page.$eval('.cm-content', element => {
+    const view = (element as any).cmTile.root.view;
+    return { text: view.state.doc.toString(), selection: view.state.selection.toJSON() };
+  });
+  assert.deepEqual(after, before, 'Cold linked scrolling preserves the complete Source text and selection');
+  // The same heading must align after a new explicit Source navigation.
+  const headingLine = before.text.slice(0, before.text.indexOf('## Cold alignment target')).split('\n').length;
+  await page.locator('.line-jump-input').fill(String(headingLine));
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(line => [...document.querySelectorAll('.cm-lineNumbers .cm-gutterElement')]
+    .some(element => Number(element.textContent) === line), {}, headingLine);
+  // This separate alignment probe starts after the line-jump transaction has
+  // settled. The cold wheel sequence above deliberately keeps its first frames.
+  await page.evaluate(async line => {
+    let previous = '', stable = 0;
+    for (let frame = 0; frame < 30; frame++) {
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      const view = (document.querySelector('.cm-content') as any).cmTile.root.view;
+      const top = view.lineBlockAt(view.state.doc.line(line).from).top;
+      const current = `${view.scrollDOM.scrollTop}:${top}`;
+      stable = current === previous ? stable + 1 : 0;
+      if (stable >= 3) return;
+      previous = current;
+    }
+    throw new Error('The explicit Source navigation did not settle');
+  }, headingLine);
+  const delta = await page.evaluate(line => {
+    const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+    const view = (document.querySelector('.cm-content') as any).cmTile.root.view;
+    return view.lineBlockAt(view.state.doc.line(line).from).top - scroller.scrollTop;
+  }, headingLine);
+  await page.mouse.move(bounds.x, bounds.y);
+  await page.mouse.wheel({ deltaY: delta });
+  await page.waitForFunction(line => {
+    const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const heading = doc.querySelector<HTMLElement>(`h2[data-source-line="${line}"]`);
+    return heading && Math.abs(heading.getBoundingClientRect().top) <= 2;
+  }, { timeout: 2000 }, headingLine).catch(async error => {
+    console.error('Cold heading alignment', await page.evaluate(line => {
+      const view = (document.querySelector('.cm-content') as any).cmTile.root.view;
+      const heading = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+        .querySelector<HTMLElement>(`h2[data-source-line="${line}"]`);
+      return { source: view.scrollDOM.scrollTop, target: view.lineBlockAt(view.state.doc.line(line).from).top,
+        preview: heading?.getBoundingClientRect().top, line };
+    }, headingLine));
+    throw error;
+  });
+}
+
 async function assertScrollContinuityAndAlignment(page: import('puppeteer-core').Page, bundle: string, windowed: boolean): Promise<void> {
   const text = '<div>\n' + Array.from({ length: 40 }, () => '<span>word</span>').join('\n') + '\n</div>\n\n'
-    + Array.from({ length: windowed ? 5000 : 100 }, (_, index) => `Paragraph ${index} with **formatting** and enough source context for a large reading window.\n\n`).join('');
+    + Array.from({ length: windowed ? 5000 : 300 }, (_, index) =>
+      `${index === 150 ? '## Cold alignment target\n\n' : ''}Paragraph ${index} with **formatting** ${'and variable wrapped source context '.repeat(index % 7 + 1)}.\n\n`).join('');
   assert.equal(assessLargeDocument(text).windowedPreview, windowed);
   const documents = new Map<string, ReturnType<typeof createPreviewDocument>>();
   const errors: string[] = [];
@@ -117,6 +228,7 @@ async function assertScrollContinuityAndAlignment(page: import('puppeteer-core')
     }
     await page.waitForFunction(() => document.querySelector('.source-preview-scroll-sync-button')?.getAttribute('aria-pressed') === 'true');
     await assertContinuousSourceScroll(page);
+    await assertColdSourceScroll(page, windowed);
     if (!windowed) {
       assert.deepEqual(errors, [], 'Ordinary linked scrolling must not throw browser errors');
       return;
@@ -125,6 +237,11 @@ async function assertScrollContinuityAndAlignment(page: import('puppeteer-core')
       await page.locator('.source-preview-scroll-sync-button').click();
     }
     await page.waitForFunction(() => document.querySelector('.source-preview-scroll-sync-button')?.getAttribute('aria-pressed') === 'false');
+    await page.evaluate(() => {
+      document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop = 0;
+    });
+    await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('.preview-frame')!
+      .contentDocument!.querySelector('[data-meo-preview-block="0"]'));
     await page.evaluate(() => {
       const scope = window as any, scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
       scroller.scrollTop = (scroller.scrollHeight - scroller.clientHeight) * 0.5;

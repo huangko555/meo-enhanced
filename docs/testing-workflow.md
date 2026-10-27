@@ -820,6 +820,16 @@ an old nonzero offset cannot acknowledge a new wheel. Transition waits use the
 same loading-cover, inert and visibility conditions as their frame sampler,
 which continues from before the action through the first visible presentation.
 
+`test-source-side-preview.ts` also jumps directly to the cold document tail, then
+samples trusted reverse and forward wheels through variable wrapped Source lines
+in ordinary and windowed Preview. It checks monotonic follower frames, unchanged
+text/selection, bounded mounted windows and exact heading alignment after a new
+navigation. `test-viewport-controller.ts` separately changes estimated Source
+prefix and line heights while retaining the same fractional reading point; both
+scroll owners must use current local geometry without remeasuring the full map.
+The browser contract prints frame-interval diagnostics for this bounded scenario;
+these are not native VS Code latency guarantees.
+
 For native block-action clicks, wait for `whenVisiblePresentationReady` after the
 last fixture navigation and before acquiring the final control handle. A visible
 box and `scrollend` may precede that navigation's source presentation; stale
