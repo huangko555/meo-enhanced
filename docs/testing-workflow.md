@@ -1292,6 +1292,10 @@ single navigation, reference edits/undo and unchanged source.
 activating a linked image's label in Source. `scripts/test-preview-links.ts` also
 checks authored image and nested-label titles against the real Host renderer in
 every built-in preset, retaining the destination and both author descriptions.
+HTML image-link wrappers are checked for inherited native titles in both editor
+work budgets. The production tooltip checks also cover initial, newly mounted
+and updated titles, single-hint ownership and preserved iframe accessible names;
+color-input guidance is exercised by `scripts/test-ui-colors-production.ts`.
 
 `scripts/test-tooltip-display-latency.ts` observes actual Chromium compositor frames
 while a synchronous renderer task spans the 200ms hover deadline. It checks both

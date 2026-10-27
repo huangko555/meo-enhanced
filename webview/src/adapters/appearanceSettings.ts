@@ -257,7 +257,8 @@ export function createAppearanceSettings(options: AppearanceSettingsOptions) {
         const field = node('div', 'appearance-color-field');
         const chip = node('label', 'appearance-color-chip');
         const swatchInput = node('input', 'appearance-color-swatch'); swatchInput.type = 'color'; swatchInput.setAttribute('aria-label', t(item.title[0], item.title[1]));
-        const input = node('input', 'appearance-color-hex'); input.type = 'text'; input.setAttribute('spellcheck', 'false'); input.maxLength = 7; input.placeholder = t('跟随 VS Code 主题', 'Follow VS Code theme'); input.setAttribute('aria-label', t(item.title[0], item.title[1]) + ' HEX'); input.title = t('输入 #RGB 或 #RRGGBB；留空跟随 VS Code 主题。', 'Enter #RGB or #RRGGBB; leave empty to follow the VS Code theme.');
+        const input = node('input', 'appearance-color-hex'); input.type = 'text'; input.setAttribute('spellcheck', 'false'); input.maxLength = 7; input.placeholder = t('跟随 VS Code 主题', 'Follow VS Code theme'); input.setAttribute('aria-label', t(item.title[0], item.title[1]) + ' HEX'); input.dataset.tooltip = t('输入 #RGB 或 #RRGGBB；留空跟随 VS Code 主题。', 'Enter #RGB or #RRGGBB; leave empty to follow the VS Code theme.');
+        input.dataset.tooltipKind = 'description';
         const unregister = options.registerInput?.(input); if (unregister) inputRegistrations.push(unregister);
         const restore = button('', 'settings-button settings-subtle appearance-color-reset'); restore.setAttribute('aria-label', t(item.title[0], item.title[1]) + ' · ' + t('跟随 VS Code 主题', 'Follow VS Code theme'));
         restore.append(createElement(RotateCcw, { width: 14, height: 14, 'aria-hidden': 'true' }));
@@ -266,7 +267,7 @@ export function createAppearanceSettings(options: AppearanceSettingsOptions) {
         presenters.push(() => {
           const color = draft[scheme][key];
           input.placeholder = colorSourceLabel();
-          input.title = t(`输入 #RGB 或 #RRGGBB；留空${usesDefaultColors() ? '使用' : ''}${colorSourceLabel()}。`, `Enter #RGB or #RRGGBB; leave empty ${usesDefaultColors() ? `to use the ${scheme} default palette` : 'to follow the VS Code theme'}.`);
+          input.dataset.tooltip = t(`输入 #RGB 或 #RRGGBB；留空${usesDefaultColors() ? '使用' : ''}${colorSourceLabel()}。`, `Enter #RGB or #RRGGBB; leave empty ${usesDefaultColors() ? `to use the ${scheme} default palette` : 'to follow the VS Code theme'}.`);
           restore.setAttribute('aria-label', t(item.title[0], item.title[1]) + ' · ' + colorSourceLabel());
           if ((!invalid.has(key) && document.activeElement !== input) || shownScheme !== scheme) { input.value = color ?? ''; input.removeAttribute('aria-invalid'); shownScheme = scheme; }
           restore.disabled = !color && !invalid.has(key);

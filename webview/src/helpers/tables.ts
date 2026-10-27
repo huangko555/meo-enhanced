@@ -1715,8 +1715,8 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'meo-md-footnote-ref';
-      button.title = getUiStrings(options.uiLanguage).jumpToFootnote(footnote.number!);
-      button.setAttribute('aria-label', button.title);
+      button.dataset.tooltip = getUiStrings(options.uiLanguage).jumpToFootnote(footnote.number!);
+      button.setAttribute('aria-label', button.dataset.tooltip);
       const number = document.createElement('sup');
       number.textContent = String(footnote.number);
       button.appendChild(number);

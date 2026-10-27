@@ -9,6 +9,7 @@ const image = 'https://assets.example.test/picture.svg';
 const href = 'https://example.com/%E5%9B%BE%E7%89%87#details';
 const expected = 'Go to: https://example.com/图片#details';
 const fixtures = [
+  { name: 'HTML link title', source: `<div><a href="${href}" title="打开本地图片"><img src="${image}" alt="picture"></a></div>` },
   { name: 'reference link', source: `[![picture](${image})][target]\n\n[target]: ${href}` },
   { name: 'direct', source: `[![picture](${image})](${href})` },
   { name: 'formatted prose', source: `[**![picture](${image})**](${href})` },
@@ -23,7 +24,7 @@ const fixtures = [
 const browser = await launchTestBrowser();
 try {
   for (const large of [false, true]) {
-    for (const fixture of fixtures.filter(fixture => !large || ['reference link', 'table', 'mixed HTML'].includes(fixture.name))) {
+    for (const fixture of fixtures.filter(fixture => !large || ['HTML link title', 'reference link', 'table', 'mixed HTML'].includes(fixture.name))) {
       const page = await browser.newPage();
       await page.bringToFront();
       const errors: string[] = [];
@@ -54,11 +55,24 @@ try {
       assert.equal(await page.evaluate(() => (window as any).HtmlContentHarness.usesLargeDocumentDerivedWorkBudget(
         (window as any).linkedImageEditor.view.state)), large, 'the actual editor must use the intended work budget');
       await page.hover('img[alt="picture"]');
+      assert.deepEqual(await page.$eval('img[alt="picture"]', element => {
+        const titles: string[] = [];
+        for (let parent: Element | null = element; parent; parent = parent.parentElement) {
+          const title = parent.getAttribute('title');
+          if (title) titles.push(title);
+        }
+        return titles;
+      }), [], 'image hover must not inherit a native rectangular title tooltip');
       try {
         await page.waitForFunction(expected => document.querySelector('.meo-tooltip.is-visible .meo-tooltip-label')?.textContent === expected,
           { timeout: 1500 }, expected);
       } catch (error) {
         throw new Error(`${large ? 'large' : 'ordinary'} ${fixture.name}: linked image hover must show the outer destination`, { cause: error });
+      }
+      assert.equal(await page.$$eval('.meo-tooltip.is-visible', elements => elements.length), 1, 'linked images show one destination hint');
+      if (fixture.name === 'HTML link title' && !large) {
+        mkdirSync('.local/probes/linked-image-hover', { recursive: true });
+        await page.screenshot({ path: '.local/probes/linked-image-hover/html-link-title.png' });
       }
       assert.equal(await page.$eval('img[alt="picture"]', element => getComputedStyle(element).cursor), 'pointer');
       await page.keyboard.down('Control');

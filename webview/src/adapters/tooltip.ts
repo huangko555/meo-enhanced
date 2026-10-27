@@ -509,6 +509,14 @@ export function bindTooltips(root: HTMLElement, options: {
   const ignored = '.find-clear-button, .find-close-button, .outline-close-button, .editor-notice-close, .meo-hex-color-adjustment-close';
 
   function prepare(element: HTMLElement) {
+    // Normalize authored titles before hover: a title on an outer wrapper can
+    // otherwise produce a second native bubble over an inner tooltip owner.
+    // Iframe titles name their browsing context for assistive technology.
+    if (element.tagName !== 'IFRAME' && element.hasAttribute('title')) {
+      element.dataset.tooltip = element.getAttribute('title') ?? '';
+      element.dataset.tooltipKind = 'description';
+      element.removeAttribute('title');
+    }
     if (element.dataset.tooltipCommand && options.shortcutForCommand) {
       const key = options.shortcutForCommand(element.dataset.tooltipCommand);
       if (key) {
@@ -574,12 +582,7 @@ export function bindTooltips(root: HTMLElement, options: {
       element = target.closest<HTMLElement>('textarea, .cm-line');
     }
     if (!element || !root.contains(element) || element.tagName === 'IFRAME' || (ownedAnchors.has(element) && current?.anchor !== element)) return null;
-    if (element.hasAttribute('title')) {
-      // Authored HTML titles are content; they are displayed through the same bubble.
-      element.dataset.tooltip = element.getAttribute('title') ?? '';
-      element.dataset.tooltipKind = 'description';
-      element.removeAttribute('title');
-    }
+    prepare(element);
     return element;
   }
 
@@ -649,8 +652,8 @@ export function bindTooltips(root: HTMLElement, options: {
 
   function scan(node: Node) {
     if (!(node instanceof view.HTMLElement)) return;
-    if (node.hasAttribute('data-tooltip')) prepare(node);
-    for (const element of node.querySelectorAll<HTMLElement>('[data-tooltip]')) prepare(element);
+    if (node.matches('[data-tooltip], [title]')) prepare(node);
+    for (const element of node.querySelectorAll<HTMLElement>('[data-tooltip], [title]')) prepare(element);
     if (node.tagName === 'IFRAME') bindFrame(node as HTMLIFrameElement);
     for (const frame of node.querySelectorAll<HTMLIFrameElement>('iframe')) bindFrame(frame);
   }
@@ -667,7 +670,7 @@ export function bindTooltips(root: HTMLElement, options: {
     refreshCurrent();
     activeTooltip?.reposition();
   });
-  observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-tooltip', 'data-tooltip-link-href', 'data-tooltip-command', 'data-tooltip-shortcut', 'data-tooltip-kind', 'data-tooltip-placement', 'data-tooltip-positioning', 'data-tooltip-live-update', 'data-meo-link-href', 'data-meo-preview-href', 'href', 'hidden', 'open'] });
+  observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['title', 'data-tooltip', 'data-tooltip-link-href', 'data-tooltip-command', 'data-tooltip-shortcut', 'data-tooltip-kind', 'data-tooltip-placement', 'data-tooltip-positioning', 'data-tooltip-live-update', 'data-meo-link-href', 'data-meo-preview-href', 'href', 'hidden', 'open'] });
   const appearance = new view.MutationObserver(() => {
     for (const state of frames.values()) if (state.doc) {
       state.doc.documentElement.dataset.meoTooltipAppearance = doc.documentElement.dataset.meoTooltipAppearance ?? doc.documentElement.dataset.editorAppearance ?? 'light';

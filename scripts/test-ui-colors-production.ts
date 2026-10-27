@@ -83,6 +83,12 @@ try {
   const resetColors = '.appearance-footer > button:first-child';
   const source = () => page.$$eval('.cm-content, .cm-line, .cm-line span, .cm-gutters', elements => elements.map(element => [element.textContent, getComputedStyle(element).color, getComputedStyle(element).backgroundColor]));
   await openFixture(); await openSettings();
+  assert.equal(await page.$eval(input('surface'), element => element.getAttribute('title')), null,
+    'color inputs must not display native rectangular hints');
+  await page.hover(input('surface'));
+  await page.waitForFunction(() => document.querySelector('.meo-tooltip.is-visible .meo-tooltip-label')?.textContent?.includes('#RGB'));
+  assert.equal(await page.$$eval('.meo-tooltip.is-visible', elements => elements.length), 1, 'color guidance uses the one shared hint');
+  await page.mouse.move(0, 0);
   await checkSemanticColors('native dark');
   assert.deepEqual(await page.$$eval('.settings-tab-label', elements => elements.map(e => e.textContent)), ['常规', '外观', '输入', '预览预设', '快捷键']);
   await page.click('[data-tab="general"]'); await page.keyboard.press('ArrowLeft');

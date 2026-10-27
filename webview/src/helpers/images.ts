@@ -816,7 +816,10 @@ export class ImageWidget extends WidgetType {
       const placeholder = document.createElement('img');
       placeholder.className = 'meo-md-image-size-placeholder';
       placeholder.alt = this.fallbackText();
-      placeholder.title = this.fallbackText();
+      if (!this.linkUrl) {
+        placeholder.dataset.tooltip = this.fallbackText();
+        placeholder.dataset.tooltipKind = 'description';
+      }
       placeholder.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>';
       this.applyDisplayImageSize(placeholder, intrinsicSize);
       container.replaceChildren(placeholder);

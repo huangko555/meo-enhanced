@@ -15,7 +15,7 @@ try {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(String(error)));
   await page.setViewport({ width: 1100, height: 780 });
-  await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
+  await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div><div id="native-title-fixture" title="Open local picture" style="position:fixed;left:400px;top:300px;z-index:700"><button data-tooltip="Existing action">Action</button></div><iframe id="named-context" title="Preview context" hidden></iframe>');
   await page.addStyleTag({ path: 'webview/src/styles.css' });
   await page.addScriptTag({ path: 'node_modules/mermaid/dist/mermaid.min.js' });
   await page.addScriptTag({ content: `
@@ -78,6 +78,34 @@ try {
       };
     });
   };
+  phase = 'native title normalization';
+  assert.equal(await page.$eval('#native-title-fixture', element => element.getAttribute('title')), null,
+    'titles present before binding cannot produce inherited native tooltips');
+  assert.equal((await show('#native-title-fixture button')).text, 'Existing action',
+    'an inner action keeps one hint instead of repeating the outer title');
+  assert.equal(await page.$$eval('.meo-tooltip.is-visible', elements => elements.length), 1);
+  await page.$eval('#native-title-fixture', element => element.setAttribute('title', 'Updated outer title'));
+  await page.waitForFunction(() => document.getElementById('native-title-fixture')?.getAttribute('title') === null);
+  assert.equal(await page.$eval('.meo-tooltip.is-visible .meo-tooltip-label', element => element.textContent), 'Existing action');
+  assert.equal(await page.$eval('#named-context', element => element.getAttribute('title')), 'Preview context',
+    'iframe titles retain their accessible browsing-context name');
+  await page.keyboard.press('Escape');
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => {
+    document.getElementById('native-title-fixture')!.remove();
+    document.getElementById('named-context')!.remove();
+    const control = document.createElement('button');
+    control.id = 'added-native-title'; control.title = 'Dynamic explanation';
+    control.textContent = 'Details'; control.style.cssText = 'position:fixed;left:400px;top:300px;z-index:700';
+    document.body.append(control);
+  });
+  await page.waitForFunction(() => document.getElementById('added-native-title')?.getAttribute('title') === null);
+  assert.equal((await show('#added-native-title')).text, 'Dynamic explanation',
+    'dynamically mounted authored titles retain their content through the shared bubble');
+  await page.keyboard.press('Escape');
+  await page.mouse.move(0, 0);
+  await page.$eval('#added-native-title', element => element.remove());
+
   const encodedAnchor = '.meo-md-link-open-btn[data-tooltip="#%E5%AE%89%E8%A3%85%E8%AF%B4%E6%98%8E"]';
   assert.equal((await show(encodedAnchor)).text, 'Go to: #安装说明', 'encoded Chinese anchors display readable text');
   assert.equal(await page.$eval(encodedAnchor, element => (element as HTMLElement).dataset.tooltipLinkHref), '#%E5%AE%89%E8%A3%85%E8%AF%B4%E6%98%8E', 'display formatting preserves the navigation target');
