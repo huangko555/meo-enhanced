@@ -10,6 +10,12 @@ const entryPath = path.join(tempDir, 'entry.ts');
 fs.writeFileSync(entryPath, `
 import ${JSON.stringify(path.join(repoRoot, 'scripts', 'test-preview-mermaid-runtime-entry.ts'))};
 import { bindTooltips } from ${JSON.stringify(path.join(repoRoot, 'webview', 'src', 'adapters', 'tooltip.ts'))};
+import { initializeImageHandling, settleImageSrcRequest } from ${JSON.stringify(path.join(repoRoot, 'webview', 'src', 'helpers', 'images.ts'))};
+initializeImageHandling({ postMessage(message) {
+  if (message.type === 'resolveImageSrc') queueMicrotask(() => settleImageSrcRequest({
+    type: 'resolvedImageSrc', requestId: message.requestId, result: { ok: true, value: { resolvedUrl: message.url } }
+  }));
+} });
 bindTooltips(document.body);
 `);
 const build = await Bun.build({
@@ -25,6 +31,13 @@ if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
 try {
   const page = await browser.newPage();
+  await page.bringToFront();
+  await page.setRequestInterception(true);
+  page.on('request', request => {
+    if (request.url() === 'https://assets.example.test/picture.png') void request.respond({ status: 200, contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="60"><rect width="100" height="60" fill="gray"/></svg>' });
+    else void request.continue();
+  });
   await page.setContent('<!doctype html><style>html,body{height:100%;margin:0}body{display:flex;flex-direction:column}.preview-host{flex:1;min-height:0}</style><body></body>');
   await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
   await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
@@ -55,7 +68,9 @@ try {
   // removed by Markdown parsing or sanitization before iframe binding.
   for (const preset of ['default', 'github-readme', 'whitey', 'newsprint', 'obsidian-minimal'] as const) {
     const payload = exportRuntime.renderPreviewDocument({
-      markdownText: '[Absolute file](<D:\\notes\\link target.md>)\n\n[Document](./guide.md#target)\n\n[Reference][guide]\n\n[guide]: ./guide.md#target\n\n<a href="./guide.md#target">HTML</a>\n\n[[guide#target|Wiki]]',
+      markdownText: '[Absolute file](<D:\\notes\\link target.md>)\n\n[Document](./guide.md#target)\n\n[Reference][guide]\n\n[guide]: ./guide.md#target\n\n<a href="./guide.md#target">HTML</a>\n\n[[guide#target|Wiki]]'
+        + '\n\n[![Linked picture](https://assets.example.test/picture.png "Picture explanation")](https://example.com/picture "Link explanation")'
+        + '\n\n<a href="https://example.com/nested" title="Link explanation"><span title="Nested explanation">Nested label</span></a>',
       sourceDocumentPath: 'C:/notes/current.md', uiLanguage: 'en', preset
     });
     await page.evaluate(({ preset, payload }) => {
@@ -99,6 +114,30 @@ try {
     const opened = await page.evaluate(() => (window as any).__previewMessages.filter((message: any) => message.type === 'openLink'));
     if (opened.length !== 1 || opened[0].href !== 'file:///D:/notes/link%20target.md' || opened[0].source !== 'preview') {
       throw new Error(`${preset}: absolute file navigation differs from shared normalization: ${JSON.stringify(opened)}`);
+    }
+    for (const [selector, expected] of [
+      ['img[alt="Linked picture"]', 'Go to: https://example.com/picture\nLink explanation\nPicture explanation'],
+      ['a[data-meo-preview-href="https://example.com/nested"] span', 'Go to: https://example.com/nested\nLink explanation\nNested explanation']
+    ]) {
+      const frame = await (await page.$('.preview-frame'))!.contentFrame();
+      await frame!.hover('img[alt="Linked picture"]');
+      try {
+        await frame!.waitForFunction(() => {
+          const image = document.querySelector<HTMLImageElement>('img[alt="Linked picture"]');
+          return image?.complete && image.naturalWidth > 0;
+        }, { timeout: 5000 });
+      } catch (error) {
+        throw new Error(`${preset}: linked image did not finish loading`, { cause: error });
+      }
+      await page.mouse.move(0, 0);
+      await frame!.hover(selector!);
+      try {
+        await frame!.waitForSelector('.meo-tooltip.is-visible', { timeout: 1500 });
+      } catch (error) {
+        throw new Error(`${preset}: no tooltip for ${selector}`, { cause: error });
+      }
+      const actual = await frame!.$eval('.meo-tooltip.is-visible .meo-tooltip-label', element => element.textContent);
+      if (actual !== expected) throw new Error(`${preset}: nested link hint: ${JSON.stringify({ actual, expected })}`);
     }
     for (const label of ['Document', 'Reference', 'HTML', ...(preset === 'github-readme' ? [] : ['Wiki'])]) {
       for (const modified of [false, true]) {

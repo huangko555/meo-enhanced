@@ -1284,6 +1284,15 @@ and Source Split checks; the adjacent editor is only an isolation observation.
 
 ## Tooltip display timing
 
+`scripts/test-linked-image-tooltips-production.ts` covers image links using direct
+and reference destinations, formatted table labels and HTML in ordinary and
+bounded-work Live editors. It checks hover destinations, modifier changes,
+single navigation, reference edits/undo and unchanged source.
+`scripts/test-link-cursor-production.ts` retains the outer destination when
+activating a linked image's label in Source. `scripts/test-preview-links.ts` also
+checks authored image and nested-label titles against the real Host renderer in
+every built-in preset, retaining the destination and both author descriptions.
+
 `scripts/test-tooltip-display-latency.ts` observes actual Chromium compositor frames
 while a synchronous renderer task spans the 200ms hover deadline. It checks both
 themes, reduced motion, Preview iframe styles, pending dismissal and committed

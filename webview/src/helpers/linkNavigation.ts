@@ -112,7 +112,7 @@ function parseReferenceLabel(text: string): string {
 
 function linkTextLabel(state: EditorState, linkNode: any): string {
   const text = state.doc.sliceString(linkNode.from, linkNode.to);
-  const match = text.match(/^\[([^\]]+)\]/);
+  const match = text.match(/^!?\[([^\]]+)\]/);
   return match ? normalizeReferenceLabel(match[1]) : '';
 }
 
@@ -172,7 +172,7 @@ function inlineLinkDestinationFromText(linkText: string): string {
   return normalizeSourceHref(unwrapped);
 }
 
-function hrefFromSourceLinkNode(state: EditorState, linkNode: any, referenceState = state): string {
+export function hrefFromSourceLinkNode(state: EditorState, linkNode: any, referenceState = state): string {
   if (isWikiLinkNode(state, linkNode)) {
     return parseWikiLinkData(state, linkNode)?.href ?? '';
   }
@@ -189,6 +189,14 @@ function hrefFromSourceLinkNode(state: EditorState, linkNode: any, referenceStat
     return '';
   }
   return getReferenceLinkMap(referenceState).get(referenceLabel) ?? '';
+}
+
+export function getEnclosingSourceLinkHref(state: EditorState, node: SyntaxNode, referenceState = state): string {
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (parent.name === 'Link') return hrefFromSourceLinkNode(state, parent, referenceState);
+    if (!['Emphasis', 'StrongEmphasis', 'Strikethrough', 'Highlight'].includes(parent.name)) break;
+  }
+  return '';
 }
 
 function isPosInsideRange(pos: number, from: number, to: number, exactTextHit: boolean): boolean {
@@ -293,6 +301,10 @@ export function getLinkHrefAtSourcePosition(state: EditorState, pos: number, opt
       }
 
       if (node.name === 'Autolink' || node.name === 'Image') {
+        if (node.name === 'Image') {
+          const href = getEnclosingSourceLinkHref(state, node, referenceState);
+          if (href) return href;
+        }
         const urlNode = childNodeByName(node, 'URL');
         const href = urlNode ? normalizeSourceHref(state.doc.sliceString(urlNode.from, urlNode.to)) : '';
         if (href) {

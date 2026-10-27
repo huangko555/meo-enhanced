@@ -15,6 +15,7 @@ import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 import { encodeMarkdownPath } from '../../../src/foundation/linkDestination';
 import { isWikiImageTarget, parseWikiReference, wikiImageSrc, wikiTargetFromImageSrc, WIKI_IMAGE_SCHEME } from '../../../src/foundation/wikiReference';
 import { stepVisualZoom } from './visualZoom';
+import { getEnclosingSourceLinkHref, hrefFromSourceLinkNode, isPrimaryModifierPointerClick } from './linkNavigation';
 
 const wikiImageIssues = new Map<string, string>();
 const wikiIssueRequests = new Map<string, number>();
@@ -507,7 +508,16 @@ export class ImageWidget extends WidgetType {
       }));
     };
     container.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0 || event.ctrlKey || event.metaKey || isControlTarget(event.target)) return;
+      if (event.button !== 0 || isControlTarget(event.target)) return;
+      if (event.ctrlKey || event.metaKey) {
+        // This widget opens on click; do not also navigate through CodeMirror's
+        // pointerdown handler before the same gesture reaches the widget.
+        if (this.linkUrl && isPrimaryModifierPointerClick(event)) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
     });
@@ -516,7 +526,7 @@ export class ImageWidget extends WidgetType {
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault();
         event.stopPropagation();
-        this.openLinkedImage(container);
+        if (isPrimaryModifierPointerClick(event)) this.openLinkedImage(container);
         return;
       }
       event.preventDefault();
@@ -918,7 +928,7 @@ export class ImageGroupWidget extends WidgetType {
 }
 
 function findChildNode(node: any, name: string): any {
-  for (let child = node.node.firstChild; child; child = child.nextSibling) {
+  for (let child = (node.node ?? node).firstChild; child; child = child.nextSibling) {
     if (child.name === name) {
       return child;
     }
@@ -935,7 +945,7 @@ export function getImageData(state: any, node: any): { url: string; altText: str
   const wiki = parseWikiReference(state.doc.sliceString(node.from, node.to));
   if (wiki?.embed && isWikiImageTarget(wiki.target)) return { url: wikiImageSrc(wiki.target), altText: wiki.label, linkUrl: '', width: wiki.width, height: wiki.height };
   const urlNode = findChildNode(node, 'URL');
-  const rawUrl = urlNode ? state.doc.sliceString(urlNode.from, urlNode.to).trim() : '';
+  const rawUrl = urlNode ? state.doc.sliceString(urlNode.from, urlNode.to).trim() : hrefFromSourceLinkNode(state, node.node ?? node);
   const url = stripMarkdownImageTitle(rawUrl);
 
   let altText = '';
@@ -945,14 +955,7 @@ export function getImageData(state: any, node: any): { url: string; altText: str
     altText = altMatch[1].replace(/\\([\\`*_[\]<>&])/g, '$1');
   }
 
-  let linkUrl = '';
-  const parentNode = node.node.parent;
-  if (parentNode && parentNode.name === 'Link') {
-    const linkUrlNode = findChildNode(parentNode, 'URL');
-    if (linkUrlNode) {
-      linkUrl = state.doc.sliceString(linkUrlNode.from, linkUrlNode.to).trim();
-    }
-  }
+  const linkUrl = getEnclosingSourceLinkHref(state, node.node ?? node);
 
   return { url, altText, linkUrl };
 }

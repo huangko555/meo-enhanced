@@ -1499,7 +1499,7 @@ function appendTableInlinePreviewLink(parent: HTMLElement, label: string, href: 
   el.className = 'meo-md-link';
   if (href) el.setAttribute('data-meo-link-href', href);
   if (options.literalLabel) appendTablePlainText(el, label, options.baseOffset ?? 0, options.diagnostics ?? [], options.searchState ?? null, options.sourceRange ?? null);
-  else appendTableInlinePreviewNodes(el, label, { ...options, disableLinkParsers: true });
+  else appendTableInlinePreviewNodes(el, label, { ...options, disableLinkParsers: true, imageLinkHref: href });
   if (isMissingLocalLinkTarget(href)) {
     parent.appendChild(createMissingLocalLinkIndicator(options.uiLanguage));
   }
@@ -1534,7 +1534,8 @@ function appendTableInlinePreviewImage(
   sourceRange: TableCellRange,
   presentationFactory: ImagePresentationFactory,
   uiLanguage: UiLanguage,
-  dimensions: { width?: number; height?: number } = {}
+  dimensions: { width?: number; height?: number } = {},
+  linkUrl = ''
 ) {
   if (!url) {
     appendInlineMappedText(parent, `![${altText}]()`, sourceRange);
@@ -1542,12 +1543,12 @@ function appendTableInlinePreviewImage(
   }
   // Table cells own pointer selection so image clicks enter the cell editor on
   // pointerup instead of being consumed by the standalone image interaction.
-  const dom = new ImageWidget(url, decodeTableInlineEscapes(altText), '', null, presentationFactory, {
+  const dom = new ImageWidget(url, decodeTableInlineEscapes(altText), linkUrl, null, presentationFactory, {
     pointerInteractionOwner: 'parent',
     uiLanguage, ...dimensions
   }).toDOM();
   if (dom instanceof HTMLElement) {
-    dom.setAttribute('data-meo-link-href', url);
+    dom.setAttribute('data-meo-link-href', linkUrl || url);
     setInlineSourceRange(dom, sourceRange, { atomic: true });
   }
   parent.appendChild(dom);
@@ -1557,6 +1558,7 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
   baseOffset?: number;
   diagnostics?: TableCellDiagnostics[];
   disableLinkParsers?: boolean;
+  imageLinkHref?: string;
   searchState?: TableSearchState | null;
   sourceRange?: TableCellRange | null;
   presentationFactory: ImagePresentationFactory;
@@ -1740,7 +1742,7 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
     if (wikiImage?.embed && isWikiImageTarget(wikiImage.target)) {
       flushBuffer();
       appendTableInlinePreviewImage(parent, wikiImage.label, wikiImageSrc(wikiImage.target),
-        { from: baseOffset + i, to: baseOffset + wikiImage.to }, options.presentationFactory, options.uiLanguage, wikiImage);
+        { from: baseOffset + i, to: baseOffset + wikiImage.to }, options.presentationFactory, options.uiLanguage, wikiImage, options.imageLinkHref);
       i = wikiImage.to;
       continue;
     }
@@ -1754,7 +1756,9 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
         decodeTableInlineEscapes(image.url),
         { from: baseOffset + i, to: baseOffset + image.nextIndex },
         options.presentationFactory,
-        options.uiLanguage
+        options.uiLanguage,
+        {},
+        options.imageLinkHref
       );
       i = image.nextIndex;
       continue;

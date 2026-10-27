@@ -524,15 +524,23 @@ export function bindTooltips(root: HTMLElement, options: {
     if (element.matches(ignored) || element.closest('[inert]')) return null;
     const live = element.closest('.cm-editor.meo-mode-live');
     const linkButton = element.hasAttribute('data-tooltip-link-href');
+    // An authored title on an image or formatted label must retain its owning
+    // link's destination. Independent controls keep their own action hints.
+    const parentLink = !element.closest('button, [role="button"], input, textarea, select')
+      ? element.parentElement?.closest<HTMLElement>('[data-meo-link-href], [data-meo-preview-href], a[href]') : null;
     const href = (element.getAttribute('data-tooltip-link-href') ?? element.getAttribute('data-meo-link-href') ?? element.getAttribute('data-meo-preview-href')
-      ?? (element.tagName === 'A' ? element.getAttribute('href') : null) ?? editableHref)?.trim();
+      ?? (element.tagName === 'A' ? element.getAttribute('href') : null)
+      ?? parentLink?.getAttribute('data-meo-link-href') ?? parentLink?.getAttribute('data-meo-preview-href')
+      ?? parentLink?.getAttribute('href') ?? editableHref)?.trim();
     if (href && !linkButton && element.closest('.cm-editor.meo-mode-source')) return null;
-    if (live && href && !linkButton && !element.matches('.meo-md-image-linked') && !linkModifier) return null;
+    if (live && href && !linkButton && !element.closest('.meo-md-image-linked') && !linkModifier) return null;
     const description = element.dataset.tooltip?.trim();
+    const parentDescription = (parentLink?.getAttribute('title') ?? parentLink?.dataset.tooltip)?.trim();
     const language = doc.documentElement.dataset.meoTooltipLanguage ?? doc.documentElement.lang;
     const displayHref = href ? formatLinkDestination(href) : '';
     const destination = displayHref ? getUiStrings(language === 'zh-CN' ? 'zh-CN' : 'en').linkDestination(displayHref) : '';
-    const text = href ? (description && description !== href ? destination + '\n' + description : destination) : description;
+    const descriptions = [...new Set([parentDescription, description].filter(value => value && value !== href))];
+    const text = href ? [destination, ...descriptions].join('\n') : description;
     if (!text) return null;
     const kind = href ? 'link' : element.dataset.tooltipKind;
     prepare(element);

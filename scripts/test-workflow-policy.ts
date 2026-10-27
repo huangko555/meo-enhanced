@@ -170,6 +170,7 @@ function targetedCommands(
         script('scripts/test-preview-preset-management-browser.ts'),
         script('scripts/test-toolbar-menus-browser.ts'),
         script('scripts/test-tooltips-production.ts'),
+        script('scripts/test-linked-image-tooltips-production.ts'),
         script('scripts/test-tooltip-pointer-position.ts'),
         script('scripts/test-tooltip-hover-sequence.ts'),
         script('scripts/test-tooltip-display-latency.ts'),

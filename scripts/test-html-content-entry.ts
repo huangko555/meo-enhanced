@@ -4,6 +4,7 @@ import { bindTooltips } from '../webview/src/adapters/tooltip';
 import { applyUiTheme } from '../webview/src/helpers/uiTheme';
 import { handleEditorShortcut } from '../webview/src/helpers/shortcuts';
 import { effectiveShortcuts } from '../src/application/editingPreferences';
+import { usesLargeDocumentDerivedWorkBudget } from '../webview/src/editor/liveInputDerivedWork';
 
 (globalThis as typeof globalThis & {
   HtmlContentHarness?: {
@@ -13,5 +14,6 @@ import { effectiveShortcuts } from '../src/application/editingPreferences';
     applyUiTheme: typeof applyUiTheme;
     handleEditorShortcut: typeof handleEditorShortcut;
     effectiveShortcuts: typeof effectiveShortcuts;
+    usesLargeDocumentDerivedWorkBudget: typeof usesLargeDocumentDerivedWorkBudget;
   };
-}).HtmlContentHarness = { createEditor, getLiveRenderedBlocks, bindTooltips, applyUiTheme, handleEditorShortcut, effectiveShortcuts };
+}).HtmlContentHarness = { createEditor, getLiveRenderedBlocks, bindTooltips, applyUiTheme, handleEditorShortcut, effectiveShortcuts, usesLargeDocumentDerivedWorkBudget };

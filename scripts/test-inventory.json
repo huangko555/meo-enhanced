@@ -540,6 +540,7 @@
       "scripts/test-line-number-typing-stability.ts",
       "scripts/test-link-candidates-production.ts",
       "scripts/test-link-cursor-production.ts",
+      "scripts/test-linked-image-tooltips-production.ts",
       "scripts/test-link-destinations-production.ts",
       "scripts/test-link-status-work-budget.ts",
       "scripts/test-linked-preview-cold-scroll.ts",

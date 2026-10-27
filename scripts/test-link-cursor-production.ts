@@ -174,6 +174,8 @@ try {
     for (const fixture of [
       { source: '[label](./guide.md)', hit: 'label', href: './guide.md' },
       { source: '[label][ref]\n\n[ref]: ./guide.md', hit: 'label', href: './guide.md' },
+      { source: '[![label](./picture.png)](./guide.md)', hit: 'label', href: './guide.md' },
+      { source: '[![label](./picture.png)][ref]\n\n[ref]: ./guide.md', hit: 'label', href: './guide.md' },
       { source: '[[guide|label]]', hit: 'label', href: 'meo-wiki:guide' },
       { source: 'Inline <a href="./guide.md">label</a>.', hit: 'label', href: './guide.md' },
       { source: 'Inline <a href="./guide.md">label</a>.', hit: './guide.md', href: './guide.md' },
