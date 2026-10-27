@@ -589,6 +589,39 @@ try {
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.ok(Math.abs(await page.evaluate(() => (window as any).__previewController.host.querySelector('iframe').contentDocument.scrollingElement.scrollTop) - wheelTop) < 3,
     'a later wheel gesture must retire the scrollbar bottom intention');
+  for (const navigation of ['pixels', 'semantic', 'marker'] as const) {
+    stage = `scrollbar boundary to Source ${navigation}`;
+    await page.evaluate(() => {
+      (window as any).__previewController.host.querySelector('iframe').contentDocument.scrollingElement.scrollTop = 0;
+    });
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await page.mouse.move(frameBounds.x + frameBounds.width - rangeBefore.scrollbar / 2, frameBounds.y + 14);
+    await page.mouse.down();
+    await page.mouse.move(frameBounds.x + frameBounds.width - rangeBefore.scrollbar / 2, frameBounds.y + frameBounds.height - 3, { steps: 15 });
+    await page.mouse.up();
+    await page.waitForFunction(() => {
+      const scroll = (window as any).__previewController.host.querySelector('iframe').contentDocument.scrollingElement;
+      return scroll.scrollTop >= scroll.scrollHeight - scroll.clientHeight - 2;
+    });
+    const target = await page.evaluate(navigation => {
+      const controller = (window as any).__previewController;
+      const scroll = controller.host.querySelector('iframe').contentDocument.scrollingElement;
+      if (navigation === 'pixels') controller.writeScrollTop(400);
+      else if (navigation === 'semantic') controller.restoreTopVisiblePosition({ line: 75, lineOffset: 0 }, () => true);
+      else {
+        controller.setSourcePositionMarker({ line: 75, visible: true, active: true }, { deferLayout: true });
+        controller.revealSourcePosition(75, () => true);
+      }
+      return { top: scroll.scrollTop, maximum: scroll.scrollHeight - scroll.clientHeight };
+    }, navigation);
+    assert.ok(target.top > 0 && target.top < target.maximum - 300, `${navigation}: Source must request a real reading position`);
+    await new Promise(resolve => setTimeout(resolve, 400));
+    const accepted = await page.evaluate(() =>
+      (window as any).__previewController.host.querySelector('iframe').contentDocument.scrollingElement.scrollTop);
+    assert.ok(Math.abs(accepted - target.top) <= 1,
+      `${navigation}: the previous Preview scrollbar boundary must yield to Source (${target.top} -> ${accepted})`);
+  }
+  await page.evaluate(() => (window as any).__previewController.setSourcePositionMarker({ line: 1, visible: false, active: false }));
   await page.evaluate(() => {
     const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
     doc.getElementById('late-scrollbar-range').remove(); doc.scrollingElement.scrollTop = 0;

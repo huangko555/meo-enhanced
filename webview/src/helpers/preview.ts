@@ -3368,8 +3368,10 @@ export function createPreviewController({
       acceptingViewportProjection.restore = restore;
       return;
     }
-    // An external scroll intent supersedes appearance's old reading witness.
-    // Resource transactions use the slot above and retain their own anchor.
+    // An external scroll intent supersedes the old native scrollbar boundary
+    // as well as appearance's reading witness. Resource transactions use the
+    // slot above and retain the current owner's boundary.
+    previewScrollRange?.interrupt();
     appearanceRetention?.release();
     presentationReadingPosition = null;
     const hasUsableFrame = frameRenderedText !== null && getSourceMap(false).length > 0;
@@ -3642,6 +3644,7 @@ export function createPreviewController({
     restoreTopVisiblePosition,
     isCurrentDocument: () => frameRenderedText !== null && isCurrentText?.(frameRenderedText) !== false,
     revealSourcePosition: (line: number, isCurrent: () => boolean) => {
+      if (isCurrent()) previewScrollRange?.interrupt();
       const current = previewViewport, generation = frameGeneration;
       const valid = () => !disposed && !host.hidden && isCurrent() && generation === frameGeneration
         && current === previewViewport && sourcePositionMarkerState.line === line
@@ -3677,6 +3680,7 @@ export function createPreviewController({
     writeScrollTop: (scrollTop: number) => {
       const scrollElement = getFrameDocument()?.scrollingElement;
       if (!scrollElement) return;
+      if (!acceptingViewportProjection) previewScrollRange?.interrupt();
       const next = Math.max(0, Math.min(
         Number.isFinite(scrollTop) ? scrollTop : 0,
         scrollElement.scrollHeight - scrollElement.clientHeight

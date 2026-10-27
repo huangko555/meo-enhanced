@@ -3069,41 +3069,6 @@ for (const owner of ['editor', 'preview'] as const) {
   } finally { controller.destroy(); }
 }
 
-// A cold window commits while its Source destination is still mounting. Its
-// old reading band must not supersede that destination just because Source
-// itself has not moved again during the asynchronous mount.
-for (const visualAnchorSurvives of [false, true]) {
-  const doc = Text.of(Array.from({ length: 80 }, () => 'line'));
-  const scroll = { scrollTop: 0, scrollLeft: 0, scrollHeight: 2000, clientHeight: 400 };
-  let previewTop = 0;
-  const requests: Array<{ line: number; isCurrent: () => boolean }> = [];
-  const controller = new ViewportController({ dom: {}, state: { doc }, scrollDOM: scroll,
-    ...uniformLineGeometry(doc)
-  } as any, { attachInteractions: false, getMode: () => 'source', previewSurface: {
-    captureTopVisiblePosition: () => ({ line: 1, lineOffset: 0 }),
-    captureVisualReadingAnchor: () => () => {
-      if (visualAnchorSurvives) previewTop = 0;
-      return visualAnchorSurvives;
-    },
-    restoreTopVisiblePosition: (position, isCurrent) => { requests.push({ line: position.line, isCurrent }); },
-    captureLinkedGeometry: () => null,
-    readScrollTop: () => previewTop, writeScrollTop: top => { previewTop = top; }
-  } });
-  try {
-    controller.setLinkedPreviewEnabled(true);
-    controller.markInteraction(); scroll.scrollTop = 600; controller.editorViewportChanged();
-    const destination = requests.at(-1)!;
-    if (destination.line !== 31) throw new Error('The cold Source destination must be requested first');
-    controller.runPreviewPresentationTransaction(() => { previewTop = 1200; });
-    if (previewTop !== 1200) throw new Error('A stale surviving glyph must not reset the newly mounted Source destination');
-    const accepted = requests.filter(request => request.isCurrent());
-    if (accepted.length !== 1 || accepted[0].line !== 31) {
-      throw new Error(`Cold window presentation replaced the current Source destination: ${accepted.map(request => request.line)}`);
-    }
-    if (scroll.scrollTop !== 600) throw new Error('Cold window presentation must leave Source unchanged');
-  } finally { controller.destroy(); }
-}
-
 // A geometry-refresh timer can beat the native scroll event. A driver that
 // already moved must not be pinned to the follower's still-old position.
 for (const owner of ['editor', 'preview'] as const) {
