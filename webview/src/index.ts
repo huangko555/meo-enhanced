@@ -2052,6 +2052,7 @@ const editorFocusController = createEditorFocusController({
   isEditableMode: () => getActiveEditorMode() !== 'preview'
 });
 // These inputs share the Webview lifetime; disposal clears their registrations.
+editorFocusController.registerInput(lineJumpInput);
 editorFocusController.registerInput(findPanelElements.findInput);
 editorFocusController.registerInput(findPanelElements.replaceInput);
 for (const input of previewController.fontSearchInputs) editorFocusController.registerInput(input);

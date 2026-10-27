@@ -19,7 +19,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Kept local-link navigation and missing-file hints synchronized with filesystem changes, retained reading positions on native window return, and improved wrapped formula spacing and Preview export-menu dismissal.
 - Preserved the reading position when releasing a floating table-header column resize instead of scrolling to the document caret.
 - Prevented an intermediate viewport jump during rich-document input when virtual block measurements changed the scroll offset while the caret stayed in place.
-- Kept Windows Ctrl+A selection within search and other native input fields so a delayed VS Code command cannot replace newly typed text.
+- Kept Windows Ctrl+A selection within search, line-jump and other native input fields so a delayed VS Code command cannot replace newly typed text or select the Source document after navigation.
 - Preserved fractional scroll progress between Source and its linked Preview, including wrapped lines and compact rendered blocks. Prevented cold tail-to-start scrolling from replaying Source height corrections as Preview jumps, retained the synchronized top when late images resize inside the Preview viewport, and released the previous Preview scrollbar boundary when Source navigation takes over.
 - Kept table cells in place when leaving Mermaid, formula, HTML or expanded code editors to enter a native cell input.
 - Preserved outer destinations on linked images and formatted table links, and unified authored title hints to prevent duplicate native tooltips.

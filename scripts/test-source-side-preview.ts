@@ -150,7 +150,26 @@ async function assertColdSourceScroll(page: import('puppeteer-core').Page, windo
   await new Promise(resolve => setTimeout(resolve, 400));
   // The same heading must align after a new explicit Source navigation.
   const headingLine = before.text.slice(0, before.text.indexOf('## Cold alignment target')).split('\n').length;
-  await page.locator('.line-jump-input').fill(String(headingLine));
+  await page.evaluate(() => {
+    const scope = window as any, input = document.querySelector('.line-jump-input');
+    const platform = Object.getOwnPropertyDescriptor(navigator, 'platform');
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const probe = scope.__lineJumpShortcut = { forwarded: 0, timer: 0 };
+    const forward = (event: KeyboardEvent) => {
+      if (event.target !== input || !event.ctrlKey || event.key.toLowerCase() !== 'a') return;
+      probe.forwarded++;
+      // Model VS Code's delayed native command after Enter returns to Source.
+      probe.timer = window.setTimeout(() => document.execCommand('selectAll'), 80);
+    };
+    window.addEventListener('keydown', forward);
+    probe.cleanup = () => {
+      window.clearTimeout(probe.timer); window.removeEventListener('keydown', forward);
+      if (platform) Object.defineProperty(navigator, 'platform', platform); else delete (navigator as any).platform;
+    };
+  });
+  await page.locator('.line-jump-input').fill('1');
+  await page.keyboard.down('Control'); await page.keyboard.press('a'); await page.keyboard.up('Control');
+  await page.keyboard.type(String(headingLine));
   await page.keyboard.press('Enter');
   await page.waitForFunction(line => [...document.querySelectorAll('.cm-lineNumbers .cm-gutterElement')]
     .some(element => Number(element.textContent) === line), {}, headingLine);
@@ -198,6 +217,16 @@ async function assertColdSourceScroll(page: import('puppeteer-core').Page, windo
   }, headingLine);
   assert.ok(settledHeading !== null && Math.abs(settledHeading) <= 2,
     `A cold window commit must retain the aligned Source destination: ${settledHeading}`);
+  const nativeSelection = await page.evaluate(line => {
+    const view = (document.querySelector('.cm-content') as any).cmTile.root.view;
+    const probe = (window as any).__lineJumpShortcut; probe.cleanup();
+    return { forwarded: probe.forwarded, from: view.state.selection.main.from, to: view.state.selection.main.to,
+      expected: view.state.doc.line(line).from, text: view.state.doc.toString() };
+  }, headingLine);
+  assert.equal(nativeSelection.forwarded, 0, 'Line-jump Ctrl+A must stay inside its native input');
+  assert.equal(nativeSelection.from, nativeSelection.expected);
+  assert.equal(nativeSelection.to, nativeSelection.expected, 'A late native command must not select the Source document');
+  assert.equal(nativeSelection.text, before.text);
 }
 
 async function assertScrollContinuityAndAlignment(page: import('puppeteer-core').Page, bundle: string, windowed: boolean): Promise<void> {
