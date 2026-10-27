@@ -86,6 +86,24 @@ the candidate to another agent:
    rerun needs an explicit coverage or invalidation reason. Conservative resume
    still rejects changed inputs and recorded failures.
 
+### Continue until acceptance is complete
+
+The executor owns progress through all required coverage, necessary repairs,
+affected validation and final evidence. Finishing a stage, encountering an
+ordinary failure, exhausting one input route or ending a chat turn does not
+complete acceptance. Diagnose and repair, choose a supported discriminating
+alternative or continue independent required work within existing authorization.
+If a real capability or human dependency blocks progress, state the exact error
+and smallest executable request promptly, retain the unfinished scope and resume
+point, and continue unaffected work. A handoff document alone does not close it.
+The two-attempt limit stops an uninformative route, not the overall objective;
+do not replace useful progress with repeated checks just to appear active.
+A coordinator may review in parallel and correct deviations. Its availability,
+reply or stage approval adds no dependency to the executor's authorized work or
+complete self-check and delivery. Keep the behavioral evidence requirements
+independent of a particular input tool; a supported equivalent method may satisfy
+them, while a missing OS boundary remains open until actually verified.
+
 Native acceptance defaults to repeatable scripts and official CLI/application
 interfaces. Computer use is an optional diagnostic or narrowly justified system
 boundary tool, not a universal prerequisite. A supported script can replace an
