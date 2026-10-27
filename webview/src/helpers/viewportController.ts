@@ -1117,10 +1117,14 @@ export class ViewportController {
       }
       const linkedPreviewEnabled = this.linkedPreviewEnabled;
       const heldPreviewTop = this.previewSurface.readScrollTop();
-      const restoreVisualAnchor = this.previewSurface.captureVisualReadingAnchor?.(documentChange ? 0 : 1 / 3);
       const interactionGeneration = this.interactionGeneration;
       const projectionGeneration = this.linkedProjectionGeneration;
       const projectionDriver = this.linkedViewportDriver;
+      // Source owns the synchronized top. Retaining a glyph below an image
+      // that grows inside the viewport would pull that top upward again.
+      const readingRatio = linkedPreviewEnabled && projectionDriver === 'editor'
+        && this.getMode() === 'source' && !this.linkedPreviewAttentionHeld ? 0 : 1 / 3;
+      const restoreVisualAnchor = this.previewSurface.captureVisualReadingAnchor?.(documentChange ? 0 : readingRatio);
       const previewGestureActive = linkedPreviewEnabled && projectionDriver === 'preview' && this.isLinkedInteractionActive();
       let readingAnchor: ViewportDocumentAnchor | null = null;
       // Source scrolling cannot displace an independently scrolled Preview.
@@ -1138,7 +1142,7 @@ export class ViewportController {
             readingAnchor = topAnchor;
           }
         } else {
-          const readingBand = this.capturePreviewDocumentAnchor(undefined, 1 / 3);
+          const readingBand = this.capturePreviewDocumentAnchor(undefined, readingRatio);
           // Reading bands inside content keep their relative point during preset
           // reflow. Only a freshly interpolated whitespace line needs the exact
           // top edge; retained mode-transition projections keep their reading band.

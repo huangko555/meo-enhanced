@@ -13,7 +13,7 @@ if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 
 const browser = await launchTestBrowser();
 let primaryError: unknown;
-try {
+const assertLateLayout = async (imageInside: boolean): Promise<void> => {
   const page = await browser.newPage();
   await page.setViewport({ width: 1200, height: 760 });
   let imageResolutionRequested = false;
@@ -59,9 +59,10 @@ try {
   const anchorText = 'Stable paragraph after late image';
   const text = [
     ...Array.from({ length: 25 }, (_, index) => `Before image paragraph ${index + 1}.`),
+    ...(imageInside ? [anchorText] : []),
     '![Late image](https://preview-layout.test/late.svg)',
     ...Array.from({ length: 2 }, (_, index) => `Between image and anchor ${index + 1}.`),
-    anchorText,
+    ...(!imageInside ? [anchorText] : []),
     ...Array.from({ length: largeDocument ? 4_100 : 40 }, (_, index) => `After anchor paragraph ${index + 1}.`)
   ].join('\n\n');
   const anchorLine = text.slice(0, text.indexOf(anchorText)).split('\n').length;
@@ -101,11 +102,38 @@ try {
     ?.contentDocument?.body.textContent?.includes(anchorText), {}, anchorText);
   assert.equal(await page.evaluate(() => document.querySelector<HTMLIFrameElement>('.preview-frame')
     ?.contentDocument?.documentElement.dataset.meoPreviewLargeDocument), String(largeDocument));
+  // Establish the actual linked top before releasing the image. A centered
+  // caret alone can leave that image inside the viewport in either fixture.
+  await page.locator('.line-jump-input').fill(String(anchorLine));
+  await page.keyboard.press('Enter');
+  const target = await page.evaluate(line => {
+    const view = (document.querySelector('.cm-content') as any).cmTile.root.view;
+    const rect = view.scrollDOM.getBoundingClientRect();
+    return { delta: view.lineBlockAt(view.state.doc.line(line).from).top - view.scrollDOM.scrollTop,
+      x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  }, anchorLine);
+  await page.mouse.move(target.x, target.y);
+  await page.mouse.wheel({ deltaY: target.delta });
+  await page.waitForFunction(anchorText => {
+    const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const anchor = [...doc.querySelectorAll('p')].find(element => element.textContent === anchorText);
+    return anchor && Math.abs(anchor.getBoundingClientRect().top) <= 2;
+  }, { timeout: 2000 }, anchorText).catch(async error => {
+    console.error('Late-image setup', await page.evaluate(anchorText => ({
+      mode: document.querySelector('.editor-root')?.getAttribute('data-mode'),
+      source: document.querySelector('.cm-scroller')?.scrollTop,
+      synced: document.querySelector('.source-preview-scroll-sync-button')?.getAttribute('aria-pressed'),
+      top: [...document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.querySelectorAll('p')]
+        .find(element => element.textContent === anchorText)?.getBoundingClientRect().top
+    }), anchorText));
+    throw error;
+  });
   await new Promise(resolve => setTimeout(resolve, 300));
-  await page.evaluate(() => {
+  const sourceTop = await page.$eval('.cm-scroller', element => element.scrollTop);
+  await page.evaluate(imageInside => {
     const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
     const frameDocument = frame.contentDocument!;
-    const readingY = (frame.contentWindow?.innerHeight ?? 0) / 3;
+    const readingY = imageInside ? 0 : (frame.contentWindow?.innerHeight ?? 0) / 3;
     const entries = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
       .map(element => ({ element, rect: element.getBoundingClientRect() }))
       .filter(entry => entry.rect.height > 0);
@@ -133,7 +161,7 @@ try {
       stop: () => { active = false; }
     };
     requestAnimationFrame(sample);
-  });
+  }, imageInside);
   releaseImageResolution();
   await page.waitForFunction(() => Array.from(
     document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.images ?? []
@@ -159,7 +187,14 @@ try {
     Math.max(...samples) - Math.min(...samples) <= 1,
     `A late Preview layout commit must preserve the visible semantic anchor: ${JSON.stringify(samples)}`
   );
-  console.log(`Source Preview late-layout anchor checks passed (${largeDocument ? 'large' : 'ordinary'} document)`);
+  assert.equal(await page.$eval('.cm-scroller', element => element.scrollTop), sourceTop,
+    'A late Preview image must not move its Source owner');
+  console.log(`Source Preview late-layout anchor checks passed (${largeDocument ? 'large' : 'ordinary'} document, image ${imageInside ? 'inside' : 'above'} viewport)`);
+  await page.close();
+};
+try {
+  await assertLateLayout(false);
+  await assertLateLayout(true);
 } catch (error) {
   primaryError = error;
 } finally {

@@ -1640,19 +1640,17 @@ try {
   await page.click('button[data-mode="live"]');
   await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live');
   await new Promise(resolve => setTimeout(resolve, 160));
-  const complexTableLiveProjection = await page.evaluate(({ startLine, targetLine }) => {
+  const complexTableLiveProjection = await page.evaluate(targetLine => {
     const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-    const blocks = Array.from(document.querySelectorAll<HTMLElement>(
-      '[data-meo-rendered-block-start-line][data-meo-rendered-block-end-line]'
-    ));
-    const block = blocks.find(candidate => Number(candidate.dataset.meoRenderedBlockStartLine) === startLine);
-    if (!block) return Number.NaN;
-    const rect = block.getBoundingClientRect();
+    // Rich rows have their own source geometry. A whole-table height ratio
+    // includes header/row spacing and can misreport a correctly retained row.
+    const row = scroller.querySelector<HTMLElement>(
+      `.meo-md-html-table:not(.meo-md-html-table-sticky-table) tr[data-source-line-number="${targetLine}"]`
+    );
+    if (!row) return Number.NaN;
     const viewport = scroller.getBoundingClientRect();
-    const endLine = Number(block.dataset.meoRenderedBlockEndLine);
-    const progress = (targetLine - startLine) / Math.max(1, endLine - startLine);
-    return rect.top - viewport.top + rect.height * progress;
-  }, { startLine: complexTableStartLine, targetLine: complexTableAnchorLine });
+    return row.getBoundingClientRect().top - viewport.top;
+  }, complexTableAnchorLine);
   assert.ok(
     Math.abs(complexTableLiveProjection - complexTableSourceOffset) <= 20,
     JSON.stringify({ complexTableSourceOffset, complexTableLiveProjection })

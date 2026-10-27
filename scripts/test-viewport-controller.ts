@@ -3031,6 +3031,44 @@ for (const settledShift of [0, 40]) {
   } finally { controller.destroy(); }
 }
 
+// An image below the synchronized top can grow inside the Preview viewport.
+// Source still owns that top; preserving a glyph below the image would instead
+// move it upward. Independent Preview reading retains its usual reading band.
+for (const owner of ['editor', 'preview'] as const) {
+  const doc = Text.of(Array.from({ length: 80 }, () => 'line'));
+  const scroll = { scrollTop: 600, scrollLeft: 0, scrollHeight: 2000, clientHeight: 400 };
+  let previewTop = 1200, imageGrowth = 0;
+  const controller = new ViewportController({ dom: {}, state: { doc }, scrollDOM: scroll,
+    ...uniformLineGeometry(doc)
+  } as any, { attachInteractions: false, getMode: () => 'source', previewSurface: {
+    captureTopVisiblePosition: () => null, restoreTopVisiblePosition() {},
+    readScrollTop: () => previewTop, writeScrollTop: top => { previewTop = top; },
+    captureVisualReadingAnchor: (ratio = 0) => {
+      const glyphTop = previewTop + ratio * 400, previousGrowth = imageGrowth;
+      return () => {
+        if (glyphTop >= 1320) previewTop += imageGrowth - previousGrowth;
+        return true;
+      };
+    },
+    captureLinkedGeometry: () => ({ maximumScrollTop: 3200 + imageGrowth,
+      regions: Array.from({ length: 80 }, (_, index) => ({ startLine: index + 1, endLine: index + 1,
+        top: index * 40 + (index >= 33 ? imageGrowth : 0),
+        bottom: (index + 1) * 40 + (index >= 32 ? imageGrowth : 0) })) })
+  } });
+  try {
+    controller.setLinkedPreviewEnabled(true, owner);
+    controller.runPreviewPresentationTransaction(() => { imageGrowth = 100; });
+    const expected = owner === 'editor' ? 1200 : 1300;
+    if (previewTop !== expected || scroll.scrollTop !== 600) {
+      throw new Error(`Late in-viewport image displaced ${owner} reading: ${scroll.scrollTop}/${previewTop}`);
+    }
+    if (owner === 'editor') {
+      scroll.scrollTop += 10; controller.editorViewportChanged();
+      if (previewTop !== 1220) throw new Error('Source wheel did not continue from the retained synchronized top');
+    }
+  } finally { controller.destroy(); }
+}
+
 // A geometry-refresh timer can beat the native scroll event. A driver that
 // already moved must not be pinned to the follower's still-old position.
 for (const owner of ['editor', 'preview'] as const) {
