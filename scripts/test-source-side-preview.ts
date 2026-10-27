@@ -77,19 +77,25 @@ async function assertColdSourceScroll(page: import('puppeteer-core').Page, windo
   });
   await page.mouse.move(bounds.x, bounds.y);
   for (const direction of [-1, 1]) {
-    await page.evaluate(() => {
+    await page.evaluate(windowed => {
       const scope = window as any;
       const probe = scope.__coldSourceScroll = { active: true, samples: [] };
       const sample = () => {
         if (!probe.active) return;
         const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+        const visible = windowed ? [...doc.querySelectorAll('main.meo-export-doc p')].map(element => {
+          const paragraph = /Paragraph (\d+) with/.exec(element.textContent ?? '');
+          const rect = element.getBoundingClientRect();
+          return paragraph && rect.bottom > 0 && rect.top < doc.defaultView!.innerHeight
+            ? { paragraph: Number(paragraph[1]), top: rect.top } : null;
+        }).find(Boolean) : null;
         probe.samples.push({ source: document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop,
           preview: doc.scrollingElement!.scrollTop, time: performance.now(),
-          mounted: doc.querySelectorAll('[data-meo-preview-block]').length });
+          mounted: doc.querySelectorAll('[data-meo-preview-block]').length, visible });
         requestAnimationFrame(sample);
       };
       sample();
-    });
+    }, windowed);
     for (let index = 0; index < 12; index++) {
       await page.mouse.wheel({ deltaY: direction * 180 });
       await new Promise(resolve => setTimeout(resolve, 45));
@@ -98,15 +104,30 @@ async function assertColdSourceScroll(page: import('puppeteer-core').Page, windo
     const samples = await page.evaluate(() => {
       const probe = (window as any).__coldSourceScroll;
       probe.active = false;
-      return probe.samples as Array<{ source: number; preview: number; time: number; mounted: number }>;
+      return probe.samples as Array<{ source: number; preview: number; time: number; mounted: number;
+        visible: { paragraph: number; top: number } | null }>;
     });
     assert.ok((samples.at(-1)!.source - samples[0]!.source) * direction > 1000,
       'The cold Source wheel must actually traverse unmeasured text');
     assert.ok((samples.at(-1)!.preview - samples[0]!.preview) * direction > 500,
       'Preview must follow the cold Source gesture');
-    assert.ok(samples.every((sample, index) => index === 0
-      || (sample.preview - samples[index - 1]!.preview) * direction >= -1),
-    `Cold Source scrolling must not rebound (${windowed}/${direction}): ${JSON.stringify(samples)}`);
+    if (windowed) {
+      // Replacing estimated gaps can move the document's pixel origin while
+      // keeping the visible paragraph fixed. Gate actual reading movement with
+      // the same one-pixel tolerance, including every intermediate frame.
+      assert.ok(samples.every(sample => sample.visible), 'Cold windows must keep visible reading content');
+      assert.ok(samples.every((sample, index) => {
+        if (index === 0) return true;
+        const before = samples[index - 1]!.visible!, after = sample.visible!;
+        return after.paragraph === before.paragraph
+          ? (before.top - after.top) * direction >= -1
+          : (after.paragraph - before.paragraph) * direction > 0;
+      }), `Cold windowed reading must not rebound (${direction}): ${JSON.stringify(samples)}`);
+    } else {
+      assert.ok(samples.every((sample, index) => index === 0
+        || (sample.preview - samples[index - 1]!.preview) * direction >= -1),
+      `Cold Source scrolling must not rebound (${windowed}/${direction}): ${JSON.stringify(samples)}`);
+    }
     if (windowed) assert.ok(samples.every(sample => sample.mounted > 0 && sample.mounted < 150),
       'Cold scrolling must keep bounded Preview windows');
     const gaps = samples.slice(1).map((sample, index) => sample.time - samples[index]!.time).sort((a, b) => a - b);
