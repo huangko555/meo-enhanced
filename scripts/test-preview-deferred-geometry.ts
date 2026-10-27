@@ -268,9 +268,11 @@ try {
     if (scenario === 'authored-size') {
       const attributes = await page.$eval('.preview-frame', element => {
         const img = (element as HTMLIFrameElement).contentDocument!.images[0]!;
-        return {width: img.getAttribute('width'), loading: img.getAttribute('loading'), title: img.title, alt: img.alt};
+        return {width: img.getAttribute('width'), loading: img.getAttribute('loading'), title: img.getAttribute('title'),
+          hint: img.dataset.tooltip, hintKind: img.dataset.tooltipKind, alt: img.alt};
       });
-      assert.deepEqual(attributes, {width: '320', loading: null, title: 'Authored image', alt: 'Pending image'});
+      assert.deepEqual(attributes, {width: '320', loading: null, title: null,
+        hint: 'Authored image', hintKind: 'description', alt: 'Pending image'});
     }
     assert.deepEqual(pageErrors, []);
     await page.close();

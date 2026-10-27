@@ -46,8 +46,13 @@ async function observe(page: Page, preview: boolean) {
       : view.contentDOM as HTMLElement;
     const signature = (element: Element) => {
       const copy = element.cloneNode(true) as Element;
-      for (const node of [copy, ...copy.querySelectorAll('[data-source-line], [data-source-end-line], [data-meo-preview-block]')]) {
+      for (const node of [copy, ...copy.querySelectorAll('*')]) {
         for (const name of ['data-source-line', 'data-source-end-line', 'data-meo-preview-block']) node.removeAttribute(name);
+        // Rebinding a hint can reorder attributes without changing its content.
+        // Preserve their names, namespaces and values while comparing semantics.
+        const attributes = [...node.attributes].sort((left, right) => left.name.localeCompare(right.name));
+        for (const attribute of attributes) node.removeAttributeNode(attribute);
+        for (const attribute of attributes) node.setAttributeNodeNS(attribute);
       }
       return copy.outerHTML;
     };
@@ -80,8 +85,52 @@ async function observe(page: Page, preview: boolean) {
   }, preview);
 }
 
+async function assertObserverSemantics() {
+  const page = await browser.newPage(), host = await open(page, 'Typing target.\n\n' + prefix + '\n\nTail witness.\n', true);
+  try {
+    await page.locator('.source-preview-button').click();
+    await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
+      ?.querySelector('.footnote-backref')?.hasAttribute('data-tooltip'));
+    await delay(700); await frames(page, 6);
+    const baseline = await observe(page, true); assert.ok(baseline.witnesses >= 4);
+    const reordered = await page.evaluate(() => {
+      const link = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.querySelector('.footnote-backref')!;
+      const before = link.outerHTML;
+      const attributes = [...link.attributes].reverse();
+      for (const attribute of attributes) link.removeAttributeNode(attribute);
+      for (const attribute of attributes) link.setAttributeNodeNS(attribute);
+      return { before, after: link.outerHTML };
+    });
+    assert.notEqual(reordered.after, reordered.before, 'The control must actually change raw attribute serialization order');
+    await frames(page, 2);
+    assert.deepEqual(await page.evaluate(() => (window as any).__unchangedContent.read().changes), [],
+      'The observer accepts reordered attributes with identical names and values');
+    await page.evaluate(() => {
+      const link = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.querySelector('.footnote-backref')!;
+      link.setAttribute('data-meo-preview-href', '#different-reference');
+    });
+    assert.ok((await page.evaluate(() => (window as any).__unchangedContent.read().changes)).length > 0,
+      'The observer must still reject a changed link destination');
+    await page.evaluate(() => {
+      (window as any).__unchangedContent.stop();
+      document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.querySelector('.footnote-backref')!
+        .setAttribute('data-meo-preview-href', '#fnref-1');
+    });
+    await observe(page, true);
+    await page.evaluate(() => {
+      const link = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.querySelector('.footnote-backref')!;
+      link.replaceWith(link.cloneNode(true));
+    });
+    assert.ok((await page.evaluate(() => (window as any).__unchangedContent.read().changes)).length > 0,
+      'The observer must still reject replacement by an identical cloned node');
+    await page.evaluate(() => (window as any).__unchangedContent.stop());
+    console.log('Unchanged-content observer controls passed: attribute order, changed destination and identical node replacement');
+  } finally { host.dispose(); await page.close(); }
+}
+
 let primary: unknown, stage = 'startup';
 try {
+  await assertObserverSemantics();
   const only = process.argv.find(arg => arg.startsWith('--only='))?.slice(7);
   const sceneOnly = process.argv.find(arg => arg.startsWith('--scene='))?.slice(8);
   for (const large of process.argv.includes('--small-only') ? [false] : process.argv.includes('--large-only') ? [true] : [false, true]) {
