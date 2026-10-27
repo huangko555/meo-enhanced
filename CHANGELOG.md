@@ -20,6 +20,9 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Preserved the reading position when releasing a floating table-header column resize instead of scrolling to the document caret.
 - Prevented an intermediate viewport jump during rich-document input when virtual block measurements changed the scroll offset while the caret stayed in place.
 - Kept Windows Ctrl+A selection within search and other native input fields so a delayed VS Code command cannot replace newly typed text.
+- Preserved fractional scroll progress between Source and its linked Preview, including wrapped lines and compact rendered blocks.
+- Kept table cells in place when leaving Mermaid, formula, HTML or expanded code editors to enter a native cell input.
+- Preserved outer destinations on linked images and formatted table links, and unified authored title hints to prevent duplicate native tooltips.
 
 ## 0.3.34
 - Added in-place HTML fragment editing with syntax-colored source, live previews, visible placeholders for non-rendering fragments, and feedback for filtered content. Improved fragment rendering, inline styles, tables, images and disclosure elements.
