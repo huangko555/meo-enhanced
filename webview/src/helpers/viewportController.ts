@@ -1124,11 +1124,13 @@ export class ViewportController {
       // that grows inside the viewport would pull that top upward again.
       const readingRatio = linkedPreviewEnabled && projectionDriver === 'editor'
         && this.getMode() === 'source' && !this.linkedPreviewAttentionHeld ? 0 : 1 / 3;
-      const restoreVisualAnchor = this.previewSurface.captureVisualReadingAnchor?.(documentChange ? 0 : readingRatio);
+      const sourceWindowProjection = readingRatio === 0 && !this.linkedViewportMap && !documentChange;
+      const restoreVisualAnchor = sourceWindowProjection ? undefined
+        : this.previewSurface.captureVisualReadingAnchor?.(documentChange ? 0 : readingRatio);
       const previewGestureActive = linkedPreviewEnabled && projectionDriver === 'preview' && this.isLinkedInteractionActive();
       let readingAnchor: ViewportDocumentAnchor | null = null;
       // Source scrolling cannot displace an independently scrolled Preview.
-      if ((!linkedPreviewEnabled || !this.isUserScrolling()) && !previewGestureActive) {
+      if (!sourceWindowProjection && (!linkedPreviewEnabled || !this.isUserScrolling()) && !previewGestureActive) {
         if (documentChange) {
           const topAnchor = this.capturePreviewDocumentAnchor(0, undefined, documentChange.previousText);
           const changedRange = findChangedDocumentRange(
@@ -1153,6 +1155,17 @@ export class ViewportController {
       }
       mutate();
       this.linkedViewportMapDirty = true;
+      if (sourceWindowProjection) {
+        // The retained window can still contain the previous reading glyph.
+        // Restoring it would compete with Source's newly mounted destination.
+        // Reproject only after a real presentation commit, never on idle ready.
+        if (interactionGeneration === this.interactionGeneration && projectionGeneration === this.linkedProjectionGeneration) {
+          this.linkedViewportPosition = null;
+        }
+        this.rebuildLinkedViewportMap(true);
+        this.scheduleLinkedViewportMapRefresh();
+        return;
+      }
       // Async Preview presentation commits can change the height of content above
       // the reading point. When Source owns an idle viewport, project the semantic
       // position sampled from Preview against the committed geometry
@@ -1207,10 +1220,6 @@ export class ViewportController {
           preview: this.previewSurface.readScrollTop() };
         this.rebaseLinkedSemanticOrigin(this.view.scrollDOM.scrollTop);
       }
-      // A window mount can restore the old Preview band while Source is still
-      // waiting for its destination. Reassert that semantic destination after
-      // the commit; idle readiness notifications alone need no new projection.
-      if (readingRatio === 0 && !this.linkedViewportMap) this.linkedViewportPosition = null;
       this.rebuildLinkedViewportMap(true);
       this.scheduleLinkedViewportMapRefresh();
       return;

@@ -138,6 +138,16 @@ async function assertColdSourceScroll(page: import('puppeteer-core').Page, windo
     return { text: view.state.doc.toString(), selection: view.state.selection.toJSON() };
   });
   assert.deepEqual(after, before, 'Cold linked scrolling preserves the complete Source text and selection');
+  // Complete a Preview-owned jump back to the start before navigating Source
+  // into a cold window. Native thumb delivery is covered in installed VS Code.
+  const previewPoint = await page.$eval('.preview-frame', element => {
+    const rect = element.getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.move(previewPoint.x, previewPoint.y);
+  await page.mouse.wheel({ deltaY: -30 });
+  await page.evaluate(() => { document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop = 0; });
+  await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop <= 2);
+  await new Promise(resolve => setTimeout(resolve, 400));
   // The same heading must align after a new explicit Source navigation.
   const headingLine = before.text.slice(0, before.text.indexOf('## Cold alignment target')).split('\n').length;
   await page.locator('.line-jump-input').fill(String(headingLine));

@@ -3072,7 +3072,7 @@ for (const owner of ['editor', 'preview'] as const) {
 // A cold window commits while its Source destination is still mounting. Its
 // old reading band must not supersede that destination just because Source
 // itself has not moved again during the asynchronous mount.
-{
+for (const visualAnchorSurvives of [false, true]) {
   const doc = Text.of(Array.from({ length: 80 }, () => 'line'));
   const scroll = { scrollTop: 0, scrollLeft: 0, scrollHeight: 2000, clientHeight: 400 };
   let previewTop = 0;
@@ -3081,6 +3081,10 @@ for (const owner of ['editor', 'preview'] as const) {
     ...uniformLineGeometry(doc)
   } as any, { attachInteractions: false, getMode: () => 'source', previewSurface: {
     captureTopVisiblePosition: () => ({ line: 1, lineOffset: 0 }),
+    captureVisualReadingAnchor: () => () => {
+      if (visualAnchorSurvives) previewTop = 0;
+      return visualAnchorSurvives;
+    },
     restoreTopVisiblePosition: (position, isCurrent) => { requests.push({ line: position.line, isCurrent }); },
     captureLinkedGeometry: () => null,
     readScrollTop: () => previewTop, writeScrollTop: top => { previewTop = top; }
@@ -3091,6 +3095,7 @@ for (const owner of ['editor', 'preview'] as const) {
     const destination = requests.at(-1)!;
     if (destination.line !== 31) throw new Error('The cold Source destination must be requested first');
     controller.runPreviewPresentationTransaction(() => { previewTop = 1200; });
+    if (previewTop !== 1200) throw new Error('A stale surviving glyph must not reset the newly mounted Source destination');
     const accepted = requests.filter(request => request.isCurrent());
     if (accepted.length !== 1 || accepted[0].line !== 31) {
       throw new Error(`Cold window presentation replaced the current Source destination: ${accepted.map(request => request.line)}`);
