@@ -10,7 +10,8 @@ export class NativeInputViewport {
 
   constructor(private readonly view: EditorView) {}
 
-  capture(target: EventTarget | null): boolean {
+  /** Pointer activation may supply the same input's pre-focus geometry. */
+  capture(target: EventTarget | null, top?: number): boolean {
     const window = this.view.dom.ownerDocument?.defaultView;
     if (!window || !(target instanceof window.HTMLTextAreaElement)
       || !this.view.contentDOM.contains(target)
@@ -18,7 +19,7 @@ export class NativeInputViewport {
       || this.view.dom.ownerDocument.activeElement !== target) return false;
     const bounds = target.getBoundingClientRect(), viewport = this.view.scrollDOM.getBoundingClientRect();
     if (bounds.bottom <= viewport.top || bounds.top >= viewport.bottom) return false;
-    this.anchor = { input: target, top: bounds.top };
+    this.anchor = { input: target, top: top ?? bounds.top };
     return true;
   }
 

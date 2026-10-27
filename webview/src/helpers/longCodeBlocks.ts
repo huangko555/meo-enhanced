@@ -22,6 +22,7 @@ import { blockReadingFocusAt, focusBlockReading } from '../editor/blockInteracti
 import { editorViewportBounds } from '../editor/editorViewportBounds';
 import { getViewportController } from './viewportController';
 import { isExternalDocumentPresentation } from '../editor/externalDocumentPresentation';
+import { setLivePointerSelectionActiveEffect, sourcePresentationSelection } from '../editor/livePointerSelection';
 
 const LONG_CODE_LINE_THRESHOLD = 18;
 const LONG_CODE_VISIBLE_LINES = 10;
@@ -362,7 +363,8 @@ function buildLongCodeState(
 }
 
 function hasLongCodeImmediateEffect(transaction: Transaction): boolean {
-  return transaction.effects.some(effect => effect.is(toggleLongCodeBlockEffect));
+  return transaction.effects.some(effect => effect.is(toggleLongCodeBlockEffect)
+    || effect.is(setLivePointerSelectionActiveEffect) && !effect.value.active);
 }
 
 function applyTemporaryTarget(
@@ -433,8 +435,9 @@ function reduceLongCodeInteractions(
   }
 
   const toggleEffectPresent = transaction.effects.some((effect) => effect.is(toggleLongCodeBlockEffect));
-  if (transaction.selection && !searchReveal && !searchClear && !toggleEffectPresent) {
-    const selection = transaction.state.selection.main;
+  const pointerReleased = transaction.effects.some(effect => effect.is(setLivePointerSelectionActiveEffect) && !effect.value.active);
+  if ((transaction.selection || pointerReleased) && !searchReveal && !searchClear && !toggleEffectPresent) {
+    const selection = sourcePresentationSelection(transaction.state).main;
     const target = findBlockIntersectingHiddenRange(blocks, selection.from, selection.to);
     if (applyTemporaryTarget(blocks, target, 'selection')) presentationChanged = true;
   }

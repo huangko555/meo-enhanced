@@ -3266,6 +3266,8 @@ class HtmlTableController extends UiLanguageSensitiveWidget {
 
   focusTableInput(input: HTMLTextAreaElement, caret: number | null = null, { scrollCellIntoView = true }: { scrollCellIntoView?: boolean } = {}) {
     if (!(input instanceof HTMLTextAreaElement)) return false;
+    const viewport = this.view ? getViewportController(this.view) : null;
+    const top = !scrollCellIntoView ? input.getBoundingClientRect().top : undefined;
     this.setCellEditingState(input, true);
     input.focus({ preventScroll: true });
     const nextCaret = Math.min(Math.max(caret ?? input.value.length, 0), input.value.length);
@@ -3273,7 +3275,6 @@ class HtmlTableController extends UiLanguageSensitiveWidget {
     if (scrollCellIntoView) {
       const cell = input.closest<HTMLElement>(tableCellSelector);
       if (cell) {
-        const viewport = this.view ? getViewportController(this.view) : null;
         if (viewport) {
           const isRevealCurrent = viewport.beginNavigationReveal();
           viewport.revealElement(cell, isRevealCurrent);
@@ -3281,6 +3282,11 @@ class HtmlTableController extends UiLanguageSensitiveWidget {
           cell.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
         }
       }
+    }
+    // A pointer-selected cell keeps its pre-activation position through row
+    // sizing and the previous block's deferred source/preview transition.
+    if (top !== undefined && viewport?.captureNativeInputViewport(input, top)) {
+      viewport.reconcileAfterEditorUpdate();
     }
     const container = input.closest('.meo-md-html-table-wrap');
     if (container instanceof HTMLElement) {

@@ -799,6 +799,14 @@ the unchanged 2px bound. Missing epochs or an invisible target fail the check.
 Start capture before the deliberate native input, so the pending-work handoff
 remains immediate; retain held-pointer DOM, source, focus and final-position checks.
 
+The same contract covers clicking a native table cell below editable Mermaid
+(both layouts), formulas, HTML and temporarily expanded code. It retains the
+cell's pre-activation geometry through row sizing and the old block's collapse,
+checks every painted release frame, the accepted cell focus/source selection,
+unchanged text and retirement by a newer wheel gesture. Ordinary and large
+fixtures assert the production size policy and actual derived-work budget.
+Use `--handoff-case=native/ordinary/mermaid-stacked` for the minimal regression.
+
 For an appearance-only operation's `EditorState` identity check, first await the
 current document's derived-work readiness, parser idle and expected large-document
 policy. Replacing a fixture document can schedule its own policy reconfiguration;

@@ -4,16 +4,17 @@ import path from 'node:path';
 import sharp from 'sharp';
 import type { Page } from 'puppeteer-core';
 import { launchTestBrowser, closeTestBrowser } from './browser-test-helpers';
+import { assessLargeDocument } from '../src/foundation/largeDocument';
 
 type Fixture = { name: string; kind: 'math' | 'html' | 'code' | 'mermaid'; block: string; body: string; side?: boolean; width?: number };
 
 /** Mark each release epoch in pixels: a rAF geometry read may precede the same
  * frame's CodeMirror write, so only its corresponding compositor PNG is visual evidence. */
-async function observeHandoffPaints(page: Page, frames: (count?: number) => Promise<unknown>) {
-  await page.evaluate(() => {
+async function observeHandoffPaints(page: Page, frames: (count?: number) => Promise<unknown>, selector = '.cm-line') {
+  await page.evaluate(selector => {
     const view = (window as any).nativeEditor.view;
     const witness = () => {
-      for (const line of view.contentDOM.querySelectorAll('.cm-line'))
+      for (const line of view.contentDOM.querySelectorAll(selector))
         if (line.textContent === 'AFTER TARGET' && !line.hasAttribute('data-handoff-witness'))
           line.setAttribute('data-handoff-witness', '');
     };
@@ -26,7 +27,7 @@ async function observeHandoffPaints(page: Page, frames: (count?: number) => Prom
     epoch.style.cssText = 'position:fixed;left:0;top:0;width:12px;height:12px;background:rgb(10,70,90);z-index:2147483647;pointer-events:none';
     document.body.append(epoch);
     (window as any).handoffPaintObserver = observer;
-  });
+  }, selector);
   // Paint the geometry-neutral positive control before the deliberately pending input.
   await frames(3);
   const client = await page.createCDPSession();
@@ -47,8 +48,7 @@ async function observeHandoffPaints(page: Page, frames: (count?: number) => Prom
         for (let index = 0; index < count; index++) {
           await new Promise(requestAnimationFrame);
           const view = (window as any).nativeEditor.view;
-          const target = Array.from(view.contentDOM.querySelectorAll('.cm-line'))
-            .find((line: any) => line.textContent === 'AFTER TARGET') as HTMLElement | undefined;
+          const target = view.contentDOM.querySelector('[data-handoff-witness]') as HTMLElement | null;
           tops.push(target?.getBoundingClientRect().top ?? null);
           document.getElementById('handoff-paint-epoch')!.style.backgroundColor = `rgb(${20 + index * 10},70,90)`;
         }
@@ -277,6 +277,89 @@ async function checkBlockEditingHandoffs(page: Page,
   console.log(`Block handoffs passed: ${cases} ordinary/rich/text cases, held pointer/release/keyboard and ${paintedFrames} compositor frames`);
 }
 
+async function checkNativeInputHandoffs(page: Page,
+  mount: (text: string, width: number) => Promise<void>,
+  select: (position: number) => Promise<void>,
+  frames: (count?: number) => Promise<unknown>): Promise<void> {
+  const fixtures = [
+    { name: 'mermaid-stacked', block: '```mermaid\nflowchart LR\nA --> B\n```', body: 'A --> B', side: false },
+    { name: 'mermaid-side', block: '```mermaid\nflowchart LR\nA --> B\n```', body: 'A --> B', side: true },
+    { name: 'math', block: '$$\nx^2 + y^2 = 1\n$$', body: 'x^2' },
+    { name: 'html', block: '<div>\n<p>Alpha</p>\n</div>', body: 'Alpha' },
+    { name: 'folded-code', block: '```js\n' + Array.from({ length: 70 }, (_, i) => `const value${i} = ${i};`).join('\n') + '\n```', body: 'const value50' }
+  ];
+  const selected = process.argv.find(arg => arg.startsWith('--handoff-case='))?.slice('--handoff-case='.length);
+  if (selected && selected !== 'native' && !selected.startsWith('native/')) return;
+  const prefix = Array.from({ length: 35 }, (_, i) => `Before paragraph ${i}\n`).join('\n') + '\n';
+  const table = '| Header | Status |\n| --- | --- |\n| AFTER TARGET | Ready |';
+  let cases = 0;
+  for (const large of [false, true]) for (const fixture of fixtures) {
+    const label = `native/${large ? 'large' : 'ordinary'}/${fixture.name}`;
+    if (selected && selected !== 'native' && selected !== label) continue;
+    const suffix = Array.from({ length: large ? 12000 : 35 }, (_, i) => `Following paragraph ${i}\n`).join('\n');
+    const text = prefix + fixture.block + '\n\n' + table + '\n\n' + suffix;
+    assert.equal(assessLargeDocument(text).boundedEditorWork, large, label + ': production size policy');
+    await mount(text, 1200);
+    await select(prefix.length + fixture.block.indexOf(fixture.body));
+    assert.equal(await page.evaluate(() => (window as any).MermaidEditingHarness.usesLargeDocumentDerivedWorkBudget(
+      (window as any).nativeEditor.view.state)), large, label + ': actual derived-work budget');
+    if (fixture.side) {
+      await page.$eval('.meo-mermaid-layout-btn', (button: any) => button.click());
+      await frames(10);
+    }
+    await page.evaluate(position => {
+      const view = (window as any).nativeEditor.view;
+      view.dispatch({ effects: view.constructor.scrollIntoView(position, { y: 'center' }) });
+      view.focus();
+    }, text.indexOf('AFTER TARGET'));
+    await frames(16);
+    const snapshot = () => page.evaluate(() => {
+      const view = (window as any).nativeEditor.view;
+      const cell = Array.from(view.contentDOM.querySelectorAll('.meo-md-html-table-cell-content'))
+        .find((node: any) => node.textContent === 'AFTER TARGET') as HTMLElement | undefined;
+      const input = cell?.querySelector('textarea');
+      const preview = cell?.querySelector('.meo-md-html-table-cell-preview');
+      const range = document.createRange();
+      if (preview) range.selectNodeContents(preview);
+      const text = range.getBoundingClientRect();
+      return { top: cell?.getBoundingClientRect().top, x: text.left + 3, y: (text.top + text.bottom) / 2,
+        active: !!input && document.activeElement === input, value: input?.value,
+        folded: view.dom.querySelectorAll('.meo-md-long-code-placeholder').length,
+        head: view.state.selection.main.head,
+        mode: view.dom.querySelector('.meo-mermaid-toolbar')?.getAttribute('data-meo-mermaid-mode') };
+    });
+    const before = await snapshot();
+    assert.ok(before.top !== undefined && before.top > 150 && before.top < 650, label + ': visible table text target');
+    if (fixture.name.startsWith('mermaid')) assert.equal(before.mode, 'edit', label + ': source is open');
+    const paints = await observeHandoffPaints(page, frames, '.meo-md-html-table-cell-content');
+    await page.mouse.move(Math.ceil(before.x), Math.floor(before.y));
+    await page.mouse.down();
+    await frames(5);
+    const held = await snapshot();
+    assert.ok(held.top !== undefined && Math.abs(held.top - before.top!) <= 2,
+      label + ': target stays under held pointer ' + JSON.stringify({ before, held }));
+    await page.mouse.up();
+    await paints.sample(24);
+    await paints.finish(label, before.top!);
+    const after = await snapshot();
+    assert.ok(after.active && after.value === 'AFTER TARGET', label + ': clicked native cell owns focus');
+    assert.ok(after.head >= text.indexOf('AFTER TARGET') && after.head <= text.indexOf('AFTER TARGET') + 12,
+      label + ': outer selection follows the accepted cell');
+    assert.ok(after.top !== undefined && Math.abs(after.top - before.top!) <= 2,
+      label + ': collapse retains the clicked cell ' + JSON.stringify({ before, held, after }));
+    if (fixture.name.startsWith('mermaid')) assert.equal(after.mode, 'preview', label + ': source retires');
+    assert.equal(await page.evaluate(() => (window as any).nativeEditor.getText()), text, label + ': no text mutation');
+    await page.mouse.move(1100, 650);
+    await page.mouse.wheel({ deltaY: 160 });
+    await frames(20);
+    const scrolled = await snapshot();
+    assert.ok(scrolled.top !== undefined && scrolled.top < after.top! - 100, label + ': newer user scroll retires retention');
+    cases++;
+  }
+  assert.ok(cases > 0, 'Selected native-input handoff exists');
+  console.log(`Native-input block handoffs passed: ${cases} ordinary/large cases, painted release frames and new user scroll`);
+}
+
 const build = await Bun.build({ entrypoints: ['scripts/test-mermaid-editing-entry.ts'], target: 'browser', format: 'iife' });
 assert.ok(build.success, build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
@@ -319,7 +402,9 @@ try {
     }, anchor);
     await frames();
   };
-  await checkBlockEditingHandoffs(page, mount, select, frames);
+  if (!process.argv.some(arg => arg === '--handoff-case=native' || arg.startsWith('--handoff-case=native/')))
+    await checkBlockEditingHandoffs(page, mount, select, frames);
+  await checkNativeInputHandoffs(page, mount, select, frames);
   assert.deepEqual(errors, []);
 } catch (error) { failure = error; }
 if (failure === undefined) await closeTestBrowser(browser); else await closeTestBrowser(browser, failure);

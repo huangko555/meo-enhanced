@@ -1167,7 +1167,11 @@ export function createEditor({
         view.dispatch({ selection, effects: setLivePointerSelectionActiveEffect.of({ active: false, preservedLine: null }) });
       };
       const top = view.hasFocus && view.state.selection.main.empty ? view.coordsAtPos(view.state.selection.main.head)?.top : undefined;
-      if (top !== undefined) retainBlockCaret(view, top, mutate);
+      // Table focus is accepted after the viewport's capture-phase pointerup.
+      // Adopt its native geometry before retiring the held block presentation.
+      if (viewportController.hasNativeInputViewportOwner() ||
+        viewportController.captureNativeInputViewport(getActiveTableInput())) mutate();
+      else if (top !== undefined) retainBlockCaret(view, top, mutate);
       else mutate();
     }
   };

@@ -2757,6 +2757,11 @@ export class ViewportController {
   /** Background viewport estimates cannot evict the current native edit. */
   hasNativeInputViewportOwner(): boolean { return this.nativeInputViewport.hasOwner(); }
 
+  /** A widget may accept pointer focus after the document's release listener. */
+  captureNativeInputViewport(target: EventTarget | null, top?: number): boolean {
+    return this.nativeInputViewport.capture(target, top);
+  }
+
   /** Reveals a document position; viewport ownership changes only when measurement requires a scroll. */
   revealPosition(
     position: number,
