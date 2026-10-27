@@ -180,6 +180,14 @@ async function assertColdSourceScroll(page: import('puppeteer-core').Page, windo
     }, headingLine));
     throw error;
   });
+  await new Promise(resolve => setTimeout(resolve, 400));
+  const settledHeading = await page.evaluate(line => {
+    const heading = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+      .querySelector<HTMLElement>(`h2[data-source-line="${line}"]`);
+    return heading?.getBoundingClientRect().top ?? null;
+  }, headingLine);
+  assert.ok(settledHeading !== null && Math.abs(settledHeading) <= 2,
+    `A cold window commit must retain the aligned Source destination: ${settledHeading}`);
 }
 
 async function assertScrollContinuityAndAlignment(page: import('puppeteer-core').Page, bundle: string, windowed: boolean): Promise<void> {

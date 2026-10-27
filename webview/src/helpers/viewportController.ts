@@ -1207,6 +1207,10 @@ export class ViewportController {
           preview: this.previewSurface.readScrollTop() };
         this.rebaseLinkedSemanticOrigin(this.view.scrollDOM.scrollTop);
       }
+      // A window mount can restore the old Preview band while Source is still
+      // waiting for its destination. Reassert that semantic destination after
+      // the commit; idle readiness notifications alone need no new projection.
+      if (readingRatio === 0 && !this.linkedViewportMap) this.linkedViewportPosition = null;
       this.rebuildLinkedViewportMap(true);
       this.scheduleLinkedViewportMapRefresh();
       return;
