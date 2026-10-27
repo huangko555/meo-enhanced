@@ -88,6 +88,26 @@ try {
   await page.waitForFunction((line) => Boolean(document.querySelector(
     `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${line}"]`
   )), {}, tableStartLine);
+  // Optimized startup first opens Source, so entering Live retains a mode
+  // round-trip origin. Programmatic fixture positioning does not replace that
+  // origin; establish a real reading gesture before testing the later return.
+  await page.waitForFunction(() => !document.querySelector<HTMLElement>('.editor-host')!.inert
+    && document.querySelector<HTMLElement>('.preview-host')!.hidden);
+  const readingPoint = await page.$eval('.cm-scroller', element => {
+    const rect = element.getBoundingClientRect();
+    (window as any).__roundtripReadingWheel = null;
+    element.addEventListener('wheel', event => {
+      (window as any).__roundtripReadingWheel = { trusted: event.isTrusted, delta: (event as WheelEvent).deltaY };
+    }, { once: true, passive: true });
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, top: element.scrollTop };
+  });
+  await page.mouse.move(readingPoint.x, readingPoint.y);
+  await page.mouse.wheel({ deltaY: 1 });
+  await page.waitForFunction(top => {
+    const wheel = (window as any).__roundtripReadingWheel;
+    return wheel?.trusted && wheel.delta === 1
+      && document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop > top + 0.5;
+  }, {}, readingPoint.top);
   await page.click('button[data-mode="source"]');
   await page.waitForFunction(() => document.querySelector<HTMLElement>('.editor-root')?.dataset.mode === 'source');
   await page.click('button[data-mode="preview"]');
