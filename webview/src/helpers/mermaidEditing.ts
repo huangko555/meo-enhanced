@@ -12,7 +12,9 @@ import {
 import { getMermaidDiagramPresentationFactory } from '../editor/mermaidDiagramPresentation';
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import { setLivePointerSelectionActiveEffect, sourcePresentationSelection } from '../editor/livePointerSelection';
-import { supersedeLiveInputDerivedWork } from '../editor/liveInputDerivedWork';
+import { supersedeLiveInputDerivedWork, isLiveInputDerivedWorkRefresh } from '../editor/liveInputDerivedWork';
+import { isCompleteMarkdownStructure } from '../editor/markdownStructure';
+import { resolvedSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
 import {
   MermaidDiagramWidget,
   createMermaidViewportState,
@@ -36,6 +38,7 @@ export type MermaidBlockMode = 'preview' | 'edit';
 type MermaidSearchReveal = { from: number; to: number } | null;
 type MermaidEditingState = {
   activeAnchor: number | null;
+  activeTo: number | null;
   layouts: Map<number, MermaidEditingLayout>;
   searchReveal: MermaidSearchReveal;
   viewports: Map<number, MermaidViewportState>;
@@ -72,6 +75,7 @@ function isMermaidAnchor(state: EditorState, anchor: number): boolean {
 export const mermaidEditingStateField = StateField.define<MermaidEditingState>({
   create: () => ({
     activeAnchor: null,
+    activeTo: null,
     layouts: new Map(),
     searchReveal: null,
     viewports: new Map(),
@@ -80,8 +84,9 @@ export const mermaidEditingStateField = StateField.define<MermaidEditingState>({
   }),
   update(value, transaction) {
     const pointerPresentationChanged = transaction.effects.some(effect => effect.is(setLivePointerSelectionActiveEffect));
+    const syntaxPublished = syntaxTreeChanged(transaction) || isLiveInputDerivedWorkRefresh(transaction);
     if (!transaction.docChanged && !transaction.selection && !transaction.reconfigured
-      && !pointerPresentationChanged && !transaction.effects.some(isMermaidPresentationEffect)) return value;
+      && !pointerPresentationChanged && !syntaxPublished && !transaction.effects.some(isMermaidPresentationEffect)) return value;
     const layouts = new Map<number, MermaidEditingLayout>(),
       viewports = new Map<number, MermaidViewportState>();
     const mapped = (anchor: number): number | null => {
@@ -119,8 +124,10 @@ export const mermaidEditingStateField = StateField.define<MermaidEditingState>({
     }
     if (transaction.selection && !revealing) searchReveal = null;
     let activeAnchor = value.activeAnchor === null ? null : mapped(value.activeAnchor);
+    let activeTo = activeAnchor === null || value.activeTo === null ? null
+      : transaction.docChanged ? transaction.changes.mapPos(value.activeTo, -1) : value.activeTo;
     const previousActive = activeAnchor;
-    if (transaction.selection || transaction.docChanged || pointerPresentationChanged) {
+    if (transaction.selection || transaction.docChanged || pointerPresentationChanged || syntaxPublished) {
       // The source/canvas layout follows the same held selection as its
       // decorations. Native hit testing may already point below the block.
       const selection = sourcePresentationSelection(transaction.state).main;
@@ -130,13 +137,22 @@ export const mermaidEditingStateField = StateField.define<MermaidEditingState>({
           ? selection.head >= source.opening.from && selection.head <= source.closing.to
           : selection.from <= source.closing.to && selection.to >= source.opening.from);
       const active = activeAnchor === null ? null : mermaidSourceForAnchor(transaction.state, activeAnchor);
+      // A partial outer parse cannot revoke an accepted editing range. Keep its
+      // mapped interaction bounds while source/diagram work is in flight; the
+      // completed syntax, a removed opening fence or an outside selection retires it.
+      const pendingActive = !active && activeAnchor !== null && activeTo !== null
+        && (selection.empty ? selection.head >= activeAnchor && selection.head <= activeTo
+          : selection.from <= activeTo && selection.to >= activeAnchor)
+        && !isCompleteMarkdownStructure(resolvedSyntaxTree(transaction.state, 0), transaction.state.doc.length);
       // A drag may cross other blocks or end outside the fence. Keep the chart
       // that owned this edit session while its source remains in the selection.
-      if (!touches(active)) {
+      if (touches(active)) activeTo = active!.closing.to;
+      else if (!pendingActive) {
         const candidate =
           mermaidSourceAt(transaction.state, selection.head) ??
           (!selection.empty ? mermaidSourceAt(transaction.state, selection.anchor) : null);
         activeAnchor = touches(candidate) ? candidate!.anchor : null;
+        activeTo = touches(candidate) ? candidate!.closing.to : null;
       }
     }
     let sideSpace = activeAnchor === previousActive ? value.sideSpace : 0;
@@ -144,7 +160,7 @@ export const mermaidEditingStateField = StateField.define<MermaidEditingState>({
       if (effect.is(setMermaidSideSpaceEffect) && effect.value.anchor === activeAnchor)
         sideSpace = effect.value.height;
     }
-    return { activeAnchor, layouts, viewports, searchReveal, narrow, sideSpace };
+    return { activeAnchor, activeTo, layouts, viewports, searchReveal, narrow, sideSpace };
   }
 });
 

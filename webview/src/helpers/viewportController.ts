@@ -2829,7 +2829,7 @@ export class ViewportController {
     viewportTop: number,
     isCurrent: () => boolean = () => true,
     measuredLayout = false,
-    options: { keepVisible?: boolean; reference?: CaretRetentionReference } = {}
+    options: { keepVisible?: boolean; reference?: CaretRetentionReference; retainOnLayout?: boolean } = {}
   ): void {
     if (this.destroyed || !isCurrent()) return;
     const targetPosition = Math.max(0, Math.min(position, this.view.state.doc.length));
@@ -2870,7 +2870,7 @@ export class ViewportController {
         kind: 'target',
         target: { top: this.view.scrollDOM.scrollTop + delta }
       };
-    }, { settle: true, measuredLayout }, isCurrent);
+    }, { settle: true, measuredLayout, retainOnLayout: options.retainOnLayout }, isCurrent);
   }
 
   private revealPositionInternal(

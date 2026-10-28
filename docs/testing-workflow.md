@@ -831,6 +831,18 @@ unchanged text and retirement by a newer wheel gesture. Ordinary and large
 fixtures assert the production size policy and actual derived-work budget.
 Use `--handoff-case=native/ordinary/mermaid-stacked` for the minimal regression.
 
+`scripts/test-live-pointer-layout.ts` clicks unwrapped/heading footnote lines
+after a wrapped source reference, and enters/leaves short and wide formulas.
+Ordinary and optimized documents retain the held/released pointer target in
+actual compositor frames and keep formula/document gutters aligned. The checks
+assert the production size assessment and actual derived-work budget.
+`scripts/test-block-late-layout-handoffs.ts` uses the built Webview, Markdown
+Worker and real Mermaid runtime in both editing layouts. It holds a changed
+diagram's completion until after source collapse and finite input settlement,
+then verifies painted target continuity, unchanged source, accepted caret and
+retirement by a newer wheel. Its large fixture verifies Worker context requests
+and bounded mounted DOM. Both belong to `test:rendered-source`.
+
 For an appearance-only operation's `EditorState` identity check, first await the
 current document's derived-work readiness, parser idle and expected large-document
 policy. Replacing a fixture document can schedule its own policy reconfiguration;

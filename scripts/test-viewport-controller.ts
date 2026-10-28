@@ -1693,6 +1693,7 @@ for (const interruption of ['stale-frame', 'destroy', 'late-measure'] as const) 
 }
 // History can finish its finite reveal before CodeMirror's later height-map
 // measurement. Keep the target through that receipt, but yield to new intent.
+for (const retention of ['history', 'caret'] as const)
 for (const initialTargetTop of [1400, 1600])
 for (const interruption of ['none', 'input', 'scroll', 'navigation', 'destroy'] as const) {
   let targetTop = initialTargetTop;
@@ -1703,12 +1704,14 @@ for (const interruption of ['none', 'input', 'scroll', 'navigation', 'destroy'] 
   });
   const controller = new ViewportController({
     dom: new FakeEventTarget(), scrollDOM: scroll, state: { doc: { length: 4999 } },
+    coordsAtPos: () => ({ top: targetTop - scroll.scrollTop, bottom: targetTop + 20 - scroll.scrollTop }),
     lineBlockAt: () => ({ top: targetTop, bottom: targetTop + 20, height: 20 }),
     requestMeasure: ({ read, write }: any) => write(read())
   } as any, { attachInteractions: false });
   try {
     const current = controller.beginNavigationReveal();
-    controller.revealPositionUntilStable(1600, {
+    if (retention === 'caret') controller.retainPositionTop(1600, 350, current, false, { retainOnLayout: true });
+    else controller.revealPositionUntilStable(1600, {
       geometry: 'line-block', marginMode: 'comfort-band', yMargin: 40,
       retainOnLayout: true
     }, current);
@@ -1741,6 +1744,7 @@ for (const interruption of ['none', 'input', 'scroll', 'navigation', 'destroy'] 
     await flushFrames(wheelFrames);
     if (interruption === 'none') {
       if (targetTop + 20 > scroll.scrollTop + 460) throw new Error('Late measured history target escaped the viewport');
+      if (retention === 'caret' && targetTop - scroll.scrollTop !== 350) throw new Error('Late block layout moved the retained caret');
     } else if (scroll.scrollTop !== beforeReceipt) {
       throw new Error(`History retention survived ${interruption}`);
     }

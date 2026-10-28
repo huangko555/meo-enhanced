@@ -1474,18 +1474,11 @@ function addInlineMarkerRange(builder: DecorationCollector, activeLines: Set<num
 }
 
 function collectActiveLines(state: EditorState): Set<number> {
-  const pointerSelection = state.field(livePointerSelectionActiveField);
   if (state.field(liveDocumentIdleField)) {
     return new Set();
   }
-  if (pointerSelection.active && !pointerSelection.awaitingSelection) {
-    return pointerSelection.preservedLine === null
-      ? new Set()
-      : new Set([pointerSelection.preservedLine]);
-  }
-
   const lines = new Set<number>();
-  for (const range of state.selection.ranges) {
+  for (const range of sourcePresentationSelection(state).ranges) {
     // In live mode, only reveal markdown markers on the focused line.
     const focusLine = state.doc.lineAt(range.head).number;
     lines.add(focusLine);
@@ -3738,6 +3731,11 @@ function rebuildLiveSelectionWithSyntax(decorations: DecorationSet, transaction:
   const definitions = parseFootnotes(state).definitions;
   const displayMathBlocks = getLiveRenderedBlocks(state, { includeSelectedMath: true, tree })
     .filter(block => block.kind === 'math');
+  // Selection alone opens/closes native formula source. Its gutter must retire
+  // the preview's zero-height anchor and hidden rows with the same transaction.
+  if (displayMathBlocks.some(block => [...active].some(line => line >= block.startLine && line <= block.endLine)
+    && isDisplayMathEditing(before, block.startLine, block.endLine)
+      !== isDisplayMathEditing(state, block.startLine, block.endLine))) changedBlockContext = true;
   const includeRoot = (range: SourceRange): SourceRange => {
     const expanded = { ...range };
     for (const position of [range.from, range.to]) {
@@ -4706,6 +4704,9 @@ const liveLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
       isMermaidPresentationEffect(effect)
       || effect.is(setLatexMathBlockModeEffect)
       || effect.is(setLatexMathSearchRevealEffect)
+      || effect.is(setLivePointerSelectionActiveEffect)
+      || effect.is(setLiveDocumentIdleEffect)
+      || isBlockInteractionEffect(effect)
     ));
     if (!transaction.docChanged
       && !isLiveInputDerivedWorkRefresh(transaction)
