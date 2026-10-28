@@ -406,7 +406,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
   ) {
     this.previewRenderer = createBackgroundPreviewRenderer(
       vscode.Uri.joinPath(context.extensionUri, 'dist', 'preview-render-worker.js').fsPath);
-    context.subscriptions.push(this.previewRenderer);
+    context.subscriptions.push(this.previewRenderer, this.previewFonts);
     this.previewPresetPreferences = createPreviewPresetPreferences({
       readStored: () => context.globalState.get(PREVIEW_PRESET_PREFERENCES_STATE_KEY),
       writeStored: preferences => context.globalState.update(PREVIEW_PRESET_PREFERENCES_STATE_KEY, preferences),
@@ -698,8 +698,23 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
           wikiResources: await resolveDocumentWikiResources(options.markdownText, documentUri)
         };
         if (!this.activePanels.has(panel)) throw new Error('Preview was closed');
-        if (options.window) return this.previewRenderer.open(previewOwner, options.window.documentId, request, options.window.anchorLine);
-        return this.previewRenderer.render(previewOwner, request);
+        const [rendered, fontStyles] = await Promise.all([
+          options.window ? this.previewRenderer.open(previewOwner, options.window.documentId, request, options.window.anchorLine)
+            : this.previewRenderer.render(previewOwner, request),
+          definition.controls.fontFamily.mode === 'editable' && !vscode.env.remoteName
+            ? this.previewFonts.styles([options.styleEnvironment?.previewFontFamily ?? '', options.styleEnvironment?.previewCodeFontFamily ?? ''], path => {
+              if (!this.activePanels.has(panel)) throw new Error('Preview was closed');
+              const uri = vscode.Uri.file(path);
+              const roots = panel.webview.options.localResourceRoots ?? [];
+              if (!roots.some(root => root.toString() === uri.toString())) {
+                panel.webview.options = { ...panel.webview.options, localResourceRoots: [...roots, uri] };
+              }
+              return panel.webview.asWebviewUri(uri).toString();
+            }) : Promise.resolve('')
+        ]);
+        return fontStyles ? { ...rendered, styles: {
+          light: `${rendered.styles.light}\n${fontStyles}`, dark: `${rendered.styles.dark}\n${fontStyles}`
+        } } : rendered;
       },
       operatePreviewDocument: (id, operation) => this.previewRenderer.operate(previewOwner, id, operation),
       getFindOptions: () => this.getFindOptions(),

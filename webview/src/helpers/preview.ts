@@ -1031,6 +1031,10 @@ export function createPreviewController({
       if (fonts?.length) { fontCatalog = fonts; fontCatalogAvailable = true; }
       for (const picker of fontPickers) picker.setStatus(fonts?.length ? '' : uiStrings.previewFontUnavailable);
       rebuildFontOptions();
+      if (refresh && fonts?.length && (fontFamilyPreference || codeFontFamilyPreference)) {
+        const text = hasPendingRequest ? pendingText : latestAcceptedText;
+        if (text !== null) void requestRender(text, { force: true, preserveViewport: true, preserveFrame: true });
+      }
     }).finally(() => { fontLoad = undefined; });
     return fontLoad;
   };
@@ -2478,6 +2482,15 @@ export function createPreviewController({
     syncPreviewCodeHighlight(frameDocument);
     ensureReadableCode(frameDocument);
     keepPosition();
+    // Refreshed local fonts can finish after the finite appearance frames.
+    // Keep the same reading owner until they settle; new interaction still cancels it.
+    let fontsLoading = frameDocument.fonts?.status === 'loading';
+    let appearanceFramesSettled = false;
+    if (fontsLoading) void frameDocument.fonts.ready.then(() => {
+      fontsLoading = false;
+      keepPosition();
+      if (appearanceFramesSettled) retention.release();
+    });
     if (preserveReadingPosition && !retentionCancelled) {
       let remainingFrames = 20;
       const settlePosition = () => {
@@ -2488,8 +2501,8 @@ export function createPreviewController({
         keepPosition();
         if (--remainingFrames > 0) requestAnimationFrame(settlePosition);
         else {
-          layoutObserver?.disconnect();
-          if (appearanceRetention === retention) appearanceRetention = null;
+          appearanceFramesSettled = true;
+          if (!fontsLoading) retention.release();
         }
       };
       requestAnimationFrame(settlePosition);

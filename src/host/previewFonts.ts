@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { decodePreviewFonts, mergePreviewFonts, type PreviewFont } from '../foundation/previewFonts';
+import { createPreviewFontFiles, type PreviewFontFile } from './previewFontFiles';
 
 const execute = promisify(execFile);
 // Static commands only: font names never enter shell source or command arguments.
@@ -30,16 +31,24 @@ export async function readSystemPreviewFonts(platform = process.platform): Promi
 }
 
 /** One catalog per local extension session. Failure retains the last successful catalog. */
-export function createPreviewFonts(read: () => Promise<readonly PreviewFont[]>) {
+export function createPreviewFonts(read: () => Promise<readonly PreviewFont[]>, readFiles?: (family: string) => Promise<readonly PreviewFontFile[]>) {
+  const files = createPreviewFontFiles(readFiles);
   let cached: readonly PreviewFont[] | undefined;
   let pending: Promise<readonly PreviewFont[]> | undefined;
+  let refreshRequested = false;
   return {
     read(refresh = false): Promise<readonly PreviewFont[]> {
+      refreshRequested ||= refresh;
       if (pending) return pending;
       if (cached && !refresh) return Promise.resolve(cached);
-      pending = read().then(fonts => { cached = mergePreviewFonts(fonts); return cached; })
-        .finally(() => { pending = undefined; });
+      pending = read().then(fonts => {
+        cached = mergePreviewFonts(fonts);
+        if (refreshRequested) files.refresh();
+        return cached;
+      }).finally(() => { pending = undefined; refreshRequested = false; });
       return pending;
-    }
+    },
+    styles: files.styles,
+    dispose: files.dispose
   };
 }

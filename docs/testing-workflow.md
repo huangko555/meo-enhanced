@@ -206,6 +206,17 @@ Chinese/English, light/dark and narrow layouts. System enumeration is local-only
 Windows is smoke checked against the installed font collection. Mac/Linux adapters
 need native platform verification before release; unavailable queries use fallback fonts.
 
+`scripts/test-preview-font-refresh-browser.ts` covers a font appearing after the
+renderer starts, picker refresh and selection, real glyph usage (rather than only
+computed CSS), independent body/code fonts, the non-first face of a TTC, and
+refreshing an unchanged selection in full and split Preview. Ordinary and
+production-windowed documents retain their reading DOM and painted text position
+through delayed font loading.
+Its controlled catalog simulates a stale native font collection without installing
+fonts on the machine. On Windows, the font catalog contract also checks real
+font-file discovery and missing-family rejection; a real install in native
+VS Code remains a release smoke.
+
 The user-facing inventory is in [testing-feature-coverage.md](testing-feature-coverage.md).
 `scripts/test-mode-wrapped-line-position.ts`, included in `test:input-presentation`,
 checks immediate trusted clicks and the first digit on a cold Live surface five

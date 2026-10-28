@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mergePreviewFonts, decodePreviewFonts } from '../src/foundation/previewFonts';
 import { createAppearanceSettingsOwner } from '../src/host/appearanceSettings';
 import { createPreviewFonts } from '../src/host/previewFonts';
+import { readSystemPreviewFontFiles } from '../src/host/previewFontFiles';
 import { decodeHostToWebviewMessage, decodeWebviewToHostMessage } from '../src/protocol/messages';
 import { decodeEditorStyleEnvironment } from '../src/protocol/editorStyleEnvironment';
 import { decodePreviewPresetPreferences, getPreviewPreset } from '../src/foundation/previewPresets';
@@ -38,6 +39,37 @@ await catalog.read(); assert.equal(calls, 1, 'New documents reuse the session ca
 fail = true; await assert.rejects(catalog.read(true));
 assert.deepEqual(await catalog.read(), first, 'A failed refresh retains the previous catalog');
 fail = false; await catalog.read(true); assert.equal(calls, 3, 'Explicit refresh retries');
+
+let fileReads = 0, enumerationFails = false;
+const fileCatalog = createPreviewFonts(async () => { if (enumerationFails) throw new Error('Unavailable'); return fonts; }, async family => {
+  fileReads++;
+  return [{ path: `/fonts/${family}.ttf`, weight: 700, style: 'italic', stretch: 5 }];
+});
+const fileUrl = () => 'https://example.invalid/font.ttf';
+assert.equal(await fileCatalog.styles(['Example Sans'], fileUrl), '', 'Normal startup keeps native fonts without reading files');
+await fileCatalog.read();
+assert.equal(await fileCatalog.styles(['Example Sans'], fileUrl), '');
+assert.equal(fileReads, 0);
+await fileCatalog.read(true);
+const [firstStyles, concurrentStyles] = await Promise.all([
+  fileCatalog.styles(['Example Sans', 'Example Sans', 'Bad; family', ''], fileUrl), fileCatalog.styles(['Example Sans'], fileUrl)
+]);
+assert.equal(fileReads, 1, 'Panels and body/code choices share one file resolution per family');
+assert.equal(firstStyles, concurrentStyles);
+assert.match(firstStyles, /font-weight:700;font-style:italic;font-stretch:100%/);
+assert.match(firstStyles, /font-display:swap/);
+assert.match(firstStyles, /meo-font-refresh=1/);
+enumerationFails = true; await assert.rejects(fileCatalog.read(true));
+assert.equal(await fileCatalog.styles(['Example Sans'], fileUrl), firstStyles, 'A failed refresh retains working font sources');
+enumerationFails = false; await fileCatalog.read(true);
+assert.match(await fileCatalog.styles(['Example Sans'], fileUrl), /meo-font-refresh=2/, 'Refresh invalidates file metadata and browser resource caches');
+assert.equal(fileReads, 2);
+await fileCatalog.dispose();
+assert.equal(await fileCatalog.styles(['Example Sans'], fileUrl), '', 'Disposed catalogs cannot publish font resources');
+if (process.platform === 'win32') {
+  assert.ok((await readSystemPreviewFontFiles('Arial')).length > 0, 'Windows file discovery resolves a real installed family');
+  assert.deepEqual(await readSystemPreviewFontFiles('MEO Missing Font 923689'), [], 'A missing family must not expose fallback font files');
+}
 const requests: any[] = [];
 const transport = createPreviewFontsTransport(request => requests.push(request));
 const pending = transport.request(false);

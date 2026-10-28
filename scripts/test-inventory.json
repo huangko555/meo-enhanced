@@ -609,6 +609,7 @@
       "scripts/test-preview-container-bands-production.ts",
       "scripts/test-preview-deferred-geometry.ts",
       "scripts/test-preview-deferred-math.ts",
+      "scripts/test-preview-font-refresh-browser.ts",
       "scripts/test-preview-giant-code-highlight.ts",
       "scripts/test-preview-image-layout.ts",
       "scripts/test-preview-layout.ts",
