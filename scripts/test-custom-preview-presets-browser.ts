@@ -57,6 +57,44 @@ try {
     await page.waitForFunction(title => document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('h1')?.textContent === title, {}, markdownText.split('\n')[0]!.slice(2));
     return page;
   };
+  const whiteyExample = await importExample('whitey');
+  const whiteyText = '# Whitey 行内代码\n\n正文 / Body `SAMPLE-034-01` 与 `03400`。\n\n| `Header` | Example |\n| --- | --- |\n| 参数 | `--preview` |\n\n```typescript\nconst sample = 42;\n```';
+  for (const language of ['zh-CN', 'en']) {
+    const whiteyPage = await open(undefined, language, whiteyText);
+    const inlinePalette = () => whiteyPage.$eval('.preview-frame', frame => {
+      const doc = (frame as HTMLIFrameElement).contentDocument!;
+      const style = (element: Element) => doc.defaultView!.getComputedStyle(element);
+      return {
+        background: style(doc.querySelector('.meo-export-doc')!).backgroundColor,
+        block: style(doc.querySelector('pre.meo-export-code-block')!).backgroundColor,
+        inline: [...doc.querySelectorAll('p code, th code, td code')].map(element => ({
+          background: style(element).backgroundColor, color: style(element).color,
+          border: style(element).boxShadow, padding: style(element).padding
+        }))
+      };
+    });
+    for (const appearance of ['light', 'dark', 'light'] as const) {
+      let builtIn: Awaited<ReturnType<typeof inlinePalette>> | undefined;
+      for (const preset of ['whitey', whiteyExample.id]) {
+        await whiteyPage.select('.preview-preset-control select', preset);
+        await whiteyPage.click(`[data-preview-appearance-choice="${appearance}"]`);
+        await whiteyPage.waitForFunction(({ preset, appearance }) => {
+          const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+          const root = doc?.querySelector('.meo-export-doc');
+          return doc?.documentElement.dataset.meoPreviewPreset === preset && root
+            && doc.defaultView!.getComputedStyle(root).backgroundColor === (appearance === 'light' ? 'rgb(254, 254, 254)' : 'rgb(30, 34, 42)');
+        }, {}, { preset, appearance });
+        const palette = await inlinePalette();
+        assert.equal(palette.inline.length, 4, 'Whitey covers body, table header and table cell inline code');
+        if (preset === 'whitey') builtIn = palette;
+        else assert.deepEqual(palette, builtIn, `${language}/${appearance}: importing the Whitey example preserves the built-in inline code palette`);
+      }
+      await whiteyPage.waitForFunction(() => document.getAnimations().every(animation => animation.playState !== 'running'));
+      await whiteyPage.screenshot({ path: `tmp/custom-presets/whitey-${language}-${appearance}.png` });
+    }
+    await whiteyPage.close();
+  }
+  await library.remove(whiteyExample.id);
   const copyPalettePage = await open();
   await copyPalettePage.evaluate(() => {
     const style = document.documentElement.style;
