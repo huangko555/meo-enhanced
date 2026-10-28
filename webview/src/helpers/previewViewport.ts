@@ -41,7 +41,8 @@ function gapRanges(blocks: readonly PreviewDocumentBlock[], from: number, to: nu
   return bounds.filter(([start, end]) => end! > start!).map(([first, last]) => {
     const block = blocks[first!]!, final = blocks[last! - 1]!;
     const ranges = first! >= footer ? blocks.slice(first, last).flatMap(block => block.sourceRanges ?? []) : undefined;
-    return { from: first!, to: last!, start: ranges?.length ? Math.min(...ranges.map(range => range.start)) : block.sourceLine,
+    return { from: first!, to: last!, footnotes: first! >= footer,
+      start: ranges?.length ? Math.min(...ranges.map(range => range.start)) : block.sourceLine,
       end: ranges?.length ? Math.max(...ranges.map(range => range.end)) : final.sourceEndLine };
   });
 }
@@ -56,7 +57,7 @@ export function previewWindowProjection(root: HTMLElement, manifest: PreviewDocu
   const gap = (from: number, to: number) => {
     if (from === 0 && to === 0) parts.push('<div class="meo-preview-viewport-gap" data-meo-preview-gap="true" aria-hidden="true" style="height:0px;margin:0;padding:0;overflow-anchor:none;pointer-events:none"></div>');
     for (const range of gapRanges(manifest.blocks, from, to)) parts.push(
-      `<div class="meo-preview-viewport-gap" data-meo-preview-gap="true" data-source-line="${range.start}" data-source-end-line="${range.end}" aria-hidden="true" style="height:${layout.top(range.to) - layout.top(range.from)}px;margin:0;padding:0;overflow-anchor:none;pointer-events:none"></div>`);
+      `<div class="meo-preview-viewport-gap" data-meo-preview-gap="true"${range.footnotes ? ' data-meo-preview-footnotes="true"' : ''} data-source-line="${range.start}" data-source-end-line="${range.end}" aria-hidden="true" style="height:${layout.top(range.to) - layout.top(range.from)}px;margin:0;padding:0;overflow-anchor:none;pointer-events:none"></div>`);
   };
   let from = 0;
   for (const chunk of [...manifest.chunks].sort((left, right) => left.index - right.index)) {
@@ -187,6 +188,7 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
     const gap = document.createElement('div');
     gap.className = 'meo-preview-viewport-gap';
     gap.dataset.meoPreviewGap = 'true';
+    if (range.footnotes) gap.dataset.meoPreviewFootnotes = 'true';
     gap.dataset.sourceLine = String(range.start);
     gap.dataset.sourceEndLine = String(range.end);
     gap.setAttribute('aria-hidden', 'true');

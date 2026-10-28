@@ -3439,6 +3439,10 @@ export function createPreviewController({
     reveal();
   };
 
+  // Relocated footnotes keep their source positions for navigation, but cannot
+  // describe which body chapters are visible in the reading viewport.
+  const getOutlineSourceMap = () => getVisualSourceMap().filter(entry =>
+    !entry.element.closest('section.footnotes, [data-meo-preview-footnotes]'));
   const getVisibleDocumentRange = () => {
     const viewportHeight = frame.contentWindow?.innerHeight ?? host.clientHeight;
     const viewportTop = getFrameDocument()?.scrollingElement?.scrollTop ?? 0;
@@ -3447,16 +3451,18 @@ export function createPreviewController({
     // Geometry is already indexed for reading-position restoration. Scroll only
     // changes the viewport bounds, not each block's document coordinates.
     if (!host.hidden && host.getClientRects().length > 0) {
-      for (const entry of getVisualSourceMap()) {
+      for (const entry of getOutlineSourceMap()) {
         if (entry.top >= viewportTop + viewportHeight) break;
         if (entry.bottom <= viewportTop || entry.bottom <= entry.top) continue;
         first = Math.min(first, entry.start);
         last = Math.max(last, entry.start);
       }
     }
-    const fromLine = Number.isFinite(first) ? first : 1;
-    // A hidden/unpainted surface has no visible range, never the entire document.
-    const toLine = Number.isFinite(last) ? last : fromLine;
+    // A footnotes-only or hidden surface has no visible body chapter. Do not
+    // fall back to the first heading or the source position of a footnote.
+    if (!Number.isFinite(first)) return null;
+    const fromLine = first;
+    const toLine = last;
     return { from: fromLine, to: toLine, fromLine, toLine };
   };
 
@@ -3465,11 +3471,9 @@ export function createPreviewController({
     isOutlinePending: () => !previewViewport && frameRenderedText === null && status.hidden,
     getViewportAnchorOffset: (ratio = 0.2) => {
       if (host.hidden || host.getClientRects().length === 0) return 1;
-      const windowAnchor = previewViewport?.readAnchor((frame.contentWindow?.innerHeight ?? host.clientHeight) * ratio);
-      if (windowAnchor && !windowAnchor.rendered) return windowAnchor.line;
       const anchorY = (getFrameDocument()?.scrollingElement?.scrollTop ?? 0)
         + (frame.contentWindow?.innerHeight ?? host.clientHeight) * ratio;
-      const entries = getVisualSourceMap();
+      const entries = getOutlineSourceMap();
       let low = 0;
       let high = entries.length - 1;
       while (low <= high) {
@@ -3477,7 +3481,11 @@ export function createPreviewController({
         if (entries[middle].top <= anchorY) low = middle + 1;
         else high = middle - 1;
       }
-      return entries[high]?.start ?? 1;
+      const entry = entries[high];
+      const windowAnchor = previewViewport?.readAnchor((frame.contentWindow?.innerHeight ?? host.clientHeight) * ratio);
+      if (windowAnchor && !windowAnchor.rendered && entry?.element.hasAttribute('data-meo-preview-gap')
+        && entry.top <= anchorY && entry.bottom > anchorY) return windowAnchor.line;
+      return entry?.start ?? 1;
     },
     getVisibleDocumentRange,
     getScrollElement: () => getFrameDocument() ?? frame,

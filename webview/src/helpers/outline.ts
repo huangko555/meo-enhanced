@@ -16,7 +16,7 @@ interface EditorApi {
   getHeadings(): OutlineHeading[];
   isOutlinePending?(): boolean;
   getViewportAnchorOffset(ratio?: number): number;
-  getVisibleDocumentRange(): { from: number; to: number; fromLine: number; toLine: number };
+  getVisibleDocumentRange(): { from: number; to: number; fromLine: number; toLine: number } | null;
   getScrollElement(): EventTarget;
   scrollToLine(line: number, position: string): void;
   preserveViewport?(mutate: () => void): void;
@@ -124,8 +124,9 @@ export function buildOutlineTree(headings: OutlineHeading[]): {
 
 export function findVisibleHeadingIndexes(
   headings: OutlineHeading[],
-  visibleRange: { from: number; to: number; fromLine: number; toLine: number }
+  visibleRange: { from: number; to: number; fromLine: number; toLine: number } | null
 ): number[] {
+  if (!visibleRange) return [];
   return headings.flatMap((heading, index) => {
     const nextHeadingLine = headings[index + 1]?.line ?? Number.POSITIVE_INFINITY;
     const sectionLastLine = nextHeadingLine - 1;
@@ -305,6 +306,10 @@ export function createOutlineController({
     if (!editor) return false;
     const visibleRange = editor.getVisibleDocumentRange();
     visibleHeadingIndexes = new Set(findVisibleHeadingIndexes(currentOutlineHeadings, visibleRange));
+    if (!visibleRange) {
+      activeHeadingIndex = -1;
+      return true;
+    }
     const anchor = editor.getViewportAnchorOffset(ACTIVE_VIEWPORT_RATIO);
     let nextActive = -1;
     for (let index = 0; index < currentOutlineHeadings.length; index += 1) {

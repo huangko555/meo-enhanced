@@ -712,7 +712,7 @@ try {
       scroller.scrollTop = position * (scroller.scrollHeight - scroller.clientHeight);
       const height = frame.contentWindow!.innerHeight;
       const rendered = Array.from(doc.querySelectorAll<HTMLElement>('[data-source-line]'))
-        .filter(element => element.getClientRects().length)
+        .filter(element => element.getClientRects().length && !element.closest('section.footnotes, [data-meo-preview-footnotes]'))
         .map(element => {
           const rect = element.getBoundingClientRect();
           return { start: Number(element.dataset.sourceLine), top: rect.top, bottom: rect.bottom };
@@ -727,14 +727,14 @@ try {
         expectedAnchor: anchors.at(-1)?.start ?? 1 };
     }, position);
     assert.deepEqual(result.actual, result.expected, `visible source range at ${position}`);
-    assert.equal(result.anchor, result.expectedAnchor, `visual anchor at ${position}, including relocated footnotes`);
+    assert.equal(result.anchor, result.expectedAnchor, `body outline anchor at ${position}, excluding relocated footnotes`);
   }
   const hidden = await page.evaluate(() => {
     const controller = (window as any).__previewController;
     controller.setVisible(false);
     return controller.getOutlineAdapter().getVisibleDocumentRange();
   });
-  assert.deepEqual(hidden, { from: 1, to: 1, fromLine: 1, toLine: 1 });
+  assert.equal(hidden, null);
   const noteText = 'References: ' + Array.from({ length: 150 }, (_, index) => `[^dense-${index}]`).join(' ') + '\n\n'
     + 'Ordinary paragraph.\n\n'.repeat(4_100)
     + Array.from({ length: 150 }, (_, index) => `[^dense-${index}]: Note ${index}.\n\n    Continued paragraph.\n\n`).join('');
