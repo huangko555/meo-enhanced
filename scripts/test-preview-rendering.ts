@@ -2,6 +2,7 @@ import { inlineScriptFixtures } from './inline-script-fixtures';
 import { prepareMarkdownPresentation, renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import assert from 'node:assert/strict';
 import { createPreviewDocument } from '../src/export/previewDocument';
+import { previewBlockAtLine } from '../src/foundation/previewDocument';
 import { createPreviewBlockLayout } from '../webview/src/application/previewBlockLayout';
 import { buildExportStyles, buildPreviewStyles } from '../src/export/exportStyles';
 import exportRuntime from '../src/export/runtime';
@@ -10,6 +11,20 @@ import { getBuiltInVisuals } from '../src/shared/builtInVisualBaseline';
 import { prepareMarkdownWithFootnotes } from '../src/export/footnotes';
 import MarkdownIt from 'markdown-it';
 import { readFileSync } from 'node:fs';
+
+{
+  const text = 'Reference[^middle] and[^end].\n\nBefore.\n\n[^middle]: Moved note.\n    Continued note.\n\nAfter.\n\n[^end]: Natural tail note.\n';
+  const parsed = createPreviewDocument('footnote-reading-flow', { markdownText: text, sourceDocumentPath: '/fixture/notes.md', uiLanguage: 'en' });
+  try {
+    const blocks = parsed.open(1).document.blocks;
+    for (const line of [5, 6]) {
+      assert.equal(blocks[previewBlockAtLine(blocks, line)!]!.kind, 'footnotes', 'explicit definition lookup retains its exact note');
+      assert.notEqual(blocks[previewBlockAtLine(blocks, line, true)!]!.kind, 'footnotes', 'continuous reading skips a relocated definition and its continuation');
+    }
+    assert.equal(blocks[previewBlockAtLine(blocks, 10, true)!]!.kind, 'footnotes', 'naturally ordered tail definitions remain in the reading flow');
+    assert.equal(previewBlockAtLine([], 1, true), null);
+  } finally { parsed.dispose(); }
+}
 
 {
   const prototype = Object.getPrototypeOf(new MarkdownIt().inline);

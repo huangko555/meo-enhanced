@@ -85,6 +85,9 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
   const document = root.ownerDocument;
   const window = document.defaultView!;
   const scroll = document.scrollingElement!;
+  let bodyEnd = manifest.blocks.length;
+  while (bodyEnd > 0 && manifest.blocks[bodyEnd - 1]!.kind === 'footnotes') bodyEnd--;
+  const bodyLastLine = bodyEnd > 0 ? manifest.blocks[bodyEnd - 1]!.sourceEndLine : 0;
   const events = new AbortController();
   const mounted = new Map<number, MountedBlock>();
   const gaps = new Set<HTMLElement>();
@@ -317,14 +320,14 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
       });
     });
   };
-  const atLine = (line: number) => {
-    return previewBlockAtLine(manifest.blocks, line) ?? 0;
+  const atLine = (line: number, readingFlow = false) => {
+    return previewBlockAtLine(manifest.blocks, line, readingFlow) ?? 0;
   };
   const ensure = async (target: { block?: number; line?: number; anchor?: string;
-    align?: ScrollLogicalPosition; scroll?: boolean; isCurrent?: () => boolean }): Promise<HTMLElement | null> => {
+    align?: ScrollLogicalPosition; scroll?: boolean; readingFlow?: boolean; isCurrent?: () => boolean }): Promise<HTMLElement | null> => {
     if (target.isCurrent?.() === false || disposed) return null;
     const revision = documentGeneration;
-    let index = target.block ?? atLine(target.line ?? 1);
+    let index = target.block ?? atLine(target.line ?? 1, target.readingFlow);
     if (target.anchor !== undefined) {
       let result: PreviewDocumentResult;
       try { result = await dependencies.request(manifest.id, { kind: 'locate', anchor: target.anchor }); }
@@ -532,14 +535,20 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
       refresh();
       return true;
     },
-    containsLine: (line: number) => mounted.has(atLine(line)),
-    readAnchor(viewportOffset = 0) {
+    containsLine: (line: number, readingFlow = false) => mounted.has(atLine(line, readingFlow)),
+    isReadingLine: (line: number) => atLine(line) === atLine(line, true),
+    readAnchor(viewportOffset = 0, readingFlow = false) {
       if (!manifest.blocks.length) return null;
       const offset = Math.max(0, scroll.scrollTop + viewportOffset - origin());
-      const index = layout.at(offset), block = manifest.blocks[index]!;
+      let index = layout.at(offset);
+      const visualBlock = manifest.blocks[index]!;
+      const outsideReadingFlow = readingFlow && visualBlock.kind === 'footnotes' && visualBlock.sourceLine < bodyLastLine;
+      if (outsideReadingFlow) index = Math.max(0, bodyEnd - 1);
+      const block = manifest.blocks[index]!;
       const progress = Math.max(0, Math.min(1, (offset - layout.top(index)) / Math.max(1, layout.height(index))));
       return { line: block.sourceLine + Math.floor((block.sourceEndLine - block.sourceLine) * progress),
-        rendered: mounted.has(index), sourceRange: { startLine: block.sourceLine, endLine: block.sourceEndLine, progress } };
+        rendered: mounted.has(index), ...(outsideReadingFlow ? { outsideReadingFlow: true } : {}),
+        sourceRange: { startLine: block.sourceLine, endLine: block.sourceEndLine, progress } };
     },
     refresh(options: { active?: boolean; invalidateGeometry?: boolean } = {}) {
       if (options.active !== undefined) active = options.active;

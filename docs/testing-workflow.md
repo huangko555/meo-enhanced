@@ -888,6 +888,16 @@ text/selection, bounded mounted windows and exact heading alignment after a new
 navigation. `test-viewport-controller.ts` separately changes estimated Source
 prefix and line heights while retaining the same fractional reading point; both
 scroll owners must use current local geometry without remeasuring the full map.
+The `--footnotes-only` slice of `test-source-side-preview.ts` pairs ordinary and
+actually windowed documents. Native forward/reverse wheels across relocated
+definitions must never visit the footer; exact Source clicks and subsequent edits
+retain their note, and a new Source wheel resumes body reading without changing
+the caret. It also checks Preview-driven footer reading, repeated-reference links
+and backlinks, independent scrolling with sync off, and a cold footnote response
+released after a newer Source gesture. `MEO_TEST_SCREENSHOTS` optionally captures
+the editing and resumed-reading surfaces. The slice remains part of the full
+owning suite; `test-preview-rendering.ts` separately retains exact definition and
+continuation lookups while distinguishing naturally authored tail definitions.
 The browser contract prints frame-interval diagnostics for this bounded scenario;
 these are not native VS Code latency guarantees.
 

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
+import path from 'node:path';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 import exportRuntime from '../src/export/runtime';
 import { createPreviewDocument } from '../src/export/previewDocument';
@@ -386,6 +388,309 @@ async function assertScrollContinuityAndAlignment(page: import('puppeteer-core')
   }
 }
 
+async function assertFootnoteLinkedScroll(page: import('puppeteer-core').Page, bundle: string, windowed: boolean): Promise<void> {
+  const label = windowed ? 'windowed footnotes' : 'ordinary footnotes';
+  const text = '# Footnote sync\n\nEarly reference[^note] and another[^other].\n\n'
+    + Array.from({ length: windowed ? 5_000 : 300 }, (_, index) => index === 80
+      ? '## Before definition\n\nRepeated reference[^note].\n\n[^note]: Editable relocated note.\n'
+        + Array.from({ length: 12 }, (_, line) => `    Continued definition ${line}.\n`).join('')
+        + '\n## After definition\n\nBody after the definition.\n\n'
+      : index === 120 ? '[^other]: Other relocated note.\n'
+        + Array.from({ length: 30 }, (_, line) => `    Other continuation ${line}.\n`).join('') + '\n'
+        : `Paragraph ${index} with enough ordinary source context to exercise linked reading.\n\n`).join('');
+  assert.equal(assessLargeDocument(text).windowedPreview, windowed, label);
+  const definitionLine = text.split('\n').findIndex(line => line.startsWith('[^note]:')) + 1;
+  const documents = new Map<string, ReturnType<typeof createPreviewDocument>>();
+  const footnoteBlocks = new Map<string, Set<number>>();
+  const errors: string[] = [];
+  let windowRequests = 0;
+  let holdFootnoteBlocks = false;
+  let reportColdRequest: () => void = () => {};
+  let releaseColdRequest: () => void = () => {};
+  const coldRequest = new Promise<void>(resolve => { reportColdRequest = resolve; });
+  const coldResponse = new Promise<void>(resolve => { releaseColdRequest = resolve; });
+  const capture = async (state: string) => {
+    if (!process.env.MEO_TEST_SCREENSHOTS) return;
+    await mkdir(process.env.MEO_TEST_SCREENSHOTS, { recursive: true });
+    await page.screenshot({ path: path.join(process.env.MEO_TEST_SCREENSHOTS, `footnote-${windowed ? 'windowed' : 'ordinary'}-${state}.png`) });
+  };
+  page.on('pageerror', error => errors.push(String(error)));
+  try {
+    await page.setViewport({ width: 1200, height: 760 });
+    await page.exposeFunction('__footnoteHost', async (message: any) => {
+      if (message.type === 'requestPreviewRender') {
+        assert.equal(Boolean(message.window), windowed, `${label}: actual rendering path`);
+        const options = { markdownText: message.text, sourceDocumentPath: '/fixture/footnote-sync.md', uiLanguage: 'en' as const };
+        let value;
+        if (message.window) {
+          windowRequests++;
+          const parsed = createPreviewDocument(message.requestId, options);
+          documents.set(message.requestId, parsed); value = parsed.open(message.window.anchorLine);
+          footnoteBlocks.set(message.requestId, new Set(value.document.blocks.filter(block => block.kind === 'footnotes').map(block => block.index)));
+        } else value = exportRuntime.renderPreviewDocument(options);
+        return { type: 'previewRenderResult', requestId: message.requestId, result: { ok: true, value } };
+      }
+      if (message.type === 'requestPreviewDocument') {
+        if (holdFootnoteBlocks && message.operation.kind === 'blocks'
+          && message.operation.indices.some((index: number) => footnoteBlocks.get(message.documentId)?.has(index))) {
+          reportColdRequest(); await coldResponse;
+        }
+        return { type: 'previewDocumentResult', requestId: message.requestId, documentId: message.documentId,
+          result: { ok: true, value: await documents.get(message.documentId)!.run(message.operation) } };
+      }
+      return null;
+    });
+    await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
+    await page.addStyleTag({ path: 'webview/src/styles.css' });
+    await page.addScriptTag({ content: `window.__footnoteState={sourcePreviewScrollSyncEnabled:false};window.acquireVsCodeApi=()=>({getState(){return window.__footnoteState},setState(state){window.__footnoteState=state},postMessage(message){window.__footnoteHost(message).then(response=>{if(response)window.dispatchEvent(new MessageEvent('message',{data:response}))});}});` });
+    await page.addScriptTag({ content: bundle });
+    await page.evaluate(text => window.dispatchEvent(new MessageEvent('message', { data: {
+      type: 'init', documentId: 'file:///footnote-sync.md', text, version: 1, savedRevision: { version: 1, text },
+      diagnostics: [], mode: 'source', uiLanguage: 'en', sourceLineNumbers: 'on', previewAppearance: 'dark',
+      previewFontFamily: '', previewSourceColoring: false, editorAppearance: 'dark', editorFontSizeMode: 'auto', editorFontSize: 14,
+      gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit',
+      fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, largeDocumentOptimizationEnabled: true,
+      findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
+      restoreReadingPositionOnOpen: false, vscodeTheme: null
+    } })), text);
+    await page.waitForFunction(() => !document.querySelector('.meo-preload-toolbar')
+      && document.querySelector<HTMLButtonElement>('.source-preview-button')?.disabled === false);
+    await page.click('.source-preview-button');
+    await page.waitForFunction(() => document.querySelector('.editor-surface')?.hasAttribute('data-source-preview')
+      && document.querySelector<HTMLElement>('.preview-loading')?.hidden
+      && getComputedStyle(document.querySelector<HTMLElement>('.preview-host')!).visibility !== 'hidden'
+      && !!document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('main'));
+    assert.equal(windowRequests > 0, windowed, `${label}: window request witness`);
+    if (await page.$eval('.source-preview-scroll-sync-button', button => button.getAttribute('aria-pressed')) === 'true') {
+      await page.click('.source-preview-scroll-sync-button');
+    }
+    await page.waitForFunction(() => document.querySelector('.source-preview-scroll-sync-button')?.getAttribute('aria-pressed') === 'false');
+    await page.evaluate(async () => { for (let frame = 0; frame < 14; frame++) await new Promise(requestAnimationFrame); });
+    const setup = await page.evaluate(line => {
+      const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+      view.scrollDOM.scrollTop = view.lineBlockAt(view.state.doc.line(line - 5).from).top;
+      return { selection: view.state.selection.toJSON() };
+    }, definitionLine);
+    const bounds = await page.$eval('.editor-host .cm-scroller', element => {
+      const rect = element.getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    });
+    await page.mouse.move(bounds.x, bounds.y);
+    await page.mouse.wheel({ deltaY: 1 });
+    await page.evaluate(async () => { for (let frame = 0; frame < 4; frame++) await new Promise(requestAnimationFrame); });
+    const correction = await page.evaluate(line => {
+      const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+      return view.lineBlockAt(view.state.doc.line(line - 5).from).top - view.scrollDOM.scrollTop;
+    }, definitionLine);
+    if (Math.abs(correction) > 1) await page.mouse.wheel({ deltaY: correction });
+    await page.waitForFunction(line => {
+      const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+      const topLine = view.state.doc.lineAt(view.lineBlockAtHeight(view.scrollDOM.scrollTop).from).number;
+      return topLine >= line - 8 && topLine < line;
+    }, { timeout: 2000 }, definitionLine).catch(async error => {
+      const position = await page.evaluate(() => {
+        const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+        return { top: view.scrollDOM.scrollTop, line: view.state.doc.lineAt(view.lineBlockAtHeight(view.scrollDOM.scrollTop).from).number,
+          sync: document.querySelector('.source-preview-scroll-sync-button')?.getAttribute('aria-pressed') };
+      });
+      throw new Error(`${label}: setup before definition ${definitionLine}: ${JSON.stringify(position)}`, { cause: error });
+    });
+    await page.locator('[data-meo-align-viewport="preview"]').click();
+    await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop > 100);
+    await page.locator('.source-preview-scroll-sync-button').click();
+    await page.waitForFunction(() => document.querySelector('.source-preview-scroll-sync-button')?.getAttribute('aria-pressed') === 'true');
+    await page.mouse.move(bounds.x, bounds.y);
+    const startMotion = () => page.evaluate(() => {
+      const scope = window as any;
+      scope.__footnoteMotion = { active: true, frames: [] };
+      const sample = () => {
+        const probe = scope.__footnoteMotion;
+        if (!probe.active) return;
+        const source = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
+        const preview = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!;
+        probe.frames.push({ source: source.scrollTop, preview: preview.scrollTop,
+          maximum: Math.max(1, preview.scrollHeight - preview.clientHeight) });
+        requestAnimationFrame(sample);
+      };
+      sample();
+    });
+    const stopMotion = () => page.evaluate(() => {
+      const probe = (window as any).__footnoteMotion; probe.active = false;
+      return probe.frames as Array<{ source: number; preview: number; maximum: number }>;
+    });
+    await startMotion();
+    for (let index = 0; index < 45; index++) {
+      await page.mouse.wheel({ deltaY: 9 });
+      await new Promise(resolve => setTimeout(resolve, 16));
+    }
+    await new Promise(resolve => setTimeout(resolve, 350));
+    const frames = await stopMotion();
+    assert.ok(frames.at(-1)!.source - frames[0]!.source > 250,
+      `${label}: native Source wheel must move across the definition: ${JSON.stringify({first:frames[0],last:frames.at(-1),count:frames.length})}`);
+    assert.ok(frames.every(frame => frame.preview / frame.maximum < .7),
+      `${label}: scrolling past a mid-document definition must not visit the footer: ${JSON.stringify(frames.filter(frame => frame.preview / frame.maximum >= .7).slice(0,6))}`);
+    assert.ok(frames.at(-1)!.preview - frames[0]!.preview > 20, `${label}: body reading advances through the definition`);
+    assert.deepEqual(await page.$eval('.editor-host .cm-content', element => (element as any).cmTile.root.view.state.selection.toJSON()),
+      setup.selection, `${label}: wheel synchronization preserves the caret`);
+    await startMotion();
+    for (let index = 0; index < 45; index++) {
+      await page.mouse.wheel({ deltaY: -9 });
+      await new Promise(resolve => setTimeout(resolve, 16));
+    }
+    await new Promise(resolve => setTimeout(resolve, 350));
+    const reverse = await stopMotion();
+    assert.ok(reverse[0]!.source - reverse.at(-1)!.source > 250, `${label}: reverse wheel crosses the definition`);
+    assert.ok(reverse.every(frame => frame.preview / frame.maximum < .7), `${label}: reverse reading never visits the footer`);
+    assert.ok(reverse[0]!.preview - reverse.at(-1)!.preview > 20, `${label}: reverse body reading follows Source`);
+    const clickSource = async (line: number) => {
+      await page.mouse.move(bounds.x, bounds.y);
+      const delta = await page.evaluate(line => {
+        const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+        return view.lineBlockAt(view.state.doc.line(line).from).top - view.scrollDOM.scrollTop - view.scrollDOM.clientHeight / 3;
+      }, line);
+      if (Math.abs(delta) > 1) await page.mouse.wheel({ deltaY: delta });
+      await page.waitForFunction(line => {
+        const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+        const coords = view.coordsAtPos(view.state.doc.line(line).from + 10), bounds = view.scrollDOM.getBoundingClientRect();
+        return coords && coords.top > bounds.top + 5 && coords.bottom < bounds.bottom - 5;
+      }, {}, line);
+      const point = await page.evaluate(line => {
+        const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+        const rect = view.coordsAtPos(view.state.doc.line(line).from + 10)!;
+        return { x: rect.left + 1, y: (rect.top + rect.bottom) / 2 };
+      }, line);
+      await page.mouse.click(point.x, point.y);
+    };
+    const noteVisible = () => page.waitForFunction(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      return [...doc.querySelectorAll('.footnote-item')].some(element => {
+        const rect = element.getBoundingClientRect();
+        return element.textContent?.includes('Editable relocated note') && rect.bottom > 0 && rect.top < doc.defaultView!.innerHeight;
+      });
+    }, { timeout: 4000 }).catch(async error => {
+      throw new Error(`note visibility ${JSON.stringify(await page.evaluate(() => {
+        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+        const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+        return { source: view.scrollDOM.scrollTop, caret: view.state.doc.lineAt(view.state.selection.main.head).number,
+          focus: document.activeElement?.className, preview: doc.scrollingElement!.scrollTop,
+          note: doc.querySelector('.footnote-item')?.getBoundingClientRect().toJSON() };
+      }))}`, { cause: error });
+    });
+    const scrollPreviewFooter = async () => {
+      const bounds = await page.$eval('.preview-frame', element => {
+        const rect = element.getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      });
+      const before = await page.evaluate(() => {
+        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+        const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+        return { top: doc.scrollingElement!.scrollTop, selection: view.state.selection.toJSON() };
+      });
+      await page.mouse.move(bounds.x, bounds.y);
+      await page.mouse.wheel({ deltaY: 250 });
+      await page.waitForFunction(before => {
+        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+        return doc.scrollingElement!.scrollTop > before + 100;
+      }, { timeout: 3000 }, before.top);
+      await page.waitForFunction(() => {
+        const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+        return view.state.doc.lineAt(view.lineBlockAtHeight(view.scrollDOM.scrollTop).from).number > view.state.doc.lines - 80;
+      }, { timeout: 3000 });
+      assert.deepEqual(await page.$eval('.editor-host .cm-content', element => (element as any).cmTile.root.view.state.selection.toJSON()),
+        before.selection, `${label}: Preview scrolling follows the tail without moving the Source caret to its definition`);
+    };
+    if (windowed) {
+      holdFootnoteBlocks = true;
+      await clickSource(definitionLine);
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([coldRequest, new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error(`${label}: cold footnote request was not exercised`)), 3000);
+        })]);
+      } finally { clearTimeout(timeout); }
+      await startMotion();
+      await page.mouse.move(bounds.x, bounds.y);
+      for (let index = 0; index < 12; index++) await page.mouse.wheel({ deltaY: 25 });
+      holdFootnoteBlocks = false; releaseColdRequest();
+      await page.evaluate(async () => { for (let frame = 0; frame < 30; frame++) await new Promise(requestAnimationFrame); });
+      const late = await stopMotion();
+      assert.ok(late.at(-1)!.source - late[0]!.source > 100, `${label}: the newer native Source wheel actually moves`);
+      assert.ok(late.every(frame => frame.preview / frame.maximum < .7),
+        `${label}: a late footnote response must yield to the newer Source scroll`);
+    }
+    await clickSource(definitionLine);
+    await noteVisible();
+    await scrollPreviewFooter();
+    await clickSource(definitionLine);
+    await noteVisible();
+    await capture('editing');
+    const noteSelection = await page.$eval('.editor-host .cm-content', element => {
+      const view = (element as any).cmTile.root.view;
+      return { selection: view.state.selection.toJSON(), line: view.state.doc.lineAt(view.state.selection.main.head).number,
+        top: view.scrollDOM.scrollTop };
+    });
+    assert.equal(noteSelection.line, definitionLine, `${label}: a trusted click keeps its exact Source caret`);
+    await page.keyboard.press('End');
+    await page.keyboard.type(' edited');
+    await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+      .querySelector('.footnotes')?.textContent?.includes('Editable relocated note. edited'));
+    await noteVisible();
+    await page.keyboard.press('ArrowLeft');
+    const edited = await page.$eval('.editor-host .cm-content', element => {
+      const view = (element as any).cmTile.root.view;
+      return { text: view.state.doc.toString(), selection: view.state.selection.toJSON() };
+    });
+    assert.equal(edited.text, text.replace('Editable relocated note.', 'Editable relocated note. edited'), `${label}: exact footnote edit`);
+    await page.mouse.move(bounds.x, bounds.y);
+    for (let index = 0; index < 12; index++) await page.mouse.wheel({ deltaY: 25 });
+    await page.waitForFunction(() => {
+      const scroll = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!;
+      return scroll.scrollTop / Math.max(1, scroll.scrollHeight - scroll.clientHeight) < .7;
+    });
+    await page.evaluate(async () => { for (let frame = 0; frame < 20; frame++) await new Promise(requestAnimationFrame); });
+    await capture('reading');
+    assert.deepEqual(await page.$eval('.editor-host .cm-content', element => (element as any).cmTile.root.view.state.selection.toJSON()),
+      edited.selection, `${label}: returning to body follows the viewport instead of the old definition caret`);
+    const referenceLine = text.split('\n').findIndex(line => line === 'Repeated reference[^note].') + 1;
+    await clickSource(referenceLine);
+    const previewFrame = (await (await page.$('.preview-frame'))!.contentFrame())!;
+    const reference = '#fnref-1-2';
+    await previewFrame.waitForSelector(reference, { visible: true });
+    const referenceId = await previewFrame.$eval(reference, element => element.id);
+    await page.waitForFunction(id => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const rect = doc.getElementById(id)?.getBoundingClientRect();
+      return rect && rect.top > 0 && rect.bottom < doc.defaultView!.innerHeight;
+    }, { timeout: 2000 }, referenceId).catch(async error => {
+      throw new Error(`${label}: reference reveal ${JSON.stringify(await previewFrame.$eval(reference, element => ({
+        html: element.parentElement?.parentElement?.outerHTML, rect: element.getBoundingClientRect().toJSON(),
+        top: document.scrollingElement!.scrollTop, height: innerHeight
+      })))}`, { cause: error });
+    });
+    await (await previewFrame.$(reference))!.click();
+    await noteVisible();
+    await scrollPreviewFooter();
+    await (await previewFrame.waitForSelector(`.footnote-backref[data-meo-preview-href="#${referenceId}"]`))!.click();
+    await page.waitForFunction(id => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const target = doc.getElementById(id)?.getBoundingClientRect();
+      return target && target.bottom > 0 && target.top < doc.defaultView!.innerHeight;
+    }, {}, referenceId);
+    await page.click('.source-preview-scroll-sync-button');
+    const independentTop = await previewFrame.evaluate(() => document.scrollingElement!.scrollTop);
+    await page.mouse.move(bounds.x, bounds.y);
+    await page.mouse.wheel({ deltaY: -150 });
+    await page.evaluate(async () => { for (let frame = 0; frame < 20; frame++) await new Promise(requestAnimationFrame); });
+    assert.ok(Math.abs(await previewFrame.evaluate(() => document.scrollingElement!.scrollTop) - independentTop) < 3,
+      `${label}: sync off keeps Preview independent`);
+    assert.deepEqual(errors, [], label);
+  } catch (error) {
+    throw new Error(`${label}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  } finally {
+    releaseColdRequest();
+    for (const parsed of documents.values()) parsed.dispose();
+    await page.close();
+  }
+}
+
 const build = await Bun.build({
   entrypoints: ['scripts/test-preview-reading-surface-production-entry.ts'],
   target: 'browser',
@@ -396,6 +701,7 @@ if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
 let primaryError: unknown;
 try {
+  if (!process.argv.includes('--footnotes-only')) {
   const page = await browser.newPage();
   const waitForFunction = page.waitForFunction.bind(page);
   page.waitForFunction = (async (predicate: any, options: any, ...args: any[]) => {
@@ -2396,6 +2702,9 @@ try {
   }
   await assertScrollContinuityAndAlignment(await browser.newPage(), await build.outputs[0]!.text(), false);
   await assertScrollContinuityAndAlignment(await browser.newPage(), await build.outputs[0]!.text(), true);
+  }
+  await assertFootnoteLinkedScroll(await browser.newPage(), await build.outputs[0]!.text(), false);
+  await assertFootnoteLinkedScroll(await browser.newPage(), await build.outputs[0]!.text(), true);
 } catch (error) {
   primaryError = error;
 } finally {

@@ -37,13 +37,15 @@ export type PreviewDocumentResult =
       readonly blocks: readonly [index: number, count: number][] }
   | { readonly kind: 'copy'; readonly text: string; readonly html: string };
 
-/** Footnotes have visual order separate from their authored source locations. */
-export function previewBlockAtLine(blocks: readonly PreviewDocumentBlock[], line: number): number | null {
+/** Exact navigation retains footnote identity; continuous reading skips definitions relocated from the body. */
+export function previewBlockAtLine(blocks: readonly PreviewDocumentBlock[], line: number, readingFlow = false): number | null {
   if (!blocks.length) return null;
   let bodyEnd = blocks.length;
   while (bodyEnd > 0 && blocks[bodyEnd - 1]!.kind === 'footnotes') bodyEnd -= 1;
+  const bodyLastLine = bodyEnd > 0 ? blocks[bodyEnd - 1]!.sourceEndLine : 0;
   let previousNote: { index: number; end: number } | null = null;
   for (let index = bodyEnd; index < blocks.length; index += 1) {
+    if (readingFlow && blocks[index]!.sourceLine < bodyLastLine) continue;
     for (const range of blocks[index]!.sourceRanges ?? []) {
       if (line >= range.start && line <= range.end) return index;
       if (range.end < line && (!previousNote || range.end > previousNote.end)) previousNote = { index, end: range.end };

@@ -3510,7 +3510,8 @@ for (const [insert, removed, expectedLine] of [['x', 0, 3], ['x\n', 0, 4], ['', 
     restoreTopVisiblePosition: (point, isCurrent) => {
       if (isCurrent()) previewTop = (point.line - 1) * 40 + (point.sourceRange?.progress ?? 0) * 40 - (point.viewportOffset ?? 0);
     },
-    revealSourcePosition: () => { previewTop = 700; }
+    revealSourcePosition: () => { previewTop = 700; },
+    isLinkedSourceLine: line => line !== 31
   } });
   const wheel = (delta: number) => { (controller as any).onWheel({ ctrlKey: false, deltaX: 0, deltaY: delta });
     scroll.scrollTop += delta; controller.editorViewportChanged(); };
@@ -3534,6 +3535,13 @@ for (const [insert, removed, expectedLine] of [['x', 0, 3], ['x\n', 0, 4], ['', 
     controller.locateLinkedSourcePosition(30); controller.setLinkedPreviewEnabled(false);
     scroll.scrollTop = 300; controller.setLinkedPreviewEnabled(true);
     if (previewTop !== 600) throw new Error('Re-enabling sync must not revive an old click origin');
+    scroll.scrollTop = 200;
+    controller.locateLinkedSourcePosition(31);
+    wheel(10);
+    if (previewTop !== 420) throw new Error(`A new wheel retained the relocated footnote pair: ${previewTop}`);
+    controller.locateLinkedSourcePosition(30);
+    wheel(10);
+    if (previewTop !== 720) throw new Error('A body click inherited the previous footnote exception');
   } finally { controller.destroy(); }
 }
 

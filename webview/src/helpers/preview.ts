@@ -108,6 +108,7 @@ type PreviewViewportPosition = {
 
 type PreviewViewportRestore = PreviewViewportPosition & {
   readonly isCurrent: () => boolean;
+  readonly readingFlow?: boolean;
 };
 
 type PendingExternalViewportRestore = {
@@ -1496,7 +1497,8 @@ export function createPreviewController({
         restore.lineOffset,
         restore.viewportOffset,
         restore.sourceRange,
-        restore.isCurrent
+        restore.isCurrent,
+        restore.readingFlow
       );
       retainViewportProjection(restore);
     };
@@ -1564,7 +1566,8 @@ export function createPreviewController({
           restore.lineOffset,
           restore.viewportOffset,
           restore.sourceRange,
-          restore.isCurrent
+          restore.isCurrent,
+          restore.readingFlow
         );
         retainViewportProjection(restore);
       }
@@ -2037,6 +2040,7 @@ export function createPreviewController({
       setPreviewCodeSources(frameDocument, payload.document?.codeSources);
       sourceMapDocument = null;
       sourceMap = [];
+      readingSourceMapInput = null; readingSourceMap = []; readingSourceElements.clear();
       visualSourceMap = [];
       sourceMapByElement = new WeakMap();
       sourceMapDirty = true;
@@ -2219,7 +2223,8 @@ export function createPreviewController({
             viewportRestore.lineOffset,
             viewportRestore.viewportOffset,
             viewportRestore.sourceRange,
-            viewportRestore.isCurrent
+            viewportRestore.isCurrent,
+            viewportRestore.readingFlow
           );
           retainViewportProjection(viewportRestore);
         }
@@ -2945,16 +2950,36 @@ export function createPreviewController({
     getSourceMap();
     return visualSourceMap;
   };
+  let readingSourceMapInput: PreviewSourceMapEntry[] | null = null;
+  let readingSourceMap: PreviewSourceMapEntry[] = [];
+  let readingSourceElements = new Set<HTMLElement>();
+  const getReadingSourceMap = () => {
+    const entries = getSourceMap();
+    if (entries !== readingSourceMapInput) {
+      readingSourceMapInput = entries;
+      const footnotes = new Set(entries.filter(entry =>
+        entry.element.closest('section.footnotes, [data-meo-preview-footnotes]')));
+      let bodyLastLine = 0;
+      for (const entry of entries) if (!footnotes.has(entry)) bodyLastLine = Math.max(bodyLastLine, entry.end);
+      readingSourceMap = entries.filter(entry => !footnotes.has(entry) || entry.start >= bodyLastLine);
+      readingSourceElements = new Set(readingSourceMap.map(entry => entry.element));
+    }
+    return readingSourceMap;
+  };
   const findVisualRangeProjection = (
     sourceRange: NonNullable<PreviewViewportPosition['sourceRange']>,
-    viewportAnchor: number
+    viewportAnchor: number,
+    readingFlow = false
   ): PreviewSourceMapEntry | undefined => {
-    let ranges = getSourceMap(false).filter(entry => (
+    let ranges = (readingFlow ? getReadingSourceMap() : getSourceMap(false)).filter(entry => (
       entry.start === sourceRange.startLine && entry.end === sourceRange.endLine
       && !entry.element.hasAttribute('data-meo-preview-gap')
     ));
     if (ranges.some(entry => !entry.element.isConnected)) {
-      ranges = getVisualSourceMap().filter(entry => entry.start === sourceRange.startLine && entry.end === sourceRange.endLine
+      const entries = getVisualSourceMap();
+      if (readingFlow) getReadingSourceMap();
+      ranges = entries.filter(entry => (!readingFlow || readingSourceElements.has(entry.element))
+        && entry.start === sourceRange.startLine && entry.end === sourceRange.endLine
         && !entry.element.hasAttribute('data-meo-preview-gap'));
     } else {
       const scrollTop = getFrameDocument()?.scrollingElement?.scrollTop ?? 0;
@@ -2987,12 +3012,12 @@ export function createPreviewController({
     const parsedEnd = Number.parseInt(element.dataset.sourceEndLine ?? '', 10);
     return { start, end: Number.isFinite(parsedEnd) ? Math.max(start, parsedEnd) : start };
   };
-  const findSourceProjection = (line: number): {
+  const findSourceProjection = (line: number, readingFlow = false): {
     exact?: PreviewSourceMapEntry;
     before?: PreviewSourceMapEntry;
     after?: PreviewSourceMapEntry;
   } | null => {
-    const entries = getSourceMap();
+    const entries = readingFlow ? getReadingSourceMap() : getSourceMap();
     if (entries.length === 0) return null;
     let low = 0;
     let high = entries.length - 1;
@@ -3172,13 +3197,14 @@ export function createPreviewController({
   };
   let pendingWindowPosition: { line: number; generation: number; interaction: number;
     lineOffset: number; viewportOffset: number; sourceRange?: { startLine: number; endLine: number; progress: number };
-    ownerIsCurrent?: () => boolean } | null = null;
+    ownerIsCurrent?: () => boolean; readingFlow: boolean } | null = null;
   const restoreTopLine = (
     line: number,
     lineOffset = 0,
     viewportOffset = 0,
     sourceRange?: { startLine: number; endLine: number; progress: number },
-    ownerIsCurrent?: () => boolean
+    ownerIsCurrent?: () => boolean,
+    readingFlow = false
   ): void => {
     if (ownerIsCurrent?.() === false) return;
     retainedViewportProjection = null;
@@ -3187,7 +3213,7 @@ export function createPreviewController({
       return;
     }
     if (sourceRange) {
-      const range = findVisualRangeProjection(sourceRange, scrollElement.scrollTop + Math.max(0, viewportOffset));
+      const range = findVisualRangeProjection(sourceRange, scrollElement.scrollTop + Math.max(0, viewportOffset), readingFlow);
       if (range) {
         const top = range.top + (range.bottom - range.top) * Math.max(0, Math.min(1, sourceRange.progress))
           - Math.max(0, viewportOffset);
@@ -3198,21 +3224,21 @@ export function createPreviewController({
       }
     }
     const currentWindow = previewViewport;
-    if (currentWindow && !currentWindow.containsLine(line)) {
+    if (currentWindow && !currentWindow.containsLine(line, readingFlow)) {
       if (host.hidden) return;
       // Keep the current reading window painted until the destination exists.
       // Projecting into an unloaded gap first exposes an empty frame to the user.
       const generation = frameGeneration, interaction = viewportInteractionGeneration;
-      if (pendingWindowPosition?.line !== line || pendingWindowPosition.generation !== generation
+      if (pendingWindowPosition?.line !== line || pendingWindowPosition.readingFlow !== readingFlow || pendingWindowPosition.generation !== generation
         || pendingWindowPosition.interaction !== interaction || pendingWindowPosition.ownerIsCurrent?.() === false) {
-        const ticket = { line, generation, interaction, lineOffset, viewportOffset, sourceRange, ownerIsCurrent };
+        const ticket = { line, generation, interaction, lineOffset, viewportOffset, sourceRange, ownerIsCurrent, readingFlow };
         pendingWindowPosition = ticket;
         const isCurrent = () => !disposed && !host.hidden && previewViewport === currentWindow && frameGeneration === generation
           && viewportInteractionGeneration === interaction && pendingWindowPosition === ticket && ticket.ownerIsCurrent?.() !== false;
-        void currentWindow.ensure({ line, scroll: false, isCurrent }).then(element => {
+        void currentWindow.ensure({ line, scroll: false, readingFlow, isCurrent }).then(element => {
           if (!isCurrent()) { if (pendingWindowPosition === ticket) pendingWindowPosition = null; return; }
           pendingWindowPosition = null;
-          if (element) restoreTopLine(ticket.line, ticket.lineOffset, ticket.viewportOffset, ticket.sourceRange, ticket.ownerIsCurrent);
+          if (element) restoreTopLine(ticket.line, ticket.lineOffset, ticket.viewportOffset, ticket.sourceRange, ticket.ownerIsCurrent, ticket.readingFlow);
         }, error => {
           const current = isCurrent();
           if (pendingWindowPosition === ticket) pendingWindowPosition = null;
@@ -3223,7 +3249,7 @@ export function createPreviewController({
       }
       return;
     }
-    const source = findSourceProjection(line);
+    const source = findSourceProjection(line, readingFlow);
     if (!source) return;
     if (source.exact) {
       const lineSpan = Math.max(1, source.exact.end - source.exact.start + 1);
@@ -3268,6 +3294,12 @@ export function createPreviewController({
       interactionGeneration: viewportInteractionGeneration
     };
   };
+  const isLinkedSourceLine = (line: number): boolean => {
+    if (previewViewport) return previewViewport.isReadingLine(line);
+    const source = findSourceProjection(line);
+    getReadingSourceMap();
+    return !source?.exact || readingSourceElements.has(source.exact.element);
+  };
   const getTopVisiblePosition = (viewportOffset = 0, linked = false): {
     topLine: number;
     topLineOffset: number;
@@ -3279,13 +3311,15 @@ export function createPreviewController({
     const frameDocument = getFrameDocument();
     const scrollElement = frameDocument?.scrollingElement;
     const boundedViewportOffset = Math.max(0, viewportOffset);
-    const windowAnchor = previewViewport?.readAnchor(boundedViewportOffset);
-    if (windowAnchor && !windowAnchor.rendered) return { topLine: windowAnchor.line, topLineOffset: 0,
-      editorLineOffset: 0, viewportOffset: boundedViewportOffset, sourceRange: windowAnchor.sourceRange };
+    const windowAnchor = previewViewport?.readAnchor(boundedViewportOffset, linked);
+    if (windowAnchor && (!windowAnchor.rendered || windowAnchor.outsideReadingFlow)) return {
+      topLine: windowAnchor.line, topLineOffset: 0, editorLineOffset: 0, viewportOffset: boundedViewportOffset,
+      sourceRange: windowAnchor.sourceRange };
     const retained = retainedViewportProjection;
     if (
       retained && frameDocument && scrollElement &&
       retained.document === frameDocument &&
+      (!linked || isLinkedSourceLine(retained.position.line)) &&
       retained.interactionGeneration === viewportInteractionGeneration &&
       Math.abs(scrollElement.scrollTop - retained.scrollTop) <= 0.5 &&
       Math.abs((retained.position.viewportOffset ?? 0) - boundedViewportOffset) <= 0.5
@@ -3299,7 +3333,9 @@ export function createPreviewController({
       };
     }
     if (retained) retainedViewportProjection = null;
-    const entries = getVisualSourceMap();
+    const visualEntries = getVisualSourceMap();
+    if (linked) getReadingSourceMap();
+    const entries = linked ? visualEntries.filter(entry => readingSourceElements.has(entry.element)) : visualEntries;
     if (entries.length === 0) {
       return null;
     }
@@ -3373,10 +3409,11 @@ export function createPreviewController({
   };
   const restoreTopVisiblePosition = (
     position: PreviewViewportPosition,
-    isCurrent: () => boolean
+    isCurrent: () => boolean,
+    readingFlow = false
   ): void => {
     if (!isCurrent()) return;
-    const restore = { ...position, isCurrent };
+    const restore = { ...position, isCurrent, readingFlow };
     if (acceptingViewportProjection) {
       acceptingViewportProjection.restore = restore;
       return;
@@ -3398,7 +3435,8 @@ export function createPreviewController({
         restore.lineOffset,
         restore.viewportOffset,
         restore.sourceRange,
-        restore.isCurrent
+        restore.isCurrent,
+        restore.readingFlow
       );
       retainViewportProjection(restore);
     }
@@ -3663,6 +3701,8 @@ export function createPreviewController({
       restoreTopLine(...args);
     },
     restoreTopVisiblePosition,
+    restoreLinkedPosition: (position: PreviewViewportPosition, isCurrent: () => boolean) =>
+      restoreTopVisiblePosition(position, isCurrent, true),
     isCurrentDocument: () => frameRenderedText !== null && isCurrentText?.(frameRenderedText) !== false,
     revealSourcePosition: (line: number, isCurrent: () => boolean) => {
       if (isCurrent()) previewScrollRange?.interrupt();
@@ -3680,6 +3720,7 @@ export function createPreviewController({
       } else reveal();
     },
     isSourceLineRendered: (line: number) => !previewViewport || previewViewport.containsLine(line),
+    isLinkedSourceLine,
     captureLinkedGeometry: () => {
       // Unmounted block heights are estimates. They cannot define a global
       // pixel-to-pixel map; the controller must use versioned source anchors.
@@ -3751,6 +3792,7 @@ export function createPreviewController({
       commitPendingCodeHighlight = null;
       sourceMapDocument = null;
       sourceMap = [];
+      readingSourceMapInput = null; readingSourceMap = []; readingSourceElements.clear();
       visualSourceMap = [];
       sourceMapByElement = new WeakMap();
       sourceMapDirty = true;
