@@ -987,11 +987,27 @@ window shell protected before the application is ready too.
 `bun run test:toolbar-viewport` additionally samples every frame through Preview
 footnote references/returns, delayed overflow, resizing, native editor wheels,
 keyboard navigation, search, focus return, menus/settings and Live/Source/full
-and side Preview transitions. Ordinary dark/English and windowed light/Chinese
+and side Preview transitions. Document fragment links and outline navigation
+must also keep both the menu and its enclosing host iframe in place; the
+simulated Workbench includes space above the Webview and outer overflow pressure.
+Ordinary dark/English and windowed light/Chinese
 narrow fixtures assert the production policy, actual window requests, the editor
 work-budget path and unchanged text. The bounded pair belongs to the browser
 and targeted viewport gates (about 19 seconds locally); it does not perform a
 full-document traversal.
+
+For changes to Preview element reveal or its embedding boundary, also run
+`./scripts/test-vscode-toolbar-viewport.ps1 -CodePath <Code.exe>` and the same
+command with `-Large`. These bounded native checks use disposable profiles and
+documents. They activate production footnote/fragment links through the DOM at
+default and increased workbench zoom, verify actual destinations and unchanged
+text, and sample both the app's menu band and the workbench-owned Webview
+container every frame. The outer container must retain zero scroll and zero
+iframe displacement; checking only the app's local geometry misses this failure.
+The browser pair additionally compares document-only reveal against native
+start/center/end/nearest alignment, scroll margins/padding and nested horizontal
+and vertical scroll ranges. Its trusted pointer interactions complement the
+native test's programmatic navigation; neither is a full release run.
 
 `scripts/test-list-toolbar-browser.ts` checks all three toolbar list actions in Live
 and Source with monospaced/proportional fonts: empty and nonempty caret placement,

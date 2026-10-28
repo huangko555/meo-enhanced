@@ -1,4 +1,5 @@
 import type { SearchMatchAnchor } from '../application/searchMatchAnchor';
+import { revealPreviewDocumentElement } from './previewDocumentReveal';
 
 type SearchOptions = { wholeWord?: boolean; caseSensitive?: boolean };
 type Match = { element: HTMLElement; anchor: SearchMatchAnchor };
@@ -157,7 +158,7 @@ export function createPreviewSearchController({
       else if (element) {
         pendingReveal = null;
         if (revealElement) revealElement(element, 'center');
-        else element.scrollIntoView({ block: 'center', inline: 'nearest' });
+        else revealPreviewDocumentElement(element, 'center');
       }
     }
     scheduleRuler();
@@ -331,7 +332,7 @@ export function createPreviewSearchController({
     anchor = matches[activeIndex]!.anchor;
     applyAnchor();
     if (revealElement) revealElement(matches[activeIndex]!.element, 'center');
-    else matches[activeIndex]!.element.scrollIntoView({ block: 'center', inline: 'nearest' });
+    else revealPreviewDocumentElement(matches[activeIndex]!.element, 'center');
     return { found: true, current: activeIndex + 1, total: matches.length };
   };
 

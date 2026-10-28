@@ -195,6 +195,16 @@
       "command": "Load scripts/test-vscode-auto-save-endurance.cjs in the VS Code acceptance host as documented in docs/testing-workflow.md",
       "reason": "Native extension-host save lifecycle verification requires an installed candidate and controlled VS Code session."
     },
+    "scripts/test-vscode-toolbar-viewport.ps1": {
+      "kind": "native",
+      "command": "./scripts/test-vscode-toolbar-viewport.ps1 -CodePath <Code.exe> [-Large]",
+      "reason": "Disposable native Electron host checks internal navigation and every-frame workbench Webview container geometry at default and increased zoom; paired ordinary and windowed documents."
+    },
+    "scripts/test-vscode-toolbar-viewport.cjs": {
+      "kind": "native",
+      "command": "scripts/test-vscode-toolbar-viewport.cjs is loaded by scripts/test-vscode-toolbar-viewport.ps1",
+      "reason": "Native extension-host entry for the toolbar embedding-boundary regression; programmatic product navigation, with pointer coverage owned by the browser toolbar suite."
+    },
     "scripts/test-vscode-preview-shortcuts.ps1": {
       "kind": "native",
       "command": "./scripts/test-vscode-preview-shortcuts.ps1 -CodePath <Code.exe>",
@@ -724,6 +734,8 @@
       "scripts/test-vscode-html-copy.ps1",
       "scripts/test-vscode-preview-shortcuts.cjs",
       "scripts/test-vscode-preview-shortcuts.ps1",
+      "scripts/test-vscode-toolbar-viewport.cjs",
+      "scripts/test-vscode-toolbar-viewport.ps1",
       "scripts/test-vsix-contents.ts",
       "scripts/test-vsix-privacy.ts",
       "scripts/test-webview-search-controls.ts",

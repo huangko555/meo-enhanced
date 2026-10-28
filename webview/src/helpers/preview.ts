@@ -21,6 +21,7 @@ import { getPreviewViewportResources, observePreviewViewportResources } from './
 import { comparePreviewVisualSourceEntries, createPreviewSourceGeometry } from './previewSourceGeometry';
 import { capturePreviewReadingAnchor, restoreFullPreviewReadingScrollTop } from './previewReadingAnchor';
 import { createPreviewScrollRange } from './previewScrollRange';
+import { revealPreviewDocumentElement } from './previewDocumentReveal';
 import { writePreviewFrame } from './previewFrameWriter';
 import { renderDeferredPreviewMath } from './previewMath';
 import { createDocumentScrollToTopController } from './scrollToTop';
@@ -1347,7 +1348,7 @@ export function createPreviewController({
     onNavigate: notifyViewportInteraction,
     revealElement: (element, block) => revealPreviewElement(element, block),
     focus: () => {
-      frame.focus();
+      frame.focus({ preventScroll: true });
       frame.contentWindow?.focus();
     }
   });
@@ -3467,14 +3468,14 @@ export function createPreviewController({
 
   const revealPreviewElement = (element: HTMLElement, block: ScrollLogicalPosition): void => {
     cancelElementReveal();
-    if (!localSourceGeometry) { element.scrollIntoView({ block, inline: 'nearest' }); return; }
+    if (!localSourceGeometry) { revealPreviewDocumentElement(element, block); return; }
     const generation = elementRevealGeneration, document = activeFrameDocument;
     let remaining = 12, stable = 0, previousTop = NaN, previousBottom = NaN;
     const reveal = () => {
       elementRevealFrame = null;
       if (disposed || host.hidden || generation !== elementRevealGeneration
         || document !== activeFrameDocument || !element.isConnected) return;
-      element.scrollIntoView({ block, inline: 'nearest' });
+      revealPreviewDocumentElement(element, block);
       const bounds = element.getBoundingClientRect();
       stable = Math.abs(bounds.top - previousTop) < .5 && Math.abs(bounds.bottom - previousBottom) < .5 ? stable + 1 : 0;
       previousTop = bounds.top; previousBottom = bounds.bottom;
@@ -3690,7 +3691,7 @@ export function createPreviewController({
     isViewportInteracting,
     isScrollbarDragging: () => !host.hidden && activePreviewScrollbarPointers.size > 0,
     focus: () => {
-      frame.focus();
+      frame.focus({ preventScroll: true });
       frame.contentWindow?.focus();
       frame.contentDocument?.body.focus({ preventScroll: true });
     },

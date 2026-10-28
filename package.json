@@ -619,7 +619,7 @@
     "test:input-presentation": "bun scripts/test-input-presentation-stability.ts && bun scripts/test-complex-input-presentation.ts && bun scripts/test-unchanged-input-content.ts && bun scripts/test-input-session-stability.ts && bun scripts/test-linked-preview-cold-scroll.ts && bun scripts/test-native-input-fractional-viewport.ts && bun scripts/test-mode-wrapped-line-position.ts",
     "test:inventory": "bun scripts/check-test-inventory.ts && bun scripts/test-test-inventory.ts",
     "test:quick": "bun scripts/test-workflow.ts quick",
-    "test:toolbar-viewport": "bun scripts/test-toolbar-viewport-stability.ts && bun scripts/test-toolbar-viewport-stability.ts --large --narrow",
+    "test:toolbar-viewport": "bun scripts/test-toolbar-viewport-stability.ts --nested-host && bun scripts/test-toolbar-viewport-stability.ts --large --narrow --nested-host",
     "test:regression": "bun scripts/test-workflow.ts regression",
     "test:ui-light": "bun scripts/test-workflow.ts ui-light",
     "test:reading-position": "bun scripts/test-reading-position-memory.ts && bun scripts/test-reading-position-lifecycle.ts && bun scripts/test-vscode-reading-position-adapter.ts && bun scripts/test-panel-session-reading-position.ts && bun scripts/test-host-view-navigation-lifecycle.ts && bun scripts/test-panel-session-tab-navigation.ts && bun scripts/test-reading-position-production.ts && bun scripts/test-save-as-view-state-browser.ts && bun scripts/test-reading-position-preview-startup.ts && bun scripts/test-tab-switch-reading-position.ts",
