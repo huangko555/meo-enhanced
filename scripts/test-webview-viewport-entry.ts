@@ -1,6 +1,13 @@
 import '../webview/src/index';
 import { EditorView } from '@codemirror/view';
 import { getViewportController } from '../webview/src/helpers/viewportController';
+import { createChangesReviewControl } from '../webview/src/adapters/changesReviewControl';
+import { usesLargeDocumentDerivedWorkBudget } from '../webview/src/editor/liveInputDerivedWork';
+
+(window as any).__viewportTestChangesReviewControl = createChangesReviewControl;
+(window as any).__viewportTestLargeBudget = () => usesLargeDocumentDerivedWorkBudget(EditorView.findFromDOM(
+  document.querySelector<HTMLElement>('.editor-host > .cm-editor')!
+)!.state);
 
 (window as any).__viewportTestText = () => EditorView.findFromDOM(
   document.querySelector<HTMLElement>('.editor-host > .cm-editor')!

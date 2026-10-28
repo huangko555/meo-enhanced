@@ -1224,6 +1224,14 @@ for the staged snapshot. A staging/content change invalidates earlier index chec
 
 ## Document-scale coverage
 
+`scripts/test-changes-review-consistency.ts` covers pending summary presentation,
+delayed feedback, equal-count baseline changes, manual snapshot replacement,
+failure and disabling comparison. Actual typing in Source and Live pairs ordinary
+documents with the production large-document budget and real delayed diff Worker.
+Every sampled input frame retains valid counts and stable toolbar geometry.
+Set `MEO_TEST_SCREENSHOTS` to a local output directory to capture English/light and
+Chinese/dark pending menus during that focused run.
+
 History navigation must also survive a completed CodeMirror height-map measurement
 after its finite reveal frames have settled. `test-viewport-controller.ts` covers
 that ordering and verifies that input, user scrolling, a newer navigation and

@@ -18,3 +18,11 @@ export type ChangesReviewDiffSummary =
       readonly added: 0;
       readonly deleted: 0;
     };
+
+export type ChangesReviewBaseline = 'current-edit' | 'recent-save' | 'git-head' | 'manual';
+
+/** Identifies the comparison that produced a summary, independently of the current selection. */
+export type ChangesReviewComparison = {
+  readonly baseline: ChangesReviewBaseline;
+  readonly generation: number;
+};

@@ -58,10 +58,11 @@ import {
   gitDiffGutterRenderExtensions,
   gitDiffLineFlagsField,
   getGitDiffSummary,
+  getGitDiffComparison,
   setGitBaselineEffect,
   isGitDiffResultRefresh
 } from './helpers/gitDiffGutter';
-import type { ChangesReviewDiffSummary } from './application/changesReview';
+import type { ChangesReviewComparison, ChangesReviewDiffSummary } from './application/changesReview';
 import { gitDiffLineHighlightsField } from './helpers/gitDiffLineHighlights';
 import { gitDiffDetailsExtensions } from './helpers/gitDiffDetails';
 import { createTableTransactionProvenance } from './application/tableTransactionProvenance';
@@ -263,7 +264,7 @@ type CreateEditorOptions = {
   /** Reports both native replay and interaction-restore failures, including keyboard actions. */
   onHistoryError?: () => void;
   onSourcePositionChange?: (change: SourcePositionChange) => void;
-  onGitDiffSummaryChange?: (summary: ChangesReviewDiffSummary) => void;
+  onGitDiffSummaryChange?: (summary: ChangesReviewDiffSummary, comparison: ChangesReviewComparison) => void;
   onViewportChange?: () => void;
   initialMode?: EditableEditorMode;
   initialGitGutter?: boolean;
@@ -622,10 +623,11 @@ export function createEditor({
   const emitGitDiffSummary = (state: EditorState) => {
     if (typeof onGitDiffSummaryChange !== 'function') return;
     const summary = getGitDiffSummary(state);
-    const signature = `${summary.status}:${summary.status === 'unavailable' ? summary.reason : ''}:${summary.added}:${summary.deleted}`;
+    const comparison = getGitDiffComparison(state);
+    const signature = `${comparison.baseline}:${comparison.generation}:${summary.status}:${summary.status === 'unavailable' ? summary.reason : ''}:${summary.added}:${summary.deleted}`;
     if (signature === lastGitDiffSummarySignature) return;
     lastGitDiffSummarySignature = signature;
-    onGitDiffSummaryChange(summary);
+    onGitDiffSummaryChange(summary, comparison);
   };
   const scheduleImeCompositionFlush = () => {
     if (imeCompositionFlushTimer !== null) {

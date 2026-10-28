@@ -81,7 +81,7 @@ import {
 import type { UiLanguagePreference } from '../../src/foundation/uiLanguage';
 import { getUiStrings, type UiLanguage } from './application/uiLanguage';
 import { createChangesReviewControl } from './adapters/changesReviewControl';
-import type { ChangesReviewDiffSummary } from './application/changesReview';
+import type { ChangesReviewComparison, ChangesReviewDiffSummary } from './application/changesReview';
 import { setGitDiffDetailsVisible } from './helpers/gitDiffDetails';
 import { createReadingPositionLifecycle, type ReadingPositionLifecycle } from './application/readingPositionLifecycle';
 import { createEditorFocusController } from './adapters/editorFocusController';
@@ -265,6 +265,7 @@ let gitDiffDetailsVisible = false;
 // Baseline selection events arrive before the matching editor transaction. Keep
 // this projection until the editor updates markers and counts from the same state.
 let gitDiffSummary: ChangesReviewDiffSummary = { status: 'pending', added: 0, deleted: 0 };
+let gitDiffComparison: ChangesReviewComparison = { baseline: 'current-edit', generation: -1 };
 let gitBaselineState: GitBaselinePayload | null = null;
 let changesReviewMode: 'live' | 'source' | 'preview' = 'live';
 let contentMaxWidthEnabled = false;
@@ -433,6 +434,7 @@ const presentChangesReview = () => {
     mode: changesReviewMode,
     baseline: fixedBaselineActive ? 'manual' : diffBaselineMode,
     summary: gitDiffSummary,
+    comparison: gitDiffComparison,
     markersVisible: gitChangesGutterVisible,
     beforeContentVisible: gitDiffDetailsVisible,
     gitBaseline: gitBaselineState,
@@ -3109,8 +3111,9 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     mermaidDiagramPresentationFactory,
     uiLanguage: activeUiLanguage,
     sourceLineNumbers: pendingSourceLineNumbers,
-    onGitDiffSummaryChange: (summary) => {
+    onGitDiffSummaryChange: (summary, comparison) => {
       gitDiffSummary = summary;
+      gitDiffComparison = comparison;
       presentChangesReview();
     },
     onViewportChange: () => readingPositionLifecycle?.viewportChanged(),

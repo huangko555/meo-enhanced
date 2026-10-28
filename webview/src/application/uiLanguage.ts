@@ -361,6 +361,8 @@ export type UiStrings = Readonly<{
   showChangeLocations: string;
   showBeforeChangeContent: string;
   noChanges: string;
+  comparisonCalculating: string;
+  comparisonUpdating: string;
   noComparison: string;
   comparisonUnavailable: string;
   comparisonUnavailableReason: (reason: ChangesReviewUnavailableReason) => string;
@@ -602,6 +604,8 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     showChangeLocations: 'Mark Change Locations',
     showBeforeChangeContent: 'Show Original · Source Only',
     noChanges: 'No Changes', noComparison: 'No comparison',
+    comparisonCalculating: 'Calculating…',
+    comparisonUpdating: 'Updating · Showing previous counts',
     comparisonUnavailable: 'Unable to Compare',
     comparisonUnavailableReason: (reason: ChangesReviewUnavailableReason) => ({
       'git-unavailable': 'Git Unavailable',
@@ -862,6 +866,8 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     createSnapshot: '创建', clickToCreateSnapshot: '点击创建', updateSnapshot: '更新',
     showChangeLocations: '标记更改位置',
     showBeforeChangeContent: '显示修改前内容 · 仅源码模式', noChanges: '无更改', noComparison: '不比较',
+    comparisonCalculating: '计算中…',
+    comparisonUpdating: '更新中，显示上次统计',
     comparisonUnavailable: '无法比较',
     comparisonUnavailableReason: (reason: ChangesReviewUnavailableReason) => ({
       'git-unavailable': 'Git 不可用',

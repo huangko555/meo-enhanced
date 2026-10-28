@@ -27,6 +27,7 @@ import {
   usesLargeDocumentDerivedWorkBudget
 } from '../editor/liveInputDerivedWork';
 import type {
+  ChangesReviewComparison,
   ChangesReviewDiffSummary,
   ChangesReviewUnavailableReason
 } from '../application/changesReview';
@@ -43,6 +44,7 @@ interface BaselineSnapshot {
   baseText: string | null;
   baseLines: string[] | null;
   mode?: 'current-edit' | 'recent-save' | 'git-head' | 'fixed';
+  generation?: number;
   headOid?: string | null;
   reason?: Exclude<ChangesReviewUnavailableReason, 'timeout'>;
 }
@@ -62,6 +64,7 @@ function normalizeBaselineSnapshot(snapshot: any): BaselineSnapshot {
   return {
     available: snapshot.available === true,
     tracked: snapshot.tracked === true,
+    generation: snapshot.generation,
     mode: snapshot.mode === 'current-edit' || snapshot.mode === 'recent-save' || snapshot.mode === 'git-head' || snapshot.mode === 'fixed'
       ? snapshot.mode
       : 'git-head',
@@ -872,6 +875,14 @@ export type GitDiffLineCounts = {
   readonly added: number;
   readonly deleted: number;
 };
+
+export function getGitDiffComparison(state: EditorState): ChangesReviewComparison {
+  const baseline = state.field(gitBaselineField);
+  return {
+    baseline: baseline.mode === 'fixed' ? 'manual' : baseline.mode ?? 'current-edit',
+    generation: baseline.generation ?? -1
+  };
+}
 
 export function getGitDiffSummary(state: EditorState): ChangesReviewDiffSummary {
   const lineFlags = state.field(gitDiffLineFlagsField, false) as GitDiffLineFlags | undefined;

@@ -15,6 +15,8 @@ import {
 } from 'lucide';
 import type { GitBaselinePayload } from '../../../src/protocol/git';
 import type {
+  ChangesReviewBaseline,
+  ChangesReviewComparison,
   ChangesReviewDiffSummary,
   ChangesReviewUnavailableReason
 } from '../application/changesReview';
@@ -38,12 +40,11 @@ const beforeContentIcon: typeof SquareSplitVertical = [
   }])
 ];
 
-export type ChangesReviewBaseline = 'current-edit' | 'recent-save' | 'git-head' | 'manual';
-
 export type ChangesReviewState = {
   readonly mode: 'live' | 'source' | 'preview';
   readonly baseline: ChangesReviewBaseline;
   readonly summary: ChangesReviewDiffSummary;
+  readonly comparison: ChangesReviewComparison;
   readonly markersVisible: boolean;
   readonly beforeContentVisible: boolean;
   readonly gitBaseline: Pick<GitBaselinePayload, 'available' | 'tracked' | 'headOid' | 'reason'> | null;
@@ -84,10 +85,14 @@ export function createChangesReviewControl(options: {
   appendIcon(triggerIcon, Diff, 16);
   const triggerSummary = document.createElement('span');
   triggerSummary.className = 'changes-review-counts';
+  const triggerUpdating = document.createElement('span');
+  triggerUpdating.className = 'changes-review-updating';
+  triggerUpdating.textContent = '…';
+  triggerUpdating.setAttribute('aria-hidden', 'true');
   const triggerChevron = document.createElement('span');
   triggerChevron.className = 'changes-review-chevron';
   appendIcon(triggerChevron, ChevronDown, 12);
-  trigger.append(triggerIcon, triggerSummary, triggerChevron);
+  trigger.append(triggerIcon, triggerSummary, triggerUpdating, triggerChevron);
 
   const panel = document.createElement('div');
   panel.className = 'changes-review-panel';
@@ -100,12 +105,27 @@ export function createChangesReviewControl(options: {
     mode: 'source',
     baseline: 'current-edit',
     summary: { status: 'pending', added: 0, deleted: 0 },
+    comparison: { baseline: 'current-edit', generation: -1 },
     markersVisible: false,
     beforeContentVisible: false,
     gitBaseline: null,
     manualSnapshot: { exists: false, updatedAt: null }
   };
   let open = false;
+  // Presentation only: never feed these previous counts back to diff actions.
+  let lastReady: Extract<ChangesReviewDiffSummary, { status: 'ready' }> | null = null;
+  let awaitingComparison = false;
+  let updatingTimer: number | null = null;
+  let showUpdating = false;
+
+  const comparisonPending = (): boolean => state.summary.status === 'pending'
+    || awaitingComparison || state.baseline !== state.comparison.baseline;
+
+  const clearUpdating = (): void => {
+    if (updatingTimer !== null) window.clearTimeout(updatingTimer);
+    updatingTimer = null;
+    showUpdating = false;
+  };
 
   const strings = () => getUiStrings(language);
 
@@ -263,15 +283,30 @@ export function createChangesReviewControl(options: {
   const beforeContent = createToggleOption('before-content', '', false);
   displaySection.append(displayHeading, beforeContent);
 
-  const render = (): void => {
+  const render = (summaryOnly = false): void => {
     const value = strings();
+    const pending = comparisonPending();
     const unavailableGitBaseline = state.baseline === 'git-head' && gitHeadUnavailable();
-    const unavailableReason: ChangesReviewUnavailableReason | null = state.summary.status === 'unavailable'
+    const unavailableReason: ChangesReviewUnavailableReason | null = !pending && state.summary.status === 'unavailable'
       ? state.summary.reason
       : unavailableGitBaseline
         ? (gitHeadDisplayStatus() as ChangesReviewUnavailableReason)
         : null;
     const comparisonUnavailable = unavailableReason !== null;
+    const busy = state.markersVisible && pending && !comparisonUnavailable;
+    const retained = busy && lastReady !== null && (lastReady.added > 0 || lastReady.deleted > 0);
+    const appendSummary = (target: HTMLElement): string => {
+      if (busy && !retained) {
+        target.replaceChildren();
+        const calculating = document.createElement('span');
+        calculating.className = 'changes-review-empty';
+        calculating.textContent = value.comparisonCalculating;
+        target.appendChild(calculating);
+        return value.comparisonCalculating;
+      }
+      const accessible = appendCounts(target, retained ? lastReady! : state.summary);
+      return retained ? `${accessible} · ${value.comparisonUpdating}` : accessible;
+    };
     let accessibleSummary: string;
     if (!state.markersVisible) {
       triggerSummary.replaceChildren();
@@ -288,8 +323,10 @@ export function createChangesReviewControl(options: {
       triggerSummary.appendChild(unavailable);
       accessibleSummary = `${value.comparisonUnavailable}: ${value.comparisonUnavailableReason(unavailableReason)}`;
     } else {
-      accessibleSummary = appendCounts(triggerSummary, state.summary);
+      accessibleSummary = appendSummary(triggerSummary);
     }
+    triggerUpdating.classList.toggle('is-visible', retained && showUpdating);
+    trigger.setAttribute('aria-busy', busy ? 'true' : 'false');
     trigger.setAttribute('aria-label', accessibleSummary);
     trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
     trigger.classList.toggle('is-open', open);
@@ -308,7 +345,7 @@ export function createChangesReviewControl(options: {
       headerCounts.textContent = value.comparisonUnavailable;
       headerSummary = value.comparisonUnavailable;
     } else {
-      headerSummary = appendCounts(headerCounts, state.summary);
+      headerSummary = appendSummary(headerCounts);
     }
     const separator = document.createElement('span');
     separator.className = 'changes-review-header-separator';
@@ -318,6 +355,12 @@ export function createChangesReviewControl(options: {
     comparison.textContent = comparisonUnavailable
       ? value.comparisonUnavailableReason(unavailableReason)
       : value.comparedWith(shortBaselineLabel(state.baseline));
+    if (retained && showUpdating) {
+      const status = document.createElement('span');
+      status.className = 'changes-review-header-status';
+      status.textContent = value.comparisonUpdating;
+      comparison.appendChild(status);
+    }
     header.setAttribute(
       'aria-label',
       comparisonUnavailable
@@ -328,6 +371,10 @@ export function createChangesReviewControl(options: {
     if (!state.markersVisible) {
       header.replaceChildren(headerCounts);
       header.setAttribute('aria-label', value.noComparison);
+    }
+    if (summaryOnly) {
+      panel.firstElementChild?.replaceWith(header);
+      return;
     }
 
     const baselineSection = document.createElement('div');
@@ -449,7 +496,29 @@ export function createChangesReviewControl(options: {
   return {
     element,
     present(nextState) {
+      const comparisonChanged = state.comparison.baseline !== nextState.comparison.baseline
+        || state.comparison.generation !== nextState.comparison.generation;
+      const selectionChanged = state.baseline !== nextState.baseline
+        || (nextState.baseline === 'manual' && state.manualSnapshot.updatedAt !== nextState.manualSnapshot.updatedAt)
+        || (!state.markersVisible && nextState.markersVisible);
+      if (selectionChanged) awaitingComparison = !comparisonChanged;
+      else if (comparisonChanged) awaitingComparison = false;
+      if (selectionChanged || comparisonChanged || !nextState.markersVisible) lastReady = null;
       state = nextState;
+      const unavailable = state.summary.status === 'unavailable'
+        || (state.baseline === 'git-head' && gitHeadUnavailable());
+      if (unavailable) lastReady = null;
+      else if (state.markersVisible && !comparisonPending() && state.summary.status === 'ready') lastReady = state.summary;
+      const retainPending = state.markersVisible && comparisonPending() && !unavailable
+        && lastReady !== null && (lastReady.added > 0 || lastReady.deleted > 0);
+      if (!retainPending) clearUpdating();
+      else if (updatingTimer === null && !showUpdating) {
+        updatingTimer = window.setTimeout(() => {
+          updatingTimer = null;
+          showUpdating = true;
+          render(true);
+        }, 500);
+      }
       render();
     },
     setUiLanguage(nextLanguage) {
@@ -457,6 +526,7 @@ export function createChangesReviewControl(options: {
       render();
     },
     destroy() {
+      clearUpdating();
       element.removeEventListener('click', onClick);
       document.removeEventListener('pointerdown', onDocumentPointerDown, true);
       document.removeEventListener('keydown', onDocumentKeyDown);

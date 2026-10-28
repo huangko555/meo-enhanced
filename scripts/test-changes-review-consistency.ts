@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { Page } from 'puppeteer-core';
+import type { Browser, Page } from 'puppeteer-core';
 import { launchTestBrowser } from './browser-test-helpers';
+import { installGitDiffWorker } from './git-diff-worker-fixture';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-changes-review-consistency-'));
@@ -24,6 +25,182 @@ async function assertCountsMatchMarkers(page: Page, label: string): Promise<void
   if (projection.counts !== '+1−1' || projection.markers !== 1) {
     throw new Error(`${label} desynchronized counts and markers: ${JSON.stringify(projection)}`);
   }
+}
+
+async function assertPendingPresentation(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const control = (window as any).__viewportTestChangesReviewControl({ uiLanguage: 'zh-CN', onIntent() {} });
+    control.element.id = 'pending-probe';
+    control.element.style.cssText = 'position:fixed;top:20px;right:20px;z-index:9999';
+    document.body.append(control.element);
+    let state = { mode: 'source', baseline: 'current-edit', markersVisible: true, beforeContentVisible: false,
+      comparison: { baseline: 'current-edit', generation: 1 }, gitBaseline: null,
+      manualSnapshot: { exists: false, updatedAt: null }, summary: { status: 'pending', added: 0, deleted: 0 } };
+    (window as any).__pendingProbe = { control, state, present(patch: any) {
+      state = { ...state, ...patch }; control.present(state);
+    }};
+    control.present(state);
+  });
+  const present = (patch: unknown) => page.evaluate(value => (window as any).__pendingProbe.present(value), patch);
+  const read = () => page.evaluate(() => {
+    const root = document.getElementById('pending-probe')!;
+    const trigger = root.querySelector<HTMLElement>('.changes-review-trigger')!;
+    return { counts: trigger.querySelector('.changes-review-counts')!.textContent,
+      busy: trigger.getAttribute('aria-busy'), label: trigger.getAttribute('aria-label'),
+      updating: root.querySelector('.changes-review-header-status')?.textContent ?? '',
+      width: trigger.getBoundingClientRect().width,
+      indicator: root.querySelector<HTMLElement>('.changes-review-updating')?.getBoundingClientRect().width ?? 0 };
+  });
+  const ready = { status: 'ready', added: 5, deleted: 2 };
+  const pending = { status: 'pending', added: 0, deleted: 0 };
+  assert.equal((await read()).counts, '计算中…', 'cold comparison must not claim no changes');
+  await present({ summary: ready });
+  const accepted = await read();
+  await present({ summary: pending });
+  assert.equal((await read()).counts, '+5−2', 'input must retain the previous nonzero counts');
+  assert.equal((await read()).busy, 'true');
+  assert.equal((await read()).width, accepted.width, 'pending must retain trigger geometry');
+  await page.click('#pending-probe .changes-review-trigger');
+  const baselineOption = await page.$('#pending-probe [data-baseline="git-head"]');
+  assert.equal((await read()).updating, '', 'short updates stay visually silent');
+  await page.waitForFunction(() => document.querySelector('#pending-probe .changes-review-header-status')?.textContent === '更新中，显示上次统计');
+  assert.equal(await baselineOption!.evaluate(element => element.isConnected), true,
+    'delayed summary feedback must preserve interactive menu nodes');
+  assert.equal((await read()).counts, '+5−2');
+  assert.equal((await read()).width, accepted.width, 'delayed feedback uses reserved indicator space');
+  assert.ok((await read()).indicator > 0);
+  await present({ summary: { status: 'ready', added: 6, deleted: 2 } });
+  assert.equal((await read()).counts, '+6−2');
+  assert.equal((await read()).busy, 'false');
+  assert.equal((await read()).updating, '');
+  // A fresh ready summary and a late language/theme render must not restart a completed timer.
+  await present({ summary: pending });
+  await present({ summary: ready });
+  await page.evaluate(() => (window as any).__pendingProbe.control.setUiLanguage('en'));
+  await new Promise(resolve => setTimeout(resolve, 550));
+  assert.equal((await read()).updating, '');
+  await present({ summary: { status: 'ready', added: 0, deleted: 0 } });
+  assert.equal((await read()).counts, 'No Changes');
+  await present({ summary: pending });
+  assert.equal((await read()).counts, 'Calculating…', 'previous zero is not evidence about pending content');
+  await present({ summary: ready });
+  await present({ baseline: 'git-head' });
+  assert.equal((await read()).counts, 'Calculating…', 'selection must retire counts from the old comparison');
+  await present({ comparison: { baseline: 'git-head', generation: 2 }, summary: ready });
+  assert.equal((await read()).counts, '+5−2', 'equal counts must still publish for a new comparison');
+  await present({ comparison: { baseline: 'git-head', generation: 3 }, summary: pending });
+  assert.equal((await read()).counts, 'Calculating…', 'refreshing the selected baseline must also retire old counts');
+  await present({ summary: ready });
+  await present({ summary: { status: 'unavailable', added: 0, deleted: 0, reason: 'timeout' } });
+  assert.equal((await read()).counts, 'Unable to Compare');
+  await present({ summary: pending });
+  assert.equal((await read()).counts, 'Calculating…', 'failure must discard the display cache');
+  await present({ markersVisible: false });
+  assert.equal((await read()).counts, 'No comparison');
+  await present({ markersVisible: true, summary: ready, baseline: 'manual',
+    comparison: { baseline: 'manual', generation: 4 }, manualSnapshot: { exists: true, updatedAt: 1000 } });
+  assert.equal((await read()).counts, '+5−2');
+  await present({ manualSnapshot: { exists: true, updatedAt: 2000 } });
+  assert.equal((await read()).counts, 'Calculating…', 'updated snapshots wait for their matching comparison');
+  await present({ comparison: { baseline: 'manual', generation: 5 }, summary: ready });
+  assert.equal((await read()).counts, '+5−2');
+  await present({ summary: pending });
+  const disposed = await page.evaluate(() => {
+    (window as any).__pendingProbe.control.destroy();
+    return document.getElementById('pending-probe')!.innerHTML;
+  });
+  await new Promise(resolve => setTimeout(resolve, 550));
+  assert.equal(await page.$eval('#pending-probe', element => element.innerHTML), disposed, 'destroy must cancel delayed rendering');
+  await page.evaluate(() => document.getElementById('pending-probe')!.remove());
+}
+
+async function assertTypingPresentation(browser: Browser, mode: 'source' | 'live', large: boolean): Promise<void> {
+  const page = await browser.newPage();
+  try {
+    await page.setViewport({ width: 1000, height: 600 });
+    await page.setContent('<body class="vscode-dark"><div id="app" class="editor-root"></div></body>');
+    await page.addStyleTag({ content: 'html,body,#app{height:100%;margin:0}' });
+    await page.addStyleTag({ path: path.join(repoRoot, 'webview/src/styles.css') });
+    await page.addScriptTag({ content: 'window.acquireVsCodeApi=()=>({postMessage(){},getState(){},setState(){}})' });
+    await installGitDiffWorker(page, 850);
+    await page.evaluate(() => {
+      const scope = window as any, NativeWorker = window.Worker;
+      scope.__diffRequests = 0;
+      window.Worker = class extends NativeWorker {
+        postMessage(message: any, ...args: any[]) {
+          if (typeof message?.baseline === 'string' && typeof message?.current === 'string') scope.__diffRequests++;
+          super.postMessage(message, ...args);
+        }
+      };
+    });
+    await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+    const text = 'changed\nplain\n\n' + (large ? 'A formatted **paragraph**.\n\n'.repeat(4100) : 'Short paragraph.\n');
+    await page.evaluate(({ text, mode }) => window.dispatchEvent(new MessageEvent('message', { data: {
+      type: 'init', documentId: 'file:///typing-changes.md', text, version: 1,
+      savedRevision: { version: 1, text }, diagnostics: [], mode,
+      uiLanguage: mode === 'source' ? 'en' : 'zh-CN', sourceLineNumbers: 'on', previewAppearance: 'dark',
+      previewFontFamily: '', previewSourceColoring: true, editorAppearance: mode === 'source' ? 'light' : 'dark',
+      editorFontSizeMode: 'auto', editorFontSize: 14, gitChangesGutter: true,
+      gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit',
+      fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false,
+      findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right',
+      outlineVisible: false, outlineWidth: 260, vscodeTheme: null
+    }})), { text, mode });
+    await page.waitForSelector('.editor-host > .cm-editor');
+    await page.evaluate(baseText => window.dispatchEvent(new MessageEvent('message', { data: {
+      type: 'gitBaselineChanged', version: 1,
+      payload: { available: true, tracked: true, mode: 'current-edit', generation: 1, baseText }
+    }})), text.replace('changed', 'before'));
+    await page.waitForFunction(() => document.querySelector('.changes-review-trigger .changes-review-counts')?.textContent === '+1−1');
+    assert.equal(await page.evaluate(() => (window as any).__viewportTestLargeBudget()), large,
+      `${mode}: the fixture must exercise the intended production budget`);
+    await page.waitForFunction(mode => document.querySelector<HTMLElement>('#app')?.dataset.mode === mode
+      && document.querySelector<HTMLElement>('.editor-loading')?.hidden
+      && !document.querySelector<HTMLElement>('.editor-host')?.inert
+      && !document.querySelector('.meo-preload-editor-shell'), {}, mode);
+    await page.bringToFront();
+    await page.click('.editor-host .cm-line');
+    await page.keyboard.down('Control'); await page.keyboard.press('Home'); await page.keyboard.up('Control');
+    await page.keyboard.press('ArrowDown'); await page.keyboard.press('End');
+    await page.evaluate(() => {
+      const scope = window as any;
+      scope.__summaryFrames = []; scope.__sampleSummary = true;
+      const sample = () => {
+        const trigger = document.querySelector<HTMLElement>('.changes-review-trigger')!;
+        const rect = trigger.getBoundingClientRect();
+        scope.__summaryFrames.push({ counts: trigger.querySelector('.changes-review-counts')!.textContent,
+          busy: trigger.getAttribute('aria-busy'), left: rect.left, top: rect.top, width: rect.width });
+        if (scope.__sampleSummary) requestAnimationFrame(sample);
+      };
+      sample();
+    });
+    await page.keyboard.type('x');
+    assert.equal(await page.evaluate(() => (window as any).__viewportTestText()), text.replace('plain', 'plainx'),
+      `${mode}/${large}: the native typing gesture must reach the second line`);
+    if (large) {
+      await page.waitForFunction(() => document.querySelector('.changes-review-trigger')?.getAttribute('aria-busy') === 'true');
+      assert.equal(await page.$eval('.changes-review-counts', element => element.textContent), '+1−1');
+      await page.click('.changes-review-trigger');
+      await page.waitForSelector('.changes-review-updating.is-visible');
+      if (process.env.MEO_TEST_SCREENSHOTS) {
+        fs.mkdirSync(process.env.MEO_TEST_SCREENSHOTS, { recursive: true });
+        await page.screenshot({ path: path.join(process.env.MEO_TEST_SCREENSHOTS, `${mode}-pending.png`) });
+      }
+    }
+    await page.waitForFunction(() => document.querySelector('.changes-review-trigger .changes-review-counts')?.textContent === '+2−2');
+    const observed = await page.evaluate(() => {
+      const scope = window as any; scope.__sampleSummary = false;
+      return { frames: scope.__summaryFrames, requests: scope.__diffRequests, text: scope.__viewportTestText() };
+    });
+    assert.equal(observed.text, text.replace('plain', 'plainx'), `${mode}/${large}: typing must preserve document contents`);
+    assert.equal(observed.requests > 0, large, `${mode}/${large}: only the optimized path uses the real diff Worker`);
+    assert.ok(observed.frames.every((frame: any) => ['+1−1', '+2−2'].includes(frame.counts)),
+      `${mode}/${large}: every input frame must retain valid counts: ${JSON.stringify(observed.frames)}`);
+    const first = observed.frames[0];
+    assert.ok(observed.frames.every((frame: any) => ['left', 'top', 'width'].every(key => Math.abs(frame[key] - first[key]) < 0.5)),
+      `${mode}/${large}: pending feedback must preserve toolbar geometry`);
+    console.log(`Changes summary typing passed: ${mode}, ${large ? 'optimized/Worker' : 'ordinary/synchronous'}.`);
+  } finally { await page.close(); }
 }
 
 async function main(): Promise<void> {
@@ -59,6 +236,8 @@ async function main(): Promise<void> {
       });
     ` });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+
+    await assertPendingPresentation(page);
 
     const precedingText = `<a href="./markdown-render-test.md#html-jump-target" title="打开当前文件并跳转">相对文件锚点</a>`;
     const currentText = `first\n${precedingText}\nnew value ${'long-source-path/'.repeat(20)}\nlast`;
@@ -357,6 +536,9 @@ async function main(): Promise<void> {
         assert.ok(contrast(color, idle.backgrounds[1]!) >= 3, `${appearance}: group headings remain distinguishable`);
       }
       await page.click('.more-tools-wrapper > button');
+    }
+    for (const mode of ['source', 'live'] as const) {
+      for (const large of [false, true]) await assertTypingPresentation(browser, mode, large);
     }
     console.log('changes review consistency checks passed');
   } finally {
