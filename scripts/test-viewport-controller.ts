@@ -3545,4 +3545,93 @@ for (const [insert, removed, expectedLine] of [['x', 0, 3], ['x\n', 0, 4], ['', 
   } finally { controller.destroy(); }
 }
 
+// Keyboard handoffs retain same-note reading, supersede cold clicks and only
+// reveal a body target once. The existing request owns revision/cancellation.
+{
+  const doc = Text.of(Array.from({ length: 80 }, (_, index) => index === 33 ? '' : 'line'));
+  const scroll = { scrollTop: 200, scrollLeft: 0, scrollHeight: 2000, clientHeight: 400 };
+  let current = true, mounted = true;
+  let delayed = false;
+  const completions: Array<() => void> = [];
+  const reveals: Array<{ line: number; isCurrent: () => boolean }> = [];
+  const note = (line: number) => line >= 30 && line <= 35 ? 1 : line >= 50 && line <= 55 ? 2 : 0;
+  const controller = new ViewportController({ dom: {}, state: { doc }, scrollDOM: scroll,
+    ...uniformLineGeometry(doc)
+  } as any, { attachInteractions: false, getMode: () => 'source', previewSurface: {
+    isCurrentDocument: () => current, captureLinkedGeometry: () => null,
+    captureTopVisiblePosition: () => null, restoreTopVisiblePosition() {},
+    readScrollTop: () => 0, writeScrollTop() {},
+    isLinkedSourceLine: line => note(line) === 0,
+    isSameSourceFootnote: (fromLine, line) => note(fromLine) !== 0 && note(fromLine) === note(line),
+    isSourceLineRendered: () => mounted,
+    revealSourcePosition: (line, isCurrent) => {
+      reveals.push({ line, isCurrent });
+      if (delayed) return new Promise<void>(resolve => completions.push(resolve));
+    }
+  } });
+  try {
+    controller.setLinkedPreviewEnabled(true);
+    controller.locateLinkedSourcePosition(30);
+    controller.navigateLinkedSourcePosition(31, 30);
+    controller.navigateLinkedSourcePosition(34, 31);
+    if (reveals.length !== 1) throw new Error('Same-note movement or a separator triggered another reveal');
+    controller.navigateLinkedSourcePosition(40, 34);
+    controller.navigateLinkedSourcePosition(41, 40);
+    if (reveals.length !== 2 || reveals[1].line !== 40 || !reveals[1].isCurrent()) {
+      throw new Error('Leaving a definition must reveal the body once, without global caret following');
+    }
+    controller.locateLinkedSourcePosition(30);
+    controller.navigateLinkedSourcePosition(50, 30);
+    if (reveals.at(-1)?.line !== 50) throw new Error('Direct keyboard navigation to another note retained the first note');
+    current = false;
+    controller.navigateLinkedSourcePosition(40, 50);
+    controller.navigateLinkedSourcePosition(42, 40);
+    const count = reveals.length;
+    current = true; controller.linkedPreviewReady(false);
+    if (reveals.length !== count + 1 || reveals.at(-1)?.line !== 42 || !reveals.at(-1)?.isCurrent()) {
+      throw new Error('A delayed revision did not retain only the latest keyboard destination');
+    }
+    mounted = false;
+    controller.locateLinkedSourcePosition(30);
+    const coldClick = reveals.at(-1)!;
+    controller.navigateLinkedSourcePosition(31, 30);
+    const coldKey = reveals.at(-1)!;
+    if (coldClick.isCurrent() || coldKey.line !== 31 || !coldKey.isCurrent()) {
+      throw new Error('An unmounted same-note keyboard destination lost or revived a cold click');
+    }
+    (controller as any).onWheel({ ctrlKey: false, deltaX: 0, deltaY: 10 });
+    if (coldKey.isCurrent()) throw new Error('A newer wheel did not cancel the cold keyboard destination');
+    delayed = true;
+    controller.locateLinkedSourcePosition(30);
+    controller.navigateLinkedSourcePosition(40, 30);
+    const coldBody = reveals.at(-1)!;
+    controller.markInteraction('editor');
+    controller.navigateLinkedSourcePosition(34, 40);
+    controller.markInteraction('editor');
+    controller.navigateLinkedSourcePosition(42, 34);
+    const latestBody = reveals.at(-1)!;
+    completions[1]!(); await Promise.resolve();
+    if (coldBody.isCurrent() || latestBody.line !== 42 || !latestBody.isCurrent()) {
+      throw new Error('Continuous keys through a separator lost the latest cold body destination');
+    }
+    for (const complete of completions) complete();
+    await Promise.resolve(); delayed = false;
+    const settledCount = reveals.length;
+    controller.navigateLinkedSourcePosition(43, 42);
+    if (reveals.length !== settledCount) throw new Error('A completed keyboard handoff kept following every body key');
+    controller.setLinkedPreviewEnabled(false); controller.setLinkedPreviewEnabled(true);
+    current = false;
+    controller.locateLinkedSourcePosition(30);
+    controller.navigateLinkedSourcePosition(40, 30);
+    current = true; controller.linkedPreviewReady(false);
+    if (reveals.at(-1)?.line !== 40) throw new Error('Keyboard navigation could not supersede an unclassified pending click');
+    current = false;
+    controller.locateLinkedSourcePosition(30);
+    controller.navigateLinkedSourcePosition(40, 30);
+    const beforeDisable = reveals.length;
+    controller.setLinkedPreviewEnabled(false); current = true; controller.linkedPreviewReady(false);
+    if (reveals.length !== beforeDisable) throw new Error('Disabling sync revived a pending keyboard destination');
+  } finally { controller.destroy(); }
+}
+
 console.log('viewport controller checks passed');

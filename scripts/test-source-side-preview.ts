@@ -409,6 +409,11 @@ async function assertFootnoteLinkedScroll(page: import('puppeteer-core').Page, b
   let releaseColdRequest: () => void = () => {};
   const coldRequest = new Promise<void>(resolve => { reportColdRequest = resolve; });
   const coldResponse = new Promise<void>(resolve => { releaseColdRequest = resolve; });
+  let holdHeadBlocks = false;
+  let reportHeadRequest: () => void = () => {};
+  let releaseHeadRequest: () => void = () => {};
+  const headRequest = new Promise<void>(resolve => { reportHeadRequest = resolve; });
+  const headResponse = new Promise<void>(resolve => { releaseHeadRequest = resolve; });
   const capture = async (state: string) => {
     if (!process.env.MEO_TEST_SCREENSHOTS) return;
     await mkdir(process.env.MEO_TEST_SCREENSHOTS, { recursive: true });
@@ -431,6 +436,9 @@ async function assertFootnoteLinkedScroll(page: import('puppeteer-core').Page, b
         return { type: 'previewRenderResult', requestId: message.requestId, result: { ok: true, value } };
       }
       if (message.type === 'requestPreviewDocument') {
+        if (holdHeadBlocks && message.operation.kind === 'blocks' && message.operation.indices.includes(0)) {
+          reportHeadRequest(); await headResponse;
+        }
         if (holdFootnoteBlocks && message.operation.kind === 'blocks'
           && message.operation.indices.some((index: number) => footnoteBlocks.get(message.documentId)?.has(index))) {
           reportColdRequest(); await coldResponse;
@@ -597,6 +605,13 @@ async function assertFootnoteLinkedScroll(page: import('puppeteer-core').Page, b
       assert.deepEqual(await page.$eval('.editor-host .cm-content', element => (element as any).cmTile.root.view.state.selection.toJSON()),
         before.selection, `${label}: Preview scrolling follows the tail without moving the Source caret to its definition`);
     };
+    const assertSourceLineVisible = async (line: number, reason: string) => {
+      await page.waitForFunction(line => {
+        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+        const rect = doc.querySelector(`[data-source-line="${line}"]`)?.getBoundingClientRect();
+        return rect && rect.bottom > 0 && rect.top < doc.defaultView!.innerHeight;
+      }, { timeout: 3000 }, line).catch(error => { throw new Error(`${label}: ${reason}`, { cause: error }); });
+    };
     if (windowed) {
       holdFootnoteBlocks = true;
       await clickSource(definitionLine);
@@ -619,6 +634,74 @@ async function assertFootnoteLinkedScroll(page: import('puppeteer-core').Page, b
     await clickSource(definitionLine);
     await noteVisible();
     await scrollPreviewFooter();
+    await clickSource(definitionLine + 12);
+    await noteVisible();
+    await page.keyboard.press('End');
+    await page.keyboard.press('ArrowLeft');
+    await noteVisible();
+    await page.keyboard.press('End');
+    await page.keyboard.press('ArrowDown');
+    await noteVisible();
+    const keyboardBefore = await page.$eval('.editor-host .cm-content', element => {
+      const view = (element as any).cmTile.root.view;
+      return { top: view.scrollDOM.scrollTop, text: view.state.doc.toString() };
+    });
+    await page.keyboard.press('ArrowDown');
+    const keyboardTarget = await page.$eval('.editor-host .cm-content', element => {
+      const view = (element as any).cmTile.root.view;
+      return { line: view.state.doc.lineAt(view.state.selection.main.head).number,
+        text: view.state.doc.lineAt(view.state.selection.main.head).text, top: view.scrollDOM.scrollTop };
+    });
+    assert.equal(keyboardTarget.text, '## After definition', `${label}: native keyboard leaves the definition`);
+    assert.ok(Math.abs(keyboardTarget.top - keyboardBefore.top) < 3, `${label}: leaving the definition does not rely on Source scrolling`);
+    await assertSourceLineVisible(keyboardTarget.line, 'keyboard navigation left the definition but Preview remained at the footer');
+    assert.equal(await page.$eval('.editor-host .cm-content', element => (element as any).cmTile.root.view.state.doc.toString()),
+      keyboardBefore.text, `${label}: keyboard navigation never edits the document`);
+    await capture('keyboard-body');
+    await clickSource(definitionLine);
+    await noteVisible();
+    const programmaticTarget = definitionLine + 16;
+    await page.evaluate(line => {
+      const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+      view.dispatch({ selection: { anchor: view.state.doc.line(line).from } });
+    }, programmaticTarget);
+    await noteVisible();
+    const programmatic = await page.$eval('.editor-host .cm-content', element => {
+      const view = (element as any).cmTile.root.view;
+      return view.state.doc.lineAt(view.state.selection.main.head).number;
+    });
+    assert.equal(programmatic, programmaticTarget, `${label}: the programmatic negative control actually moves selection`);
+    await page.keyboard.down('Control');
+    await page.keyboard.press('a');
+    await page.keyboard.up('Control');
+    await noteVisible();
+    await clickSource(definitionLine);
+    await noteVisible();
+    await page.keyboard.press('Home');
+    await page.keyboard.press('ArrowUp');
+    await noteVisible();
+    await page.keyboard.press('ArrowUp');
+    const reverseTarget = await page.$eval('.editor-host .cm-content', element => {
+      const view = (element as any).cmTile.root.view;
+      return view.state.doc.lineAt(view.state.selection.main.head).number;
+    });
+    assert.equal(reverseTarget, definitionLine - 2, `${label}: native Up leaves through the preceding separator`);
+    await assertSourceLineVisible(reverseTarget, 'upward keyboard exit must reveal preceding body');
+    await clickSource(definitionLine + 12);
+    await page.keyboard.press('End');
+    await page.keyboard.down('Shift');
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.up('Shift');
+    const extended = await page.$eval('.editor-host .cm-content', element => {
+      const view = (element as any).cmTile.root.view, selection = view.state.selection.main;
+      return { empty: selection.empty, anchorLine: view.state.doc.lineAt(selection.anchor).number,
+        headLine: view.state.doc.lineAt(selection.head).number };
+    });
+    assert.equal(extended.empty, false, `${label}: Shift navigation retains a real range`);
+    assert.equal(extended.anchorLine, definitionLine + 12);
+    assert.equal(extended.headLine, keyboardTarget.line);
+    await assertSourceLineVisible(extended.headLine, 'Shift navigation reveals the accepted selection head');
     await clickSource(definitionLine);
     await noteVisible();
     await capture('editing');
@@ -630,6 +713,18 @@ async function assertFootnoteLinkedScroll(page: import('puppeteer-core').Page, b
     assert.equal(noteSelection.line, definitionLine, `${label}: a trusted click keeps its exact Source caret`);
     await page.keyboard.press('End');
     await page.keyboard.type(' edited');
+    await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+      .querySelector('.footnotes')?.textContent?.includes('Editable relocated note. edited'));
+    await noteVisible();
+    await page.keyboard.down('Control');
+    await page.keyboard.press('z');
+    await page.keyboard.up('Control');
+    await page.waitForFunction(() => !document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+      .querySelector('.footnotes')?.textContent?.includes('Editable relocated note. edited'));
+    await noteVisible();
+    await page.keyboard.down('Control');
+    await page.keyboard.press('y');
+    await page.keyboard.up('Control');
     await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
       .querySelector('.footnotes')?.textContent?.includes('Editable relocated note. edited'));
     await noteVisible();
@@ -674,18 +769,45 @@ async function assertFootnoteLinkedScroll(page: import('puppeteer-core').Page, b
       const target = doc.getElementById(id)?.getBoundingClientRect();
       return target && target.bottom > 0 && target.top < doc.defaultView!.innerHeight;
     }, {}, referenceId);
+    if (windowed) {
+      await clickSource(definitionLine);
+      await noteVisible();
+      holdHeadBlocks = true;
+      await page.keyboard.down('Control');
+      await page.keyboard.press('Home');
+      await page.keyboard.up('Control');
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([headRequest, new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error(`${label}: cold keyboard body request was not exercised`)), 3000);
+        })]);
+      } finally { clearTimeout(timeout); }
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('ArrowDown');
+      holdHeadBlocks = false; releaseHeadRequest();
+      const headLine = await page.$eval('.editor-host .cm-content', element => {
+        const view = (element as any).cmTile.root.view;
+        return view.state.doc.lineAt(view.state.selection.main.head).number;
+      });
+      assert.equal(headLine, 3, `${label}: later native keys supersede the cold heading target through a blank line`);
+      await assertSourceLineVisible(headLine, 'only the latest cold keyboard body target may be revealed');
+    }
     await page.click('.source-preview-scroll-sync-button');
     const independentTop = await previewFrame.evaluate(() => document.scrollingElement!.scrollTop);
     await page.mouse.move(bounds.x, bounds.y);
-    await page.mouse.wheel({ deltaY: -150 });
+    const independentSourceTop = await page.$eval('.editor-host .cm-scroller', element => element.scrollTop);
+    await page.mouse.wheel({ deltaY: 150 });
     await page.evaluate(async () => { for (let frame = 0; frame < 20; frame++) await new Promise(requestAnimationFrame); });
     assert.ok(Math.abs(await previewFrame.evaluate(() => document.scrollingElement!.scrollTop) - independentTop) < 3,
       `${label}: sync off keeps Preview independent`);
+    assert.ok(await page.$eval('.editor-host .cm-scroller', element => element.scrollTop) > independentSourceTop + 100,
+      `${label}: the independent Source wheel actually moves`);
     assert.deepEqual(errors, [], label);
   } catch (error) {
     throw new Error(`${label}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   } finally {
     releaseColdRequest();
+    releaseHeadRequest();
     for (const parsed of documents.values()) parsed.dispose();
     await page.close();
   }

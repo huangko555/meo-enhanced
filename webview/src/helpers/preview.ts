@@ -3300,6 +3300,12 @@ export function createPreviewController({
     getReadingSourceMap();
     return !source?.exact || readingSourceElements.has(source.exact.element);
   };
+  const sourceFootnoteAtLine = (line: number): HTMLElement | null => {
+    const source = findSourceProjection(line);
+    const item = (source?.exact ?? source?.before)?.element.closest<HTMLElement>('.footnote-item') ?? null;
+    const range = item && getSourceRange(item);
+    return range && line >= range.start && line <= range.end ? item : null;
+  };
   const getTopVisiblePosition = (viewportOffset = 0, linked = false): {
     topLine: number;
     topLineOffset: number;
@@ -3714,13 +3720,18 @@ export function createPreviewController({
       if (current && !current.containsLine(line)) {
         // Keep the old window painted; only the newest click may reveal the
         // destination after its source-backed block has actually mounted.
-        void current.ensure({ line, scroll: false, isCurrent: valid }).then(reveal, error => {
+        return current.ensure({ line, scroll: false, isCurrent: valid }).then(reveal, error => {
           if (valid()) handleWindowError(error);
         });
       } else reveal();
     },
     isSourceLineRendered: (line: number) => !previewViewport || previewViewport.containsLine(line),
     isLinkedSourceLine,
+    isSameSourceFootnote: (fromLine: number, line: number) => {
+      if (previewViewport) return previewViewport.isSameFootnote(fromLine, line);
+      const item = sourceFootnoteAtLine(fromLine);
+      return item !== null && item === sourceFootnoteAtLine(line);
+    },
     captureLinkedGeometry: () => {
       // Unmounted block heights are estimates. They cannot define a global
       // pixel-to-pixel map; the controller must use versioned source anchors.

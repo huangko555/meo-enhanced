@@ -537,6 +537,10 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
     },
     containsLine: (line: number, readingFlow = false) => mounted.has(atLine(line, readingFlow)),
     isReadingLine: (line: number) => atLine(line) === atLine(line, true),
+    isSameFootnote: (fromLine: number, line: number) => {
+      const index = atLine(fromLine);
+      return manifest.blocks[index]?.kind === 'footnotes' && index === atLine(line);
+    },
     readAnchor(viewportOffset = 0, readingFlow = false) {
       if (!manifest.blocks.length) return null;
       const offset = Math.max(0, scroll.scrollTop + viewportOffset - origin());

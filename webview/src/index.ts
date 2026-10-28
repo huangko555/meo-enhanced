@@ -3121,6 +3121,7 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
       isCurrentDocument: () => previewController.isCurrentDocument(),
       revealSourcePosition: (line, isCurrent) => previewController.revealSourcePosition(line, isCurrent),
       isLinkedSourceLine: line => previewController.isLinkedSourceLine(line),
+      isSameSourceFootnote: (fromLine, line) => previewController.isSameSourceFootnote(fromLine, line),
       restoreLinkedPosition: (position, isCurrent) => previewController.restoreLinkedPosition(position, isCurrent),
       captureVisualReadingAnchor: ratio => previewController.captureVisualReadingAnchor(ratio),
       isInteracting: () => previewController.isViewportInteracting(),

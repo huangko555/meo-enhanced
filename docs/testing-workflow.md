@@ -898,6 +898,14 @@ released after a newer Source gesture. `MEO_TEST_SCREENSHOTS` optionally capture
 the editing and resumed-reading surfaces. The slice remains part of the full
 owning suite; `test-preview-rendering.ts` separately retains exact definition and
 continuation lookups while distinguishing naturally authored tail definitions.
+The same slice exercises native forward/reverse keyboard exits without a Source
+scroll, Shift selection across the boundary, retained same-note/separator reading,
+and programmatic selection/select-all negative controls. Undo/redo keeps the note
+comparison until a new navigation or wheel. Its windowed case holds a cold body
+request while later keys cross a separator; only the latest target may reveal.
+Controller contracts separately cover direct note-to-note navigation, stale
+revision coalescing, asynchronous completion, and cancellation by newer gestures
+or disabling sync. The pending reveal remains owned until its actual completion.
 The browser contract prints frame-interval diagnostics for this bounded scenario;
 these are not native VS Code latency guarantees.
 
