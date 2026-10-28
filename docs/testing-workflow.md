@@ -640,6 +640,11 @@ zero-size code typography, copied source after a preserved-frame update, and
 bounded geometry inside a 150-note footnote section. Its parser contract compares
 the browser's canonical HTML across UTF-16, entity, code, table and MathML chunk
 boundaries, including superseded writes and repeated cancellation.
+The bottom-retirement case uses a laid-out tail outside lazy prose overscan,
+requires a trusted wheel receipt and actual movement away from the bottom, then
+checks real 700px range growth and the unchanged 3px position bound over fourteen
+frames. A native end clamp caused by shrinking skipped prose is not evidence
+that an old bottom intention survived the wheel.
 
 For changes to large Preview loading or positioning, the bounded variants
 `test-preview-loading-reuse.ts --large`,

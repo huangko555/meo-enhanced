@@ -559,7 +559,10 @@ try {
   });
   await page.evaluate(() => {
     const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
-    const addition = doc.createElement('div'); addition.id = 'late-scrollbar-range'; addition.style.height = '900px';
+    // Keep the wheel inside a laid-out tail, away from content-visibility's
+    // overscan boundary. Revealing skipped prose can otherwise shrink the range
+    // enough to clamp a valid upward wheel back to the document end.
+    const addition = doc.createElement('div'); addition.id = 'late-scrollbar-range'; addition.style.height = '5000px';
     doc.querySelector('.meo-export-page').appendChild(addition);
   });
   await page.waitForFunction(() => {
@@ -573,22 +576,51 @@ try {
     scroll.scrollTop -= 129;
   });
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-  assert.equal(await page.evaluate(() => {
-    const scroll = (window as any).__previewController.host.querySelector('iframe').contentDocument.scrollingElement;
-    return scroll.scrollTop >= scroll.scrollHeight - scroll.clientHeight - 2;
-  }), true, 'a later root-scroll adjustment must retain the chosen bottom even without another resize');
+  const beforeWheel = await page.evaluate(() => {
+    const scope = window as any, doc = scope.__previewController.host.querySelector('iframe').contentDocument;
+    const scroll = doc.scrollingElement;
+    scope.__scrollbarWheelReceipt = null;
+    doc.addEventListener('wheel', (event: WheelEvent) => {
+      scope.__scrollbarWheelReceipt = { trusted: event.isTrusted, deltaY: event.deltaY, prevented: event.defaultPrevented };
+    }, { once: true, passive: true });
+    return { top: scroll.scrollTop, maximum: scroll.scrollHeight - scroll.clientHeight };
+  });
+  assert.ok(beforeWheel.top >= beforeWheel.maximum - 2,
+    'a later root-scroll adjustment must retain the chosen bottom even without another resize');
   await page.mouse.move(frameBounds.x + frameBounds.width / 2, frameBounds.y + frameBounds.height / 2);
   await page.mouse.wheel({ deltaY: -250 });
-  await new Promise(resolve => setTimeout(resolve, 200));
-  const wheelTop = await page.evaluate(() => {
-    const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
-    const top = doc.scrollingElement.scrollTop;
-    doc.getElementById('late-scrollbar-range').style.height = '1600px';
-    return top;
+  const wheel = await page.evaluate(async () => {
+    const scope = window as any, doc = scope.__previewController.host.querySelector('iframe').contentDocument;
+    const scroll = doc.scrollingElement;
+    let previousTop = NaN, previousHeight = NaN, stable = 0;
+    for (let frame = 0; frame < 60; frame++) {
+      await new Promise<void>(resolve => doc.defaultView.requestAnimationFrame(() => resolve()));
+      const top = scroll.scrollTop, height = scroll.scrollHeight;
+      stable = Math.abs(top - previousTop) < .5 && height === previousHeight ? stable + 1 : 0;
+      previousTop = top; previousHeight = height;
+      if (scope.__scrollbarWheelReceipt && stable >= 4) return {
+        top, height, maximum: height - scroll.clientHeight, receipt: scope.__scrollbarWheelReceipt
+      };
+    }
+    throw new Error('The native Preview wheel did not reach stable scroll/range geometry');
   });
-  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  assert.ok(Math.abs(await page.evaluate(() => (window as any).__previewController.host.querySelector('iframe').contentDocument.scrollingElement.scrollTop) - wheelTop) < 3,
-    'a later wheel gesture must retire the scrollbar bottom intention');
+  assert.deepEqual(wheel.receipt, { trusted: true, deltaY: -250, prevented: false });
+  assert.ok(beforeWheel.top - wheel.top >= 200 && wheel.maximum - wheel.top >= 200,
+    `the real upward wheel must leave the bottom before testing later growth: ${JSON.stringify({ beforeWheel, wheel })}`);
+  const growth = await page.evaluate(async top => {
+    const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
+    const scroll = doc.scrollingElement;
+    doc.getElementById('late-scrollbar-range').style.height = '5700px';
+    let drift = 0;
+    for (let frame = 0; frame < 14; frame++) {
+      await new Promise<void>(resolve => doc.defaultView.requestAnimationFrame(() => resolve()));
+      drift = Math.max(drift, Math.abs(scroll.scrollTop - top));
+    }
+    return { drift, height: scroll.scrollHeight };
+  }, wheel.top);
+  assert.ok(Math.abs(growth.height - wheel.height - 700) < 3, 'the later range growth must actually add 700px');
+  assert.ok(growth.drift < 3,
+    `a later wheel gesture must retire the scrollbar bottom intention (${growth.drift}px drift)`);
   for (const navigation of ['pixels', 'semantic', 'marker'] as const) {
     stage = `scrollbar boundary to Source ${navigation}`;
     await page.evaluate(() => {
