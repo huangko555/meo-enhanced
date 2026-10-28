@@ -696,6 +696,15 @@ const maliciousFontStyles = buildPreviewStyles({
   previewFontFamily: 'MEO Synthetic Sans";color:red;}'
 }, 'dark');
 const customSizeStyles = buildPreviewStyles({ ...environment, editorFontSizePx: 12 }, 'dark');
+for (const appearance of ['light', 'dark'] as const) {
+  for (const lineHeight of [1.2, 1.5, 1.6, 2]) {
+    for (const buildStyles of [buildPreviewStyles, buildExportStyles]) {
+      const styles = buildStyles({ ...environment, liveLineHeight: lineHeight, sourceLineHeight: lineHeight }, appearance);
+      assert.ok(styles.includes(`--meo-line-height: ${lineHeight};`), 'default reading typography uses the selected line spacing, including values below 1.7');
+      assert.ok(styles.includes(`--meo-code-line-height: ${lineHeight};`), 'code and body accept the same line spacing preference');
+    }
+  }
+}
 const lightVisuals = getBuiltInVisuals('light');
 const darkVisuals = getBuiltInVisuals('dark');
 if (lightVisuals.semanticColors.strongForeground !== 'var(--meo-foreground)') {

@@ -190,10 +190,18 @@ try {
   });
   const initialRequest = await latestPreviewRequest();
   await renderPreview(initialRequest.id, initialRequest.size);
+  // Hidden font changes can invalidate the initial preload. Let the owner
+  // request its replacement instead of requiring that obsolete payload to paint.
+  await page.waitForFunction(previous => {
+    const latest = window.__hostMessages.findLast((message: { type: string; requestId?: string }) => message.type === 'requestPreviewRender');
+    return latest?.requestId !== previous || document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('[data-source-line="75"]');
+  }, {}, initialRequest.id);
+  const activatedRequest = await latestPreviewRequest();
+  if (activatedRequest.id !== initialRequest.id) await renderPreview(activatedRequest.id, activatedRequest.size);
   await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('[data-source-line="75"]'));
   await new Promise((resolve) => setTimeout(resolve, 100));
   const settledRequest = await latestPreviewRequest();
-  if (settledRequest.id !== initialRequest.id) await renderPreview(settledRequest.id, settledRequest.size);
+  if (settledRequest.id !== activatedRequest.id) await renderPreview(settledRequest.id, settledRequest.size);
   await page.evaluate(async () => { for (let i = 0; i < 8; i++) await new Promise(requestAnimationFrame); });
   await page.evaluate(() => { document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop = 1400; });
   const previewFrameRect = await page.$eval('.preview-frame', (frame) => frame.getBoundingClientRect().toJSON());

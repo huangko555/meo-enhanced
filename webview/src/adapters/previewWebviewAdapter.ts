@@ -39,6 +39,7 @@ export type PreviewWebviewAdapter = {
     active: boolean;
     text: string;
   }): void;
+  /** Invalidate retained settings/results even while hidden; render only when active. */
   refreshVisible(text: string, options?: { preserveViewport?: boolean; preserveFrame?: boolean }): void;
   scheduleVisibleRefresh(text: DocumentText): void;
   invalidateResources(text?: string): void;
@@ -65,7 +66,7 @@ export function createPreviewWebviewAdapter(
   } | null = null;
   let renderInFlight = false;
   let currentText: DocumentText | null = null;
-  let resourcesInvalidated = false;
+  let renderInvalidated = false;
   const refreshDelayMs = options.refreshDelayMs ?? 300;
   const scheduleTimeout = options.scheduleTimeout ?? ((callback, delayMs) => globalThis.setTimeout(callback, delayMs));
   const cancelTimeout = options.cancelTimeout ?? ((timeout) => globalThis.clearTimeout(timeout as ReturnType<typeof setTimeout>));
@@ -82,11 +83,11 @@ export function createPreviewWebviewAdapter(
     const request = queuedRender;
     queuedRender = null;
     renderInFlight = true;
-    const forceResources = resourcesInvalidated;
-    resourcesInvalidated = false;
+    const forceRefresh = renderInvalidated;
+    renderInvalidated = false;
     const completion = surface.requestRender(readDocumentText(request.text), {
       ...request.options,
-      ...(forceResources ? { force: true } : {})
+      ...(forceRefresh ? { force: true } : {})
     });
     if (!completion || typeof (completion as Promise<void>).then !== 'function') {
       renderInFlight = false;
@@ -118,13 +119,17 @@ export function createPreviewWebviewAdapter(
     });
   };
 
+  const invalidateRender = (): void => {
+    // Reject obsolete payloads when their requests settle; the next active
+    // render must bypass the same-text cache, including an in-flight preload.
+    surface.invalidateRender?.();
+    renderInvalidated = true;
+  };
+
   const invalidateResources = (text?: string): void => {
     if (disposed) return;
     if (text !== undefined) currentText = text;
-    // Settle obsolete requests without accepting their payload; the next active
-    // render must bypass the same-text cache, including an in-flight preload.
-    surface.invalidateRender?.();
-    resourcesInvalidated = true;
+    invalidateRender();
     if (active && currentText !== null) requestImmediateRender(currentText, { force: true, preserveViewport: true });
   };
 
@@ -160,8 +165,12 @@ export function createPreviewWebviewAdapter(
       requestImmediateRender(input.text);
     },
     refreshVisible(text, options = {}) {
-      if (!disposed) currentText = text;
-      if (disposed || !active) return;
+      if (disposed) return;
+      currentText = text;
+      // Settings can change while this retained surface is hidden. Invalidate
+      // its cache and in-flight result now; defer rendering until activation.
+      invalidateRender();
+      if (!active) return;
       requestImmediateRender(text, {
         force: true,
         preserveViewport: options.preserveViewport !== false,

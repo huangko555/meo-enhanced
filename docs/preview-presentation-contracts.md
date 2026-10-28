@@ -4,6 +4,23 @@ This document records the invariants that keep Source-side Preview stable. They
 apply to both the split Preview and the standalone Preview surface because both
 use the same presentation controller.
 
+## Settings and retained surfaces
+
+- Hiding Preview defers expensive work; it does not suspend acceptance of render
+  input changes. Font size (including Auto/Custom), line spacing and resource
+  updates invalidate the accepted cache and obsolete in-flight results through
+  `previewWebviewAdapter`, even when the document text is unchanged.
+- The existing single-flight queue renders the latest settings on activation.
+  Repeated hidden changes coalesce without starting background renders. Hiding
+  cancels queued work while retaining invalidation; disposal rejects all work.
+- The first interactive presentation after activation uses current settings.
+  Unchanged switches retain valid caches. Visible appearance updates retain their
+  frame and reading-position policy; a settings fix must not force every switch
+  to rebuild the document or add another settings owner.
+- Cover cached standalone/split surfaces and delayed preload/render completion.
+  Pair ordinary rendering with the production windowed request and bounded DOM;
+  assert actual computed typography, unchanged contents and no hidden rendering.
+
 ## Source-to-Preview geometry
 
 - Source lookup and visual lookup are different indexes. Source navigation is

@@ -3,6 +3,8 @@ import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 import { createPreviewPresetLibrary, type StoredPreviewPreset } from '../src/host/customPreviewPresets';
 import exportRuntime from '../src/export/runtime';
 import { createPreviewDocument } from '../src/export/previewDocument';
+import { assessLargeDocument } from '../src/foundation/largeDocument';
+import { mkdir } from 'node:fs/promises';
 
 const large = process.argv.includes('--large');
 const katexCss = `data:text/css;base64,${Buffer.from(await Bun.file('node_modules/katex/dist/katex.min.css').text()).toString('base64')}`;
@@ -30,6 +32,8 @@ if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 const bundle = await build.outputs[0]!.text();
 const settle = (milliseconds = 150) => new Promise(resolve => setTimeout(resolve, milliseconds));
 const browser = await launchTestBrowser();
+const screenshots = '.local/preview-hidden-settings';
+await mkdir(screenshots, { recursive: true });
 let primaryError: unknown;
 try {
   for (const appearance of ['light', 'dark']) for (const surface of ['preview', 'linked-source', 'independent-source']) {
@@ -42,6 +46,7 @@ try {
     await page.addStyleTag({ url: katexCss });
     await page.evaluate(href => { document.body.dataset.meoKatexSrc = href; }, katexCss);
     let nextResponseGate: { promise: Promise<void>; requested: boolean; release: () => void } | undefined;
+    const renderRequests: Array<{ window?: unknown; text: string; environment: { editorFontSizePx: number; liveLineHeight: number } }> = [];
     const documents = new Map<string, ReturnType<typeof createPreviewDocument>>();
     const holdNextResponse = () => {
       let release = () => {};
@@ -56,6 +61,7 @@ try {
         result: { ok: true, value: await documents.get(message.documentId)!.run(message.operation) }
       };
       if (message.type !== 'requestPreviewRender') return null;
+      renderRequests.push(message);
       const gate = nextResponseGate;
       nextResponseGate = undefined;
       if (gate) { gate.requested = true; await gate.promise; }
@@ -332,6 +338,86 @@ try {
       await settle();
       assert.equal(await page.$eval('.preview-frame', element => (element as HTMLIFrameElement).contentDocument!.scrollingElement!.scrollTop), 0, `${preset}: the document start stays at the start`);
     }
+
+    // Reusing unchanged text must still observe settings accepted while the
+    // Preview was hidden, on full and windowed production rendering paths.
+    assert.equal(assessLargeDocument(markdown).windowedPreview, large);
+    assert.equal(Boolean(renderRequests.at(-1)?.window), large, 'the production request uses the assessed rendering path');
+    const typography = () => page.evaluate(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const style = doc.defaultView!.getComputedStyle(doc.querySelector('main.meo-export-doc')!);
+      return { size: parseFloat(style.fontSize), spacing: parseFloat(style.lineHeight) / parseFloat(style.fontSize) };
+    });
+    const baseline = await typography();
+    const openMore = async () => {
+      if (await page.$eval('.more-tools-panel', element => (element as HTMLElement).hidden)) {
+        await page.click('.more-tools-wrapper > .format-button');
+      }
+    };
+    const hidePreview = async () => {
+      await page.click(`[data-mode="${surface === 'preview' ? 'source' : 'live'}"]`);
+      if (await page.$eval('.source-preview-button', element => element.getAttribute('aria-pressed') === 'true')) {
+        await page.click('.source-preview-button');
+      }
+      await page.waitForFunction(() => document.querySelector<HTMLElement>('.preview-host')!.hidden
+        && !document.querySelector<HTMLElement>('.editor-host')!.inert);
+    };
+    const showPreview = async () => {
+      if (surface === 'preview') await page.click('[data-mode="preview"]');
+      else {
+        await page.click('[data-mode="source"]');
+        await page.waitForSelector('.source-preview-button', { visible: true });
+        if (await page.$eval('.source-preview-button', element => element.getAttribute('aria-pressed') !== 'true')) {
+          await page.click('.source-preview-button');
+        }
+      }
+      await page.waitForFunction(() => {
+        const host = document.querySelector<HTMLElement>('.preview-host')!;
+        const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+        return !host.hidden && !host.inert && getComputedStyle(host).visibility !== 'hidden'
+          && frame.contentDocument?.documentElement.inert === false
+          && getComputedStyle(frame).visibility !== 'hidden'
+          && document.querySelector<HTMLElement>('.preview-loading')?.hidden === true
+          && !document.querySelector('.editor-host')?.hasAttribute('data-preview-cover');
+      });
+    };
+    await openMore();
+    await page.click('[data-editor-font-size-mode="custom"]');
+    await page.click('.editor-font-size-stepper-button:last-child');
+    const customSize = await page.$eval('.editor-font-size-value', element => Number(element.textContent));
+    assert.notEqual(customSize, baseline.size, 'the regression changes the actual automatic size');
+    await page.waitForFunction(expected => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      return parseFloat(doc.defaultView!.getComputedStyle(doc.querySelector('main.meo-export-doc')!).fontSize) === expected;
+    }, {}, customSize);
+    await hidePreview();
+    const beforeHiddenFont = renderRequests.length;
+    await openMore();
+    await page.click('[data-editor-font-size-mode="auto"]');
+    await settle();
+    assert.equal(renderRequests.length, beforeHiddenFont, 'hidden automatic sizing does not start rendering');
+    await showPreview();
+    assert.equal((await typography()).size, baseline.size, `${surface}: automatic size applies on the first restored presentation`);
+    assert.equal(renderRequests.at(-1)!.environment.editorFontSizePx, baseline.size);
+
+    await hidePreview();
+    const beforeHiddenSpacing = renderRequests.length;
+    await openMore();
+    await page.click('.more-tools-settings-button');
+    await page.click('.settings-tab[data-tab="appearance"]');
+    await page.click('[data-setting="lineHeight"] .editor-font-size-stepper button:last-child');
+    await page.click('.settings-close');
+    await settle();
+    assert.equal(renderRequests.length, beforeHiddenSpacing, 'hidden line spacing does not start rendering');
+    await showPreview();
+    const restored = await typography();
+    assert.equal(restored.size, baseline.size);
+    assert.ok(Math.abs(restored.spacing - 1.6) < 0.001, `${surface}: hidden line spacing applies on activation`);
+    assert.ok(renderRequests.every(request => request.text === markdown), 'appearance operations leave document contents unchanged');
+    if (large) assert.ok(await page.$eval('.preview-frame', element =>
+      (element as HTMLIFrameElement).contentDocument!.querySelector('main')!.childElementCount) < 100,
+    'hidden typography updates preserve bounded reading DOM');
+    await page.screenshot({ path: `${screenshots}/${large ? 'windowed' : 'ordinary'}-${appearance}-${surface}.png` });
     assert.deepEqual(errors, []);
     console.log(`Preview preset position: ${appearance}/${surface} passed`);
     await page.close();

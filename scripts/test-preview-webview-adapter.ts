@@ -102,6 +102,13 @@ adapter.setActive({ active: false, text: 'hidden again' });
 const beforeHiddenRefresh = calls.length;
 adapter.refreshVisible('must not render');
 assert.equal(calls.length, beforeHiddenRefresh);
+adapter.setActive({ active: true, text: 'must not render' });
+assert.deepEqual(calls.at(-1), {
+  type: 'render', text: 'must not render', force: true, preserveViewport: false, preserveFrame: false
+}, 'settings changed while hidden invalidate the same-text render cache on activation');
+adapter.setActive({ active: false, text: 'must not render' });
+adapter.setActive({ active: true, text: 'must not render' });
+assert.equal(calls.at(-1)?.force, false, 'unchanged mode switches still reuse the accepted render');
 
 adapter.dispose();
 adapter.dispose();
@@ -212,6 +219,41 @@ resourceAdapter.invalidateResources('disposed');
 resourceAdapter.accept({ type: 'previewPresetsChanged', presets: [], diagnostics: [] });
 assert.equal(resourceInvalidations, disposedInvalidations);
 assert.equal(catalogChanges.length, disposedCatalogChanges);
+
+// A settings update must retire a pending preload/result immediately, while
+// the existing single-flight queue coalesces all changes until it settles.
+for (const initialActive of [false, true]) {
+  let complete: (() => void) | undefined;
+  let invalidations = 0;
+  const renders: Array<{ text: string; force: boolean; preserveFrame: boolean }> = [];
+  const settingsAdapter = createPreviewWebviewAdapter({
+    ...surface,
+    preload: () => new Promise<void>(resolve => { complete = resolve; }),
+    invalidateRender() { invalidations++; },
+    requestRender(text, options) {
+      renders.push({ text, force: options?.force === true, preserveFrame: options?.preserveFrame === true });
+      return new Promise<void>(resolve => { complete = resolve; });
+    },
+    dispose() {}
+  });
+  settingsAdapter.start({ text: 'same text', appearance: 'auto', fontFamily: '', sourceColoring: true, showComments: false, active: initialActive });
+  if (initialActive) settingsAdapter.setActive({ active: true, text: 'same text' });
+  settingsAdapter.refreshVisible('same text', { preserveFrame: true });
+  settingsAdapter.refreshVisible('same text', { preserveFrame: true });
+  assert.equal(invalidations, 2, 'each environment update rejects the obsolete result before it can paint');
+  assert.equal(renders.length, initialActive ? 1 : 0, 'settings updates do not race an in-flight render or preload');
+  settingsAdapter.setActive({ active: false, text: 'same text' });
+  complete?.();
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(renders.length, initialActive ? 1 : 0, 'hiding cancels queued work without forgetting cache invalidation');
+  settingsAdapter.setActive({ active: true, text: 'same text' });
+  assert.deepEqual(renders.at(-1), { text: 'same text', force: true, preserveFrame: false });
+  complete?.();
+  await Promise.resolve(); await Promise.resolve();
+  settingsAdapter.refreshVisible('same text', { preserveFrame: true });
+  assert.deepEqual(renders.at(-1), { text: 'same text', force: true, preserveFrame: true }, 'visible appearance updates retain their frame-preservation policy');
+  settingsAdapter.dispose();
+}
 
 const largeHiddenText = '# Large hidden preview\n\n' + 'Synthetic paragraph.\n\n'.repeat(5_000);
 const largePreviewWork: string[] = [];

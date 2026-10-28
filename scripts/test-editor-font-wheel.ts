@@ -126,6 +126,29 @@ try {
   });
   assert.equal(await page.evaluate(() => (window as any).__hostMessages.findLast((message: any) => message.type === 'requestPreviewRender').environment.editorFontSizePx), 22, 'Preview/export use the same saved size');
 
+  // A retained Preview must accept typography changes made while it is hidden.
+  await page.click('[data-mode="source"]');
+  await page.waitForFunction(() => !document.querySelector<HTMLElement>('.editor-host')!.inert);
+  await page.click('.more-tools-wrapper > .format-button');
+  await page.click('[data-editor-font-size-mode="auto"]');
+  await waitSize(15);
+  await page.click('[data-mode="preview"]');
+  await page.waitForFunction(() => {
+    const host = document.querySelector<HTMLElement>('.preview-host');
+    const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
+    return host && !host.hidden && !host.inert && getComputedStyle(host).visibility !== 'hidden'
+      && frame?.contentDocument?.documentElement.inert === false
+      && document.querySelector<HTMLElement>('.preview-loading')?.hidden === true;
+  });
+  assert.equal(await page.evaluate(() => {
+    const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    return doc.defaultView!.getComputedStyle(doc.querySelector('.meo-export-doc')!).fontSize;
+  }), '15px', 'Returning to cached Preview applies automatic font sizing without a second click');
+
+  await page.click('[data-mode="source"]');
+  await page.click('.more-tools-wrapper > .format-button');
+  await page.click('[data-editor-font-size-mode="custom"]');
+
   // Fine trackpad deltas accumulate; horizontal and extra-modifier gestures stay unclaimed.
   await page.click('[data-mode="source"]');
   await page.evaluate(() => {

@@ -151,7 +151,7 @@ function buildReadingStyles(
   const editorFontSizePx = clampFontSize(environment.editorFontSizePx);
   const liveFontSizePx = resolveThemeFontSizePx(fonts.liveFontSize, editorFontSizePx);
   const sourceFontSizePx = resolveThemeFontSizePx(fonts.sourceFontSize, editorFontSizePx);
-  const lineHeight = Math.max(1.7, clampLineHeight(environment.liveLineHeight ?? fonts.liveLineHeight));
+  const lineHeight = clampLineHeight(environment.liveLineHeight ?? fonts.liveLineHeight);
   const sourceLineHeight = clampLineHeight(environment.sourceLineHeight ?? fonts.sourceLineHeight);
   const headingFontSizes = fonts.headingFontSizes.map((fontSize) => `${fontSize}em`);
   const headingFontWeights = headingFontSizes.map(() => '600');

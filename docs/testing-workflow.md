@@ -170,6 +170,19 @@ normal and narrow widths. It runs in regression, targeted appearance and browser
 visual evidence is saved under `.local/font-wheel-acceptance/`. The existing
 font-size viewport contract covers reading-anchor continuity during layout changes.
 
+Retained Preview settings are covered by `test-preview-webview-adapter.ts`
+(cache invalidation, delayed preload/render retirement, coalescing and unchanged
+switch reuse) and the font-wheel browser contract (Custom to Auto while hidden).
+`test-preview-preset-position.ts`, including its existing `--large` invocation,
+also changes font size and line spacing while hidden before restoring standalone
+and split Preview from Source/Live. It checks the first interactive typography,
+no hidden render requests, unchanged contents, the production windowed request
+and bounded reading DOM. These extend the existing owning suites; they do not
+require a full-document font sweep for an ordinary repair.
+Visual evidence is saved under `.local/preview-hidden-settings/`.
+`test-preview-rendering.ts` also locks default Preview/export line spacing to
+the selected value in both appearances, including values below 1.7.
+
 Preview preset memory is covered by `scripts/test-preview-preset-preferences.ts`
 and `scripts/test-preview-preset-preferences-browser.ts` in regression, appearance and
 release gates. They verify built-in/custom initial Auto behavior, independent
@@ -823,6 +836,10 @@ current document's derived-work readiness, parser idle and expected large-docume
 policy. Replacing a fixture document can schedule its own policy reconfiguration;
 keep the original state, DOM, viewport and color assertions around the isolated
 CSS operation. Pending-input and cold-start cases retain their unfinished work.
+Manually driven Host fixtures must also answer a replacement render requested
+after settings invalidate a hidden preload. Do not wait for an obsolete payload
+to paint before answering the current request; retain the reading-position and
+node-reuse assertions around the accepted presentation.
 
 For split-preview continuity, require the colored code target to intersect the
 iframe viewport before editing; cached offscreen tokens do not establish that
