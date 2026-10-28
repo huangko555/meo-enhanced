@@ -84,6 +84,21 @@ try {
       writeClipboard: async (value: Promise<unknown>) => { scope.__windowCopied = await value; }
     });
   }, openedWindow);
+  stage = 'leading compensation preserves the document start';
+  const leadingBoundary = await page.evaluate(async () => {
+    const scope = window as any, viewport = scope.__windowViewport;
+    await viewport.whenReady();
+    const scroll = scope.__windowFrame.contentDocument.scrollingElement;
+    scroll.scrollTop = 200;
+    // A tall resource above the witness can require more compensation than
+    // an empty prefix has space for. Keep the document start reachable.
+    const target = scroll.scrollTop + 200;
+    viewport.restoreReadingScrollTop(target, true);
+    const actual = scroll.scrollTop;
+    viewport.restoreReadingScrollTop(0);
+    return { actual, target };
+  });
+  assert.equal(leadingBoundary.actual, leadingBoundary.target, 'An empty prefix must not clip authored content to prolong native motion');
   stage = 'fast scrolling coalesces background demand';
   const burst = await page.evaluate(async () => {
     const scope = window as any, viewport = scope.__windowViewport, doc = scope.__windowFrame.contentDocument;

@@ -115,7 +115,7 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
     return createPreviewBlockLayout(manifest.blocks, { width: root.clientWidth || window.innerWidth,
       fontSize, lineHeight: Number.parseFloat(style.lineHeight) || fontSize * 1.6 });
   }
-  const origin = () => root.getBoundingClientRect().top + scroll.scrollTop;
+  const origin = () => root.getBoundingClientRect().top + scroll.scrollTop + leadingGapOffset;
   const nodes = (block: MountedBlock): Node[] => {
     const result: Node[] = [];
     for (let node = block.start.nextSibling; node && node !== block.end; node = node.nextSibling) result.push(node);
@@ -179,12 +179,14 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
     if (selected && !logicalAll) { indices.add(selected.from.block); indices.add(selected.to.block); }
     return [...indices].filter(index => index >= 0 && index < manifest.blocks.length).sort((left, right) => left - right);
   };
+  const minimumLeadingGapOffset = () => -Math.max(0, Number.parseFloat(window.getComputedStyle(root).paddingTop) || 0);
   const addGap = (from: number, to: number, before: Node | null) => {
     if (from === 0 && to === 0) {
+      leadingGapOffset = Math.max(minimumLeadingGapOffset(), leadingGapOffset);
       const gap = document.createElement('div');
       gap.className = 'meo-preview-viewport-gap'; gap.dataset.meoPreviewGap = 'true';
       gap.setAttribute('aria-hidden', 'true');
-      gap.style.cssText = `height:${leadingGapOffset}px;margin:0;padding:0;overflow-anchor:none;pointer-events:none`;
+      gap.style.cssText = `height:${Math.max(0, leadingGapOffset)}px;margin:0 0 ${Math.min(0, leadingGapOffset)}px;padding:0;overflow-anchor:none;pointer-events:none`;
       root.insertBefore(gap, before); gaps.add(gap);
     }
     for (const range of gapRanges(manifest.blocks, from, to)) {
@@ -486,9 +488,27 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
   return {
     get manifest() { return manifest; },
     ensure,
-    restoreReadingScrollTop(top: number): boolean {
+    restoreReadingScrollTop(top: number, preserveNativeScroll = false): boolean {
+      // Source's position marker can precede the reading flow in split view.
+      const gap = gaps.values().next().value ?? null;
+      if (preserveNativeScroll && gap && gaps.has(gap) && Number.isFinite(top)
+        && top > 1 && top < scroll.scrollHeight - scroll.clientHeight - 1) {
+        // A scrollTop write, however small, abandons Chromium's native wheel
+        // animation. Absorb window measurement error in its existing prefix
+        // instead, retaining both the painted witness and the browser's target.
+        const delta = scroll.scrollTop - top;
+        const emptyPrefix = !gap.hasAttribute('data-source-line');
+        const height = gap.getBoundingClientRect().height + (Number.parseFloat(gap.style.marginBottom) || 0) + delta;
+        // Without an omitted prefix, only the document's top padding can
+        // absorb a negative offset; authored content must remain reachable.
+        if (height >= (emptyPrefix ? minimumLeadingGapOffset() : 0)) {
+          leadingGapOffset += delta;
+          gap.style.height = `${Math.max(0, height)}px`;
+          gap.style.marginBottom = `${Math.min(0, height)}px`;
+          return true;
+        }
+      }
       scroll.scrollTop = top;
-      const gap = root.firstElementChild as HTMLElement | null;
       const error = scroll.scrollTop - top;
       if (!gap || !gaps.has(gap) || !Number.isFinite(error) || Math.abs(error) > 1
         || top <= 1 || top >= scroll.scrollHeight - scroll.clientHeight - 1 || Math.abs(error) < 0.001) return false;
@@ -497,14 +517,16 @@ export function createPreviewViewport(root: HTMLElement, manifest: PreviewDocume
       // glyph. Keep that residual in the virtual gap, not in the reading DOM.
       const quantum = 1 / window.devicePixelRatio;
       const total = leadingGapOffset + error;
-      // Keep the residual nonnegative: a window beginning at block zero has
-      // no omitted prefix whose height could absorb a negative remainder.
+      // Idle restoration folds whole pixels back into the native offset,
+      // leaving only a nonnegative fractional remainder in the leading gap.
       const whole = Math.floor(total / quantum) * quantum;
       const next = total - whole;
       // CSSOM serializes large pixel values with limited precision: a 200,000px
       // prefix can lose its fraction when read back through style.height.
       // Correct the actual layout box so repeated restoration cannot drift.
-      gap.style.height = `${Math.max(0, gap.getBoundingClientRect().height + next - leadingGapOffset)}px`;
+      const height = gap.getBoundingClientRect().height + (Number.parseFloat(gap.style.marginBottom) || 0) + next - leadingGapOffset;
+      gap.style.height = `${Math.max(0, height)}px`;
+      gap.style.marginBottom = `${Math.min(0, height)}px`;
       leadingGapOffset = next;
       if (whole) scroll.scrollTop -= whole;
       return true;

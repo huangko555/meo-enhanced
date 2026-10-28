@@ -528,9 +528,13 @@ reduced-motion UI cases retain their own media policy.
 native-animation seam to ordinary/windowed Preview, long code and lists, with
 Live/Source controls. It records actual wheel receipt, intermediate reading
 witnesses, reversal, fine pixel packets, idle stability, bounded container DOM
-and split ownership on/off after deliberately slow loading. A cold-band geometry
-correction may end native animation; the test keeps that compensation and checks
-settling and the next gesture instead of replaying the abandoned destination.
+and split ownership on/off after deliberately slow loading. Forward/reverse
+3600px gestures must complete across cold windows, retaining each mounted text
+witness and bounded DOM. Window measurement compensation uses the existing prefix
+gap rather than writing `scrollTop`, which would abandon native animation. The
+split cases also retain Source's position marker ahead of the reading flow and
+cover 125% DPI. The list repeats the crossing before smaller gestures warm its
+height map; all cases preserve document content and the editor selection.
 Physical mouse-wheel and trackpad inertia/feel still require device testing;
 CDP packets and native `smooth` calls do not establish that evidence.
 The tall-Mermaid viewport contract checks each trusted pixel-wheel event's target,

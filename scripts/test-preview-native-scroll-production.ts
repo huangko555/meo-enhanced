@@ -4,7 +4,7 @@ import { closeTestBrowser } from './browser-test-helpers';
 import { assessLargeDocument } from '../src/foundation/largeDocument';
 
 process.env.MEO_TEST_NATIVE_SMOOTH_SCROLLING = '1';
-const { browser, server, open, frames } = await import('./input-presentation-test-helpers');
+const { browser, server, open, frames, captureResult } = await import('./input-presentation-test-helpers');
 
 const prose = (count: number) => Array.from({ length: count }, (_, index) =>
   `Paragraph ${index}: ${'A stable reading witness. '.repeat(8)}\n`).join('\n');
@@ -19,7 +19,8 @@ const cases = [
   { name: 'long-code', text: code, mode: 'preview' },
   { name: 'long-list', text: list, mode: 'preview' },
   { name: 'split-independent', text: list, mode: 'source', split: false },
-  { name: 'split-linked', text: list, mode: 'source', split: true }
+  { name: 'split-linked', text: list, mode: 'source', split: true },
+  { name: 'split-hidpi', text: list, mode: 'source', split: true, dpr: 1.25 }
 ] as const;
 
 async function record(page: Page, animated: boolean) {
@@ -32,7 +33,7 @@ async function record(page: Page, animated: boolean) {
     });
     if (!witness) throw Error('A concrete reading witness is required');
     scope.__nativeAnimated = animated;
-    scope.__nativeTrace = { wheels: [], writes: [], samples: [], witness, initial: scroll.scrollTop,
+    scope.__nativeTrace = { wheels: [], writes: [], samples: [], witness, reading: witness, epoch: 0, initial: scroll.scrollTop,
       witnessTop: witness.getBoundingClientRect().top };
     return scroll.scrollTop;
   }, animated);
@@ -43,7 +44,7 @@ async function result(page: Page) {
     const scope = window as any, trace = scope.__nativeTrace, scroll = scope.__nativeScrollElement as Element;
     return { wheels: trace.wheels as Array<{ trusted: boolean; prevented: boolean; delta: number; top: number }>,
       writes: trace.writes as Array<{ before: number; after: number }>, initial: trace.initial as number, top: scroll.scrollTop,
-      samples: trace.samples as Array<{ top: number; witness: number | null; source: number }>,
+      samples: trace.samples as Array<{ top: number; witness: number | null; source: number; reading: number | null; epoch: number }>,
       visualDelta: trace.witness.isConnected ? trace.witness.getBoundingClientRect().top - trace.witnessTop as number : null };
   });
 }
@@ -99,6 +100,7 @@ try {
     const host = await open(page, testCase.text, false, testCase.mode,
       'split' in testCase ? { beforePreviewRender: () => new Promise(resolve => setTimeout(resolve, 350)) } : {});
     try {
+      if ('dpr' in testCase) await page.setViewport({ ...page.viewport()!, deviceScaleFactor: testCase.dpr });
       const preview = testCase.mode === 'preview' || 'split' in testCase;
       if ('split' in testCase) {
         await page.click('.source-preview-button');
@@ -111,6 +113,10 @@ try {
         }
       }
       await frames(page, 12);
+      const selection = await page.evaluate(() => {
+        const content = document.querySelector('.editor-host .cm-content') as any;
+        return content?.cmTile?.root.view.state.selection.toJSON() ?? null;
+      });
       const point = await page.evaluate(preview => {
         const scope = window as any, frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
         const doc = preview ? frame!.contentDocument! : document;
@@ -128,14 +134,27 @@ try {
           // test's platform default, after recording whether production consumed
           // the trusted event; the browser still owns every animation frame.
           if (!event.defaultPrevented && scope.__nativeAnimated) {
-            event.preventDefault(); scroll.scrollBy({ top: event.deltaY, behavior: 'smooth' });
+            // CDP scales WheelEvent deltas by emulated DPR; its default scroll
+            // still consumes the original pixel distance.
+            event.preventDefault(); scroll.scrollBy({ top: event.deltaY * doc.defaultView!.devicePixelRatio, behavior: 'smooth' });
           }
         }, { passive: false });
         const sample = () => {
           const trace = scope.__nativeTrace;
-          if (trace) trace.samples.push({ top: scroll.scrollTop,
-            witness: trace.witness.isConnected ? trace.witness.getBoundingClientRect().top : null,
-            source: document.querySelector('.editor-host .cm-scroller')?.scrollTop ?? 0 });
+          if (trace) {
+            let reading = trace.reading?.isConnected ? trace.reading.getBoundingClientRect() : null;
+            if (!reading || reading.bottom < 0 || reading.top > doc.defaultView!.innerHeight) {
+              trace.reading = [...doc.querySelectorAll<HTMLElement>('main p, main li, .meo-export-code-line')].find(element => {
+                const r = element.getBoundingClientRect(); return r.height > 0 && r.top > 100 && r.bottom < doc.defaultView!.innerHeight - 100;
+              });
+              trace.epoch++;
+              reading = trace.reading?.getBoundingClientRect() ?? null;
+            }
+            trace.samples.push({ top: scroll.scrollTop,
+              witness: trace.witness.isConnected ? trace.witness.getBoundingClientRect().top : null,
+              reading: reading?.top ?? null, epoch: trace.epoch,
+              source: document.querySelector('.editor-host .cm-scroller')?.scrollTop ?? 0 });
+          }
           requestAnimationFrame(sample);
         }; requestAnimationFrame(sample);
         const rect = preview ? frame!.getBoundingClientRect() : scroll.getBoundingClientRect();
@@ -143,6 +162,10 @@ try {
       }, preview);
       if (preview) assert.equal(point.windowed, assessLargeDocument(testCase.text).windowedPreview, `${testCase.name}: expected scale path`);
       await page.mouse.move(point.x, point.y);
+      if (testCase.name === 'long-list') {
+        await crossWindow(3600);
+        await crossWindow(-3600);
+      }
       for (const [animated, delta] of [[false, 360], [true, 720], [true, -360]] as const) {
         await record(page, animated); await page.mouse.wheel({ deltaY: delta }); await frames(page, 52);
         await settleNativeMotion(page);
@@ -176,25 +199,40 @@ try {
         await settleNativeMotion(page);
         assertMotion(await result(page), packets.reduce((sum, delta) => sum + delta, 0) * sign, false, `${testCase.name}/pixel/${sign}`);
       }
-      if (testCase.name === 'long-list') {
-        // Crossing a cold band can require a real layout correction. That
-        // correction may end Chromium's animation; it must neither pull back
-        // nor replay the abandoned target after the next gesture.
-        await record(page, true); await page.mouse.wheel({ deltaY: 3600 }); await frames(page, 90);
+      async function crossWindow(delta: number) {
+        // Cold windows must preserve the browser's complete native motion.
+        // Even a tiny scrollTop correction cancels its remaining animation.
+        await record(page, true); await page.mouse.wheel({ deltaY: delta }); await frames(page, 90);
         await settleNativeMotion(page);
         const crossing = await result(page);
-        assert.ok(crossing.top > crossing.initial + 500 && crossing.top <= crossing.initial + 3604);
-        assert.ok(crossing.top >= crossing.initial + 3598 || crossing.writes.some(write => Math.abs(write.after - write.before) > 1),
-          'An early end needs evidence of a necessary geometry correction');
-        assert.ok(crossing.samples.every((sample, index, samples) => index === 0 || sample.top >= samples[index - 1]!.top - 1));
+        assert.ok(Math.abs(crossing.top - crossing.initial - delta) <= 2,
+          `Cold window interrupted native motion: ${JSON.stringify({ initial: crossing.initial, top: crossing.top, writes: crossing.writes })}`);
+        for (let index = 1; index < crossing.samples.length; index++) {
+          const previous = crossing.samples[index - 1]!, current = crossing.samples[index]!;
+          assert.notEqual(current.reading, null, `${testCase.name}: cold window left the reading viewport blank`);
+          assert.ok((current.top - previous.top) * Math.sign(delta) >= -1, `${testCase.name}: cold window pulled back`);
+          if ('split' in testCase) assert.ok(testCase.split
+            ? (current.source - previous.source) * Math.sign(delta) >= -1
+            : Math.abs(current.source - previous.source) <= 1, `${testCase.name}: cold window changed Source ownership`);
+          if (current.epoch === previous.epoch && current.reading !== null && previous.reading !== null) {
+            assert.ok(Math.abs(current.reading - previous.reading + current.top - previous.top) <= 2,
+              `${testCase.name}: cold window displaced its painted reading witness`);
+          }
+        }
         const tail = crossing.samples.slice(-8).map(sample => sample.top);
         assert.ok(Math.max(...tail) - Math.min(...tail) <= 1, 'Band correction must settle');
-        assert.ok(await page.$eval('.preview-frame', frame => (frame as HTMLIFrameElement).contentDocument!
+        if ('split' in testCase && testCase.split) assert.ok(
+          (crossing.samples.at(-1)!.source - crossing.samples[0]!.source) * Math.sign(delta) > 0,
+          `${testCase.name}: cold window did not synchronize Source`);
+        if (testCase.name === 'long-list' || 'split' in testCase) assert.ok(await page.$eval('.preview-frame', frame => (frame as HTMLIFrameElement).contentDocument!
           .querySelectorAll('[data-meo-container-part] > li').length < 256), 'Native motion must keep bounded DOM');
+        console.log(`${testCase.name} cold boundary: ${crossing.top - crossing.initial}px native progress, ${crossing.writes.length} geometry writes`);
+      }
+      if (preview) for (const delta of [3600, -3600]) await crossWindow(delta);
+      if (preview) {
         await record(page, false); await page.mouse.wheel({ deltaY: -120 }); await frames(page, 20);
         await settleNativeMotion(page);
-        assertMotion(await result(page), -120, false, 'list/cold-boundary/reverse', true);
-        console.log(`long-list cold boundary: ${crossing.top - crossing.initial}px native progress, ${crossing.writes.length} geometry writes`);
+        assertMotion(await result(page), -120, false, `${testCase.name}/cold-boundary/reverse`, true);
       }
       // Existing programmatic navigation remains immediate, without CSS smooth.
       assert.equal(await page.evaluate(() => {
@@ -204,6 +242,12 @@ try {
         return scroll.scrollTop === top && scroll.ownerDocument.defaultView!.getComputedStyle(scroll).scrollBehavior === 'auto';
       }), true);
       assert.deepEqual(host.errors, []);
+      assert.equal(host.readHost(), testCase.text, 'Reading must not change document content');
+      assert.deepEqual(await page.evaluate(() => {
+        const content = document.querySelector('.editor-host .cm-content') as any;
+        return content?.cmTile?.root.view.state.selection.toJSON() ?? null;
+      }), selection, 'Preview scrolling must not move the editor selection');
+      await captureResult(page, `native-scroll-${testCase.name}`);
       console.log(`${testCase.name}: native wheel, multi-frame progress, reversal, fine packets and idle stability passed`);
     } finally { host.dispose(); await page.close(); }
   }

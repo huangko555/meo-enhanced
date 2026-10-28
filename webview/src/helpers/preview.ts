@@ -2145,6 +2145,9 @@ export function createPreviewController({
       syncPreviewCodeHighlight(frameDocument);
       ensureReadableCode(frameDocument);
       frameDocument.addEventListener('scroll', () => {
+        // Native smooth motion continues after its last wheel packet. Keep
+        // window compensation off scrollTop until that motion has settled.
+        if (performance.now() < previewGestureUntil) previewGestureUntil = performance.now() + 250;
         if (!disposed && activeFrameDocument === frameDocument) scheduleViewportHighlight(frameDocument);
         if (!disposed && activeFrameDocument === frameDocument) {
           onViewportChange?.();
@@ -2345,7 +2348,7 @@ export function createPreviewController({
   const restoreVisualReadingScrollTop = (document: Document, top: number): void => {
     retainedViewportProjection = null;
     if (previewViewport) {
-      if (previewViewport.restoreReadingScrollTop(top)) { sourceMapDirty = true; localGeometryViewport = null; }
+      if (previewViewport.restoreReadingScrollTop(top, isViewportInteracting())) { sourceMapDirty = true; localGeometryViewport = null; }
     } else if (restoreFullPreviewReadingScrollTop(document, top)) sourceMapDirty = true;
   };
 

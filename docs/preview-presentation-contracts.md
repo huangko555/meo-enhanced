@@ -237,7 +237,12 @@ must retain the current text witness rather than silently moving the page.
 Ordinary mouse-wheel and trackpad events retain the browser default; only the
 font-size shortcut consumes its wheel gesture. Do not replay wheel deltas through
 `scrollTop`, animate other navigation, or disable necessary reading compensation
-to prolong an animation. A real geometry correction can end a native animation.
+to prolong an animation. Window measurement error is absorbed by the existing
+leading gap during native motion, keeping the painted reading witness without
+abandoning the browser's destination. This also covers motion after the final
+wheel packet and split Preview with a Source position marker before the gap.
+An empty prefix can absorb only available top padding; larger real-content
+changes still use necessary scroll restoration so the document start stays reachable.
 Loading inactivity belongs to the iframe's document root, including a replacement
 document: toggling `inert` on the iframe itself can leave Chromium's wheel scroller
 inactive after slow loading even after that attribute is removed.

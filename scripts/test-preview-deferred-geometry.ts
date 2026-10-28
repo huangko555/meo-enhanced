@@ -108,8 +108,11 @@ try {
       return anchor.getBoundingClientRect().top;
     }, { margin: scenario === 'margin', paragraph: fontChange ? -1 : 4 });
     let imageBaseline = before;
-    const beforeHeight = await page.$eval('.preview-frame', element =>
-      (element as HTMLIFrameElement).contentDocument!.scrollingElement!.scrollHeight);
+    const beforeGeometry = await page.$eval('.preview-frame', element => {
+      const doc = (element as HTMLIFrameElement).contentDocument!;
+      return { height: doc.scrollingElement!.scrollHeight, reading: doc.querySelector('main')!.getBoundingClientRect().height,
+        padding: Number.parseFloat(doc.documentElement.style.paddingTop) || 0 };
+    });
     assert.ok(releaseImage, 'The visible image must start loading before moving the reading position');
     if (fontChange) {
       const oldSize = await page.$eval('.preview-frame', element => {
@@ -242,9 +245,19 @@ try {
     const after = await page.evaluate(() => document.querySelector<HTMLIFrameElement>('.preview-frame')!
       .contentDocument!.querySelector('[data-reading-anchor]')!.getBoundingClientRect().top);
     if (scenario === 'gap') {
-      const afterHeight = await page.$eval('.preview-frame', element =>
-        (element as HTMLIFrameElement).contentDocument!.scrollingElement!.scrollHeight);
-      assert.equal(afterHeight, beforeHeight, 'The fixed-size image must exercise a geometry-neutral commit');
+      const afterGeometry = await page.$eval('.preview-frame', element => {
+        const doc = (element as HTMLIFrameElement).contentDocument!;
+        return { height: doc.scrollingElement!.scrollHeight, reading: doc.querySelector('main')!.getBoundingClientRect().height,
+          padding: Number.parseFloat(doc.documentElement.style.paddingTop) || 0 };
+      });
+      assert.equal(afterGeometry.reading, beforeGeometry.reading, 'The fixed-size image must exercise a geometry-neutral commit');
+      // Reading retention keeps subpixel rounding in the document root. Its
+      // fractional padding can change rounded scrollHeight by one pixel even
+      // though the image and the complete reading layout stayed unchanged.
+      assert.ok(afterGeometry.padding >= 0 && afterGeometry.padding < 1);
+      assert.equal(afterGeometry.height - beforeGeometry.height,
+        Math.round(afterGeometry.reading + afterGeometry.padding) - Math.round(beforeGeometry.reading + beforeGeometry.padding),
+        'Only fractional root compensation may change rounded document height');
     }
     if (scenario === 'hidden' || scenario === 'font-hidden') {
       assert.equal(await page.$eval('#app', element => (element as HTMLElement).dataset.mode), 'source');
