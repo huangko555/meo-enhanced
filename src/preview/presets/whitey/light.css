@@ -6,4 +6,6 @@
   --meo-muted: #777777;
   --meo-link: #2484c1;
   --meo-code-bg: #f8f8f8;
+  --meo-inline-code-bg: #ececec;
+  --meo-inline-code-border: #dedede;
 }
