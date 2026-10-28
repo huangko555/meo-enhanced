@@ -926,6 +926,13 @@ history failures. It checks latest-draft retry, quiet incomplete results,
 no automatic repeat writes/replays, actionable copy recovery for toolbar/keyboard,
 and captures bilingual light/dark screenshots of the production notice UI.
 
+`bun run test:toolbar-viewport` checks Preview footnote references, numbered
+return links and backrefs with trusted clicks and frame-by-frame toolbar geometry.
+Deliberate offscreen shell overflow must not scroll the outer page or move the
+menu. Ordinary dark/English and windowed light/Chinese narrow fixtures assert
+the production size policy and actual window requests. The bounded pair takes
+about 12 seconds locally and belongs to the browser and targeted viewport gates.
+
 `scripts/test-list-toolbar-browser.ts` checks all three toolbar list actions in Live
 and Source with monospaced/proportional fonts: empty and nonempty caret placement,
 indented markers, immediate task layout without overshoot, conversion, cancellation,

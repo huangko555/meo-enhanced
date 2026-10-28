@@ -704,6 +704,7 @@
       "scripts/test-theme-inheritance.ts",
       "scripts/test-toolbar-input-viewport.ts",
       "scripts/test-toolbar-menus-browser.ts",
+      "scripts/test-toolbar-viewport-stability.ts",
       "scripts/test-tooltip-display-latency.ts",
       "scripts/test-tooltip-hover-sequence.ts",
       "scripts/test-tooltip-pointer-position.ts",

@@ -126,10 +126,13 @@ body {
 }
 
 .editor-root {
-  position: relative;
+  /* Anchor window chrome even when inner reveal/focus scrolls an ancestor. */
+  position: fixed;
+  inset: 0;
   isolation: isolate;
   display: flex;
   flex-direction: column;
+  overflow: clip;
 }
 
 .editor-wrapper {

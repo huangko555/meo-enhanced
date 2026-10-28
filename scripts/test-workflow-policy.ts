@@ -193,6 +193,7 @@ function targetedCommands(
       ];
     case 'viewport':
       return [
+        packageScript('test:toolbar-viewport'),
         script('scripts/test-source-syntax-stability.ts'),
         script('scripts/test-preview-navigation-continuity.ts'),
         script('scripts/test-preview-preset-position.ts'),
