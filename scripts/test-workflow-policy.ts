@@ -322,6 +322,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-large-document-policy.ts'),
           script('scripts/test-test-workflow.ts'),
           script('scripts/test-test-inventory.ts'),
+          { args: ['scripts/test-toolbar-viewport-stability.ts', '--shell-only'] },
           script('scripts/test-source-syntax-first-paint.ts'),
           script('scripts/test-mode-roundtrip-reveal.ts'),
           script('scripts/test-virtual-block-scroll-stability.ts')

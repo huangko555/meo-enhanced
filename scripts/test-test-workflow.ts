@@ -16,6 +16,8 @@ const coreCommands = flattenTestWorkflowCommands(quick);
 assert.equal(quick.longRunning, false);
 assert.doesNotThrow(() => validateTestWorkflowAuthorization(quick, false, false));
 assert.ok(coreCommands.length <= 20, 'Core checks need an explicit scope review before growing');
+assert.ok(coreCommands.some(command => command.args.join(' ') === 'scripts/test-toolbar-viewport-stability.ts --shell-only'),
+  'The bounded menu shell invariant belongs to daily core checks');
 assert.deepEqual(coreCommands.filter(command => command.args[0] === 'run'), [{ args: ['run', 'typecheck'] }],
   'Broad aliases cannot silently inflate the daily core');
 for (const name of ['document-session', 'document-auto-save-concurrency', 'document-save-flush-protocol',

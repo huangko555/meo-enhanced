@@ -1085,20 +1085,27 @@ function getNonce(): string {
   return nonce;
 }
 
+// Keep viewport ownership stable before the external stylesheet and editor load.
 function getWebviewPreloadShellCss(): string {
   return `
       html, body {
         margin: 0;
         padding: 0;
         height: 100%;
+        overflow: hidden;
       }
       body {
         background: var(--meo-background, var(--vscode-editor-background));
       }
       #app {
-        min-height: 100%;
+        position: fixed;
+        inset: 0;
+        height: 100%;
+        min-height: 0;
+        min-width: 0;
         display: flex;
         flex-direction: column;
+        overflow: clip;
       }
       #app > .mode-toolbar.meo-preload-toolbar {
         min-height: 40px;

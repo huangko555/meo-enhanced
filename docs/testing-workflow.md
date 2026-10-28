@@ -926,12 +926,19 @@ history failures. It checks latest-draft retry, quiet incomplete results,
 no automatic repeat writes/replays, actionable copy recovery for toolbar/keyboard,
 and captures bilingual light/dark screenshots of the production notice UI.
 
-`bun run test:toolbar-viewport` checks Preview footnote references, numbered
-return links and backrefs with trusted clicks and frame-by-frame toolbar geometry.
-Deliberate offscreen shell overflow must not scroll the outer page or move the
-menu. Ordinary dark/English and windowed light/Chinese narrow fixtures assert
-the production size policy and actual window requests. The bounded pair takes
-about 12 seconds locally and belongs to the browser and targeted viewport gates.
+The daily core runs `scripts/test-toolbar-viewport-stability.ts --shell-only`
+(about 3 seconds locally). It reads the production preload templates and checks
+the inline and full styles independently: offscreen focus, native reveal and
+forced ancestor scrolling must leave the menu in place. This keeps the fixed
+window shell protected before the application is ready too.
+`bun run test:toolbar-viewport` additionally samples every frame through Preview
+footnote references/returns, delayed overflow, resizing, native editor wheels,
+keyboard navigation, search, focus return, menus/settings and Live/Source/full
+and side Preview transitions. Ordinary dark/English and windowed light/Chinese
+narrow fixtures assert the production policy, actual window requests, the editor
+work-budget path and unchanged text. The bounded pair belongs to the browser
+and targeted viewport gates (about 19 seconds locally); it does not perform a
+full-document traversal.
 
 `scripts/test-list-toolbar-browser.ts` checks all three toolbar list actions in Live
 and Source with monospaced/proportional fonts: empty and nonempty caret placement,
