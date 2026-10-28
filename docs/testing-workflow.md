@@ -16,6 +16,12 @@ and native desktop acceptance remain required separately for their applicable sc
 Choose their environment using [native acceptance environment](#native-acceptance-environment)
 before preparing a host profile or VM.
 
+After pushing a candidate for release, read the completed `CI checks` run for that
+exact commit. Both Ubuntu and Windows jobs, including their final package checks,
+must pass before creating the GitHub Release or uploading to Marketplace. A
+successful push, local Windows acceptance or a passing build does not cover an
+unresolved failure or a skipped package check on the other platform.
+
 ## Release acceptance sequence
 
 Acceptance has one executor and a recorded candidate. Keep a small ledger of
@@ -337,6 +343,11 @@ presets, continuing numbers across image formats, concurrent exclusive creation,
 Chinese folders/document names, escaped Markdown targets and final-file-name alt
 text. Settings coverage includes persisted selection, bilingual search and narrow
 light/dark layouts; `MEO_SETTINGS_SCREENSHOTS` captures the naming controls.
+The clipboard-image root contract also runs the production directory resolver with
+isolated POSIX and Windows path adapters on every OS. Relative-only settings reject
+either platform's roots and drive-relative paths; advanced rules retain explicit
+absolute destinations. Native filesystem creation and symbolic-link checks still
+run with the real host path adapter.
 
 `scripts/test-link-candidates-production.ts` initializes the standalone fixture's
 host font variables and measures native textarea text through Chromium's debugging

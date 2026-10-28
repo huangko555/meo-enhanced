@@ -149,7 +149,8 @@ function isUnsafeWindowsSegment(value: string): boolean {
 }
 
 function resolveContainedPath(root: string, relativePath: string, label: string): string {
-  if (!relativePath || path.isAbsolute(relativePath)) {
+  if (!relativePath || path.posix.isAbsolute(relativePath) || path.win32.isAbsolute(relativePath)
+    || /^[a-z]:/i.test(relativePath)) {
     throw new Error(`${label} must be a non-empty relative path`);
   }
   const target = path.resolve(root, relativePath);

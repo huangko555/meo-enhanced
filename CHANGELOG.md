@@ -3,6 +3,10 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.36
+- Fixed pasted-image folder validation on Linux: relative-only settings now reject Windows drive paths, rooted paths and network paths consistently across platforms. Advanced image-folder rules retain their explicit absolute-path support.
+- Added POSIX and Windows path regressions alongside the existing image creation, collision and symbolic-link checks.
+
 ## 0.3.35
 - Improved large and complex documents with background Markdown parsing and syntax highlighting, incremental updates, and bounded rendering for long tables, code fences, lists, quotes and footnotes. Copy, search, navigation, history and exports retain the complete document.
 - Separated the optional large-file startup mode from automatic runtime optimizations, and added delayed loading feedback while Live, Source or Preview prepares a document.

@@ -1,8 +1,48 @@
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { saveClipboardImageFile } from '../src/host/clipboardImageSave';
 import { resolveClipboardImageSaveRoot } from '../src/shared/clipboardImages';
+
+const unsafeFolders = ['../outside', '/absolute', 'C:\\absolute', 'C:/absolute', 'C:relative',
+  '\\absolute', '\\\\server\\share', '//server/share', '\\\\?\\C:\\absolute'];
+const resolverModule = pathToFileURL(path.resolve(import.meta.dir, '../src/host/clipboardImageSave.ts')).href;
+// Isolate the path mock so both OS contracts run without replacing the real filesystem path API below.
+for (const flavor of ['posix', 'win32'] as const) {
+  const result = spawnSync(process.execPath, ['--eval', `
+    import assert from 'node:assert/strict';
+    import { mock } from 'bun:test';
+    import path from 'node:path';
+    const paths = path[${JSON.stringify(flavor)}];
+    mock.module('node:path', () => ({ ...paths, default: paths, posix: path.posix, win32: path.win32 }));
+    const { resolveClipboardImageDirectory } = await import(${JSON.stringify(resolverModule)});
+    const workspaceFsPath = ${JSON.stringify(flavor === 'posix' ? '/workspace' : 'C:\\workspace')};
+    const documentFsPath = paths.join(workspaceFsPath, 'notes', 'draft.md');
+    const context = { documentFsPath, workspaceFsPath };
+    for (const configuredFolder of ${JSON.stringify(unsafeFolders)}) {
+      assert.throws(() => resolveClipboardImageDirectory({ ...context, configuredFolder }),
+        /relative path|configured root/, 'unsafe legacy folder: ' + configuredFolder);
+      for (const mode of ['default', 'perDocument']) {
+        assert.throws(() => resolveClipboardImageDirectory({ ...context,
+          imageStorage: { mode, folder: configuredFolder, rule: 'assets' } }),
+          /inside the document directory/, 'unsafe basic folder: ' + configuredFolder);
+      }
+    }
+    assert.equal(resolveClipboardImageDirectory({ ...context, configuredFolder: 'media/images' }).targetDirectory,
+      paths.join(workspaceFsPath, 'media', 'images'));
+    assert.equal(resolveClipboardImageDirectory({ documentFsPath, configuredFolder: 'media/images' }).targetDirectory,
+      paths.join(workspaceFsPath, 'notes', 'media', 'images'));
+    const absoluteRule = paths.join(workspaceFsPath, 'shared images');
+    assert.equal(resolveClipboardImageDirectory({ ...context,
+      imageStorage: { mode: 'advanced', folder: 'assets', rule: absoluteRule } }).targetDirectory, absoluteRule);
+    assert.equal(resolveClipboardImageDirectory({ ...context,
+      imageStorage: { mode: 'advanced', folder: 'assets', rule: '../shared images' } }).targetDirectory, absoluteRule);
+  `], { encoding: 'utf8' });
+  assert.equal(result.status, 0, `${flavor} image folder contract failed:\n${result.stderr || result.error || result.stdout}`);
+}
 
 const documentPath = path.join('D:', 'notes', 'draft.md');
 const standaloneRoot = resolveClipboardImageSaveRoot(documentPath);
@@ -70,7 +110,7 @@ try {
     throw new Error(`workspace-relative configured path was ${JSON.stringify(configured.relativePath)}`);
   }
 
-  for (const unsafe of ['../outside', '/absolute', 'C:\\absolute']) {
+  for (const unsafe of unsafeFolders) {
     let rejected = false;
     try {
       await saveClipboardImageFile({
