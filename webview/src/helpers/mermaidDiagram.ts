@@ -500,7 +500,7 @@ function mermaidEstimatedHeightKey(resultCacheKey: string, contentWidth: number)
   return `estimated:${resultCacheKey}\nwidth:${Math.max(0, Math.round(contentWidth))}`;
 }
 
-function estimateCachedMermaidHeight(svgContent: string | undefined, contentWidth: number): number {
+function estimateCachedMermaidContentHeight(svgContent: string | undefined, contentWidth: number): number {
   if (!svgContent) return -1;
   const svgTag = svgContent.match(/<svg\b[^>]*>/i)?.[0] ?? '';
   const width = Number(svgTag.match(/\bwidth=["']([\d.]+)(?:px)?["']/i)?.[1]);
@@ -511,7 +511,12 @@ function estimateCachedMermaidHeight(svgContent: string | undefined, contentWidt
   if (!(intrinsicWidth > 0) || !(intrinsicHeight > 0)) return -1;
   const availableWidth = Math.max(0, contentWidth - 24);
   const scale = availableWidth > 0 ? Math.min(1, availableWidth / intrinsicWidth) : 1;
-  return intrinsicHeight * scale + 24;
+  return intrinsicHeight * scale;
+}
+
+function estimateCachedMermaidHeight(svgContent: string | undefined, contentWidth: number): number {
+  const height = estimateCachedMermaidContentHeight(svgContent, contentWidth);
+  return height > 0 ? height + 24 : height;
 }
 
 export function isDisplayMathDiagram(diagramText: string): boolean {
@@ -722,7 +727,11 @@ export class MermaidDiagramWidget extends WidgetType {
       });
     };
     container.className = 'meo-mermaid-block';
-    const initialHeight = this.estimatedHeight;
+    // Editing uses a content-box canvas with its own padding. A reading-mode
+    // measurement includes toolbar padding and cannot be used as its min-height.
+    const sourceContentHeight = this.cachePreviewHeight ? -1
+      : estimateCachedMermaidContentHeight(this.intrinsicSvg ?? undefined, currentMermaidContentWidth());
+    const initialHeight = sourceContentHeight > 0 ? sourceContentHeight : this.estimatedHeight;
     if (initialHeight > 0 && (!this.staleSvg || gated)) {
       container.style.minHeight = `${initialHeight}px`;
     }
@@ -801,13 +810,8 @@ export class MermaidDiagramWidget extends WidgetType {
         if (estimatedHeight > 0) {
           this.measuredHeight = estimatedHeight;
           this.measuredContentWidth = contentWidth;
-          this.presentationFactory.rememberHeight(
-            mermaidEstimatedHeightKey(
-              JSON.stringify(mermaidRenderRequest(this.diagramText, this.themeSignature)),
-              contentWidth
-            ),
-            estimatedHeight
-          );
+          // Only ResizeObserver publishes measured reading geometry. This SVG
+          // estimate must not overwrite it from a differently padded edit canvas.
         }
         container.style.removeProperty('min-height');
         container.replaceChildren();

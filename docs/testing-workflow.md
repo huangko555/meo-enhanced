@@ -841,7 +841,12 @@ Worker and real Mermaid runtime in both editing layouts. It holds a changed
 diagram's completion until after source collapse and finite input settlement,
 then verifies painted target continuity, unchanged source, accepted caret and
 retirement by a newer wheel. Its large fixture verifies Worker context requests
-and bounded mounted DOM. Both belong to `test:rendered-source`.
+and bounded mounted DOM. Its `--neighbor-only` slice also places an unchanged
+formula below Mermaid, checks every painted keyboard-entry frame against the
+accepted editing geometry, and permits only pixel rounding on pointer exit.
+Reading measurements include toolbar padding; editing placeholders must use
+content height and must not overwrite those measurements with SVG estimates.
+Both contracts belong to `test:rendered-source`.
 
 For an appearance-only operation's `EditorState` identity check, first await the
 current document's derived-work readiness, parser idle and expected large-document
