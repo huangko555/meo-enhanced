@@ -136,11 +136,12 @@ body {
 }
 
 .editor-wrapper {
-  position: relative;
+  position: absolute;
+  inset: var(--meo-editor-toolbar-height) 0 0;
   z-index: var(--meo-layer-document-base);
   display: flex;
-  flex: 1;
   min-height: 0;
+  min-width: 0;
 }
 
 .editor-wrapper[data-outline-position='left'] {
@@ -354,10 +355,12 @@ html[data-meo-ui-contrast='high'] .document-scroll-top {
 
 .mode-toolbar {
   box-sizing: border-box;
-  position: relative;
+  position: absolute;
+  inset: 0 0 auto;
   z-index: var(--meo-layer-window-chrome);
   display: flex;
   align-items: center;
+  height: var(--meo-editor-toolbar-height);
   min-height: var(--meo-editor-toolbar-height);
   padding: 7px 14px 7px 10px;
   background-color: var(--meo-ui-surface);

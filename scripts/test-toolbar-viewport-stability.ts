@@ -53,15 +53,25 @@ try {
       document.body.scrollTop = 40;
       await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
       const forced = toolbar.getBoundingClientRect();
+      // A new control or late font must not resize the window's document band.
+      const oversizedControl = document.createElement('div');
+      oversizedControl.style.cssText = 'height:200px;width:1200px;flex:none';
+      toolbar.append(oversizedControl);
+      const expanded = toolbar.getBoundingClientRect();
+      const content = document.querySelector('.editor-wrapper')!.getBoundingClientRect();
       return { before: { top: before.top, left: before.left, height: before.height },
         focused: document.activeElement === input,
         after: { top: after.top, left: after.left, height: after.height },
         forced: { top: forced.top, left: forced.left, height: forced.height },
+        expanded: { top: expanded.top, left: expanded.left, height: expanded.height },
+        content: { top: content.top, bottom: content.bottom },
         root: { top: root.top, left: root.left, width: root.width, height: root.height } };
     });
     assert.equal(shellResult.focused, true, `${stage} must exercise a real native focus target`);
     assert.deepEqual(shellResult.after, shellResult.before, `${stage} focus/reveal moved the menu: ${JSON.stringify(shellResult)}`);
     assert.deepEqual(shellResult.forced, shellResult.before, `${stage} ancestor scrolling moved the menu`);
+    assert.deepEqual(shellResult.expanded, shellResult.before, `${stage} intrinsic control size changed the fixed menu band`);
+    assert.deepEqual(shellResult.content, { top: 40, bottom: 520 }, `${stage} content must occupy the remaining fixed window band`);
     assert.deepEqual(shellResult.root, { top: 0, left: 0, width: 800, height: 520 }, `${stage} shell must stay in the window`);
     await shell.close();
     console.log(`PASS ${stage} shell focus, reveal and ancestor scroll isolation`);
@@ -114,7 +124,7 @@ try {
       const trace = (window as any).__toolbarStability = {
         baseline: { top: baseline.top, left: baseline.left, height: baseline.height },
         phase: 'footnotes',
-        samples: [] as Array<{ phase: string; top: number; left: number; height: number; rootError: number;
+        samples: [] as Array<{ phase: string; top: number; left: number; height: number; contentTop: number; rootError: number;
           outerScroll: number; bodyScroll: number; rootScroll: number; wrapperScroll: number }>,
         stopped: false
       };
@@ -122,6 +132,7 @@ try {
         const box = toolbar.getBoundingClientRect();
         const root = document.getElementById('app')!.getBoundingClientRect();
         trace.samples.push({ phase: trace.phase, top: box.top, left: box.left, height: box.height,
+            contentTop: document.querySelector('.editor-wrapper')!.getBoundingClientRect().top,
           rootError: Math.max(Math.abs(root.top), Math.abs(root.left), Math.abs(box.right - root.right)),
           outerScroll: document.scrollingElement!.scrollTop, bodyScroll: document.body.scrollTop,
           rootScroll: document.getElementById('app')!.scrollTop,
@@ -253,9 +264,10 @@ try {
     });
     assert.equal(trace.baseline.top, 0, 'the menu starts at the window top');
     assert.ok(trace.samples.every((sample: any) => Math.abs(sample.top - trace.baseline.top) < 0.5
-      && Math.abs(sample.left - trace.baseline.left) < 0.5 && Math.abs(sample.height - trace.baseline.height) < 0.5 && sample.rootError < 0.5),
+      && Math.abs(sample.left - trace.baseline.left) < 0.5 && Math.abs(sample.height - trace.baseline.height) < 0.5
+      && Math.abs(sample.contentTop - trace.baseline.height) < .5 && sample.rootError < 0.5),
     `editor operation moved the toolbar: ${JSON.stringify({ baseline: trace.baseline,
-      changed: trace.samples.filter((sample: any) => sample.top !== trace.baseline.top || sample.rootError >= .5).slice(0, 4) })}`);
+      changed: trace.samples.filter((sample: any) => sample.top !== trace.baseline.top || Math.abs(sample.contentTop - trace.baseline.height) >= .5 || sample.rootError >= .5).slice(0, 4) })}`);
     assert.ok(trace.samples.every((sample: any) => sample.rootScroll === 0 && sample.wrapperScroll === 0
       && (sample.phase === 'forced ancestor scroll' || (sample.outerScroll === 0 && sample.bodyScroll === 0))),
       `native operations must keep scrolling inside their document viewport: ${JSON.stringify(trace.samples.filter((sample: any) => sample.rootScroll || sample.wrapperScroll || sample.outerScroll || sample.bodyScroll).slice(0, 4))}`);

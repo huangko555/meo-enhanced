@@ -1123,12 +1123,16 @@ function getWebviewPreloadShellCss(): string {
         overflow: clip;
       }
       #app > .mode-toolbar.meo-preload-toolbar {
+        position: absolute;
+        inset: 0 0 auto;
+        height: 40px;
         min-height: 40px;
         box-sizing: border-box;
         background: var(--vscode-sideBar-background);
       }
       #app > .editor-wrapper.meo-preload-editor-shell {
-        flex: 1;
+        position: absolute;
+        inset: 40px 0 0;
         min-height: 0;
         display: flex;
       }

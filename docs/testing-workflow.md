@@ -980,7 +980,9 @@ and captures bilingual light/dark screenshots of the production notice UI.
 The daily core runs `scripts/test-toolbar-viewport-stability.ts --shell-only`
 (about 3 seconds locally). It reads the production preload templates and checks
 the inline and full styles independently: offscreen focus, native reveal and
-forced ancestor scrolling must leave the menu in place. This keeps the fixed
+forced ancestor scrolling must leave the menu in place. Oversized controls must
+also preserve the fixed 40px menu band and the document's separate lower band.
+This keeps the fixed
 window shell protected before the application is ready too.
 `bun run test:toolbar-viewport` additionally samples every frame through Preview
 footnote references/returns, delayed overflow, resizing, native editor wheels,
