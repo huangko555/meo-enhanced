@@ -1224,11 +1224,12 @@ for the staged snapshot. A staging/content change invalidates earlier index chec
 
 ## Document-scale coverage
 
-`scripts/test-changes-review-consistency.ts` covers pending summary presentation,
-delayed feedback, equal-count baseline changes, manual snapshot replacement,
+`scripts/test-changes-review-consistency.ts` covers silent pending summaries,
+retaining zero/nonzero results, equal-count baseline changes, manual snapshot replacement,
 failure and disabling comparison. Actual typing in Source and Live pairs ordinary
 documents with the production large-document budget and real delayed diff Worker.
-Every sampled input frame retains valid counts and stable toolbar geometry.
+Every sampled input frame retains accepted counts and stable toolbar geometry,
+without visible or accessible process hints. Slow comparisons do not trigger delayed menu renders.
 Set `MEO_TEST_SCREENSHOTS` to a local output directory to capture English/light and
 Chinese/dark pending menus during that focused run.
 

@@ -46,62 +46,61 @@ async function assertPendingPresentation(page: Page): Promise<void> {
     const root = document.getElementById('pending-probe')!;
     const trigger = root.querySelector<HTMLElement>('.changes-review-trigger')!;
     return { counts: trigger.querySelector('.changes-review-counts')!.textContent,
-      busy: trigger.getAttribute('aria-busy'), label: trigger.getAttribute('aria-label'),
-      updating: root.querySelector('.changes-review-header-status')?.textContent ?? '',
+      label: trigger.getAttribute('aria-label'),
+      headerCounts: root.querySelector('.changes-review-header .changes-review-counts')?.textContent ?? null,
       width: trigger.getBoundingClientRect().width,
-      indicator: root.querySelector<HTMLElement>('.changes-review-updating')?.getBoundingClientRect().width ?? 0 };
+      processHints: root.querySelectorAll('.changes-review-updating, .changes-review-header-status, [aria-busy]').length };
   });
   const ready = { status: 'ready', added: 5, deleted: 2 };
   const pending = { status: 'pending', added: 0, deleted: 0 };
-  assert.equal((await read()).counts, '计算中…', 'cold comparison must not claim no changes');
+  assert.equal((await read()).counts, '无更改', 'cold comparison uses the default label without process feedback');
   await present({ summary: ready });
   const accepted = await read();
   await present({ summary: pending });
   assert.equal((await read()).counts, '+5−2', 'input must retain the previous nonzero counts');
-  assert.equal((await read()).busy, 'true');
+  assert.equal((await read()).label, accepted.label, 'pending must retain the accessible summary too');
   assert.equal((await read()).width, accepted.width, 'pending must retain trigger geometry');
   await page.click('#pending-probe .changes-review-trigger');
   const baselineOption = await page.$('#pending-probe [data-baseline="git-head"]');
-  assert.equal((await read()).updating, '', 'short updates stay visually silent');
-  await page.waitForFunction(() => document.querySelector('#pending-probe .changes-review-header-status')?.textContent === '更新中，显示上次统计');
+  const pendingHtml = await page.$eval('#pending-probe', element => element.innerHTML);
+  await new Promise(resolve => setTimeout(resolve, 650));
+  assert.equal(await page.$eval('#pending-probe', element => element.innerHTML), pendingHtml,
+    'slow updates must stay silent without a delayed render');
   assert.equal(await baselineOption!.evaluate(element => element.isConnected), true,
-    'delayed summary feedback must preserve interactive menu nodes');
+    'waiting must preserve interactive menu nodes');
   assert.equal((await read()).counts, '+5−2');
-  assert.equal((await read()).width, accepted.width, 'delayed feedback uses reserved indicator space');
-  assert.ok((await read()).indicator > 0);
+  assert.equal((await read()).headerCounts, '+5−2');
+  assert.equal((await read()).width, accepted.width, 'waiting must preserve trigger geometry');
+  assert.equal((await read()).processHints, 0, 'there must be no process indicators or reserved indicator space');
   await present({ summary: { status: 'ready', added: 6, deleted: 2 } });
   assert.equal((await read()).counts, '+6−2');
-  assert.equal((await read()).busy, 'false');
-  assert.equal((await read()).updating, '');
-  // A fresh ready summary and a late language/theme render must not restart a completed timer.
-  await present({ summary: pending });
-  await present({ summary: ready });
-  await page.evaluate(() => (window as any).__pendingProbe.control.setUiLanguage('en'));
-  await new Promise(resolve => setTimeout(resolve, 550));
-  assert.equal((await read()).updating, '');
+  assert.equal((await read()).headerCounts, '+6−2');
   await present({ summary: { status: 'ready', added: 0, deleted: 0 } });
-  assert.equal((await read()).counts, 'No Changes');
+  assert.equal((await read()).counts, '无更改');
+  const zero = await read();
   await present({ summary: pending });
-  assert.equal((await read()).counts, 'Calculating…', 'previous zero is not evidence about pending content');
+  assert.deepEqual(await read(), zero, 'a pending comparison must also retain the previous zero result');
+  await page.evaluate(() => (window as any).__pendingProbe.control.setUiLanguage('en'));
+  assert.equal((await read()).counts, 'No Changes');
   await present({ summary: ready });
   await present({ baseline: 'git-head' });
-  assert.equal((await read()).counts, 'Calculating…', 'selection must retire counts from the old comparison');
+  assert.equal((await read()).counts, 'No Changes', 'selection must retire counts from the old comparison');
   await present({ comparison: { baseline: 'git-head', generation: 2 }, summary: ready });
   assert.equal((await read()).counts, '+5−2', 'equal counts must still publish for a new comparison');
   await present({ comparison: { baseline: 'git-head', generation: 3 }, summary: pending });
-  assert.equal((await read()).counts, 'Calculating…', 'refreshing the selected baseline must also retire old counts');
+  assert.equal((await read()).counts, 'No Changes', 'refreshing the selected baseline must also retire old counts');
   await present({ summary: ready });
   await present({ summary: { status: 'unavailable', added: 0, deleted: 0, reason: 'timeout' } });
   assert.equal((await read()).counts, 'Unable to Compare');
   await present({ summary: pending });
-  assert.equal((await read()).counts, 'Calculating…', 'failure must discard the display cache');
+  assert.equal((await read()).counts, 'No Changes', 'failure must discard the display cache');
   await present({ markersVisible: false });
   assert.equal((await read()).counts, 'No comparison');
   await present({ markersVisible: true, summary: ready, baseline: 'manual',
     comparison: { baseline: 'manual', generation: 4 }, manualSnapshot: { exists: true, updatedAt: 1000 } });
   assert.equal((await read()).counts, '+5−2');
   await present({ manualSnapshot: { exists: true, updatedAt: 2000 } });
-  assert.equal((await read()).counts, 'Calculating…', 'updated snapshots wait for their matching comparison');
+  assert.equal((await read()).counts, 'No Changes', 'updated snapshots must not reuse an older comparison');
   await present({ comparison: { baseline: 'manual', generation: 5 }, summary: ready });
   assert.equal((await read()).counts, '+5−2');
   await present({ summary: pending });
@@ -110,7 +109,7 @@ async function assertPendingPresentation(page: Page): Promise<void> {
     return document.getElementById('pending-probe')!.innerHTML;
   });
   await new Promise(resolve => setTimeout(resolve, 550));
-  assert.equal(await page.$eval('#pending-probe', element => element.innerHTML), disposed, 'destroy must cancel delayed rendering');
+  assert.equal(await page.$eval('#pending-probe', element => element.innerHTML), disposed, 'destroyed menus must remain untouched');
   await page.evaluate(() => document.getElementById('pending-probe')!.remove());
 }
 
@@ -122,7 +121,7 @@ async function assertTypingPresentation(browser: Browser, mode: 'source' | 'live
     await page.addStyleTag({ content: 'html,body,#app{height:100%;margin:0}' });
     await page.addStyleTag({ path: path.join(repoRoot, 'webview/src/styles.css') });
     await page.addScriptTag({ content: 'window.acquireVsCodeApi=()=>({postMessage(){},getState(){},setState(){}})' });
-    await installGitDiffWorker(page, 850);
+    await installGitDiffWorker(page, 1100);
     await page.evaluate(() => {
       const scope = window as any, NativeWorker = window.Worker;
       scope.__diffRequests = 0;
@@ -169,19 +168,24 @@ async function assertTypingPresentation(browser: Browser, mode: 'source' | 'live
         const trigger = document.querySelector<HTMLElement>('.changes-review-trigger')!;
         const rect = trigger.getBoundingClientRect();
         scope.__summaryFrames.push({ counts: trigger.querySelector('.changes-review-counts')!.textContent,
-          busy: trigger.getAttribute('aria-busy'), left: rect.left, top: rect.top, width: rect.width });
+          status: scope.__viewportTestGitDiffSummary().status,
+          processHints: document.querySelectorAll('.changes-review-updating, .changes-review-header-status, .changes-review-trigger[aria-busy]').length,
+          left: rect.left, top: rect.top, width: rect.width });
         if (scope.__sampleSummary) requestAnimationFrame(sample);
       };
       sample();
     });
-    await page.keyboard.type('x');
-    assert.equal(await page.evaluate(() => (window as any).__viewportTestText()), text.replace('plain', 'plainx'),
+    await page.keyboard.type('xyz', { delay: 50 });
+    assert.equal(await page.evaluate(() => (window as any).__viewportTestText()), text.replace('plain', 'plainxyz'),
       `${mode}/${large}: the native typing gesture must reach the second line`);
     if (large) {
-      await page.waitForFunction(() => document.querySelector('.changes-review-trigger')?.getAttribute('aria-busy') === 'true');
+      await page.waitForFunction(() => (window as any).__viewportTestGitDiffSummary().status === 'pending');
       assert.equal(await page.$eval('.changes-review-counts', element => element.textContent), '+1−1');
       await page.click('.changes-review-trigger');
-      await page.waitForSelector('.changes-review-updating.is-visible');
+      await new Promise(resolve => setTimeout(resolve, 650));
+      assert.equal(await page.evaluate(() => (window as any).__viewportTestGitDiffSummary().status), 'pending',
+        'the screenshot must observe a real slow comparison');
+      assert.equal(await page.$eval('.changes-review-counts', element => element.textContent), '+1−1');
       if (process.env.MEO_TEST_SCREENSHOTS) {
         fs.mkdirSync(process.env.MEO_TEST_SCREENSHOTS, { recursive: true });
         await page.screenshot({ path: path.join(process.env.MEO_TEST_SCREENSHOTS, `${mode}-pending.png`) });
@@ -192,10 +196,13 @@ async function assertTypingPresentation(browser: Browser, mode: 'source' | 'live
       const scope = window as any; scope.__sampleSummary = false;
       return { frames: scope.__summaryFrames, requests: scope.__diffRequests, text: scope.__viewportTestText() };
     });
-    assert.equal(observed.text, text.replace('plain', 'plainx'), `${mode}/${large}: typing must preserve document contents`);
+    assert.equal(observed.text, text.replace('plain', 'plainxyz'), `${mode}/${large}: typing must preserve document contents`);
     assert.equal(observed.requests > 0, large, `${mode}/${large}: only the optimized path uses the real diff Worker`);
     assert.ok(observed.frames.every((frame: any) => ['+1−1', '+2−2'].includes(frame.counts)),
       `${mode}/${large}: every input frame must retain valid counts: ${JSON.stringify(observed.frames)}`);
+    assert.ok(observed.frames.every((frame: any) => frame.processHints === 0), `${mode}/${large}: all input frames stay silent`);
+    assert.equal(observed.frames.some((frame: any) => frame.status === 'pending') || !large, true,
+      `${mode}/${large}: the optimized case must observe unfinished background work`);
     const first = observed.frames[0];
     assert.ok(observed.frames.every((frame: any) => ['left', 'top', 'width'].every(key => Math.abs(frame[key] - first[key]) < 0.5)),
       `${mode}/${large}: pending feedback must preserve toolbar geometry`);

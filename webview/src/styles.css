@@ -1519,24 +1519,6 @@ html[data-editor-appearance='dark'] .preview-preset-dropdown-panel {
   color: var(--meo-ui-text-muted, var(--meo-ui-text));
 }
 
-.changes-review-updating {
-  flex: 0 0 8px;
-  width: 8px;
-  visibility: hidden;
-  color: var(--meo-ui-text-muted, var(--meo-ui-text));
-}
-
-.changes-review-updating.is-visible {
-  visibility: visible;
-}
-
-.changes-review-header-status {
-  display: block;
-  white-space: normal;
-  font-size: 11px;
-  color: var(--meo-ui-text-muted, var(--meo-ui-text));
-}
-
 .changes-review-panel {
   position: absolute;
   top: calc(100% + 8px);
