@@ -2,12 +2,13 @@ import { EditorSelection, Transaction, type EditorState } from '@codemirror/stat
 import type { EditorView } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import { getCodeBlockSourceLines, parseBlockLinePrefix } from './blockIndent';
-import { getFencedCodeInfo, resolvedSyntaxTreeAt } from './markdownSyntax';
+import { getFencedCodeInfo, currentSyntaxTree } from './markdownSyntax';
 import { insertLiteralSourceNewline } from '../editor/indentedCodeEditing';
 
 export function mermaidSourceAt(state: EditorState, position = state.selection.main.head) {
   const line = state.doc.lineAt(Math.max(0, Math.min(position, state.doc.length)));
-  let node: SyntaxNode | null = resolvedSyntaxTreeAt(state, line.to, 0).resolveInner(line.to, -1);
+  // Passive state-field updates also run in Source; do not advance its parser.
+  let node: SyntaxNode | null = currentSyntaxTree(state).resolveInner(line.to, -1);
   for (; node; node = node.parent) {
     if (node.name !== 'FencedCode') continue;
     if (getFencedCodeInfo(state, { node }) !== 'mermaid') return null;
