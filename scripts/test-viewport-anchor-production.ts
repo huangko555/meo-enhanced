@@ -108,6 +108,14 @@ async function main(): Promise<void> {
             import { createEditor as createRealEditor } from ${JSON.stringify(editorModulePath)};
             export function createEditor(options: Parameters<typeof createRealEditor>[0]) {
               const editor = createRealEditor(options);
+              const prepareLiveSyntax = editor.prepareLiveSyntax.bind(editor);
+              editor.prepareLiveSyntax = async (...args: Parameters<typeof prepareLiveSyntax>) => {
+                if ((window as any).__holdAnchorLivePreparation) {
+                  (window as any).__holdAnchorLivePreparation = false;
+                  await new Promise<void>(resolve => { (window as any).__releaseAnchorLivePreparation = resolve; });
+                }
+                return prepareLiveSyntax(...args);
+              };
               let foreignEditor: ReturnType<typeof createRealEditor> | null = null;
               (window as any).__viewportAnchorTransaction = {
                 editor,
@@ -467,8 +475,27 @@ async function main(): Promise<void> {
       if (!paragraph) throw new Error('Reading band must intersect a fixture paragraph');
       return { documentPosition: Number(paragraph.dataset.sourceLine), viewportOffset };
     });
+    // Mode intent precedes the atomic interactive reveal. Prove that distinction
+    // with pending preparation, then sample the accepted editor surface.
+    await page.evaluate(() => { (window as any).__holdAnchorLivePreparation = true; });
     await page.click('[data-mode="live"]');
-    await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live');
+    await page.waitForFunction(() => typeof (window as any).__releaseAnchorLivePreparation === 'function');
+    await waitForFrames(page, 4);
+    const pendingExit = await page.evaluate(() => ({
+      mode: document.querySelector<HTMLElement>('#app')?.dataset.mode,
+      inert: document.querySelector<HTMLElement>('.editor-host')?.inert,
+      selection: window.getSelection()?.toString() ?? ''
+    }));
+    assert.equal(pendingExit.mode, 'live', 'Mode intent can be Live while preparation is pending');
+    assert.equal(pendingExit.inert, true, 'The pending editor must remain noninteractive');
+    assert.notEqual(pendingExit.selection, 'semantic anchor', 'Four frames after intent cannot establish editor selection readiness');
+    await page.evaluate(() => { (window as any).__releaseAnchorLivePreparation(); });
+    await page.waitForFunction(() => {
+      const host = document.querySelector<HTMLElement>('.editor-host');
+      return document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live'
+        && host && !host.hidden && !host.inert && !host.hasAttribute('data-preview-cover')
+        && !document.querySelector('[data-mode][aria-busy="true"]');
+    });
     await waitForFrames(page, 4);
     const previewExitLine = previewExitAnchor.documentPosition;
     assert.ok(

@@ -23,7 +23,7 @@ async function main(): Promise<void> {
     await page.setViewport({ width: 900, height: 600, deviceScaleFactor: 1 });
     await page.setContent(`<!doctype html><style>
       #root { position: relative; width: 800px; height: 500px; }
-      #editor-wrapper { position: relative; width: 100%; height: 440px; }
+      #editor-wrapper { position: relative; inset: auto; width: 100%; height: 440px; }
       #preview-frame { width: 100%; height: 100%; }
     </style><body>
       <main id="root" class="editor-root">
@@ -59,6 +59,10 @@ async function main(): Promise<void> {
       outline.setMode('floating');
       outline.setVisible(true);
       (window as any).__outline = outline;
+      (window as any).__outsidePresses = 0;
+      document.getElementById('outside')!.addEventListener('pointerdown', event => {
+        if (event.isTrusted) (window as any).__outsidePresses++;
+      });
     });
 
     for (const [language, label] of [['zh-CN', '拖动调整目录宽度'], ['en', 'Drag to resize outline']]) {
@@ -112,6 +116,8 @@ async function main(): Promise<void> {
 
     await page.evaluate(() => (window as any).__outline.setVisible(true));
     await page.click('#outside');
+    assert.equal(await page.evaluate(() => (window as any).__outsidePresses), 1,
+      'the outside click must reach its button rather than an overlapping iframe');
     assert.equal(await page.evaluate(() => (window as any).__outline.isVisible()), false,
       'floating outline remained visible after an outside click');
 

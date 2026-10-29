@@ -1,5 +1,5 @@
 import { enterMermaidSource, findMermaidOpening } from './history-mermaid-chromium';
-import { enterDisplayMathSource, findDisplayMathOpening, readDisplayMathHistoryTarget } from './history-display-math-chromium';
+import { displayMathSourceBounds, enterDisplayMathSource, findDisplayMathOpening, readDisplayMathHistoryTarget } from './history-display-math-chromium';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -354,10 +354,27 @@ async function main() {
     }
 
     await pressHistoryShortcut(page, 'y');
-    const afterMathRedo = await readDisplayMathHistoryTarget(page, '__mixedHistoryEditor',
-      await findDisplayMathOpening(page, '__mixedHistoryEditor', 'x = 1'));
-    if (afterMathRedo.source.includes('y = 2') !== true || !afterMathRedo.focused || !afterMathRedo.caretAtEnd || !afterMathRedo.visible || !afterMathRedo.resultPresent)
+    const mathRedoOpening = await findDisplayMathOpening(page, '__mixedHistoryEditor', 'x = 1');
+    const afterMathRedo = await readDisplayMathHistoryTarget(page, '__mixedHistoryEditor', mathRedoOpening);
+    if (afterMathRedo.source.includes('y = 2') !== true || !afterMathRedo.focused || !afterMathRedo.caretAtEnd || !afterMathRedo.visible)
       throw new Error(`Mixed formula history missed its document target: ${JSON.stringify(afterMathRedo)}`);
+    if (!afterMathRedo.resultPresent) {
+      const bounds = await displayMathSourceBounds(page, '__mixedHistoryEditor', mathRedoOpening);
+      const reading = await page.evaluate(closing => {
+        const view = (window as any).__mixedHistoryEditor.view;
+        const rect = view.scrollDOM.getBoundingClientRect();
+        return { outside: view.viewport.to < Math.min(view.state.doc.length, closing + 1),
+          x: rect.left + 5, y: rect.top + rect.height / 2 };
+      }, bounds.closing);
+      if (!reading.outside) throw new Error('Mixed formula result is missing inside the mounted viewport');
+      // Preserve the history caret, then reveal the virtualized result with a real reading gesture.
+      await page.mouse.move(reading.x, reading.y);
+      await page.mouse.wheel({ deltaY: 180 });
+      await waitForFrames(page);
+      const revealed = await readDisplayMathHistoryTarget(page, '__mixedHistoryEditor', mathRedoOpening);
+      if (!revealed.resultPresent || revealed.source !== afterMathRedo.source || !revealed.focused || !revealed.caretAtEnd || !revealed.visible)
+        throw new Error(`Mixed formula result did not mount without changing its history target: ${JSON.stringify(revealed)}`);
+    }
 
     await pressHistoryShortcut(page, 'y');
     const afterTailRedo = await readOuterLineFocus('TAIL_TARGET');

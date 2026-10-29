@@ -776,6 +776,12 @@ the gesture and attempts release even when the press receipt times out. A CDP ev
 receipt is browser-protocol evidence; it is not evidence of a physical Windows key
 or OS pointer, and this attachment check does not prove installed-package integrity.
 
+For installed pointer checks, establish a visible owned Workbench and activate its
+page before input. A hidden launch can acknowledge a press while delivering only
+move/release to the document. Confirm actual trusted down/up receipts and the
+resulting editor state; changing to a visible active instance is a driver contrast,
+not proof of physical Windows input.
+
 For every release, assess the changes since the last published version and choose
 the environment before starting setup. The agent owns this choice; the user does
 not need to request a VM assessment. Preserve final installed-VSIX and applicable

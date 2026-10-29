@@ -122,7 +122,12 @@ try {
       }
       if (view === 'preview' || view === 'source+preview') {
         await page.waitForFunction(() => !document.querySelector<HTMLElement>('.preview-host')!.inert
-          && getComputedStyle(document.querySelector('.preview-host')!).visibility !== 'hidden');
+          && getComputedStyle(document.querySelector('.preview-host')!).visibility !== 'hidden'
+          && document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.documentElement.inert === false
+          && !document.querySelector('.editor-surface')!.hasAttribute('data-source-preview-preparing')
+          && (document.querySelector<HTMLElement>('.editor-root')!.dataset.mode !== 'preview'
+            || document.querySelector<HTMLElement>('.editor-host')!.hidden
+              && !document.querySelector('.editor-host')!.hasAttribute('data-preview-cover')));
       }
       for (const position of ['left', 'right'] as const) {
         for (const outlineMode of ['fixed', 'floating'] as const) {
@@ -169,6 +174,7 @@ try {
       const editor = document.querySelector<HTMLElement>('.editor-host')!;
       return root.dataset.mode === mode && (mode === 'preview'
         ? editor.hidden && !editor.hasAttribute('data-preview-cover')
+          && document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.documentElement.inert === false
         : !editor.hidden && !editor.inert && !document.querySelector('.editor-surface')!.hasAttribute('data-source-preview-preparing'));
     }, {}, mode);
     const switchMode = async (mode: 'source' | 'preview') => {

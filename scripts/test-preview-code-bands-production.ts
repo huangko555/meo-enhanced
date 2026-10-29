@@ -41,9 +41,17 @@ try {
     await page.waitForFunction(() => typeof (window as any).__copiedCode === 'string');
     assert.equal(await page.evaluate(() => (window as any).__copiedCode), source);
     stage = 'deep search';
+    await page.waitForFunction(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
+      return frame?.contentDocument?.documentElement.inert === false
+        && !document.querySelector<HTMLElement>('.preview-host')?.hidden;
+    });
     await page.click('[data-action="find"]');
     await page.waitForSelector('.find-panel.is-visible');
-    await page.focus('.find-input'); await page.keyboard.type('row9000'); await page.keyboard.press('Enter');
+    await page.focus('.find-input'); await page.keyboard.type('row9000');
+    assert.equal(await page.$eval<HTMLInputElement, string>('.find-input', input => input.value), 'row9000',
+      'The first trusted search input must reach the ready surface without retransmission');
+    await page.keyboard.press('Enter');
     await page.waitForFunction(() => {
       const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
       const match = doc.querySelector('.meo-preview-search-match.is-active'), rect = match?.getBoundingClientRect();
@@ -135,6 +143,18 @@ try {
     assert.ok((await state()).visible.some(text => text?.includes('row17999')), 'Bottom navigation reaches the final authored line');
     assert.deepEqual(host.errors, []);
     console.log('Production giant Preview code: bounded DOM, full copy, deep search, cross-band grammar, edit refresh, resize and bottom navigation passed');
+  } catch (error) {
+    console.error('Code band failure state:', await page.evaluate(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+      const match = doc?.querySelector('.meo-preview-search-match.is-active');
+      const rect = match?.getBoundingClientRect();
+      return { mode: document.querySelector<HTMLElement>('#app')?.dataset.mode,
+        query: document.querySelector<HTMLInputElement>('.find-input')?.value,
+        previewInert: doc?.documentElement.inert, match: match?.textContent,
+        matchRect: rect && { top: rect.top, bottom: rect.bottom },
+        rows: doc?.querySelectorAll('.meo-export-code-line-source').length };
+    }).catch(() => ({ unavailable: true })));
+    throw error;
   } finally { host.dispose(); await page.close(); }
 } catch (error) { console.error('Failed stage:', stage); primary = error; throw error; }
 finally { server.stop(true); if (primary === undefined) await closeTestBrowser(browser); else await closeTestBrowser(browser, primary); }

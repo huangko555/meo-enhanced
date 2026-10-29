@@ -47,6 +47,7 @@ try {
     const api = (window as any).__linkStatusBudget;
     return api?.local.getLocalLinkStatus('sample.md') === true && api.wiki.getWikiLinkStatus('Sample') === true;
   });
+  await page.waitForFunction(() => !document.querySelector('.meo-preload-toolbar'));
   const request = async (kind: 'local' | 'wiki', content = text) => {
     const responses = await page.evaluate(({ kind, content }) => {
       const scope = window as any;
