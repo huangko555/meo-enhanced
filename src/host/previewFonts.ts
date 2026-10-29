@@ -37,7 +37,6 @@ export function createPreviewFonts(read: () => Promise<readonly PreviewFont[]>, 
   let pending: Promise<readonly PreviewFont[]> | undefined;
   let refreshRequested = false;
   return {
-    resourceRoot: files.resourceRoot,
     read(refresh = false): Promise<readonly PreviewFont[]> {
       refreshRequested ||= refresh;
       if (pending) return pending;

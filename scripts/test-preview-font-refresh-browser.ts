@@ -28,12 +28,12 @@ for (const [index, font] of fontBuffers.entries()) {
   offset += (font.length + 3) & ~3;
 }
 const collectionPath = join(directory, 'fixture.ttc'); writeFileSync(collectionPath, collection);
-const resources = new Map<string, string>();
+const resources = new Map<string, Uint8Array>();
 const server = Bun.serve({ port: 0, async fetch(request) {
-  const path = resources.get(new URL(request.url).pathname);
-  if (!path) return new Response(null, { status: 404 });
+  const bytes = resources.get(new URL(request.url).pathname);
+  if (!bytes) return new Response(null, { status: 404 });
   await new Promise(resolve => setTimeout(resolve, 700));
-  return new Response(Bun.file(path), { headers: { 'Content-Type': 'font/ttf', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' } });
+  return new Response(bytes, { headers: { 'Content-Type': 'font/ttf', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' } });
 } });
 let browser: Awaited<ReturnType<typeof launchTestBrowser>> | undefined;
 try {
@@ -72,12 +72,14 @@ try {
           const document = createPreviewDocument(message.requestId, options); documents.set(message.requestId, document);
           return document.open(message.window.anchorLine);
         })() : exportRuntime.renderPreviewDocument(options);
-        const styles = await catalog.styles([message.environment.previewFontFamily, message.environment.previewCodeFontFamily ?? ''],
-          path => {
-            let key = [...resources].find(([, value]) => value === path)?.[0];
-            if (!key) { key = `/font-${resources.size}.ttf`; resources.set(key, path); }
-            return `http://localhost:${server.port}${key}`;
-          });
+        const embeddedStyles = await catalog.styles([message.environment.previewFontFamily, message.environment.previewCodeFontFamily ?? '']);
+        // Keep the deliberately late font-completion contrast. The installed
+        // acceptance separately exercises the production data URLs inside VS Code.
+        const styles = embeddedStyles.replace(/url\("(data:font\/[^;]+;base64,[^"]+)"\)/g, (_, source: string) => {
+          const uri = new URL(source), key = `/font-${resources.size}.ttf`;
+          resources.set(key, Buffer.from(uri.pathname.split(',')[1], 'base64'));
+          return `url("http://localhost:${server.port}${key}${uri.hash}")`;
+        });
         return { type: 'previewRenderResult', requestId: message.requestId, result: { ok: true,
           value: { ...value, styles: { light: value.styles.light + styles, dark: value.styles.dark + styles } } } };
       });

@@ -1,9 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, copyFile, readFile, writeFile, rm } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
-import { tmpdir } from 'node:os';
-import { join, extname } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { extname } from 'node:path';
 import { normalizePreviewFontFamily } from '../foundation/previewFontFamily';
 
 export type PreviewFontFile = Readonly<{ path: string; weight: number; style: 'normal' | 'italic' | 'oblique'; stretch: number }>;
@@ -97,13 +95,10 @@ function collectionFace(data: Buffer, family: string, face: PreviewFontFile): Bu
 
 /** Only explicit refresh enables file sources; normal startup keeps native font loading. */
 export function createPreviewFontFiles(read: (family: string) => Promise<readonly PreviewFontFile[]> = readSystemPreviewFontFiles) {
-  const resourceRoot = join(tmpdir(), `meo-preview-fonts-${randomUUID()}`);
   let enabled = false, disposed = false;
   let revision = 0;
-  let directory: Promise<string> | undefined;
-  let nextFile = 0;
-  const pending = new Map<string, Promise<readonly PreviewFontFile[]>>();
-  const work = new Set<Promise<readonly PreviewFontFile[]>>();
+  type EmbeddedFace = PreviewFontFile & { source: string };
+  const pending = new Map<string, Promise<readonly EmbeddedFace[]>>();
   const stretchValues = [50, 62.5, 75, 87.5, 100, 112.5, 125, 150, 200];
   const resolve = (family: string) => {
     let result = pending.get(family);
@@ -112,12 +107,12 @@ export function createPreviewFontFiles(read: (family: string) => Promise<readonl
         const unique = [...new Map(faces.map(face => [JSON.stringify(face), face])).values()];
         const resolved = await Promise.allSettled(unique.map(async face => {
           const collection = ['.ttc', '.otc'].includes(extname(face.path).toLowerCase());
-          directory ??= mkdir(resourceRoot).then(() => resourceRoot);
-          const path = join(await directory, `${++nextFile}${collection ? '.ttf' : extname(face.path)}`);
-          if (disposed) throw new Error('Preview fonts disposed');
-          if (collection) await writeFile(path, collectionFace(await readFile(face.path), family, face));
-          else await copyFile(face.path, path);
-          return { ...face, path };
+          const data = await readFile(face.path);
+          const bytes = collection ? collectionFace(data, family, face) : data;
+          const format = collection || extname(face.path).toLowerCase() === '.ttf' ? 'ttf' : 'otf';
+          // A srcdoc Preview has no VS Code resource-client id. Its font requests
+          // cannot use asWebviewUri, even when the same URL loads in the parent.
+          return { ...face, source: `data:font/${format};base64,${bytes.toString('base64')}` };
         }));
         return resolved.map(result => {
           if (result.status === 'rejected') throw result.reason;
@@ -125,31 +120,24 @@ export function createPreviewFontFiles(read: (family: string) => Promise<readonl
         });
       }).catch(() => []);
       pending.set(family, result);
-      work.add(result);
-      void result.finally(() => work.delete(result!));
     }
     return result;
   };
   return {
-    resourceRoot,
     refresh() { enabled = true; revision++; pending.clear(); },
-    async styles(families: readonly string[], resourceUrl: (path: string) => string): Promise<string> {
+    async styles(families: readonly string[]): Promise<string> {
       if (!enabled || disposed) return '';
       const sourceRevision = revision;
       const values = [...new Set(families.map(normalizePreviewFontFamily).filter((family): family is string => Boolean(family)))];
       return (await Promise.all(values.map(async family => (await resolve(family)).map(face => {
         if (disposed) return '';
-        const url = new URL(resourceUrl(face.path));
-        if (url.protocol !== 'data:') url.searchParams.set('meo-font-refresh', String(sourceRevision));
-        return `@font-face{font-family:${JSON.stringify(family)};src:url(${JSON.stringify(url.toString())});font-display:swap;font-weight:${face.weight};font-style:${face.style};font-stretch:${stretchValues[face.stretch - 1]}%;}`;
+        const source = `${face.source}#meo-font-refresh=${sourceRevision}`;
+        return `@font-face{font-family:${JSON.stringify(family)};src:url(${JSON.stringify(source)});font-display:swap;font-weight:${face.weight};font-style:${face.style};font-stretch:${stretchValues[face.stretch - 1]}%;}`;
       }).join('\n')))).join('\n');
     },
-    async dispose() {
+    dispose() {
       disposed = true;
-      await Promise.allSettled(work);
       pending.clear();
-      const path = await directory?.catch(() => undefined);
-      if (path) await rm(path, { recursive: true, force: true });
     }
   };
 }

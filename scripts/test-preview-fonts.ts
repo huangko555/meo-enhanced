@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
-import { join, relative, isAbsolute } from 'node:path';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mergePreviewFonts, decodePreviewFonts } from '../src/foundation/previewFonts';
 import { createAppearanceSettingsOwner } from '../src/host/appearanceSettings';
@@ -53,47 +53,39 @@ const fileCatalog = createPreviewFonts(async () => { if (enumerationFails) throw
   if (fileReadFails) throw new Error('Font file unavailable');
   return [{ path: sourceFont, weight: 700, style: 'italic', stretch: 5 }];
 });
-const approvedRoot = fileCatalog.resourceRoot;
-assert.equal(existsSync(approvedRoot), false, 'Declaring the stable font resource root must not create startup files');
-const cachedFiles = new Set<string>();
-const fileUrl = (file: string) => {
-  const path = relative(approvedRoot, file);
-  assert.ok(path && !path.startsWith('..') && !isAbsolute(path), 'Every refreshed font uses the initially approved root');
-  assert.deepEqual(readFileSync(file), fontBytes, 'The permitted font copy retains exact source bytes');
-  cachedFiles.add(file);
-  return 'https://example.invalid/font.ttf';
-};
-assert.equal(await fileCatalog.styles(['Example Sans'], fileUrl), '', 'Normal startup keeps native fonts without reading files');
+assert.equal(await fileCatalog.styles(['Example Sans']), '', 'Normal startup keeps native fonts without reading files');
 await fileCatalog.read();
-assert.equal(await fileCatalog.styles(['Example Sans'], fileUrl), '');
+assert.equal(await fileCatalog.styles(['Example Sans']), '');
 assert.equal(fileReads, 0);
 await fileCatalog.read(true);
 const [firstStyles, concurrentStyles] = await Promise.all([
-  fileCatalog.styles(['Example Sans', 'Example Sans', 'Bad; family', ''], fileUrl), fileCatalog.styles(['Example Sans'], fileUrl)
+  fileCatalog.styles(['Example Sans', 'Example Sans', 'Bad; family', '']), fileCatalog.styles(['Example Sans'])
 ]);
 assert.equal(fileReads, 1, 'Panels and body/code choices share one file resolution per family');
 assert.equal(firstStyles, concurrentStyles);
 assert.match(firstStyles, /font-weight:700;font-style:italic;font-stretch:100%/);
 assert.match(firstStyles, /font-display:swap/);
 assert.match(firstStyles, /meo-font-refresh=1/);
+const embeddedSource = new URL(JSON.parse(/src:url\(("[^"]+")\)/.exec(firstStyles)![1]));
+assert.equal(embeddedSource.protocol, 'data:', 'Nested srcdoc Preview cannot resolve VS Code resource URLs');
+assert.deepEqual(Buffer.from(embeddedSource.pathname.split(',')[1], 'base64'), fontBytes, 'Inline font bytes must match the selected installed source');
 enumerationFails = true; await assert.rejects(fileCatalog.read(true));
-assert.equal(await fileCatalog.styles(['Example Sans'], fileUrl), firstStyles, 'A failed refresh retains working font sources');
+assert.equal(await fileCatalog.styles(['Example Sans']), firstStyles, 'A failed refresh retains working font sources');
 enumerationFails = false; await fileCatalog.read(true);
-assert.match(await fileCatalog.styles(['Example Sans'], fileUrl), /meo-font-refresh=2/, 'Refresh invalidates file metadata and browser resource caches');
+assert.match(await fileCatalog.styles(['Example Sans']), /meo-font-refresh=2/, 'Refresh invalidates file metadata and browser resource caches');
 assert.equal(fileReads, 2);
-assert.equal(cachedFiles.size, 2, 'Refresh creates a new font source without changing the approved root');
+assert.notEqual(await fileCatalog.styles(['Example Sans']), firstStyles, 'An explicit refresh changes the font source identity');
 fileReadFails = true; await fileCatalog.read(true);
-assert.equal(await fileCatalog.styles(['Example Sans'], fileUrl), '');
-assert.equal(await fileCatalog.styles(['Example Sans'], fileUrl), '');
+assert.equal(await fileCatalog.styles(['Example Sans']), '');
+assert.equal(await fileCatalog.styles(['Example Sans']), '');
 assert.equal(fileReads, 3, 'A failed file resolution must not repeat filesystem work on every render');
 fileReadFails = false; await fileCatalog.read(true);
-assert.match(await fileCatalog.styles(['Example Sans'], fileUrl), /meo-font-refresh=4/, 'Explicit refresh retries unavailable font files');
+assert.match(await fileCatalog.styles(['Example Sans']), /meo-font-refresh=4/, 'Explicit refresh retries unavailable font files');
 assert.equal(fileReads, 4);
 await fileCatalog.dispose();
-assert.equal(existsSync(approvedRoot), false, 'Disposal removes only the owned font resource directory');
 assert.deepEqual(readFileSync(sourceFont), fontBytes, 'Disposal must preserve installed source fonts');
 rmSync(fixtureDirectory, { recursive: true, force: true });
-assert.equal(await fileCatalog.styles(['Example Sans'], fileUrl), '', 'Disposed catalogs cannot publish font resources');
+assert.equal(await fileCatalog.styles(['Example Sans']), '', 'Disposed catalogs cannot publish font resources');
 if (process.platform === 'win32') {
   assert.ok((await readSystemPreviewFontFiles('Arial')).length > 0, 'Windows file discovery resolves a real installed family');
   assert.deepEqual(await readSystemPreviewFontFiles('MEO Missing Font 923689'), [], 'A missing family must not expose fallback font files');
