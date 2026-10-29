@@ -82,6 +82,12 @@ assert.equal(fileReads, 3, 'A failed file resolution must not repeat filesystem 
 fileReadFails = false; await fileCatalog.read(true);
 assert.match(await fileCatalog.styles(['Example Sans']), /meo-font-refresh=4/, 'Explicit refresh retries unavailable font files');
 assert.equal(fileReads, 4);
+for (let index = 0; index < 5; index++) await fileCatalog.styles([`Comparison ${index}`]);
+assert.equal(fileReads, 9);
+await fileCatalog.styles(['Comparison 4']);
+assert.equal(fileReads, 9, 'The recent font comparison stays cached');
+await fileCatalog.styles(['Example Sans']);
+assert.equal(fileReads, 10, 'Comparing many fonts evicts old embedded bytes instead of retaining every family');
 await fileCatalog.dispose();
 assert.deepEqual(readFileSync(sourceFont), fontBytes, 'Disposal must preserve installed source fonts');
 rmSync(fixtureDirectory, { recursive: true, force: true });

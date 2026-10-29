@@ -99,6 +99,8 @@ export function createPreviewFontFiles(read: (family: string) => Promise<readonl
   let revision = 0;
   type EmbeddedFace = PreviewFontFile & { source: string };
   const pending = new Map<string, Promise<readonly EmbeddedFace[]>>();
+  // Body/code choices plus a small recent comparison set; font bytes are large.
+  const cachedFamilyLimit = 4;
   const stretchValues = [50, 62.5, 75, 87.5, 100, 112.5, 125, 150, 200];
   const resolve = (family: string) => {
     let result = pending.get(family);
@@ -119,8 +121,10 @@ export function createPreviewFontFiles(read: (family: string) => Promise<readonl
           return result.value;
         });
       }).catch(() => []);
-      pending.set(family, result);
     }
+    pending.delete(family);
+    pending.set(family, result);
+    if (pending.size > cachedFamilyLimit) pending.delete(pending.keys().next().value!);
     return result;
   };
   return {

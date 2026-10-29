@@ -103,6 +103,7 @@ try {
         const host = document.querySelector<HTMLElement>('.preview-host');
         return host && !host.hidden && !host.inert && !host.querySelector<HTMLElement>('.preview-loading:not([hidden])');
       });
+      await page.waitForFunction(() => !document.querySelector('.meo-preload-toolbar'));
       if (split) {
         await page.click('button[data-mode="source"]');
         await page.waitForFunction(() => document.querySelector<HTMLElement>('.editor-root')?.dataset.mode === 'source');
