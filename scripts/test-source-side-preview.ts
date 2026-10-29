@@ -388,9 +388,99 @@ async function assertScrollContinuityAndAlignment(page: import('puppeteer-core')
   }
 }
 
-async function assertFootnoteLinkedScroll(page: import('puppeteer-core').Page, bundle: string, windowed: boolean): Promise<void> {
-  const label = windowed ? 'windowed footnotes' : 'ordinary footnotes';
-  const text = '# Footnote sync\n\nEarly reference[^note] and another[^other].\n\n'
+function collapsedScrollText(windowed: boolean, nested = false): string {
+  return '# Collapsed reading\n\nReference[^note].\n\n'
+    + Array.from({ length: 12 }, (_, index) => `Before ${index}: ordinary reading context.\n\n`).join('')
+    + (nested ? '<details open>\n<summary>Outer disclosure</summary>\n' : '')
+    + '<details>\n<summary>Supplement</summary>\n\nHidden paragraph.\n\n- First hidden item.\n- Second hidden item.\n\n'
+    + '```text\nhidden code\n```\n\n</details>\n' + (nested ? '</details>\n' : '')
+    + '\n[^note]: Relocated note.\n\nAfter disclosure.\n\n'
+    + '## Following chapter\n\n'
+    + Array.from({ length: windowed ? 1500 : 30 }, (_, index) => `After ${index}: `
+      + 'Ordinary wrapped reading context for the linked preview. '.repeat(4) + '\n\n').join('');
+}
+
+async function assertCollapsedSourceScroll(page: import('puppeteer-core').Page, windowed: boolean, text: string): Promise<void> {
+  assert.equal(assessLargeDocument(text).windowedPreview, windowed);
+  await page.waitForFunction(() => document.querySelector('.cm-content')?.textContent?.includes('Collapsed reading')
+    && document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('h1')?.textContent === 'Collapsed reading'
+    && document.querySelector<HTMLElement>('.preview-loading')?.hidden);
+  assert.equal(await page.$eval('.preview-frame', element => Boolean((element as HTMLIFrameElement).contentDocument!
+    .querySelector('[data-meo-preview-block]'))), windowed, 'The disclosure scenario uses the actual ordinary/windowed path');
+  if (await page.$eval('.source-preview-scroll-sync-button', button => button.getAttribute('aria-pressed')) !== 'true')
+    await page.click('.source-preview-scroll-sync-button');
+  const targetLine = text.split('\n').findIndex(line => line.startsWith('After 3:')) + 1;
+  const bounds = await page.$eval('.editor-host .cm-scroller', element => {
+    const r = element.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  await page.mouse.move(bounds.x, bounds.y);
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const delta = await page.evaluate(line => {
+      const view = (document.querySelector('.cm-content') as any).cmTile.root.view;
+      return view.lineBlockAt(view.state.doc.line(line).from).top - view.scrollDOM.scrollTop;
+    }, targetLine);
+    if (attempt === 0) await page.$eval('.cm-scroller', (element, delta) => { element.scrollTop += delta; }, delta);
+    else if (Math.abs(delta) > 2) await page.mouse.wheel({ deltaY: delta });
+    await page.evaluate(async () => { for (let n = 0; n < 12; n++) await new Promise(requestAnimationFrame); });
+  }
+  await page.mouse.wheel({ deltaY: 1 });
+  await page.evaluate(async () => { for (let n = 0; n < 12; n++) await new Promise(requestAnimationFrame); });
+  // Highlighting or an earlier geometry read can lay out a closed disclosure's
+  // suppressed body. Chromium's nonzero rectangles still are not painted boxes.
+  await page.evaluate(() => {
+    const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    for (const element of doc.querySelectorAll('details:not([open]) [data-source-line]')) element.getBoundingClientRect();
+  });
+  const before = await page.$eval('.cm-content', element => {
+    const view = (element as any).cmTile.root.view;
+    return { text: view.state.doc.toString(), selection: view.state.selection.toJSON() };
+  });
+  for (const direction of [-1, 1]) {
+    await page.evaluate(direction => {
+      const probe = (window as any).__disclosureScroll = { active: true, samples: [], previous: new Map() };
+      const sample = () => {
+        if (!probe.active) return;
+        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+        const witnesses = [...doc.querySelectorAll<HTMLElement>('main p[data-source-line],main h2[data-source-line]')]
+          .filter(element => !element.closest('.footnotes,details:not([open])')).map(element => {
+            const r = element.getBoundingClientRect();
+            return { key: `${element.dataset.sourceLine}:${element.textContent}`, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
+          }).filter(row => row.height > 0 && row.top > 0 && row.bottom < doc.defaultView!.innerHeight);
+        const reversals = witnesses.flatMap(row => {
+          const previous = probe.previous.get(row.key);
+          return previous && previous.width === row.width && previous.height === row.height
+            && (row.top - previous.top) * direction > 2 ? [{ before: previous.top, after: row.top }] : [];
+        });
+        probe.previous = new Map(witnesses.map(row => [row.key, row]));
+        probe.samples.push({ source: document.querySelector('.cm-scroller')!.scrollTop, witnesses: witnesses.length, reversals });
+        requestAnimationFrame(sample);
+      }; sample();
+    }, direction);
+    for (let n = 0; n < 70; n++) {
+      await page.mouse.wheel({ deltaY: direction * 16 });
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    await page.evaluate(async () => { for (let n = 0; n < 20; n++) await new Promise(requestAnimationFrame); });
+    const samples = await page.evaluate(() => {
+      const probe = (window as any).__disclosureScroll; probe.active = false;
+      return probe.samples as Array<{ source: number; witnesses: number; reversals: unknown[] }>;
+    });
+    assert.ok((samples.at(-1)!.source - samples[0]!.source) * direction > 500, 'Source must actually cross the disclosure');
+    assert.ok(samples.filter(sample => sample.witnesses > 0).length > 30, 'Continuity checks must observe painted body text');
+    assert.deepEqual(samples.filter(sample => sample.reversals.length), [],
+      `Visible Preview text must not reverse across a collapsed region (${windowed}, ${direction})`);
+  }
+  assert.deepEqual(await page.$eval('.cm-content', element => {
+    const view = (element as any).cmTile.root.view;
+    return { text: view.state.doc.toString(), selection: view.state.selection.toJSON() };
+  }), before, 'Reading preserves the complete document and selection');
+}
+
+async function assertFootnoteLinkedScroll(page: import('puppeteer-core').Page, bundle: string, windowed: boolean,
+  disclosure?: 'single' | 'nested'): Promise<void> {
+  const collapsed = disclosure !== undefined;
+  const label = `${windowed ? 'windowed' : 'ordinary'} ${disclosure ?? 'footnotes'}`;
+  const text = collapsed ? collapsedScrollText(windowed, disclosure === 'nested') : '# Footnote sync\n\nEarly reference[^note] and another[^other].\n\n'
     + Array.from({ length: windowed ? 5_000 : 300 }, (_, index) => index === 80
       ? '## Before definition\n\nRepeated reference[^note].\n\n[^note]: Editable relocated note.\n'
         + Array.from({ length: 12 }, (_, line) => `    Continued definition ${line}.\n`).join('')
@@ -452,15 +542,15 @@ async function assertFootnoteLinkedScroll(page: import('puppeteer-core').Page, b
     await page.addStyleTag({ path: 'webview/src/styles.css' });
     await page.addScriptTag({ content: `window.__footnoteState={sourcePreviewScrollSyncEnabled:false};window.acquireVsCodeApi=()=>({getState(){return window.__footnoteState},setState(state){window.__footnoteState=state},postMessage(message){window.__footnoteHost(message).then(response=>{if(response)window.dispatchEvent(new MessageEvent('message',{data:response}))});}});` });
     await page.addScriptTag({ content: bundle });
-    await page.evaluate(text => window.dispatchEvent(new MessageEvent('message', { data: {
+    await page.evaluate(({ text, collapsed }) => window.dispatchEvent(new MessageEvent('message', { data: {
       type: 'init', documentId: 'file:///footnote-sync.md', text, version: 1, savedRevision: { version: 1, text },
       diagnostics: [], mode: 'source', uiLanguage: 'en', sourceLineNumbers: 'on', previewAppearance: 'dark',
-      previewFontFamily: '', previewSourceColoring: false, editorAppearance: 'dark', editorFontSizeMode: 'auto', editorFontSize: 14,
+      previewFontFamily: '', previewSourceColoring: collapsed, editorAppearance: 'dark', editorFontSizeMode: 'auto', editorFontSize: 14,
       gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit',
       fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, largeDocumentOptimizationEnabled: true,
       findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
       restoreReadingPositionOnOpen: false, vscodeTheme: null
-    } })), text);
+    } })), { text, collapsed });
     await page.waitForFunction(() => !document.querySelector('.meo-preload-toolbar')
       && document.querySelector<HTMLButtonElement>('.source-preview-button')?.disabled === false);
     await page.click('.source-preview-button');
@@ -469,6 +559,11 @@ async function assertFootnoteLinkedScroll(page: import('puppeteer-core').Page, b
       && getComputedStyle(document.querySelector<HTMLElement>('.preview-host')!).visibility !== 'hidden'
       && !!document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('main'));
     assert.equal(windowRequests > 0, windowed, `${label}: window request witness`);
+    if (collapsed) {
+      await assertCollapsedSourceScroll(page, windowed, text);
+      assert.deepEqual(errors, [], label);
+      return;
+    }
     if (await page.$eval('.source-preview-scroll-sync-button', button => button.getAttribute('aria-pressed')) === 'true') {
       await page.click('.source-preview-scroll-sync-button');
     }
@@ -823,7 +918,7 @@ if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
 let primaryError: unknown;
 try {
-  if (!process.argv.includes('--footnotes-only')) {
+  if (!process.argv.includes('--footnotes-only') && !process.argv.includes('--collapsed-only')) {
   const page = await browser.newPage();
   const waitForFunction = page.waitForFunction.bind(page);
   page.waitForFunction = (async (predicate: any, options: any, ...args: any[]) => {
@@ -2825,8 +2920,14 @@ try {
   await assertScrollContinuityAndAlignment(await browser.newPage(), await build.outputs[0]!.text(), false);
   await assertScrollContinuityAndAlignment(await browser.newPage(), await build.outputs[0]!.text(), true);
   }
-  await assertFootnoteLinkedScroll(await browser.newPage(), await build.outputs[0]!.text(), false);
-  await assertFootnoteLinkedScroll(await browser.newPage(), await build.outputs[0]!.text(), true);
+  if (!process.argv.includes('--collapsed-only')) {
+    await assertFootnoteLinkedScroll(await browser.newPage(), await build.outputs[0]!.text(), false);
+    await assertFootnoteLinkedScroll(await browser.newPage(), await build.outputs[0]!.text(), true);
+  }
+  for (const disclosure of ['single', 'nested'] as const) {
+    await assertFootnoteLinkedScroll(await browser.newPage(), await build.outputs[0]!.text(), false, disclosure);
+    await assertFootnoteLinkedScroll(await browser.newPage(), await build.outputs[0]!.text(), true, disclosure);
+  }
 } catch (error) {
   primaryError = error;
 } finally {

@@ -2988,6 +2988,7 @@ export function createPreviewController({
     } else {
       const scrollTop = getFrameDocument()?.scrollingElement?.scrollTop ?? 0;
       ranges = ranges.map(entry => {
+        if (localSourceGeometry) return localSourceGeometry.measure(entry);
         const rect = entry.element.getBoundingClientRect();
         return { ...entry, top: rect.top + scrollTop, bottom: rect.bottom + scrollTop,
           rendered: entry.element.getClientRects().length > 0 };
@@ -3031,7 +3032,7 @@ export function createPreviewController({
       if (line < entry.start) high = middle - 1;
       else low = middle + 1;
     }
-    const read = (entry: PreviewSourceMapEntry | undefined) => entry && localSourceGeometry ? localSourceGeometry.measure(entry) : entry;
+    const read = (entry: PreviewSourceMapEntry | undefined) => entry && localSourceGeometry ? localSourceGeometry.project(entry) : entry;
     const before = read(high >= 0 ? entries[high] : undefined);
     const after = read(low < entries.length ? entries[low] : undefined);
     if (before && line <= before.end) return { exact: before };

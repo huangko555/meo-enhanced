@@ -913,6 +913,15 @@ or disabling sync. The pending reveal remains owned until its actual completion.
 The browser contract prints frame-interval diagnostics for this bounded scenario;
 these are not native VS Code latency guarantees.
 
+The same suite's `--collapsed-only` slice starts fresh ordinary and windowed
+Source/Preview sessions around closed disclosures followed by relocated notes.
+It samples painted paragraph positions through trusted reverse/forward wheels,
+including nested raw HTML disclosures without their own source-line attributes.
+Nonzero suppressed-body rectangles must never become reading coordinates;
+complete source text and selection remain unchanged. The viewport work-budget
+contract separately checks open/close cycles, outer/inner ownership and remounts
+against the canonical renderer, alongside its existing bounded geometry reads.
+
 For native block-action clicks, wait for `whenVisiblePresentationReady` after the
 last fixture navigation and before acquiring the final control handle. A visible
 box and `scrollend` may precede that navigation's source presentation; stale

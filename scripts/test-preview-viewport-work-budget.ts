@@ -40,6 +40,45 @@ try {
     (window as any).__previewDeclineViewportTransactionOwner = true;
   });
   await page.addScriptTag({ content: await build.outputs[0].text() });
+  stage = 'collapsed source geometry';
+  const disclosure = exportRuntime.renderPreviewDocument({ sourceDocumentPath: '/fixture/disclosure.md', uiLanguage: 'en',
+    markdownText: '<details open>\n<summary>Outer</summary>\n<details>\n<summary>Inner</summary>\n\n'
+      + 'Hidden paragraph.\n\n```text\nhidden code\n```\n\n</details>\n</details>\n\nFollowing paragraph.' });
+  const disclosureStates = await page.evaluate(html => {
+    const frame = document.createElement('iframe'); document.body.append(frame);
+    const doc = frame.contentDocument!;
+    doc.open(); doc.write(`<main class="meo-export-doc">${html}</main>`); doc.close();
+    try {
+      const root = doc.querySelector<HTMLElement>('main')!;
+      const factory = (window as any).__createPreviewSourceGeometry;
+      let geometry = factory(doc);
+      const outer = root.querySelector('details')!, inner = outer.querySelector('details')!;
+      const hidden = inner.querySelector('p')!;
+      if (inner.hasAttribute('data-source-line')) throw new Error('Nested fixture must exercise an unlabelled disclosure');
+      const snapshot = (label: string, expected: Element, painted: boolean) => {
+        // Force layout as highlighting can do; hidden rectangles may be nonzero.
+        hidden.getBoundingClientRect();
+        const entry = geometry.entries.find((entry: any) => entry.element === hidden);
+        return { label, painted: geometry.measure(entry).rendered === painted,
+          projection: geometry.project(entry).element === expected,
+          viewport: geometry.viewport(0, 1000).some((entry: any) => entry.element === hidden) === painted };
+      };
+      const states = [snapshot('inner closed', inner, false)];
+      inner.open = true; states.push(snapshot('both open', hidden, true));
+      outer.open = false; states.push(snapshot('outer closed', outer, false));
+      outer.open = true; inner.open = false; states.push(snapshot('inner reclosed', inner, false));
+      const clone = outer.cloneNode(true) as HTMLDetailsElement;
+      outer.replaceWith(clone); geometry = factory(doc);
+      const newHidden = clone.querySelector('p')!;
+      const entry = geometry.entries.find((entry: any) => entry.element === newHidden);
+      states.push({ label: 'remounted', painted: !geometry.measure(entry).rendered,
+        projection: geometry.project(entry).element === clone.querySelector('details'),
+        viewport: !geometry.viewport(0, 1000).some((entry: any) => entry.element === newHidden) });
+      return states;
+    } finally { frame.remove(); }
+  }, disclosure.html);
+  assert.ok(disclosureStates.every(state => state.painted && state.projection && state.viewport),
+    `Collapsed source identity and painted geometry must agree through toggles/remount: ${JSON.stringify(disclosureStates)}`);
   const windowText = '# Reading window\n\n' + Array.from({ length: 5000 }, (_, index) =>
     `Paragraph ${index} with **needle-${index}** and editable source context.\n\n`).join('')
     + '## Complete tail\n\nNotes[^first] and[^second].\n\n[^second]: Second note.\n\n[^first]: First note.\n';

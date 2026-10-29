@@ -31,13 +31,14 @@ export function createPreviewSourceGeometry(document: Document) {
     return node;
   });
   const entries: PreviewSourceEntry[] = [];
-  for (const element of Array.from(main.querySelectorAll<HTMLElement>('[data-source-line]'))) {
+  for (const element of Array.from(main.querySelectorAll<HTMLElement>('[data-source-line],details'))) {
     const start = Number.parseInt(element.dataset.sourceLine ?? '', 10);
-    if (!Number.isFinite(start)) continue;
+    if (!Number.isFinite(start) && element.tagName !== 'DETAILS') continue;
     const parsedEnd = Number.parseInt(element.dataset.sourceEndLine ?? '', 10);
-    const entry: PreviewSourceEntry = { element, start, end: Number.isFinite(parsedEnd) ? Math.max(start, parsedEnd) : start,
-      top: 0, bottom: 0, rendered: false };
-    entries.push(entry);
+    const entry: PreviewSourceEntry | undefined = Number.isFinite(start)
+      ? { element, start, end: Number.isFinite(parsedEnd) ? Math.max(start, parsedEnd) : start,
+        top: 0, bottom: 0, rendered: false } : undefined;
+    if (entry) entries.push(entry);
     const existing = nodes.get(element);
     if (existing) { existing.entry = entry; continue; }
     const node: SourceNode = { element, entry, children: [] };
@@ -46,13 +47,46 @@ export function createPreviewSourceGeometry(document: Document) {
     while (parent && parent !== main && !nodes.has(parent)) parent = parent.parentElement;
     if (parent && parent !== main) nodes.get(parent)!.children.push(node);
   }
+  const includeDescendantRanges = (node: SourceNode): { start: number; end: number } => {
+    let start = node.entry?.start ?? Infinity, end = node.entry?.end ?? 0;
+    for (const child of node.children) {
+      const range = includeDescendantRanges(child);
+      start = Math.min(start, range.start); end = Math.max(end, range.end);
+    }
+    // A Markdown-in-HTML disclosure's opening token only labels its summary.
+    // The collapsed reading box represents its entire source body as well.
+    if (node.element.tagName === 'DETAILS' && Number.isFinite(start)) {
+      if (node.entry) node.entry.end = end;
+      else {
+        // Several raw opening tags can share one token. An unlabelled nested
+        // disclosure still owns the indexed Markdown descendants it suppresses.
+        node.entry = { element: node.element, start, end, top: 0, bottom: 0, rendered: false };
+        entries.push(node.entry);
+      }
+    }
+    return { start, end };
+  };
+  for (const root of roots) includeDescendantRanges(root);
   entries.sort((left, right) => left.start - right.start || right.end - left.end);
+  const collapsedOwner = (entry: PreviewSourceEntry): PreviewSourceEntry | undefined => {
+    let owner: PreviewSourceEntry | undefined;
+    for (let parent = entry.element.parentElement; parent && parent !== main; parent = parent.parentElement) {
+      if (parent.tagName !== 'DETAILS' || parent.hasAttribute('open')) continue;
+      const summary = Array.from(parent.children).find(child => child.tagName === 'SUMMARY');
+      if (!summary?.contains(entry.element)) owner = nodes.get(parent)?.entry ?? owner;
+    }
+    return owner;
+  };
   const measure = (entry: PreviewSourceEntry): PreviewSourceEntry => {
+    // Chromium can return nonzero layout rectangles for suppressed bodies.
+    // Do not force that hidden layout merely to reject it as a reading box.
+    if (collapsedOwner(entry)) return { ...entry, rendered: false };
     const scrollTop = document.scrollingElement?.scrollTop ?? 0;
     const rect = entry.element.getBoundingClientRect();
     return { ...entry, top: rect.top + scrollTop, bottom: rect.bottom + scrollTop,
       rendered: entry.element.getClientRects().length > 0 };
   };
+  const project = (entry: PreviewSourceEntry): PreviewSourceEntry => measure(collapsedOwner(entry) ?? entry);
   const viewport = (offset: number, height: number): PreviewSourceEntry[] => {
     const scrollTop = document.scrollingElement?.scrollTop ?? 0;
     const minimum = offset - scrollTop, maximum = minimum + height;
@@ -76,6 +110,11 @@ export function createPreviewSourceGeometry(document: Document) {
       const bounds = rect(node);
       if (node.entry && node.element.getClientRects().length > 0) result.push({ ...node.entry,
         top: bounds.top + scrollTop, bottom: bounds.bottom + scrollTop, rendered: true });
+      if (node.element.tagName === 'DETAILS' && !node.element.hasAttribute('open')) {
+        const summary = Array.from(node.element.children).find(child => child.tagName === 'SUMMARY');
+        for (const child of node.children) if (summary?.contains(child.element)) visit(child);
+        return;
+      }
       if (bounds.bottom < minimum || bounds.top > maximum) {
         const edge = bounds.bottom < minimum ? node.children.at(-1) : node.children[0];
         if (edge) visit(edge);
@@ -129,5 +168,5 @@ export function createPreviewSourceGeometry(document: Document) {
     return [{ startLine: Math.min(...members.map(entry => entry.start)), endLine: Math.max(...members.map(entry => entry.end)),
       top: bounds.top + top, bottom: bounds.bottom + top }];
   });
-  return { entries, measure, viewport, linkedRegions };
+  return { entries, measure, project, viewport, linkedRegions };
 }

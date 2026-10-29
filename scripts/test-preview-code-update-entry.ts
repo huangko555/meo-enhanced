@@ -6,6 +6,7 @@ import { createMermaidDiagramRenderPool } from '../webview/src/editor/mermaidDia
 import { initializeMermaidEditorRuntime, renderMermaidRuntime } from '../webview/src/helpers/mermaidDiagram';
 import { createPreviewScrollRange } from '../webview/src/helpers/previewScrollRange';
 import { createPreviewViewport } from '../webview/src/helpers/previewViewport';
+import { createPreviewSourceGeometry } from '../webview/src/helpers/previewSourceGeometry';
 import { initializeImageHandling, settleImageSrcRequest } from '../webview/src/helpers/images';
 
 // Resolving both export palettes must not change the active Preview theme.
@@ -36,6 +37,7 @@ const scope = window as typeof window & {
   __previewInteractionCount?: number;
   __createPreviewScrollRange: typeof createPreviewScrollRange;
   __createPreviewViewport: typeof createPreviewViewport;
+  __createPreviewSourceGeometry: typeof createPreviewSourceGeometry;
   __initializeImageHandling: typeof initializeImageHandling;
   __settleImageSrcRequest: typeof settleImageSrcRequest;
 };
@@ -44,6 +46,7 @@ scope.__previewMessages = messages;
 scope.__writePreviewFrame = writePreviewFrame;
 scope.__createPreviewScrollRange = createPreviewScrollRange;
 scope.__createPreviewViewport = createPreviewViewport;
+scope.__createPreviewSourceGeometry = createPreviewSourceGeometry;
 scope.__initializeImageHandling = initializeImageHandling;
 scope.__settleImageSrcRequest = settleImageSrcRequest;
 document.body.append(controller.host);
