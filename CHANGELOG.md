@@ -3,6 +3,15 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.37
+- Kept the toolbar fixed within the VS Code window during Preview navigation, focus changes and document scrolling, including windowed large documents.
+- Preserved native Preview scrolling and reading positions as rendering windows and collapsed content change geometry.
+- Improved Source/Preview synchronization around relocated footnotes, including keyboard navigation into and out of definitions, and kept footnotes out of outline highlights.
+- Applied current typography when returning to retained Preview surfaces and made newly installed fonts available without restarting VS Code.
+- Preserved Live pointer targets and Mermaid reading geometry through delayed layout changes, and stabilized menus across editor lifecycle transitions.
+- Retained change-review counts while comparisons update and kept background summaries quiet.
+- Improved Whitey light inline-code contrast consistently in Preview, exports and the example preset.
+
 ## 0.3.36
 - Fixed pasted-image folder validation on Linux: relative-only settings now reject Windows drive paths, rooted paths and network paths consistently across platforms. Advanced image-folder rules retain their explicit absolute-path support.
 - Added POSIX and Windows path regressions alongside the existing image creation, collision and symbolic-link checks.
