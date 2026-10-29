@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdir, copyFile, readFile, writeFile, rm } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, extname } from 'node:path';
 import { normalizePreviewFontFamily } from '../foundation/previewFontFamily';
@@ -96,6 +97,7 @@ function collectionFace(data: Buffer, family: string, face: PreviewFontFile): Bu
 
 /** Only explicit refresh enables file sources; normal startup keeps native font loading. */
 export function createPreviewFontFiles(read: (family: string) => Promise<readonly PreviewFontFile[]> = readSystemPreviewFontFiles) {
+  const resourceRoot = join(tmpdir(), `meo-preview-fonts-${randomUUID()}`);
   let enabled = false, disposed = false;
   let revision = 0;
   let directory: Promise<string> | undefined;
@@ -108,16 +110,20 @@ export function createPreviewFontFiles(read: (family: string) => Promise<readonl
     if (!result) {
       result = read(family).then(async faces => {
         const unique = [...new Map(faces.map(face => [JSON.stringify(face), face])).values()];
-        return Promise.all(unique.map(async face => {
-          if (!['.ttc', '.otc'].includes(extname(face.path).toLowerCase())) return face;
-          const data = collectionFace(await readFile(face.path), family, face);
-          directory ??= mkdtemp(join(tmpdir(), 'meo-preview-fonts-'));
-          const path = join(await directory, `${++nextFile}.ttf`);
+        const resolved = await Promise.allSettled(unique.map(async face => {
+          const collection = ['.ttc', '.otc'].includes(extname(face.path).toLowerCase());
+          directory ??= mkdir(resourceRoot).then(() => resourceRoot);
+          const path = join(await directory, `${++nextFile}${collection ? '.ttf' : extname(face.path)}`);
           if (disposed) throw new Error('Preview fonts disposed');
-          await writeFile(path, data);
+          if (collection) await writeFile(path, collectionFace(await readFile(face.path), family, face));
+          else await copyFile(face.path, path);
           return { ...face, path };
         }));
-      }).catch(() => { if (pending.get(family) === result) pending.delete(family); return []; });
+        return resolved.map(result => {
+          if (result.status === 'rejected') throw result.reason;
+          return result.value;
+        });
+      }).catch(() => []);
       pending.set(family, result);
       work.add(result);
       void result.finally(() => work.delete(result!));
@@ -125,6 +131,7 @@ export function createPreviewFontFiles(read: (family: string) => Promise<readonl
     return result;
   };
   return {
+    resourceRoot,
     refresh() { enabled = true; revision++; pending.clear(); },
     async styles(families: readonly string[], resourceUrl: (path: string) => string): Promise<string> {
       if (!enabled || disposed) return '';

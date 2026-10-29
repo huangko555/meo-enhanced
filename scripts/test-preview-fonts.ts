@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { join, relative, isAbsolute } from 'node:path';
+import { tmpdir } from 'node:os';
 import { mergePreviewFonts, decodePreviewFonts } from '../src/foundation/previewFonts';
 import { createAppearanceSettingsOwner } from '../src/host/appearanceSettings';
 import { createPreviewFonts } from '../src/host/previewFonts';
@@ -40,12 +43,26 @@ fail = true; await assert.rejects(catalog.read(true));
 assert.deepEqual(await catalog.read(), first, 'A failed refresh retains the previous catalog');
 fail = false; await catalog.read(true); assert.equal(calls, 3, 'Explicit refresh retries');
 
-let fileReads = 0, enumerationFails = false;
+let fileReads = 0, enumerationFails = false, fileReadFails = false;
+const fixtureDirectory = mkdtempSync(join(tmpdir(), 'meo-font-catalog-test-'));
+const sourceFont = join(fixtureDirectory, 'fixture.ttf');
+const fontBytes = Buffer.from('font file copy fixture');
+writeFileSync(sourceFont, fontBytes);
 const fileCatalog = createPreviewFonts(async () => { if (enumerationFails) throw new Error('Unavailable'); return fonts; }, async family => {
   fileReads++;
-  return [{ path: `/fonts/${family}.ttf`, weight: 700, style: 'italic', stretch: 5 }];
+  if (fileReadFails) throw new Error('Font file unavailable');
+  return [{ path: sourceFont, weight: 700, style: 'italic', stretch: 5 }];
 });
-const fileUrl = () => 'https://example.invalid/font.ttf';
+const approvedRoot = fileCatalog.resourceRoot;
+assert.equal(existsSync(approvedRoot), false, 'Declaring the stable font resource root must not create startup files');
+const cachedFiles = new Set<string>();
+const fileUrl = (file: string) => {
+  const path = relative(approvedRoot, file);
+  assert.ok(path && !path.startsWith('..') && !isAbsolute(path), 'Every refreshed font uses the initially approved root');
+  assert.deepEqual(readFileSync(file), fontBytes, 'The permitted font copy retains exact source bytes');
+  cachedFiles.add(file);
+  return 'https://example.invalid/font.ttf';
+};
 assert.equal(await fileCatalog.styles(['Example Sans'], fileUrl), '', 'Normal startup keeps native fonts without reading files');
 await fileCatalog.read();
 assert.equal(await fileCatalog.styles(['Example Sans'], fileUrl), '');
@@ -64,7 +81,18 @@ assert.equal(await fileCatalog.styles(['Example Sans'], fileUrl), firstStyles, '
 enumerationFails = false; await fileCatalog.read(true);
 assert.match(await fileCatalog.styles(['Example Sans'], fileUrl), /meo-font-refresh=2/, 'Refresh invalidates file metadata and browser resource caches');
 assert.equal(fileReads, 2);
+assert.equal(cachedFiles.size, 2, 'Refresh creates a new font source without changing the approved root');
+fileReadFails = true; await fileCatalog.read(true);
+assert.equal(await fileCatalog.styles(['Example Sans'], fileUrl), '');
+assert.equal(await fileCatalog.styles(['Example Sans'], fileUrl), '');
+assert.equal(fileReads, 3, 'A failed file resolution must not repeat filesystem work on every render');
+fileReadFails = false; await fileCatalog.read(true);
+assert.match(await fileCatalog.styles(['Example Sans'], fileUrl), /meo-font-refresh=4/, 'Explicit refresh retries unavailable font files');
+assert.equal(fileReads, 4);
 await fileCatalog.dispose();
+assert.equal(existsSync(approvedRoot), false, 'Disposal removes only the owned font resource directory');
+assert.deepEqual(readFileSync(sourceFont), fontBytes, 'Disposal must preserve installed source fonts');
+rmSync(fixtureDirectory, { recursive: true, force: true });
 assert.equal(await fileCatalog.styles(['Example Sans'], fileUrl), '', 'Disposed catalogs cannot publish font resources');
 if (process.platform === 'win32') {
   assert.ok((await readSystemPreviewFontFiles('Arial')).length > 0, 'Windows file discovery resolves a real installed family');

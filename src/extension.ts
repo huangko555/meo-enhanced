@@ -632,6 +632,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       enableScripts: true,
       localResourceRoots: [
         ...collectLocalResourceRoots(distRoot, documentUri, imageResources.roots),
+        ...(!vscode.env.remoteName ? [vscode.Uri.file(this.previewFonts.resourceRoot)] : []),
         ...(this.context.extensionMode === vscode.ExtensionMode.Development ? [developmentStylesRoot] : [])
       ]
     };
@@ -705,10 +706,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
             ? this.previewFonts.styles([options.styleEnvironment?.previewFontFamily ?? '', options.styleEnvironment?.previewCodeFontFamily ?? ''], path => {
               if (!this.activePanels.has(panel)) throw new Error('Preview was closed');
               const uri = vscode.Uri.file(path);
-              const roots = panel.webview.options.localResourceRoots ?? [];
-              if (!roots.some(root => root.toString() === uri.toString())) {
-                panel.webview.options = { ...panel.webview.options, localResourceRoots: [...roots, uri] };
-              }
               return panel.webview.asWebviewUri(uri).toString();
             }) : Promise.resolve('')
         ]);
