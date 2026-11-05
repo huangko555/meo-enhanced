@@ -736,6 +736,8 @@ async function main() {
       const convertedToEight = editor.getText().includes('#11223380 and');
       const undone = await editor.undo() && editor.getText().includes('#112233 and');
       const redone = await editor.redo() && editor.getText().includes('#11223380 and');
+      // History restores an editable source line, where Live hides color controls.
+      editor.scrollToLine(1, 'top');
       open('#aabbcc80');
       await frame();
       setOpacity(255);
@@ -777,6 +779,7 @@ async function main() {
         const undone = applied && await editor.undo() && editor.getText() === `Intro\nColor ${testCase.source}`;
         let opaqueAfterSlider = false;
         if (undone) {
+          editor.scrollToLine(1, 'top');
           app.querySelector<HTMLButtonElement>(`.meo-md-color-swatch-interactive[data-color-value="${testCase.source}"]`)!.click();
           await frame();
           const nextInput = app.querySelector<HTMLInputElement>('.meo-hex-color-adjustment-value')!;
