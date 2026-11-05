@@ -81,7 +81,9 @@ async function main(): Promise<void> {
   const { checkTestInventory } = await import('./check-test-inventory');
   const resources = await checkTestInventory(root);
   const scripts = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts as Record<string, string>;
-  const stages = prepareWorkflow(plan, scripts, { ...resources, 'run typecheck': 'process', 'run architecture:check': 'process' });
+  const captureBrowser = process.env.MEO_TEST_CAPTURE_BROWSER?.trim();
+  const stages = prepareWorkflow(plan, scripts, { ...resources, 'run typecheck': 'process', 'run architecture:check': 'process' },
+    captureBrowser ? resolve(captureBrowser) : undefined);
   const planHash = digest(JSON.stringify(stages));
   console.log(`${plan.title} (${plan.expectedDuration})`);
   if (plan.tier === 'quick') console.log('Core checks only: complete affected-feature and relevant document-scale checks before delivery.');
@@ -102,7 +104,8 @@ async function main(): Promise<void> {
   }
   const fingerprintTimings: NonNullable<WorkflowReport['fingerprintTimings']> = [];
   let phase: 'before' | 'after' = 'before';
-  const inputs = () => plan.tier === 'release' ? workflowFingerprint(root, browserPath, (section, seconds, metrics) => {
+  const inputs = () => plan.tier === 'release' ? workflowFingerprint(root,
+    [browserPath, ...(captureBrowser ? [resolve(captureBrowser)] : [])], (section, seconds, metrics) => {
     fingerprintTimings.push({ phase, section, seconds, ...metrics });
     console.log(`Fingerprint ${phase}: ${section} ${seconds.toFixed(1)}s${metrics ? ` (${metrics.files} physical files, ${metrics.cacheHits} shared nodes)` : ''}`);
   }, request.documentPath ? [request.documentPath] : []) : '';

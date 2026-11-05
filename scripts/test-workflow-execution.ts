@@ -88,7 +88,7 @@ export function expandTestCommand(
   });
 }
 
-export function prepareWorkflow(plan: TestWorkflowPlan, scripts: Record<string, string>, resources?: Record<string, 'process' | 'exclusive'>): WorkflowStage[] {
+export function prepareWorkflow(plan: TestWorkflowPlan, scripts: Record<string, string>, resources?: Record<string, 'process' | 'exclusive'>, captureBrowser?: string): WorkflowStage[] {
   for (const stage of plan.stages) {
     if (!stage.commands.length || !Number.isInteger(stage.maxConcurrency ?? 1) || (stage.maxConcurrency ?? 1) < 1) {
       throw new Error(`Invalid stage scheduling: ${stage.title}`);
@@ -102,7 +102,8 @@ export function prepareWorkflow(plan: TestWorkflowPlan, scripts: Record<string, 
     groups: stage.commands.map((command, groupIndex) =>
       expandTestCommand(command, scripts).map((leaf, leafIndex) => ({
         id: `${stageIndex + 1}-${groupIndex + 1}-${leafIndex + 1}`,
-        command: leaf,
+        command: captureBrowser && leaf.args[0] === 'scripts/test-block-editing-handoffs.ts'
+          ? { ...leaf, env: { ...leaf.env, MEO_TEST_BROWSER: captureBrowser } } : leaf,
         reusable: leaf.args[0]?.startsWith('scripts/test-') === true,
         ...(resources ? { resource: resources[leaf.args[0]!] ?? resources[leaf.args.join(' ')] ?? 'exclusive' } : {})
       })))

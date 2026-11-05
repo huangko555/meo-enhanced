@@ -50,7 +50,7 @@ export function hashPaths(paths: string[], metrics?: HashMetrics): string {
 
 // Any source/test/config/dependency change invalidates resume. This is not
 // affected-test inference or a cross-machine result cache.
-export function workflowFingerprint(root: string, browserPath: string,
+export function workflowFingerprint(root: string, browserPath: string | string[],
   record: (section: string, seconds: number, metrics?: HashMetrics) => void = () => {}, extraPaths: string[] = []): string {
   const started = performance.now();
   const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
@@ -70,7 +70,7 @@ export function workflowFingerprint(root: string, browserPath: string,
   if (extraPaths.length) append('Selected document fixtures', extraPaths.map(file => resolve(root, file)));
   append('Installed dependencies and runtimes', [
     join(root, 'node_modules'), join(root, 'webview/node_modules'),
-    process.execPath, Bun.which('node') ?? '', browserPath
+    process.execPath, Bun.which('node') ?? '', ...[browserPath].flat()
   ].filter(Boolean));
   // Hash environment values rather than persisting credentials in reports.
   hash.update(JSON.stringify(Object.entries(process.env).sort(([a], [b]) => a.localeCompare(b))));

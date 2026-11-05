@@ -942,6 +942,11 @@ the unchanged 2px bound. Missing epochs or an invisible target fail the check.
   original frame counts, immediate input, lossless PNGs and pixel bounds; a later
   screenshot cannot fill missing intermediate epochs. Record the executable's
   version and hash separately from the ordinary browser and installed checks.
+  For a combined workflow, set `MEO_TEST_CAPTURE_BROWSER` to that preflighted
+  executable. The runner records a per-command `MEO_TEST_BROWSER` override only
+  for this handoff contract and fingerprints both browser executables. Other
+  browser contracts retain their ordinary executable, including real background
+  visibility behavior that a headless shell may not provide.
 Start capture before the deliberate native input, so the pending-work handoff
 remains immediate; retain held-pointer DOM, source, focus and final-position checks.
 

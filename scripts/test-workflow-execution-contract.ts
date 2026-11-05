@@ -4,7 +4,7 @@ import { spyOn } from 'bun:test';
 import { join } from 'node:path';
 import { digest, executeWorkflow, expandTestCommand, prepareWorkflow, readResumeReport, saveReport,
   type TaskResult, type WorkflowReport } from './test-workflow-execution';
-import { hashPaths } from './test-workflow-snapshot';
+import { hashPaths, workflowFingerprint } from './test-workflow-snapshot';
 import type { TestWorkflowPlan } from './test-workflow-policy';
 import { runCommand } from './test-workflow';
 
@@ -30,6 +30,17 @@ try {
       { title: 'package', commands: [{ args: ['run', 'package:check'] }] }
     ] };
   const stages = prepareWorkflow(plan, scripts);
+  const capturePlan = { ...plan, stages: [{ title: 'capture', commands: [
+    { args: ['scripts/test-block-editing-handoffs.ts'], env: { MEO_SAMPLE: 'kept' } },
+    { args: ['scripts/test-background-shiki-production.ts'] }
+  ] }] };
+  const captureTasks = prepareWorkflow(capturePlan, {}, undefined, '/capture-browser').flatMap(stage => stage.groups.flat());
+  assert.deepEqual(captureTasks.map(task => task.command), [
+    { args: ['scripts/test-block-editing-handoffs.ts'], env: { MEO_SAMPLE: 'kept', MEO_TEST_BROWSER: '/capture-browser' } },
+    { args: ['scripts/test-background-shiki-production.ts'] }
+  ], 'A capture-only executable must not change background-tab and other ordinary browser contracts');
+  assert.deepEqual(prepareWorkflow(capturePlan, {}).flatMap(stage => stage.groups.flat()).map(task => task.command),
+    capturePlan.stages[0].commands, 'Without explicit capture configuration the browser selection is unchanged');
   assert.throws(() => prepareWorkflow({ ...plan, stages: [{ ...plan.stages[0]!, maxConcurrency: 0 }] }, scripts), /Invalid stage/);
   const createReport = (): WorkflowReport => ({ schemaVersion: 1, pid: process.pid, title: 'fixture',
     fingerprint: 'input', planHash: digest(JSON.stringify(stages)), status: 'running',
@@ -233,6 +244,16 @@ try {
   const boundaryHash = hashPaths([collisionA, collisionB]);
   writeFileSync(collisionA, 'ab'); writeFileSync(collisionB, 'c');
   assert.notEqual(hashPaths([collisionA, collisionB]), boundaryHash, 'File boundaries cannot be confused with concatenated bytes');
+  const ordinaryBrowser = join(root, 'ordinary-browser');
+  const captureBrowser = join(root, 'capture-browser');
+  writeFileSync(ordinaryBrowser, 'one'); writeFileSync(captureBrowser, 'one');
+  const initialBrowsers = workflowFingerprint(root, [ordinaryBrowser, captureBrowser]);
+  writeFileSync(captureBrowser, 'two');
+  const changedCapture = workflowFingerprint(root, [ordinaryBrowser, captureBrowser]);
+  assert.notEqual(changedCapture, initialBrowsers, 'Changing only capture executable bytes must invalidate release evidence');
+  writeFileSync(ordinaryBrowser, 'two');
+  assert.notEqual(workflowFingerprint(root, [ordinaryBrowser, captureBrowser]), changedCapture,
+    'The ordinary browser remains an independently fingerprinted runtime');
   const childScript = join(root, 'child.ts');
   writeFileSync(childScript, 'console.log("stdout witness"); console.error("stderr witness"); process.exitCode = 7;');
   const result: TaskResult = { id: 'child', status: 'running', startedAt: new Date().toISOString() };
