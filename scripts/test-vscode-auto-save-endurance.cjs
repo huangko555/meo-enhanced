@@ -36,12 +36,20 @@ exports.run = async function () {
     browser = await puppeteer.connect({ browserURL: process.env.MEO_NATIVE_BROWSER_URL || 'http://127.0.0.1:9337', defaultViewport: null });
     let frame;
     await waitFor(async () => {
+      const matches = [];
       for (const page of await browser.pages()) {
         for (const candidate of page.frames()) {
-          if (await candidate.$('.cm-content').catch(() => null)) { frame = candidate; return true; }
+          const active = await candidate.evaluate(() => window.frameElement?.id === 'active-frame'
+            && getComputedStyle(window.frameElement).visibility === 'visible'
+            && document.querySelector('.editor-root')?.textContent.includes('Auto-save endurance')
+            && !document.querySelector('.meo-preload-toolbar')
+            && !!document.querySelector('.cm-content')).catch(() => false);
+          if (active) matches.push(candidate);
         }
       }
-      return false;
+      assert.ok(matches.length <= 1, 'Only one active Webview may own the disposable document');
+      frame = matches[0];
+      return !!frame;
     }, 'production editor');
     // A selected mode button can precede the final interactive surface. Input
     // must reach that surface before automatic-save assertions have meaning.
@@ -80,7 +88,8 @@ exports.run = async function () {
       const savesBefore = report.saves;
       if (mode === 'live') {
         const selector = '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tbody textarea[data-table-col="1"]';
-        await frame.waitForSelector(selector);
+        await frame.click('.meo-md-html-table:not(.meo-md-html-table-sticky-table) tbody tr:first-child td:nth-child(2) .meo-md-html-table-cell-preview');
+        await frame.waitForSelector(selector, { visible: true });
         const cell = await frame.$(selector);
         await cell.click();
         await cell.evaluate(input => input.select());

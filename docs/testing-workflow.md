@@ -2590,6 +2590,9 @@ and `--extensions-dir`, and `--remote-debugging-port=9337`. It requires:
 The native runner creates its own Markdown fixture, uses `afterDelay` at 1000 ms,
 and keeps one document session alive across Source input, Live table editing,
 undo/redo, and Preview transitions. It waits for actual platform save events and
+admits only the unique active Webview containing its fixture heading. Live cell
+input activates the rendered cell before requiring its visible native textarea.
+These readiness checks retain the existing per-operation deadlines. The runner
 compares exact expected text with TextDocument and disk, checks cell focus, then
 reopens the file. It never calls `document.save()` to simulate auto-save. Results
 are written to `auto-save-endurance-result.json` in the disposable workspace.
