@@ -3,10 +3,9 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
-## Unreleased
-- Added an explicit, default-off LaTeX delimiter switch in the Settings popover and More Settings → General, with consistent `\(...\)` and `\[...\]` parsing, completion, source highlighting, Live tables, Preview and exports. GitHub README retains its fixed math syntax.
-
 ## 0.4.0
+- Added the Explorer's MEO Outline view for the most recently focused MEO document, with shared split-editor navigation, current-heading selection, six-level expansion and retained collapse state.
+- Added an explicit, default-off LaTeX delimiter switch in the Settings popover and More Settings → General, with consistent `\(...\)` and `\[...\]` parsing, completion, source highlighting, Live tables, Preview and exports. GitHub README retains its fixed math syntax.
 - Added bilingual status-bar line and word counts for the active MEO document, including text and table-cell selections in Live and Source.
 - Added optional document-view and code-block integration interfaces with feature controls, lazy loading and explicit cleanup; the main editor remains usable without companion extensions.
 - Shared graph editing and viewing containers while preserving Mermaid interactions, document typography, colors, navigation and fullscreen controls.
@@ -18,6 +17,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Opened Find and Replace with the current editor selection, retained queries across closing and mode changes, and ignored stale table-cell selections.
 - Kept optional block rendering idle when no code renderer is enabled, avoiding repeated code-block scans in Preview.
 - Fixed Select All in the active table cell while retaining full-document selection in Source.
+- Preserved rendered-text selections and delayed widget click ownership, and used the default cursor when viewing fullscreen images.
 
 ## 0.3.40
 - Aligned HTML rendering across Live, Preview and exports, including omitted child end tags, native author-defined sizing and supported SVG fill rules, while preserving source-completion boundaries.
