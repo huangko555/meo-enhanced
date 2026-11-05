@@ -654,7 +654,7 @@ async function main() {
         'Show Original · Source Only'
       ],
       headerText: 'No Changes·vs. Last Saved Version',
-      settingsHeading: 'Document display',
+      settingsHeading: 'Document settings',
       strongColorLabel: 'Color bold text',
       clipped: false
     })) {
@@ -916,10 +916,10 @@ async function main() {
     });
     if (
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
-        '显示行号', '折叠长代码块', '限制宽度', '粗体文字着色',
+        '显示行号', '折叠长代码块', '限制宽度', '粗体文字着色', 'LaTeX 风格公式',
         '外观 · 输入 · 快捷键', '遇到问题或有建议？', '支持项目'
       ]) ||
-      moreToolsLayout.topHeading !== '文档显示' ||
+      moreToolsLayout.topHeading !== '文档设置' ||
       moreToolsLayout.languageAutoLabel !== '自动' ||
       !moreToolsLayout.directChildren ||
       moreToolsLayout.separatorCount !== 0 ||

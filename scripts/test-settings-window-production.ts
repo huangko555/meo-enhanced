@@ -546,7 +546,7 @@ try {
   assert.equal(await page.$eval('.settings-about-copy', element => element.getAttribute('aria-label')), '复制版本信息', 'Reopening retires prior clipboard feedback');
   await page.click('.settings-tab[data-tab="general"]');
   assert.equal(await page.$eval('.settings-window', element => (element as HTMLDialogElement).open), true);
-  assert.equal(await page.$$eval('.settings-item', elements => elements.length), 9);
+  assert.equal(await page.$$eval('.settings-item', elements => elements.length), 10);
   for (const [setting, type] of [['boldHeadings', 'setBoldHeadings'], ['stickyHeader', 'setTableStickyHeader']]) {
     const toggle = `[data-setting="${setting}"] .settings-switch`;
     assert.equal(await page.$eval(toggle, element => element.getAttribute('aria-checked')), 'true');
@@ -1161,7 +1161,7 @@ try {
         query: element.querySelector('.settings-item-title')!.textContent!,
         values: [...element.querySelectorAll('.settings-key, .image-location-mode-title, .image-naming-title, .image-location-field-label, .image-location-picker, .image-location-token')].map(control => control.getAttribute('aria-label') ?? control.textContent!)
       })));
-      assert.equal(items.length, tab === 'general' ? 9 : tab === 'appearance' ? 13 : tab === 'typing' ? 16 : editorCommandIds.length, 'search inventory includes every setting and command');
+      assert.equal(items.length, tab === 'general' ? 10 : tab === 'appearance' ? 13 : tab === 'typing' ? 16 : editorCommandIds.length, 'search inventory includes every setting and command');
       searchCases.push(...items.flatMap(item => [item.query, ...item.values].map(query => ({tab, id: item.id, query}))));
     }
     await page.click('.settings-close');

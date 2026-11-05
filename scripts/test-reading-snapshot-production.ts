@@ -19,6 +19,7 @@ const createDeferred = (): Deferred => {
 const createHarness = (initialText: string, initialAppearance: 'light' | 'dark', initialFontFamily: string) => {
   let text = initialText;
   let appearance = initialAppearance;
+  let latexDelimiters = false;
   let environment = {
     editorBackgroundColor: initialAppearance === 'dark' ? '#111111' : '#ffffff',
     previewFontFamily: initialFontFamily
@@ -38,6 +39,7 @@ const createHarness = (initialText: string, initialAppearance: 'light' | 'dark',
       if (decoded?.type === 'exportSnapshotResult') hostTransport.accept(decoded);
     },
     getCurrentText: () => text,
+    getLatexDelimiters: () => latexDelimiters,
     whenDocumentIdle: () => idle.promise,
     getPreviewAppearance: () => appearance,
     getUiLanguage: () => 'zh-CN',
@@ -50,10 +52,12 @@ const createHarness = (initialText: string, initialAppearance: 'light' | 'dark',
       readonly text: string;
       readonly appearance: 'light' | 'dark';
       readonly background: string;
+      readonly latexDelimiters?: boolean;
       readonly fontFamily?: string;
     }) {
       text = next.text;
       appearance = next.appearance;
+      latexDelimiters = next.latexDelimiters ?? latexDelimiters;
       environment = {
         editorBackgroundColor: next.background,
         previewFontFamily: next.fontFamily ?? environment.previewFontFamily
@@ -68,11 +72,12 @@ const createHarness = (initialText: string, initialAppearance: 'light' | 'dark',
   };
 };
 
+const capturedText = '# editor one current\n\nInline: \\(a+b\\).';
 const first = createHarness('# editor one old', 'light', 'MEO Synthetic Sans');
 const second = createHarness('# editor two', 'light', 'MEO Synthetic Serif');
 const firstPending = first.request();
 const secondPending = second.request();
-first.replaceState({ text: '# editor one current', appearance: 'dark', background: '#101010' });
+first.replaceState({ text: capturedText, appearance: 'dark', background: '#101010', latexDelimiters: true });
 first.resolveIdle();
 second.resolveIdle();
 const [firstResult, secondResult] = await Promise.all([firstPending, secondPending]);
@@ -83,7 +88,8 @@ if (!firstResult.ok || !secondResult.ok) throw new Error('ReadingSnapshot captur
 const firstSnapshot: ReadingSnapshot = firstResult.value;
 assert.deepEqual(firstSnapshot, {
   snapshotId: firstSnapshot.snapshotId,
-  text: '# editor one current',
+  text: capturedText,
+  latexDelimiters: true,
   appearance: 'dark',
   uiLanguage: 'zh-CN',
   environment: { editorBackgroundColor: '#101010', previewFontFamily: 'MEO Synthetic Sans' },
@@ -91,11 +97,12 @@ assert.deepEqual(firstSnapshot, {
 });
 assert.equal(secondResult.value.text, '# editor two', 'two Editor/panel transports must remain isolated');
 assert.equal(secondResult.value.environment.previewFontFamily, 'MEO Synthetic Serif');
+assert.equal(secondResult.value.latexDelimiters, false, 'math syntax preferences remain isolated between panels');
 assert.notEqual(firstSnapshot.snapshotId.length, 0);
 assert.notEqual(secondResult.value.snapshotId.length, 0);
 
 first.replaceState({
-  text: '# later edit', appearance: 'light', background: '#eeeeee', fontFamily: 'MEO Synthetic Serif'
+  text: '# later edit', appearance: 'light', background: '#eeeeee', fontFamily: 'MEO Synthetic Serif', latexDelimiters: false
 });
 const commonOutput = {
   sourceDocumentPath: 'C:/notes/input.md',
@@ -112,6 +119,8 @@ for (const target of ['html', 'pdf'] as const) {
     ...commonOutput
   });
   assert.match(rendered.htmlDocument, /editor one current/);
+  assert.equal(firstSnapshot.latexDelimiters, true, 'the accepted snapshot retains its math syntax preference');
+  assert.match(rendered.htmlDocument, /class="meo-export-math(?:\s|")/, 'export uses the captured opt-in syntax after current settings change');
   assert.doesNotMatch(rendered.htmlDocument, /later edit/);
   assert.match(rendered.htmlDocument, target === 'docx' ? /--meo-bg:\s*#ffffff/ : /--meo-bg:\s*#101010/);
   if (target === 'docx') assert.doesNotMatch(rendered.htmlDocument, /#101010/);
