@@ -28,6 +28,7 @@ type Timers = {
 export const SIDEBAR_OUTLINE_ACTIVE_VIEWPORT_RATIO = 0.2;
 const PUBLISH_DELAY_MS = 120;
 const PENDING_RETRY_MS = 50;
+const NAVIGATION_INPUT_EVENTS = ['wheel', 'pointerdown', 'keydown', 'beforeinput'] as const;
 
 function projectHeadings(headings: ReturnType<SidebarOutlineSource['getHeadings']>): SidebarOutlineHeading[] {
   return headings.slice(0, MAX_SIDEBAR_OUTLINE_HEADINGS).map(heading => ({
@@ -68,6 +69,7 @@ export function createSidebarOutlineReporter(
   let snapshotVersion = 0;
   let sentActive = -2;
   let headingStarts: number[] = [];
+  const cancelPendingNavigation = () => { pendingNavigation = null; };
 
   const cancelTimer = () => {
     if (timer !== null) timers.clearTimeout(timer);
@@ -79,6 +81,8 @@ export function createSidebarOutlineReporter(
   };
   const unbindScroll = () => {
     boundScrollElement?.removeEventListener('scroll', scheduleActive);
+    for (const type of NAVIGATION_INPUT_EVENTS)
+      boundScrollElement?.removeEventListener(type, cancelPendingNavigation, true);
     boundScrollElement = null;
   };
   const bindScroll = (source: SidebarOutlineSource) => {
@@ -87,6 +91,8 @@ export function createSidebarOutlineReporter(
     unbindScroll();
     boundScrollElement = element;
     element.addEventListener('scroll', scheduleActive, { passive: true } as AddEventListenerOptions);
+    for (const type of NAVIGATION_INPUT_EVENTS)
+      element.addEventListener(type, cancelPendingNavigation, { capture: true, passive: true });
   };
 
   const readActiveIndex = (source: SidebarOutlineSource) => source.getVisibleDocumentRange()
@@ -97,6 +103,7 @@ export function createSidebarOutlineReporter(
     if (!enabled || disposed) return;
     const source = getSource();
     if (!source) return;
+    bindScroll(source);
     // getHeadings advances parsing and refreshes the editor's pending flag.
     const all = source.getHeadings();
     if (source.isOutlinePending?.()) {
@@ -106,7 +113,6 @@ export function createSidebarOutlineReporter(
     const navigation = pendingNavigation;
     pendingNavigation = null;
     if (navigation) reveal(navigation.key, navigation.snapshot);
-    bindScroll(source);
     headingStarts = all.slice(0, MAX_SIDEBAR_OUTLINE_HEADINGS).map(heading => heading.from);
     const headings = projectHeadings(all);
     const changed = publishedHeadings === null || headings.length !== publishedHeadings.length
@@ -137,7 +143,8 @@ export function createSidebarOutlineReporter(
   };
 
   function scheduleActive() {
-    pendingNavigation = null;
+    // Height corrections also emit scroll events. Only a new input gesture
+    // supersedes a click waiting for complete heading identities.
     if (!enabled || disposed || frame !== null) return;
     frame = timers.requestFrame(refreshActive);
   }
@@ -154,6 +161,7 @@ export function createSidebarOutlineReporter(
     pendingNavigation = null;
     const source = getSource();
     if (!source || disposed) return;
+    if (enabled) bindScroll(source);
     const headings = projectHeadings(source.getHeadings());
     // A pending result retains mapped offsets but still has old identities.
     // Validate the latest click once parsing settles, before replacing its snapshot.

@@ -18,6 +18,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Kept optional block rendering idle when no code renderer is enabled, avoiding repeated code-block scans in Preview.
 - Fixed Select All in the active table cell while retaining full-document selection in Source.
 - Preserved rendered-text selections and delayed widget click ownership, and used the default cursor when viewing fullscreen images.
+- Fixed sidebar heading navigation after editing large documents, preserving pending clicks through passive layout scrolling.
 
 ## 0.3.40
 - Aligned HTML rendering across Live, Preview and exports, including omitted child end tags, native author-defined sizing and supported SVG fill rules, while preserving source-completion boundaries.

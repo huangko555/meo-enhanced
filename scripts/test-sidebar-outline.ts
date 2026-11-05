@@ -50,9 +50,16 @@ const timers = {
 const flush = () => { while (queue.length) queue.shift()!.run(); };
 
 let scrollListener: (() => void) | null = null;
+const interactionListeners = new Map<string, () => void>();
 const scrollElement = {
-  addEventListener: (_: string, listener: () => void) => { scrollListener = listener; },
-  removeEventListener: (_: string, listener: () => void) => { if (scrollListener === listener) scrollListener = null; }
+  addEventListener: (type: string, listener: () => void) => {
+    interactionListeners.set(type, listener);
+    if (type === 'scroll') scrollListener = listener;
+  },
+  removeEventListener: (type: string, listener: () => void) => {
+    if (interactionListeners.get(type) === listener) interactionListeners.delete(type);
+    if (type === 'scroll' && scrollListener === listener) scrollListener = null;
+  }
 } as unknown as EventTarget;
 let headings = [
   { level: 1, text: ' Intro ', from: 0, line: 1 },
@@ -99,20 +106,28 @@ reporter.schedule();
 reporter.reveal(endKey, posted.at(-1).snapshot);
 assert.deepEqual(scrolled, [9, 19], 'navigation resolves current source lines before the deferred publication');
 pending = true;
+const beforePendingReveal = scrolled.length;
 reporter.reveal(endKey, posted.at(-1).snapshot);
 assert.deepEqual(scrolled, [9, 19], 'pending cached headings cannot validate a stale navigation target');
+scrollListener!();
+reporter.refreshViewport();
 pending = false;
 flush();
+assert.equal(scrolled.length, beforePendingReveal + 1, 'passive layout scrolling must not discard the pending heading click');
 assert.equal(scrolled.at(-1), 19, 'the pending click navigates after complete identities are validated');
 const beforeCanceledNavigation = scrolled.length;
-for (const cancel of [() => scrollListener!(), () => reporter.schedule(), () => reporter.setEnabled(false)]) {
+const cancelByInteraction = ['wheel', 'pointerdown', 'keydown', 'beforeinput'].map(type => () => {
+  assert.ok(interactionListeners.has(type), type + ' owns cancellation of an older heading click');
+  interactionListeners.get(type)!();
+});
+for (const cancel of [...cancelByInteraction, () => reporter.schedule(), () => reporter.setEnabled(false)]) {
   pending = true;
   reporter.reveal(endKey, posted.at(-1).snapshot);
   cancel();
   pending = false;
   reporter.setEnabled(true);
   flush();
-  assert.equal(scrolled.length, beforeCanceledNavigation, 'new scrolling, edits and hiding retire a pending click');
+  assert.equal(scrolled.length, beforeCanceledNavigation, 'new user input, edits and hiding retire a pending click');
 }
 const beforePendingRename = scrolled.length;
 pending = true;
@@ -136,6 +151,7 @@ reporter.reveal(renamedKey, snapshotBeforeDuplicate);
 assert.equal(scrolled.length, beforeDuplicate, 'a delayed old row cannot select the new duplicate after publication');
 reporter.setEnabled(false);
 assert.equal(scrollListener, null, 'disabling releases the scroll listener');
+assert.equal(interactionListeners.size, 0, 'disabling releases all navigation interaction listeners');
 const resumedKey = outlineHeadingKeys(headings)[0];
 reporter.setEnabled(true);
 reporter.reveal(resumedKey, posted.at(-1).snapshot);
