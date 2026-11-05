@@ -4,13 +4,14 @@ import { createEditorHistoryApplication } from '../webview/src/application/edito
 import {
   createEditorHistoryEffectAdapter,
   type EditorHistoryEffectCapabilities,
+  type EditorHistoryRestoreAttempt,
   type EditorHistoryRestoreRequest
 } from '../webview/src/adapters/editorHistoryEffectAdapter';
 import { createEditorHistoryRuntime } from '../webview/src/adapters/editorHistoryRuntime';
 
 const events: string[] = [];
 const errors: string[] = [];
-let restoreResult: 'not-rendered' | 'restored' | 'retry' = 'not-rendered';
+let restoreResult: EditorHistoryRestoreAttempt = 'not-rendered';
 let scheduledRetry: (() => void) | null = null;
 let retryCancels = 0;
 let nativeResult: { applied: boolean; changedRange: { from: number; to: number } | null } = {
@@ -100,7 +101,25 @@ assert.equal(runtime.getState().pendingReplay, null);
 assert.equal(events.filter((event) => event === 'cancel-retry').length, 1);
 
 events.length = 0;
-restoreResult = 'retry';
+restoreResult = 'pending-presentation';
+await runtime.dispatch({ type: 'requestReplay', direction: 'undo' });
+let presentationSettled = false;
+const presentationCompletion = runtime.whenSettled().then(() => { presentationSettled = true; });
+for (let attempt = 0; attempt < 64; attempt++) {
+  assert.ok(scheduledRetry);
+  scheduledRetry();
+  await Promise.resolve();
+}
+assert.equal(presentationSettled, false, 'Pending presentation cannot exhaust the focus retry budget');
+assert.equal(runtime.getState().pendingReplay?.phase, 'restoring');
+assert.equal(events.some(event => event.startsWith('editor:')), false, 'A generic fallback cannot accept an unfinished presentation');
+restoreResult = 'restored';
+scheduledRetry!();
+await presentationCompletion;
+assert.equal(runtime.getState().pendingReplay, null);
+
+events.length = 0;
+restoreResult = 'pending-presentation';
 await runtime.dispatch({ type: 'requestReplay', direction: 'undo' });
 const staleRetry = scheduledRetry;
 assert.ok(staleRetry);
@@ -137,8 +156,8 @@ release();
 await Promise.all([rapidUndo, rapidRedo]);
 await runtime.whenIdle();
 assert.deepEqual(events, [
-  'commit', 'native:undo', 'boundary:6',
-  'commit', 'native:redo', 'boundary:7'
+  'commit', 'native:undo', 'boundary:7',
+  'commit', 'native:redo', 'boundary:8'
 ]);
 
 events.length = 0;
@@ -155,6 +174,22 @@ assert.equal(events.filter((event) => event === 'dispose').length, 1);
 assert.equal(await runtime.dispatch({ type: 'requestReplay', direction: 'redo' }), null);
 assert.equal(errors.length, 0);
 assert.ok(retryCancels >= 3, 'retry handles must be cancelled after completion, invalidation, and dispose');
+
+let genuineAttempts = 0, budgetFallbacks = 0;
+let budgetRetry: (() => void) | null = null;
+const budgetRuntime = createEditorHistoryRuntime(createEditorHistoryApplication(), createEditorHistoryEffectAdapter({
+  ...capabilities,
+  attemptBoundaryRestore: () => { genuineAttempts++; return 'retry'; },
+  restoreEditorInteraction: () => { budgetFallbacks++; },
+  scheduleFocusRetry: run => { budgetRetry = run; return () => {}; }
+}), error => errors.push(String(error)));
+await budgetRuntime.dispatch({ type: 'requestReplay', direction: 'undo' });
+for (let attempt = 1; attempt < 32; attempt++) budgetRetry!();
+await budgetRuntime.whenSettled();
+assert.equal(genuineAttempts, 32, 'Genuine focus recovery retains its original attempt bound');
+assert.equal(budgetFallbacks, 1);
+budgetRuntime.dispose();
+assert.equal(errors.length, 0);
 
 const restoreRequest: EditorHistoryRestoreRequest = {
   replayId: 99,

@@ -82,6 +82,62 @@ async function assertTallRenderedHistoryViewport(page: any): Promise<void> {
   for (const kind of ['mermaid', 'math'] as const) await assertTallNativeHistory(page, kind);
 }
 
+async function assertFormulaHistoryWaitsForDerivedPresentation(page: any): Promise<void> {
+  const text = ['$$', 'x = 1', '$$', '',
+    ...Array.from({ length: 12000 }, (_, index) => `Delayed history paragraph ${index}`)].join('\n');
+  await page.evaluate(text => {
+    const w = window as any;
+    w.__historyProductionEditor?.destroy(); document.getElementById('app')!.replaceChildren();
+    w.__historyProductionEditor = w.MermaidEditingHarness.createEditor({
+      parent: document.getElementById('app')!, text, initialMode: 'live', onApplyChanges() {}
+    });
+    if (!w.MermaidEditingHarness.usesLargeDocumentDerivedWorkBudget(w.__historyProductionEditor.view.state))
+      throw Error('The formula history fixture must use bounded derived work');
+  }, text);
+  await enterDisplayMathSource(page, '__historyProductionEditor', 1);
+  await page.keyboard.press('End'); await page.keyboard.type(' + 1');
+  await waitForFrames(page, 20);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__historyOriginalIdle = window.requestIdleCallback;
+    w.__historyHeldPresentation = [];
+    w.__historyHoldPresentation = true;
+    window.requestIdleCallback = (callback, options) => w.__historyOriginalIdle.call(window, (deadline: IdleDeadline) => {
+      if (w.__historyHoldPresentation) w.__historyHeldPresentation.push(() => callback(deadline));
+      else callback(deadline);
+    }, options);
+    w.__historyReturned = false;
+    w.__historyPendingUndo = w.__historyProductionEditor.undo().then((applied: boolean) => {
+      w.__historyReturned = true; return applied;
+    });
+  });
+  try {
+    await page.waitForFunction(() => (window as any).__historyHeldPresentation.length > 0, { timeout: 3000 });
+    // Hold the real presentation producer beyond the focus retry budget. A
+    // document transaction alone cannot complete the public history operation.
+    await waitForFrames(page, 64);
+    assert.equal(await page.evaluate(() => (window as any).__historyReturned), false,
+      'Formula history must remain pending while its derived presentation is held');
+  } finally {
+    await page.evaluate(() => {
+      const w = window as any;
+      w.__historyHoldPresentation = false;
+      window.requestIdleCallback = w.__historyOriginalIdle;
+      for (const release of w.__historyHeldPresentation.splice(0)) release();
+    });
+  }
+  assert.equal(await page.evaluate(() => (window as any).__historyPendingUndo), true);
+  const accepted = await page.evaluate(() => {
+    const editor = (window as any).__historyProductionEditor, view = editor.view;
+    return { text: editor.getText(), focused: view.hasFocus && document.activeElement === view.contentDOM,
+      line: view.state.doc.lineAt(view.state.selection.main.head).number,
+      sourceLines: view.contentDOM.querySelectorAll('.meo-math-source-line').length,
+      results: view.contentDOM.querySelectorAll('.meo-math-live-result').length };
+  });
+  assert.deepEqual(accepted, { text, focused: true, line: 2, sourceLines: 3, results: 1 },
+    'The accepted replay must expose the focused formula source and its result');
+}
+
 async function assertDistantNestedFormulaHistory(page: any): Promise<void> {
   const text = [
     ...Array.from({ length: 180 }, () => 'Leading history spacer.\n'),
@@ -591,6 +647,7 @@ async function main(): Promise<void> {
     await assertTallRenderedHistoryViewport(page);
     await assertDistantNestedFormulaHistory(page);
     await assertFormulaToolbarHistoryHitability(page);
+    await assertFormulaHistoryWaitsForDerivedPresentation(page);
     await page.evaluate(() => (window as any).__historyProductionEditor.destroy());
   } finally {
     await browser.close();

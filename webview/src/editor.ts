@@ -3118,7 +3118,7 @@ export function createEditor({
       if (!isCurrent()) return 'not-rendered';
       if (currentMode !== 'live') return 'not-rendered';
       const tableTarget = tableHistoryFocusAdapter.read(view.state);
-      if (!isLiveInputDerivedWorkReady(view.state) && !tableTarget?.contentOnly) return 'retry';
+      if (!isLiveInputDerivedWorkReady(view.state) && !tableTarget?.contentOnly) return 'pending-presentation';
       const changedRangeIsTable = tableTarget?.contentOnly || (request.changedRange
         ? isTableHistoryRange(view.state, request.changedRange)
         : false);
@@ -3192,7 +3192,8 @@ export function createEditor({
         if (!run) return 'not-rendered';
         pendingRenderedHistoryFocus = { replayId: request.replayId, run };
       }
-      if (!pendingRenderedHistoryFocus.run()) return 'retry';
+      if (!pendingRenderedHistoryFocus.run())
+        return isLiveInputDerivedWorkPending(view.state) ? 'pending-presentation' : 'retry';
       pendingRenderedHistoryFocus = null;
       return 'restored';
     },

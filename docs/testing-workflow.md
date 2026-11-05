@@ -179,6 +179,10 @@ public undo/redo promise completes, as well as after the existing twelve-frame
 history observation. Native text focus alone does not establish completed formula
 presentation while its accepted input generation is still pending. The existing
 history restore owner retains its original retry budget and cancellation rules.
+The production history browser contract holds the real idle presentation callback
+beyond that focus retry budget: the public operation must remain pending, then
+return focused paired source/results after release. Waiting for the presentation
+owner does not consume focus attempts; new input and disposal still cancel it.
 
 Retained Preview settings are covered by `test-preview-webview-adapter.ts`
 (cache invalidation, delayed preload/render retirement, coalescing and unchanged

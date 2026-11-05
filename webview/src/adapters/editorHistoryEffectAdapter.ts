@@ -16,7 +16,7 @@ export type EditorHistoryRestoreRequest = Extract<
   { readonly type: 'restoreHistoryInteraction' }
 >;
 
-export type EditorHistoryRestoreAttempt = 'not-rendered' | 'restored' | 'retry';
+export type EditorHistoryRestoreAttempt = 'not-rendered' | 'restored' | 'retry' | 'pending-presentation';
 
 export type EditorHistoryEffectCapabilities = {
   captureContext(): EditorHistoryContext;
@@ -76,7 +76,6 @@ export function createEditorHistoryEffectAdapter(
 
       const attempt = (): void => {
         if (generation !== restoreGeneration || settleRestore !== resolve) return;
-        attempts += 1;
         try {
           const result = capabilities.attemptBoundaryRestore(request, isCurrent);
           if (result === 'restored') {
@@ -88,7 +87,9 @@ export function createEditorHistoryEffectAdapter(
             finish({ type: 'interactionRestored', replayId: request.replayId });
             return;
           }
-          if (attempts >= maxRestoreAttempts) {
+          // Deferred presentation owns its completion and cancellation. Waiting
+          // for it is not a failed focus attempt and must not certify a fallback.
+          if (result !== 'pending-presentation' && ++attempts >= maxRestoreAttempts) {
             capabilities.restoreEditorInteraction(request, isCurrent);
             finish({ type: 'interactionRestored', replayId: request.replayId });
             return;
