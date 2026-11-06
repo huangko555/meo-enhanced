@@ -1224,6 +1224,10 @@ Worker source and WASM fetches share the existing startup timeout rather than a
 shorter independent asset deadline. The real HTTP/Worker contract includes slow
 successful asset responses, while preserving unavailable-resource recovery and
 the no-progress watchdog.
+The giant-code Preview contract holds later Worker token packets after the first
+colored reading band, navigates to a deep search result, then releases the packets.
+The active match must survive token projection through the existing search owner;
+waiting for complete syntax before searching does not cover this boundary.
 The background-demotion unit check explicitly advances reading-pause timers and
 idle callbacks, including fast polling turns. A fixed count of zero-delay timer
 callbacks does not prove that a real 50ms pause expired on every operating system.

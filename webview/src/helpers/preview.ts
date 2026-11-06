@@ -1449,6 +1449,13 @@ export function createPreviewController({
     return () => !disposed && isSourceColoringEnabled() && (latestPayload?.preset ?? 'default') === presetPreference && generation === frameGeneration
       && activeFrameDocument === frameDocument;
   };
+  const applyCodeHighlight = (frameDocument: Document): void => {
+    if (!applyPreviewCodeHighlight(frameDocument, true, currentCodeHighlight(frameDocument)) || !searchQuery) return;
+    // Token spans replace text nodes that may own visible Find marks. The
+    // existing search owner retains its logical anchor and projects it again.
+    search.invalidate();
+    if (!host.hidden) (previewDocumentSearch ?? search).surfaceReady();
+  };
   const cancelHighlightFrame = () => {
     if (highlightFrame !== null) window.cancelAnimationFrame(highlightFrame);
     if (highlightTimer !== null) window.clearTimeout(highlightTimer);
@@ -1473,7 +1480,7 @@ export function createPreviewController({
         addPreviewCodeCopyControls(frameDocument, uiLanguage);
         refreshDocumentBlocks?.(frameDocument);
         if (currentCodeHighlight(frameDocument)()) {
-          applyPreviewCodeHighlight(frameDocument, true, currentCodeHighlight(frameDocument));
+          applyCodeHighlight(frameDocument);
         }
         ensureReadableCode(frameDocument, false);
         if (frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true' && latestPayload?.hasMermaid) {
@@ -1547,7 +1554,7 @@ export function createPreviewController({
       return;
     }
     if (!disposed && isSourceColoringEnabled() && activeFrameDocument) {
-      applyPreviewCodeHighlight(activeFrameDocument, true, currentCodeHighlight(activeFrameDocument));
+      applyCodeHighlight(activeFrameDocument);
     }
   }, 'preview');
 
@@ -1997,7 +2004,7 @@ export function createPreviewController({
   const syncPreviewCodeHighlight = (frameDocument: Document): void => {
     syncDocumentBackground(frameDocument);
     frameDocument.documentElement.dataset.meoPreviewSourceColoring = String(isSourceColoringEnabled());
-    if (isSourceColoringEnabled()) applyPreviewCodeHighlight(frameDocument, true, currentCodeHighlight(frameDocument));
+    if (isSourceColoringEnabled()) applyCodeHighlight(frameDocument);
   };
 
   const syncPreviewCopyPalette = (frameDocument: Document): void => {

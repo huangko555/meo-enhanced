@@ -9,6 +9,29 @@ let primary: unknown;
 let stage = 'open';
 try {
   const page = await browser.newPage();
+  await page.evaluateOnNewDocument(() => {
+    const scope = window as any;
+    const descriptor = Object.getOwnPropertyDescriptor(Worker.prototype, 'onmessage')!;
+    scope.__heldSyntax = [];
+    scope.__syntaxReleased = false;
+    scope.__releaseSyntax = () => {
+      scope.__syntaxReleased = true;
+      for (const deliver of scope.__heldSyntax.splice(0)) deliver();
+    };
+    // Hold delivery after the first colored band; keep real Worker computation.
+    Object.defineProperty(Worker.prototype, 'onmessage', {
+      configurable: true,
+      get() { return descriptor.get!.call(this); },
+      set(listener) {
+        descriptor.set!.call(this, (event: MessageEvent) => {
+          const data = event.data;
+          if (!scope.__syntaxReleased && data?.tokens?.rows instanceof Uint32Array && data.fromLine >= 256) {
+            scope.__heldSyntax.push(() => listener?.call(this, event));
+          } else listener?.call(this, event);
+        });
+      }
+    });
+  });
   const host = await open(page, '```javascript\n' + source + '\n```', false, 'preview');
   try {
     await page.evaluate(() => {
@@ -57,6 +80,13 @@ try {
       const match = doc.querySelector('.meo-preview-search-match.is-active'), rect = match?.getBoundingClientRect();
       return match?.textContent === 'row9000' && rect && rect.bottom > 0 && rect.top < doc.defaultView!.innerHeight;
     });
+    await page.waitForFunction(() => (window as any).__heldSyntax.length > 0);
+    assert.equal(await page.evaluate(() => document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
+      ?.querySelector('.meo-preview-search-match.is-active')?.textContent), 'row9000',
+    'Search must navigate while later syntax results remain held');
+    await page.evaluate(()=>(window as any).__releaseSyntax());
+    await page.waitForFunction(()=>document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector<HTMLElement>('[data-source-line="9002"].meo-export-code-line-source')?.dataset.meoShiki);
+    await page.waitForFunction(()=>document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('.meo-preview-search-match.is-active')?.textContent==='row9000');
     await page.click('.find-close-button'); await frames(page, 12);
     stage = 'deep highlight';
     await page.waitForFunction(() => {
@@ -152,7 +182,7 @@ try {
         query: document.querySelector<HTMLInputElement>('.find-input')?.value,
         previewInert: doc?.documentElement.inert, match: match?.textContent,
         matchRect: rect && { top: rect.top, bottom: rect.bottom },
-        rows: doc?.querySelectorAll('.meo-export-code-line-source').length };
+        rows:doc?.querySelectorAll('.meo-export-code-line-source').length,first:doc?.querySelector<HTMLElement>('.meo-export-code-line-source')?.dataset.sourceLine,last:[...doc?.querySelectorAll<HTMLElement>('.meo-export-code-line-source')??[]].at(-1)?.dataset.sourceLine,held:(window as any).__heldSyntax?.length,released:(window as any).__syntaxReleased,marks:doc?.querySelectorAll('.meo-preview-search-match').length };
     }).catch(() => ({ unavailable: true })));
     throw error;
   } finally { host.dispose(); await page.close(); }

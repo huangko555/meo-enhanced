@@ -86,9 +86,10 @@ export function hasAppliedPreviewCodeHighlight(root: ParentNode): boolean {
   return requests.every(request => request.sources.some(source => source.dataset.meoShiki === request.version));
 }
 
-/** Projects the exact Shiki tokens used by Live mode onto an already-rendered Preview code block. */
-export function applyPreviewCodeHighlight(frameDocument: Document, nearViewportOnly = false, isCurrent: () => boolean = () => true): void {
-  if (!isCurrent()) return;
+/** Projects exact Shiki tokens and reports whether it replaced reading-row DOM. */
+export function applyPreviewCodeHighlight(frameDocument: Document, nearViewportOnly = false, isCurrent: () => boolean = () => true): boolean {
+  if (!isCurrent()) return false;
+  let changed = false;
   const nearby = nearViewportOnly ? getPreviewViewportResources(frameDocument, 'code') : undefined;
   const codes = nearby ?? Array.from(frameDocument.querySelectorAll<HTMLElement>('code.hljs'));
   const height = nearViewportOnly ? frameDocument.documentElement.clientHeight : 0;
@@ -132,6 +133,8 @@ export function applyPreviewCodeHighlight(frameDocument: Document, nearViewportO
       }
       sourceElement.replaceChildren(fragment);
       sourceElement.dataset.meoShiki = themeVersion;
+      changed = true;
     }
   }
+  return changed;
 }

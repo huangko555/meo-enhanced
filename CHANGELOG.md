@@ -10,6 +10,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Kept syntax highlighting and Source-mode preparation working through VS Code's Webview resource boundary.
 - Presented initial code colors while long fences continue highlighting on slower machines, retaining inactivity protection and bounded Live updates.
 - Let slow syntax resources finish within the bounded worker startup budget instead of failing early.
+- Preserved Preview search matches when background syntax results update code rows.
 - Prevented unavailable saved revisions from repeatedly refreshing comparisons, retaining explicit retry and recovery when the saved file becomes readable.
 - Added the Explorer's MEO Outline view for the most recently focused MEO document, with shared split-editor navigation, current-heading selection, six-level expansion and retained collapse state.
 - Added an explicit, default-off LaTeX delimiter switch in the Settings popover and More Settings → General, with consistent `\(...\)` and `\[...\]` parsing, completion, source highlighting, Live tables, Preview and exports. GitHub README retains its fixed math syntax.
