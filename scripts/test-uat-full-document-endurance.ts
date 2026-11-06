@@ -1,3 +1,4 @@
+import { installPackagedMermaid } from './mermaid-runtime-test-helpers';
 import { enterMermaidSource, setMermaidLayout } from './history-mermaid-chromium';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1169,7 +1170,7 @@ async function main(): Promise<void> {
     await page.addStyleTag({
       content: ':root{--meo-background:#24292e;--meo-foreground:#e6edf3;--meo-code-background:#1b1f23;--meo-surface-background:#24292e;--meo-semantic-mutedForeground:#8b949e;--meo-font-live:Arial;--meo-font-live-weight:400;--meo-font-live-size:16px;--meo-font-source:monospace;--meo-font-source-weight:400;--meo-font-source-size:14px;--vscode-editor-font-family:monospace;--vscode-editor-font-size:14px;--vscode-editor-line-height:20px}'
     });
-    await page.addScriptTag({ path: path.join(repoRoot, 'webview', 'dist', 'mermaid.min.js') });
+    await installPackagedMermaid(page);
     if (!await page.evaluate(() => typeof (window as any).mermaid?.render === 'function')) {
       throw new Error('Full-document UAT requires the packaged Mermaid runtime');
     }

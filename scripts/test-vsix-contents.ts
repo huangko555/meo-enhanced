@@ -52,7 +52,6 @@ const requiredFiles = [
   archive ? 'changelog.md' : 'CHANGELOG.md',
   archive ? 'LICENSE.txt' : 'LICENSE',
   'THIRD_PARTY_NOTICES.md',
-  'logo.png',
   'media/outline.svg',
   'dist/extension.js',
   'dist/export-runtime.js',
@@ -70,7 +69,10 @@ const requiredFiles = [
   'webview/dist/logo.png',
   'webview/dist/mermaid.min.js',
   'webview/dist/mermaid/mermaidRuntime.js',
-  'webview/dist/mermaid/elk-layout-worker.js',
+  'webview/dist/mermaid/core.js',
+  'webview/dist/mermaid/loader.js',
+  'webview/dist/mermaid/preload.json',
+  'webview/dist/mermaid/elk-worker-source.js',
   'webview/dist/mermaid/elk-LICENSE.md',
   'webview/dist/package.json',
   'webview/dist/shiki-language-assets.json',
@@ -78,6 +80,23 @@ const requiredFiles = [
 ];
 for (const path of requiredFiles) {
   if (!included.has(path)) throw new Error(`VSIX listing is missing required file ${path}`);
+}
+if (included.has('logo.png') || !included.has(packagedManifest.icon)
+  || !(await readIncludedFile(packagedManifest.icon)).equals(readFileSync(resolve(repoRoot, 'logo.png')))) {
+  throw new Error('The package icon and Webview must share the unchanged logo asset');
+}
+const mermaidPreloads = JSON.parse((await readIncludedFile('webview/dist/mermaid/preload.json')).toString('utf8'));
+if (!Array.isArray(mermaidPreloads) || !mermaidPreloads.includes('core.js') || mermaidPreloads.some(name =>
+  typeof name !== 'string' || !/^[a-zA-Z0-9_-]+\.js$/.test(name) || !included.has(`webview/dist/mermaid/${name}`))) {
+  throw new Error('Mermaid preloads must reference existing local core modules');
+}
+if ((await readIncludedFile('webview/dist/mermaid.min.js')).length > 16_384
+  || included.has('webview/dist/mermaid/elk-layout-worker.js')) {
+  throw new Error('Mermaid must share its module graph and worker instead of shipping duplicate distributions');
+}
+const elkSource = readFileSync(resolve(repoRoot, 'node_modules/elkjs/lib/elk-worker.min.js'), 'utf8');
+if (!(await readIncludedFile('webview/dist/mermaid/elk-worker-source.js')).toString('utf8').includes(JSON.stringify(elkSource))) {
+  throw new Error('The shared ELK asset must preserve the official worker source');
 }
 const wasmPath = 'webview/dist/onig.wasm';
 const wasm = await readIncludedFile(wasmPath);
@@ -102,7 +121,7 @@ if (files.some(path => path.startsWith(fontRoot) && !path.endsWith('.woff2'))) {
   throw new Error('Formula fonts must use the single supported WOFF2 format');
 }
 const notices = (await readIncludedFile('THIRD_PARTY_NOTICES.md')).toString('utf8');
-for (const [dependency, licensePath] of [['jsonc-parser 3.3.1', 'jsonc-parser/LICENSE.md'], ['PostCSS 8.5.6', 'postcss/LICENSE']]) {
+for (const [dependency, licensePath] of [['jsonc-parser 3.3.1', 'jsonc-parser/LICENSE.md'], ['PostCSS 8.5.6', 'postcss/LICENSE'], ['SystemJS 6.15.1', 'systemjs/LICENSE']]) {
   if (!notices.includes(`## ${dependency}`)) throw new Error(`Bundled preset dependency is missing its license notice: ${dependency}`);
   const licenseText = readFileSync(resolve(repoRoot, 'node_modules', licensePath), 'utf8').trim().replaceAll('\r\n', '\n');
   if (!notices.replaceAll('\r\n', '\n').includes(licenseText)) throw new Error(`Bundled preset dependency license differs from the upstream notice: ${dependency}`);

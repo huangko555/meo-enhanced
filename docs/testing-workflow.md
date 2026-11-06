@@ -1376,6 +1376,13 @@ pie charts are checked in both themes, Word drawing bounds against actual page
 margins, and PDF heading/description/diagram pagination. Build first.
 This focused pack typically takes less than a minute.
 
+`bun scripts/test-mermaid-module-runtime.ts` checks the shared lazy asset graph
+under the production CSP, non-executing Source prefetch without duplicate
+downloads, concurrent consumers, unchanged official geometry, worker-load
+failure/retry, and relocated offline HTML opened through ordinary `file:` URLs.
+`test-preview-mermaid-runtime.ts` also checks classic loading with nonce-only
+script authorization. Build first; the same graph serves editors and exports.
+
 `bun scripts/test-fenced-code-boundaries.ts` checks Source/Live coloring and real
 Mermaid source typing at unfinished fences, including quote/list exits, nested
 quotes, ordered lists, deleting a closer, authoring an unfinished diagram, and exact document undo/redo. It also

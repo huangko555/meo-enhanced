@@ -1,3 +1,4 @@
+import { installPackagedMermaid } from './mermaid-runtime-test-helpers';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { launchTestBrowser, closeTestBrowser } from './browser-test-helpers';
@@ -34,7 +35,7 @@ try {
     content:
       ':root{--meo-font-live:Arial;--meo-font-source:monospace;--meo-font-live-size:16px;--meo-font-source-size:14px}'
   });
-  await page.addScriptTag({ content: fs.readFileSync('webview/dist/mermaid.min.js', 'utf8') });
+  await installPackagedMermaid(page);
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
   const frames = (count = 8) =>
     page.evaluate(async (count) => {

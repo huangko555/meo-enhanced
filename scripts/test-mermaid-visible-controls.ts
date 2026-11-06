@@ -1,3 +1,4 @@
+import { installPackagedMermaid } from './mermaid-runtime-test-helpers';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { assertReadableMermaidTasks } from './mermaid-contrast-helpers';
@@ -426,7 +427,7 @@ try {
   assert.equal(await page.$('.meo-mermaid-preview-controls'), null, 'Disposal removes the group');
   // Real width-dependent SVG layout and very wide diagrams need more than a
   // mocked aspect ratio: a Gantt rendered in a collapsed host is already cramped.
-  await page.addScriptTag({ path: 'webview/dist/mermaid.min.js' });
+  await installPackagedMermaid(page);
   const wideSource = 'flowchart LR\n  A[需求] --> B[调研] --> C[设计] --> D[评审] --> E[开发] --> F[测试] --> G[修订] --> H[验收] --> I[交付] --> J[归档]';
   const ganttSource = 'gantt\n  title 示例项目计划\n  dateFormat YYYY-MM-DD\n  axisFormat %m-%d\n  section 设计\n  调研 :done, a1, 2026-10-01, 3d\n  方案 :done, a2, after a1, 4d\n  section 实施\n  开发 :active, b1, after a2, 8d\n  测试 :b2, after b1, 5d\n  section 交付\n  验收 :milestone, c1, after b2, 0d';
   for (const width of [520, 1100]) for (const light of [false, true]) {

@@ -1,3 +1,4 @@
+import { installPackagedMermaid } from './mermaid-runtime-test-helpers';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,7 +20,7 @@ try {
   await page.addStyleTag({ content: fs.readFileSync(path.join(katexDirectory, 'katex.min.css'), 'utf8').replace(/url\((fonts\/[^)]+)\)/g, (_match, file) =>
     `url(data:font/${path.extname(file).slice(1)};base64,${fs.readFileSync(path.join(katexDirectory, file)).toString('base64')})`) });
   await page.addStyleTag({ content: ':root{--meo-font-live:Arial;--meo-font-live-size:16px;--meo-font-source:monospace;--meo-font-source-size:16px;--meo-semantic-codeCopyBackground:transparent;--meo-semantic-codeCopyHoverBackground:rgba(127,127,127,.2)}' });
-  await page.addScriptTag({ content: fs.readFileSync('webview/dist/mermaid.min.js', 'utf8') });
+  await installPackagedMermaid(page);
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
   const settle = (count = 8) => page.evaluate(async count => {
     for (let i = 0; i < count; i++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));

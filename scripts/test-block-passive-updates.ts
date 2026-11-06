@@ -1,3 +1,4 @@
+import { installPackagedMermaid } from './mermaid-runtime-test-helpers';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import sharp from 'sharp';
@@ -14,7 +15,7 @@ try {
   await page.setViewport({ width: 1200, height: 1100 });
   await page.setContent('<!doctype html><meta charset="utf-8"><style>html,body,#app{height:100%;margin:0}</style><div id="app" class="editor-host"></div>');
   await page.addStyleTag({ path: 'webview/src/styles.css' });
-  await page.addScriptTag({ content: fs.readFileSync('webview/dist/mermaid.min.js', 'utf8') });
+  await installPackagedMermaid(page);
   await page.addScriptTag({ content: await bundle.outputs[0]!.text() });
   const frames = (count = 16) => page.evaluate(async count => {
     for (let i = 0; i < count; i++) await new Promise(resolve => requestAnimationFrame(resolve));

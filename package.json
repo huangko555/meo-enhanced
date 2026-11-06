@@ -6,7 +6,7 @@
   "publisher": "huangko555",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
-  "icon": "logo.png",
+  "icon": "webview/dist/logo.png",
   "engines": {
     "vscode": "^1.94.0"
   },
@@ -794,6 +794,7 @@
     "@types/sanitize-html": "^2.16.0",
     "@vscode/vsce": "3.9.2",
     "jszip": "3.10.2",
+    "systemjs": "6.15.1",
     "typescript": "^5.9.3",
     "vscode-uri": "3.0.8"
   },

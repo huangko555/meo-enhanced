@@ -1,3 +1,4 @@
+import { installPackagedMermaid } from './mermaid-runtime-test-helpers';
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
@@ -281,7 +282,7 @@ try {
   assert.deepEqual(await camera(), { zoom: 1, panX: 0, panY: 0 }, 'Reset recovers offscreen embedded content');
   stage = 'real Mermaid runtime';
   await page.evaluate(() => (window as any).viewportEditor.destroy());
-  await page.addScriptTag({ path: 'webview/dist/mermaid.min.js' });
+  await installPackagedMermaid(page);
   await page.evaluate(() => {
     document.querySelector('#app')!.replaceChildren();
     (window as any).MermaidEditingHarness.refreshMermaidTheme();

@@ -6,6 +6,7 @@ out/**
 output/**
 tmp/**
 node_modules/**
+logo.png
 patches/**
 bun.lock
 tsconfig.json

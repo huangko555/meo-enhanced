@@ -26,8 +26,8 @@
         "@lezer/markdown": "1.6.3",
         "@shyang1012/docx-convert": "2.1.2",
         "@types/vscode": "1.94.0",
-        "elkjs": "0.9.3",
         "@unified-latex/unified-latex-util-parse": "1.8.4",
+        "elkjs": "0.9.3",
         "highlight.js": "^11.11.1",
         "htmlparser2": "10.0.0",
         "image-size": "2.0.4",
@@ -52,6 +52,7 @@
         "@types/sanitize-html": "^2.16.0",
         "@vscode/vsce": "3.9.2",
         "jszip": "3.10.2",
+        "systemjs": "6.15.1",
         "typescript": "^5.9.3",
         "vscode-uri": "3.0.8",
       },
@@ -1190,6 +1191,8 @@
     "supports-color": ["supports-color@7.2.0", "", { "dependencies": { "has-flag": "^4.0.0" } }, "sha512-qpCAvRl9stuOHveKsn7HncJRvv501qIacKzQlO/+Lwxc9+0q2wLyv4Dfvt80/DPn2pqOBsJdDiogXGR9+OvwRw=="],
 
     "supports-hyperlinks": ["supports-hyperlinks@3.2.0", "", { "dependencies": { "has-flag": "^4.0.0", "supports-color": "^7.0.0" } }, "sha512-zFObLMyZeEwzAoKCyu1B91U79K2t7ApXuQfo8OuxwXLDgcKxuwM+YvcbIhm6QWqz7mHUH1TVytR1PwVVjEuMig=="],
+
+    "systemjs": ["systemjs@6.15.1", "", {}, "sha512-Nk8c4lXvMB98MtbmjX7JwJRgJOL8fluecYCfCeYBznwmpOs8Bf15hLM6z4z71EDAhQVrQrI+wt1aLWSXZq+hXA=="],
 
     "table": ["table@6.9.0", "", { "dependencies": { "ajv": "^8.0.1", "lodash.truncate": "^4.4.2", "slice-ansi": "^4.0.0", "string-width": "^4.2.3", "strip-ansi": "^6.0.1" } }, "sha512-9kY+CygyYM6j02t5YFHbNz2FN5QmYGv9zAjVp4lCDjlCw7amdckXlEt/bjMhUIfj4ThGRE4gCUH5+yGnNuPo5A=="],
 

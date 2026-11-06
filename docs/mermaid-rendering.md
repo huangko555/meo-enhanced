@@ -1,16 +1,20 @@
 # Mermaid rendering
 
-The extension ships Mermaid 12.0.0's official single-file browser runtime. ELK is
-bundled and is the default for flowcharts, state, class and ER diagrams. Leave the
+The extension ships one lazy module graph built from Mermaid 12.0.0. SystemJS
+loads the same graph in the editor and exported HTML, including directly opened
+local files. The editor's native ESM entry and the export script are small
+bridges to that graph. ELK is the default for flowcharts, state, class and ER diagrams. Leave the
 global layout unset so mindmaps retain their dedicated cose-bilkent layout.
 The host selects `classic` and the customizable `base` theme. Diagram authors can
 still override the layout, theme, look and `classDef` colors in their source.
 
 Live, Preview and export share the editor's gray surfaces and blue accents in
 `src/shared/mermaidPalette.ts`. Preview follows its selected light/dark appearance;
-HTML, PDF and Word retain the existing light export page. Fonts continue to follow
-the reading surface. The build copies the official runtime into the extension;
-rendering does not need a CDN or an additional ELK loader.
+HTML and PDF follow the selected reading appearance; Word uses a light page. Fonts continue to follow
+the reading surface. The build preserves all diagram loaders and wraps the unchanged official ELK
+worker source in a loadable module. Layout still runs in a dedicated Blob Worker,
+with the existing queue, timeout, cancellation and idle-retirement policy.
+Rendering loads only packaged resources.
 
 Ordinary diagrams use neutral nodes, text and sequence notes; connections use the
 existing blue accent. Pie charts use twelve opaque official Catppuccin Mocha

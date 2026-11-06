@@ -1,3 +1,4 @@
+import { installPackagedMermaid } from './mermaid-runtime-test-helpers';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import type { Page } from 'puppeteer-core';
@@ -83,7 +84,7 @@ try {
       await page.setViewport({ width, height: 900 });
       await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
       await page.addStyleTag({ path: 'webview/src/styles.css' });
-      await page.addScriptTag({ path: 'webview/dist/mermaid.min.js' });
+      await installPackagedMermaid(page);
       await page.exposeFunction('__renderScrollPreview', (message: any) => {
         if (message.type !== 'requestPreviewRender') return null;
         return { type: 'previewRenderResult', requestId: message.requestId,

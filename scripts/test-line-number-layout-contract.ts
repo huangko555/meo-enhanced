@@ -1,3 +1,4 @@
+import { installPackagedMermaid } from './mermaid-runtime-test-helpers';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,7 +19,7 @@ try {
   await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app" class="editor-host"></div>');
   await page.addStyleTag({ path: 'webview/src/styles.css' });
   await page.addStyleTag({ content: ':root{--meo-font-live:Arial;--meo-font-live-size:16px;--meo-font-source:Consolas,monospace;--meo-font-source-size:14px}' });
-  await page.addScriptTag({ content: fs.readFileSync('webview/dist/mermaid.min.js', 'utf8') });
+  await installPackagedMermaid(page);
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
   await page.evaluate(uri => {
     document.body.dataset.meoMarkdownWorkerSrc = uri;

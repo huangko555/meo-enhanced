@@ -1,3 +1,4 @@
+import { installPackagedMermaid } from './mermaid-runtime-test-helpers';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
 import type { Browser } from 'puppeteer-core';
@@ -194,7 +195,7 @@ export async function checkMermaidInputContinuity(browser: Browser, bundle: stri
           }
         };
       }, await worker.outputs[0].text());
-      await page.addScriptTag({ path: 'webview/dist/mermaid.min.js' });
+      await installPackagedMermaid(page);
       await page.evaluate(() => {
         const g = window as any, render = g.mermaid.render.bind(g.mermaid);
         g.continuityRenderRequests = [];

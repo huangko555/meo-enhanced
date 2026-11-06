@@ -1,3 +1,4 @@
+import { installPackagedMermaid } from './mermaid-runtime-test-helpers';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import darkPlus from '@shikijs/themes/dark-plus';
@@ -16,7 +17,7 @@ try {
   await page.setViewport({ width: 1020, height: 720 });
   await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
   await page.addStyleTag({ path: 'webview/src/styles.css' });
-  await page.addScriptTag({ path: 'webview/dist/mermaid.min.js' });
+  await installPackagedMermaid(page);
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
   const prepare = async (text: string, theme: typeof darkPlus, mode = 'live') => {
     await page.evaluate(({ text, theme, mode }) => {

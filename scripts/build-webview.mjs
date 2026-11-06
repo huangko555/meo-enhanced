@@ -3,6 +3,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { bundledLanguagesInfo } from 'shiki/langs';
 import { sharedShikiWasmPlugin } from './shiki-wasm-plugin.mjs';
+import { buildMermaidRuntime } from './build-mermaid-runtime.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const dist = path.join(root, 'webview', 'dist');
@@ -44,21 +45,7 @@ const markdownWorkerBuild = spawnSync(process.execPath, [
   '--minify', '--outfile=webview/dist/markdown-parse-worker.js'
 ], { cwd: root, stdio: 'inherit' });
 if (markdownWorkerBuild.status !== 0) process.exit(markdownWorkerBuild.status ?? 1);
-const mermaidModuleBuild = await Bun.build({
-  entrypoints: [path.join(root, 'webview/src/mermaidRuntime.ts')], target: 'browser', format: 'esm',
-  splitting: true, minify: true, outdir: path.join(dist, 'mermaid'),
-  plugins: [{ name: 'mermaid-off-thread-elk', setup(builder) {
-    builder.onResolve({ filter: /^elkjs\/lib\/elk\.bundled\.js$/ }, () => ({
-      path: path.join(root, 'webview/src/adapters/mermaidElkLayout.ts')
-    }));
-  } }]
-});
-if (!mermaidModuleBuild.success) throw new Error(mermaidModuleBuild.logs.map(String).join('\n'));
-console.log(`Built split Mermaid runtime (${mermaidModuleBuild.outputs.length} assets), with off-thread ELK`);
-// Use ELK's official standalone worker. Its simulated-worker constructor cannot
-// be instantiated inside another worker, and rebundling Browserify breaks shims.
-cpSync(path.join(root, 'node_modules/elkjs/lib/elk-worker.min.js'), path.join(dist, 'mermaid/elk-layout-worker.js'));
-cpSync(path.join(root, 'node_modules/elkjs/LICENSE.md'), path.join(dist, 'mermaid/elk-LICENSE.md'));
+await buildMermaidRuntime(root, dist);
 
 const buildMetadata = build.metafile;
 const languageModules = new Map();
@@ -88,7 +75,6 @@ writeFileSync(
 
 cpSync(path.join(root, 'webview', 'src', 'styles.css'), path.join(dist, 'index.css'));
 cpSync(path.join(root, 'logo.png'), path.join(dist, 'logo.png'));
-cpSync(path.join(root, 'node_modules', 'mermaid', 'dist', 'mermaid.min.js'), path.join(dist, 'mermaid.min.js'));
 const katexSourceDir = path.join(root, 'node_modules', 'katex', 'dist');
 const katexCss = readFileSync(path.join(katexSourceDir, 'katex.min.css'), 'utf8');
 

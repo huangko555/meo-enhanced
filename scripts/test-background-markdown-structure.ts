@@ -92,7 +92,7 @@ const workerBuild = await Bun.build({ entrypoints: ['webview/src/markdownParseWo
     builder.onLoad({ filter: /[\\/]katex[\\/]dist[\\/]katex\.(?:js|mjs)$/ }, () => ({ loader: 'js', contents:
       'throw new Error("Source structure must not initialize the formula renderer"); export default {};' }));
     builder.onLoad({ filter: /webview[\\/]src[\\/]markdownDocumentContext\.ts$/ }, async ({ path }) => {
-      const source = await Bun.file(path).text(), marker = '  const state = EditorState.create({ doc, extensions: EditorState.tabSize.of(tabSize) });';
+      const source = await Bun.file(path).text(), marker = '  const state = EditorState.create({ doc, extensions: [EditorState.tabSize.of(tabSize), latexDelimitersFacet.of(latexDelimiters)] });';
       assert.equal(source.split(marker).length, 2);
       return { loader: 'ts', contents: source.replace(marker,
         '  (globalThis as any).__contextPreparations = ((globalThis as any).__contextPreparations ?? 0) + 1;\n' + marker) };
