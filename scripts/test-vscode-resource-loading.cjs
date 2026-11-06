@@ -90,6 +90,12 @@ exports.run = async () => {
         await frame.waitForFunction(sourceReady);
         record.initialSourceMs = performance.now() - started;
         await click('button[data-mode="live"]');
+      } else if (record.initialMode === 'preview') {
+        await frame.waitForFunction(() => document.querySelector('.preview-host')?.hidden === false
+          && document.querySelector('.preview-loading')?.hidden === true
+          && document.querySelector('.preview-frame')?.contentDocument?.documentElement.inert === false);
+        record.initialPreviewMs = performance.now() - started;
+        await click('button[data-mode="live"]');
       }
       await frame.waitForFunction(colorsReady);
       await frame.waitForFunction(() => document.getElementById('app')?.dataset.mode === 'live'
@@ -114,9 +120,9 @@ exports.run = async () => {
         view.focus();
       });
       const marker = ' native edit';
-      await frame.type('.editor-host .cm-content', marker);
-      await frame.waitForFunction(length => document.querySelector('.editor-host .cm-content').cmTile.root.view.state.doc.length === length, {}, original.length + marker.length);
       const page = frame.page();
+      await page.keyboard.sendCharacter(marker);
+      await frame.waitForFunction(length => document.querySelector('.editor-host .cm-content').cmTile.root.view.state.doc.length === length, {}, original.length + marker.length);
       const control = async key => {
         await page.keyboard.down('Control');
         try { await page.keyboard.press(key); } finally { await page.keyboard.up('Control'); }

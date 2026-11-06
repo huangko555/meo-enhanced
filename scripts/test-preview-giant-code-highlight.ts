@@ -15,7 +15,11 @@ const entry = path.join(temporary, 'entry.ts');
 fs.writeFileSync(entry, `
   import * as highlight from ${JSON.stringify(path.resolve('webview/src/helpers/previewCodeHighlight.ts'))};
   import { activateShikiCodeHighlighting, setShikiTheme } from ${JSON.stringify(path.resolve('webview/src/helpers/shikiHighlighter.ts'))};
+  import * as resources from ${JSON.stringify(path.resolve('webview/src/helpers/previewViewportResources.ts'))};
+  import { writePreviewFrame } from ${JSON.stringify(path.resolve('webview/src/helpers/previewFrameWriter.ts'))};
   (window as any).highlight = highlight;
+  (window as any).resources = resources;
+  (window as any).writeFrame = writePreviewFrame;
   (window as any).release = activateShikiCodeHighlighting('preview');
   (window as any).theme = (color: string) => setShikiTheme({name: color, type: 'dark',
     tokenColors: [{scope: ['keyword', 'storage.type'], settings: {foreground: color}},
@@ -69,6 +73,37 @@ try {
     if (stage === 'middle') assert.equal(result.bracketColor, 'rgb(218, 112, 214)', 'Visible brackets must retain nesting from offscreen preceding lines');
   }
   await page.evaluate(() => (window as any).release());
+  const sandbox = '<!--'+ 'streamed'.repeat(20000) +'--><code id="first" class="hljs language-javascript">const first = 1;</code><div class="gap"></div><code id="last" class="hljs language-javascript">const last = 2;</code><script>parent.authorScriptExecuted=true</script>';
+  await page.setContent('<style>html,body{margin:0;height:100%}iframe{width:100%;height:100%;border:0}</style><iframe sandbox="allow-same-origin"></iframe>');
+  await page.addScriptTag({content:await build.outputs[0]!.text()});
+  await page.evaluate(html => new Promise<void>(resolve => {
+    (window as any).writeFrame(document.querySelector('iframe'),
+      '<!doctype html><html data-meo-preview-large-document="true"><head><style>body{margin:0}code{display:block;height:100px}.gap{height:3000px}</style></head><body>',html,'</body></html>',()=>true,resolve);
+  }),sandbox);
+  await page.evaluate(() => {
+    const frame=document.querySelector('iframe')!;
+    if(frame.sandbox.contains('allow-scripts'))throw new Error('Keep authored Preview scripts disabled');
+    (window as any).resourceChanges=0;
+    (window as any).resourceObserver=(window as any).resources.observePreviewViewportResources(frame.contentDocument,()=>(window as any).resourceChanges++);
+    (window as any).resourceObserver.setActive(true);
+  });
+  await page.waitForFunction(() => {
+    const doc=document.querySelector('iframe')!.contentDocument!;
+    return (window as any).resources.getPreviewViewportResources(doc,'code')?.includes(doc.querySelector('#first'));
+  },{timeout:2000});
+  assert.equal(await page.evaluate(() => !!(window as any).authorScriptExecuted),false,'Observing Preview must not enable author scripts');
+  await page.evaluate(() => {const frame=document.querySelector('iframe')!;frame.contentWindow!.scrollTo(0,frame.contentDocument!.documentElement.scrollHeight);});
+  await page.waitForFunction(() => {
+    const doc=document.querySelector('iframe')!.contentDocument!;
+    const codes=(window as any).resources.getPreviewViewportResources(doc,'code');
+    return doc.scrollingElement!.scrollTop>0&&codes?.includes(doc.querySelector('#last'))&&!codes.includes(doc.querySelector('#first'));
+  },{timeout:2000});
+  await page.evaluate(() => (window as any).resourceObserver.setActive(false));
+  assert.equal(await page.evaluate(() => (window as any).resources.getPreviewViewportResources(document.querySelector('iframe')!.contentDocument,'code').length),0);
+  await page.evaluate(() => (window as any).resourceObserver.setActive(true));
+  await page.waitForFunction(() => {const doc=document.querySelector('iframe')!.contentDocument;return (window as any).resources.getPreviewViewportResources(doc,'code').includes(doc!.querySelector('#last'));},{timeout:2000});
+  await page.evaluate(() => {(window as any).resourceObserver.dispose();(window as any).release();});
+  assert.equal(await page.evaluate(() => (window as any).resources.getPreviewViewportResources(document.querySelector('iframe')!.contentDocument,'code')),undefined);
   console.log('Giant Preview code highlighting stays bounded across scrolling, theme changes and wrapping');
 } catch (error) { primary = error; throw error; }
 finally { fs.rmSync(temporary, { recursive: true, force: true });
