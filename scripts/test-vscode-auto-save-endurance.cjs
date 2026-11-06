@@ -116,7 +116,11 @@ exports.run = async function () {
           return remaining.toString() === '';
         }), true, 'Source input must target the document end');
         const marker = ` round-${round}`;
-        await page.keyboard.type(marker, { delay: 30 });
+        // This sample is one edit with one Undo. Real per-key arrival gaps can
+        // split a typing burst into several history groups on a busy native UI.
+        // Keep live-cell typing above; use a real atomic text input for this
+        // automatic-save/history round trip.
+        await page.keyboard.sendCharacter(marker);
         expected = before + marker;
         await saved(expected);
         await page.keyboard.down('Control');

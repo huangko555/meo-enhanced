@@ -137,6 +137,11 @@ Keep native driver actions and observations separate: name the owning window/fra
 record actual event target and complete press/release delivery, observe geometry
 and document effects, and restore temporary state even on failure. Check the
 observer itself with a known event before trusting absence/count assertions.
+Native automatic-save endurance inserts each Source sample as one real text
+input before checking one Undo and Redo. Per-key arrival gaps can legitimately
+split typing into several history groups. Live-cell per-character input, real
+save events, focus, exact Host/disk, all 60 rounds and the existing save deadlines
+remain required.
 For a Windows left-Alt requirement, require trusted `AltLeft` events with location
 `1`; a tool's `Alt_L` label can still deliver generic Alt with an empty code and
 location `0`. Probe that boundary before the scenario. An input-tool access error
