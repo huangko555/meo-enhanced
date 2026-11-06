@@ -226,4 +226,41 @@ assert.deepEqual(decodedRefreshedInit?.savedRevision, { version: document.versio
 assert.equal(document.text, '# Preview startup\r\n\r\nBody', 'Protocol projection must preserve physical document text');
 refreshedController.dispose();
 
+let unavailableReads = 0;
+let unavailableReason: 'too-large' | null = 'too-large';
+const unavailablePublications: Array<{ kind: string }> = [];
+const unavailableController = createPanelSessionController(createPanelSessionControllerParams({
+  panel, document,
+  pendingDraftRecovery: createPendingDraftRecovery({ readCurrentText: () => document.text, applyDraft: async () => true }),
+  readDiskText: () => document.text,
+  overrides: {
+    savedRevisionFile: { read: async () => {
+      unavailableReads++;
+      // Bound the broken feedback loop so this contract fails without starving
+      // the event loop when an unchanged unavailable read republishes itself.
+      if (unavailableReads > 6) return new Promise(() => {});
+      return unavailableReason ? { ok: false, reason: unavailableReason } : { ok: true, text: document.text };
+    } },
+    diffBaselineOutput: {
+      hash: (selection: unknown) => JSON.stringify(selection),
+      publish: async (selection: { kind: string }) => { unavailablePublications.push(selection); return true; },
+      publishFixedState: async () => undefined
+    }
+  }
+}) as never);
+try {
+  await unavailableController.handleMessage({ type: 'ready' });
+  unavailableController.session.refreshGitBaseline({ forcePost: true });
+  for (let index = 0; index < 160; index++) await Promise.resolve();
+  assert.ok(unavailableReads <= 2, 'an unavailable initial Saved Revision must not recursively refresh its own comparison');
+  const beforeRetry = unavailableReads;
+  unavailableController.session.refreshGitBaseline({ forcePost: true });
+  for (let index = 0; index < 80; index++) await Promise.resolve();
+  assert.equal(unavailableReads, beforeRetry + 1, 'an explicit retry still reads an unavailable baseline again');
+  unavailableReason = null;
+  unavailableController.session.refreshGitBaseline({ forcePost: true });
+  for (let index = 0; index < 100; index++) await Promise.resolve();
+  assert.ok(unavailablePublications.some(selection => selection.kind === 'saved'), 'a later readable file recovers comparison');
+} finally { unavailableController.dispose(); }
+
 console.log('Panel Session ready/init single-flight checks passed');

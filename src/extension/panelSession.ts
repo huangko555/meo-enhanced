@@ -349,7 +349,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     timer: savedRevisionRefreshTimer,
     readDocumentRevision: () => ({ version: document.version, text: document.getText() }),
     saveDocument,
-    onRefresh: async ({ result, recoveredFromUnavailable }) => {
+    onRefresh: async ({ result, previousUnavailableReason, recoveredFromUnavailable }) => {
       if (!result.ok) {
         if (result.reason === 'error' && document.isDirty
           && externalFileStatus !== 'deleted-while-dirty') {
@@ -357,7 +357,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         } else if (!document.isDirty && externalFileStatus === 'unreadable-while-dirty') {
           publishExternalFileStatus('current');
         }
-        notifySavedRevisionChanged();
+        // Resolving an unavailable comparison may itself request this read.
+        // Only a changed failure state can invalidate the comparison again.
+        if (previousUnavailableReason !== result.reason) notifySavedRevisionChanged();
         return;
       }
       const hadDiskRevision = savedRevisionTracker.getCurrentEditBaseline() !== null;

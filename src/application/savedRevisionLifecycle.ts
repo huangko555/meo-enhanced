@@ -14,6 +14,7 @@ export type SavedRevisionRefreshTimer = {
 
 export type SavedRevisionRefreshObservation = {
   readonly result: SavedRevisionFileReadResult;
+  readonly previousUnavailableReason: SavedRevisionUnavailableReason | null;
   readonly recoveredFromUnavailable: boolean;
 };
 
@@ -79,8 +80,9 @@ export function createSavedRevisionLifecycle(
         const result = await readWithRecovery();
         if (disposed) return;
         if (readGeneration !== generation) continue;
+        const previousUnavailableReason = unavailableReason;
         const recoveredFromUnavailable = noteResult(result);
-        await dependencies.onRefresh({ result, recoveredFromUnavailable });
+        await dependencies.onRefresh({ result, previousUnavailableReason, recoveredFromUnavailable });
       }
     })().finally(() => {
       if (refreshRunning === running) refreshRunning = null;
@@ -136,9 +138,11 @@ export function createSavedRevisionLifecycle(
     async markUnavailable(reason) {
       if (disposed) return;
       generation += 1;
+      const previousUnavailableReason = unavailableReason;
       unavailableReason = reason;
       await dependencies.onRefresh({
         result: { ok: false, reason },
+        previousUnavailableReason,
         recoveredFromUnavailable: false
       });
     },
