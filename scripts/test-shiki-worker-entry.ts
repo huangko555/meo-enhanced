@@ -2,7 +2,7 @@ import { activateShikiCodeHighlighting, setShikiTheme, requestShikiTokens, getSh
 import type { RawVscodeTheme, ShikiSurface } from '../webview/src/helpers/shikiHighlighter';
 
 (window as any).shikiWorkerHarness = {
-  activateShikiCodeHighlighting, setShikiTheme, getShikiTokens, requestShikiTokens,
+  activateShikiCodeHighlighting, setShikiTheme, getShikiTokens, requestShikiTokens, subscribeShikiRefresh,
   async request(lang: string, code: string, surface: ShikiSurface) {
     return new Promise((resolve, reject) => {
       const deadline = setTimeout(() => { release(); reject(new Error('No worker tokens: ' + lang)); }, 25_000);

@@ -50,6 +50,10 @@ export function createBackgroundShiki(uri: string, theme: RawVscodeTheme,
     timeout = undefined;
     worker?.terminate(); worker = undefined; workerWasm = undefined; loaded.clear();
   };
+  const armTimeout = () => {
+    if (timeout !== undefined) clearTimeout(timeout);
+    timeout = setTimeout(() => finish(null, true), 20_000);
+  };
   const finish = (tokens: ShikiTokenLines | null, reset = false) => {
     if (timeout !== undefined) clearTimeout(timeout);
     timeout = undefined;
@@ -67,7 +71,7 @@ export function createBackgroundShiki(uri: string, theme: RawVscodeTheme,
     }
     const job = running;
     if (!job) return;
-    timeout = setTimeout(() => finish(null, true), 20_000);
+    armTimeout();
     try {
       if (!worker) {
         const wasmUri = document.body.dataset.meoShikiWasmSrc
@@ -93,7 +97,12 @@ export function createBackgroundShiki(uri: string, theme: RawVscodeTheme,
               if (running === active) {
                 if (tokens) {
                   if ((data.fromLine ?? 0) !== active.received.length) throw new Error('Syntax result arrived out of order');
+                  const previousRows = active.received.length;
                   for (const line of tokens) active.received.push(line);
+                  // A large fence can legitimately outlive one timeout window
+                  // on a slow machine. Only accepted new rows prove progress;
+                  // checkpoints, stale packets and silence retain the watchdog.
+                  if (active.received.length > previousRows) armTimeout();
                 }
                 if (data.partial) { if (tokens && active.isNeeded()) active.progress?.(active.received); }
                 else finish(tokens ? active.received : null, !!data.error);

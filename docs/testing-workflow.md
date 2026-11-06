@@ -1209,6 +1209,13 @@ superseded and disposed requests. Package checks verify one unchanged upstream
 WASM binary, all upstream WOFF2 fonts and their CSS references, and reject
 embedded WASM copies or redundant font formats. Formula layout checks use the
 packaged embedded stylesheet; DOCX/PDF browser checks use its file-based sibling.
+Slow-worker coverage distinguishes accepted row progress from mere checkpoints:
+new rows renew the existing inactivity watchdog, while silence, stale packets,
+checkpoint-only work and out-of-order rows still retire the worker. Live may
+publish its first immutable token prefix once before completion; requests without
+an explicit line boundary still require complete tokens, and unfinished lines
+keep their neutral pending palette. A held-completion contract prevents partial
+tokens from entering the complete cache or causing a full Live rebuild per chunk.
 The background-demotion unit check explicitly advances reading-pause timers and
 idle callbacks, including fast polling turns. A fixed count of zero-delay timer
 callbacks does not prove that a real 50ms pause expired on every operating system.

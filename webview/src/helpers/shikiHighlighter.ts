@@ -79,7 +79,7 @@ type PendingHighlight = {
   priority: 'foreground' | 'background';
   readonly deferBackground: () => boolean;
   resumeForeground?: () => void;
-  previewPrefix?: ShikiTokenLines;
+  tokenPrefix?: ShikiTokenLines;
 };
 
 const alwaysNeeded = () => true;
@@ -218,7 +218,7 @@ export function getShikiTokens(
   const key = cacheKey(state, lang, code);
   const complete = state.tokenCache.get(key);
   if (complete) return complete;
-  const prefix = surface === 'preview' && throughLine !== undefined ? state.pending.get(key)?.previewPrefix : undefined;
+  const prefix = surface !== 'source' && throughLine !== undefined ? state.pending.get(key)?.tokenPrefix : undefined;
   return prefix && prefix.length >= throughLine! ? prefix : null;
 }
 
@@ -521,7 +521,13 @@ async function tokenizeAndCache(
         return grammars;
       });
       const tokens = await state.background.request(lang, code, isCurrent, prefix => {
-        if (state === runtimeStates.preview && isCurrent()) { request.previewPrefix = prefix; scheduleTokenRefresh(state); }
+        if (isCurrent() && (state === runtimeStates.preview || state === runtimeStates.editor && !request.tokenPrefix)) {
+          // Live publishes the first accepted batch and the complete result.
+          // Rebuilding a whole fence for every later chunk would make a slow
+          // background calculation compete with foreground editing.
+          request.tokenPrefix = state === runtimeStates.editor ? prefix.slice() : prefix;
+          scheduleTokenRefresh(state);
+        }
       });
       if (tokens && isCurrent()) {
         state.tokenCache.set(key, tokens);

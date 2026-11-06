@@ -38,6 +38,7 @@ const server = Bun.serve({ port: 0, fetch(request) {
 } });
 const browser = await launchTestBrowser();
 try {
+  if (!process.argv.includes('--progress-only')) {
   const page = await browser.newPage();
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(String(error)));
@@ -122,4 +123,57 @@ try {
   assert.equal(replacement.stats.created, replacement.stats.terminated, 'theme changes and consumer release must retire every worker');
   assert.deepEqual(errors, []);
   console.log(`Shiki classic worker passed ${checked} token parity cases, consumer disposal, and foreground responsiveness ${JSON.stringify(responsiveness)}`);
+  }
+  const progressive = await browser.newPage();
+  await progressive.evaluateOnNewDocument(() => {
+    const Native = Worker;
+    (window as any).heldSyntaxResults = [];
+    (window as any).holdSyntaxResults = true;
+    (window as any).Worker = class extends Native {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        this.addEventListener('message', event => {
+          if ((window as any).holdSyntaxResults && event.data.tokens && !event.data.partial) {
+            event.stopImmediatePropagation();
+            (window as any).heldSyntaxResults.push({worker:this,data:event.data});
+          }
+        });
+      }
+    };
+    (window as any).releaseSyntaxResults = () => {
+      (window as any).holdSyntaxResults = false;
+      for(const {worker,data} of (window as any).heldSyntaxResults.splice(0))worker.dispatchEvent(new MessageEvent('message',{data}));
+    };
+  });
+  await progressive.goto(server.url.href);
+  await progressive.waitForFunction(() => !!(window as any).shikiWorkerHarness);
+  await progressive.evaluate(theme => {
+    const harness=(window as any).shikiWorkerHarness;
+    harness.start(theme,'editor');
+    const code=(window as any).progressCode=('const visible = {text:"colored", value:1};\n').repeat(1200);
+    (window as any).publishedPrefixLengths=[];
+    (window as any).releaseProgressObserver=harness.subscribeShikiRefresh(() => {
+      if(!harness.getShikiTokens('typescript',code,'editor')){
+        const prefix=harness.getShikiTokens('typescript',code,'editor',1);
+        if(prefix)(window as any).publishedPrefixLengths.push(prefix.length);
+      }
+    },'editor');
+    void harness.request('typescript',code,'editor').then((tokens:unknown)=>(window as any).completedProgressTokens=tokens);
+  }, darkPlus);
+  await progressive.waitForFunction(() => (window as any).heldSyntaxResults.length > 0);
+  const partial=await progressive.evaluate(() => {
+    const harness=(window as any).shikiWorkerHarness,code=(window as any).progressCode;
+    const prefix=harness.getShikiTokens('typescript',code,'editor',1);
+    return {lines:prefix?.length,full:harness.getShikiTokens('typescript',code,'editor'),beyond:harness.getShikiTokens('typescript',code,'editor',129),prefixLengths:(window as any).publishedPrefixLengths};
+  });
+  assert.equal(partial.lines,128,'Live may use the first accepted prefix while a slow full result is still pending');
+  assert.equal(partial.full,null,'A prefix must never masquerade as a complete token cache entry');
+  assert.equal(partial.beyond,null,'Unfinished lines must retain their pending presentation');
+  assert.deepEqual([...new Set(partial.prefixLengths)],[128],'Live publishes one prefix rather than rebuilding the whole fence for every worker chunk');
+  await progressive.evaluate(() => (window as any).releaseSyntaxResults());
+  await progressive.waitForFunction(() => !!(window as any).completedProgressTokens);
+  assert.equal(await progressive.evaluate(() => (window as any).completedProgressTokens.map((line:any[])=>line.map(syntaxToken=>syntaxToken.content).join('')).join('\n')===(window as any).progressCode),true);
+  await progressive.evaluate(() => {(window as any).releaseProgressObserver();(window as any).shikiWorkerHarness.stop();});
+  await progressive.close();
+  console.log('Shiki progressive Live prefix passed held completion, bounded publication and exact final tokens');
 } finally { await closeTestBrowser(browser); server.stop(true); }

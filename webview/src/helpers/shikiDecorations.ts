@@ -171,7 +171,10 @@ function addTokenDecorations(
   isNeeded: () => boolean = () => true,
   sourceLines?: readonly { from: number; to: number }[]
 ): void {
-  const tokens = getShikiTokens(lang, code);
+  const tokens = getShikiTokens(lang, code, 'editor', 1);
+  // A prefix still belongs to pending work. Register this visible surface even
+  // when another preparation caller requested the first batch and later retires.
+  if (tokens && isNeeded()) requestShikiTokens(lang, code, 'editor', isNeeded);
   if (!tokens) {
     // Keep the mapped presentation until this revision's tokens are ready.
     // Only matching language/theme identities may enter the rebuilt result.
@@ -284,6 +287,25 @@ function addTokenDecorations(
       }
     }
     if (sourceLines) lineOffset += codeLines[index]!.length + 1;
+  }
+  // A first batch colors the beginning of a slow fence while its unchanged
+  // remainder keeps the same neutral pending palette. It is never a complete
+  // cache entry, and only completion replaces this tail with final tokens.
+  const lastToken = tokens.at(-1)?.at(-1);
+  if (lastToken && lastToken.offset + lastToken.content.length >= code.length) return;
+  let pendingOffset = 0;
+  for (let index = 0; index < tokens.length && pendingOffset < code.length; index++) {
+    const end = code.indexOf('\n', pendingOffset);
+    pendingOffset = end < 0 ? code.length : end + 1;
+  }
+  if (pendingOffset < code.length) {
+    const pending = pendingDocumentTokenDecoration(lang);
+    if (sourceLines) {
+      for (let index = tokens.length; index < sourceLines.length; index++) {
+        const line = codeLines[index]!;
+        if (line.length) builder.add(sourceLines[index]!.from, sourceLines[index]!.from + line.length, pending);
+      }
+    } else builder.add(contentFrom + pendingOffset, contentTo, pending);
   }
 }
 
