@@ -20,8 +20,14 @@ worker.onmessage = ({ data }) => {
   queue = queue.then(async () => {
     activeId = data.id;
     try {
-      highlighter ??= await createHighlighterCore({ themes: [toShikiTheme(data.theme)], langs: [],
-        engine: await createOnigurumaEngine(wasm) });
+      if (!highlighter) {
+        const scope = globalThis as typeof globalThis & { __meoShikiWasmBytes?: ArrayBuffer };
+        scope.__meoShikiWasmBytes = data.wasm;
+        try {
+          highlighter = await createHighlighterCore({ themes: [toShikiTheme(data.theme)], langs: [],
+            engine: await createOnigurumaEngine(wasm) });
+        } finally { delete scope.__meoShikiWasmBytes; }
+      }
       incremental ??= createIncrementalShiki(highlighter);
       if (data.grammars.length) { await highlighter.loadLanguage(...data.grammars as any[]); incremental.clear(); }
       let checkpoint = performance.now() + 100;

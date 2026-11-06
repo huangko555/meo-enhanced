@@ -1,5 +1,15 @@
 {
   "separate": {
+    "scripts/test-vscode-resource-loading.ps1": {
+      "kind": "native",
+      "command": "./scripts/test-vscode-resource-loading.ps1 -CodePath <Code.exe>",
+      "reason": "Real Webview resource proxy, shared WASM, syntax colors, ordinary/optimized modes, editing/history, side Preview, diagrams and formulas."
+    },
+    "scripts/test-vscode-resource-loading.cjs": {
+      "kind": "native",
+      "command": "scripts/test-vscode-resource-loading.cjs is loaded by scripts/test-vscode-resource-loading.ps1",
+      "reason": "Production bundles and actual VS Code resource routing in an isolated disposable profile."
+    },
     "scripts/test-vscode-sidebar-outline.ps1": {
       "kind": "native",
       "command": "./scripts/test-vscode-sidebar-outline.ps1 -CodePath <Code.exe>",
@@ -777,6 +787,8 @@
       "scripts/test-vscode-toolbar-viewport.cjs",
       "scripts/test-vscode-sidebar-outline.cjs",
       "scripts/test-vscode-sidebar-outline.ps1",
+      "scripts/test-vscode-resource-loading.cjs",
+      "scripts/test-vscode-resource-loading.ps1",
       "scripts/test-vscode-toolbar-viewport.ps1",
       "scripts/test-vsix-contents.ts",
       "scripts/test-vsix-privacy.ts",

@@ -18,6 +18,8 @@ export type ShikiSurface = 'editor' | 'preview' | 'source';
 
 export type ShikiWorkerRequest = {
   readonly id: number;
+  /** Supplied once per worker; fetched by the owning Webview, never the worker. */
+  readonly wasm?: ArrayBuffer;
   readonly theme: RawVscodeTheme;
   readonly lang: string;
   readonly grammars: readonly unknown[];

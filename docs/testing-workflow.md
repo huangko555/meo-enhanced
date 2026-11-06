@@ -1456,6 +1456,20 @@ for the staged snapshot. A staging/content change invalidates earlier index chec
 
 ## Document-scale coverage
 
+After changes to packaged syntax engines or Webview resource loading, run
+`scripts/test-vscode-resource-loading.ps1 -CodePath <Code.exe>` against the
+production build. Its disposable native profile checks real VS Code resource
+routing, distinct Live token colors, Source preparation, full/side Preview,
+typing and undo/redo with complete saved-source equality, diagrams and formulas.
+It pairs an ordinary document with an actually bounded document above one MiB
+and requires one shared binary load per Webview. The regular
+`test-background-shiki-production.ts` browser contract also disables Worker
+resource fetches and retains failure recovery, cold/warm large-document work,
+cancellation and disposal. HTTP CSP tests alone do not cover VS Code's proxy.
+The native large-document entry also exceeds the Saved Revision read budget;
+`test-panel-session-ready-init.ts` locks down unavailable comparison resolution,
+explicit retries and recovery without a self-triggering disk-read/publish loop.
+
 `scripts/test-webview-search-controls.ts --selection-entry-only` covers search
 entry through the actual Webview and native shortcuts in ordinary/optimized
 documents. Ctrl+A selects the active native cell without selecting the outer document;

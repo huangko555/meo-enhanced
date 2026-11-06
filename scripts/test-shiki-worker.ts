@@ -87,7 +87,7 @@ try {
       checked += 2;
     }
   }
-  assert.equal(wasmRequests, 4, 'Each worker loads the shared engine once; foreground surfaces reuse their existing engine');
+  assert.equal(wasmRequests, 3, 'Each Webview shares one binary across worker surfaces; the foreground reference loads its own engine');
   for (const surfacePage of [reference, foreground, inlineForeground]) {
     await surfacePage.evaluate(() => (window as any).shikiWorkerHarness.stop());
     await surfacePage.close();

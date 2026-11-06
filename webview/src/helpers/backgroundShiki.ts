@@ -2,6 +2,19 @@ import type { RawVscodeTheme, ShikiTokenLines, ShikiWorkerRequest, ShikiWorkerRe
 import { unpackShikiTokens } from './shikiTokenTransfer';
 
 let source: { uri: string; promise: Promise<string> } | undefined;
+let binary: { uri: string; promise: Promise<ArrayBuffer> } | undefined;
+async function loadWasm(uri: string): Promise<ArrayBuffer> {
+  if (binary?.uri !== uri) {
+    const promise = fetch(uri, { signal: AbortSignal.timeout(5_000) }).then(async response => {
+      if (!response.ok) throw new Error('Could not load syntax highlighting WASM');
+      return response.arrayBuffer();
+    });
+    binary = { uri, promise };
+    void promise.catch(() => { if (binary?.promise === promise) binary = undefined; });
+  }
+  return binary.promise;
+}
+
 async function loadSource(uri: string): Promise<string> {
   if (source?.uri !== uri) {
     const promise = fetch(uri, { signal: AbortSignal.timeout(5_000) }).then(response => {
@@ -29,12 +42,13 @@ type Job = {
 export function createBackgroundShiki(uri: string, theme: RawVscodeTheme,
   loadGrammars: (lang: string, code: string, loaded: Set<string>) => Promise<readonly unknown[]>) {
   let worker: Worker | undefined, disposed = false, nextId = 0, running: Job | undefined;
+  let workerWasm: ArrayBuffer | undefined;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const queue: Job[] = [], loaded = new Set<string>();
   const retire = () => {
     if (timeout !== undefined) clearTimeout(timeout);
     timeout = undefined;
-    worker?.terminate(); worker = undefined; loaded.clear();
+    worker?.terminate(); worker = undefined; workerWasm = undefined; loaded.clear();
   };
   const finish = (tokens: ShikiTokenLines | null, reset = false) => {
     if (timeout !== undefined) clearTimeout(timeout);
@@ -56,13 +70,14 @@ export function createBackgroundShiki(uri: string, theme: RawVscodeTheme,
     timeout = setTimeout(() => finish(null, true), 20_000);
     try {
       if (!worker) {
-        const text = await loadSource(uri);
-        if (disposed || running !== job) return;
         const wasmUri = document.body.dataset.meoShikiWasmSrc
           ?? new URL('onig.wasm', new URL(uri, document.baseURI)).href;
-        const url = URL.createObjectURL(new Blob([
-          `const __meoShikiWasmUri = ${JSON.stringify(wasmUri)};\n`, text
-        ], { type: 'text/javascript' }));
+        const [text, bytes] = await Promise.all([loadSource(uri), loadWasm(wasmUri)]);
+        if (disposed || running !== job) return;
+        // Keep the shared cache attached. Each worker receives its own bounded
+        // transferable copy, retained until its first real request is sent.
+        workerWasm = bytes.slice(0);
+        const url = URL.createObjectURL(new Blob([text], { type: 'text/javascript' }));
         try { worker = new Worker(url); } finally { URL.revokeObjectURL(url); }
         let delivery = Promise.resolve();
         worker.onmessage = ({ data }: MessageEvent<ShikiWorkerResponse>) => {
@@ -93,7 +108,10 @@ export function createBackgroundShiki(uri: string, theme: RawVscodeTheme,
       const grammars = await loadGrammars(job.lang, job.code, nextLoaded);
       if (disposed || running !== job) return;
       if (!job.isNeeded()) { finish(null); return; }
-      worker.postMessage({ id: job.id, lang: job.lang, code: job.code, grammars, theme } satisfies ShikiWorkerRequest);
+      const wasm = workerWasm;
+      worker.postMessage({ id: job.id, lang: job.lang, code: job.code, grammars, theme, wasm } satisfies ShikiWorkerRequest,
+        wasm ? [wasm] : []);
+      workerWasm = undefined;
       for (const language of nextLoaded) loaded.add(language);
     } catch { if (running === job) finish(null, true); }
   };
