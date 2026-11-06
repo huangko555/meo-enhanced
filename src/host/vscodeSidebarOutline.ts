@@ -71,7 +71,10 @@ export function createVscodeSidebarOutline(language: () => string) {
   let expansionGeneration = 0;
   let focusSequence = 0;
   const changed = new vscode.EventEmitter<OutlineNode | OutlineNode[] | undefined>();
-  const zh = () => language() === 'zh-CN';
+  // Native callbacks visit every heading; shared labels follow configuration
+  // changes without reading configuration again for every tree item.
+  let uiLanguage = language();
+  const zh = () => uiLanguage === 'zh-CN';
 
   const provider: vscode.TreeDataProvider<OutlineNode> = {
     onDidChangeTreeData: changed.event,
@@ -174,7 +177,11 @@ export function createVscodeSidebarOutline(language: () => string) {
       node.entry.post({ type: 'revealOutlineHeading', key: node.key, snapshot: node.snapshot });
     }),
     vscode.workspace.onDidChangeConfiguration(event => {
-      if (event.affectsConfiguration('meoEnhanced.language')) { presentHeader(); changed.fire(undefined); }
+      if (event.affectsConfiguration('meoEnhanced.language')) {
+        uiLanguage = language();
+        presentHeader();
+        changed.fire(undefined);
+      }
     })
   ];
   presentHeader();

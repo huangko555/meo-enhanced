@@ -361,4 +361,63 @@ recentOutline.dispose();
 secondHandle.setReady(true); second.changeViewState(); await settle();
 assert.equal(second.posted.length, postedBeforeDispose, 'owner disposal detaches every panel and rejects late initialization');
 
+// Shared row labels must not query configuration for every native tree item.
+let boundedLanguage = 'en';
+let languageReads = 0;
+const boundedOutline = createVscodeSidebarOutline(() => { languageReads += 1; return boundedLanguage; });
+const boundedPanel = createPanel(true);
+const boundedHandle = boundedOutline.attach(boundedPanel as any, documentFor('/large-outline.md') as any);
+treeView.visible = true; treeView.visibility.fire();
+boundedHandle.setReady(true);
+const scaleHeadings = Array.from({ length: 10000 }, (_, index) => [
+  heading(1, `Root ${index}`, index * 4 + 1),
+  heading(2, `Child ${index}`, index * 4 + 3)
+]).flat();
+boundedHandle.update({ type: 'sidebarOutline', snapshot: 'scale:1', headings: scaleHeadings, activeIndex: 0 });
+const checkScaleRows = (chinese: boolean) => {
+  let count = 0;
+  for (const parent of provider.getChildren(undefined)) {
+    for (const node of [parent, ...provider.getChildren(parent)]) {
+      const row = provider.getTreeItem(node);
+      assert.equal(row.label, node.heading.text);
+      assert.equal(row.tooltip, chinese ? `H${node.heading.level} · 第 ${node.heading.line} 行` : `H${node.heading.level} · Line ${node.heading.line}`);
+      assert.equal(row.command.title, chinese ? '跳转到标题' : 'Go to Heading');
+      count += 1;
+    }
+  }
+  assert.equal(count, 20000);
+};
+checkScaleRows(false);
+assert.ok(languageReads <= 2, `20,000 rows must share a bounded language lookup, received ${languageReads}`);
+const beforeUnrelatedSetting = languageReads;
+configuration.fire({ affectsConfiguration: key => key === 'editor.fontSize' });
+assert.equal(languageReads, beforeUnrelatedSetting, 'unrelated settings do not refresh outline labels');
+boundedLanguage = 'zh-CN';
+configuration.fire({ affectsConfiguration: key => key === 'meoEnhanced.language' });
+const afterLanguageSetting = languageReads;
+assert.ok(afterLanguageSetting <= beforeUnrelatedSetting + 2, 'one setting update has a bounded language lookup');
+checkScaleRows(true);
+await commands.get(SIDEBAR_OUTLINE_EXPAND_COMMAND)!();
+checkScaleRows(true);
+assert.equal(languageReads, afterLanguageSetting, 'rebuilding and expanding every row reuse current language labels');
+boundedHandle.update({ type: 'sidebarOutline', snapshot: 'empty-heading:1', headings: [heading(1, '', 1)], activeIndex: 0 });
+const emptyHeading = provider.getChildren(undefined)[0];
+assert.equal(provider.getTreeItem(emptyHeading).label, '（空标题）');
+assert.equal(provider.getTreeItem(emptyHeading).accessibilityInformation.label, '空标题, H1');
+boundedLanguage = 'en';
+configuration.fire({ affectsConfiguration: key => key === 'meoEnhanced.language' });
+assert.equal(provider.getTreeItem(emptyHeading).label, '(empty heading)');
+assert.equal(provider.getTreeItem(emptyHeading).accessibilityInformation.label, 'Empty heading, H1');
+boundedHandle.update({ type: 'sidebarOutline', snapshot: 'empty:1', headings: [], activeIndex: -1 });
+assert.equal(treeView.message, 'The document has no headings.');
+boundedLanguage = 'zh-CN';
+configuration.fire({ affectsConfiguration: key => key === 'meoEnhanced.language' });
+assert.equal(treeView.message, '当前文档没有标题。');
+boundedHandle.dispose();
+assert.equal(treeView.message, '没有活动的 MEO 编辑器。');
+const readsBeforeOwnerDispose = languageReads;
+boundedOutline.dispose();
+configuration.fire({ affectsConfiguration: key => key === 'meoEnhanced.language' });
+assert.equal(languageReads, readsBeforeOwnerDispose, 'disposed outline owners stop observing language changes');
+
 console.log('Sidebar outline: protocol, active heading, webview reporter, tree, split focus, reveal and lifecycle passed');

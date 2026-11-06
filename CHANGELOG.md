@@ -19,6 +19,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Fixed Select All in the active table cell while retaining full-document selection in Source.
 - Preserved rendered-text selections and delayed widget click ownership, and used the default cursor when viewing fullscreen images.
 - Fixed sidebar heading navigation after editing large documents, preserving pending clicks through passive layout scrolling.
+- Reduced repeated language-setting reads when presenting large native outlines, while keeping language changes immediate.
 - Kept formula undo and redo pending until deferred source presentation is ready, without exhausting focus recovery while background work is still pending.
 
 ## 0.3.40
