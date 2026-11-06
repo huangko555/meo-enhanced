@@ -2,35 +2,25 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { bundledLanguagesInfo } from 'shiki/langs';
+import { sharedShikiWasmPlugin } from './shiki-wasm-plugin.mjs';
+import { buildMermaidRuntime } from './build-mermaid-runtime.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const dist = path.join(root, 'webview', 'dist');
 const katexDist = path.join(dist, 'katex');
-const buildMetadataPath = path.join(dist, '.build-metadata.json');
 
 // Bun emits content-hashed chunks but does not remove hashes from earlier builds.
 // Always rebuild from an empty directory so stale chunks cannot enter the VSIX.
 rmSync(dist, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 mkdirSync(katexDist, { recursive: true });
 
-const build = spawnSync(process.execPath, [
-  'build',
-  'webview/src/index.ts',
-  'webview/src/editor.ts',
-  '--target=browser',
-  '--format=esm',
-  '--splitting',
-  '--minify',
-  '--outdir=webview/dist',
-  '--metafile=webview/dist/.build-metadata.json'
-], {
-  cwd: root,
-  stdio: 'inherit'
+const build = await Bun.build({
+  entrypoints: [path.join(root, 'webview/src/index.ts'), path.join(root, 'webview/src/editor.ts')],
+  target: 'browser', format: 'esm', splitting: true, minify: true,
+  outdir: dist, write: true, metafile: true,
+  plugins: [sharedShikiWasmPlugin('browser')]
 });
-
-if (build.status !== 0) {
-  process.exit(build.status ?? 1);
-}
+if (!build.success) throw new AggregateError(build.logs, 'Webview build failed');
 
 const statisticsWorkerBuild = spawnSync(process.execPath, [
   'build', 'webview/src/documentStatisticsWorker.ts', '--target=browser', '--format=iife',
@@ -42,33 +32,22 @@ const workerBuild = spawnSync(process.execPath, [
   '--minify', '--outfile=webview/dist/git-diff-worker.js'
 ], { cwd: root, stdio: 'inherit' });
 if (workerBuild.status !== 0) process.exit(workerBuild.status ?? 1);
-const shikiWorkerBuild = spawnSync(process.execPath, [
-  'build', 'webview/src/helpers/shikiHighlightWorker.ts', '--target=browser', '--format=iife',
-  '--minify', '--outfile=webview/dist/shiki-highlight-worker.js'
-], { cwd: root, stdio: 'inherit' });
-if (shikiWorkerBuild.status !== 0) process.exit(shikiWorkerBuild.status ?? 1);
+const shikiWorkerBuild = await Bun.build({
+  entrypoints: [path.join(root, 'webview/src/helpers/shikiHighlightWorker.ts')],
+  target: 'browser', format: 'iife', minify: true,
+  plugins: [sharedShikiWasmPlugin('worker')]
+});
+if (!shikiWorkerBuild.success) throw new AggregateError(shikiWorkerBuild.logs, 'Shiki worker build failed');
+await Bun.write(path.join(dist, 'shiki-highlight-worker.js'), shikiWorkerBuild.outputs[0]);
+cpSync(path.join(root, 'node_modules/shiki/dist/onig.wasm'), path.join(dist, 'onig.wasm'));
 const markdownWorkerBuild = spawnSync(process.execPath, [
   'build', 'webview/src/markdownParseWorker.ts', '--target=browser', '--format=iife',
   '--minify', '--outfile=webview/dist/markdown-parse-worker.js'
 ], { cwd: root, stdio: 'inherit' });
 if (markdownWorkerBuild.status !== 0) process.exit(markdownWorkerBuild.status ?? 1);
-const mermaidModuleBuild = await Bun.build({
-  entrypoints: [path.join(root, 'webview/src/mermaidRuntime.ts')], target: 'browser', format: 'esm',
-  splitting: true, minify: true, outdir: path.join(dist, 'mermaid'),
-  plugins: [{ name: 'mermaid-off-thread-elk', setup(builder) {
-    builder.onResolve({ filter: /^elkjs\/lib\/elk\.bundled\.js$/ }, () => ({
-      path: path.join(root, 'webview/src/adapters/mermaidElkLayout.ts')
-    }));
-  } }]
-});
-if (!mermaidModuleBuild.success) throw new Error(mermaidModuleBuild.logs.map(String).join('\n'));
-console.log(`Built split Mermaid runtime (${mermaidModuleBuild.outputs.length} assets), with off-thread ELK`);
-// Use ELK's official standalone worker. Its simulated-worker constructor cannot
-// be instantiated inside another worker, and rebundling Browserify breaks shims.
-cpSync(path.join(root, 'node_modules/elkjs/lib/elk-worker.min.js'), path.join(dist, 'mermaid/elk-layout-worker.js'));
-cpSync(path.join(root, 'node_modules/elkjs/LICENSE.md'), path.join(dist, 'mermaid/elk-LICENSE.md'));
+await buildMermaidRuntime(root, dist);
 
-const buildMetadata = JSON.parse(readFileSync(buildMetadataPath, 'utf8'));
+const buildMetadata = build.metafile;
 const languageModules = new Map();
 for (const [outputPath, output] of Object.entries(buildMetadata.outputs ?? {})) {
   const entryPoint = String(output?.entryPoint ?? '').replaceAll('\\', '/');
@@ -88,7 +67,6 @@ const languageAssets = bundledLanguagesInfo.map((language) => {
     module
   };
 });
-rmSync(buildMetadataPath);
 writeFileSync(path.join(dist, 'package.json'), '{"type":"module"}\n');
 writeFileSync(
   path.join(dist, 'shiki-language-assets.json'),
@@ -97,16 +75,18 @@ writeFileSync(
 
 cpSync(path.join(root, 'webview', 'src', 'styles.css'), path.join(dist, 'index.css'));
 cpSync(path.join(root, 'logo.png'), path.join(dist, 'logo.png'));
-cpSync(path.join(root, 'node_modules', 'mermaid', 'dist', 'mermaid.min.js'), path.join(dist, 'mermaid.min.js'));
 const katexSourceDir = path.join(root, 'node_modules', 'katex', 'dist');
 const katexCss = readFileSync(path.join(katexSourceDir, 'katex.min.css'), 'utf8');
-cpSync(path.join(katexSourceDir, 'katex.min.css'), path.join(katexDist, 'katex.min.css'));
-cpSync(path.join(katexSourceDir, 'fonts'), path.join(katexDist, 'fonts'), { recursive: true });
 
 const woff2OnlyKatexCss = katexCss.replace(
   /,url\((['"]?)fonts\/[^'")]+\.woff\1\) format\("woff"\),url\((['"]?)fonts\/[^'")]+\.ttf\2\) format\("truetype"\)/g,
   ''
 );
+writeFileSync(path.join(katexDist, 'katex.min.css'), woff2OnlyKatexCss);
+cpSync(path.join(katexSourceDir, 'fonts'), path.join(katexDist, 'fonts'), {
+  recursive: true,
+  filter: source => !path.extname(source) || source.endsWith('.woff2')
+});
 const embeddedKatexCss = woff2OnlyKatexCss.replace(
   /url\((['"]?)fonts\/([^'")]+\.woff2)\1\)/g,
   (_match, _quote, fontName) => {

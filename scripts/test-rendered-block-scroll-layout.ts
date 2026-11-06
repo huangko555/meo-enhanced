@@ -1,3 +1,4 @@
+import { installPackagedMermaid } from './mermaid-runtime-test-helpers';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,7 +18,7 @@ try {
   await page.setViewport({ width: 700, height: 600 });
   await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}.cm-editor{height:100%}</style><div id="app" class="editor-host"></div>');
   await page.addStyleTag({ path: 'webview/src/styles.css' });
-  await page.addScriptTag({ path: 'webview/dist/mermaid.min.js' });
+  await installPackagedMermaid(page);
   await page.addScriptTag({ path: path.join(temp, 'bundle.js') });
   const cdp = await page.createCDPSession();
   await cdp.send('Performance.enable');

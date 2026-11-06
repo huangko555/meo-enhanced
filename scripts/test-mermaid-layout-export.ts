@@ -6,6 +6,7 @@ import { getMermaidPalette } from '../src/shared/mermaidPalette';
 import { assertReadableMermaidTasks } from './mermaid-contrast-helpers';
 import { complexMermaidSamples } from './fixtures/mermaid-community-samples';
 import { launchTestBrowser, closeTestBrowser } from './browser-test-helpers';
+import { readMermaidTestAsset } from './mermaid-runtime-test-helpers';
 
 const flow = `flowchart TD
   subgraph review[资料审核]
@@ -41,6 +42,8 @@ try {
   page.on('request', request => {
     if (request.url() === 'https://meo-runtime.test/mermaid.min.js') {
       void request.respond({ status: 200, contentType: 'text/javascript', body: runtime });
+    } else if (readMermaidTestAsset(request.url(), 'https://meo-runtime.test/')) {
+      void request.respond({ status: 200, contentType: 'text/javascript', headers: { 'Access-Control-Allow-Origin': '*' }, body: readMermaidTestAsset(request.url(), 'https://meo-runtime.test/')! });
     } else if (/^https?:/.test(request.url())) {
       unexpectedRequests.push(request.url());
       void request.abort();
@@ -60,15 +63,16 @@ try {
         shikiLanguageAssetsRoot: path.resolve(import.meta.dir, '../webview/dist')
       });
       const html = document.htmlDocument.replace('<script data-meo-export-runtime>', `<script>
-        (()=>{
+        window.__MEO_MERMAID_READY__.then(()=>{
         const realInitialize=window.mermaid.initialize.bind(window.mermaid);
         window.mermaid.initialize=config=>{window.__exportMermaidConfig=config;return realInitialize(config)};
-        })();
+        });
       </script><script data-meo-export-runtime>`);
       await page.setContent(html, { waitUntil: 'domcontentloaded' });
       await page.waitForFunction(() => (window as any).__MEO_EXPORT_READY__ === true).catch(async error => {
         throw new Error(`Export not ready (${target}/${appearance}): ${JSON.stringify({ pageErrors, state: await page.evaluate(() => ({ error: (window as any).__MEO_EXPORT_ERROR__, blocks: document.querySelectorAll('.meo-export-mermaid svg').length })) })}`, { cause: error });
       });
+      assert.equal(await page.evaluate(() => (window as any).__MEO_EXPORT_ERROR__), null, `Export must render successfully (${target}/${appearance})`);
       const result = await page.evaluate(async flow => {
         const blocks = Array.from(document.querySelectorAll<HTMLElement>('.meo-export-mermaid'));
         const runtime = (window as any).mermaid;
@@ -140,7 +144,7 @@ try {
     }
   }
   assert.deepEqual(pageErrors, []);
-  assert.deepEqual(unexpectedRequests, [], 'All layout engines must work from the shipped single file');
+  assert.deepEqual(unexpectedRequests, [], 'All layout engines must work from packaged assets');
 } catch (error) {
   primaryError = error;
   throw error;

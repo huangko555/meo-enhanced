@@ -701,6 +701,7 @@ function buildRuntimeScript(hasMermaid: boolean, githubStyle = false): string {
       if (window.__MEO_EXPORT_MATH_READY__) {
         await window.__MEO_EXPORT_MATH_READY__;
       }
+      if (${mermaidFlag} && window.__MEO_MERMAID_READY__) await window.__MEO_MERMAID_READY__;
       await renderMermaidBlocks();
       await waitForImages();
     } catch (error) {

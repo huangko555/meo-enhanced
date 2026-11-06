@@ -1,9 +1,10 @@
+import { installPackagedMermaid, readMermaidTestAsset } from './mermaid-runtime-test-helpers';
 import assert from 'node:assert/strict';
 import { assertReadableMermaidTasks } from './mermaid-contrast-helpers';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { shouldPreloadMermaid } from '../src/extension/webviewResourceHints';
+import { shouldPreloadMermaid, webviewPreloadModules } from '../src/extension/webviewResourceHints';
 import { launchTestBrowser } from './browser-test-helpers';
 import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { buildPreviewStyles } from '../src/export/exportStyles';
@@ -28,14 +29,14 @@ assert.equal(shouldPreloadMermaid('~'.repeat(100_000) + 'mermaid'), true);
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-preview-mermaid-runtime-'));
 
-async function assertGanttPreviewContrast(browser: Awaited<ReturnType<typeof launchTestBrowser>>, runtime: string, entry: string) {
+async function assertGanttPreviewContrast(browser: Awaited<ReturnType<typeof launchTestBrowser>>, entry: string) {
   // Keep this fresh Preview separate from the lifecycle/KaTeX loading cases.
   const page = await browser.newPage();
   try {
     await page.setContent('<!doctype html><style>html,body{height:100%;margin:0}</style><body></body>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview/src/styles.css') });
     await page.addStyleTag({ content: ':root{--meo-background:#22272e;--meo-foreground:#d8dee9;--meo-code-background:#2e333b}body{background:#22272e;color:#d8dee9}' });
-    await page.addScriptTag({ content: runtime });
+    await installPackagedMermaid(page);
     await page.addScriptTag({ content: entry });
     const source = 'gantt\n  title 示例项目计划\n  dateFormat YYYY-MM-DD\n  axisFormat %m-%d\n  section 设计\n  调研 :done, a1, 2026-10-01, 3d\n  方案 :done, a2, after a1, 4d\n  section 实施\n  开发 :active, b1, after a2, 8d\n  测试 :b2, after b1, 5d\n  section 交付\n  验收 :milestone, c1, after b2, 0d';
     const custom = '---\nconfig:\n  themeVariables:\n    doneTaskBkgColor: "#ffdab9"\n    taskTextDarkColor: "#241208"\n---\ngantt\n  dateFormat YYYY-MM-DD\n  section 自定义\n  作者颜色 :done, custom, 2026-10-01, 5d';
@@ -200,9 +201,12 @@ async function assertPreviewRuntime() {
   if (!extensionSource.includes('data-meo-mermaid-src="${mermaidRuntimeUri}"')
     || !extensionSource.includes('data-meo-script-nonce="${nonce}"')
     || !extensionSource.includes('data-meo-mermaid-module-src="${mermaidModuleUri}"')
-    || !extensionSource.includes('${preloadMermaid ? `<link rel="modulepreload" href="${mermaidModuleUri}" />` : \'\'}')) {
+    || !extensionSource.includes('webviewPreloadModules(preloadMermaid)')
+    || !extensionSource.includes('${modulePreloads.map(uri => `<link rel="modulepreload" href="${uri}" />`).join(\'\\n\')}')) {
     throw new Error('Mermaid must load diagram modules on demand and keep resource hints for existing diagrams');
   }
+  assert.deepEqual(webviewPreloadModules(false), ['editor.js'], 'ordinary documents prepare the editor without diagram modules');
+  assert.deepEqual(webviewPreloadModules(true), ['editor.js', 'mermaid/mermaidRuntime.js'], 'diagram documents retain both editor and Mermaid preloads');
 
   const build = await Bun.build({
     entrypoints: [path.join(import.meta.dir, 'test-preview-mermaid-runtime-entry.ts')],
@@ -219,13 +223,23 @@ async function assertPreviewRuntime() {
   let runtimeRequests = 0;
   await page.setRequestInterception(true);
   page.on('request', request => {
-    if (request.url() !== 'https://meo-runtime.invalid/mermaid.min.js') return void request.continue();
+    if (request.url() !== 'https://meo-runtime.invalid/mermaid.min.js') {
+      const asset = readMermaidTestAsset(request.url(), 'https://meo-runtime.invalid/');
+      if (asset) {
+        // The bridge's load event can precede its nested runtime dependencies.
+        const delay = request.url().endsWith('/core.js') ? 250 : 0;
+        return void new Promise(resolve => setTimeout(resolve, delay)).then(() => request.respond({
+          status: 200, contentType: 'text/javascript', headers: { 'Access-Control-Allow-Origin': '*' }, body: asset
+        }));
+      }
+      return void request.continue();
+    }
     runtimeRequests += 1;
     void request.respond(runtimeRequests === 1
       ? {status: 503, body: 'Temporarily unavailable'}
       : {status: 200, contentType: 'text/javascript', body: runtime});
   });
-  await page.setContent(`<!doctype html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' data:; font-src data:; script-src 'nonce-preview-runtime-test'"></head><body></body>`);
+  await page.setContent(`<!doctype html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' data:; font-src data:; worker-src blob:; script-src 'nonce-preview-runtime-test'"></head><body></body>`);
   await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
   await page.addStyleTag({ content: ':root { --meo-font-live: "Sarasa Term SC", "Cascadia Mono", Consolas, monospace; --meo-font-live-size: 15px; --meo-code-background: #20252b; --meo-foreground: #d8dee9; --meo-surface-background: #20252b; } .cm-line { white-space: pre; }' });
   await page.evaluate(entry => {
@@ -246,15 +260,18 @@ async function assertPreviewRuntime() {
   }
   const sharedRuntime = await page.evaluate(async () => {
     const load = (window as any).__loadMermaidRuntime;
-    const [first, second] = await Promise.all([load(), load()]);
-    return first === second && typeof first.render === 'function';
+    const firstLoad = load();
+    while (!(window as any).__MEO_MERMAID_READY__) await new Promise(resolve => setTimeout(resolve, 0));
+    const secondLoad = load();
+    const [first, second] = await Promise.all([firstLoad, secondLoad]);
+    return firstLoad === secondLoad && first === second && typeof first.render === 'function';
   });
   if (!sharedRuntime || runtimeRequests !== 2) throw new Error('Retry must load one CSP-authorized runtime shared by concurrent callers');
   const gestureBatch = await page.evaluate(() => (window as any).__probePreviewGestureBatch());
   assert.deepEqual(gestureBatch, { between: { started: 1, painted: 0 }, beforeCommit: { painted: 0, notices: 0 },
     after: { painted: 2, notices: 1 } }, 'an in-flight batch must yield between diagrams and before SVG projection, then resume exactly once');
   if (process.argv.includes('--gantt-only')) {
-    await assertGanttPreviewContrast(browser, runtime, entry);
+    await assertGanttPreviewContrast(browser, entry);
     return;
   }
   const invalidMermaidLeaked = await page.evaluate(() => (
@@ -955,7 +972,7 @@ async function assertPreviewRuntime() {
   if (Math.abs(disposedViewport.afterCompletion - disposedViewport.afterDispose) > 2) {
     throw new Error(`Disposed Preview Mermaid completion changed the viewport: ${JSON.stringify(disposedViewport)}`);
   }
-  await assertGanttPreviewContrast(browser, runtime, entry);
+  await assertGanttPreviewContrast(browser, entry);
   console.log('Preview Mermaid runtime test passed');
 }
 

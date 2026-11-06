@@ -3,6 +3,14 @@ import type { ElkLayoutRequest, ElkLayoutResponse, NativeElkWorkerRequest, Nativ
 import { createClassicWorkerTransport } from './classicWorkerTransport';
 
 type Transport = { send(request: ElkLayoutRequest): void; dispose(): void };
+async function loadWorkerSource(uri: string): Promise<string> {
+  const loader = (globalThis as typeof globalThis & {
+    __meoMermaidSystem: { import(uri: string): Promise<{ default: unknown }> };
+  }).__meoMermaidSystem;
+  const module = await loader.import(uri);
+  if (typeof module.default !== 'string') throw new Error('Invalid ELK worker source');
+  return module.default;
+}
 async function createElkTransport(uri: string, receive: (value: ElkLayoutResponse) => void, fail: (error: Error) => void): Promise<Transport> {
   const transport = await createClassicWorkerTransport<NativeElkWorkerRequest, NativeElkWorkerResponse>(uri, value => {
     const message = value.error instanceof Error ? value.error.message : typeof value.error === 'string' ? value.error
@@ -11,7 +19,7 @@ async function createElkTransport(uri: string, receive: (value: ElkLayoutRespons
     if (value.error !== undefined) receive({ id: value.id, error: message });
     else if (value.data) receive({ id: value.id, graph: value.data });
     else fail(new Error('Invalid ELK worker response'));
-  }, fail);
+  }, fail, loadWorkerSource);
   try {
     transport.send({ id: 0, cmd: 'register', algorithms: ['layered', 'stress', 'mrtree', 'radial', 'force', 'disco',
       'sporeOverlap', 'sporeCompaction', 'rectpacking'] });
@@ -141,7 +149,7 @@ export function disposeMermaidElkLayoutWorker(): void { shared?.dispose(); share
  * plugin. Labels and SVG painting retain Mermaid's original implementation. */
 export default class MermaidElkLayout {
   layout(graph: ElkNode, options?: ElkLayoutArguments): Promise<ElkNode> {
-    shared ??= createMermaidElkLayoutClient(new URL('./elk-layout-worker.js', import.meta.url).href);
+    shared ??= createMermaidElkLayoutClient(new URL('./elk-worker-source.js', import.meta.url).href);
     return shared.layout(graph, options);
   }
   terminateWorker(): void { disposeMermaidElkLayoutWorker(); }

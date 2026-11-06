@@ -1199,6 +1199,16 @@ checks scope specificity, independent punctuation rules and Source overrides
 feeding the automatic reading colors. Both remain in regression and appearance gates.
 The Shiki lifecycle contracts verify bounded shared caches, unchanged palette
 reuse, real palette invalidation, stale-work cancellation and final disposal.
+After changing packaged syntax resources, run `scripts/test-shiki-worker.ts`
+after `build:webview`. It compares the shared-WASM and inlined engines separately
+for foreground and classic Worker execution, preserving each path's complete
+token representation. It also checks lazy loading, one binary load per engine,
+disposal and foreground responsiveness. `scripts/test-background-shiki-production.ts`
+covers unavailable-binary recovery, ordinary fences and 18,000-line cold/warm,
+superseded and disposed requests. Package checks verify one unchanged upstream
+WASM binary, all upstream WOFF2 fonts and their CSS references, and reject
+embedded WASM copies or redundant font formats. Formula layout checks use the
+packaged embedded stylesheet; DOCX/PDF browser checks use its file-based sibling.
 The background-demotion unit check explicitly advances reading-pause timers and
 idle callbacks, including fast polling turns. A fixed count of zero-delay timer
 callbacks does not prove that a real 50ms pause expired on every operating system.
@@ -1374,6 +1384,13 @@ the browser export check also generates final Word and PDF files. Eight-category
 pie charts are checked in both themes, Word drawing bounds against actual page
 margins, and PDF heading/description/diagram pagination. Build first.
 This focused pack typically takes less than a minute.
+
+`bun scripts/test-mermaid-module-runtime.ts` checks the shared lazy asset graph
+under the production CSP, non-executing Source prefetch without duplicate
+downloads, concurrent consumers, unchanged official geometry, worker-load
+failure/retry, and relocated offline HTML opened through ordinary `file:` URLs.
+`test-preview-mermaid-runtime.ts` also checks classic loading with nonce-only
+script authorization. Build first; the same graph serves editors and exports.
 
 `bun scripts/test-fenced-code-boundaries.ts` checks Source/Live coloring and real
 Mermaid source typing at unfinished fences, including quote/list exits, nested

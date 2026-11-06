@@ -1,3 +1,4 @@
+import { installPackagedMermaid } from './mermaid-runtime-test-helpers';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -51,7 +52,7 @@ try {
       } catch (error) { return { type: 'previewRenderResult', requestId: message.requestId, result: { ok: false, error: { code: 'operation-failed', message: String(error) } } }; }
     });
     await page.addScriptTag({ content: `window.__presetState=${JSON.stringify(state ?? {})};window.__presetMessages=[];window.acquireVsCodeApi=()=>({getState(){return window.__presetState},setState(state){window.__presetState=state},postMessage(message){window.__presetMessages.push(message);window.__renderCustomPreset(message).then(response=>{if(response)window.dispatchEvent(new MessageEvent('message',{data:response}));});}});` });
-    await page.addScriptTag({ path: 'webview/dist/mermaid.min.js' });
+    await installPackagedMermaid(page);
     await page.addScriptTag({ content: bundle });
     await page.evaluate(init => window.dispatchEvent(new MessageEvent('message', { data: init })), { ...init, text: markdownText, savedRevision: { version: 1, text: markdownText }, uiLanguage, customPreviewPresets: library.list(), previewPresetDiagnostics: library.diagnostics() });
     await page.waitForFunction(title => document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('h1')?.textContent === title, {}, markdownText.split('\n')[0]!.slice(2));

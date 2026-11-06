@@ -1,3 +1,4 @@
+import { installPackagedMermaid } from './mermaid-runtime-test-helpers';
 import assert from 'node:assert/strict';
 import { launchTestBrowser } from './browser-test-helpers';
 import exportRuntime from '../src/export/runtime';
@@ -42,7 +43,7 @@ try {
     }) } };
   });
   await page.addScriptTag({ content: 'window.acquireVsCodeApi=()=>({getState(){return {}},setState(){},postMessage(message){window.__renderBackgroundPreview(message).then(response=>{if(response)window.dispatchEvent(new MessageEvent("message",{data:response}));});}});' });
-  await page.addScriptTag({ content: await fs.readFile('webview/dist/mermaid.min.js', 'utf8') });
+  await installPackagedMermaid(page);
   await page.addScriptTag({ content: bundle });
   const text = ['---', 'title: Document surfaces', 'tags: [theme, color]', '---', '',
     '# 文档表面配色', '', '代码、表格与边线从同一文档背景派生。`inline code` 使用独立底色，<kbd>Ctrl</kbd> 保持轮廓。', '',

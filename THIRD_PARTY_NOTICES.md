@@ -38,10 +38,26 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
 - Source: https://github.com/kieler/elkjs/tree/v0.9.3
 - License: Eclipse Public License 2.0 (EPL-2.0).
 - Bundled asset: The unchanged official `elk-worker.min.js` is distributed as
-  `webview/dist/mermaid/elk-layout-worker.js` for background Mermaid layout.
+  the string payload of `webview/dist/mermaid/elk-worker-source.js` for background Mermaid layout.
 - License text: `webview/dist/mermaid/elk-LICENSE.md` in the extension package.
 - Source availability: The corresponding source is available from the linked
   upstream release. The worker itself is not modified.
+
+## SystemJS 6.15.1
+
+- Source: https://github.com/systemjs/systemjs/tree/6.15.1
+- License: MIT. Loads shared Mermaid modules in Webviews and offline HTML.
+
+MIT License
+-----------
+
+Copyright (C) 2013-2022 Guy Bedford
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ## VS Code Markdown Math grammars
 

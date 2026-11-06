@@ -396,10 +396,13 @@ export function loadMermaidRuntime(): Promise<MermaidRuntime> {
       script.remove();
     };
     script.onload = () => {
-      cleanup();
-      const runtime = getMermaidRuntime();
-      if (runtime) resolve(runtime);
-      else reject(new Error('Loaded Mermaid runtime unavailable'));
+      const ready = (window as typeof window & { __MEO_MERMAID_READY__?: Promise<MermaidRuntime> }).__MEO_MERMAID_READY__;
+      void Promise.resolve(ready).then(() => {
+        cleanup();
+        const runtime = getMermaidRuntime();
+        if (runtime) resolve(runtime);
+        else reject(new Error('Loaded Mermaid runtime unavailable'));
+      }, error => { cleanup(); reject(error); });
     };
     script.onerror = () => {
       cleanup();

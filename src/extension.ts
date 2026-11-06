@@ -3,6 +3,7 @@ import { createDocumentViewsRegistry } from './extension/documentViews';
 import { createExtensionFeatures } from './extension/extensionFeatures';
 import type { DocumentViewsApi } from './documentViews';
 import * as path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import * as vscode from 'vscode';
 import { createVscodeDocumentStatistics } from './host/vscodeDocumentStatistics';
@@ -1079,6 +1080,9 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
   private getWebviewHtml(webview: vscode.Webview, preloadMermaid: boolean): string {
     const modulePreloads = webviewPreloadModules(preloadMermaid).map(module =>
       webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', module)).toString());
+    const mermaidPreloads: string[] = preloadMermaid ? JSON.parse(readFileSync(
+      vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'mermaid', 'preload.json').fsPath, 'utf8'
+    )) : [];
     const logoUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'logo.png')).toString();
     const scriptUri = webview
       .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'index.js'))
@@ -1134,6 +1138,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         <link href="${katexStyleUri}" rel="stylesheet" />
         <link href="${styleUri}" rel="stylesheet" />
         ${modulePreloads.map(uri => `<link rel="modulepreload" href="${uri}" />`).join('\n')}
+        ${mermaidPreloads.map(name => `<link rel="preload" as="script" crossorigin="anonymous" href="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'mermaid', name))}" />`).join('\n')}
       </head>
       <body data-meo-statistics-worker-src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'document-statistics-worker.js'))}" data-meo-katex-src="${katexStyleUri}" data-meo-mermaid-src="${mermaidRuntimeUri}" data-meo-mermaid-module-src="${mermaidModuleUri}" data-meo-git-diff-worker-src="${gitDiffWorkerUri}" data-meo-shiki-worker-src="${shikiWorkerUri}" data-meo-markdown-worker-src="${markdownWorkerUri}" data-meo-script-nonce="${nonce}">
         <div id="app" class="editor-root">

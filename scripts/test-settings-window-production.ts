@@ -87,10 +87,12 @@ try {
     await page.setContent(`<!doctype html><meta name="meo-logo" content="${logoDataUrl}"><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>`);
     await page.addStyleTag({ path: 'webview/src/styles.css' });
     if (process.argv.includes('--latex-only')) {
-      await page.evaluate(({ markdown, shiki }) => {
+      await page.evaluate(({ markdown, shiki, wasm }) => {
         document.body.dataset.meoMarkdownWorkerSrc = URL.createObjectURL(new Blob([markdown], { type: 'text/javascript' }));
         document.body.dataset.meoShikiWorkerSrc = URL.createObjectURL(new Blob([shiki], { type: 'text/javascript' }));
+        document.body.dataset.meoShikiWasmSrc = URL.createObjectURL(new Blob([Uint8Array.from(atob(wasm), character => character.charCodeAt(0))]));
       }, { markdown: await fs.readFile('webview/dist/markdown-parse-worker.js', 'utf8'),
+        wasm: (await fs.readFile('webview/dist/onig.wasm')).toString('base64'),
         shiki: await fs.readFile('webview/dist/shiki-highlight-worker.js', 'utf8') });
     }
     await page.addScriptTag({ content: `

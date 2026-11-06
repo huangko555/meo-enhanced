@@ -1,15 +1,19 @@
 let source: { uri: string; promise: Promise<string> } | undefined;
 
+async function fetchSource(uri: string): Promise<string> {
+  const response = await fetch(uri, { signal: AbortSignal.timeout(5_000) });
+  if (!response.ok) throw new Error('Could not load parser worker');
+  return response.text();
+}
+
 /** Load a packaged classic worker under the webview CSP. The caller owns its
  * request/revision policy; this adapter owns browser resources and wire events. */
 export async function createClassicWorkerTransport<Request, Response>(uri: string,
-  receive: (response: Response) => void, fail: (error: Error) => void
+  receive: (response: Response) => void, fail: (error: Error) => void,
+  loadSource: (uri: string) => Promise<string> = fetchSource
 ): Promise<{ send(request: Request): void; dispose(): void }> {
   if (source?.uri !== uri) {
-    const promise = fetch(uri, { signal: AbortSignal.timeout(5_000) }).then(response => {
-      if (!response.ok) throw new Error('Could not load parser worker');
-      return response.text();
-    });
+    const promise = loadSource(uri);
     source = { uri, promise };
     void promise.catch(() => { if (source?.promise === promise) source = undefined; });
   }

@@ -1,3 +1,4 @@
+import { installPackagedMermaid } from './mermaid-runtime-test-helpers';
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
@@ -51,7 +52,7 @@ try {
       }) } };
     });
     await page.addScriptTag({ content: `window.__presetState=${JSON.stringify(state ?? { sourcePreviewScrollSyncEnabled: false })};window.__presetMessages=[];window.acquireVsCodeApi=()=>({getState(){return window.__presetState},setState(state){window.__presetState=state},postMessage(message){window.__presetMessages.push(message);window.__renderPreset(message).then(response=>{if(response)window.dispatchEvent(new MessageEvent('message',{data:response}));});}});` });
-    await page.addScriptTag({ path: 'webview/dist/mermaid.min.js' });
+    await installPackagedMermaid(page);
     await page.addScriptTag({ content: bundle });
     await page.evaluate(init => window.dispatchEvent(new MessageEvent('message', { data: init })), { ...init, uiLanguage, customPreviewPresets });
     await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body?.textContent?.includes('Preview presets'));

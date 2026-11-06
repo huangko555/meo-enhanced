@@ -1,3 +1,4 @@
+import { installPackagedMermaid, isMermaidTestRequest } from './mermaid-runtime-test-helpers';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -10,8 +11,6 @@ const build = await Bun.build({
   target: 'browser', format: 'iife'
 });
 if (!build.success) throw new Error(build.logs.map(String).join('\n'));
-const root = path.resolve(import.meta.dir, '..');
-const runtime = fs.readFileSync(path.join(root, 'webview/dist/mermaid.min.js'), 'utf8');
 const browser = await launchTestBrowser();
 let primaryError: unknown;
 try {
@@ -22,6 +21,7 @@ try {
   page.on('pageerror', error => pageErrors.push(error.message));
   await page.setRequestInterception(true);
   page.on('request', request => {
+    if (isMermaidTestRequest(request.url())) return void request.continue();
     if (/^https?:/.test(request.url())) {
       externalRequests.push(request.url());
       void request.abort();
@@ -46,7 +46,7 @@ try {
   await page.evaluate(href => { document.body.dataset.meoKatexSrc = href;
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => { (window as any).__copiedFormula = text; } } });
   }, katexHref);
-  await page.addScriptTag({ content: runtime });
+  await installPackagedMermaid(page);
   await page.addScriptTag({ content: `
     window.__invalidMermaidRenders=0;window.__heldMermaidRender=false;
     const realRender=window.mermaid.render.bind(window.mermaid);
