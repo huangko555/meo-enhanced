@@ -159,8 +159,10 @@ try {
   for (const preset of ['default', dual.id, single.id]) {
     await narrowTablePage.setViewport({ width: 1400, height: 850 });
     if (preset !== 'default') {
-      await narrowTablePage.click('.preview-preset-dropdown');
-      await narrowTablePage.click(`.preview-preset-dropdown-panel [data-value="${preset}"]`);
+      // Resizing relocates toolbar controls on the next layout frame. Admit
+      // stable visible controls before the real gesture in this prepared case.
+      await narrowTablePage.locator('.preview-preset-dropdown').click();
+      await narrowTablePage.locator(`.preview-preset-dropdown-panel [data-value="${preset}"]`).click();
     }
     await narrowTablePage.setViewport({ width: 360, height: 850 });
     await narrowTablePage.waitForFunction(preset => {

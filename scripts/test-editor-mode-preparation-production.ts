@@ -11,10 +11,11 @@ const text = '# Pending mode\n\n' + Array.from({ length: 1_600 }, (_, index) =>
   '```markdown\n# Literal heading\n\nLiteral **Markdown**.\n```\n\n').join('');
 const preparedModules = new Map<string, string>();
 function withPreparationGate(file: string): string | undefined {
-  if (!path.basename(file).startsWith('editor-') || !file.endsWith('.js')) return;
+  if (!file.endsWith('.js')) return;
   const cached = preparedModules.get(file);
   if (cached) return cached;
   const source = fs.readFileSync(file, 'utf8');
+  if (!source.includes('prepareLiveSyntax')) return;
   const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   let preparation: ts.MethodDeclaration | undefined;
   const visit = (node: ts.Node) => {
@@ -109,6 +110,7 @@ try {
     });
   });
   await page.waitForFunction(() => !!(window as any).__modePreparationFrame);
+  await page.waitForFunction(() => (window as any).__modePreparationEntered === true);
   stage = 'pending frame';
   const pending = await page.evaluate(() => (window as any).__modePreparationFrame);
   assert.ok(pending.sourceVisible, 'the existing Source surface must paint during preparation');
@@ -171,6 +173,7 @@ try {
   console.error(stage, consoleErrors, await activePage?.evaluate(() => ({
     mode: document.querySelector('#app')?.getAttribute('data-mode'),
     classes: document.querySelector('.editor-host > .cm-editor')?.className,
+    preparationEntered: (window as any).__modePreparationEntered,
     busy: Array.from(document.querySelectorAll('.mode-group [aria-busy]')).map(element => element.outerHTML),
     clicks: (window as any).__modeTestClicks,
     notice: Array.from(document.querySelectorAll('[class*="notice"]')).map(element => [element.className, element.textContent])
