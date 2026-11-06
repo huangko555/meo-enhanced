@@ -58,7 +58,11 @@ export function createBackgroundShiki(uri: string, theme: RawVscodeTheme,
       if (!worker) {
         const text = await loadSource(uri);
         if (disposed || running !== job) return;
-        const url = URL.createObjectURL(new Blob([text], { type: 'text/javascript' }));
+        const wasmUri = document.body.dataset.meoShikiWasmSrc
+          ?? new URL('onig.wasm', new URL(uri, document.baseURI)).href;
+        const url = URL.createObjectURL(new Blob([
+          `const __meoShikiWasmUri = ${JSON.stringify(wasmUri)};\n`, text
+        ], { type: 'text/javascript' }));
         try { worker = new Worker(url); } finally { URL.revokeObjectURL(url); }
         let delivery = Promise.resolve();
         worker.onmessage = ({ data }: MessageEvent<ShikiWorkerResponse>) => {

@@ -1,18 +1,37 @@
 import assert from 'node:assert/strict';
-import { isDeepStrictEqual } from 'node:util';
 import darkPlus from '@shikijs/themes/dark-plus';
+import path from 'node:path';
 import { launchTestBrowser, closeTestBrowser } from './browser-test-helpers';
+import { sharedShikiWasmPlugin } from './shiki-wasm-plugin.mjs';
 
-const build = await Bun.build({ entrypoints: ['scripts/test-shiki-worker-entry.ts'], target: 'browser', format: 'iife' });
+const build = await Bun.build({
+  entrypoints: ['scripts/test-shiki-worker-entry.ts'], target: 'browser', format: 'esm',
+  splitting: true, outdir: 'tmp/shiki-worker-fixture', plugins: [sharedShikiWasmPlugin('browser')]
+});
 assert.ok(build.success, build.logs.map(String).join('\n'));
-const bundle = await build.outputs[0]!.text();
+const chunks = new Map(build.outputs.map(output => [path.basename(output.path), output]));
+const inlineBuild = await Bun.build({
+  entrypoints: ['scripts/test-shiki-worker-entry.ts'], target: 'browser', format: 'esm',
+  splitting: true, outdir: 'tmp/shiki-inline-fixture'
+});
+const inlineChunks = new Map(inlineBuild.outputs.map(output => ['/inline/' + path.basename(output.path), output]));
+const inlineWorkerBuild = await Bun.build({ entrypoints: ['webview/src/helpers/shikiHighlightWorker.ts'], target: 'browser', format: 'iife', minify: true });
+assert.ok(inlineBuild.success && inlineWorkerBuild.success, 'The pre-deduplication reference engines must build');
 const workerFile = Bun.file('webview/dist/shiki-highlight-worker.js');
 assert.ok(await workerFile.exists(), 'build:webview must produce the packaged classic worker');
+let wasmRequests = 0;
 const server = Bun.serve({ port: 0, fetch(request) {
-  const path = new URL(request.url).pathname;
-  if (path === '/bundle.js') return new Response(bundle, { headers: { 'content-type': 'text/javascript' } });
-  if (path === '/worker.js') return new Response(workerFile, { headers: { 'content-type': 'text/javascript' } });
-  return new Response(`<body ${new URL(request.url).searchParams.has('foreground') ? '' : 'data-meo-shiki-worker-src="/worker.js"'}><script src="/bundle.js"></script></body>`, { headers: {
+  const pathname = new URL(request.url).pathname;
+  const chunk = chunks.get(pathname.slice(1));
+  if (chunk) return new Response(chunk, { headers: { 'content-type': 'text/javascript' } });
+  if (pathname === '/worker.js') return new Response(workerFile, { headers: { 'content-type': 'text/javascript' } });
+  const inlineChunk = inlineChunks.get(pathname);
+  if (inlineChunk) return new Response(inlineChunk, { headers: { 'content-type': 'text/javascript' } });
+  if (pathname === '/inline-worker.js') return new Response(inlineWorkerBuild.outputs[0], { headers: { 'content-type': 'text/javascript' } });
+  if (pathname === '/onig.wasm') { wasmRequests++; return new Response(Bun.file('webview/dist/onig.wasm')); }
+  const query = new URL(request.url).searchParams;
+  const script = `<script type="module" src="/${query.has('inline') ? 'inline/' : ''}test-shiki-worker-entry.js"></script>`;
+  return new Response(`<body ${query.has('foreground') ? '' : `data-meo-shiki-worker-src="/${query.has('inline') ? 'inline-worker.js' : 'worker.js'}"`}>${script}</body>`, { headers: {
     'content-type': 'text/html',
     'content-security-policy': "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; worker-src blob:"
   } });
@@ -32,7 +51,15 @@ try {
   });
   await page.goto(server.url.href);
   const reference = await browser.newPage();
-  await reference.goto(server.url.href + '?foreground');
+  await reference.goto(server.url.href + '?inline');
+  const foreground = await browser.newPage();
+  await foreground.goto(server.url.href + '?foreground');
+  const inlineForeground = await browser.newPage();
+  await inlineForeground.goto(server.url.href + '?inline&foreground');
+  for (const surfacePage of [page, reference, foreground, inlineForeground]) {
+    await surfacePage.waitForFunction(() => !!(window as any).shikiWorkerHarness);
+  }
+  assert.equal(wasmRequests, 0, 'Opening the editor must not eagerly fetch or initialize the syntax engine');
   const fixtures = [
     ['typescript', '/* 跨行 😀\n' + '\n'.repeat(300) + '*/\nconst x = { message: "{}" };\n'],
     ['html', '<script>const value = "{}";</script>\n<style>.a {color:red}</style>'],
@@ -42,21 +69,29 @@ try {
   ] as const;
   let checked = 0;
   for (const surface of ['editor', 'preview', 'source'] as const) {
-    await page.evaluate(({ theme, surface }) => (window as any).shikiWorkerHarness.start(theme, surface), { theme: darkPlus, surface });
-    await reference.evaluate(({ theme, surface }) => (window as any).shikiWorkerHarness.start(theme, surface), { theme: darkPlus, surface });
-      for (const [lang] of fixtures) {
-        await reference.evaluate(({ lang, surface }) => (window as any).shikiWorkerHarness.request(lang, 'prime', surface), { lang, surface });
-        await page.evaluate(({ lang, surface }) => (window as any).shikiWorkerHarness.request(lang, 'prime', surface), { lang, surface });
+    for (const surfacePage of [page, reference, foreground, inlineForeground]) {
+      await surfacePage.evaluate(({ theme, surface }) => (window as any).shikiWorkerHarness.start(theme, surface), { theme: darkPlus, surface });
+    }
+    for (const [lang] of fixtures) {
+      for (const surfacePage of [page, reference, foreground, inlineForeground]) {
+        await surfacePage.evaluate(({ lang, surface }) => (window as any).shikiWorkerHarness.request(lang, 'prime', surface), { lang, surface });
       }
-      for (const [lang, input] of fixtures) for (const code of [input, input.replaceAll('\n', '\r\n'), '', '\n']) {
-        const expected = await reference.evaluate(({ lang, code, surface }) => (window as any).shikiWorkerHarness.request(lang, code, surface), { lang, code, surface });
-        const actual = await page.evaluate(({ lang, code, surface }) => (window as any).shikiWorkerHarness.request(lang, code, surface), { lang, code, surface });
-        assert.ok(isDeepStrictEqual(actual, expected), `${surface}/${lang} must preserve exact token colors, offsets and scope metadata`);
-        checked++;
-      }
+    }
+    for (const [lang, input] of fixtures) for (const code of [input, input.replaceAll('\n', '\r\n'), '', '\n']) {
+      const expected = await reference.evaluate(({ lang, code, surface }) => (window as any).shikiWorkerHarness.request(lang, code, surface), { lang, code, surface });
+      const actual = await page.evaluate(({ lang, code, surface }) => (window as any).shikiWorkerHarness.request(lang, code, surface), { lang, code, surface });
+      assert.deepEqual(actual, expected, `${surface}/${lang} worker tokens must match the inlined engine exactly`);
+      const foregroundExpected = await inlineForeground.evaluate(({ lang, code, surface }) => (window as any).shikiWorkerHarness.request(lang, code, surface), { lang, code, surface });
+      const foregroundActual = await foreground.evaluate(({ lang, code, surface }) => (window as any).shikiWorkerHarness.request(lang, code, surface), { lang, code, surface });
+      assert.deepEqual(foregroundActual, foregroundExpected, `${surface}/${lang} foreground tokens and scope metadata must match the inlined engine exactly`);
+      checked += 2;
+    }
   }
-  await reference.evaluate(() => (window as any).shikiWorkerHarness.stop());
-  await reference.close();
+  assert.equal(wasmRequests, 4, 'Each worker loads the shared engine once; foreground surfaces reuse their existing engine');
+  for (const surfacePage of [reference, foreground, inlineForeground]) {
+    await surfacePage.evaluate(() => (window as any).shikiWorkerHarness.stop());
+    await surfacePage.close();
+  }
   await page.evaluate(() => (window as any).shikiWorkerHarness.stop());
   assert.deepEqual(await page.evaluate(() => (window as any).workerStats), { created: 3, terminated: 3 }, 'releasing the last surface consumer must terminate its actual CPU work');
   // A cold grammar plus a large token calculation must let the foreground run.

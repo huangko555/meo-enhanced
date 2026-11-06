@@ -31,8 +31,17 @@ const runner = createBackgroundShiki('/worker.js', {name:'test',type:'dark',colo
 const build = await Bun.build({ entrypoints: [entry], target: 'browser', format: 'iife' });
 assert.ok(build.success, build.logs.map(String).join('\n'));
 const script = await build.outputs[0]!.text();
-const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: request => new URL(request.url).pathname === '/worker.js'
-  ? new Response(Bun.file('webview/dist/shiki-highlight-worker.js')) : new Response('<!doctype html><body>Syntax worker regression</body>', { headers: { 'Content-Type': 'text/html' } }) });
+let failNextWasm = true, wasmRequests = 0;
+const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+  const pathname = new URL(request.url).pathname;
+  if (pathname === '/worker.js') return new Response(Bun.file('webview/dist/shiki-highlight-worker.js'));
+  if (pathname === '/onig.wasm') {
+    wasmRequests++;
+    if (failNextWasm) { failNextWasm = false; return new Response('Unavailable', { status: 503 }); }
+    return new Response(Bun.file('webview/dist/onig.wasm'));
+  }
+  return new Response('<!doctype html><body>Syntax worker regression</body>', { headers: { 'Content-Type': 'text/html' } });
+} });
 const browser = await launchTestBrowser();
 let primary: unknown;
 try {
@@ -43,11 +52,14 @@ try {
     await page.waitForFunction(id => (window as any).jobs[id].done, { timeout: 30000 }, id);
     return page.evaluate(id => (window as any).jobs[id], id);
   };
+  const unavailable = await wait(await page.evaluate(() => (window as any).startSyntax('const unavailable = 1;')));
+  assert.ok(unavailable.cancelled, 'An unavailable WASM asset must settle the request and retire the failed worker');
   const first = await page.evaluate(code => (window as any).startSyntax(code), source), cold = await wait(first);
   assert.ok(cold.exact && cold.partialRows === 128 && cold.first < cold.milliseconds / 2);
   const edited = source.replace('row9000 =', 'renamed9000 =');
   const second = await page.evaluate(code => (window as any).startSyntax(code), edited), warm = await wait(second);
   assert.ok(warm.exact);
+  assert.equal(wasmRequests, 2, 'A recovered worker loads the binary once and retains it for warm edits');
   const third = await page.evaluate(({ source, edited }) => (window as any).startSyntax('/*\n' + source, edited), { source, edited });
   const obsolete = await wait(third), latest = await wait(obsolete.next);
   assert.ok(obsolete.cancelled && latest.exact, 'A newer edit stops obsolete work and receives its complete syntax');

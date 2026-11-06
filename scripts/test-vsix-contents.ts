@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import JSZip from 'jszip';
 import { assertPackageTextIsPublic } from './vsix-privacy';
@@ -63,6 +63,7 @@ const requiredFiles = [
   'webview/dist/index.js',
   'webview/dist/git-diff-worker.js',
   'webview/dist/shiki-highlight-worker.js',
+  'webview/dist/onig.wasm',
   'webview/dist/markdown-parse-worker.js',
   'webview/dist/document-statistics-worker.js',
   'webview/dist/index.css',
@@ -78,6 +79,28 @@ const requiredFiles = [
 for (const path of requiredFiles) {
   if (!included.has(path)) throw new Error(`VSIX listing is missing required file ${path}`);
 }
+const wasmPath = 'webview/dist/onig.wasm';
+const wasm = await readIncludedFile(wasmPath);
+if (!wasm.equals(readFileSync(resolve(repoRoot, 'node_modules/shiki/dist/onig.wasm')))) {
+  throw new Error('Packaged syntax engine differs from the installed Shiki binary');
+}
+const embeddedWasmPrefix = wasm.toString('base64').slice(0, 128);
+const fontRoot = 'webview/dist/katex/fonts/';
+const fontNames = readdirSync(resolve(repoRoot, 'node_modules/katex/dist/fonts')).filter(name => name.endsWith('.woff2'));
+for (const name of fontNames) {
+  const packaged = await readIncludedFile(fontRoot + name);
+  if (!packaged.equals(readFileSync(resolve(repoRoot, 'node_modules/katex/dist/fonts', name)))) {
+    throw new Error(`Packaged formula font differs from upstream: ${name}`);
+  }
+}
+const katexCss = (await readIncludedFile('webview/dist/katex/katex.min.css')).toString('utf8');
+const fontReferences = [...katexCss.matchAll(/url\(["']?fonts\/([^"')]+)["']?\)/g)].map(match => match[1]);
+if (fontReferences.length !== fontNames.length || fontNames.some(name => !fontReferences.includes(name))) {
+  throw new Error('Formula CSS must reference every packaged WOFF2 font');
+}
+if (files.some(path => path.startsWith(fontRoot) && !path.endsWith('.woff2'))) {
+  throw new Error('Formula fonts must use the single supported WOFF2 format');
+}
 const notices = (await readIncludedFile('THIRD_PARTY_NOTICES.md')).toString('utf8');
 for (const [dependency, licensePath] of [['jsonc-parser 3.3.1', 'jsonc-parser/LICENSE.md'], ['PostCSS 8.5.6', 'postcss/LICENSE']]) {
   if (!notices.includes(`## ${dependency}`)) throw new Error(`Bundled preset dependency is missing its license notice: ${dependency}`);
@@ -87,10 +110,14 @@ for (const [dependency, licensePath] of [['jsonc-parser 3.3.1', 'jsonc-parser/LI
 let scannedTextFiles = 0;
 for (const path of files) {
   const contents = await readIncludedFile(path);
+  if (path !== wasmPath && contents.equals(wasm)) throw new Error(`Duplicate syntax engine binary: ${path}`);
   // Inspect every UTF-8 text file regardless of suffix, including text with NULs.
   let text: string;
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(contents); }
   catch { continue; }
+  if (path.endsWith('.js') && text.includes(embeddedWasmPrefix)) {
+    throw new Error(`Syntax engine must load the shared binary instead of embedding base64: ${path}`);
+  }
   assertPackageTextIsPublic(path, text, repoRoot);
   scannedTextFiles += 1;
 }

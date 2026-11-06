@@ -43,9 +43,7 @@ const markdown = [
   'Inline control $x+1$ and $\\frac{1}{2}$ remain inline.'
 ].join('\n\n');
 const expectedTagCount = formulas.length + 1;
-const katexDirectory = path.join(root, 'node_modules/katex/dist');
-const katexCss = fs.readFileSync(path.join(katexDirectory, 'katex.min.css'), 'utf8')
-  .replace(/url\(([^)]+)\)/g, (_match, fontPath) => `url(data:font/woff2;base64,${fs.readFileSync(path.join(katexDirectory, fontPath)).toString('base64')})`);
+const katexCss = fs.readFileSync(path.join(root, 'webview/dist/katex/katex-embedded.css'), 'utf8');
 const katexHref = `data:text/css;base64,${Buffer.from(katexCss).toString('base64')}`;
 
 async function readTagLayout({ surface, selector = '.katex-html > .tag' }: { surface: string; selector?: string }) {

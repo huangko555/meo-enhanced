@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
+import { sharedShikiWasmPlugin } from './shiki-wasm-plugin.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const lucidePackage = createRequire(import.meta.url).resolve('lucide/package.json');
@@ -28,7 +29,11 @@ for (const [entry, output] of [
 ]) {
   const result = await Bun.build({
     entrypoints: [resolve(root, 'src/export', entry)],
-    target: 'node', format: 'cjs', minify: true, plugins: [lucidePlugin, fallbackPlugin]
+    target: 'node', format: 'cjs', minify: true,
+    // A literal banner preserves the installed directory instead of Bun folding
+    // a dependency's __dirname to the build checkout.
+    banner: 'var __meoExportRuntimeDir = __dirname;',
+    plugins: [lucidePlugin, fallbackPlugin, sharedShikiWasmPlugin('node')]
   });
   if (!result.success) throw new AggregateError(result.logs, `${output} build failed`);
   if (result.outputs.length !== 1) throw new Error(`${output} must be emitted as one bundle`);
