@@ -16,6 +16,7 @@ mkdirSync(katexDist, { recursive: true });
 const build = spawnSync(process.execPath, [
   'build',
   'webview/src/index.ts',
+  'webview/src/editor.ts',
   '--target=browser',
   '--format=esm',
   '--splitting',

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import darkPlus from '@shikijs/themes/dark-plus';
 import { bundledLanguagesInfo } from 'shiki/langs';
 import type { CodeThemeDto } from '../src/protocol/hostConfigurationEvents';
@@ -44,7 +45,8 @@ for (const expected of bundledLanguagesInfo) {
   assert.equal(existsSync(path.join(webviewDist, actual.module)), true, `missing language module ${actual.module}`);
 }
 
-for (const id of ['typescript', 'html', 'vue', 'wasm', 'zig', 'mdx']) {
+const sampledLanguages = ['typescript', 'html', 'vue', 'wasm', 'zig', 'mdx'];
+for (const id of sampledLanguages) {
   const asset = manifestById.get(id);
   assert.ok(asset, `missing sampled language ${id}`);
   const loaded = await import(pathToFileURL(path.join(webviewDist, asset.module)).href);
@@ -53,6 +55,16 @@ for (const id of ['typescript', 'html', 'vue', 'wasm', 'zig', 'mdx']) {
     `sampled language module ${asset.module} did not expose ${id}`
   );
 }
+
+// These same browser build chunks are imported by the Node export host. An
+// additional build entry must not pull browser-only initialization into them.
+const nodeGrammarImports = sampledLanguages.map(id => ({ id,
+  href: pathToFileURL(path.join(webviewDist, manifestById.get(id)!.module)).href }));
+execFileSync('node', ['--input-type=module', '--eval',
+  'delete globalThis.navigator;\nfor (const { id, href } of ' + JSON.stringify(nodeGrammarImports) + ') {\n'
+  + 'const loaded = await import(href);\n'
+  + 'if (!Array.isArray(loaded.default) || !loaded.default.some(grammar => grammar.name === id)) throw new Error("Missing Node grammar: " + id);\n}'
+], { cwd: repoRoot, stdio: 'pipe' });
 
 const runtimeBytes = statSync(exportRuntimePath).size;
 assert.ok(

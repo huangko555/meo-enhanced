@@ -11,7 +11,7 @@ import { createBackgroundPreviewRenderer } from './host/previewRenderWorker';
 import { createImageDimensionCatalog } from './host/imageDimensions';
 import { disposeWikiResources, resolveDocumentWikiResources } from './host/wikiResources';
 import type { ResolvedWikiResources } from './foundation/wikiReference';
-import { shouldPreloadMermaid } from './extension/webviewResourceHints';
+import { shouldPreloadMermaid, webviewPreloadModules } from './extension/webviewResourceHints';
 import { createGitApiWatcher } from './git/gitApiWatch';
 import {
   AGENT_REVIEW_FILE_OVERRIDE_CLEANUP_DELAY_MS,
@@ -1077,6 +1077,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
   }
 
   private getWebviewHtml(webview: vscode.Webview, preloadMermaid: boolean): string {
+    const modulePreloads = webviewPreloadModules(preloadMermaid).map(module =>
+      webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', module)).toString());
     const logoUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'logo.png')).toString();
     const scriptUri = webview
       .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'index.js'))
@@ -1131,7 +1133,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         <style>${getWebviewPreloadShellCss()}</style>
         <link href="${katexStyleUri}" rel="stylesheet" />
         <link href="${styleUri}" rel="stylesheet" />
-        ${preloadMermaid ? `<link rel="modulepreload" href="${mermaidModuleUri}" />` : ''}
+        ${modulePreloads.map(uri => `<link rel="modulepreload" href="${uri}" />`).join('\n')}
       </head>
       <body data-meo-statistics-worker-src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'document-statistics-worker.js'))}" data-meo-katex-src="${katexStyleUri}" data-meo-mermaid-src="${mermaidRuntimeUri}" data-meo-mermaid-module-src="${mermaidModuleUri}" data-meo-git-diff-worker-src="${gitDiffWorkerUri}" data-meo-shiki-worker-src="${shikiWorkerUri}" data-meo-markdown-worker-src="${markdownWorkerUri}" data-meo-script-nonce="${nonce}">
         <div id="app" class="editor-root">

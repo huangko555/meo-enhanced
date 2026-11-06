@@ -1897,6 +1897,12 @@ default/custom layout settings and verifies that initial settings do not save a
 temporary default mode as a user preference. Source's optional side-by-side
 preview is covered by
 `scripts/test-source-side-preview.ts` in the production browser matrix.
+Build the production assets before running the startup contract directly. Its
+module-preload case holds the actual shell script response, requires the editor
+module to be fetched independently, and verifies that Source mount reuses that
+one module without constructing an editor before initialization. Installed
+startup checks retain the content, focus, loading and first-input boundaries;
+the preload is preparation only, not permission to reveal an unready surface.
 `scripts/test-mode-roundtrip-reveal.ts` checks Live → Source → Preview → Live
 with a viewport table whose row layout is deliberately delayed. The first
 visible Live frame must already contain content and the table's final height;

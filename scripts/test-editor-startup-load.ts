@@ -2,6 +2,65 @@ import assert from 'node:assert/strict';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 import exportRuntime from '../src/export/runtime';
 import type { Page } from 'puppeteer-core';
+import fs from 'node:fs';
+import path from 'node:path';
+import { webviewPreloadModules } from '../src/extension/webviewResourceHints';
+
+async function checkEditorModulePreload(browser: Awaited<ReturnType<typeof launchTestBrowser>>, init: Record<string, unknown>) {
+  const dist = path.resolve('webview/dist');
+  assert.ok(fs.existsSync(path.join(dist, 'editor.js')), 'Build the production Webview before the startup contract');
+  let releaseShell!: () => void;
+  const shellHeld = new Promise<void>(resolve => { releaseShell = resolve; });
+  let sawEditor!: () => void;
+  const editorRequested = new Promise<void>(resolve => { sawEditor = resolve; });
+  let editorRequests = 0;
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    const relative = decodeURIComponent(new URL(request.url).pathname).slice(1);
+    if (!relative) return new Response('<!doctype html><link rel="stylesheet" href="/index.css">'
+      + webviewPreloadModules(false).map(module => `<link rel="modulepreload" href="/${module}">`).join('')
+      + '<style>html,body,#app{height:100%;margin:0}</style><body class="vscode-dark"><div id="app"></div><script type="module" src="/index.js"></script>', { headers: { 'Content-Type': 'text/html' } });
+    if (relative === 'index.js') await shellHeld;
+    if (relative === 'editor.js') { editorRequests += 1; sawEditor(); }
+    const file = path.resolve(dist, relative);
+    return file.startsWith(dist + path.sep) && fs.existsSync(file) ? new Response(Bun.file(file)) : new Response('', { status: 404 });
+  } });
+  const context = await browser.createBrowserContext();
+  const page = await context.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(String(error)));
+  try {
+    await page.setCacheEnabled(false);
+    await page.exposeFunction('__preloadHost', (message: any) => message.type === 'ready'
+      ? { ...init, mode: 'source' }
+      : message.type === 'requestPreviewRender' ? {
+        type: 'previewRenderResult', requestId: message.requestId,
+        result: { ok: true, value: exportRuntime.renderPreviewDocument({ markdownText: message.text,
+          sourceDocumentPath: 'C:/tmp/startup-load.md', uiLanguage: message.uiLanguage, styleEnvironment: message.environment }) }
+      } : null);
+    await page.evaluateOnNewDocument(() => {
+      const scope = window as any;
+      scope.acquireVsCodeApi = () => ({ getState() {}, setState() {}, postMessage(message: any) {
+        scope.__preloadHost(message).then((response: any) => {
+          if (response) window.dispatchEvent(new MessageEvent('message', { data: response }));
+        });
+      } });
+    });
+    const navigation = page.goto(server.url.href, { waitUntil: 'load' });
+    // Observe immediately so a failed navigation cannot become an unhandled rejection.
+    void navigation.catch(() => {});
+    await Promise.race([editorRequested, new Promise((_, reject) => setTimeout(() => reject(new Error('Editor fetch waited for the held shell')), 5000))]);
+    assert.equal(await page.$('.cm-editor'), null, 'Module preparation must not construct an editor ahead of initialization');
+    releaseShell();
+    await navigation;
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('.editor-root')?.dataset.mode === 'source'
+      && document.querySelector('.cm-content')?.textContent?.includes('Startup content')
+      && document.querySelector<HTMLElement>('.editor-loading')?.hidden === true
+      && document.querySelector<HTMLElement>('.editor-host')?.inert === false, { timeout: 10000 });
+    assert.equal(editorRequests, 1, 'Mount must reuse the prepared module instead of fetching a second copy');
+    assert.deepEqual(errors, [], 'The separately emitted editor must retain the shell\'s shared runtime');
+    console.log('Editor module prepared before shell execution and reused by Source mount');
+  } finally { releaseShell(); await context.close(); server.stop(true); }
+}
 
 const builds = await Promise.all([
   Bun.build({ entrypoints: ['scripts/test-preview-reading-surface-production-entry.ts'], target: 'browser', format: 'iife' }),
@@ -236,6 +295,7 @@ try {
       console.log(`Statistics readiness handoff passed: pending Preview / ${destination}`);
     } finally { releasePreview(); await page.close(); }
   }
+  await checkEditorModulePreload(browser, handoffInit!);
   console.log('Editor startup content checks passed: Live, Source, Preview and pending statistics handoffs');
 } catch (error) {
   primaryError = error;

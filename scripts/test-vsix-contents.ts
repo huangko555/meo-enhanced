@@ -61,6 +61,7 @@ const requiredFiles = [
   'dist/docx-runtime.js',
   'dist/puppeteer-runtime.js',
   'webview/dist/index.js',
+  'webview/dist/editor.js',
   'webview/dist/git-diff-worker.js',
   'webview/dist/shiki-highlight-worker.js',
   'webview/dist/markdown-parse-worker.js',

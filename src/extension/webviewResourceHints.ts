@@ -1,3 +1,8 @@
+/** Fetch and compile the editor alongside the shell; construction stays lazy. */
+export function webviewPreloadModules(preloadMermaid: boolean): readonly string[] {
+  return ['editor.js', ...(preloadMermaid ? ['mermaid/mermaidRuntime.js'] : [])];
+}
+
 /** A conservative fetch hint, not a Markdown parser. Keep nested/unfinished fences warm. */
 export function shouldPreloadMermaid(text: string): boolean {
   // Mentioning the library in prose or a URL does not require its large runtime.
