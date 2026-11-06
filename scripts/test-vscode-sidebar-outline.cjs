@@ -102,6 +102,34 @@ exports.run = async () => {
     const otherFile = path.join(output, 'workspace', 'other.md');
     fs.writeFileSync(otherFile, '# Other focused document\n');
     await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(otherFile), 'meoEnhanced.editor', vscode.ViewColumn.Beside);
+    // A new native split has a separate Webview bootstrap. Admit that document
+    // before measuring its outline publication; a blank loading surface is not
+    // an active editor. Keep the subsequent outline and bulk-expansion budgets.
+    const splitStarted = Date.now();
+    const splitDeadline = splitStarted + 120000;
+    let splitReady = false;
+    while (!splitReady && Date.now() < splitDeadline) {
+      for (const candidate of page.frames()) {
+        splitReady = await Promise.race([
+          candidate.evaluate(() => {
+            const root = document.querySelector('.editor-root');
+            if (window.frameElement?.id !== 'active-frame' || !document.hasFocus()
+              || !root?.textContent.includes('Other focused document') || document.querySelector('.meo-preload-toolbar')) return false;
+            return root.dataset.mode === 'preview'
+              ? document.querySelector('.preview-host')?.hidden === false && !document.querySelector('.preview-host')?.inert
+                && document.querySelector('.preview-loading')?.hidden === true
+                && document.querySelector('.preview-frame')?.contentDocument?.documentElement.inert === false
+              : document.querySelector('.editor-host')?.hidden === false && !document.querySelector('.editor-host')?.inert
+                && document.querySelector('.editor-loading')?.hidden === true;
+          }).catch(() => false),
+          new Promise(resolve => setTimeout(() => resolve(false), 500))
+        ]);
+        if (splitReady) break;
+      }
+      if (!splitReady) await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    result.newSplitAdmissionMilliseconds = Date.now() - splitStarted;
+    assert.ok(splitReady, 'The new split must expose its focused, interactive MEO document within native startup admission');
     await page.waitForFunction(selector => [...document.querySelectorAll(selector)].some(row => row.textContent.includes('Other focused document')), {}, rows);
     await vscode.commands.executeCommand('meoEnhanced.outline.focus');
     assert.equal(await page.$$eval(rows, nodes => nodes.length), 1, 'Sidebar focus preserves the last MEO outline');

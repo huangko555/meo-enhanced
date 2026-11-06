@@ -34,7 +34,10 @@ try {
     -RedirectStandardOutput (Join-Path $output ($phase + '-stdout.log')) -RedirectStandardError (Join-Path $output ($phase + '-stderr.log')) -PassThru
   # Retain the process handle so Windows PowerShell can read ExitCode after exit.
   $null = $child.Handle
-  $deadline = [DateTime]::UtcNow.AddSeconds(120)
+  # The full owner separately admits a cold split before its unchanged feature
+  # budgets. The outer process guard must leave time to finish those checks.
+  $phaseTimeout = if ($phase -eq 'full') { 360 } else { 120 }
+  $deadline = [DateTime]::UtcNow.AddSeconds($phaseTimeout)
   while (-not $child.WaitForExit(1000)) {
     if ([DateTime]::UtcNow -gt $deadline) { throw 'Native sidebar outline checks timed out.' }
   }
