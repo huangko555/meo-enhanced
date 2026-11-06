@@ -1220,6 +1220,10 @@ publish its first immutable token prefix once before completion; requests withou
 an explicit line boundary still require complete tokens, and unfinished lines
 keep their neutral pending palette. A held-completion contract prevents partial
 tokens from entering the complete cache or causing a full Live rebuild per chunk.
+Worker source and WASM fetches share the existing startup timeout rather than a
+shorter independent asset deadline. The real HTTP/Worker contract includes slow
+successful asset responses, while preserving unavailable-resource recovery and
+the no-progress watchdog.
 The background-demotion unit check explicitly advances reading-pause timers and
 idle callbacks, including fast polling turns. A fixed count of zero-delay timer
 callbacks does not prove that a real 50ms pause expired on every operating system.

@@ -49,6 +49,15 @@ let runner = createRunner();
     return {exact:rows?.map(line=>line.map(syntaxToken=>syntaxToken.content).join('')).join('\\n')===code,cancelled:rows===null,progress,milliseconds:performance.now()-started};
   } finally { controlled.dispose();window.setTimeout = nativeTimeout; }
 };
+(window as any).slowAssetSyntax = async () => {
+  const nativeTimeout = AbortSignal.timeout;
+  AbortSignal.timeout = milliseconds => nativeTimeout(milliseconds === 5_000 ? 50 : milliseconds === 20_000 ? 500 : milliseconds);
+  document.body.dataset.meoShikiWasmSrc = '/slow-onig.wasm';
+  const slow = createBackgroundShiki('/slow-worker.js', {name:'test',type:'dark',colors:theme.colors ?? {},tokenColors:theme.tokenColors ?? theme.settings ?? []}, async () => [javascript]);
+  const code = 'const slowAsset = "ready";';
+  try {const rows = await slow.request('javascript',code,()=>true);return rows?.flat().map(syntaxToken=>syntaxToken.content).join('')===code;}
+  finally {slow.dispose();AbortSignal.timeout = nativeTimeout;delete document.body.dataset.meoShikiWasmSrc;}
+};
 `);
 const build = await Bun.build({ entrypoints: [entry], target: 'browser', format: 'iife' });
 assert.ok(build.success, build.logs.map(String).join('\n'));
@@ -68,9 +77,13 @@ const controlledBuild = await Bun.build({ entrypoints:[controlledEntry],target:'
 assert.ok(controlledBuild.success, controlledBuild.logs.map(String).join('\n'));
 const controlledWorker = await controlledBuild.outputs[0]!.text();
 let failNextWasm = true, wasmRequests = 0;
-const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
   const pathname = new URL(request.url).pathname;
   if (pathname === '/worker.js') return new Response(Bun.file('webview/dist/shiki-highlight-worker.js'));
+  if (pathname === '/slow-worker.js' || pathname === '/slow-onig.wasm') {
+    await Bun.sleep(100);
+    return new Response(Bun.file(pathname === '/slow-worker.js' ? 'webview/dist/shiki-highlight-worker.js' : 'webview/dist/onig.wasm'));
+  }
   if (pathname.startsWith('/controlled-')) {
     const mode=pathname.slice('/controlled-'.length,-'.js'.length);
     return new Response('self.__controlledMode=' + JSON.stringify(mode) + ';\n' + controlledWorker);
@@ -143,6 +156,8 @@ try {
     const stalled = await page.evaluate(mode => (window as any).controlledSyntax(mode), mode);
     assert.ok(stalled.cancelled, `${mode} work must not keep the inactivity watchdog alive`);
   }
+  assert.equal(await page.evaluate(() => (window as any).slowAssetSyntax()),true,
+    'Worker source and WASM assets may use the existing startup budget rather than aborting a valid slow resource response');
   console.log(JSON.stringify({ cold, warm, obsolete, latest }));
   await page.close();
 } catch (error) { primary = error; throw error; }

@@ -1,11 +1,12 @@
 import type { RawVscodeTheme, ShikiTokenLines, ShikiWorkerRequest, ShikiWorkerResponse } from './shikiTypes';
 import { unpackShikiTokens } from './shikiTokenTransfer';
 
+const WORKER_TIMEOUT_MS = 20_000;
 let source: { uri: string; promise: Promise<string> } | undefined;
 let binary: { uri: string; promise: Promise<ArrayBuffer> } | undefined;
 async function loadWasm(uri: string): Promise<ArrayBuffer> {
   if (binary?.uri !== uri) {
-    const promise = fetch(uri, { signal: AbortSignal.timeout(5_000) }).then(async response => {
+    const promise = fetch(uri, { signal: AbortSignal.timeout(WORKER_TIMEOUT_MS) }).then(async response => {
       if (!response.ok) throw new Error('Could not load syntax highlighting WASM');
       return response.arrayBuffer();
     });
@@ -17,7 +18,7 @@ async function loadWasm(uri: string): Promise<ArrayBuffer> {
 
 async function loadSource(uri: string): Promise<string> {
   if (source?.uri !== uri) {
-    const promise = fetch(uri, { signal: AbortSignal.timeout(5_000) }).then(response => {
+    const promise = fetch(uri, { signal: AbortSignal.timeout(WORKER_TIMEOUT_MS) }).then(response => {
       if (!response.ok) throw new Error('Could not load syntax highlighting worker');
       return response.text();
     });
@@ -52,7 +53,7 @@ export function createBackgroundShiki(uri: string, theme: RawVscodeTheme,
   };
   const armTimeout = () => {
     if (timeout !== undefined) clearTimeout(timeout);
-    timeout = setTimeout(() => finish(null, true), 20_000);
+    timeout = setTimeout(() => finish(null, true), WORKER_TIMEOUT_MS);
   };
   const finish = (tokens: ShikiTokenLines | null, reset = false) => {
     if (timeout !== undefined) clearTimeout(timeout);
