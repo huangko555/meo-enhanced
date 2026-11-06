@@ -28,7 +28,7 @@ try {
   $reportPath = Join-Path $output 'result.json'
   Write-Output ('Report: ' + $reportPath)
   $report = Get-Content -Raw -LiteralPath $reportPath -Encoding UTF8 | ConvertFrom-Json
-  $report | ConvertTo-Json -Depth 6
+  $report | ConvertTo-Json -Depth 12
   if ($child.ExitCode -ne 0 -or -not $report.passed) { throw 'Native resource loading checks failed.' }
 } finally {
   if ($null -ne $child -and -not $child.HasExited) { $child.Kill($true) }

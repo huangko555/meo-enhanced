@@ -87,6 +87,11 @@ async function createPointerDriver({ frame, page, mouse = page.mouse, timeoutMs 
       armed = true;
       await mouse.move(point.root.x, point.root.y);
       evidence.commands.push('move');
+      stage = 'pointermove';
+      await frame.waitForFunction(({ x, y }) => window.__meoInputDelivery.events.some(event =>
+        event.type === 'pointermove' && event.trusted && event.targetMatches
+        && Math.abs(event.x - x) <= 1 && Math.abs(event.y - y) <= 1),
+      { timeout: timeoutMs }, point.local);
       stage = 'pointerdown';
       held = true;
       await mouse.down();

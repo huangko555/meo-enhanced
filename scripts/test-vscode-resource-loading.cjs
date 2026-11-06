@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const puppeteer = require('puppeteer-core');
+const { createPointerDriver } = require('./native-input-delivery.cjs');
 
 exports.run = async () => {
   const output = process.env.MEO_RESOURCE_OUTPUT;
@@ -73,6 +74,10 @@ exports.run = async () => {
       activeFrame = frame;
       frame.page().setDefaultTimeout(30000);
       await frame.waitForFunction(() => !document.querySelector('.meo-preload-toolbar,.meo-preload-editor-shell'));
+      await frame.page().bringToFront();
+      const pointer = await createPointerDriver({frame,page:frame.page()});
+      record.inputs = [];
+      const click = async selector => {record.inputs.push({selector,receipt:await pointer.click(selector)});};
       await frame.evaluate(() => {
         globalThis.__resourceModeClicks = [];
         document.addEventListener('click', event => {
@@ -84,7 +89,7 @@ exports.run = async () => {
       if (record.initialMode === 'source') {
         await frame.waitForFunction(sourceReady);
         record.initialSourceMs = performance.now() - started;
-        await frame.locator('button[data-mode="live"]').click();
+        await click('button[data-mode="live"]');
       }
       await frame.waitForFunction(colorsReady);
       await frame.waitForFunction(() => document.getElementById('app')?.dataset.mode === 'live'
@@ -93,7 +98,7 @@ exports.run = async () => {
       if (!large) await frame.waitForFunction(() => !!document.querySelector('.meo-mermaid-block svg') && !!document.querySelector('.katex'));
       await frame.page().screenshot({ path: path.join(output, large ? 'large-live.png' : 'ordinary-live.png') });
       let modeStarted = performance.now();
-      await frame.locator('button[data-mode="source"]').click();
+      await click('button[data-mode="source"]');
       await frame.waitForFunction(sourceReady);
       record.switches.sourceMs = performance.now() - modeStarted;
       const source = await frame.evaluate(() => {
@@ -126,7 +131,7 @@ exports.run = async () => {
       await vscode.commands.executeCommand('workbench.action.files.save');
       assert.equal(fs.readFileSync(file, 'utf8'), original, 'typing and history preserve the complete saved source');
       modeStarted = performance.now();
-      await frame.locator('button[data-mode="preview"]').click();
+      await click('button[data-mode="preview"]');
       await frame.waitForFunction(previewReady);
       record.switches.previewMs = performance.now() - modeStarted;
       if (!large) await frame.waitForFunction(() => {
@@ -134,13 +139,13 @@ exports.run = async () => {
         return !!doc?.querySelector('.meo-export-mermaid.is-rendered svg') && !!doc?.querySelector('.katex');
       });
       modeStarted = performance.now();
-      await frame.locator('button[data-mode="source"]').click();
+      await click('button[data-mode="source"]');
       await frame.waitForFunction(sourceReady);
       record.switches.warmSourceMs = performance.now() - modeStarted;
-      await frame.click('.source-preview-button');
+      await click('.source-preview-button');
       await frame.waitForFunction(previewReady);
-      await frame.click('.source-preview-button');
-      await frame.locator('button[data-mode="live"]').click();
+      await click('.source-preview-button');
+      await click('button[data-mode="live"]');
       await frame.waitForFunction(colorsReady);
       record.wasmLoads = await frame.evaluate(() => performance.getEntriesByType('resource').filter(entry => entry.name.includes('/onig.wasm')).length);
       assert.equal(record.wasmLoads, 1, 'Live, Source, full Preview and side Preview share one Webview binary load');
@@ -151,6 +156,7 @@ exports.run = async () => {
     result.passed = true;
   } catch (error) {
     result.error = String(error.stack || error);
+    if (error.code === 'native-input-unavailable') result.inputFailure = {stage:error.stage,evidence:error.evidence};
     if (activeFrame && !activeFrame.detached) result.state = await activeFrame.evaluate(() => ({ mode: document.getElementById('app')?.dataset.mode,
       loading: document.querySelector('.editor-loading')?.hidden, sourceTokens: document.querySelectorAll('.meo-source-token').length,
       hostHidden: document.querySelector('.editor-host')?.hidden,

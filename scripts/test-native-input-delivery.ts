@@ -60,6 +60,16 @@ if (args.has('--browser-url')) {
     assert.ok(clicked.events.some((event: any) => event.type === 'pointerdown' && event.trusted));
     const dragged = await driver.drag('#drag', 30);
     assert.equal(await frame.$eval('#drag', node => node.getBoundingClientRect().width), 50);
+
+  let undeliveredMoves = 0, prematurePresses = 0;
+  const unmoved = await createPointerDriver({ frame, page, timeoutMs: 150, mouse: {
+    move: async () => { undeliveredMoves++; }, down: async () => { prematurePresses++; }, up: async () => {}
+  } });
+  await assert.rejects(unmoved.click('#click'), (error: any) => error instanceof NativeInputCapabilityError
+    && error.stage === 'pointermove');
+  assert.equal(undeliveredMoves, 1);
+  assert.equal(prematurePresses, 0, 'An acknowledged move must reach the current Webview before pressing');
+  assert.equal(await frame.evaluate(() => '__meoInputDelivery' in window), false);
     assert.ok(dragged.events.some((event: any) => event.type === 'pointerup' && event.trusted));
 
     let presses = 0, releases = 0;

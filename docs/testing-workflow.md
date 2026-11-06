@@ -871,6 +871,10 @@ Before using browser-protocol pointer input in an installed Workbench, run
 actual press/move/release receipts, rejects an acknowledged but undelivered press,
 rejects pending/covered frames and removes its observer on failure. It runs separately
 from quick and does not establish Windows OS input coverage.
+Before pressing, the driver requires trusted pointer movement at the current
+target. A newly admitted Webview may acknowledge a move before its input route
+has delivered it. The dropped-move negative control requires zero press commands;
+this is an observed delivery boundary, not a fixed quiet delay or action retry.
 
 For a disposable document already opened in an isolated, normally installed VS Code
 instance with its debugging port enabled, attach the same check with:
