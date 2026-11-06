@@ -15,6 +15,14 @@ exports.run = async () => {
     page = (await browser.pages()).find(candidate => candidate.url().startsWith('vscode-file:'));
     assert.ok(page, 'A real VS Code workbench must be connected');
     page.setDefaultTimeout(15000);
+    if (!restoring) {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await vscode.commands.executeCommand('workbench.action.joinAllGroups');
+      // This full scenario moves the view out of Explorer. Start from that
+      // layout even when a previous disposable-profile run already moved it.
+      await vscode.commands.executeCommand('workbench.action.resetViewLocations');
+      result.initialViewLocationsReset = true;
+    }
     const file = path.join(output, 'workspace', 'outline.md');
     const headings = ['Native root', 'Native second', 'Native third', 'Native fourth', 'Native fifth', 'Native sixth'];
     fs.writeFileSync(file, headings.map((text, index) => `${'#'.repeat(index + 1)} ${text}\n\n${'Readable content.\n\n'.repeat(35)}`).join('\n'));
@@ -47,12 +55,29 @@ exports.run = async () => {
     assert.ok(collapse, 'The native collapse-all action is registered');
     await vscode.commands.executeCommand(collapse);
     await page.waitForFunction(selector => document.querySelectorAll(selector).length === 1, {}, rows);
-    const expandButton = '.pane-header .codicon-expand-all';
-    const outlineHeader = '.pane-header:has(.codicon-expand-all)';
-    await page.waitForSelector(outlineHeader);
-    await page.hover(outlineHeader);
-    await page.waitForSelector(expandButton, { visible: true });
-    await page.click(expandButton);
+    const outlineHeader = '.pane-header:has(.codicon-expand-all), .composite.title:has(.codicon-expand-all)';
+    const visibleHeader = element => {
+      const bounds = element.getBoundingClientRect();
+      return element.textContent.includes('MEO Outline') && bounds.width > 0 && bounds.height > 0
+        && bounds.bottom > 0 && bounds.top < innerHeight && bounds.right > 0 && bounds.left < innerWidth
+        && getComputedStyle(element).visibility !== 'hidden';
+    };
+    await page.waitForFunction(selector => [...document.querySelectorAll(selector)].some(element => {
+      const bounds = element.getBoundingClientRect();
+      return element.textContent.includes('MEO Outline') && bounds.width > 0 && bounds.height > 0
+        && bounds.bottom > 0 && bounds.top < innerHeight && bounds.right > 0 && bounds.left < innerWidth
+        && getComputedStyle(element).visibility !== 'hidden';
+    }), {}, outlineHeader);
+    const headers = await page.$$(outlineHeader);
+    let header;
+    for (const candidate of headers) if (await candidate.evaluate(visibleHeader)) { header = candidate; break; }
+    assert.ok(header, 'The current visible outline header exposes the native expand action');
+    await header.hover();
+    const expandButton = await header.$('.codicon-expand-all');
+    assert.ok(expandButton);
+    await page.waitForFunction(element => element.getClientRects().length > 0
+      && getComputedStyle(element).visibility !== 'hidden', {}, expandButton);
+    await expandButton.click();
     await page.waitForFunction(selector => document.querySelectorAll(selector).length === 6
       && ![...document.querySelectorAll(selector)].some(row => row.getAttribute('aria-expanded') === 'false'), {}, rows);
     result.cases.push('native collapse all and complete six-level expansion');
@@ -146,11 +171,28 @@ exports.run = async () => {
     await vscode.commands.executeCommand(collapse);
     await page.waitForFunction(selector => ![...document.querySelectorAll(selector)].some(row => row.getAttribute('aria-level') === '2'), {}, rows);
     const collapsedHeight = await page.$eval(`${tree} .monaco-list-rows`, element => parseFloat(element.style.height));
+    await page.evaluate(({ tree, collapsedHeight }) => {
+      const list = document.querySelector(`${tree} .monaco-list-rows`);
+      const clock = window.__meoOutlineExpansionClock = { readyAt: null };
+      clock.observer = new MutationObserver(() => {
+        if (clock.readyAt === null && parseFloat(list.style.height) > collapsedHeight * 1.9) clock.readyAt = Date.now();
+      });
+      clock.observer.observe(list, { attributes: true, attributeFilter: ['style'] });
+    }, { tree, collapsedHeight });
     const started = Date.now();
     await vscode.commands.executeCommand('meoEnhanced.outline.expandAll');
     await page.waitForFunction(({ tree, collapsedHeight }) => parseFloat(document.querySelector(`${tree} .monaco-list-rows`).style.height) > collapsedHeight * 1.9,
       {}, { tree, collapsedHeight });
     result.expandAll20000Milliseconds = Date.now() - started;
+    const readyAt = await page.evaluate(() => {
+      const clock = window.__meoOutlineExpansionClock;
+      clock.observer.disconnect();
+      return clock.readyAt;
+    });
+    if (readyAt !== null) {
+      result.independentExpansionMilliseconds = readyAt - started;
+      result.expansionObservationLagMilliseconds = result.expandAll20000Milliseconds - result.independentExpansionMilliseconds;
+    }
     assert.ok(result.expandAll20000Milliseconds < 10000, '20,000 headings expand within the native interaction budget');
     await vscode.commands.executeCommand('meoEnhanced.outline.focus');
     await vscode.commands.executeCommand('list.focusLast');
@@ -172,6 +214,7 @@ exports.run = async () => {
     }
     throw error;
   } finally {
+    if (page) await page.evaluate(() => window.__meoOutlineExpansionClock?.observer.disconnect()).catch(() => {});
     browser.disconnect();
     fs.writeFileSync(path.join(output, restoring ? 'result-restore.json' : 'result.json'), JSON.stringify(result, null, 2));
   }

@@ -144,6 +144,15 @@ to the subsequent 15-second outline-publication wait. Its 30-second large-docume
 check and 10-second 20,000-heading expansion budget remain unchanged. This admission
 is not a cold-start performance claim or permission to delay deliberate first-frame
 or pending-work tests.
+The outline row contract also requires bulk enumeration to leave hover and
+navigation metadata unresolved. Native hover/open resolution must preserve labels,
+accessibility, displayed snapshot targets and immediate language changes.
+Explicit expansion resets native row identities while reusing unchanged heading
+nodes and snapshot targets, including all 20,000 headings.
+The native owner records DOM expansion completion separately from observation
+lag; the existing end-to-end 10-second budget still decides the result.
+Its full scenario resets view locations in the disposable profile before testing
+the Explorer-to-standalone move; the restart/restore scenario retains saved layout.
 The native launcher's full-phase process guard allows 360 seconds for that
 admission and all checks together; its restore phase keeps the 120-second guard.
 Native automatic-save endurance inserts each Source sample as one real text

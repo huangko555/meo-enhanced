@@ -229,7 +229,7 @@ mock.module('vscode', () => ({
           reveals.push({ node, options });
           const expandChildren = (element: any, depth: number) => {
             if (depth <= 0 || !element.children.length) return;
-            collapsedNodes.delete(element.id); expand.fire({ element });
+            collapsedNodes.delete(provider.getTreeItem(element).id); expand.fire({ element });
             element.children.forEach((child: any) => expandChildren(child, depth - 1));
           };
           expandChildren(node, Math.min(3, Number(options.expand) || 0));
@@ -285,6 +285,9 @@ assert.deepEqual(provider.getChildren(roots[0]).map((node: any) => node.heading.
 const item = provider.getTreeItem(roots[0]);
 assert.equal(typeof item.label, 'string', 'rows use plain labels without viewport range emphasis');
 assert.equal(item.collapsibleState, 2);
+assert.equal(item.tooltip, undefined, 'Bulk rows defer hover metadata to native resolution');
+assert.equal(item.command, undefined, 'Bulk rows must not allocate a navigation command for every heading');
+assert.equal(provider.resolveTreeItem(item, roots[0], { isCancellationRequested: false }), item);
 assert.equal(item.tooltip, 'H1 · 第 1 行');
 assert.equal(item.iconPath, undefined, 'heading rows have no leading icon');
 assert.equal(provider.getParent(provider.getChildren(roots[0])[0]), roots[0]);
@@ -318,26 +321,32 @@ assert.equal(treeView.description, '1.md', 'closing the shown editor falls back 
 const deep = Array.from({ length: 6 }, (_, index) => heading(index + 1, `Heading ${index + 1}`, index + 1));
 leftHandle.update({ type: 'sidebarOutline', snapshot: 'test:1', headings: deep, activeIndex: 5 });
 let deepNode = provider.getChildren(undefined)[0];
+const deepRoot = deepNode;
+const collapsedRowIds: string[] = [];
 while (deepNode.children.length) {
-  collapsedNodes.add(deepNode.id); treeView.collapse.fire({ element: deepNode }); deepNode = deepNode.children[0];
+  const id = provider.getTreeItem(deepNode).id;
+  collapsedRowIds.push(id); collapsedNodes.add(id);
+  treeView.collapse.fire({ element: deepNode }); deepNode = deepNode.children[0];
 }
 await commands.get(SIDEBAR_OUTLINE_EXPAND_COMMAND)!();
 const expandedRoots = provider.getChildren(undefined);
-assert.ok(expandedRoots[0].id !== roots[0].id, 'explicit expand all resets native expansion identities once');
+assert.equal(expandedRoots[0], deepRoot, 'Explicit expansion reuses the unchanged heading tree');
 let expandedNode = expandedRoots[0];
 for (let level = 1; level < 6; level += 1) {
   assert.equal(provider.getTreeItem(expandedNode).collapsibleState, 2);
-  assert.ok(!collapsedNodes.has(expandedNode.id), 'every branch receives fresh expanded state');
+  const id = provider.getTreeItem(expandedNode).id;
+  assert.notEqual(id, collapsedRowIds[level - 1], 'explicit expand all resets every native branch identity');
+  assert.ok(!collapsedNodes.has(id), 'every branch receives fresh expanded state');
   expandedNode = expandedNode.children[0];
 }
 language = 'en'; configuration.fire({ affectsConfiguration: key => key === 'meoEnhanced.language' });
 assert.equal(treeView.title, 'MEO Outline');
-assert.equal(provider.getTreeItem(deepNode).tooltip, 'H6 · Line 6');
+assert.equal(provider.resolveTreeItem(provider.getTreeItem(deepNode), deepNode, { isCancellationRequested: false }).tooltip, 'H6 · Line 6');
 language = 'zh-CN'; configuration.fire({ affectsConfiguration: key => key === 'meoEnhanced.language' });
 assert.equal(treeView.title, 'MEO Outline');
 assert.equal(treeView.title, englishLabels['view.outline']);
 assert.equal(treeView.title, chineseLabels['view.outline'], 'view and container titles match in both locales');
-assert.equal(provider.getTreeItem(deepNode).tooltip, 'H6 · 第 6 行');
+assert.equal(provider.resolveTreeItem(provider.getTreeItem(deepNode), deepNode, { isCancellationRequested: false }).tooltip, 'H6 · 第 6 行');
 commands.get(SIDEBAR_OUTLINE_REVEAL_COMMAND)!(target); await settle();
 assert.equal(right.posted.filter(message => message.type === 'revealOutlineHeading').length, 1, 'closed editors ignore stale tree items');
 leftHandle.dispose(); await settle();
@@ -366,7 +375,7 @@ let boundedLanguage = 'en';
 let languageReads = 0;
 const boundedOutline = createVscodeSidebarOutline(() => { languageReads += 1; return boundedLanguage; });
 const boundedPanel = createPanel(true);
-const boundedHandle = boundedOutline.attach(boundedPanel as any, documentFor('/large-outline.md') as any);
+const boundedHandle = boundedOutline.attach(boundedPanel as any, documentFor('/long-folder'.repeat(60) + '/large-outline.md') as any);
 treeView.visible = true; treeView.visibility.fire();
 boundedHandle.setReady(true);
 const scaleHeadings = Array.from({ length: 10000 }, (_, index) => [
@@ -380,8 +389,17 @@ const checkScaleRows = (chinese: boolean) => {
     for (const node of [parent, ...provider.getChildren(parent)]) {
       const row = provider.getTreeItem(node);
       assert.equal(row.label, node.heading.text);
+      assert.ok(row.id.length < 256, 'Native row identities must not repeat a long document URI for every heading');
+      assert.equal(row.command, undefined, 'Expanding the tree does not prepare commands for all 20,000 rows');
+      assert.equal(row.tooltip, undefined, 'Expanding the tree does not prepare tooltips for all 20,000 rows');
+      const presentation = { id: row.id, label: row.label, state: row.collapsibleState, accessibility: row.accessibilityInformation };
+      assert.equal(provider.resolveTreeItem(row, node, { isCancellationRequested: false }), row);
+      assert.deepEqual({ id: row.id, label: row.label, state: row.collapsibleState, accessibility: row.accessibilityInformation }, presentation,
+        'Resolution must preserve the displayed row and its accessibility metadata');
       assert.equal(row.tooltip, chinese ? `H${node.heading.level} · 第 ${node.heading.line} 行` : `H${node.heading.level} · Line ${node.heading.line}`);
       assert.equal(row.command.title, chinese ? '跳转到标题' : 'Go to Heading');
+      assert.equal(row.command.command, SIDEBAR_OUTLINE_REVEAL_COMMAND);
+      assert.equal(row.command.arguments[0], node, 'Native click/open resolution retains the displayed snapshot and target');
       count += 1;
     }
   }
@@ -397,9 +415,18 @@ configuration.fire({ affectsConfiguration: key => key === 'meoEnhanced.language'
 const afterLanguageSetting = languageReads;
 assert.ok(afterLanguageSetting <= beforeUnrelatedSetting + 2, 'one setting update has a bounded language lookup');
 checkScaleRows(true);
+const scaleRootsBeforeExpansion = provider.getChildren(undefined);
+const scaleNodesBeforeExpansion = scaleRootsBeforeExpansion.flatMap((node: any) => [node, ...node.children]);
+const scaleIdsBeforeExpansion = scaleNodesBeforeExpansion.map((node: any) => provider.getTreeItem(node).id);
 await commands.get(SIDEBAR_OUTLINE_EXPAND_COMMAND)!();
+const scaleNodesAfterExpansion = provider.getChildren(undefined).flatMap((node: any) => [node, ...node.children]);
+assert.equal(scaleNodesAfterExpansion.length, scaleNodesBeforeExpansion.length);
+scaleNodesAfterExpansion.forEach((node: any, index: number) => {
+  assert.equal(node, scaleNodesBeforeExpansion[index], 'Bulk expansion does not rebuild unchanged heading nodes');
+  assert.notEqual(provider.getTreeItem(node).id, scaleIdsBeforeExpansion[index], 'All native row identities reset');
+});
 checkScaleRows(true);
-assert.equal(languageReads, afterLanguageSetting, 'rebuilding and expanding every row reuse current language labels');
+assert.equal(languageReads, afterLanguageSetting, 'expanding every row reuses current language labels');
 boundedHandle.update({ type: 'sidebarOutline', snapshot: 'empty-heading:1', headings: [heading(1, '', 1)], activeIndex: 0 });
 const emptyHeading = provider.getChildren(undefined)[0];
 assert.equal(provider.getTreeItem(emptyHeading).label, '（空标题）');

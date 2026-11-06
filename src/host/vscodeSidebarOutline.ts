@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { createHash } from 'node:crypto';
 import type { SidebarOutlineHeading, SidebarOutlineHostEvent, SidebarOutlineMessage } from '../protocol/sidebarOutline';
 import { outlineHeadingKeys } from '../foundation/outline';
 
@@ -10,6 +11,7 @@ export const SIDEBAR_OUTLINE_EXPAND_COMMAND = 'meoEnhanced.outline.expandAll';
 type Entry = {
   readonly panel: vscode.WebviewPanel;
   readonly document: vscode.TextDocument;
+  readonly treeIdPrefix: string;
   roots: OutlineNode[];
   nodes: OutlineNode[];
   activeIndex: number;
@@ -66,7 +68,6 @@ function documentName(document: vscode.TextDocument): string {
 export function createVscodeSidebarOutline(language: () => string) {
   const entries = new Set<Entry>();
   let current: Entry | null = null;
-  const treePrefix = (entry: Entry) => `${entry.document.uri.toString()}/${entry.expansionVersion}`;
   let disposed = false;
   let expansionGeneration = 0;
   let focusSequence = 0;
@@ -85,10 +86,15 @@ export function createVscodeSidebarOutline(language: () => string) {
         node.heading.text || (zh() ? '（空标题）' : '(empty heading)'),
         node.children.length ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None
       );
-      item.id = node.id;
+      item.id = `${node.entry.expansionVersion}/${node.id}`;
       item.accessibilityInformation = { label: `${node.heading.text || (zh() ? '空标题' : 'Empty heading')}, H${node.heading.level}` };
-      item.tooltip = zh() ? `H${node.heading.level} · 第 ${node.heading.line} 行` : `H${node.heading.level} · Line ${node.heading.line}`;
-      item.command = { command: SIDEBAR_OUTLINE_REVEAL_COMMAND, title: zh() ? '跳转到标题' : 'Go to Heading', arguments: [node] };
+      return item;
+    },
+    resolveTreeItem: (item, node) => {
+      // Bulk expansion can visit every heading. Native hover/open resolution
+      // avoids allocating and transferring action metadata for untouched rows.
+      item.tooltip ??= zh() ? `H${node.heading.level} · 第 ${node.heading.line} 行` : `H${node.heading.level} · Line ${node.heading.line}`;
+      item.command ??= { command: SIDEBAR_OUTLINE_REVEAL_COMMAND, title: zh() ? '跳转到标题' : 'Go to Heading', arguments: [node] };
       return item;
     }
   };
@@ -153,12 +159,10 @@ export function createVscodeSidebarOutline(language: () => string) {
       // TreeView has no public bulk-expand API and reveal expands only three
       // levels. Reset view identities once for this explicit action, so native
       // rendering applies Expanded to every branch without thousands of IPCs.
-      // Semantic keys remain stable for navigation and subsequent document edits.
+      // Only native row identities change: reuse the heading tree and snapshot
+      // rather than rebuilding every node for an unchanged document.
       entry.expansionVersion += 1;
       entry.collapsedKeys.clear();
-      ({ roots: entry.roots, nodes: entry.nodes } = buildSidebarOutlineTree(
-        entry.nodes.map(node => node.heading), treePrefix(entry), { entry, snapshot: entry.snapshot }
-      ));
       changed.fire(undefined);
       const selected = entry.nodes.find(node => node.key === selectedKey) ?? entry.roots[0];
       if (selected && generation === expansionGeneration && current === entry && !disposed) {
@@ -198,6 +202,9 @@ export function createVscodeSidebarOutline(language: () => string) {
     const entry: Entry = {
       panel,
       document,
+      // Keep identities stable without repeating a potentially long URI in
+      // every native row and child request.
+      treeIdPrefix: createHash('sha256').update(document.uri.toString()).digest('base64url'),
       roots: [],
       nodes: [],
       activeIndex: -1,
@@ -248,7 +255,7 @@ export function createVscodeSidebarOutline(language: () => string) {
         if (message.headings) {
           entry.snapshot = message.snapshot;
           expansionGeneration += 1;
-          ({ roots: entry.roots, nodes: entry.nodes } = buildSidebarOutlineTree(message.headings, treePrefix(entry), { entry, snapshot: entry.snapshot }));
+          ({ roots: entry.roots, nodes: entry.nodes } = buildSidebarOutlineTree(message.headings, entry.treeIdPrefix, { entry, snapshot: entry.snapshot }));
           entry.loaded = true;
           const keys = new Set(entry.nodes.map(node => node.key));
           entry.collapsedKeys = new Set([...entry.collapsedKeys].filter(key => keys.has(key)));
