@@ -62,7 +62,7 @@ try {
   const primaryPath = join(temporaryRoot, 'primary.json');
   const primary = report([
     { id: 'passed-extra-args', command, status: 'passed', exitCode: 0, stdout, stderr, stdoutHash: hash('historical stdout\n'), stderrHash: hash('historical stderr\n'), evidence: 'fixture-evidence' },
-    { id: 'failed', command, status: 'failed', exitCode: 7, stdout: stableStdout, stderr: stableStderr, stdoutHash: hash('stable stdout\n'), stderrHash: hash('stable stderr\n') },
+    { id: 'failed', command, status: 'failed', exitCode: 7, startedAt: '2026-11-07T00:01:00.000Z', seconds: 0.25, childPid: 54321, error: 'fixture infrastructure failure', stdout: stableStdout, stderr: stableStderr, stdoutHash: hash('stable stdout\n'), stderrHash: hash('stable stderr\n') },
     { id: 'reused', command, status: 'reused', exitCode: 0, stdout, stderr, stdoutHash: hash('historical stdout\n'), stderrHash: hash('historical stderr\n') }
   ], 'failed');
   write(primaryPath, JSON.stringify(primary, null, 2));
@@ -78,9 +78,13 @@ try {
   write(changedPath, JSON.stringify(report([
     { id: 'changed-log', command, status: 'passed', exitCode: 0, stdout, stderr, stdoutHash: hash('historical stdout\n'), stderrHash: hash('historical stderr\n') }
   ])));
+  const initialPath = join(temporaryRoot, 'initial.json');
+  write(initialPath, JSON.stringify(report([], 'running', 'initial-input-fingerprint')));
   write(stdout, 'changed after report\n');
 
-  const summary = createFeatureCoverageReport({ root, reports: [primaryPath, invalidatedPath, runningPath, changedPath] });
+  const summary = createFeatureCoverageReport({ root, reports: [primaryPath, invalidatedPath, runningPath, changedPath, initialPath] });
+  assert.equal(summary.reports.find(item => item.path.endsWith('/initial.json'))?.fingerprint, 'initial-input-fingerprint',
+    'even an initial report without observations retains its actual input fingerprint');
   assert.equal(readFileSync(primaryPath, 'utf8'), originalPrimary, 'input reports are read-only and never rewritten');
   assert.ok(summary.reports.some(item => item.status === 'failed' && !item.fingerprintPresent), 'empty fingerprints stay visible rather than proving a clean tree');
   assert.ok(summary.reports.some(item => item.status === 'invalidated'), 'invalidated sources stay visible');
@@ -95,6 +99,9 @@ try {
   assert.equal(passed?.logs.integrity, 'missing-or-changed', 'changed evidence cannot make a historical command look fully verified');
   assert.ok(passed?.command.args.includes('--partial'), 'an argument-specific partial run is not promoted to the full script');
   assert.equal(observations.find(item => item.task.id === 'failed')?.recordedStatus, 'failed', 'failures are not ignored');
+  assert.deepEqual(observations.find(item => item.task.id === 'failed')?.task, {
+    id: 'failed', startedAt: '2026-11-07T00:01:00.000Z', seconds: 0.25, childPid: 54321, error: 'fixture infrastructure failure'
+  }, 'task timing, process and infrastructure errors remain traceable in the historical projection');
   assert.equal(observations.find(item => item.task.id === 'failed')?.logs.integrity, 'logs-match',
     'ordinary failed commands retain independently checkable log evidence without becoming a green result');
   assert.equal(observations.find(item => item.task.id === 'invalidated')?.reportStatus, 'invalidated');

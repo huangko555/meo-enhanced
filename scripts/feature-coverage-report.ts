@@ -13,7 +13,7 @@ export type FeatureCoverageObservation = {
   candidate?: string;
   fingerprint: { present: boolean; value?: string };
   reportStatus: ReportStatus;
-  task: { id: string };
+  task: { id: string; startedAt?: string; seconds?: number; childPid?: number; error?: string };
   recordedStatus: TaskStatus;
   exitCode?: number;
   command: { args: string[]; env?: Record<string, string> };
@@ -43,12 +43,16 @@ export type FeatureCoverageReport = {
   scope: 'historical-command-execution-summary-only';
   notes: string[];
   source: { coverageMarkdown: string; currentHead: string };
-  reports: Array<{ path: string; candidate?: string; fingerprintPresent: boolean; status: ReportStatus }>;
+  reports: Array<{ path: string; candidate?: string; fingerprint: string; fingerprintPresent: boolean; status: ReportStatus }>;
   entries: FeatureCoverageDirectoryEntry[];
 };
 
 type ValidatedTask = {
   id: string;
+  startedAt?: string;
+  seconds?: number;
+  childPid?: number;
+  error?: string;
   command: { args: string[]; env?: Record<string, string> };
   status: TaskStatus;
   exitCode?: number;
@@ -81,6 +85,12 @@ function requiredString(value: unknown, label: string): string {
 function optionalString(value: unknown, label: string): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== 'string') throw new Error(`${label} must be a string when present`);
+  return value;
+}
+
+function optionalNumber(value: unknown, label: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${label} must be a finite number when present`);
   return value;
 }
 
@@ -122,6 +132,10 @@ export function validateWorkflowReport(value: unknown, source: string): Validate
     }
     return {
       id,
+      ...(optionalString(candidate.startedAt, `${label}.startedAt`) === undefined ? {} : { startedAt: candidate.startedAt as string }),
+      ...(optionalString(candidate.error, `${label}.error`) === undefined ? {} : { error: candidate.error as string }),
+      ...(optionalNumber(candidate.seconds, `${label}.seconds`) === undefined ? {} : { seconds: candidate.seconds as number }),
+      ...(optionalNumber(candidate.childPid, `${label}.childPid`) === undefined ? {} : { childPid: candidate.childPid as number }),
       command: validateCommand(candidate.command, label),
       status: candidate.status as TaskStatus,
       ...(candidate.exitCode === undefined ? {} : { exitCode: candidate.exitCode }),
@@ -174,7 +188,13 @@ function observation(reportPath: string, report: ValidatedWorkflowReport, task: 
     ...(report.candidate === undefined ? {} : { candidate: report.candidate }),
     fingerprint: { present: report.fingerprint.length > 0, ...(report.fingerprint.length > 0 ? { value: report.fingerprint } : {}) },
     reportStatus: report.status,
-    task: { id: task.id },
+    task: {
+      id: task.id,
+      ...(task.startedAt === undefined ? {} : { startedAt: task.startedAt }),
+      ...(task.seconds === undefined ? {} : { seconds: task.seconds }),
+      ...(task.childPid === undefined ? {} : { childPid: task.childPid }),
+      ...(task.error === undefined ? {} : { error: task.error })
+    },
     recordedStatus: task.status,
     ...(task.exitCode === undefined ? {} : { exitCode: task.exitCode }),
     command: task.command,
@@ -232,6 +252,7 @@ export function createFeatureCoverageReport(options: { root?: string; reports?: 
     reports: loaded.map(({ path, report }) => ({
       path,
       ...(report.candidate === undefined ? {} : { candidate: report.candidate }),
+      fingerprint: report.fingerprint,
       fingerprintPresent: report.fingerprint.length > 0,
       status: report.status
     })),

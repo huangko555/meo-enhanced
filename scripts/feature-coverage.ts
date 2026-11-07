@@ -1,6 +1,11 @@
 import { posix } from 'node:path';
 
 export const featureCoveragePath = 'docs/testing-feature-coverage.md';
+export function referencesTestPath(command: unknown, path: string): boolean {
+  if (typeof command !== 'string') return false;
+  return command.replaceAll('\\', '/').split(/[\s"'`()\[\],;=]+/)
+    .some(reference => reference === path || reference === `./${path}`);
+}
 export type FeatureCoverageEntry = {
   section: string;
   label: string;
@@ -96,7 +101,7 @@ export function inspectFeatureCoverage(
     for (const path of entry.links) if (!availableFiles.has(path)) errors.push(`${at}: Missing capability reference: ${path}`);
     for (const path of entry.tests) {
       const exception = separate[path];
-      const native = exception?.kind === 'native' && exception.reason?.trim() && exception.command?.includes(path);
+      const native = exception?.kind === 'native' && exception.reason?.trim() && referencesTestPath(exception.command, path);
       if (!releaseTests.has(path) && !native) errors.push(`${at}: Capability test must enter release or an explicit native gate: ${path}`);
     }
   }

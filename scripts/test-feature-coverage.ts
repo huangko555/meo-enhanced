@@ -121,6 +121,23 @@ assert.ok(errorsFor(nativeOnly, nativeOnly.flatMap(entry => entry.publicIds), na
 assert.ok(errorsFor(nativeOnly, nativeOnly.flatMap(entry => entry.publicIds), nativeFiles, new Set(), {
   'scripts/test-native.ps1': { kind: 'targeted', command: 'pwsh -File scripts/test-native.ps1', reason: 'A targeted run is enough.' },
 }).length > 0, 'targeted is not a release exception kind');
+for (const command of [
+  'pwsh ./scripts/test-native.ps1 -CodePath <Code.exe>',
+  'VS Code --extensionTestsPath="scripts/test-native.ps1"',
+  'scripts/test-native.ps1 is loaded by another registered native driver'
+]) {
+  assert.deepEqual(errorsFor(nativeOnly, nativeOnly.flatMap(entry => entry.publicIds), nativeFiles, new Set(), {
+    'scripts/test-native.ps1': { kind: 'native', command, reason: 'Requires an installed host.' }
+  }), [], 'current native registration formats reference the exact script path');
+}
+for (const command of [
+  'pwsh scripts/test-native.ps1.disabled', 'pwsh scripts/test-native.ps1-old',
+  'pwsh archive/scripts/test-native.ps1'
+]) {
+  assert.ok(errorsFor(nativeOnly, nativeOnly.flatMap(entry => entry.publicIds), nativeFiles, new Set(), {
+    'scripts/test-native.ps1': { kind: 'native', command, reason: 'Requires an installed host.' }
+  }).length > 0, 'a filename substring is not an exact native test reference');
+}
 
 expectParseError([
   '## Bad', '| 能力 | 预期 |', '| --- | --- |', '| 只有一列 |',

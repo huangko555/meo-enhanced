@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, posix, resolve } from 'node:path';
 import type { TestWorkflowCommand } from './test-workflow-policy';
-import { featureCoveragePath, inspectFeatureCoverage, parseFeatureCoverage } from './feature-coverage';
+import { featureCoveragePath, inspectFeatureCoverage, parseFeatureCoverage, referencesTestPath } from './feature-coverage';
 
 type Exception = { kind: 'targeted' | 'native' | 'endurance'; command: string; reason: string };
 type InventoryCommand = TestWorkflowCommand & { runtime?: 'bun' | 'node' };
@@ -79,7 +79,7 @@ export function inspectTestInventory(files: Snapshot, commands: TestWorkflowComm
   for (const [path, exception] of Object.entries(inventory.separate)) {
     if (!candidate(path) || !files.has(path)) errors.push(`Stale separate-test registration: ${path}`);
     if (!['targeted', 'native', 'endurance'].includes(exception.kind)
-      || !exception.reason?.trim() || !exception.command?.includes(path)) errors.push(`Missing classification, command or reason: ${path}`);
+      || !exception.reason?.trim() || !referencesTestPath(exception.command, path)) errors.push(`Missing classification, command or reason: ${path}`);
     if (reached.has(path)) errors.push(`Test is now in release; remove its separate registration: ${path}`);
     reached.add(path);
     runnable.add(path);

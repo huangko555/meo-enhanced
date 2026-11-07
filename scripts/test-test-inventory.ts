@@ -19,6 +19,12 @@ const special: TestInventory = { separate: { 'scripts/test-new.ts': {
   kind: 'native', command: 'node scripts/test-new.ts', reason: 'Requires an installed extension host.'
 } }, repeats: [], resources: { process: ['scripts/test-a.ts'], exclusive: ['scripts/test-new.ts'] } };
 assert.deepEqual(inspectTestInventory(orphan, [command], special), []);
+for (const invalidCommand of ['node scripts/test-new.ts.disabled', 'node scripts/test-new.ts-old', 'node archive/scripts/test-new.ts']) {
+  assert.ok(inspectTestInventory(orphan, [command], { ...special, separate: {
+    'scripts/test-new.ts': { ...special.separate['scripts/test-new.ts']!, command: invalidCommand }
+  } }).some(error => error.includes('Missing classification, command or reason')),
+  'separate-test registration must reference the exact script, not an extended filename');
+}
 assert.ok(inspectTestInventory(orphan, [command], { ...special, separate: {
   'scripts/test-new.ts': { ...special.separate['scripts/test-new.ts']!, reason: '' }
 } }).some(error => error.includes('Missing classification')));
