@@ -5515,6 +5515,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   line-height: normal;
   margin: 0;
   padding: 0;
+  cursor: default;
 }
 
 .cm-editor .meo-md-image-group {
@@ -5533,7 +5534,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   margin: 0;
   padding: 0;
   vertical-align: bottom;
-  cursor: pointer;
+  cursor: inherit;
 }
 
 .cm-editor .meo-md-image-fallback {
@@ -5555,7 +5556,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   background: var(--meo-semantic-imageBackground);
 }
 
-.cm-editor .meo-md-image-linked {
+.cm-editor.meo-mode-live.meo-link-modifier-hover .meo-md-image-linked {
   cursor: pointer;
 }
 
