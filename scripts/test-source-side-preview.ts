@@ -1307,7 +1307,7 @@ try {
         started,
         mode: document.querySelector<HTMLElement>('#app')?.dataset.mode ?? '',
         covered: document.querySelector<HTMLElement>('.editor-host')?.hasAttribute('data-preview-cover') ?? false,
-        visible: !host.hidden && getComputedStyle(host).visibility !== 'hidden'
+        visible: !host.hidden && getComputedStyle(frame).visibility !== 'hidden'
           && host.querySelector<HTMLElement>('.preview-loading')?.hidden !== false,
         offset: projection?.offset ?? null,
         scrollTop: frameDocument.scrollingElement?.scrollTop ?? 0,
@@ -2047,7 +2047,8 @@ try {
     const sample = () => {
       const host = document.querySelector<HTMLElement>('.preview-host')!;
       const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument;
-      const hidden = host.hidden || getComputedStyle(host).visibility === 'hidden';
+      const hidden = host.hidden || getComputedStyle(host).visibility === 'hidden'
+        || host.querySelector<HTMLElement>('.preview-loading')?.hidden === false;
       samples.push({ hidden, scrollTop: frameDocument?.scrollingElement?.scrollTop ?? 0 });
       if (!hidden) visibleFrames += 1;
       // Cover the first visible frames even when asynchronous rendering finishes later.
@@ -2488,25 +2489,13 @@ try {
   const lastSplitFrame = sourceToFullPreviewFrames
     .filter(frame => !frame.started && frame.split && frame.editorVisible && frame.editorOffset !== null)
     .at(-1);
-  const coveredSourceFrames = sourceToFullPreviewFrames.filter(frame => (
-    frame.started && frame.covered && frame.editorVisible && frame.editorOffset !== null
-  ));
-  assert.ok(lastSplitFrame && coveredSourceFrames.length > 0, JSON.stringify(sourceToFullPreviewFrames));
-  assert.ok(
-    coveredSourceFrames.every(frame => (
-      Math.abs(frame.editorWidth - lastSplitFrame.editorWidth) <= 1
-      && Math.abs((frame.editorOffset as number) - (lastSplitFrame.editorOffset as number)) <= 1
-    )),
-    `Source-to-Preview must not reflow the visible Source cover before Preview paints: ${JSON.stringify(sourceToFullPreviewFrames)}`
-  );
+  assert.ok(lastSplitFrame, JSON.stringify(sourceToFullPreviewFrames));
+  assert.ok(sourceToFullPreviewFrames.filter(frame => frame.started).every(frame => !frame.editorVisible),
+    `Source-to-Preview must not leave Source over the full-width Preview: ${JSON.stringify(sourceToFullPreviewFrames)}`);
   const visibleSourceToFullPreviewFrames = sourceToFullPreviewFrames
     .filter(frame => frame.mode === 'preview' && frame.visible && frame.offset !== null);
   const finalFullPreviewFrame = visibleSourceToFullPreviewFrames.at(-1);
   assert.ok(finalFullPreviewFrame, JSON.stringify(sourceToFullPreviewFrames));
-  assert.ok(
-    sourceToFullPreviewFrames.some(frame => frame.started && frame.covered),
-    `Source-to-Preview must cover the resized iframe until its compositor is ready: ${JSON.stringify(sourceToFullPreviewFrames)}`
-  );
   const uncoveredTransitionFrames = sourceToFullPreviewFrames
     .filter(frame => frame.started && frame.visible && !frame.covered && frame.offset !== null);
   assert.ok(

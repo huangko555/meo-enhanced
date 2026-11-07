@@ -5,6 +5,7 @@ import type { Page } from 'puppeteer-core';
 import fs from 'node:fs';
 import path from 'node:path';
 import { webviewPreloadModules } from '../src/extension/webviewResourceHints';
+import { getWebviewPreloadShellCss, getWebviewPreloadShellMarkup } from '../src/shared/webviewPreloadShell';
 
 async function checkEditorModulePreload(browser: Awaited<ReturnType<typeof launchTestBrowser>>, init: Record<string, unknown>) {
   const dist = path.resolve('webview/dist');
@@ -16,9 +17,9 @@ async function checkEditorModulePreload(browser: Awaited<ReturnType<typeof launc
   let editorRequests = 0;
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
     const relative = decodeURIComponent(new URL(request.url).pathname).slice(1);
-    if (!relative) return new Response('<!doctype html><link rel="stylesheet" href="/index.css">'
+    if (!relative) return new Response(`<!doctype html><style>${getWebviewPreloadShellCss()}</style><link rel="stylesheet" href="/index.css">`
       + webviewPreloadModules(false).map(module => `<link rel="modulepreload" href="/${module}">`).join('')
-      + '<style>html,body,#app{height:100%;margin:0}</style><body class="vscode-dark"><div id="app"></div><script type="module" src="/index.js"></script>', { headers: { 'Content-Type': 'text/html' } });
+      + `<body class="vscode-dark"><div id="app">${getWebviewPreloadShellMarkup()}</div><script type="module" src="/index.js"></script>`, { headers: { 'Content-Type': 'text/html' } });
     if (relative === 'index.js') await shellHeld;
     if (relative === 'editor.js') { editorRequests += 1; sawEditor(); }
     const file = path.resolve(dist, relative);
@@ -50,6 +51,9 @@ async function checkEditorModulePreload(browser: Awaited<ReturnType<typeof launc
     void navigation.catch(() => {});
     await Promise.race([editorRequested, new Promise((_, reject) => setTimeout(() => reject(new Error('Editor fetch waited for the held shell')), 5000))]);
     assert.equal(await page.$('.cm-editor'), null, 'Module preparation must not construct an editor ahead of initialization');
+    assert.equal(await page.$eval('.meo-startup-loading', element =>
+      !!element.textContent?.trim() && getComputedStyle(element).display !== 'none'), true,
+    'The production HTML shell must show feedback while its JavaScript module is held');
     releaseShell();
     await navigation;
     await page.waitForFunction(() => document.querySelector<HTMLElement>('.editor-root')?.dataset.mode === 'source'
@@ -57,6 +61,7 @@ async function checkEditorModulePreload(browser: Awaited<ReturnType<typeof launc
       && document.querySelector<HTMLElement>('.editor-loading')?.hidden === true
       && document.querySelector<HTMLElement>('.editor-host')?.inert === false, { timeout: 10000 });
     assert.equal(editorRequests, 1, 'Mount must reuse the prepared module instead of fetching a second copy');
+    assert.equal(await page.$('.meo-startup-loading'), null, 'Ready Source must retire the startup feedback');
     assert.deepEqual(errors, [], 'The separately emitted editor must retain the shell\'s shared runtime');
     console.log('Editor module prepared before shell execution and reused by Source mount');
   } finally { releaseShell(); await context.close(); server.stop(true); }

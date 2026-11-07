@@ -189,6 +189,12 @@ const tooltipBinding = bindTooltips(document.body, {
 });
 let activeUiLanguage: UiLanguage = 'en';
 let activeUiStrings = getUiStrings(activeUiLanguage);
+const startupLoadingPresentation = createLoadingPresentation('meo-startup-loading');
+const preloadLoading = root.querySelector('.meo-startup-loading');
+startupLoadingPresentation.setLabel(preloadLoading?.textContent?.trim() || activeUiStrings.loading);
+startupLoadingPresentation.begin(() => true, () => {}, { immediate: true });
+if (preloadLoading) preloadLoading.replaceWith(startupLoadingPresentation.element);
+else root.append(startupLoadingPresentation.element);
 let activeUiLanguagePreference: UiLanguagePreference = 'auto';
 let automaticUiLanguage: UiLanguage = 'en';
 
@@ -1245,6 +1251,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   activeUiLanguage = language;
   documentBlocks.refreshAppearance();
   activeUiStrings = strings;
+  startupLoadingPresentation.setLabel(strings.loading);
   updateTableGridHighlight(selectedTableCols, selectedTableRows);
   editor?.setUiLanguage?.(language);
   document.documentElement.lang = language;
@@ -1724,6 +1731,8 @@ const editorWrapper = existingEditorWrapper instanceof HTMLElement ? existingEdi
 editorWrapper.classList.add('editor-wrapper', 'meo-preload-editor-shell');
 editorWrapper.setAttribute('aria-hidden', 'true');
 const revealInitialShell = (): void => {
+  startupLoadingPresentation.finish();
+  startupLoadingPresentation.element.remove();
   toolbar.classList.remove('meo-preload-toolbar');
   toolbar.removeAttribute('aria-hidden');
   editorWrapper.classList.remove('meo-preload-editor-shell');
@@ -1860,7 +1869,7 @@ const previewController = createPreviewController({
     previewPaintReady = true;
     resolveInitialPreviewPaint?.();
     editorHost.removeAttribute('data-preview-cover');
-    editorSurface.removeAttribute('data-source-preview-exit-cover');
+    editorSurface.removeAttribute('data-preview-preparing');
     const splitWillReveal = pendingSourcePreviewReveal !== null;
     markSourcePreviewSurfaceReady();
     // A ready frame must not start a new spinner while split linkage settles.
@@ -1875,7 +1884,6 @@ const previewController = createPreviewController({
   onLoadingVisible: () => {
     if (getActiveEditorMode() === 'preview') {
       editorHost.removeAttribute('data-preview-cover');
-      editorSurface.removeAttribute('data-source-preview-exit-cover');
       // Initial Preview also waits for paint under the bootstrap shell. A real
       // loading surface must be visible while that first frame is still pending.
       revealInitialShell();
@@ -1958,9 +1966,7 @@ outlineController = createOutlineController({
     const split = editorSurface.hasAttribute('data-source-preview');
     const usePreview = previewVisible && (
       editorSurface.hasAttribute('data-source-preview-preparing')
-      || (editorCover
-        ? editorSurface.hasAttribute('data-source-preview-exit-cover') && position === 'right'
-        : !split || position === 'right')
+      || (!editorCover && (!split || position === 'right'))
     );
     return getDocumentSurfacePalette(usePreview);
   },
@@ -2048,11 +2054,11 @@ const beginEditorLoading = (mode: 'live' | 'source'): void => {
     editorHost.setAttribute('aria-busy', 'true');
     editorHost.inert = true;
     revealInitialShell();
-  });
+  }, { immediate: initialEditorPresentationPending || (!editor && previewController.host.hidden) });
 };
 editorWrapper.replaceChildren(editorSurface, outlineController.sidebar, selectionMenuElements.menu);
 // Keep the shared popup outside toolbar stacking and inside editor focus ownership.
-root.replaceChildren(toolbar, editorNoticeBanner, editorWrapper, previewOptionsPanel);
+root.replaceChildren(toolbar, editorNoticeBanner, editorWrapper, previewOptionsPanel, startupLoadingPresentation.element);
 
 const editorModeApplication = createEditorModeApplication();
 let editorModeRuntime: EditorModeRuntime;
@@ -2219,15 +2225,17 @@ const presentPreviewSurface = (
   const visible = fullPreview || split;
   const hadSplit = editorSurface.hasAttribute('data-source-preview');
   const splitGeometryChanged = split !== hadSplit;
-  // Keep the Source cover in its already-painted split column while the
-  // existing Preview iframe adopts full width underneath it. Expanding the
-  // cover itself would reflow CodeMirror and expose a different Source
-  // position for the one or two frames before Preview is ready.
-  editorSurface.toggleAttribute('data-source-preview-exit-cover', fullPreview && hadSplit);
-  if (visible !== !previewController.host.hidden || splitGeometryChanged) {
-    previewPaintReady = false;
-    if (visible) previewController.beginLoadingPresentation();
-  }
+  // A half-width Source cover would expose the other half of the iframe while
+  // it reflows underneath. Use the Preview background until the final-width
+  // frame is painted, with immediate feedback instead of a silent background.
+  editorSurface.toggleAttribute('data-preview-preparing', fullPreview && hadSplit);
+  const loadingNeeded = visible && (previewController.host.hidden || splitGeometryChanged);
+  if (visible !== !previewController.host.hidden || splitGeometryChanged) previewPaintReady = false;
+  const beginPreviewLoading = () => {
+    if (loadingNeeded) previewController.beginLoadingPresentation({
+      immediate: initialEditorPresentationPending || (fullPreview && hadSplit) || (atomicSplit && split)
+    });
+  };
   editorSurface.removeAttribute('data-source-preview-preparing');
   editorSurface.toggleAttribute('data-source-preview', split);
   sourcePreviewButton.classList.toggle('is-active', split);
@@ -2258,11 +2266,13 @@ const presentPreviewSurface = (
     previewAdapter.setActive({ active: true, text: getCurrentEditorText() });
     presentSourcePreviewPosition(false, true);
     previewController.host.inert = true;
+    beginPreviewLoading();
     outlineController.refreshAppearance(); documentViews?.refreshAppearance();
     return { split, visible };
   }
   cancelSourcePreviewReveal();
   previewAdapter.setActive({ active: visible, text: getCurrentEditorText() });
+  beginPreviewLoading();
   if (split && !deferSplitLinkage) {
     activateSourcePreviewLinkage(
       deferEditorViewportUntilPreviewExit ? 'last-interaction' : 'editor'
@@ -3426,7 +3436,9 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
       && !previewController.host.hidden
       && !editorSurface.hasAttribute('data-source-preview');
     editorSurface.toggleAttribute('data-source-preview-preparing', preparingSourceSplit);
-    editorHost.toggleAttribute('data-preview-cover', !visible && !previewPaintReady);
+    editorHost.toggleAttribute('data-preview-cover', !visible && !previewPaintReady
+      && !editorSurface.hasAttribute('data-preview-preparing')
+      && !previewController.isLoadingPresentationVisible());
     editorInteractive = interactive;
     editorHost.inert = !interactive || !editorLoading.hidden;
     editorHost.hidden = !visible;

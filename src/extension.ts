@@ -1,4 +1,5 @@
 import { createWorkspaceDocumentsHost } from './host/workspaceDocuments';
+import { getWebviewPreloadShellCss, getWebviewPreloadShellMarkup } from './shared/webviewPreloadShell';
 import { createDocumentViewsRegistry } from './extension/documentViews';
 import { createExtensionFeatures } from './extension/extensionFeatures';
 import type { DocumentViewsApi } from './documentViews';
@@ -1127,7 +1128,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     ].join('; ');
 
     return `<!DOCTYPE html>
-    <html lang="en"${initialHtmlClass}>
+    <html lang="${this.getUiLanguage()}"${initialHtmlClass}>
       <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -1142,7 +1143,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       </head>
       <body data-meo-statistics-worker-src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'document-statistics-worker.js'))}" data-meo-katex-src="${katexStyleUri}" data-meo-mermaid-src="${mermaidRuntimeUri}" data-meo-mermaid-module-src="${mermaidModuleUri}" data-meo-git-diff-worker-src="${gitDiffWorkerUri}" data-meo-shiki-worker-src="${shikiWorkerUri}" data-meo-markdown-worker-src="${markdownWorkerUri}" data-meo-script-nonce="${nonce}">
         <div id="app" class="editor-root">
-          ${getWebviewPreloadShellMarkup()}
+          ${getWebviewPreloadShellMarkup(this.getUiLanguage())}
         </div>
         <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
       </body>
@@ -1157,60 +1158,6 @@ function getNonce(): string {
     nonce += chars[Math.floor(Math.random() * chars.length)];
   }
   return nonce;
-}
-
-// Keep viewport ownership stable before the external stylesheet and editor load.
-function getWebviewPreloadShellCss(): string {
-  return `
-      html, body {
-        margin: 0;
-        padding: 0;
-        height: 100%;
-        overflow: hidden;
-      }
-      body {
-        background: var(--meo-background, var(--vscode-editor-background));
-      }
-      #app {
-        position: fixed;
-        inset: 0;
-        height: 100%;
-        min-height: 0;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        overflow: clip;
-      }
-      #app > .mode-toolbar.meo-preload-toolbar {
-        position: absolute;
-        inset: 0 0 auto;
-        height: 40px;
-        min-height: 40px;
-        box-sizing: border-box;
-        background: var(--vscode-sideBar-background);
-      }
-      #app > .editor-wrapper.meo-preload-editor-shell {
-        position: absolute;
-        inset: 40px 0 0;
-        min-height: 0;
-        display: flex;
-      }
-      #app > .editor-wrapper.meo-preload-editor-shell > .editor-host {
-        flex: 1;
-        min-width: 0;
-        min-height: 0;
-        background: var(--meo-background, var(--vscode-editor-background));
-      }
-    `;
-}
-
-function getWebviewPreloadShellMarkup(): string {
-  return `
-          <div class="mode-toolbar meo-preload-toolbar" role="presentation" aria-hidden="true"></div>
-          <div class="editor-wrapper meo-preload-editor-shell" role="presentation" aria-hidden="true">
-            <div class="editor-host"></div>
-          </div>
-        `;
 }
 
 async function loadExportRuntimeModule(extensionUri: vscode.Uri): Promise<ExportRuntimeModule> {

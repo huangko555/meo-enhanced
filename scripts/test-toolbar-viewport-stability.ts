@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync } from 'node:fs';
-import ts from 'typescript';
+import { getWebviewPreloadShellCss, getWebviewPreloadShellMarkup } from '../src/shared/webviewPreloadShell';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 import exportRuntime from '../src/export/runtime';
 import { createPreviewDocument } from '../src/export/previewDocument';
@@ -12,14 +12,6 @@ const appearance = narrow ? 'light' : 'dark';
 const language = narrow ? 'zh-CN' : 'en';
 const shellOnly = process.argv.includes('--shell-only');
 const nestedHost = process.argv.includes('--nested-host');
-const extensionSource = ts.createSourceFile('extension.ts', readFileSync('src/extension.ts', 'utf8'), ts.ScriptTarget.Latest, true);
-const shellTemplate = (name: string): string => {
-  const declaration = extensionSource.statements.find((statement): statement is ts.FunctionDeclaration =>
-    ts.isFunctionDeclaration(statement) && statement.name?.text === name);
-  const value = declaration?.body?.statements.find(ts.isReturnStatement)?.expression;
-  assert.ok(value && ts.isNoSubstitutionTemplateLiteral(value), `${name} must supply the production shell template`);
-  return value.text;
-};
 const markdown = '# Document start\n\nReference[^note]. [Jump to Section 20](#section-20).\n\n' + Array.from({ length: large ? 1600 : 30 }, (_, index) =>
   `## Section ${index + 1}\n\n` + (index === 19 ? '[Return to start](#document-start)\n\n' : '')
     + 'Reading content for toolbar stability. '.repeat(8)
@@ -35,8 +27,13 @@ try {
   for (const stage of ['preload', 'stylesheet'] as const) {
     const shell = await browser.newPage();
     await shell.setViewport({ width: 800, height: 520 });
-    const css = stage === 'preload' ? shellTemplate('getWebviewPreloadShellCss') : readFileSync('webview/src/styles.css', 'utf8');
-    await shell.setContent(`<!doctype html><style>${css}</style><div id="app" class="editor-root">${shellTemplate('getWebviewPreloadShellMarkup')}</div>`);
+    const css = stage === 'preload' ? getWebviewPreloadShellCss() : readFileSync('webview/src/styles.css', 'utf8');
+    await shell.setContent(`<!doctype html><style>${css}</style><div id="app" class="editor-root">${getWebviewPreloadShellMarkup()}</div>`);
+    if (stage === 'preload') assert.equal(await shell.evaluate(() => {
+      const status = document.querySelector<HTMLElement>('.meo-startup-loading');
+      return !!status?.textContent?.trim() && getComputedStyle(status).display !== 'none'
+        && getComputedStyle(status).visibility !== 'hidden' && status.getBoundingClientRect().height > 0;
+    }), true, 'The HTML shell must give immediate loading feedback before stylesheets or JavaScript arrive');
     const shellResult = await shell.evaluate(async () => {
       const toolbar = document.querySelector('.mode-toolbar')!;
       const before = toolbar.getBoundingClientRect();

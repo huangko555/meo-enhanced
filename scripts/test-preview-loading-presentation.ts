@@ -51,7 +51,9 @@ async function exercise(side: boolean) {
   try {
     await gate(); await page.click(trigger);
     await page.waitForFunction(() => (window as any).__loadingEntered);
-    assert.equal(await shown(), false, 'The first feedback must remain silent below the threshold');
+    assert.equal(await shown(), side, side
+      ? 'A newly opened empty side pane must show feedback immediately'
+      : 'The retained editor cover keeps fast full Preview activation silent');
     await page.waitForFunction(() => {
       const e = document.querySelector<HTMLElement>('.preview-loading');
       return e && !e.hidden && getComputedStyle(e).visibility === 'visible';
@@ -63,7 +65,8 @@ async function exercise(side: boolean) {
         editorCovered: editor.hasAttribute('data-preview-cover'), editorInert: editor.inert,
         frameInert: document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.documentElement.inert };
     });
-    assert.ok(state.elapsed >= 195 && state.elapsed < 1_000, JSON.stringify(state));
+    assert.ok(side ? state.elapsed >= 0 && state.elapsed < 195
+      : state.elapsed >= 195 && state.elapsed < 1_000, JSON.stringify(state));
     assert.match(state.text!, /正在加载预览/);
     assert.equal(state.frameInert, true, 'An unfinished frame must not become interactive');
     if (side) assert.equal(state.editorInert, false, 'Loading the side Preview must not block editing');
@@ -87,11 +90,12 @@ async function exercise(side: boolean) {
       await release(); await delay(350); await frames(page);
     }
 
-    // A warm reopen does not insert a loading frame.
+    // Full Preview retains its editor cover on a warm reopen. A side pane must
+    // still cover its pending final geometry, even when its payload is cached.
     await page.click(side ? trigger : '[data-mode="source"]'); await frames(page, 8);
     await page.evaluate(() => { (window as any).__loadingShows = []; });
     await page.click(trigger); await ready(); await delay(250);
-    assert.deepEqual(await page.evaluate(() => (window as any).__loadingShows), [], 'A warm reopen must stay silent');
+    if (!side) assert.deepEqual(await page.evaluate(() => (window as any).__loadingShows), [], 'A warm full reopen must stay silent');
     await page.click(side ? trigger : '[data-mode="source"]'); await frames(page, 8);
 
     // Force a new source revision while hidden, then cancel a real pending load.

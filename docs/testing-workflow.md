@@ -2073,6 +2073,12 @@ default/custom layout settings and verifies that initial settings do not save a
 temporary default mode as a user preference. Source's optional side-by-side
 preview is covered by
 `scripts/test-source-side-preview.ts` in the production browser matrix.
+`scripts/test-source-preview-mode-transition.ts` exercises the same production
+entry with ordinary and windowed Preview documents. It holds the full-layout
+response, checks that Source and unfinished iframe content remain hidden behind
+immediate loading feedback without a blank interval, then verifies
+cancellation, stale completion and successful round trips without text loss.
+It runs in the source-side-preview contract and the release browser suite.
 Build the production assets before running the startup contract directly. Its
 module-preload case holds the actual shell script response, requires the editor
 module to be fetched independently, and verifies that Source mount reuses that

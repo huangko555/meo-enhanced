@@ -10,6 +10,7 @@ const text = '# Editable view\n\nA paragraph that remains editable after loading
 const prepared = new Map<string, string>();
 let moduleGate: Promise<void> | null = null;
 let moduleHeld = false;
+let onModuleRequested = () => {};
 function gatedIndex(file: string): string {
   const cached = prepared.get(file);
   if (cached) return cached;
@@ -36,7 +37,7 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) 
   if (pathname === '/') return new Response('<!doctype html><link rel="stylesheet" href="/index.css"><style>html,body,#app{height:100%;margin:0}</style><body class="vscode-dark" data-meo-markdown-worker-src="/markdown-parse-worker.js" data-meo-git-diff-worker-src="/git-diff-worker.js" data-meo-shiki-worker-src="/shiki-highlight-worker.js"><div id="app"></div><script type="module" src="/index.js"></script>', { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
   const file = path.resolve(dist, '.' + pathname);
   if (!file.startsWith(dist + path.sep) || !fs.existsSync(file)) return new Response('Missing', { status: 404 });
-  if (/^editor-[^/]+\.js$/.test(path.basename(file)) && moduleGate) { moduleHeld = true; await moduleGate; }
+  if (path.basename(file) === 'editor.js' && moduleGate) { moduleHeld = true; onModuleRequested(); await moduleGate; }
   return path.basename(file) === 'index.js'
     ? new Response(gatedIndex(file), { headers: { 'Content-Type': 'text/javascript; charset=utf-8' } })
     : new Response(Bun.file(file), { headers: file.endsWith('.js') ? { 'Content-Type': 'text/javascript' } : {} });
@@ -45,7 +46,7 @@ const browser = await launchTestBrowser().catch(error => { server.stop(true); th
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 fs.mkdirSync('.local/editor-loading', { recursive: true });
 let primaryError: unknown;
-async function open(mode: 'live' | 'source') {
+async function open(mode: 'live' | 'source' | 'preview') {
   const page = await browser.newPage();
   page.setDefaultTimeout(10_000);
   await page.setViewport({ width: 1100, height: 720 });
@@ -104,13 +105,14 @@ async function settled(page: Page, mode: 'live' | 'source') {
       throw error;
     });
 }
-async function show(page: Page, mode: 'live' | 'source') {
+async function show(page: Page, mode: 'live' | 'source', initial = false) {
   await page.waitForFunction(() => !document.querySelector<HTMLElement>('.editor-loading')!.hidden, { timeout: 2_000 });
   const state = await page.evaluate(() => ({ show: (window as any).__loadingShows.at(-1),
     opacity: getComputedStyle(document.querySelector('.editor-wrapper')!).opacity,
     inert: document.querySelector<HTMLElement>('.editor-host')!.inert,
     underline: getComputedStyle(document.querySelector('.mode-button.is-active .segmented-control-button-indicator')!, '::after').content }));
-  assert.ok(state.show.elapsed >= 195 && state.show.elapsed < 1_500, JSON.stringify(state));
+  assert.ok(initial ? state.show.elapsed >= 0 && state.show.elapsed < 195
+    : state.show.elapsed >= 195 && state.show.elapsed < 1_500, JSON.stringify({ ...state, initial }));
   assert.equal(state.show.text, mode === 'live' ? '正在加载实时视图…' : '正在加载源码视图…');
   assert.equal(state.opacity, '1', 'The bootstrap cover must not hide loading feedback');
   assert.equal(state.inert, true, 'An unfinished editor must not accept input behind the loading surface');
@@ -134,14 +136,48 @@ async function release(page: Page) {
 try {
   for (const mode of ['source', 'live'] as const) {
     let releaseModule!: () => void;
+    const moduleRequested = new Promise<void>(resolve => { onModuleRequested = resolve; });
     moduleHeld = false; moduleGate = new Promise(resolve => { releaseModule = resolve; });
     const { page, errors } = await open(mode);
     try {
-      await show(page, mode); assert.equal(moduleHeld, true, 'The actual cold editor module must still be pending');
+      await show(page, mode, true);
+      let moduleTimer: ReturnType<typeof setTimeout> | undefined;
+      try { await Promise.race([moduleRequested, new Promise((_, reject) => {
+        moduleTimer = setTimeout(() => reject(new Error('The cold editor entry was not requested')), 5_000);
+      })]); } finally { clearTimeout(moduleTimer); }
+      assert.equal(moduleHeld, true, 'The actual cold editor module must still be pending');
       await page.screenshot({ path: `.local/editor-loading/cold-${mode}.png` });
       moduleGate = null; releaseModule(); await settled(page, mode);
       console.log(`Cold ${mode} loading passed`);
       assert.deepEqual(errors, []);
+    } finally { moduleGate = null; releaseModule(); await page.close(); }
+  }
+  // Preview can be ready while its background editor entry is still loading.
+  // Leaving it, then cancelling, must not use that empty editor as a cover.
+  {
+    let releaseModule!: () => void;
+    moduleGate = new Promise(resolve => { releaseModule = resolve; });
+    const { page, errors } = await open('preview');
+    const previewReady = () => page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview'
+      && document.querySelector<HTMLElement>('.preview-loading')?.hidden
+      && document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('h1'));
+    try {
+      await previewReady();
+      assert.equal(await page.$('.editor-host > .cm-editor'), null);
+      await page.click('[data-mode="source"]');
+      await page.waitForFunction(() => !document.querySelector<HTMLElement>('.editor-loading')!.hidden);
+      const cancelled = await page.evaluate(async () => {
+        document.querySelector<HTMLButtonElement>('[data-mode="preview"]')!.click();
+        await new Promise(requestAnimationFrame);
+        return { editorCover: document.querySelector('.editor-host')!.hasAttribute('data-preview-cover'),
+          feedback: !document.querySelector<HTMLElement>('.preview-loading')!.hidden,
+          ready: document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.documentElement.inert === false };
+      });
+      assert.equal(cancelled.editorCover, false, 'A cold editor with no content must never cover the returning Preview');
+      assert.ok(cancelled.feedback || cancelled.ready, 'Returning from a cold mount must keep reading content or feedback');
+      moduleGate = null; releaseModule(); await previewReady();
+      assert.deepEqual(errors, []);
+      console.log('Preview cancellation during cold editor mount keeps feedback or accepted content');
     } finally { moduleGate = null; releaseModule(); await page.close(); }
   }
   const { page, errors } = await open('source');

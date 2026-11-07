@@ -186,18 +186,19 @@ body {
   opacity: 0;
 }
 
-/* During Source split -> Preview, keep the old Source half at its painted
-   width while the Preview iframe prepares its full-width compositor frame. */
-.editor-surface[data-source-preview-exit-cover] {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+.meo-startup-loading {
+  inset: var(--meo-editor-toolbar-height, 40px) 0 0;
+  font-family: var(--vscode-font-family, system-ui);
 }
 
-.editor-surface[data-source-preview-exit-cover] > .editor-host {
-  grid-area: 1 / 1;
+/* A split-to-full transition prepares at its final width behind one opaque
+   Preview surface with immediate loading feedback. */
+.editor-surface[data-preview-preparing] > .preview-host > :not(.preview-loading):not(.preview-status) {
+  visibility: hidden;
 }
 
-.editor-surface[data-source-preview-exit-cover] > .preview-host {
-  grid-area: 1 / 1 / 2 / 3;
+.editor-surface[data-preview-preparing] > .preview-host {
+  background: var(--meo-preview-background, var(--meo-background));
 }
 
 .editor-surface[data-source-preview-preparing] > .editor-host {

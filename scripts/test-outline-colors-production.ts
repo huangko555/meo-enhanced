@@ -141,7 +141,7 @@ try {
       }
     }
 
-    type PaletteSample = { color: string; preparing: boolean; cover: boolean; splitCover: boolean; previewVisible: boolean; editorInert: boolean };
+    type PaletteSample = { color: string; preparing: boolean; cover: boolean; previewVisible: boolean; editorInert: boolean };
     // Observe intermediate states so an incorrect palette cannot hide behind a correct final frame.
     const beginTransition = () => page.evaluate(() => {
       const w = window as any;
@@ -152,7 +152,6 @@ try {
         const preview = document.querySelector<HTMLElement>('.preview-host')!;
         const sample = { color: getComputedStyle(document.querySelector('.outline-sidebar')!).backgroundColor,
           preparing: surface.hasAttribute('data-source-preview-preparing'), cover: editor.hasAttribute('data-preview-cover'),
-          splitCover: surface.hasAttribute('data-source-preview-exit-cover'),
           previewVisible: !preview.hidden && preview.style.visibility !== 'hidden', editorInert: editor.inert };
         const key = JSON.stringify(sample);
         if (key !== previous) { previous = key; samples.push(sample); }
@@ -186,7 +185,7 @@ try {
       assert.deepEqual(colors, expected, `${editorAppearance}/${position}: palette changes once with its visible viewport`);
       for (const sample of samples) {
         if (sample.preparing) assert.equal(sample.color, preview, 'full Preview remains the carrier while Source prepares');
-        if (sample.cover && (!sample.splitCover || position === 'left')) {
+        if (sample.cover) {
           assert.equal(sample.color, source, 'visible editor cover keeps its palette until Preview is painted');
         }
       }

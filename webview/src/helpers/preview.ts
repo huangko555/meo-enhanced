@@ -1086,17 +1086,18 @@ export function createPreviewController({
     host.removeAttribute('aria-busy');
     if (frame.contentDocument?.documentElement) frame.contentDocument.documentElement.inert = false;
   };
-  const beginLoadingPresentation = (): void => {
+  const beginLoadingPresentation = (options?: { readonly immediate?: boolean }): void => {
     if (disposed) return;
     // Only explicit opening/width transitions start this deadline. Render
     // requests and coalesced edits must not create or restart loading feedback.
+    // Empty destination regions show feedback immediately; retained covers wait.
     loadingPresentation.begin(() => !disposed && !host.hidden, () => {
       host.setAttribute('aria-busy', 'true');
       // Keep inactivity inside the frame. Toggling inert on the iframe itself
       // can leave Chromium's native wheel scroller disabled after slow loading.
       if (frame.contentDocument?.documentElement) frame.contentDocument.documentElement.inert = true;
       onLoadingVisible?.();
-    });
+    }, options);
   };
 
   const applyUiLanguage = (language: UiLanguage): void => {
@@ -3701,6 +3702,7 @@ export function createPreviewController({
       && (activeFrameDocument !== null || !status.hidden),
     beginLoadingPresentation,
     finishLoadingPresentation,
+    isLoadingPresentationVisible: () => !loading.hidden,
     presetControl,
     widthControl,
     presetInfoControl,
