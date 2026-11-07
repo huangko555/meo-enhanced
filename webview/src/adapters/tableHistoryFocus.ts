@@ -7,13 +7,15 @@ export type TableHistoryFocusTarget = {
   readonly row: number;
   readonly col: number;
   readonly caret: number;
+  readonly selectionEnd?: number;
+  readonly selectionDirection?: 'forward' | 'backward' | 'none';
   /** Proven native-cell text replacement; row/column structure is unchanged. */
   readonly contentOnly?: true;
 };
 
 export type CodeMirrorTableHistoryFocus = {
   readonly extension: Extension;
-  effect(target: TableHistoryFocusTarget): StateEffect<unknown>;
+  effect(target: TableHistoryFocusTarget | null, inverse?: TableHistoryFocusTarget | null): StateEffect<unknown>;
   read(state: EditorState): TableHistoryFocusTarget | null;
   isContentOnly(transaction: Transaction): boolean;
 };

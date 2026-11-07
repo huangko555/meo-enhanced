@@ -5,6 +5,7 @@ type ListHistoryTarget = {
   readonly lineFrom: number;
   readonly offset: number;
   readonly inverseOffset: number;
+  readonly preserveSelection?: boolean;
 };
 
 // Offsets belong to the two sides of the same operation. Only the line identity
@@ -13,12 +14,13 @@ const listHistoryTarget = StateEffect.define<ListHistoryTarget>({
   map: (target, mapping) => ({ ...target, lineFrom: mapping.mapPos(target.lineFrom, -1) })
 });
 
-const replayTarget = StateField.define<number | null>({
+const replayTarget = StateField.define<{ position: number; preserveSelection: boolean } | null>({
   create: () => null,
   update(value, transaction) {
     if (!transaction.isUserEvent('undo') && !transaction.isUserEvent('redo')) return transaction.docChanged ? null : value;
     const effect = transaction.effects.find(effect => effect.is(listHistoryTarget));
-    return effect ? Math.min(transaction.newDoc.length, effect.value.lineFrom + effect.value.offset) : null;
+    return effect ? { position: Math.min(transaction.newDoc.length, effect.value.lineFrom + effect.value.offset),
+      preserveSelection: effect.value.preserveSelection === true } : null;
   }
 });
 
@@ -38,6 +40,7 @@ export const listHistoryFocus: Extension = [
   }),
   invertedEffects.of(transaction => transaction.effects.filter(effect => effect.is(listHistoryTarget)).map(effect =>
     listHistoryTarget.of({
+      ...effect.value,
       lineFrom: transaction.changes.invertedDesc.mapPos(effect.value.lineFrom, -1),
       offset: effect.value.inverseOffset,
       inverseOffset: effect.value.offset
@@ -45,10 +48,10 @@ export const listHistoryFocus: Extension = [
   ))
 ];
 
-export function listHistoryFocusEffect(lineFrom: number, before: number, after: number): StateEffect<unknown> {
-  return listHistoryTarget.of({ lineFrom, offset: after - lineFrom, inverseOffset: before - lineFrom });
+export function listHistoryFocusEffect(lineFrom: number, before: number, after: number, preserveSelection = false): StateEffect<unknown> {
+  return listHistoryTarget.of({ lineFrom, offset: after - lineFrom, inverseOffset: before - lineFrom, preserveSelection });
 }
 
-export function readListHistoryPosition(state: EditorState): number | null {
+export function readListHistoryFocus(state: EditorState): { position: number; preserveSelection: boolean } | null {
   return state.field(replayTarget, false) ?? null;
 }

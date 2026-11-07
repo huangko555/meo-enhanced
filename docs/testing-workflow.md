@@ -1473,6 +1473,46 @@ If the hook is missing or omits those checks, run them explicitly. Keep the hook
 and required staged privacy scan enabled; never substitute working-tree evidence
 for the staged snapshot. A staging/content change invalidates earlier index checks.
 
+## Shared undo/redo acceptance
+
+Document-changing acceptance cases include the action, Undo and Redo. Checking
+restored text or a visible final caret alone is insufficient: assert the exact
+directed selection (including the primary range), native focus owner and native
+cell range, semantic source target, history grouping and subsequent editability.
+Observe intermediate frames through the owning feature's ready boundary and
+quiet-time publication. A visible target retains the reading viewport; an
+offscreen target gets one minimal reveal, without a jump-and-return. Unchanged
+presentation, menu-shell geometry and newer input/navigation ownership remain
+part of the same acceptance contract.
+
+`scripts/history-interaction-contract.ts` provides common continuous assertions
+and requires a successful Undo/Redo receipt for every declared case. Its negative
+controls reject transient scrolling, source/presentation replacement, lost
+logical/native ranges, wrong focus, missing observation and missing receipts.
+`test-command-history-production.ts` applies it to the shared inline-format
+catalogue in Live/Source and actual ordinary/optimized Worker paths, including
+compositor frames. `test-live-command-presentation.ts --table-history-only`
+applies it to every production table command, including pending native input;
+the checkbox path also preserves a selected task-body range. Sample the source
+at the actual command boundary: pending native input can belong to the same
+atomic transaction, so its unconfirmed DOM value is not an Undo expectation.
+These focused contracts belong to the targeted history and release browser gates.
+
+`scripts/history-acceptance-coverage.ts` requires every public editor command to
+declare its edit, contextual, neutral, replay or persistence semantics and owning
+behavioral suites. Adding a command without a route fails the workflow check.
+This registry proves routing, not executed behavior. Existing component suites
+still own rich blocks, clipboard, search, structural input, cancellation and
+mixed histories; a registry row or one round trip cannot replace that evidence.
+Navigation, copying, view changes and saving must not add document Undo entries;
+any pre-existing pending edit retains its separately defined commit boundary.
+
+Release readiness requires the affected features' history evidence at both
+document scales, plus the existing native/endurance and artifact gates. Focused
+repair passes do not turn a previous artifact or historical release report into
+evidence for a changed candidate. This contract reduces repeated omissions; it
+does not claim exhaustive coverage of all possible interaction sequences.
+
 ## Document-scale coverage
 
 After changes to packaged syntax engines or Webview resource loading, run

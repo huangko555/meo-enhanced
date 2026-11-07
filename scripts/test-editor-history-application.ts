@@ -66,6 +66,14 @@ assert.deepEqual(live.dispatch({
 }]);
 
 const rapid = createEditorHistoryApplication();
+const selected = createEditorHistoryApplication();
+selected.dispatch({ type: 'requestReplay', direction: 'undo', context: sourceContext });
+const selection = { ranges: [{ anchor: 24, head: 16 }, { anchor: 30, head: 35 }], mainIndex: 1 };
+const selectedEffects = selected.dispatch({ type: 'nativeHistoryCompleted', replayId: selected.getState().pendingReplay!.id,
+  applied: true, changedRange: { from: 16, to: 35 }, targetPosition: 35, targetSelection: selection });
+assert.deepEqual(selectedEffects[0], { type: 'restoreHistoryInteraction', replayId: selected.getState().pendingReplay!.id,
+  direction: 'undo', targetPosition: 35, targetSelection: selection, changedRange: { from: 16, to: 35 }, previousViewport: sourceContext.viewport },
+  'A replay carries the complete directed selection and primary range through the shared owner');
 rapid.dispatch({ type: 'requestReplay', direction: 'undo', context: sourceContext });
 const staleId = rapid.getState().pendingReplay?.id;
 const secondRequest = rapid.dispatch({ type: 'requestReplay', direction: 'undo', context: sourceContext });

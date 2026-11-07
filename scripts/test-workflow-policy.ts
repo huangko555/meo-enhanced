@@ -84,6 +84,9 @@ function targetedCommands(
   switch (area) {
     case 'history':
       return [
+        script('scripts/test-command-history-production.ts'),
+        { args: ['scripts/test-live-command-presentation.ts', '--local-units', '--action=checkbox'] },
+        { args: ['scripts/test-live-command-presentation.ts', '--table-history-only'] },
         script('scripts/test-preview-shortcuts-production.ts'),
         script('scripts/test-math-completion-production.ts'),
         script('scripts/test-input-assistance-production.ts'),
@@ -318,6 +321,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-panel-session-ready-init.ts'),
           script('scripts/test-panel-session-window-focus.ts'),
           script('scripts/test-editor-history-runtime.ts'),
+          script('scripts/test-history-interaction-contract.ts'),
           script('scripts/test-editing-preferences.ts'),
           script('scripts/test-live-input-derived-work.ts'),
           script('scripts/test-viewport-controller.ts'),

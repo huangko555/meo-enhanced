@@ -18,6 +18,8 @@ export type TableCommandTransactionPlan = {
   readonly confirmations?: readonly TableCellCommitConfirmation[];
   readonly afterDispatch?: () => void;
   readonly restoreInteraction?: () => void;
+  /** Explicit post-command focus; null transfers ownership to the document. */
+  readonly historyFocusAfter?: { readonly row: number; readonly col: number; readonly caret?: number } | null;
 };
 
 export type TableCommandEditorTarget = {

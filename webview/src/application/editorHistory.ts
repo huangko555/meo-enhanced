@@ -1,5 +1,11 @@
 export type EditorHistoryDirection = 'undo' | 'redo';
 
+/** Framework-free selection restored by the same replay that owns positioning. */
+export type EditorHistorySelection = {
+  readonly ranges: readonly { readonly anchor: number; readonly head: number }[];
+  readonly mainIndex: number;
+};
+
 export type EditorHistoryViewport = {
   readonly scrollTop: number;
   readonly selection: {
@@ -37,6 +43,7 @@ export type EditorHistoryInput =
       readonly applied: boolean;
       readonly changedRange: { readonly from: number; readonly to: number } | null;
       readonly targetPosition?: number | null;
+      readonly targetSelection?: EditorHistorySelection;
     }
   | { readonly type: 'interactionRestored'; readonly replayId: number }
   | { readonly type: 'cancelRestore' }
@@ -61,6 +68,7 @@ export type EditorHistoryEffect =
       readonly targetPosition: number | null;
       readonly changedRange: { readonly from: number; readonly to: number } | null;
       readonly previousViewport: EditorHistoryViewport;
+      readonly targetSelection?: EditorHistorySelection;
     }
   | { readonly type: 'disposeHistory' };
 
@@ -158,6 +166,7 @@ export function createEditorHistoryApplication(): EditorHistoryApplication {
             ? pending.direction === 'undo' ? input.changedRange.from : input.changedRange.to
             : null),
           changedRange: input.changedRange,
+          ...(input.targetSelection ? { targetSelection: input.targetSelection } : {}),
           previousViewport: pending.context.viewport
         }];
       }

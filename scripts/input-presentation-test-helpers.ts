@@ -227,4 +227,20 @@ async function open(page: Page, text: string, coldPreview = false, initialMode: 
 }
 
 
-export { browser, server, open, frames, assertStablePaint, captureResult };
+async function assertStableHistoryPaint(page: Page, clip: { left: number; top: number; width: number; height: number }, action: () => Promise<void>, id: string) {
+  // A range-selection replay may produce only one damage frame. A tiny marker
+  // outside the measured content requests continuous compositor observation;
+  // it does not relax the existing frame count or unchanged-pixel threshold.
+  await page.evaluate(() => {
+    const marker = document.createElement('div'); marker.id = 'history-paint-cadence';
+    marker.style.cssText = 'position:fixed;left:18px;top:4px;width:2px;height:2px;z-index:2147483647;pointer-events:none';
+    document.body.append(marker);
+    marker.animate([{ background: 'rgb(211,47,193)' }, { background: 'rgb(19,211,41)' }], { duration: 34, iterations: Infinity });
+  });
+  try { await assertStablePaint(page, clip, action, id); }
+  finally { await page.evaluate(() => {
+    const marker = document.getElementById('history-paint-cadence');
+    marker?.getAnimations().forEach(animation => animation.cancel()); marker?.remove();
+  }); }
+}
+export { browser, server, open, frames, assertStablePaint, assertStableHistoryPaint, captureResult };

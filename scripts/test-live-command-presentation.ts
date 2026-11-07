@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
-import { browser, server, open, frames, assertStablePaint, observedPaints } from './input-presentation-test-helpers';
+import { browser, server, open, frames, assertStablePaint, assertStableHistoryPaint, observedPaints } from './input-presentation-test-helpers';
 import { closeTestBrowser } from './browser-test-helpers';
 import { assessLargeDocument } from '../src/foundation/largeDocument';
+import { tableCommands } from '../webview/src/application/tableCommand';
+import { captureHistoryInteraction, captureHistoryAction, assertHistoryRoundTrip, assertHistoryCoverage, type HistoryInteractionState } from './history-interaction-contract';
 
 // Use the shipped Worker/partial-parse path; core-editor fixtures miss the bug.
 const fixture = [
@@ -13,12 +15,10 @@ const fixture = [
   'After table.', '', '```js', 'const stable = true;', '```', '',
   '$$', 'x^2 + y^2', '$$', '', '<div>Stable HTML</div>', ''
 ].join('\n');
-const commands = [
-  'insert-row-above', 'insert-row-below', 'delete-row',
-  'insert-column-left', 'insert-column-right', 'delete-column',
-  'move-row-up', 'move-row-down', 'move-column-left', 'move-column-right',
-  'align-left', 'align-center', 'align-right', 'sort-ascending', 'sort-descending', 'delete-table'
-];
+const selectedCommand = process.argv.find(arg => arg.startsWith('--command='))?.slice(10);
+assert.ok(!selectedCommand || tableCommands.includes(selectedCommand as typeof tableCommands[number]), 'Unknown table command filter');
+const commands = tableCommands.filter(command => !selectedCommand || command === selectedCommand);
+const historyReceipts: string[] = [];
 let cases = 0;
 
 // Exercise the shipped editor/Worker with a reading viewport independent of
@@ -129,6 +129,14 @@ async function taskInteractionCase(large: boolean, nested: boolean) {
           view.contentDOM.querySelector('.meo-task-checkbox').click();
         }, body);
       }, body + 2, padded.replace('- [x]', '- [ ]'), true);
+      const surface = { witness: 'Before 84.' };
+      await page.evaluate(body => { const view = (window as any).__taskView; view.focus(); view.dispatch({ selection: { anchor: body + 2, head: body + 6 } }); }, body);
+      const before = await captureHistoryInteraction(page, surface);
+      await page.mouse.click(point!.x, point!.y); await frames(page, 8);
+      const after = await captureHistoryInteraction(page, surface);
+      assert.deepEqual(after.ranges, before.ranges, label + ': retain a body text selection when toggling');
+      const historyLabel = label + '/body-selection';
+      await assertHistoryRoundTrip(page, { ...surface, label: historyLabel, before, after }); historyReceipts.push(historyLabel);
     } else {
       await page.evaluate(body => (window as any).__taskView.dispatch({ selection: { anchor: body } }), body);
       await frames(page, 4);
@@ -517,23 +525,28 @@ async function colorCase(large: boolean, inTable: boolean, apply: boolean, fromC
   finally { host.dispose(); await page.close(); }
 }
 
-async function tableCase(large: boolean, command: string) {
+async function tableCase(large: boolean, command: string, selected = false) {
   const page = await browser.newPage(), host = await prepare(page, large);
-  const label = `table ${command} large ${large}`;
+  const label = `table ${command} large ${large}${selected ? '/selected-cell' : ''}`;
   try {
     await page.click('tbody tr:nth-child(2) td:nth-child(2) .meo-md-html-table-cell-preview');
     await page.keyboard.press('End');
-    await page.keyboard.type('777'); // Commands must also retire an existing native-input viewport owner.
+    if (selected) await page.evaluate(() => (document.activeElement as HTMLTextAreaElement).setSelectionRange(0, 2, 'backward'));
+    // Pending native text and the command are accepted by one atomic
+    // transaction. Undo restores its last confirmed source/cell state.
+    const cellBefore = await captureHistoryInteraction(page, { witness: 'Controls' });
+    if (!selected) await page.keyboard.type('777'); // Also retire an existing native-input viewport owner.
     await frames(page, 5);
     const before = await page.evaluate(() => (window as any).__commandView.state.doc.toString());
+    let beforeInteraction: HistoryInteractionState;
     const clip = await observe(page);
     await assertStablePaint(page, clip, async () => {
       await page.click('.meo-md-html-table-context-trigger');
       if (/^(move|align|sort)-/.test(command)) await page.click('[data-page-action="next"]');
       const selector = `[data-command="${command}"]`;
       assert.equal(await page.$eval(selector, element => (element as HTMLButtonElement).disabled), false, label + ': enabled command');
-      await page.click(selector);
-      if (command === 'delete-table') await page.click(selector); // Two-click confirmation.
+      if (command === 'delete-table') await page.click(selector); // First click only confirms.
+      beforeInteraction = await captureHistoryAction(page, { witness: 'Controls' }, selector);
     }, label);
     const samples = await finishObservation(page, label);
     const after = await page.evaluate(() => (window as any).__commandView.state.doc.toString());
@@ -551,6 +564,13 @@ async function tableCase(large: boolean, command: string) {
           && view.state.doc.lineAt(view.state.selection.main.head).number === sourceLine;
       }), label + ': focus returns to a visible cell');
     } else assert.equal(await page.$('.meo-md-html-table-shell'), null, label + ': table removed');
+    const afterInteraction = await captureHistoryInteraction(page, { witness: 'Controls' });
+    // This fixture appends pending text at End. The source at the actual
+    // command boundary decides whether it belongs to this atomic undo step.
+    const acceptedCell = beforeInteraction!.text.split('\n')[cellBefore.focus.sourceLine! - 1].split('|')[Number(cellBefore.focus.col) + 1].trim();
+    beforeInteraction!.focus = selected ? cellBefore.focus : { ...cellBefore.focus, value: acceptedCell, from: acceptedCell.length, to: acceptedCell.length };
+    await assertHistoryRoundTrip(page, { witness: 'Controls', label, before: beforeInteraction!, after: afterInteraction,
+      observePaint: (action, direction) => assertStableHistoryPaint(page, clip, action, label + '/' + direction) }); historyReceipts.push(label);
     assert.deepEqual(host.errors, [], label + ': no runtime errors');
     cases++;
   } finally { host.dispose(); await page.close(); }
@@ -629,24 +649,38 @@ let failure: unknown;
 try {
   const onlyColor = process.argv.includes('--color-only');
   const onlyCellPreview = process.argv.includes('--cell-preview');
+  const onlyTableHistory = process.argv.includes('--table-history-only');
   const onlyAction = process.argv.find(arg => arg.startsWith('--action='))?.slice(9);
-  if (!onlyColor && !onlyCellPreview) {
+  const expectedHistory = [
+    ...(!onlyColor && !onlyCellPreview && !onlyTableHistory && (!onlyAction || onlyAction === 'checkbox')
+      ? [false, true].map(large => `task interaction large ${large} nested false/body-selection`) : []),
+    ...((!process.argv.includes('--local-units') && !onlyCellPreview || onlyTableHistory) && !onlyColor
+      ? [false, true].flatMap(large => commands.flatMap(command => [`table ${command} large ${large}`,
+          ...(command === 'move-row-down' ? [`table ${command} large ${large}/selected-cell`] : [])])) : [])
+  ];
+  if (!onlyColor && !onlyCellPreview && !onlyTableHistory) {
     if (!onlyAction || onlyAction === 'checkbox') for (const large of [false, true]) for (const nested of [false, true]) await taskInteractionCase(large, nested);
     if (!onlyAction || onlyAction === 'checkbox' || onlyAction === 'task-backspace') for (const large of [false, true]) for (const action of ['Backspace', 'Enter', 'StartEnter', 'Tab', 'Outdent'] as const) await richTaskBackspaceCase(large, action);
     for (const large of [false, true]) for (const action of ['checkbox', 'bulletList', 'numberedList', 'task', 'quote', 'heading'].filter(action => !onlyAction || onlyAction === action)) await localUnitCase(large, action);
     if (!onlyAction || onlyAction === 'bulletList') for (const large of [false, true]) await localUnitCase(large, 'bulletList', true);
     if (!onlyAction) for (const large of [false, true]) await columnFrameCase(large);
   }
-  if (!onlyColor && !onlyAction) for (const large of [false, true]) await cellPreviewUnitCase(large);
-  if (!process.argv.includes('--local-units') && !onlyCellPreview) {
+  if (!onlyColor && !onlyAction && !onlyTableHistory) for (const large of [false, true]) await cellPreviewUnitCase(large);
+  if ((!process.argv.includes('--local-units') && !onlyCellPreview) || onlyTableHistory) {
   for (const large of [false, true]) {
-    for (const inTable of [false, true]) for (const apply of [false, true]) await colorCase(large, inTable, apply);
-    for (const apply of [false, true]) await colorCase(large, true, apply, true);
-    if (!onlyColor) for (const command of commands) await tableCase(large, command);
+    if (!onlyTableHistory) {
+      for (const inTable of [false, true]) for (const apply of [false, true]) await colorCase(large, inTable, apply);
+      for (const apply of [false, true]) await colorCase(large, true, apply, true);
+    }
+    if (!onlyColor) for (const command of commands) {
+      await tableCase(large, command);
+      if (command === 'move-row-down') await tableCase(large, command, true);
+    }
   }
-  if (!onlyColor) for (const command of ['insert-row-below', 'align-center', 'sort-descending', 'delete-table']) await longTableCase(command);
+  if (!onlyColor && !onlyTableHistory) for (const command of ['insert-row-below', 'align-center', 'sort-descending', 'delete-table']) await longTableCase(command);
   }
-  console.log(`Live command presentation passed: ${cases} cases, ${observedPaints} compositor frames`);
+  assertHistoryCoverage(expectedHistory);
+  console.log(`Live command presentation passed: ${cases} cases, ${observedPaints} compositor frames; ${historyReceipts.length} complete history contracts`);
 } catch (error) { failure = error; throw error; }
 finally {
   server.stop(true);

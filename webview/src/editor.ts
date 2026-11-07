@@ -29,7 +29,7 @@ import { boundedMarkdownInputPrefix, editorMarkdownLanguage, getEditorMarkdownLa
 import { indentUnit, syntaxTree, forceParsing } from '@codemirror/language';
 import { sourceHighlightStyle } from './theme';
 import { viewportSyntaxHighlighting } from './editor/viewportSyntaxHighlighting';
-import { listHistoryFocus, readListHistoryPosition } from './adapters/codeMirrorListHistoryFocus';
+import { listHistoryFocus, readListHistoryFocus } from './adapters/codeMirrorListHistoryFocus';
 import { backgroundMarkdownStructureExtensions } from './editor/backgroundMarkdownStructure';
 import { isCompleteMarkdownStructure, markdownStructureIdentity } from './editor/markdownStructure';
 import { adoptMarkdownDocumentContext } from './markdownDocumentContext';
@@ -126,6 +126,7 @@ import {
   tablePointerTarget,
   focusHistoryChange,
   focusTableHistoryChange,
+  tableHistorySourcePosition,
   refreshMountedTablePositions,
   projectMountedTablePositions,
   refreshMountedTableUiLanguage,
@@ -3080,6 +3081,13 @@ export function createEditor({
     getMode: () => currentMode === 'live' ? 'live' : 'source'
   });
   const editorHistoryApplication = createEditorHistoryApplication();
+  const restoreHistorySelection = (request: EditorHistoryRestoreRequest, isCurrent: () => boolean) => {
+    if (!request.targetSelection || !isCurrent()) return;
+    const selection = EditorSelection.create(request.targetSelection.ranges.map(range =>
+      EditorSelection.range(range.anchor, range.head)), request.targetSelection.mainIndex);
+    if (!selection.eq(view.state.selection)) view.dispatch({ selection, annotations: Transaction.addToHistory.of(false) });
+    view.focus();
+  };
   const editorHistoryEffectAdapter = createEditorHistoryEffectAdapter({
     captureContext(): EditorHistoryContext {
       return {
@@ -3098,19 +3106,33 @@ export function createEditor({
       interactionContinuity?.cancel();
       viewportController.beginNavigationReveal();
       const beforeDocument = view.state.doc;
+      let nativeSelectionOwnsTarget = false;
+      let semanticTargetPosition: number | null = null;
       try {
         const target = {
           state: view.state,
           dispatch(transaction: Transaction) {
-            const position = readListHistoryPosition(transaction.state);
+            const listTarget = readListHistoryFocus(transaction.state);
+            const tableTarget = tableHistoryFocusAdapter.read(transaction.state);
+            semanticTargetPosition = listTarget?.position ?? (tableTarget && !tableTarget.contentOnly
+              ? tableHistorySourcePosition(transaction.state, tableTarget) : null);
+            const nativeSelection = transaction.newSelection.main;
+            if (!listTarget && !tableTarget) {
+              // Native history already restores the real text selection. Only
+              // prefer it when it belongs to the replayed edit, so an unrelated
+              // old selection cannot replace a rendered control's target.
+              transaction.changes.iterChangedRanges((_from, _to, from, to) => {
+                nativeSelectionOwnsTarget ||= nativeSelection.from <= to && nativeSelection.to >= from;
+              });
+            }
             // Native history bypasses transaction filters. Accept its original
             // transaction and the semantic selection in one view update, before
             // any native caret reveal or intermediate source frame can paint.
-            if (position === null) view.dispatch(transaction);
+            if (semanticTargetPosition === null || listTarget?.preserveSelection && nativeSelection.head === semanticTargetPosition) view.dispatch(transaction);
             else view.dispatch([transaction, transaction.state.update({
-              selection: { anchor: position },
+              selection: { anchor: semanticTargetPosition },
               annotations: Transaction.addToHistory.of(false),
-              scrollIntoView: true
+              scrollIntoView: Boolean(listTarget)
             })]);
           }
         };
@@ -3119,12 +3141,22 @@ export function createEditor({
           // Replaying a change can synchronously remove the focused table or
           // rendered-block editor. Keep keyboard ownership inside the editor
           // while the richer boundary restore resolves its replacement target.
-          view.contentDOM.focus({ preventScroll: true });
+          // Let CodeMirror synchronize its native DOM selection as well. A raw
+          // contentDOM.focus() can adopt the detached input's old DOM range and
+          // publish an unrelated document selection before table restoration.
+          view.focus();
         }
         return {
           applied,
-          targetPosition: applied ? readListHistoryPosition(view.state) : null,
-          changedRange: applied ? changedCodeMirrorDocumentRange(beforeDocument, view.state.doc) : null
+          targetPosition: applied ? semanticTargetPosition
+            ?? (nativeSelectionOwnsTarget ? view.state.selection.main.head : null) : null,
+          changedRange: applied ? changedCodeMirrorDocumentRange(beforeDocument, view.state.doc) : null,
+          ...(applied && !tableHistoryFocusAdapter.read(view.state)
+            && (nativeSelectionOwnsTarget || readListHistoryFocus(view.state)?.preserveSelection)
+            && (view.state.selection.ranges.length > 1 || !view.state.selection.main.empty) ? {
+              targetSelection: { ranges: view.state.selection.ranges.map(range => ({ anchor: range.anchor, head: range.head })),
+                mainIndex: view.state.selection.mainIndex }
+            } : {})
         };
       } finally {
         queueMicrotask(() => {
@@ -3213,6 +3245,7 @@ export function createEditor({
       if (!pendingRenderedHistoryFocus.run())
         return isLiveInputDerivedWorkPending(view.state) ? 'pending-presentation' : 'retry';
       pendingRenderedHistoryFocus = null;
+      restoreHistorySelection(request, isCurrent);
       return 'restored';
     },
     restoreEditorInteraction(request, isCurrent) {
@@ -3225,6 +3258,7 @@ export function createEditor({
         request.targetPosition ?? undefined,
         isCurrent
       );
+      restoreHistorySelection(request, isCurrent);
     },
     scheduleFocusRetry(run) {
       let cancelled = false;

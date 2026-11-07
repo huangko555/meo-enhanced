@@ -3,13 +3,15 @@ import type {
   EditorHistoryDirection,
   EditorHistoryEffect,
   EditorHistoryEffectExecutor,
-  EditorHistoryInput
+  EditorHistoryInput,
+  EditorHistorySelection
 } from '../application/editorHistory';
 
 export type EditorHistoryNativeResult = {
   readonly applied: boolean;
   readonly changedRange: { readonly from: number; readonly to: number } | null;
   readonly targetPosition?: number | null;
+  readonly targetSelection?: EditorHistorySelection;
 };
 
 export type EditorHistoryRestoreRequest = Extract<
@@ -142,7 +144,8 @@ export function createEditorHistoryEffectAdapter(
                 replayId: effect.replayId,
                 applied: result.applied,
                 changedRange: result.changedRange,
-                targetPosition: result.targetPosition
+                targetPosition: result.targetPosition,
+                targetSelection: result.targetSelection
               }))
               .catch((error): EditorHistoryInput => {
                 capabilities.reportError('native-history', error);

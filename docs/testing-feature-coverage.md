@@ -4,6 +4,8 @@
 
 `scripts/test-test-workflow.ts` 检查所有公开命令、设置均在本表登记，引用的测试进入发布门禁，而且快速门禁不能比发布门禁覆盖更多基本合同。它检查登记和调度完整性；实际行为仍由各项测试断言。
 
+修改文档的各项操作都须验证操作、撤销、重做的完整交互：准确文本、选区及方向、原生焦点和单元格选择、语义位置、历史分组、后续可编辑性，以及中间帧的视口与呈现稳定。普通与实际优化路径按[统一历史验收合同](testing-workflow.md#shared-undoredo-acceptance)配对；只核对最终文本或登记了测试不构成通过证据。公开命令由 [历史语义登记](../scripts/history-acceptance-coverage.ts)约束新增覆盖，导航、复制及保存等操作分别验证不增加文档历史。
+
 ## 编辑、阅读与内容操作
 
 | 功能 | 必须检查的结果 | 门禁证据与边界 |
@@ -17,7 +19,7 @@
 | 正文输入、换行、选区、多光标、IME | 内容与光标一致，组合输入不重复提交，不丢字 | [输入路径](../scripts/test-live-input-path-production.ts)、[IME](../scripts/test-ime-composition.ts)、[快捷键](../scripts/test-editor-shortcuts.ts)；原生输入法另验 |
 | 行内代码 | 阅读态隐藏反引号不占宽；正文、引用、列表、标题、表格和 HTML 内边距一致；编辑边界、折行与 Source 正常 | [行内代码布局](../scripts/test-inline-code-layout-production.ts)；覆盖 Live、Preview 和 HTML 导出两种主题 |
 | Markdown 行内语法边界 | 字面代码、公式、链接地址/标题、注释不参与外部配对；嵌套格式、未闭合标记及表格与正文一致；编辑和撤销保留源码 | [共享分隔符](../scripts/test-inline-style-delimiters.ts)、[渲染边界](../scripts/test-inline-syntax-boundaries.ts)、[生产边界](../scripts/test-inline-syntax-boundaries-production.ts)；覆盖深浅主题、光标状态、Preview 与 HTML/PDF/DOCX 渲染 |
-| 格式工具与选中文字菜单 | 加粗、斜体、删除线、高亮、代码、链接等实际修改正文，撤销重做准确 | [基础功能矩阵](../scripts/test-basic-capability-production-matrix.ts) |
+| 格式工具与选中文字菜单 | 加粗、斜体、删除线、高亮、代码、链接等实际修改正文；撤销重做保留准确选区、原生焦点及视口，未改内容不闪回源码 | [基础功能矩阵](../scripts/test-basic-capability-production-matrix.ts)、[生产历史交互](../scripts/test-command-history-production.ts)；Live / Source、普通 / 实际优化 Worker 路径及合成器帧 |
 | 滚轮与阅读稳定 | 向下/向上持续前进；一次手势多帧完成时不被拉回；迟到布局只补偿几何变化 | [滚动进度](../scripts/test-native-scroll-progress-production.ts)、[虚拟块布局](../scripts/test-virtual-block-scroll-stability.ts)；全篇检查必须实际到达首尾 |
 | 文档滚动条 | 长文档的正文滑块在浅色和深色下清晰可见；拖动滑块实际改变阅读位置并能到达首尾；预设切换、分屏、目录开关及面板缩窄后仍可见、可操作 | 真实 VS Code 用户环境必验，使用 [GitHub 对照样例](../scripts/fixtures/github-readme/README.md)；覆盖默认 / GitHub README、独立 Preview / 分屏 Preview，并检查 Live / Source；`scrollHeight`、滚动条 CSS 色值或占位存在均不能单独证明滑块已正常绘制 |
 | 搜索、替换、上一项/下一项 | 匹配正确；可见项不多滚；离屏项进入可用视口；替换及撤销内容准确 | [搜索替换](../scripts/test-search-replace-production.ts)、[搜索控件](../scripts/test-webview-search-controls.ts) |

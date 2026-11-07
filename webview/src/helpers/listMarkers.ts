@@ -587,7 +587,7 @@ export class CheckboxWidget extends UiLanguageSensitiveWidget {
         // Pointer activation adopts this task; keyboard activation keeps the
         // native checkbox focused and leaves its text selection untouched.
         selection: keyboardActivation || inBody ? undefined : { anchor: body },
-        effects: listHistoryFocusEffect(line.from, target, target),
+        effects: listHistoryFocusEffect(line.from, target, target, inBody),
         annotations: isolateHistory.of('full'),
         userEvent: 'input.task'
       });

@@ -9,6 +9,7 @@ import {
   validateTestWorkflowAuthorization
 } from './test-workflow-policy';
 import { prepareWorkflow } from './test-workflow-execution';
+import { historyAcceptance, inspectHistoryAcceptance } from './history-acceptance-coverage';
 
 const regression = createTestWorkflowPlan(parseTestWorkflowRequest(['regression']));
 const quick = createTestWorkflowPlan(parseTestWorkflowRequest(['quick']));
@@ -86,6 +87,12 @@ for (const commands of [regressionCommands, viewportCommands]) {
 const history = createTestWorkflowPlan(
   parseTestWorkflowRequest(['targeted', 'history'])
 );
+for (const command of [
+  ['scripts/test-command-history-production.ts'],
+  ['scripts/test-live-command-presentation.ts', '--local-units', '--action=checkbox'],
+  ['scripts/test-live-command-presentation.ts', '--table-history-only']
+]) assert.ok(flattenTestWorkflowCommands(history).some(item => JSON.stringify(item.args) === JSON.stringify(command)),
+  'History selection must include format, task and every production table command, not just a generic history test');
 assert.equal(history.tier, 'targeted');
 assert.equal(history.area, 'history');
 assert.equal(history.longRunning, false);
@@ -357,6 +364,11 @@ for (const command of flattenTestWorkflowCommands(release)) {
   } else if (command.args[0]?.startsWith('scripts/')) {
     releaseDirectScripts.add(command.args[0]);
   }
+}
+
+assert.deepEqual(inspectHistoryAcceptance(), [], 'Every public editing command must declare history semantics');
+for (const entry of historyAcceptance) for (const owner of entry.tests) {
+  assert.ok(releaseDirectScripts.has(`scripts/${owner}`), `History acceptance owner is absent from release: ${owner}`);
 }
 for (const command of [...coreCommands, ...flattenTestWorkflowCommands(regression)]) {
   if (!command.args[0]?.startsWith('scripts/')) continue;

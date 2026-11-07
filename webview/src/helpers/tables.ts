@@ -459,6 +459,19 @@ export function tableUsableViewportBounds(view: EditorView, element: Element) {
   };
 }
 
+/** Resolve only the target row, before a native history transaction can paint
+ * an unrelated document caret while its table presentation is still pending. */
+export function tableHistorySourcePosition(state: EditorState, target: TableHistoryFocusTarget): number | null {
+  const start = state.doc.lineAt(Math.max(0, Math.min(target.tableFrom, state.doc.length)));
+  const number = start.number + (target.row > 0 ? target.row + 1 : 0);
+  if (number > state.doc.lines) return null;
+  const line = state.doc.line(number);
+  const cell = parseTableLine(number, line.from, line.to, line.text).segments[target.col];
+  if (!cell) return null;
+  const value = tableCellSourceToEditorValue(state.doc.sliceString(cell.from, cell.to));
+  return Math.min(cell.to, cell.from + tableCellEditorOffsetToSourceOffset(value, Math.min(target.caret, value.length)));
+}
+
 export function focusTableHistoryChange(
   view: EditorView,
   changed: { from: number; to: number },
@@ -543,7 +556,8 @@ export function focusTableHistoryChange(
       ? Math.min(Math.max(semanticTarget.caret, 0), input.value.length)
       : tableCellSourceOffsetToEditorOffset(input.value, sourceCaret);
     input.focus({ preventScroll: true });
-    input.setSelectionRange(caret, caret);
+    input.setSelectionRange(caret, semanticTarget?.selectionEnd === undefined ? caret
+      : Math.min(Math.max(semanticTarget.selectionEnd, caret), input.value.length), semanticTarget?.selectionDirection);
 
     const cell = input.closest<HTMLElement>(tableCellSelector);
     if (!cell) return 'restored' as const;
@@ -4411,13 +4425,32 @@ class HtmlTableController extends UiLanguageSensitiveWidget {
     command: TableCommand,
     target: TableCommandTarget
   ): TableCommandTransactionPlan {
+    const view = this.view, dom = this.domRefs?.wrap;
+    const range = view && dom ? this.resolveCurrentTableRange(view, dom) : null;
+    const row = target.row ?? this.activeTarget.row, col = target.column ?? this.activeTarget.col;
+    const input = this.domRefs?.allRowInputs?.[row]?.[col];
+    const beforeFocus: TableHistoryFocusTarget | null = range ? { tableFrom: range.from, row, col,
+      caret: input?.selectionStart ?? 0, selectionEnd: input?.selectionEnd ?? 0,
+      selectionDirection: input?.selectionDirection ?? 'none' } : null;
     const commit = this.cellInteraction.accept({ type: 'commit', reason: 'command' }).commit;
     const confirmation = commit
       ? createTableCellCommitConfirmation(this.cellInteraction, commit.generation)
       : null;
     if (confirmation) this.cancelPendingCellAutoCommit();
     try {
-      const plan = this.buildTableCommandTransactionPlan(command, target);
+      let plan = this.buildTableCommandTransactionPlan(command, target);
+      if (view && range && plan.transaction?.changes) {
+        const changes = view.state.changes(plan.transaction.changes);
+        if (!changes.empty) {
+          if (plan.historyFocusAfter === undefined) throw new Error('Table command must declare its history focus');
+          const afterFocus: TableHistoryFocusTarget | null = plan.historyFocusAfter === null ? null
+            : { tableFrom: changes.mapPos(range.from, -1), ...plan.historyFocusAfter, caret: plan.historyFocusAfter.caret ?? 0 };
+          const effects = plan.transaction.effects;
+          const previous: readonly StateEffect<unknown>[] = !effects ? [] : Array.isArray(effects) ? effects : [effects as StateEffect<unknown>];
+          plan = { ...plan, transaction: { ...plan.transaction,
+            effects: [...previous, getTableHistoryFocus(view.state).effect(afterFocus, beforeFocus)] } };
+        }
+      }
       // Removing the anchor transfers ownership to the document caret. Keeping
       // the old table's absolute viewport would leave that caret off-screen.
       const preserveViewport = command !== 'delete-table';
@@ -4506,6 +4539,7 @@ class HtmlTableController extends UiLanguageSensitiveWidget {
     return {
       transaction: { changes: { from, to, insert: '' }, selection: { anchor: from } },
       outcome: 'changed',
+      historyFocusAfter: null,
       afterDispatch: () => {
         this.pendingContextMenuRestore = false;
         this.setContextMenuOpen(false);
@@ -4912,6 +4946,7 @@ class HtmlTableController extends UiLanguageSensitiveWidget {
         return {
           transaction: { effects: commandEffects },
           outcome: 'changed',
+          historyFocusAfter: focusTarget,
           restoreInteraction: focusTarget
             ? () => this.scheduleFocusCellAfterCommit(
                 view,
@@ -4966,6 +5001,7 @@ class HtmlTableController extends UiLanguageSensitiveWidget {
       },
       outcome: 'changed',
       preserveViewport: preserveScrollPosition,
+      historyFocusAfter: focusTarget,
       restoreInteraction: focusTarget
         ? () => this.scheduleFocusCellAfterCommit(
             view,
@@ -5105,6 +5141,7 @@ class HtmlTableController extends UiLanguageSensitiveWidget {
     return {
       transaction: { changes, effects: insertedRowEffect },
       outcome: 'changed',
+      historyFocusAfter: focusTarget,
       restoreInteraction: () => this.scheduleFocusCellAfterCommit(
         view,
         tableStartLine,
@@ -5228,6 +5265,7 @@ class HtmlTableController extends UiLanguageSensitiveWidget {
     return {
       transaction: { changes, effects: deletionEffects },
       outcome: 'changed',
+      historyFocusAfter: focusTarget,
       restoreInteraction: () => this.scheduleFocusCellAfterCommit(
         view,
         tableStartLine,

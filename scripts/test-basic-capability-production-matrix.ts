@@ -5,11 +5,13 @@ import path from 'node:path';
 import type { Browser, Page } from 'puppeteer-core';
 import { launchTestBrowser } from './browser-test-helpers';
 import type { SourceLineNumberMode } from '../src/protocol/readyInit';
+import { captureHistoryInteraction, assertHistoryRoundTrip, assertHistoryCoverage } from './history-interaction-contract';
+import { historyFormatCases, formattedHistoryRange } from './history-format-cases';
 
 const root = path.resolve(import.meta.dir, '..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-basic-capability-index-'));
 const target = 'format target';
-const actions = [['bold', `**${target}**`], ['italic', `*${target}*`], ['lineover', `~~${target}~~`], ['highlight', `==${target}==`], ['inlineCode', `\`${target}\``], ['link', `[${target}]()`], ['wikiLink', `[[${target}]]`], ['kbd', `<kbd>${target}</kbd>`], ['underline', `<u>${target}</u>`]] as const;
+const actions = historyFormatCases(target);
 
 const init = (text: string, mode: 'live' | 'source' | 'preview', sourceLineNumbers: SourceLineNumberMode = 'on') => ({ type: 'init', documentId: `file:///basic-${mode}.md`, text, version: 1, savedRevision: { version: 1, text }, diagnostics: [], mode, uiLanguage: 'en', sourceLineNumbers, previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'light', gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, largeDocumentOptimizationEnabled: true, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null });
 
@@ -125,14 +127,25 @@ async function resolveMergeConflicts(browser: Browser): Promise<void> {
 }
 
 async function matrix(browser: Browser): Promise<void> {
+  const prefix = '# History witness\n\n';
+  const receipts = ['source', 'live'].flatMap(mode => actions.map(([action]) => `inline ${mode}/${action}`));
   for (const mode of ['source', 'live'] as const) for (const [action, expected] of actions) {
-    const page = await open(browser, target, mode); try {
-      await select(page); await page.click(`.selection-inline-button[data-action="${action}"]`);
-      await page.waitForFunction((x) => (window as any).__hostMessages.some((m: any) => m.type === 'draftChanged' && m.text === x), {}, expected); assert.deepEqual(await drafts(page), [expected]);
-      await page.keyboard.down('Control'); await page.keyboard.press('z'); await page.keyboard.up('Control'); await page.waitForFunction((x) => (window as any).__hostMessages.filter((m: any) => m.type === 'draftChanged').at(-1)?.text === x, {}, target);
-      await page.keyboard.down('Control'); await page.keyboard.press('y'); await page.keyboard.up('Control'); await page.waitForFunction((x) => (window as any).__hostMessages.filter((m: any) => m.type === 'draftChanged').at(-1)?.text === x, {}, expected); assert.deepEqual(await drafts(page), [expected, target, expected]);
+    const original = prefix + target, formatted = prefix + expected;
+    const label = `inline ${mode}/${action}`, surface = { witness: 'History witness' };
+    const page = await open(browser, original, mode); try {
+      await select(page);
+      const before = await captureHistoryInteraction(page, surface);
+      assert.deepEqual(before.ranges, [{ anchor: prefix.length, head: original.length }], label + ': select complete body');
+      await page.click(`.selection-inline-button[data-action="${action}"]`);
+      await page.waitForFunction((x) => (window as any).__hostMessages.some((m: any) => m.type === 'draftChanged' && m.text === x), {}, formatted); assert.deepEqual(await drafts(page), [formatted]);
+      const after = await captureHistoryInteraction(page, surface);
+      const range = formattedHistoryRange(action, expected, target, prefix.length);
+      assert.deepEqual(after.ranges, [range], label + ': format selection');
+      await assertHistoryRoundTrip(page, { ...surface, label, before, after });
+      assert.deepEqual(await drafts(page), [formatted, original, formatted]);
     } finally { await page.close(); }
   }
+  assertHistoryCoverage(receipts);
 }
 
 async function preview(browser: Browser): Promise<void> {
@@ -622,5 +635,5 @@ async function reopenedPreviewMode(browser: Browser): Promise<void> {
     await page.close();
   }
 }
-async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { await startupModeVisibility(browser); await reopenedPreviewMode(browser); await blockquotePressLayout(browser); await alertPressLayout(browser); await blockquoteEnterFirstFrame(browser); await matrix(browser); await resolveMergeConflicts(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); await headingWeightPreference(browser); await largeDocumentStartupPreference(browser); } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
+async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { if (process.argv.includes('--history-only')) { await matrix(browser); } else { await startupModeVisibility(browser); await reopenedPreviewMode(browser); await blockquotePressLayout(browser); await alertPressLayout(browser); await blockquoteEnterFirstFrame(browser); await matrix(browser); await resolveMergeConflicts(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); await headingWeightPreference(browser); await largeDocumentStartupPreference(browser); } } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
 main().finally(() => fs.rmSync(temp, { recursive: true, force: true })).catch((e) => { console.error(e instanceof Error ? e.stack : e); process.exitCode = 1; });

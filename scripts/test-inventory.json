@@ -312,6 +312,7 @@
   ],
   "resources": {
     "process": [
+      "scripts/test-history-interaction-contract.ts",
       "scripts/test-document-content.ts",
       "scripts/test-document-statistics.ts",
       "scripts/test-appearance-settings.ts",
@@ -493,6 +494,7 @@
       "scripts/test-workspace-documents-host.ts"
     ],
     "exclusive": [
+      "scripts/test-command-history-production.ts",
       "scripts/test-document-block-preview-idle.ts",
       "scripts/test-document-statistics-selection.ts",
       "scripts/test-vscode-document-statistics.cjs",
