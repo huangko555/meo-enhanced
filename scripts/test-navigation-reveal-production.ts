@@ -6,7 +6,8 @@ import { assessLargeDocument } from '../src/foundation/largeDocument';
 import { browser, server, open, frames } from './input-presentation-test-helpers';
 import { closeTestBrowser } from './browser-test-helpers';
 
-type Sample = { scroll: number; height: number; head: number; top: number | null; bottom: number | null; viewportTop: number; viewportBottom: number; visibleContent: boolean };
+type Sample = { scroll: number; height: number; head: number; documentLength: number; nativeHead: number | null;
+  top: number | null; bottom: number | null; viewportTop: number; viewportBottom: number; visibleContent: boolean };
 let cases = 0, paintedFrames = 0, failure: unknown;
 const shortcut = async (page: Page, key: string) => {
   await page.keyboard.down('Control'); await page.keyboard.press(key); await page.keyboard.up('Control');
@@ -14,7 +15,8 @@ const shortcut = async (page: Page, key: string) => {
 
 // Observe mounted DOM only. coordsAtPos/lineBlockAt can flush CodeMirror's
 // pending measure and would change the ordering this contract needs to observe.
-async function observeReveal(page: Page, label: string, action: () => Promise<void>, retain = false) {
+async function observeReveal(page: Page, label: string, action: () => Promise<void>, retain = false,
+  historyTarget?: { head: number; documentLength: number }) {
   const client = await page.createCDPSession(), paints: number[] = [], pendingAcks = new Set<Promise<unknown>>();
   let decoding = Promise.resolve(), decodeError: unknown, armed = false, firstBad: Buffer | undefined;
   let ready!: () => void;
@@ -57,8 +59,12 @@ async function observeReveal(page: Page, label: string, action: () => Promise<vo
       const lines = [...view.contentDOM.querySelectorAll('.cm-line')] as HTMLElement[];
       const target = lines.find(line => line.textContent?.startsWith('Line 200'));
       const rect = target?.getBoundingClientRect(), bounds = view.scrollDOM.getBoundingClientRect();
+      const native = document.getSelection();
+      const nativeHead = native?.focusNode && view.contentDOM.contains(native.focusNode)
+        ? view.posAtDOM(native.focusNode, native.focusOffset) : null;
       scope.__navigationFrames.push({ scroll: view.scrollDOM.scrollTop, height: view.scrollDOM.scrollHeight,
-        head: view.state.selection.main.head, top: rect?.top ?? null, bottom: rect?.bottom ?? null,
+        head: view.state.selection.main.head, documentLength: view.state.doc.length, nativeHead,
+        top: rect?.top ?? null, bottom: rect?.bottom ?? null,
         viewportTop: bounds.top, viewportBottom: bounds.bottom,
         visibleContent: lines.some(line => { const box = line.getBoundingClientRect(); return box.bottom > bounds.top && box.top < bounds.bottom; }) });
       scope.__navigationFrame = requestAnimationFrame(sample);
@@ -82,6 +88,13 @@ async function observeReveal(page: Page, label: string, action: () => Promise<vo
       assert.ok(paints.every(ink => ink >= 1000), label + ': a painted viewport lost its surrounding text: ' + JSON.stringify(paints));
       assert.ok(positions.length <= (retain ? 1 : 2), label + ': preliminary reveal followed by another placement: ' + JSON.stringify(positions));
       const last = samples.at(-1)!;
+      if (historyTarget) {
+        assert.equal(last.documentLength, historyTarget.documentLength, label + ': replayed document');
+        for (const [frame, sample] of samples.entries()) if (sample.documentLength === historyTarget.documentLength) {
+          assert.equal(sample.head, historyTarget.head, label + `: history caret at frame ${frame}`);
+          assert.equal(sample.nativeHead, historyTarget.head, label + `: native history caret at frame ${frame}`);
+        }
+      }
       assert.ok(last.top !== null && last.bottom !== null && last.top >= last.viewportTop - 1 && last.bottom <= last.viewportBottom + 1,
         label + ': destination must be mounted and visible');
       const lineHeight = last.bottom! - last.top!, gapAbove = last.top! - last.viewportTop, gapBelow = last.viewportBottom - last.bottom!;
@@ -119,10 +132,10 @@ try {
       await frames(page, 8); await page.keyboard.type('Z'); await frames(page, 10);
       await shortcut(page, 'Home'); await frames(page, 8);
       const id = `${mode}-large-${large}`;
-      await observeReveal(page, id + '-undo-down', () => shortcut(page, 'z'));
+      await observeReveal(page, id + '-undo-down', () => shortcut(page, 'z'), false, { head: position, documentLength: text.length });
       assert.equal(host.readHost(), text);
       await shortcut(page, 'End'); await frames(page, 8);
-      await observeReveal(page, id + '-redo-up', () => shortcut(page, 'y'));
+      await observeReveal(page, id + '-redo-up', () => shortcut(page, 'y'), false, { head: position + 1, documentLength: text.length + 1 });
       assert.equal(host.readHost(), text.slice(0, position) + 'Z' + text.slice(position));
       // A visible target near an edge retains its viewport; it must not gain a
       // comfort margin merely because this is a history command.
@@ -131,7 +144,7 @@ try {
         return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2, delta: caret.bottom - (bounds.bottom - 8) };
       });
       await page.mouse.move(wheel.x, wheel.y); await page.mouse.wheel({ deltaY: wheel.delta }); await frames(page, 12);
-      await observeReveal(page, id + '-undo-visible-edge', () => shortcut(page, 'z'), true);
+      await observeReveal(page, id + '-undo-visible-edge', () => shortcut(page, 'z'), true, { head: position, documentLength: text.length });
       assert.equal(host.readHost(), text);
       // A newer ordinary request must still retain native caret scrolling.
       await shortcut(page, 'Home'); await frames(page, 8);

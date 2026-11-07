@@ -3755,6 +3755,7 @@ type LiveDecorationCheckpoint = {
   readonly doc: EditorState['doc'];
   readonly selection: EditorSelection;
   readonly decorations: DecorationSet;
+  readonly tree?: Tree;
 };
 type LiveDecorationMetadata = {
   readonly complete: boolean;
@@ -4411,12 +4412,17 @@ function restoreLiveDecorationCheckpoint(
   if (transaction.docChanged) {
     const isHistory = transaction.isUserEvent('undo') || transaction.isUserEvent('redo');
     const current = contextUnchanged && previous?.complete ? {
-      doc: transaction.startState.doc, selection: transaction.startState.selection, decorations
+      doc: transaction.startState.doc, selection: transaction.startState.selection, decorations,
+      tree: previous.tree ?? preparedLiveDecorationTrees.get(decorations)
     } : undefined;
     if (isHistory) {
       const restored = checkpoint?.selection.eq(transaction.state.selection)
         && checkpoint.doc.eq(transaction.newDoc) ? checkpoint.decorations : undefined;
-      liveDecorationMetadata.set(transaction.state, { checkpoint: current, complete: restored !== undefined });
+      // The restored presentation and its accepted Markdown context are one
+      // checkpoint. A following selection normalization must not rebuild it
+      // against the replacement revision's still-provisional syntax tree.
+      liveDecorationMetadata.set(transaction.state, { checkpoint: current, complete: restored !== undefined,
+        tree: restored !== undefined ? checkpoint?.tree : undefined });
       return restored;
     }
     const startsHistoryGroup = undoDepth(transaction.state) > undoDepth(transaction.startState);

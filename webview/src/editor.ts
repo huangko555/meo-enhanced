@@ -3093,11 +3093,13 @@ export function createEditor({
       interactionContinuity?.cancel();
       viewportController.beginNavigationReveal();
       const beforeDocument = view.state.doc;
+      let changedRange: { from: number; to: number } | null = null;
       let nativeSelectionOwnsTarget = false;
       let semanticTargetPosition: number | null = null;
       const target = {
         state: view.state,
         dispatch(transaction: Transaction) {
+          changedRange = changedCodeMirrorDocumentRange(beforeDocument, transaction.newDoc);
           const listTarget = readListHistoryFocus(transaction.state);
           const tableTarget = tableHistoryFocusAdapter.read(transaction.state);
           semanticTargetPosition = listTarget?.position ?? (tableTarget && !tableTarget.contentOnly
@@ -3110,11 +3112,18 @@ export function createEditor({
             transaction.changes.iterChangedRanges((_from, _to, from, to) => {
               nativeSelectionOwnsTarget ||= nativeSelection.from <= to && nativeSelection.to >= from;
             });
+            // A nonhistorical selection move can become native redo's saved
+            // selection. Resolve the existing text-edit fallback before
+            // publishing the document, rather than exposing that old caret
+            // until asynchronous presentation restoration corrects it.
+            semanticTargetPosition = nativeSelectionOwnsTarget ? nativeSelection.head : changedRange
+              ? direction === 'undo' ? changedRange.from : changedRange.to : null;
           }
           // Native history bypasses transaction filters. Accept its original
           // transaction and the semantic selection in one view update, before
           // any native caret reveal or intermediate source frame can paint.
-          if (semanticTargetPosition === null || listTarget?.preserveSelection && nativeSelection.head === semanticTargetPosition) view.dispatch(transaction);
+          if (semanticTargetPosition === null || (nativeSelectionOwnsTarget || listTarget?.preserveSelection)
+            && nativeSelection.head === semanticTargetPosition) view.dispatch(transaction);
           else view.dispatch([transaction, transaction.state.update({
             selection: { anchor: semanticTargetPosition },
             annotations: [Transaction.addToHistory.of(false), editorManagedScroll.of(true)],
@@ -3136,7 +3145,7 @@ export function createEditor({
         applied,
         targetPosition: applied ? semanticTargetPosition
           ?? (nativeSelectionOwnsTarget ? view.state.selection.main.head : null) : null,
-        changedRange: applied ? changedCodeMirrorDocumentRange(beforeDocument, view.state.doc) : null,
+        changedRange: applied ? changedRange : null,
         ...(applied && !tableHistoryFocusAdapter.read(view.state)
           && (nativeSelectionOwnsTarget || readListHistoryFocus(view.state)?.preserveSelection)
           && (view.state.selection.ranges.length > 1 || !view.state.selection.main.empty) ? {

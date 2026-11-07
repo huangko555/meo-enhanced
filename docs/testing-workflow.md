@@ -1489,14 +1489,22 @@ part of the same acceptance contract.
 and requires a successful Undo/Redo receipt for every declared case. Its negative
 controls reject transient scrolling, source/presentation replacement, lost
 logical/native ranges, wrong focus, missing observation and missing receipts.
+After the replayed text is accepted, every observed frame must already carry
+its expected document selection and native caret; a later correct final frame
+does not clear an intermediate wrong-line selection.
 `test-command-history-production.ts` applies it to the shared inline-format
 catalogue in Live/Source and actual ordinary/optimized Worker paths, including
-compositor frames. `test-live-command-presentation.ts --table-history-only`
+compositor frames. Its `--text-only` subset covers task and paragraph input,
+deletion and multiline edits after a nonhistorical selection move, through
+both keyboard and toolbar history. `test-live-command-presentation.ts --table-history-only`
 applies it to every production table command, including pending native input;
 the checkbox path also preserves a selected task-body range. Sample the source
 at the actual command boundary: pending native input can belong to the same
 atomic transaction, so its unconfirmed DOM value is not an Undo expectation.
 These focused contracts belong to the targeted history and release browser gates.
+`test-navigation-reveal-production.ts` also checks logical and native caret
+positions in every accepted-history frame for offscreen and visible-edge targets,
+alongside its continuous scroll and compositor assertions.
 
 `scripts/history-acceptance-coverage.ts` requires every public editor command to
 declare its edit, contextual, neutral, replay or persistence semantics and owning

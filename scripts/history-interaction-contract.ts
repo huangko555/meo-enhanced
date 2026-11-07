@@ -115,6 +115,16 @@ export function assertHistoryInteraction(trace: HistoryInteractionTrace, expecte
       label + `: unchanged presentation was replaced or revealed as source at frame ${frame}: ${JSON.stringify({ ranges: sample.ranges, focus: sample.focus, document: sample.document })}`);
     if (options.viewport === 'retain') assert.ok(Math.abs(sample.witness!.top - options.witness.top) <= 1, label + ': unchanged content moved');
   }
+  // A pending replay may still show the previous document. Once its text is
+  // accepted, the caret must already belong to that same replay, including
+  // frames before derived rendering or focus settlement completes.
+  if (expected.focus.kind === 'document') for (const [frame, sample] of samples.entries()) {
+    if (documents[sample.document] !== expected.text) continue;
+    assert.deepEqual(sample.ranges, expected.ranges, label + `: logical selection at frame ${frame}`);
+    assert.equal(sample.mainIndex, expected.mainIndex, label + `: primary selection at frame ${frame}`);
+    assert.equal(sample.focus.kind, 'document', label + `: focus owner at frame ${frame}`);
+    assert.deepEqual(sample.nativeRanges, [expected.ranges[expected.mainIndex]], label + `: native selection at frame ${frame}`);
+  }
   const last = samples.at(-1)!;
   assert.equal(documents[last.document], expected.text, label + ': document');
   assert.equal(last.visible, true, label + ': target is not visible');
@@ -134,6 +144,7 @@ const completed = new Set<string>();
 export async function assertHistoryRoundTrip(page: Page, options: Surface & {
   label: string; before: HistoryInteractionState; after: HistoryInteractionState;
   viewport?: 'retain' | 'reveal'; settle?: (direction: 'undo' | 'redo') => Promise<void>;
+  trigger?: 'keyboard' | 'toolbar';
   observePaint?: (action: () => Promise<void>, direction: 'undo' | 'redo') => Promise<void>;
 }): Promise<void> {
   assert.notEqual(options.before.text, options.after.text, options.label + ': document mutation is required');
@@ -144,8 +155,11 @@ export async function assertHistoryRoundTrip(page: Page, options: Surface & {
       await page.evaluate(readProductState, { witness: options.witness, editor: options.editor }, false);
       try {
         const replay = async () => {
-          const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
-          await page.keyboard.down(modifier); await page.keyboard.press(direction === 'undo' ? 'z' : 'y'); await page.keyboard.up(modifier);
+          if (options.trigger === 'toolbar') await page.click(`button[data-action="${direction}"]`);
+          else {
+            const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+            await page.keyboard.down(modifier); await page.keyboard.press(direction === 'undo' ? 'z' : 'y'); await page.keyboard.up(modifier);
+          }
           await options.settle?.(direction);
           // Include quiet-time derived publication. Component readiness remains
           // the owning feature's responsibility, separate from this window.
