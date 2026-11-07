@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { ChangeSet, Text } from '@codemirror/state';
 import { createDocumentSessionCoordinator } from '../src/application/documentSession';
 import { createDocumentSessionActionAdapter } from '../webview/src/adapters/documentSessionActions';
+import { documentEdit } from '../webview/src/adapters/documentSnapshot';
 
 const createCoordinator = () => createDocumentSessionCoordinator({
   documentId: 'file:///actions.md',
@@ -91,6 +93,47 @@ const pageId = 'page_actions';
   assert.equal(coordinator.draftRecoveryReceiptVersion(), 2, 'terminal conflict must advance the Draft Recovery Receipt');
   assert.deepEqual(notices, [
     'external-conflict'
+  ]);
+}
+
+// Both the ordinary checkpoint and the terminal close handoff must carry the
+// same fully rebased candidate. The adapter merely transports the coordinator
+// result; it must not collapse the original multi-range transaction again.
+{
+  const base = 'abcdef';
+  const before = Text.of([base]);
+  const changes = ChangeSet.of([
+    { from: 0, to: 1, insert: 'X' },
+    { from: 5, to: 6, insert: 'Y' }
+  ], before.length);
+  const edit = documentEdit(changes, before, changes.apply(before));
+  const coordinator = createDocumentSessionCoordinator({
+    documentId: 'file:///multi-range-actions.md',
+    revision: { number: 1, text: base },
+    savedRevision: { revisionNumber: 1, text: base }
+  });
+  const messages: unknown[] = [];
+  const adapter = createDocumentSessionActionAdapter({
+    pageId,
+    postMessage: message => messages.push(message),
+    presentText: () => true,
+    executeRemote: async () => { throw new Error('Unexpected remote action'); },
+    handleInput: input => coordinator.handle(input),
+    showNotice: () => undefined
+  });
+
+  await adapter.execute(coordinator.handle({
+    type: 'hostRevisionChanged', version: 2, text: 'abCdef'
+  }));
+  const actions = coordinator.handle({ type: 'localDraftChanged', text: edit.after, edit });
+  await adapter.execute(actions);
+  const rebasedDraft = actions.find(action => action.type === 'rememberDraft');
+  if (rebasedDraft?.type !== 'rememberDraft') throw new Error('Expected rebased draft recovery action');
+  adapter.preserveDraft(rebasedDraft);
+
+  assert.deepEqual(messages, [
+    { type: 'draftChanged', pageId, text: 'XbCdeY', baseVersion: 2, receiptVersion: 2 },
+    { type: 'draftChanged', pageId, text: 'XbCdeY', baseVersion: 2, terminal: true, receiptVersion: 2 }
   ]);
 }
 

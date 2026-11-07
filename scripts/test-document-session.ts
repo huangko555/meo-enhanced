@@ -1,9 +1,66 @@
 import assert from 'node:assert/strict';
-import { documentSnapshotFromString } from '../webview/src/adapters/documentSnapshot';
+import { ChangeSet, Text } from '@codemirror/state';
+import { documentEdit, documentSnapshotFromString } from '../webview/src/adapters/documentSnapshot';
 import {
   createDocumentSession,
   transitionDocumentSession
 } from '../src/domain/documentSession';
+import { readDocumentText, type DocumentTextChange } from '../src/foundation/documentSnapshot';
+
+function createTransactionEdit(base: string, changes: readonly DocumentTextChange[]) {
+  const before = Text.of([base]);
+  const transaction = ChangeSet.of(changes, before.length);
+  return documentEdit(transaction, before, transaction.apply(before));
+}
+
+function assertMultiRangeRebase(input: {
+  readonly label: string;
+  readonly base: string;
+  readonly host: string;
+  readonly changes: readonly DocumentTextChange[];
+  readonly expected: string;
+}): void {
+  const edit = createTransactionEdit(input.base, input.changes);
+  for (const [representation, baseText, hostText] of [
+    ['string', input.base, input.host],
+    ['snapshot', documentSnapshotFromString(input.base), documentSnapshotFromString(input.host)]
+  ] as const) {
+    const createState = () => createDocumentSession({
+      documentId: `file:///multi-range-${input.label}-${representation}.md`,
+      revision: { number: 1, text: baseText },
+      savedRevision: { revisionNumber: 1, text: baseText }
+    });
+
+    const hostFirstRevision = transitionDocumentSession(createState(), {
+      type: 'revisionReceived',
+      revision: { number: 2, text: hostText }
+    });
+    const hostFirst = transitionDocumentSession(hostFirstRevision.state, {
+      type: 'draftChanged', text: edit.after, edit
+    });
+    assert.equal(readDocumentText(hostFirst.state.draft?.text ?? ''), input.expected,
+      `${input.label}: Host-first ${representation} replays every local range`);
+    assert.equal(hostFirst.state.draft?.baseRevision, 2);
+    assert.equal(hostFirst.state.draft?.conflictBaseText, undefined);
+    assert.deepEqual(hostFirst.effects.map(effect => effect.type), ['persistDraft', 'presentText']);
+
+    const localFirstDraft = transitionDocumentSession(createState(), {
+      type: 'draftChanged', text: edit.after, edit
+    });
+    const localFirst = transitionDocumentSession(localFirstDraft.state, {
+      type: 'revisionReceived',
+      revision: { number: 2, text: hostText }
+    });
+    assert.equal(readDocumentText(localFirst.state.draft?.text ?? ''), input.expected,
+      `${input.label}: local-first ${representation} replays every local range`);
+    assert.equal(readDocumentText(localFirst.state.pendingChange?.text ?? ''), input.expected);
+    assert.equal(localFirst.state.draft?.baseRevision, 2);
+    assert.equal(localFirst.state.draft?.conflictBaseText, undefined);
+    assert.deepEqual(localFirst.effects.map(effect => effect.type), [
+      'persistDraft', 'presentText', 'submitChange'
+    ]);
+  }
+}
 
 const initial = createDocumentSession({
   documentId: 'file:///notes.md',
@@ -310,5 +367,78 @@ for (const base of ['', documentSnapshotFromString('')]) {
   const submit = transitionDocumentSession(conflict, { type: 'submitDraft' });
   assert.equal(submit.state, conflict);
   assert.deepEqual(submit.effects, [], 'conflict protection must depend on presence, not truthiness');
+}
+
+// A stale transaction is described by ranges in its real pre-Host document.
+// Replaying those ranges must preserve disjoint edits at both ends, rather
+// than collapsing them to the one span between their first and last change.
+assertMultiRangeRebase({
+  label: 'separated-replacements',
+  base: 'abcdef',
+  host: 'abCdef',
+  changes: [
+    { from: 0, to: 1, insert: 'X' },
+    { from: 5, to: 6, insert: 'Y' }
+  ],
+  expected: 'XbCdeY'
+});
+
+// Touching a Host range is not itself a conflict: a local insertion at the
+// left edge stays before it and a deletion at the right edge stays after it.
+assertMultiRangeRebase({
+  label: 'adjacent-insert-delete',
+  base: 'abcdef',
+  host: 'abCdef',
+  changes: [
+    { from: 2, to: 2, insert: 'L' },
+    { from: 3, to: 4, insert: '' }
+  ],
+  expected: 'abLCef'
+});
+
+// When a Host deletion collapses two distinct local boundaries to one point,
+// their original transaction order remains observable.
+assertMultiRangeRebase({
+  label: 'collapsed-boundaries',
+  base: 'abcdef',
+  host: 'abef',
+  changes: [
+    { from: 2, to: 2, insert: 'L' },
+    { from: 4, to: 4, insert: 'R' }
+  ],
+  expected: 'abLRef'
+});
+
+// A local insertion inside a Host-deleted range is covered, not merely
+// adjacent. It must remain a terminal conflict in both arrival orders.
+{
+  const base = 'abcdef';
+  const host = 'abef';
+  const edit = createTransactionEdit(base, [{ from: 3, to: 3, insert: 'L' }]);
+  for (const arrival of ['host-first', 'local-first'] as const) {
+    let state = createDocumentSession({
+      documentId: `file:///covered-range-${arrival}.md`,
+      revision: { number: 1, text: base },
+      savedRevision: { revisionNumber: 1, text: base }
+    });
+    if (arrival === 'host-first') {
+      state = transitionDocumentSession(state, {
+        type: 'revisionReceived', revision: { number: 2, text: host }
+      }).state;
+    }
+    const local = transitionDocumentSession(state, {
+      type: 'draftChanged', text: edit.after, edit
+    });
+    const conflict = arrival === 'host-first'
+      ? local
+      : transitionDocumentSession(local.state, {
+        type: 'revisionReceived', revision: { number: 2, text: host }
+      });
+    assert.equal(readDocumentText(conflict.state.draft?.text ?? ''), 'abcLdef');
+    assert.equal(readDocumentText(conflict.state.draft?.conflictBaseText ?? ''), base);
+    assert.deepEqual(conflict.effects.map(effect => effect.type), [
+      'persistDraft', 'reportExternalConflict'
+    ]);
+  }
 }
 console.log('Document Session domain checks passed');

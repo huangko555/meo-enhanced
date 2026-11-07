@@ -1,5 +1,5 @@
 import { equalDocumentText, isEmptyDocumentEdit, readDocumentText,
-  type DocumentText, type DocumentTextEdit } from '../foundation/documentSnapshot';
+  type DocumentText, type DocumentTextChange, type DocumentTextEdit } from '../foundation/documentSnapshot';
 
 export type Revision = {
   readonly number: number;
@@ -99,8 +99,12 @@ export function transitionDocumentSession(
     const suppliedEdit = event.edit && equalDocumentText(event.edit.after, event.text) ? event.edit : undefined;
     const localEdit = suppliedEdit && equalDocumentText(suppliedEdit.before, previousText)
       ? suppliedEdit : undefined;
-    const rebasedText = localEdit || suppliedEdit === undefined
-      ? null : reconcileDraft(suppliedEdit.before, suppliedEdit.after, previousText);
+    const editRebase = localEdit || suppliedEdit === undefined
+      ? null : rebaseDocumentEdit(suppliedEdit, previousText);
+    const rebasedText = editRebase === null || editRebase.kind === 'conflict'
+      ? null
+      : editRebase.kind === 'merged' ? editRebase.text
+        : reconcileDraft(suppliedEdit!.before, suppliedEdit!.after, previousText);
     if (suppliedEdit && !localEdit && !equalDocumentText(suppliedEdit.before, previousText)
       && rebasedText === null && !equalDocumentText(event.text, previousText)) {
       const draft: Draft = {
@@ -197,7 +201,11 @@ export function transitionDocumentSession(
           : [{ type: 'persistDraft', draft: null }]
       };
     }
-    const rebasedText = reconcileDraft(state.revision.text, state.draft?.text ?? null, revision.text);
+    const editRebase = state.draft?.edit === undefined
+      ? null : rebaseDocumentEdit(state.draft.edit, revision.text);
+    const rebasedText = editRebase === null || editRebase.kind === 'unavailable'
+      ? reconcileDraft(state.revision.text, state.draft?.text ?? null, revision.text)
+      : editRebase.kind === 'merged' ? editRebase.text : null;
     if (rebasedText === null
       && state.draft !== null
       && !equalDocumentText(state.draft.text, revision.text)) {
@@ -340,6 +348,65 @@ type TextChange = {
   readonly insert: string;
 };
 
+type EditRebase =
+  | { readonly kind: 'merged'; readonly text: DocumentText }
+  | { readonly kind: 'conflict' }
+  | { readonly kind: 'unavailable' };
+
+/**
+ * Replays the concrete transaction ranges only when a Host revision has
+ * crossed the local edit. Normal local input keeps its existing hot path.
+ */
+function rebaseDocumentEdit(edit: DocumentTextEdit, incomingText: DocumentText): EditRebase {
+  if (!isReplayableDocumentEdit(edit)) return { kind: 'unavailable' };
+  if (equalDocumentText(edit.after, incomingText)) return { kind: 'merged', text: incomingText };
+
+  const incomingChange = findTextChange(readDocumentText(edit.before), readDocumentText(incomingText));
+  if (incomingChange === null) {
+    return { kind: 'merged', text: applyTextChanges(incomingText, edit.changes) };
+  }
+
+  const delta = incomingChange.insert.length - (incomingChange.to - incomingChange.from);
+  const rebasedChanges: TextChange[] = [];
+  for (const change of edit.changes) {
+    if (changesOverlap(change, incomingChange)) return { kind: 'conflict' };
+    const shifted = incomingChange.to <= change.from;
+    rebasedChanges.push({
+      from: change.from + (shifted ? delta : 0),
+      to: change.to + (shifted ? delta : 0),
+      insert: change.insert
+    });
+  }
+  return { kind: 'merged', text: applyTextChanges(incomingText, rebasedChanges) };
+}
+
+/** Real edit ranges must describe their recorded before/after transaction. */
+function isReplayableDocumentEdit(edit: DocumentTextEdit): boolean {
+  return edit.changes.every(change => (
+    change.from >= 0 && change.to >= change.from && change.to <= edit.before.length
+  )) && equalDocumentText(applyTextChanges(edit.before, edit.changes), edit.after);
+}
+
+/**
+ * Changes are in their common before-coordinate space. Apply right-to-left;
+ * retaining the original right-to-left order keeps adjacent ranges stable when
+ * a Host deletion collapses their boundaries to one position.
+ */
+function applyTextChanges(text: DocumentText, changes: readonly DocumentTextChange[]): DocumentText {
+  let result = text;
+  const ordered = changes.map((change, index) => ({ change, index })).sort((left, right) => (
+    right.change.from - left.change.from
+      || right.change.to - left.change.to
+      || right.index - left.index
+ ));
+  for (const { change } of ordered) {
+    result = typeof result === 'string'
+      ? result.slice(0, change.from) + change.insert + result.slice(change.to)
+      : result.replace(change.from, change.to, change.insert);
+  }
+  return result;
+}
+
 function reconcileDraft(baseText: DocumentText, draftText: DocumentText | null, incomingText: DocumentText): DocumentText | null {
   if (draftText === null || equalDocumentText(draftText, baseText) || equalDocumentText(draftText, incomingText)) return null;
   const draftChange = findTextChange(readDocumentText(baseText), readDocumentText(draftText));
@@ -372,5 +439,7 @@ function findTextChange(previousText: string, nextText: string): TextChange | nu
 
 function changesOverlap(left: TextChange, right: TextChange): boolean {
   if (left.from === left.to && right.from === right.to) return left.from === right.from;
+  if (left.from === left.to) return right.from < left.from && left.from < right.to;
+  if (right.from === right.to) return left.from < right.from && right.from < left.to;
   return left.from < right.to && right.from < left.to;
 }
