@@ -483,7 +483,10 @@ for (const closeImmediately of [false, true]) {
   const recovery = createPendingDraftRecovery({
     readCurrentRevision: () => ({ version: 2, text: 'ayc' }),
     applyDraft: async () => { applied = true; return true; },
-    preserveConflict: async copy => { copies.push(copy); return true; }
+    preserveConflict: async copy => {
+      const index = copies.push(copy) - 1;
+      return { replace: async text => { copies[index] = text; return true; } };
+    }
   });
   const receiver = createDraftRecoveryReceiver(recovery, () => { throw new Error('complete conflict receipt expected'); });
   const session = createDocumentSessionWebviewAdapter({

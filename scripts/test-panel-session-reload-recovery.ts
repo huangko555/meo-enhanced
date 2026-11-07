@@ -83,8 +83,8 @@ const createHostFixture = (initialText = 'accepted', nextDiskText = 'disk versio
       return true;
     },
     preserveConflict: async (copyText) => {
-      recoveryCopies.push(copyText);
-      return true;
+      const index = recoveryCopies.push(copyText) - 1;
+      return { replace: async text => { recoveryCopies[index] = text; return true; } };
     }
   });
   let baselinePublishCount = 0;
@@ -462,6 +462,60 @@ assert.equal(typeof immediateCloseFixture.getReceiveMessage(), 'function');
   await flushMicrotasks();
   assert.equal(document.text, 'second page pending',
     'a late old-page disk-reload acknowledgement cannot discard a same-number new-page receipt');
+}
+
+// A ready packet from any previously activated page cannot replace the live
+// generation, even after more than one replacement.
+{
+  const fixture = createHostFixture('generation base');
+  for (const generation of ['page_ready_a', 'page_ready_b', 'page_ready_c']) {
+    await fixture.controller.handleMessage({ type: 'ready', pageId: generation });
+  }
+  const initCount = fixture.postedToWebview.filter(message => message.type === 'init').length;
+  await fixture.controller.handleMessage({ type: 'ready', pageId: 'page_ready_a' });
+  assert.equal(fixture.postedToWebview.filter(message => message.type === 'init').length, initCount,
+    'a retired ready must not revive an older coordinator');
+  await fixture.controller.handleMessage({ type: 'draftChanged', pageId: 'page_ready_c',
+    text: 'live generation draft', baseVersion: document.version, receiptVersion: 1 });
+  assert.equal(await closeAndReadRecoveredText(fixture.controller), 'live generation draft');
+}
+
+// Ordinary messages from a retired page are not terminal preservation. A final
+// complete packet is sufficient and is the sole bounded recovery operation.
+{
+  const fixture = createHostFixture('retired base');
+  await fixture.controller.handleMessage({ type: 'ready', pageId: 'page_retired_a' });
+  await fixture.controller.handleMessage({ type: 'ready', pageId: 'page_retired_b' });
+  await fixture.controller.handleMessage({ type: 'draftChanged', pageId: 'page_retired_a',
+    text: 'intermediate retired draft', baseVersion: 1, receiptVersion: 1 });
+  await flushMicrotasks();
+  assert.deepEqual(fixture.getRecoveryCopies(), [], 'ordinary retired traffic must not open a copy');
+  await fixture.controller.handleMessage({ type: 'draftChanged', pageId: 'page_retired_a',
+    text: 'final retired draft', baseVersion: 1, terminal: true, receiptVersion: 2 });
+  await flushMicrotasks();
+  assert.equal(fixture.getRecoveryCopies().length, 1);
+  assert.match(fixture.getRecoveryCopies()[0]!, /final retired draft/);
+  assert.equal(document.text, 'retired base');
+  fixture.controller.dispose();
+}
+
+// Equivalence is successful settlement, not a failed preservation. Its receipt
+// stays deduplicated when the Host changes later.
+{
+  const fixture = createHostFixture('equivalent final');
+  for (const generation of ['page_equiv_a', 'page_equiv_b', 'page_equiv_c']) {
+    await fixture.controller.handleMessage({ type: 'ready', pageId: generation });
+  }
+  const packet = { type: 'draftChanged', pageId: 'page_equiv_a', text: 'equivalent final',
+    baseVersion: 1, terminal: true, receiptVersion: 1 };
+  await fixture.controller.handleMessage(packet);
+  await flushMicrotasks();
+  document.text = 'later authoritative Host'; document.version += 1;
+  await fixture.controller.handleMessage(packet);
+  await flushMicrotasks();
+  assert.deepEqual(fixture.getRecoveryCopies(), [], 'equivalent settled receipt must stay deduplicated');
+  assert.equal(document.text, 'later authoritative Host');
+  fixture.controller.dispose();
 }
 
 console.log('Panel Session reload recovery checks passed');

@@ -12,11 +12,13 @@ class Range {
   constructor(readonly start: { offset: number }, readonly end: { offset: number }) {}
 }
 class WorkspaceEdit {
-  readonly edits: Array<{ range: Range; text: string }> = [];
-  replace(_uri: unknown, range: Range, text: string): void { this.edits.push({ range, text }); }
+  readonly edits: Array<{ uri: unknown; range: Range; text: string }> = [];
+  replace(uri: unknown, range: Range, text: string): void { this.edits.push({ uri, range, text }); }
 }
 let documents: unknown[] = [document];
 const copies: string[] = [];
+const copyDocuments: Array<typeof document> = [];
+let onShowCopy: (() => Promise<void>) | null = null;
 let writes = 0;
 mock.module('vscode', () => ({
   Range,
@@ -24,16 +26,25 @@ mock.module('vscode', () => ({
   workspace: {
     get textDocuments() { return documents; },
     applyEdit: async (edit: WorkspaceEdit) => {
-      writes += 1;
       const change = edit.edits[0]!;
-      document.text = document.text.slice(0, change.range.start.offset)
-        + change.text + document.text.slice(change.range.end.offset);
-      document.version += 1;
+      const target = [document, ...copyDocuments].find(candidate => candidate.uri === change.uri)!;
+      if (target === document) writes += 1;
+      target.text = target.text.slice(0, change.range.start.offset)
+        + change.text + target.text.slice(change.range.end.offset);
+      target.version += 1;
+      const copyIndex = copyDocuments.indexOf(target);
+      if (copyIndex >= 0) copies[copyIndex] = target.text;
       return true;
     },
-    openTextDocument: async ({ content }: { content: string }) => ({ content })
+    openTextDocument: async ({ content }: { content: string }) => {
+      const copy = { uri: { toString: () => `untitled:recovery-${copyDocuments.length}` },
+        version: 1, text: content, positionAt: (offset: number) => ({ offset }),
+        getText: () => copy.text };
+      copyDocuments.push(copy); documents.push(copy); copies.push(content);
+      return copy;
+    }
   },
-  window: { showTextDocument: async ({ content }: { content: string }) => { copies.push(content); } }
+  window: { showTextDocument: async () => { await onShowCopy?.(); } }
 }));
 
 const { createVscodePendingDraftRecoveryAdapter } = await import('../src/host/vscodePendingDraftRecoveryAdapter');
@@ -59,5 +70,37 @@ assert.equal(await recovery.recover(), true, 'a closed original TextDocument mus
 assert.equal(writes, 1);
 assert.match(copies.at(-1) ?? '', /must not target a reopened URI/);
 assert.match(copies.at(-1) ?? '', /Host document unavailable/);
+
+for (const outcome of ['owned', 'user-edited', 'closed'] as const) {
+  const adapter = createVscodePendingDraftRecoveryAdapter({ document: document as never, noteOwnedFileChange() {} });
+  let started!: () => void, release!: () => void;
+  const showing = new Promise<void>(resolve => { started = resolve; });
+  const released = new Promise<void>(resolve => { release = resolve; });
+  onShowCopy = async () => { started(); await released; };
+  const count = copyDocuments.length;
+  adapter.remember({ type: 'draft', baseVersion: 1, text: 'older pending local' }, 1);
+  const settling = adapter.settleForTermination();
+  await showing;
+  const copy = copyDocuments.at(-1)!;
+  adapter.remember({ type: 'draft', baseVersion: 1, text: 'newest pending local' }, 2);
+  if (outcome === 'user-edited') { copy.text = 'user-owned recovery text'; copy.version += 1; }
+  if (outcome === 'closed') documents = documents.filter(open => open !== copy);
+  release();
+  await settling;
+  assert.equal(copyDocuments.length, count + (outcome === 'owned' ? 1 : 2),
+    'a drain reuses its owned buffer, and preserves separately only after ownership is lost');
+  assert.equal(writes, 1, 'recovery artifacts never target the original document');
+  if (outcome === 'owned') {
+    assert.match(copy.text, /newest pending local/);
+    assert.doesNotMatch(copy.text, /older pending local/);
+    assert.equal(adapter.hasPending(), false);
+  } else {
+    assert.equal(adapter.hasPending(), false, 'the latest candidate must survive in a new buffer after ownership is lost');
+    if (outcome === 'user-edited') assert.equal(copy.text, 'user-owned recovery text');
+    else assert.match(copy.text, /older pending local/);
+    assert.match(copyDocuments.at(-1)!.text, /newest pending local/);
+  }
+  onShowCopy = null;
+}
 
 console.log('VS Code pending Draft recovery adapter base guard and conflict copy checks passed');

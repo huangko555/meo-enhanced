@@ -303,6 +303,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   let activeRecoveryOwnerReceiptVersion = 0;
   let nextRecoveryOwnerReceiptVersion = 1;
   const retiredTerminalReceiptKeys: string[] = [];
+  const retiredPageIds: string[] = [];
   const documentEditEcho = createDocumentEditEchoFilter();
   const pendingDiskReloadPresentations = new Map<number, {
     readonly pageId: string;
@@ -342,48 +343,19 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   type PageRecoveryChannel = {
     readonly pageId: string;
     readonly receiver: DraftRecoveryReceiver;
-    candidate: DraftRecoveryCandidate | null;
-    settling: boolean;
-    retired: boolean;
   };
   let activePageRecovery: PageRecoveryChannel | null = null;
-  let retiredPageRecovery: PageRecoveryChannel | null = null;
   const createPageRecoveryChannel = (pageId: string): PageRecoveryChannel => {
-    let record: PageRecoveryChannel;
     const receiver = createDraftRecoveryReceiver({
-      remember(candidate, receiptVersion) {
-        if (!record.retired) {
-          activeRecoveryOwnerReceiptVersion = nextRecoveryOwnerReceiptVersion;
-          nextRecoveryOwnerReceiptVersion += 1;
-          return pendingDraftRecovery.remember(candidate, activeRecoveryOwnerReceiptVersion);
-        }
-        if (candidate !== null) {
-          record.candidate = candidate;
-          if (!record.settling) {
-            record.settling = true;
-            runBackground((async () => {
-              try {
-                await Promise.resolve();
-                while (record.candidate !== null) {
-                  const pending = record.candidate;
-                  const preserved = await pendingDraftRecovery.preserveRetired(pending);
-                  if (record.candidate !== pending) continue;
-                  if (!preserved) return;
-                  record.candidate = null;
-                }
-              } finally {
-                record.settling = false;
-              }
-            })(), 'retiredPageDraftRecovery');
-          }
-        }
-        return receiptVersion;
+      remember(candidate) {
+        activeRecoveryOwnerReceiptVersion = nextRecoveryOwnerReceiptVersion;
+        nextRecoveryOwnerReceiptVersion += 1;
+        return pendingDraftRecovery.remember(candidate, activeRecoveryOwnerReceiptVersion);
       }
-    }, () => !record.retired && activePageId === pageId
+    }, () => activePageId === pageId
       ? postToWebview({ type: 'requestDraftRecoverySnapshot', pageId })
       : false);
-    record = { pageId, receiver, candidate: null, settling: false, retired: false };
-    return record;
+    return { pageId, receiver };
   };
   const preserveOrphanedTerminalRecovery = (message: Extract<DraftRecoveryMessage, {
     readonly type: 'draftChanged'; readonly text: string;
@@ -767,10 +739,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     }
     if (pageActivation?.pageId === pageId) return pageActivation.promise;
     if (switchingPage) {
-      const previous = activePageRecovery;
-      if (previous) {
-        previous.retired = true;
-        retiredPageRecovery = previous;
+      if (activePageId !== null) {
+        retiredPageIds.push(activePageId);
+        if (retiredPageIds.length > 16) retiredPageIds.shift();
       }
       activePageRecovery = null;
       activePageId = pageId;
@@ -916,8 +887,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       }
       case 'ready':
+        if (retiredPageIds.includes(raw.pageId)) return;
         sidebarOutline?.setReady(false);
-        if (raw.pageId === retiredPageRecovery?.pageId) return;
         webviewReady = true;
         await activateWebviewPage(raw.pageId);
         refreshGitBaseline({ forcePost: true, delayMs: GIT_BASELINE_STARTUP_DELAY_MS });
@@ -1264,8 +1235,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       case 'draftPatched':
         if (raw.pageId === activePageId && activePageRecovery !== null) {
           draftRecoveryReceiptVersion = activePageRecovery.receiver.accept(raw);
-        } else if (raw.pageId === retiredPageRecovery?.pageId) {
-          retiredPageRecovery.receiver.accept(raw);
         } else if (raw.type === 'draftChanged' && raw.text !== null) {
           preserveOrphanedTerminalRecovery(raw);
         }

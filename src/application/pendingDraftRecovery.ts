@@ -22,19 +22,24 @@ export type PendingDraftRecovery = {
   recover(): Promise<boolean>;
   /** Terminal close/page handoff: failed apply falls back to an untitled preservation copy. */
   settleForTermination(): Promise<boolean>;
-  /** Preserves a retired Webview page candidate without mutating the active Host document. */
+  /** Settles a retired candidate by equivalence or preservation without mutating active Host text. */
   preserveRetired(candidate: DraftRecoveryCandidate): Promise<boolean>;
 };
 
+type DraftRecoveryArtifact = {
+  readonly replace: (copyText: string) => Promise<boolean>;
+};
+type CurrentRecoveryRevision = { readonly version: number; readonly text: string } | null;
+
 export type PendingDraftRecoveryDependencies = {
-  readonly readCurrentRevision: () => { readonly version: number; readonly text: string } | null;
+  readonly readCurrentRevision: () => CurrentRecoveryRevision;
   /** Must reject a closed/replaced document or a changed revision before mutating Host text. */
   readonly applyDraft: (
     expected: { readonly version: number; readonly text: string },
     draftText: string
   ) => Promise<boolean>;
-  /** Persists both sides in a non-destructive recovery artifact, such as an untitled buffer. */
-  readonly preserveConflict: (copyText: string) => Promise<boolean>;
+  /** Creates one recovery artifact; replacement must reject user-modified/closed artifacts. */
+  readonly preserveConflict: (copyText: string) => Promise<false | DraftRecoveryArtifact>;
 };
 
 const normalizeLineEndings = (text: string): string => text.replace(/\r\n/g, '\n');
@@ -77,6 +82,24 @@ export function createPendingDraftRecovery(
 
   const drainRecovery = async (terminal: boolean): Promise<boolean> => {
     let recovered = false;
+    let artifact: DraftRecoveryArtifact | null = null;
+    const preserve = async (candidate: DraftRecoveryCandidate, current: CurrentRecoveryRevision): Promise<boolean> => {
+      const text = formatConflictCopy(candidate, current);
+      if (artifact !== null) {
+        try {
+          if (await artifact.replace(text)) return true;
+        } catch {
+          // The existing buffer is no longer writable. Preserve the latest
+          // candidate separately rather than overwrite user work or strand it
+          // in a terminating owner. The old artifact is never modified again.
+        }
+        artifact = null;
+      }
+      const created = await dependencies.preserveConflict(text);
+      if (created === false) return false;
+      artifact = created;
+      return true;
+    };
     for (;;) {
       const candidate = pendingCandidate;
       const receiptVersion = version;
@@ -90,13 +113,15 @@ export function createPendingDraftRecovery(
       if (version !== receiptVersion || pendingCandidate !== candidate) continue;
 
       const current = dependencies.readCurrentRevision();
-      if (current !== null && normalizeLineEndings(current.text) === normalizeLineEndings(candidate.text)) {
+      if (artifact === null && current !== null && normalizeLineEndings(current.text) === normalizeLineEndings(candidate.text)) {
         clearHandled(candidate, receiptVersion);
         continue;
       }
 
       let handled: boolean;
-      if (current !== null && candidate.type === 'draft' && current.version === candidate.baseVersion) {
+      if (artifact !== null) {
+        handled = await preserve(candidate, current);
+      } else if (current !== null && candidate.type === 'draft' && current.version === candidate.baseVersion) {
         try {
           handled = await dependencies.applyDraft(current, candidate.text);
         } catch (error) {
@@ -104,10 +129,10 @@ export function createPendingDraftRecovery(
           handled = false;
         }
         if (!handled && terminal) {
-          handled = await dependencies.preserveConflict(formatConflictCopy(candidate, dependencies.readCurrentRevision()));
+          handled = await preserve(candidate, dependencies.readCurrentRevision());
         }
       } else {
-        handled = await dependencies.preserveConflict(formatConflictCopy(candidate, current));
+        handled = await preserve(candidate, current);
       }
       if (!handled) return recovered;
       recovered = true;
@@ -161,9 +186,9 @@ export function createPendingDraftRecovery(
       const task = retiredPreservation.then(async () => {
         const current = dependencies.readCurrentRevision();
         if (current !== null && normalizeLineEndings(current.text) === normalizeLineEndings(candidate.text)) {
-          return false;
+          return true;
         }
-        return dependencies.preserveConflict(formatConflictCopy(candidate, current));
+        return (await dependencies.preserveConflict(formatConflictCopy(candidate, current))) !== false;
       });
       retiredPreservation = task.then(() => undefined, () => undefined);
       return task;

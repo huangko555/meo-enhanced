@@ -34,8 +34,24 @@ export function createVscodePendingDraftRecoveryAdapter(
     },
     preserveConflict: async (copyText) => {
       const recovery = await vscode.workspace.openTextDocument({ content: copyText, language: 'markdown' });
+      let ownedVersion = recovery.version;
+      let ownedText = copyText;
       await vscode.window.showTextDocument(recovery, { preview: false });
-      return true;
+      return {
+        replace: async (nextText) => {
+          // Never overwrite a recovery buffer after the user edited or closed
+          // it. Only this drain's exact still-owned revision may be updated.
+          if (!vscode.workspace.textDocuments.includes(recovery)
+            || recovery.version !== ownedVersion || recovery.getText() !== ownedText) return false;
+          if (nextText === ownedText) return true;
+          const edit = new vscode.WorkspaceEdit();
+          edit.replace(recovery.uri, new vscode.Range(recovery.positionAt(0), recovery.positionAt(ownedText.length)), nextText);
+          if (!await vscode.workspace.applyEdit(edit) || recovery.getText() !== nextText) return false;
+          ownedVersion = recovery.version;
+          ownedText = nextText;
+          return true;
+        }
+      };
     }
   });
 }

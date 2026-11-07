@@ -15,7 +15,10 @@ const recovery = createPendingDraftRecovery({
     if (applyResult) current = { version: current.version + 1, text: draftText };
     return applyResult;
   },
-  preserveConflict: async copy => { copies.push(copy); return true; }
+  preserveConflict: async copy => {
+    const index = copies.push(copy) - 1;
+    return { replace: async text => { copies[index] = text; return true; } };
+  }
 });
 
 const draft = (text: string, baseVersion = current.version) => ({ type: 'draft' as const, baseVersion, text });
@@ -133,7 +136,7 @@ assert.equal(applied.at(-1)?.draftText, 'current receipt candidate',
       conflictCopies += 1;
       signalCopyStarted?.();
       await copyReleased;
-      return true;
+      return { replace: async () => true };
     }
   });
   racingConflict.remember({ type: 'draft', baseVersion: 1, text: 'local text' }, 1);
@@ -154,7 +157,10 @@ assert.equal(applied.at(-1)?.draftText, 'current receipt candidate',
   const terminal = createPendingDraftRecovery({
     readCurrentRevision: () => ({ version: 7, text: 'Host remains' }),
     applyDraft: async () => false,
-    preserveConflict: async copy => { terminalCopies.push(copy); return true; }
+    preserveConflict: async copy => {
+      const index = terminalCopies.push(copy) - 1;
+      return { replace: async text => { terminalCopies[index] = text; return true; } };
+    }
   });
   terminal.remember({ type: 'draft', baseVersion: 7, text: 'local terminal text' }, 1);
   assert.equal(await terminal.recover(), false, 'ordinary recovery retains a rejected candidate for retry');
@@ -174,13 +180,46 @@ assert.equal(applied.at(-1)?.draftText, 'current receipt candidate',
       stillOpen = false;
       throw new Error('TextDocument closed during WorkspaceEdit');
     },
-    preserveConflict: async copy => { terminalCopies.push(copy); return true; }
+    preserveConflict: async copy => {
+      const index = terminalCopies.push(copy) - 1;
+      return { replace: async text => { terminalCopies[index] = text; return true; } };
+    }
   });
   terminal.remember({ type: 'draft', baseVersion: 8, text: 'last local text' }, 1);
   assert.equal(await terminal.settleForTermination(), true,
     'terminal settlement falls back when the original document closes during apply');
   assert.match(terminalCopies[0] ?? '', /Host document unavailable/);
   assert.match(terminalCopies[0] ?? '', /last local text/);
+}
+
+// A newer receipt can arrive after the preservation operation has started.
+// That drain must update its one owned artifact instead of opening old/new
+// copies, while concurrent callers continue to share the same operation.
+{
+  const artifacts: string[] = [];
+  let started!: () => void, release!: () => void;
+  const opening = new Promise<void>(resolve => { started = resolve; });
+  const released = new Promise<void>(resolve => { release = resolve; });
+  const coalesced = createPendingDraftRecovery({
+    readCurrentRevision: () => ({ version: 2, text: 'Host remains' }),
+    applyDraft: async () => { throw new Error('conflict never replaces Host'); },
+    preserveConflict: async text => {
+      const index = artifacts.push(text) - 1;
+      started();
+      await released;
+      return { replace: async (next: string) => { artifacts[index] = next; return true; } };
+    }
+  });
+  coalesced.remember({ type: 'draft', baseVersion: 1, text: 'older local' }, 1);
+  const draining = coalesced.settleForTermination();
+  await opening;
+  coalesced.remember({ type: 'draft', baseVersion: 1, text: 'newest local' }, 2);
+  release();
+  assert.equal(await draining, true);
+  assert.equal(artifacts.length, 1, 'one drain creates only one recovery artifact');
+  assert.match(artifacts[0]!, /newest local/);
+  assert.doesNotMatch(artifacts[0]!, /older local/);
+  assert.equal(coalesced.hasPending(), false);
 }
 
 console.log('Pending Draft recovery checks passed');
