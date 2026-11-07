@@ -563,4 +563,25 @@ assertMultiRangeRebase({
     ]);
   }
 }
+// Native acknowledgement keeps its existing fast path: when a later draft
+// has the same length, compare it only once while retaining the newer input.
+{
+  const snapshot = documentSnapshotFromString('new value');
+  let reads = 0;
+  const counted = {
+    length: snapshot.length, sliceString: snapshot.sliceString.bind(snapshot),
+    equals: snapshot.equals.bind(snapshot), replace: snapshot.replace.bind(snapshot),
+    toString() { reads += 1; return snapshot.toString(); }
+  };
+  const state = {
+    ...createDocumentSession({ documentId: 'file:///ack-budget.md', revision: { number: 1, text: 'base text' }, savedRevision: null }),
+    draft: { baseRevision: 1, text: counted }, pendingChange: { baseRevision: 1, text: 'old value' },
+    savePhase: 'awaiting-change' as const
+  };
+  const result = transitionDocumentSession(state, { type: 'revisionReceived', revision: { number: 2, text: 'old value' } });
+  assert.equal(result.state.draft?.text, counted);
+  assert.equal(result.state.savePhase, 'awaiting-change');
+  assert.equal(reads, 1, 'native acknowledgement must not read the complete later Draft twice');
+}
+
 console.log('Document Session domain checks passed');

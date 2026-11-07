@@ -164,24 +164,6 @@ export function transitionDocumentSession(
         ? { state, effects: [] }
         : { state, effects: [{ type: 'requestResync' }] };
     }
-    if (state.draft !== null && equalDocumentText(revision.text, state.draft.text)) {
-      const isAwaitingChange = state.savePhase === 'awaiting-change';
-      return {
-        state: {
-          ...state,
-          revision,
-          draft: null,
-          pendingChange: null,
-          lastRejectedExternalRevision: null,
-          savePhase: isAwaitingChange ? 'saving' : state.savePhase,
-          savingRevision: isAwaitingChange ? revision : state.savingRevision
-        },
-        effects: [
-          { type: 'persistDraft', draft: null },
-          ...(isAwaitingChange ? [{ type: 'saveRevision' as const, revision }] : [])
-        ]
-      };
-    }
     if (state.pendingChange !== null && equalDocumentText(revision.text, state.pendingChange.text)) {
       if (state.draft !== null && !equalDocumentText(state.draft.text, state.pendingChange.text)) {
         const edit = state.pendingChange.edit && state.draft.edit
@@ -218,6 +200,26 @@ export function transitionDocumentSession(
               { type: 'saveRevision', revision }
             ]
           : [{ type: 'persistDraft', draft: null }]
+      };
+    }
+    // Ordinary native acknowledgements above already own their Draft check.
+    // Only an unmatched Host revision needs this additional equality/rebase path.
+    if (state.draft !== null && equalDocumentText(revision.text, state.draft.text)) {
+      const isAwaitingChange = state.savePhase === 'awaiting-change';
+      return {
+        state: {
+          ...state,
+          revision,
+          draft: null,
+          pendingChange: null,
+          lastRejectedExternalRevision: null,
+          savePhase: isAwaitingChange ? 'saving' : state.savePhase,
+          savingRevision: isAwaitingChange ? revision : state.savingRevision
+        },
+        effects: [
+          { type: 'persistDraft', draft: null },
+          ...(isAwaitingChange ? [{ type: 'saveRevision' as const, revision }] : [])
+        ]
       };
     }
     const editRebase = state.draft?.edit === undefined
