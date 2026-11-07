@@ -488,7 +488,7 @@
       "scripts/test-block-export.ts",
       "scripts/test-workspace-documents.ts",
       "scripts/test-workspace-documents-host.ts",
-      "scripts/test-code-mirror-search-history-focus-adapter.ts",
+      "scripts/test-code-mirror-history-selection-adapter.ts",
       "scripts/test-vscode-pending-draft-recovery-adapter.ts"
     ],
     "exclusive": [

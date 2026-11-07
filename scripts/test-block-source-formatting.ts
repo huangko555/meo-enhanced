@@ -71,6 +71,48 @@ try {
     await page.waitForFunction(() => !(document.querySelector('.meo-format-math-btn') as HTMLButtonElement)?.disabled);
     await settle();
   };
+  const beginHeldHistoryReplay = async (direction: 'undo' | 'redo') => page.evaluate(direction => {
+    const w = window as any, editor = w.blockEditor, view = editor.view;
+    w.__formatHistoryTransactions = [];
+    w.HtmlContentHarness.observeEditorTransactions(view, w.__formatHistoryTransactions);
+    w.__formatHistoryIdle = window.requestIdleCallback;
+    w.__formatHistoryHeld = [];
+    w.__formatHistoryHold = true;
+    window.requestIdleCallback = (callback, options) => w.__formatHistoryIdle.call(window, (deadline: IdleDeadline) => {
+      if (w.__formatHistoryHold) w.__formatHistoryHeld.push(() => callback(deadline));
+      else callback(deadline);
+    }, options);
+    w.__formatHistoryReturned = false;
+    w.__formatHistoryReplay = editor[direction]().then((applied: boolean) => {
+      w.__formatHistoryReturned = true; return applied;
+    });
+  }, direction);
+  const releaseHeldHistoryReplay = () => page.evaluate(() => {
+    const w = window as any;
+    w.__formatHistoryHold = false;
+    window.requestIdleCallback = w.__formatHistoryIdle;
+    for (const release of w.__formatHistoryHeld.splice(0)) release();
+  });
+  const sampleHistorySelectionFrames = () => page.evaluate(async () => {
+    const w = window as any, view = w.blockEditor.view;
+    const read = () => {
+      const selection = document.getSelection();
+      const posAt = (node: Node | null, offset: number) => node && view.contentDOM.contains(node)
+        ? view.posAtDOM(node, offset) : null;
+      return { state: view.state.selection.toJSON(), dom: { active: document.activeElement === view.contentDOM,
+        anchor: posAt(selection?.anchorNode ?? null, selection?.anchorOffset ?? 0),
+        head: posAt(selection?.focusNode ?? null, selection?.focusOffset ?? 0) } };
+    };
+    const frames = [] as ReturnType<typeof read>[];
+    for (let index = 0; index < 64; index++) {
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      frames.push(read());
+    }
+    return { returned: w.__formatHistoryReturned, frames, transactions: w.__formatHistoryTransactions };
+  });
+  const expectedDomSelection = (selection: { ranges: Array<{ anchor: number; head: number }>; main: number }) => ({
+    active: true, anchor: selection.ranges[selection.main].anchor, head: selection.ranges[selection.main].head
+  });
   fs.mkdirSync('.local/probes/block-source-formatting', { recursive: true });
   let combinations = 0;
   for (const width of [480, 1050]) for (const appearance of ['light', 'dark']) for (const language of ['en', 'zh-CN']) {
@@ -102,6 +144,147 @@ try {
     assert.equal(await page.evaluate(() => (window as any).blockEditor.redo()), true); await settle();
     assert.equal(await read(), formatted);
     combinations++;
+  }
+  {
+    // The formatter changes the aligned body but leaves its closing command
+    // untouched. The selection at the body end is therefore outside the
+    // minimal text diff and must travel with the format history entry.
+    const text = `Before\n\n$$\n${expression}\n$$\n\nAfter`;
+    await mount(text);
+    const before = await page.evaluate(expression => {
+      const view = (window as any).blockEditor.view;
+      const anchor = view.state.doc.toString().indexOf(expression) + expression.length;
+      view.dispatch({ selection: { anchor } }); view.focus();
+      return view.state.selection.toJSON();
+    }, expression);
+    await settle();
+    assert.ok(await page.$('.meo-format-math-btn'), 'A caret after the unchanged formula suffix keeps format available');
+    await clickFormat();
+    const formatted = await read();
+    const after = await page.evaluate(() => (window as any).blockEditor.view.state.selection.toJSON());
+    await page.evaluate(() => { const view = (window as any).blockEditor.view; view.dispatch({ selection: { anchor: 0 } }); });
+    assert.equal(await page.evaluate(() => (window as any).blockEditor.undo()), true); await settle();
+    assert.equal(await read(), text);
+    assert.deepEqual(await page.evaluate(() => {
+      const view = (window as any).blockEditor.view, selection = document.getSelection();
+      const posAt = (node: Node | null, offset: number) => node && view.contentDOM.contains(node) ? view.posAtDOM(node, offset) : null;
+      return { state: view.state.selection.toJSON(), dom: { active: document.activeElement === view.contentDOM,
+        anchor: posAt(selection?.anchorNode ?? null, selection?.anchorOffset ?? 0), head: posAt(selection?.focusNode ?? null, selection?.focusOffset ?? 0) } };
+    }), { state: before, dom: { active: true, anchor: before.ranges[0].head, head: before.ranges[0].head } },
+    'Undo restores the display-math selection outside the formatter minimum diff');
+    await page.evaluate(() => { const view = (window as any).blockEditor.view; view.dispatch({ selection: { anchor: 1 } }); });
+    assert.equal(await page.evaluate(() => (window as any).blockEditor.redo()), true); await settle();
+    assert.equal(await read(), formatted);
+    assert.deepEqual(await page.evaluate(() => {
+      const view = (window as any).blockEditor.view, selection = document.getSelection();
+      const posAt = (node: Node | null, offset: number) => node && view.contentDOM.contains(node) ? view.posAtDOM(node, offset) : null;
+      return { state: view.state.selection.toJSON(), dom: { active: document.activeElement === view.contentDOM,
+        anchor: posAt(selection?.anchorNode ?? null, selection?.anchorOffset ?? 0), head: posAt(selection?.focusNode ?? null, selection?.focusOffset ?? 0) } };
+    }), { state: after, dom: { active: true, anchor: after.ranges[0].head, head: after.ranges[0].head } },
+    'Redo restores the display-math formatted selection outside the formatter minimum diff');
+  }
+  for (const large of [false, true]) for (const backward of [false, true]) {
+    const text = `Before\n\n$$\n${expression}\n$$\n\nAfter${large ? '\n\n' + 'padding text\n'.repeat(12000) : ''}`;
+    await mount(text);
+    await page.waitForFunction(large => (window as any).HtmlContentHarness.usesLargeDocumentDerivedWorkBudget(
+      (window as any).blockEditor.view.state) === large, {}, large);
+    const before = await page.evaluate(({ backward }) => {
+      const view = (window as any).blockEditor.view, from = view.state.doc.toString().indexOf('frac');
+      if (from < 0) throw Error('Missing format selection');
+      view.dispatch({ selection: backward ? { anchor: from + 4, head: from } : { anchor: from, head: from + 4 } }); view.focus();
+      return view.state.selection.toJSON();
+    }, { backward });
+    await settle(); await clickFormat();
+    const formatted = await read();
+    const after = await page.evaluate(() => (window as any).blockEditor.view.state.selection.toJSON());
+    assert.notEqual(after.ranges[after.main].anchor, after.ranges[after.main].head,
+      'Formatting retains a nonempty semantic selection for history replay');
+    assert.equal(after.ranges[after.main].anchor < after.ranges[after.main].head, !backward,
+      'Formatting retains the selection direction for history replay');
+    for (const [direction, expected, expectedText] of [
+      ['undo', before, text], ['redo', after, formatted]
+    ] as const) {
+      await page.evaluate(() => { const view = (window as any).blockEditor.view; view.dispatch({ selection: { anchor: 0 } }); });
+      await beginHeldHistoryReplay(direction);
+      try {
+        await page.waitForFunction(() => (window as any).__formatHistoryHeld.length > 0, { timeout: 3000 });
+        await page.waitForFunction(direction => (window as any).__formatHistoryTransactions.some((transaction: any) => transaction.historyDirection === direction), {}, direction);
+        const pending = await sampleHistorySelectionFrames();
+        const expectedDom = expectedDomSelection(expected);
+        const acceptedIndex = pending.transactions.findIndex((transaction: any) => transaction.historyDirection === direction);
+        assert.ok(acceptedIndex >= 0, 'The production dispatch listener observes the accepted replay transaction');
+        const acceptedTransactions = pending.transactions.slice(acceptedIndex);
+        const divergentIndex = acceptedTransactions.findIndex((transaction: any) => JSON.stringify(transaction.selection) !== JSON.stringify(expected));
+        const divergentDispatch = divergentIndex < 0 ? null : acceptedTransactions[divergentIndex];
+        const dispatchEvidence = divergentIndex < 0 ? '' : JSON.stringify({
+          phase: `${large ? 'large' : 'ordinary'}/${backward ? 'backward' : 'forward'}/${direction}`,
+          expectedSelection: expected,
+          targetDoc: expectedText,
+          firstDivergent: { ...divergentDispatch, textMatches: divergentDispatch.text === expectedText },
+          adjacent: acceptedTransactions.slice(Math.max(0, divergentIndex - 1), divergentIndex + 2).map((transaction: any) => ({
+            ...transaction, textMatches: transaction.text === expectedText
+          }))
+        });
+        assert.ok(!divergentDispatch,
+          `${large ? 'large' : 'ordinary'}/${backward ? 'backward' : 'forward'} ${direction}: no production dispatch collapses the restored selection; evidence=${dispatchEvidence}`);
+        assert.ok(pending.frames.every(frame => JSON.stringify(frame.state) === JSON.stringify(expected) && JSON.stringify(frame.dom) === JSON.stringify(expectedDom)),
+          `${large ? 'large' : 'ordinary'}/${backward ? 'backward' : 'forward'} ${direction}: every pending frame retains the state and DOM selection`);
+        assert.equal(pending.returned, !large, `${large ? 'large' : 'ordinary'}/${backward ? 'backward' : 'forward'} ${direction}: only the bounded-derived-work replay waits for the real pending presentation`);
+      } finally {
+        await releaseHeldHistoryReplay();
+      }
+      assert.equal(await page.evaluate(() => (window as any).__formatHistoryReplay), true);
+      assert.equal(await read(), expectedText);
+      assert.deepEqual(await page.evaluate(() => {
+        const view = (window as any).blockEditor.view, selection = document.getSelection();
+        const posAt = (node: Node | null, offset: number) => node && view.contentDOM.contains(node) ? view.posAtDOM(node, offset) : null;
+        return { state: view.state.selection.toJSON(), dom: { active: document.activeElement === view.contentDOM,
+          anchor: posAt(selection?.anchorNode ?? null, selection?.anchorOffset ?? 0), head: posAt(selection?.focusNode ?? null, selection?.focusOffset ?? 0) } };
+      }), { state: expected, dom: expectedDomSelection(expected) },
+      `${large ? 'large' : 'ordinary'}/${backward ? 'backward' : 'forward'} ${direction}: accepting presentation retains the full selection`);
+    }
+
+    await mount(text);
+    await page.waitForFunction(large => (window as any).HtmlContentHarness.usesLargeDocumentDerivedWorkBudget(
+      (window as any).blockEditor.view.state) === large, {}, large);
+    const inputCase = await page.evaluate(({ backward }) => {
+      const view = (window as any).blockEditor.view, from = view.state.doc.toString().indexOf('frac');
+      view.dispatch({ selection: backward ? { anchor: from + 4, head: from } : { anchor: from, head: from + 4 } }); view.focus();
+      return view.state.selection.toJSON();
+    }, { backward });
+    await settle(); await clickFormat();
+    await page.evaluate(() => { const view = (window as any).blockEditor.view; view.dispatch({ selection: { anchor: 0 } }); });
+    await beginHeldHistoryReplay('undo');
+    let cancelledReplayReleased = false;
+    try {
+      await page.waitForFunction(() => (window as any).__formatHistoryHeld.length > 0, { timeout: 3000 });
+      await page.waitForFunction(() => (window as any).__formatHistoryTransactions.some((transaction: any) => transaction.historyDirection === 'undo'));
+      const pending = await sampleHistorySelectionFrames();
+      assert.ok(pending.frames.every(frame => JSON.stringify(frame.state) === JSON.stringify(inputCase)),
+        'The held undo exposes the full selection before real input cancels it');
+      await page.evaluate(() => {
+        const w = window as any;
+        w.__formatHistoryInput = [];
+        w.blockEditor.view.contentDOM.addEventListener('beforeinput', (event: InputEvent) => w.__formatHistoryInput.push({
+          trusted: event.isTrusted, type: event.inputType, target: event.target === w.blockEditor.view.contentDOM
+        }), { once: true });
+      });
+      await page.keyboard.type('Q'); await settle();
+      const expectedInputText = text.slice(0, Math.min(inputCase.ranges[inputCase.main].anchor, inputCase.ranges[inputCase.main].head))
+        + 'Q' + text.slice(Math.max(inputCase.ranges[inputCase.main].anchor, inputCase.ranges[inputCase.main].head));
+      assert.deepEqual(await page.evaluate(() => (window as any).__formatHistoryInput), [{ trusted: true, type: 'insertText', target: true }],
+        'The cancellation path uses a real trusted document input');
+      assert.equal(await read(), expectedInputText, 'New input replaces the complete restored selection while replay is held');
+      const inputSelection = await page.evaluate(() => (window as any).blockEditor.view.state.selection.toJSON());
+      await releaseHeldHistoryReplay();
+      cancelledReplayReleased = true;
+      assert.equal(await page.evaluate(() => (window as any).__formatHistoryReplay), true);
+      assert.equal(await read(), expectedInputText, 'Releasing the cancelled presentation cannot restore stale document text');
+      assert.deepEqual(await page.evaluate(() => (window as any).blockEditor.view.state.selection.toJSON()), inputSelection,
+        'Releasing the cancelled presentation cannot restore the stale history selection');
+    } finally {
+      if (!cancelledReplayReleased) await releaseHeldHistoryReplay();
+    }
   }
   // The formatter edits only the expression, retaining Markdown containers and optional math wrappers.
   for (const fixture of [

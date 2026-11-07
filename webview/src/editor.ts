@@ -73,7 +73,7 @@ import { gitDiffDetailsExtensions } from './helpers/gitDiffDetails';
 import { createTableTransactionProvenance } from './application/tableTransactionProvenance';
 import { createCodeMirrorTableTransactionProvenanceAdapter } from './adapters/codeMirrorTableTransactionProvenanceAdapter';
 import { createCodeMirrorTableHistoryFocusAdapter } from './adapters/codeMirrorTableHistoryFocusAdapter';
-import { createCodeMirrorSearchHistoryFocusAdapter, isSearchHistorySelectionValid } from './adapters/codeMirrorSearchHistoryFocusAdapter';
+import { createCodeMirrorHistorySelectionAdapter, isHistorySelectionValid } from './adapters/codeMirrorHistorySelectionAdapter';
 import { createCodeMirrorDomTableColumnWidthAdapter } from './editor/tableColumnWidthAdapter';
 import { tableColumnWidthPolicy } from './editor/tableColumnWidthPolicy';
 import { beginTableColumnResizeViewport, finishTableColumnResizeViewport, preserveTableColumnResizeLayout } from './helpers/tableColumnResizeViewport';
@@ -2076,7 +2076,8 @@ export function createEditor({
   const prepareRenderedHistoryPosition = (
     position: number,
     previousViewport: EditorHistoryViewport,
-    isCurrent: () => boolean
+    isCurrent: () => boolean,
+    preserveSelection = false
   ): (() => boolean) | null => {
     if (currentMode !== 'live') {
       return null;
@@ -2108,7 +2109,9 @@ export function createEditor({
         ? Math.max(contentFrom, Math.min(targetPosition, contentTo))
         : nativeHead >= view.state.doc.line(block.startLine).from
           && nativeHead <= view.state.doc.line(block.endLine).to ? nativeHead : targetPosition;
-      view.dispatch({ selection: { anchor: sourceTargetPosition } });
+      // The native replay already accepted its complete directed selection.
+      // Preparing source presentation must not collapse it while work is pending.
+      if (!preserveSelection) view.dispatch({ selection: { anchor: sourceTargetPosition } });
       // Opening native source can move its caret beyond the old reading
       // viewport even when the logical line was visible in the collapsed result.
       const coords = view.coordsAtPos(sourceTargetPosition);
@@ -2381,7 +2384,7 @@ export function createEditor({
       view.dispatch({
         changes: { from, to, insert: replacement },
         selection: { anchor: match.start, head: match.end },
-        effects: [searchHistoryFocusAdapter.effect(
+        effects: [historySelectionAdapter.effect(
           { ranges: [{ anchor: match.start, head: match.end }], mainIndex: 0 },
           { ranges: [{ anchor: from, head: to }], mainIndex: 0 }
         ), postEditMatches],
@@ -2414,7 +2417,7 @@ export function createEditor({
     createTableTransactionProvenance()
   );
   const tableHistoryFocusAdapter = createCodeMirrorTableHistoryFocusAdapter();
-  const searchHistoryFocusAdapter = createCodeMirrorSearchHistoryFocusAdapter();
+  const historySelectionAdapter = createCodeMirrorHistorySelectionAdapter();
   const tableColumnWidthAdapter = createCodeMirrorDomTableColumnWidthAdapter({
     root: parent,
     policy: tableColumnWidthPolicy,
@@ -2801,7 +2804,7 @@ export function createEditor({
       modeCompartment.of(startMode === 'live' ? [shikiCodeHighlight, ...liveModeExtensions({ largeDocument: boundedEditorWork, language: modeLanguage() })] : sourceMode(boundedEditorWork, lightweightSourceSyntax, modeLanguage())),
       searchQueryField,
       searchAnchorField,
-      searchHistoryFocusAdapter.extension,
+      historySelectionAdapter.extension,
       Prec.high(searchMatchField),
       diagnosticDataField,
       diagnosticField,
@@ -3191,15 +3194,15 @@ export function createEditor({
       let changedRange: { from: number; to: number } | null = null;
       let nativeSelectionOwnsTarget = false;
       let semanticTargetPosition: number | null = null;
-      let semanticTargetSelection: ReturnType<typeof searchHistoryFocusAdapter.read> = null;
+      let semanticTargetSelection: ReturnType<typeof historySelectionAdapter.read> = null;
       const target = {
         state: view.state,
         dispatch(transaction: Transaction) {
           changedRange = changedCodeMirrorDocumentRange(beforeDocument, transaction.newDoc);
           const listTarget = readListHistoryFocus(transaction.state);
           const tableTarget = tableHistoryFocusAdapter.read(transaction.state);
-          const searchTarget = searchHistoryFocusAdapter.read(transaction.state);
-          semanticTargetSelection = isSearchHistorySelectionValid(searchTarget, transaction.newDoc.length) ? searchTarget : null;
+          const historySelection = historySelectionAdapter.read(transaction.state);
+          semanticTargetSelection = isHistorySelectionValid(historySelection, transaction.newDoc.length) ? historySelection : null;
           semanticTargetPosition = semanticTargetSelection?.ranges[semanticTargetSelection.mainIndex]?.head
             ?? listTarget?.position ?? (tableTarget && !tableTarget.contentOnly
             ? tableHistorySourcePosition(transaction.state, tableTarget) : null);
@@ -3278,8 +3281,8 @@ export function createEditor({
       if (view.state.selection.ranges.length > 1) return 'not-rendered';
       if (currentMode !== 'live') return 'not-rendered';
       const tableTarget = tableHistoryFocusAdapter.read(view.state);
-      const searchCandidate = searchHistoryFocusAdapter.read(view.state);
-      const searchTarget = isSearchHistorySelectionValid(searchCandidate, view.state.doc.length) ? searchCandidate : null;
+      const historySelection = historySelectionAdapter.readExplicit(view.state);
+      const searchTarget = isHistorySelectionValid(historySelection, view.state.doc.length) ? historySelection : null;
       // A search target is attached to this native history event. It owns both
       // selection and reveal, even when the replaced match happened to be in a
       // table and the next match did not. Do not let a changed-range heuristic
@@ -3380,7 +3383,8 @@ export function createEditor({
         const run = prepareRenderedHistoryPosition(
           request.targetPosition,
           request.previousViewport,
-          isCurrent
+          isCurrent,
+          Boolean(request.targetSelection)
         );
         if (!run) return 'not-rendered';
         pendingRenderedHistoryFocus = { replayId: request.replayId, run };

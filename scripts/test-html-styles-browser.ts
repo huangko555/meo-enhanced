@@ -71,6 +71,8 @@ export async function checkHtmlStyleRendering(): Promise<void> {
         const page = await browser.newPage(), errors: string[] = [], imageRequests: string[] = [];
         const documents = new Map<string, ReturnType<typeof createPreviewDocument>>();
         let previewSource = '';
+        let resolveReadyPageId!: (pageId: string) => void;
+        const readyPageId = new Promise<string>(resolve => { resolveReadyPageId = resolve; });
         page.on('pageerror', error => errors.push(String(error)));
         try {
           await page.setViewport({width:1200,height:1500});
@@ -88,6 +90,11 @@ export async function checkHtmlStyleRendering(): Promise<void> {
             };
           },workerBundle);
           await page.exposeFunction('__htmlStyleHost', async (message: any) => {
+            if (message.type === 'ready') {
+              if (typeof message.pageId !== 'string') throw new Error('HTML style Webview ready message omitted pageId');
+              resolveReadyPageId(message.pageId);
+              return null;
+            }
             if (message.type === 'resolveImageSrc') {
               imageRequests.push(message.url);
               return {type:'resolvedImageSrc',requestId:message.requestId,
@@ -105,6 +112,7 @@ export async function checkHtmlStyleRendering(): Promise<void> {
           });
           await page.addScriptTag({content:`window.acquireVsCodeApi=()=>({getState(){},setState(){},postMessage(message){window.__htmlStyleHost(message).then(response=>{if(response)window.dispatchEvent(new MessageEvent('message',{data:response}));});}});`});
           await page.addScriptTag({content:bundle});
+          const pageId = await readyPageId;
           const sheet = fixture.match(/<style>[\s\S]*?<\/style>/)![0];
           const text = large ? fixture.replace(sheet, '')
             + '\nUnchanged background paragraph with enough text to exceed the automatic large document threshold.\n'.repeat(15000)
@@ -112,7 +120,7 @@ export async function checkHtmlStyleRendering(): Promise<void> {
           assert.equal(assessLargeDocument(text).windowedPreview, large,
             'The paired fixtures must straddle the real Preview policy boundary');
           const init = {
-            type:'init',documentId:'file:///html-styles.md',text,version:1,savedRevision:{version:1,text},diagnostics:[],
+            type:'init',pageId,documentId:'file:///html-styles.md',text,version:1,savedRevision:{version:1,text},diagnostics:[],
             mode:surface === 'source-preview' ? 'source' : surface,uiLanguage:appearance === 'dark' ? 'zh-CN' : 'en',
             editorAppearance:appearance,previewAppearance:appearance,sourceLineNumbers:'on',previewSourceColoring:false,previewFontFamily:'',previewShowComments:false,
             gitChangesGutter:false,gitDiffLineHighlights:false,gitDiffDetailsVisible:false,diffBaselineMode:'current-edit',

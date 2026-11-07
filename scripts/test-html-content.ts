@@ -472,6 +472,20 @@ async function checkHtmlPasteEditing(page: Page): Promise<void> {
   const before = 'Before.\n\n\n\nAfter.';
   const insertAt = before.indexOf('\n\n') + 2;
   const fragment = '<div id="pasted-html"><p>First</p><p>Second</p></div>';
+  const readCaret = () => page.evaluate(() => {
+    const view = (window as any).__htmlEditor.view;
+    const selection = document.getSelection();
+    const posAt = (node: Node | null, offset: number) => node && view.contentDOM.contains(node)
+      ? view.posAtDOM(node, offset) : null;
+    return {
+      state: view.state.selection.main.head,
+      dom: {
+        active: document.activeElement === view.contentDOM,
+        anchor: posAt(selection?.anchorNode ?? null, selection?.anchorOffset ?? 0),
+        head: posAt(selection?.focusNode ?? null, selection?.focusOffset ?? 0)
+      }
+    };
+  });
   for (const large of [false, true]) for (const [name, pasted, plain] of [
     ['block', fragment, false], ['trailing-lines', fragment + '\n\n', false],
     ['plain-paste', fragment + '\n', true],
@@ -515,6 +529,10 @@ async function checkHtmlPasteEditing(page: Page): Promise<void> {
       assert.equal(caret, '\n\n', 'Explicit formatting preserves the caret after pasted trailing lines');
       await page.keyboard.down('Control'); await page.keyboard.press('z'); await page.keyboard.up('Control'); await frames(page);
       assert.equal(await page.evaluate(() => (window as any).__htmlEditor.getText()), expected);
+      assert.deepEqual(await readCaret(), {
+        state: insertAt + pasted.length,
+        dom: { active: true, anchor: insertAt + pasted.length, head: insertAt + pasted.length }
+      }, `${large ? 'optimized' : 'ordinary'}: undoing HTML format restores the trailing-lines source caret`);
     }
     await page.keyboard.down('Control'); await page.keyboard.press('z'); await page.keyboard.up('Control'); await frames(page);
     assert.equal(await page.evaluate(() => (window as any).__htmlEditor.getText()), initial, `${name}: one undo removes the paste`);
@@ -523,6 +541,10 @@ async function checkHtmlPasteEditing(page: Page): Promise<void> {
     if (large) await page.waitForSelector('.meo-md-html-source-range-start');
     assert.ok(await page.$('.meo-md-html-source-range-start'), `${name}: redo restores source editing`);
     if (name === 'trailing-lines') {
+      assert.deepEqual(await readCaret(), {
+        state: insertAt + pasted.length,
+        dom: { active: true, anchor: insertAt + pasted.length, head: insertAt + pasted.length }
+      }, `${large ? 'optimized' : 'ordinary'}: redoing HTML paste restores the trailing-lines source caret`);
       await page.keyboard.type('Following prose'); await frames(page);
       assert.equal(await page.evaluate(() => (window as any).HtmlContentHarness.getHtmlEditingRange(
         (window as any).__htmlEditor.view.state)), null, 'New input retires pasted HTML source intent');
