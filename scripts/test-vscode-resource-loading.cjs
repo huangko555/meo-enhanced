@@ -121,6 +121,30 @@ exports.run = async () => {
       });
       const marker = ' native edit';
       const page = frame.page();
+      await frame.evaluate(() => {
+        globalThis.__resourceExplicitSaveResults = [];
+        window.addEventListener('message', event => {
+          if (event.data?.type !== 'saveDocumentRevisionResult') return;
+          globalThis.__resourceExplicitSaveResults.push({ ok: event.data.result?.ok === true,
+            code: event.data.result?.error?.code ?? null });
+        });
+      });
+      const assertExplicitSave = async (method, expectedText) => {
+        const before = await frame.evaluate(() => globalThis.__resourceExplicitSaveResults.length);
+        if (method === 'toolbar') {
+          await frame.waitForFunction(() => {
+            const button = document.querySelector('button[data-action="save"]');
+            return button && !button.disabled;
+          });
+          await click('button[data-action="save"]');
+        }
+        else await control('s');
+        await frame.waitForFunction(count => globalThis.__resourceExplicitSaveResults.length > count, {}, before);
+        const receipt = await frame.evaluate(index => globalThis.__resourceExplicitSaveResults[index], before);
+        assert.equal(receipt.ok, true, method + ': MEO must acknowledge explicit save even when its optional comparison baseline is too large');
+        assert.equal(fs.readFileSync(file, 'utf8'), expectedText, method + ': exact saved contents');
+        (record.explicitSaves ??= []).push({ method, ...receipt });
+      };
       await page.keyboard.sendCharacter(marker);
       await frame.waitForFunction(length => document.querySelector('.editor-host .cm-content').cmTile.root.view.state.doc.length === length, {}, original.length + marker.length);
       const control = async key => {
@@ -132,8 +156,12 @@ exports.run = async () => {
       assert.equal(await frame.evaluate(documentLength), original.length, 'Source undo restores the original document');
       await control('y');
       await frame.waitForFunction(length => document.querySelector('.editor-host .cm-content').cmTile.root.view.state.doc.length === length, {}, original.length + marker.length);
+      const firstLineEnd = original.indexOf('\n');
+      const edited = original.slice(0, firstLineEnd) + marker + original.slice(firstLineEnd);
+      await assertExplicitSave('toolbar', edited);
       await control('z');
       await frame.waitForFunction(length => document.querySelector('.editor-host .cm-content').cmTile.root.view.state.doc.length === length, {}, original.length);
+      await assertExplicitSave('keyboard', original);
       await vscode.commands.executeCommand('workbench.action.files.save');
       assert.equal(fs.readFileSync(file, 'utf8'), original, 'typing and history preserve the complete saved source');
       modeStarted = performance.now();

@@ -23,15 +23,23 @@ export type SavedRevisionAssociation = {
   readonly version: number | null;
 };
 
+export type SavedRevisionExpectedDocument = {
+  readonly version: number;
+  readonly text: string;
+};
+
 export type SavedRevisionReadBackResult =
   | { readonly ok: true; readonly text: string }
+  // The native save completed, but this document is deliberately outside the
+  // bounded Saved Revision comparison budget.
+  | { readonly ok: true; readonly text: null }
   | { readonly ok: false; readonly reason: 'save-rejected' | 'read-failed' | 'text-mismatch' };
 
 export type SavedRevisionLifecycle = {
   readInitial(): Promise<SavedRevisionAssociation | null>;
   refreshNow(): Promise<void>;
   scheduleRefresh(delayMs?: number): void;
-  saveAndReadBack(expectedText: string): Promise<SavedRevisionReadBackResult>;
+  saveAndReadBack(expected: SavedRevisionExpectedDocument): Promise<SavedRevisionReadBackResult>;
   markUnavailable(reason: SavedRevisionUnavailableReason): Promise<void>;
   getUnavailableReason(): SavedRevisionUnavailableReason | null;
   dispose(): void;
@@ -41,6 +49,7 @@ export type SavedRevisionLifecycleDependencies = {
   readonly file: SavedRevisionFileAdapter;
   readonly timer: SavedRevisionRefreshTimer;
   readonly readDocumentRevision: () => { readonly version: number; readonly text: string };
+  readonly readDocumentVersion: () => number;
   readonly saveDocument: () => Promise<boolean>;
   readonly onRefresh: (observation: SavedRevisionRefreshObservation) => Promise<void>;
   readonly defaultRefreshDelayMs?: number;
@@ -121,16 +130,25 @@ export function createSavedRevisionLifecycle(
         void refreshNow();
       });
     },
-    async saveAndReadBack(expectedText) {
+    async saveAndReadBack(expected) {
       if (disposed || !await dependencies.saveDocument()) {
         return { ok: false, reason: 'save-rejected' };
+      }
+      // TextDocument.version is the authoritative, constant-size snapshot for
+      // changes made by formatters or other will-save participants. The caller
+      // already matched this revision immediately before requesting the save.
+      if (dependencies.readDocumentVersion() !== expected.version) {
+        return { ok: false, reason: 'text-mismatch' };
       }
       generation += 1;
       const result = await readWithRecovery();
       if (disposed) return { ok: false, reason: 'read-failed' };
       noteResult(result);
+      // A successful TextDocument.save is the persistence acknowledgement.
+      // Saved Revision is only an optional, bounded comparison baseline.
+      if (!result.ok && result.reason === 'too-large') return { ok: true, text: null };
       if (!result.ok) return { ok: false, reason: 'read-failed' };
-      if (normalizeLineEndings(result.text) !== expectedText) {
+      if (normalizeLineEndings(result.text) !== expected.text) {
         return { ok: false, reason: 'text-mismatch' };
       }
       return { ok: true, text: result.text };

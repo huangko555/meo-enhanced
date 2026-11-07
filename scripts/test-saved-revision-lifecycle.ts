@@ -10,8 +10,9 @@ import {
 } from '../src/application/savedRevisionLifecycle';
 
 let vscodeRead: () => Promise<Uint8Array> = async () => new Uint8Array();
+let vscodeStat: () => Promise<{ size: number }> = async () => ({ size: 0 });
 mock.module('vscode', () => ({
-  workspace: { fs: { readFile: () => vscodeRead() } }
+  workspace: { fs: { readFile: () => vscodeRead(), stat: () => vscodeStat() } }
 }));
 const { createVscodeSavedRevisionFileAdapter } = await import('../src/host/vscodeSavedRevisionFileAdapter');
 
@@ -19,12 +20,27 @@ const nonFile = createVscodeSavedRevisionFileAdapter({ scheme: 'untitled' } as n
 assert.deepEqual(await nonFile.read(), { ok: false, reason: 'not-file' });
 
 const file = createVscodeSavedRevisionFileAdapter({ scheme: 'file' } as never);
-vscodeRead = async () => new Uint8Array(1024 * 1024 + 1);
+let oversizedReadCalls = 0;
+vscodeStat = async () => ({ size: 1024 * 1024 + 1 });
+vscodeRead = async () => {
+  oversizedReadCalls += 1;
+  return new Uint8Array(1024 * 1024 + 1);
+};
 assert.deepEqual(await file.read(), { ok: false, reason: 'too-large' });
+assert.equal(oversizedReadCalls, 0, 'a known oversized file must not be read into memory for a diff baseline');
+vscodeStat = async () => ({ size: 0 });
+vscodeRead = async () => new Uint8Array(1024 * 1024 + 1);
+assert.deepEqual(await file.read(), { ok: false, reason: 'too-large' },
+  'a file that grows after stat must still stay outside the comparison budget');
 vscodeRead = async () => new Uint8Array([65, 0, 66]);
 assert.deepEqual(await file.read(), { ok: false, reason: 'binary' });
 vscodeRead = async () => new TextEncoder().encode('\ufeffsaved');
 assert.deepEqual(await file.read(), { ok: true, text: 'saved' });
+vscodeStat = async () => { throw new Error('stat unavailable'); };
+vscodeRead = async () => new TextEncoder().encode('stat fallback');
+assert.deepEqual(await file.read(), { ok: true, text: 'stat fallback' },
+  'a stat failure must not hide a readable Saved Revision');
+vscodeStat = async () => ({ size: 0 });
 vscodeRead = async () => { throw new Error('read failed'); };
 assert.deepEqual(await file.read(), { ok: false, reason: 'error' });
 
@@ -46,6 +62,7 @@ const lifecycle = createSavedRevisionLifecycle({
   file: { read: () => reads.shift()?.() ?? Promise.resolve({ ok: false, reason: 'error' }) },
   timer,
   readDocumentRevision: () => documentRevision,
+  readDocumentVersion: () => documentRevision.version,
   saveDocument: async () => saveAccepted,
   onRefresh: async (observation) => { observations.push(observation.result); }
 });
@@ -83,6 +100,7 @@ const transient = createSavedRevisionLifecycle({
     : { ok: true, text: 'disk' } },
   timer,
   readDocumentRevision: () => ({ version: 1, text: 'disk' }),
+  readDocumentVersion: () => 1,
   saveDocument: async () => true,
   onRefresh: async ({ result }) => { transientObservations.push(result); }
 });
@@ -100,21 +118,67 @@ const explicit = createSavedRevisionLifecycle({
   file: explicitFile,
   timer,
   readDocumentRevision: () => ({ version: 1, text: 'saved text' }),
+  readDocumentVersion: () => 1,
   saveDocument: async () => { saveTrace.push('save'); return true; },
   onRefresh: async () => undefined
 });
-assert.deepEqual(await explicit.saveAndReadBack('saved text'), { ok: true, text: 'saved text' });
+assert.deepEqual(await explicit.saveAndReadBack({ version: 1, text: 'saved text' }), { ok: true, text: 'saved text' });
 assert.deepEqual(saveTrace, ['save', 'read'], 'explicit save must complete before read-back');
+const oversizedSave = createSavedRevisionLifecycle({
+  file: { read: async () => ({ ok: false, reason: 'too-large' }) },
+  timer,
+  readDocumentRevision: () => ({ version: 1, text: 'large text' }),
+  readDocumentVersion: () => 1,
+  saveDocument: async () => true,
+  onRefresh: async () => undefined
+});
+assert.deepEqual(
+  await oversizedSave.saveAndReadBack({ version: 1, text: 'large text' }),
+  { ok: true, text: null },
+  'a host-confirmed save must not fail only because the optional diff baseline exceeds its budget'
+);
+assert.equal(oversizedSave.getUnavailableReason(), 'too-large');
+let rewrittenDocumentVersion = 1;
+let rewrittenReadCalls = 0;
+let rewrittenRevisionReads = 0;
+const rewrittenDuringSave = createSavedRevisionLifecycle({
+  file: { read: async () => { rewrittenReadCalls += 1; return { ok: false, reason: 'too-large' }; } },
+  timer,
+  readDocumentRevision: () => {
+    rewrittenRevisionReads += 1;
+    return { version: rewrittenDocumentVersion, text: 'formatted text' };
+  },
+  readDocumentVersion: () => rewrittenDocumentVersion,
+  saveDocument: async () => { rewrittenDocumentVersion = 2; return true; },
+  onRefresh: async () => undefined
+});
+assert.deepEqual(
+  await rewrittenDuringSave.saveAndReadBack({ version: 1, text: 'large text' }),
+  { ok: false, reason: 'text-mismatch' },
+  'a formatter or another save participant must not turn a different large document Revision into success'
+);
+assert.equal(rewrittenReadCalls, 0, 'the authoritative TextDocument version check must reject before optional disk read-back');
+assert.equal(rewrittenRevisionReads, 0, 'post-save verification must not materialize the full TextDocument');
 const mismatch = createSavedRevisionLifecycle({
   file: { read: async () => ({ ok: true, text: 'different' }) },
   timer,
   readDocumentRevision: () => ({ version: 1, text: 'expected' }),
+  readDocumentVersion: () => 1,
   saveDocument: async () => true,
   onRefresh: async () => undefined
 });
-assert.deepEqual(await mismatch.saveAndReadBack('expected'), { ok: false, reason: 'text-mismatch' });
+assert.deepEqual(await mismatch.saveAndReadBack({ version: 1, text: 'expected' }), { ok: false, reason: 'text-mismatch' });
+const unreadable = createSavedRevisionLifecycle({
+  file: { read: async () => ({ ok: false, reason: 'error' }) },
+  timer,
+  readDocumentRevision: () => ({ version: 1, text: 'expected' }),
+  readDocumentVersion: () => 1,
+  saveDocument: async () => true,
+  onRefresh: async () => undefined
+});
+assert.deepEqual(await unreadable.saveAndReadBack({ version: 1, text: 'expected' }), { ok: false, reason: 'read-failed' });
 saveAccepted = false;
-assert.deepEqual(await lifecycle.saveAndReadBack('ignored'), { ok: false, reason: 'save-rejected' });
+assert.deepEqual(await lifecycle.saveAndReadBack({ version: 8, text: 'ignored' }), { ok: false, reason: 'save-rejected' });
 
 lifecycle.scheduleRefresh(150);
 const disposeTimer = scheduled.at(-1);
@@ -130,6 +194,7 @@ const late = createSavedRevisionLifecycle({
   file: { read: () => new Promise((resolve) => { resolveLate = resolve; }) },
   timer,
   readDocumentRevision: () => ({ version: 1, text: 'old' }),
+  readDocumentVersion: () => 1,
   saveDocument: async () => true,
   onRefresh: async (observation) => { lateObservations.push(observation.result); }
 });

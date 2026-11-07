@@ -348,6 +348,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     file: savedRevisionFile,
     timer: savedRevisionRefreshTimer,
     readDocumentRevision: () => ({ version: document.version, text: document.getText() }),
+    readDocumentVersion: () => document.version,
     saveDocument,
     onRefresh: async ({ result, previousUnavailableReason, recoveredFromUnavailable }) => {
       if (!result.ok) {
@@ -621,7 +622,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     }
     const previousDisk = savedRevisionTracker.getCurrentEditBaseline();
     const readBack = await documentSaveLifecycle.runPreparedSave(
-      () => savedRevisionLifecycle.saveAndReadBack(expected.text)
+      () => savedRevisionLifecycle.saveAndReadBack(expected)
     );
     if (!readBack.ok && readBack.reason === 'save-rejected') {
       return { ok: false, error: { code: 'operation-failed', message: 'VS Code rejected the document save' } };
@@ -632,9 +633,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     if (!readBack.ok) {
       return { ok: false, error: { code: 'operation-failed', message: 'Saved text differs from the requested Revision' } };
     }
-    savedRevisionTracker.getCurrentEditBaseline()
-      ? savedRevisionTracker.noteExplicitSave(readBack.text, previousDisk)
-      : savedRevisionTracker.initialize(readBack.text);
+    if (readBack.text !== null) {
+      savedRevisionTracker.getCurrentEditBaseline()
+        ? savedRevisionTracker.noteExplicitSave(readBack.text, previousDisk)
+        : savedRevisionTracker.initialize(readBack.text);
+    }
     retryDiffComparison();
     return { ok: true, value: { revision: expected } };
   };

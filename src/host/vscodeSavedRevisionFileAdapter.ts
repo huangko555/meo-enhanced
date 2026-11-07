@@ -12,6 +12,13 @@ export function createVscodeSavedRevisionFileAdapter(documentUri: vscode.Uri): S
     async read(): Promise<SavedRevisionFileReadResult> {
       if (documentUri.scheme !== 'file') return { ok: false, reason: 'not-file' };
       try {
+        const stat = await vscode.workspace.fs.stat(documentUri);
+        if (stat.size > SAVED_REVISION_MAX_BYTES) return { ok: false, reason: 'too-large' };
+      } catch {
+        // Stat is only a fast-path budget check. readFile remains authoritative
+        // for providers that cannot stat a file but can still read it.
+      }
+      try {
         const bytes = await vscode.workspace.fs.readFile(documentUri);
         if (bytes.byteLength > SAVED_REVISION_MAX_BYTES) return { ok: false, reason: 'too-large' };
         if (bytes.includes(0)) return { ok: false, reason: 'binary' };
