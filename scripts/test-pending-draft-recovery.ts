@@ -222,4 +222,276 @@ assert.equal(applied.at(-1)?.draftText, 'current receipt candidate',
   assert.equal(coalesced.hasPending(), false);
 }
 
+// Active and retired candidates are one settlement owner. A same-receipt
+// terminal packet strengthens the active candidate instead of racing it with
+// an unnecessary untitled copy.
+{
+  const copies: string[] = [];
+  const applied: string[] = [];
+  const origin = { ownerId: 'page-A', receiptVersion: 1 };
+  const coordinated = createPendingDraftRecovery({
+    readCurrentRevision: () => ({ version: 1, text: 'Host text' }),
+    applyDraft: async (_expected, text) => { applied.push(text); return true; },
+    preserveConflict: async text => { copies.push(text); return { replace: async () => true }; }
+  });
+  const candidate = { type: 'draft' as const, baseVersion: 1, text: 'same handoff text' };
+  coordinated.remember(candidate, 1, origin);
+  const active = coordinated.settleForTermination();
+  const retired = coordinated.preserveRetired(candidate, origin);
+  assert.deepEqual(await Promise.all([active, retired]), [true, true]);
+  assert.deepEqual(applied, ['same handoff text']);
+  assert.deepEqual(copies, [], 'same receipt must not open a competing retired copy');
+}
+
+// A newer terminal handoff wins before an older active candidate can write
+// Host; older/equal late terminal packets are settled by the same tombstone.
+{
+  const copies: string[] = [];
+  let applies = 0;
+  const coordinated = createPendingDraftRecovery({
+    readCurrentRevision: () => ({ version: 1, text: 'Host text' }),
+    applyDraft: async () => { applies += 1; return true; },
+    preserveConflict: async text => { copies.push(text); return { replace: async next => { copies[0] = next; return true; } }; }
+  });
+  coordinated.remember({ type: 'draft', baseVersion: 1, text: 'old active' }, 1, { ownerId: 'page-A', receiptVersion: 1 });
+  const active = coordinated.settleForTermination();
+  const newest = coordinated.preserveRetired(
+    { type: 'draft', baseVersion: 1, text: 'new terminal' },
+    { ownerId: 'page-A', receiptVersion: 2 }
+  );
+  assert.deepEqual(await Promise.all([active, newest]), [false, true]);
+  assert.equal(applies, 0, 'superseded active receipt must never write Host');
+  assert.equal(copies.length, 1);
+  assert.match(copies[0]!, /new terminal/);
+  assert.equal(await coordinated.preserveRetired(
+    { type: 'draft', baseVersion: 1, text: 'late old terminal' },
+    { ownerId: 'page-A', receiptVersion: 1 }
+  ), true);
+  assert.equal(copies.length, 1, 'lower terminal receipt must use the settled tombstone');
+}
+
+// Artifact capability belongs to a handoff scope. A newer same-scope terminal
+// packet may update it, whereas another scope receives an independent copy.
+{
+  const copies: string[] = [];
+  const coordinated = createPendingDraftRecovery({
+    readCurrentRevision: () => ({ version: 4, text: 'Host text' }),
+    applyDraft: async () => { throw new Error('retired candidates never apply'); },
+    preserveConflict: async text => {
+      const index = copies.push(text) - 1;
+      return { replace: async next => { copies[index] = next; return true; } };
+    }
+  });
+  await coordinated.preserveRetired({ type: 'draft', baseVersion: 1, text: 'A one' }, { ownerId: 'A', receiptVersion: 1 });
+  await coordinated.preserveRetired({ type: 'draft', baseVersion: 1, text: 'A two' }, { ownerId: 'A', receiptVersion: 2 });
+  await coordinated.preserveRetired({ type: 'draft', baseVersion: 1, text: 'B one' }, { ownerId: 'B', receiptVersion: 1 });
+  assert.equal(copies.length, 2);
+  assert.match(copies[0]!, /A two/);
+  assert.match(copies[1]!, /B one/);
+}
+
+// If a released recovery buffer is no longer writable, the newest candidate
+// is copied separately; an update failure never overwrites user-owned text.
+{
+  const copies: string[] = [];
+  const coordinated = createPendingDraftRecovery({
+    readCurrentRevision: () => ({ version: 4, text: 'Host text' }),
+    applyDraft: async () => false,
+    preserveConflict: async text => {
+      const index = copies.push(text) - 1;
+      return { replace: async () => { if (index === 0) throw new Error('copy closed'); return true; } };
+    }
+  });
+  await coordinated.preserveRetired({ type: 'draft', baseVersion: 1, text: 'first protected' }, { ownerId: 'A', receiptVersion: 1 });
+  await coordinated.preserveRetired({ type: 'draft', baseVersion: 1, text: 'latest protected' }, { ownerId: 'A', receiptVersion: 2 });
+  assert.equal(copies.length, 2);
+  assert.match(copies[0]!, /first protected/);
+  assert.match(copies[1]!, /latest protected/);
+}
+
+// Replacing an unstarted retired job does not falsely settle the older
+// receipt. Both callers receive the actual failure of the surviving job.
+{
+  const coordinated = createPendingDraftRecovery({
+    readCurrentRevision: () => ({ version: 4, text: 'Host text' }),
+    applyDraft: async () => false,
+    preserveConflict: async () => false
+  });
+  const old = coordinated.preserveRetired({ type: 'draft', baseVersion: 1, text: 'older' }, { ownerId: 'A', receiptVersion: 1 });
+  const newest = coordinated.preserveRetired({ type: 'draft', baseVersion: 1, text: 'newest' }, { ownerId: 'A', receiptVersion: 2 });
+  assert.deepEqual(await Promise.all([old, newest]), [false, false], 'superseded waiters must wait for durable newest preservation');
+}
+
+// An unscoped active settlement cannot swallow an unrelated retired
+// candidate. Independent retired calls never inherit active settlement or write Host.
+{
+  const copies: string[] = [];
+  const coordinated = createPendingDraftRecovery({
+    readCurrentRevision: () => ({ version: 1, text: 'Host text' }),
+    applyDraft: async () => true,
+    preserveConflict: async text => { copies.push(text); return { replace: async () => true }; }
+  });
+  coordinated.remember({ type: 'draft', baseVersion: 1, text: 'active text' }, 1);
+  assert.equal(await coordinated.recover(), true);
+  assert.equal(await coordinated.preserveRetired({ type: 'draft', baseVersion: 1, text: 'independent retired text' }), true);
+  assert.equal(copies.length, 1);
+  assert.match(copies[0]!, /independent retired text/);
+}
+
+// An equivalent same-receipt terminal packet is settled even when the active
+// call reports no Host mutation because the text was already current.
+{
+  const origin = { ownerId: 'A', receiptVersion: 1 };
+  const candidate = { type: 'draft' as const, baseVersion: 1, text: 'already current' };
+  const coordinated = createPendingDraftRecovery({
+    readCurrentRevision: () => ({ version: 1, text: 'already current' }),
+    applyDraft: async () => { throw new Error('equivalence must not write'); },
+    preserveConflict: async () => { throw new Error('equivalence must not copy'); }
+  });
+  coordinated.remember(candidate, 1, origin);
+  assert.deepEqual(await Promise.all([
+    coordinated.settleForTermination(),
+    coordinated.preserveRetired(candidate, origin)
+  ]), [false, true]);
+}
+
+// A completion callback may enqueue recovery precisely as an empty drain is
+// releasing its latch. The queue must restart and settle that late work.
+{
+  const copies: string[] = [];
+  const coordinated = createPendingDraftRecovery({
+    readCurrentRevision: () => ({ version: 9, text: 'Host text' }),
+    applyDraft: async () => false,
+    preserveConflict: async text => { copies.push(text); return { replace: async () => true }; }
+  });
+  const noWork = coordinated.settleForTermination();
+  const late = noWork.then(() => coordinated.preserveRetired(
+    { type: 'draft', baseVersion: 1, text: 'late queue wakeup' }, { ownerId: 'late', receiptVersion: 1 }
+  ));
+  assert.equal(await late, true);
+  assert.equal(copies.length, 1);
+}
+
+// Unscoped candidates have no shared receipt identity. Their text must not be
+// concatenated into an ambiguous metadata key (or retained there at full size).
+{
+  const copies: string[] = [];
+  const recovery = createPendingDraftRecovery({
+    readCurrentRevision: () => null, applyDraft: async () => false,
+    preserveConflict: async text => { copies.push(text); return { replace: async () => true }; }
+  });
+  await recovery.preserveRetired({ type: 'conflict', baseVersion: 1, baseText: 'left:middle', text: 'right' });
+  await recovery.preserveRetired({ type: 'conflict', baseVersion: 1, baseText: 'left', text: 'middle:right' });
+  assert.equal(copies.length, 2, 'independent unscoped candidates must not collide');
+}
+
+// A confirmed clear is a settlement, including a matching explicit discard
+// when there is no remaining active candidate. Older terminal packets cannot
+// resurrect text after that acknowledgement.
+{
+  const copies: string[] = [];
+  const recovery = createPendingDraftRecovery({
+    readCurrentRevision: () => ({ version: 4, text: 'new Host text' }), applyDraft: async () => false,
+    preserveConflict: async text => { copies.push(text); return { replace: async () => true }; }
+  });
+  recovery.remember({ type: 'draft', baseVersion: 1, text: 'acknowledged draft' }, 1, { ownerId: 'A', receiptVersion: 1 });
+  recovery.remember(null, 2, { ownerId: 'A', receiptVersion: 2 });
+  assert.equal(recovery.discardIfCurrent(2), true);
+  assert.equal(await recovery.preserveRetired({ type: 'draft', baseVersion: 1, text: 'acknowledged draft' },
+    { ownerId: 'A', receiptVersion: 1 }), true);
+  assert.deepEqual(copies, []);
+}
+
+// The artifact stays pinned through its settlement, including the microtask
+// between the preservation port resolving and the public receipt being marked.
+{
+  const copies: string[] = [];
+  let open!: () => void, release!: () => void;
+  const updating = new Promise<void>(resolve => { open = resolve; });
+  const released = new Promise<void>(resolve => { release = resolve; });
+  let updates = 0;
+  const recovery = createPendingDraftRecovery({
+    readCurrentRevision: () => null, applyDraft: async () => false,
+    preserveConflict: async text => {
+      const index = copies.push(text) - 1;
+      return { replace: async text => {
+        if (++updates === 1) { open(); await released; }
+        copies[index] = text; return true;
+      } };
+    }
+  });
+  await recovery.preserveRetired({ type: 'draft', baseVersion: 1, text: 'A first' }, { ownerId: 'A', receiptVersion: 1 });
+  const pending = recovery.preserveRetired({ type: 'draft', baseVersion: 1, text: 'A second' }, { ownerId: 'A', receiptVersion: 2 });
+  await updating;
+  release();
+  queueMicrotask(() => {
+    for (let index = 0; index < 24; index++) {
+      const origin = { ownerId: `other-${index}`, receiptVersion: 1 };
+      recovery.remember(null, index + 1, origin);
+    }
+  });
+  assert.equal(await pending, true);
+  await recovery.preserveRetired({ type: 'draft', baseVersion: 1, text: 'A latest' }, { ownerId: 'A', receiptVersion: 3 });
+  assert.equal(copies.length, 1, 'scope churn must not lose a capability before its settlement finishes');
+  assert.match(copies[0]!, /A latest/);
+}
+
+// Terminal packets arriving during real port I/O cannot race the active
+// operation. Re-read Host equivalence after apply; reuse a copy after preserve.
+for (const sink of ['apply', 'preserve'] as const) for (const newer of [false, true]) {
+  let current = { version: 1, text: 'Host unchanged' };
+  const copies: string[] = [];
+  let started!: () => void, release!: () => void;
+  const entering = new Promise<void>(resolve => { started = resolve; });
+  const released = new Promise<void>(resolve => { release = resolve; });
+  const recovery = createPendingDraftRecovery({
+    readCurrentRevision: () => current,
+    applyDraft: async (_expected, text) => {
+      assert.equal(sink, 'apply'); started(); await released;
+      current = { version: 2, text }; return true;
+    },
+    preserveConflict: async text => {
+      const index = copies.push(text) - 1;
+      if (sink === 'preserve' && index === 0) { started(); await released; }
+      return { replace: async next => { copies[index] = next; return true; } };
+    }
+  });
+  const candidate = sink === 'apply'
+    ? { type: 'draft' as const, baseVersion: 1, text: 'active local' }
+    : { type: 'conflict' as const, baseVersion: 1, baseText: 'base', text: 'active local' };
+  recovery.remember(candidate, 1, { ownerId: 'A', receiptVersion: 1 });
+  const active = recovery.settleForTermination();
+  await entering;
+  const retired = recovery.preserveRetired(newer ? { ...candidate, text: 'latest local' } : candidate,
+    { ownerId: 'A', receiptVersion: newer ? 2 : 1 });
+  release();
+  assert.deepEqual(await Promise.all([active, retired]), [true, true]);
+  assert.equal(current.text, sink === 'apply' ? 'active local' : 'Host unchanged', 'retired input never writes Host');
+  assert.equal(copies.length, sink === 'apply' && !newer ? 0 : 1);
+  if (copies.length) assert.match(copies[0]!, newer ? /latest local/ : /active local/);
+}
+
+// A retired receipt that settles first makes a lower active receipt inert,
+// including when the active request was enqueued during preservation I/O.
+{
+  const copies: string[] = [];
+  let started!: () => void, release!: () => void;
+  const entering = new Promise<void>(resolve => { started = resolve; });
+  const released = new Promise<void>(resolve => { release = resolve; });
+  const recovery = createPendingDraftRecovery({
+    readCurrentRevision: () => ({ version: 1, text: 'Host unchanged' }),
+    applyDraft: async () => { throw new Error('an older active receipt must not write'); },
+    preserveConflict: async text => {
+      copies.push(text); started(); await released; return { replace: async () => true };
+    }
+  });
+  const retired = recovery.preserveRetired({ type: 'draft', baseVersion: 1, text: 'newest retired' }, { ownerId: 'A', receiptVersion: 2 });
+  await entering;
+  recovery.remember({ type: 'draft', baseVersion: 1, text: 'older active' }, 1, { ownerId: 'A', receiptVersion: 1 });
+  const active = recovery.settleForTermination();
+  release();
+  assert.deepEqual(await Promise.all([retired, active]), [true, false]);
+  assert.equal(copies.length, 1); assert.match(copies[0]!, /newest retired/);
+}
+
 console.log('Pending Draft recovery checks passed');

@@ -51,7 +51,7 @@ const flushMicrotasks = async (): Promise<void> => {
   for (let index = 0; index < 12; index += 1) await Promise.resolve();
 };
 
-const createHostFixture = (initialText = 'accepted', nextDiskText = 'disk version') => {
+const createHostFixture = (initialText = 'accepted', nextDiskText = 'disk version', mayPreserve = () => true) => {
   document.text = initialText;
   document.version = 1;
   document.isDirty = true;
@@ -83,6 +83,7 @@ const createHostFixture = (initialText = 'accepted', nextDiskText = 'disk versio
       return true;
     },
     preserveConflict: async (copyText) => {
+      if (!mayPreserve()) return false;
       const index = recoveryCopies.push(copyText) - 1;
       return { replace: async text => { recoveryCopies[index] = text; return true; } };
     }
@@ -516,6 +517,53 @@ assert.equal(typeof immediateCloseFixture.getReceiveMessage(), 'function');
   assert.deepEqual(fixture.getRecoveryCopies(), [], 'equivalent settled receipt must stay deduplicated');
   assert.equal(document.text, 'later authoritative Host');
   fixture.controller.dispose();
+}
+
+// A failed receipt can be retried, but dropping that receipt's pending marker
+// must never revive its retired page's ready packet.
+{
+  let mayPreserve = false;
+  const fixture = createHostFixture('Host text', 'Host text', () => mayPreserve);
+  await fixture.controller.handleMessage({ type: 'ready', pageId: 'page_failed_a' });
+  const packet = { type: 'draftChanged', pageId: 'page_failed_a', text: 'conflicting local',
+    conflictBaseText: 'base', baseVersion: 1, receiptVersion: 1 };
+  await fixture.controller.handleMessage(packet);
+  await fixture.controller.handleMessage({ type: 'ready', pageId: 'page_failed_b' });
+  await fixture.controller.handleMessage({ ...packet, terminal: true });
+  await flushMicrotasks();
+  const initCount = fixture.postedToWebview.filter(message => message.type === 'init').length;
+  mayPreserve = true;
+  await fixture.controller.handleMessage({ type: 'ready', pageId: 'page_failed_a' });
+  assert.equal(fixture.postedToWebview.filter(message => message.type === 'init').length, initCount,
+    'receipt failure must not revive a retired page');
+  assert.deepEqual(fixture.getRecoveryCopies(), []);
+  await fixture.controller.handleMessage({ type: 'ready', pageId: 'page_failed_b' });
+  assert.equal(fixture.postedToWebview.filter(message => message.type === 'init').at(-1)?.pageId, 'page_failed_b');
+  assert.equal(fixture.getRecoveryCopies().length, 1, 'the current page retry settles the retained candidate once');
+  assert.equal(document.text, 'Host text');
+  fixture.controller.dispose();
+  await flushMicrotasks();
+}
+
+// A normal active conflict and its late full terminal snapshot share the
+// Application settlement receipt and artifact, with no second panel cache.
+{
+  const fixture = createHostFixture('Host current', 'Host current');
+  await fixture.controller.handleMessage({ type: 'ready', pageId: 'page_copy_a' });
+  const candidate = { type: 'draftChanged', pageId: 'page_copy_a', text: 'local first',
+    baseVersion: 1, conflictBaseText: 'base', receiptVersion: 1 };
+  await fixture.controller.handleMessage(candidate);
+  await fixture.controller.handleMessage({ type: 'ready', pageId: 'page_copy_b' });
+  assert.equal(fixture.getRecoveryCopies().length, 1);
+  await fixture.controller.handleMessage({ ...candidate, terminal: true });
+  await flushMicrotasks();
+  assert.equal(fixture.getRecoveryCopies().length, 1, 'a known normal receipt cannot create another terminal copy');
+  await fixture.controller.handleMessage({ ...candidate, text: 'local latest', receiptVersion: 2, terminal: true });
+  await flushMicrotasks();
+  assert.equal(fixture.getRecoveryCopies().length, 1, 'newer terminal text reuses the exact still-owned artifact');
+  assert.match(fixture.getRecoveryCopies()[0]!, /local latest/);
+  assert.equal(document.text, 'Host current');
+  fixture.controller.dispose(); await flushMicrotasks();
 }
 
 console.log('Panel Session reload recovery checks passed');

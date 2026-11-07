@@ -302,7 +302,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   let draftRecoveryReceiptVersion = 0;
   let activeRecoveryOwnerReceiptVersion = 0;
   let nextRecoveryOwnerReceiptVersion = 1;
-  const retiredTerminalReceiptKeys: string[] = [];
+  // Page activation history is independent of Application-owned settlement:
+  // a failed/expired receipt must not make a retired page active again.
   const retiredPageIds: string[] = [];
   const documentEditEcho = createDocumentEditEchoFilter();
   const pendingDiskReloadPresentations = new Map<number, {
@@ -347,10 +348,13 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   let activePageRecovery: PageRecoveryChannel | null = null;
   const createPageRecoveryChannel = (pageId: string): PageRecoveryChannel => {
     const receiver = createDraftRecoveryReceiver({
-      remember(candidate) {
+      remember(candidate, receiptVersion) {
         activeRecoveryOwnerReceiptVersion = nextRecoveryOwnerReceiptVersion;
         nextRecoveryOwnerReceiptVersion += 1;
-        return pendingDraftRecovery.remember(candidate, activeRecoveryOwnerReceiptVersion);
+        return pendingDraftRecovery.remember(candidate, activeRecoveryOwnerReceiptVersion, {
+          ownerId: pageId,
+          receiptVersion
+        });
       }
     }, () => activePageId === pageId
       ? postToWebview({ type: 'requestDraftRecoverySnapshot', pageId })
@@ -361,25 +365,13 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     readonly type: 'draftChanged'; readonly text: string;
   }>): void => {
     if (message.terminal !== true) return;
-    const key = `${message.pageId}:${message.receiptVersion}`;
-    if (retiredTerminalReceiptKeys.includes(key)) return;
-    retiredTerminalReceiptKeys.push(key);
-    if (retiredTerminalReceiptKeys.length > 16) retiredTerminalReceiptKeys.shift();
     const candidate: DraftRecoveryCandidate = message.conflictBaseText === undefined
       ? { type: 'draft', baseVersion: message.baseVersion, text: message.text }
       : { type: 'conflict', baseVersion: message.baseVersion, baseText: message.conflictBaseText, text: message.text };
-    runBackground(pendingDraftRecovery.preserveRetired(candidate).then(
-      preserved => {
-        if (preserved) return;
-        const index = retiredTerminalReceiptKeys.indexOf(key);
-        if (index >= 0) retiredTerminalReceiptKeys.splice(index, 1);
-      },
-      error => {
-        const index = retiredTerminalReceiptKeys.indexOf(key);
-        if (index >= 0) retiredTerminalReceiptKeys.splice(index, 1);
-        throw error;
-      }
-    ), 'orphanedTerminalDraftRecovery');
+    runBackground(pendingDraftRecovery.preserveRetired(candidate, {
+      ownerId: message.pageId,
+      receiptVersion: message.receiptVersion
+    }), 'orphanedTerminalDraftRecovery');
   };
 
   type ExternalFileStatus = Extract<HostEditorEvent, { type: 'externalFileStatusChanged' }>['status'];
@@ -1252,6 +1244,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
           && raw.receiptVersion === draftRecoveryReceiptVersion
           && pendingReload.receiptVersion === raw.receiptVersion
           && pendingReload.ownerReceiptVersion === activeRecoveryOwnerReceiptVersion) {
+          // Application records this actual presentation acknowledgement in the
+          // same settlement owner used by active and retired recovery receipts.
           pendingDraftRecovery.discardIfCurrent(pendingReload.ownerReceiptVersion);
         }
         return;

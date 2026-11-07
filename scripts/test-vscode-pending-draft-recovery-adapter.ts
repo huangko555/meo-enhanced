@@ -20,6 +20,7 @@ const copies: string[] = [];
 const copyDocuments: Array<typeof document> = [];
 let onShowCopy: (() => Promise<void>) | null = null;
 let writes = 0;
+let copyUpdateOutcome: 'ok' | 'false' | 'throw' = 'ok';
 mock.module('vscode', () => ({
   Range,
   WorkspaceEdit,
@@ -29,10 +30,12 @@ mock.module('vscode', () => ({
       const change = edit.edits[0]!;
       const target = [document, ...copyDocuments].find(candidate => candidate.uri === change.uri)!;
       if (target === document) writes += 1;
+      const copyIndex = copyDocuments.indexOf(target);
+      if (copyIndex >= 0 && copyUpdateOutcome === 'false') return false;
+      if (copyIndex >= 0 && copyUpdateOutcome === 'throw') throw new Error('simulated untitled update failure');
       target.text = target.text.slice(0, change.range.start.offset)
         + change.text + target.text.slice(change.range.end.offset);
       target.version += 1;
-      const copyIndex = copyDocuments.indexOf(target);
       if (copyIndex >= 0) copies[copyIndex] = target.text;
       return true;
     },
@@ -71,7 +74,7 @@ assert.equal(writes, 1);
 assert.match(copies.at(-1) ?? '', /must not target a reopened URI/);
 assert.match(copies.at(-1) ?? '', /Host document unavailable/);
 
-for (const outcome of ['owned', 'user-edited', 'closed'] as const) {
+for (const outcome of ['owned', 'user-edited', 'closed', 'update-false', 'update-throws'] as const) {
   const adapter = createVscodePendingDraftRecoveryAdapter({ document: document as never, noteOwnedFileChange() {} });
   let started!: () => void, release!: () => void;
   const showing = new Promise<void>(resolve => { started = resolve; });
@@ -85,6 +88,8 @@ for (const outcome of ['owned', 'user-edited', 'closed'] as const) {
   adapter.remember({ type: 'draft', baseVersion: 1, text: 'newest pending local' }, 2);
   if (outcome === 'user-edited') { copy.text = 'user-owned recovery text'; copy.version += 1; }
   if (outcome === 'closed') documents = documents.filter(open => open !== copy);
+  if (outcome === 'update-false') copyUpdateOutcome = 'false';
+  if (outcome === 'update-throws') copyUpdateOutcome = 'throw';
   release();
   await settling;
   assert.equal(copyDocuments.length, count + (outcome === 'owned' ? 1 : 2),
@@ -100,6 +105,7 @@ for (const outcome of ['owned', 'user-edited', 'closed'] as const) {
     else assert.match(copy.text, /older pending local/);
     assert.match(copyDocuments.at(-1)!.text, /newest pending local/);
   }
+  copyUpdateOutcome = 'ok';
   onShowCopy = null;
 }
 
